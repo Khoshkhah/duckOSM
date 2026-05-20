@@ -1,0 +1,16 @@
+name: tartu
+pbf_path: data/maps/tartu.osm.pbf
+output_path: ../../data
+options:
+  build_graph: true
+  h3_indexing: true
+  h3_resolution: 15
+  simplify: true
+  process_speeds: true
+  extract_restrictions: true
+  calculate_costs: true
+modes:
+- driving
+- walking
+- cycling
+boundary_path: data/boundaries/tartu.geojson

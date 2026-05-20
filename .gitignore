@@ -1,0 +1,26 @@
+# Generated data — not tracked
+data/maps/*.pbf
+data/maps/*.osm.pbf
+data/output/*.duckdb
+data/output/*.db
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

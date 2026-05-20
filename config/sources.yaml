@@ -1,0 +1,30 @@
+sources:
+  somerset:
+    place: "Somerset, Kentucky, USA"
+    pbf_url: "https://download.geofabrik.de/north-america/us/kentucky-latest.osm.pbf"
+    pbf_region: "kentucky"
+
+  burnaby:
+    place: "Burnaby, British Columbia, Canada"
+    pbf_url: "https://download.geofabrik.de/north-america/canada/british-columbia-latest.osm.pbf"
+    pbf_region: "british-columbia"
+
+  vancouver_city:
+    place: "City of Vancouver, British Columbia, Canada"
+    pbf_url: "https://download.geofabrik.de/north-america/canada/british-columbia-latest.osm.pbf"
+    pbf_region: "british-columbia"
+
+  metro_vancouver:
+    place: "Metro Vancouver Regional District, British Columbia, Canada"
+    pbf_url: "https://download.geofabrik.de/north-america/canada/british-columbia-latest.osm.pbf"
+    pbf_region: "british-columbia"
+
+  tehran:
+    place: "Tehran, Tehran Province, Iran"
+    pbf_url: "https://download.geofabrik.de/asia/iran-latest.osm.pbf"
+    pbf_region: "iran"
+
+  tartu:
+    place: "Tartu, Estonia"
+    pbf_url: "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+    pbf_region: "estonia"

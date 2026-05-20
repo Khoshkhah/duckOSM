@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "duckosm"
+version = "0.1.0"
+description = "High-performance OSM-to-routing-network converter built on DuckDB"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Kaveh Khoshkhah" }]
+keywords = ["osm", "openstreetmap", "routing", "duckdb", "h3", "network"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "duckdb>=1.0.0",
+    "shapely>=2.0.0",
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "h3>=4.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+duckosm = "duckosm.cli:main"
+
+[project.optional-dependencies]
+viz = ["folium", "leafmap", "streamlit"]
+dev = ["pytest", "black", "ruff"]
+
+[project.urls]
+Homepage = "https://github.com/khoshkhah/duckOSM"
+Repository = "https://github.com/khoshkhah/duckOSM"
+Issues = "https://github.com/khoshkhah/duckOSM/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

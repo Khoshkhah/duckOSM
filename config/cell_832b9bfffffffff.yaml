@@ -1,0 +1,36 @@
+name: "cell_832b9bfffffffff"
+pbf_path: "data/maps/cell_832b9bfffffffff.osm.pbf"
+output_path: "../../data"
+# → Creates: data/output/somerset.duckdb
+
+# Boundary filter (optional)
+boundary_path: "data/boundaries/cell_832b9bfffffffff.geojson"
+
+# H3 cell filter (optional)
+# h3_cell: "832b9bfffffffff"
+
+options:
+  # Build routing graph table
+  build_graph: true
+  
+  # Add H3 spatial indexing
+  h3_indexing: true
+  h3_resolution: 15
+  
+  # Graph simplification (experimental)
+  # Contracts degree-2 nodes into single edges
+  simplify: yes
+  
+  # Speed processing
+  process_speeds: true
+  
+  # Extract turn restrictions
+  extract_restrictions: true
+  
+  # Calculate travel costs
+  calculate_costs: true
+
+modes:
+  - driving
+  - walking
+  - cycling
