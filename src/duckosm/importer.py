@@ -154,16 +154,12 @@ class DuckOSM:
                 self._cleanup()
                 progress.advance(main_task)
                 
-                # Generate visualization metadata
-                # Switch back to main schema so metadata is accessible globally (for Streamlit)
+                # Generate visualization metadata in the main schema
                 try:
                     self.con.execute("USE main")
                     self._generate_metadata()
-                    # Also create alias 'visualization' which Streamlit expects
-                    self.con.execute("CREATE OR REPLACE TABLE visualization AS SELECT * FROM visualization_metadata")
-                    logger.info("  Metadata materialized in main schema (visualization)")
                 except Exception as e:
-                    logger.warning(f"Failed to finalize metadata in main schema: {e}")
+                    logger.warning(f"Failed to generate visualization_metadata: {e}")
 
                 # Final checkpoint to ensure disk persistence
                 self._checkpoint()

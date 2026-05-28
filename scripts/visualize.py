@@ -338,7 +338,7 @@ if all_layers:
     
     # 1. Try metadata
     try:
-        meta = con.execute("SELECT center_lat, center_lon, initial_zoom FROM main.visualization").fetchone()
+        meta = con.execute("SELECT center_lat, center_lon, initial_zoom FROM main.visualization_metadata").fetchone()
         if meta and not any(x is None for x in meta):
             lat, lon, zoom = meta
     except:
