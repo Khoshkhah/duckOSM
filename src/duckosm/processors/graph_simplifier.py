@@ -140,7 +140,9 @@ class GraphSimplifier(BaseProcessor):
                     map_extract(w.tags, 'highway')[1] as highway,
                     map_extract(w.tags, 'name')[1] as name,
                     map_extract(w.tags, 'maxspeed')[1] as maxspeed,
-                    map_extract(w.tags, 'oneway')[1] as oneway,
+                    -- Roundabouts are inherently one-way even without an explicit oneway tag.
+                    CASE WHEN map_extract(w.tags, 'junction')[1] IN ('roundabout', 'circular')
+                         THEN 'yes' ELSE map_extract(w.tags, 'oneway')[1] END as oneway,
                     map_extract(w.tags, 'lanes')[1] as lanes,
                     map_extract(w.tags, 'surface')[1] as surface,
                     map_extract(w.tags, 'access')[1] as access,

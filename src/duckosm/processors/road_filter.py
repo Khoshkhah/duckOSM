@@ -67,7 +67,9 @@ class RoadFilter(BaseProcessor):
                 map_extract(tags, 'highway')[1] AS highway,
                 map_extract(tags, 'name')[1] AS name,
                 map_extract(tags, 'maxspeed')[1] AS maxspeed,
-                map_extract(tags, 'oneway')[1] AS oneway,
+                -- Roundabouts are inherently one-way even without an explicit oneway tag.
+                CASE WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular')
+                     THEN 'yes' ELSE map_extract(tags, 'oneway')[1] END AS oneway,
                 map_extract(tags, 'lanes')[1] AS lanes,
                 map_extract(tags, 'surface')[1] AS surface,
                 map_extract(tags, 'access')[1] AS access,
