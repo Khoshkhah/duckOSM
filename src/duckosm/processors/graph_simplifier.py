@@ -350,10 +350,9 @@ class GraphSimplifier(BaseProcessor):
                 TRUE AS is_reverse,
                 length_m
             FROM simplified_edges_forward
-            -- Two-way roads get a reverse edge. Roundabouts (junction=roundabout/circular)
-            -- are inherently one-way even when the oneway tag is absent, so exclude them.
-            WHERE (oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1'))
-              AND (junction IS NULL OR junction NOT IN ('roundabout', 'circular'))
+            -- Two-way roads get a reverse edge. oneway is the single source of truth
+            -- (roundabouts were already normalised to oneway='yes' upstream).
+            WHERE oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1')
         """)
         
         # 3. Replace the main edges table
