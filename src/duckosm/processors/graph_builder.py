@@ -34,6 +34,7 @@ class GraphBuilder(BaseProcessor):
                     w.oneway,
                     w.lanes,
                     w.surface,
+                    w.junction,
                     w.refs[1] AS source,
                     w.refs[len(w.refs)] AS target,
                     len(w.refs) AS node_count
@@ -50,6 +51,7 @@ class GraphBuilder(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                junction,
                 node_count,
                 -- Haversine distance in meters
                 CAST(
@@ -88,12 +90,15 @@ class GraphBuilder(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                junction,
                 node_count,
                 length_m,
                 -- Reverse geometry natively
                 ST_Reverse(geometry) AS geometry,
                 TRUE AS is_reverse
             FROM edges
-            WHERE oneway IS NULL 
-               OR oneway NOT IN ('yes', '1', 'true', '-1')
+            -- Two-way roads get a reverse edge. Roundabouts (junction=roundabout/circular)
+            -- are inherently one-way even when the oneway tag is absent, so exclude them.
+            WHERE (oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1'))
+              AND (junction IS NULL OR junction NOT IN ('roundabout', 'circular'))
         """)

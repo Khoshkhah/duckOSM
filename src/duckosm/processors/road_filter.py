@@ -71,6 +71,7 @@ class RoadFilter(BaseProcessor):
                 map_extract(tags, 'lanes')[1] AS lanes,
                 map_extract(tags, 'surface')[1] AS surface,
                 map_extract(tags, 'access')[1] AS access,
+                map_extract(tags, 'junction')[1] AS junction,
                 tags,
                 refs
             FROM raw.ways

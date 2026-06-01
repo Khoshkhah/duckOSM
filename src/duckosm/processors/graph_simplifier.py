@@ -144,6 +144,7 @@ class GraphSimplifier(BaseProcessor):
                     map_extract(w.tags, 'lanes')[1] as lanes,
                     map_extract(w.tags, 'surface')[1] as surface,
                     map_extract(w.tags, 'access')[1] as access,
+                    map_extract(w.tags, 'junction')[1] as junction,
                     w.tags
                 FROM way_segments ws
                 JOIN raw.nodes n ON ws.node_id = n.osm_id
@@ -161,6 +162,7 @@ class GraphSimplifier(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                junction,
                 node_list as refs,
                 ST_GeomFromText('LINESTRING(' || list_aggregate(coord_list, 'string_agg', ', ') || ')') AS geometry,
                 FALSE AS is_reverse
@@ -238,6 +240,7 @@ class GraphSimplifier(BaseProcessor):
                     oneway,
                     lanes,
                     surface,
+                    junction,
                     refs,
                     geometry,
                     length_m,
@@ -259,6 +262,7 @@ class GraphSimplifier(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                junction,
                 refs[1:len(refs)/2 + 1] as refs,
                 ST_AsText(ST_LineSubstring(geometry, 0, 0.5)) AS geometry_text,
                 FALSE AS is_reverse,
@@ -279,6 +283,7 @@ class GraphSimplifier(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                junction,
                 refs[len(refs)/2 + 1:] as refs,
                 ST_AsText(ST_LineSubstring(geometry, 0.5, 1)) AS geometry_text,
                 FALSE AS is_reverse,
@@ -303,12 +308,12 @@ class GraphSimplifier(BaseProcessor):
         self.execute("""
             CREATE TABLE simplified_edges_forward_new AS
             SELECT edge_id, source, target, osm_id, highway, name, maxspeed, oneway, lanes, surface,
-                   refs, geometry, is_reverse, length_m
+                   junction, refs, geometry, is_reverse, length_m
             FROM simplified_edges_forward
             WHERE source != target
             UNION ALL
             SELECT edge_id, source, target, osm_id, highway, name, maxspeed, oneway, lanes, surface,
-                   refs, ST_GeomFromText(geometry_text) AS geometry, is_reverse, length_m
+                   junction, refs, ST_GeomFromText(geometry_text) AS geometry, is_reverse, length_m
             FROM split_loops
             WHERE geometry_text IS NOT NULL
               AND ST_NPoints(ST_GeomFromText(geometry_text)) >= 2
@@ -336,13 +341,17 @@ class GraphSimplifier(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                junction,
                 list_reverse(refs) as refs,
                 -- Native reverse geometry
                 ST_Reverse(geometry),
                 TRUE AS is_reverse,
                 length_m
             FROM simplified_edges_forward
-            WHERE oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1')
+            -- Two-way roads get a reverse edge. Roundabouts (junction=roundabout/circular)
+            -- are inherently one-way even when the oneway tag is absent, so exclude them.
+            WHERE (oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1'))
+              AND (junction IS NULL OR junction NOT IN ('roundabout', 'circular'))
         """)
         
         # 3. Replace the main edges table
