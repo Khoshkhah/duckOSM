@@ -76,142 +76,109 @@ class GraphSimplifier(BaseProcessor):
         logger.info(f"  Identified {junction_count:,} junction nodes")
 
     def _segment_ways(self) -> None:
-        """Split ways into segments between junctions, ensuring junctions are shared."""
-        # 1. Identify all junction points for each way
-        self.execute("""
-            CREATE OR REPLACE TEMP TABLE way_junction_seqs AS
-            SELECT way_id, seq
-            FROM way_nodes wn
-            JOIN junctions j ON wn.node_id = j.node_id
-            ORDER BY way_id, seq
-        """)
-        
-        # 2. Pair consecutive junctions into segments
-        self.execute("""
-            CREATE OR REPLACE TEMP TABLE way_segment_ranges AS
-            SELECT 
-                way_id,
-                seq as start_seq,
-                LEAD(seq) OVER (PARTITION BY way_id ORDER BY seq) as end_seq
-            FROM way_junction_seqs
-        """)
-        
-        # 3. Create the way_segments table by joining back to way_nodes
+        """Split ways into segments between junctions, ensuring junctions are shared.
+
+        A segment runs from one junction to the next; junction nodes are shared between
+        the two adjacent segments (they are the end of one and the start of the next).
+        ``segment_idx`` is the sequence index of the segment's starting junction.
+
+        This is computed with O(N) window functions over the (already ordered) way
+        nodes. The earlier implementation joined nodes to segment ranges with an
+        inequality (``seq BETWEEN start AND end``), which materialised N*K rows per way
+        (N nodes x K segments) and OOM'd on dense, highly-connected networks (cycling).
+        """
         self.execute("""
             CREATE OR REPLACE TABLE way_segments AS
-            SELECT 
-                r.way_id,
-                r.start_seq as segment_idx,
-                wn.node_id,
-                wn.seq
-            FROM way_nodes wn
-            JOIN way_segment_ranges r ON wn.way_id = r.way_id 
-                AND wn.seq >= r.start_seq 
-                AND wn.seq <= r.end_seq
-            WHERE r.end_seq IS NOT NULL
+            WITH marked AS (
+                SELECT
+                    wn.way_id,
+                    wn.node_id,
+                    wn.seq,
+                    (j.node_id IS NOT NULL) AS is_junction,
+                    -- latest junction at or before this node = start of its segment
+                    max(CASE WHEN j.node_id IS NOT NULL THEN wn.seq END) OVER (
+                        PARTITION BY wn.way_id ORDER BY wn.seq
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS seg_start_incl,
+                    -- nearest junction strictly before / after (segment links for junction nodes)
+                    max(CASE WHEN j.node_id IS NOT NULL THEN wn.seq END) OVER (
+                        PARTITION BY wn.way_id ORDER BY wn.seq
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_junction,
+                    min(CASE WHEN j.node_id IS NOT NULL THEN wn.seq END) OVER (
+                        PARTITION BY wn.way_id ORDER BY wn.seq
+                        ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS next_junction
+                FROM way_nodes wn
+                LEFT JOIN junctions j ON wn.node_id = j.node_id
+            )
+            -- Non-junction nodes belong to the single segment that contains them.
+            SELECT way_id, seg_start_incl AS segment_idx, node_id, seq
+            FROM marked
+            WHERE NOT is_junction
+            UNION ALL
+            -- Junction nodes start the next segment (when one follows).
+            SELECT way_id, seq AS segment_idx, node_id, seq
+            FROM marked
+            WHERE is_junction AND next_junction IS NOT NULL
+            UNION ALL
+            -- Junction nodes also close the previous segment (when one precedes).
+            SELECT way_id, prev_junction AS segment_idx, node_id, seq
+            FROM marked
+            WHERE is_junction AND prev_junction IS NOT NULL
         """)
 
     def _build_simplified_edges(self) -> None:
         """Create simplified edges by stitching node geometries."""
-        # Get coordinates for all nodes in segments
-        self.execute("""
-            CREATE OR REPLACE TEMP TABLE segment_geometry_prep AS
-            SELECT 
-                ws.way_id,
-                ws.segment_idx,
-                ws.node_id,
-                ws.seq,
-                n.lat,
-                n.lon
-            FROM way_segments ws
-            JOIN raw.nodes n ON ws.node_id = n.osm_id
-            ORDER BY ws.way_id, ws.segment_idx, ws.seq
-        """)
-        
         # Stitch into LineStrings and calculate length
         self.execute("""
             CREATE OR REPLACE TABLE simplified_edges_forward AS
             WITH segment_groups AS (
-                SELECT 
+                -- Aggregate ONLY the numeric node geometry here, keyed by segment. Per-way
+                -- attributes (highway/name/maxspeed/oneway/lanes/surface/junction) are
+                -- attached afterwards by joining the small `ways` table, so this heavy
+                -- ordered aggregate never carries the OSM tags MAP. Replicating that MAP
+                -- across ~26M node rows is what OOM'd the country-scale cycling network.
+                SELECT
                     ws.way_id,
                     ws.segment_idx,
                     LIST(ws.node_id ORDER BY ws.seq) as node_list,
-                    LIST(n.lon || ' ' || n.lat ORDER BY ws.seq) as coord_list,
-                    map_extract(w.tags, 'highway')[1] as highway,
-                    map_extract(w.tags, 'name')[1] as name,
-                    map_extract(w.tags, 'maxspeed')[1] as maxspeed,
-                    -- Boolean one-way flag, computed upstream in road_filter.
-                    w.oneway as oneway,
-                    w.lanes_fwd as lanes,
-                    map_extract(w.tags, 'surface')[1] as surface,
-                    map_extract(w.tags, 'access')[1] as access,
-                    map_extract(w.tags, 'junction')[1] as junction,
-                    w.tags
+                    LIST(n.lon ORDER BY ws.seq) as lons,
+                    LIST(n.lat ORDER BY ws.seq) as lats
                 FROM way_segments ws
                 JOIN raw.nodes n ON ws.node_id = n.osm_id
-                JOIN ways w ON ws.way_id = w.osm_id
-                GROUP BY ws.way_id, ws.segment_idx, w.tags, w.lanes_fwd, w.oneway
+                GROUP BY ws.way_id, ws.segment_idx
             )
-            SELECT 
+            SELECT
                 row_number() OVER ()::INTEGER AS edge_id,
-                node_list[1] AS source,
-                node_list[len(node_list)] AS target,
-                way_id AS osm_id,
-                highway,
-                name,
-                maxspeed,
-                oneway,
-                lanes,
-                surface,
-                junction,
-                node_list as refs,
-                ST_GeomFromText('LINESTRING(' || list_aggregate(coord_list, 'string_agg', ', ') || ')') AS geometry,
-                FALSE AS is_reverse
-            FROM segment_groups
-            WHERE len(coord_list) >= 2
-        """)
-
-        # Now calculate actual lengths using Haversine formula
-        # ST_Length_Spheroid is broken in DuckDB spatial for certain coordinate ranges
-        self.execute("ALTER TABLE simplified_edges_forward ADD COLUMN length_m FLOAT")
-
-        self.execute("""
-            WITH edge_npoints AS (
-                SELECT edge_id, geometry, ST_NPoints(geometry) as npoints
-                FROM simplified_edges_forward
-            ),
-            point_indices AS (
-                SELECT edge_id, geometry, UNNEST(generate_series(1, npoints::INTEGER))::INTEGER as idx
-                FROM edge_npoints
-            ),
-            edge_points AS (
-                SELECT 
-                    edge_id, 
-                    idx,
-                    ST_X(ST_PointN(geometry, idx)) as lon,
-                    ST_Y(ST_PointN(geometry, idx)) as lat
-                FROM point_indices
-            ),
-            segment_lengths AS (
-                SELECT 
-                    p1.edge_id,
-                    12742000 * ASIN(SQRT(
-                        POWER(SIN(RADIANS(p2.lat - p1.lat) / 2), 2) +
-                        COS(RADIANS(p1.lat)) * COS(RADIANS(p2.lat)) *
-                        POWER(SIN(RADIANS(p2.lon - p1.lon) / 2), 2)
-                    )) as segment_m
-                FROM edge_points p1
-                JOIN edge_points p2 ON p1.edge_id = p2.edge_id AND p2.idx = p1.idx + 1
-            ),
-            total_lengths AS (
-                SELECT edge_id, SUM(segment_m) as total_m
-                FROM segment_lengths
-                GROUP BY edge_id
-            )
-            UPDATE simplified_edges_forward 
-            SET length_m = total_lengths.total_m
-            FROM total_lengths
-            WHERE simplified_edges_forward.edge_id = total_lengths.edge_id;
+                sg.node_list[1] AS source,
+                sg.node_list[len(sg.node_list)] AS target,
+                sg.way_id AS osm_id,
+                w.highway,
+                w.name,
+                w.maxspeed,
+                w.oneway,
+                w.lanes_fwd AS lanes,
+                w.surface,
+                w.junction,
+                sg.node_list as refs,
+                ST_GeomFromText('LINESTRING(' || list_aggregate(
+                    list_transform(range(1, len(sg.lons) + 1), i -> sg.lons[i] || ' ' || sg.lats[i]),
+                    'string_agg', ', '
+                ) || ')') AS geometry,
+                FALSE AS is_reverse,
+                -- Haversine length summed over consecutive vertices, computed directly
+                -- from the coordinate lists. Avoids round-tripping through the geometry
+                -- (ST_PointN per point is O(n^2) and replicates the geometry blob per
+                -- vertex, which OOMs on dense country-scale networks).
+                CAST(list_sum(list_transform(
+                    range(1, len(sg.lons)),
+                    i -> 12742000 * ASIN(SQRT(
+                        POWER(SIN(RADIANS(sg.lats[i + 1] - sg.lats[i]) / 2), 2) +
+                        COS(RADIANS(sg.lats[i])) * COS(RADIANS(sg.lats[i + 1])) *
+                        POWER(SIN(RADIANS(sg.lons[i + 1] - sg.lons[i]) / 2), 2)
+                    ))
+                )) AS FLOAT) AS length_m
+            FROM segment_groups sg
+            JOIN ways w ON w.osm_id = sg.way_id
+            WHERE len(sg.lons) >= 2
         """)
 
 
