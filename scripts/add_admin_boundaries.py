@@ -33,6 +33,7 @@ Examples
     python scripts/add_admin_boundaries.py --pbf ... --db ... --gpkg /tmp/sweden_admin.gpkg
 """
 import argparse
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -141,16 +142,17 @@ def main(argv=None) -> int:
     if not args.db.exists():
         sys.exit(f"DB not found: {args.db}")
 
-    tmp = None
+    tmpdir = None
     if args.gpkg is not None:
         gpkg = args.gpkg
     else:
-        tmp = tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False)
-        tmp.close()
-        gpkg = Path(tmp.name)
+        # A temp directory (not a temp file): ogr2ogr's GPKG driver won't write
+        # over an existing path, and NamedTemporaryFile would pre-create one.
+        tmpdir = tempfile.mkdtemp()
+        gpkg = Path(tmpdir) / "admin_boundaries.gpkg"
 
     try:
-        if gpkg.exists() and args.gpkg is not None:
+        if gpkg.exists():
             print(f"Reusing existing GeoPackage: {gpkg}")
         else:
             print(f"Extracting admin boundaries from {args.pbf} -> {gpkg} ...")
@@ -163,8 +165,8 @@ def main(argv=None) -> int:
         for level, n in rows:
             print(f"  admin_level {level if level is not None else 'NULL':>4}: {n}")
     finally:
-        if tmp is not None:
-            Path(tmp.name).unlink(missing_ok=True)
+        if tmpdir is not None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
     return 0
 
 
