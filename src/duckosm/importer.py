@@ -484,7 +484,9 @@ class DuckOSM:
                     ]) as ext_line FROM bounds
                 ),
                 poly AS (
-                    SELECT ST_Polygonize(ext_line) as ext FROM bbox
+                    -- ST_MakePolygon turns the closed bbox ring into a polygon.
+                    -- (ST_Polygonize is not available in the DuckDB spatial extension.)
+                    SELECT ST_MakePolygon(ext_line) as ext FROM bbox
                 ),
                 center AS (
                     SELECT ST_Point((xmin + xmax) / 2, (ymin + ymax) / 2) as geom FROM bounds
