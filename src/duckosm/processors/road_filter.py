@@ -50,15 +50,36 @@ class RoadFilter(BaseProcessor):
             """
         elif self.mode == "cycling":
             where_clause = """
-                map_extract(tags, 'highway')[1] IN (
-                    'cycleway', 'path', 'track', 'bridleway', 'living_street',
-                    'residential', 'service', 'unclassified', 'tertiary', 'secondary'
+                (
+                    (
+                        map_extract(tags, 'highway')[1] IN (
+                            'cycleway', 'path', 'track', 'bridleway', 'living_street',
+                            'residential', 'service', 'unclassified',
+                            'tertiary', 'tertiary_link', 'secondary', 'secondary_link',
+                            'primary', 'primary_link'
+                        )
+                        OR map_extract(tags, 'bicycle')[1] IN ('yes', 'designated', 'permissive')
+                        -- A road carrying explicit cycle infrastructure, but not
+                        -- 'no'/'none'/'separate' (the latter means use the separately
+                        -- mapped cycleway, not this road).
+                        OR (
+                            map_extract(tags, 'cycleway')[1] IS NOT NULL
+                            AND map_extract(tags, 'cycleway')[1] NOT IN ('no', 'none', 'separate')
+                        )
+                    )
+                    -- Drop ways where cycling is explicitly forbidden ...
+                    AND COALESCE(map_extract(tags, 'bicycle')[1], '') <> 'no'
+                    -- ... or that are private/closed, unless bicycles are explicitly allowed.
+                    AND (
+                        COALESCE(map_extract(tags, 'access')[1], '') NOT IN ('private', 'no')
+                        OR map_extract(tags, 'bicycle')[1] IN ('yes', 'designated', 'permissive')
+                    )
                 )
-                OR map_extract(tags, 'bicycle')[1] IN ('yes', 'designated')
-                OR map_extract(tags, 'cycleway')[1] IS NOT NULL
             """
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
+
+        oneway_expr = self._oneway_expression()
             
         self.execute(f"""
             CREATE OR REPLACE TABLE ways AS
@@ -68,15 +89,9 @@ class RoadFilter(BaseProcessor):
                     map_extract(tags, 'highway')[1] AS highway,
                     map_extract(tags, 'name')[1] AS name,
                     map_extract(tags, 'maxspeed')[1] AS maxspeed,
-                    -- One-way flag as a boolean. Roundabouts are inherently one-way even
-                    -- without an explicit oneway tag. OSM 'oneway=-1' (one-way against the
-                    -- digitisation direction) is also treated as one-way. Everything else
-                    -- (incl. untagged) is two-way -> FALSE, so the column is never NULL.
-                    CASE
-                        WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
-                        WHEN map_extract(tags, 'oneway')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
-                        ELSE FALSE
-                    END AS oneway,
+                    -- One-way flag as a boolean (mode-aware; see _oneway_expression).
+                    -- Never NULL: two-way / untagged -> FALSE.
+                    {oneway_expr} AS oneway,
                     map_extract(tags, 'surface')[1] AS surface,
                     map_extract(tags, 'access')[1] AS access,
                     map_extract(tags, 'junction')[1] AS junction,
@@ -123,7 +138,33 @@ class RoadFilter(BaseProcessor):
                 refs
             FROM base
         """)
-    
+
+    def _oneway_expression(self) -> str:
+        """SQL boolean expression for the one-way flag, tailored to the mode.
+
+        Roundabouts and OSM ``oneway`` in (yes/1/true/-1) are one-way; ``-1`` means
+        one-way against the digitisation direction. For cycling, ``oneway:bicycle``
+        overrides the generic ``oneway`` so contraflow cycling on one-way streets
+        (very common in Europe) yields a reverse edge.
+        """
+        if self.mode == "cycling":
+            return """
+                CASE
+                    WHEN map_extract(tags, 'oneway:bicycle')[1] = 'no' THEN FALSE
+                    WHEN map_extract(tags, 'oneway:bicycle')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
+                    WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
+                    WHEN map_extract(tags, 'oneway')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
+                    ELSE FALSE
+                END
+            """
+        return """
+            CASE
+                WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
+                WHEN map_extract(tags, 'oneway')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
+                ELSE FALSE
+            END
+        """
+
     def _create_way_nodes_table(self) -> None:
         """Create way_nodes junction table."""
         self.execute("""
