@@ -7,8 +7,12 @@ assembly natively, so this script shells out to ``ogr2ogr`` to extract
 ``boundary='administrative'`` multipolygons, then loads them into the target DuckDB
 as a single table:
 
-    admin_boundaries(osm_id BIGINT, name VARCHAR, admin_level INTEGER,
-                     parent_osm_id BIGINT, geometry GEOMETRY)  -- EPSG:4326
+    admin_boundaries(osm_id BIGINT, name VARCHAR, name_en VARCHAR,
+                     admin_level INTEGER, parent_osm_id BIGINT,
+                     geometry GEOMETRY)  -- EPSG:4326
+
+``name`` is the local (OSM) name; ``name_en`` is the English name (OSM ``name:en``)
+where present, so searches like "Sweden" can match "Sverige".
 
 ``parent_osm_id`` is the immediate enclosing boundary (the containing boundary with
 the highest ``admin_level`` below this one's), derived by spatial containment, so the
@@ -104,6 +108,10 @@ def load_boundaries(gpkg: Path, db: Path) -> dict:
         SELECT
             TRY_CAST(COALESCE(osm_id, osm_way_id) AS BIGINT) AS osm_id,
             name,
+            -- English name (OSM name:en), parsed from GDAL's hstore other_tags.
+            -- Only present for areas that carry a name:en tag (country, counties,
+            -- big cities); NULL otherwise.
+            NULLIF(regexp_extract(other_tags, '"name:en"=>"([^"]*)"', 1), '') AS name_en,
             TRY_CAST(admin_level AS INTEGER) AS admin_level,
             geom AS geometry
         FROM ST_Read('{gpkg}')

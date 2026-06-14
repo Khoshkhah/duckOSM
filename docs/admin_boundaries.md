@@ -62,7 +62,8 @@ Caveats:
 | Column | Type | Description |
 |--------|------|-------------|
 | `osm_id` | BIGINT | OSM id of the boundary relation |
-| `name` | VARCHAR | Boundary name (may be NULL) |
+| `name` | VARCHAR | Boundary name in the local language (may be NULL) |
+| `name_en` | VARCHAR | English name (OSM `name:en`); present for the country, counties and big cities, NULL otherwise |
 | `admin_level` | INTEGER | OSM admin level (see above); NULL if untagged |
 | `parent_osm_id` | BIGINT | `osm_id` of the immediate enclosing boundary (see below); NULL for the root and a few edge cases |
 | `geometry` | GEOMETRY | MultiPolygon, EPSG:4326 (same CRS as the edge geometries) |
