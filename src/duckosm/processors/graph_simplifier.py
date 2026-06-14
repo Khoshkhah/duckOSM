@@ -2,44 +2,73 @@
 Graph simplifier processor - contracts degree-2 nodes and splits ways at junctions.
 """
 
+import math
 import time
 import logging
 from duckosm.processors.base import BaseProcessor
 
 logger = logging.getLogger(__name__)
 
+# Node-refs processed per batch keeps the per-segment aggregate + geometry build
+# within ~16 GB. Used only when batches are chosen automatically.
+NODE_REFS_PER_BATCH = 13_000_000
+
+
 class GraphSimplifier(BaseProcessor):
     """
     Simplifies the road network by contracting degree-2 nodes.
-    
+
     This results in a graph where:
     1. Every node is a junction (degree != 2) or an endpoint.
     2. Edges contain the full geometry (stitching intermediate points).
     3. Length and costs are correctly aggregated.
+
+    For very large (country-scale) extracts the simplified edges are built in
+    several way-id buckets so the heavy geometry aggregation stays within memory.
     """
-    
+
+    def __init__(self, con, batches: int = 0):
+        super().__init__(con)
+        # 0 = auto (pick from node count), 1 = single pass, N>1 = N buckets.
+        self.batches = batches
+
     def run(self) -> None:
         """Run the simplification pipeline."""
         logger.info("Simplifying graph...")
         start = time.time()
-        
-        # 1. Identify junction nodes
+
+        # 1. Identify junction nodes (global; junction-ness spans ways)
         self._find_junctions()
-        
-        # 2. Segment ways at junctions
-        self._segment_ways()
-        
-        # 3. Build simplified edges with full geometry
-        self._build_simplified_edges()
-        
+
+        # 2 + 3. Segment ways and build simplified edges, optionally in batches
+        num_batches = self._num_batches()
+        if num_batches > 1:
+            logger.info(f"  Building simplified edges in {num_batches} way-id batches")
+        offset = 0
+        for b in range(num_batches):
+            way_filter = "TRUE" if num_batches == 1 else f"(wn.way_id % {num_batches}) = {b}"
+            self._segment_ways(way_filter)
+            self._build_simplified_edges(create=(b == 0), edge_offset=offset)
+            offset = self.fetchone(
+                "SELECT COALESCE(MAX(edge_id), 0) FROM simplified_edges_forward")[0]
+            if num_batches > 1:
+                logger.info(f"    batch {b + 1}/{num_batches}: {offset:,} edges so far")
+
         # 4. Split self-loops with virtual midpoint nodes
         self._split_self_loops()
-        
+
         # 5. Finalize tables
         self._finalize_tables()
-        
+
         elapsed = time.time() - start
         logger.info(f"  Graph simplified in {elapsed:.2f}s")
+
+    def _num_batches(self) -> int:
+        """Number of way-id buckets to build the simplified graph in."""
+        if self.batches and self.batches > 0:
+            return self.batches
+        n_refs = self.fetchone("SELECT COUNT(*) FROM way_nodes")[0] or 0
+        return max(1, math.ceil(n_refs / NODE_REFS_PER_BATCH))
 
     def _find_junctions(self) -> None:
         """Identify nodes that are junctions (degree != 2) or endpoints."""
@@ -75,7 +104,7 @@ class GraphSimplifier(BaseProcessor):
         junction_count = self.fetchone("SELECT COUNT(*) FROM junctions")[0]
         logger.info(f"  Identified {junction_count:,} junction nodes")
 
-    def _segment_ways(self) -> None:
+    def _segment_ways(self, way_filter: str = "TRUE") -> None:
         """Split ways into segments between junctions, ensuring junctions are shared.
 
         A segment runs from one junction to the next; junction nodes are shared between
@@ -86,8 +115,12 @@ class GraphSimplifier(BaseProcessor):
         nodes. The earlier implementation joined nodes to segment ranges with an
         inequality (``seq BETWEEN start AND end``), which materialised N*K rows per way
         (N nodes x K segments) and OOM'd on dense, highly-connected networks (cycling).
+
+        ``way_filter`` is a SQL predicate on ``wn.way_id`` used to restrict to one
+        batch of ways; partitioning by way_id keeps each way's nodes together so the
+        window functions stay correct.
         """
-        self.execute("""
+        self.execute(f"""
             CREATE OR REPLACE TABLE way_segments AS
             WITH marked AS (
                 SELECT
@@ -108,6 +141,7 @@ class GraphSimplifier(BaseProcessor):
                         ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS next_junction
                 FROM way_nodes wn
                 LEFT JOIN junctions j ON wn.node_id = j.node_id
+                WHERE {way_filter}
             )
             -- Non-junction nodes belong to the single segment that contains them.
             SELECT way_id, seg_start_incl AS segment_idx, node_id, seq
@@ -125,11 +159,18 @@ class GraphSimplifier(BaseProcessor):
             WHERE is_junction AND prev_junction IS NOT NULL
         """)
 
-    def _build_simplified_edges(self) -> None:
-        """Create simplified edges by stitching node geometries."""
+    def _build_simplified_edges(self, create: bool = True, edge_offset: int = 0) -> None:
+        """Create (or append a batch of) simplified edges by stitching node geometries.
+
+        ``create`` controls whether the target table is created or appended to;
+        ``edge_offset`` shifts the row-numbered edge_id so ids stay unique across
+        batches.
+        """
+        verb = ("CREATE OR REPLACE TABLE simplified_edges_forward AS"
+                if create else "INSERT INTO simplified_edges_forward")
         # Stitch into LineStrings and calculate length
-        self.execute("""
-            CREATE OR REPLACE TABLE simplified_edges_forward AS
+        self.execute(f"""
+            {verb}
             WITH segment_groups AS (
                 -- Aggregate ONLY the numeric node geometry here, keyed by segment. Per-way
                 -- attributes (highway/name/maxspeed/oneway/lanes/surface/junction) are
@@ -147,7 +188,7 @@ class GraphSimplifier(BaseProcessor):
                 GROUP BY ws.way_id, ws.segment_idx
             )
             SELECT
-                row_number() OVER ()::INTEGER AS edge_id,
+                ({edge_offset} + row_number() OVER ())::INTEGER AS edge_id,
                 sg.node_list[1] AS source,
                 sg.node_list[len(sg.node_list)] AS target,
                 sg.way_id AS osm_id,

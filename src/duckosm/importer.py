@@ -318,7 +318,7 @@ class DuckOSM:
         """Simplify the road network graph."""
         start = time.time()
         
-        GraphSimplifier(self.con).run()
+        GraphSimplifier(self.con, batches=self.config.options.simplify_batches).run()
         
         # Update stats
         res = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()

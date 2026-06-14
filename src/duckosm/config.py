@@ -23,6 +23,10 @@ class Options:
     # threads: cap worker threads to reduce peak memory (None = DuckDB default).
     memory_limit: Optional[str] = None
     threads: Optional[int] = None
+    # Number of way-id buckets to build the simplified graph in. 0 = auto (chosen
+    # from the node count to bound peak memory); 1 = single pass. Larger = lower
+    # peak RAM at the cost of extra passes over the node table.
+    simplify_batches: int = 0
 
 
 @dataclass
