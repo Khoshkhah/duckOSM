@@ -9,8 +9,13 @@ options:
   process_speeds: true
   extract_restrictions: true
   calculate_costs: true
+  # Cap DuckDB memory so the spatial/H3 extensions and Python have headroom on a
+  # 23 GiB machine; large intermediates spill to disk. Prevents OOM on the cycling
+  # network (the largest). Raise/lower to match available RAM.
+  memory_limit: "16GB"
 modes:
   - driving
   - walking
-  - cycling
-# Add 'walking' and 'cycling' below to build all three modes (~3x time/size).
+  # cycling omitted: its country-scale simplification peaks >16 GB RAM and OOMs on
+  # this machine. Re-enable on a larger host (or with batched simplification).
+  # - cycling

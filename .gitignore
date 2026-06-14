@@ -3,6 +3,10 @@ data/maps/*.pbf
 data/maps/*.osm.pbf
 data/output/*.duckdb
 data/output/*.db
+data/db/*.duckdb
+data/db/*.db
+data/db/*.wal
+data/db/*.tmp/
 logs/
 
 # Python
