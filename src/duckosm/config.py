@@ -18,6 +18,11 @@ class Options:
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True
+    # DuckDB memory tuning for large (e.g. country-scale) builds.
+    # memory_limit: e.g. "16GB" (None = DuckDB default of ~80% RAM).
+    # threads: cap worker threads to reduce peak memory (None = DuckDB default).
+    memory_limit: Optional[str] = None
+    threads: Optional[int] = None
 
 
 @dataclass

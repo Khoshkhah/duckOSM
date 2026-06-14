@@ -180,6 +180,17 @@ class DuckOSM:
         logger.info("Connecting to DuckDB...")
         self.con = duckdb.connect(str(self.output_path))
         self.con.execute("INSTALL spatial; LOAD spatial;")
+
+        # Large-build tuning: spill big intermediates to disk instead of OOM, and
+        # avoid buffering rows just to preserve insertion order (edge_id only needs
+        # to be unique, not ordered). Critical for country-scale extracts.
+        tmp_dir = self.output_path.parent / f"{self.output_path.stem}.tmp"
+        self.con.execute(f"SET temp_directory = '{tmp_dir}'")
+        self.con.execute("SET preserve_insertion_order = false")
+        if self.config.options.memory_limit:
+            self.con.execute(f"SET memory_limit = '{self.config.options.memory_limit}'")
+        if self.config.options.threads:
+            self.con.execute(f"SET threads = {self.config.options.threads}")
         
         # Try to load H3 extension
         try:
