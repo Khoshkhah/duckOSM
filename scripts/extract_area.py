@@ -10,8 +10,9 @@ Clip rule: an edge is kept **whole** if its geometry intersects the area (geomet
 not cut), preserving routing connectivity at the border. For every mode schema the
 referenced ``nodes``, ``edge_graph``, ``turn_restrictions``, ``ways`` and
 ``way_nodes`` are carried along. ``main.boundary``, a fresh
-``main.visualization_metadata`` and any intersecting ``admin_boundaries`` are added.
-The large ``raw.*`` tables are not copied.
+``main.visualization_metadata`` (incl. an IANA ``timezone`` when ``timezonefinder``
+is installed; disable with ``--no-timezone``) and any intersecting
+``admin_boundaries`` are added. The large ``raw.*`` tables are not copied.
 
 Examples
 --------
@@ -82,6 +83,33 @@ def build_clip(out, name, osm_id, boundary):
     return label
 
 
+def add_timezone(out) -> None:
+    """Add an IANA timezone (from the centroid) to main.visualization_metadata.
+
+    Graceful: skips with a note if `timezonefinder` isn't installed or lookup fails.
+    """
+    try:
+        from timezonefinder import TimezoneFinder
+    except ImportError:
+        print("  (timezone skipped — timezonefinder not installed)")
+        return
+    try:
+        row = out.execute(
+            "SELECT center_lat, center_lon FROM main.visualization_metadata").fetchone()
+        if not row or row[0] is None:
+            return
+        tz = TimezoneFinder().timezone_at(lat=row[0], lng=row[1])
+        if not tz:
+            return
+        cols = [r[0] for r in out.execute("DESCRIBE main.visualization_metadata").fetchall()]
+        if "timezone" not in cols:
+            out.execute("ALTER TABLE main.visualization_metadata ADD COLUMN timezone VARCHAR")
+        out.execute("UPDATE main.visualization_metadata SET timezone = ?", [tz])
+        print(f"  Timezone: {tz}")
+    except Exception as e:
+        print(f"  (timezone skipped — {e})")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -91,6 +119,8 @@ def main(argv=None) -> int:
     g.add_argument("--name", help="area name, matched in the source admin_boundaries")
     g.add_argument("--osm-id", type=int, help="admin boundary osm_id to use as the area")
     g.add_argument("--boundary", type=Path, help="GeoJSON boundary file")
+    ap.add_argument("--timezone", action=argparse.BooleanOptionalAction, default=True,
+                    help="add IANA timezone to visualization_metadata (needs timezonefinder)")
     args = ap.parse_args(argv)
 
     if not args.source.exists():
@@ -154,6 +184,9 @@ def main(argv=None) -> int:
         "            LOG2(360.0 / NULLIF(ST_XMax(geom) - ST_XMin(geom), 0)))) AS INTEGER) "
         "            AS initial_zoom "
         "FROM _clip")
+
+    if args.timezone:
+        add_timezone(out)
 
     out.execute("DROP TABLE _clip")
     out.execute("DETACH src")
