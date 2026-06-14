@@ -30,6 +30,9 @@ options:
   boundary_cells: false              # write the main.boundary_cells table
   boundary_cell_resolutions: null    # e.g. [6, 7, 8]; null = [h3_resolution]
 
+  timezone: false                    # add IANA timezone to visualization_metadata
+                                     # (needs the optional `timezonefinder` package)
+
   # Large-build tuning (optional):
   memory_limit: null                 # e.g. "16GB"; null = DuckDB default (~80% of RAM)
   threads: null                      # cap worker threads; null = DuckDB default

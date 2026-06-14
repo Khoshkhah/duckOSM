@@ -32,6 +32,10 @@ class Options:
     # boundary skip it. Resolutions default to [h3_resolution] when unset.
     boundary_cells: bool = False
     boundary_cell_resolutions: Optional[list[int]] = None
+    # Add an IANA timezone (from the boundary/area centroid) to
+    # visualization_metadata. Requires the optional `timezonefinder` package;
+    # if it isn't installed the step logs a warning and is skipped.
+    timezone: bool = False
 
 
 @dataclass

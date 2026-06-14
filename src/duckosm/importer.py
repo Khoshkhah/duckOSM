@@ -160,6 +160,8 @@ class DuckOSM:
                 try:
                     self.con.execute("USE main")
                     self._generate_metadata()
+                    if self.config.options.timezone:
+                        self._add_timezone()
                 except Exception as e:
                     logger.warning(f"Failed to generate visualization_metadata: {e}")
 
@@ -530,6 +532,36 @@ class DuckOSM:
                     initial_zoom INTEGER
                 )
             """)
+
+    def _add_timezone(self) -> None:
+        """Add an IANA timezone column to visualization_metadata (optional).
+
+        Looks up the timezone from the stored centroid via `timezonefinder`. If that
+        package isn't installed, or anything else fails, it logs and skips — it never
+        aborts the build.
+        """
+        try:
+            from timezonefinder import TimezoneFinder
+        except ImportError:
+            logger.warning("timezone requested but `timezonefinder` is not installed "
+                           "(pip install timezonefinder) — skipping")
+            return
+        try:
+            row = self.con.execute(
+                "SELECT center_lat, center_lon FROM visualization_metadata").fetchone()
+            if not row or row[0] is None:
+                return
+            tz = TimezoneFinder().timezone_at(lat=row[0], lng=row[1])
+            if not tz:
+                logger.warning("  No timezone found for centroid — skipping")
+                return
+            cols = [r[0] for r in self.con.execute("DESCRIBE visualization_metadata").fetchall()]
+            if "timezone" not in cols:
+                self.con.execute("ALTER TABLE visualization_metadata ADD COLUMN timezone VARCHAR")
+            self.con.execute("UPDATE visualization_metadata SET timezone = ?", [tz])
+            logger.info(f"  Timezone: {tz}")
+        except Exception as e:
+            logger.warning(f"Failed to add timezone: {e}")
 
     def _print_stats(self) -> None:
         """Print final statistics summary."""

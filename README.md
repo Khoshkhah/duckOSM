@@ -90,6 +90,7 @@ options:
   # Boundary H3 grid (optional; needs boundary_path):
   boundary_cells: false             # write main.boundary_cells
   boundary_cell_resolutions: null   # e.g. [6, 7, 8]; null = [h3_resolution]
+  timezone: false                   # add IANA timezone (needs timezonefinder)
   # Large-build tuning (optional):
   memory_limit: "16GB"     # cap DuckDB memory (null = ~80% of RAM)
   threads: null            # cap worker threads
