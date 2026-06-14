@@ -1,6 +1,6 @@
 name: sweden
 pbf_path: /home/kaveh/projects/osm-traffic-enrichment/map/sweden-latest.osm.pbf
-output_path: data/output
+output_path: data/db
 options:
   build_graph: true
   h3_indexing: true
@@ -11,4 +11,6 @@ options:
   calculate_costs: true
 modes:
   - driving
+  - walking
+  - cycling
 # Add 'walking' and 'cycling' below to build all three modes (~3x time/size).
