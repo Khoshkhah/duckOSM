@@ -1,5 +1,5 @@
 name: sweden
-pbf_path: /home/kaveh/projects/osm-traffic-enrichment/map/sweden-latest.osm.pbf
+pbf_path: data/map/sweden-latest.osm.pbf
 output_path: data/db
 options:
   build_graph: true

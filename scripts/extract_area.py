@@ -11,8 +11,9 @@ not cut), preserving routing connectivity at the border. For every mode schema t
 referenced ``nodes``, ``edge_graph``, ``turn_restrictions``, ``ways`` and
 ``way_nodes`` are carried along. ``main.boundary``, a fresh
 ``main.visualization_metadata`` (incl. an IANA ``timezone`` when ``timezonefinder``
-is installed; disable with ``--no-timezone``) and any intersecting
-``admin_boundaries`` are added. The large ``raw.*`` tables are not copied.
+is installed; disable with ``--no-timezone``) and the ``admin_boundaries`` nested
+inside the area (its sub-areas only — parents and neighbours are dropped) are added.
+The large ``raw.*`` tables are not copied.
 
 Examples
 --------
@@ -45,7 +46,9 @@ def build_clip(out, name, osm_id, boundary):
     if boundary:
         out.execute(
             "CREATE TEMP TABLE _clip AS "
-            f"SELECT ST_Union_Agg(geom) AS geom FROM ST_Read('{Path(boundary).resolve()}')"
+            "SELECT ST_Union_Agg(geom) AS geom, NULL::BIGINT AS osm_id, "
+            "       NULL AS name, NULL::INTEGER AS admin_level "
+            f"FROM ST_Read('{Path(boundary).resolve()}')"
         )
         label = Path(boundary).name
     else:
@@ -59,14 +62,14 @@ def build_clip(out, name, osm_id, boundary):
         if osm_id is not None:
             out.execute(
                 "CREATE TEMP TABLE _clip AS "
-                "SELECT geometry AS geom, name, admin_level FROM src.main.admin_boundaries "
+                "SELECT geometry AS geom, osm_id, name, admin_level FROM src.main.admin_boundaries "
                 f"WHERE osm_id = {int(osm_id)}")
         else:
             has_en = "name_en" in cols
             en = "strip_accents(lower(coalesce(name_en,'')))" if has_en else "''"
             out.execute(
                 "CREATE TEMP TABLE _clip AS "
-                "SELECT geometry AS geom, name, admin_level FROM src.main.admin_boundaries "
+                "SELECT geometry AS geom, osm_id, name, admin_level FROM src.main.admin_boundaries "
                 f"WHERE strip_accents(lower(name)) LIKE '%' || strip_accents(lower($q)) || '%' "
                 f"   OR {en} LIKE '%' || strip_accents(lower($q)) || '%' "
                 f"ORDER BY (strip_accents(lower(name)) = strip_accents(lower($q)) "
@@ -171,10 +174,14 @@ def main(argv=None) -> int:
     out.execute("CREATE SCHEMA IF NOT EXISTS main")
     out.execute("CREATE OR REPLACE TABLE main.boundary AS SELECT geom AS geometry FROM _clip")
     if "admin_boundaries" in present.get("main", set()):
+        # Keep only boundaries nested INSIDE the area (interior point within the
+        # clip), excluding the area itself — i.e. its sub-areas. This drops parent
+        # areas (county/country) and edge-touching neighbours that merely intersect.
         out.execute(
             "CREATE OR REPLACE TABLE main.admin_boundaries AS "
-            "SELECT * FROM src.main.admin_boundaries "
-            "WHERE ST_Intersects(geometry, (SELECT geom FROM _clip))")
+            "SELECT a.* FROM src.main.admin_boundaries a "
+            "WHERE ST_Within(ST_PointOnSurface(a.geometry), (SELECT geom FROM _clip)) "
+            "  AND ((SELECT osm_id FROM _clip) IS NULL OR a.osm_id <> (SELECT osm_id FROM _clip))")
     out.execute(
         "CREATE OR REPLACE TABLE main.visualization_metadata AS "
         "SELECT ST_AsGeoJSON(geom) AS boundary_geojson, "
