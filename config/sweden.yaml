@@ -15,7 +15,6 @@ options:
   memory_limit: "16GB"
 modes:
   - driving
-  - walking
-  # cycling omitted: its country-scale simplification peaks >16 GB RAM and OOMs on
-  # this machine. Re-enable on a larger host (or with batched simplification).
+  # walking and cycling omitted to keep this DB driving-only.
+  # - walking
   # - cycling
