@@ -32,7 +32,7 @@ class GraphBuilder(BaseProcessor):
                     w.name,
                     w.maxspeed,
                     w.oneway,
-                    w.lanes,
+                    w.lanes_fwd,
                     w.surface,
                     w.junction,
                     w.refs[1] AS source,
@@ -49,7 +49,7 @@ class GraphBuilder(BaseProcessor):
                 name,
                 maxspeed,
                 oneway,
-                lanes,
+                lanes_fwd AS lanes,
                 surface,
                 junction,
                 node_count,
@@ -79,25 +79,27 @@ class GraphBuilder(BaseProcessor):
         
         self.execute(f"""
             INSERT INTO edges
-            SELECT 
+            SELECT
                 {max_id} + row_number() OVER () AS edge_id,
-                target AS source,
-                source AS target,
-                osm_id,
-                highway,
-                name,
-                maxspeed,
-                oneway,
-                lanes,
-                surface,
-                junction,
-                node_count,
-                length_m,
+                e.target AS source,
+                e.source AS target,
+                e.osm_id,
+                e.highway,
+                e.name,
+                e.maxspeed,
+                e.oneway,
+                -- Reverse edge carries the backward lane count.
+                w.lanes_bwd AS lanes,
+                e.surface,
+                e.junction,
+                e.node_count,
+                e.length_m,
                 -- Reverse geometry natively
-                ST_Reverse(geometry) AS geometry,
+                ST_Reverse(e.geometry) AS geometry,
                 TRUE AS is_reverse
-            FROM edges
+            FROM edges e
+            JOIN ways w ON w.osm_id = e.osm_id
             -- Two-way roads get a reverse edge. oneway is the single source of truth
-            -- (roundabouts were already normalised to oneway='yes' upstream).
-            WHERE oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1')
+            -- (roundabouts were already normalised to oneway=TRUE upstream).
+            WHERE NOT e.oneway
         """)

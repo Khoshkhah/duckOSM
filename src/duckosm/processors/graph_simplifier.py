@@ -140,10 +140,9 @@ class GraphSimplifier(BaseProcessor):
                     map_extract(w.tags, 'highway')[1] as highway,
                     map_extract(w.tags, 'name')[1] as name,
                     map_extract(w.tags, 'maxspeed')[1] as maxspeed,
-                    -- Roundabouts are inherently one-way even without an explicit oneway tag.
-                    CASE WHEN map_extract(w.tags, 'junction')[1] IN ('roundabout', 'circular')
-                         THEN 'yes' ELSE map_extract(w.tags, 'oneway')[1] END as oneway,
-                    map_extract(w.tags, 'lanes')[1] as lanes,
+                    -- Boolean one-way flag, computed upstream in road_filter.
+                    w.oneway as oneway,
+                    w.lanes_fwd as lanes,
                     map_extract(w.tags, 'surface')[1] as surface,
                     map_extract(w.tags, 'access')[1] as access,
                     map_extract(w.tags, 'junction')[1] as junction,
@@ -151,7 +150,7 @@ class GraphSimplifier(BaseProcessor):
                 FROM way_segments ws
                 JOIN raw.nodes n ON ws.node_id = n.osm_id
                 JOIN ways w ON ws.way_id = w.osm_id
-                GROUP BY ws.way_id, ws.segment_idx, w.tags
+                GROUP BY ws.way_id, ws.segment_idx, w.tags, w.lanes_fwd, w.oneway
             )
             SELECT 
                 row_number() OVER ()::INTEGER AS edge_id,
@@ -332,27 +331,29 @@ class GraphSimplifier(BaseProcessor):
             CREATE OR REPLACE TABLE simplified_edges AS
             SELECT * FROM simplified_edges_forward
             UNION ALL
-            SELECT 
+            SELECT
                 ({max_id} + row_number() OVER ())::INTEGER AS edge_id,
-                target AS source,
-                source AS target,
-                osm_id,
-                highway,
-                name,
-                maxspeed,
-                oneway,
-                lanes,
-                surface,
-                junction,
-                list_reverse(refs) as refs,
+                sef.target AS source,
+                sef.source AS target,
+                sef.osm_id,
+                sef.highway,
+                sef.name,
+                sef.maxspeed,
+                sef.oneway,
+                -- Reverse edge carries the backward lane count.
+                w.lanes_bwd AS lanes,
+                sef.surface,
+                sef.junction,
+                list_reverse(sef.refs) as refs,
                 -- Native reverse geometry
-                ST_Reverse(geometry),
+                ST_Reverse(sef.geometry),
                 TRUE AS is_reverse,
-                length_m
-            FROM simplified_edges_forward
+                sef.length_m
+            FROM simplified_edges_forward sef
+            JOIN ways w ON w.osm_id = sef.osm_id
             -- Two-way roads get a reverse edge. oneway is the single source of truth
-            -- (roundabouts were already normalised to oneway='yes' upstream).
-            WHERE oneway IS NULL OR oneway NOT IN ('yes', '1', 'true', '-1')
+            -- (roundabouts were already normalised to oneway=TRUE upstream).
+            WHERE NOT sef.oneway
         """)
         
         # 3. Replace the main edges table

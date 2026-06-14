@@ -35,7 +35,8 @@ Self-loop edges (cul-de-sacs) are split at midpoint, creating virtual nodes:
 | `osm_id` | BIGINT | Original OSM way ID |
 | `highway` | VARCHAR | Highway type |
 | `name` | VARCHAR | Road name |
-| `maxspeed` | VARCHAR | Raw OSM maxspeed string |
+| `lanes` | INTEGER | Lane count in this edge's direction of travel. Parsed from OSM `lanes`/`lanes:forward`/`lanes:backward`; two-way roads split the total between directions (forward gets the larger half). Filled with a class-based default (motorway/trunk = 2, otherwise 1) when untagged — never NULL. |
+| `oneway` | BOOLEAN | TRUE if the road is one-way. Derived from OSM `oneway` (`yes`/`1`/`true`/`-1`) and roundabouts (`junction=roundabout`/`circular`); everything else, including untagged, is FALSE — never NULL. One-way roads have no reverse edge. |
 | `length_m` | FLOAT | Length in meters |
 | `maxspeed_kmh` | FLOAT | Normalized speed (km/h) |
 | `cost_s` | FLOAT | Travel time in seconds |
