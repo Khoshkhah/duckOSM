@@ -1,0 +1,36 @@
+# duckOSM configuration template — copy, edit, and run with:
+#   python -m duckosm --config config/<your>.yaml
+# Every key shows its default; omit any key to accept that default.
+# Full reference: docs/configuration.md
+
+name: my_import                      # logical name; also the output filename when
+                                     # output_path is a directory
+pbf_path: data/maps/input.osm.pbf    # REQUIRED — source OSM PBF file
+output_path: data/output             # a .duckdb file, OR a directory -> <name>.duckdb
+
+# Optional spatial filter (use at most one):
+boundary_path: null                  # GeoJSON polygon to clip to
+h3_cell: null                        # OR a single H3 cell id to clip to
+
+modes:                               # one output schema per mode
+  - driving
+  # - walking
+  # - cycling
+
+options:
+  build_graph: true                  # build the edge-adjacency (edge_graph) table
+  h3_indexing: true                  # add from_cell / to_cell / lca_res to edges
+  h3_resolution: 8                   # H3 resolution for edge indexing (0-15)
+  simplify: true                     # contract degree-2 nodes (recommended)
+  process_speeds: true               # compute maxspeed_kmh (drops the raw maxspeed string)
+  extract_restrictions: true         # build turn_restrictions (driving only)
+  calculate_costs: true              # compute travel-time cost_s
+
+  # Boundary H3 grid (optional; requires boundary_path):
+  boundary_cells: false              # write the main.boundary_cells table
+  boundary_cell_resolutions: null    # e.g. [6, 7, 8]; null = [h3_resolution]
+
+  # Large-build tuning (optional):
+  memory_limit: null                 # e.g. "16GB"; null = DuckDB default (~80% of RAM)
+  threads: null                      # cap worker threads; null = DuckDB default
+  simplify_batches: 0                # 0 = auto-size by node count; 1 = single pass

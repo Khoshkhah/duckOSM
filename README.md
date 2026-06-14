@@ -70,6 +70,9 @@ and [`docs/architecture.md`](docs/architecture.md) for the pipeline.
 
 ## Configuration
 
+Copy [`config/template.yaml`](config/template.yaml) and edit. Full field reference:
+[`docs/configuration.md`](docs/configuration.md).
+
 ```yaml
 name: "my_import"
 pbf_path: "data/maps/input.osm.pbf"
@@ -117,6 +120,19 @@ example queries.
 - [`notebooks/explore_network.ipynb`](notebooks/explore_network.ipynb) — load and map
   the network, plus admin-boundary **name search** (e.g. find the `osm_id` of
   "sodermalm"), hierarchy traversal, children, and point-in-region lookup.
+
+## Sub-area extraction
+
+Slice an area out of an existing database (no re-import) into a new self-contained
+duckdb — by name (from `admin_boundaries`), boundary `osm_id`, or a GeoJSON file.
+Edges intersecting the area are kept whole, with their nodes / edge_graph /
+restrictions carried along.
+
+```bash
+python scripts/extract_area.py --source data/db/sweden.duckdb \
+    --db data/db/sodermalm.duckdb --name "Sodermalm"
+# or: --osm-id 5691336   |   --boundary area.geojson
+```
 
 ## Tools
 
