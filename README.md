@@ -4,10 +4,16 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 
 ## Features
 
-- **Fast**: Uses DuckDB's native `ST_READOSM` for 100x faster PBF parsing
-- **Memory Efficient**: Streaming SQL processing, no Python object overhead
-- **Portable**: Single `.duckdb` file output, queryable anywhere
-- **Configurable**: YAML config or CLI arguments
+- **Fast**: native `ST_READOSM` for ~100x faster PBF parsing
+- **Memory efficient**: streaming SQL; graph simplification auto-batches so even
+  country-scale extracts fit in RAM
+- **Multi-modal**: separate `driving` / `walking` / `cycling` networks with
+  mode-aware filtering, speeds and one-way handling (incl. cycling contraflow)
+- **Routing-ready**: degree-2 simplified graph, edge-adjacency table, turn
+  restrictions, H3 spatial indexing, travel-time costs
+- **Admin boundaries**: optional table of all OSM administrative levels with a
+  derived parent hierarchy
+- **Portable**: single `.duckdb` file, queryable anywhere
 
 ## Installation
 
@@ -21,55 +27,98 @@ pip install -e .
 ### CLI
 
 ```bash
-# Using config file
+# From a YAML config
 python -m duckosm --config config/default.yaml
 
-# Using CLI arguments
+# From CLI arguments
 python -m duckosm \
     --pbf data/maps/input.osm.pbf \
     --output data/output/network.duckdb \
-    --graph
+    --modes driving walking
 ```
 
 ### Python API
 
 ```python
-from duckosm import DuckOSM
+from duckosm import DuckOSM, Config
 
-importer = DuckOSM(
+config = Config.from_args(
     pbf_path="input.osm.pbf",
-    output_path="output.duckdb"
+    output_path="output.duckdb",
+    modes=["driving"],
 )
-importer.run()
+DuckOSM(config).run()
+# or: DuckOSM(Config.from_yaml("config/default.yaml")).run()
 ```
 
-## Output Tables
+## Output
+
+Each transport mode gets its own schema (`driving`, `walking`, `cycling`):
 
 | Table | Description |
 |-------|-------------|
-| `nodes` | Road network nodes with coordinates |
-| `edges` | Road segments with attributes |
-| `turn_restrictions` | Turn restriction relations |
+| `edges` | Directed road segments: geometry, `length_m`, `maxspeed_kmh`, `cost_s`, `lanes` (int, per-direction), `oneway` (bool), `highway`, H3 cells, … |
+| `nodes` | Junction / endpoint nodes |
 | `edge_graph` | Edge adjacency for routing |
+| `turn_restrictions` | Turn-restriction relations (driving) |
+
+Shared tables: `raw.*` (parsed OSM), `main.visualization_metadata`, and the optional
+`main.admin_boundaries`.
+
+See [`docs/data_dictionary.md`](docs/data_dictionary.md) for full column definitions
+and [`docs/architecture.md`](docs/architecture.md) for the pipeline.
 
 ## Configuration
 
 ```yaml
 name: "my_import"
 pbf_path: "data/maps/input.osm.pbf"
-output_path: "data/output/network.duckdb"
+output_path: "data/output/network.duckdb"   # or a directory -> <name>.duckdb
+boundary_path: null                          # optional GeoJSON clip
 
 options:
   build_graph: true
   h3_indexing: true
   h3_resolution: 8
-  simplify: false  # Graph simplification (experimental)
+  simplify: true
+  process_speeds: true
+  extract_restrictions: true
+  calculate_costs: true
+  # Large-build tuning (optional):
+  memory_limit: "16GB"     # cap DuckDB memory (null = ~80% of RAM)
+  threads: null            # cap worker threads
+  simplify_batches: 0      # 0 = auto-size by node count; 1 = single pass
+
+modes:
+  - driving
+  - walking
+  - cycling
+```
+
+## Administrative boundaries
+
+Add all OSM administrative areas (country, county, municipality, district, …) to a
+built database as an `admin_boundaries` table, with a derived `parent_osm_id` for
+hierarchy traversal:
+
+```bash
+python scripts/add_admin_boundaries.py --pbf input.osm.pbf --db output.duckdb
+```
+
+Requires `ogr2ogr` (GDAL). The OSM `admin_level` meaning is country-specific — see
+[`docs/admin_boundaries.md`](docs/admin_boundaries.md) for the levels, schema and
+example queries.
+
+## Notebooks
+
+- [`notebooks/explore_network.ipynb`](notebooks/explore_network.ipynb) — load and map
+  the network, plus admin-boundary **name search** (e.g. find the `osm_id` of
+  "sodermalm"), hierarchy traversal, children, and point-in-region lookup.
 
 ## Tools
 
-- **Visualizer**: Run `streamlit run scripts/visualize.py` to explore the network on an interactive map.
-- **Comparison**: Use `scripts/compare_results.py` to validate output against other tools.
-```
+- **Visualizer**: `streamlit run scripts/visualize.py` — explore the network on a map
+- **Comparison**: `scripts/compare_results.py` — validate output against other tools
 
 ## License
 
