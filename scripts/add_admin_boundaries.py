@@ -8,7 +8,13 @@ assembly natively, so this script shells out to ``ogr2ogr`` to extract
 as a single table:
 
     admin_boundaries(osm_id BIGINT, name VARCHAR, admin_level INTEGER,
-                     geometry GEOMETRY)   -- EPSG:4326, matches the edge geometries
+                     parent_osm_id BIGINT, geometry GEOMETRY)  -- EPSG:4326
+
+``parent_osm_id`` is the immediate enclosing boundary (the containing boundary with
+the highest ``admin_level`` below this one's), derived by spatial containment, so the
+hierarchy (e.g. kommun -> county -> country) can be traversed with self-joins. It is
+NULL for the country root and for the few boundaries whose interior point is not
+covered by any parent (border/coastline artifacts).
 
 The table is replaced on each run. Requires ``ogr2ogr`` (GDAL) on PATH and the
 ``duckdb`` Python package with the spatial extension.
@@ -42,6 +48,52 @@ def extract_boundaries(pbf: Path, gpkg: Path) -> None:
     )
 
 
+def compute_parents(con) -> None:
+    """Set ``parent_osm_id`` to each boundary's immediate enclosing boundary.
+
+    Containment is tested with a guaranteed-interior point (ST_PointOnSurface) against
+    the geometry of candidate parents (those with a lower admin_level), pre-filtered by
+    bounding box for speed. The immediate parent is the containing boundary with the
+    highest admin_level below the child's (smallest by area to break ties).
+    """
+    con.execute("ALTER TABLE admin_boundaries ADD COLUMN IF NOT EXISTS parent_osm_id BIGINT")
+    con.execute("""
+        CREATE OR REPLACE TEMP TABLE _b AS
+        SELECT osm_id, admin_level, geometry,
+               ST_X(ST_PointOnSurface(geometry)) AS px,
+               ST_Y(ST_PointOnSurface(geometry)) AS py,
+               ST_XMin(geometry) xmin, ST_XMax(geometry) xmax,
+               ST_YMin(geometry) ymin, ST_YMax(geometry) ymax
+        FROM admin_boundaries
+    """)
+    con.execute("""
+        CREATE OR REPLACE TEMP TABLE _parent AS
+        WITH cand AS (
+            SELECT c.osm_id AS child_id, p.osm_id AS parent_id,
+                   p.admin_level AS plvl, ST_Area(p.geometry) AS parea
+            FROM _b c
+            JOIN _b p
+              ON p.osm_id <> c.osm_id
+             AND (p.admin_level < c.admin_level OR c.admin_level IS NULL)
+             AND c.px BETWEEN p.xmin AND p.xmax
+             AND c.py BETWEEN p.ymin AND p.ymax
+             AND ST_Contains(p.geometry, ST_Point(c.px, c.py))
+        )
+        SELECT child_id, parent_id FROM (
+            SELECT child_id, parent_id,
+                   row_number() OVER (
+                       PARTITION BY child_id ORDER BY plvl DESC NULLS LAST, parea ASC) rn
+            FROM cand
+        ) WHERE rn = 1
+    """)
+    con.execute("""
+        UPDATE admin_boundaries SET parent_osm_id = _parent.parent_id
+        FROM _parent WHERE admin_boundaries.osm_id = _parent.child_id
+    """)
+    con.execute("DROP TABLE IF EXISTS _b")
+    con.execute("DROP TABLE IF EXISTS _parent")
+
+
 def load_boundaries(gpkg: Path, db: Path) -> dict:
     """Load the GeoPackage into ``admin_boundaries`` and return per-level counts."""
     con = duckdb.connect(str(db))
@@ -57,6 +109,7 @@ def load_boundaries(gpkg: Path, db: Path) -> dict:
         FROM ST_Read('{gpkg}')
         """
     )
+    compute_parents(con)
     rows = con.execute(
         "SELECT admin_level, count(*) FROM admin_boundaries "
         "GROUP BY admin_level ORDER BY admin_level NULLS LAST"
