@@ -59,6 +59,46 @@ WHERE tags['highway'] IS NOT NULL
   AND tags['highway'] IN ('motorway', 'primary', 'secondary', 'residential', ...);
 ```
 
+### Lane count (`lanes`)
+
+The `lanes` column on each edge is an **integer lane count for that edge's direction of
+travel**, and is never NULL. It is computed in two parts.
+
+**1. Per-direction counts on `ways`** (in `road_filter`). The OSM tags are parsed to
+integers — `regexp_extract(..., '\d+')` takes the first integer, so `"2"`, `"2;3"` and
+`"1.5"` all yield a value; `0`, blanks and non-numeric values become NULL. A forward and a
+backward count are then derived:
+
+```sql
+-- n_total = lanes, n_fwd = lanes:forward, n_bwd = lanes:backward (parsed ints)
+-- Forward direction:
+CASE
+    WHEN n_fwd IS NOT NULL THEN n_fwd                      -- explicit lanes:forward wins
+    WHEN oneway                                            -- one-way (boolean): all lanes forward
+        THEN COALESCE(n_total, default_lanes)
+    WHEN n_total IS NOT NULL AND n_bwd IS NOT NULL
+        THEN GREATEST(n_total - n_bwd, 1)                  -- remainder of the total
+    WHEN n_total IS NOT NULL
+        THEN GREATEST(CEIL(n_total / 2.0)::INT, 1)         -- two-way split, larger half
+    ELSE default_lanes                                     -- nothing tagged → fallback
+END AS lanes_fwd
+-- Backward direction is symmetric: lanes:backward, else (n_total - n_fwd),
+-- else FLOOR(n_total / 2), else default_lanes.
+```
+
+`default_lanes` is a class-based fallback applied **only when nothing is tagged**:
+**motorway / trunk → 2, every other highway class → 1.**
+
+**2. Each edge picks its side** (in `graph_builder` / `graph_simplifier`). The forward edge
+takes `lanes_fwd`; the reverse edge created for two-way roads takes `lanes_bwd` (looked up
+by joining the edge back to its way on `osm_id`). One-way roads have no reverse edge, so all
+lanes stay on the single forward edge.
+
+> [!NOTE]
+> OSM lane tagging is dense on major roads but sparse on local roads (in Sweden:
+> motorway ~100%, trunk ~93%, residential/service <3%), so the class-based fallback is what
+> keeps the column fully populated.
+
 ---
 
 ## Step 3: Build Initial Edges
@@ -126,11 +166,13 @@ FROM edges WHERE source = target;
 ```sql
 INSERT INTO edges
 SELECT 
-    target AS source, source AS target,
-    ST_Reverse(geometry),
+    e.target AS source, e.source AS target,
+    w.lanes_bwd AS lanes,          -- reverse edge carries the backward lane count
+    ST_Reverse(e.geometry),
     TRUE AS is_reverse
-FROM edges
-WHERE oneway NOT IN ('yes', '1', 'true');
+FROM edges e
+JOIN ways w ON w.osm_id = e.osm_id
+WHERE NOT e.oneway;          -- oneway is a boolean: FALSE = two-way
 ```
 
 ---
@@ -145,6 +187,9 @@ UPDATE edges SET maxspeed_kmh =
         WHEN maxspeed ~ '^\d+$' THEN CAST(maxspeed AS FLOAT)
         ELSE (SELECT default_speed FROM highway_defaults WHERE highway = edges.highway)
     END;
+
+-- maxspeed_kmh is the normalized, always-populated speed; drop the raw OSM string.
+ALTER TABLE edges DROP COLUMN maxspeed;
 ```
 
 ---
@@ -194,3 +239,5 @@ UPDATE edges SET
 | `source/target` | BIGINT |
 | `from_cell/to_cell` | UBIGINT |
 | `length_m/cost_s/maxspeed_kmh` | FLOAT |
+| `lanes` | INTEGER |
+| `oneway` | BOOLEAN |

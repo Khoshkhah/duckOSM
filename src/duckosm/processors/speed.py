@@ -42,6 +42,7 @@ class SpeedProcessor(BaseProcessor):
     def run(self) -> None:
         """Process speed limits."""
         self._add_maxspeed_kmh_column()
+        self._drop_raw_maxspeed()
     
     def _add_maxspeed_kmh_column(self) -> None:
         """Add normalized maxspeed_kmh column to edges."""
@@ -73,8 +74,12 @@ class SpeedProcessor(BaseProcessor):
         self.execute(f"""
             ALTER TABLE edges ADD COLUMN IF NOT EXISTS maxspeed_kmh FLOAT;
             {update_sql};
-            
-            -- Also populate the string 'maxspeed' column if it's NULL, for user visibility
-            UPDATE edges SET maxspeed = CAST(maxspeed_kmh AS VARCHAR)
-            WHERE maxspeed IS NULL;
         """)
+
+    def _drop_raw_maxspeed(self) -> None:
+        """Drop the raw OSM maxspeed string once maxspeed_kmh has been derived.
+
+        maxspeed_kmh is the normalized, always-populated speed; the raw string is
+        redundant after the conversion above, so it is removed from the edges table.
+        """
+        self.execute("ALTER TABLE edges DROP COLUMN IF EXISTS maxspeed")
