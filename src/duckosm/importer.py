@@ -79,6 +79,8 @@ class DuckOSM:
         # Add optional boundary loading
         if self.config.boundary_path:
             global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
+            if self.config.options.boundary_cells:
+                global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
         
         # 2. Mode-specific steps (run for each mode)
         def get_mode_steps(mode):
@@ -281,6 +283,15 @@ class DuckOSM:
         elapsed = time.time() - start
         logger.info(f"  Boundary loaded: {count} features in {elapsed:.2f}s")
     
+    def _build_boundary_cells(self) -> None:
+        """Generate the main.boundary_cells H3 grid from the boundary (optional)."""
+        from duckosm.processors.boundary_cells import BoundaryCellsBuilder
+        resolutions = (self.config.options.boundary_cell_resolutions
+                       or [self.config.options.h3_resolution])
+        BoundaryCellsBuilder(
+            self.con, Path(self.config.boundary_path).resolve(), resolutions
+        ).run()
+
     def _filter_roads(self, mode: str) -> None:
         """Filter to highway ways only."""
         logger.info(f"[{mode}] Filtering roads...")

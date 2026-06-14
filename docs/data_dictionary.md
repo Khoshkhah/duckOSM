@@ -96,3 +96,17 @@ Stores computed metadata for frontend visualization.
 | `center_lat` | DOUBLE | Latitude of map center |
 | `center_lon` | DOUBLE | Longitude of map center |
 | `initial_zoom` | INTEGER | Recommended initial zoom level (1-14) |
+
+### Table: `boundary_cells` *(optional)*
+H3 hexagon grid covering the boundary, for spatial tiling/filtering. Created only
+when a `boundary_path` is given and `options.boundary_cells` is true (one row per
+cell per resolution in `boundary_cell_resolutions`, default `[h3_resolution]`).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `h3_id` | VARCHAR | H3 cell index (unique; resolution encoded in the index) |
+| `resolution` | INTEGER | H3 resolution of the cell |
+| `geometry` | GEOMETRY | Hexagon polygon, EPSG:4326 |
+
+### Table: `admin_boundaries` *(optional)*
+Added by `scripts/add_admin_boundaries.py`. See [`admin_boundaries.md`](admin_boundaries.md).

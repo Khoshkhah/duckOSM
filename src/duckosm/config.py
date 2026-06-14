@@ -27,6 +27,11 @@ class Options:
     # from the node count to bound peak memory); 1 = single pass. Larger = lower
     # peak RAM at the cost of extra passes over the node table.
     simplify_batches: int = 0
+    # Generate an H3 hexagon grid covering the boundary (table main.boundary_cells).
+    # Requires a boundary_path. Off by default; whole-region builds without a
+    # boundary skip it. Resolutions default to [h3_resolution] when unset.
+    boundary_cells: bool = False
+    boundary_cell_resolutions: Optional[list[int]] = None
 
 
 @dataclass
