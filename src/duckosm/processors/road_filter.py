@@ -35,9 +35,32 @@ class RoadFilter(BaseProcessor):
                 'platform', 'elevator', 'track'
             ]
             exclude_list = ", ".join(f"'{h}'" for h in exclude_highways)
+            # Access-aware driving filter. A way is drivable when its highway class is a road
+            # class (not one of the excluded pedestrian/path/track/... classes) OR motor
+            # vehicles are explicitly allowed on it (e.g. highway=pedestrian|living_street with
+            # motor_vehicle=yes — a shared/access street that genuinely carries cars and
+            # connects the network). In BOTH cases, drop the way when motor vehicles are
+            # explicitly forbidden (motor_vehicle/motorcar=no) or access is closed (no/private)
+            # without a motor-vehicle override. This keeps drivable shared streets that the
+            # class-only filter wrongly dropped, and removes genuinely car-free / closed ways
+            # the class-only filter wrongly kept.
+            mv = ("COALESCE(map_extract(tags, 'motor_vehicle')[1], "
+                  "map_extract(tags, 'motorcar')[1], map_extract(tags, 'vehicle')[1])")
+            mv_mc = ("COALESCE(map_extract(tags, 'motor_vehicle')[1], "
+                     "map_extract(tags, 'motorcar')[1])")
+            allow = "('yes', 'designated', 'permissive', 'destination')"
             where_clause = f"""
                 map_extract(tags, 'highway')[1] IS NOT NULL
-                AND map_extract(tags, 'highway')[1] NOT IN ({exclude_list})
+                AND (
+                    map_extract(tags, 'highway')[1] NOT IN ({exclude_list})
+                    OR {mv} IN {allow}
+                )
+                AND COALESCE(map_extract(tags, 'motor_vehicle')[1], '') <> 'no'
+                AND COALESCE(map_extract(tags, 'motorcar')[1], '') <> 'no'
+                AND (
+                    COALESCE(map_extract(tags, 'access')[1], '') NOT IN ('no', 'private')
+                    OR {mv_mc} IN {allow}
+                )
             """
         elif self.mode == "walking":
             where_clause = """
