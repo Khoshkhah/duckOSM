@@ -151,6 +151,12 @@ class DuckOSM:
                         'total_time': time.time() - mode_start
                     }
                 
+                # Persist the canonical stable-edge_id macro (callable anywhere as
+                # `edge_id_hash(osm_id, source, target, is_reverse)`), so the formula travels
+                # with the db and other projects reuse one implementation.
+                from duckosm.edge_id import create_edge_id_macro
+                create_edge_id_macro(self.con)
+
                 # Final cleanup
                 progress.update(main_task, description="Cleaning up...")
                 self._cleanup()

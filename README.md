@@ -73,6 +73,39 @@ Shared tables: `raw.*` (parsed OSM), `main.visualization_metadata`, and the opti
 See [`docs/data_dictionary.md`](docs/data_dictionary.md) for full column definitions
 and [`docs/architecture.md`](docs/architecture.md) for the pipeline.
 
+## Stable `edge_id` — reusing the hash elsewhere
+
+`edge_id = (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT` (DuckDB's `hash`). It is
+deterministic — the same physical edge keeps the same id across rebuilds — so other projects can
+recompute or match it. Three ways:
+
+**1. DuckDB SQL — the persisted macro** (shipped in every output db, incl. sub-area extracts):
+
+```sql
+SELECT edge_id_hash(osm_id, source, target, is_reverse) AS edge_id FROM my_edges;
+```
+
+**2. Python helper:**
+
+```python
+from duckosm import edge_id_hash, edge_id_expr
+edge_id_hash(832010768, 7767910376, 21761577, False)   # -> 6183985562678836213
+# bulk: embed the SQL fragment in your own query / over a dataframe `df`
+import duckdb
+duckdb.sql(f"SELECT *, {edge_id_expr()} AS edge_id FROM df").df()
+```
+
+**3. Just need the id? Join on the natural key** — version-proof, never touches the hash:
+
+```sql
+... JOIN driving.edges USING (osm_id, source, target, is_reverse)
+```
+
+Notes: argument **order matters** (`osm_id, source, target, is_reverse`); integer types are
+interchangeable (`INTEGER`≡`BIGINT`) and `BOOLEAN`≡`0/1`. `hash()` is a DuckDB-internal function —
+reproducible only in DuckDB and **not guaranteed identical across major DuckDB versions**, so for
+cross-project id matching pin the DuckDB version or use the join (option 3).
+
 ## Configuration
 
 Copy [`config/template.yaml`](config/template.yaml) and edit. Full field reference:

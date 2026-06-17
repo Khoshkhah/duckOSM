@@ -31,6 +31,8 @@ from pathlib import Path
 
 import duckdb
 
+from duckosm.edge_id import create_edge_id_macro
+
 # Per-mode tables and how each is filtered to the kept edges.
 MODE_TABLES = {
     "nodes":             "node_id IN (SELECT source FROM {sch}.edges UNION SELECT target FROM {sch}.edges)",
@@ -197,6 +199,7 @@ def main(argv=None) -> int:
 
     out.execute("DROP TABLE _clip")
     out.execute("DETACH src")
+    create_edge_id_macro(out)   # ship the canonical edge_id_hash() macro with the extract too
     out.execute("CHECKPOINT")
     out.close()
 
