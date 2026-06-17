@@ -8,7 +8,12 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 - **Memory efficient**: streaming SQL; graph simplification auto-batches so even
   country-scale extracts fit in RAM
 - **Multi-modal**: separate `driving` / `walking` / `cycling` networks with
-  mode-aware filtering, speeds and one-way handling (incl. cycling contraflow)
+  mode-aware filtering, speeds and one-way handling (incl. cycling contraflow).
+  Driving filtering is **access-aware** — it keeps drivable shared streets
+  (`highway=pedestrian` etc. with `motor_vehicle=yes`, reclassed `living_street`) and
+  drops drivable-class ways that forbid cars (`motor_vehicle=no` / `access=no`)
+- **Stable ids**: `edge_id` is a deterministic content hash, so rebuilds don't renumber
+  the graph and downstream consumers survive without a full re-match
 - **Routing-ready**: degree-2 simplified graph, edge-adjacency table, turn
   restrictions, H3 spatial indexing, travel-time costs
 - **Admin boundaries**: optional table of all OSM administrative levels with a
@@ -57,7 +62,7 @@ Each transport mode gets its own schema (`driving`, `walking`, `cycling`):
 
 | Table | Description |
 |-------|-------------|
-| `edges` | Directed road segments: geometry, `length_m`, `maxspeed_kmh`, `cost_s`, `lanes` (int, per-direction), `oneway` (bool), `highway`, H3 cells, … |
+| `edges` | Directed road segments: `edge_id` (**stable content hash** of `(osm_id, source, target, is_reverse)` — same id across rebuilds, see docs/data_dictionary.md), geometry, `length_m`, `maxspeed_kmh`, `cost_s`, `lanes` (int, per-direction), `oneway` (bool), `highway`, H3 cells, … |
 | `nodes` | Junction / endpoint nodes |
 | `edge_graph` | Edge adjacency for routing |
 | `turn_restrictions` | Turn-restriction relations (driving) |

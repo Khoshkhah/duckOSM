@@ -51,12 +51,35 @@ CREATE TABLE raw.relations AS
 
 ## Step 2: Filter Roads
 
+The driving filter is **access-aware** (an *exclude* list of non-road classes, plus the OSM
+access tags) rather than a fixed include list — so it keeps drivable shared streets and drops
+drivable-class ways that forbid cars:
+
 ```sql
 CREATE TABLE ways AS
-SELECT osm_id, tags['highway'] AS highway, tags['name'] AS name, refs, ...
+SELECT osm_id,
+       -- A rescued shared street (an excluded class that nonetheless admits cars) is
+       -- reclassed to living_street so its capacity/speed reflect a slow drivable road.
+       CASE WHEN tags['highway'] IN ('footway','cycleway','path','pedestrian','steps',
+                                     'corridor','track', ...)
+                 AND coalesce(tags['motor_vehicle'],tags['motorcar'],tags['vehicle'])
+                     IN ('yes','designated','permissive','destination')
+            THEN 'living_street' ELSE tags['highway'] END AS highway,
+       tags['name'] AS name, refs, ...
 FROM raw.ways
 WHERE tags['highway'] IS NOT NULL
-  AND tags['highway'] IN ('motorway', 'primary', 'secondary', 'residential', ...);
+  -- a road class, OR motor vehicles explicitly allowed (rescues drivable pedestrian/footway):
+  AND ( tags['highway'] NOT IN ('footway','cycleway','path','pedestrian','steps','corridor',
+                                'bridleway','construction','proposed','raceway','bus_guideway',
+                                'escape','platform','elevator','track')
+        OR coalesce(tags['motor_vehicle'],tags['motorcar'],tags['vehicle'])
+           IN ('yes','designated','permissive','destination') )
+  -- but never where cars are forbidden / access is closed (unless a motor-vehicle tag re-permits):
+  AND coalesce(tags['motor_vehicle'],'') <> 'no'
+  AND coalesce(tags['motorcar'],'') <> 'no'
+  AND ( coalesce(tags['access'],'') NOT IN ('no','private')
+        OR coalesce(tags['motor_vehicle'],tags['motorcar'])
+           IN ('yes','designated','permissive','destination') );
 ```
 
 ### Lane count (`lanes`)
@@ -105,14 +128,28 @@ lanes stay on the single forward edge.
 
 ```sql
 CREATE TABLE edges AS
-SELECT 
-    row_number() OVER ()::INTEGER AS edge_id,
+SELECT
+    -- Stable, deterministic edge_id: a hash of the edge's identity. Forward = is_reverse FALSE;
+    -- the reverse edge (created for two-way roads) hashes its own swapped endpoints + TRUE.
+    (hash(osm_id, refs[1], refs[len(refs)], FALSE) >> 1)::BIGINT AS edge_id,
     refs[1] AS source,
     refs[len(refs)] AS target,
     osm_id,
     ST_MakeLine(coordinates) AS geometry
 FROM ways;
 ```
+
+### Stable edge ids
+`edge_id` is **not** a row number — it is a deterministic hash of the edge's identity
+`(osm_id, source, target, is_reverse)`. Since OSM way/node ids and direction are stable, an
+unchanged edge keeps the **same id across rebuilds**, so a rebuild only re-numbers edges that
+were genuinely added/removed/re-geometried; everything downstream keyed on `edge_id`
+(map-matching, joins, derived pipelines) survives a rebuild without a full re-key. When the
+graph is simplified, the final `_rekey_edges` step re-applies this hash after segmentation,
+reverse-edge creation and self-loop splitting (whose virtual-node ids are likewise made
+deterministic). The node path `refs` is folded into the hash as a tiebreaker for the rare ways
+that have two segments between the same junction pair. A build-time guard fails if the key is
+ever still non-unique (hash collision).
 
 ---
 

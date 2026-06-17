@@ -43,7 +43,19 @@ SELECT * FROM walking.edges WHERE source_h3 = '8f1234567890abc';
 ## Mode-Specific Logic
 
 ### Driving
-- **Filtering**: Excludes non-routable paths like `footway`, `cycleway`, `path`.
+- **Filtering** (access-aware). A way is part of the driving network when:
+  - its `highway` is a road class (i.e. **not** one of `footway`, `cycleway`, `path`,
+    `pedestrian`, `steps`, `corridor`, `track`, …), **or** motor vehicles are explicitly
+    allowed on it via `motor_vehicle` / `motorcar` / `vehicle` ∈ {`yes`, `designated`,
+    `permissive`, `destination`); **and**
+  - it is **not** `motor_vehicle=no` / `motorcar=no`, and **not** `access=no` / `access=private`
+    (unless a motor-vehicle tag re-permits it).
+  - This keeps **drivable shared streets** (e.g. `highway=pedestrian` with `motor_vehicle=yes` —
+    common for access streets / building passages that genuinely carry cars and connect the
+    network) and drops drivable-class ways that actually forbid cars. A rescued
+    pedestrian/footway way is **reclassed to `highway=living_street`** so its capacity/speed and
+    downstream class handling reflect that it is a slow-but-drivable street (the original tag is
+    preserved in `raw`/`tags`).
 - **Restrictions**: Supports extraction of `restriction` relations (No Left Turn, etc.).
 - **Speeds**: Converts `maxspeed` strings (including MPH) to km/h.
 

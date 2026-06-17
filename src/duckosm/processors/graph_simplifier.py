@@ -76,10 +76,14 @@ class GraphSimplifier(BaseProcessor):
         re-run and re-match. A content hash is STABLE: an unchanged edge keeps its id across
         rebuilds, so only added/removed/changed edges shift. BIGINT holds the 63-bit hash.
         """
+        # refs (the ordered node path) is the segment tiebreaker: a few ways have two distinct
+        # segments between the SAME junction pair (osm_id, source, target) — they differ only by
+        # their intermediate nodes, so hashing refs too keeps each id unique while staying fully
+        # deterministic (refs are stable OSM node ids).
         self.execute("""
             CREATE OR REPLACE TABLE edges AS
             SELECT
-                (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT AS edge_id,
+                (hash(osm_id, source, target, is_reverse, refs::VARCHAR) >> 1)::BIGINT AS edge_id,
                 source, target, osm_id, highway, name, maxspeed, oneway, lanes,
                 surface, junction, refs, geometry, is_reverse, length_m
             FROM edges
@@ -87,8 +91,8 @@ class GraphSimplifier(BaseProcessor):
         dup = self.fetchone("SELECT COUNT(*) - COUNT(DISTINCT edge_id) FROM edges")[0]
         if dup:
             raise RuntimeError(
-                f"edge_id content hash produced {dup} duplicate ids — the natural key "
-                "(osm_id, source, target, is_reverse) is not unique here; add segment_idx.")
+                f"edge_id content hash still produced {dup} duplicate ids — the key "
+                "(osm_id, source, target, is_reverse, refs) is not unique here.")
 
     def _num_batches(self) -> int:
         """Number of way-id buckets to build the simplified graph in."""
