@@ -147,9 +147,11 @@ were genuinely added/removed/re-geometried; everything downstream keyed on `edge
 (map-matching, joins, derived pipelines) survives a rebuild without a full re-key. When the
 graph is simplified, the final `_rekey_edges` step re-applies this hash after segmentation,
 reverse-edge creation and self-loop splitting (whose virtual-node ids are likewise made
-deterministic). The node path `refs` is folded into the hash as a tiebreaker for the rare ways
-that have two segments between the same junction pair. A build-time guard fails if the key is
-ever still non-unique (hash collision).
+deterministic). Before re-keying, the rare **same-direction parallel segments** produced by
+self-crossing ways (one way that passes the same junction pair twice in the *same* direction —
+e.g. a lead-in chord plus a loop arc, both `A→B`) are **de-duplicated to the shortest**, so the
+key is unique without widening it. A genuine loop is unaffected: its two halves are `A→B` and
+`B→A` — distinct keys. A build-time guard fails if any duplicate remains.
 
 ---
 

@@ -30,7 +30,7 @@ Self-loop edges (cul-de-sacs) are split at midpoint, creating virtual nodes:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `edge_id` | BIGINT | Unique edge identifier — a **stable content hash** of the edge's identity, `(hash(osm_id, source, target, is_reverse, refs) >> 1)` (forward/reverse get distinct ids; `refs`, the node path, is a tiebreaker for the few ways with two segments between the same junction pair). See *Stable edge ids* below. |
+| `edge_id` | BIGINT | Unique edge identifier — a **stable content hash** of the edge's identity, `(hash(osm_id, source, target, is_reverse) >> 1)` (forward and reverse directions get distinct ids). See *Stable edge ids* below. |
 | `source` | BIGINT | Starting node ID |
 | `target` | BIGINT | Ending node ID |
 | `osm_id` | BIGINT | Original OSM way ID |

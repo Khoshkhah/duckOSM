@@ -76,23 +76,29 @@ class GraphSimplifier(BaseProcessor):
         re-run and re-match. A content hash is STABLE: an unchanged edge keeps its id across
         rebuilds, so only added/removed/changed edges shift. BIGINT holds the 63-bit hash.
         """
-        # refs (the ordered node path) is the segment tiebreaker: a few ways have two distinct
-        # segments between the SAME junction pair (osm_id, source, target) — they differ only by
-        # their intermediate nodes, so hashing refs too keeps each id unique while staying fully
-        # deterministic (refs are stable OSM node ids).
+        # De-duplicate, then re-key. (osm_id, source, target, is_reverse) is unique EXCEPT for
+        # self-crossing ways that pass the same junction pair twice in the SAME direction — e.g.
+        # a lead-in chord plus a loop arc, both A->B. (A genuine loop splits into A->B and B->A:
+        # opposite orientation, distinct keys, so it is never affected here.) For such a
+        # same-direction parallel, the longer arc is never the optimal route between the two
+        # junctions — its interior nodes aren't junctions, so nothing branches off it — so keep
+        # the shortest. This makes the natural key unique with no addition to it.
         self.execute("""
             CREATE OR REPLACE TABLE edges AS
             SELECT
-                (hash(osm_id, source, target, is_reverse, refs::VARCHAR) >> 1)::BIGINT AS edge_id,
+                (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT AS edge_id,
                 source, target, osm_id, highway, name, maxspeed, oneway, lanes,
                 surface, junction, refs, geometry, is_reverse, length_m
-            FROM edges
+            FROM (
+                SELECT * EXCLUDE (edge_id), row_number() OVER (
+                    PARTITION BY osm_id, source, target, is_reverse
+                    ORDER BY length_m, refs::VARCHAR) AS _rn
+                FROM edges
+            ) WHERE _rn = 1
         """)
         dup = self.fetchone("SELECT COUNT(*) - COUNT(DISTINCT edge_id) FROM edges")[0]
         if dup:
-            raise RuntimeError(
-                f"edge_id content hash still produced {dup} duplicate ids — the key "
-                "(osm_id, source, target, is_reverse, refs) is not unique here.")
+            raise RuntimeError(f"edge_id still has {dup} duplicate ids after de-dup — unexpected.")
 
     def _num_batches(self) -> int:
         """Number of way-id buckets to build the simplified graph in."""
