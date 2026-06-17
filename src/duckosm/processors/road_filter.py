@@ -27,6 +27,10 @@ class RoadFilter(BaseProcessor):
     
     def _create_ways_table(self) -> None:
         """Create ways table with highway features."""
+        # Default: keep the OSM highway tag verbatim. Driving mode overrides this to reclass
+        # "rescued" shared streets (drivable pedestrian/footway ways) so downstream gets the
+        # right capacity. The original class is always preserved in the `tags` map.
+        highway_expr = "map_extract(tags, 'highway')[1]"
         if self.mode == "driving":
             exclude_highways = [
                 'footway', 'cycleway', 'path', 'pedestrian',
@@ -49,6 +53,17 @@ class RoadFilter(BaseProcessor):
             mv_mc = ("COALESCE(map_extract(tags, 'motor_vehicle')[1], "
                      "map_extract(tags, 'motorcar')[1])")
             allow = "('yes', 'designated', 'permissive', 'destination')"
+            # Reclass a rescued way (excluded pedestrian/footway/path class that nonetheless
+            # admits motor vehicles) to living_street, so SUMO capacity/speed, road-class
+            # profiles and styling treat it as the slow-but-drivable street it is rather than
+            # a footpath. The original highway tag stays available in `tags`.
+            highway_expr = f"""
+                CASE
+                    WHEN map_extract(tags, 'highway')[1] IN ({exclude_list}) AND {mv} IN {allow}
+                        THEN 'living_street'
+                    ELSE map_extract(tags, 'highway')[1]
+                END
+            """
             where_clause = f"""
                 map_extract(tags, 'highway')[1] IS NOT NULL
                 AND (
@@ -109,7 +124,7 @@ class RoadFilter(BaseProcessor):
             WITH base AS (
                 SELECT
                     osm_id,
-                    map_extract(tags, 'highway')[1] AS highway,
+                    {highway_expr} AS highway,
                     map_extract(tags, 'name')[1] AS name,
                     map_extract(tags, 'maxspeed')[1] AS maxspeed,
                     -- One-way flag as a boolean (mode-aware; see _oneway_expression).

@@ -60,8 +60,35 @@ class GraphSimplifier(BaseProcessor):
         # 5. Finalize tables
         self._finalize_tables()
 
+        # 6. Replace the position-based edge_id with a stable content hash so rebuilds
+        #    don't renumber the whole graph (see _rekey_edges).
+        self._rekey_edges()
+
         elapsed = time.time() - start
         logger.info(f"  Graph simplified in {elapsed:.2f}s")
+
+    def _rekey_edges(self) -> None:
+        """Replace the row-number edge_id with a deterministic hash of the edge's identity
+        (osm_id, source, target, is_reverse).
+
+        Position-based ids (row_number) change on every rebuild, forcing every downstream
+        consumer keyed on edge_id (map-matching, joins, the regime/simulation pipelines) to
+        re-run and re-match. A content hash is STABLE: an unchanged edge keeps its id across
+        rebuilds, so only added/removed/changed edges shift. BIGINT holds the 63-bit hash.
+        """
+        self.execute("""
+            CREATE OR REPLACE TABLE edges AS
+            SELECT
+                (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT AS edge_id,
+                source, target, osm_id, highway, name, maxspeed, oneway, lanes,
+                surface, junction, refs, geometry, is_reverse, length_m
+            FROM edges
+        """)
+        dup = self.fetchone("SELECT COUNT(*) - COUNT(DISTINCT edge_id) FROM edges")[0]
+        if dup:
+            raise RuntimeError(
+                f"edge_id content hash produced {dup} duplicate ids — the natural key "
+                "(osm_id, source, target, is_reverse) is not unique here; add segment_idx.")
 
     def _num_batches(self) -> int:
         """Number of way-id buckets to build the simplified graph in."""
@@ -253,7 +280,10 @@ class GraphSimplifier(BaseProcessor):
                     refs,
                     geometry,
                     length_m,
-                    -(edge_id) AS virtual_node_id,
+                    -- Deterministic virtual midpoint-node id (was -(edge_id), which depended on
+                    -- the volatile row-number edge_id). A loop is keyed by (osm_id, source);
+                    -- a stable negative id keeps the split edges reproducible across rebuilds.
+                    -((hash(osm_id, source) >> 2)::BIGINT) AS virtual_node_id,
                     ST_PointN(geometry, (ST_NPoints(geometry) / 2 + 1)::INTEGER) AS midpoint_geom
                 FROM simplified_edges_forward
                 WHERE source = target
