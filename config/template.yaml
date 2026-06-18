@@ -55,7 +55,7 @@ options:
   h3_indexing: true                    # from_cell / to_cell / lca_res on edges
   h3_resolution: 8                     # 0-15
   simplify: true                       # contract degree-2 nodes
-  merge_segments: false                # merge consecutive same-road segments (degree-2 chains); writes <mode>.edge_id_map (v1->v2 id matching)
+  merge_segments: true                 # DEFAULT ON. merge consecutive same-road segments (degree-2 chains); writes <mode>.edge_id_map. set false for a no-merge build
   process_speeds: true                 # maxspeed_kmh (drops the raw maxspeed string)
   extract_restrictions: true           # turn_restrictions (driving only)
   calculate_costs: true                # cost_s travel time

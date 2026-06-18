@@ -28,7 +28,7 @@ class Options:
     h3_indexing: bool = True
     h3_resolution: int = 8
     simplify: bool = False
-    merge_segments: bool = False           # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map
+    merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True
