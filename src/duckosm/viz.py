@@ -15,7 +15,8 @@ logger = logging.getLogger("duckosm")
 BASEMAP_LAYERS = ["voyager", "positron", "esri_gray", "osm", "satellite"]
 
 
-def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows=False):
+def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows=False,
+                   boundary=True):
     try:
         import geopandas as gpd
         from shapely import wkt as _wkt
@@ -69,9 +70,33 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         name=f"{name} ({mode})", legend=True,
         arrows=arrows, arrow_col=("oneway" if arrows else None),
     )
+    if boundary:
+        _add_boundary(con, m)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}_{mode}_network.html"
     m.save(str(path))
     logger.info(f"  Viz: {path}")
     return path
+
+
+def _add_boundary(con, m):
+    """Overlay the clip/area boundary (`main.boundary`) as a dashed outline, so the map shows
+    the extent the network was clipped to. Skips silently if there's no boundary table."""
+    import folium
+    from shapely import wkt as _wkt
+    from shapely.geometry import mapping
+
+    try:
+        rows = con.execute("SELECT ST_AsText(geom) FROM main.boundary WHERE geom IS NOT NULL").fetchall()
+    except Exception:
+        return  # no boundary in this build (e.g. a whole-country PBF)
+    feats = [{"type": "Feature", "properties": {}, "geometry": mapping(_wkt.loads(r[0]))}
+             for r in rows if r[0]]
+    if not feats:
+        return
+    folium.GeoJson(
+        {"type": "FeatureCollection", "features": feats}, name="boundary", control=False,
+        style_function=lambda f: {"color": "#6a0dad", "weight": 2.5, "fill": False,
+                                  "opacity": 0.9, "dashArray": "6 4"},
+    ).add_to(m)

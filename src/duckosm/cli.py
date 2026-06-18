@@ -160,8 +160,10 @@ def admin(args):
 @click.option('--out-dir', default='reports', show_default=True,
               help='Output directory for <name>_<mode>_network.html')
 @click.option('--arrows/--no-arrows', default=False, show_default=True,
-              help='Overlay source->target direction arrows (one-way red, two-way blue both sides)')
-def viz(db, modes, basemap, out_dir, arrows):
+              help='Overlay one-way direction arrows (gray chevrons, shown when zoomed in)')
+@click.option('--boundary/--no-boundary', default=True, show_default=True,
+              help='Overlay the clip/area boundary outline (main.boundary), if present')
+def viz(db, modes, basemap, out_dir, arrows, boundary):
     """Render a roadstyle HTML map of a built network.
 
     Writes <out-dir>/<name>_<mode>_network.html per mode, with edges styled by
@@ -190,7 +192,8 @@ def viz(db, modes, basemap, out_dir, arrows):
             f"mode(s) {unknown} not found in {db} (present: {present or 'none'})")
 
     name = Path(db).stem
-    rendered = [render_network(con, m, name, basemap=basemap, out_dir=out_dir, arrows=arrows)
+    rendered = [render_network(con, m, name, basemap=basemap, out_dir=out_dir, arrows=arrows,
+                               boundary=boundary)
                 for m in chosen]
     rendered = [p for p in rendered if p]
     if not rendered:

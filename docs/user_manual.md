@@ -166,6 +166,9 @@ arrowed (each is a forward+reverse edge pair, so arrowing all edges is too heavy
 duckosm viz data/db/sodermalm.duckdb --arrows
 ```
 
+The clip/area **boundary** (`main.boundary`) is overlaid as a dashed outline by default, so the
+map shows the extent the network was clipped to; turn it off with `--no-boundary`.
+
 ## Routing (shortest path)
 
 `edge_graph` is the edge-based routing graph (nodes = `edge_id`s; illegal turns already
