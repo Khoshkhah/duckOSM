@@ -59,6 +59,26 @@ def _oneway_graph():
     return con
 
 
+def _two_way_aligned_graph():
+    """A two-way chain whose two forward edges BOTH point out of the shared node 2 (2->1 and
+    2->3), so sum(fwd) at node 2 is 2, not 1. The one-in/one-out check is one-way-only, so this
+    must still merge. (For two-way roads the forward orientation is arbitrary per way.)"""
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA raw")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lon DOUBLE, lat DOUBLE)")
+    con.execute("INSERT INTO raw.nodes VALUES (1,0,0),(2,1,0),(3,2,0)")
+    con.execute("""CREATE TABLE simplified_edges_forward(
+        edge_id INTEGER, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR,
+        name VARCHAR, maxspeed VARCHAR, oneway BOOLEAN, lanes INTEGER, surface VARCHAR,
+        junction VARCHAR, refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
+    g = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute(f"""INSERT INTO simplified_edges_forward VALUES
+      (1,2,1,700,'residential','Foo','50',false,2,NULL,NULL,[2,1],{g('LINESTRING(1 0,0 0)')},false,111195),
+      (2,2,3,701,'residential','Foo','50',false,2,NULL,NULL,[2,3],{g('LINESTRING(1 0,2 0)')},false,111195)""")
+    return con
+
+
 # ---- config flag -------------------------------------------------------------------
 def test_merge_segments_config(tmp_path):
     base = "name: t\nsource: {type: pbf, pbf_path: x}\n"
@@ -84,6 +104,18 @@ def test_contract_chains_merges_same_road_across_osm_id():
     assert npts == 3                                # geometry stitched through the middle node
     assert length == pytest.approx(333585, rel=0.01)  # member lengths summed
     assert con.execute("SELECT count(*) FROM simplified_edges_forward").fetchone()[0] == 5  # 6 -> 5
+
+
+def test_contract_chains_two_way_aligned_orientation_merges():
+    """Regression: a two-way chain whose forward edges both point out of the shared node
+    (sum(fwd)=2) must still merge — the one-in/one-out rule is one-way-only. Previously skipped."""
+    con = _two_way_aligned_graph()
+    GraphSimplifier(con)._contract_chains()
+    rows = con.execute("SELECT source, target, refs FROM simplified_edges_forward").fetchall()
+    assert len(rows) == 1                            # the two segments merged into one edge
+    s, t, refs = rows[0]
+    assert sorted([s, t]) == [1, 3]                  # outer endpoints of the chain
+    assert refs in ([1, 2, 3], [3, 2, 1])            # stitched through the shared node 2
 
 
 def test_contract_chains_respects_attribute_and_loop_boundaries():

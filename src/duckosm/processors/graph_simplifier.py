@@ -386,8 +386,10 @@ class GraphSimplifier(BaseProcessor):
 
         A node is a contraction point when it has exactly two forward edges that agree on
         EVERY carried attribute (highway, name, oneway, maxspeed, lanes, surface, junction),
-        it is a real node (id > 0, so virtual self-loop midpoints stay intact), and the two
-        edges pass through it (one in, one out). This merges a street that OSM split into
+        it is a real node (id > 0, so virtual self-loop midpoints stay intact), and — for
+        ONE-WAY roads only — the two edges pass through it one-in/one-out. (Two-way forward
+        edges carry an arbitrary per-way orientation, so that check is skipped for them.)
+        This merges a street that OSM split into
         several way objects (different osm_id) — the common case — without blurring any
         attribute, since they are all required equal.
 
@@ -412,14 +414,20 @@ class GraphSimplifier(BaseProcessor):
                    highway, name, oneway, maxspeed, lanes, surface, junction
             FROM simplified_edges_forward
         """)
-        # Contraction nodes: degree-2, real, through-orientation (one in/out), and the two
-        # edges identical on every attribute (chr(1) sentinel so NULL == NULL groups as one).
+        # Contraction nodes: degree-2, real, and the two edges identical on every attribute
+        # (chr(1) sentinel so NULL == NULL groups as one). The one-in/one-out check
+        # (sum(fwd)=1) is required ONLY for one-way roads, where it guarantees a drivable
+        # directed through-path. For two-way roads the forward-edge orientation is arbitrary
+        # (each follows its own way's digitisation), so two consecutive segments can both point
+        # out (sum=2) or both in (sum=0) at their shared node — still a valid degree-2 through
+        # point (the reverse halves exist and the walk reverses refs per-step). Demanding
+        # sum(fwd)=1 there wrongly skipped such chains; gate it on bool_or(oneway).
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _node2 AS
             SELECT node FROM _inc
             WHERE node > 0
             GROUP BY node
-            HAVING count(*) = 2 AND sum(fwd::INT) = 1
+            HAVING count(*) = 2 AND (NOT bool_or(oneway) OR sum(fwd::INT) = 1)
                AND count(DISTINCT highway) = 1
                AND count(DISTINCT coalesce(name, chr(1))) = 1
                AND count(DISTINCT oneway) = 1

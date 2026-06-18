@@ -24,8 +24,11 @@ A node is a **contraction point** when *all* hold (see `_node2` in
 - it is a **real** node — `node_id > 0` (excludes the virtual midpoints created when
   self-loops are split, which must stay split);
 - it has exactly **two** forward edges (degree 2);
-- the two edges pass **through** it — one in, one out (`sum(fwd) = 1`); a one-way meeting
-  itself head-to-head is not a through-node;
+- **for one-way roads**, the two edges pass **through** it — one in, one out (`sum(fwd) = 1`);
+  a one-way meeting itself head-to-head is not a through-node. Two-way roads skip this check:
+  their forward edges carry an arbitrary per-way orientation, so two consecutive segments can
+  both point out (`sum=2`) or in (`sum=0`) at the shared node and are still a valid through
+  point (the walk reverses each segment's refs as needed);
 - the two edges agree on **every carried attribute**: `highway, name, oneway, maxspeed,
   lanes, surface, junction`.
 
