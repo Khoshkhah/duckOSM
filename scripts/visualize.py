@@ -72,11 +72,15 @@ with st.sidebar:
     st.markdown("### duckOSM Explorer")
     
     # Search in multiple locations
-    search_paths = [Path("data/output"), Path("../../data")]
+    search_paths = [Path("data/db"), Path("data/output"), Path("../../data")]
     db_files = []
+    seen = set()
     for p in search_paths:
         if p.exists():
-            db_files.extend(list(p.glob("*.duckdb")))
+            for f in sorted(p.glob("*.duckdb")):
+                if f.resolve() not in seen:
+                    seen.add(f.resolve())
+                    db_files.append(f)
     
     if not db_files:
         st.error("No DuckDB files found.")
