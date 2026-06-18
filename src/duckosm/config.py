@@ -28,6 +28,7 @@ class Options:
     h3_indexing: bool = True
     h3_resolution: int = 8
     simplify: bool = False
+    merge_segments: bool = False           # contract degree-2 chains of SAME-osm_id segments
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True

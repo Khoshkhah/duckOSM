@@ -27,10 +27,12 @@ class GraphSimplifier(BaseProcessor):
     several way-id buckets so the heavy geometry aggregation stays within memory.
     """
 
-    def __init__(self, con, batches: int = 0):
+    def __init__(self, con, batches: int = 0, merge_segments: bool = False):
         super().__init__(con)
         # 0 = auto (pick from node count), 1 = single pass, N>1 = N buckets.
         self.batches = batches
+        # Contract degree-2 chains of consecutive segments that share the same osm_id.
+        self.merge_segments = merge_segments
 
     def run(self) -> None:
         """Run the simplification pipeline."""
@@ -56,6 +58,11 @@ class GraphSimplifier(BaseProcessor):
 
         # 4. Split self-loops with virtual midpoint nodes
         self._split_self_loops()
+
+        # 4b. Optionally contract degree-2 chains of same-osm_id segments (forward edges,
+        #     before reverse edges + the stable re-key are built).
+        if self.merge_segments:
+            self._contract_chains()
 
         # 5. Finalize tables
         self._finalize_tables()
@@ -369,6 +376,135 @@ class GraphSimplifier(BaseProcessor):
         """)
         self.execute("DROP TABLE simplified_edges_forward")
         self.execute("ALTER TABLE simplified_edges_forward_new RENAME TO simplified_edges_forward")
+
+    def _contract_chains(self) -> None:
+        """Merge maximal chains of consecutive forward segments that share the same osm_id.
+
+        A node is a contraction point when it has exactly two forward edges, both with the
+        SAME osm_id, it is a real node (id > 0, so virtual self-loop midpoints stay intact),
+        and the two edges pass through it (one in, one out). Each maximal run of such
+        segments collapses to one edge whose geometry/length/refs are rebuilt from the
+        stitched node sequence. Because every member shares one osm_id, all way attributes
+        are identical and the osm_id (hence the stable edge_id) is preserved.
+
+        Runs on forward edges only, before reverse edges and the stable re-key are built.
+        """
+        # Each forward edge as two half-edges (at its source, at its target).
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _inc AS
+            SELECT edge_id, source AS node, target AS other, osm_id, refs, TRUE  AS fwd
+            FROM simplified_edges_forward
+            UNION ALL
+            SELECT edge_id, target AS node, source AS other, osm_id, refs, FALSE AS fwd
+            FROM simplified_edges_forward
+        """)
+        # Contraction nodes: degree-2, real, single osm_id, through-orientation (one in/out).
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _node2 AS
+            SELECT node FROM _inc
+            WHERE node > 0
+            GROUP BY node
+            HAVING count(*) = 2 AND count(DISTINCT osm_id) = 1 AND sum(fwd::INT) = 1
+        """)
+        if self.fetchone("SELECT COUNT(*) FROM _node2")[0] == 0:
+            self.execute("DROP TABLE IF EXISTS _inc; DROP TABLE IF EXISTS _node2;")
+            logger.info("  merge_segments: no same-osm_id chains to contract")
+            return
+
+        # Walk each chain from a terminal node through contraction nodes, accumulating the
+        # ordered node sequence (refs_acc, source -> target). edge_set guards against revisits.
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _chains AS
+            WITH RECURSIVE walk AS (
+                SELECT i.node AS start, i.edge_id AS last_edge, i.other AS cur,
+                       [i.edge_id] AS edge_set,
+                       CASE WHEN i.fwd THEN i.refs ELSE list_reverse(i.refs) END AS refs_acc
+                FROM _inc i
+                WHERE i.node NOT IN (SELECT node FROM _node2)
+                  AND i.other IN (SELECT node FROM _node2)
+                UNION ALL
+                SELECT w.start, i.edge_id, i.other,
+                       list_append(w.edge_set, i.edge_id),
+                       list_concat(w.refs_acc,
+                           (CASE WHEN i.fwd THEN i.refs ELSE list_reverse(i.refs) END)[2:])
+                FROM walk w
+                JOIN _node2 n ON n.node = w.cur
+                JOIN _inc i ON i.node = w.cur AND i.edge_id <> w.last_edge
+                WHERE NOT list_contains(w.edge_set, i.edge_id)
+            )
+            SELECT row_number() OVER () AS cid, start AS source, cur AS target,
+                   edge_set, refs_acc
+            FROM walk
+            WHERE cur NOT IN (SELECT node FROM _node2)   -- reached the far terminal
+              AND len(edge_set) > 1                      -- real (multi-segment) chains only
+              AND start < cur                            -- keep one of the two walk directions
+        """)
+
+        n_chains = self.fetchone("SELECT COUNT(*) FROM _chains")[0]
+        if n_chains == 0:
+            self.execute("DROP TABLE IF EXISTS _inc; DROP TABLE IF EXISTS _node2; "
+                         "DROP TABLE IF EXISTS _chains;")
+            logger.info("  merge_segments: no same-osm_id chains to contract")
+            return
+
+        # Rebuild one edge per chain: geometry + length from the stitched node coords,
+        # attributes from any member (identical within one osm_id).
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _merged AS
+            WITH attrs AS (
+                SELECT c.cid, c.source, c.target, c.refs_acc,
+                       e.osm_id, e.highway, e.name, e.maxspeed, e.oneway,
+                       e.lanes, e.surface, e.junction
+                FROM _chains c
+                JOIN simplified_edges_forward e ON e.edge_id = c.edge_set[1]
+            ),
+            coords AS (
+                SELECT a.cid,
+                       list(n.lon ORDER BY g.i) AS lons,
+                       list(n.lat ORDER BY g.i) AS lats
+                FROM attrs a
+                CROSS JOIN range(1, len(a.refs_acc) + 1) AS g(i)
+                JOIN raw.nodes n ON n.osm_id = a.refs_acc[g.i]
+                GROUP BY a.cid
+            )
+            SELECT
+                a.source, a.target, a.osm_id, a.highway, a.name, a.maxspeed, a.oneway,
+                a.lanes, a.surface, a.junction, a.refs_acc AS refs,
+                ST_GeomFromText('LINESTRING(' || list_aggregate(
+                    list_transform(range(1, len(c.lons) + 1), i -> c.lons[i] || ' ' || c.lats[i]),
+                    'string_agg', ', ') || ')') AS geometry,
+                FALSE AS is_reverse,
+                CAST(list_sum(list_transform(range(1, len(c.lons)),
+                    i -> 12742000 * ASIN(SQRT(
+                        POWER(SIN(RADIANS(c.lats[i + 1] - c.lats[i]) / 2), 2) +
+                        COS(RADIANS(c.lats[i])) * COS(RADIANS(c.lats[i + 1])) *
+                        POWER(SIN(RADIANS(c.lons[i + 1] - c.lons[i]) / 2), 2)
+                    )))) AS FLOAT) AS length_m
+            FROM attrs a JOIN coords c USING (cid)
+            WHERE len(c.lons) >= 2
+        """)
+
+        # Forward edges = untouched singletons + one edge per merged chain.
+        self.execute("""
+            CREATE OR REPLACE TABLE simplified_edges_forward AS
+            SELECT (row_number() OVER ())::INTEGER AS edge_id, *
+            FROM (
+                SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
+                       surface, junction, refs, geometry, is_reverse, length_m FROM _merged
+                UNION ALL
+                SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
+                       surface, junction, refs, geometry, is_reverse, length_m
+                FROM simplified_edges_forward
+                WHERE edge_id NOT IN (SELECT UNNEST(edge_set) FROM _chains)
+            )
+        """)
+
+        n_removed = self.fetchone(
+            "SELECT COALESCE(SUM(len(edge_set)), 0) - COUNT(*) FROM _chains")[0]
+        logger.info(f"  merge_segments: contracted {n_chains:,} chain(s), "
+                    f"removed {n_removed:,} forward edge(s)")
+        self.execute("DROP TABLE IF EXISTS _inc; DROP TABLE IF EXISTS _node2; "
+                     "DROP TABLE IF EXISTS _chains; DROP TABLE IF EXISTS _merged;")
 
     def _finalize_tables(self) -> None:
         """Replace edges and nodes with simplified versions."""

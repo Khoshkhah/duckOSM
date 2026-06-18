@@ -55,6 +55,7 @@ options:
   h3_indexing: true                    # from_cell / to_cell / lca_res on edges
   h3_resolution: 8                     # 0-15
   simplify: true                       # contract degree-2 nodes
+  merge_segments: false                # also merge consecutive SAME-osm_id segments (degree-2 chains)
   process_speeds: true                 # maxspeed_kmh (drops the raw maxspeed string)
   extract_restrictions: true           # turn_restrictions (driving only)
   calculate_costs: true                # cost_s travel time
