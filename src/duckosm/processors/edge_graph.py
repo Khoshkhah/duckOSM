@@ -43,18 +43,27 @@ class EdgeGraphBuilder(BaseProcessor):
         """)
     
     def _remove_restricted_turns(self) -> None:
-        """Remove edges that violate turn restrictions."""
+        """Remove edge-graph transitions forbidden by turn restrictions.
+
+        Handles every restriction type, which split into two semantics:
+        - ``no_*`` (no_left_turn, no_u_turn, no_entry, …): the named ``from -> to`` turn is
+          prohibited — drop exactly that transition.
+        - ``only_*`` (only_straight_on, only_left_turn, …): the named ``from -> to`` turn is
+          MANDATORY — drop every *other* transition out of ``from_edge``. All of from_edge's
+          successors leave the via node (edge_graph joins ``e1.target = e2.source`` and the
+          restriction's via_node = from_edge.target), so keeping only ``to_edge`` enforces it.
+        """
         # Check if turn_restrictions table exists in current schema
         result = self.fetchone("""
-            SELECT COUNT(*) FROM information_schema.tables 
+            SELECT COUNT(*) FROM information_schema.tables
             WHERE table_name = 'turn_restrictions'
             AND table_schema = current_schema()
         """)
-        
+
         if result[0] == 0:
             return
-        
-        # Remove restricted turns
+
+        # no_*: drop the single prohibited transition.
         self.execute("""
             DELETE FROM edge_graph
             WHERE EXISTS (
@@ -62,5 +71,15 @@ class EdgeGraphBuilder(BaseProcessor):
                 WHERE tr.from_edge_id = edge_graph.from_edge
                 AND tr.to_edge_id = edge_graph.to_edge
                 AND tr.restriction_type LIKE 'no_%'
+            )
+        """)
+        # only_*: drop every transition out of from_edge EXCEPT the mandated to_edge.
+        self.execute("""
+            DELETE FROM edge_graph
+            WHERE EXISTS (
+                SELECT 1 FROM turn_restrictions tr
+                WHERE tr.from_edge_id = edge_graph.from_edge
+                AND tr.restriction_type LIKE 'only_%'
+                AND edge_graph.to_edge <> tr.to_edge_id
             )
         """)

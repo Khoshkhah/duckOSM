@@ -8,6 +8,7 @@ import pytest
 from duckosm import Config
 from duckosm.processors.graph_simplifier import GraphSimplifier
 from duckosm.processors.restrictions import RestrictionProcessor
+from duckosm.processors.edge_graph import EdgeGraphBuilder
 
 
 def _graph():
@@ -188,3 +189,23 @@ def test_restriction_matches_incident_end_way_of_merged_edge():
     rows = con.execute("SELECT restriction_type, via_node, from_edge_id, to_edge_id "
                        "FROM turn_restrictions").fetchall()
     assert rows == [('no_left_turn', 10, 1, 2)]   # matched via the incident way 502/600, not osm_id 500
+
+
+# ---- edge_graph enforces all restriction types -------------------------------------
+def test_edge_graph_enforces_no_and_only_restrictions():
+    """edge_graph must drop turns for BOTH no_* (the named turn is forbidden) and only_* (the
+    named turn is mandatory -> every OTHER successor of from_edge is forbidden)."""
+    con = duckdb.connect()
+    con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT, cost_s DOUBLE)")
+    # edges 1 and 5 both end at via-node 10; edges 2,3,4 leave node 10
+    con.execute("INSERT INTO edges VALUES (1,1,10,1.0),(2,10,20,1.0),(3,10,30,1.0),(4,10,40,1.0),(5,50,10,1.0)")
+    con.execute("CREATE TABLE turn_restrictions(restriction_id BIGINT, restriction_type VARCHAR, "
+                "via_node BIGINT, from_edge_id BIGINT, to_edge_id BIGINT)")
+    con.execute("INSERT INTO turn_restrictions VALUES "
+                "(1,'only_straight_on',10,1,2), "   # from 1 you MUST go to 2  -> drop 1->3, 1->4
+                "(2,'no_right_turn',10,5,3)")        # from 5 you may NOT go to 3 -> drop only 5->3
+    EdgeGraphBuilder(con).run()
+    only_succ = sorted(r[0] for r in con.execute("SELECT to_edge FROM edge_graph WHERE from_edge=1").fetchall())
+    no_succ = sorted(r[0] for r in con.execute("SELECT to_edge FROM edge_graph WHERE from_edge=5").fetchall())
+    assert only_succ == [2]          # only_* keeps just the mandated turn
+    assert no_succ == [2, 4]         # no_* drops only the prohibited turn (3)

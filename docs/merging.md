@@ -168,6 +168,11 @@ not against `edges.osm_id`. Matching by the representative `osm_id` silently dro
 on merged edges — and *every* one on reverse edges, whose source-end way is the forward twin's
 *last* member. This is correct for singleton, merged, and reverse edges alike.
 
+`EdgeGraphBuilder` then enforces **all** restriction types when it removes turns from
+`edge_graph`: `no_*` drops the single prohibited `from → to` transition, and `only_*` (mandatory
+turn) drops every *other* successor of `from_edge` at the via-node, keeping only the mandated
+`to_edge`.
+
 ## Complexity & optimality
 
 - **Result-optimal:** merges every maximal same-road chain — minimum edges for the
