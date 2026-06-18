@@ -417,6 +417,18 @@ class DuckOSM:
                 "SELECT COUNT(*) FROM edge_graph").fetchone()[0]
         except Exception:
             pass
+        # If merge_segments wrote <mode>.edge_id_map, prune rows whose merged edge was just
+        # removed by this clean-up, so the table only references live edges.
+        if self.config.options.merge_segments and self.con.execute(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_name = 'edge_id_map' AND table_schema = current_schema()"
+        ).fetchone()[0]:
+            stale = self.con.execute("SELECT COUNT(*) FROM edge_id_map "
+                                     "WHERE new_edge_id NOT IN (SELECT edge_id FROM edges)").fetchone()[0]
+            if stale:
+                self.con.execute("DELETE FROM edge_id_map "
+                                 "WHERE new_edge_id NOT IN (SELECT edge_id FROM edges)")
+                logger.info(f"  edge_id_map: pruned {stale:,} row(s) for component-dropped edges")
 
     # ---- validation (C) ---------------------------------------------------------------
     def _validate(self, mode: str) -> None:
