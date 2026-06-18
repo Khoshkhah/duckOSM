@@ -41,10 +41,10 @@ def test_merge_segments_config(tmp_path):
     base = "name: t\nsource: {type: pbf, pbf_path: x}\n"
     d = tmp_path / "d.yaml"
     d.write_text(base + "options: {simplify: true}\n")
-    assert Config.from_yaml(str(d)).options.merge_segments is False          # default off
+    assert Config.from_yaml(str(d)).options.merge_segments is True           # default on
     e = tmp_path / "e.yaml"
-    e.write_text(base + "options: {merge_segments: true}\n")
-    assert Config.from_yaml(str(e)).options.merge_segments is True
+    e.write_text(base + "options: {merge_segments: false}\n")
+    assert Config.from_yaml(str(e)).options.merge_segments is False          # opt out
 
 
 # ---- contraction -------------------------------------------------------------------

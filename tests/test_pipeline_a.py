@@ -11,7 +11,8 @@ from duckosm import DuckOSM, Config
 from duckosm.processors import ComponentFilter
 from duckosm.validate import Validator, ValidationError
 
-PARENT = Path(__file__).resolve().parents[1] / "data" / "db" / "sodermalm.duckdb"
+# Clip a sub-area (Sodermalm) out of the country parent (Sweden); both must be built.
+PARENT = Path(__file__).resolve().parents[1] / "data" / "db" / "sweden.duckdb"
 BOUND = Path(__file__).resolve().parents[1] / "data" / "boundaries" / "sodermalm.geojson"
 
 
