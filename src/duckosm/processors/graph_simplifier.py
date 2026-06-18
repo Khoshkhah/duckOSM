@@ -378,37 +378,52 @@ class GraphSimplifier(BaseProcessor):
         self.execute("ALTER TABLE simplified_edges_forward_new RENAME TO simplified_edges_forward")
 
     def _contract_chains(self) -> None:
-        """Merge maximal chains of consecutive forward segments that share the same osm_id.
+        """Merge maximal chains of consecutive forward segments that are the SAME road.
 
-        A node is a contraction point when it has exactly two forward edges, both with the
-        SAME osm_id, it is a real node (id > 0, so virtual self-loop midpoints stay intact),
-        and the two edges pass through it (one in, one out). Each maximal run of such
-        segments collapses to one edge whose geometry/length/refs are rebuilt from the
-        stitched node sequence. Because every member shares one osm_id, all way attributes
-        are identical and the osm_id (hence the stable edge_id) is preserved.
+        A node is a contraction point when it has exactly two forward edges that agree on
+        EVERY carried attribute (highway, name, oneway, maxspeed, lanes, surface, junction),
+        it is a real node (id > 0, so virtual self-loop midpoints stay intact), and the two
+        edges pass through it (one in, one out). This merges a street that OSM split into
+        several way objects (different osm_id) — the common case — without blurring any
+        attribute, since they are all required equal.
 
-        Runs on forward edges only, before reverse edges and the stable re-key are built.
+        Each maximal run collapses to one edge whose geometry/length/refs are rebuilt from
+        the stitched node sequence. The merged edge keeps its LONGEST member's osm_id as the
+        representative, so the stable edge_id hash (osm_id, source, target, is_reverse) stays
+        well-defined. Runs on forward edges only, before reverse edges and the re-key.
         """
-        # Each forward edge as two half-edges (at its source, at its target).
+        # Each forward edge as two half-edges (at its source, at its target), carrying the
+        # attributes the merge predicate compares.
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _inc AS
-            SELECT edge_id, source AS node, target AS other, osm_id, refs, TRUE  AS fwd
+            SELECT edge_id, source AS node, target AS other, refs, TRUE  AS fwd,
+                   highway, name, oneway, maxspeed, lanes, surface, junction
             FROM simplified_edges_forward
             UNION ALL
-            SELECT edge_id, target AS node, source AS other, osm_id, refs, FALSE AS fwd
+            SELECT edge_id, target AS node, source AS other, refs, FALSE AS fwd,
+                   highway, name, oneway, maxspeed, lanes, surface, junction
             FROM simplified_edges_forward
         """)
-        # Contraction nodes: degree-2, real, single osm_id, through-orientation (one in/out).
+        # Contraction nodes: degree-2, real, through-orientation (one in/out), and the two
+        # edges identical on every attribute (chr(1) sentinel so NULL == NULL groups as one).
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _node2 AS
             SELECT node FROM _inc
             WHERE node > 0
             GROUP BY node
-            HAVING count(*) = 2 AND count(DISTINCT osm_id) = 1 AND sum(fwd::INT) = 1
+            HAVING count(*) = 2 AND sum(fwd::INT) = 1
+               AND count(DISTINCT highway) = 1
+               AND count(DISTINCT coalesce(name, chr(1))) = 1
+               AND count(DISTINCT oneway) = 1
+               AND count(DISTINCT coalesce(maxspeed, chr(1))) = 1
+               AND count(DISTINCT coalesce(CAST(lanes AS VARCHAR), chr(1))) = 1
+               AND count(DISTINCT coalesce(surface, chr(1))) = 1
+               AND count(DISTINCT coalesce(junction, chr(1))) = 1
         """)
         if self.fetchone("SELECT COUNT(*) FROM _node2")[0] == 0:
+            self._empty_edge_id_map()
             self.execute("DROP TABLE IF EXISTS _inc; DROP TABLE IF EXISTS _node2;")
-            logger.info("  merge_segments: no same-osm_id chains to contract")
+            logger.info("  merge_segments: no same-road chains to contract")
             return
 
         # Walk each chain from a terminal node through contraction nodes, accumulating the
@@ -442,27 +457,38 @@ class GraphSimplifier(BaseProcessor):
 
         n_chains = self.fetchone("SELECT COUNT(*) FROM _chains")[0]
         if n_chains == 0:
+            self._empty_edge_id_map()
             self.execute("DROP TABLE IF EXISTS _inc; DROP TABLE IF EXISTS _node2; "
                          "DROP TABLE IF EXISTS _chains;")
-            logger.info("  merge_segments: no same-osm_id chains to contract")
+            logger.info("  merge_segments: no same-road chains to contract")
             return
 
-        # Rebuild one edge per chain: geometry + length from the stitched node coords,
-        # attributes from any member (identical within one osm_id).
+        # Per-chain metadata: stitched endpoints/refs, uniform attributes (from any member —
+        # identical by the same-road predicate), and the representative osm_id = LONGEST member
+        # (so the stable edge_id hash stays well-defined for the merged edge).
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _cmeta AS
+            WITH members AS (
+                SELECT c.cid, e.osm_id, e.length_m
+                FROM _chains c, UNNEST(c.edge_set) AS m(eid)
+                JOIN simplified_edges_forward e ON e.edge_id = m.eid
+            ),
+            prim AS (SELECT cid, arg_max(osm_id, length_m) AS osm_id FROM members GROUP BY cid)
+            SELECT c.cid, c.source, c.target, c.refs_acc, p.osm_id,
+                   e.highway, e.name, e.maxspeed, e.oneway, e.lanes, e.surface, e.junction
+            FROM _chains c
+            JOIN prim p USING (cid)
+            JOIN simplified_edges_forward e ON e.edge_id = c.edge_set[1]
+        """)
+
+        # One edge per chain: geometry + length rebuilt from the stitched node coords.
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _merged AS
-            WITH attrs AS (
-                SELECT c.cid, c.source, c.target, c.refs_acc,
-                       e.osm_id, e.highway, e.name, e.maxspeed, e.oneway,
-                       e.lanes, e.surface, e.junction
-                FROM _chains c
-                JOIN simplified_edges_forward e ON e.edge_id = c.edge_set[1]
-            ),
-            coords AS (
+            WITH coords AS (
                 SELECT a.cid,
                        list(n.lon ORDER BY g.i) AS lons,
                        list(n.lat ORDER BY g.i) AS lats
-                FROM attrs a
+                FROM _cmeta a
                 CROSS JOIN range(1, len(a.refs_acc) + 1) AS g(i)
                 JOIN raw.nodes n ON n.osm_id = a.refs_acc[g.i]
                 GROUP BY a.cid
@@ -480,8 +506,31 @@ class GraphSimplifier(BaseProcessor):
                         COS(RADIANS(c.lats[i])) * COS(RADIANS(c.lats[i + 1])) *
                         POWER(SIN(RADIANS(c.lons[i + 1] - c.lons[i]) / 2), 2)
                     )))) AS FLOAT) AS length_m
-            FROM attrs a JOIN coords c USING (cid)
+            FROM _cmeta a JOIN coords c USING (cid)
             WHERE len(c.lons) >= 2
+        """)
+
+        # Matching table (v1 merge-off id -> v2 merged id), one row per original segment.
+        # seq = the segment's position along the road (forward direction). Stable-hash ids on
+        # both sides (same formula as _rekey_edges), forward + reverse (reverse only two-way).
+        # Edges NOT in this table are unchanged by the merge.
+        self.execute("""
+            CREATE OR REPLACE TABLE edge_id_map AS
+            WITH mem AS (
+                SELECT c.cid, m.seq, e.osm_id, e.source, e.target
+                FROM _chains c, UNNEST(c.edge_set) WITH ORDINALITY AS m(eid, seq)
+                JOIN simplified_edges_forward e ON e.edge_id = m.eid
+            )
+            SELECT (hash(mem.osm_id, mem.source, mem.target, FALSE) >> 1)::BIGINT AS old_edge_id,
+                   (hash(cm.osm_id, cm.source, cm.target, FALSE) >> 1)::BIGINT AS new_edge_id,
+                   mem.seq::INTEGER AS seq, FALSE AS is_reverse
+            FROM mem JOIN _cmeta cm USING (cid)
+            UNION ALL
+            SELECT (hash(mem.osm_id, mem.target, mem.source, TRUE) >> 1)::BIGINT,
+                   (hash(cm.osm_id, cm.target, cm.source, TRUE) >> 1)::BIGINT,
+                   mem.seq::INTEGER, TRUE
+            FROM mem JOIN _cmeta cm USING (cid)
+            WHERE NOT cm.oneway
         """)
 
         # Forward edges = untouched singletons + one edge per merged chain.
@@ -501,10 +550,19 @@ class GraphSimplifier(BaseProcessor):
 
         n_removed = self.fetchone(
             "SELECT COALESCE(SUM(len(edge_set)), 0) - COUNT(*) FROM _chains")[0]
-        logger.info(f"  merge_segments: contracted {n_chains:,} chain(s), "
-                    f"removed {n_removed:,} forward edge(s)")
+        n_map = self.fetchone("SELECT COUNT(*) FROM edge_id_map")[0]
+        logger.info(f"  merge_segments: contracted {n_chains:,} chain(s), removed "
+                    f"{n_removed:,} forward edge(s); edge_id_map has {n_map:,} row(s)")
         self.execute("DROP TABLE IF EXISTS _inc; DROP TABLE IF EXISTS _node2; "
-                     "DROP TABLE IF EXISTS _chains; DROP TABLE IF EXISTS _merged;")
+                     "DROP TABLE IF EXISTS _chains; DROP TABLE IF EXISTS _merged; "
+                     "DROP TABLE IF EXISTS _cmeta;")
+
+    def _empty_edge_id_map(self) -> None:
+        """Create an empty edge_id_map so the table always exists when merge_segments is on."""
+        self.execute("""
+            CREATE OR REPLACE TABLE edge_id_map (
+                old_edge_id BIGINT, new_edge_id BIGINT, seq INTEGER, is_reverse BOOLEAN)
+        """)
 
     def _finalize_tables(self) -> None:
         """Replace edges and nodes with simplified versions."""
