@@ -114,3 +114,28 @@ def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time",
         "length_m": sum(r["length_m"] for r in rows if r["length_m"] is not None),
         "path": rows,
     }
+
+
+class Router:
+    """Build the routing graph ONCE, then answer many shortest-path queries cheaply.
+
+        r = Router(con)                 # builds the in-memory graph once (time, no service)
+        r.route(from_edge, to_edge)     # reuses it -> same dict as routing.route()
+        r.route(c, d)                   # no rebuild
+
+    Defaults match :func:`route` (fastest, service-free); set ``weight="length"`` /
+    ``with_service=True`` per Router. The prebuilt graph is on ``.graph``.
+    """
+
+    def __init__(self, con, mode: str = "driving", weight: str = "time",
+                 with_service: bool = False):
+        self.con = con
+        self.mode = mode
+        self.weight = weight
+        self.with_service = with_service
+        self.graph = to_networkx(con, mode=mode, weight=weight, with_service=with_service)
+
+    def route(self, from_edge, to_edge):
+        """Shortest route between two edge ids, reusing the prebuilt graph."""
+        return route(self.con, from_edge, to_edge, mode=self.mode, weight=self.weight,
+                     with_service=self.with_service, graph=self.graph)

@@ -2,7 +2,7 @@
 import duckdb
 import pytest
 
-from duckosm.routing import to_networkx, route
+from duckosm.routing import to_networkx, route, Router
 
 
 def _db():
@@ -64,3 +64,11 @@ def test_route_no_path_returns_none():
 def test_route_unknown_edge_raises():
     with pytest.raises(ValueError):
         route(_route_db(), 1, 999999)
+
+
+def test_router_builds_once_and_reuses_graph():
+    r = Router(_route_db())
+    g = r.graph
+    assert r.route(1, 3)["edges"] == [1, 2, 3]
+    assert r.route(2, 3)["edges"] == [2, 3]
+    assert r.graph is g                              # graph built once, not rebuilt per query

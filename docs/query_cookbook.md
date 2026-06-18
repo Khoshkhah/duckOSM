@@ -102,13 +102,15 @@ r = route(con, FROM_EDGE, TO_EDGE)            # defaults: fastest (time), servic
 #   route(con, a, b, with_service=True) -> may use service roads
 ```
 
-For many routes, build the graph once and reuse it (avoids rebuilding per call):
+`route()` rebuilds the graph each call. For **many** routes use `Router`, which builds the graph
+**once**:
 
 ```python
-import networkx as nx
-from duckosm import to_networkx, route
-G = to_networkx(con, weight="time")
-r = route(con, FROM_EDGE, TO_EDGE, graph=G)             # or nx.shortest_path(G, a, b, weight="weight")
+from duckosm import Router
+r = Router(con)                       # builds the graph once (time, no service)
+r.route(FROM_EDGE, TO_EDGE)           # reuses it — no rebuild
+r.route(OTHER_FROM, OTHER_TO)
+# r.graph is the underlying networkx DiGraph if you want nx algorithms directly
 ```
 
 Needs `networkx` (`pip install duckosm[routing]`). This loads the whole graph into memory — fine
