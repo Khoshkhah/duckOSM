@@ -48,24 +48,33 @@ def main():
     con.execute(f"ATTACH '{db}' AS d (READ_ONLY)")
     cols = [c[0] for c in con.execute(f"SELECT * FROM d.{a.mode}.edges LIMIT 0").description]
 
-    sel = ["edge_id", "highway"]
-    if "name" in cols:
-        sel.append("COALESCE(name,'') AS name")
-    if a.color_by and a.color_by in cols and a.color_by not in ("edge_id", "highway", "name"):
-        sel.append(a.color_by)
+    if "highway" not in cols:
+        raise SystemExit(f"{a.mode}.edges has no 'highway' column (roadstyle styles by road class)")
+    # resolve the id column for click-to-copy + tooltip: explicit --copy-field, else the
+    # first of edge_id / id / osm_id / fid that exists (so a renamed id column still works).
+    id_col = (a.copy_field if (a.copy_field and a.copy_field in cols)
+              else next((c for c in ("edge_id", "id", "osm_id", "fid") if c in cols), None))
+    if a.copy_field and a.copy_field not in cols:
+        print(f"note: --copy-field '{a.copy_field}' not in {a.mode}.edges"
+              + (f"; using '{id_col}'" if id_col else "; copy disabled"))
+
+    sel = (["highway"] + ([id_col] if id_col else [])
+           + (["COALESCE(name,'') AS name"] if "name" in cols else [])
+           + ([a.color_by] if (a.color_by and a.color_by in cols
+                               and a.color_by not in (id_col, "highway", "name")) else []))
     df = con.execute(
         f"SELECT {', '.join(sel)}, ST_AsText(geometry) AS wkt FROM d.{a.mode}.edges").df()
     if df.empty:
         raise SystemExit(f"no edges in {a.mode}.edges")
-    print(f"{len(df):,} edges in {a.mode}")
+    print(f"{len(df):,} edges in {a.mode}" + (f"  ·  copy field: {id_col}" if id_col else ""))
 
     df["geometry"] = df["wkt"].map(shapely_wkt.loads)
     g = gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry="geometry", crs="EPSG:4326")
 
-    tooltip = [c for c in ("edge_id", "highway", "name", a.color_by) if c and c in g.columns]
+    tooltip = [c for c in (id_col, "highway", "name", a.color_by) if c and c in g.columns]
     kw = dict(theme=a.theme, basemap=a.basemap, tooltip=tooltip,
               name=a.title or db.stem, legend=True,
-              copy_field=(a.copy_field or None))   # click an edge -> copy this column
+              copy_field=id_col)                    # click an edge -> copy this column
     layers = [b.strip() for b in a.basemaps.split(",") if b.strip()]
     if layers:                                        # toggleable base-map layer switcher
         kw["basemaps"] = [a.basemap] + [b for b in layers if b != a.basemap]
