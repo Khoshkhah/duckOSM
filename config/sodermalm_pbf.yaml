@@ -1,4 +1,4 @@
-name: sodermalm_new
+name: sodermalm_pbf
 output_path: data/db
 source:
   type: pbf
