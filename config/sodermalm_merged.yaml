@@ -1,0 +1,19 @@
+# Södermalm driving network, PBF build WITH merge_segments (v2 same-road contraction).
+#   duckosm build --config config/sodermalm_merged.yaml   # -> data/db/sodermalm_merged.duckdb
+name: sodermalm_merged
+output_path: data/db
+source: {type: pbf, pbf_path: data/maps/sweden-latest.osm.pbf}
+boundary: {path: data/boundaries/sodermalm.geojson}
+clip: {predicate: intersects, keep_largest_component: true}
+modes: [driving]
+options:
+  build_graph: true
+  simplify: true
+  merge_segments: true
+  process_speeds: true
+  extract_restrictions: true
+  calculate_costs: true
+  h3_indexing: false
+validation: {enabled: true, fail_on_error: false}
+report: {enabled: false}
+viz: {enabled: true, basemap: voyager}
