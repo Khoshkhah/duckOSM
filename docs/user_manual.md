@@ -82,12 +82,20 @@ Each mode has its own schema (e.g., `driving.edges`, `walking.edges`).
 | `to_cell` | UBIGINT | Target node H3 cell |
 
 ### `edge_graph`
+Edge-based routing graph (line graph). **Service-free** by default (`separate_service`); the full
+graph incl. `service` roads is kept as `edge_graph_with_service`.
+
 | Column | Type | Description |
 |--------|------|-------------|
 | `from_edge` | INTEGER | Incoming edge |
 | `to_edge` | INTEGER | Outgoing edge |
 | `via_edge` | INTEGER | Same as to_edge |
 | `cost` | FLOAT | Travel cost of from_edge |
+
+### `service_edges`
+`highway=service` edges (driveways, alleys) moved out of the routing graph by the final
+`separate_service` step — same columns as `edges`. Visualization unions `edges` + `service_edges`,
+so the map still shows every road. (`edge_graph_with_service` is the matching full graph.)
 
 ### `turn_restrictions`
 | Column | Type | Description |
@@ -157,6 +165,34 @@ arrowed (each is a forward+reverse edge pair, so arrowing all edges is too heavy
 ```bash
 duckosm viz data/db/sodermalm.duckdb --arrows
 ```
+
+## Routing (shortest path)
+
+`edge_graph` is the edge-based routing graph (nodes = `edge_id`s; illegal turns already
+removed). The helpers wrap it with `networkx` — `pip install duckosm[routing]`:
+
+```python
+import duckdb
+from duckosm import route, Router
+
+con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+
+# one-off: shortest route between two edge_ids (defaults: fastest, service roads excluded)
+r = route(con, FROM_EDGE, TO_EDGE)
+r["edges"]        # ordered edge_ids
+r["time_s"]       # total travel time (door-to-door)
+r["length_m"]     # total length
+r["path"]         # per-edge name/highway/length_m/cost_s/geometry, in order
+
+# many routes: build the graph once, reuse it
+router = Router(con)
+router.route(FROM_EDGE, TO_EDGE)
+```
+
+Options: `weight="length"` routes by distance instead of time; `with_service=True` routes over
+`service` roads (`edge_graph_with_service`). `to_networkx(con, ...)` returns the raw weighted
+`DiGraph` if you want to run networkx algorithms directly. This loads the graph into memory —
+fine for a city; for country scale prefer an on-disk A\* over `edge_graph`.
 
 ## Troubleshooting
 

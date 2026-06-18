@@ -20,8 +20,12 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   connected-component clean-up that drops boundary stubs
 - **Validation, report & viz**: build-time invariant checks, a `reports/<name>.{md,html}`
   build report, and an optional [roadstyle](../roadstyle) network map
-- **Routing-ready**: degree-2 simplified graph, edge-adjacency table, turn
-  restrictions, H3 spatial indexing, travel-time costs
+- **Routing-ready**: degree-2 simplified graph, edge-adjacency line graph, turn
+  restrictions, H3 spatial indexing, travel-time costs — plus `route()` / `Router`
+  shortest-path helpers (`from duckosm import route`)
+- **Service roads separated**: `highway=service` (driveways/alleys) are moved into a
+  `service_edges` table so the routing graph is real roads only; the full graph is kept as
+  `edge_graph_with_service` for when you need them. Visualization still shows every road.
 - **Admin boundaries**: optional table of all OSM administrative levels with a
   derived parent hierarchy
 - **Portable**: single `.duckdb` file, queryable anywhere
@@ -103,6 +107,28 @@ DuckOSM(config).run()
 # or: DuckOSM(Config.from_yaml("config/sweden.yaml")).run()
 ```
 
+### Routing (shortest path between two edges)
+
+`edge_graph` is the edge-based routing graph (nodes = `edge_id`s; illegal turns already removed).
+The helpers wrap it with `networkx` (`pip install duckosm[routing]`):
+
+```python
+import duckdb
+from duckosm import route, Router
+
+con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+r = route(con, FROM_EDGE, TO_EDGE)          # fastest route (default); weight="length" for distance
+r["edges"]                                   # ordered edge_ids
+r["time_s"], r["length_m"]                   # door-to-door totals
+r["path"]                                    # per-edge name/highway/length_m/cost_s/geometry
+
+router = Router(con)                          # many routes: build the graph once, reuse it
+router.route(FROM_EDGE, TO_EDGE)
+```
+
+Defaults are fastest-by-time and service-free; pass `weight="length"` or `with_service=True` to
+change. See [`docs/query_cookbook.md`](docs/query_cookbook.md#shortest-path-between-two-edges).
+
 ### Clip an area from a parent build
 
 Build a large region once, then derive sub-areas cheaply — edge_ids are preserved, so a
@@ -129,7 +155,9 @@ Each transport mode gets its own schema (`driving`, `walking`, `cycling`):
 |-------|-------------|
 | `edges` | Directed road segments: `edge_id` (**stable content hash** of `(osm_id, source, target, is_reverse)` — same id across rebuilds, see docs/data_dictionary.md), geometry, `length_m`, `maxspeed_kmh`, `cost_s`, `lanes` (int, per-direction), `oneway` (bool), `highway`, H3 cells, … |
 | `nodes` | Junction / endpoint nodes |
-| `edge_graph` | Edge adjacency for routing |
+| `edge_graph` | Edge adjacency (line graph) for routing — **service-free** by default |
+| `edge_graph_with_service` | Full edge adjacency incl. `service` roads (present when any were split out) |
+| `service_edges` | `highway=service` edges moved out of the routing graph (same columns as `edges`) |
 | `turn_restrictions` | Turn-restriction relations (driving) |
 
 Shared tables: `raw.*` (parsed OSM), `main.visualization_metadata`, and the optional
