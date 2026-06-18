@@ -80,9 +80,26 @@ Find all possible next steps from a specific edge:
 ```sql
 SELECT e.edge_id, e.name, e.highway
 FROM edge_graph eg
-JOIN edges e ON eg.to_edge_id = e.edge_id
-WHERE eg.from_edge_id = 1; -- Replace with a real edge ID
+JOIN edges e ON eg.to_edge = e.edge_id
+WHERE eg.from_edge = 1234567890;   -- a real edge_id
 ```
+
+### Shortest path between two edges
+`edge_graph` is the edge-based routing graph (each node is an `edge_id`; illegal turns already
+removed). Load it as a weighted `networkx` graph and route — by travel time or by distance:
+
+```python
+import duckdb, networkx as nx
+from duckosm import to_networkx
+
+con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+G = to_networkx(con, weight="time")          # weight="length" for distance; with_service=True to allow service roads
+path = nx.shortest_path(G, FROM_EDGE, TO_EDGE, weight="weight")          # ordered edge_ids
+cost = nx.shortest_path_length(G, FROM_EDGE, TO_EDGE, weight="weight")   # seconds (or metres)
+```
+
+Needs `networkx` (`pip install duckosm[routing]`). This loads the whole graph into memory — fine
+for a city; at country scale run an on-disk A\* over `edge_graph` instead.
 
 ---
 

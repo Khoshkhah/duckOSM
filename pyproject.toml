@@ -37,7 +37,8 @@ duckosm = "duckosm.cli:main"
 [project.optional-dependencies]
 viz = ["folium", "leafmap"]
 tz = ["timezonefinder>=6.0"]
-dev = ["pytest", "black", "ruff"]
+routing = ["networkx"]
+dev = ["pytest", "black", "ruff", "networkx"]
 
 [project.urls]
 Homepage = "https://github.com/khoshkhah/duckOSM"
