@@ -159,7 +159,9 @@ def admin(args):
               help='Default base map: voyager, positron, esri_gray, osm, satellite')
 @click.option('--out-dir', default='reports', show_default=True,
               help='Output directory for <name>_<mode>_network.html')
-def viz(db, modes, basemap, out_dir):
+@click.option('--arrows/--no-arrows', default=False, show_default=True,
+              help='Overlay source->target direction arrows (one-way red, two-way blue both sides)')
+def viz(db, modes, basemap, out_dir, arrows):
     """Render a roadstyle HTML map of a built network.
 
     Writes <out-dir>/<name>_<mode>_network.html per mode, with edges styled by
@@ -188,7 +190,8 @@ def viz(db, modes, basemap, out_dir):
             f"mode(s) {unknown} not found in {db} (present: {present or 'none'})")
 
     name = Path(db).stem
-    rendered = [render_network(con, m, name, basemap=basemap, out_dir=out_dir) for m in chosen]
+    rendered = [render_network(con, m, name, basemap=basemap, out_dir=out_dir, arrows=arrows)
+                for m in chosen]
     rendered = [p for p in rendered if p]
     if not rendered:
         raise click.ClickException(
