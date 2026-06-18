@@ -28,7 +28,10 @@ def main():
     ap.add_argument("--db", required=True, help="duckOSM .duckdb file")
     ap.add_argument("--mode", default="driving", help="schema: driving | walking | cycling")
     ap.add_argument("--out", default=None, help="output .html (default: <db>_<mode>.html)")
-    ap.add_argument("--basemap", default="voyager", help="voyager | positron | esri_gray | osm")
+    ap.add_argument("--basemap", default="voyager", help="default base map (selected on load)")
+    ap.add_argument("--basemaps", default="voyager,positron,esri_gray,osm",
+                    help="comma list of base maps offered as a toggleable layer switcher; "
+                         "'' for none. Any of: voyager positron esri_gray osm dark_matter satellite")
     ap.add_argument("--theme", default="light", help="light | dark")
     ap.add_argument("--color-by", default=None, help="numeric/categorical column to colour by")
     ap.add_argument("--cmap", default=None, help="matplotlib cmap for --color-by")
@@ -60,6 +63,9 @@ def main():
     tooltip = [c for c in ("edge_id", "highway", "name", a.color_by) if c and c in g.columns]
     kw = dict(theme=a.theme, basemap=a.basemap, tooltip=tooltip,
               name=a.title or db.stem, legend=True)
+    layers = [b.strip() for b in a.basemaps.split(",") if b.strip()]
+    if layers:                                        # toggleable base-map layer switcher
+        kw["basemaps"] = [a.basemap] + [b for b in layers if b != a.basemap]
     if a.color_by:                                    # data-driven colour overrides class styling
         kw["color_by"] = a.color_by
         if a.cmap:

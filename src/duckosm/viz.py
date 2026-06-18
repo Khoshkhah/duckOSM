@@ -11,6 +11,9 @@ from pathlib import Path
 
 logger = logging.getLogger("duckosm")
 
+# Base maps offered as a toggleable layer switcher in the output HTML.
+BASEMAP_LAYERS = ["voyager", "positron", "esri_gray", "osm"]
+
 
 def render_network(con, mode, name, basemap="voyager", out_dir="reports"):
     try:
@@ -36,8 +39,10 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports"):
     g = gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry="geometry", crs="EPSG:4326")
 
     # No color_by => roadstyle's classic OSM highway-class casing+fill.
+    # basemaps=[...] adds the toggleable base-map layer switcher (chosen one first).
+    layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
-        g, theme="light", basemap=basemap,
+        g, theme="light", basemap=basemap, basemaps=layers,
         tooltip=["edge_id", "highway", "name"],
         name=f"{name} ({mode})", legend=True,
     )
