@@ -12,7 +12,7 @@ from pathlib import Path
 logger = logging.getLogger("duckosm")
 
 # Base maps offered as a toggleable layer switcher in the output HTML.
-BASEMAP_LAYERS = ["voyager", "positron", "esri_gray", "osm"]
+BASEMAP_LAYERS = ["voyager", "positron", "esri_gray", "osm", "satellite"]
 
 
 def render_network(con, mode, name, basemap="voyager", out_dir="reports"):

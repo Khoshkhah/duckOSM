@@ -29,7 +29,7 @@ def main():
     ap.add_argument("--mode", default="driving", help="schema: driving | walking | cycling")
     ap.add_argument("--out", default=None, help="output .html (default: <db>_<mode>.html)")
     ap.add_argument("--basemap", default="voyager", help="default base map (selected on load)")
-    ap.add_argument("--basemaps", default="voyager,positron,esri_gray,osm",
+    ap.add_argument("--basemaps", default="voyager,positron,esri_gray,osm,satellite",
                     help="comma list of base maps offered as a toggleable layer switcher; "
                          "'' for none. Any of: voyager positron esri_gray osm dark_matter satellite")
     ap.add_argument("--theme", default="light", help="light | dark")
