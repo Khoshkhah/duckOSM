@@ -131,6 +131,37 @@ def test_merged_edge_geometry_matches_source_and_target():
         assert mismatched == []
 
 
+# ---- self-loop splitting -----------------------------------------------------------
+def test_split_self_loop_node_matches_geometry():
+    """The virtual midpoint node of a split self-loop must sit exactly where the two halves are
+    cut (ST_LineSubstring at 0.5), so each half-edge's endpoint at the virtual node equals the
+    node's coordinate. Regression: the node used the middle vertex (ST_PointN), metres off."""
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("""CREATE TABLE simplified_edges_forward(
+        edge_id INTEGER, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR,
+        name VARCHAR, maxspeed VARCHAR, oneway BOOLEAN, lanes INTEGER, surface VARCHAR,
+        junction VARCHAR, refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
+    # a self-loop (source==target=1) with unevenly-spaced vertices: the middle vertex (3 1) is
+    # NOT the 50%-by-length point, so the old code put the node off the cut.
+    g = "ST_GeomFromText('LINESTRING(0 0, 3 0, 3 1, 0 0)')"
+    con.execute(f"""INSERT INTO simplified_edges_forward VALUES
+        (1, 1, 1, 700, 'residential', 'Loop', '50', false, 1, NULL, NULL, [1,2,3,1], {g}, false, 7.16)""")
+    GraphSimplifier(con)._split_self_loops()
+    assert con.execute("SELECT count(*) FROM virtual_nodes").fetchone()[0] == 1
+    assert con.execute("SELECT count(*) FROM simplified_edges_forward "
+                       "WHERE source < 0 OR target < 0").fetchone()[0] == 2   # two halves
+    bad = con.execute("""
+        SELECT e.edge_id FROM simplified_edges_forward e
+        JOIN virtual_nodes v ON v.node_id IN (e.source, e.target)
+        WHERE (e.target < 0 AND (ABS(ST_X(ST_EndPoint(e.geometry))   - ST_X(v.geom)) > 1e-9
+                              OR ABS(ST_Y(ST_EndPoint(e.geometry))   - ST_Y(v.geom)) > 1e-9))
+           OR (e.source < 0 AND (ABS(ST_X(ST_StartPoint(e.geometry)) - ST_X(v.geom)) > 1e-9
+                              OR ABS(ST_Y(ST_StartPoint(e.geometry)) - ST_Y(v.geom)) > 1e-9))
+    """).fetchall()
+    assert bad == []
+
+
 # ---- matching table ----------------------------------------------------------------
 def test_contract_chains_edge_id_map():
     con = _graph()

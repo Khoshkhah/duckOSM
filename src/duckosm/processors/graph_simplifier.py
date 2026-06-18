@@ -301,7 +301,11 @@ class GraphSimplifier(BaseProcessor):
                     -- the volatile row-number edge_id). A loop is keyed by (osm_id, source);
                     -- a stable negative id keeps the split edges reproducible across rebuilds.
                     -((hash(osm_id, source) >> 2)::BIGINT) AS virtual_node_id,
-                    ST_PointN(geometry, (ST_NPoints(geometry) / 2 + 1)::INTEGER) AS midpoint_geom
+                    -- Midpoint = the 50%-by-length point, i.e. exactly where the two halves are
+                    -- cut below (ST_LineSubstring at 0.5). Using the middle *vertex*
+                    -- (ST_PointN at npoints/2) instead put the node a few metres off the cut, so
+                    -- the half-edges' shared endpoint did not equal the virtual node's coord.
+                    ST_LineInterpolatePoint(geometry, 0.5) AS midpoint_geom
                 FROM simplified_edges_forward
                 WHERE source = target
                   AND ST_NPoints(geometry) >= 3
