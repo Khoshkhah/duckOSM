@@ -58,7 +58,9 @@ def main():
         print(f"note: --copy-field '{a.copy_field}' not in {a.mode}.edges"
               + (f"; using '{id_col}'" if id_col else "; copy disabled"))
 
-    sel = (["highway"] + ([id_col] if id_col else [])
+    # cast the id column to VARCHAR so a 64-bit edge_id > 2^53 survives JS Number precision
+    # (else the tooltip/copy round its low digits to a non-existent id).
+    sel = (["highway"] + ([f'CAST({id_col} AS VARCHAR) AS "{id_col}"'] if id_col else [])
            + (["COALESCE(name,'') AS name"] if "name" in cols else [])
            + ([a.color_by] if (a.color_by and a.color_by in cols
                                and a.color_by not in (id_col, "highway", "name")) else []))

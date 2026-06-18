@@ -26,8 +26,10 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports"):
         return None
 
     try:
+        # edge_id is a 64-bit hash > 2^53 — cast to VARCHAR so it survives JS Number
+        # precision (else the tooltip/copy round the low digits to a non-existent id).
         df = con.execute(
-            f"SELECT edge_id, highway, COALESCE(name, '') AS name, "
+            f"SELECT CAST(edge_id AS VARCHAR) AS edge_id, highway, COALESCE(name, '') AS name, "
             f"ST_AsText(geometry) AS wkt FROM {mode}.edges").df()
     except Exception as e:
         logger.warning(f"viz[{mode}]: cannot read edges ({e})")
