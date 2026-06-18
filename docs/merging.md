@@ -33,6 +33,27 @@ The strict all-attributes rule (not just `highway`+`oneway`+`name`) is deliberat
 guarantees the merged edge is **lossless** — no maxspeed/lane/surface change is silently
 averaged away. It costs only a handful of merges versus the looser rule.
 
+## Speed and lanes
+
+`maxspeed` and `lanes` are both in the predicate, so a **change in either is a merge
+boundary** — the road stays split where the speed limit or lane count changes, and the
+merged edge always has one exact value for each. Nothing is averaged.
+
+- **Speed.** Merging runs *before* `process_speeds`, so the predicate compares the **raw OSM
+  `maxspeed` string** (`"50"`, `"30"`, `"50 mph"`, `null`). Two segments merge only if these
+  are identical; a `50 → 30` transition is never collapsed. `process_speeds` then converts
+  the merged edge's single `maxspeed` to `maxspeed_kmh`, and `calculate_costs` derives
+  `cost_s` from it — so travel time stays correct over the whole merged edge.
+
+- **Lanes.** A forward edge's `lanes` is the **per-direction** (forward) lane count
+  (`lanes_fwd`; see the lanes mechanism). The predicate requires it equal along the chain, so
+  a forward lane-count change is a merge boundary and the merged edge carries that one value.
+  The **reverse** edge is built after the merge and takes its backward count (`lanes_bwd`)
+  from the merged edge's representative (longest-member) `osm_id`. Edge case: if two merged
+  segments share the same *forward* lanes but differ in *backward* lanes, the reverse edge
+  reflects only the representative segment's backward count — tighten the predicate to also
+  compare `lanes_bwd` if that matters for your use.
+
 ## The algorithm — maximal-chain contraction
 
 Runs on the **forward edges only** (`simplified_edges_forward`), *after* self-loop
