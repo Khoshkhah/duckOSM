@@ -49,10 +49,10 @@ merged edge always has one exact value for each. Nothing is averaged.
   (`lanes_fwd`; see the lanes mechanism). The predicate requires it equal along the chain, so
   a forward lane-count change is a merge boundary and the merged edge carries that one value.
   The **reverse** edge is built after the merge and takes its backward count (`lanes_bwd`)
-  from the merged edge's representative (longest-member) `osm_id`. Edge case: if two merged
-  segments share the same *forward* lanes but differ in *backward* lanes, the reverse edge
-  reflects only the representative segment's backward count — tighten the predicate to also
-  compare `lanes_bwd` if that matters for your use.
+  from the merged edge's representative (first-member, source-end) `osm_id`. Edge case: if two
+  merged segments share the same *forward* lanes but differ in *backward* lanes, the reverse
+  edge reflects only the representative segment's backward count — tighten the predicate to
+  also compare `lanes_bwd` if that matters for your use.
 
 ## The algorithm — maximal-chain contraction
 
@@ -65,24 +65,71 @@ end. Steps (`_contract_chains`):
 2. **`_node2`** — group by node and keep the contraction points (predicate above).
 3. **walk** (recursive CTE) — seed at each *terminal → contraction-point* boundary edge,
    then step through contraction points onto their other edge, accumulating the ordered
-   node sequence `refs_acc` (oriented source→target, shared node dropped each step). A chain
-   ends when it reaches a non-contraction node. Each chain is found from both ends; the
-   `start < cur` filter keeps one. `edge_set` (the member ids) guards against revisiting.
+   node sequence `refs_acc` (shared node dropped each step). A chain ends when it reaches a
+   non-contraction node. Each chain is found from both ends; the orientation filter keeps one
+   (see [Orientation](#orientation-source-and-target-follow-the-road)). `edge_set` (the member
+   ids) guards against revisiting.
 4. **`_cmeta` / `_merged`** — for each chain, rebuild geometry and length from the stitched
-   node coordinates (`raw.nodes`), carry the uniform attributes from any member, and set the
+   node coordinates (`raw.nodes`) in `refs_acc` order (so the geometry runs `source → target`
+   by construction), carry the uniform attributes from the first member, and set its
    representative `osm_id` (below).
 5. **rebuild** `simplified_edges_forward` = untouched singleton edges + one edge per chain.
 
 This contracts **every** maximal same-road chain, so the result is the minimum edge count
 under the predicate; nothing mergeable is missed and re-running is a no-op (idempotent).
 
+### Orientation: source and target follow the road
+
+Each chain is discovered twice — once from each terminal — so the walk must keep exactly one,
+in the right direction. The orientation rule depends on `oneway`:
+
+- **One-way chains** keep their **legal travel direction**: the walk seeded *forward* (the
+  seed edge traversed source→target, `seed_fwd`) is the one kept, so the merged edge's
+  `source → target` is the direction you may legally drive. A one-way road gets **no reverse
+  edge**, so its single forward edge *must* point the right way.
+- **Two-way chains** are oriented deterministically by node id (`start < cur`). Either
+  direction is valid — a reverse edge is generated afterward (`ST_Reverse` of the geometry,
+  swapped endpoints) — so this is just a stable tie-break, not a correctness choice.
+
+In both cases the geometry is rebuilt from `refs_acc` in `source → target` order, so
+`ST_StartPoint(geometry)` is always the `source` node and `ST_EndPoint(geometry)` the
+`target` node. (`tests/test_merge_segments.py` asserts both: one-way legal direction, and
+geometry endpoints matching `source`/`target`.)
+
+> Earlier versions oriented *every* chain by `start < cur`, which silently reversed ~46% of
+> merged one-way edges (those whose legal-source node id was the larger of the two) — the
+> forward edge then pointed against traffic. The `oneway`-aware rule above fixes it.
+
 ### `osm_id` and the stable `edge_id`
 
 A merged edge spans several `osm_id`s. The stable id is
 `edge_id = hash(osm_id, source, target, is_reverse)`, so the merged edge needs one `osm_id`:
-it takes its **longest contributing member's** `osm_id` (`arg_max(osm_id, length_m)`). This
-keeps the id scheme and the natural-key join intact with no schema change. (`refs` still
-carries the full node list, so turn-restriction matching is unaffected.)
+it takes its **first contributing member's** `osm_id` — the segment at the chain's `source`
+end (`edge_set[1]`). This keeps the id scheme and the natural-key join intact with no schema
+change. (`refs` still carries the full node list, so turn-restriction matching is unaffected.)
+
+"First" is first **in the oriented chain** (`source → target`), which is well-defined once
+the chain is oriented (see [Orientation](#orientation-source-and-target-follow-the-road)): for a
+one-way road it is the first segment you legally drive onto. It collapses `osm_id` to a single
+value, but **only** `osm_id`: the predicate already forced every other carried attribute equal
+along the chain, so nothing else is lost.
+
+The discarded `osm_id`s are still recoverable, but **not** from `edge_id_map` — that table's
+`old_edge_id` is the hash `hash(osm_id, source, target, is_reverse)`, which bakes `osm_id`
+in rather than storing it, and the pre-merge segment rows don't exist in a merged build.
+Recover the full constituent set from the merged edge's `refs` (the complete node sequence
+is preserved) joined to `<mode>.way_nodes`:
+
+```sql
+-- every original way stitched into a given merged edge
+WITH e AS (SELECT refs FROM <mode>.edges WHERE edge_id = ?),
+     pairs AS (SELECT refs[i] AS a, refs[i+1] AS b FROM e, range(1, len(refs)) g(i))
+SELECT DISTINCT wn1.way_id AS osm_id
+FROM pairs p
+JOIN <mode>.way_nodes wn1 ON wn1.node_id = p.a
+JOIN <mode>.way_nodes wn2 ON wn2.node_id = p.b
+                         AND wn2.way_id = wn1.way_id AND abs(wn2.seq - wn1.seq) = 1;
+```
 
 ## The matching table — `<mode>.edge_id_map`
 

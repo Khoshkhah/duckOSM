@@ -388,8 +388,12 @@ class GraphSimplifier(BaseProcessor):
         attribute, since they are all required equal.
 
         Each maximal run collapses to one edge whose geometry/length/refs are rebuilt from
-        the stitched node sequence. The merged edge keeps its LONGEST member's osm_id as the
-        representative, so the stable edge_id hash (osm_id, source, target, is_reverse) stays
+        the stitched node sequence, oriented along the road's travel direction: a one-way
+        chain keeps its LEGAL direction (source -> target follows the OSM node order, so the
+        single forward edge is drivable the right way), and a two-way chain is oriented
+        deterministically by node id (its reverse edge is generated afterward, so either
+        direction is valid). The merged edge keeps its FIRST member's osm_id (the source-end
+        segment), so the stable edge_id hash (osm_id, source, target, is_reverse) stays
         well-defined. Runs on forward edges only, before reverse edges and the re-key.
         """
         # Each forward edge as two half-edges (at its source, at its target), carrying the
@@ -433,7 +437,8 @@ class GraphSimplifier(BaseProcessor):
             WITH RECURSIVE walk AS (
                 SELECT i.node AS start, i.edge_id AS last_edge, i.other AS cur,
                        [i.edge_id] AS edge_set,
-                       CASE WHEN i.fwd THEN i.refs ELSE list_reverse(i.refs) END AS refs_acc
+                       CASE WHEN i.fwd THEN i.refs ELSE list_reverse(i.refs) END AS refs_acc,
+                       i.fwd AS seed_fwd, i.oneway AS oneway
                 FROM _inc i
                 WHERE i.node NOT IN (SELECT node FROM _node2)
                   AND i.other IN (SELECT node FROM _node2)
@@ -441,7 +446,8 @@ class GraphSimplifier(BaseProcessor):
                 SELECT w.start, i.edge_id, i.other,
                        list_append(w.edge_set, i.edge_id),
                        list_concat(w.refs_acc,
-                           (CASE WHEN i.fwd THEN i.refs ELSE list_reverse(i.refs) END)[2:])
+                           (CASE WHEN i.fwd THEN i.refs ELSE list_reverse(i.refs) END)[2:]),
+                       w.seed_fwd, w.oneway
                 FROM walk w
                 JOIN _node2 n ON n.node = w.cur
                 JOIN _inc i ON i.node = w.cur AND i.edge_id <> w.last_edge
@@ -452,7 +458,12 @@ class GraphSimplifier(BaseProcessor):
             FROM walk
             WHERE cur NOT IN (SELECT node FROM _node2)   -- reached the far terminal
               AND len(edge_set) > 1                      -- real (multi-segment) chains only
-              AND start < cur                            -- keep one of the two walk directions
+              AND start <> cur                           -- drop closed loops (same terminal)
+              -- Orient the chain. One-way: keep the walk seeded in the legal travel
+              -- direction (seed traversed forward), so source -> target is drivable. Two-way:
+              -- either direction is valid (the reverse edge is added later), so dedupe the two
+              -- mirror walks deterministically by node id.
+              AND (CASE WHEN oneway THEN seed_fwd ELSE start < cur END)
         """)
 
         n_chains = self.fetchone("SELECT COUNT(*) FROM _chains")[0]
@@ -463,21 +474,16 @@ class GraphSimplifier(BaseProcessor):
             logger.info("  merge_segments: no same-road chains to contract")
             return
 
-        # Per-chain metadata: stitched endpoints/refs, uniform attributes (from any member —
-        # identical by the same-road predicate), and the representative osm_id = LONGEST member
-        # (so the stable edge_id hash stays well-defined for the merged edge).
+        # Per-chain metadata: stitched endpoints/refs plus the uniform attributes and the
+        # representative osm_id, all taken from the FIRST member (the source-end segment,
+        # edge_set[1]). The members are identical on every carried attribute by the same-road
+        # predicate, so any member would do for those; osm_id is the one field that differs,
+        # and taking the first one keeps the stable edge_id hash well-defined.
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _cmeta AS
-            WITH members AS (
-                SELECT c.cid, e.osm_id, e.length_m
-                FROM _chains c, UNNEST(c.edge_set) AS m(eid)
-                JOIN simplified_edges_forward e ON e.edge_id = m.eid
-            ),
-            prim AS (SELECT cid, arg_max(osm_id, length_m) AS osm_id FROM members GROUP BY cid)
-            SELECT c.cid, c.source, c.target, c.refs_acc, p.osm_id,
+            SELECT c.cid, c.source, c.target, c.refs_acc, e.osm_id,
                    e.highway, e.name, e.maxspeed, e.oneway, e.lanes, e.surface, e.junction
             FROM _chains c
-            JOIN prim p USING (cid)
             JOIN simplified_edges_forward e ON e.edge_id = c.edge_set[1]
         """)
 
