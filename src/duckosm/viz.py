@@ -25,15 +25,30 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
                        "(pip install geopandas roadstyle)")
         return None
 
-    # edge_id is a 64-bit hash > 2^53 — cast to VARCHAR so it survives JS Number precision
-    # (else the tooltip/copy round the low digits to a non-existent id). `oneway` is pulled only
-    # for the optional direction arrows (roadstyle draws a chevron per one-way edge).
-    cols = "CAST(edge_id AS VARCHAR) AS edge_id, highway, COALESCE(name, '') AS name"
-    if arrows:
-        cols += ", oneway"
+    # Columns present on this build's edges (e.g. maxspeed_kmh needs process_speeds). edge_id is
+    # a 64-bit hash > 2^53, cast to VARCHAR so it survives JS Number precision. lanes + speed are
+    # added to the hover tooltip when present; oneway is pulled for the optional arrows.
+    def _columns(table):
+        return {r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_schema = '{mode}' AND table_name = '{table}'").fetchall()}
+
+    edge_cols = _columns("edges")
+    if not edge_cols:
+        logger.warning(f"viz[{mode}]: no edges table to render")
+        return None
+    info = [c for c in ("lanes", "maxspeed_kmh") if c in edge_cols]      # extra tooltip fields
+    select = "CAST(edge_id AS VARCHAR) AS edge_id, highway, COALESCE(name, '') AS name"
+    select += "".join(f", {c}" for c in info)
+    if arrows and "oneway" in edge_cols:
+        select += ", oneway"
+    select += ", ST_AsText(geometry) AS wkt"
+
+    # Render EVERY road: the routing-graph edges PLUS the separated service roads (same styling),
+    # so the map still shows the full network even though service edges live in their own table.
+    froms = [f"{mode}.edges"] + ([f"{mode}.service_edges"] if _columns("service_edges") else [])
     try:
-        df = con.execute(
-            f"SELECT {cols}, ST_AsText(geometry) AS wkt FROM {mode}.edges").df()
+        df = con.execute(" UNION ALL ".join(f"SELECT {select} FROM {t}" for t in froms)).df()
     except Exception as e:
         logger.warning(f"viz[{mode}]: cannot read edges ({e})")
         return None
@@ -50,7 +65,7 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", "highway", "name"], copy_field="edge_id",
+        tooltip=["edge_id", "highway", "name", *info], copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
         arrows=arrows, arrow_col=("oneway" if arrows else None),
     )
