@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--theme", default="light", help="light | dark")
     ap.add_argument("--color-by", default=None, help="numeric/categorical column to colour by")
     ap.add_argument("--cmap", default=None, help="matplotlib cmap for --color-by")
+    ap.add_argument("--copy-field", default="edge_id",
+                    help="column copied to the clipboard on edge click ('' to disable)")
     ap.add_argument("--title", default=None)
     a = ap.parse_args()
 
@@ -62,7 +64,8 @@ def main():
 
     tooltip = [c for c in ("edge_id", "highway", "name", a.color_by) if c and c in g.columns]
     kw = dict(theme=a.theme, basemap=a.basemap, tooltip=tooltip,
-              name=a.title or db.stem, legend=True)
+              name=a.title or db.stem, legend=True,
+              copy_field=(a.copy_field or None))   # click an edge -> copy this column
     layers = [b.strip() for b in a.basemaps.split(",") if b.strip()]
     if layers:                                        # toggleable base-map layer switcher
         kw["basemaps"] = [a.basemap] + [b for b in layers if b != a.basemap]

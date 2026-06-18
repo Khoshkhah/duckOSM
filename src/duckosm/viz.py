@@ -43,7 +43,7 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports"):
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", "highway", "name"],
+        tooltip=["edge_id", "highway", "name"], copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
     )
     out = Path(out_dir)
