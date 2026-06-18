@@ -83,7 +83,7 @@ duckosm admin --pbf data/maps/sweden-latest.osm.pbf --db data/db/sweden.duckdb
 `roadstyle`):
 
 ```bash
-duckosm viz data/db/sodermalm.duckdb
+duckosm viz data/db/sodermalm.duckdb            # add --arrows for zoom-gated one-way direction arrows
 ```
 
 Not activated? Use `.venv/bin/duckosm <command> ...`, `python -m duckosm <command> ...`,

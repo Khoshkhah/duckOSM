@@ -148,6 +148,16 @@ toggleable base-map switcher, a legend, and click-to-copy `edge_id`. Needs
 `geopandas` + `roadstyle` installed. Use `--mode driving` to render a single
 mode, or `--basemap` / `--out-dir` to tweak the output.
 
+Add `--arrows` to overlay **one-way direction arrows** — a small gray chevron at
+each one-way edge's midpoint pointing `source → target` (the legal travel
+direction). They are zoom-gated (rendered only at zoom ≥ 18) so the zoomed-out
+view stays clean; zoom in to a one-way street to see them. Two-way roads are not
+arrowed (each is a forward+reverse edge pair, so arrowing all edges is too heavy).
+
+```bash
+duckosm viz data/db/sodermalm.duckdb --arrows
+```
+
 ## Troubleshooting
 
 | Issue | Solution |
