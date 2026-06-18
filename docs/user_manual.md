@@ -14,10 +14,10 @@ pip install -e .
 
 ```bash
 # Using config file (recommended)
-python main.py --config config/somerset.yaml
+duckosm build --config config/sweden.yaml
 
 # Or with CLI options
-python main.py --pbf input.osm.pbf --output network.duckdb
+duckosm build --pbf input.osm.pbf --output network.duckdb
 ```
 
 ## CLI Options
