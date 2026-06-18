@@ -18,7 +18,7 @@ Welcome to duckOSM - a high-performance OSM-to-routing-network converter.
 pip install -e .
 
 # Run
-python -m duckosm --pbf input.osm.pbf --output network.duckdb
+duckosm build --pbf input.osm.pbf --output network.duckdb
 ```
 
 ## Performance

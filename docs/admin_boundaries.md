@@ -8,10 +8,10 @@ It is **not** built by the core import pipeline. Add it to an existing duckOSM
 database with:
 
 ```bash
-python scripts/add_admin_boundaries.py --pbf <file.osm.pbf> --db <file.duckdb>
+duckosm admin --pbf <file.osm.pbf> --db <file.duckdb>
 ```
 
-The script extracts `boundary='administrative'` multipolygons from the PBF with
+This extracts `boundary='administrative'` multipolygons from the PBF with
 `ogr2ogr` (GDAL assembles the boundary relations' member ways into polygons —
 something the bundled DuckDB spatial extension can't do, as it lacks
 `ST_Polygonize`), loads them, and computes `parent_osm_id`.

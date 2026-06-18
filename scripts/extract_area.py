@@ -18,12 +18,12 @@ The large ``raw.*`` tables are not copied.
 Examples
 --------
     # By name (needs admin_boundaries in the source)
-    python scripts/extract_area.py --source data/db/sweden.duckdb \\
+    duckosm extract --source data/db/sweden.duckdb \\
         --db data/db/sodermalm.duckdb --name "Sodermalm"
 
     # By a specific boundary osm_id, or by a GeoJSON file
-    python scripts/extract_area.py --source ... --db ... --osm-id 5691336
-    python scripts/extract_area.py --source ... --db ... --boundary area.geojson
+    duckosm extract --source ... --db ... --osm-id 5691336
+    duckosm extract --source ... --db ... --boundary area.geojson
 """
 import argparse
 import sys

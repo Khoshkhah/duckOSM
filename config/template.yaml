@@ -1,6 +1,6 @@
 # duckOSM configuration — FULL TEMPLATE
 # Copy, edit, and run with:
-#   python -m duckosm --config config/<your>.yaml      (or: duckosm build --config ...)
+#   duckosm build --config config/<your>.yaml
 # Every key shows its default; omit any key to accept that default.
 #
 # Two source modes:

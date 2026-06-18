@@ -139,13 +139,14 @@ WHERE from_cell = 617700169958293503;
 ## Visualization
 
 ```bash
-streamlit run scripts/visualize.py
+duckosm viz data/db/sodermalm.duckdb
 ```
 
-Features:
-- Toggle modes (driving/walking/cycling)
-- View edge properties on hover
-- Two-way roads shown as parallel lines
+Renders a publication-quality roadstyle HTML map per mode
+(`reports/<name>_<mode>_network.html`): edges styled by highway class, a
+toggleable base-map switcher, a legend, and click-to-copy `edge_id`. Needs
+`geopandas` + `roadstyle` installed. Use `--mode driving` to render a single
+mode, or `--basemap` / `--out-dir` to tweak the output.
 
 ## Troubleshooting
 

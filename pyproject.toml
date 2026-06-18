@@ -35,7 +35,7 @@ dependencies = [
 duckosm = "duckosm.cli:main"
 
 [project.optional-dependencies]
-viz = ["folium", "leafmap", "streamlit"]
+viz = ["folium", "leafmap"]
 tz = ["timezonefinder>=6.0"]
 dev = ["pytest", "black", "ruff"]
 

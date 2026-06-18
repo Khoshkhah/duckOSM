@@ -42,10 +42,10 @@ con.execute("INSTALL h3 FROM community; LOAD h3;")
 
 ```bash
 # Somerset (small)
-python -m duckosm --pbf files/Somerset.osm.pbf --output test.duckdb
+duckosm build --pbf files/Somerset.osm.pbf --output test.duckdb
 
 # GTA (large)
-python -m duckosm --pbf cell_832b9bfffffffff.osm.pbf --output gta.duckdb
+duckosm build --pbf cell_832b9bfffffffff.osm.pbf --output gta.duckdb
 ```
 
 ## Future Work

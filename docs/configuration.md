@@ -4,10 +4,10 @@ duckOSM is driven by a YAML config file (or equivalent CLI flags). A ready-to-ed
 template is at [`config/template.yaml`](../config/template.yaml).
 
 ```bash
-python -m duckosm --config config/my_import.yaml
+duckosm build --config config/my_import.yaml
 ```
 
-CLI flags override the corresponding config values (see `python -m duckosm --help`).
+CLI flags override the corresponding config values (see `duckosm build --help`).
 
 ## Top-level keys
 

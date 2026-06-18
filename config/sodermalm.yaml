@@ -1,8 +1,8 @@
 # Södermalm driving network — DERIVED (clipped) from the Sweden build.
 #
 # Build the parent once, then clip this area from it:
-#   python -m duckosm --config config/sweden.yaml        # -> data/db/sweden.duckdb  (slow, once)
-#   python -m duckosm --config config/sodermalm.yaml     # -> data/db/sodermalm.duckdb  (fast clip)
+#   duckosm build --config config/sweden.yaml        # -> data/db/sweden.duckdb  (slow, once)
+#   duckosm build --config config/sodermalm.yaml     # -> data/db/sodermalm.duckdb  (fast clip)
 #
 # Why duckdb-clip instead of a PBF build: Södermalm edges keep the EXACT edge_id they have in
 # Sweden (same geometry + source/target -> same hash), so this db is a stable view of its parent

@@ -30,23 +30,64 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 
 ```bash
 cd duckOSM
-pip install -e .
+python -m venv .venv          # create a virtual environment (once)
+source .venv/bin/activate     # activate it  (Windows: .venv\Scripts\activate)
+pip install -e .              # install duckosm (editable) + dependencies
 ```
+
+> **Activate the venv in every new shell.** The `duckosm` command and the
+> project's dependencies live inside `.venv`, so they're only on your `PATH`
+> while it's active. Run `source .venv/bin/activate` first in each new terminal
+> session. If you skip activation you'll get `command not found: duckosm` — fall
+> back to `.venv/bin/duckosm ...`, or just activate the venv.
+
+Optional extras: `pip install -e ".[viz]"` (notebook maps: folium/leafmap), `".[tz]"`
+(timezones), `".[dev]"` (tests/linting). The `duckosm viz` roadstyle map additionally
+needs `geopandas` + [`roadstyle`](../roadstyle).
 
 ## Usage
 
 ### CLI
 
+With the venv activated, the `duckosm` command has four subcommands. Run
+`duckosm --help` for the list, or `duckosm <command> --help` for a command's options.
+
+**`build`** — build a network from a PBF, or clip one from a parent db:
+
 ```bash
-# From a YAML config
-python -m duckosm --config config/default.yaml
+# From a YAML config (copy config/template.yaml and edit it first)
+duckosm build --config config/my_area.yaml
 
 # From CLI arguments
-python -m duckosm \
-    --pbf data/maps/input.osm.pbf \
-    --output data/output/network.duckdb \
-    --modes driving walking
+duckosm build --pbf data/maps/input.osm.pbf \
+    --output data/output/network.duckdb --modes driving walking
 ```
+
+With no `--config`, `build` loads `config/default.yaml` if it exists.
+
+**`extract`** — slice a sub-area out of an existing build into a new db, by admin
+name / boundary `osm_id` / GeoJSON file (edge_ids preserved):
+
+```bash
+duckosm extract --source data/db/sweden.duckdb \
+    --db data/db/sodermalm.duckdb --name "Sodermalm"
+```
+
+**`admin`** — add OSM administrative boundaries to a built db (needs `ogr2ogr`/GDAL):
+
+```bash
+duckosm admin --pbf data/maps/sweden-latest.osm.pbf --db data/db/sweden.duckdb
+```
+
+**`viz`** — render a roadstyle HTML map per mode into `reports/` (needs `geopandas` +
+`roadstyle`):
+
+```bash
+duckosm viz data/db/sodermalm.duckdb
+```
+
+Not activated? Use `.venv/bin/duckosm <command> ...`, `python -m duckosm <command> ...`,
+or `python main.py <command> ...`.
 
 ### Python API
 
@@ -59,7 +100,7 @@ config = Config.from_args(
     modes=["driving"],
 )
 DuckOSM(config).run()
-# or: DuckOSM(Config.from_yaml("config/default.yaml")).run()
+# or: DuckOSM(Config.from_yaml("config/sweden.yaml")).run()
 ```
 
 ### Clip an area from a parent build
@@ -68,10 +109,10 @@ Build a large region once, then derive sub-areas cheaply — edge_ids are preser
 sub-area is a stable view of its parent (no re-key downstream):
 
 ```bash
-python -m duckosm --config config/sweden.yaml        # data/db/sweden.duckdb  (slow, once)
-python -m duckosm --config config/sodermalm.yaml     # data/db/sodermalm.duckdb (fast clip)
+duckosm build --config config/sweden.yaml        # data/db/sweden.duckdb  (slow, once)
+duckosm build --config config/sodermalm.yaml     # data/db/sodermalm.duckdb (fast clip)
 # or ad-hoc:
-python -m duckosm --source-db data/db/sweden.duckdb \
+duckosm build --source-db data/db/sweden.duckdb \
     --boundary data/boundaries/sodermalm.geojson \
     --output data/db/sodermalm.duckdb --modes driving
 ```
@@ -132,37 +173,53 @@ cross-project id matching pin the DuckDB version or use the join (option 3).
 
 ## Configuration
 
-Copy [`config/template.yaml`](config/template.yaml) and edit. Full field reference:
-[`docs/configuration.md`](docs/configuration.md).
+Copy [`config/template.yaml`](config/template.yaml) (fully commented) and edit. Full
+field reference: [`docs/configuration.md`](docs/configuration.md). The schema groups
+into `source` / `boundary` / `clip` / `modes` / `options` / `validation` / `report` /
+`viz` blocks:
 
 ```yaml
-name: "my_import"
-pbf_path: "data/maps/input.osm.pbf"
-output_path: "data/output/network.duckdb"   # or a directory -> <name>.duckdb
-boundary_path: null                          # optional GeoJSON clip
+name: my_import                        # output -> <output_path>/<name>.duckdb
+output_path: data/db                   # a directory, or a full *.duckdb path
 
-options:
-  build_graph: true
-  h3_indexing: true
-  h3_resolution: 8
-  simplify: true
-  process_speeds: true
-  extract_restrictions: true
-  calculate_costs: true
-  # Boundary H3 grid (optional; needs boundary_path):
-  boundary_cells: false             # write main.boundary_cells
-  boundary_cell_resolutions: null   # e.g. [6, 7, 8]; null = [h3_resolution]
-  timezone: false                   # add IANA timezone (needs timezonefinder)
-  # Large-build tuning (optional):
-  memory_limit: "16GB"     # cap DuckDB memory (null = ~80% of RAM)
-  threads: null            # cap worker threads
-  simplify_batches: 0      # 0 = auto-size by node count; 1 = single pass
+source:
+  type: pbf                            # 'pbf' (build from OSM) | 'duckdb' (clip a built db)
+  pbf_path: data/maps/input.osm.pbf    # type: pbf — local extract
+  # country: sweden                    #   OR a Geofabrik code to auto-download
+  # source_db: data/db/sweden.duckdb   # type: duckdb — parent build to clip from
+
+boundary:                              # the clip region (set at most one)
+  path: null                           # GeoJSON polygon file
+  # place: "Södermalm, Stockholm"      #   OR a Nominatim place name
+  # bbox: [min_lon, min_lat, max_lon, max_lat]
+
+clip:                                  # clean-up after clipping (needs a boundary)
+  predicate: intersects                # 'within' | 'intersects' | 'centroid'
+  keep_largest_component: true         # drop disconnected boundary stubs -> one clean network
 
 modes:
   - driving
-  - walking
-  - cycling
+  # - walking
+  # - cycling
+
+options:
+  h3_resolution: 8                     # 0-15
+  simplify: true                       # contract degree-2 nodes
+  memory_limit: null                   # e.g. "16GB" for country-scale builds
+  # build_graph / h3_indexing / process_speeds / extract_restrictions /
+  # calculate_costs default to true; see config/template.yaml for the rest
+
+validation:
+  enabled: true                        # fail the build on a broken invariant
+
+report:
+  enabled: true                        # reports/<name>_<ts>.{md,html}
+viz:
+  enabled: false                       # roadstyle map -> reports/<name>_network.html
 ```
+
+The legacy flat keys (`pbf_path`, `boundary_path`, `h3_cell` at the top level) are still
+accepted as `source.type: pbf` shorthand.
 
 ## Administrative boundaries
 
@@ -171,7 +228,7 @@ built database as an `admin_boundaries` table, with a derived `parent_osm_id` fo
 hierarchy traversal:
 
 ```bash
-python scripts/add_admin_boundaries.py --pbf input.osm.pbf --db output.duckdb
+duckosm admin --pbf input.osm.pbf --db output.duckdb
 ```
 
 Requires `ogr2ogr` (GDAL). The OSM `admin_level` meaning is country-specific — see
@@ -192,14 +249,15 @@ Edges intersecting the area are kept whole, with their nodes / edge_graph /
 restrictions carried along.
 
 ```bash
-python scripts/extract_area.py --source data/db/sweden.duckdb \
+duckosm extract --source data/db/sweden.duckdb \
     --db data/db/sodermalm.duckdb --name "Sodermalm"
 # or: --osm-id 5691336   |   --boundary area.geojson
 ```
 
 ## Tools
 
-- **Visualizer**: `streamlit run scripts/visualize.py` — explore the network on a map
+- **Visualizer**: `duckosm viz data/db/sodermalm.duckdb` — render a roadstyle HTML map
+  per mode into `reports/` (needs `geopandas` + `roadstyle`)
 - **Comparison**: `scripts/compare_results.py` — validate output against other tools
 
 ## License

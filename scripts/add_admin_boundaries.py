@@ -25,12 +25,12 @@ The table is replaced on each run. Requires ``ogr2ogr`` (GDAL) on PATH and the
 
 Examples
 --------
-    python scripts/add_admin_boundaries.py \\
+    duckosm admin \\
         --pbf /path/to/sweden-latest.osm.pbf \\
         --db  data/db/sweden.duckdb
 
     # Reuse a previously extracted GeoPackage (skips the slow ogr2ogr step):
-    python scripts/add_admin_boundaries.py --pbf ... --db ... --gpkg /tmp/sweden_admin.gpkg
+    duckosm admin --pbf ... --db ... --gpkg /tmp/sweden_admin.gpkg
 """
 import argparse
 import shutil
