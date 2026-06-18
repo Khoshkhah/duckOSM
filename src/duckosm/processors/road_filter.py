@@ -32,50 +32,35 @@ class RoadFilter(BaseProcessor):
         # right capacity. The original class is always preserved in the `tags` map.
         highway_expr = "map_extract(tags, 'highway')[1]"
         if self.mode == "driving":
-            exclude_highways = [
-                'footway', 'cycleway', 'path', 'pedestrian',
-                'steps', 'corridor', 'bridleway', 'construction',
-                'proposed', 'raceway', 'bus_guideway', 'escape',
-                'platform', 'elevator', 'track'
+            # Class-trusting driving filter. Road classes are kept UNCONDITIONALLY (including
+            # the _link ramps, service and living_street — omitting those silently disconnects
+            # every interchange and shared street). A highway=pedestrian way is rescued ONLY
+            # when it explicitly admits cars (motorcar/motor_vehicle in yes/designated/
+            # permissive) or carries a drivable-restricted access tag (delivery/destination/
+            # agricultural) — a shared street that genuinely carries cars; it is reclassed to
+            # living_street so downstream capacity/speed treat it as the slow drivable street
+            # it is. The original highway tag stays available in `tags`.
+            road_classes = [
+                'motorway', 'motorway_link', 'trunk', 'trunk_link',
+                'primary', 'primary_link', 'secondary', 'secondary_link',
+                'tertiary', 'tertiary_link', 'unclassified', 'residential',
+                'service', 'living_street', 'road',
             ]
-            exclude_list = ", ".join(f"'{h}'" for h in exclude_highways)
-            # Access-aware driving filter. A way is drivable when its highway class is a road
-            # class (not one of the excluded pedestrian/path/track/... classes) OR motor
-            # vehicles are explicitly allowed on it (e.g. highway=pedestrian|living_street with
-            # motor_vehicle=yes — a shared/access street that genuinely carries cars and
-            # connects the network). In BOTH cases, drop the way when motor vehicles are
-            # explicitly forbidden (motor_vehicle/motorcar=no) or access is closed (no/private)
-            # without a motor-vehicle override. This keeps drivable shared streets that the
-            # class-only filter wrongly dropped, and removes genuinely car-free / closed ways
-            # the class-only filter wrongly kept.
-            mv = ("COALESCE(map_extract(tags, 'motor_vehicle')[1], "
-                  "map_extract(tags, 'motorcar')[1], map_extract(tags, 'vehicle')[1])")
-            mv_mc = ("COALESCE(map_extract(tags, 'motor_vehicle')[1], "
-                     "map_extract(tags, 'motorcar')[1])")
-            allow = "('yes', 'designated', 'permissive', 'destination')"
-            # Reclass a rescued way (excluded pedestrian/footway/path class that nonetheless
-            # admits motor vehicles) to living_street, so SUMO capacity/speed, road-class
-            # profiles and styling treat it as the slow-but-drivable street it is rather than
-            # a footpath. The original highway tag stays available in `tags`.
+            road_list = ", ".join(f"'{h}'" for h in road_classes)
+            mv = ("COALESCE(map_extract(tags, 'motorcar')[1], "
+                  "map_extract(tags, 'motor_vehicle')[1])")
+            ped_ok = (
+                "map_extract(tags, 'highway')[1] = 'pedestrian' AND ("
+                f"{mv} IN ('yes', 'designated', 'permissive') "
+                "OR map_extract(tags, 'access')[1] IN ('delivery', 'destination', 'agricultural'))"
+            )
             highway_expr = f"""
-                CASE
-                    WHEN map_extract(tags, 'highway')[1] IN ({exclude_list}) AND {mv} IN {allow}
-                        THEN 'living_street'
-                    ELSE map_extract(tags, 'highway')[1]
-                END
+                CASE WHEN {ped_ok} THEN 'living_street'
+                     ELSE map_extract(tags, 'highway')[1] END
             """
             where_clause = f"""
-                map_extract(tags, 'highway')[1] IS NOT NULL
-                AND (
-                    map_extract(tags, 'highway')[1] NOT IN ({exclude_list})
-                    OR {mv} IN {allow}
-                )
-                AND COALESCE(map_extract(tags, 'motor_vehicle')[1], '') <> 'no'
-                AND COALESCE(map_extract(tags, 'motorcar')[1], '') <> 'no'
-                AND (
-                    COALESCE(map_extract(tags, 'access')[1], '') NOT IN ('no', 'private')
-                    OR {mv_mc} IN {allow}
-                )
+                map_extract(tags, 'highway')[1] IN ({road_list})
+                OR ({ped_ok})
             """
         elif self.mode == "walking":
             where_clause = """

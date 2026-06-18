@@ -1,39 +1,84 @@
-# duckOSM configuration template — copy, edit, and run with:
-#   python -m duckosm --config config/<your>.yaml
+# duckOSM configuration — FULL TEMPLATE
+# Copy, edit, and run with:
+#   python -m duckosm --config config/<your>.yaml      (or: duckosm build --config ...)
 # Every key shows its default; omit any key to accept that default.
-# Full reference: docs/configuration.md
+#
+# Two source modes:
+#   source.type: pbf     -> build a network from OSM (download / clip / filter / graph)
+#   source.type: duckdb  -> CLIP an existing duckOSM db (e.g. sodermalm <- sweden),
+#                           preserving edge_ids (no re-hash, no cross-project re-key).
+#
+# Full reference: docs/configuration.md · docs/pipeline.md · PLAN.md
 
-name: my_import                      # logical name; also the output filename when
-                                     # output_path is a directory
-pbf_path: data/maps/input.osm.pbf    # REQUIRED — source OSM PBF file
-output_path: data/output             # a .duckdb file, OR a directory -> <name>.duckdb
+name: my_import                        # REQUIRED — logical name + output filename (<name>.duckdb)
+output_path: data/db                   # a directory (-> data/db/<name>.duckdb) OR a full *.duckdb path
 
-# Optional spatial filter (use at most one):
-boundary_path: null                  # GeoJSON polygon to clip to
-h3_cell: null                        # OR a single H3 cell id to clip to
+# ---- SOURCE: where the network comes from (set type, fill that block) -------
+source:
+  type: pbf                            # 'pbf' | 'duckdb'
 
-modes:                               # one output schema per mode
+  # -- type: pbf (build from OSM) --
+  pbf_path: data/maps/input.osm.pbf    # local .osm.pbf (whole-country or already clipped)
+  country: null                        # OR Geofabrik code (e.g. 'sweden') -> auto-download to map/<country>.osm.pbf
+  country_url: null                    # OR an explicit Geofabrik URL
+
+  # -- type: duckdb (derive THIS area by clipping a parent build) --
+  source_db: null                      # parent duckOSM db, e.g. data/db/sweden.duckdb
+  source_modes: null                   # schemas to clip; null = same as `modes`
+  preserve_edge_ids: true              # keep the parent's edge_id hashes (recommended)
+
+# ---- BOUNDARY: the clip region (set at most one of path/place/bbox/h3_cell) -
+boundary:
+  path: null                           # GeoJSON polygon file
+  place: null                          # OR Nominatim place name -> fetched to boundaries/<name>.geojson
+  bbox: null                           # OR [min_lon, min_lat, max_lon, max_lat]
+  h3_cell: null                        # OR a single H3 cell id
+  buffer_m: 0                          # optional outward buffer (metres) before clipping
+
+# ---- CLIP behaviour (clean-up applied after selection / extraction) ---------
+clip:
+  predicate: intersects                # 'within' | 'intersects' | 'centroid'  (edge-vs-boundary test)
+  keep_largest_component: true         # drop disconnected boundary stubs -> one clean network
+  min_component_edges: 1               # also drop weak components smaller than this
+  connectivity_rescue: true            # re-admit a 'maybe' connector iff it reconnects a drive component
+  strongly_connected: false            # false = weakly-connected keep; true = require routable round-trip
+
+# ---- MODES -----------------------------------------------------------------
+modes:
   - driving
   # - walking
   # - cycling
 
+# ---- BUILD OPTIONS (source.type: pbf; mostly inert for a duckdb clip) -------
 options:
-  build_graph: true                  # build the edge-adjacency (edge_graph) table
-  h3_indexing: true                  # add from_cell / to_cell / lca_res to edges
-  h3_resolution: 8                   # H3 resolution for edge indexing (0-15)
-  simplify: true                     # contract degree-2 nodes (recommended)
-  process_speeds: true               # compute maxspeed_kmh (drops the raw maxspeed string)
-  extract_restrictions: true         # build turn_restrictions (driving only)
-  calculate_costs: true              # compute travel-time cost_s
+  build_graph: true                    # edge-adjacency (edge_graph) table
+  h3_indexing: true                    # from_cell / to_cell / lca_res on edges
+  h3_resolution: 8                     # 0-15
+  simplify: true                       # contract degree-2 nodes
+  process_speeds: true                 # maxspeed_kmh (drops the raw maxspeed string)
+  extract_restrictions: true           # turn_restrictions (driving only)
+  calculate_costs: true                # cost_s travel time
+  boundary_cells: false                # main.boundary_cells H3 grid (needs a boundary)
+  boundary_cell_resolutions: null      # e.g. [6, 7, 8]; null = [h3_resolution]
+  timezone: false                      # IANA tz on visualization_metadata (needs `timezonefinder`)
+  memory_limit: null                   # e.g. "16GB"; null = DuckDB default
+  threads: null                        # cap worker threads; null = DuckDB default
+  simplify_batches: 0                  # 0 = auto-size by node count; 1 = single pass
 
-  # Boundary H3 grid (optional; requires boundary_path):
-  boundary_cells: false              # write the main.boundary_cells table
-  boundary_cell_resolutions: null    # e.g. [6, 7, 8]; null = [h3_resolution]
+# ---- VALIDATION (run after build; fail loudly on a broken invariant) -------
+validation:
+  enabled: true
+  fail_on_error: true
+  assert_single_component: true        # <=1 dominant component after clip
+  assert_no_stranded_named: true       # no named drivable through-street left disconnected
+  assert_edge_id_stable: true          # regression vs fixture (pbf) / vs parent (duckdb)
 
-  timezone: false                    # add IANA timezone to visualization_metadata
-                                     # (needs the optional `timezonefinder` package)
+# ---- REPORT + VISUALIZATION ------------------------------------------------
+report:
+  enabled: true                        # write reports/<name>_<ts>.{md,html} (stats, filter audit, components, validation)
+viz:
+  enabled: false                       # roadstyle map -> reports/<name>_network.html (+ .png)
+  basemap: carto-voyager               # carto-voyager | carto-positron | carto-dark | osm
 
-  # Large-build tuning (optional):
-  memory_limit: null                 # e.g. "16GB"; null = DuckDB default (~80% of RAM)
-  threads: null                      # cap worker threads; null = DuckDB default
-  simplify_batches: 0                # 0 = auto-size by node count; 1 = single pass
+# ---- INPUT CACHING (downloads/boundary only; the network db always rebuilds)
+cache_dir: pbf                         # reuse a downloaded country PBF / fetched boundary if present

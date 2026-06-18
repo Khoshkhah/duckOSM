@@ -47,3 +47,29 @@ python scripts/validate_geometry.py --db data/output/somerset.duckdb
 # Compare with legacy importer
 python scripts/compare_results.py
 ```
+
+---
+
+## Unit / integration tests (pytest)
+
+```bash
+pip install -e .          # + pytest
+pytest tests/ -q
+```
+
+`tests/test_pipeline_a.py` covers the build pipeline:
+
+- **config schema** — `source.type: duckdb` parsing and the back-compat flat keys
+  (`pbf_path` / `boundary_path`).
+- **ComponentFilter** — keeps the largest weakly-connected component and drops a
+  disconnected fragment (and its orphaned nodes); no-op when already connected.
+- **Validator** — fails on a multi-component graph when `assert_single_component`.
+- **duckdb clip (integration)** — clips the parent `data/db/sodermalm.duckdb`, asserting
+  every clipped `edge_id` exists **verbatim** in the parent (edge_ids preserved) and the
+  result is smaller (fragments dropped). *Skipped if the parent db isn't built.*
+
+## Build-time validation
+
+Every build with `validation.enabled: true` runs the same invariants (single dominant
+component, no stranded named edge) and **fails the build** on a breach when
+`fail_on_error: true`. See [`pipeline.md`](pipeline.md).

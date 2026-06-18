@@ -48,6 +48,52 @@ CLI flags override the corresponding config values (see `python -m duckosm --hel
   extension on memory-constrained machines.
 - **`boundary_cells`** only runs when a `boundary_path` is supplied.
 
+## `source` — where the network comes from
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `source.type` | `pbf` \| `duckdb` | `pbf` | Build from OSM, or clip an existing duckOSM db. |
+| `source.pbf_path` | string | — | (pbf) source PBF. Also accepted as the flat top-level `pbf_path`. |
+| `source.country` / `country_url` | string \| null | `null` | (pbf) reserved — Geofabrik auto-download. |
+| `source.source_db` | string | — | (duckdb) parent db to clip from, e.g. `data/db/sweden.duckdb`. |
+| `source.source_modes` | list \| null | `null` | (duckdb) schemas to clip; `null` = same as `modes`. |
+| `source.preserve_edge_ids` | bool | `true` | (duckdb) keep the parent's `edge_id`s (recommended). |
+
+## `boundary` — the clip region
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `boundary.path` | string \| null | `null` | GeoJSON polygon. Also accepted as the flat `boundary_path`. |
+| `boundary.place` / `bbox` / `h3_cell` | — | `null` | Alternative region specs (`place`/`bbox` reserved). |
+| `boundary.buffer_m` | float | `0` | Outward buffer (metres) before clipping. |
+
+A boundary now **actually clips the graph** (PBF mode pre-clips with `osmium`; duckdb mode
+spatially selects). Set at most one of `path` / `place` / `bbox` / `h3_cell`.
+
+## `clip` — clean-up (runs when a boundary is set)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `clip.predicate` | `within` \| `intersects` \| `centroid` | `intersects` | Edge-vs-boundary test. |
+| `clip.keep_largest_component` | bool | `true` | Drop disconnected boundary stubs; keep the largest component. |
+| `clip.min_component_edges` | int | `1` | Drop weak components smaller than this. |
+| `clip.connectivity_rescue` | bool | `true` | Re-admit a connector iff it reconnects a component (reserved). |
+| `clip.strongly_connected` | bool | `false` | Require routable round-trip (reserved). |
+
+## `validation` / `report` / `viz`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `validation.enabled` | bool | `false` | Run invariant checks per mode after the build. |
+| `validation.fail_on_error` | bool | `true` | Abort the build on a failed check. |
+| `validation.assert_single_component` | bool | `true` | One dominant weakly-connected component. |
+| `validation.assert_no_stranded_named` | bool | `true` | No named edge outside the largest component. |
+| `report.enabled` | bool | `false` | Write `reports/<name>_<ts>.{md,html}`. |
+| `viz.enabled` | bool | `false` | Write a roadstyle network map (needs `geopandas` + `roadstyle`). |
+| `viz.basemap` | string | `voyager` | `voyager` \| `positron` \| `esri_gray` \| `osm`. |
+
+See [`docs/pipeline.md`](pipeline.md) for the full stage order and the two source modes.
+
 ## Minimal example
 
 ```yaml

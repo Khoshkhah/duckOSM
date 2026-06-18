@@ -11,6 +11,8 @@ from duckosm.processors.restrictions import RestrictionProcessor
 from duckosm.processors.h3_indexer import H3Indexer
 from duckosm.processors.edge_graph import EdgeGraphBuilder
 from duckosm.processors.graph_simplifier import GraphSimplifier
+from duckosm.processors.component_filter import ComponentFilter
+from duckosm.processors.duckdb_clipper import DuckdbClipper
 
 __all__ = [
     "BaseProcessor",
@@ -21,5 +23,7 @@ __all__ = [
     "RestrictionProcessor",
     "H3Indexer",
     "EdgeGraphBuilder",
-    "GraphSimplifier"
+    "GraphSimplifier",
+    "ComponentFilter",
+    "DuckdbClipper",
 ]

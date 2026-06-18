@@ -10,6 +10,9 @@ from typing import Optional
 
 import duckdb
 
+import shutil
+import subprocess
+
 from duckosm.config import Config
 from duckosm.processors import (
     RoadFilter,
@@ -20,6 +23,8 @@ from duckosm.processors import (
     H3Indexer,
     EdgeGraphBuilder,
     GraphSimplifier,
+    ComponentFilter,
+    DuckdbClipper,
 )
 
 logger = logging.getLogger("duckosm")
@@ -42,14 +47,20 @@ class DuckOSM:
         """
         self.config = config
         self.config.validate()
-        
-        self.pbf_path = Path(config.pbf_path).resolve()
+
+        if config.source_type == "duckdb":
+            self.pbf_path = None
+            self.source_db = Path(config.source_db).resolve()
+        else:
+            self.pbf_path = Path(config.effective_pbf_path).resolve()
+            self.source_db = None
         self.output_path = config.get_db_path()
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self.con: Optional[duckdb.DuckDBPyConnection] = None
         self.stats = {}
         self.mode_stats = {}
+        self.validation_results = {}
     
     def run(self) -> Path:
         """
@@ -64,52 +75,81 @@ class DuckOSM:
         console = Console()
         total_start = time.time()
         
-        console.print(f"[bold blue]duckOSM Import[/bold blue]")
-        console.print(f"  PBF: {self.pbf_path}")
+        is_clip = self.config.source_type == "duckdb"
+        # Component clean-up only makes sense when clipping to an AREA. A whole-region /
+        # whole-country build (no boundary) legitimately has separate components (islands)
+        # and 2.35M-edge union-find would be slow — so require a boundary.
+        do_components = (self.config.effective_boundary_path is not None) and (
+            self.config.clip.keep_largest_component
+            or self.config.clip.min_component_edges > 1)
+        console.print(f"[bold blue]duckOSM {'Clip' if is_clip else 'Import'}[/bold blue]")
+        console.print(f"  Source: {self.source_db if is_clip else self.pbf_path}")
         console.print(f"  Output: {self.output_path}")
         console.print(f"  Modes: {', '.join(self.config.modes)}")
         console.print()
-        
+
         # 1. Global steps (run once)
-        global_steps = [
-            ("connect", "Connecting to DuckDB", self._connect),
-            ("load_pbf", "Loading PBF file", self._load_pbf),
-        ]
-        
-        # Add optional boundary loading
-        if self.config.boundary_path:
-            global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
-            if self.config.options.boundary_cells:
-                global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
-        
+        if is_clip:
+            global_steps = [
+                ("connect", "Connecting to DuckDB", self._connect),
+                ("attach_parent", "Attaching parent db", self._attach_parent),
+                ("load_boundary", "Loading boundary", self._load_boundary),
+            ]
+        else:
+            global_steps = [("connect", "Connecting to DuckDB", self._connect)]
+            # In-pipeline osmium clip: make `boundary` actually clip the graph (A1).
+            if self.config.effective_boundary_path:
+                global_steps.append(("clip_pbf", "Clipping PBF to boundary", self._clip_pbf))
+            global_steps.append(("load_pbf", "Loading PBF file", self._load_pbf))
+            if self.config.effective_boundary_path:
+                global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
+                if self.config.options.boundary_cells:
+                    global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
+
         # 2. Mode-specific steps (run for each mode)
         def get_mode_steps(mode):
+            if is_clip:
+                steps = [("clip_mode", f"[{mode}] Clipping from parent", lambda: self._clip_mode(mode))]
+                if do_components:
+                    steps.append(("component_filter", f"[{mode}] Component clean-up",
+                                  lambda: self._component_filter(mode)))
+                steps.append(("create_indexes", f"[{mode}] Creating indexes", self._create_indexes))
+                if self.config.validation.enabled:
+                    steps.append(("validate", f"[{mode}] Validating", lambda: self._validate(mode)))
+                return steps
+
             steps = [
                 ("filter_roads", f"[{mode}] Filtering roads", lambda: self._filter_roads(mode)),
                 ("build_edges", f"[{mode}] Building edges", self._build_edges),
             ]
-            
+
             if self.config.options.simplify:
                 steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
-            
+
             if self.config.options.process_speeds:
                 steps.append(("process_speeds", f"[{mode}] Processing speeds", lambda: self._process_speeds(mode)))
-            
+
             if self.config.options.calculate_costs:
                 steps.append(("calculate_costs", f"[{mode}] Calculating costs", lambda: self._calculate_costs(mode)))
-            
+
             if self.config.options.extract_restrictions:
                 # Turn restrictions only for driving for now
                 if mode == "driving":
                     steps.append(("extract_restrictions", f"[{mode}] Extracting turn restrictions", self._extract_restrictions))
-            
+
             if self.config.options.build_graph:
                 steps.append(("build_edge_graph", f"[{mode}] Building edge graph", self._build_edge_graph))
-            
+                # Drop boundary-crossing stubs / fragments right after the graph is built (A3).
+                if do_components:
+                    steps.append(("component_filter", f"[{mode}] Component clean-up",
+                                  lambda: self._component_filter(mode)))
+
             if self.config.options.h3_indexing:
                 steps.append(("add_h3_indexing", f"[{mode}] Adding H3 indexing", self._add_h3_indexing))
-            
+
             steps.append(("create_indexes", f"[{mode}] Creating indexes", self._create_indexes))
+            if self.config.validation.enabled:
+                steps.append(("validate", f"[{mode}] Validating", lambda: self._validate(mode)))
             return steps
 
         total_steps = len(global_steps) + sum(len(get_mode_steps(m)) for m in self.config.modes) + 1 # +1 for cleanup
@@ -170,6 +210,23 @@ class DuckOSM:
                         self._add_timezone()
                 except Exception as e:
                     logger.warning(f"Failed to generate visualization_metadata: {e}")
+
+                # Build report (D) + roadstyle viz (E)
+                if self.config.report.enabled:
+                    try:
+                        from duckosm.report import write_report
+                        write_report(self.con, self.config, self.mode_stats,
+                                     self.validation_results)
+                    except Exception as e:
+                        logger.warning(f"Report generation failed: {e}")
+                if self.config.viz.enabled:
+                    try:
+                        from duckosm.viz import render_network
+                        for mode in self.config.modes:
+                            render_network(self.con, mode, self.config.name,
+                                           self.config.viz.basemap)
+                    except Exception as e:
+                        logger.warning(f"Viz generation failed: {e}")
 
                 # Final checkpoint to ensure disk persistence
                 self._checkpoint()
@@ -274,13 +331,13 @@ class DuckOSM:
     
     def _load_boundary(self) -> None:
         """Load optional boundary GeoJSON file into database."""
-        if not self.config.boundary_path:
+        if not self.config.effective_boundary_path:
             return
-            
+
         logger.info("Loading boundary GeoJSON...")
         start = time.time()
-        
-        boundary_path = Path(self.config.boundary_path).resolve()
+
+        boundary_path = Path(self.config.effective_boundary_path).resolve()
         
         self.con.execute(f"""
             CREATE TABLE IF NOT EXISTS boundary AS
@@ -297,8 +354,75 @@ class DuckOSM:
         resolutions = (self.config.options.boundary_cell_resolutions
                        or [self.config.options.h3_resolution])
         BoundaryCellsBuilder(
-            self.con, Path(self.config.boundary_path).resolve(), resolutions
+            self.con, Path(self.config.effective_boundary_path).resolve(), resolutions
         ).run()
+
+    # ---- source.type: pbf — in-pipeline osmium clip (A1) -----------------------------
+    def _clip_pbf(self) -> None:
+        """Pre-clip the source PBF to the boundary with osmium so `boundary` actually
+        constrains the graph. Idempotent (caches to pbf/<name>.osm.pbf). Falls back to
+        the original PBF if osmium is unavailable or the clip fails."""
+        osmium = shutil.which("osmium")
+        if not osmium:
+            logger.warning("osmium not found — skipping in-pipeline clip; using PBF as-is")
+            return
+        boundary = Path(self.config.effective_boundary_path).resolve()
+        cache_dir = Path("pbf")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        clipped = (cache_dir / f"{self.config.name}.osm.pbf").resolve()
+        if clipped == self.pbf_path:
+            return                                            # already the clipped file
+        if not clipped.exists():
+            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium) ...")
+            r = subprocess.run(
+                [osmium, "extract", "--polygon", str(boundary),
+                 "--output", str(clipped), "--overwrite", str(self.pbf_path)],
+                capture_output=True, text=True)
+            if r.returncode != 0:
+                logger.warning(f"osmium clip failed ({r.stderr.strip()[:200]}); using PBF as-is")
+                return
+        self.pbf_path = clipped
+
+    # ---- source.type: duckdb — clip an area out of a parent build (A2) ----------------
+    def _attach_parent(self) -> None:
+        """Attach the parent duckOSM db (read-only) as `parent`."""
+        logger.info(f"Attaching parent {self.source_db} ...")
+        self.con.execute(f"ATTACH '{self.source_db}' AS parent (READ_ONLY)")
+
+    def _clip_mode(self, mode: str) -> None:
+        """Clip one mode's tables out of the parent (edge_ids preserved)."""
+        start = time.time()
+        DuckdbClipper(self.con, mode=mode, parent_alias="parent",
+                      predicate=self.config.clip.predicate).run()
+        self.stats['edge_count'] = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        self.stats['node_count'] = self.con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        try:
+            self.stats['edge_graph_count'] = self.con.execute(
+                "SELECT COUNT(*) FROM edge_graph").fetchone()[0]
+        except Exception:
+            self.stats['edge_graph_count'] = 0
+        logger.info(f"  [{mode}] clipped in {time.time() - start:.2f}s")
+
+    # ---- ComponentFilter — drop boundary stubs / fragments (A3) -----------------------
+    def _component_filter(self, mode: str) -> None:
+        c = self.config.clip
+        ComponentFilter(self.con, keep_largest=c.keep_largest_component,
+                        min_component_edges=c.min_component_edges,
+                        connectivity_rescue=c.connectivity_rescue,
+                        strongly_connected=c.strongly_connected).run()
+        self.stats['edge_count'] = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        self.stats['node_count'] = self.con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        try:
+            self.stats['edge_graph_count'] = self.con.execute(
+                "SELECT COUNT(*) FROM edge_graph").fetchone()[0]
+        except Exception:
+            pass
+
+    # ---- validation (C) ---------------------------------------------------------------
+    def _validate(self, mode: str) -> None:
+        from duckosm.validate import Validator
+        self.validation_results[mode] = Validator(
+            self.con, mode, self.config.validation).run()
 
     def _filter_roads(self, mode: str) -> None:
         """Filter to highway ways only."""

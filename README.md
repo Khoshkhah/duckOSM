@@ -14,6 +14,12 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   drops drivable-class ways that forbid cars (`motor_vehicle=no` / `access=no`)
 - **Stable ids**: `edge_id` is a deterministic content hash, so rebuilds don't renumber
   the graph and downstream consumers survive without a full re-match
+- **Two source modes**: build from a PBF, **or clip an area out of an existing build**
+  (`sodermalm ← sweden`) preserving edge_ids — see [`docs/pipeline.md`](docs/pipeline.md)
+- **Clean clipped areas**: native in-pipeline `osmium` boundary clip + a
+  connected-component clean-up that drops boundary stubs
+- **Validation, report & viz**: build-time invariant checks, a `reports/<name>.{md,html}`
+  build report, and an optional [roadstyle](../roadstyle) network map
 - **Routing-ready**: degree-2 simplified graph, edge-adjacency table, turn
   restrictions, H3 spatial indexing, travel-time costs
 - **Admin boundaries**: optional table of all OSM administrative levels with a
@@ -55,6 +61,24 @@ config = Config.from_args(
 DuckOSM(config).run()
 # or: DuckOSM(Config.from_yaml("config/default.yaml")).run()
 ```
+
+### Clip an area from a parent build
+
+Build a large region once, then derive sub-areas cheaply — edge_ids are preserved, so a
+sub-area is a stable view of its parent (no re-key downstream):
+
+```bash
+python -m duckosm --config config/sweden.yaml        # data/db/sweden.duckdb  (slow, once)
+python -m duckosm --config config/sodermalm.yaml     # data/db/sodermalm.duckdb (fast clip)
+# or ad-hoc:
+python -m duckosm --source-db data/db/sweden.duckdb \
+    --boundary data/boundaries/sodermalm.geojson \
+    --output data/db/sodermalm.duckdb --modes driving
+```
+
+See [`config/template.yaml`](config/template.yaml) for the full schema (`source` /
+`boundary` / `clip` / `validation` / `report` / `viz`) and
+[`docs/pipeline.md`](docs/pipeline.md) for the stages. Tests: `pytest tests/`.
 
 ## Output
 
