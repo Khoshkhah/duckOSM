@@ -1,0 +1,55 @@
+# duckOSM default config — loaded automatically by `duckosm build` when no --config
+# is given. See config/template.yaml for the fully-commented reference; edit the
+# values below for your area.
+
+name: default                          # output -> data/db/default.duckdb
+output_path: data/db                   # a directory, or a full *.duckdb path
+
+# ---- SOURCE: where the network comes from -------------------------------------
+source:
+  type: pbf                            # 'pbf' (build from OSM) | 'duckdb' (clip a built db)
+  pbf_path: data/maps/input.osm.pbf    # type: pbf — path to your .osm.pbf extract
+  # country: null                      #   OR a Geofabrik code to auto-download
+  # source_db: null                    # type: duckdb — parent build to clip from
+
+# ---- BOUNDARY: optional clip region (else the whole PBF is built) -------------
+boundary:
+  path: null                           # GeoJSON polygon file
+  # place: null                        #   OR a Nominatim place name
+  # bbox: null                         #   OR [min_lon, min_lat, max_lon, max_lat]
+
+# ---- CLIP behaviour (only applies when a boundary is set) ---------------------
+clip:
+  predicate: intersects                # 'within' | 'intersects' | 'centroid'
+  keep_largest_component: true         # drop disconnected boundary stubs -> one clean network
+
+# ---- MODES --------------------------------------------------------------------
+modes:
+  - driving
+  # - walking
+  # - cycling
+
+# ---- BUILD OPTIONS ------------------------------------------------------------
+options:
+  build_graph: true
+  h3_indexing: true
+  h3_resolution: 8                     # 0-15
+  simplify: true
+  process_speeds: true
+  extract_restrictions: true
+  calculate_costs: true
+  memory_limit: null                   # e.g. "16GB" for country-scale builds
+
+# ---- VALIDATION ---------------------------------------------------------------
+validation:
+  enabled: true
+  fail_on_error: true
+
+# ---- REPORT + VISUALIZATION ---------------------------------------------------
+report:
+  enabled: true                        # reports/<name>_<ts>.{md,html}
+viz:
+  enabled: false                       # roadstyle map -> reports/<name>_network.html
+
+# ---- INPUT CACHING (downloads/boundary only; the network db always rebuilds) --
+cache_dir: pbf
