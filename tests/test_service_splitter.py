@@ -43,6 +43,15 @@ def test_service_splitter_idempotent():
     assert {r[0] for r in con.execute("SELECT edge_id FROM edges").fetchall()} == {1, 3}
 
 
+def test_service_splitter_replaces_stale_table():
+    # Simulate a rebuild over a db that already had a service_edges from a previous build:
+    # the result must REPLACE it (one row per service edge), not append (which would double it).
+    con = _graph()
+    con.execute("CREATE TABLE service_edges AS SELECT * FROM edges WHERE highway='service'")  # stale
+    ServiceSplitter(con).run()
+    assert [r[0] for r in con.execute("SELECT edge_id FROM service_edges ORDER BY edge_id").fetchall()] == [2]
+
+
 def test_service_splitter_no_service_creates_empty_table():
     con = duckdb.connect()
     con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT, highway VARCHAR)")

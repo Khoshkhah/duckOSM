@@ -33,11 +33,12 @@ class ServiceSplitter(BaseProcessor):
     """Separate `highway='service'` edges into `<mode>.service_edges` and prune the main graph."""
 
     def run(self) -> None:
-        # Ensure the table exists (empty, same schema) so consumers + viz can always reference it.
-        self.execute("CREATE TABLE IF NOT EXISTS service_edges AS SELECT * FROM edges WHERE FALSE")
-
         n = self.fetchone("SELECT COUNT(*) FROM edges WHERE highway = 'service'")[0]
         if n == 0:
+            # No service rows in `edges`. Ensure the table exists (empty) so consumers + viz can
+            # reference it — but WITHOUT clobbering a clip's service_edges inherited from its
+            # parent (the duckdb clip path: clipper builds it, splitter is a no-op here).
+            self.execute("CREATE TABLE IF NOT EXISTS service_edges AS SELECT * FROM edges WHERE FALSE")
             logger.info("  separate_service: no service edges to move")
             return
 
@@ -48,7 +49,9 @@ class ServiceSplitter(BaseProcessor):
         except Exception:
             pass  # build_graph off — no edge_graph to back up
 
-        self.execute("INSERT INTO service_edges SELECT * FROM edges WHERE highway = 'service'")
+        # CREATE OR REPLACE (not INSERT) so rebuilding over an existing db replaces the table
+        # rather than appending to a stale one (which would duplicate every service edge).
+        self.execute("CREATE OR REPLACE TABLE service_edges AS SELECT * FROM edges WHERE highway = 'service'")
         self.execute("DELETE FROM edges WHERE highway = 'service'")
 
         # Prune the derived tables of references to the just-removed edges (best-effort: some
