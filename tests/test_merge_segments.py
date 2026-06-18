@@ -7,6 +7,7 @@ import pytest
 
 from duckosm import Config
 from duckosm.processors.graph_simplifier import GraphSimplifier
+from duckosm.processors.restrictions import RestrictionProcessor
 
 
 def _graph():
@@ -149,6 +150,9 @@ def test_contract_chains_edge_id_map():
     assert con.execute("SELECT count(*) FROM edge_id_map "
                        "WHERE old_edge_id = ? AND seq = 1 AND NOT is_reverse",
                        [old_seg1]).fetchone()[0] == 1
+    # osm_id column = the segment's way, ordered by seq -> the merged edge's constituent ways
+    assert con.execute("SELECT osm_id FROM edge_id_map WHERE seq = 1 AND NOT is_reverse").fetchone()[0] == 100
+    assert con.execute("SELECT osm_id FROM edge_id_map WHERE seq = 2 AND NOT is_reverse").fetchone()[0] == 200
 
 
 def test_contract_chains_no_candidates_writes_empty_map():
@@ -157,3 +161,30 @@ def test_contract_chains_no_candidates_writes_empty_map():
     con.execute("DELETE FROM simplified_edges_forward WHERE osm_id IN (100, 200)")  # drop the mergeable chain
     GraphSimplifier(con)._contract_chains()
     assert con.execute("SELECT count(*) FROM edge_id_map").fetchone()[0] == 0
+
+
+# ---- turn restrictions on merged edges ---------------------------------------------
+def test_restriction_matches_incident_end_way_of_merged_edge():
+    """A turn restriction must map to the edge whose way INCIDENT to the via-node equals
+    from_way/to_way — even when that way is a non-representative member of a merged edge.
+    Regression: matching by the single representative `edges.osm_id` silently dropped these."""
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA raw")
+    con.execute("CREATE TABLE raw.relations(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), "
+                "refs BIGINT[], ref_roles VARCHAR[], ref_types VARCHAR[])")
+    # no_left_turn: FROM way 502, VIA node 10, TO way 600
+    con.execute("INSERT INTO raw.relations VALUES (999, "
+                "MAP(['type','restriction'], ['restriction','no_left_turn']), "
+                "[502, 10, 600], ['from','via','to'], ['way','node','way'])")
+    # from-edge 1 is a MERGE of ways 500 (1->2) and 502 (2->10): its representative osm_id is the
+    # first member 500, but the way INCIDENT to via-node 10 is 502 (its target-end member).
+    con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT, "
+                "osm_id BIGINT, refs BIGINT[])")
+    con.execute("INSERT INTO edges VALUES (1, 1, 10, 500, [1,2,10]), (2, 10, 30, 600, [10,30])")
+    con.execute("CREATE TABLE way_nodes(way_id BIGINT, node_id BIGINT, seq INTEGER)")
+    con.execute("INSERT INTO way_nodes VALUES "
+                "(500,1,1),(500,2,2), (502,2,1),(502,10,2), (600,10,1),(600,30,2)")
+    RestrictionProcessor(con).run()
+    rows = con.execute("SELECT restriction_type, via_node, from_edge_id, to_edge_id "
+                       "FROM turn_restrictions").fetchall()
+    assert rows == [('no_left_turn', 10, 1, 2)]   # matched via the incident way 502/600, not osm_id 500

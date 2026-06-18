@@ -517,8 +517,10 @@ class GraphSimplifier(BaseProcessor):
         """)
 
         # Matching table (v1 merge-off id -> v2 merged id), one row per original segment.
-        # seq = the segment's position along the road (forward direction). Stable-hash ids on
-        # both sides (same formula as _rekey_edges), forward + reverse (reverse only two-way).
+        # seq = the segment's position along the road (forward direction); osm_id = that
+        # segment's way, so (ORDER BY seq) is the merged edge's constituent ways source->target
+        # (seq 1 = source-end / first, MAX(seq) = target-end / last). Stable-hash ids on both
+        # sides (same formula as _rekey_edges), forward + reverse (reverse only two-way).
         # Edges NOT in this table are unchanged by the merge.
         self.execute("""
             CREATE OR REPLACE TABLE edge_id_map AS
@@ -529,12 +531,12 @@ class GraphSimplifier(BaseProcessor):
             )
             SELECT (hash(mem.osm_id, mem.source, mem.target, FALSE) >> 1)::BIGINT AS old_edge_id,
                    (hash(cm.osm_id, cm.source, cm.target, FALSE) >> 1)::BIGINT AS new_edge_id,
-                   mem.seq::INTEGER AS seq, FALSE AS is_reverse
+                   mem.seq::INTEGER AS seq, FALSE AS is_reverse, mem.osm_id AS osm_id
             FROM mem JOIN _cmeta cm USING (cid)
             UNION ALL
             SELECT (hash(mem.osm_id, mem.target, mem.source, TRUE) >> 1)::BIGINT,
                    (hash(cm.osm_id, cm.target, cm.source, TRUE) >> 1)::BIGINT,
-                   mem.seq::INTEGER, TRUE
+                   mem.seq::INTEGER, TRUE, mem.osm_id
             FROM mem JOIN _cmeta cm USING (cid)
             WHERE NOT cm.oneway
         """)
@@ -567,7 +569,8 @@ class GraphSimplifier(BaseProcessor):
         """Create an empty edge_id_map so the table always exists when merge_segments is on."""
         self.execute("""
             CREATE OR REPLACE TABLE edge_id_map (
-                old_edge_id BIGINT, new_edge_id BIGINT, seq INTEGER, is_reverse BOOLEAN)
+                old_edge_id BIGINT, new_edge_id BIGINT, seq INTEGER, is_reverse BOOLEAN,
+                osm_id BIGINT)
         """)
 
     def _finalize_tables(self) -> None:

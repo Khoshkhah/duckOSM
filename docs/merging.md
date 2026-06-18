@@ -142,10 +142,31 @@ on the pre-merge ids translate to the merged ids:
 | `new_edge_id` | the id of the merged edge it became part of |
 | `seq` | the segment's position along the road (forward direction, 1…k) |
 | `is_reverse` | `false` = forward edge, `true` = the two-way reverse edge |
+| `osm_id` | the segment's own OSM way id |
 
 Both ids use the same stable hash the final graph carries. Edges **absent** from the table
-are unchanged by the merge. After ComponentFilter, rows whose merged edge was dropped (a
-small disconnected component) are pruned, so the table only references live edges.
+are unchanged by the merge (they are single-segment, so their one way is `edges.osm_id`).
+After ComponentFilter, rows whose merged edge was dropped (a small disconnected component)
+are pruned, so the table only references live edges.
+
+Because `osm_id` is per-segment and `seq` orders the segments, `ORDER BY seq` over one
+`new_edge_id` gives a merged edge's constituent ways `source → target` — a cheaper provenance
+read than the `refs`→`way_nodes` query above, for merged edges:
+
+```sql
+SELECT osm_id FROM <mode>.edge_id_map
+WHERE new_edge_id = ? AND NOT is_reverse ORDER BY seq;   -- source-end first, target-end last
+```
+
+### Turn restrictions match the *incident* way, not the representative
+
+A turn restriction names a `from_way`/`to_way` that is **incident to the via-node** — i.e. the
+merged edge's *end* segment, which is usually **not** its representative `osm_id`. So
+`RestrictionProcessor` matches the restriction's ways against each edge's **end way** read from
+`refs` (`from_way` = the way at the edge's `target` end, `to_way` = the way at the `source` end),
+not against `edges.osm_id`. Matching by the representative `osm_id` silently dropped restrictions
+on merged edges — and *every* one on reverse edges, whose source-end way is the forward twin's
+*last* member. This is correct for singleton, merged, and reverse edges alike.
 
 ## Complexity & optimality
 
