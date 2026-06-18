@@ -86,16 +86,29 @@ WHERE eg.from_edge = 1234567890;   -- a real edge_id
 
 ### Shortest path between two edges
 `edge_graph` is the edge-based routing graph (each node is an `edge_id`; illegal turns already
-removed). Load it as a weighted `networkx` graph and route — by travel time or by distance:
+removed). The one-call helper returns the route between two edge_ids:
 
 ```python
-import duckdb, networkx as nx
-from duckosm import to_networkx
+import duckdb
+from duckosm import route
 
 con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
-G = to_networkx(con, weight="time")          # weight="length" for distance; with_service=True to allow service roads
-path = nx.shortest_path(G, FROM_EDGE, TO_EDGE, weight="weight")          # ordered edge_ids
-cost = nx.shortest_path_length(G, FROM_EDGE, TO_EDGE, weight="weight")   # seconds (or metres)
+r = route(con, FROM_EDGE, TO_EDGE)            # defaults: fastest (time), service roads excluded
+#   r["edges"]    -> ordered list of edge_ids
+#   r["time_s"]   -> total travel time (door-to-door)
+#   r["length_m"] -> total length
+#   r["path"]     -> per-edge name/highway/length_m/cost_s/geometry, in order
+#   route(con, a, b, weight="length")   -> shortest by distance
+#   route(con, a, b, with_service=True) -> may use service roads
+```
+
+For many routes, build the graph once and reuse it (avoids rebuilding per call):
+
+```python
+import networkx as nx
+from duckosm import to_networkx, route
+G = to_networkx(con, weight="time")
+r = route(con, FROM_EDGE, TO_EDGE, graph=G)             # or nx.shortest_path(G, a, b, weight="weight")
 ```
 
 Needs `networkx` (`pip install duckosm[routing]`). This loads the whole graph into memory — fine
