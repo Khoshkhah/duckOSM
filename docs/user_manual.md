@@ -193,9 +193,11 @@ router.route(FROM_EDGE, TO_EDGE)
 ```
 
 Options: `weight="length"` routes by distance instead of time; `with_service=True` routes over
-`service` roads (`edge_graph_with_service`). `to_networkx(con, ...)` returns the raw weighted
-`DiGraph` if you want to run networkx algorithms directly. This loads the graph into memory —
-fine for a city; for country scale prefer an on-disk A\* over `edge_graph`.
+`service` roads (`edge_graph_with_service`). `to_networkx(con, ...)` returns the weighted `DiGraph`
+directly for your own networkx algorithms — by default each node (`edge_id`) carries its road
+metadata (`name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`); pass
+`node_attrs=False` for a bare, faster graph. This loads the graph into memory — fine for a city;
+for country scale prefer an on-disk A\* over `edge_graph`.
 
 ## SUMO export
 

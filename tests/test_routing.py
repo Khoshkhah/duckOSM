@@ -16,19 +16,40 @@ def _db():
 
 
 def test_to_networkx_time_weight():
-    G = to_networkx(_db(), weight="time")
+    G = to_networkx(_db(), weight="time", node_attrs=False)         # minimal db has no attr columns
     assert G.number_of_nodes() == 3 and G.number_of_edges() == 2   # nodes = edge_ids
     assert G[1][2]["weight"] == 10 and G[2][3]["weight"] == 20      # travel time of from_edge
 
 
 def test_to_networkx_length_weight():
-    G = to_networkx(_db(), weight="length")
+    G = to_networkx(_db(), weight="length", node_attrs=False)
     assert G[1][2]["weight"] == 100 and G[2][3]["weight"] == 200    # length of from_edge
 
 
 def test_to_networkx_bad_weight():
     with pytest.raises(ValueError):
         to_networkx(_db(), weight="nope")
+
+
+def test_to_networkx_attaches_node_attrs():
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, name VARCHAR, highway VARCHAR, "
+                "length_m DOUBLE, maxspeed_kmh DOUBLE, cost_s DOUBLE, geometry GEOMETRY)")
+    con.execute("INSERT INTO driving.edges VALUES "
+                "(1,'A St','residential',100,30,12,ST_GeomFromText('LINESTRING(0 0,1 0)')),"
+                "(2,'B St','primary',200,50,14,ST_GeomFromText('LINESTRING(1 0,2 0)'))")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
+    con.execute("INSERT INTO driving.edge_graph VALUES (1,2,12)")
+
+    G = to_networkx(con)                                # node_attrs=True by default
+    assert G.nodes[1]["name"] == "A St" and G.nodes[1]["highway"] == "residential"
+    assert G.nodes[1]["length_m"] == 100 and G.nodes[1]["maxspeed_kmh"] == 30
+    assert G.nodes[1]["geometry"].startswith("LINESTRING")
+
+    bare = to_networkx(con, node_attrs=False)           # opt out -> weight only, no node metadata
+    assert "name" not in bare.nodes[1]
 
 
 def _route_db():

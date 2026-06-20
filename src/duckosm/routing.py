@@ -22,7 +22,8 @@ import logging
 logger = logging.getLogger("duckosm")
 
 
-def to_networkx(con, mode: str = "driving", weight: str = "time", with_service: bool = False):
+def to_networkx(con, mode: str = "driving", weight: str = "time", with_service: bool = False,
+                node_attrs: bool = True):
     """Return a `networkx.DiGraph` of the routing graph, with a `weight` attribute per arc.
 
     Parameters
@@ -35,8 +36,12 @@ def to_networkx(con, mode: str = "driving", weight: str = "time", with_service: 
         fastest / shortest route between two edge ids.
     with_service : use ``edge_graph_with_service`` (includes ``service`` roads) instead of the
         default service-free ``edge_graph``.
+    node_attrs : when True (default) attach each edge's metadata to its node — ``name``,
+        ``highway``, ``length_m``, ``maxspeed_kmh``, ``cost_s`` and ``geometry`` (WKT) — so
+        ``G.nodes[edge_id]`` carries the road data, not just the routing ``weight`` on arcs. Pass
+        False for a bare graph (e.g. inside :func:`route`, which doesn't need it).
 
-    Returns a DiGraph whose nodes are ``edge_id``s.
+    Returns a DiGraph whose nodes are ``edge_id``s (with the attributes above when ``node_attrs``).
     """
     try:
         import networkx as nx
@@ -61,9 +66,35 @@ def to_networkx(con, mode: str = "driving", weight: str = "time", with_service: 
 
     g = nx.DiGraph()
     g.add_weighted_edges_from(con.execute(sql).fetchall(), weight="weight")
+    if node_attrs:
+        _attach_edge_attrs(con, g, mode, with_service)
     logger.info(f"routing graph[{mode}]: {g.number_of_nodes():,} edges, "
                 f"{g.number_of_edges():,} arcs, weight={weight}"
-                f"{', with service' if with_service else ''}")
+                f"{', with service' if with_service else ''}"
+                f"{', +node attrs' if node_attrs else ''}")
+    return g
+
+
+def _attach_edge_attrs(con, g, mode, with_service):
+    """Attach each edge's metadata onto its node (edge_id) in an edge-based graph.
+
+    Sets name/highway/length_m/maxspeed_kmh/cost_s and geometry (WKT) on every node already in
+    ``g``; isolated edges absent from the graph are skipped.
+    """
+    try:
+        con.execute("INSTALL spatial; LOAD spatial;")
+    except Exception:
+        pass
+    cols = "edge_id, name, highway, length_m, maxspeed_kmh, cost_s, geometry"
+    esrc = (f"(SELECT {cols} FROM {mode}.edges UNION ALL SELECT {cols} FROM {mode}.service_edges)"
+            if with_service else f"{mode}.edges")
+    rows = con.execute(
+        f"SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry) "
+        f"FROM {esrc}").fetchall()
+    for eid, name, hw, length, spd, cost, geom in rows:
+        if eid in g:
+            g.nodes[eid].update(name=name, highway=hw, length_m=length,
+                                maxspeed_kmh=spd, cost_s=cost, geometry=geom)
     return g
 
 
@@ -85,7 +116,7 @@ def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time",
         raise ImportError("route needs networkx — `pip install duckosm[routing]`") from e
 
     g = graph if graph is not None else to_networkx(con, mode=mode, weight=weight,
-                                                    with_service=with_service)
+                                                    with_service=with_service, node_attrs=False)
     missing = [e for e in (from_edge, to_edge) if e not in g]
     if missing:
         raise ValueError(f"edge id(s) not in the {mode} routing graph: {missing}")
@@ -133,7 +164,8 @@ class Router:
         self.mode = mode
         self.weight = weight
         self.with_service = with_service
-        self.graph = to_networkx(con, mode=mode, weight=weight, with_service=with_service)
+        self.graph = to_networkx(con, mode=mode, weight=weight, with_service=with_service,
+                                 node_attrs=False)
 
     def route(self, from_edge, to_edge):
         """Shortest route between two edge ids, reusing the prebuilt graph."""

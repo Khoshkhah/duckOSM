@@ -118,10 +118,28 @@ DuckOSM(config).run()
 # or: DuckOSM(Config.from_yaml("config/sweden.yaml")).run()
 ```
 
+### networkx export
+
+`to_networkx(con)` returns the network as a `networkx.DiGraph` — the **edge-based** graph: nodes are
+`edge_id`s and arcs are legal turns (with a routing `weight`). Each node also carries its road
+metadata (`name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`), so you can analyse or
+plot the network directly. Needs `pip install duckosm[routing]`.
+
+```python
+import duckdb
+from duckosm import to_networkx
+
+con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+G = to_networkx(con)                          # DiGraph; nodes = edge_id, each with road attributes
+G.nodes[edge_id]["name"], G.nodes[edge_id]["length_m"]
+to_networkx(con, weight="length")             # arc weight in metres (default: travel time, cost_s)
+to_networkx(con, node_attrs=False)            # bare graph (routing weight only) — faster
+```
+
 ### Routing (shortest path between two edges)
 
 `edge_graph` is the edge-based routing graph (nodes = `edge_id`s; illegal turns already removed).
-The helpers wrap it with `networkx` (`pip install duckosm[routing]`):
+The `route()` / `Router` helpers wrap it with `networkx` (`pip install duckosm[routing]`):
 
 ```python
 import duckdb
