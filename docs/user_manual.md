@@ -197,6 +197,31 @@ Options: `weight="length"` routes by distance instead of time; `with_service=Tru
 `DiGraph` if you want to run networkx algorithms directly. This loads the graph into memory —
 fine for a city; for country scale prefer an on-disk A\* over `edge_graph`.
 
+## SUMO export
+
+Export the network to a [SUMO](https://eclipse.dev/sumo/) simulation net whose edge ids **are** the
+duckOSM `edge_id`. `to_sumo` writes SUMO plain-XML (`.nod.xml` + `.edg.xml`, ids = `edge_id`) and runs
+**netconvert** to assemble the `.net.xml`; netconvert keeps the ids it's given, so per-edge data
+(flow / demand / a regime table) maps onto the simulation by identity — no geometry conflation step.
+Needs `pip install duckosm[sumo]` (the `eclipse-sumo` + `sumolib` wheels ship netconvert).
+
+```python
+import duckdb
+from duckosm import to_sumo
+
+con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+out = to_sumo(con, "sumo/")                  # sumo/network.{nod,edg}.xml + network.net.xml
+out["net"], out["n_edges"]                   # .net.xml path; n_edges == driving.edges count
+
+to_sumo(con, "sumo/", run_netconvert=False)  # write only the plain-XML (assemble it yourself)
+```
+
+Or from the CLI: `duckosm sumo data/db/sodermalm.duckdb` (add `--no-netconvert` for plain-XML only,
+`--out-dir`/`--name` to control the output). Edge `shape`, `numLanes` (`lanes`), `speed`
+(`maxspeed_kmh`), `type` (`highway`) and `name` are carried over; coordinates are geographic and
+netconvert projects them (`--proj.plain-geo`). Turn restrictions are not yet emitted — netconvert
+infers connections; the `turn_restrictions` table can be layered in later via a `.con.xml`.
+
 ## Troubleshooting
 
 | Issue | Solution |

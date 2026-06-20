@@ -4,7 +4,7 @@ Welcome to duckOSM - a high-performance OSM-to-routing-network converter.
 
 ## Documentation
 
-- [User Manual](user_manual.md) - Installation, CLI usage, and API examples
+- [User Manual](user_manual.md) - Installation, CLI usage, API, routing & SUMO export
 - [Multi-Mode Support](multi_mode.md) - Driving, Walking, and Cycling modes
 - [Data Dictionary](data_dictionary.md) - Table and schema descriptions
 - [Query Cookbook](query_cookbook.md) - SQL snippets for analysis
