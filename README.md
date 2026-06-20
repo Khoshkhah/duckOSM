@@ -160,26 +160,34 @@ change. See [`docs/query_cookbook.md`](docs/query_cookbook.md#shortest-path-betw
 
 ### SUMO export (simulation network keyed on `edge_id`)
 
-`to_sumo` writes SUMO *plain-XML* (`.nod.xml` + `.edg.xml`, ids = `edge_id`) and runs **netconvert**
-to assemble the `.net.xml`. netconvert keeps the ids you give it, so **every SUMO edge id equals the
-duckOSM `edge_id`** — anything keyed on `edge_id` (a per-edge flow/demand/regime table) maps onto the
-SUMO network by identity, with no geometry conflation step. Needs `pip install duckosm[sumo]`.
+`to_sumo` writes SUMO *plain-XML* — `.nod.xml`, `.edg.xml` (ids = `edge_id`) and `.con.xml` (the legal
+successors from `edge_graph`) — plus a standard netconvert config (`.netccfg`), then runs **netconvert**
+to assemble the `.net.xml`. Because netconvert keeps the ids and the explicit connections:
+
+- **every SUMO edge id equals the duckOSM `edge_id`** — anything keyed on `edge_id` (a per-edge
+  flow/demand/regime table) maps onto the SUMO network by identity, no conflation step; and
+- **turn restrictions are honoured** — junction movements are limited to the `edge_graph` successors,
+  not guessed from geometry.
+
+Needs `pip install duckosm[sumo]`.
 
 ```python
 import duckdb
 from duckosm import to_sumo
 
 con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
-out = to_sumo(con, "sumo/")                  # sumo/network.{nod,edg}.xml + network.net.xml
-out["net"]                                   # path to the .net.xml; out["n_edges"] == driving.edges
+out = to_sumo(con, "sumo/")                  # sumo/network.{nod,edg,con}.xml + .netccfg + .net.xml
+out["net"], out["n_edges"], out["n_connections"]
 
 to_sumo(con, "sumo/", run_netconvert=False)  # write only the plain-XML (assemble it yourself)
+to_sumo(con, "sumo/", config={"junctions.join": "true"})   # override netconvert options
+to_sumo(con, "sumo/", config="my.netccfg")   # or drive netconvert with your own config file
 ```
 
-Edge `shape`, `numLanes` (`lanes`), `speed` (`maxspeed_kmh`), `type` (`highway`) and `name` are carried
-over; coordinates are geographic and netconvert projects them (`--proj.plain-geo`). Turn restrictions
-are not yet emitted — netconvert infers connections (the `turn_restrictions` table can be layered in
-later via a `.con.xml`).
+Edge `shape`, `numLanes`, `speed`, `priority`/`type` and true `length` are carried over; coordinates
+are geographic and netconvert projects them. netconvert options come from a built-in default
+(`DEFAULT_NETCFG`, written as a standard `.netccfg`); pass `config=` (a dict merged onto the default,
+or a `.netccfg` path) to change them. CLI: `duckosm sumo data/db/sodermalm.duckdb [-c my.netccfg]`.
 
 ### Clip an area from a parent build
 

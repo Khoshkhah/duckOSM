@@ -212,12 +212,17 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
               help='Output directory for <name>.{nod,edg,net}.xml')
 @click.option('--name', default=None,
               help='Net basename (default: the db filename stem)')
+@click.option('--connections/--no-connections', default=True, show_default=True,
+              help='Emit turn-restriction connections from edge_graph (else let netconvert infer)')
+@click.option('--config', '-c', type=click.Path(exists=True), default=None,
+              help='netconvert config (.netccfg) to use instead of the built-in default')
 @click.option('--netconvert/--no-netconvert', default=True, show_default=True,
               help='Assemble the .net.xml with netconvert (else write only plain-XML)')
-def sumo(db, mode, out_dir, name, netconvert):
+def sumo(db, mode, out_dir, name, connections, config, netconvert):
     """Export a built network to a SUMO net, keeping duckOSM edge_id as the SUMO edge id.
 
-    Writes <out-dir>/<name>.nod.xml + .edg.xml (and .net.xml unless --no-netconvert).
+    Writes <out-dir>/<name>.{nod,edg,con}.xml + a standard .netccfg (and .net.xml unless
+    --no-netconvert). Connections come from edge_graph so turn restrictions are honoured.
     netconvert ships with SUMO (`pip install duckosm[sumo]` or a system install).
     """
     import duckdb
@@ -228,11 +233,14 @@ def sumo(db, mode, out_dir, name, netconvert):
     con = duckdb.connect(db, read_only=True)
     net_name = name or Path(db).stem
     try:
-        out = to_sumo(con, out_dir, mode=mode, net_name=net_name, run_netconvert=netconvert)
+        out = to_sumo(con, out_dir, mode=mode, net_name=net_name, connections=connections,
+                      config=config, run_netconvert=netconvert)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {out['edg']} ({out['n_edges']} edges) and {out['nod']} "
                f"({out['n_nodes']} nodes)")
+    if out.get("con"):
+        click.echo(f"wrote {out['con']} ({out['n_connections']} connections)")
     if out.get("net"):
         click.echo(f"wrote {out['net']}")
 

@@ -1,4 +1,4 @@
-"""Tests for duckosm.sumo.to_sumo — export a duckOSM network to SUMO, keeping edge_id."""
+"""Tests for duckosm.sumo.to_sumo — export a duckOSM network to SUMO, keeping edge_id + turns."""
 import re
 
 import duckdb
@@ -30,39 +30,69 @@ def _db():
     con.execute(f"""INSERT INTO driving.nodes VALUES
         (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.08 59.32)')})""")
     con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, "
-                "highway VARCHAR, name VARCHAR, lanes INTEGER, maxspeed_kmh FLOAT, geometry GEOMETRY)")
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, maxspeed_kmh FLOAT, length_m FLOAT, "
+                "geometry GEOMETRY)")
     con.execute(f"""INSERT INTO driving.edges VALUES
-        ({E1},1,2,'residential','A & B',1,30,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
-        ({E2},2,3,'tertiary',NULL,2,50,{p('LINESTRING(18.07 59.32,18.08 59.32)')})""")
+        ({E1},1,2,'residential','A & B',1,30,123.4,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+        ({E2},2,3,'tertiary',NULL,2,50,567.8,{p('LINESTRING(18.07 59.32,18.08 59.32)')})""")
+    # legal-successor line graph (turn restrictions already excluded): only E1 -> E2 is allowed
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
+    con.execute(f"INSERT INTO driving.edge_graph VALUES ({E1},{E2},1.0)")
     return con
 
 
-def test_plain_xml_preserves_edge_id(tmp_path):
+def test_plain_xml_preserves_edge_id_and_emits_connections(tmp_path):
     out = to_sumo(_db(), str(tmp_path), run_netconvert=False)
-    assert out["n_nodes"] == 3 and out["n_edges"] == 2
-    assert "net" not in out                                   # netconvert not run
+    assert out["n_nodes"] == 3 and out["n_edges"] == 2 and "net" not in out
     edg = (tmp_path / "network.edg.xml").read_text()
     assert f'id="{E1}"' in edg and f'id="{E2}"' in edg        # edge_id == SUMO edge id
     assert 'from="1"' in edg and 'to="2"' in edg
-    assert 'type="residential"' in edg and 'numLanes="1"' in edg
+    assert 'priority=' in edg and 'numLanes="1"' in edg
     assert 'speed="8.333"' in edg                             # 30 km/h -> m/s
-    assert 'name="A &amp; B"' in edg                         # attribute properly escaped
+    assert 'length="123.40"' in edg                           # true graph length stamped
+    assert 'type="residential"' in edg
+    assert 'name="A &amp; B"' in edg                          # attribute properly escaped
+    # connections come from edge_graph -> turn restrictions honoured
+    assert out["n_connections"] == 1
+    conx = (tmp_path / "network.con.xml").read_text()
+    assert f'<connection from="{E1}" to="{E2}"/>' in conx
     nod = (tmp_path / "network.nod.xml").read_text()
     assert 'id="1"' in nod and 'x="18.06' in nod
 
 
 def test_missing_values_are_omitted(tmp_path):
     out = to_sumo(_db(), str(tmp_path), run_netconvert=False)
-    edg = (tmp_path / "network.edg.xml").read_text()
-    e2 = [ln for ln in edg.splitlines() if f'id="{E2}"' in ln][0]
+    e2 = [ln for ln in (tmp_path / "network.edg.xml").read_text().splitlines()
+          if f'id="{E2}"' in ln][0]
     assert "name=" not in e2                                  # E2 has NULL name -> omitted
+
+
+def test_no_edge_graph_falls_back_to_inference(tmp_path):
+    con = _db()
+    con.execute("DROP TABLE driving.edge_graph")
+    out = to_sumo(con, str(tmp_path), run_netconvert=False)
+    assert "con" not in out                                   # no edge_graph -> no .con.xml emitted
 
 
 @pytest.mark.skipif(not HAVE_NETCONVERT,
                     reason="netconvert not installed (pip install duckosm[sumo])")
-def test_netconvert_preserves_all_edge_ids(tmp_path):
+def test_netconvert_preserves_ids_and_connections(tmp_path):
     out = to_sumo(_db(), str(tmp_path), net_name="t", run_netconvert=True)
     assert out["net"].endswith("t.net.xml")
     net = (tmp_path / "t.net.xml").read_text()
     sumo_ids = set(re.findall(r'<edge id="([^":][^"]*)"', net))   # exclude internal ':' edges
     assert {str(E1), str(E2)} <= sumo_ids                         # both duckOSM ids survived
+    assert "<connection " in net                                  # explicit connections kept
+
+
+@pytest.mark.skipif(not HAVE_NETCONVERT,
+                    reason="netconvert not installed (pip install duckosm[sumo])")
+def test_netccfg_default_and_override(tmp_path):
+    out = to_sumo(_db(), str(tmp_path / "a"), net_name="d")       # default config
+    cfg = open(out["netccfg"]).read()
+    assert "<configuration>" in cfg                               # standard SUMO config format
+    assert '<geometry.remove value="false"/>' in cfg
+    assert '<proj.plain-geo value="true"/>' in cfg
+    out2 = to_sumo(_db(), str(tmp_path / "b"), net_name="d",
+                   config={"geometry.remove": "true"})           # dict override merged onto default
+    assert '<geometry.remove value="true"/>' in open(out2["netccfg"]).read()
