@@ -5,6 +5,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm extract  slice a sub-area out of an existing build into a new db
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
+  duckosm sumo     export a built network to a SUMO net (edge_id preserved)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -201,6 +202,39 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
             "nothing rendered — install geopandas + roadstyle, or check the db has edges")
     for p in rendered:
         click.echo(f"wrote {p}")
+
+
+@main.command()
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True,
+              help='Mode schema to export')
+@click.option('--out-dir', default='sumo', show_default=True,
+              help='Output directory for <name>.{nod,edg,net}.xml')
+@click.option('--name', default=None,
+              help='Net basename (default: the db filename stem)')
+@click.option('--netconvert/--no-netconvert', default=True, show_default=True,
+              help='Assemble the .net.xml with netconvert (else write only plain-XML)')
+def sumo(db, mode, out_dir, name, netconvert):
+    """Export a built network to a SUMO net, keeping duckOSM edge_id as the SUMO edge id.
+
+    Writes <out-dir>/<name>.nod.xml + .edg.xml (and .net.xml unless --no-netconvert).
+    netconvert ships with SUMO (`pip install duckosm[sumo]` or a system install).
+    """
+    import duckdb
+
+    from duckosm.sumo import to_sumo
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    con = duckdb.connect(db, read_only=True)
+    net_name = name or Path(db).stem
+    try:
+        out = to_sumo(con, out_dir, mode=mode, net_name=net_name, run_netconvert=netconvert)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {out['edg']} ({out['n_edges']} edges) and {out['nod']} "
+               f"({out['n_nodes']} nodes)")
+    if out.get("net"):
+        click.echo(f"wrote {out['net']}")
 
 
 if __name__ == '__main__':

@@ -38,6 +38,7 @@ duckosm = "duckosm.cli:main"
 viz = ["folium", "leafmap"]
 tz = ["timezonefinder>=6.0"]
 routing = ["networkx"]
+sumo = ["eclipse-sumo", "sumolib"]
 dev = ["pytest", "black", "ruff", "networkx"]
 
 [project.urls]

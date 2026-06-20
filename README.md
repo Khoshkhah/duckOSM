@@ -23,6 +23,9 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 - **Routing-ready**: degree-2 simplified graph, edge-adjacency line graph, turn
   restrictions, H3 spatial indexing, travel-time costs — plus `route()` / `Router`
   shortest-path helpers (`from duckosm import route`)
+- **Exporters**: load the network as a `networkx` DiGraph (`to_networkx`), or export a
+  **SUMO** simulation net (`to_sumo` / `duckosm sumo`) whose edge ids *are* the duckOSM
+  `edge_id` — so per-edge data maps onto the sim by identity, no conflation step
 - **Service roads separated**: `highway=service` (driveways/alleys) are moved into a
   `service_edges` table so the routing graph is real roads only; the full graph is kept as
   `edge_graph_with_service` for when you need them. Visualization still shows every road.
@@ -90,6 +93,14 @@ duckosm admin --pbf data/maps/sweden-latest.osm.pbf --db data/db/sweden.duckdb
 duckosm viz data/db/sodermalm.duckdb            # add --arrows for zoom-gated one-way direction arrows
 ```
 
+**`sumo`** — export a built network to a SUMO net, keeping `edge_id` as the SUMO edge id (needs
+netconvert; `pip install duckosm[sumo]`):
+
+```bash
+duckosm sumo data/db/sodermalm.duckdb           # -> sumo/sodermalm.{nod,edg,net}.xml
+duckosm sumo data/db/sodermalm.duckdb --out-dir net --name soder --no-netconvert  # plain-XML only
+```
+
 Not activated? Use `.venv/bin/duckosm <command> ...`, `python -m duckosm <command> ...`,
 or `python main.py <command> ...`.
 
@@ -128,6 +139,29 @@ router.route(FROM_EDGE, TO_EDGE)
 
 Defaults are fastest-by-time and service-free; pass `weight="length"` or `with_service=True` to
 change. See [`docs/query_cookbook.md`](docs/query_cookbook.md#shortest-path-between-two-edges).
+
+### SUMO export (simulation network keyed on `edge_id`)
+
+`to_sumo` writes SUMO *plain-XML* (`.nod.xml` + `.edg.xml`, ids = `edge_id`) and runs **netconvert**
+to assemble the `.net.xml`. netconvert keeps the ids you give it, so **every SUMO edge id equals the
+duckOSM `edge_id`** — anything keyed on `edge_id` (a per-edge flow/demand/regime table) maps onto the
+SUMO network by identity, with no geometry conflation step. Needs `pip install duckosm[sumo]`.
+
+```python
+import duckdb
+from duckosm import to_sumo
+
+con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+out = to_sumo(con, "sumo/")                  # sumo/network.{nod,edg}.xml + network.net.xml
+out["net"]                                   # path to the .net.xml; out["n_edges"] == driving.edges
+
+to_sumo(con, "sumo/", run_netconvert=False)  # write only the plain-XML (assemble it yourself)
+```
+
+Edge `shape`, `numLanes` (`lanes`), `speed` (`maxspeed_kmh`), `type` (`highway`) and `name` are carried
+over; coordinates are geographic and netconvert projects them (`--proj.plain-geo`). Turn restrictions
+are not yet emitted — netconvert infers connections (the `turn_restrictions` table can be layered in
+later via a `.con.xml`).
 
 ### Clip an area from a parent build
 
