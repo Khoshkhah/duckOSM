@@ -118,6 +118,11 @@ class RoadFilter(BaseProcessor):
                     map_extract(tags, 'surface')[1] AS surface,
                     map_extract(tags, 'access')[1] AS access,
                     map_extract(tags, 'junction')[1] AS junction,
+                    -- Vertical layering: layer (signed int as string), bridge, tunnel — for
+                    -- draw-order (z_order += 10*layer) and bridge/tunnel styling downstream.
+                    map_extract(tags, 'layer')[1] AS layer,
+                    map_extract(tags, 'bridge')[1] AS bridge,
+                    map_extract(tags, 'tunnel')[1] AS tunnel,
                     -- Parsed integer lane counts (first integer in the tag; NULL when
                     -- untagged, zero or non-numeric).
                     NULLIF(TRY_CAST(regexp_extract(map_extract(tags, 'lanes')[1], '\\d+') AS INTEGER), 0) AS n_total,
@@ -137,6 +142,9 @@ class RoadFilter(BaseProcessor):
                 surface,
                 access,
                 junction,
+                layer,
+                bridge,
+                tunnel,
                 -- Lane count in the forward direction. Prefer lanes:forward; for one-way
                 -- roads all lanes are forward; otherwise split the two-way total (forward
                 -- gets the larger half). Fall back to a class default when nothing is tagged.

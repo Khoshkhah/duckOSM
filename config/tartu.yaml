@@ -1,0 +1,24 @@
+# Tartu (city) — no-merge, service roads kept in the routing graph, all three modes.
+# Built fresh from the Estonia PBF, clipped to the Tartu linn (admin_level 9) urban-core boundary.
+name: tartu
+pbf_path: data/maps/estonia-latest.osm.pbf
+output_path: data/db
+
+boundary:
+  path: data/boundaries/tartu.geojson   # Tartu linn urban core (osm_id 2153396), exported from the PBF
+
+modes:
+  - driving
+  - walking
+  - cycling
+
+options:
+  build_graph: true
+  h3_indexing: true
+  h3_resolution: 15            # match the sibling estonia build
+  simplify: true              # junction-based routing graph
+  merge_segments: false       # NO merging — keep same-road segments as separate edges
+  separate_service: false     # keep highway=service in edges/edge_graph (no service_edges split)
+  process_speeds: true
+  extract_restrictions: true
+  calculate_costs: true
