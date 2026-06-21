@@ -116,6 +116,9 @@ class RoadFilter(BaseProcessor):
                     -- Never NULL: two-way / untagged -> FALSE.
                     {oneway_expr} AS oneway,
                     map_extract(tags, 'surface')[1] AS surface,
+                    -- service subtag (driveway/parking_aisle/alley/...) — drives the
+                    -- narrow-vs-wide service-road rendering, like openstreetmap-carto.
+                    map_extract(tags, 'service')[1] AS service,
                     map_extract(tags, 'access')[1] AS access,
                     map_extract(tags, 'junction')[1] AS junction,
                     -- Vertical layering: layer (signed int as string), bridge, tunnel — for
@@ -140,6 +143,7 @@ class RoadFilter(BaseProcessor):
                 maxspeed,
                 oneway,
                 surface,
+                service,
                 access,
                 junction,
                 layer,
