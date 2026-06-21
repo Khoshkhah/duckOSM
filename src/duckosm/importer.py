@@ -656,8 +656,8 @@ class DuckOSM:
                     ]) as ext_line FROM bounds
                 ),
                 poly AS (
-                    -- ST_MakePolygon turns the closed bbox ring into a polygon.
-                    -- (ST_Polygonize is not available in the DuckDB spatial extension.)
+                    -- ST_MakePolygon turns the closed bbox ring into a polygon
+                    -- (a single known ring, so no ST_Polygonize/ST_BuildArea needed).
                     SELECT ST_MakePolygon(ext_line) as ext FROM bbox
                 ),
                 center AS (

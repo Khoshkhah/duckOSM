@@ -23,18 +23,19 @@ def _graph():
     con.execute("""CREATE TABLE simplified_edges_forward(
         edge_id INTEGER, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR,
         name VARCHAR, maxspeed VARCHAR, oneway BOOLEAN, lanes INTEGER, surface VARCHAR,
-        junction VARCHAR, refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
+        junction VARCHAR, layer VARCHAR, bridge VARCHAR, tunnel VARCHAR,
+        refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
     g = lambda w: f"ST_GeomFromText('{w}')"
     con.execute(f"""INSERT INTO simplified_edges_forward VALUES
       -- same road, different osm_id, all attrs equal -> MERGE (first/source-end -> osm_id 100 wins)
-      (1,1,2,100,'residential','Foo','50',false,2,NULL,NULL,[1,2],{g('LINESTRING(0 0,1 0)')},false,111195),
-      (2,2,3,200,'residential','Foo','50',false,2,NULL,NULL,[2,3],{g('LINESTRING(1 0,3 0)')},false,222390),
+      (1,1,2,100,'residential','Foo','50',false,2,NULL,NULL,NULL,NULL,NULL,[1,2],{g('LINESTRING(0 0,1 0)')},false,111195),
+      (2,2,3,200,'residential','Foo','50',false,2,NULL,NULL,NULL,NULL,NULL,[2,3],{g('LINESTRING(1 0,3 0)')},false,222390),
       -- differs only in maxspeed at node 21 -> NOT merged
-      (3,20,21,300,'tertiary','Bar','50',true,1,NULL,NULL,[20,21],{g('LINESTRING(7 0,8 0)')},true,111195),
-      (4,21,22,301,'tertiary','Bar','30',true,1,NULL,NULL,[21,22],{g('LINESTRING(8 0,9 0)')},true,111195),
+      (3,20,21,300,'tertiary','Bar','50',true,1,NULL,NULL,NULL,NULL,NULL,[20,21],{g('LINESTRING(7 0,8 0)')},true,111195),
+      (4,21,22,301,'tertiary','Bar','30',true,1,NULL,NULL,NULL,NULL,NULL,[21,22],{g('LINESTRING(8 0,9 0)')},true,111195),
       -- virtual self-loop midpoint (-999) -> NOT merged (node id <= 0)
-      (5,30,-999,400,'residential','Loop','50',false,1,NULL,NULL,[30,-999],{g('LINESTRING(1 1,1 2)')},false,50),
-      (6,-999,31,400,'residential','Loop','50',false,1,NULL,NULL,[-999,31],{g('LINESTRING(1 2,1 3)')},false,50)""")
+      (5,30,-999,400,'residential','Loop','50',false,1,NULL,NULL,NULL,NULL,NULL,[30,-999],{g('LINESTRING(1 1,1 2)')},false,50),
+      (6,-999,31,400,'residential','Loop','50',false,1,NULL,NULL,NULL,NULL,NULL,[-999,31],{g('LINESTRING(1 2,1 3)')},false,50)""")
     return con
 
 
@@ -51,11 +52,12 @@ def _oneway_graph():
     con.execute("""CREATE TABLE simplified_edges_forward(
         edge_id INTEGER, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR,
         name VARCHAR, maxspeed VARCHAR, oneway BOOLEAN, lanes INTEGER, surface VARCHAR,
-        junction VARCHAR, refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
+        junction VARCHAR, layer VARCHAR, bridge VARCHAR, tunnel VARCHAR,
+        refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
     g = lambda w: f"ST_GeomFromText('{w}')"
     con.execute(f"""INSERT INTO simplified_edges_forward VALUES
-      (1,52,51,500,'residential','One','50',true,1,NULL,NULL,[52,51],{g('LINESTRING(10 0,11 0)')},false,111195),
-      (2,51,50,501,'residential','One','50',true,1,NULL,NULL,[51,50],{g('LINESTRING(11 0,12 0)')},false,111195)""")
+      (1,52,51,500,'residential','One','50',true,1,NULL,NULL,NULL,NULL,NULL,[52,51],{g('LINESTRING(10 0,11 0)')},false,111195),
+      (2,51,50,501,'residential','One','50',true,1,NULL,NULL,NULL,NULL,NULL,[51,50],{g('LINESTRING(11 0,12 0)')},false,111195)""")
     return con
 
 
@@ -71,11 +73,12 @@ def _two_way_aligned_graph():
     con.execute("""CREATE TABLE simplified_edges_forward(
         edge_id INTEGER, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR,
         name VARCHAR, maxspeed VARCHAR, oneway BOOLEAN, lanes INTEGER, surface VARCHAR,
-        junction VARCHAR, refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
+        junction VARCHAR, layer VARCHAR, bridge VARCHAR, tunnel VARCHAR,
+        refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
     g = lambda w: f"ST_GeomFromText('{w}')"
     con.execute(f"""INSERT INTO simplified_edges_forward VALUES
-      (1,2,1,700,'residential','Foo','50',false,2,NULL,NULL,[2,1],{g('LINESTRING(1 0,0 0)')},false,111195),
-      (2,2,3,701,'residential','Foo','50',false,2,NULL,NULL,[2,3],{g('LINESTRING(1 0,2 0)')},false,111195)""")
+      (1,2,1,700,'residential','Foo','50',false,2,NULL,NULL,NULL,NULL,NULL,[2,1],{g('LINESTRING(1 0,0 0)')},false,111195),
+      (2,2,3,701,'residential','Foo','50',false,2,NULL,NULL,NULL,NULL,NULL,[2,3],{g('LINESTRING(1 0,2 0)')},false,111195)""")
     return con
 
 
@@ -173,12 +176,13 @@ def test_split_self_loop_node_matches_geometry():
     con.execute("""CREATE TABLE simplified_edges_forward(
         edge_id INTEGER, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR,
         name VARCHAR, maxspeed VARCHAR, oneway BOOLEAN, lanes INTEGER, surface VARCHAR,
-        junction VARCHAR, refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
+        junction VARCHAR, layer VARCHAR, bridge VARCHAR, tunnel VARCHAR,
+        refs BIGINT[], geometry GEOMETRY, is_reverse BOOLEAN, length_m FLOAT)""")
     # a self-loop (source==target=1) with unevenly-spaced vertices: the middle vertex (3 1) is
     # NOT the 50%-by-length point, so the old code put the node off the cut.
     g = "ST_GeomFromText('LINESTRING(0 0, 3 0, 3 1, 0 0)')"
     con.execute(f"""INSERT INTO simplified_edges_forward VALUES
-        (1, 1, 1, 700, 'residential', 'Loop', '50', false, 1, NULL, NULL, [1,2,3,1], {g}, false, 7.16)""")
+        (1, 1, 1, 700, 'residential', 'Loop', '50', false, 1, NULL, NULL, NULL, NULL, NULL, [1,2,3,1], {g}, false, 7.16)""")
     GraphSimplifier(con)._split_self_loops()
     assert con.execute("SELECT count(*) FROM virtual_nodes").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM simplified_edges_forward "
