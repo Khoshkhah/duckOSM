@@ -245,6 +245,13 @@ class DuckOSM:
     def _connect(self) -> None:
         """Connect to DuckDB and load extensions."""
         logger.info("Connecting to DuckDB...")
+        # Start every build from a clean database file so a rebuild can never inherit stale
+        # tables from a previous run (e.g. tables a since-removed pipeline step used to write).
+        # Only the OUTPUT file is removed here — a clip's source/parent db is a different file.
+        wal = self.output_path.with_name(self.output_path.name + ".wal")
+        for stale in (self.output_path, wal):
+            if stale.exists():
+                stale.unlink()
         self.con = duckdb.connect(str(self.output_path))
         self.con.execute("INSTALL spatial; LOAD spatial;")
 
