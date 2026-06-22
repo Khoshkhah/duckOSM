@@ -33,10 +33,16 @@ def main():
                     help="comma list of base maps offered as a toggleable layer switcher; "
                          "'' for none. Any of: voyager positron esri_gray osm dark_matter satellite")
     ap.add_argument("--theme", default="light", help="light | dark")
+    ap.add_argument("--palette", default="highsat",
+                    help="road colour palette: highsat (high-saturation, default) | carto "
+                         "(OSM-standard look) | mono (grayscale) | any registered palette name")
     ap.add_argument("--color-by", default=None, help="numeric/categorical column to colour by")
     ap.add_argument("--cmap", default=None, help="matplotlib cmap for --color-by")
     ap.add_argument("--copy-field", default="edge_id",
                     help="column copied to the clipboard on edge click ('' to disable)")
+    ap.add_argument("--service", action=argparse.BooleanOptionalAction, default=True,
+                    help="also draw the separate {mode}.service_edges table if present "
+                         "(service roads are split out of the routable graph; --no-service to skip)")
     ap.add_argument("--title", default=None)
     a = ap.parse_args()
 
@@ -58,23 +64,41 @@ def main():
         print(f"note: --copy-field '{a.copy_field}' not in {a.mode}.edges"
               + (f"; using '{id_col}'" if id_col else "; copy disabled"))
 
+    # grade-separation columns: roadstyle reads `bridge`/`tunnel`/`layer` by default to dash
+    # tunnels, give bridges a solid casing, and z-order so over/underpasses don't look connected.
+    # Carry whichever exist so that support is on by default (no flag needed).
+    grade = [c for c in ("bridge", "tunnel", "layer") if c in cols]
     # cast the id column to VARCHAR so a 64-bit edge_id > 2^53 survives JS Number precision
     # (else the tooltip/copy round its low digits to a non-existent id).
     sel = (["highway"] + ([f'CAST({id_col} AS VARCHAR) AS "{id_col}"'] if id_col else [])
            + (["COALESCE(name,'') AS name"] if "name" in cols else [])
+           + grade
            + ([a.color_by] if (a.color_by and a.color_by in cols
-                               and a.color_by not in (id_col, "highway", "name")) else []))
+                               and a.color_by not in (id_col, "highway", "name", *grade)) else []))
+    # service roads live in a separate {mode}.service_edges table (split out of the routable
+    # graph but kept for cartography); it shares every column we project, so UNION it in unless
+    # --no-service. Drawn together they read as one network, coloured by the same palette.
+    proj = f"{', '.join(sel)}, ST_AsText(geometry) AS wkt"
+    tables, n_svc = [f"{a.mode}.edges"], 0
+    if a.service and con.execute(
+            "SELECT count(*) FROM information_schema.tables "
+            f"WHERE table_schema = '{a.mode}' AND table_name = 'service_edges'").fetchone()[0]:
+        n_svc = con.execute(f"SELECT count(*) FROM d.{a.mode}.service_edges").fetchone()[0]
+        tables.append(f"{a.mode}.service_edges")
     df = con.execute(
-        f"SELECT {', '.join(sel)}, ST_AsText(geometry) AS wkt FROM d.{a.mode}.edges").df()
+        " UNION ALL ".join(f"SELECT {proj} FROM d.{t}" for t in tables)).df()
     if df.empty:
         raise SystemExit(f"no edges in {a.mode}.edges")
-    print(f"{len(df):,} edges in {a.mode}" + (f"  ·  copy field: {id_col}" if id_col else ""))
+    print(f"{len(df):,} edges in {a.mode}"
+          + (f"  ·  +{n_svc:,} service_edges" if n_svc else "")
+          + (f"  ·  copy field: {id_col}" if id_col else ""))
 
     df["geometry"] = df["wkt"].map(shapely_wkt.loads)
     g = gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry="geometry", crs="EPSG:4326")
 
-    tooltip = [c for c in (id_col, "highway", "name", a.color_by) if c and c in g.columns]
-    kw = dict(theme=a.theme, basemap=a.basemap, tooltip=tooltip,
+    tooltip = [c for c in (id_col, "highway", "name", "bridge", "tunnel", a.color_by)
+               if c and c in g.columns]
+    kw = dict(theme=a.theme, basemap=a.basemap, palette=a.palette, tooltip=tooltip,
               name=a.title or db.stem, legend=True,
               copy_field=id_col)                    # click an edge -> copy this column
     layers = [b.strip() for b in a.basemaps.split(",") if b.strip()]
