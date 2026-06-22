@@ -39,8 +39,13 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         logger.warning(f"viz[{mode}]: no edges table to render")
         return None
     info = [c for c in ("lanes", "maxspeed_kmh") if c in edge_cols]      # extra tooltip fields
+    # bridge/tunnel/layer drive roadstyle's grade-separation ordering (tunnels under, bridges over,
+    # else the sign of the OSM layer tag). roadstyle reads these exact column names by default, so
+    # passing them straight through is enough — they're carried onto every edge by the build.
+    grade = [c for c in ("bridge", "tunnel", "layer") if c in edge_cols]
     select = "CAST(edge_id AS VARCHAR) AS edge_id, highway, COALESCE(name, '') AS name"
     select += "".join(f", {c}" for c in info)
+    select += "".join(f", {c}" for c in grade)
     if arrows and "oneway" in edge_cols:
         select += ", oneway"
     select += ", ST_AsText(geometry) AS wkt"
@@ -69,9 +74,8 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         tooltip=["edge_id", "highway", "name", *info], copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
         arrows=arrows, arrow_col=("oneway" if arrows else None),
+        boundary=(_boundary_geojson(con) if boundary else None),
     )
-    if boundary:
-        _add_boundary(con, m)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}_{mode}_network.html"
@@ -80,23 +84,17 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     return path
 
 
-def _add_boundary(con, m):
-    """Overlay the clip/area boundary (`main.boundary`) as a dashed outline, so the map shows
-    the extent the network was clipped to. Skips silently if there's no boundary table."""
-    import folium
+def _boundary_geojson(con):
+    """Build a GeoJSON FeatureCollection of the clip/area boundary (`main.boundary`) for roadstyle to
+    overlay as a dashed outline, so the map shows the extent the network was clipped to. Returns None
+    if there's no boundary table (e.g. a whole-country PBF) — roadstyle then draws no overlay."""
     from shapely import wkt as _wkt
     from shapely.geometry import mapping
 
     try:
         rows = con.execute("SELECT ST_AsText(geom) FROM main.boundary WHERE geom IS NOT NULL").fetchall()
     except Exception:
-        return  # no boundary in this build (e.g. a whole-country PBF)
+        return None  # no boundary in this build (e.g. a whole-country PBF)
     feats = [{"type": "Feature", "properties": {}, "geometry": mapping(_wkt.loads(r[0]))}
              for r in rows if r[0]]
-    if not feats:
-        return
-    folium.GeoJson(
-        {"type": "FeatureCollection", "features": feats}, name="boundary", control=False,
-        style_function=lambda f: {"color": "#6a0dad", "weight": 2.5, "fill": False,
-                                  "opacity": 0.9, "dashArray": "6 4"},
-    ).add_to(m)
+    return {"type": "FeatureCollection", "features": feats} if feats else None
