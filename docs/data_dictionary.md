@@ -71,25 +71,8 @@ Line graph for edge-based routing.
 
 **Rule**: Edge A → Edge B exists if `target(A) == source(B)`
 
-With `options.separate_service` (default **on**), `edge_graph` is the **service-free** routing
-graph (transitions touching a `service` edge are removed). The full graph is preserved as
-`edge_graph_with_service` (see below) for when service roads must be routable.
-
----
-
-### Table: `edge_graph_with_service`
-Present only when `options.separate_service` moved any service edges. Identical shape to
-`edge_graph`, but it is the **full** line graph built *before* service edges were split out — so
-it includes transitions onto/off `service` edges. Use it (with `edges` ∪ `service_edges` to
-resolve geometry) when you need to route over driveways/alleys; otherwise use `edge_graph`.
-
----
-
-### Table: `service_edges`
-Same columns as `edges`. Holds the `highway = 'service'` edges (driveways, parking aisles,
-alleys) moved out of the routing graph by the final `separate_service` step, so `edges`/`edge_graph`
-describe real roads only. Visualization (`duckosm viz`) unions `edges` + `service_edges`, so the
-map still shows every road. Empty (but present) when there were no service edges.
+`edge_graph` is built from **all** edges, so every road — including `highway = 'service'`
+(driveways, parking aisles, alleys) — lives in `edges` and is routable.
 
 ---
 

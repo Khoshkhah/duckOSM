@@ -82,8 +82,8 @@ Each mode has its own schema (e.g., `driving.edges`, `walking.edges`).
 | `to_cell` | UBIGINT | Target node H3 cell |
 
 ### `edge_graph`
-Edge-based routing graph (line graph). **Service-free** by default (`separate_service`); the full
-graph incl. `service` roads is kept as `edge_graph_with_service`.
+Edge-based routing graph (line graph), built from **all** edges — every road, incl.
+`highway=service` (driveways/alleys), is routable.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -91,11 +91,6 @@ graph incl. `service` roads is kept as `edge_graph_with_service`.
 | `to_edge` | INTEGER | Outgoing edge |
 | `via_edge` | INTEGER | Same as to_edge |
 | `cost` | FLOAT | Travel cost of from_edge |
-
-### `service_edges`
-`highway=service` edges (driveways, alleys) moved out of the routing graph by the final
-`separate_service` step — same columns as `edges`. Visualization unions `edges` + `service_edges`,
-so the map still shows every road. (`edge_graph_with_service` is the matching full graph.)
 
 ### `turn_restrictions`
 | Column | Type | Description |
@@ -169,11 +164,10 @@ duckosm viz data/db/sodermalm.duckdb --arrows
 The clip/area **boundary** (`main.boundary`) is overlaid as a dashed outline by default, so the
 map shows the extent the network was clipped to; turn it off with `--no-boundary`.
 
-**Grade separation & service roads.** Both `duckosm viz` and the standalone renderer carry the
+**Grade separation.** Both `duckosm viz` and the standalone renderer carry the
 `bridge` / `tunnel` / `layer` columns into roadstyle, which draws **tunnels underneath, bridges on
-top with a solid casing**, and z-orders edges so over/underpasses don't look connected. Service
-roads (split out of the routable graph into a separate `{mode}.service_edges` table) are overlaid
-by default so the map shows every road.
+top with a solid casing**, and z-orders edges so over/underpasses don't look connected. Every road,
+including `highway=service`, lives in `edges`, so the map shows the whole network.
 
 ### Standalone renderer & palettes
 
@@ -185,10 +179,9 @@ python scripts/roadstyle_map.py --db data/db/sodermalm.duckdb --palette mono
 ```
 
 `--palette` picks the roadstyle palette — `highsat` (default, high-contrast), `carto`
-(OSM-standard look), or `mono` (grayscale). It renders the same bridge/tunnel grade separation and
-overlays `{mode}.service_edges` by default (`--no-service` to skip). `--color-by <column>` colours
-edges by a numeric/categorical column instead of road class; `--out` / `--basemap` / `--theme`
-tweak the output.
+(OSM-standard look), or `mono` (grayscale). It renders the same bridge/tunnel grade separation.
+`--color-by <column>` colours edges by a numeric/categorical column instead of road class;
+`--out` / `--basemap` / `--theme` tweak the output.
 
 ## Routing (shortest path)
 
@@ -201,7 +194,7 @@ from duckosm import route, Router
 
 con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
 
-# one-off: shortest route between two edge_ids (defaults: fastest, service roads excluded)
+# one-off: shortest route between two edge_ids (defaults: fastest by time)
 r = route(con, FROM_EDGE, TO_EDGE)
 r["edges"]        # ordered edge_ids
 r["time_s"]       # total travel time (door-to-door)
@@ -213,8 +206,8 @@ router = Router(con)
 router.route(FROM_EDGE, TO_EDGE)
 ```
 
-Options: `weight="length"` routes by distance instead of time; `with_service=True` routes over
-`service` roads (`edge_graph_with_service`). `to_networkx(con, ...)` returns the weighted `DiGraph`
+Options: `weight="length"` routes by distance instead of time (every road, incl. `highway=service`,
+is in the graph). `to_networkx(con, ...)` returns the weighted `DiGraph`
 directly for your own networkx algorithms — by default each node (`edge_id`) carries its road
 metadata (`name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`); pass
 `node_attrs=False` for a bare, faster graph. This loads the graph into memory — fine for a city;

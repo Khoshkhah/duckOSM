@@ -128,7 +128,7 @@ def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
             run_netconvert: bool = True, netconvert_bin: str = None,
-            connections: bool = True, with_service: bool = False, config=None):
+            connections: bool = True, config=None):
     """Export the duckOSM network to SUMO, preserving ``edge_id`` and the turn restrictions.
 
     Parameters
@@ -144,7 +144,6 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     connections : if True (default) emit ``.con.xml`` from ``<mode>.edge_graph`` so junction
         movements are restricted to the legal successors (turn restrictions honoured); falls back to
         netconvert inference (with a warning) if the edge_graph table is absent.
-    with_service : include ``service`` roads (``service_edges`` + ``edge_graph_with_service``).
     config : netconvert configuration. ``None`` → the built-in :data:`DEFAULT_NETCFG`; a ``dict`` of
         ``{netconvert-option: value}`` is merged onto the default; a ``str`` path to a ``.netccfg``
         is used as-is (inputs/output are still set by this function). The effective config is written
@@ -173,12 +172,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         f.write('</nodes>\n')
 
     # ---- edges: id = edge_id (1:1); real shape; true graph length (meso uses it directly) ----
-    cols = "edge_id, source, target, highway, name, lanes, maxspeed_kmh, length_m, geometry"
-    esrc = (f"(SELECT {cols} FROM {mode}.edges UNION ALL SELECT {cols} FROM {mode}.service_edges)"
-            if with_service else f"{mode}.edges")
     rows = con.execute(
         f"SELECT edge_id, source, target, highway, name, lanes, maxspeed_kmh, length_m, "
-        f"ST_AsText(geometry) FROM {esrc}").fetchall()
+        f"ST_AsText(geometry) FROM {mode}.edges").fetchall()
     n_edges = self_loops = 0
     with open(edg_path, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<edges>\n')
@@ -209,7 +205,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     out = {"nod": nod_path, "edg": edg_path, "n_nodes": len(nodes), "n_edges": n_edges}
 
     # ---- connections: the legal successors from edge_graph (turn restrictions already applied) ----
-    graph_tbl = f"{mode}.edge_graph_with_service" if with_service else f"{mode}.edge_graph"
+    graph_tbl = f"{mode}.edge_graph"
     use_conns = connections and _table_exists(con, graph_tbl)
     if connections and not use_conns:
         logger.warning(f"{graph_tbl} absent — letting netconvert INFER connections "

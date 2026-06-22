@@ -25,7 +25,6 @@ from duckosm.processors import (
     GraphSimplifier,
     ComponentFilter,
     DuckdbClipper,
-    ServiceSplitter,
 )
 
 logger = logging.getLogger("duckosm")
@@ -117,9 +116,6 @@ class DuckOSM:
                 steps.append(("create_indexes", f"[{mode}] Creating indexes", self._create_indexes))
                 if self.config.validation.enabled:
                     steps.append(("validate", f"[{mode}] Validating", lambda: self._validate(mode)))
-                if self.config.options.separate_service:
-                    steps.append(("separate_service", f"[{mode}] Separating service roads",
-                                  lambda: self._split_service(mode)))
                 return steps
 
             steps = [
@@ -154,9 +150,6 @@ class DuckOSM:
             steps.append(("create_indexes", f"[{mode}] Creating indexes", self._create_indexes))
             if self.config.validation.enabled:
                 steps.append(("validate", f"[{mode}] Validating", lambda: self._validate(mode)))
-            if self.config.options.separate_service:
-                steps.append(("separate_service", f"[{mode}] Separating service roads",
-                              lambda: self._split_service(mode)))
             return steps
 
         total_steps = len(global_steps) + sum(len(get_mode_steps(m)) for m in self.config.modes) + 1 # +1 for cleanup
@@ -544,12 +537,6 @@ class DuckOSM:
         
         logger.info(f"  Created {self.stats['edge_graph_count']:,} edge pairs in "
                    f"{self.stats['edge_graph_time']:.2f}s")
-
-    def _split_service(self, mode: str) -> None:
-        """Final step: move highway='service' edges out of the routing graph into
-        <mode>.service_edges (viz still renders both). Runs in the active mode schema."""
-        logger.info(f"[{mode}] Separating service roads...")
-        ServiceSplitter(self.con).run()
 
     def _add_h3_indexing(self) -> None:
         """Add H3 spatial indexing."""

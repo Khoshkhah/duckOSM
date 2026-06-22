@@ -18,7 +18,6 @@ options:
   h3_resolution: 15            # match the sibling estonia build
   simplify: true              # junction-based routing graph
   merge_segments: false       # NO merging — keep same-road segments as separate edges
-  separate_service: false     # keep highway=service in edges/edge_graph (no service_edges split)
   process_speeds: true
   extract_restrictions: true
   calculate_costs: true

@@ -32,7 +32,6 @@ class Options:
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True
-    separate_service: bool = True          # final step: move highway='service' edges out of the routing graph into <mode>.service_edges (viz still shows both)
     memory_limit: Optional[str] = None
     threads: Optional[int] = None
     simplify_batches: int = 0

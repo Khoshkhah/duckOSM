@@ -26,9 +26,6 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 - **Exporters**: load the network as a `networkx` DiGraph (`to_networkx`), or export a
   **SUMO** simulation net (`to_sumo` / `duckosm sumo`) whose edge ids *are* the duckOSM
   `edge_id` — so per-edge data maps onto the sim by identity, no conflation step
-- **Service roads separated**: `highway=service` (driveways/alleys) are moved into a
-  `service_edges` table so the routing graph is real roads only; the full graph is kept as
-  `edge_graph_with_service` for when you need them. Visualization still shows every road.
 - **Admin boundaries**: optional table of all OSM administrative levels with a
   derived parent hierarchy
 - **Portable**: single `.duckdb` file, queryable anywhere
@@ -88,7 +85,7 @@ duckosm admin --pbf data/maps/sweden-latest.osm.pbf --db data/db/sweden.duckdb
 
 **`viz`** — render a roadstyle HTML map per mode into `reports/` (needs `geopandas` +
 `roadstyle`). Roads are styled by class with **bridge/tunnel grade separation** (tunnels under,
-bridges over) and the separate `service_edges` table overlaid — both on by default:
+bridges over) on by default:
 
 ```bash
 duckosm viz data/db/sodermalm.duckdb            # add --arrows for zoom-gated one-way direction arrows
@@ -158,8 +155,8 @@ router = Router(con)                          # many routes: build the graph onc
 router.route(FROM_EDGE, TO_EDGE)
 ```
 
-Defaults are fastest-by-time and service-free; pass `weight="length"` or `with_service=True` to
-change. See [`docs/query_cookbook.md`](docs/query_cookbook.md#shortest-path-between-two-edges).
+Defaults are fastest-by-time; pass `weight="length"` to route by distance. Every road is in the
+graph, incl. `highway=service`. See [`docs/query_cookbook.md`](docs/query_cookbook.md#shortest-path-between-two-edges).
 
 ### SUMO export (simulation network keyed on `edge_id`)
 
@@ -218,9 +215,7 @@ Each transport mode gets its own schema (`driving`, `walking`, `cycling`):
 |-------|-------------|
 | `edges` | Directed road segments: `edge_id` (**stable content hash** of `(osm_id, source, target, is_reverse)` — same id across rebuilds, see docs/data_dictionary.md), geometry, `length_m`, `maxspeed_kmh`, `cost_s`, `lanes` (int, per-direction), `oneway` (bool), `highway`, H3 cells, … |
 | `nodes` | Junction / endpoint nodes |
-| `edge_graph` | Edge adjacency (line graph) for routing — **service-free** by default |
-| `edge_graph_with_service` | Full edge adjacency incl. `service` roads (present when any were split out) |
-| `service_edges` | `highway=service` edges moved out of the routing graph (same columns as `edges`) |
+| `edge_graph` | Edge adjacency (line graph) for routing — built from **all** edges, incl. `highway=service` |
 | `turn_restrictions` | Turn-restriction relations (driving) |
 
 Shared tables: `raw.*` (parsed OSM), `main.visualization_metadata`, and the optional
@@ -349,11 +344,10 @@ duckosm extract --source data/db/sweden.duckdb \
 
 - **Visualizer**: `duckosm viz data/db/sodermalm.duckdb` — render a roadstyle HTML map
   per mode into `reports/` (needs `geopandas` + `roadstyle`). Bridge/tunnel **grade
-  separation** (tunnels under, bridges over) and the separate `service_edges` overlay
-  are on by default.
+  separation** (tunnels under, bridges over) is on by default.
 - **Standalone roadstyle map**: `scripts/roadstyle_map.py --db <db> [--palette highsat|carto|mono]
-  [--no-service] [--color-by <col>]` — the same map with **palette selection** (incl. the
-  grayscale `mono`), a service-road toggle, and data-driven colouring.
+  [--color-by <col>]` — the same map with **palette selection** (incl. the
+  grayscale `mono`) and data-driven colouring.
 - **Comparison**: `scripts/compare_results.py` — validate output against other tools
 
 ## License

@@ -69,7 +69,7 @@ def _route_db():
 
 
 def test_route_returns_ordered_path_with_totals():
-    r = route(_route_db(), 1, 3)                       # defaults: time, no service
+    r = route(_route_db(), 1, 3)                       # defaults: fastest by time
     assert r["edges"] == [1, 2, 3]
     assert r["time_s"] == 35 and r["length_m"] == 350  # door-to-door (every edge counted)
     assert [p["name"] for p in r["path"]] == ["A", "B", "C"]

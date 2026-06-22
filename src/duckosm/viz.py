@@ -50,11 +50,9 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         select += ", oneway"
     select += ", ST_AsText(geometry) AS wkt"
 
-    # Render EVERY road: the routing-graph edges PLUS the separated service roads (same styling),
-    # so the map still shows the full network even though service edges live in their own table.
-    froms = [f"{mode}.edges"] + ([f"{mode}.service_edges"] if _columns("service_edges") else [])
+    # Every road, incl. highway='service', lives in the single edges table.
     try:
-        df = con.execute(" UNION ALL ".join(f"SELECT {select} FROM {t}" for t in froms)).df()
+        df = con.execute(f"SELECT {select} FROM {mode}.edges").df()
     except Exception as e:
         logger.warning(f"viz[{mode}]: cannot read edges ({e})")
         return None
