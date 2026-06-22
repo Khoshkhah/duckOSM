@@ -87,10 +87,13 @@ duckosm admin --pbf data/maps/sweden-latest.osm.pbf --db data/db/sweden.duckdb
 ```
 
 **`viz`** — render a roadstyle HTML map per mode into `reports/` (needs `geopandas` +
-`roadstyle`):
+`roadstyle`). Roads are styled by class with **bridge/tunnel grade separation** (tunnels under,
+bridges over) and the separate `service_edges` table overlaid — both on by default:
 
 ```bash
 duckosm viz data/db/sodermalm.duckdb            # add --arrows for zoom-gated one-way direction arrows
+# standalone renderer with palette choice (highsat | carto | mono — grayscale):
+python scripts/roadstyle_map.py --db data/db/sodermalm.duckdb --palette mono
 ```
 
 **`sumo`** — export a built network to a SUMO net, keeping `edge_id` as the SUMO edge id (needs
@@ -345,7 +348,12 @@ duckosm extract --source data/db/sweden.duckdb \
 ## Tools
 
 - **Visualizer**: `duckosm viz data/db/sodermalm.duckdb` — render a roadstyle HTML map
-  per mode into `reports/` (needs `geopandas` + `roadstyle`)
+  per mode into `reports/` (needs `geopandas` + `roadstyle`). Bridge/tunnel **grade
+  separation** (tunnels under, bridges over) and the separate `service_edges` overlay
+  are on by default.
+- **Standalone roadstyle map**: `scripts/roadstyle_map.py --db <db> [--palette highsat|carto|mono]
+  [--no-service] [--color-by <col>]` — the same map with **palette selection** (incl. the
+  grayscale `mono`), a service-road toggle, and data-driven colouring.
 - **Comparison**: `scripts/compare_results.py` — validate output against other tools
 
 ## License

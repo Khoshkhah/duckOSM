@@ -169,6 +169,27 @@ duckosm viz data/db/sodermalm.duckdb --arrows
 The clip/area **boundary** (`main.boundary`) is overlaid as a dashed outline by default, so the
 map shows the extent the network was clipped to; turn it off with `--no-boundary`.
 
+**Grade separation & service roads.** Both `duckosm viz` and the standalone renderer carry the
+`bridge` / `tunnel` / `layer` columns into roadstyle, which draws **tunnels underneath, bridges on
+top with a solid casing**, and z-orders edges so over/underpasses don't look connected. Service
+roads (split out of the routable graph into a separate `{mode}.service_edges` table) are overlaid
+by default so the map shows every road.
+
+### Standalone renderer & palettes
+
+`scripts/roadstyle_map.py` is a standalone alternative to `duckosm viz` that adds **palette
+selection**:
+
+```bash
+python scripts/roadstyle_map.py --db data/db/sodermalm.duckdb --palette mono
+```
+
+`--palette` picks the roadstyle palette — `highsat` (default, high-contrast), `carto`
+(OSM-standard look), or `mono` (grayscale). It renders the same bridge/tunnel grade separation and
+overlays `{mode}.service_edges` by default (`--no-service` to skip). `--color-by <column>` colours
+edges by a numeric/categorical column instead of road class; `--out` / `--basemap` / `--theme`
+tweak the output.
+
 ## Routing (shortest path)
 
 `edge_graph` is the edge-based routing graph (nodes = `edge_id`s; illegal turns already
