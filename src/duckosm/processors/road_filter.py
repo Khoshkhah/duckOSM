@@ -178,9 +178,11 @@ class RoadFilter(BaseProcessor):
         """SQL boolean expression for the one-way flag, tailored to the mode.
 
         Roundabouts and OSM ``oneway`` in (yes/1/true/-1) are one-way; ``-1`` means
-        one-way against the digitisation direction. For cycling, ``oneway:bicycle``
-        overrides the generic ``oneway`` so contraflow cycling on one-way streets
-        (very common in Europe) yields a reverse edge.
+        one-way against the digitisation direction. ``motorway`` / ``motorway_link``
+        are **implicitly** one-way per the OSM convention even when untagged, unless an
+        explicit ``oneway=no`` says otherwise. For cycling, ``oneway:bicycle`` overrides
+        the generic ``oneway`` so contraflow cycling on one-way streets (very common in
+        Europe) yields a reverse edge.
         """
         if self.mode == "cycling":
             return """
@@ -196,6 +198,10 @@ class RoadFilter(BaseProcessor):
             CASE
                 WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
                 WHEN map_extract(tags, 'oneway')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
+                -- an explicit oneway=no wins over the implicit motorway rule below
+                WHEN map_extract(tags, 'oneway')[1] IN ('no', 'false', '0') THEN FALSE
+                -- motorways / motorway slip roads are implicitly one-way even when untagged
+                WHEN map_extract(tags, 'highway')[1] IN ('motorway', 'motorway_link') THEN TRUE
                 ELSE FALSE
             END
         """
