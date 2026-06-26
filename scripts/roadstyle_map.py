@@ -40,9 +40,6 @@ def main():
     ap.add_argument("--cmap", default=None, help="matplotlib cmap for --color-by")
     ap.add_argument("--copy-field", default="edge_id",
                     help="column copied to the clipboard on edge click ('' to disable)")
-    ap.add_argument("--service", action=argparse.BooleanOptionalAction, default=True,
-                    help="also draw the separate {mode}.service_edges table if present "
-                         "(service roads are split out of the routable graph; --no-service to skip)")
     ap.add_argument("--title", default=None)
     a = ap.parse_args()
 
@@ -75,22 +72,11 @@ def main():
            + grade
            + ([a.color_by] if (a.color_by and a.color_by in cols
                                and a.color_by not in (id_col, "highway", "name", *grade)) else []))
-    # service roads live in a separate {mode}.service_edges table (split out of the routable
-    # graph but kept for cartography); it shares every column we project, so UNION it in unless
-    # --no-service. Drawn together they read as one network, coloured by the same palette.
-    proj = f"{', '.join(sel)}, ST_AsText(geometry) AS wkt"
-    tables, n_svc = [f"{a.mode}.edges"], 0
-    if a.service and con.execute(
-            "SELECT count(*) FROM information_schema.tables "
-            f"WHERE table_schema = '{a.mode}' AND table_name = 'service_edges'").fetchone()[0]:
-        n_svc = con.execute(f"SELECT count(*) FROM d.{a.mode}.service_edges").fetchone()[0]
-        tables.append(f"{a.mode}.service_edges")
     df = con.execute(
-        " UNION ALL ".join(f"SELECT {proj} FROM d.{t}" for t in tables)).df()
+        f"SELECT {', '.join(sel)}, ST_AsText(geometry) AS wkt FROM d.{a.mode}.edges").df()
     if df.empty:
         raise SystemExit(f"no edges in {a.mode}.edges")
     print(f"{len(df):,} edges in {a.mode}"
-          + (f"  ·  +{n_svc:,} service_edges" if n_svc else "")
           + (f"  ·  copy field: {id_col}" if id_col else ""))
 
     df["geometry"] = df["wkt"].map(shapely_wkt.loads)

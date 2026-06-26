@@ -66,26 +66,6 @@ class DuckdbClipper(BaseProcessor):
             """)
         except Exception:
             pass                                              # no restrictions for this mode/build
-        # service roads inside the boundary (parent built with separate_service) — kept out of
-        # the routing graph but carried along so viz can still show every road
-        try:
-            self.execute(f"""
-                CREATE OR REPLACE TABLE service_edges AS
-                SELECT e.* FROM {p}.{m}.service_edges e
-                WHERE EXISTS (SELECT 1 FROM main.boundary b WHERE {pred})
-            """)
-        except Exception:
-            pass                                              # parent has no service_edges
-        # full (with-service) edge graph — endpoints survive among edges OR service_edges
-        try:
-            self.execute("""
-                CREATE OR REPLACE TABLE edge_graph_with_service AS
-                SELECT g.* FROM {p}.{m}.edge_graph_with_service g
-                WHERE g.from_edge IN (SELECT edge_id FROM edges UNION SELECT edge_id FROM service_edges)
-                  AND g.to_edge   IN (SELECT edge_id FROM edges UNION SELECT edge_id FROM service_edges)
-            """.format(p=p, m=m))
-        except Exception:
-            pass                                              # parent has no edge_graph_with_service
 
         n_e = self.fetchone("SELECT COUNT(*) FROM edges")[0]
         n_n = self.fetchone("SELECT COUNT(*) FROM nodes")[0]

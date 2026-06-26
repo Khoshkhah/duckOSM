@@ -32,7 +32,6 @@ CLI flags override the corresponding config values (see `duckosm build --help`).
 | `process_speeds` | bool | `true` | Compute `maxspeed_kmh` (and drop the raw `maxspeed` string). |
 | `extract_restrictions` | bool | `true` | Build the `turn_restrictions` table (driving only). |
 | `calculate_costs` | bool | `true` | Compute travel-time `cost_s` per edge. |
-| `separate_service` | bool | `true` | Final step: move `highway='service'` edges out of the routing graph into `<mode>.service_edges` and prune them from `edges`/`edge_graph`/`turn_restrictions` (the full graph is kept as `edge_graph_with_service`). Viz still shows every road. |
 | `boundary_cells` | bool | `false` | Write `main.boundary_cells` (H3 grid over the boundary). Needs `boundary_path`. |
 | `boundary_cell_resolutions` | list[int] \| null | `null` | Resolutions for `boundary_cells`; `null` = `[h3_resolution]`. |
 | `timezone` | bool | `false` | Add an IANA `timezone` column to `visualization_metadata` (from the centroid). Needs the optional `timezonefinder` package (`pip install timezonefinder` or `pip install -e .[tz]`); skipped with a warning if absent. |

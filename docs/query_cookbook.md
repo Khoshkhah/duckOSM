@@ -99,7 +99,6 @@ r = route(con, FROM_EDGE, TO_EDGE)            # defaults: fastest (time), servic
 #   r["length_m"] -> total length
 #   r["path"]     -> per-edge name/highway/length_m/cost_s/geometry, in order
 #   route(con, a, b, weight="length")   -> shortest by distance
-#   route(con, a, b, with_service=True) -> may use service roads
 ```
 
 `route()` rebuilds the graph each call. For **many** routes use `Router`, which builds the graph

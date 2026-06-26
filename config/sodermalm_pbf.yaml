@@ -6,7 +6,7 @@ source:
 boundary:
   path: data/boundaries/sodermalm.geojson
 clip: {predicate: intersects, keep_largest_component: true}
-modes: [driving]
+modes: [driving, walking, cycling]
 options:
   build_graph: true
   simplify: true

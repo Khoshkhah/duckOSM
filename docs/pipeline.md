@@ -10,13 +10,11 @@ mode (`driving` / `walking` / `cycling`), each holding `nodes`, `edges`, `edge_g
 ```
 [fetch boundary] → [osmium clip] → load PBF → RoadFilter → GraphBuilder →
 GraphSimplifier → speeds → costs → restrictions → EdgeGraphBuilder →
-ComponentFilter → H3 → validate → ServiceSplitter → report → viz
+ComponentFilter → H3 → validate → report → viz
 ```
 
-- **ServiceSplitter** (final per-mode step, `options.separate_service`, default on): moves
-  `highway='service'` edges out of `edges`/`edge_graph`/`turn_restrictions` into
-  `service_edges`, keeping the full graph as `edge_graph_with_service`. Runs on the clip path
-  too; viz unions `edges` + `service_edges` so the map still shows every road.
+- **All roads in one graph**: `highway='service'` (driveways/alleys) stays in `edges` and is
+  built into `edge_graph` like any other road — there is no separate `service_edges` table.
 - **osmium clip** (new): when a boundary is set, the PBF is pre-clipped in-pipeline with
   `osmium extract --polygon` (cached under `pbf/<name>.osm.pbf`). This makes `boundary`
   actually constrain the graph — previously `boundary_path` only loaded a metadata table.
