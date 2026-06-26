@@ -19,11 +19,17 @@ the recommended fix, and a status.
 | **Area** | Södermalm (`pbf/sodermalm_pbf.osm.pbf`) |
 | **OSM way** | `4392632` (`highway=residential`, `name=Hökens Gata`) |
 | **Edges** | `6739996069361458541` (forward) + `491685589105352415` (reverse twin) |
-| **Status** | OPEN — pending on-the-ground verification of the real directionality |
+| **Status** | **CONFIRMED OSM error** — the adjacent Hökens Gata segment is tagged `oneway=yes`; way `4392632` is just missing the tag |
 
 **Symptom.** Hökens Gata comes out as a **two-way** street: one OSM way → a forward edge plus a
 reverse twin (same `osm_id`, identical length, mirror-image geometry, `oneway=False`). A user expected
 it to be one-way.
+
+**Confirmed (it IS one-way).** The *adjacent* Hökens Gata segment — edge `8115774911033883256`, OSM way
+`676781760`, which connects end-to-end with `4392632` — **is** explicitly tagged `oneway=yes`
+(`highway=residential, name=Hökens Gata, oneway=yes, oneway:bicycle=no, maxspeed=30, …`). So the street
+is genuinely one-way; way `4392632` is simply **missing the tag**, which is why only that stretch came
+out two-way. This is a real OSM tagging error, not a duckOSM bug.
 
 **Root cause (verified).** The raw OSM way `4392632` carries **no `oneway` tag** (and no
 `junction=roundabout`). Its full tag set is:
@@ -51,3 +57,22 @@ implicit-one-way rule for `motorway` / `motorway_link` was added to `_oneway_exp
 motorways are implicitly one-way per OSM convention, with an explicit `oneway=no` still winning). That
 is a logic improvement and is a **no-op on Södermalm** (0 motorways) — it does not change the Hökens
 Gata result, which stays two-way because residential roads are correctly two-way-by-default.
+
+---
+
+## 2. Katarina Bangata — missing `oneway` tag (rendered two-way)
+
+| field | value |
+| --- | --- |
+| **Area** | Södermalm (`pbf/sodermalm_pbf.osm.pbf`) |
+| **OSM way** | `233761079` (`highway=residential`, `name=Katarina Bangata`) |
+| **Edges** | `224569842445438623` (forward) + `8329252562982974380` (reverse twin) |
+| **Status** | OPEN — pending on-the-ground verification of the real directionality |
+
+Same class as #1. The raw way `233761079` carries **no `oneway` tag** and no `junction=roundabout`
+(full tags: `highway=residential`, `lit=yes`, `maxspeed=30`, `name=Katarina Bangata`,
+`parking:both=no`, `parking:both:restriction=no_parking`, `surface=asphalt`, `wikidata=Q1692894`,
+`wikipedia=sv:Katarina Bangata`). duckOSM therefore correctly defaults it to **two-way** (forward +
+reverse twin) — the output is faithful to the input. If it is one-way on the ground, add
+`oneway=yes` / `-1` to way `233761079` in OpenStreetMap and rebuild (or apply a local override).
+Verified by reading the tags from the pbf with `ST_READOSM`.
