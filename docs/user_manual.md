@@ -213,6 +213,43 @@ metadata (`name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`); 
 `node_attrs=False` for a bare, faster graph. This loads the graph into memory — fine for a city;
 for country scale prefer an on-disk A\* over `edge_graph`.
 
+For the **geographic** (node-based) view, `to_networkx_nodes(con, mode=...)` returns a
+`networkx.MultiDiGraph` in the osmnx layout: nodes are OSM junction `node_id`s (each with `x`/`y`
+lon-lat plus any extra node columns such as `h3_cell`), and every edge is a road segment from
+`<mode>.edges` keyed by `edge_id`, carrying its **full attribute set** (`osm_id`, `highway`, `name`,
+`oneway`, `lanes`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`, …). Parallel ways between the
+same two junctions are preserved, so osmnx / momepy tooling consumes it directly. Geometry is a WKT
+string by default; pass `geometry="shapely"` for shapely objects or `geometry="none"` to drop it.
+
+```python
+from duckosm import to_networkx_nodes
+
+G = to_networkx_nodes(con, mode="driving")    # MultiDiGraph; nodes = junctions, edges = roads
+G.nodes[node_id]["x"], G.nodes[node_id]["y"]  # lon, lat
+G[u][v][edge_id]["highway"]                   # full edge attrs, keyed by edge_id
+```
+
+### networkx file export (`export-graph`)
+
+To persist either graph to disk, use `write_graph(con, path, ...)` or the `duckosm export-graph`
+CLI. The format is inferred from the output extension: **GraphML** (`.graphml`) is portable but
+scalar-only — list attributes like `refs` and the geometry are stringified and null values dropped;
+**gpickle** (`.gpickle`) round-trips the graph losslessly (including shapely geometry) but is
+Python-only. Defaults to the node-based graph; pass `graph="edge"` / `-g edge` for the edge-based
+routing graph. Needs `networkx`.
+
+```bash
+duckosm export-graph data/db/sodermalm.duckdb              # -> sodermalm_driving.graphml (node graph)
+duckosm export-graph data/db/sodermalm.duckdb -o sm.gpickle   # gpickle (lossless)
+duckosm export-graph data/db/sodermalm.duckdb -g edge -o routing.graphml  # edge-based routing graph
+```
+
+```python
+from duckosm import write_graph
+write_graph(con, "sodermalm.graphml")                     # node graph, GraphML (format from extension)
+write_graph(con, "routing.gpickle", graph="edge")         # edge-based routing graph, gpickle
+```
+
 ## SUMO export
 
 Export the network to a [SUMO](https://eclipse.dev/sumo/) simulation net whose edge ids **are** the
