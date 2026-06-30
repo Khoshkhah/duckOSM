@@ -6,6 +6,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
   duckosm sumo     export a built network to a SUMO net (edge_id preserved)
+  duckosm export-graph  export a built network as a networkx graph file (GraphML / gpickle)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -243,6 +244,50 @@ def sumo(db, mode, out_dir, name, connections, config, netconvert):
         click.echo(f"wrote {out['con']} ({out['n_connections']} connections)")
     if out.get("net"):
         click.echo(f"wrote {out['net']}")
+
+
+@main.command(name="export-graph")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True,
+              help='Mode schema to export')
+@click.option('--out', '-o', default=None,
+              help='Output file (default: <name>_<mode>.<ext>). Extension picks the format.')
+@click.option('--graph', '-g', 'graph_kind', type=click.Choice(['node', 'edge']), default='node',
+              show_default=True,
+              help="'node': geographic MultiDiGraph (junctions + full edge info); "
+                   "'edge': edge-based routing DiGraph")
+@click.option('--format', '-f', 'fmt', type=click.Choice(['graphml', 'gpickle']), default=None,
+              help='Output format (default: inferred from --out extension, else graphml)')
+@click.option('--weight', type=click.Choice(['time', 'length']), default='time', show_default=True,
+              help="Arc weight for --graph edge (ignored for node graphs)")
+@click.option('--geometry', type=click.Choice(['wkt', 'shapely', 'none']), default='wkt',
+              show_default=True,
+              help="Edge geometry for --graph node (shapely falls back to WKT for graphml)")
+def export_graph(db, mode, out, graph_kind, fmt, weight, geometry):
+    """Export a built network as a networkx graph file (GraphML or gpickle).
+
+    By default writes the geographic node-based MultiDiGraph (OSM junctions as nodes, road
+    segments keyed by edge_id carrying their full attribute set). Use --graph edge for the
+    edge-based routing DiGraph. GraphML is portable (scalar-only — lists/geometry stringified);
+    gpickle round-trips losslessly but is Python-only. Needs networkx (`pip install networkx`).
+    """
+    import duckdb
+
+    from duckosm.routing import write_graph
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    con = duckdb.connect(db, read_only=True)
+
+    if out is None:
+        ext = ".graphml" if (fmt or "graphml") == "graphml" else ".gpickle"
+        out = f"{Path(db).stem}_{mode}{ext}"
+    try:
+        res = write_graph(con, out, mode=mode, graph=graph_kind, fmt=fmt, weight=weight,
+                          geometry=geometry)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {res['path']} ({res['fmt']}: {res['n_nodes']} nodes, "
+               f"{res['n_edges']} edges)")
 
 
 if __name__ == '__main__':

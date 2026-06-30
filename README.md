@@ -23,7 +23,10 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 - **Routing-ready**: degree-2 simplified graph, edge-adjacency line graph, turn
   restrictions, H3 spatial indexing, travel-time costs — plus `route()` / `Router`
   shortest-path helpers (`from duckosm import route`)
-- **Exporters**: load the network as a `networkx` DiGraph (`to_networkx`), or export a
+- **Exporters**: load the network as a `networkx` graph — the edge-based routing `DiGraph`
+  (`to_networkx`) or the geographic node-based `MultiDiGraph` with full edge info
+  (`to_networkx_nodes`, osmnx layout) — or write either to a GraphML / gpickle file
+  (`write_graph` / `duckosm export-graph`); or export a
   **SUMO** simulation net (`to_sumo` / `duckosm sumo`) whose edge ids *are* the duckOSM
   `edge_id` — so per-edge data maps onto the sim by identity, no conflation step
 - **Admin boundaries**: optional table of all OSM administrative levels with a
@@ -101,6 +104,16 @@ duckosm sumo data/db/sodermalm.duckdb           # -> sumo/sodermalm.{nod,edg,net
 duckosm sumo data/db/sodermalm.duckdb --out-dir net --name soder --no-netconvert  # plain-XML only
 ```
 
+**`export-graph`** — write a built network to a `networkx` graph file (GraphML or gpickle; needs
+`networkx`). Defaults to the geographic node-based `MultiDiGraph` with full edge info; `-g edge`
+gives the edge-based routing `DiGraph`:
+
+```bash
+duckosm export-graph data/db/sodermalm.duckdb              # -> sodermalm_driving.graphml (node graph)
+duckosm export-graph data/db/sodermalm.duckdb -o sm.gpickle   # gpickle (lossless, Python-only)
+duckosm export-graph data/db/sodermalm.duckdb -g edge -o routing.graphml  # edge-based routing graph
+```
+
 Not activated? Use `.venv/bin/duckosm <command> ...`, `python -m duckosm <command> ...`,
 or `python main.py <command> ...`.
 
@@ -134,6 +147,42 @@ G = to_networkx(con)                          # DiGraph; nodes = edge_id, each w
 G.nodes[edge_id]["name"], G.nodes[edge_id]["length_m"]
 to_networkx(con, weight="length")             # arc weight in metres (default: travel time, cost_s)
 to_networkx(con, node_attrs=False)            # bare graph (routing weight only) — faster
+```
+
+For the **geographic** (node-based) view, `to_networkx_nodes(con)` returns a
+`networkx.MultiDiGraph` in the osmnx layout: nodes are OSM junction `node_id`s (each with `x`/`y`
+lon-lat), and every edge is a road segment from `<mode>.edges` keyed by `edge_id`, carrying its
+**full attribute set** (`osm_id`, `highway`, `name`, `oneway`, `lanes`, `length_m`,
+`maxspeed_kmh`, `cost_s`, `geometry`, …). Parallel ways between the same two junctions are kept, so
+osmnx / momepy tooling consumes it directly.
+
+```python
+from duckosm import to_networkx_nodes
+
+G = to_networkx_nodes(con, mode="driving")    # MultiDiGraph; nodes = junctions, edges = roads
+G.nodes[node_id]["x"], G.nodes[node_id]["y"]  # lon, lat
+G[u][v][edge_id]["highway"]                   # full edge attrs, keyed by edge_id
+to_networkx_nodes(con, geometry="shapely")    # shapely LineStrings (needs shapely; else WKT strings)
+to_networkx_nodes(con, geometry="none")       # drop geometry — lighter graph
+```
+
+To write either graph to a file, use `write_graph` / the `duckosm export-graph` CLI. GraphML is
+portable (scalar-only — lists like `refs` and geometry are stringified, nulls dropped); gpickle
+round-trips losslessly (incl. shapely objects) but is Python-only. The format is inferred from the
+output extension (`.graphml` / `.gpickle`).
+
+```bash
+# node-based MultiDiGraph (default), GraphML -> <db-stem>_<mode>.graphml
+duckosm export-graph data/db/sodermalm.duckdb
+
+duckosm export-graph data/db/sodermalm.duckdb -o sodermalm.gpickle      # gpickle (lossless)
+duckosm export-graph data/db/sodermalm.duckdb -g edge -o routing.graphml  # edge-based routing graph
+```
+
+```python
+from duckosm import write_graph
+write_graph(con, "sodermalm.graphml")                  # node graph, GraphML (format from extension)
+write_graph(con, "routing.gpickle", graph="edge")      # edge-based routing graph, gpickle
 ```
 
 ### Routing (shortest path between two edges)

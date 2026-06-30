@@ -2,7 +2,7 @@
 import duckdb
 import pytest
 
-from duckosm.routing import to_networkx, route, Router
+from duckosm.routing import to_networkx, to_networkx_nodes, write_graph, route, Router
 
 
 def _db():
@@ -50,6 +50,116 @@ def test_to_networkx_attaches_node_attrs():
 
     bare = to_networkx(con, node_attrs=False)           # opt out -> weight only, no node metadata
     assert "name" not in bare.nodes[1]
+
+
+def _node_db():
+    """Minimal geographic db: 3 junctions, 2 directed road segments with full edge attrs."""
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY, h3_cell BIGINT)")
+    con.execute("INSERT INTO driving.nodes VALUES "
+                "(10, ST_GeomFromText('POINT(0 0)'), 100),"
+                "(11, ST_GeomFromText('POINT(1 0)'), 101),"
+                "(12, ST_GeomFromText('POINT(2 0)'), 102)")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, "
+                "osm_id BIGINT, highway VARCHAR, name VARCHAR, oneway BOOLEAN, length_m DOUBLE, "
+                "maxspeed_kmh DOUBLE, cost_s DOUBLE, is_reverse BOOLEAN, geometry GEOMETRY)")
+    con.execute("INSERT INTO driving.edges VALUES "
+                "(1,10,11,500,'residential','A St',FALSE,100,30,12,FALSE,"
+                "ST_GeomFromText('LINESTRING(0 0,1 0)')),"
+                "(2,11,12,500,'residential','A St',FALSE,200,30,24,FALSE,"
+                "ST_GeomFromText('LINESTRING(1 0,2 0)'))")
+    return con
+
+
+def test_to_networkx_nodes_is_geographic_multidigraph():
+    G = to_networkx_nodes(_node_db())
+    import networkx as nx
+    assert isinstance(G, nx.MultiDiGraph)
+    assert G.number_of_nodes() == 3 and G.number_of_edges() == 2   # nodes = junctions
+    assert G.graph["crs"] == "EPSG:4326" and G.graph["mode"] == "driving"
+    # node carries lon/lat (x/y) + extra node columns
+    assert G.nodes[11]["x"] == 1 and G.nodes[11]["y"] == 0 and G.nodes[11]["h3_cell"] == 101
+    # edge is keyed by edge_id and carries the full attribute set
+    assert G[10][11][1]["highway"] == "residential" and G[10][11][1]["name"] == "A St"
+    assert G[10][11][1]["length_m"] == 100 and G[10][11][1]["edge_id"] == 1
+    assert G[10][11][1]["geometry"].startswith("LINESTRING")     # WKT by default
+    assert "source" not in G[10][11][1]                          # endpoints become u/v, not attrs
+
+
+def test_to_networkx_nodes_geometry_none_omits_geometry():
+    G = to_networkx_nodes(_node_db(), geometry="none")
+    assert "geometry" not in G[10][11][1]
+
+
+def test_to_networkx_nodes_bad_geometry_raises():
+    with pytest.raises(ValueError):
+        to_networkx_nodes(_node_db(), geometry="nope")
+
+
+def test_write_graph_graphml_roundtrips(tmp_path):
+    import networkx as nx
+    out = tmp_path / "g.graphml"
+    res = write_graph(_node_db(), out)                  # format inferred from .graphml
+    assert res["fmt"] == "graphml" and res["graph"] == "node" and res["n_nodes"] == 3
+    # force_multigraph: read_graphml only auto-detects a multigraph when parallel edges exist
+    G = nx.read_graphml(out, force_multigraph=True)     # portable read-back
+    assert isinstance(G, nx.MultiDiGraph) and G.number_of_edges() == 2
+    u, v, d = next(iter(G.edges(data=True)))
+    assert d["highway"] == "residential" and d["geometry"].startswith("LINESTRING")
+
+
+def test_write_graph_gpickle_roundtrips_lossless(tmp_path):
+    import pickle
+    out = tmp_path / "g.gpickle"
+    res = write_graph(_node_db(), out)                  # .gpickle -> pickle
+    assert res["fmt"] == "gpickle"
+    with open(out, "rb") as f:
+        G = pickle.load(f)
+    assert G.number_of_nodes() == 3 and G.number_of_edges() == 2
+
+
+def test_write_graph_edge_kind(tmp_path):
+    # edge-based to_networkx attaches node attrs (name/highway/length_m/maxspeed_kmh/cost_s/geom).
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, name VARCHAR, highway VARCHAR, "
+                "length_m DOUBLE, maxspeed_kmh DOUBLE, cost_s DOUBLE, geometry GEOMETRY)")
+    con.execute("INSERT INTO driving.edges VALUES "
+                "(1,'A','residential',100,30,12,ST_GeomFromText('LINESTRING(0 0,1 0)')),"
+                "(2,'B','residential',200,30,24,ST_GeomFromText('LINESTRING(1 0,2 0)'))")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
+    con.execute("INSERT INTO driving.edge_graph VALUES (1,2,12)")
+    out = tmp_path / "edge.graphml"
+    res = write_graph(con, out, graph="edge")           # edge-based routing graph
+    assert res["graph"] == "edge" and res["n_nodes"] == 2   # nodes = edge_ids
+
+
+def test_write_graph_graphml_stringifies_lists_and_drops_none(tmp_path):
+    # `refs` is a list and `name` NULL — neither is GraphML-serialisable as-is.
+    import networkx as nx
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute("INSERT INTO driving.nodes VALUES (10, ST_GeomFromText('POINT(0 0)')),"
+                "(11, ST_GeomFromText('POINT(1 0)'))")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, "
+                "name VARCHAR, refs BIGINT[], geometry GEOMETRY)")
+    con.execute("INSERT INTO driving.edges VALUES "
+                "(1,10,11,NULL,[10,11],ST_GeomFromText('LINESTRING(0 0,1 0)'))")
+    out = tmp_path / "g.graphml"
+    write_graph(con, out)                               # must not raise on list/None attrs
+    G = nx.read_graphml(out)
+    d = next(iter(G.edges(data=True)))[2]
+    assert isinstance(d["refs"], str) and "name" not in d   # list stringified, NULL dropped
+
+
+def test_write_graph_bad_format_raises(tmp_path):
+    with pytest.raises(ValueError):
+        write_graph(_node_db(), tmp_path / "g.xyz", fmt="nope")
 
 
 def _route_db():

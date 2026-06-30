@@ -15,6 +15,9 @@ run any networkx algorithm:
 
 This loads the whole graph into memory — fine for a city; for country-scale prefer an on-disk
 search (see docs). Every road in `edges` is part of `edge_graph`, including `highway='service'`.
+
+For the *geographic* (node-based) view — OSM junctions as nodes, road segments as edges with
+their full attribute set, in the osmnx `MultiDiGraph` layout — use `to_networkx_nodes` instead.
 """
 import logging
 
@@ -83,6 +86,176 @@ def _attach_edge_attrs(con, g, mode):
             g.nodes[eid].update(name=name, highway=hw, length_m=length,
                                 maxspeed_kmh=spd, cost_s=cost, geometry=geom)
     return g
+
+
+def to_networkx_nodes(con, mode: str = "driving", geometry: str = "wkt"):
+    """Return a node-based ``networkx.MultiDiGraph`` of the road network for ``mode``.
+
+    Where :func:`to_networkx` returns the *edge-based* routing (line) graph — whose nodes are
+    ``edge_id``s and whose arcs are legal turns — this returns the **geographic** graph: nodes are
+    OSM junction ``node_id``s and each graph edge is a road segment from ``<mode>.edges`` carrying
+    its **full attribute set** (``edge_id``, ``osm_id``, ``highway``, ``name``, ``oneway``,
+    ``lanes``, ``length_m``, ``maxspeed_kmh``, ``cost_s``, ``geometry``, ``is_reverse``, …).
+
+    The layout matches osmnx: a directed multigraph keyed by ``edge_id`` (so parallel ways between
+    the same two junctions are preserved), nodes carry ``x``/``y`` (lon/lat) plus any extra node
+    columns (e.g. ``h3_cell``), and ``G.graph['crs'] = 'EPSG:4326'``. So osmnx / momepy tooling can
+    consume it directly::
+
+        from duckosm.routing import to_networkx_nodes
+        G = to_networkx_nodes(con, mode="driving")
+        G.nodes[node_id]["x"], G.nodes[node_id]["y"]       # lon, lat
+        G[u][v][edge_id]["highway"]                        # full edge attrs, keyed by edge_id
+
+    Parameters
+    ----------
+    con : a DuckDB connection to a built duckOSM database.
+    mode : the mode schema to read (default ``"driving"``).
+    geometry : how to store each edge's geometry — ``"wkt"`` (default) as a WKT string,
+        ``"shapely"`` as a shapely object (needs ``shapely``; matches osmnx), or ``"none"`` to omit
+        it (lighter graph). Node geometry is always reduced to ``x``/``y``.
+    """
+    try:
+        import networkx as nx
+    except ImportError as e:
+        raise ImportError("to_networkx_nodes needs networkx — `pip install networkx`") from e
+    if geometry not in ("wkt", "shapely", "none"):
+        raise ValueError("geometry must be 'wkt', 'shapely' or 'none'")
+    try:
+        con.execute("INSTALL spatial; LOAD spatial;")
+    except Exception:
+        pass
+
+    to_shapely = None
+    if geometry == "shapely":
+        try:
+            from shapely import wkt as _wkt
+        except ImportError as e:
+            raise ImportError("geometry='shapely' needs shapely — `pip install shapely`") from e
+        to_shapely = _wkt.loads
+
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "EPSG:4326"
+    g.graph["mode"] = mode
+
+    # --- nodes: node_id -> x/y (+ any other node columns, e.g. h3_cell) -------------------------
+    ncols = [r[1] for r in con.execute(f"PRAGMA table_info('{mode}.nodes')").fetchall()]
+    nselect = ["node_id", "ST_X(geom) AS x", "ST_Y(geom) AS y"]
+    nextra = [c for c in ncols if c not in ("node_id", "geom")]
+    nselect += nextra
+    nrows = con.execute(f"SELECT {', '.join(nselect)} FROM {mode}.nodes WHERE geom IS NOT NULL")
+    ncolnames = [d[0] for d in nrows.description]
+    for row in nrows.fetchall():
+        rec = dict(zip(ncolnames, row))
+        nid = rec.pop("node_id")
+        g.add_node(nid, **rec)
+
+    # --- edges: one directed multigraph edge per row, keyed by edge_id, with full attributes ----
+    ecols = [r[1] for r in con.execute(f"PRAGMA table_info('{mode}.edges')").fetchall()]
+    eselect = []
+    for c in ecols:
+        if c == "geometry":
+            if geometry == "none":
+                continue
+            eselect.append("ST_AsText(geometry) AS geometry")
+        else:
+            eselect.append(c)
+    erows = con.execute(f"SELECT {', '.join(eselect)} FROM {mode}.edges")
+    ecolnames = [d[0] for d in erows.description]
+    n_edges = 0
+    for row in erows.fetchall():
+        rec = dict(zip(ecolnames, row))
+        eid = rec["edge_id"]
+        source = rec.pop("source")
+        target = rec.pop("target")
+        if to_shapely is not None and rec.get("geometry") is not None:
+            rec["geometry"] = to_shapely(rec["geometry"])
+        # source/target may be junctions pruned from `nodes` (clipped builds); add_edge re-adds them
+        # as bare nodes, which is fine and matches osmnx behaviour.
+        g.add_edge(source, target, key=eid, **rec)
+        n_edges += 1
+
+    logger.info(f"node graph[{mode}]: {g.number_of_nodes():,} nodes, {n_edges:,} edges, "
+                f"geometry={geometry}")
+    return g
+
+
+# file extensions we recognise per format, for inferring `fmt` from the output path.
+_GRAPH_EXTS = {".graphml": "graphml", ".gpickle": "gpickle", ".pkl": "gpickle",
+               ".pickle": "gpickle"}
+
+
+def _graphml_safe(g):
+    """In-place: coerce attribute values GraphML can't serialise (lists, None, other objects).
+
+    GraphML only stores scalars (str/int/float/bool). Lists (e.g. the ``refs`` array) and any other
+    object become their ``str``; ``None``-valued keys are dropped (GraphML has no null). Done on a
+    shallow copy of each attr dict so the caller's graph is untouched only if they pass a copy — we
+    mutate ``g`` directly here, so this is for write-paths that build the graph fresh.
+    """
+    def fix(d):
+        for k in list(d):
+            v = d[k]
+            if v is None:
+                del d[k]
+            elif not isinstance(v, (str, int, float, bool)):
+                d[k] = str(v)
+    for _, data in g.nodes(data=True):
+        fix(data)
+    # MultiDiGraph edge views accept keys=True; plain DiGraph (the edge graph) does not.
+    edges = g.edges(data=True, keys=True) if g.is_multigraph() else g.edges(data=True)
+    for *_, data in edges:
+        fix(data)
+
+
+def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
+                weight: str = "time", geometry: str = "wkt"):
+    """Build a networkx graph for ``mode`` and write it to ``path``. Returns a small summary dict.
+
+    Parameters
+    ----------
+    path : output file. ``fmt`` is inferred from its extension when not given.
+    graph : ``"node"`` → the geographic node-based ``MultiDiGraph`` (:func:`to_networkx_nodes`,
+        full edge info) or ``"edge"`` → the edge-based routing ``DiGraph`` (:func:`to_networkx`).
+    fmt : ``"graphml"`` or ``"gpickle"``. Default: inferred from the path extension, else
+        ``"graphml"``. GraphML is portable but scalar-only (lists like ``refs`` and shapely
+        geometry are stringified, nulls dropped); gpickle round-trips the graph losslessly
+        (including shapely objects) but is Python-only.
+    weight, geometry : forwarded to the underlying builder (``weight`` only for ``graph="edge"``;
+        ``geometry`` only for ``graph="node"``).
+    """
+    from pathlib import Path
+    path = Path(path)
+    fmt = fmt or _GRAPH_EXTS.get(path.suffix.lower(), "graphml")
+    if fmt not in ("graphml", "gpickle"):
+        raise ValueError("fmt must be 'graphml' or 'gpickle'")
+    if graph not in ("node", "edge"):
+        raise ValueError("graph must be 'node' or 'edge'")
+    try:
+        import networkx as nx
+    except ImportError as e:
+        raise ImportError("write_graph needs networkx — `pip install networkx`") from e
+
+    if graph == "node":
+        # GraphML can't hold shapely objects; keep geometry as WKT for that format.
+        geom = "wkt" if (fmt == "graphml" and geometry == "shapely") else geometry
+        g = to_networkx_nodes(con, mode=mode, geometry=geom)
+    else:
+        g = to_networkx(con, mode=mode, weight=weight)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "graphml":
+        _graphml_safe(g)
+        nx.write_graphml(g, path)
+    else:
+        import pickle
+        with open(path, "wb") as f:
+            pickle.dump(g, f)
+    summary = {"path": str(path), "fmt": fmt, "graph": graph, "mode": mode,
+               "n_nodes": g.number_of_nodes(), "n_edges": g.number_of_edges()}
+    logger.info(f"wrote {graph} graph[{mode}] -> {path} ({fmt}: "
+                f"{summary['n_nodes']:,} nodes, {summary['n_edges']:,} edges)")
+    return summary
 
 
 def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
