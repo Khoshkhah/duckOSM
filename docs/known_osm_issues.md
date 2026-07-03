@@ -128,3 +128,21 @@ station location isn't a spot where a temporary merge/auxiliary lane briefly mak
 > **duckOSM logic bug** (ignored `lanes:reversible`), fixed in code — OSM tags them correctly
 > (`lanes=3` + `lanes:reversible=1`). Per this file's scope, code bugs are fixed in code + tests, not
 > catalogued here.
+
+---
+
+## 4. Bohusgatan — missing `oneway` tag on 5 of its 6 ways (rendered two-way)
+
+| field | value |
+| --- | --- |
+| **Area** | Södermalm (`pbf/sodermalm_pbf.osm.pbf`) |
+| **OSM ways** | untagged: `140726414` (asked), `34425155`, `34425156`, `1277761939`, `1277761941` · **tagged `oneway=yes`: `151083837`** |
+| **Edges (way 140726414)** | `3351157701764431365` (forward) + `7237647270561809940` (reverse twin) |
+| **Status** | **CONFIRMED OSM error** — a Bohusgatan segment (way `151083837`) is `oneway=yes`; the other five ways are missing the tag. (Verify the *whole* street is one-way, not just that stretch.) |
+
+Same class as #1/#2, at larger scale: **five of Bohusgatan's six ways carry no `oneway` tag** (e.g. way
+`140726414`: `highway=residential`, `name=Bohusgatan`, `maxspeed=30`, `lit=yes`, `parking:both=no`,
+`surface=asphalt`), so duckOSM renders them two-way. But one segment — **way `151083837` — is tagged
+`oneway=yes`**, strong evidence Bohusgatan is a one-way street whose other segments simply lack the tag.
+Fix: add `oneway=yes` (matching way `151083837`'s direction) to the five untagged ways in OSM and
+rebuild, or apply a local override. Verified via `ST_READOSM`.
