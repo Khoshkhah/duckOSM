@@ -16,6 +16,7 @@ import subprocess
 from duckosm.config import Config
 from duckosm.processors import (
     RoadFilter,
+    OsmOverrides,
     GraphBuilder,
     SpeedProcessor,
     CostCalculator,
@@ -120,8 +121,13 @@ class DuckOSM:
 
             steps = [
                 ("filter_roads", f"[{mode}] Filtering roads", lambda: self._filter_roads(mode)),
-                ("build_edges", f"[{mode}] Building edges", self._build_edges),
             ]
+            # Local corrections for known OSM errors — MUST run on `ways` after RoadFilter and
+            # before GraphBuilder, because `oneway` is topological (decides the reverse twin).
+            if self.config.osm_overrides:
+                steps.append(("apply_osm_overrides", f"[{mode}] Applying OSM overrides",
+                              self._apply_osm_overrides))
+            steps.append(("build_edges", f"[{mode}] Building edges", self._build_edges))
 
             if self.config.options.simplify:
                 steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
@@ -466,6 +472,14 @@ class DuckOSM:
         logger.info(f"  Filtered to {self.stats['node_count']:,} nodes, "
                    f"{self.stats['way_count']:,} ways in {self.stats['road_filter_time']:.2f}s")
     
+    def _apply_osm_overrides(self) -> None:
+        """Patch `ways` with local corrections for known OSM errors (before edges are built)."""
+        logger.info("Applying OSM overrides...")
+        n = OsmOverrides(self.con, self.config.osm_overrides).run()
+        self.stats['osm_overrides_applied'] = self.stats.get('osm_overrides_applied', 0) + n
+        if not n:
+            logger.info("  no OSM overrides matched this area")
+
     def _build_edges(self) -> None:
         """Create directed edges from ways."""
         logger.info("Building edges...")

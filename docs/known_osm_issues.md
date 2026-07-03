@@ -76,3 +76,49 @@ Same class as #1. The raw way `233761079` carries **no `oneway` tag** and no `ju
 reverse twin) — the output is faithful to the input. If it is one-way on the ground, add
 `oneway=yes` / `-1` to way `233761079` in OpenStreetMap and rebuild (or apply a local override).
 Verified by reading the tags from the pbf with `ST_READOSM`.
+
+---
+
+## 3. Trans-Canada Highway westbound (Second Narrows approach) — undercounted `lanes`
+
+| field | value |
+| --- | --- |
+| **Area** | Vancouver (City of Vancouver, built from `metro_vancouver.osm.pbf` via `config/vancouver_city.yaml`) |
+| **OSM way** | `507979055` (`highway=motorway`, `name=Trans-Canada Highway`, one-way westbound) |
+| **Edge** | `1868603694539326257` (single directed edge — the way is one-way) |
+| **Status** | OPEN — probable OSM under-count; BC MoTI per-lane counts show **3** WB lanes vs OSM `lanes=2` |
+
+**Symptom.** The westbound Trans-Canada carriageway near the east end of the Second Narrows crossing
+comes out with `lanes=2`, but three separate BC MoTI **per-lane** traffic-count stations sit across it,
+implying **3** through lanes.
+
+**Evidence (BC MoTI).** The `aadt_moti` map-match (in the `vancouver_traffic_data` project) landed
+three per-lane WB stations on this one directed edge:
+
+- `P-15-21` "WB SLOW LANE" — AADT 13,115
+- `P-15-22` "WB MIDDLE LANE" — AADT 23,404
+- `P-15-23` "WB FAST LANE" — AADT 22,566  → **3 lanes, ≈59,085 veh/day total**
+
+The **eastbound twin** (OSM way `23795653`) *is* correctly tagged `lanes=3` (with full
+`turn:lanes` / `destination:lanes`), so the WB carriageway reading `2` is an asymmetry that points to a
+tagging gap, not a real lane drop.
+
+**Root cause (verified).** Raw OSM way `507979055` is tagged `lanes=2`, `oneway=yes`, with no
+`lanes:forward`/`lanes:backward`. duckOSM's one-way branch in
+`RoadFilter._create_ways_table` (`src/duckosm/processors/road_filter.py`) takes
+`COALESCE(n_total, class_default)` = the tagged **2**, so the output is faithful to the input — the
+count is wrong in **OSM**, not in duckOSM. (Confirmed by reading the way's tags from the pbf.)
+
+**Caveat.** The MoTI reading is old (`LAST_YEAR = 2002`); a lane count is structural and unlikely to
+have dropped since, but confirm against current imagery before editing OSM — and check the exact
+station location isn't a spot where a temporary merge/auxiliary lane briefly makes 3.
+
+**Recommended fix.**
+1. Verify on current imagery / on the ground that the WB carriageway carries 3 through lanes here.
+2. If so, set `lanes=3` on way `507979055` in **OpenStreetMap** and rebuild the area.
+3. If you cannot wait on OSM, apply a **local override** for this `osm_id` in the pipeline.
+
+> **Not listed here:** Lions Gate Bridge / Stanley Park Causeway reading `lanes=1` per direction was a
+> **duckOSM logic bug** (ignored `lanes:reversible`), fixed in code — OSM tags them correctly
+> (`lanes=3` + `lanes:reversible=1`). Per this file's scope, code bugs are fixed in code + tests, not
+> catalogued here.

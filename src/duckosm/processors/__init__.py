@@ -13,10 +13,12 @@ from duckosm.processors.edge_graph import EdgeGraphBuilder
 from duckosm.processors.graph_simplifier import GraphSimplifier
 from duckosm.processors.component_filter import ComponentFilter
 from duckosm.processors.duckdb_clipper import DuckdbClipper
+from duckosm.processors.osm_overrides import OsmOverrides
 
 __all__ = [
     "BaseProcessor",
     "RoadFilter",
+    "OsmOverrides",
     "GraphBuilder",
     "SpeedProcessor",
     "CostCalculator",

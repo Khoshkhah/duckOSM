@@ -1,0 +1,33 @@
+# Local corrections for known OSM source-data errors — see docs/known_osm_issues.md.
+#
+# Applied to the `ways` table after RoadFilter and before GraphBuilder (once per mode), so both
+# `oneway` (topological — decides whether a reverse-twin edge is created) and `lanes` take effect
+# on a rebuild. Each rule is keyed by OSM `osm_id` and is a silent no-op in any area that doesn't
+# contain that way, so this one global file is safe to apply to every build.
+#
+# Fields per rule:
+#   osm_id          (required) the OSM way id
+#   oneway          bool  — force one-way (true) / two-way (false)
+#   lanes           int   — per-direction lane count; sets BOTH directions
+#   lanes_forward   int   — per-direction (asymmetric roads)
+#   lanes_backward  int
+#   note            free text (provenance)
+#
+# Only enable a rule once the correction is verified — an unverified `oneway` flip silently drops
+# the reverse edge. Keep unverified issues commented out.
+
+overrides:
+  # --- Södermalm ---
+  - osm_id: 4392632          # Hökens Gata — missing oneway (known_osm_issues #1, CONFIRMED)
+    oneway: true
+    note: "Hökens Gata missing oneway; adjacent segment 676781760 is oneway=yes"
+
+  # OPEN / unverified — enable only after checking direction on the ground:
+  # - osm_id: 233761079      # Katarina Bangata — missing oneway (known_osm_issues #2, OPEN)
+  #   oneway: true
+  #   note: "Katarina Bangata missing oneway — VERIFY before enabling"
+
+  # --- Vancouver ---
+  - osm_id: 507979055        # Trans-Canada WB @ Second Narrows — lanes undercount (known_osm_issues #3)
+    lanes: 3
+    note: "OSM lanes=2 but BC MoTI measured 3 WB lanes (P-15-21/22/23)"
