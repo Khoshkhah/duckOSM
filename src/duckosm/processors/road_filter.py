@@ -131,6 +131,7 @@ class RoadFilter(BaseProcessor):
                     NULLIF(TRY_CAST(regexp_extract(map_extract(tags, 'lanes')[1], '\\d+') AS INTEGER), 0) AS n_total,
                     NULLIF(TRY_CAST(regexp_extract(map_extract(tags, 'lanes:forward')[1], '\\d+') AS INTEGER), 0) AS n_fwd,
                     NULLIF(TRY_CAST(regexp_extract(map_extract(tags, 'lanes:backward')[1], '\\d+') AS INTEGER), 0) AS n_bwd,
+                    NULLIF(TRY_CAST(regexp_extract(map_extract(tags, 'lanes:reversible')[1], '\\d+') AS INTEGER), 0) AS n_rev,
                     tags,
                     refs
                 FROM raw.ways
@@ -152,6 +153,10 @@ class RoadFilter(BaseProcessor):
                 -- Lane count in the forward direction. Prefer lanes:forward; for one-way
                 -- roads all lanes are forward; otherwise split the two-way total (forward
                 -- gets the larger half). Fall back to a class default when nothing is tagged.
+                -- A `lanes:reversible` (counterflow) lane is shared and available to each
+                -- direction at its peak, so it's added to both directions' capacity — e.g.
+                -- Lions Gate Bridge (lanes=3, forward=1, backward=1, reversible=1) -> 2 each way.
+                -- COALESCE(n_rev, 0) is a no-op for the vast majority of roads (no reversible tag).
                 CASE
                     WHEN n_fwd IS NOT NULL THEN n_fwd
                     WHEN oneway
@@ -159,16 +164,16 @@ class RoadFilter(BaseProcessor):
                     WHEN n_total IS NOT NULL AND n_bwd IS NOT NULL THEN GREATEST(n_total - n_bwd, 1)
                     WHEN n_total IS NOT NULL THEN GREATEST(CAST(CEIL(n_total / 2.0) AS INTEGER), 1)
                     ELSE CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END
-                END AS lanes_fwd,
+                END + COALESCE(n_rev, 0) AS lanes_fwd,
                 -- Lane count in the backward direction (used by the reverse edge of two-way
                 -- roads). Prefer lanes:backward, else the remaining/half of the total, else
-                -- the class default.
+                -- the class default. A shared reversible lane is added here too (see above).
                 CASE
                     WHEN n_bwd IS NOT NULL THEN n_bwd
                     WHEN n_total IS NOT NULL AND n_fwd IS NOT NULL THEN GREATEST(n_total - n_fwd, 1)
                     WHEN n_total IS NOT NULL THEN GREATEST(CAST(FLOOR(n_total / 2.0) AS INTEGER), 1)
                     ELSE CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END
-                END AS lanes_bwd,
+                END + COALESCE(n_rev, 0) AS lanes_bwd,
                 tags,
                 refs
             FROM base
