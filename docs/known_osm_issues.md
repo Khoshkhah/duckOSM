@@ -67,15 +67,21 @@ Gata result, which stays two-way because residential roads are correctly two-way
 | **Area** | Södermalm (`pbf/sodermalm_pbf.osm.pbf`) |
 | **OSM way** | `233761079` (`highway=residential`, `name=Katarina Bangata`) |
 | **Edges** | `224569842445438623` (forward) + `8329252562982974380` (reverse twin) |
-| **Status** | OPEN — pending on-the-ground verification of the real directionality |
+| **Status** | **CONFIRMED OSM error** — the street is one-way (56 sibling segments tagged `oneway=yes`); way `233761079` just omits the tag. Local override **enabled** in `config/osm_overrides.yaml`. |
 
 Same class as #1. The raw way `233761079` carries **no `oneway` tag** and no `junction=roundabout`
 (full tags: `highway=residential`, `lit=yes`, `maxspeed=30`, `name=Katarina Bangata`,
 `parking:both=no`, `parking:both:restriction=no_parking`, `surface=asphalt`, `wikidata=Q1692894`,
-`wikipedia=sv:Katarina Bangata`). duckOSM therefore correctly defaults it to **two-way** (forward +
-reverse twin) — the output is faithful to the input. If it is one-way on the ground, add
-`oneway=yes` / `-1` to way `233761079` in OpenStreetMap and rebuild (or apply a local override).
-Verified by reading the tags from the pbf with `ST_READOSM`.
+`wikipedia=sv:Katarina Bangata`), so duckOSM correctly defaults it to **two-way** — faithful to the input.
+
+**Confirmed (it IS one-way).** An Overpass query for every way `name="Katarina Bangata"` (verified via
+live OSM, 2026-07) returns **56 residential segments tagged `oneway=yes`** and only a few untagged —
+`233761079` among them. All oneway values are `yes` (none `-1`), i.e. digitisation-forward. So the
+street is one-way and this segment is simply **missing the tag** — exactly the #1 pattern, not a
+duckOSM bug.
+
+**Fix.** Add `oneway=yes` to way `233761079` in OpenStreetMap (benefits every consumer), or — as now
+applied — a local override (`osm_id: 233761079, oneway: true`) in `config/osm_overrides.yaml`.
 
 ---
 

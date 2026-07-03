@@ -20,6 +20,7 @@ CLI flags override the corresponding config values (see `duckosm build --help`).
 | `h3_cell` | string \| null | `null` | Optional single H3 cell id to clip to (alternative to `boundary_path`). |
 | `modes` | list | `["driving"]` | One output schema per mode: any of `driving`, `walking`, `cycling`. |
 | `options` | map | see below | Processing options. |
+| `osm_overrides` | string \| null | `"config/osm_overrides.yaml"` | Path to a global rules file of local corrections for known OSM errors, applied per mode between road-filtering and edge-building. Silent no-op if the file is absent. See [`osm_overrides`](#osm_overrides--local-corrections-for-known-osm-errors). |
 
 ## `options`
 
@@ -65,7 +66,7 @@ CLI flags override the corresponding config values (see `duckosm build --help`).
 |-----|------|---------|-------------|
 | `boundary.path` | string \| null | `null` | GeoJSON polygon. Also accepted as the flat `boundary_path`. |
 | `boundary.place` / `bbox` / `h3_cell` | — | `null` | Alternative region specs (`place`/`bbox` reserved). |
-| `boundary.buffer_m` | float | `0` | Outward buffer (metres) before clipping. |
+| `boundary.buffer_m` | float | `0` | Outward margin (metres) added to the boundary before clipping — buffered in an auto-selected UTM zone (from the boundary centroid), so the clip region grows uniformly on the ground. Use it to keep roadside sensors just outside an admin boundary on the network. `0` = clip to the exact boundary. |
 
 A boundary now **actually clips the graph** (PBF mode pre-clips with `osmium`; duckdb mode
 spatially selects). Set at most one of `path` / `place` / `bbox` / `h3_cell`.
@@ -79,6 +80,44 @@ spatially selects). Set at most one of `path` / `place` / `bbox` / `h3_cell`.
 | `clip.min_component_edges` | int | `1` | Drop weak components smaller than this. |
 | `clip.connectivity_rescue` | bool | `true` | Re-admit a connector iff it reconnects a component (reserved). |
 | `clip.strongly_connected` | bool | `false` | Require routable round-trip (reserved). |
+
+## `osm_overrides` — local corrections for known OSM errors
+
+Some OSM source data is wrong or ambiguous — a missing `oneway` tag, an undercounted `lanes` value.
+When fixing it upstream in OpenStreetMap isn't practical, duckOSM can patch the affected ways locally
+from a single global rules file so every rebuild reproduces the correction. The catalogue of issues
+these rules address lives in [`known_osm_issues.md`](known_osm_issues.md).
+
+The top-level `osm_overrides` key points at the file (default `config/osm_overrides.yaml`); set it to
+`null` to disable. The rules are applied to the `ways` table **after `RoadFilter` and before
+`GraphBuilder`, once per mode** — placement matters: `oneway` is *topological* (it decides whether a
+reverse-twin edge is created), so it cannot be patched on the finished DB.
+
+Each rule is keyed by OSM `osm_id` and is a **silent no-op in any area that doesn't contain that way**,
+so one global file is safe to apply to every build.
+
+```yaml
+# config/osm_overrides.yaml
+overrides:
+  - osm_id: 4392632          # Hökens Gata, Södermalm — missing oneway (known_osm_issues #1)
+    oneway: true
+    note: "adjacent segment 676781760 is oneway=yes"
+  - osm_id: 507979055        # Trans-Canada WB, Vancouver — lane undercount (known_osm_issues #3)
+    lanes: 3
+    note: "OSM lanes=2 but BC MoTI measured 3 WB lanes"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `osm_id` | int | **required** — the OSM way id to patch. |
+| `oneway` | bool | Force one-way (`true`) or two-way (`false`). Changes topology, so the affected edge(s) can be re-simplified and get a **new `edge_id`**. |
+| `lanes` | int | Per-direction lane count; sets **both** directions. Attribute-only — `edge_id` stays stable. |
+| `lanes_forward` / `lanes_backward` | int | Per-direction lane counts for asymmetric roads. |
+| `note` | string | Free-text provenance (shown in the build log). |
+
+Only enable a rule once the correction is **verified** — an unverified `oneway` flip silently drops a
+direction of travel. Keep unverified issues commented out. Existing `.duckdb` builds must be **rebuilt**
+to pick up any change. The log reports how many rules matched (`applied N/M OSM override(s)`).
 
 ## `validation` / `report` / `viz`
 

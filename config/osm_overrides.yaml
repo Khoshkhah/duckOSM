@@ -22,10 +22,9 @@ overrides:
     oneway: true
     note: "Hökens Gata missing oneway; adjacent segment 676781760 is oneway=yes"
 
-  # OPEN / unverified — enable only after checking direction on the ground:
-  # - osm_id: 233761079      # Katarina Bangata — missing oneway (known_osm_issues #2, OPEN)
-  #   oneway: true
-  #   note: "Katarina Bangata missing oneway — VERIFY before enabling"
+  - osm_id: 233761079        # Katarina Bangata — missing oneway (known_osm_issues #2, CONFIRMED)
+    oneway: true
+    note: "56 sibling Katarina Bangata segments are oneway=yes; this one just omits the tag (Overpass, 2026-07)"
 
   # --- Vancouver ---
   - osm_id: 507979055        # Trans-Canada WB @ Second Narrows — lanes undercount (known_osm_issues #3)

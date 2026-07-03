@@ -342,6 +342,37 @@ class DuckOSM:
         logger.info(f"  PBF loaded in {self.stats['pbf_load_time']:.2f}s")
         logger.info(f"  Raw: {raw_nodes:,} nodes, {raw_ways:,} ways, {raw_rels:,} relations")
     
+    def _effective_boundary_path(self) -> Optional[str]:
+        """Boundary file to clip against: the raw path, or a cached outward-buffered copy when
+        ``boundary.buffer_m > 0``. The buffer is applied in metres in an auto-selected UTM zone
+        (from the boundary centroid), so a `margin` grows the clip region uniformly on the ground —
+        used to keep roadside sensors just outside an admin boundary on the network."""
+        raw = self.config.effective_boundary_path
+        if not raw:
+            return None
+        buf = getattr(self.config.boundary, "buffer_m", 0.0) or 0.0
+        if buf <= 0:
+            return raw
+        if getattr(self, "_buffered_boundary_path", None):
+            return self._buffered_boundary_path
+        raw_p = Path(raw).resolve()
+        lon, lat = self.con.execute(
+            f"SELECT ST_X(ST_Centroid(geom)), ST_Y(ST_Centroid(geom)) "
+            f"FROM ST_Read('{raw_p}') LIMIT 1").fetchone()
+        srid = (32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1   # UTM zone from centroid
+        out = raw_p.with_name(f"{raw_p.stem}.buffer{int(buf)}m.geojson")
+        self.con.execute(f"""
+            COPY (
+              SELECT ST_Transform(
+                       ST_Buffer(ST_Transform(geom, 'EPSG:4326', 'EPSG:{srid}', always_xy := true), {buf}),
+                       'EPSG:{srid}', 'EPSG:4326', always_xy := true) AS geom
+              FROM ST_Read('{raw_p}')
+            ) TO '{out}' (FORMAT gdal, DRIVER 'GeoJSON')
+        """)
+        logger.info(f"  Boundary buffered +{buf:g} m (UTM {srid}) -> {out.name}")
+        self._buffered_boundary_path = str(out)
+        return self._buffered_boundary_path
+
     def _load_boundary(self) -> None:
         """Load optional boundary GeoJSON file into database."""
         if not self.config.effective_boundary_path:
@@ -350,7 +381,7 @@ class DuckOSM:
         logger.info("Loading boundary GeoJSON...")
         start = time.time()
 
-        boundary_path = Path(self.config.effective_boundary_path).resolve()
+        boundary_path = Path(self._effective_boundary_path()).resolve()
         
         self.con.execute(f"""
             CREATE TABLE IF NOT EXISTS boundary AS
@@ -367,7 +398,7 @@ class DuckOSM:
         resolutions = (self.config.options.boundary_cell_resolutions
                        or [self.config.options.h3_resolution])
         BoundaryCellsBuilder(
-            self.con, Path(self.config.effective_boundary_path).resolve(), resolutions
+            self.con, Path(self._effective_boundary_path()).resolve(), resolutions
         ).run()
 
     # ---- source.type: pbf — in-pipeline osmium clip (A1) -----------------------------
@@ -379,7 +410,7 @@ class DuckOSM:
         if not osmium:
             logger.warning("osmium not found — skipping in-pipeline clip; using PBF as-is")
             return
-        boundary = Path(self.config.effective_boundary_path).resolve()
+        boundary = Path(self._effective_boundary_path()).resolve()
         cache_dir = Path("pbf")
         cache_dir.mkdir(parents=True, exist_ok=True)
         clipped = (cache_dir / f"{self.config.name}.osm.pbf").resolve()
