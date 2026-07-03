@@ -16,6 +16,11 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   (`mm.edges` + `mm.transfers`) so a single trip can **switch mode mid-route** — walk → drive →
   walk (park-and-ride). Build with `duckosm multimodal <db>`, route with `route_multimodal()`.
   See [`docs/multimodal.md`](docs/multimodal.md)
+- **Base-map features**: optional `features.*` schema — every OSM base-map theme (roads+rail as
+  `streets`, water, land, buildings, POIs, transit, places) mapped to the **Shortbread** vector-tile
+  schema and extracted **once into the same db**, so a renderer like [duckmap](../duckmap) draws from
+  it instead of re-ingesting OSM. Enable with `options.build_features`. See
+  [`docs/features_schema.md`](docs/features_schema.md)
 - **Stable ids**: `edge_id` is a deterministic content hash, so rebuilds don't renumber
   the graph and downstream consumers survive without a full re-match
 - **Two source modes**: build from a PBF, **or clip an area out of an existing build**

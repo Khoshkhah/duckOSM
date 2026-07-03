@@ -98,6 +98,41 @@ Line graph for edge-based routing.
 
 ---
 
+## `mm` Schema *(optional — intermodal routing)*
+
+Built by `duckosm multimodal` / `multimodal.enabled`. Stitches the per-mode graphs into one layered
+graph so a trip can switch mode mid-route. See [multimodal.md](multimodal.md).
+
+| Table | Key Columns |
+|-------|-------------|
+| `mm.edges` *(view)* | `mode`, `edge_id`, `source`, `target`, `cost_s`, `geometry` — union of per-mode `edges` tagged by `mode` (a **view**, no duplication) |
+| `mm.transfers` | `node_id`, `from_mode`, `to_mode`, `cost_s`, `kind` — mode-change arcs at shared junctions |
+
+---
+
+## `features` Schema *(optional — base map)*
+
+Built by `options.build_features`. Every OSM base-map theme, mapped to the **Shortbread** vector-tile
+schema, for a renderer (duckmap) to draw from. Uniform contract per table:
+`osm_id`, `osm_type`, `kind` (Shortbread class), `name`, `tags`, `geom`. See
+[features_schema.md](features_schema.md).
+
+| Table | Geom | Contents |
+|-------|------|----------|
+| `features.streets` | line | roads **and** rail merged (`kind` = highway/railway value) |
+| `features.water_polygons` / `features.water_lines` | area / line | water bodies / watercourses |
+| `features.land` | area | landuse / natural / leisure polygons |
+| `features.sites` | area | amenity areas — parking, university, hospital, construction, … |
+| `features.buildings` | area | building footprints |
+| `features.public_transport` | point | bus stops, stations, halts, tram stops, … |
+| `features.pois` | point | amenity / shop / tourism / office / leisure / man_made |
+| `features.place_labels` | point | city / town / village / … |
+
+> `geom.*` (way/relation geometry scaffolding) is built transiently during the features build and
+> **dropped** afterward, so each geometry lives in exactly one place (no duplication).
+
+---
+
 ## Global Schema (default)
 
 ### Table: `visualization_metadata`
