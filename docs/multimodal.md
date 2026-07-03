@@ -115,19 +115,23 @@ Put everything in a new schema, `mm` (or `multimodal`), leaving the per-mode sch
 
 ### 1. `mm.edges` — unified edges with a `mode` column
 
-Union the per-mode `edges`, adding `mode`. Key is `(mode, edge_id)`.
+Union the per-mode `edges`, adding `mode`. Key is `(mode, edge_id)`. **It is a `VIEW`, not a
+materialised table** — so it never duplicates the (potentially large) per-mode edge rows and always
+reflects the current per-mode networks (rebuild a mode and `mm.edges` follows). A `name` column is
+also carried through.
 
 ```sql
-CREATE TABLE mm.edges AS
-  SELECT 'driving'  AS mode, edge_id, source, target, cost_s, length_m, highway, geometry FROM driving.edges
+CREATE VIEW mm.edges AS
+  SELECT 'driving'  AS mode, edge_id, source, target, cost_s, length_m, highway, name, geometry FROM driving.edges
   UNION ALL
-  SELECT 'walking'  AS mode, edge_id, source, target, cost_s, length_m, highway, geometry FROM walking.edges
+  SELECT 'walking'  AS mode, edge_id, source, target, cost_s, length_m, highway, name, geometry FROM walking.edges
   UNION ALL
-  SELECT 'cycling'  AS mode, edge_id, source, target, cost_s, length_m, highway, geometry FROM cycling.edges;
+  SELECT 'cycling'  AS mode, edge_id, source, target, cost_s, length_m, highway, name, geometry FROM cycling.edges;
 ```
 
 (Only union the modes actually present in the db — discover them the way `viz` does: schemas with an
-`edges` table, excluding `main`/`raw`/`information_schema`/`pg_catalog`.)
+`edges` table, excluding `main`/`raw`/`information_schema`/`pg_catalog`. Because `mm.edges` is a view,
+it won't appear in `duckdb_tables()`; check `information_schema.tables` to test whether it exists.)
 
 ### 2. `mm.transfers` — the mode-change arcs (the essential new table)
 

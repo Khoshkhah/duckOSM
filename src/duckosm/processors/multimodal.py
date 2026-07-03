@@ -5,8 +5,10 @@ duckOSM builds one **independent** graph per mode (``driving`` / ``walking`` / `
 its own schema, with no arcs connecting them. This processor stitches them into a single **layered
 graph** so a trip can *switch mode mid-route* (walk → drive → walk / park-and-ride):
 
-- ``mm.edges``     — every present mode's ``edges`` unioned with a ``mode`` column. Key
-                     ``(mode, edge_id)`` (``edge_id`` collides across modes — no mode in the hash).
+- ``mm.edges``     — a **VIEW** over every present mode's ``edges`` unioned with a ``mode`` column.
+                     Key ``(mode, edge_id)`` (``edge_id`` collides across modes — no mode in the
+                     hash). It's a view, not a table, so it never duplicates the per-mode edge rows
+                     and always reflects the current per-mode networks.
 - ``mm.transfers`` — the mode-change arcs: ``(node_id, from_mode, to_mode, cost_s, kind)``. A
                      transfer connects the *same physical junction* in two layers (``node_id`` is
                      the raw OSM node id, so it is identical across modes — a plain equality join).
@@ -44,7 +46,11 @@ TRANSFER_KINDS = {
 _DEFAULT_KINDS = ("enter", "exit")
 
 # Columns carried into mm.edges (must exist in every mode's `edges`; all do — see graph_builder).
-_EDGE_COLS = ["edge_id", "source", "target", "cost_s", "length_m", "highway", "name", "geometry"]
+# Typed so the degenerate "no modes" case can still declare an empty, correctly-typed view.
+_EDGE_COL_TYPES = [("edge_id", "BIGINT"), ("source", "BIGINT"), ("target", "BIGINT"),
+                   ("cost_s", "DOUBLE"), ("length_m", "DOUBLE"), ("highway", "VARCHAR"),
+                   ("name", "VARCHAR"), ("geometry", "GEOMETRY")]
+_EDGE_COLS = [c for c, _ in _EDGE_COL_TYPES]
 
 # Schemas that are never transport-mode layers.
 _NON_MODE_SCHEMAS = ("information_schema", "pg_catalog", "main", "raw")
@@ -118,26 +124,39 @@ class MultimodalBuilder(BaseProcessor):
         return [r[0] for r in rows if r[0] not in excl]
 
     def _build_edges(self, modes: list[str]) -> None:
-        """``mm.edges`` = per-mode ``edges`` unioned with a ``mode`` column, key ``(mode, edge_id)``."""
+        """``mm.edges`` = a **VIEW** over the per-mode ``edges`` unioned with a ``mode`` column, key
+        ``(mode, edge_id)``. A view (not a materialised table) so it never duplicates the per-mode
+        edge rows and always reflects the current per-mode networks."""
+        if modes:
+            self._require_cost_s(modes[0])         # fail before we drop anything
+        self._drop_edges_relation()                # handle a leftover pre-view TABLE (upgrade path)
+
         if not modes:
-            # No layers at all — create an empty, correctly-typed table and stop.
+            # No mode layers at all — an empty, correctly-typed view.
+            empty = ", ".join(f"NULL::{t} AS {c}" for c, t in _EDGE_COL_TYPES)
             self.con.execute(
-                f"CREATE OR REPLACE TABLE {self.schema}.edges AS "
-                "SELECT NULL::VARCHAR AS mode, " +
-                ", ".join(f"NULL AS {c}" for c in _EDGE_COLS) + " WHERE FALSE")
+                f"CREATE VIEW {self.schema}.edges AS "
+                f"SELECT NULL::VARCHAR AS mode, {empty} WHERE FALSE")
             self.stats["edge_count"] = 0
             return
 
-        self._require_cost_s(modes[0])
         cols = ", ".join(_EDGE_COLS)
         parts = [f"SELECT '{m}' AS mode, {cols} FROM {m}.edges" for m in modes]
         self.con.execute(
-            f"CREATE OR REPLACE TABLE {self.schema}.edges AS\n" + "\nUNION ALL\n".join(parts))
-        self.con.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_mm_edges_src "
-            f"ON {self.schema}.edges(mode, source)")
+            f"CREATE VIEW {self.schema}.edges AS\n" + "\nUNION ALL\n".join(parts))
         self.stats["edge_count"] = self.con.execute(
             f"SELECT COUNT(*) FROM {self.schema}.edges").fetchone()[0]
+
+    def _drop_edges_relation(self) -> None:
+        """Drop any existing ``mm.edges`` — whether a view or a leftover materialised TABLE from the
+        pre-view build — so we can (re)create it as a view. ``CREATE OR REPLACE VIEW`` can't replace
+        a table, so we drop explicitly; each DROP is guarded because only one type will match."""
+        for stmt in (f"DROP VIEW IF EXISTS {self.schema}.edges",
+                     f"DROP TABLE IF EXISTS {self.schema}.edges"):
+            try:
+                self.con.execute(stmt)
+            except Exception:
+                pass
 
     def _require_cost_s(self, mode: str) -> None:
         """Fail early with a clear message if the network has no travel-time costs."""

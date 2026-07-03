@@ -77,6 +77,20 @@ def test_builder_unions_edges_with_mode():
     assert "mode" in cols and "cost_s" in cols and "geometry" in cols
 
 
+def test_mm_edges_is_a_view_not_a_table():
+    """mm.edges must be a VIEW (no row duplication) — so it isn't in duckdb_tables()."""
+    con = _mm_db()
+    MultimodalBuilder(con).run()
+    ttype = con.execute("SELECT table_type FROM information_schema.tables "
+                        "WHERE table_schema = 'mm' AND table_name = 'edges'").fetchone()[0]
+    assert ttype == "VIEW"
+    assert con.execute("SELECT COUNT(*) FROM duckdb_tables() "
+                       "WHERE schema_name = 'mm' AND table_name = 'edges'").fetchone()[0] == 0
+    # mm.transfers stays a real table (generated data)
+    assert con.execute("SELECT COUNT(*) FROM duckdb_tables() "
+                       "WHERE schema_name = 'mm' AND table_name = 'transfers'").fetchone()[0] == 1
+
+
 def test_builder_key_is_mode_plus_edge_id():
     """edge_id collides across modes; only (mode, edge_id) is unique."""
     con = _new_db()

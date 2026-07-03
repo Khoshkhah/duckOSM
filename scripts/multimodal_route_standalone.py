@@ -45,9 +45,10 @@ def _wkt_lonlat(wkt):
 
 
 def _ensure_mm(con, transfer_cost):
+    # information_schema.tables lists VIEWs too (mm.edges is a view), unlike duckdb_tables().
     has_mm = con.execute(
-        "SELECT COUNT(*) FROM duckdb_tables() WHERE schema_name = 'mm' "
-        "AND table_name = 'edges'").fetchone()[0]
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema = 'mm' AND table_name = 'edges'").fetchone()[0]
     if not has_mm:
         print("building mm.* graph (none present) ...")
         MultimodalBuilder(con, transfer_s=transfer_cost).run()
