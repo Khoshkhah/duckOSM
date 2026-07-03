@@ -141,6 +141,45 @@ can differ from `drive_node`.
   and emit transfers **only** at those points (car ingress/egress restricted to parking). This is
   what makes walk→drive→walk trustworthy.
 
+## Public transport (bus, train) — a separate, later phase, NOT a peer mode
+
+Do **not** add `bus`/`train` as free-flow modes alongside walk/drive/cycle. They are a different
+class and cannot be built the same way:
+
+- **Free-flow modes (walk/drive/cycle):** traverse any edge at any time; cost = length/speed. Fully
+  built from OSM; static Dijkstra. ← this spec.
+- **Scheduled modes (bus/train):** you can only move along a **line** at **timetabled times**.
+  Routing is **time-dependent** ("when is the next departure?"), needing a different algorithm
+  (RAPTOR / Connection Scan / a time-expanded graph), not static Dijkstra.
+
+Why they can't just be another mode filter:
+
+1. **OSM has no timetables.** It has PT *infrastructure* (`highway=bus_stop`,
+   `public_transport=platform`/`stop_position`, `railway=rail`/`tram`/`subway`/`station`,
+   `route=bus`/`train` relations) but **no departure times** — you cannot route transit from OSM
+   alone.
+2. **The schedule lives in GTFS** (agency-published: stops, routes, trips, stop_times, calendar) —
+   a new data source, not a new OSM filter. (pt2matsim does exactly this: OSM for the network, GTFS
+   for the schedule.)
+3. **Bus rides the road graph** — it runs on `driving` edges restricted to a route, stopping at
+   stops; there is no separate "bus network" to build. Only **rail** has its own physical network
+   (`railway=*`), which *can* be extracted from OSM like the road modes — but that is for rail
+   *simulation* (railML/OpenTrack, see export targets), not journey planning.
+
+Sequencing:
+
+- **Phase 1 (this spec):** walk ↔ drive ↔ cycle. Static, OSM-only. Build first.
+- **Phase 2 (optional):** a `rail` **network** mode from OSM `railway=*` — for simulation, not
+  journey planning. Structurally like the road modes.
+- **Phase 3 (separate, bigger):** transit **journey planning** — ingest **GTFS**, add stops as
+  walk↔transit transfer points, add a **time-dependent** router (RAPTOR/CSA). Here bus and train
+  become routable.
+
+**Forward-compatibility:** the layered `(node_id, mode)` model still holds — transit is another
+layer, stops are transfer points — **but** its arcs are time-dependent, so it needs a time-expanded
+representation or a RAPTOR-style algorithm alongside the static Dijkstra. Keep `mm.transfers` and the
+router open to a transit layer; don't build it now.
+
 ## Build plan (implementation steps)
 
 1. **New processor `MultimodalBuilder`** (`src/duckosm/processors/multimodal.py`), registered in
