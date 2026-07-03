@@ -204,6 +204,14 @@ class DuckOSM:
                     progress.update(main_task, description="Building multimodal graph...")
                     self._build_multimodal()
 
+                # Base-map feature layers (features.*) — everything duckmap needs (roads, water,
+                # land, buildings, POIs, transit, places, …), extracted once from raw.* into THIS
+                # db so duckmap renders from it instead of building its own. Runs after modes
+                # (needs raw.*, still present until _cleanup); guarded by options.build_features.
+                if self.config.options.build_features:
+                    progress.update(main_task, description="Building feature layers...")
+                    self._build_features()
+
                 # Persist the canonical stable-edge_id macro (callable anywhere as
                 # `edge_id_hash(osm_id, source, target, is_reverse)`), so the formula travels
                 # with the db and other projects reuse one implementation.
@@ -620,6 +628,20 @@ class DuckOSM:
             logger.warning(f"  multimodal (realistic) skipped: {e}")
         except Exception as e:
             logger.warning(f"  multimodal build failed: {e}")
+
+    def _build_features(self) -> None:
+        """Build the features.* base-map schema (Shortbread layers) from raw.*. Optional post-mode
+        step; everything duckmap needs, extracted once into this db. Never aborts the build."""
+        from duckosm.features import FeaturesBuilder
+        logger.info("Building base-map feature layers (features.*)...")
+        start = time.time()
+        try:
+            stats = FeaturesBuilder(self.con).run()
+            self.stats['feature_layers'] = [k for k, v in stats.items() if v and v >= 0]
+            logger.info(f"  Feature layers built in {time.time() - start:.2f}s: "
+                        f"{len(self.stats['feature_layers'])} layers")
+        except Exception as e:
+            logger.warning(f"  features build failed: {e}")
 
     def _add_h3_indexing(self) -> None:
         """Add H3 spatial indexing."""

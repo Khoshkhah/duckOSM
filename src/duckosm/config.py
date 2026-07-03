@@ -38,6 +38,7 @@ class Options:
     boundary_cells: bool = False
     boundary_cell_resolutions: Optional[list[int]] = None
     timezone: bool = False
+    build_features: bool = False           # build the features.* base-map schema (Shortbread layers) for duckmap to render
 
 
 @dataclass
