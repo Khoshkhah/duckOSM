@@ -187,8 +187,17 @@ class RoadFilter(BaseProcessor):
         are **implicitly** one-way per the OSM convention even when untagged, unless an
         explicit ``oneway=no`` says otherwise. For cycling, ``oneway:bicycle`` overrides
         the generic ``oneway`` so contraflow cycling on one-way streets (very common in
-        Europe) yields a reverse edge.
+        Europe) yields a reverse edge. For walking, vehicular ``oneway`` is ignored
+        entirely (pedestrians may walk either way); only an explicit ``oneway:foot``
+        makes a walking edge one-way.
         """
+        if self.mode == "walking":
+            return """
+                CASE
+                    WHEN map_extract(tags, 'oneway:foot')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
+                    ELSE FALSE
+                END
+            """
         if self.mode == "cycling":
             return """
                 CASE
