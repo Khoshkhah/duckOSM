@@ -433,8 +433,13 @@ class DuckOSM:
             return                                            # already the clipped file
         if not clipped.exists():
             logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium) ...")
+            # `--strategy complete_ways` (osmium's default, set explicitly): every way with at
+            # least one node inside the boundary is kept in FULL — all its nodes, including
+            # shared intersection nodes at/near the edge. Keeps the graph connected (no dropped
+            # junctions) and way geometries intact. (`smart` additionally completes relations —
+            # switch to it if multipolygon features that cross the boundary come out broken.)
             r = subprocess.run(
-                [osmium, "extract", "--polygon", str(boundary),
+                [osmium, "extract", "--strategy", "complete_ways", "--polygon", str(boundary),
                  "--output", str(clipped), "--overwrite", str(self.pbf_path)],
                 capture_output=True, text=True)
             if r.returncode != 0:

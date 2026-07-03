@@ -34,10 +34,12 @@ def filter_pbf(input_file: str, boundary_file: str, output_file: str):
     try:
         # Generate the osmium extract command
         # -p: boundary polygon
-        # -s: strategy (simple or complete_ways)
-        # We use complete_ways to ensure we don't break way geometries
+        # -s complete_ways: keep every way with a node in the region in FULL — all its nodes,
+        #   including shared intersection nodes at the edge — so junctions aren't dropped and
+        #   way geometries stay intact (set explicitly, not left to osmium's default).
         cmd = [
             "osmium", "extract",
+            "-s", "complete_ways",
             "-p", boundary_file,
             input_file,
             "-o", output_file,
