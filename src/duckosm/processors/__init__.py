@@ -14,6 +14,7 @@ from duckosm.processors.graph_simplifier import GraphSimplifier
 from duckosm.processors.component_filter import ComponentFilter
 from duckosm.processors.duckdb_clipper import DuckdbClipper
 from duckosm.processors.osm_overrides import OsmOverrides
+from duckosm.processors.multimodal import MultimodalBuilder, TransferPointExtractor
 
 __all__ = [
     "BaseProcessor",
@@ -28,4 +29,6 @@ __all__ = [
     "GraphSimplifier",
     "ComponentFilter",
     "DuckdbClipper",
+    "MultimodalBuilder",
+    "TransferPointExtractor",
 ]

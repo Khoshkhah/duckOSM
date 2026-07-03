@@ -196,7 +196,14 @@ class DuckOSM:
                         'edge_graph_count': self.stats.get('edge_graph_count', 0),
                         'total_time': time.time() - mode_start
                     }
-                
+
+                # Multimodal (intermodal) transfer graph — stitch the per-mode networks into one
+                # layered graph so a trip can switch mode mid-route (walk->drive->walk). Runs once,
+                # after every mode is built; guarded (needs >=2 modes incl. walking).
+                if self.config.multimodal.enabled:
+                    progress.update(main_task, description="Building multimodal graph...")
+                    self._build_multimodal()
+
                 # Persist the canonical stable-edge_id macro (callable anywhere as
                 # `edge_id_hash(osm_id, source, target, is_reverse)`), so the formula travels
                 # with the db and other projects reuse one implementation.
@@ -589,6 +596,30 @@ class DuckOSM:
         
         logger.info(f"  Created {self.stats['edge_graph_count']:,} edge pairs in "
                    f"{self.stats['edge_graph_time']:.2f}s")
+
+    def _build_multimodal(self) -> None:
+        """Build the intermodal mm.* transfer graph (walk<->drive<->cycle). Optional post-mode step.
+
+        A realistic (v2) build isn't implemented yet, so `multimodal.realistic: true` logs a warning
+        and leaves the coarse tables — it never aborts the build.
+        """
+        from duckosm.processors import MultimodalBuilder
+        mm = self.config.multimodal
+        logger.info("Building multimodal transfer graph (mm.*)...")
+        start = time.time()
+        try:
+            stats = MultimodalBuilder(self.con, transfer_s=mm.transfer_s,
+                                      transfer_costs=mm.transfer_costs,
+                                      realistic=mm.realistic).run()
+            self.stats['mm_edge_count'] = stats.get('edge_count', 0)
+            self.stats['mm_transfer_count'] = stats.get('transfer_count', 0)
+            logger.info(f"  Multimodal graph built in {time.time() - start:.2f}s: "
+                        f"{self.stats['mm_edge_count']:,} edges, "
+                        f"{self.stats['mm_transfer_count']:,} transfers")
+        except NotImplementedError as e:
+            logger.warning(f"  multimodal (realistic) skipped: {e}")
+        except Exception as e:
+            logger.warning(f"  multimodal build failed: {e}")
 
     def _add_h3_indexing(self) -> None:
         """Add H3 spatial indexing."""

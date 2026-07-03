@@ -325,3 +325,178 @@ class Router:
         """Shortest route between two edge ids, reusing the prebuilt graph."""
         return route(self.con, from_edge, to_edge, mode=self.mode, weight=self.weight,
                      graph=self.graph)
+
+
+# ---- multimodal (intermodal) routing over the mm.* layered graph ------------------------------
+
+# The pedestrian layer every mode-change routes through (matches MultimodalBuilder). A trip is
+# walk* (drive|cycle)* walk*: you can only *enter* a vehicle from walking and *leave* it back to
+# walking, so every vehicular leg is bracketed by walking.
+_HUB_MODE = "walking"
+
+
+def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
+                     end_mode: str = "walking", enforce_sequence: bool = True):
+    """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
+
+    Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
+    by :class:`duckosm.processors.multimodal.MultimodalBuilder` — vertices are ``(node_id, mode)``,
+    intra-mode arcs are ``mm.edges`` (weight ``cost_s``) and inter-mode arcs are ``mm.transfers``
+    (a transfer penalty in seconds). So a single trip can **switch mode** (walk → drive → walk).
+
+    Everything is weighted in **seconds**, so ``time_s`` is exactly ``Σ edge cost_s + Σ transfer
+    cost_s``. A node-based Dijkstra (``heapq``); needs no networkx.
+
+    Parameters
+    ----------
+    con : DuckDB connection to a db that has an ``mm`` schema (run ``duckosm multimodal`` first).
+    src_node, dst_node : OSM junction ``node_id``s (as in ``<mode>.nodes`` / ``mm.edges``).
+    schema : the multimodal schema (default ``"mm"``).
+    start_mode, end_mode : the mode you begin / end the trip in (default walking on both ends).
+    enforce_sequence : when True (default) restrict the trip to ``walk* (drive|cycle)* walk*`` — at
+        most one contiguous vehicular segment, entered and left via walking. False = plain layered
+        Dijkstra (any mode alternation the transfers allow).
+
+    Returns a dict::
+
+        { "time_s":    float,                       # door-to-door seconds (edges + transfers)
+          "length_m":  float,                       # summed edge length
+          "edges":     [(mode, edge_id), …],        # full ordered path
+          "legs":      [{"mode","edges","time_s","path"}, …],   # grouped into same-mode legs
+          "transfers": [{"node_id","from_mode","to_mode","cost_s","kind"}, …],
+          "nodes":     [node_id, …] }               # junction path (consecutive dups collapsed)
+
+    ``None`` if the two nodes aren't connected (e.g. no transfers → the layers are disconnected).
+    Raises ``ValueError`` if an endpoint isn't present in its mode's layer.
+    """
+    import heapq
+
+    try:
+        con.execute("INSTALL spatial; LOAD spatial;")
+    except Exception:
+        pass
+
+    # --- load adjacency (two SQL reads) ---------------------------------------------------------
+    adj: dict = {}                       # (mode, node) -> [(nbr_node, edge_id, cost_s)]
+    nodes_by_mode: dict = {}             # mode -> {node_id}
+    for mode, s, t, eid, cost in con.execute(
+            f"SELECT mode, source, target, edge_id, cost_s FROM {schema}.edges").fetchall():
+        adj.setdefault((mode, s), []).append((t, eid, float(cost) if cost is not None else 0.0))
+        nm = nodes_by_mode.setdefault(mode, set())
+        nm.add(s)
+        nm.add(t)
+    tadj: dict = {}                      # (from_mode, node) -> [(to_mode, cost_s, kind)]
+    for nid, fm, tm, cost, kind in con.execute(
+            f"SELECT node_id, from_mode, to_mode, cost_s, kind FROM {schema}.transfers").fetchall():
+        tadj.setdefault((fm, nid), []).append((tm, float(cost) if cost is not None else 0.0, kind))
+
+    if src_node not in nodes_by_mode.get(start_mode, set()):
+        raise ValueError(f"src node {src_node} not in the '{start_mode}' layer of {schema}.edges")
+    if dst_node not in nodes_by_mode.get(end_mode, set()):
+        raise ValueError(f"dst node {dst_node} not in the '{end_mode}' layer of {schema}.edges")
+
+    # --- Dijkstra over states (node_id, mode, phase) --------------------------------------------
+    INF = float("inf")
+    init_phase = (0 if start_mode == _HUB_MODE else 1) if enforce_sequence else 0
+    start = (src_node, start_mode, init_phase)
+    dist = {start: 0.0}
+    prev: dict = {}                      # state -> (prev_state, step)
+    pq = [(0.0, src_node, start_mode, init_phase)]
+    goal = None
+    while pq:
+        d, node, mode, phase = heapq.heappop(pq)
+        state = (node, mode, phase)
+        if d > dist.get(state, INF):
+            continue
+        if node == dst_node and mode == end_mode:
+            goal = state
+            break
+        # intra-mode edges — never change mode/phase
+        for nbr, eid, cost in adj.get((mode, node), ()):
+            ns = (nbr, mode, phase)
+            nd = d + cost
+            if nd < dist.get(ns, INF):
+                dist[ns] = nd
+                prev[ns] = (state, ("edge", eid, mode, cost))
+                heapq.heappush(pq, (nd, nbr, mode, phase))
+        # inter-mode transfers — same node, change mode (+ enforce the walk* veh* walk* phase)
+        for tm, cost, kind in tadj.get((mode, node), ()):
+            nphase = phase
+            if enforce_sequence:
+                entering = mode == _HUB_MODE and tm != _HUB_MODE
+                leaving = mode != _HUB_MODE and tm == _HUB_MODE
+                if entering:
+                    if phase != 0:
+                        continue            # already used (or past) the one vehicular segment
+                    nphase = 1
+                elif leaving:
+                    if phase != 1:
+                        continue
+                    nphase = 2
+            ns = (node, tm, nphase)
+            nd = d + cost
+            if nd < dist.get(ns, INF):
+                dist[ns] = nd
+                prev[ns] = (state, ("transfer", mode, tm, cost, kind))
+                heapq.heappush(pq, (nd, node, tm, nphase))
+
+    if goal is None:
+        return None
+
+    # --- reconstruct the ordered state path, then walk the steps between states ------------------
+    state_path = [goal]
+    s = goal
+    while s in prev:
+        s = prev[s][0]
+        state_path.append(s)
+    state_path.reverse()
+
+    edges_seq: list = []                 # (mode, edge_id) in order
+    legs: list = []
+    transfers: list = []
+    nodes: list = [state_path[0][0]]
+    for b in state_path[1:]:
+        a, step = prev[b]
+        if a[0] != nodes[-1]:
+            nodes.append(a[0])
+        if step[0] == "edge":
+            _, eid, mode, cost = step
+            edges_seq.append((mode, eid))
+            if not legs or legs[-1]["mode"] != mode:
+                legs.append({"mode": mode, "edges": [], "time_s": 0.0})
+            legs[-1]["edges"].append(eid)
+            legs[-1]["time_s"] += cost
+        else:
+            _, fm, tm, cost, kind = step
+            transfers.append({"node_id": a[0], "from_mode": fm, "to_mode": tm,
+                              "cost_s": cost, "kind": kind})
+        if b[0] != nodes[-1]:
+            nodes.append(b[0])
+
+    # --- per-edge detail (name/highway/length/cost/geometry) for each leg ------------------------
+    detail: dict = {}
+    ids = {e for _, e in edges_seq}
+    if ids:
+        idlist = ", ".join(str(e) for e in ids)
+        for row in con.execute(
+                f"SELECT mode, edge_id, name, highway, length_m, cost_s, "
+                f"ST_AsText(geometry) AS wkt FROM {schema}.edges "
+                f"WHERE edge_id IN ({idlist})").fetchall():
+            detail[(row[0], row[1])] = row
+    length_m = 0.0
+    for leg in legs:
+        leg["path"] = []
+        for eid in leg["edges"]:
+            r = detail.get((leg["mode"], eid))
+            if r is None:
+                continue
+            leg["path"].append({"edge_id": eid, "name": r[2], "highway": r[3],
+                                "length_m": r[4], "cost_s": r[5], "geometry": r[6]})
+            if r[4] is not None:
+                length_m += r[4]
+
+    time_s = sum(leg["time_s"] for leg in legs) + sum(t["cost_s"] for t in transfers)
+    logger.info(f"route_multimodal: {src_node} -> {dst_node}: {len(legs)} leg(s), "
+                f"{len(transfers)} transfer(s), {time_s:.1f}s")
+    return {"time_s": time_s, "length_m": length_m, "edges": edges_seq, "legs": legs,
+            "transfers": transfers, "nodes": nodes}

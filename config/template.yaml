@@ -74,6 +74,15 @@ validation:
   assert_no_stranded_named: true       # no named drivable through-street left disconnected
   assert_edge_id_stable: true          # regression vs fixture (pbf) / vs parent (duckdb)
 
+# ---- MULTIMODAL (intermodal walk<->drive<->cycle routing; see docs/multimodal.md) --
+multimodal:
+  enabled: false                       # build the mm.* transfer graph after the per-mode builds
+  transfer_s: 60                       # flat transfer penalty (seconds) at each shared junction (v1 coarse)
+  realistic: false                     # v2 park-and-ride (extract parking POIs) — NOT yet implemented
+  transfer_costs: null                 # optional per-direction overrides, e.g. {"walking->driving": 60, "driving->walking": 30}
+  categories: null                     # v2 OSM POI categories (reserved)
+  # NOTE: needs >=2 modes AND `walking` present (walking is the pedestrian hub between modes).
+
 # ---- REPORT + VISUALIZATION ------------------------------------------------
 report:
   enabled: true                        # write reports/<name>_<ts>.{md,html} (stats, filter audit, components, validation)

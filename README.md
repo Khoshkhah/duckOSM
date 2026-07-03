@@ -12,6 +12,10 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   Driving filtering is **access-aware** — it keeps drivable shared streets
   (`highway=pedestrian` etc. with `motor_vehicle=yes`, reclassed `living_street`) and
   drops drivable-class ways that forbid cars (`motor_vehicle=no` / `access=no`)
+- **Intermodal (multimodal) routing**: stitch the per-mode networks into one layered graph
+  (`mm.edges` + `mm.transfers`) so a single trip can **switch mode mid-route** — walk → drive →
+  walk (park-and-ride). Build with `duckosm multimodal <db>`, route with `route_multimodal()`.
+  See [`docs/multimodal.md`](docs/multimodal.md)
 - **Stable ids**: `edge_id` is a deterministic content hash, so rebuilds don't renumber
   the graph and downstream consumers survive without a full re-match
 - **Two source modes**: build from a PBF, **or clip an area out of an existing build**
@@ -56,8 +60,9 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 
 ### CLI
 
-With the venv activated, the `duckosm` command has four subcommands. Run
-`duckosm --help` for the list, or `duckosm <command> --help` for a command's options.
+With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
+`viz`, `sumo`, `export-graph`, `multimodal`). Run `duckosm --help` for the list, or
+`duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
 
@@ -112,6 +117,16 @@ gives the edge-based routing `DiGraph`:
 duckosm export-graph data/db/sodermalm.duckdb              # -> sodermalm_driving.graphml (node graph)
 duckosm export-graph data/db/sodermalm.duckdb -o sm.gpickle   # gpickle (lossless, Python-only)
 duckosm export-graph data/db/sodermalm.duckdb -g edge -o routing.graphml  # edge-based routing graph
+```
+
+**`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
+(`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes
+including `walking`; writes the `mm` schema in place. Route the result with
+`duckosm.route_multimodal(con, src_node, dst_node)`:
+
+```bash
+duckosm multimodal data/db/sodermalm.duckdb --transfer-cost 60    # flat transfer penalty (seconds)
+# or enable it during a build: modes: [driving, walking] + multimodal: {enabled: true} in the config
 ```
 
 Not activated? Use `.venv/bin/duckosm <command> ...`, `python -m duckosm <command> ...`,

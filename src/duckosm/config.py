@@ -85,6 +85,23 @@ class Validation:
 
 
 @dataclass
+class Multimodal:
+    """Intermodal (walk↔drive↔cycle) transfer graph — the `mm.*` tables. See docs/multimodal.md.
+
+    When ``enabled``, a post-mode step builds ``mm.edges`` (the per-mode ``edges`` unioned with a
+    ``mode`` column) and ``mm.transfers`` (the mode-change arcs), so a single trip can switch mode
+    (park-and-ride). Needs ≥2 modes including ``walking`` (the pedestrian hub).
+    """
+    enabled: bool = False
+    transfer_s: float = 60.0                        # flat transfer penalty (seconds), v1 coarse
+    realistic: bool = False                         # v2 park-and-ride (not yet implemented)
+    # optional per-direction overrides, keyed "from->to" e.g. {"walking->driving": 60,
+    # "driving->walking": 30}; any pair not listed falls back to `transfer_s`.
+    transfer_costs: Optional[dict] = None
+    categories: Optional[list] = None               # v2 OSM POI categories (reserved)
+
+
+@dataclass
 class Report:
     """Build report (reports/<name>_<ts>.{md,html})."""
     enabled: bool = False
@@ -117,6 +134,7 @@ class Config:
     validation: Validation = field(default_factory=Validation)
     report: Report = field(default_factory=Report)
     viz: Viz = field(default_factory=Viz)
+    multimodal: Multimodal = field(default_factory=Multimodal)
 
     # ---- effective accessors (unify the new blocks with the back-compat flat keys) ----
     @property
@@ -153,6 +171,7 @@ class Config:
         validation = Validation(**_only_known(Validation, data.get("validation")))
         report = Report(**_only_known(Report, data.get("report")))
         viz = Viz(**_only_known(Viz, data.get("viz")))
+        multimodal = Multimodal(**_only_known(Multimodal, data.get("multimodal")))
 
         return cls(
             name=data.get("name", "default"),
@@ -164,6 +183,7 @@ class Config:
             modes=data.get("modes") or ["driving"],
             options=options, source=source, boundary=boundary,
             clip=clip, validation=validation, report=report, viz=viz,
+            multimodal=multimodal,
         )
 
     @classmethod

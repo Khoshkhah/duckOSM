@@ -246,6 +246,42 @@ def sumo(db, mode, out_dir, name, connections, config, netconvert):
         click.echo(f"wrote {out['net']}")
 
 
+@main.command()
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--transfer-cost', type=float, default=60.0, show_default=True,
+              help='Flat transfer penalty in seconds at each shared junction (v1 coarse)')
+@click.option('--schema', default='mm', show_default=True,
+              help='Target schema for the mm.edges / mm.transfers tables')
+@click.option('--realistic', is_flag=True, default=False,
+              help='v2 park-and-ride (restrict transfers to parking POIs) — NOT yet implemented')
+def multimodal(db, transfer_cost, schema, realistic):
+    """Build the intermodal transfer graph (mm.edges + mm.transfers) into a built db.
+
+    Stitches the per-mode networks (driving/walking/cycling) into one layered graph so a trip can
+    switch mode mid-route (walk->drive->walk / park-and-ride). Needs >=2 modes including walking.
+    Route the result with `duckosm.route_multimodal(con, src_node, dst_node)`. See
+    docs/multimodal.md. The db is modified in place (writes the `mm` schema).
+    """
+    import duckdb
+
+    from duckosm.processors import MultimodalBuilder
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    con = duckdb.connect(db)                     # read-write: this writes the mm.* tables
+    try:
+        stats = MultimodalBuilder(con, transfer_s=transfer_cost, realistic=realistic,
+                                  schema=schema).run()
+        con.execute("CHECKPOINT")
+    except NotImplementedError as e:
+        raise click.ClickException(str(e))
+    except Exception as e:
+        raise click.ClickException(str(e))
+    finally:
+        con.close()
+    click.echo(f"wrote {schema}.edges ({stats.get('edge_count', 0)} edges) and "
+               f"{schema}.transfers ({stats.get('transfer_count', 0)} arcs)")
+
+
 @main.command(name="export-graph")
 @click.argument('db', type=click.Path(exists=True))
 @click.option('--mode', '-m', default='driving', show_default=True,

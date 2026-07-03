@@ -1,8 +1,57 @@
 # Multimodal (intermodal) routing — design & build spec
 
-> **Status:** design spec, not yet implemented. This document is written to be built from in a
-> fresh session — it records the current data model, the additions needed, and a concrete build
-> plan. Nothing in the codebase implements mode-switching yet.
+> **Status:** ✅ **Phase 1 (v1 coarse) implemented.** walk ↔ drive ↔ cycle transfers, OSM-only,
+> static Dijkstra. Build the `mm.*` tables with `duckosm multimodal <db>` (or `multimodal.enabled`
+> in a build config) and route with `duckosm.route_multimodal`. The **v2 realistic** park-and-ride
+> path (`--realistic`) is wired but stubbed (raises `NotImplementedError`); transit (Phase 3) is
+> out of scope. The remaining sections below are the original design spec, kept as the rationale
+> and the roadmap for v2/transit.
+
+## Usage (Phase 1, v1 coarse)
+
+Build the intermodal graph into a network that already has ≥2 modes including `walking`:
+
+```bash
+# add mm.edges + mm.transfers to an existing built db (writes the `mm` schema in place)
+duckosm multimodal data/db/sodermalm.duckdb --transfer-cost 60
+
+# or build it as part of a fresh build — in the YAML config:
+#   modes: [driving, walking]
+#   multimodal: {enabled: true, transfer_s: 60}
+```
+
+Then route a trip that switches mode (walk → drive → walk / park-and-ride):
+
+```python
+import duckdb
+from duckosm import route_multimodal
+
+con = duckdb.connect("data/db/sodermalm.duckdb")     # read-write only needed for the build step
+r = route_multimodal(con, SRC_NODE, DST_NODE)        # OSM junction node_ids; default walking↔walking
+r["time_s"]                                          # door-to-door seconds = Σ edge cost_s + Σ transfer cost_s
+r["legs"]                                            # [{mode, edges, time_s, path}, …] grouped by mode
+r["transfers"]                                       # the mode-change points [{node_id, from_mode, to_mode, cost_s, kind}]
+route_multimodal(con, SRC, DST, start_mode="walking", end_mode="driving")   # e.g. end at a parked car
+route_multimodal(con, SRC, DST, enforce_sequence=False)   # allow any mode alternation (default enforces walk* veh* walk*)
+```
+
+`route_multimodal` is a node-based Dijkstra over vertices `(node_id, mode)` (hand-rolled `heapq`, no
+networkx needed). `enforce_sequence=True` (default) restricts a trip to `walk* (drive|cycle)* walk*`
+— at most one contiguous vehicular segment, entered and left via walking.
+
+**Visualise a route by mode** (walking green, driving red, cycling blue) with the sibling
+[`mapstyle`](../../mapstyle) deck.gl viewer:
+
+```bash
+# auto-picks a walk->drive->walk trip across Sodermalm and renders it
+python scripts/multimodal_route_map.py --db data/db/sodermalm_pbf.duckdb
+python scripts/multimodal_route_map.py --db <db> --src <node_id> --dst <node_id> --out-dir reports/mm
+python reports/<db-stem>_multimodal_route/serve.py     # then open the printed http URL
+```
+
+Implementation: `MultimodalBuilder` in `src/duckosm/processors/multimodal.py`, `route_multimodal` in
+`src/duckosm/routing.py`, the `multimodal` CLI subcommand in `src/duckosm/cli.py`, config block in
+`src/duckosm/config.py`, tests in `tests/test_multimodal.py`.
 
 ## Goal
 

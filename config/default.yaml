@@ -45,6 +45,11 @@ validation:
   enabled: true
   fail_on_error: true
 
+# ---- MULTIMODAL (walk<->drive<->cycle transfers; needs >=2 modes incl. walking)
+multimodal:
+  enabled: false                       # build mm.edges + mm.transfers for intermodal routing
+  # transfer_s: 60                     #   flat transfer penalty in seconds (v1 coarse)
+
 # ---- REPORT + VISUALIZATION ---------------------------------------------------
 report:
   enabled: true                        # reports/<name>_<ts>.{md,html}

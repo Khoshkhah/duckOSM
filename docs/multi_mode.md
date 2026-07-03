@@ -3,8 +3,9 @@
 duckOSM allows you to generate multiple routing networks (Driving, Walking, Cycling) in a single import run. Each mode is isolated within its own DuckDB schema, allowing for mode-specific filtering, speed profiles, and topological rules.
 
 > Looking for **intermodal** routing that *switches* between these modes in one trip
-> (walk→drive→walk / park-and-ride)? See [`multimodal.md`](multimodal.md) — a design spec for
-> connecting these separate networks. It is not yet implemented.
+> (walk→drive→walk / park-and-ride)? See [`multimodal.md`](multimodal.md) — Phase 1 (walk ↔ drive ↔
+> cycle) is implemented: `duckosm multimodal <db>` builds the `mm.*` graph and
+> `duckosm.route_multimodal(...)` routes across it.
 
 ## Available Modes
 
