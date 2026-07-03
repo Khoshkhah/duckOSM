@@ -39,6 +39,7 @@ class Options:
     boundary_cell_resolutions: Optional[list[int]] = None
     timezone: bool = False
     build_features: bool = False           # build the features.* base-map schema (Shortbread layers) for duckmap to render
+    clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
 
 
 @dataclass

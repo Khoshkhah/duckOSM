@@ -432,14 +432,21 @@ class DuckOSM:
         if clipped == self.pbf_path:
             return                                            # already the clipped file
         if not clipped.exists():
-            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium) ...")
-            # `--strategy complete_ways` (osmium's default, set explicitly): every way with at
-            # least one node inside the boundary is kept in FULL — all its nodes, including
-            # shared intersection nodes at/near the edge. Keeps the graph connected (no dropped
-            # junctions) and way geometries intact. (`smart` additionally completes relations —
-            # switch to it if multipolygon features that cross the boundary come out broken.)
+            # Extract strategy, in order of completeness:
+            #  - complete_ways : every way with a node in the region kept in FULL — all its nodes
+            #    incl. shared intersection junctions (connected graph, intact way geometry). But it
+            #    does NOT complete multipolygon relations: a river/landcover/coastline polygon whose
+            #    member ways extend past the boundary loses those members and fails to close (its
+            #    ST_BuildArea comes out empty and the polygon is dropped).
+            #  - smart : complete_ways PLUS completing multipolygon/boundary relations (pulls in
+            #    every member way), so those area features build correctly.
+            # Default to `smart` when we build the features base map (needs whole multipolygons),
+            # else `complete_ways` (leaner, enough for routing). Overridable via options.clip_strategy.
+            strategy = self.config.options.clip_strategy or (
+                "smart" if self.config.options.build_features else "complete_ways")
+            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium, --strategy {strategy}) ...")
             r = subprocess.run(
-                [osmium, "extract", "--strategy", "complete_ways", "--polygon", str(boundary),
+                [osmium, "extract", "--strategy", strategy, "--polygon", str(boundary),
                  "--output", str(clipped), "--overwrite", str(self.pbf_path)],
                 capture_output=True, text=True)
             if r.returncode != 0:
