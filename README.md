@@ -43,7 +43,10 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   then verify that export with `duckosm gis-debug` (reads the file back through GDAL → an HTML map +
   `edge_id`/round-trip QA audit); or extract a standalone **GMNS** network DuckDB — every GMNS table
   OSM supports incl. **lane detail** and turn **movements** (`to_gmns` / `duckosm gmns`, `link_id` =
-  `edge_id` — see [`docs/gmns_export.md`](docs/gmns_export.md))
+  `edge_id` — see [`docs/gmns_export.md`](docs/gmns_export.md)), optionally with a **mesoscopic**
+  lane-level network (`duckosm gmns --meso` — [`docs/gmns_meso.md`](docs/gmns_meso.md)) and an
+  **interactive HTML viewer** to explore lanes / meso with hover tooltips (`duckosm gmns-viz` —
+  [`docs/gmns_viewer.md`](docs/gmns_viewer.md))
 - **Admin boundaries**: optional table of all OSM administrative levels with a
   derived parent hierarchy
 - **Portable**: single `.duckdb` file, queryable anywhere
