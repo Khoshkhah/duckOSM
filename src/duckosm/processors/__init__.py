@@ -11,6 +11,7 @@ from duckosm.processors.restrictions import RestrictionProcessor
 from duckosm.processors.h3_indexer import H3Indexer
 from duckosm.processors.edge_graph import EdgeGraphBuilder
 from duckosm.processors.graph_simplifier import GraphSimplifier
+from duckosm.processors.path_connector import PathConnector
 from duckosm.processors.component_filter import ComponentFilter
 from duckosm.processors.duckdb_clipper import DuckdbClipper
 from duckosm.processors.osm_overrides import OsmOverrides
@@ -27,6 +28,7 @@ __all__ = [
     "H3Indexer",
     "EdgeGraphBuilder",
     "GraphSimplifier",
+    "PathConnector",
     "ComponentFilter",
     "DuckdbClipper",
     "MultimodalBuilder",

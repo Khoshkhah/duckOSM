@@ -72,8 +72,9 @@ class Clip:
     predicate: str = "intersects"                  # 'within' | 'intersects' | 'centroid'
     keep_largest_component: bool = True
     min_component_edges: int = 1
-    connectivity_rescue: bool = True
-    strongly_connected: bool = False
+    connectivity_rescue: bool = True               # reconnect dangling path ends (PathConnector,
+    connect_snap_m: float = 10.0                   #   cycling/walking) within this many metres,
+    strongly_connected: bool = False               #   BEFORE the component filter. See docs/connectivity_repair.md
 
 
 @dataclass

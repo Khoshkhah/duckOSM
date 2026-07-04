@@ -7,8 +7,8 @@ edge_graph is built (PBF mode) or after a duckdb clip. Operates on the tables of
 active schema (`USE <mode>`): edges / nodes / edge_graph / turn_restrictions.
 
 Weakly-connected components are computed in Python via union-find on (source, target) —
-fast for the area-sized graphs this runs on. `connectivity_rescue` and
-`strongly_connected` are accepted but not yet implemented (logged as a no-op).
+fast for the area-sized graphs this runs on. `connectivity_rescue` is implemented upstream by
+`PathConnector` (reconnects dangling paths before this step); `strongly_connected` is still a no-op.
 """
 import logging
 from collections import Counter
@@ -28,9 +28,11 @@ class ComponentFilter(BaseProcessor):
         self.strongly_connected = strongly_connected
 
     def run(self) -> None:
-        if self.connectivity_rescue or self.strongly_connected:
-            logger.warning("  ComponentFilter: connectivity_rescue / strongly_connected not yet "
-                           "implemented — using weakly-connected keep-largest")
+        # connectivity_rescue is now handled UPSTREAM by PathConnector (adds connector edges before
+        # this runs; see docs/connectivity_repair.md). strongly_connected is still a no-op.
+        if self.strongly_connected:
+            logger.warning("  ComponentFilter: strongly_connected not yet implemented — "
+                           "using weakly-connected keep-largest")
 
         edges = self.fetchall("SELECT edge_id, source, target FROM edges")
         if not edges:

@@ -24,6 +24,7 @@ from duckosm.processors import (
     H3Indexer,
     EdgeGraphBuilder,
     GraphSimplifier,
+    PathConnector,
     ComponentFilter,
     DuckdbClipper,
 )
@@ -131,6 +132,12 @@ class DuckOSM:
 
             if self.config.options.simplify:
                 steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
+
+            # Reconnect dangling cycleway/footway ends to the network BEFORE the component filter, so
+            # disconnected paths aren't pruned. Cycling/walking only (driving networks are connected).
+            if self.config.clip.connectivity_rescue and mode in ("cycling", "walking"):
+                steps.append(("connect_paths", f"[{mode}] Connecting dangling paths",
+                              lambda: self._connect_paths(mode)))
 
             if self.config.options.process_speeds:
                 steps.append(("process_speeds", f"[{mode}] Processing speeds", lambda: self._process_speeds(mode)))
@@ -569,7 +576,16 @@ class DuckOSM:
         
         self.stats['simplification_time'] = time.time() - start
         logger.info(f"  Graph simplified: {self.stats['node_count']:,} nodes, {self.stats['edge_count']:,} edges")
-    
+
+    def _connect_paths(self, mode: str) -> None:
+        """Reconnect dangling cycleway/footway ends to the network (PathConnector) before the
+        component filter would drop them. See docs/connectivity_repair.md."""
+        before = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        PathConnector(self.con, snap_m=self.config.clip.connect_snap_m).run()
+        after = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        self.stats['edge_count'] = after
+        self.stats['node_count'] = self.con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+
     def _process_speeds(self, mode: str) -> None:
         """Process and fill missing speed limits."""
         logger.info(f"[{mode}] Processing speeds...")
