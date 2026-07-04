@@ -428,22 +428,25 @@ class DuckOSM:
         boundary = Path(self._effective_boundary_path()).resolve()
         cache_dir = Path("pbf")
         cache_dir.mkdir(parents=True, exist_ok=True)
-        clipped = (cache_dir / f"{self.config.name}.osm.pbf").resolve()
+        # Extract strategy, in order of completeness:
+        #  - complete_ways : every way with a node in the region kept in FULL — all its nodes
+        #    incl. shared intersection junctions (connected graph, intact way geometry). But it
+        #    does NOT complete multipolygon relations: a river/landcover/coastline polygon whose
+        #    member ways extend past the boundary loses those members and fails to close (its
+        #    ST_BuildArea comes out empty and the polygon is dropped).
+        #  - smart : complete_ways PLUS completing multipolygon/boundary relations (pulls in
+        #    every member way), so those area features build correctly.
+        # Default to `smart` when we build the features base map (needs whole multipolygons),
+        # else `complete_ways` (leaner, enough for routing). Overridable via options.clip_strategy.
+        strategy = self.config.options.clip_strategy or (
+            "smart" if self.config.options.build_features else "complete_ways")
+        # Strategy is part of the cache key: a clip made with a different strategy is NOT
+        # interchangeable (complete_ways drops multipolygon members smart keeps), so it must never be
+        # silently reused — that once dropped the Emajõgi river polygon on a features build.
+        clipped = (cache_dir / f"{self.config.name}.{strategy}.osm.pbf").resolve()
         if clipped == self.pbf_path:
             return                                            # already the clipped file
         if not clipped.exists():
-            # Extract strategy, in order of completeness:
-            #  - complete_ways : every way with a node in the region kept in FULL — all its nodes
-            #    incl. shared intersection junctions (connected graph, intact way geometry). But it
-            #    does NOT complete multipolygon relations: a river/landcover/coastline polygon whose
-            #    member ways extend past the boundary loses those members and fails to close (its
-            #    ST_BuildArea comes out empty and the polygon is dropped).
-            #  - smart : complete_ways PLUS completing multipolygon/boundary relations (pulls in
-            #    every member way), so those area features build correctly.
-            # Default to `smart` when we build the features base map (needs whole multipolygons),
-            # else `complete_ways` (leaner, enough for routing). Overridable via options.clip_strategy.
-            strategy = self.config.options.clip_strategy or (
-                "smart" if self.config.options.build_features else "complete_ways")
             logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium, --strategy {strategy}) ...")
             r = subprocess.run(
                 [osmium, "extract", "--strategy", strategy, "--polygon", str(boundary),

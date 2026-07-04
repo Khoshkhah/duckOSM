@@ -21,3 +21,6 @@ options:
   process_speeds: true
   extract_restrictions: true
   calculate_costs: true
+  build_features: true         # also build features.* (Shortbread base-map layers) into THIS db so
+                               # mapstyle renders roads + base map from one duckOSM db (auto smart-clip
+                               # -> complete river/landcover multipolygons)

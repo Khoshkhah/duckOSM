@@ -11,6 +11,9 @@ Shortbread specifics that differ from a naive per-OSM-tag split:
 - POIs split into ``pois`` (amenity/shop/...) and ``public_transport`` (stops/stations).
 - ``amenity=parking`` and other amenity *areas* go to ``sites`` (Shortbread), not ``pois``.
 - Shortbread has no barriers/power layers — out of scope (they were disabled stubs in duckmap).
+- **traffic** (``highway=traffic_signals`` / ``crossing``) is a duckOSM extension beyond Shortbread:
+  the base map renders these road-furniture nodes, and crossings carry a ``bearing`` (the direction
+  of the road they sit on) so the marking can be rotated to lie across the road.
 """
 
 from duckosm.features.geometry import build_area_layer, build_line_layer, build_point_layer
@@ -144,6 +147,54 @@ class Pois(Layer):
                 f"{_t('leisure')}, {_t('man_made')})")
 
 
+class Traffic(Layer):
+    """Traffic-control nodes — ``highway=traffic_signals`` and ``highway=crossing`` (pedestrian
+    crossings). Not a Shortbread layer, but the base map renders them, so duckOSM extracts them
+    here. Crossings additionally carry a ``bearing`` (the direction of the road they sit on) so the
+    crossing marking can be rotated to lie across the road."""
+    name = "traffic"
+    geom_kind = "point"
+    where_sql = f"{_t('highway')} IN ('traffic_signals','crossing')"
+    kind_sql = f"{_t('highway')}"
+
+    def build(self) -> int:
+        n = build_point_layer(self.con, self.name, self.where_sql, self.kind_sql)
+        # A crossing node is a vertex of the ROAD way it crosses; bearing = direction from the
+        # previous to the next node along that road (so the marking rotates to lie across it). The
+        # node is also a vertex of the crossing footway/cycleway (perpendicular) — exclude those.
+        self.con.execute("ALTER TABLE features.traffic ADD COLUMN IF NOT EXISTS bearing DOUBLE")
+        self.con.execute("""
+            UPDATE features.traffic SET bearing = b.bearing
+            FROM (
+                WITH hw AS (   -- ROAD ways only (skip the footway/cycleway/path the crossing runs on)
+                    SELECT refs FROM raw.ways
+                    WHERE map_extract(tags,'highway')[1] IS NOT NULL
+                      AND map_extract(tags,'highway')[1] NOT IN
+                          ('footway','path','steps','corridor','bridleway','cycleway','pedestrian',
+                           'construction','proposed')
+                ),
+                pos AS (
+                    SELECT p.osm_id AS node_id, h.refs AS refs, list_position(h.refs, p.osm_id) AS pp
+                    FROM features.traffic p JOIN hw h ON list_contains(h.refs, p.osm_id)
+                    WHERE p.kind = 'crossing'
+                    QUALIFY row_number() OVER (PARTITION BY p.osm_id ORDER BY len(h.refs) DESC) = 1
+                ),
+                nb AS (
+                    SELECT node_id, refs[greatest(pp-1, 1)] AS a, refs[least(pp+1, len(refs))] AS b
+                    FROM pos
+                )
+                SELECT nb.node_id,
+                       degrees(atan2((n2.lon-n1.lon)*cos(radians((n1.lat+n2.lat)/2)),
+                                     (n2.lat-n1.lat))) AS bearing
+                FROM nb JOIN raw.nodes n1 ON n1.osm_id = nb.a
+                        JOIN raw.nodes n2 ON n2.osm_id = nb.b
+                WHERE nb.a <> nb.b
+            ) b
+            WHERE features.traffic.osm_id = b.node_id
+        """)
+        return n
+
+
 class PlaceLabels(Layer):
     name = "place_labels"
     geom_kind = "point"
@@ -176,6 +227,7 @@ LAYERS = [
     Boundaries,
     PublicTransport,
     Pois,
+    Traffic,
     PlaceLabels,
 ]
 
