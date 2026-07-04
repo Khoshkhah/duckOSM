@@ -28,13 +28,13 @@ def _source(path):
     p = lambda w: f"ST_GeomFromText('{w}')"
     con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
     con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),"
-                f"(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.07 59.33)')})")
+                f"(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.07 59.31)')})")  # 3 is south of 2
     con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
                 "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, length_m FLOAT, "
                 "maxspeed_kmh FLOAT, geometry GEOMETRY)")
     con.execute(f"""INSERT INTO driving.edges VALUES
         ({A},1,2,100,'primary','Main',2,false,80,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
-        ({B},2,3,101,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.07 59.33)')}),
+        ({B},2,3,101,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.07 59.31)')}),
         ({AR},2,1,100,'primary','Main',2,true,80,50,{p('LINESTRING(18.07 59.32,18.06 59.32)')})""")
     con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
     con.execute(f"INSERT INTO driving.edge_graph VALUES ({A},{B},{B},1.0),({A},{AR},{AR},1.0)")  # A->AR = U-turn
@@ -96,6 +96,35 @@ def test_signal_and_curb(tmp_path):
     assert con.execute("SELECT ctrl_type FROM gmns_driving.node WHERE node_id=2").fetchone()[0] == "signal"
     assert con.execute("SELECT count(*) FROM gmns_driving.signal_controller").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM gmns_driving.curb_seg WHERE regulation='lane'").fetchone()[0] >= 1
+
+
+def test_meso_network(tmp_path):
+    from duckosm.gmns import to_meso
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    to_meso(str(out), modes=["driving"])
+
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    q = lambda s: con.execute(s).fetchone()[0]
+    assert q("SELECT count(*) FROM meso_driving.meso_node") == 3 * 2          # 2 meso nodes per macro link
+    assert q("SELECT count(*) FROM meso_driving.meso_link WHERE meso_type='normal'") == 3
+    # one connector per legal movement (the A->AR U-turn was already dropped upstream)
+    assert (q("SELECT count(*) FROM meso_driving.meso_link WHERE meso_type='movement'")
+            == q("SELECT count(*) FROM gmns_driving.movement"))
+    # referential integrity: every endpoint resolves to a meso node
+    assert q("SELECT count(*) FROM meso_driving.meso_link l "
+             "WHERE from_node_id NOT IN (SELECT node_id FROM meso_driving.meso_node)") == 0
+    # reversible ids: 'M'||macro_link_id == the section link_id
+    assert q("SELECT count(*) FROM meso_driving.meso_link "
+             "WHERE meso_type='normal' AND 'M'||macro_link_id::VARCHAR = link_id") == 3
+    # turn:lanes drives the connector's lane range: A->B is a right turn, and A's lane 2 is the 'right' lane
+    lanes, s_ib, e_ib = con.execute(
+        f"SELECT lanes, start_ib_lane, end_ib_lane FROM meso_driving.meso_link "
+        f"WHERE link_id = 'X{A}-{B}'").fetchone()
+    assert (lanes, s_ib, e_ib) == (1, 2, 2)
 
 
 def test_to_csv_is_spec_clean(tmp_path):

@@ -165,6 +165,41 @@ duckosm gmns data/db/sodermalm.duckdb -m driving            # driving schema onl
 duckosm gmns data/db/sodermalm.duckdb -o out.duckdb --to-csv gmns/   # also dump spec CSVs
 ```
 
+## Comparison with osm2gmns
+
+[osm2gmns](https://github.com/jiawlu/OSM2GMNS) (Lu & Zhou, ASU) is the established OSM→GMNS tool. Both
+were run on the **same Södermalm PBF** (2026-07-04); this is an empirical diff, not a spec sheet.
+
+| | **duckOSM `gmns`** | **osm2gmns 1.0.1** (current pip) | **osm2gmns 0.7.6** (full) |
+|---|---|---|---|
+| Output | 10 tables in **one DuckDB** (+ CSV) | 2 CSVs (node, link) | 7 CSVs: macro node/link/**movement** + **meso** + **micro** |
+| Rows (driving/auto) | 2,876 links · 1,482 nodes | 3,542 · 2,215 | macro 3,540 · **meso 7,100** · **micro 35,352** |
+| `link_id` / `node_id` | **stable content hash** (`edge_id`) | sequential ints (OSM id in `osm_way_id`) | sequential ints (from 0) |
+| Lane detail | **per-lane rows** with `turn`/`allowed_uses`(bus/bike)/`width` from OSM tags + offset geom | lane **count** only | **meso/micro lane cells** — routable, with lane-change connectors, geometric offset |
+| Movements | 4,503, from the **turn-restriction-respecting** `edge_graph` | none | 4,558, **geometric**, with lane ranges + direction codes + geometry |
+| Intersection consolidation | no (preserves OSM topology) | **yes** | **yes** |
+| Multi-resolution meso/micro | no | no | **yes** |
+| Signals / curb tables | `signal_controller` + `curb_seg` | node `ctrl_type` only | node `ctrl_type` only |
+| Multimodal | 3 modes in one file, shared `edge_id` | one network type per run | one network type per run |
+
+**Read-out — they solve different problems:**
+
+- **osm2gmns is the deeper *modelling* tool.** Its 0.7.x line builds **multi-resolution** networks
+  (meso = lane-level, micro = cell-based with lane-change connectors — 35k micro links here) that are
+  microsimulation-ready, consolidates complex intersections, fills capacity defaults, generates
+  movements with lane ranges + direction codes, and integrates with DTALite / grid2demand. If the
+  goal is a ready-to-simulate model, it leads. (The current pip release **1.0.1** is a leaner C++
+  rewrite that emits only node+link.)
+- **duckOSM is the richer *network extract*.** It keeps a **stable, joinable `link_id`** (osm2gmns
+  renumbers every run), carries **per-lane OSM semantics** (bus/bike lane, turn arrow, width — from
+  `turn:lanes`/`bicycle:lanes`/`psv:lanes`/`width:lanes`, which osm2gmns' geometric lanes don't),
+  derives movements from a **turn-restriction-honoring** routing graph, adds signals + curb, keeps all
+  modes in **one queryable DuckDB** sharing `edge_id`, and plugs into the duckOSM spatial pipeline.
+
+The two are complementary: osm2gmns' geometric **lane topology** vs duckOSM's **lane semantics +
+stable ids**. A natural pairing is duckOSM for the stable-ID, measured-data-joined network and
+osm2gmns for the micro simulation build.
+
 ## Implementation
 
 Module `src/duckosm/gmns.py` (`to_gmns(source_db, out_path, …)`): opens a **new writable** target

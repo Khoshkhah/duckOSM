@@ -321,6 +321,120 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry):
     con.unregister("_curb_df")
 
 
+def _meso_modes_present(con):
+    """Modes that have a gmns_<mode> schema (a built GMNS network) to derive a meso net from."""
+    return [r[0].replace("gmns_", "") for r in con.execute(
+        "SELECT DISTINCT schema_name FROM duckdb_tables() "
+        "WHERE schema_name LIKE 'gmns_%' AND table_name = 'link' ORDER BY schema_name").fetchall()]
+
+
+def to_meso(gmns_db, modes=None, trim_m=6.0):
+    """Build a mesoscopic (lane-level) network into an existing GMNS DuckDB, from its gmns_<mode>
+    tables. Writes a ``meso_<mode>`` schema (``meso_node`` + ``meso_link``) per mode.
+
+    A meso net is two kinds of link: a **normal** (section) link per macro link, and a **movement**
+    (connector) link per legal turn (from ``movement``, so turn restrictions are honoured). Lane→turn
+    assignment (``start_ib_lane``/``end_ib_lane``) comes from the ``turn:lanes``-derived ``lane.turn``.
+    Ids are stable, reversible composites (``M<edge_id>`` / ``X<from>-<to>``); ``macro_link_id`` is kept
+    as a column. Default mode: ``driving`` (meso is a vehicular-lane construct). Returns per-mode counts.
+    """
+    import duckdb
+
+    con = duckdb.connect(gmns_db)                            # writable — adds meso_<mode> schemas
+    con.execute("INSTALL spatial; LOAD spatial;")
+    have = _meso_modes_present(con)
+    chosen = list(modes) if modes else ["driving"]
+    unknown = [m for m in chosen if m not in have]
+    if unknown:
+        con.close()
+        raise ValueError(f"mode(s) {unknown} have no gmns_<mode> schema (present: {have or 'none'})")
+
+    result = {}
+    for mode in chosen:
+        g, ms = f"gmns_{mode}", f"meso_{mode}"
+        con.execute(f"DROP SCHEMA IF EXISTS {ms} CASCADE")
+        con.execute(f"CREATE SCHEMA {ms}")
+        _build_meso_nodes(con, g, ms, trim_m)
+        _build_meso_links(con, g, ms, trim_m)
+        r = {
+            "meso_node": con.execute(f"SELECT count(*) FROM {ms}.meso_node").fetchone()[0],
+            "normal": con.execute(
+                f"SELECT count(*) FROM {ms}.meso_link WHERE meso_type='normal'").fetchone()[0],
+            "movement": con.execute(
+                f"SELECT count(*) FROM {ms}.meso_link WHERE meso_type='movement'").fetchone()[0],
+        }
+        r["meso_link"] = r["normal"] + r["movement"]
+        result[mode] = r
+        logger.info(f"MESO[{mode}]: {r['meso_node']:,} nodes, {r['meso_link']:,} links "
+                    f"({r['normal']:,} section + {r['movement']:,} connector) -> {ms}")
+    con.close()
+    return result
+
+
+def _build_meso_nodes(con, g, ms, trim_m):
+    """Two meso nodes per macro link — upstream/downstream, inset ``trim_m`` metres from each end."""
+    con.execute(f"""CREATE TABLE {ms}.meso_node AS
+      WITH L AS (SELECT link_id, from_node_id, to_node_id, geom,
+                        LEAST(0.35, {trim_m} / GREATEST("length", 0.1)) AS tf FROM {g}.link)
+      SELECT link_id::VARCHAR || 'u' AS node_id,
+             ST_X(ST_LineInterpolatePoint(geom, tf)) AS x_coord,
+             ST_Y(ST_LineInterpolatePoint(geom, tf)) AS y_coord,
+             from_node_id AS macro_node_id, link_id AS macro_link_id,
+             ST_LineInterpolatePoint(geom, tf) AS geom
+      FROM L
+      UNION ALL
+      SELECT link_id::VARCHAR || 'd',
+             ST_X(ST_LineInterpolatePoint(geom, 1 - tf)),
+             ST_Y(ST_LineInterpolatePoint(geom, 1 - tf)),
+             to_node_id, link_id, ST_LineInterpolatePoint(geom, 1 - tf)
+      FROM L""")
+
+
+def _build_meso_links(con, g, ms, trim_m):
+    """Normal (section) meso links + movement (connector) meso links."""
+    con.execute(f"""CREATE TABLE {ms}.meso_link AS
+      WITH L AS (SELECT link_id, geom, "length" AS len, lanes, free_speed, facility_type, allowed_uses,
+                        LEAST(0.35, {trim_m} / GREATEST("length", 0.1)) AS tf FROM {g}.link)
+      SELECT 'M' || link_id::VARCHAR AS link_id,
+             link_id::VARCHAR || 'u' AS from_node_id, link_id::VARCHAR || 'd' AS to_node_id,
+             1 AS dir_flag, (len * (1 - 2 * tf))::DOUBLE AS length, lanes::INTEGER AS lanes,
+             NULL::DOUBLE AS capacity, free_speed, facility_type, allowed_uses,
+             ST_AsText(ST_LineSubstring(geom, tf, 1 - tf)) AS geometry,
+             ST_LineSubstring(geom, tf, 1 - tf) AS geom,
+             'normal' AS meso_type, link_id AS macro_link_id, NULL::VARCHAR AS movement_id,
+             NULL::VARCHAR AS mvmt_txt_id, NULL::INTEGER AS start_ib_lane, NULL::INTEGER AS end_ib_lane,
+             NULL::VARCHAR AS ctrl_type
+      FROM L""")
+
+    con.execute(f"""INSERT INTO {ms}.meso_link
+      (link_id, from_node_id, to_node_id, dir_flag, length, lanes, capacity, free_speed,
+       facility_type, allowed_uses, geometry, geom, meso_type, macro_link_id, movement_id,
+       mvmt_txt_id, start_ib_lane, end_ib_lane, ctrl_type)
+      WITH lt AS (                        -- lanes feeding each (inbound link, turn category)
+        SELECT link_id AS ib,
+          CASE WHEN turn ILIKE '%through%' OR turn = 'thru' THEN 'thru'
+               WHEN turn ILIKE '%reverse%' OR turn ILIKE '%uturn%' THEN 'uturn'
+               WHEN turn ILIKE '%left%' THEN 'left'
+               WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
+          min(lane_num) AS mn, max(lane_num) AS mx, count(*) AS cnt
+        FROM {g}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
+      )
+      SELECT 'X' || m.ib_link_id::VARCHAR || '-' || m.ob_link_id::VARCHAR,
+             m.ib_link_id::VARCHAR || 'd', m.ob_link_id::VARCHAR || 'u', 1,
+             (ST_Distance(nd.geom, nu.geom) * 111320.0)::DOUBLE,
+             COALESCE(lt.cnt, 1)::INTEGER, NULL::DOUBLE, il.free_speed, 'connector', m.allowed_uses,
+             ST_AsText(ST_MakeLine(nd.geom, nu.geom)), ST_MakeLine(nd.geom, nu.geom),
+             'movement', NULL::BIGINT, m.mvmt_id,
+             CASE m.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' WHEN 'uturn' THEN 'U'
+                         ELSE 'T' END,
+             lt.mn, lt.mx, m.ctrl_type
+      FROM {g}.movement m
+      JOIN {ms}.meso_node nd ON nd.node_id = m.ib_link_id::VARCHAR || 'd'
+      JOIN {ms}.meso_node nu ON nu.node_id = m.ob_link_id::VARCHAR || 'u'
+      JOIN {g}.link il ON il.link_id = m.ib_link_id
+      LEFT JOIN lt ON lt.ib = m.ib_link_id AND lt.cat = m.type""")
+
+
 def _dump_csv(con, modes, to_csv):
     """COPY each GMNS table to a spec-standard CSV (dropping the non-spec geom/turn columns)."""
     tables = ["config", "node", "link", "geometry", "lane", "movement",

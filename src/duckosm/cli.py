@@ -404,7 +404,11 @@ def gis_debug(export_path, source_db, out, name):
               help='Also dump spec-standard GMNS CSVs into this directory')
 @click.option('--lane-geometry/--no-lane-geometry', default=True, show_default=True,
               help='Compute per-lane offset geometry for lane-level rendering (needs shapely)')
-def gmns(db, out, modes, to_csv, lane_geometry):
+@click.option('--meso', is_flag=True, default=False,
+              help='Also build a mesoscopic (lane-level) network — meso_<mode> schemas')
+@click.option('--meso-mode', 'meso_modes', multiple=True,
+              help='Modes to build meso for (default: driving)')
+def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -413,19 +417,24 @@ def gmns(db, out, modes, to_csv, lane_geometry):
     length metres, free_speed km/h, coordinates EPSG:4326. `--to-csv` also writes the spec CSVs. Lane
     / signal / curb detail needs the OSM tags (raw schema); needs the DuckDB spatial extension.
     """
-    from duckosm.gmns import to_gmns
+    from duckosm.gmns import to_gmns, to_meso
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     if out is None:
         out = f"{Path(db).stem}_gmns.duckdb"
     try:
         res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry)
+        meso_res = to_meso(out, modes=list(meso_modes) or ["driving"]) if meso else None
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {res['path']}")
     for mode, m in res['modes'].items():
         click.echo(f"  {mode}: {m['link']} links, {m['lane']} lanes, {m['movement']} movements, "
                    f"{m['signal_controller']} signals, {m['curb_seg']} curb segments")
+    if meso_res:
+        for mode, m in meso_res.items():
+            click.echo(f"  meso[{mode}]: {m['meso_link']} meso links "
+                       f"({m['normal']} section + {m['movement']} connector), {m['meso_node']} nodes")
     if res.get('csv'):
         click.echo(f"  + GMNS CSVs -> {res['csv']}")
 
