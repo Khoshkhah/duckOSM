@@ -5,6 +5,7 @@ Welcome to duckOSM - a high-performance OSM-to-routing-network converter.
 ## Documentation
 
 - [User Manual](user_manual.md) - Installation, CLI usage, API, routing & SUMO export
+- [GIS Export](gis_export.md) - GeoPackage / shapefile network export (`duckosm export-gis`)
 - [Multi-Mode Support](multi_mode.md) - Driving, Walking, and Cycling modes
 - [Multimodal Routing](multimodal.md) - Design spec: intermodal trips (walk→drive→walk) across modes
 - [Feature Schema](features_schema.md) - Base-map `features.*` (Shortbread layers) for rendering; the duckmap migration

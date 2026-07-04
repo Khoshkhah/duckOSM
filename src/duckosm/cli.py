@@ -7,6 +7,8 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm viz      render a roadstyle HTML map of a built network
   duckosm sumo     export a built network to a SUMO net (edge_id preserved)
   duckosm export-graph  export a built network as a networkx graph file (GraphML / gpickle)
+  duckosm export-gis    export a built network to GeoPackage / shapefile (edge_id preserved)
+  duckosm gis-debug     read a GIS export back through GDAL and write an HTML debug/QA page
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -324,6 +326,71 @@ def export_graph(db, mode, out, graph_kind, fmt, weight, geometry):
         raise click.ClickException(str(e))
     click.echo(f"wrote {res['path']} ({res['fmt']}: {res['n_nodes']} nodes, "
                f"{res['n_edges']} edges)")
+
+
+@main.command(name="export-gis")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--mode', '-m', 'modes', multiple=True,
+              help='Mode schema(s) to export (default: every mode present in the db)')
+@click.option('--format', '-f', 'fmt', type=click.Choice(['gpkg', 'shp']), default='gpkg',
+              show_default=True, help='GeoPackage (multi-layer, primary) or ESRI shapefile')
+@click.option('--out', '-o', default=None,
+              help='gpkg: output .gpkg file; shp: output directory (default: <name>.gpkg / <name>_gis/)')
+@click.option('--boundary/--no-boundary', default=True, show_default=True,
+              help='Also export main.boundary as a boundary layer, if present')
+@click.option('--name', default=None, help='Layer/file basename (default: the db filename stem)')
+def export_gis(db, modes, fmt, out, boundary, name):
+    """Export a built network to GeoPackage / shapefile, keeping duckOSM edge_id as an attribute.
+
+    Writes the geographic layers only — edges_<mode>, nodes_<mode> and boundary — in EPSG:4326.
+    GeoPackage is one multi-layer file (assembled with ogr2ogr; needs GDAL); shapefile is one
+    fileset per layer. Routing adjacency (edge_graph/turn_restrictions) is not GIS data — use
+    `export-graph` or `sumo` for that. Needs the DuckDB spatial extension.
+    """
+    import duckdb
+
+    from duckosm.gis import to_gis
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    con = duckdb.connect(db, read_only=True)
+    base = name or Path(db).stem
+    if out is None:
+        out = f"{base}.gpkg" if fmt == "gpkg" else f"{base}_gis"
+    try:
+        res = to_gis(con, out, modes=list(modes) or None, fmt=fmt, boundary=boundary, name=base)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    dest = res.get("path") or res.get("dir")
+    click.echo(f"wrote {dest} ({res['fmt']}: {len(res['layers'])} layers — "
+               + ", ".join(f"{k} {v}" for k, v in res['layers'].items()) + ")")
+    if res['fmt'] == 'gpkg' and res.get('path') is None:
+        click.echo(f"  (ogr2ogr not found — wrote {len(res['files'])} single-layer files instead)")
+
+
+@main.command(name="gis-debug")
+@click.argument('export_path', type=click.Path(exists=True))
+@click.option('--source-db', type=click.Path(exists=True), default=None,
+              help='Built duckOSM db to round-trip against (checks every exported edge_id matches)')
+@click.option('--out', '-o', default=None, help='Output HTML (default: <name>_gis_debug.html)')
+@click.option('--name', default=None, help='Display name (default: the export filename stem)')
+def gis_debug(export_path, source_db, out, name):
+    """Debug an export: read the GeoPackage/shapefile back through GDAL and write a self-contained
+    HTML page — a canvas map of every layer plus a QA audit (feature counts, CRS, edge_id integrity,
+    and a round-trip diff vs --source-db). Verifies the file on disk, not the db. Needs geopandas.
+
+    EXPORT_PATH is a .gpkg file or a directory of shapefiles.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.gis_debug import write_debug
+
+    if out is None:
+        out = f"{Path(export_path).stem or 'export'}_gis_debug.html"
+    try:
+        path = write_debug(export_path, source_db=source_db, out=out, name=name)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {path} — open in a browser")
 
 
 if __name__ == '__main__':

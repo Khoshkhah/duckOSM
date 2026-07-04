@@ -35,9 +35,13 @@ High-performance OSM-to-routing-network converter built on DuckDB.
 - **Exporters**: load the network as a `networkx` graph — the edge-based routing `DiGraph`
   (`to_networkx`) or the geographic node-based `MultiDiGraph` with full edge info
   (`to_networkx_nodes`, osmnx layout) — or write either to a GraphML / gpickle file
-  (`write_graph` / `duckosm export-graph`); or export a
+  (`write_graph` / `duckosm export-graph`); export a
   **SUMO** simulation net (`to_sumo` / `duckosm sumo`) whose edge ids *are* the duckOSM
-  `edge_id` — so per-edge data maps onto the sim by identity, no conflation step
+  `edge_id` — so per-edge data maps onto the sim by identity, no conflation step; or write the
+  geographic network to **GeoPackage / shapefile** for any GIS tool (`to_gis` /
+  `duckosm export-gis`, `edge_id` preserved as an attribute — see [`docs/gis_export.md`](docs/gis_export.md)),
+  then verify that export with `duckosm gis-debug` (reads the file back through GDAL → an HTML map +
+  `edge_id`/round-trip QA audit)
 - **Admin boundaries**: optional table of all OSM administrative levels with a
   derived parent hierarchy
 - **Portable**: single `.duckdb` file, queryable anywhere
@@ -66,7 +70,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -122,6 +126,30 @@ gives the edge-based routing `DiGraph`:
 duckosm export-graph data/db/sodermalm.duckdb              # -> sodermalm_driving.graphml (node graph)
 duckosm export-graph data/db/sodermalm.duckdb -o sm.gpickle   # gpickle (lossless, Python-only)
 duckosm export-graph data/db/sodermalm.duckdb -g edge -o routing.graphml  # edge-based routing graph
+```
+
+**`export-gis`** — export the geographic network to **GeoPackage** (multi-layer, primary) or
+**shapefile** (`--format shp`) for QGIS / ArcGIS / any GIS tool, with `edge_id` preserved as an
+attribute. Writes `edges_<mode>` / `nodes_<mode>` / `boundary` layers in EPSG:4326; GeoPackage
+assembly needs `ogr2ogr` (GDAL). See [`docs/gis_export.md`](docs/gis_export.md):
+
+```bash
+duckosm export-gis data/db/sodermalm.duckdb                 # -> sodermalm.gpkg (all modes + boundary)
+duckosm export-gis data/db/sodermalm.duckdb -m driving      # only the driving schema
+duckosm export-gis data/db/sodermalm.duckdb --format shp -o gis/   # shapefile set into gis/
+```
+
+**`gis-debug`** — verify a GIS export by reading the file **back through GDAL** (the path QGIS /
+ArcGIS / FME take) and writing a self-contained HTML debug page: a canvas map of every layer (edges
+by highway class, nodes, boundary; per-mode toggles, pan/zoom, no tiles) plus a QA audit — feature
+counts, geometry type, CRS, and `edge_id` integrity (a **float** dtype means a shapefile DBF rounded
+the 64-bit id). With `--source-db` it runs a **round-trip diff** — the exported `edge_id` set vs the
+db's, per mode — and reports an overall `PASS` / `CHECK` / `FAIL`. Verifies the file on disk, not the
+db. Needs `geopandas` + `pyogrio`:
+
+```bash
+duckosm gis-debug sodermalm.gpkg --source-db data/db/sodermalm.duckdb   # -> sodermalm_gis_debug.html
+duckosm gis-debug gis/ -o reports/gis_debug.html                        # a shapefile directory
 ```
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
