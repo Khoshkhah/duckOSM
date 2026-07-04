@@ -87,10 +87,10 @@ parent_node_id` blank*. Plus non-spec `geom` (POINT) for rendering.
 
 **`link`** — `link_id`✅(**`edge_id`**) · `from_node_id`✅(`source`) · `to_node_id`✅(`target`) ·
 `directed`✅(`true`) · `geometry`(WKT) · `dir_flag`(1) · `length`(`length_m`, m) ·
-`free_speed`(`maxspeed_kmh`, km/h) · `lanes`(count) · `facility_type`(**`highway`** — GMNS's field,
-not `link_type`) · `name` · `allowed_uses`(mode) · `bike_facility`/`ped_facility`(from
-`highway`/`cycleway`/`sidewalk`) · *`grade,capacity,toll,parking,jurisdiction,row_width,geometry_id,
-parent_link_id` blank*. Plus non-spec `geom` (LINESTRING).
+`free_speed`(`maxspeed_kmh`, km/h) · `lanes`(count) · `capacity`(class default, pce/hr/lane) ·
+`facility_type`(**`highway`** — GMNS's field, not `link_type`) · `name` · `allowed_uses`(mode) ·
+`bike_facility`/`ped_facility`(from `highway`/`cycleway`/`sidewalk`) · *`grade,toll,parking,
+jurisdiction,row_width,geometry_id,parent_link_id` blank*. Plus non-spec `geom` (LINESTRING).
 
 **`lane`** — one row per lane of a directed link: `lane_id`✅ · `link_id`✅(`edge_id`) ·
 `lane_num`✅(1…N, GMNS left-to-right) · `allowed_uses`(per-lane, from `*:lanes` tags, else the mode) ·
@@ -99,8 +99,10 @@ parent_link_id` blank*. Plus non-spec `geom` (LINESTRING).
 
 **`movement`** — one row per legal turn (`edge_graph`): `mvmt_id`✅ · `node_id`✅(junction) ·
 `ib_link_id`✅(`from_edge`) · `ob_link_id`✅(`to_edge`) · `allowed_uses`(mode) · `type`(left/right/
-thru/uturn from the bearing change at the junction) · `ctrl_type`(signal if the node is signalized) ·
-*rest blank*. The **immediate reversal** (turning back onto the same physical segment — `edge_graph`
+thru/uturn from the bearing change at the junction) · `mvmt_code`(direction+turn, `NBL`/`EBT`… from
+the inbound compass bearing) · `start_ib_lane`/`end_ib_lane`(the inbound lanes feeding the turn, from
+`turn:lanes`) · `geometry`(a short turn-path connector) · `ctrl_type`(signal if the node is
+signalized) · *rest blank*. The **immediate reversal** (turning back onto the same physical segment — `edge_graph`
 carries it for routing completeness) is dropped; genuine intersection U-turns (a different `osm_id`)
 stay and are typed `uturn`.
 

@@ -32,6 +32,15 @@ logger = logging.getLogger("duckosm")
 _MODE_USES = {"driving": "auto", "walking": "walk", "cycling": "bike"}
 _USE_DEF = {"auto": (1.0, 1.0), "walk": (1.0, 0.0), "bike": (1.0, 0.2), "bus": (25.0, 2.0)}
 _DEFAULT_LANE_W = 3.25          # metres, when width:lanes is absent (used for lane offset spacing)
+# saturation capacity default (pce/hr/lane) by facility_type (normalized highway; _link → parent)
+_CAPACITY = {"motorway": 2000, "trunk": 1800, "primary": 1600, "secondary": 1400, "tertiary": 1200,
+             "unclassified": 1000, "residential": 800, "living_street": 300, "service": 300,
+             "road": 800}
+
+
+def _capacity_case(hw_expr):
+    whens = " ".join(f"WHEN '{k}' THEN {v}" for k, v in _CAPACITY.items())
+    return f"CASE {hw_expr} {whens} ELSE 800 END"
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
 _CSV_EXCLUDE = {"node": ["geom"], "link": ["geom"], "geometry": ["geom"], "lane": ["geom", "turn"]}
@@ -146,9 +155,9 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True):
         _build_node(con, sch, mode)
         _build_link(con, sch, mode, uses, has_raw)
         _build_geometry(con, sch, mode)
+        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry)   # before movement: lane→turn ranges
         _build_movement(con, sch, mode, uses)
         _build_signal_controller(con, sch)
-        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
             for t in ("node", "link", "lane", "movement", "signal_controller", "curb_seg")}
@@ -197,7 +206,9 @@ def _build_link(con, sch, mode, uses, has_raw):
       e.edge_id AS link_id, e.name AS name, e.source AS from_node_id, e.target AS to_node_id,
       true AS directed, e.edge_id AS geometry_id, ST_AsText(e.geometry) AS geometry,
       NULL::BIGINT AS parent_link_id, 1 AS dir_flag, e.length_m AS length, NULL::DOUBLE AS grade,
-      e.highway AS facility_type, NULL::DOUBLE AS capacity, e.maxspeed_kmh AS free_speed, e.lanes,
+      e.highway AS facility_type,
+      {_capacity_case("regexp_replace(split_part(e.highway, ';', 1), '_link$', '')")}::DOUBLE AS capacity,
+      e.maxspeed_kmh AS free_speed, e.lanes,
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
       '{uses}' AS allowed_uses, NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction,
       NULL::DOUBLE AS row_width, e.geometry AS geom
@@ -222,6 +233,7 @@ def _build_movement(con, sch, mode, uses):
     con.execute(f"""CREATE TABLE {sch}.movement AS
       WITH mv AS (
         SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id,
+               fe.geometry AS ibg, te.geometry AS obg,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER)       AS pe,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER - 1)   AS pp,
                ST_PointN(te.geometry, 1) AS qs, ST_PointN(te.geometry, 2) AS qn
@@ -232,26 +244,42 @@ def _build_movement(con, sch, mode, uses):
         -- artifact for routing completeness, not a modelled movement. Real intersection U-turns
         -- (a different osm_id) are kept and typed 'uturn'.
         WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source)
-      ), a AS (
-        SELECT ib, ob, node_id,
-          degrees(
-            atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) -
-            atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe))))
-          ) AS raw_ang
+      ), b AS (
+        SELECT ib, ob, node_id, ibg, obg,
+          atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,
+          atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) AS out_b
         FROM mv
-      ), n AS (
-        SELECT ib, ob, node_id, ((raw_ang + 180) - floor((raw_ang + 180) / 360) * 360) - 180 AS ang
-        FROM a
+      ), t AS (
+        SELECT ib, ob, node_id, ibg, obg,
+          CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
+               WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
+          -- inbound compass heading (0=N, clockwise) = (90 - math-bearing) mod 360
+          ((90 - degrees(in_b)) - floor((90 - degrees(in_b)) / 360) * 360) AS hdg
+        FROM (SELECT *, ((degrees(out_b - in_b) + 180) - floor((degrees(out_b - in_b) + 180) / 360) * 360) - 180 AS ang FROM b)
+      ), lt AS (                        -- inbound lanes feeding each turn category, from turn:lanes
+        SELECT link_id AS ib,
+          CASE WHEN turn ILIKE '%through%' OR turn = 'thru' THEN 'thru'
+               WHEN turn ILIKE '%reverse%' OR turn ILIKE '%uturn%' THEN 'uturn'
+               WHEN turn ILIKE '%left%' THEN 'left'
+               WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
+          min(lane_num) AS mn, max(lane_num) AS mx
+        FROM {sch}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
       )
-      SELECT ib::VARCHAR || '-' || ob::VARCHAR AS mvmt_id, node_id, NULL::VARCHAR AS name,
-             ib AS ib_link_id, NULL::INT AS start_ib_lane, NULL::INT AS end_ib_lane,
-             ob AS ob_link_id, NULL::INT AS start_ob_lane, NULL::INT AS end_ob_lane,
-             CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
-                  WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
+      SELECT t.ib::VARCHAR || '-' || t.ob::VARCHAR AS mvmt_id, t.node_id, NULL::VARCHAR AS name,
+             t.ib AS ib_link_id, lt.mn AS start_ib_lane, lt.mx AS end_ib_lane,
+             t.ob AS ob_link_id, NULL::INT AS start_ob_lane, NULL::INT AS end_ob_lane, t.type,
              NULL::DOUBLE AS penalty, NULL::DOUBLE AS capacity,
              CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
-             NULL::VARCHAR AS mvmt_code, '{uses}' AS allowed_uses, NULL::VARCHAR AS geometry
-      FROM n LEFT JOIN _sig sig ON sig.osm_id = n.node_id""")
+             (CASE WHEN t.hdg < 45 OR t.hdg >= 315 THEN 'NB' WHEN t.hdg < 135 THEN 'EB'
+                   WHEN t.hdg < 225 THEN 'SB' ELSE 'WB' END)
+             || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R'
+                             WHEN 'uturn' THEN 'U' ELSE 'T' END) AS mvmt_code,
+             '{uses}' AS allowed_uses,
+             ST_AsText(ST_MakeLine(ST_LineInterpolatePoint(t.ibg, 0.85),
+                                   ST_LineInterpolatePoint(t.obg, 0.15))) AS geometry
+      FROM t
+      LEFT JOIN lt ON lt.ib = t.ib AND lt.cat = t.type
+      LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
 
 
 def _build_signal_controller(con, sch):
@@ -310,7 +338,8 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry):
     con.register("_lane_df", lane_df)
     geom_sel = "ST_GeomFromText(geom_wkt)" if lane_geometry else "NULL::GEOMETRY"
     con.execute(f"""CREATE TABLE {sch}.lane AS SELECT
-      lane_id, link_id, lane_num, allowed_uses, r_barrier, l_barrier, width, turn,
+      lane_id, link_id, lane_num, allowed_uses, r_barrier::VARCHAR AS r_barrier,
+      l_barrier::VARCHAR AS l_barrier, width::DOUBLE AS width, turn::VARCHAR AS turn,
       {geom_sel} AS geom FROM _lane_df""")
     con.unregister("_lane_df")
 

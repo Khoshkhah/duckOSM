@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 pytest.importorskip("pandas")
-from duckosm.gmns import to_gmns  # noqa: E402
+from duckosm.gmns import to_gmns, to_meso  # noqa: E402
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
 
@@ -125,6 +125,53 @@ def test_meso_network(tmp_path):
         f"SELECT lanes, start_ib_lane, end_ib_lane FROM meso_driving.meso_link "
         f"WHERE link_id = 'X{A}-{B}'").fetchone()
     assert (lanes, s_ib, e_ib) == (1, 2, 2)
+
+
+def test_capacity_and_movement_enrichment(tmp_path):
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    # capacity default by facility_type: A is 'primary' -> 1600 pce/hr/lane
+    assert con.execute(f"SELECT capacity FROM gmns_driving.link WHERE link_id={A}").fetchone()[0] == 1600
+    # movement A->B: A heads east and turns south (right) -> mvmt_code EBR; the right lane (2) feeds it
+    r = con.execute(f"SELECT mvmt_code, start_ib_lane, end_ib_lane, geometry "
+                    f"FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={B}").fetchone()
+    assert r[0] == "EBR" and (r[1], r[2]) == (2, 2) and r[3] is not None
+    # every movement gets a code + a connector geometry
+    n, coded = con.execute("SELECT count(*), count(mvmt_code) FROM gmns_driving.movement").fetchone()
+    assert coded == n and n > 0
+
+
+def test_cycling_meso(tmp_path):
+    """Meso builds for cycling too (same code path as driving), not just the default."""
+    src = tmp_path / "src.duckdb"
+    con = duckdb.connect(str(src))
+    con.execute("INSTALL spatial; LOAD spatial;")
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    for m in ("driving", "cycling"):
+        con.execute(f"CREATE SCHEMA {m}")
+        con.execute(f"CREATE TABLE {m}.nodes(node_id BIGINT, geom GEOMETRY)")
+        con.execute(f"INSERT INTO {m}.nodes VALUES (1,{p('POINT(18.06 59.32)')}),"
+                    f"(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.07 59.31)')})")
+        con.execute(f"CREATE TABLE {m}.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                    f"highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, length_m FLOAT, "
+                    f"maxspeed_kmh FLOAT, geometry GEOMETRY)")
+        con.execute(f"""INSERT INTO {m}.edges VALUES
+            ({A},1,2,100,'primary','Main',1,false,80,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+            ({B},2,3,101,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.07 59.31)')})""")
+        con.execute(f"CREATE TABLE {m}.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+        con.execute(f"INSERT INTO {m}.edge_graph VALUES ({A},{B},{B},1.0)")
+    con.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out), modes=["driving", "cycling"])
+    to_meso(str(out), modes=["driving", "cycling"])
+    con = duckdb.connect(str(out))
+    for m in ("driving", "cycling"):
+        assert con.execute(
+            f"SELECT count(*) FROM meso_{m}.meso_link WHERE meso_type='normal'").fetchone()[0] == 2
 
 
 def test_to_csv_is_spec_clean(tmp_path):

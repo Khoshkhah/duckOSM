@@ -1,6 +1,7 @@
 # Mesoscopic network — `duckosm gmns --meso`
 
-**Status:** shipped 2026-07-04 (`to_meso` / `duckosm gmns --meso`), driving-only v1 as specced below.
+**Status:** shipped 2026-07-04 (`to_meso` / `duckosm gmns --meso`). Driving by default; **cycling**
+supported via `--meso-mode cycling`; walking excluded (no lanes).
 
 Build a **lane-level mesoscopic network** from the GMNS extract, into the same standalone GMNS
 DuckDB. It's the bridge between the macro (link-level) network and a micro (cell-level) one, and the
@@ -21,7 +22,7 @@ A meso network is a *vehicular lane* construct, so the modes are not equal:
 | Mode | v1 | Why |
 |------|----|-----|
 | **driving** | ✅ build | lanes, turn bays, lane→movement assignment all matter; meso DTA is for cars |
-| cycling | ◻ later (flag) | cycleways are ~single-lane → meso ≈ a 1:1 copy of macro; only useful with dedicated multi-lane cycle infra |
+| cycling | ✅ (opt-in flag) | `--meso-mode cycling`; cycleways are mostly single-lane so meso ≈ macro, but built on the same code path |
 | walking | ✕ never | footways have no lanes; pedestrian sim uses *surfaces*, a different primitive (Tier-3 Vadere/JuPedSim) |
 
 **Multimodal (stitched): deferred** — it inherits the cross-mode `edge_id` collision and would fold in
