@@ -8,6 +8,7 @@ Welcome to duckOSM - a high-performance OSM-to-routing-network converter.
 - [GIS Export](gis_export.md) - GeoPackage / shapefile network export (`duckosm export-gis`)
 - [GMNS Export](gmns_export.md) - standalone GMNS DuckDB with lane detail & movements (`duckosm gmns`)
 - [GMNS Meso](gmns_meso.md) - mesoscopic lane-level network (section + turn-connector links) (`duckosm gmns --meso`)
+- [GMNS Viewer](gmns_viewer.md) - interactive HTML viewer for a GMNS DuckDB (lanes / meso, hover tooltips) (`duckosm gmns-viz`)
 - [Multi-Mode Support](multi_mode.md) - Driving, Walking, and Cycling modes
 - [Multimodal Routing](multimodal.md) - Design spec: intermodal trips (walk→drive→walk) across modes
 - [Feature Schema](features_schema.md) - Base-map `features.*` (Shortbread layers) for rendering; the duckmap migration

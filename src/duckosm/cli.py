@@ -10,6 +10,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm export-gis    export a built network to GeoPackage / shapefile (edge_id preserved)
   duckosm gis-debug     read a GIS export back through GDAL and write an HTML debug/QA page
   duckosm gmns          extract a built network to a standalone GMNS DuckDB (lanes, movements, …)
+  duckosm gmns-viz      write an interactive HTML viewer for a GMNS DuckDB (lanes / meso, tooltips)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -437,6 +438,31 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes):
                        f"({m['normal']} section + {m['movement']} connector), {m['meso_node']} nodes")
     if res.get('csv'):
         click.echo(f"  + GMNS CSVs -> {res['csv']}")
+
+
+@main.command(name="gmns-viz")
+@click.argument('gmns_db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to view')
+@click.option('--out', '-o', default=None, help='Output HTML (default: <name>_viewer.html)')
+def gmns_viz(gmns_db, mode, out):
+    """Write a self-contained interactive HTML viewer for a GMNS DuckDB.
+
+    Toggle between the individual *lanes* (offset by use) and the *mesoscopic* network (section +
+    turn-connector links); hover any line for its type, id and attributes; scroll to zoom, drag to
+    pan. The meso layer appears only if the db has a meso_<mode> schema (`duckosm gmns --meso`).
+    Reads only DuckDB (geometry is drawn client-side); open the HTML in any browser.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.gmns_viewer import write_viewer
+
+    if out is None:
+        out = f"{Path(gmns_db).stem}_viewer.html"
+    try:
+        path = write_viewer(gmns_db, out, mode=mode)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {path} — open in a browser")
 
 
 if __name__ == '__main__':

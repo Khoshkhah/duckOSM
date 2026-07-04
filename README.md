@@ -72,7 +72,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -164,6 +164,16 @@ See [`docs/gmns_export.md`](docs/gmns_export.md):
 ```bash
 duckosm gmns data/db/sodermalm.duckdb                       # -> sodermalm_pbf_gmns.duckdb (all modes)
 duckosm gmns data/db/sodermalm.duckdb -m driving --to-csv gmns/   # driving only, + spec CSVs
+duckosm gmns data/db/sodermalm.duckdb --meso                # + a mesoscopic (lane-level) network
+```
+
+**`gmns-viz`** — write a **self-contained interactive HTML viewer** for a GMNS DuckDB: toggle
+between individual **lanes** (offset by use) and the **mesoscopic** section + turn-connector network,
+**hover any line** for its id/attributes, scroll-zoom / drag-pan. Needs only DuckDB (geometry drawn
+client-side). See [`docs/gmns_viewer.md`](docs/gmns_viewer.md):
+
+```bash
+duckosm gmns-viz sodermalm_pbf_gmns.duckdb                  # -> sodermalm_pbf_gmns_viewer.html
 ```
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
