@@ -88,16 +88,21 @@ class Land(Layer):
 class Sites(Layer):
     name = "sites"
     geom_kind = "area"
+    # amenity/institutional areas + transport areas (bus_station, and public_transport platform /
+    # station footprints — the node-mapped stops live in `public_transport`; the AREA versions land
+    # here so a bus terminal / platform renders as a filled shape).
     where_sql = (
-        f"{_t('amenity')} IN ('parking','bicycle_parking','university','college','school',"
-        f"'hospital','prison') "
+        f"{_t('amenity')} IN ('parking','bicycle_parking','bus_station','university','college',"
+        f"'school','hospital','prison') "
+        f"OR {_t('public_transport')} IN ('platform','station') "
         f"OR {_t('leisure')} = 'sports_centre' OR {_t('landuse')} = 'construction' "
         f"OR {_t('military')} = 'danger_area'")
     kind_sql = (
         f"CASE WHEN {_t('landuse')} = 'construction' THEN 'construction' "
         f"WHEN {_t('military')} = 'danger_area' THEN 'danger_area' "
         f"WHEN {_t('leisure')} = 'sports_centre' THEN 'sports_centre' "
-        f"ELSE {_t('amenity')} END")
+        f"WHEN {_t('amenity')} IS NOT NULL THEN {_t('amenity')} "
+        f"ELSE {_t('public_transport')} END")
 
 
 class Buildings(Layer):
