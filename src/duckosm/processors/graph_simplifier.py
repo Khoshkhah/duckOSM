@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 # within ~16 GB. Used only when batches are chosen automatically.
 NODE_REFS_PER_BATCH = 13_000_000
 
+# Non-road (non-vehicular) highway classes. A ROAD's split points are decided by ROAD connectivity
+# only — a footway/path/cycleway joining a road mid-segment must not fragment it, or the road would
+# be segmented differently in the walking/cycling graphs (which contain those paths) than in driving
+# (which doesn't), giving the same physical road a different edge_id per mode. These paths still
+# split at every junction for their OWN routing.
+_NON_ROAD_HIGHWAYS = "('footway','path','cycleway','steps','pedestrian','bridleway','corridor')"
+_IS_ROAD = f"COALESCE(w.highway NOT IN {_NON_ROAD_HIGHWAYS}, TRUE)"
+
 
 class GraphSimplifier(BaseProcessor):
     """
@@ -115,38 +123,48 @@ class GraphSimplifier(BaseProcessor):
         return max(1, math.ceil(n_refs / NODE_REFS_PER_BATCH))
 
     def _find_junctions(self) -> None:
-        """Identify nodes that are junctions (degree != 2) or endpoints."""
-        self.execute("""
+        """Identify junction nodes, and which of them are ROAD junctions.
+
+        A node is a graph junction if it is shared by >1 way or is a way endpoint (kept as a routing
+        node). It is additionally a ROAD junction (`is_road_junction`) when >=2 ROAD ways meet there
+        or a road ends there. Roads are split ONLY at road junctions, so a footway/path/cycleway
+        joining a road mid-segment does not fragment it — the road keeps the SAME segmentation (and
+        edge_id) across the driving / walking / cycling graphs. Non-road ways still split at every
+        junction (their own routing). With no paths present (e.g. a driving-only build) every way is
+        a road, so `is_road_junction` marks every junction and behaviour is unchanged.
+        """
+        self.execute(f"""
             CREATE OR REPLACE TEMP TABLE node_counts AS
-            SELECT 
-                node_id,
-                COUNT(*) as way_count,
-                SUM(CASE WHEN is_endpoint THEN 1 ELSE 0 END) as endpoint_count
+            SELECT node_id,
+                   COUNT(*)                                                 AS way_count,
+                   SUM(CASE WHEN is_endpoint THEN 1 ELSE 0 END)             AS endpoint_count,
+                   SUM(CASE WHEN is_road THEN 1 ELSE 0 END)                 AS road_way_count,
+                   SUM(CASE WHEN is_road AND is_endpoint THEN 1 ELSE 0 END) AS road_endpoint_count
             FROM (
-                SELECT 
-                    node_id,
-                    (seq = 0 OR seq = max_seq) AS is_endpoint
+                SELECT wn.node_id,
+                       (wn.seq = 0 OR wn.seq = wn.max_seq) AS is_endpoint,
+                       {_IS_ROAD}                          AS is_road
                 FROM (
-                    SELECT 
-                        node_id, 
-                        seq,
-                        MAX(seq) OVER (PARTITION BY way_id) as max_seq
+                    SELECT way_id, node_id, seq, MAX(seq) OVER (PARTITION BY way_id) AS max_seq
                     FROM way_nodes
-                )
+                ) wn
+                LEFT JOIN ways w ON w.osm_id = wn.way_id
             )
             GROUP BY node_id
         """)
-        
+
         self.execute("""
             CREATE OR REPLACE TABLE junctions AS
-            SELECT node_id
+            SELECT node_id,
+                   (road_way_count > 1 OR road_endpoint_count > 0) AS is_road_junction
             FROM node_counts
-            WHERE way_count > 1        -- Shared between ways
-               OR endpoint_count > 0   -- Endpoint of a way
+            WHERE way_count > 1        -- shared between ways (kept as a routing node)
+               OR endpoint_count > 0   -- endpoint of a way
         """)
-        
+
         junction_count = self.fetchone("SELECT COUNT(*) FROM junctions")[0]
-        logger.info(f"  Identified {junction_count:,} junction nodes")
+        road_junctions = self.fetchone("SELECT COUNT(*) FROM junctions WHERE is_road_junction")[0]
+        logger.info(f"  Identified {junction_count:,} junction nodes ({road_junctions:,} road junctions)")
 
     def _segment_ways(self, way_filter: str = "TRUE") -> None:
         """Split ways into segments between junctions, ensuring junctions are shared.
@@ -166,26 +184,35 @@ class GraphSimplifier(BaseProcessor):
         """
         self.execute(f"""
             CREATE OR REPLACE TABLE way_segments AS
-            WITH marked AS (
+            WITH nodes AS (
                 SELECT
-                    wn.way_id,
-                    wn.node_id,
-                    wn.seq,
-                    (j.node_id IS NOT NULL) AS is_junction,
-                    -- latest junction at or before this node = start of its segment
-                    max(CASE WHEN j.node_id IS NOT NULL THEN wn.seq END) OVER (
-                        PARTITION BY wn.way_id ORDER BY wn.seq
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS seg_start_incl,
-                    -- nearest junction strictly before / after (segment links for junction nodes)
-                    max(CASE WHEN j.node_id IS NOT NULL THEN wn.seq END) OVER (
-                        PARTITION BY wn.way_id ORDER BY wn.seq
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_junction,
-                    min(CASE WHEN j.node_id IS NOT NULL THEN wn.seq END) OVER (
-                        PARTITION BY wn.way_id ORDER BY wn.seq
-                        ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS next_junction
+                    wn.way_id, wn.node_id, wn.seq,
+                    -- a ROAD splits only at ROAD junctions; a path/footway splits at every junction
+                    (j.node_id IS NOT NULL AND (NOT {_IS_ROAD} OR COALESCE(j.is_road_junction, FALSE)))
+                        AS split_here
                 FROM way_nodes wn
+                LEFT JOIN ways w ON w.osm_id = wn.way_id
                 LEFT JOIN junctions j ON wn.node_id = j.node_id
                 WHERE {way_filter}
+            ),
+            marked AS (
+                SELECT
+                    way_id,
+                    node_id,
+                    seq,
+                    split_here AS is_junction,
+                    -- latest split at or before this node = start of its segment
+                    max(CASE WHEN split_here THEN seq END) OVER (
+                        PARTITION BY way_id ORDER BY seq
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS seg_start_incl,
+                    -- nearest split strictly before / after (segment links for junction nodes)
+                    max(CASE WHEN split_here THEN seq END) OVER (
+                        PARTITION BY way_id ORDER BY seq
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_junction,
+                    min(CASE WHEN split_here THEN seq END) OVER (
+                        PARTITION BY way_id ORDER BY seq
+                        ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS next_junction
+                FROM nodes
             )
             -- Non-junction nodes belong to the single segment that contains them.
             SELECT way_id, seg_start_incl AS segment_idx, node_id, seq
