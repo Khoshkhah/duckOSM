@@ -41,7 +41,9 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   geographic network to **GeoPackage / shapefile** for any GIS tool (`to_gis` /
   `duckosm export-gis`, `edge_id` preserved as an attribute — see [`docs/gis_export.md`](docs/gis_export.md)),
   then verify that export with `duckosm gis-debug` (reads the file back through GDAL → an HTML map +
-  `edge_id`/round-trip QA audit)
+  `edge_id`/round-trip QA audit); or extract a standalone **GMNS** network DuckDB — every GMNS table
+  OSM supports incl. **lane detail** and turn **movements** (`to_gmns` / `duckosm gmns`, `link_id` =
+  `edge_id` — see [`docs/gmns_export.md`](docs/gmns_export.md))
 - **Admin boundaries**: optional table of all OSM administrative levels with a
   derived parent hierarchy
 - **Portable**: single `.duckdb` file, queryable anywhere
@@ -70,7 +72,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -150,6 +152,18 @@ db. Needs `geopandas` + `pyogrio`:
 ```bash
 duckosm gis-debug sodermalm.gpkg --source-db data/db/sodermalm.duckdb   # -> sodermalm_gis_debug.html
 duckosm gis-debug gis/ -o reports/gis_debug.html                        # a shapefile directory
+```
+
+**`gmns`** — extract a built network to a **standalone GMNS DuckDB** (the open network standard for
+DTALite / Path4GMNS / the AMS ecosystem). Writes every GMNS table OSM supports — `config`, `node`,
+`link`, `geometry`, **`lane`** (per-lane rows with turns/uses/width from OSM lane tags), **`movement`**
+(turns from the line graph), `use_definition`/`use_group`, `signal_controller`, `curb_seg` — with
+native geometry so it renders on its own, and `link_id = edge_id`. `--to-csv` also dumps the spec CSVs.
+See [`docs/gmns_export.md`](docs/gmns_export.md):
+
+```bash
+duckosm gmns data/db/sodermalm.duckdb                       # -> sodermalm_pbf_gmns.duckdb (all modes)
+duckosm gmns data/db/sodermalm.duckdb -m driving --to-csv gmns/   # driving only, + spec CSVs
 ```
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph

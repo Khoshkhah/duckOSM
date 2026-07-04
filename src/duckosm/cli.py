@@ -9,6 +9,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm export-graph  export a built network as a networkx graph file (GraphML / gpickle)
   duckosm export-gis    export a built network to GeoPackage / shapefile (edge_id preserved)
   duckosm gis-debug     read a GIS export back through GDAL and write an HTML debug/QA page
+  duckosm gmns          extract a built network to a standalone GMNS DuckDB (lanes, movements, …)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -391,6 +392,42 @@ def gis_debug(export_path, source_db, out, name):
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {path} — open in a browser")
+
+
+@main.command(name="gmns")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--out', '-o', default=None,
+              help='Output GMNS .duckdb file (default: <name>_gmns.duckdb)')
+@click.option('--mode', '-m', 'modes', multiple=True,
+              help='Mode schema(s) to extract (default: every mode present in the db)')
+@click.option('--to-csv', default=None,
+              help='Also dump spec-standard GMNS CSVs into this directory')
+@click.option('--lane-geometry/--no-lane-geometry', default=True, show_default=True,
+              help='Compute per-lane offset geometry for lane-level rendering (needs shapely)')
+def gmns(db, out, modes, to_csv, lane_geometry):
+    """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
+    (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
+    curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
+
+    GMNS is the open network standard consumed by DTALite / Path4GMNS / the AMS ecosystem. Units:
+    length metres, free_speed km/h, coordinates EPSG:4326. `--to-csv` also writes the spec CSVs. Lane
+    / signal / curb detail needs the OSM tags (raw schema); needs the DuckDB spatial extension.
+    """
+    from duckosm.gmns import to_gmns
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    if out is None:
+        out = f"{Path(db).stem}_gmns.duckdb"
+    try:
+        res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {res['path']}")
+    for mode, m in res['modes'].items():
+        click.echo(f"  {mode}: {m['link']} links, {m['lane']} lanes, {m['movement']} movements, "
+                   f"{m['signal_controller']} signals, {m['curb_seg']} curb segments")
+    if res.get('csv'):
+        click.echo(f"  + GMNS CSVs -> {res['csv']}")
 
 
 if __name__ == '__main__':
