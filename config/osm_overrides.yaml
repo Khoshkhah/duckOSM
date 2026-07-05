@@ -36,3 +36,20 @@ overrides:
   - osm_id: 1429337399       # underground-parking ramp mis-tagged layer=-1 for its WHOLE length
     layer: 0                 # (known_osm_issues #4, CONFIRMED) — sits at grade where it meets the
     note: "service=driveway ramp tagged layer=-1 end-to-end though its junction end is at grade (joins the level-0 driveway 1429337400 at a shared node); no tunnel/bridge structure. Set to 0."
+
+
+# Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
+# physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
+# (RestrictionProcessor) so the edge graph, routing, GMNS movements, exports and the lane viz all drop
+# the turn. Each rule maps from_way -> via_node -> to_way to edge ids (handles merged/reverse edges),
+# and is a global no-op in areas that don't contain the ways. See docs/design/turn-restriction-overrides.md.
+#   from_way, via_node, to_way  (required, OSM ids) · restriction (no_u_turn|no_left_turn|no_right_turn|
+#   no_straight_on|only_*, default no_u_turn) · note
+# Takes effect on the next driving rebuild (RestrictionProcessor runs it, then the edge graph drops it).
+turn_restrictions:
+  # --- Tartu ---
+  - from_way: 1307524008     # no U-turn onto the opposing Tähe carriageway (known_osm_issues #6)
+    via_node: 330045016
+    to_way: 997402723
+    restriction: no_u_turn
+    note: "OSM lacks the restriction; the -166° turn from one-way link onto opposing/westbound Tähe is forbidden"

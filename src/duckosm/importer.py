@@ -611,7 +611,7 @@ class DuckOSM:
         logger.info("Extracting turn restrictions...")
         start = time.time()
         
-        RestrictionProcessor(self.con).run()
+        RestrictionProcessor(self.con, self.config.osm_overrides).run()   # + synthetic overrides
         
         self.stats['restriction_time'] = time.time() - start
         self.stats['restriction_count'] = self.con.execute(

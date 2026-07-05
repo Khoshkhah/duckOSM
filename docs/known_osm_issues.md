@@ -170,3 +170,30 @@ Properly this way should be **split in OSM at the level-transition node** into a
 `layer=-1` part. As a shortcut we bring the whole way to grade: local override
 `osm_id: 1429337399, layer: 0` in `config/osm_overrides.yaml` (there is no real tunnel, so rendering it
 at grade end-to-end is acceptable). Takes effect on the next rebuild.
+
+---
+
+## 6. Tartu Tähe junction — missing `no_u_turn` (spurious U-turn onto opposing carriageway)
+
+| field | value |
+| --- | --- |
+| **Area** | Tartu (`config/tartu.yaml`) |
+| **Junction** | node `330045016` (two-way Tähe meets a one-way link) |
+| **OSM ways** | from `1307524008` (one-way inbound) · via node `330045016` · to `997402723` (Tähe, opposing/westbound) |
+| **Movement** | `2048307190992484263 → 5604449516676458023` (typed `uturn`, mvmt_code `EBU`) |
+| **Status** | **CONFIRMED OSM gap** — no restriction relation at the node; synthetic override **enabled** (`turn_restrictions:` in `config/osm_overrides.yaml`; takes effect on the next driving rebuild) |
+
+At node `330045016` the one-way link `2048307190992484263` (way `1307524008`) arrives heading ~101°
+(ESE). It has a legitimate `thru` onto **eastbound** Tähe (`8788328652948037784`, way `207110404`,
+leaves ~124°). But duckOSM also emits a movement onto the **westbound / opposing** Tähe carriageway
+(`5604449516676458023`, way `997402723`, leaves ~295°) — a **−166° turn back onto oncoming traffic**,
+typed `uturn`. That maneuver is physically forbidden at this merge; OSM simply carries **no
+`restriction=no_u_turn` relation** there, so duckOSM — which connects all node-adjacent edge pairs
+minus same-way immediate reversals — generates it. (This is why it surfaced in the lanestyle
+lane-connectivity view as an extra "outgoing" from that lane.)
+
+**Fix.** Add the restriction upstream in OSM (`type=restriction`, `restriction=no_u_turn`; from way
+`1307524008`, via node `330045016`, to way `997402723`) and rebuild — or, locally, the synthetic
+turn-restriction override in `config/osm_overrides.yaml` (mechanism in
+`docs/design/turn-restriction-overrides.md`). Verified against the movement / edge-graph tables: the
+`thru` movement is correct and untouched; only the U-turn is spurious.

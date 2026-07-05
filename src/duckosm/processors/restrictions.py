@@ -1,18 +1,38 @@
 """
 Restriction processor - extracts and maps turn restrictions.
+
+Also injects **synthetic** turn restrictions from the OSM-overrides file (`turn_restrictions:` in
+`config/osm_overrides.yaml`) for junctions where OSM is missing a `type=restriction` relation that
+physically exists — see `docs/design/turn-restriction-overrides.md` and `docs/known_osm_issues.md` #6.
+Synthetic rules ride the same `from_way → via_node → to_way` mapping as OSM restrictions, so merged and
+reverse edges are handled identically, and the edge graph / routing / GMNS / exports all honour them.
 """
+import logging
+from pathlib import Path
 
 from duckosm.processors.base import BaseProcessor
+
+logger = logging.getLogger("duckosm.restrictions")
+
+# OSM `restriction` values the edge graph understands (no_* remove the turn; only_* mandate it).
+_ALLOWED_RESTRICTIONS = {
+    "no_u_turn", "no_left_turn", "no_right_turn", "no_straight_on", "no_entry", "no_exit",
+    "only_straight_on", "only_left_turn", "only_right_turn", "only_u_turn",
+}
 
 
 class RestrictionProcessor(BaseProcessor):
     """
-    Extract turn restrictions from OSM relations.
-    
+    Extract turn restrictions from OSM relations (+ synthetic overrides).
+
     Creates:
         - turn_restrictions: Restriction rules mapped to edge IDs
     """
-    
+
+    def __init__(self, con, overrides_path=None):
+        super().__init__(con)
+        self.overrides_path = Path(overrides_path) if overrides_path else None
+
     def run(self) -> None:
         """Extract and process restrictions."""
         self._extract_raw_restrictions()
@@ -61,6 +81,9 @@ class RestrictionProcessor(BaseProcessor):
             GROUP BY restriction_id, restriction_type
         """)
         
+        # Add any synthetic restrictions (from osm_overrides.yaml) — same shape, so they map below too.
+        self._inject_overrides()
+
         # Map to edge IDs by the way that is INCIDENT to the via node — i.e. each edge's END
         # segment, not its single representative osm_id. A merged edge spans several ways and
         # keeps only one representative osm_id (its source-end member), so matching `from_way`
@@ -103,3 +126,32 @@ class RestrictionProcessor(BaseProcessor):
         self.execute("DROP TABLE IF EXISTS restrictions_raw")
         self.execute("DROP TABLE IF EXISTS restrictions_unnested")
         self.execute("DROP TABLE IF EXISTS restrictions_pivoted")
+
+    def _inject_overrides(self) -> int:
+        """Insert synthetic `turn_restrictions:` rules from the overrides file into
+        `restrictions_pivoted` (so the mapping below turns them into edge-level restrictions). Rules
+        whose ways/node aren't in this area simply map to no edges — a global no-op. Returns the count
+        of rules injected (a synthetic negative `restriction_id` keeps them clear of real relation ids)."""
+        if not self.overrides_path or not self.overrides_path.exists():
+            return 0
+        import yaml
+        rules = (yaml.safe_load(self.overrides_path.read_text()) or {}).get("turn_restrictions") or []
+        vals = []
+        for i, r in enumerate(rules):
+            try:
+                fw, vn, tw = int(r["from_way"]), int(r["via_node"]), int(r["to_way"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            rt = str(r.get("restriction", "no_u_turn"))
+            if rt not in _ALLOWED_RESTRICTIONS:                 # allow-list → injection-safe string
+                logger.warning(f"  turn_restriction override skipped: unknown restriction '{rt}'")
+                continue
+            vals.append(f"({-(i + 1)}::BIGINT,'{rt}',{fw}::BIGINT,{vn}::BIGINT,{tw}::BIGINT)")
+        if not vals:
+            return 0
+        self.execute(
+            "INSERT INTO restrictions_pivoted (restriction_id, restriction_type, from_way, via_node, to_way) "
+            f"SELECT * FROM (VALUES {','.join(vals)}) "
+            "AS t(restriction_id, restriction_type, from_way, via_node, to_way)")
+        logger.info(f"  injected {len(vals)} synthetic turn-restriction override(s)")
+        return len(vals)
