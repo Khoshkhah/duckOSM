@@ -486,7 +486,9 @@ def gmns_viz(gmns_db, mode, out):
 
 @main.command(name="matsim")
 @click.argument('db', type=click.Path(exists=True))
-@click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to export')
+@click.option('--mode', '-m', default='driving', show_default=True,
+              help="Mode(s): a single mode, 'all', or a comma-list (e.g. driving,cycling) → one "
+                   "multimodal network with modes= per link")
 @click.option('--crs', default='EPSG:3006', show_default=True,
               help='Projected metric CRS for node coords (default SWEREF99 TM; e.g. EPSG:32635 for Tartu)')
 @click.option('--gzip/--no-gzip', 'gzip', default=True, show_default=True, help='Gzip the output (MATSim convention)')

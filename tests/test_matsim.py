@@ -11,6 +11,35 @@ from duckosm.matsim import to_matsim
 _DTD = Path(__file__).parent / "fixtures" / "network_v2.dtd"   # vendored official MATSim network_v2 DTD
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
+SH, D_ONLY, C_ONLY, W_ONLY = 111111, 222222, 333333, 444444   # multimodal edge_ids
+
+
+def _build_multi(path, nodes, per_mode):
+    """Build a multi-mode source: nodes shared, per_mode = {mode: [edge tuples]} (edge tuple as _build)."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial;")
+    g = "ST_GeomFromText('LINESTRING(18.06 59.32,18.07 59.32)')"
+    for m, edges in per_mode.items():
+        con.execute(f"CREATE SCHEMA {m}")
+        con.execute(f"CREATE TABLE {m}.nodes(node_id BIGINT, geom GEOMETRY)")
+        for nid, lon, lat in nodes:
+            con.execute(f"INSERT INTO {m}.nodes VALUES ({nid}, ST_GeomFromText('POINT({lon} {lat})'))")
+        con.execute(f"CREATE TABLE {m}.edges(edge_id BIGINT, source BIGINT, target BIGINT, highway VARCHAR, "
+                    f"lanes INTEGER, maxspeed_kmh FLOAT, length_m FLOAT, cost_s FLOAT, geometry GEOMETRY)")
+        for eid, src, tgt, hw, lanes, spd, length, cost in edges:
+            lv, sv = ("NULL" if lanes is None else str(lanes)), ("NULL" if spd is None else str(spd))
+            con.execute(f"INSERT INTO {m}.edges VALUES ({eid},{src},{tgt},'{hw}',{lv},{sv},{length},{cost},{g})")
+    con.close()
+    return path
+
+
+def _multi_src(path):
+    nodes = [(1, 18.06, 59.32), (2, 18.07, 59.32), (3, 18.07, 59.31), (4, 18.06, 59.31)]
+    return _build_multi(path, nodes, {
+        "driving": [(SH, 1, 2, "primary", 2, 50, 80, 6), (D_ONLY, 2, 3, "residential", 1, None, 50, 6)],
+        "cycling": [(SH, 1, 2, "primary", 2, 50, 80, 6), (C_ONLY, 3, 4, "cycleway", None, None, 40, 8)],
+        "walking": [(W_ONLY, 1, 4, "footway", None, None, 60, 12)],
+    })
 
 
 def _src(path):
@@ -145,3 +174,30 @@ def test_gzip_roundtrip(tmp_path):
     to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xml.gz", gzip=True)
     root = _parse(tmp_path / "n.xml.gz", gz=True)
     assert len(root.findall("./links/link")) == 3 and len(root.findall("./nodes/node")) == 3
+
+
+def test_multimodal_merge(tmp_path):
+    res = to_matsim(str(_multi_src(tmp_path / "s.duckdb")), tmp_path / "n.xml", mode="all", gzip=False)
+    assert res == {"nodes": 4, "links": 4}                       # 4 distinct edge_ids, node union
+    links = {l.get("id"): l for l in _parse(tmp_path / "n.xml", gz=False).findall("./links/link")}
+    sh = links[str(SH)]                                          # shared driving+cycling segment
+    assert sh.get("modes") == "car,bike"                        # union of modes on one link
+    assert sh.get("permlanes") == "2" and float(sh.get("capacity")) == 1600 * 2   # car attrs
+    assert links[str(C_ONLY)].get("modes") == "bike"            # cycling-only
+    assert links[str(W_ONLY)].get("modes") == "walk"           # walking-only
+    assert links[str(D_ONLY)].get("modes") == "car"
+
+
+def test_multimodal_subset(tmp_path):
+    # --mode driving,cycling drops the walk-only link
+    to_matsim(str(_multi_src(tmp_path / "s.duckdb")), tmp_path / "n.xml", mode="driving,cycling", gzip=False)
+    ids = {l.get("id") for l in _parse(tmp_path / "n.xml", gz=False).findall("./links/link")}
+    assert ids == {str(SH), str(D_ONLY), str(C_ONLY)}          # no W_ONLY
+
+
+def test_multimodal_dtd_valid(tmp_path):
+    lxml_etree = pytest.importorskip("lxml.etree")
+    to_matsim(str(_multi_src(tmp_path / "s.duckdb")), tmp_path / "n.xml", mode="all", gzip=False)
+    dtd = lxml_etree.DTD(str(_DTD))
+    tree = lxml_etree.parse(str(tmp_path / "n.xml"))
+    assert dtd.validate(tree), "\n".join(e.message for e in dtd.error_log)   # modes="car,bike,walk" valid CDATA

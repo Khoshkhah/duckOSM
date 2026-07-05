@@ -1,9 +1,9 @@
 # MATSim network export → `duckosm matsim` (design)
 
-**Status:** **shipped** 2026-07-04 (`to_matsim` / `duckosm matsim`, single-mode v1). Tier 1, item 2 on
-the [export roadmap](../../product/simulation-export-targets.md) — the next target after
-[GMNS](gmns_export.md). Emits a MATSim **`network.xml`** from a built duckOSM routing db, plugging
-duckOSM into the MATSim / **BEAM** / eqasim agent-based ecosystem.
+**Status:** **shipped** 2026-07-04 (`to_matsim` / `duckosm matsim`) — single-mode **and** multimodal
+(`--mode all`). Tier 1, item 2 on the [export roadmap](../../product/simulation-export-targets.md) —
+the next target after [GMNS](gmns_export.md). Emits a MATSim **`network.xml`** from a built duckOSM
+routing db, plugging duckOSM into the MATSim / **BEAM** / eqasim agent-based ecosystem.
 
 ## What MATSim's network is
 
@@ -94,11 +94,52 @@ to_matsim("sodermalm_pbf.duckdb", "network.xml.gz", mode="driving", crs="EPSG:30
 capacity / permlanes / modes, reprojected coords, gzip. The high-value 90% that MATSim & BEAM need.
 
 **Explicitly out of scope (follow-ons, noted not silently dropped):**
-- **Multimodal single network** — one network with `modes="car,bike,walk"` per link, from the stitched
-  `mm` schema (`mm.edges`). A clean follow-on once v1 lands.
 - **`lanes.xml` + `signalSystems`** — MATSim's detailed intersection model; we already have the
   turn **movements** (from GMNS/meso) to feed it later.
 - **GTFS transit, `plans`/`population`, `config.xml`** — demand & scenario, not network; out of scope.
+
+## Multimodal single network — shipped 2026-07-04 (`--mode all`)
+
+**Goal:** one `network.xml` where each link carries the **set of modes** allowed on it
+(`modes="car,bike,walk"`), the form MATSim/BEAM actually want for multimodal agents — instead of three
+separate single-mode files.
+
+**Why it's a clean merge (verified on Södermalm).** `edge_id` is **stable across modes** — a physical
+segment present in driving *and* cycling *and* walking has the *same* `edge_id` and identical
+`source`/`target`/`length` in each (checked: 1,197 edge_ids in all 3 modes, 1,864 in 2). So the merge
+is a group-by-`edge_id`, union-the-modes over the per-mode `<mode>.edges` tables — **no dependency on
+the `mm` schema** (works on any built db with ≥1 mode). For Södermalm all-3 → **16,329 links, 5,857
+nodes**.
+
+**Build:**
+- **Nodes** = union of `<mode>.nodes` across the requested modes, dedup by `node_id` (same OSM node →
+  same coords), reprojected as in v1.
+- **Links** = union of `<mode>.edges`, **grouped by `edge_id`**. Per merged link:
+  | attr | rule |
+  |---|---|
+  | `modes` | sorted set of MATSim modes holding this `edge_id` (`driving→car`, `cycling→bike`, `walking→walk`) |
+  | `from`/`to`/`length` | from any row (identical across modes) |
+  | `permlanes` | driving `lanes` if car-allowed, else `1` |
+  | `freespeed` | car's `maxspeed_kmh/3.6` if present; else `length / min(cost_s)` over the edge's modes (fastest traversal); else fallback |
+  | `capacity` | `_CAPACITY[highway] × permlanes` (highway from the driving row if car, else the walk/bike row — e.g. `footway`/`cycleway`) |
+
+- **No transfer links.** MATSim changes mode at any node where the link-modes meet (agent mode chain),
+  so duckOSM's `mm.transfers` (its own router's device) is *not* emitted. Noted, not silently dropped.
+
+**API / CLI.** Extend `mode` to accept a **list**, `"all"`, or a comma string (single string stays
+single-mode → backward compatible; existing calls/tests unchanged):
+```bash
+duckosm matsim sodermalm_pbf.duckdb --mode all              # merge every present mode
+duckosm matsim sodermalm_pbf.duckdb --mode driving,cycling  # a subset
+```
+`to_matsim(src, out, mode=["driving","cycling","walking"], …)` → one modes-tagged network.
+
+**Fidelity.** Topology/length/modes are real; walk & bike links get a nominal (non-binding) capacity
+and their `freespeed` from the routing cost — fine for mode-choice/agent runs.
+
+**Tests.** A ≥2-mode fixture: a shared segment → one link `modes="car,bike"`; a walk-only edge →
+`modes="walk"`; node union is the dedup'd union; link count = distinct `edge_id`; output still
+**DTD-valid** (`modes="car,bike,walk"` is valid CDATA); `--mode all` picks all present modes.
 
 ## Fidelity
 

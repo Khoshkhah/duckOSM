@@ -208,8 +208,13 @@ node+link substrate for **MATSim / BEAM / eqasim**. See [`docs/matsim_export.md`
 
 ```bash
 duckosm matsim sodermalm_pbf.duckdb                        # -> sodermalm_pbf_network.xml.gz (driving, EPSG:3006)
+duckosm matsim sodermalm_pbf.duckdb --mode all             # multimodal: one network, modes=car,bike,walk per link
 duckosm matsim tartu_pbf.duckdb --crs EPSG:32635 --no-gzip # UTM 35N, plain XML
 ```
+
+`--mode all` (or a comma-list like `driving,cycling`) merges the per-mode networks into one, keyed on
+the mode-stable `edge_id`, so a segment shared by several modes becomes a single link tagged with all
+its `modes` — the form MATSim/BEAM want for multimodal agents.
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes
