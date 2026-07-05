@@ -258,6 +258,28 @@ def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
     return summary
 
 
+def node_out_degree(con, node_ids, mode: str = "driving"):
+    """Out-degree of each node in ``<mode>.edges`` — how many edges LEAVE it (``source = node``).
+
+    A junction hint for turn-by-turn guidance: out-degree ``<= 2`` is a **through-node** (the road just
+    continues, or a dead-end — no real choice, so a bend there isn't a "turn"); ``>= 3`` is a **genuine
+    junction** where turns/forks are worth announcing. Out-degree (not undirected degree) is the right
+    measure: a two-way road passing straight through has out-degree 2 (continue + the way back), while a
+    3-way junction has 3 — undirected degree would double-count every two-way road.
+
+    Returns ``{node_id: out_degree}`` for the requested nodes (absent nodes omitted). No new tables —
+    computed straight from ``source``.
+    """
+    ids = {int(n) for n in node_ids if n is not None}
+    if not ids:
+        return {}
+    idlist = ",".join(map(str, ids))
+    rows = con.execute(
+        f"SELECT source, COUNT(*) FROM {mode}.edges WHERE source IN ({idlist}) GROUP BY source"
+    ).fetchall()
+    return {int(n): int(d) for n, d in rows}
+
+
 def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
     """Shortest route between two edge ids.
 
