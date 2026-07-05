@@ -43,9 +43,12 @@ High-performance OSM-to-routing-network converter built on DuckDB.
   then verify that export with `duckosm gis-debug` (reads the file back through GDAL → an HTML map +
   `edge_id`/round-trip QA audit); or extract a standalone **GMNS** network DuckDB — every GMNS table
   OSM supports incl. **lane detail** and turn **movements** (`to_gmns` / `duckosm gmns`, `link_id` =
-  `edge_id` — see [`docs/gmns_export.md`](docs/gmns_export.md)), optionally with a **mesoscopic**
-  lane-level network (`duckosm gmns --meso` — [`docs/gmns_meso.md`](docs/gmns_meso.md)) and an
-  **interactive HTML viewer** to explore lanes / meso with hover tooltips (`duckosm gmns-viz` —
+  `edge_id` — see [`docs/gmns_export.md`](docs/gmns_export.md)), optionally with **mesoscopic**
+  (`--meso`) and **microscopic** cell-based (`--micro`) lane-level networks, a single mode-tagged
+  **combined** network (`--combined`), drive-side-aware lane geometry and smooth Bézier turn
+  connectors (see [`docs/gmns_meso.md`](docs/gmns_meso.md), [`docs/gmns_micro.md`](docs/gmns_micro.md),
+  [`docs/gmns_map_realism.md`](docs/gmns_map_realism.md)) — and an **interactive HTML viewer** to
+  explore lanes / meso / micro with hover tooltips (`duckosm gmns-viz` —
   [`docs/gmns_viewer.md`](docs/gmns_viewer.md))
 - **Admin boundaries**: optional table of all OSM administrative levels with a
   derived parent hierarchy
@@ -167,14 +170,21 @@ See [`docs/gmns_export.md`](docs/gmns_export.md):
 ```bash
 duckosm gmns data/db/sodermalm.duckdb                       # -> sodermalm_pbf_gmns.duckdb (all modes)
 duckosm gmns data/db/sodermalm.duckdb -m driving --to-csv gmns/   # driving only, + spec CSVs
-duckosm gmns data/db/sodermalm.duckdb --meso                # + a mesoscopic (lane-level) network
+duckosm gmns data/db/sodermalm.duckdb --meso --micro        # + mesoscopic + microscopic (cell) networks
 duckosm gmns data/db/sodermalm.duckdb --combined            # + a single mode-tagged gmns_all network
+duckosm gmns data/db/sodermalm.duckdb --drive-side left     # left-hand traffic lane offset
 ```
 
-**`gmns-viz`** — write a **self-contained interactive HTML viewer** for a GMNS DuckDB: toggle
-between individual **lanes** (offset by use) and the **mesoscopic** section + turn-connector network,
-**hover any line** for its id/attributes, scroll-zoom / drag-pan. Needs only DuckDB (geometry drawn
-client-side). See [`docs/gmns_viewer.md`](docs/gmns_viewer.md):
+Lane geometry is **drive-side aware** (two-way roads separate onto their travel sides) and turn
+connectors are **smooth Béziers**, so junctions render like real roads. `--meso` adds a lane-level
+mesoscopic network (section + turn-connector links); `--micro` adds a cell-based microscopic network
+(lane cells + lane-change mesh + turn connectors) for microsimulation; `--combined` merges the modes
+into one `gmns_all` network tagged by `allowed_uses`.
+
+**`gmns-viz`** — write a **self-contained interactive HTML viewer** for a GMNS DuckDB: toggle between
+individual **lanes** (offset by use), the **mesoscopic** section + turn-connector network, and the
+**microscopic** cell mesh; **hover any line** for its id/attributes, scroll-zoom / drag-pan. Needs
+only DuckDB (geometry drawn client-side). See [`docs/gmns_viewer.md`](docs/gmns_viewer.md):
 
 ```bash
 duckosm gmns-viz sodermalm_pbf_gmns.duckdb                  # -> sodermalm_pbf_gmns_viewer.html
