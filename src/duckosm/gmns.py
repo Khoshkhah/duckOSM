@@ -101,7 +101,7 @@ def _offset_wkt(line_wkt, off_m):
     return LineString(back).wkt if len(back) >= 2 else line_wkt
 
 
-def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True):
+def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -112,8 +112,12 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True):
     to_csv : if set, also dump spec-standard GMNS CSVs into this directory (per-mode subfolders when
         more than one mode).
     lane_geometry : compute a per-lane offset ``geom`` for lane-level rendering (needs shapely).
+    combined : also write a single **mode-tagged** ``gmns_all`` network (node + link), the per-mode
+        links merged on ``link_id`` (= ``edge_id``) with ``allowed_uses`` unioned across the modes that
+        contain each edge. Needs ≥2 modes.
 
-    Returns ``{"path", "csv", "modes": {mode: {counts per table}}}``. Every ``link_id`` == ``edge_id``.
+    Returns ``{"path", "csv", "combined", "modes": {mode: {counts per table}}}``. Every
+    ``link_id`` == ``edge_id``.
     """
     import duckdb
 
@@ -165,13 +169,62 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True):
         logger.info(f"GMNS[{mode}]: {r['node']:,} nodes, {r['link']:,} links, {r['lane']:,} lanes, "
                     f"{r['movement']:,} movements, {r['signal_controller']} signals -> {sch}")
 
+    result["combined"] = None
+    if combined and len(chosen) > 1:
+        c = _build_combined(con, chosen, name)
+        result["combined"] = c
+        logger.info(f"GMNS[combined]: {c['node']:,} nodes, {c['link']:,} links "
+                    f"(mode-tagged allowed_uses) -> gmns_all")
+
     if to_csv:
         _dump_csv(con, chosen, to_csv)
+        if result["combined"]:
+            _dump_csv(con, ["all"], os.path.join(to_csv, "combined"), schema_prefix="gmns_")
         result["csv"] = to_csv
 
     con.execute("DETACH s")
     con.close()
     return result
+
+
+def _build_combined(con, modes, name):
+    """A single mode-tagged ``gmns_all`` network: per-mode node/link merged on the shared id
+    (``edge_id`` collides across modes → the same physical edge becomes one row), with
+    ``allowed_uses`` unioned across the modes that contain it. Lane/movement stay per-mode."""
+    con.execute("CREATE SCHEMA gmns_all")
+    con.execute(f"""CREATE TABLE gmns_all.config AS SELECT * FROM (VALUES
+      ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', '0.97', 'integer')
+    ) t(dataset_name, long_length, short_length, speed, crs, geometry_field_format,
+        version_number, id_type)""")
+    con.execute("CREATE TABLE gmns_all.use_definition AS "
+                + " UNION ".join(f"SELECT * FROM gmns_{m}.use_definition" for m in modes))
+    con.execute("CREATE TABLE gmns_all.use_group AS "
+                + " UNION ".join(f"SELECT * FROM gmns_{m}.use_group" for m in modes))
+    con.execute(f"""CREATE TABLE gmns_all.node AS
+      WITH u AS ({" UNION ALL ".join(f"SELECT * FROM gmns_{m}.node" for m in modes)})
+      SELECT node_id, any_value(name) AS name, any_value(x_coord) AS x_coord,
+             any_value(y_coord) AS y_coord, any_value(z_coord) AS z_coord,
+             any_value(node_type) AS node_type, max(ctrl_type) AS ctrl_type,
+             any_value(zone_id) AS zone_id, any_value(parent_node_id) AS parent_node_id,
+             any_value(geom) AS geom
+      FROM u GROUP BY node_id""")
+    con.execute(f"""CREATE TABLE gmns_all.link AS
+      WITH u AS ({" UNION ALL ".join(f"SELECT * FROM gmns_{m}.link" for m in modes)})
+      SELECT link_id, any_value(name) AS name, any_value(from_node_id) AS from_node_id,
+             any_value(to_node_id) AS to_node_id, any_value(directed) AS directed,
+             any_value(geometry_id) AS geometry_id, any_value(geometry) AS geometry,
+             any_value(parent_link_id) AS parent_link_id, any_value(dir_flag) AS dir_flag,
+             any_value(length) AS length, any_value(grade) AS grade,
+             any_value(facility_type) AS facility_type, any_value(capacity) AS capacity,
+             any_value(free_speed) AS free_speed, any_value(lanes) AS lanes,
+             any_value(bike_facility) AS bike_facility, any_value(ped_facility) AS ped_facility,
+             any_value(parking) AS parking,
+             string_agg(DISTINCT allowed_uses, ',' ORDER BY allowed_uses) AS allowed_uses,
+             any_value(toll) AS toll, any_value(jurisdiction) AS jurisdiction,
+             any_value(row_width) AS row_width, any_value(geom) AS geom
+      FROM u GROUP BY link_id""")
+    return {t: con.execute(f"SELECT count(*) FROM gmns_all.{t}").fetchone()[0]
+            for t in ("node", "link")}
 
 
 def _build_fixed(con, sch, name, mode, uses):
@@ -464,15 +517,20 @@ def _build_meso_links(con, g, ms, trim_m):
       LEFT JOIN lt ON lt.ib = m.ib_link_id AND lt.cat = m.type""")
 
 
-def _dump_csv(con, modes, to_csv):
-    """COPY each GMNS table to a spec-standard CSV (dropping the non-spec geom/turn columns)."""
+def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):
+    """COPY each GMNS table to a spec-standard CSV (dropping the non-spec geom/turn columns).
+    Skips tables a schema doesn't have (e.g. the combined ``gmns_all`` carries only node/link/config/
+    use_*)."""
     tables = ["config", "node", "link", "geometry", "lane", "movement",
               "use_definition", "use_group", "signal_controller", "curb_seg"]
     for mode in modes:
-        sch = f"gmns_{mode}"
+        sch = f"{schema_prefix}{mode}"
         d = os.path.join(to_csv, mode) if len(modes) > 1 else to_csv
         os.makedirs(d, exist_ok=True)
         for t in tables:
+            if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? "
+                           "AND table_name = ?", [sch, t]).fetchone()[0] == 0:
+                continue
             excl = _CSV_EXCLUDE.get(t)
             sel = f"* EXCLUDE ({', '.join(excl)})" if excl else "*"
             path = os.path.join(d, f"{t}.csv")

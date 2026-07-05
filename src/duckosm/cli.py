@@ -409,7 +409,9 @@ def gis_debug(export_path, source_db, out, name):
               help='Also build a mesoscopic (lane-level) network — meso_<mode> schemas')
 @click.option('--meso-mode', 'meso_modes', multiple=True,
               help='Modes to build meso for (default: driving)')
-def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes):
+@click.option('--combined', is_flag=True, default=False,
+              help='Also write a single mode-tagged gmns_all network (links merged, allowed_uses unioned)')
+def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -424,7 +426,8 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes):
     if out is None:
         out = f"{Path(db).stem}_gmns.duckdb"
     try:
-        res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry)
+        res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry,
+                      combined=combined)
         meso_res = to_meso(out, modes=list(meso_modes) or ["driving"]) if meso else None
     except Exception as e:
         raise click.ClickException(str(e))
@@ -432,6 +435,9 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes):
     for mode, m in res['modes'].items():
         click.echo(f"  {mode}: {m['link']} links, {m['lane']} lanes, {m['movement']} movements, "
                    f"{m['signal_controller']} signals, {m['curb_seg']} curb segments")
+    if res.get('combined'):
+        click.echo(f"  combined: gmns_all — {res['combined']['link']} links, "
+                   f"{res['combined']['node']} nodes (mode-tagged)")
     if meso_res:
         for mode, m in meso_res.items():
             click.echo(f"  meso[{mode}]: {m['meso_link']} meso links "

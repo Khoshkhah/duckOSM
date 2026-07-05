@@ -168,6 +168,7 @@ See [`docs/gmns_export.md`](docs/gmns_export.md):
 duckosm gmns data/db/sodermalm.duckdb                       # -> sodermalm_pbf_gmns.duckdb (all modes)
 duckosm gmns data/db/sodermalm.duckdb -m driving --to-csv gmns/   # driving only, + spec CSVs
 duckosm gmns data/db/sodermalm.duckdb --meso                # + a mesoscopic (lane-level) network
+duckosm gmns data/db/sodermalm.duckdb --combined            # + a single mode-tagged gmns_all network
 ```
 
 **`gmns-viz`** — write a **self-contained interactive HTML viewer** for a GMNS DuckDB: toggle

@@ -63,6 +63,11 @@ duckosm gmns data/db/sodermalm.duckdb -o sodermalm_gmns.duckdb
   `edge_id` collides across modes (same physical edge → same hash), so each mode is its own GMNS
   network (which is what DTALite / Path4GMNS consume). Lane detail is populated for the vehicle
   (`driving`) mode.
+- **Optional combined network** — `duckosm gmns --combined` also writes a single **mode-tagged**
+  `gmns_all` (node + link): the per-mode links merged on `link_id` (= `edge_id`), so the shared
+  physical edge is one row with `allowed_uses` unioned across the modes that use it (`auto,bike,walk`).
+  The merge dissolves the cross-mode id collision (unique `link_id` again) — the multimodal-assignment
+  network osm2gmns can't build. See [gmns_roundout.md](gmns_roundout.md).
 - **Native geometry, not just WKT.** `node.geom` (POINT) and `link.geom` (LINESTRING) are stored as
   DuckDB `GEOMETRY` (EPSG:4326) so the file is directly queryable (`ST_*`) and renderable. The
   spec's textual `geometry` (WKT) is kept alongside for CSV fidelity.

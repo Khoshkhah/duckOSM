@@ -148,7 +148,19 @@ def test_capacity_and_movement_enrichment(tmp_path):
 def test_cycling_meso(tmp_path):
     """Meso builds for cycling too (same code path as driving), not just the default."""
     src = tmp_path / "src.duckdb"
-    con = duckdb.connect(str(src))
+    _two_mode_source(src)
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out), modes=["driving", "cycling"])
+    to_meso(str(out), modes=["driving", "cycling"])
+    con = duckdb.connect(str(out))
+    for m in ("driving", "cycling"):
+        assert con.execute(
+            f"SELECT count(*) FROM meso_{m}.meso_link WHERE meso_type='normal'").fetchone()[0] == 2
+
+
+def _two_mode_source(path):
+    """A source with driving + cycling sharing edges A, B (same edge_ids across modes)."""
+    con = duckdb.connect(str(path))
     con.execute("INSTALL spatial; LOAD spatial;")
     p = lambda w: f"ST_GeomFromText('{w}')"
     for m in ("driving", "cycling"):
@@ -165,13 +177,20 @@ def test_cycling_meso(tmp_path):
         con.execute(f"CREATE TABLE {m}.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
         con.execute(f"INSERT INTO {m}.edge_graph VALUES ({A},{B},{B},1.0)")
     con.close()
+
+
+def test_combined_mode_tagged(tmp_path):
+    src = tmp_path / "src.duckdb"
+    _two_mode_source(src)
     out = tmp_path / "out_gmns.duckdb"
-    to_gmns(str(src), str(out), modes=["driving", "cycling"])
-    to_meso(str(out), modes=["driving", "cycling"])
+    to_gmns(str(src), str(out), modes=["driving", "cycling"], combined=True)
     con = duckdb.connect(str(out))
-    for m in ("driving", "cycling"):
-        assert con.execute(
-            f"SELECT count(*) FROM meso_{m}.meso_link WHERE meso_type='normal'").fetchone()[0] == 2
+    # A and B are in both modes -> merged to one row each; link_id (= edge_id) unique again
+    n, d = con.execute("SELECT count(*), count(DISTINCT link_id) FROM gmns_all.link").fetchone()
+    assert n == 2 and d == 2
+    # allowed_uses unioned across the modes that contain the edge: auto (driving) + bike (cycling)
+    assert con.execute(f"SELECT allowed_uses FROM gmns_all.link WHERE link_id={A}").fetchone()[0] == "auto,bike"
+    assert con.execute("SELECT count(*) FROM gmns_all.node").fetchone()[0] == 3   # union of node ids
 
 
 def test_to_csv_is_spec_clean(tmp_path):

@@ -1,8 +1,9 @@
 # Round out GMNS — capacity, richer movements, cycling meso, combined mode-tagged
 
-**Status:** Phase 1 **shipped** 2026-07-04 (capacity + movement enrichment + cycling meso); Phase 2
-(combined mode-tagged) pending. Fills currently-NULL spec columns and adds the multimodal variant —
-no restructuring of what's shipped. Sits before the [micro network](#then-micro) on the roadmap.
+**Status:** **shipped** 2026-07-04 — Phase 1 (capacity + movement enrichment + cycling meso) and
+Phase 2 (combined mode-tagged `gmns_all`, `duckosm gmns --combined`). Fills currently-NULL spec
+columns and adds the multimodal variant — no restructuring of what shipped. Sits before the
+[micro network](#then-micro) on the roadmap.
 
 Confirmed on Södermalm driving: `link.capacity` 0/2,876, `movement.mvmt_code`/`geometry`/
 `start_ib_lane`/`end_ib_lane` all 0/4,503 — these are populated columns in the spec that we leave
@@ -49,7 +50,7 @@ Three NULL columns, all derivable from data we already have:
 [gmns_meso.md](gmns_meso.md) from "driving-only v1" to "driving + cycling; walking still excluded —
 no lanes", and add a cycling-meso test). No new code.
 
-## 4. Combined mode-tagged GMNS — ◻ Phase 2 (bigger)
+## 4. Combined mode-tagged GMNS — ✅ Phase 2 (`--combined`)
 
 The single-network variant the multimodal note flagged. Today each mode is its own `gmns_<mode>`
 schema (because `edge_id` collides across modes). A combined network unifies them:
