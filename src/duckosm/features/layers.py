@@ -73,11 +73,12 @@ class Land(Layer):
         f"{_t('landuse')} IN ('forest','meadow','grass','farmland','farmyard','residential',"
         f"'commercial','industrial','retail','garages','cemetery','allotments','orchard',"
         f"'vineyard','quarry','recreation_ground','village_green','greenfield','brownfield',"
-        f"'landfill','railway','plant_nursery') "
+        f"'landfill','railway','plant_nursery','flowerbed','military','religious') "
         f"OR {_t('natural')} IN ('wood','scrub','heath','grassland','fell','sand','beach','scree',"
         f"'shingle','bare_rock','wetland') "
         f"OR {_t('leisure')} IN ('park','garden','golf_course','playground','miniature_golf',"
-        f"'nature_reserve') "
+        f"'nature_reserve','stadium','pitch','track','dog_park','marina','ice_rink',"
+        f"'swimming_area') "                              # sport/leisure AREAS render as fills in OSM-Carto (not POIs)
         f"OR {_t('landuse')} = 'greenhouse_horticulture'")
     # natural=wood -> Shortbread 'forest'; everything else passes through (values match Shortbread).
     kind_sql = (
@@ -93,13 +94,14 @@ class Sites(Layer):
     # here so a bus terminal / platform renders as a filled shape).
     where_sql = (
         f"{_t('amenity')} IN ('parking','bicycle_parking','bus_station','university','college',"
-        f"'school','hospital','prison') "
+        f"'school','kindergarten','hospital','prison') "
         f"OR {_t('public_transport')} IN ('platform','station') "
         f"OR {_t('leisure')} = 'sports_centre' OR {_t('landuse')} = 'construction' "
-        f"OR {_t('military')} = 'danger_area'")
+        f"OR {_t('military')} = 'danger_area' OR {_t('man_made')} = 'bridge'")
     kind_sql = (
         f"CASE WHEN {_t('landuse')} = 'construction' THEN 'construction' "
         f"WHEN {_t('military')} = 'danger_area' THEN 'danger_area' "
+        f"WHEN {_t('man_made')} = 'bridge' THEN 'bridge' "
         f"WHEN {_t('leisure')} = 'sports_centre' THEN 'sports_centre' "
         f"WHEN {_t('amenity')} IS NOT NULL THEN {_t('amenity')} "
         f"ELSE {_t('public_transport')} END")
@@ -146,7 +148,8 @@ class Pois(Layer):
         f"'bus_station','ferry_terminal')) "
         f"OR {_t('shop')} IS NOT NULL OR {_t('tourism')} IS NOT NULL OR {_t('office')} IS NOT NULL "
         f"OR ({_t('leisure')} IS NOT NULL AND {_t('leisure')} NOT IN ('park','garden','sports_centre',"
-        f"'golf_course','playground','nature_reserve','miniature_golf')) "
+        f"'golf_course','playground','nature_reserve','miniature_golf','stadium','pitch','track',"
+        f"'dog_park','marina','ice_rink','swimming_area')) "
         f"OR {_t('man_made')} IS NOT NULL")
     kind_sql = (f"COALESCE({_t('amenity')}, {_t('shop')}, {_t('tourism')}, {_t('office')}, "
                 f"{_t('leisure')}, {_t('man_made')})")
