@@ -63,6 +63,17 @@ def test_payload_has_lanes_and_meso(tmp_path):
     assert lane["t"] == "lane" and "id" in lane and "u" in lane
 
 
+def test_payload_includes_micro(tmp_path):
+    from duckosm.gmns import to_micro
+    db = _gmns_db(tmp_path)                                     # gmns + meso
+    to_micro(str(db), modes=["driving"])
+    con = duckdb.connect(str(db), read_only=True)
+    con.execute("LOAD spatial;")
+    p = build_viewer_payload(con, mode="driving")
+    assert p["has_micro"] is True
+    assert len(p["micro_cells"]) > 0 and len(p["micro_conns"]) > 0   # cells + turn connectors present
+
+
 def test_payload_without_meso(tmp_path):
     con = duckdb.connect(str(_gmns_db(tmp_path, meso=False)), read_only=True)
     con.execute("LOAD spatial;")

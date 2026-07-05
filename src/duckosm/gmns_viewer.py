@@ -55,6 +55,12 @@ def build_viewer_payload(con, mode="driving"):
                            f"ST_AsText(geom) FROM {m}.meso_link WHERE meso_type='movement' "
                            f"AND geom IS NOT NULL").fetchall()
         mnodes = con.execute(f"SELECT ST_AsText(geom) FROM {m}.meso_node").fetchall()
+    mi = f"micro_{mode}"
+    have_micro = _table(con, mi, "micro_link")
+    micro = []
+    if have_micro:
+        micro = con.execute(f"SELECT cell_type, mvmt_txt_id, ST_AsText(geom) FROM {mi}.micro_link "
+                            f"WHERE geom IS NOT NULL").fetchall()
     cnt = dict(con.execute(f"SELECT allowed_uses, count(*) FROM {g}.lane GROUP BY 1").fetchall())
 
     # a lane-rich junction to open on (prefer a bus-lane / multi-lane approach)
@@ -86,6 +92,10 @@ def build_viewer_payload(con, mode="driving"):
     con_feats = [{"t": "conn", "id": cid, "mv": mv or "", "la": la, "s": sib, "e": eib, "g": flat(w)}
                  for cid, mv, la, sib, eib, w in cons]
     mnode_arr = [[qx(x), qy(y)] for x, y in (_coords(w)[0] for (w,) in mnodes)]
+    # micro: cells + lane-change drawn from flat coords (no hover); turn connectors hoverable
+    mi_cells = [flat(w) for ct, mv, w in micro if ct == "normal"]
+    mi_lchg = [flat(w) for ct, mv, w in micro if ct == "lane_change"]
+    mi_conns = [{"t": "mconn", "mv": mv or "", "g": flat(w)} for ct, mv, w in micro if ct == "movement"]
     if not focus:
         focus = ((minx + maxx) / 2, (miny + maxy) / 2)
     fx, fy = qx(focus[0]), qy(focus[1])
@@ -94,9 +104,11 @@ def build_viewer_payload(con, mode="driving"):
     return {
         "grid": {"w": gw, "h": gh}, "focus": [fx - half, fy - half, fx + half, fy + half],
         "lanes": lane_feats, "sections": sec_feats, "conns": con_feats, "mnodes": mnode_arr,
-        "has_meso": bool(sec_feats or con_feats), "mode": mode,
+        "micro_cells": mi_cells, "micro_lchg": mi_lchg, "micro_conns": mi_conns,
+        "has_meso": bool(sec_feats or con_feats), "has_micro": bool(micro), "mode": mode,
         "stats": {"lanes": sum(cnt.values()), "bus": cnt.get("bus", 0), "bike": cnt.get("bike", 0),
-                  "sec": len(sec_feats), "con": len(con_feats), "file": ""},
+                  "sec": len(sec_feats), "con": len(con_feats),
+                  "mcell": len(mi_cells), "mconn": len(mi_conns), "file": ""},
     }
 
 
@@ -175,7 +187,8 @@ padding:7px 10px;font-family:var(--mono);font-size:11.5px;color:#e6edf3;max-widt
     <canvas id="c"></canvas>
     <div class="seg" id="seg" role="group" aria-label="Layer">
       <button data-l="lanes" aria-pressed="false">Lanes</button>
-      <button data-l="meso" aria-pressed="true">Meso</button></div>
+      <button data-l="meso" aria-pressed="true">Meso</button>
+      <button data-l="micro" data-micro="1" aria-pressed="false">Micro</button></div>
     <div class="legend" id="legend"></div>
     <div class="hint">scroll zoom · drag pan · hover = info</div>
     <div class="foot"><b id="z">1.0×</b></div>
@@ -188,27 +201,36 @@ const $=i=>document.getElementById(i),fN=n=>n.toLocaleString('en-US');
 $('f').textContent=D.stats.file;$('md').textContent=D.mode;
 const T=[['Lanes',fN(D.stats.lanes),''],['Bus lanes',fN(D.stats.bus),'bus'],['Bike lanes',fN(D.stats.bike),'bike']];
 if(D.has_meso)T.push(['Meso sections',fN(D.stats.sec),''],['Connectors',fN(D.stats.con),'con']);
+if(D.has_micro)T.push(['Micro cells',fN(D.stats.mcell),''],['Turn cells',fN(D.stats.mconn),'con']);
 $('tiles').innerHTML=T.map(([k,v,c])=>`<div class="tile"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`).join('');
 const cv=$('c'),ctx=cv.getContext('2d'),tip=$('tip');
 const LCOL=['#8aa0b6','#e8934a','#5aa0d8'];let dpr=Math.min(window.devicePixelRatio||1,2),v={s:1,tx:0,ty:0};
 let layer=D.has_meso?'meso':'lanes',hover=null;
-if(!D.has_meso)$('seg').style.display='none';
+if(!D.has_meso&&!D.has_micro)$('seg').style.display='none';
+[...$('seg').children].forEach(b=>{if(b.dataset.l==='meso'&&!D.has_meso)b.style.display='none';
+ if(b.dataset.micro&&!D.has_micro)b.style.display='none';});
 const mesoFeats=D.sections.concat(D.conns);
 const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const X=x=>(x*v.s+v.tx)*dpr,Y=y=>(y*v.s+v.ty)*dpr;
 
-function legend(){const L=layer==='lanes'
- ?[['--auto','auto'],['--bus','bus (psv)'],['--bike','bike']]
- :[['--sec','section (per macro link)'],['--con','movement connector (turn)']];
- $('legend').innerHTML='<div class="h">'+(layer==='lanes'?'Lane · allowed use':'Meso links')+'</div>'
- +L.map(([c,t])=>`<div class="r"><span class="sw" style="background:var(${c})"></span>${t}</div>`).join('')
- +(layer==='lanes'?'':'<div class="r"><span class="sw dot"></span>meso node</div>');}
+function legend(){let L,title;
+ if(layer==='lanes'){L=[['--auto','auto'],['--bus','bus (psv)'],['--bike','bike']];title='Lane · allowed use';}
+ else if(layer==='micro'){L=[['--sec','lane cell'],['#5f6f7d','lane-change'],['--con','turn connector']];title='Micro (cell-based)';}
+ else{L=[['--sec','section (per macro link)'],['--con','movement connector (turn)']];title='Meso links';}
+ const sw=c=>c[0]==='#'?c:'var('+c+')';
+ $('legend').innerHTML='<div class="h">'+title+'</div>'
+ +L.map(([c,t])=>`<div class="r"><span class="sw" style="background:${sw(c)}"></span>${t}</div>`).join('')
+ +(layer==='meso'?'<div class="r"><span class="sw dot"></span>meso node</div>':'');}
 
 function poly(g){ctx.moveTo(X(g[0]),Y(g[1]));for(let i=2;i<g.length;i+=2)ctx.lineTo(X(g[i]),Y(g[i+1]));}
 function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle=cssVar('--map')||'#0b1017';ctx.fillRect(0,0,cv.width,cv.height);
 ctx.lineCap='round';ctx.lineJoin='round';const lw=Math.max(.8,Math.min(4,v.s*.9))*dpr;
 if(layer==='lanes'){const bk=[[],[],[]];for(const f of D.lanes)bk[f.u].push(f);
  bk.forEach((arr,u)=>{if(!arr.length)return;ctx.strokeStyle=LCOL[u];ctx.lineWidth=lw;ctx.beginPath();for(const f of arr)poly(f.g);ctx.stroke();});
+}else if(layer==='micro'){
+ ctx.strokeStyle='#5f6f7d';ctx.lineWidth=lw*.7;ctx.beginPath();for(const g of D.micro_lchg)poly(g);ctx.stroke();
+ ctx.strokeStyle=cssVar('--sec');ctx.lineWidth=lw;ctx.beginPath();for(const g of D.micro_cells)poly(g);ctx.stroke();
+ ctx.strokeStyle=cssVar('--con');ctx.lineWidth=lw*1.2;ctx.beginPath();for(const f of D.micro_conns)poly(f.g);ctx.stroke();
 }else{ctx.strokeStyle=cssVar('--sec');ctx.lineWidth=lw;ctx.beginPath();for(const f of D.sections)poly(f.g);ctx.stroke();
  ctx.strokeStyle=cssVar('--con');ctx.lineWidth=lw*1.15;ctx.beginPath();for(const f of D.conns)poly(f.g);ctx.stroke();
  ctx.fillStyle=cssVar('--nd');const rad=Math.max(.8,Math.min(2.6,v.s*.5))*dpr;
@@ -219,12 +241,13 @@ $('z').textContent=v.s.toFixed(2).replace(/0$/,'')+'×';}
 function ds2(px,py,x1,y1,x2,y2){const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;let t=0;
  if(l2>0){t=((px-x1)*dx+(py-y1)*dy)/l2;t=t<0?0:t>1?1:t;}const cx=x1+t*dx,cy=y1+t*dy,ex=px-cx,ey=py-cy;return ex*ex+ey*ey;}
 function hit(mx,my){const gx=(mx-v.tx)/v.s,gy=(my-v.ty)/v.s,th=(9/v.s)*(9/v.s);let best=null,bd=th;
- const feats=layer==='lanes'?D.lanes:mesoFeats;
+ const feats=layer==='lanes'?D.lanes:layer==='micro'?D.micro_conns:mesoFeats;
  for(const f of feats){const g=f.g;for(let i=0;i<g.length-2;i+=2){const d=ds2(gx,gy,g[i],g[i+1],g[i+2],g[i+3]);if(d<bd){bd=d;best=f;}}}
  return best;}
 function showTip(f,mx,my){if(!f){tip.style.display='none';return;}let h='',m='';
  if(f.t==='lane'){h='Lane · '+['auto','bus','bike'][f.u];m='link '+f.id+'<br>lane '+f.n+(f.tr?' · turn '+f.tr:'');}
  else if(f.t==='section'){h='Meso section';m=f.id+'<br>macro '+f.m+'<br>'+f.la+' lane(s) · '+(f.f||'—');}
+ else if(f.t==='mconn'){h='Micro turn cell';m='movement '+(f.mv||'?');}
  else{h='Turn connector';m=(f.mv||'?')+' · '+f.la+' lane(s)'+(f.s!=null?'<br>ib lanes '+f.s+'–'+f.e:'')+'<br>'+f.id;}
  tip.innerHTML='<div class="h">'+h+'</div><div class="m">'+m+'</div>';tip.style.display='block';
  const r=cv.getBoundingClientRect();let tx=mx+14,ty=my+14;if(tx>r.width-200)tx=mx-tip.offsetWidth-14;if(ty>r.height-70)ty=my-tip.offsetHeight-14;

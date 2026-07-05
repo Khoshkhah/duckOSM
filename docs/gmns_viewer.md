@@ -29,6 +29,9 @@ Input is a GMNS DuckDB built by [`duckosm gmns`](gmns_export.md) (the meso layer
 - **Meso** — the mesoscopic network: **section** links (grey, one per macro link, centerline,
   trimmed at junctions), **turn connectors** (cyan, one per legal movement), and **meso nodes**
   (yellow). Shown only when the db has a `meso_<mode>` schema.
+- **Micro** — the microscopic cell-based network: **lane cells** (grey ladder), **lane-change**
+  connectors (the diagonal cross-hatch mesh between adjacent lanes), and **turn connectors** (cyan,
+  hoverable). Shown only when the db has a `micro_<mode>` schema (`duckosm gmns --micro`).
 
 The two are kept as **separate layers on purpose** — lanes are *offset* from the centerline while
 meso sections/connectors are *on* the centerline, so stacking them reads as connectors "floating"
