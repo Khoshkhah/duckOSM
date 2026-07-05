@@ -8,9 +8,11 @@ import xml.etree.ElementTree as ET
 import duckdb
 import pytest
 
+from duckosm.gmns import to_gmns
 from duckosm.opendrive import to_opendrive
 
 A, B = 6141068311830699705, 3843102655846694531
+C, AR = 5555555555555555555, 1234567890123456789
 
 
 def _src(path):
@@ -71,3 +73,57 @@ def test_georeference_and_metric_coords(tmp_path):
 def test_bad_mode_raises(tmp_path):
     with pytest.raises(ValueError, match="cycling"):
         to_opendrive(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xodr", mode="cycling")
+
+
+# ---- Phase 2: routable junctions (from a GMNS db) ----
+
+def _gmns(tmp_path):
+    """A GMNS db from a source with a turn choice A→{B,C} at node 2 (→ node 2 is a junction)."""
+    src = tmp_path / "src.duckdb"
+    con = duckdb.connect(str(src))
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),"
+                f"(3,{p('POINT(18.07 59.31)')}),(4,{p('POINT(18.08 59.32)')})")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, length_m FLOAT, "
+                "maxspeed_kmh FLOAT, geometry GEOMETRY)")
+    con.execute(f"""INSERT INTO driving.edges VALUES
+        ({A},1,2,100,'primary','Main',2,false,80,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+        ({B},2,3,101,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.07 59.31)')}),
+        ({C},2,4,102,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.08 59.32)')}),
+        ({AR},2,1,100,'primary','Main',2,true,80,50,{p('LINESTRING(18.07 59.32,18.06 59.32)')})""")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    con.execute(f"INSERT INTO driving.edge_graph VALUES ({A},{B},{B},1.0),({A},{C},{C},1.0)")
+    con.close()
+    gmns = tmp_path / "gmns.duckdb"
+    to_gmns(str(src), str(gmns))
+    return gmns
+
+
+def test_junctions_structure(tmp_path):
+    res = to_opendrive(str(_gmns(tmp_path)), tmp_path / "n.xodr", junctions=True)
+    assert res["junctions"] == 1 and res["connecting_roads"] >= 2   # node 2, turns A→B and A→C
+    root, roads = _roads(tmp_path / "n.xodr")
+    junc = root.findall("junction")
+    assert len(junc) == 1 and junc[0].get("id") == "2"
+    conns = junc[0].findall("connection")
+    assert len(conns) >= 2
+    c0 = conns[0]
+    assert c0.get("incomingRoad") == str(A) and c0.find("laneLink") is not None
+    # its connecting road exists, is tagged junction=2, and links ib→ob
+    cr = roads[c0.get("connectingRoad")]
+    assert cr.get("junction") == "2"
+    assert cr.find("./link/predecessor").get("elementId") == str(A)
+    assert cr.find("./link/successor").get("elementId") in {str(B), str(C)}
+    # main road A links forward into the junction
+    assert roads[str(A)].find("./link/successor").get("elementType") == "junction"
+    assert roads[str(A)].find("./link/successor").get("elementId") == "2"
+
+
+def test_junctions_requires_gmns(tmp_path):
+    # core db (no gmns_driving.movement) → --junctions raises
+    with pytest.raises(ValueError, match="GMNS"):
+        to_opendrive(str(_src(tmp_path / "core.duckdb")), tmp_path / "n.xodr", junctions=True)

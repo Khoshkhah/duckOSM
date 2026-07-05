@@ -240,9 +240,13 @@ lane-level network); routable `<junction>`s (reusing the meso turn Béziers) are
 See [`docs/opendrive_export.md`](docs/opendrive_export.md):
 
 ```bash
-duckosm opendrive sodermalm_pbf.duckdb                     # -> sodermalm_pbf.xodr (driving, EPSG:3006)
-duckosm opendrive tartu_pbf.duckdb --crs EPSG:32635        # UTM 35N
+duckosm opendrive sodermalm_pbf.duckdb                     # Phase 1: roads + lanes (from the core db)
+duckosm opendrive sodermalm_pbf_gmns.duckdb --junctions    # Phase 2: + routable junctions (from a GMNS db)
 ```
+
+`--junctions` (Phase 2, needs a GMNS db) links roads through `<junction>` elements whose connecting
+roads carry the smooth turn geometry — a *routable* network. Turn geometry & lane links are simplified,
+and there's no local esmini/CARLA to prove simulator acceptance, so load-test on your side.
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes

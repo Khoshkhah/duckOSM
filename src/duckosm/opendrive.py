@@ -45,68 +45,179 @@ def _coords(wkt):
     return [tuple(float(v) for v in p.split()[:2]) for p in b.split(",")]
 
 
-def to_opendrive(source, out_path, mode="driving", crs="EPSG:3006"):
-    """Write an OpenDRIVE ``.xodr`` from a built duckOSM db (``<mode>.edges``). Node coordinates are
-    reprojected to the metric ``crs`` (recorded in ``<geoReference>``). Returns ``{"roads": n}``."""
+def _segments(pts):
+    """polyline points → [(s, x, y, hdg, seg_length)] + total length (piecewise-linear reference)."""
+    segs, s = [], 0.0
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        length = math.hypot(x1 - x0, y1 - y0)
+        if length <= 0:
+            continue
+        segs.append((s, x0, y0, math.atan2(y1 - y0, x1 - x0), length))
+        s += length
+    return segs, s
+
+
+def _planview(segs):
+    o = ['\t\t<planView>']
+    for s, x, y, hdg, length in segs:
+        o.append(f'\t\t\t<geometry s="{s:.4f}" x="{x:.4f}" y="{y:.4f}" hdg="{hdg:.6f}" '
+                 f'length="{length:.4f}"><line/></geometry>')
+    o.append('\t\t</planView>')
+    return o
+
+
+def _lanes(n):
+    o = ['\t\t<lanes>', '\t\t\t<laneSection s="0">',
+         '\t\t\t\t<center><lane id="0" type="none" level="false"/></center>', '\t\t\t\t<right>']
+    for i in range(1, n + 1):
+        o += [f'\t\t\t\t\t<lane id="-{i}" type="driving" level="false">',
+              f'\t\t\t\t\t\t<width sOffset="0" a="{_LANE_W}" b="0" c="0" d="0"/>', '\t\t\t\t\t</lane>']
+    o += ['\t\t\t\t</right>', '\t\t\t</laneSection>', '\t\t</lanes>']
+    return o
+
+
+def _header(name, xs, ys, crs):
+    return [f'\t<header revMajor="1" revMinor="7" name={quoteattr(name)} version="1.00" '
+            f'north="{max(ys):.2f}" south="{min(ys):.2f}" east="{max(xs):.2f}" west="{min(xs):.2f}">',
+            f'\t\t<geoReference><![CDATA[{_geo_ref(crs)}]]></geoReference>', '\t</header>']
+
+
+def _tx(col):
+    return f"ST_AsText(ST_Transform({col}, 'EPSG:4326', ?, always_xy := true))"
+
+
+def _build_phase1(con, mode, crs, name):
+    rows = con.execute(f"SELECT edge_id, COALESCE(lanes, 1), name, {_tx('geometry')} "
+                       f"FROM {mode}.edges WHERE geometry IS NOT NULL", [crs]).fetchall()
+    xs, ys, o = [], [], []
+    for eid, lanes, nm, wkt in rows:
+        pts = _coords(wkt)
+        if len(pts) < 2:
+            continue
+        segs, total = _segments(pts)
+        if not segs:
+            continue
+        xs += [p[0] for p in pts]; ys += [p[1] for p in pts]
+        o.append(f'\t<road name={quoteattr(nm or "")} length="{total:.4f}" id="{eid}" junction="-1">')
+        o += _planview(segs) + _lanes(max(int(lanes), 1)) + ['\t</road>']
+    body = ['<?xml version="1.0" encoding="UTF-8"?>', '<OpenDRIVE>'] + _header(name, xs, ys, crs) + o
+    body.append('</OpenDRIVE>\n')
+    return "\n".join(body), {"roads": sum(1 for line in o if line.startswith('\t<road '))}
+
+
+def _build_junctions(con, g, crs, name):
+    from collections import defaultdict
+
+    links = con.execute(f"SELECT link_id, from_node_id, to_node_id, COALESCE(lanes, 1), name, "
+                        f"{_tx('geom')} FROM {g}.link WHERE geom IS NOT NULL", [crs]).fetchall()
+    movements = con.execute(
+        f"SELECT node_id, ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, {_tx('ST_GeomFromText(geometry)')} "
+        f"FROM {g}.movement WHERE geometry IS NOT NULL AND ib_link_id IS NOT NULL "
+        f"AND ob_link_id IS NOT NULL", [crs]).fetchall()
+
+    # a node is a junction if any inbound link has ≥2 outbound choices, or ≥3 inbound links meet
+    ib_obs = defaultdict(lambda: defaultdict(set))
+    for node, ib, ob, sib, eib, wkt in movements:
+        ib_obs[node][ib].add(ob)
+    jnodes = {n for n, ibs in ib_obs.items() if len(ibs) >= 3 or any(len(o) >= 2 for o in ibs.values())}
+
+    # direct road-to-road links at non-junction (through) nodes
+    succ, pred = {}, {}
+    for node, ib, ob, sib, eib, wkt in movements:
+        if node not in jnodes:
+            succ.setdefault(ib, ob)          # ib ends at `node`, continues to ob
+            pred.setdefault(ob, ib)          # ob starts at `node`, comes from ib
+
+    xs, ys = [], []
+    road_o, conn_o = [], []
+    conns_by_node = defaultdict(list)
+    # main roads (from links), with junction/road end-links
+    for lid, fn, tn, lanes, nm, wkt in links:
+        pts = _coords(wkt)
+        if len(pts) < 2:
+            continue
+        segs, total = _segments(pts)
+        if not segs:
+            continue
+        xs += [p[0] for p in pts]; ys += [p[1] for p in pts]
+        link = []
+        if fn in jnodes:
+            link.append(f'\t\t\t<predecessor elementType="junction" elementId="{fn}"/>')
+        elif lid in pred:
+            link.append(f'\t\t\t<predecessor elementType="road" elementId="{pred[lid]}" contactPoint="end"/>')
+        if tn in jnodes:
+            link.append(f'\t\t\t<successor elementType="junction" elementId="{tn}"/>')
+        elif lid in succ:
+            link.append(f'\t\t\t<successor elementType="road" elementId="{succ[lid]}" contactPoint="start"/>')
+        road_o.append(f'\t<road name={quoteattr(nm or "")} length="{total:.4f}" id="{lid}" junction="-1">')
+        if link:
+            road_o += ['\t\t<link>'] + link + ['\t\t</link>']
+        road_o += _planview(segs) + _lanes(max(int(lanes), 1)) + ['\t</road>']
+    # connecting roads (one per movement at a junction node) + junction connections
+    ci = 0
+    for node, ib, ob, sib, eib, wkt in movements:
+        if node not in jnodes or not wkt:
+            continue
+        pts = _coords(wkt)
+        if len(pts) < 2:
+            continue
+        segs, total = _segments(pts)
+        if not segs:
+            continue
+        cid = f"c{ci}"; ci += 1
+        xs += [p[0] for p in pts]; ys += [p[1] for p in pts]
+        conn_o.append(f'\t<road name="" length="{total:.4f}" id="{cid}" junction="{node}">')
+        conn_o += ['\t\t<link>',
+                   f'\t\t\t<predecessor elementType="road" elementId="{ib}" contactPoint="end"/>',
+                   f'\t\t\t<successor elementType="road" elementId="{ob}" contactPoint="start"/>',
+                   '\t\t</link>']
+        conn_o += _planview(segs) + _lanes(1) + ['\t</road>']
+        conns_by_node[node].append((cid, ib))
+    junc_o = []
+    for node, cs in conns_by_node.items():
+        junc_o.append(f'\t<junction id="{node}" name="">')
+        for k, (cid, ib) in enumerate(cs):
+            junc_o += [f'\t\t<connection id="{k}" incomingRoad="{ib}" connectingRoad="{cid}" contactPoint="start">',
+                       '\t\t\t<laneLink from="-1" to="-1"/>', '\t\t</connection>']
+        junc_o.append('\t</junction>')
+
+    body = (['<?xml version="1.0" encoding="UTF-8"?>', '<OpenDRIVE>'] + _header(name, xs, ys, crs)
+            + road_o + conn_o + junc_o + ['</OpenDRIVE>\n'])
+    counts = {"roads": sum(1 for line in road_o if line.startswith('\t<road ')),
+              "connecting_roads": ci, "junctions": len(conns_by_node)}
+    return "\n".join(body), counts
+
+
+def to_opendrive(source, out_path, mode="driving", crs="EPSG:3006", junctions=False):
+    """Write an OpenDRIVE ``.xodr`` from a built duckOSM db, reprojected to the metric ``crs``.
+
+    ``junctions=False`` (Phase 1): read ``<mode>.edges`` → roads + lanes, no junctions.
+    ``junctions=True`` (Phase 2): read a **GMNS db** (``gmns_<mode>.link`` + ``.movement``) → roads
+    that link through ``<junction>`` elements whose connecting roads carry the turn geometry.
+    Returns counts."""
     import duckdb
 
     con = duckdb.connect(str(source), read_only=True)
     con.execute("INSTALL spatial; LOAD spatial;")
-    if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='edges'",
-                   [mode]).fetchone()[0] == 0:
-        con.close()
-        raise ValueError(f"no '{mode}.edges' in {source} — is this a built duckOSM db with mode '{mode}'?")
-    rows = con.execute(
-        f"SELECT edge_id, COALESCE(lanes, 1), name, "
-        f"ST_AsText(ST_Transform(geometry, 'EPSG:4326', ?, always_xy := true)) "
-        f"FROM {mode}.edges WHERE geometry IS NOT NULL", [crs]).fetchall()
+    if junctions:
+        g = f"gmns_{mode}"
+        if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='movement'",
+                       [g]).fetchone()[0] == 0:
+            con.close()
+            raise ValueError(f"--junctions needs a GMNS db (no '{g}.movement' in {source}) — build with duckosm gmns")
+        xml, counts = _build_junctions(con, g, crs, Path(source).stem)
+    else:
+        if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='edges'",
+                       [mode]).fetchone()[0] == 0:
+            con.close()
+            raise ValueError(f"no '{mode}.edges' in {source} — is this a built duckOSM db with mode '{mode}'?")
+        xml, counts = _build_phase1(con, mode, crs, Path(source).stem)
     con.close()
-
-    roads, xs, ys = [], [], []
-    for eid, lanes, name, wkt in rows:
-        pts = _coords(wkt)
-        if len(pts) < 2:
-            continue
-        segs, s = [], 0.0
-        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-            length = math.hypot(x1 - x0, y1 - y0)
-            if length <= 0:
-                continue
-            segs.append((s, x0, y0, math.atan2(y1 - y0, x1 - x0), length))
-            s += length
-        if not segs:
-            continue
-        roads.append((eid, max(int(lanes), 1), name or "", segs, s))
-        xs += [p[0] for p in pts]; ys += [p[1] for p in pts]
-
-    o = ['<?xml version="1.0" encoding="UTF-8"?>', '<OpenDRIVE>']
-    o.append(f'\t<header revMajor="1" revMinor="7" name={quoteattr(Path(source).stem)} version="1.00" '
-             f'north="{max(ys):.2f}" south="{min(ys):.2f}" east="{max(xs):.2f}" west="{min(xs):.2f}">')
-    o.append(f'\t\t<geoReference><![CDATA[{_geo_ref(crs)}]]></geoReference>')
-    o.append('\t</header>')
-    for eid, lanes, name, segs, total in roads:
-        o.append(f'\t<road name={quoteattr(name)} length="{total:.4f}" id="{eid}" junction="-1">')
-        o.append('\t\t<planView>')
-        for s, x, y, hdg, length in segs:
-            o.append(f'\t\t\t<geometry s="{s:.4f}" x="{x:.4f}" y="{y:.4f}" hdg="{hdg:.6f}" '
-                     f'length="{length:.4f}"><line/></geometry>')
-        o.append('\t\t</planView>')
-        o.append('\t\t<lanes>')
-        o.append('\t\t\t<laneSection s="0">')
-        o.append('\t\t\t\t<center><lane id="0" type="none" level="false"/></center>')
-        o.append('\t\t\t\t<right>')
-        for i in range(1, lanes + 1):
-            o.append(f'\t\t\t\t\t<lane id="-{i}" type="driving" level="false">')
-            o.append(f'\t\t\t\t\t\t<width sOffset="0" a="{_LANE_W}" b="0" c="0" d="0"/>')
-            o.append('\t\t\t\t\t</lane>')
-        o.append('\t\t\t\t</right>')
-        o.append('\t\t\t</laneSection>')
-        o.append('\t\t</lanes>')
-        o.append('\t</road>')
-    o.append('</OpenDRIVE>\n')
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text("\n".join(o), encoding="utf-8")
-    logger.info(f"OpenDRIVE[{mode}]: {len(roads):,} roads (CRS {crs}) -> {out_path}")
-    return {"roads": len(roads)}
+    out_path.write_text(xml, encoding="utf-8")
+    extra = (f", {counts['connecting_roads']:,} connecting roads, {counts['junctions']:,} junctions"
+             if junctions else "")
+    logger.info(f"OpenDRIVE[{mode}]: {counts['roads']:,} roads{extra} (CRS {crs}) -> {out_path}")
+    return counts

@@ -519,11 +519,14 @@ def matsim(db, mode, crs, gzip, out):
 @click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to export')
 @click.option('--crs', default='EPSG:3006', show_default=True,
               help='Projected metric CRS for the reference line (default SWEREF99 TM)')
+@click.option('--junctions', is_flag=True, default=False,
+              help='Phase 2: routable junctions + connecting roads (requires a GMNS db, not the core db)')
 @click.option('--out', '-o', default=None, help='Output .xodr (default: <name>.xodr)')
-def opendrive(db, mode, crs, out):
+def opendrive(db, mode, crs, junctions, out):
     """Export an ASAM OpenDRIVE .xodr from a built duckOSM db — roads with a reprojected reference line
     and lane-level width offsets, for AV sims (CARLA/esmini) and commercial micro (Vissim/Aimsun).
-    Phase 1: geometry + lanes (no junctions yet). See docs/opendrive_export.md.
+    Phase 1 (default): geometry + lanes. `--junctions` adds routable junctions + turn connecting roads
+    (needs a GMNS db). See docs/opendrive_export.md.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -532,10 +535,11 @@ def opendrive(db, mode, crs, out):
     if out is None:
         out = f"{Path(db).stem}.xodr"
     try:
-        res = to_opendrive(db, out, mode=mode, crs=crs)
+        res = to_opendrive(db, out, mode=mode, crs=crs, junctions=junctions)
     except Exception as e:
         raise click.ClickException(str(e))
-    click.echo(f"wrote {out} — {res['roads']} roads")
+    extra = f" + {res['connecting_roads']} connecting roads, {res['junctions']} junctions" if junctions else ""
+    click.echo(f"wrote {out} — {res['roads']} roads{extra}")
 
 
 @main.command(name="matsim-lanes")
