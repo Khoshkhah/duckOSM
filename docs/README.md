@@ -14,6 +14,7 @@ Welcome to duckOSM - a high-performance OSM-to-routing-network converter.
 - [MATSim Lanes & Signals](matsim_lanes_signals.md) - turn lanes.xml + signalSystems/Groups/Control from a GMNS db (`duckosm matsim-lanes`)
 - [OpenDRIVE Export](opendrive_export.md) - ASAM OpenDRIVE .xodr (roads + lane-level geometry) for AV sims / commercial micro (`duckosm opendrive`)
 - [railML Export](railml_export.md) - railML 2.4 rail infrastructure (tracks, switches, signals, OCPs) for OpenTrack / RailSys (`duckosm railml`)
+- [Lanelet2 Export](lanelet2_export.md) - Lanelet2 HD-map (.osm): per-lane lanelets with boundaries for Autoware / AD (`duckosm lanelet2`)
 - [Multi-Mode Support](multi_mode.md) - Driving, Walking, and Cycling modes
 - [Multimodal Routing](multimodal.md) - Design spec: intermodal trips (walk→drive→walk) across modes
 - [Feature Schema](features_schema.md) - Base-map `features.*` (Shortbread layers) for rendering; the duckmap migration

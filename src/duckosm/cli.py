@@ -16,6 +16,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm matsim-lanes  export MATSim lanes.xml + signals from a GMNS db (turn lanes, signalised nodes)
   duckosm opendrive     export an ASAM OpenDRIVE .xodr from a built duckOSM db (roads + lanes)
   duckosm railml        export a railML 2.4 rail infrastructure file from a built duckOSM db's raw OSM
+  duckosm lanelet2      export a Lanelet2 HD-map (.osm) from a GMNS db's per-lane geometry
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -513,6 +514,29 @@ def matsim(db, mode, crs, gzip, out):
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links")
+
+
+@main.command(name="lanelet2")
+@click.argument('gmns_db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True, help='GMNS mode schema')
+@click.option('--out', '-o', default=None, help='Output .osm (default: <name>.lanelet2.osm)')
+def lanelet2(gmns_db, mode, out):
+    """Export a Lanelet2 HD-map (.osm) from a GMNS db — each per-lane geometry becomes a lanelet
+    (left/right boundaries from centerline ± half-width) with subtype/one_way/speed_limit tags, for
+    Autoware / the lanelet2 library. A lane-level map skeleton in the AD standard (OSM XML, renders
+    natively) — not survey-grade. See docs/lanelet2_export.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.lanelet2 import to_lanelet2
+
+    if out is None:
+        out = f"{Path(gmns_db).stem}.lanelet2.osm"
+    try:
+        res = to_lanelet2(gmns_db, out, mode=mode)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {out} — {res['lanelets']} lanelets, {res['ways']} boundary ways, {res['nodes']} nodes")
 
 
 @main.command(name="railml")

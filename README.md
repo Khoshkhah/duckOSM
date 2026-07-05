@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `lanelet2`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -260,6 +260,20 @@ duckosm railml sodermalm_pbf.duckdb                        # -> sodermalm_pbf.ra
 
 Infrastructure only (no timetable/rollingstock); OSM rail topology is partial and the switch model is
 simplified, so treat it as a strong starting network to refine in a rail tool.
+
+**`lanelet2`** — export a **Lanelet2 HD-map** (`.osm`) from a GMNS db: each per-lane geometry becomes a
+**lanelet** (left/right boundaries = centerline ± ½·width) with `subtype`/`one_way`/`speed_limit` tags,
+for **Autoware** / the `lanelet2` library. Because Lanelet2 *is* OSM XML, the boundary ways also render
+natively in a deck.gl/MapLibre pipeline (a lane-level basemap). See
+[`docs/lanelet2_export.md`](docs/lanelet2_export.md):
+
+```bash
+duckosm lanelet2 sodermalm_pbf_gmns.duckdb                 # -> sodermalm_pbf_gmns.lanelet2.osm
+```
+
+This is a lane-level **map skeleton in the AD standard**, not a survey-grade HD map — the geometry is
+OSM centerlines offset by assumed widths (meter-level), a base layer/prior to refine, not the finished
+cm-accurate map. Regulatory elements (traffic lights, stop lines) are a Phase-2 follow-on.
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes
