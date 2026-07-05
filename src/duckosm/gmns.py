@@ -42,6 +42,16 @@ def _capacity_case(hw_expr):
     whens = " ".join(f"WHEN '{k}' THEN {v}" for k, v in _CAPACITY.items())
     return f"CASE {hw_expr} {whens} ELSE 800 END"
 
+
+def _bezier_line_sql(x0, y0, cx0, cy0, cx1, cy1, x1, y1, n=10):
+    """A SQL expression: a cubic-Bézier LINESTRING sampled at ``n``+1 points, from endpoints
+    (``x0,y0``)→(``x1,y1``) with control points (``cx0,cy0``),(``cx1,cy1``). Used for smooth,
+    tangent-respecting turn connectors."""
+    ts = ", ".join(f"{i / n:.4f}" for i in range(n + 1))
+    bx = f"pow(1-u,3)*{x0} + 3*pow(1-u,2)*u*{cx0} + 3*(1-u)*pow(u,2)*{cx1} + pow(u,3)*{x1}"
+    by = f"pow(1-u,3)*{y0} + 3*pow(1-u,2)*u*{cy0} + 3*(1-u)*pow(u,2)*{cy1} + pow(u,3)*{y1}"
+    return f"ST_MakeLine(list_transform([{ts}], u -> ST_Point({bx}, {by})))"
+
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
 _CSV_EXCLUDE = {"node": ["geom"], "link": ["geom"], "geometry": ["geom"], "lane": ["geom", "turn"]}
 
@@ -318,6 +328,24 @@ def _build_movement(con, sch, mode, uses):
                WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
           min(lane_num) AS mn, max(lane_num) AS mx
         FROM {sch}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
+      ), pts AS (                        -- turn-connector endpoints + tangent anchors, hugging the junction
+        SELECT t.*,
+          ST_X(ST_LineInterpolatePoint(ibg, 0.94)) AS x0, ST_Y(ST_LineInterpolatePoint(ibg, 0.94)) AS y0,
+          ST_X(ST_LineInterpolatePoint(ibg, 0.78)) AS xb, ST_Y(ST_LineInterpolatePoint(ibg, 0.78)) AS yb,
+          ST_X(ST_LineInterpolatePoint(obg, 0.06)) AS x1, ST_Y(ST_LineInterpolatePoint(obg, 0.06)) AS y1,
+          ST_X(ST_LineInterpolatePoint(obg, 0.22)) AS xa, ST_Y(ST_LineInterpolatePoint(obg, 0.22)) AS ya
+        FROM t
+      ), cp AS (                         -- cubic-Bézier control points (tangent-respecting)
+        SELECT pts.*,
+          x0 + (x0 - xb) / GREATEST(sqrt(pow(x0-xb,2)+pow(y0-yb,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cx0,
+          y0 + (y0 - yb) / GREATEST(sqrt(pow(x0-xb,2)+pow(y0-yb,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cy0,
+          x1 - (xa - x1) / GREATEST(sqrt(pow(xa-x1,2)+pow(ya-y1,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cx1,
+          y1 - (ya - y1) / GREATEST(sqrt(pow(xa-x1,2)+pow(ya-y1,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cy1
+        FROM pts
       )
       SELECT t.ib::VARCHAR || '-' || t.ob::VARCHAR AS mvmt_id, t.node_id, NULL::VARCHAR AS name,
              t.ib AS ib_link_id, lt.mn AS start_ib_lane, lt.mx AS end_ib_lane,
@@ -329,9 +357,9 @@ def _build_movement(con, sch, mode, uses):
              || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R'
                              WHEN 'uturn' THEN 'U' ELSE 'T' END) AS mvmt_code,
              '{uses}' AS allowed_uses,
-             ST_AsText(ST_MakeLine(ST_LineInterpolatePoint(t.ibg, 0.85),
-                                   ST_LineInterpolatePoint(t.obg, 0.15))) AS geometry
-      FROM t
+             ST_AsText({_bezier_line_sql('t.x0', 't.y0', 't.cx0', 't.cy0',
+                                         't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry
+      FROM cp t
       LEFT JOIN lt ON lt.ib = t.ib AND lt.cat = t.type
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
 
@@ -516,9 +544,9 @@ def _build_meso_links(con, g, ms, trim_m):
       )
       SELECT 'X' || m.ib_link_id::VARCHAR || '-' || m.ob_link_id::VARCHAR,
              m.ib_link_id::VARCHAR || 'd', m.ob_link_id::VARCHAR || 'u', 1,
-             (ST_Distance(nd.geom, nu.geom) * 111320.0)::DOUBLE,
+             (ST_Length(ST_GeomFromText(m.geometry)) * 111320.0)::DOUBLE,   -- smooth Bézier length
              COALESCE(lt.cnt, 1)::INTEGER, NULL::DOUBLE, il.free_speed, 'connector', m.allowed_uses,
-             ST_AsText(ST_MakeLine(nd.geom, nu.geom)), ST_MakeLine(nd.geom, nu.geom),
+             m.geometry, ST_GeomFromText(m.geometry),          -- reuse the movement's smooth connector
              'movement', NULL::BIGINT, m.mvmt_id,
              CASE m.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' WHEN 'uturn' THEN 'U'
                          ELSE 'T' END,
