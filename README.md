@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -247,6 +247,19 @@ duckosm opendrive sodermalm_pbf_gmns.duckdb --junctions    # Phase 2: + routable
 `--junctions` (Phase 2, needs a GMNS db) links roads through `<junction>` elements whose connecting
 roads carry the smooth turn geometry — a *routable* network. Turn geometry & lane links are simplified,
 and there's no local esmini/CARLA to prove simulator acceptance, so load-test on your side.
+
+**`railml`** — export a **railML 2.4 rail infrastructure** file. Unlike the other exporters (which
+reuse the road network), this is a **new rail extraction** from the raw OSM: `railway` ways are split
+at switches/junctions into **tracks** with topology (connections / buffer stops), plus **switches**,
+**signals** and **OCPs** (stations) — for **OpenTrack / RailSys / Viriato**. See
+[`docs/railml_export.md`](docs/railml_export.md):
+
+```bash
+duckosm railml sodermalm_pbf.duckdb                        # -> sodermalm_pbf.railml.xml (railML 2.4)
+```
+
+Infrastructure only (no timetable/rollingstock); OSM rail topology is partial and the switch model is
+simplified, so treat it as a strong starting network to refine in a rail tool.
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes

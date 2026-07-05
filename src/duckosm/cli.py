@@ -15,6 +15,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm matsim        export a MATSim network.xml from a built duckOSM db (nodes + links)
   duckosm matsim-lanes  export MATSim lanes.xml + signals from a GMNS db (turn lanes, signalised nodes)
   duckosm opendrive     export an ASAM OpenDRIVE .xodr from a built duckOSM db (roads + lanes)
+  duckosm railml        export a railML 2.4 rail infrastructure file from a built duckOSM db's raw OSM
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -512,6 +513,28 @@ def matsim(db, mode, crs, gzip, out):
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links")
+
+
+@main.command(name="railml")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--out', '-o', default=None, help='Output file (default: <name>.railml.xml)')
+def railml(db, out):
+    """Export a railML 2.4 rail infrastructure file from a built duckOSM db — a NEW rail extraction
+    (duckOSM has no rail mode): railway ways from the raw OSM are split into tracks with topology,
+    switches, signals and OCPs/stations, for OpenTrack / RailSys / Viriato. See docs/railml_export.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.railml import to_railml
+
+    if out is None:
+        out = f"{Path(db).stem}.railml.xml"
+    try:
+        res = to_railml(db, out)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {out} — {res['tracks']} tracks, {res['switches']} switches, "
+               f"{res['signals']} signals, {res['ocps']} OCPs")
 
 
 @main.command(name="opendrive")
