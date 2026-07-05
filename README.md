@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -199,6 +199,16 @@ width**. Both overlay smooth turn connectors, on a dark canvas with pan/zoom. Se
 ```bash
 duckosm gmns-map sodermalm_pbf_gmns.duckdb                  # road-by-direction (-> ..._road.html)
 duckosm gmns-map sodermalm_pbf_gmns.duckdb --style lane     # every lane by width
+```
+
+**`matsim`** — export a **MATSim `network.xml`** from a built db: each edge becomes one directed
+`<link>` (stable `edge_id` preserved) with `length` / `freespeed` / `capacity` / `permlanes` / `modes`,
+and node coordinates reprojected to a metric CRS (default `EPSG:3006` SWEREF99 TM). The directed
+node+link substrate for **MATSim / BEAM / eqasim**. See [`docs/matsim_export.md`](docs/matsim_export.md):
+
+```bash
+duckosm matsim sodermalm_pbf.duckdb                        # -> sodermalm_pbf_network.xml.gz (driving, EPSG:3006)
+duckosm matsim tartu_pbf.duckdb --crs EPSG:32635 --no-gzip # UTM 35N, plain XML
 ```
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
