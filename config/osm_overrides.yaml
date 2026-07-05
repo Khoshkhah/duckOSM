@@ -11,6 +11,7 @@
 #   lanes           int   — per-direction lane count; sets BOTH directions
 #   lanes_forward   int   — per-direction (asymmetric roads)
 #   lanes_backward  int
+#   layer           int   — vertical stacking level (fixes a wrong OSM `layer` tag)
 #   note            free text (provenance)
 #
 # Only enable a rule once the correction is verified — an unverified `oneway` flip silently drops
@@ -30,3 +31,8 @@ overrides:
   - osm_id: 507979055        # Trans-Canada WB @ Second Narrows — lanes undercount (known_osm_issues #3)
     lanes: 3
     note: "OSM lanes=2 but BC MoTI measured 3 WB lanes (P-15-21/22/23)"
+
+  # --- Tartu ---
+  - osm_id: 1429337399       # underground-parking ramp mis-tagged layer=-1 for its WHOLE length
+    layer: 0                 # (known_osm_issues #4, CONFIRMED) — sits at grade where it meets the
+    note: "service=driveway ramp tagged layer=-1 end-to-end though its junction end is at grade (joins the level-0 driveway 1429337400 at a shared node); no tunnel/bridge structure. Set to 0."

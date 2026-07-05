@@ -146,3 +146,27 @@ Same class as #1/#2, at larger scale: **five of Bohusgatan's six ways carry no `
 `oneway=yes`**, strong evidence Bohusgatan is a one-way street whose other segments simply lack the tag.
 Fix: add `oneway=yes` (matching way `151083837`'s direction) to the five untagged ways in OSM and
 rebuild, or apply a local override. Verified via `ST_READOSM`.
+
+---
+
+## 5. Tartu underground-parking ramp — whole way mis-tagged `layer=-1`
+
+| field | value |
+| --- | --- |
+| **Area** | Tartu (`config/tartu.yaml`) |
+| **OSM way** | `1429337399` (`highway=service`, `service=driveway`, `layer=-1`) — an underground-parking ramp |
+| **Edges** | split at junction node `13139650528` into `761090243668882770` (17.4 m, junction side) + `2063175062303482770` (75.2 m) — plus reverse twins; **all inherit `layer=-1`** |
+| **Neighbour** | way `1429337400` (`6219894338208087916`, `service=driveway`, no `layer` = grade) **joins at the shared node** `13139650528` |
+| **Status** | **CONFIRMED OSM mapping shortcut** — override **enabled** in `config/osm_overrides.yaml`. |
+
+The ramp descends from the surface (where it meets the level-0 driveway `1429337400` at a shared node)
+down to underground parking, but the **whole OSM way carries a single `layer=-1`** — there is no
+`tunnel`/`bridge` structure (`layer` is just a relative stacking number, not a physical object). When
+duckOSM splits the way at the junction, **every segment inherits `layer=-1`**, so the surface end
+(`761090…`) is stacked below — and, because the renderer styles anything `layer<0` like a tunnel, drawn
+faded/dashed — even though it is at grade with the driveway it joins.
+
+Properly this way should be **split in OSM at the level-transition node** into a `layer=0` part and a
+`layer=-1` part. As a shortcut we bring the whole way to grade: local override
+`osm_id: 1429337399, layer: 0` in `config/osm_overrides.yaml` (there is no real tunnel, so rendering it
+at grade end-to-end is acceptable). Takes effect on the next rebuild.

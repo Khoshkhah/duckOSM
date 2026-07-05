@@ -20,7 +20,8 @@ Rules file (YAML), keyed by OSM `osm_id`; each is a silent no-op in areas that d
         note: "..."
 
 Fields: `oneway` (bool) · `lanes` (int, per-direction — sets both directions) ·
-`lanes_forward` / `lanes_backward` (int, for asymmetric roads).
+`lanes_forward` / `lanes_backward` (int, for asymmetric roads) · `layer` (signed int — vertical
+stacking level; overrides a wrong OSM `layer` tag, e.g. an at-grade way mis-tagged `layer=-1`).
 """
 import logging
 from pathlib import Path
@@ -78,4 +79,6 @@ class OsmOverrides(BaseProcessor):
             sets.append(f"lanes_fwd = {int(rule['lanes_forward'])}")
         if rule.get("lanes_backward") is not None:
             sets.append(f"lanes_bwd = {int(rule['lanes_backward'])}")
+        if rule.get("layer") is not None:                      # vertical stacking level (signed int)
+            sets.append(f"layer = '{int(rule['layer'])}'")     # `ways.layer` is the raw tag string
         return sets
