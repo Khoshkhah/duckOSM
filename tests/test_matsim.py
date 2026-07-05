@@ -31,6 +31,25 @@ def _src(path):
     return path
 
 
+def _build(path, nodes, edges):
+    """Build a minimal driving-only source db from (node_id, lon, lat) + edge tuples
+    (edge_id, source, target, highway, lanes, maxspeed_kmh, length_m, cost_s)."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    for nid, lon, lat in nodes:
+        con.execute(f"INSERT INTO driving.nodes VALUES ({nid}, ST_GeomFromText('POINT({lon} {lat})'))")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, highway VARCHAR, "
+                "lanes INTEGER, maxspeed_kmh FLOAT, length_m FLOAT, cost_s FLOAT, geometry GEOMETRY)")
+    g = "ST_GeomFromText('LINESTRING(18.06 59.32,18.07 59.32)')"
+    for eid, src, tgt, hw, lanes, spd, length, cost in edges:
+        lv, sv = ("NULL" if lanes is None else str(lanes)), ("NULL" if spd is None else str(spd))
+        con.execute(f"INSERT INTO driving.edges VALUES ({eid},{src},{tgt},'{hw}',{lv},{sv},{length},{cost},{g})")
+    con.close()
+    return path
+
+
 def _parse(path, gz=True):
     if gz:
         with gzip.open(path, "rt") as f:
@@ -91,3 +110,38 @@ def test_dtd_valid(tmp_path):
     tree = lxml_etree.parse(str(tmp_path / "net.xml"))
     assert dtd.validate(tree), "network_v2.dtd validation failed:\n" + "\n".join(
         e.message for e in dtd.error_log)
+
+
+def test_isolated_node_dropped(tmp_path):
+    # node 99 has no incident link → must not appear in <nodes>
+    src = _build(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.07, 59.32), (99, 18.08, 59.33)],
+                 [(A, 1, 2, "primary", 2, 50, 80, 6)])
+    res = to_matsim(str(src), tmp_path / "n.xml", gzip=False)
+    ids = {n.get("id") for n in _parse(tmp_path / "n.xml", gz=False).findall("./nodes/node")}
+    assert ids == {"1", "2"} and res["nodes"] == 2
+
+
+def test_capacity_default_and_permlanes_floor(tmp_path):
+    # unknown highway class → capacity default 800; lanes NULL → permlanes floored to 1
+    src = _build(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.07, 59.32)],
+                 [(A, 1, 2, "pedestrian", None, None, 50, 6)])
+    to_matsim(str(src), tmp_path / "n.xml", gzip=False)
+    link = _parse(tmp_path / "n.xml", gz=False).find("./links/link")
+    assert float(link.get("capacity")) == 800.0 and link.get("permlanes") == "1"
+    assert float(link.get("freespeed")) == pytest.approx(50 / 6, abs=1e-3)   # maxspeed NULL → length/cost_s (4dp)
+
+
+def test_link_with_missing_endpoint_skipped(tmp_path):
+    # edge B → node 3 which doesn't exist: B is dropped, A survives (no crash)
+    src = _build(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.07, 59.32)],
+                 [(A, 1, 2, "primary", 2, 50, 80, 6), (B, 2, 3, "primary", 1, 50, 80, 6)])
+    res = to_matsim(str(src), tmp_path / "n.xml", gzip=False)
+    ids = {l.get("id") for l in _parse(tmp_path / "n.xml", gz=False).findall("./links/link")}
+    assert ids == {str(A)} and res["links"] == 1
+
+
+def test_gzip_roundtrip(tmp_path):
+    # gzip output re-opens and parses to the same counts
+    to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xml.gz", gzip=True)
+    root = _parse(tmp_path / "n.xml.gz", gz=True)
+    assert len(root.findall("./links/link")) == 3 and len(root.findall("./nodes/node")) == 3
