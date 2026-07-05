@@ -82,7 +82,7 @@ def to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True):
         x, y = node_xy[nid]
         out.append(f'\t\t<node id="{nid}" x="{x:.2f}" y="{y:.2f}"/>')
     out.append('\t</nodes>')
-    out.append('\t<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanelength="7.5">')
+    out.append('\t<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">')
     for eid, src, tgt, length, freespeed, capacity, permlanes in links:
         out.append(f'\t\t<link id="{eid}" from="{src}" to="{tgt}" length="{length:.2f}" '
                    f'freespeed="{freespeed:.4f}" capacity="{capacity:.1f}" permlanes="{permlanes}" '

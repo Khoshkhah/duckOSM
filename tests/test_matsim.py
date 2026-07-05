@@ -1,11 +1,14 @@
 """Tests for duckosm.matsim — MATSim network.xml export from a built duckOSM db."""
 import gzip
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import duckdb
 import pytest
 
 from duckosm.matsim import to_matsim
+
+_DTD = Path(__file__).parent / "fixtures" / "network_v2.dtd"   # vendored official MATSim network_v2 DTD
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
 
@@ -78,3 +81,13 @@ def test_crs_override(tmp_path):
 def test_bad_mode(tmp_path):
     with pytest.raises(ValueError, match="cycling"):
         to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "net.xml", mode="cycling")
+
+
+def test_dtd_valid(tmp_path):
+    """The emitted network validates against the official MATSim network_v2 DTD (vendored)."""
+    lxml_etree = pytest.importorskip("lxml.etree")
+    to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "net.xml", gzip=False)
+    dtd = lxml_etree.DTD(str(_DTD))
+    tree = lxml_etree.parse(str(tmp_path / "net.xml"))
+    assert dtd.validate(tree), "network_v2.dtd validation failed:\n" + "\n".join(
+        e.message for e in dtd.error_log)
