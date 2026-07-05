@@ -101,7 +101,8 @@ def _offset_wkt(line_wkt, off_m):
     return LineString(back).wkt if len(back) >= 2 else line_wkt
 
 
-def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False):
+def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False,
+            drive_side="right"):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -159,7 +160,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_node(con, sch, mode)
         _build_link(con, sch, mode, uses, has_raw)
         _build_geometry(con, sch, mode)
-        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry)   # before movement: lane→turn ranges
+        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side)  # before movement
         _build_movement(con, sch, mode, uses)
         _build_signal_controller(con, sch)
         result["modes"][mode] = {
@@ -341,15 +342,24 @@ def _build_signal_controller(con, sch):
     FROM {sch}.node WHERE ctrl_type = 'signal'""")
 
 
-def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry):
-    """Per-lane rows from OSM lane tags (+ optional offset geometry) and curb_seg from parking tags."""
+def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="right"):
+    """Per-lane rows from OSM lane tags (+ optional offset geometry) and curb_seg from parking tags.
+
+    Lane offset is **drive-side aware**: a one-way road's lanes are centered on its carriageway, but a
+    two-way road's lanes are shifted to the direction's travel side (right for ``drive_side='right'``),
+    so the forward and reverse edges separate onto opposite physical sides instead of overlapping."""
     import pandas as pd
 
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
     tagcol = "w.tags" if has_raw else "NULL::MAP(VARCHAR, VARCHAR)"
+    has_oneway = con.execute(
+        "SELECT count(*) FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+        "AND table_name = 'edges' AND column_name = 'oneway'", [mode]).fetchone()[0] > 0
+    oneway_sel = "e.oneway" if has_oneway else "false"      # older/synthetic edges: treat as two-way
     rows = con.execute(f"""SELECT e.edge_id, e.is_reverse, e.lanes, e.length_m, e.source,
-      ST_AsText(e.geometry) AS wkt, {tagcol} AS tags
+      {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags
       FROM s.{mode}.edges e {raw_join}""").fetchall()
+    side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
 
     def pick(tags, base, is_rev):
         # OSM: unsuffixed *:lanes is the way's forward direction; :backward is the reverse edge
@@ -357,7 +367,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry):
             tags.get(base + ":forward") or tags.get(base))
 
     lane_rows, curb_rows = [], []
-    for edge_id, is_rev, lanes, length_m, source, wkt, tags in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags in rows:
         tags = tags or {}
         turns = _split(pick(tags, "turn:lanes", is_rev))
         widths = _split(pick(tags, "width:lanes", is_rev))
@@ -376,7 +386,10 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry):
                 u = "bus"
             width = _num(widths[i]) if i < len(widths) else None
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
-            off_m = half - (run + w_each[i] / 2.0)          # left (+) → leftmost lane first
+            if oneway:                                       # one-way: lanes centered on the carriageway
+                off_m = half - (run + w_each[i] / 2.0)
+            else:                                            # two-way: this direction's lanes on its travel side
+                off_m = side_sign * (run + w_each[i] / 2.0)
             run += w_each[i]
             geom = _offset_wkt(wkt, off_m) if lane_geometry else None
             lane_rows.append((f"{edge_id}_{i + 1}", edge_id, i + 1, u, None, None, width, turn, geom))

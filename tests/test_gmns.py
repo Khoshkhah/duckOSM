@@ -158,6 +158,22 @@ def test_cycling_meso(tmp_path):
             f"SELECT count(*) FROM meso_{m}.meso_link WHERE meso_type='normal'").fetchone()[0] == 2
 
 
+def test_two_way_lanes_offset_to_sides(tmp_path):
+    """Drive-side offset: the two directions of a road get their lanes on opposite sides (not
+    overlapping on the centerline)."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    # A (1->2) and AR (2->1) are the two directions of the same road
+    d = con.execute(f"""SELECT ST_Distance(
+        (SELECT geom FROM gmns_driving.lane WHERE link_id={A} AND lane_num=1),
+        (SELECT geom FROM gmns_driving.lane WHERE link_id={AR} AND lane_num=1)) * 111320""").fetchone()[0]
+    assert d > 1.0                                              # separated on the ground (was 0 = overlapping)
+
+
 def _two_mode_source(path):
     """A source with driving + cycling sharing edges A, B (same edge_ids across modes)."""
     con = duckdb.connect(str(path))
