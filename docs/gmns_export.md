@@ -1,5 +1,7 @@
 # GMNS extract → a standalone GMNS DuckDB (`duckosm gmns`)
 
+![GMNS lanes + smooth turn connectors at a Södermalm junction](images/gmns_junction.png)
+
 Extract **every GMNS table that OSM can support** — including **lane detail** — into **one new,
 self-contained `.duckdb` file**. The output stands alone: it doesn't reference the source build, it
 carries native geometry so it's queryable and **renderable (down to individual lanes)**, and it can
