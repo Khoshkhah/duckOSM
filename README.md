@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `lanelet2`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `lanelet2`, `lane-graph`, `route-lanes`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -274,6 +274,20 @@ duckosm lanelet2 sodermalm_pbf_gmns.duckdb                 # -> sodermalm_pbf_gm
 This is a lane-level **map skeleton in the AD standard**, not a survey-grade HD map — the geometry is
 OSM centerlines offset by assumed widths (meter-level), a base layer/prior to refine, not the finished
 cm-accurate map. Regulatory elements (traffic lights, stop lines) are a Phase-2 follow-on.
+
+**`lane-graph` / `route-lanes`** — **lane-level routing**. `lane-graph` builds a lane→lane graph in a
+GMNS db (turn edges from movements + lane-change edges between adjacent lanes); `route-lanes` plans a
+route over it, returning the **lane sequence + concatenated geometry + a maneuver list** ("left turn",
+"lane change") — not just road-to-road. Mirrors the road `edge_graph`→`Router` pattern at lane
+resolution. See [`docs/lane_routing.md`](docs/lane_routing.md):
+
+```bash
+duckosm lane-graph   sodermalm_pbf_gmns.duckdb                 # build lane_<mode>.lane_edges
+duckosm route-lanes  sodermalm_pbf_gmns.duckdb <fromLane> <toLane> -o route.geojson
+```
+
+Lane connectivity *structure* is real (turns honour restrictions); lane-to-lane *turn assignment* is
+permissive where `turn:lanes` is untagged — fine for lane-level planning, not lane-accurate control.
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes

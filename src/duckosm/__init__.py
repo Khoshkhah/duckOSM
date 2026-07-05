@@ -15,9 +15,11 @@ from duckosm.matsim_lanes import to_matsim_lanes
 from duckosm.opendrive import to_opendrive
 from duckosm.railml import to_railml
 from duckosm.lanelet2 import to_lanelet2
+from duckosm.lane_routing import build_lane_graph, route_lanes
 
 __version__ = "0.1.0"
 __all__ = ["DuckOSM", "Config", "edge_id_hash", "edge_id_expr", "create_edge_id_macro",
            "to_networkx", "to_networkx_nodes", "write_graph", "route", "Router",
            "route_multimodal", "to_sumo", "DEFAULT_NETCFG", "to_gis", "to_gmns", "to_meso",
-           "to_micro", "to_matsim", "to_matsim_lanes", "to_opendrive", "to_railml", "to_lanelet2"]
+           "to_micro", "to_matsim", "to_matsim_lanes", "to_opendrive", "to_railml", "to_lanelet2",
+           "build_lane_graph", "route_lanes"]

@@ -17,6 +17,8 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm opendrive     export an ASAM OpenDRIVE .xodr from a built duckOSM db (roads + lanes)
   duckosm railml        export a railML 2.4 rail infrastructure file from a built duckOSM db's raw OSM
   duckosm lanelet2      export a Lanelet2 HD-map (.osm) from a GMNS db's per-lane geometry
+  duckosm lane-graph    build a lane-level routing graph (lane->lane turns + lane-changes) in a GMNS db
+  duckosm route-lanes   plan a lane-level route (lane sequence + geometry + maneuvers) over a GMNS db
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -514,6 +516,62 @@ def matsim(db, mode, crs, gzip, out):
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links")
+
+
+@main.command(name="lane-graph")
+@click.argument('gmns_db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True, help='GMNS mode schema')
+def lane_graph(gmns_db, mode):
+    """Build a lane-level routing graph in a GMNS db — lane->lane turn edges (from movements) +
+    lane-change edges (adjacent lanes), written as lane_<mode>.lane_edges. See docs/lane_routing.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.lane_routing import build_lane_graph
+
+    try:
+        res = build_lane_graph(gmns_db, mode=mode)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"built lane graph — {res['lanes']} lanes, {res['edges']} edges "
+               f"({res['turn']} turn + {res['lane_change']} lane-change)")
+
+
+@main.command(name="route-lanes")
+@click.argument('gmns_db', type=click.Path(exists=True))
+@click.argument('from_lane')
+@click.argument('to_lane')
+@click.option('--mode', '-m', default='driving', show_default=True, help='GMNS mode schema')
+@click.option('--out', '-o', default=None, help='Write the route as GeoJSON to this path')
+def route_lanes_cmd(gmns_db, from_lane, to_lane, mode, out):
+    """Plan a lane-level route between two lanes (each a lane_id or an edge_id → its lane 1). Prints the
+    lane count / cost / maneuvers; with -o writes the route geometry as GeoJSON. See docs/lane_routing.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.lane_routing import route_lanes
+
+    try:
+        res = route_lanes(gmns_db, from_lane, to_lane, mode=mode)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    if not res["lanes"]:
+        click.echo(f"no lane route from {from_lane} to {to_lane}")
+        return
+    click.echo(f"route: {len(res['lanes'])} lanes, cost {res['cost']:.0f}, "
+               f"maneuvers: {', '.join(res['maneuvers']) or '(none)'}")
+    if out and res["geometry"]:
+        import json
+
+        # minimal inline WKT LINESTRING -> GeoJSON (no extra deps)
+        body = res["geometry"][res["geometry"].index("(") + 1:res["geometry"].rindex(")")]
+        coords = [[float(v) for v in p.split()[:2]] for p in body.split(",")]
+        fc = {"type": "FeatureCollection", "features": [{"type": "Feature",
+              "properties": {"lanes": len(res["lanes"]), "cost": res["cost"],
+                             "maneuvers": res["maneuvers"]},
+              "geometry": {"type": "LineString", "coordinates": coords}}]}
+        Path(out).write_text(json.dumps(fc))
+        click.echo(f"wrote {out}")
 
 
 @main.command(name="lanelet2")
