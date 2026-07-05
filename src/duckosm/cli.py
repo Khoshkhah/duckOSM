@@ -13,6 +13,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm gmns-viz      write an interactive HTML viewer for a GMNS DuckDB (lanes / meso, tooltips)
   duckosm gmns-map      write a pretty HTML map of a GMNS DuckDB (road-by-direction / lane-width)
   duckosm matsim        export a MATSim network.xml from a built duckOSM db (nodes + links)
+  duckosm matsim-lanes  export MATSim lanes.xml + signals from a GMNS db (turn lanes, signalised nodes)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -510,6 +511,33 @@ def matsim(db, mode, crs, gzip, out):
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links")
+
+
+@main.command(name="matsim-lanes")
+@click.argument('gmns_db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True, help='GMNS mode schema')
+@click.option('--signals/--no-signals', default=True, show_default=True,
+              help='Also write signalSystems/signalGroups/signalControl.xml for signalised nodes')
+@click.option('--cycle', default=90, show_default=True, help='Default signal cycle time (seconds)')
+@click.option('--out', '-o', 'out_dir', default='.', show_default=True, help='Output directory')
+def matsim_lanes(gmns_db, mode, signals, cycle, out_dir):
+    """Export MATSim lanes.xml (+ signalSystems/Groups/Control.xml) from a GMNS db. Turn lanes come
+    from the movement table; signals from signalised nodes with a default fixed-time plan (the timing
+    is a synthetic placeholder — OSM has no signal plans). Pair with `duckosm matsim` (same edge_id
+    link ids). See docs/matsim_lanes_signals.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.matsim_lanes import to_matsim_lanes
+
+    try:
+        res = to_matsim_lanes(gmns_db, out_dir=out_dir, mode=mode, signals=signals, cycle_s=cycle)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    msg = f"wrote lanes.xml ({res['lanes_links']} assignments)"
+    if signals:
+        msg += f" + signals ({res['signal_systems']} systems)"
+    click.echo(f"{msg} -> {out_dir}")
 
 
 @main.command(name="gmns-map")

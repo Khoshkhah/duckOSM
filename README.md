@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -215,6 +215,22 @@ duckosm matsim tartu_pbf.duckdb --crs EPSG:32635 --no-gzip # UTM 35N, plain XML
 `--mode all` (or a comma-list like `driving,cycling`) merges the per-mode networks into one, keyed on
 the mode-stable `edge_id`, so a segment shared by several modes becomes a single link tagged with all
 its `modes` — the form MATSim/BEAM want for multimodal agents.
+
+**`matsim-lanes`** — export MATSim **turn lanes** (`lanes.xml`) and **signals**
+(`signalSystems`/`signalGroups`/`signalControl.xml`) from a **GMNS db** (its `movement` table is the
+lane→turn model; `link_id` = `edge_id`, so the files pair with the `matsim` network). Every file is
+validated against the official MATSim v2.0 XSD schemas. See
+[`docs/matsim_lanes_signals.md`](docs/matsim_lanes_signals.md):
+
+```bash
+duckosm gmns         sodermalm_pbf.duckdb -o gmns.duckdb   # movements + signalised nodes (prereq)
+duckosm matsim-lanes gmns.duckdb                           # -> lanes.xml + signalSystems/Groups/Control.xml
+duckosm matsim-lanes gmns.duckdb --no-signals              # lanes.xml only
+```
+
+Turn *connectivity* (legal turns) and *which* junctions are signalised are real; per-lane turn
+assignment needs `turn:lanes` tags, and the signal **timing** is a default fixed-time plan (OSM has no
+signal plans) — a calibrate-me placeholder.
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes
