@@ -11,6 +11,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm gis-debug     read a GIS export back through GDAL and write an HTML debug/QA page
   duckosm gmns          extract a built network to a standalone GMNS DuckDB (lanes, movements, …)
   duckosm gmns-viz      write an interactive HTML viewer for a GMNS DuckDB (lanes / meso, tooltips)
+  duckosm gmns-map      write a pretty HTML map of a GMNS DuckDB (road-by-direction / lane-width)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -477,6 +478,31 @@ def gmns_viz(gmns_db, mode, out):
         out = f"{Path(gmns_db).stem}_viewer.html"
     try:
         path = write_viewer(gmns_db, out, mode=mode)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {path} — open in a browser")
+
+
+@main.command(name="gmns-map")
+@click.argument('gmns_db', type=click.Path(exists=True))
+@click.option('--style', type=click.Choice(['road', 'lane']), default='road', show_default=True,
+              help="'road': one carriageway ribbon per direction, by class; 'lane': every lane as a width ribbon")
+@click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to map')
+@click.option('--out', '-o', default=None, help='Output HTML (default: <name>_<style>.html)')
+def gmns_map(gmns_db, style, mode, out):
+    """Write a pretty, self-contained HTML map of a GMNS DuckDB (a presentation counterpart to
+    `gmns-viz`). `--style road` draws one carriageway per direction coloured by road class;
+    `--style lane` draws every lane as a ribbon of its real width. Both overlay the smooth turn
+    connectors, on a dark canvas with pan/zoom. Needs only DuckDB (geometry drawn client-side).
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.gmns_map import write_map
+
+    if out is None:
+        out = f"{Path(gmns_db).stem}_{style}.html"
+    try:
+        path = write_map(gmns_db, out, style=style, mode=mode)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {path} — open in a browser")

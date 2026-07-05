@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -188,6 +188,17 @@ only DuckDB (geometry drawn client-side). See [`docs/gmns_viewer.md`](docs/gmns_
 
 ```bash
 duckosm gmns-viz sodermalm_pbf_gmns.duckdb                  # -> sodermalm_pbf_gmns_viewer.html
+```
+
+**`gmns-map`** — write a **pretty** self-contained HTML map of a GMNS DuckDB (presentation, vs
+`gmns-viz`'s inspection): `--style road` draws one **carriageway ribbon per direction** coloured by
+road class (two-way roads split in two); `--style lane` draws **every lane as a ribbon of its real
+width**. Both overlay smooth turn connectors, on a dark canvas with pan/zoom. See
+[`docs/gmns_map.md`](docs/gmns_map.md):
+
+```bash
+duckosm gmns-map sodermalm_pbf_gmns.duckdb                  # road-by-direction (-> ..._road.html)
+duckosm gmns-map sodermalm_pbf_gmns.duckdb --style lane     # every lane by width
 ```
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
