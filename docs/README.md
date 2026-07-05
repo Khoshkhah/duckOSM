@@ -12,6 +12,7 @@ Welcome to duckOSM - a high-performance OSM-to-routing-network converter.
 - [GMNS Maps](gmns_map.md) - pretty road-by-direction / lane-width HTML maps of a GMNS DuckDB (`duckosm gmns-map`)
 - [MATSim Export](matsim_export.md) - MATSim network.xml (nodes + directed links) for MATSim / BEAM / eqasim (`duckosm matsim`)
 - [MATSim Lanes & Signals](matsim_lanes_signals.md) - turn lanes.xml + signalSystems/Groups/Control from a GMNS db (`duckosm matsim-lanes`)
+- [OpenDRIVE Export](opendrive_export.md) - ASAM OpenDRIVE .xodr (roads + lane-level geometry) for AV sims / commercial micro (`duckosm opendrive`)
 - [Multi-Mode Support](multi_mode.md) - Driving, Walking, and Cycling modes
 - [Multimodal Routing](multimodal.md) - Design spec: intermodal trips (walk→drive→walk) across modes
 - [Feature Schema](features_schema.md) - Base-map `features.*` (Shortbread layers) for rendering; the duckmap migration

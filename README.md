@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `multimodal`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -231,6 +231,18 @@ duckosm matsim-lanes gmns.duckdb --no-signals              # lanes.xml only
 Turn *connectivity* (legal turns) and *which* junctions are signalised are real; per-lane turn
 assignment needs `turn:lanes` tags, and the signal **timing** is a default fixed-time plan (OSM has no
 signal plans) — a calibrate-me placeholder.
+
+**`opendrive`** — export an **ASAM OpenDRIVE `.xodr`**: each edge becomes a `<road>` (stable `edge_id`)
+with a reprojected **reference line** (`planView`) and **lane-level width offsets**, the
+continuous-geometry format that reaches AV sims (**CARLA / esmini**) and commercial micro (**PTV Vissim
+/ Aimsun**) that the graph exports can't. **Phase 1** is geometry + lanes (loads/renders the real
+lane-level network); routable `<junction>`s (reusing the meso turn Béziers) are the Phase-2 follow-on.
+See [`docs/opendrive_export.md`](docs/opendrive_export.md):
+
+```bash
+duckosm opendrive sodermalm_pbf.duckdb                     # -> sodermalm_pbf.xodr (driving, EPSG:3006)
+duckosm opendrive tartu_pbf.duckdb --crs EPSG:32635        # UTM 35N
+```
 
 **`multimodal`** — stitch the per-mode networks of a built db into an intermodal `mm.*` graph
 (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route (walk→drive→walk). Needs ≥2 modes

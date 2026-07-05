@@ -14,6 +14,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm gmns-map      write a pretty HTML map of a GMNS DuckDB (road-by-direction / lane-width)
   duckosm matsim        export a MATSim network.xml from a built duckOSM db (nodes + links)
   duckosm matsim-lanes  export MATSim lanes.xml + signals from a GMNS db (turn lanes, signalised nodes)
+  duckosm opendrive     export an ASAM OpenDRIVE .xodr from a built duckOSM db (roads + lanes)
 
 The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
@@ -511,6 +512,30 @@ def matsim(db, mode, crs, gzip, out):
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links")
+
+
+@main.command(name="opendrive")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to export')
+@click.option('--crs', default='EPSG:3006', show_default=True,
+              help='Projected metric CRS for the reference line (default SWEREF99 TM)')
+@click.option('--out', '-o', default=None, help='Output .xodr (default: <name>.xodr)')
+def opendrive(db, mode, crs, out):
+    """Export an ASAM OpenDRIVE .xodr from a built duckOSM db — roads with a reprojected reference line
+    and lane-level width offsets, for AV sims (CARLA/esmini) and commercial micro (Vissim/Aimsun).
+    Phase 1: geometry + lanes (no junctions yet). See docs/opendrive_export.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.opendrive import to_opendrive
+
+    if out is None:
+        out = f"{Path(db).stem}.xodr"
+    try:
+        res = to_opendrive(db, out, mode=mode, crs=crs)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {out} — {res['roads']} roads")
 
 
 @main.command(name="matsim-lanes")
