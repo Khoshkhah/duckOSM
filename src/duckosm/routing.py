@@ -258,6 +258,40 @@ def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
     return summary
 
 
+def _compass_bearing(a, b):
+    """Initial compass bearing (deg, 0 = north, clockwise) from ``a`` to ``b`` (``[lng, lat]``)."""
+    import math
+    lon1, lat1, lon2, lat2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    return round((math.degrees(math.atan2(y, x)) + 360.0) % 360.0, 1)
+
+
+def node_branches(con, node_ids, mode: str = "driving"):
+    """For each node, the LEAVING bearing of every edge whose ``source`` is that node.
+
+    Returns ``{node_id: [(edge_id, bearing_deg), …]}`` — the full branch structure at a junction, so
+    guidance can reason about **forks** ("keep left/right" when two branches both go ~forward) and
+    **roundabout exits**. Bearing = compass heading over the first ~2 segments of each branch. Same
+    source data as :func:`node_out_degree`; no new tables.
+    """
+    ids = {int(n) for n in node_ids if n is not None}
+    if not ids:
+        return {}
+    rows = con.execute(f"""
+        SELECT source, edge_id,
+               ST_X(ST_PointN(geometry, 1)), ST_Y(ST_PointN(geometry, 1)),
+               ST_X(ST_PointN(geometry, CAST(LEAST(ST_NPoints(geometry), 3) AS INTEGER))),
+               ST_Y(ST_PointN(geometry, CAST(LEAST(ST_NPoints(geometry), 3) AS INTEGER)))
+        FROM {mode}.edges WHERE source IN ({",".join(map(str, ids))})
+    """).fetchall()
+    out = {}
+    for src, eid, x1, y1, x2, y2 in rows:
+        out.setdefault(int(src), []).append((str(eid), _compass_bearing((x1, y1), (x2, y2))))
+    return out
+
+
 def node_out_degree(con, node_ids, mode: str = "driving"):
     """Out-degree of each node in ``<mode>.edges`` — how many edges LEAVE it (``source = node``).
 
