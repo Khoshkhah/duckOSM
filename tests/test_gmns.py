@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 pytest.importorskip("pandas")
-from duckosm.gmns import to_gmns, to_meso  # noqa: E402
+from duckosm.gmns import to_gmns, to_meso, to_micro  # noqa: E402
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
 
@@ -156,6 +156,26 @@ def test_cycling_meso(tmp_path):
     for m in ("driving", "cycling"):
         assert con.execute(
             f"SELECT count(*) FROM meso_{m}.meso_link WHERE meso_type='normal'").fetchone()[0] == 2
+
+
+def test_micro_network(tmp_path):
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    to_micro(str(out), modes=["driving"], cell_length_m=7.0)
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    q = lambda s: con.execute(s).fetchone()[0]
+    assert q("SELECT count(*) FROM micro_driving.micro_link WHERE cell_type='normal'") > 0   # cells
+    assert q(f"SELECT count(*) FROM micro_driving.micro_link "                                # lane change on A (2 lanes)
+             f"WHERE cell_type='lane_change' AND macro_link_id={A}") > 0
+    assert q("SELECT count(*) FROM micro_driving.micro_link WHERE cell_type='movement'") > 0  # turn connector
+    # referential integrity + reversible cell ids
+    assert q("SELECT count(*) FROM micro_driving.micro_link l "
+             "WHERE from_node_id NOT IN (SELECT node_id FROM micro_driving.micro_node)") == 0
+    assert q("SELECT count(*) FROM micro_driving.micro_link "
+             "WHERE cell_type='normal' AND link_id NOT LIKE 'C%'") == 0
 
 
 def test_two_way_lanes_offset_to_sides(tmp_path):

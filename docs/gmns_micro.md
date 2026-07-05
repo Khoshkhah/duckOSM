@@ -1,9 +1,10 @@
 # Microscopic (cell-based) network — `duckosm gmns --micro` (design)
 
-**Status:** design spec (2026-07-04), pending sign-off before implementation. The last piece of the
-osm2gmns feature parity — the level below [meso](gmns_meso.md): each lane chopped into **cells** with
-**lane-change** connectors, the representation microsimulation (DTALite micro, cell-transmission)
-consumes. Built on the per-lane geometry we already have in the `lane` table.
+**Status:** **shipped** 2026-07-04 (`to_micro` / `duckosm gmns --micro`, driving-only v1,
+`cell_length_m` default 7 m). The last piece of the osm2gmns feature parity — the level below
+[meso](gmns_meso.md): each lane chopped into **cells** with **lane-change** connectors, the
+representation microsimulation (DTALite micro, cell-transmission) consumes. Built on the per-lane
+geometry (drive-side offset) in the `lane` table + the smooth Bézier turn connectors.
 
 > Like meso, micro is **not core GMNS** — it's the osm2gmns `micronet` convention. Column layout
 > **mirrors osm2gmns' micronet** for interoperability, plus our stable-id extras.

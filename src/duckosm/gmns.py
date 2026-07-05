@@ -451,6 +451,101 @@ def _meso_modes_present(con):
         "WHERE schema_name LIKE 'gmns_%' AND table_name = 'link' ORDER BY schema_name").fetchall()]
 
 
+_MICRO_COLS = ("link_id, from_node_id, to_node_id, dir_flag, length, lanes, width, free_speed, "
+               "facility_type, allowed_uses, geometry, geom, macro_link_id, meso_link_id, lane_no, "
+               "cell_type, mvmt_txt_id, ctrl_type")
+
+
+def to_micro(gmns_db, modes=None, cell_length_m=7.0):
+    """Build a **microscopic (cell-based)** network into an existing GMNS DuckDB, from its
+    ``gmns_<mode>`` lane + movement tables. Writes a ``micro_<mode>`` schema (``micro_node`` +
+    ``micro_link``) per mode. Three kinds of micro link: **normal** cells (each lane sliced into
+    ``cell_length_m`` pieces), **lane_change** connectors (adjacent lanes), and **movement** turn
+    connectors (inbound lane end → outbound lane start, reusing the smooth Bézier). Ids are stable,
+    reversible composites; ``macro_link_id`` / ``lane_no`` kept as columns. Default mode: driving."""
+    import duckdb
+
+    con = duckdb.connect(gmns_db)
+    con.execute("INSTALL spatial; LOAD spatial;")
+    have = _meso_modes_present(con)
+    chosen = list(modes) if modes else ["driving"]
+    unknown = [m for m in chosen if m not in have]
+    if unknown:
+        con.close()
+        raise ValueError(f"mode(s) {unknown} have no gmns_<mode> schema (present: {have or 'none'})")
+
+    result = {}
+    for mode in chosen:
+        g, mc = f"gmns_{mode}", f"micro_{mode}"
+        cl = cell_length_m
+        con.execute(f"DROP SCHEMA IF EXISTS {mc} CASCADE")
+        con.execute(f"CREATE SCHEMA {mc}")
+        # micro nodes: one per (lane, cell boundary k = 0..nc)
+        con.execute(f"""CREATE TABLE {mc}.micro_node AS
+          WITH L AS (SELECT lane_id, link_id, lane_num, geom,
+                            GREATEST(1, CEIL(ST_Length(geom) * 111320.0 / {cl}))::BIGINT AS nc
+                     FROM {g}.lane WHERE geom IS NOT NULL)
+          SELECT lane_id, k AS cell_k, lane_id || '@' || k AS node_id,
+                 ST_X(ST_LineInterpolatePoint(geom, k::DOUBLE / nc)) AS x_coord,
+                 ST_Y(ST_LineInterpolatePoint(geom, k::DOUBLE / nc)) AS y_coord,
+                 link_id AS macro_link_id, lane_num AS lane_no,
+                 ST_LineInterpolatePoint(geom, k::DOUBLE / nc) AS geom
+          FROM L, range(nc + 1) AS s(k)""")
+        # normal (cell) micro links
+        con.execute(f"""CREATE TABLE {mc}.micro_link AS
+          WITH L AS (SELECT la.lane_id, la.link_id, la.lane_num, la.allowed_uses, la.width, la.geom,
+                            lk.free_speed, lk.facility_type,
+                            GREATEST(1, CEIL(ST_Length(la.geom) * 111320.0 / {cl}))::BIGINT AS nc
+                     FROM {g}.lane la JOIN {g}.link lk ON lk.link_id = la.link_id
+                     WHERE la.geom IS NOT NULL)
+          SELECT 'C' || lane_id || '#' || k AS link_id, lane_id || '@' || k AS from_node_id,
+                 lane_id || '@' || (k + 1) AS to_node_id, 1 AS dir_flag,
+                 (ST_Length(ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc))) * 111320)::DOUBLE AS length,
+                 1 AS lanes, width, free_speed, facility_type, allowed_uses,
+                 ST_AsText(ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc))) AS geometry,
+                 ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc)) AS geom,
+                 link_id AS macro_link_id, 'M' || link_id AS meso_link_id, lane_num AS lane_no,
+                 'normal' AS cell_type, NULL::VARCHAR AS mvmt_txt_id, NULL::VARCHAR AS ctrl_type
+          FROM L, range(nc) AS s(k)""")
+        # lane-change micro links: adjacent lanes of a link, one cell forward (both directions)
+        con.execute(f"""INSERT INTO {mc}.micro_link ({_MICRO_COLS})
+          SELECT 'H' || a.node_id || '-' || b.node_id, a.node_id, b.node_id, 1,
+                 ST_Distance(a.geom, b.geom) * 111320, 1, NULL::DOUBLE, NULL::DOUBLE, 'lane_change',
+                 NULL::VARCHAR, ST_AsText(ST_MakeLine(a.geom, b.geom)), ST_MakeLine(a.geom, b.geom),
+                 a.macro_link_id, 'M' || a.macro_link_id, NULL::INTEGER, 'lane_change',
+                 NULL::VARCHAR, NULL::VARCHAR
+          FROM {mc}.micro_node a JOIN {mc}.micro_node b
+            ON a.macro_link_id = b.macro_link_id AND abs(a.lane_no - b.lane_no) = 1
+               AND b.cell_k = a.cell_k + 1""")
+        # movement (turn) micro links: inbound lane end -> outbound lane start, smooth Bézier
+        con.execute(f"""INSERT INTO {mc}.micro_link ({_MICRO_COLS})
+          WITH ie AS (SELECT macro_link_id AS lk, lane_no, arg_max(node_id, cell_k) AS node
+                      FROM {mc}.micro_node GROUP BY macro_link_id, lane_no),
+               oe AS (SELECT macro_link_id AS lk, lane_no, arg_min(node_id, cell_k) AS node
+                      FROM {mc}.micro_node GROUP BY macro_link_id, lane_no)
+          SELECT 'X' || ie.node || '-' || oe.node, ie.node, oe.node, 1,
+                 ST_Length(ST_GeomFromText(m.geometry)) * 111320, 1, NULL::DOUBLE, il.free_speed,
+                 'connector', m.allowed_uses, m.geometry, ST_GeomFromText(m.geometry),
+                 NULL::BIGINT, 'M' || m.ib_link_id, NULL::INTEGER, 'movement', m.mvmt_code, m.ctrl_type
+          FROM {g}.movement m
+          JOIN ie ON ie.lk = m.ib_link_id AND ie.lane_no = COALESCE(m.start_ib_lane, 1)
+          JOIN oe ON oe.lk = m.ob_link_id AND oe.lane_no = 1
+          JOIN {g}.link il ON il.link_id = m.ib_link_id
+          WHERE m.geometry IS NOT NULL""")
+        r = {
+            "micro_node": con.execute(f"SELECT count(*) FROM {mc}.micro_node").fetchone()[0],
+            "cell": con.execute(f"SELECT count(*) FROM {mc}.micro_link WHERE cell_type='normal'").fetchone()[0],
+            "lane_change": con.execute(f"SELECT count(*) FROM {mc}.micro_link WHERE cell_type='lane_change'").fetchone()[0],
+            "movement": con.execute(f"SELECT count(*) FROM {mc}.micro_link WHERE cell_type='movement'").fetchone()[0],
+        }
+        r["micro_link"] = r["cell"] + r["lane_change"] + r["movement"]
+        result[mode] = r
+        logger.info(f"MICRO[{mode}]: {r['micro_node']:,} nodes, {r['micro_link']:,} links "
+                    f"({r['cell']:,} cell + {r['lane_change']:,} lane-change + {r['movement']:,} turn) -> {mc}")
+    con.close()
+    return result
+
+
 def to_meso(gmns_db, modes=None, trim_m=6.0):
     """Build a mesoscopic (lane-level) network into an existing GMNS DuckDB, from its gmns_<mode>
     tables. Writes a ``meso_<mode>`` schema (``meso_node`` + ``meso_link``) per mode.

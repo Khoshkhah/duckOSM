@@ -413,7 +413,11 @@ def gis_debug(export_path, source_db, out, name):
               help='Also write a single mode-tagged gmns_all network (links merged, allowed_uses unioned)')
 @click.option('--drive-side', type=click.Choice(['right', 'left']), default='right', show_default=True,
               help='Traffic side: two-way lanes offset to this side so the directions separate')
-def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side):
+@click.option('--micro', is_flag=True, default=False,
+              help='Also build a microscopic (cell-based) network — micro_<mode> schemas')
+@click.option('--micro-mode', 'micro_modes', multiple=True, help='Modes to build micro for (default: driving)')
+def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side, micro,
+         micro_modes):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -422,7 +426,7 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
     length metres, free_speed km/h, coordinates EPSG:4326. `--to-csv` also writes the spec CSVs. Lane
     / signal / curb detail needs the OSM tags (raw schema); needs the DuckDB spatial extension.
     """
-    from duckosm.gmns import to_gmns, to_meso
+    from duckosm.gmns import to_gmns, to_meso, to_micro
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     if out is None:
@@ -431,6 +435,7 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
         res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry,
                       combined=combined, drive_side=drive_side)
         meso_res = to_meso(out, modes=list(meso_modes) or ["driving"]) if meso else None
+        micro_res = to_micro(out, modes=list(micro_modes) or ["driving"]) if micro else None
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {res['path']}")
@@ -444,6 +449,10 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
         for mode, m in meso_res.items():
             click.echo(f"  meso[{mode}]: {m['meso_link']} meso links "
                        f"({m['normal']} section + {m['movement']} connector), {m['meso_node']} nodes")
+    if micro_res:
+        for mode, m in micro_res.items():
+            click.echo(f"  micro[{mode}]: {m['micro_link']} micro links ({m['cell']} cell + "
+                       f"{m['lane_change']} lane-change + {m['movement']} turn), {m['micro_node']} nodes")
     if res.get('csv'):
         click.echo(f"  + GMNS CSVs -> {res['csv']}")
 
