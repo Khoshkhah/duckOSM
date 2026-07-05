@@ -392,7 +392,7 @@ _HUB_MODE = "walking"
 
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
-                     end_mode: str = "walking", enforce_sequence: bool = True):
+                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None):
     """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
 
     Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
@@ -412,6 +412,9 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     enforce_sequence : when True (default) restrict the trip to ``walk* (drive|cycle)* walk*`` — at
         most one contiguous vehicular segment, entered and left via walking. False = plain layered
         Dijkstra (any mode alternation the transfers allow).
+    allowed_modes : optional iterable of modes to restrict the trip to (e.g. ``{"walking", "cycling"}``
+        for a **car-free** route). ``None`` = all modes present in the graph. ``start_mode``/``end_mode``
+        must be in it.
 
     Returns a dict::
 
@@ -432,11 +435,15 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     except Exception:
         pass
 
-    # --- load adjacency (two SQL reads) ---------------------------------------------------------
+    allow = set(allowed_modes) if allowed_modes else None   # None = all modes
+
+    # --- load adjacency (two SQL reads), skipping any mode not in `allow` -----------------------
     adj: dict = {}                       # (mode, node) -> [(nbr_node, edge_id, cost_s)]
     nodes_by_mode: dict = {}             # mode -> {node_id}
     for mode, s, t, eid, cost in con.execute(
             f"SELECT mode, source, target, edge_id, cost_s FROM {schema}.edges").fetchall():
+        if allow is not None and mode not in allow:
+            continue
         adj.setdefault((mode, s), []).append((t, eid, float(cost) if cost is not None else 0.0))
         nm = nodes_by_mode.setdefault(mode, set())
         nm.add(s)
@@ -444,6 +451,8 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     tadj: dict = {}                      # (from_mode, node) -> [(to_mode, cost_s, kind)]
     for nid, fm, tm, cost, kind in con.execute(
             f"SELECT node_id, from_mode, to_mode, cost_s, kind FROM {schema}.transfers").fetchall():
+        if allow is not None and (fm not in allow or tm not in allow):
+            continue
         tadj.setdefault((fm, nid), []).append((tm, float(cost) if cost is not None else 0.0, kind))
 
     if src_node not in nodes_by_mode.get(start_mode, set()):
