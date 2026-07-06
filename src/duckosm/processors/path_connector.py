@@ -89,7 +89,7 @@ class PathConnector(BaseProcessor):
                      "(source BIGINT, target BIGINT, highway VARCHAR, length_m DOUBLE, osm_id BIGINT)")
         self.con.executemany("INSERT INTO _pairs VALUES (?, ?, ?, ?, ?)", pairs)
         self.execute("""
-            INSERT INTO edges (edge_id, source, target, osm_id, highway, name, oneway, lanes,
+            INSERT INTO edges (edge_id, edge_ref, source, target, osm_id, highway, name, oneway, lanes,
                                surface, junction, layer, bridge, tunnel, service, refs,
                                geometry, is_reverse, length_m)
             WITH base AS (
@@ -104,6 +104,10 @@ class PathConnector(BaseProcessor):
                        tgeom AS sgeom, sgeom AS tgeom, TRUE AS is_reverse FROM base
             )
             SELECT (hash(osm_id, source, target) >> 1)::BIGINT AS edge_id,
+                   osm_id || '#'
+                       || dense_rank() OVER (PARTITION BY osm_id
+                                             ORDER BY least(source, target), greatest(source, target))
+                       || (CASE WHEN is_reverse THEN 'r' ELSE 'f' END) AS edge_ref,
                    source, target, osm_id, highway, NULL, FALSE, NULL,
                    NULL, NULL, NULL, NULL, NULL, NULL, [source, target]::BIGINT[],
                    ST_MakeLine(sgeom, tgeom), is_reverse, length_m

@@ -107,27 +107,48 @@ class GraphSimplifier(BaseProcessor):
         # (osm_id, source, target) is unique EXCEPT for same-direction parallels — a self-crossing
         # way with a lead-in chord + loop arc, both A->B. The longer is never the optimal route
         # between the two junctions (its interior nodes aren't junctions), so keep the shortest.
+        # edge_ref: a human-readable secondary id '{osm_id}#{seq}{f|r}'. seq ranks the FORWARD edges
+        # of a way by (source, target); a reverse edge inherits its forward twin's seq, so the two
+        # directions of a two-way segment share seq (…#2f / …#2r) while two distinct one-way arcs of a
+        # self-crossing way get different seq. f/r is the direction. Not a join key (positional seq is
+        # not rebuild-stable) — the integer edge_id stays that. See the design doc.
         self.execute("""
             CREATE OR REPLACE TABLE edges AS
+            WITH deduped AS (
+                SELECT * EXCLUDE (_rn) FROM (
+                    SELECT * EXCLUDE (edge_id), row_number() OVER (
+                        PARTITION BY osm_id, source, target
+                        ORDER BY length_m, refs::VARCHAR) AS _rn
+                    FROM edges
+                ) WHERE _rn = 1
+            ),
+            fseq AS (
+                SELECT osm_id, source, target,
+                       dense_rank() OVER (PARTITION BY osm_id ORDER BY source, target) AS seq
+                FROM deduped WHERE NOT is_reverse
+            )
             SELECT
-                (hash(osm_id, source, target) >> 1)::BIGINT AS edge_id,
-                source, target, osm_id, highway, name, maxspeed, oneway, lanes,
-                surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
-            FROM (
-                SELECT * EXCLUDE (edge_id), row_number() OVER (
-                    PARTITION BY osm_id, source, target
-                    ORDER BY length_m, refs::VARCHAR) AS _rn
-                FROM edges
-            ) WHERE _rn = 1
+                (hash(d.osm_id, d.source, d.target) >> 1)::BIGINT AS edge_id,
+                d.osm_id || '#' || COALESCE(ff.seq, fr.seq)
+                    || (CASE WHEN d.is_reverse THEN 'r' ELSE 'f' END) AS edge_ref,
+                d.source, d.target, d.osm_id, d.highway, d.name, d.maxspeed, d.oneway, d.lanes,
+                d.surface, d.junction, d.layer, d.bridge, d.tunnel, d.service, d.refs, d.geometry,
+                d.is_reverse, d.length_m
+            FROM deduped d
+            LEFT JOIN fseq ff ON NOT d.is_reverse
+                AND ff.osm_id = d.osm_id AND ff.source = d.source AND ff.target = d.target
+            LEFT JOIN fseq fr ON d.is_reverse
+                AND fr.osm_id = d.osm_id AND fr.source = d.target AND fr.target = d.source
         """)
         n = self.fetchone("SELECT COUNT(*) FROM edges")[0]
         du = self.fetchone("SELECT COUNT(DISTINCT edge_id) FROM edges")[0]
         dt = self.fetchone("SELECT COUNT(*) FROM (SELECT DISTINCT osm_id, source, target FROM edges)")[0]
-        if du != n or dt != n:
+        dr = self.fetchone("SELECT COUNT(DISTINCT edge_ref) FROM edges")[0]
+        if du != n or dt != n or dr != n:
             raise RuntimeError(
-                f"edge_id not unique after re-key: {n} edges, {du} distinct edge_id, "
-                f"{dt} distinct (osm_id, source, target) — the loop/antiparallel splits should make "
-                f"these equal.")
+                f"edge id/ref not unique after re-key: {n} edges, {du} distinct edge_id, "
+                f"{dt} distinct (osm_id, source, target), {dr} distinct edge_ref — the "
+                f"loop/antiparallel splits should make these equal.")
 
     def _num_batches(self) -> int:
         """Number of way-id buckets to build the simplified graph in."""
