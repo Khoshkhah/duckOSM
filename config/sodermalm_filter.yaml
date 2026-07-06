@@ -1,0 +1,55 @@
+# Södermalm driving network — DERIVED (clipped) from the Sweden build.
+#
+# Build the parent once, then clip this area from it:
+#   duckosm build --config config/sweden.yaml        # -> data/db/sweden.duckdb  (slow, once)
+#   duckosm build --config config/sodermalm.yaml     # -> data/db/sodermalm.duckdb  (fast clip)
+#
+# Why duckdb-clip instead of a PBF build: Södermalm edges keep the EXACT edge_id they have in
+# Sweden (same geometry + source/target -> same hash), so this db is a stable view of its parent
+# and downstream projects that key on edge_id never re-match. See PLAN.md §2.1.
+
+name: sodermalm_filter
+output_path: data/db                   # -> data/db/sodermalm.duckdb
+
+source:
+  type: duckdb
+  source_db: data/db/sweden.duckdb     # parent build to clip from
+  source_modes: [driving]
+  preserve_edge_ids: true              # Södermalm edges keep their Sweden edge_id
+
+boundary:
+  path: data/boundaries/sodermalm.geojson
+
+clip:
+  predicate: intersects                # keep whole boundary-crossing roads (bridges/tunnels)...
+  keep_largest_component: true         # ...then drop the disconnected outside stubs -> one clean network
+  min_component_edges: 1
+  connectivity_rescue: true            # re-admit a dropped/maybe connector iff it reconnects the network
+  strongly_connected: false            # weakly-connected keep (one-way pockets stay; traps flagged, not dropped)
+
+modes:
+  - driving
+
+options:
+  # Mostly inert for a duckdb clip (the parent already has speeds / costs / restrictions /
+  # edge_graph); listed for clarity and in case you switch source.type to pbf later.
+  build_graph: true
+  simplify: true
+  process_speeds: true
+  extract_restrictions: true
+  calculate_costs: true
+  h3_indexing: true
+  h3_resolution: 15
+
+validation:
+  enabled: true
+  fail_on_error: true
+  assert_single_component: true
+  assert_no_stranded_named: true
+  assert_edge_id_stable: true          # vs the Sweden parent
+
+report:
+  enabled: true                        # reports/sodermalm_<ts>.{md,html}
+viz:
+  enabled: true                        # roadstyle map of the clipped Södermalm network
+  basemap: carto-voyager

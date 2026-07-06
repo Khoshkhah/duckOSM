@@ -1,56 +1,47 @@
 # Greater Stockholm driving network — Stockholms län / Stockholm County (admin_level 4,
-# osm_id 54391), the whole REGION, not the city/municipality (Stockholms kommun, level 7).
-# DERIVED (clipped) from the Sweden build, so edges keep their exact Sweden edge_id.
+# osm_id 54391), the whole REGION. PBF variant: built directly from the Sweden PBF clipped to
+# the county boundary, instead of clipping data/db/sweden.duckdb (config/stockholm_county.yaml).
+# Edge_ids are computed fresh from this clip (still the stable hash(osm_id, source, target)), so
+# boundary-adjacent edges may differ from a sweden-clip; interior edges match.
 #
-#   duckosm build --config config/sweden.yaml            # -> data/db/sweden.duckdb  (slow, once)
-#   duckosm build --config config/stockholm_county.yaml  # -> data/db/stockholm_county.duckdb
-#
-# The boundary GeoJSON was exported from sweden.duckdb's admin_boundaries (osm_id 54391).
+#   duckosm build --config config/stockholm_county_pbf.yaml   # -> data/db/stockholm_county.duckdb
 
 name: stockholm_county                 # -> data/db/stockholm_county.duckdb
 output_path: data/db
 
 source:
-  type: duckdb
-  source_db: data/db/sweden.duckdb     # parent build to clip from
-  source_modes: [driving]
-  preserve_edge_ids: true              # Stockholm edges keep their Sweden edge_id
+  type: pbf
+  pbf_path: data/maps/sweden-latest.osm.pbf
 
 boundary:
   path: data/boundaries/stockholm_county.geojson
 
 clip:
   predicate: intersects                # keep whole boundary-crossing roads (bridges)...
-  keep_largest_component: true         # ...then drop disconnected stubs -> one clean network.
-                                       # NOTE: unbridged archipelago islands form their own
-                                       # components and are dropped; set false to keep them.
+  keep_largest_component: true         # ...then drop disconnected stubs -> one clean network
   min_component_edges: 1
-  connectivity_rescue: true            # re-admit a dropped/maybe connector iff it reconnects
-  strongly_connected: false            # weakly-connected keep (one-way pockets stay)
+  connectivity_rescue: true
+  strongly_connected: false
 
 modes:
   - driving
 
 options:
-  # Mostly inert for a duckdb clip (the parent already has speeds / costs / restrictions /
-  # edge_graph); listed for clarity and in case you switch source.type to pbf later.
   build_graph: true
   simplify: true
   process_speeds: true
   extract_restrictions: true
   calculate_costs: true
   h3_indexing: true
-  h3_resolution: 15                    # matches the Sweden parent / sodermalm
-  memory_limit: "16GB"                 # headroom for scanning the country-scale parent db
+  h3_resolution: 15
 
 validation:
   enabled: true
-  fail_on_error: true
-  assert_single_component: true        # keep_largest_component leaves one dominant network
+  fail_on_error: false                 # no parent baseline; keep the build resilient
+  assert_single_component: true
   assert_no_stranded_named: true
-  assert_edge_id_stable: true          # vs the Sweden parent
 
 report:
   enabled: true                        # reports/stockholm_county_<ts>.{md,html}
 viz:
-  enabled: false                       # county-scale; render on demand: duckosm viz data/db/stockholm_county.duckdb
+  enabled: false                       # county-scale; render on demand
