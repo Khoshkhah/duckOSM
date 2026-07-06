@@ -157,3 +157,33 @@ FROM raw.ways
 WHERE tags['leisure'] = 'park' OR tags['building'] IS NOT NULL
 LIMIT 10;
 ```
+
+---
+
+## Cross-Mode Inspection
+
+### Everything about one osm_id, all modes in one table
+One raw way is extracted into per-mode edge tables with different schemas; union them back
+for a side-by-side view (this is what `duckosm way <db> <osm_id>` prints — from Python use
+`duckosm.query.way_table(con, osm_id)`, which builds the column union dynamically):
+```sql
+SELECT * FROM (
+    SELECT 'driving' AS mode, edge_id, edge_ref, source, target, is_reverse, highway,
+           length_m, maxspeed_kmh, cost_s, NULL AS walk_type, NULL AS cycle_type
+    FROM driving.edges WHERE osm_id = 223203426
+    UNION ALL
+    SELECT 'walking', edge_id, edge_ref, source, target, is_reverse, highway,
+           length_m, maxspeed_kmh, cost_s, walk_type, NULL
+    FROM walking.edges WHERE osm_id = 223203426
+    UNION ALL
+    SELECT 'cycling', edge_id, edge_ref, source, target, is_reverse, highway,
+           length_m, maxspeed_kmh, cost_s, NULL, cycle_type
+    FROM cycling.edges WHERE osm_id = 223203426
+) ORDER BY COALESCE(TRY_CAST(regexp_extract(edge_ref, '#(\d+)', 1) AS INT), 2000000000),
+           is_reverse, mode;
+```
+The same `edge_id`/`edge_ref` under several modes = the cross-mode alignment invariant holding;
+a mode missing a segment shows exactly where its filter dropped it. The raw side of the story:
+```sql
+SELECT osm_id, tags, refs FROM raw.ways WHERE osm_id = 223203426;
+```

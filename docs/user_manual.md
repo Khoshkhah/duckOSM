@@ -65,21 +65,20 @@ Each mode has its own schema (e.g., `driving.edges`, `walking.edges`).
 | `h3_cell` | UBIGINT | H3 spatial index |
 
 ### `edges`
+The full column-by-column reference lives in [`data_dictionary.md`](data_dictionary.md); the
+highlights:
+
 | Column | Type | Description |
 |--------|------|-------------|
-| `edge_id` | INTEGER | Unique edge ID |
-| `source` | BIGINT | Source node ID |
-| `target` | BIGINT | Target node ID |
-| `osm_id` | BIGINT | Original OSM way ID |
-| `highway` | VARCHAR | Highway type |
-| `name` | VARCHAR | Street name |
-| `length_m` | FLOAT | Length in meters |
-| `maxspeed_kmh` | FLOAT | Speed limit (km/h) |
-| `cost_s` | FLOAT | Travel time (seconds) |
-| `geometry` | GEOMETRY | LineString geometry |
-| `is_reverse` | BOOLEAN | True if reverse direction |
-| `from_cell` | UBIGINT | Source node H3 cell |
-| `to_cell` | UBIGINT | Target node H3 cell |
+| `edge_id` | BIGINT | Stable content hash `(hash(osm_id, source, target) >> 1)` — same edge, same id across rebuilds |
+| `edge_ref` | VARCHAR | Readable secondary id `{osm_id}#{seq}{f\|r}` (not a join key) |
+| `source` / `target` | BIGINT | Endpoint node IDs (negative = virtual node) |
+| `osm_id` | BIGINT | Original OSM way ID (negative = synthetic connector edge) |
+| `highway`, `name`, `oneway`, `lanes`, `surface`, `junction`, `service`, `layer`, `bridge`, `tunnel` | | Way attributes carried onto every edge (e.g. `service` = `driveway`/`parking_aisle`/`alley`/…) |
+| `walk_type` / `cycle_type` | VARCHAR | Mode functional class (walking / cycling schema only) |
+| `length_m`, `maxspeed_kmh`, `cost_s` | FLOAT | Length, normalized speed, travel time |
+| `geometry`, `refs`, `is_reverse` | | LineString, shape-point node ids, direction flag |
+| `from_cell`, `to_cell`, `lca_res` | | H3 cells of the endpoints (when H3 indexing is on) |
 
 ### `edge_graph`
 Edge-based routing graph (line graph), built from **all** edges — every road, incl.
@@ -138,6 +137,25 @@ WHERE from_edge = 123;
 SELECT * FROM driving.edges 
 WHERE from_cell = 617700169958293503;
 ```
+
+### One way across all modes
+
+Everything the db knows about one `osm_id` — the raw way row plus its edges in every mode,
+unioned into one table (columns NULL-filled where a mode doesn't carry them, traversal order):
+
+```bash
+duckosm way data/db/tartu.duckdb 223203426          # add -m driving to restrict, --geom for WKT
+duckosm way data/db/tartu.duckdb 223203426 -o way.csv   # write to file (.csv / .parquet / .json)
+```
+
+```python
+from duckosm.query import way_table
+way_table(con, 223203426).show()                    # same table from Python / a notebook
+```
+
+A row per (mode, edge): the same `edge_id`/`edge_ref` appearing under several modes is the
+cross-mode alignment invariant at work; `walk_type` / `cycle_type` / `maxspeed_kmh` / `cost_s`
+sit side by side. A negative `osm_id` inspects synthetic PathConnector connector edges.
 
 ## Visualization
 

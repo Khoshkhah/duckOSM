@@ -46,6 +46,14 @@ midpoint, creating virtual nodes:
 | `length_m` | FLOAT | Length in meters |
 | `maxspeed_kmh` | FLOAT | Normalized speed (km/h) |
 | `cost_s` | FLOAT | Travel time in seconds |
+| `surface` | VARCHAR | OSM `surface` tag (`asphalt`, `gravel`, `paving_stones`, …); NULL when untagged |
+| `junction` | VARCHAR | OSM `junction` tag (`roundabout`, `circular`, …); NULL for ordinary edges. Roundabouts are also normalised to `oneway=TRUE` |
+| `service` | VARCHAR | OSM `service` subtag — for `highway=service` roads, what *kind*: `driveway`, `parking_aisle`, `alley`, `drive-through`, `slipway`, … NULL for non-service roads or untagged service roads. Used to style/filter parking-lot plumbing apart from real minor roads |
+| `layer` | VARCHAR | OSM `layer` tag (vertical order, `-2`…`2`); NULL = ground level. Drives grade-separation rendering |
+| `bridge` | VARCHAR | OSM `bridge` tag (`yes`, `viaduct`, …); NULL when not a bridge |
+| `tunnel` | VARCHAR | OSM `tunnel` tag (`yes`, `building_passage`, …); NULL when not a tunnel |
+| `walk_type` | VARCHAR | **walking schema only** — pedestrian functional class derived from OSM sub-tags: `sidewalk` / `crossing` / `footpath` / `steps` / `escalator` / `pedestrian_street` / `plaza` / `shared_street` / `shared_road` / `corridor` / `platform` / `path`. See `docs/design/walk_cycle_type.md` |
+| `cycle_type` | VARCHAR | **cycling schema only** — cyclist functional class, directional (`cycleway:right` on forward, `cycleway:left` on reverse): `cycleway` / `cycle_track` / `cycle_lane` / `shared_lane` / `bus_cycle_lane` / `segregated_path` / `shared_path` / `mixed_traffic`. See `docs/design/walk_cycle_type.md` |
 | `geometry` | GEOMETRY | LineString geometry |
 | `is_reverse` | BOOLEAN | True if opposite direction |
 | `refs` | BIGINT[] | Shape point node IDs |
