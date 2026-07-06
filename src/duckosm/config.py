@@ -30,6 +30,7 @@ class Options:
     simplify: bool = False
     merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
     global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/global_junction_segmentation.md
+    functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/design/walk_cycle_type.md
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True

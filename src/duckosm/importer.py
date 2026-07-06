@@ -25,6 +25,7 @@ from duckosm.processors import (
     EdgeGraphBuilder,
     GraphSimplifier,
     GlobalJunctions,
+    FunctionalType,
     PathConnector,
     ComponentFilter,
     DuckdbClipper,
@@ -150,6 +151,11 @@ class DuckOSM:
 
             if self.config.options.calculate_costs:
                 steps.append(("calculate_costs", f"[{mode}] Calculating costs", lambda: self._calculate_costs(mode)))
+
+            # Pedestrian/cyclist functional class (walk_type / cycle_type) from OSM sub-tags.
+            if self.config.options.functional_types and mode in ("walking", "cycling"):
+                steps.append(("functional_type", f"[{mode}] Deriving functional type",
+                              lambda m=mode: self._add_functional_type(m)))
 
             if self.config.options.extract_restrictions:
                 # Turn restrictions only for driving for now
@@ -574,6 +580,10 @@ class DuckOSM:
         shared set so a road keeps the same edge_id across driving/walking/cycling.
         """
         GlobalJunctions(self.con).run()
+
+    def _add_functional_type(self, mode: str) -> None:
+        """Add walk_type / cycle_type to the mode's edges from OSM sub-tags (walking/cycling only)."""
+        FunctionalType(self.con, mode=mode).run()
 
     def _simplify_graph(self) -> None:
         """Simplify the road network graph."""
