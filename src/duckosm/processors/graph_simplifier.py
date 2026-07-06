@@ -107,11 +107,11 @@ class GraphSimplifier(BaseProcessor):
         # (osm_id, source, target) is unique EXCEPT for same-direction parallels — a self-crossing
         # way with a lead-in chord + loop arc, both A->B. The longer is never the optimal route
         # between the two junctions (its interior nodes aren't junctions), so keep the shortest.
-        # edge_ref: a human-readable secondary id '{osm_id}#{seq}{f|r}'. seq ranks the FORWARD edges
-        # of a way by (source, target); a reverse edge inherits its forward twin's seq, so the two
-        # directions of a two-way segment share seq (…#2f / …#2r) while two distinct one-way arcs of a
-        # self-crossing way get different seq. f/r is the direction. Not a join key (positional seq is
-        # not rebuild-stable) — the integer edge_id stays that. See the design doc.
+        # edge_ref: a human-readable secondary id '{osm_id}#{seq}{f|r}'. seq numbers the FORWARD edges
+        # of a way in TRAVERSAL order (source-end segment = #1); a reverse edge inherits its forward
+        # twin's seq, so the two directions of a two-way segment share seq (#2f / #2r) while two
+        # distinct one-way arcs of a self-crossing way get different seq. f/r is the direction. Not a
+        # join key (positional seq is not rebuild-stable) — the integer edge_id stays that.
         self.execute("""
             CREATE OR REPLACE TABLE edges AS
             WITH deduped AS (
@@ -123,9 +123,16 @@ class GraphSimplifier(BaseProcessor):
                 ) WHERE _rn = 1
             ),
             fseq AS (
-                SELECT osm_id, source, target,
-                       dense_rank() OVER (PARTITION BY osm_id ORDER BY source, target) AS seq
-                FROM deduped WHERE NOT is_reverse
+                -- number forward edges in TRAVERSAL order (by the source node's position in the
+                -- way's original node list); virtual-node sources (negative, absent from that list)
+                -- sort last, deterministically.
+                SELECT d.osm_id, d.source, d.target,
+                       dense_rank() OVER (PARTITION BY d.osm_id ORDER BY
+                           COALESCE(list_position(w.refs, d.source), 2000000000),
+                           d.source, d.target) AS seq
+                FROM deduped d
+                LEFT JOIN raw.ways w ON w.osm_id = d.osm_id
+                WHERE NOT d.is_reverse
             )
             SELECT
                 (hash(d.osm_id, d.source, d.target) >> 1)::BIGINT AS edge_id,
