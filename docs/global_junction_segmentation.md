@@ -1,6 +1,7 @@
 # Global-junction segmentation (cross-mode `edge_id` alignment)
 
-**Status:** design / proposed (not implemented). Fixes the cross-mode `edge_id` misalignment so the
+**Status:** implemented (branch `edge-id-segmentation-overhaul`; config `global_junctions`, default
+on; falls back to per-mode junctions when off / for clip builds). Fixes the cross-mode `edge_id` misalignment so the
 same physical road carries the **same `edge_id`** in the driving / walking / cycling graphs.
 
 ## The problem

@@ -1,7 +1,8 @@
 # Functional edge types — `walk_type` and `cycle_type`
 
-**Status:** design proposal (not yet implemented). Adds one derived enum column to the `walking`
-and `cycling` `edges` tables.
+**Status:** implemented (branch `edge-id-segmentation-overhaul`; config `functional_types`, default
+on) as a post-process (`FunctionalType`) that joins each edge to its raw way tags — no simplifier
+plumbing. Adds one derived enum column to the `walking` and `cycling` `edges` tables.
 
 ## Summary
 

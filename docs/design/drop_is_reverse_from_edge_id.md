@@ -1,8 +1,9 @@
 # Removing `is_reverse` from the edge_id hash
 
-**Status:** design proposal (not yet implemented). Touches core segmentation
+**Status:** implemented (branch `edge-id-segmentation-overhaul`). Touches core segmentation
 (`GraphSimplifier` / `GraphBuilder`) and the `edge_id` definition, so it changes ids in every DB
-and requires a downstream re-match. Review before implementing.
+and requires a **full rebuild of all areas + downstream re-match** (handled separately). The old
+formula is retained as the `edge_id_hash_v1` macro for old→new crosswalks.
 
 ## Summary
 
