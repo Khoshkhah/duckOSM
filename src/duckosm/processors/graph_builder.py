@@ -43,7 +43,7 @@ class GraphBuilder(BaseProcessor):
             SELECT
                 -- Stable, deterministic edge_id: a hash of the edge's identity (so rebuilds
                 -- don't renumber the graph). See GraphSimplifier._rekey_edges for rationale.
-                (hash(osm_id, source, target, FALSE) >> 1)::BIGINT AS edge_id,
+                (hash(osm_id, source, target) >> 1)::BIGINT AS edge_id,
                 source,
                 target,
                 osm_id,
@@ -82,9 +82,9 @@ class GraphBuilder(BaseProcessor):
         self.execute(f"""
             INSERT INTO edges
             SELECT
-                -- Reverse edge: hash its OWN endpoints (swapped) + is_reverse=TRUE, so it gets
-                -- a stable id distinct from the forward edge.
-                (hash(e.osm_id, e.target, e.source, TRUE) >> 1)::BIGINT AS edge_id,
+                -- Reverse edge: hash its OWN (swapped) endpoints, so it gets a stable id distinct
+                -- from the forward edge (source->target already encodes direction; no is_reverse).
+                (hash(e.osm_id, e.target, e.source) >> 1)::BIGINT AS edge_id,
                 e.target AS source,
                 e.source AS target,
                 e.osm_id,

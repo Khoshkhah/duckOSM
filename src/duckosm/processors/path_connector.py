@@ -9,7 +9,7 @@ the largest component (and becomes routable). Cycling/walking only.
 A connector's osm_id is **`-min(a, b)`**, where a/b are the osm_ids of the two roads it joins (the
 dangling path and the road at the target node). Negative marks it synthetic (`osm_id < 0`, never
 collides with real OSM ids) and points back to the connected roads. edge_id is the usual
-`hash(osm_id, source, target, is_reverse)>>1`. Runs on the active schema's `edges`/`nodes` (after
+`hash(osm_id, source, target)>>1`. Runs on the active schema's `edges`/`nodes` (after
 `simplify_graph`, before `build_edge_graph`). See docs/connectivity_repair.md.
 """
 import logging
@@ -103,7 +103,7 @@ class PathConnector(BaseProcessor):
                 SELECT target AS source, source AS target, highway, length_m, osm_id,
                        tgeom AS sgeom, sgeom AS tgeom, TRUE AS is_reverse FROM base
             )
-            SELECT (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT AS edge_id,
+            SELECT (hash(osm_id, source, target) >> 1)::BIGINT AS edge_id,
                    source, target, osm_id, highway, NULL, FALSE, NULL,
                    NULL, NULL, NULL, NULL, NULL, NULL, [source, target]::BIGINT[],
                    ST_MakeLine(sgeom, tgeom), is_reverse, length_m

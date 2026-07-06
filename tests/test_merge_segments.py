@@ -209,12 +209,12 @@ def test_contract_chains_edge_id_map():
     assert {r[0] for r in con.execute("SELECT DISTINCT seq FROM edge_id_map").fetchall()} == {1, 2}
     # new ids are the same stable hash _rekey_edges will assign to the merged edge
     # (osm_id 100 = the first/source-end member, the representative)
-    fwd_new = con.execute("SELECT (hash(100::BIGINT, 1::BIGINT, 3::BIGINT, FALSE) >> 1)::BIGINT").fetchone()[0]
-    rev_new = con.execute("SELECT (hash(100::BIGINT, 3::BIGINT, 1::BIGINT, TRUE) >> 1)::BIGINT").fetchone()[0]
+    fwd_new = con.execute("SELECT (hash(100::BIGINT, 1::BIGINT, 3::BIGINT) >> 1)::BIGINT").fetchone()[0]
+    rev_new = con.execute("SELECT (hash(100::BIGINT, 3::BIGINT, 1::BIGINT) >> 1)::BIGINT").fetchone()[0]
     assert {r[0] for r in con.execute("SELECT DISTINCT new_edge_id FROM edge_id_map").fetchall()} \
         == {fwd_new, rev_new}
     # the first forward segment maps from its own merge-off id at seq 1
-    old_seg1 = con.execute("SELECT (hash(100::BIGINT, 1::BIGINT, 2::BIGINT, FALSE) >> 1)::BIGINT").fetchone()[0]
+    old_seg1 = con.execute("SELECT (hash(100::BIGINT, 1::BIGINT, 2::BIGINT) >> 1)::BIGINT").fetchone()[0]
     assert con.execute("SELECT count(*) FROM edge_id_map "
                        "WHERE old_edge_id = ? AND seq = 1 AND NOT is_reverse",
                        [old_seg1]).fetchone()[0] == 1

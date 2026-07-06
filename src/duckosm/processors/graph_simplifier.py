@@ -89,37 +89,45 @@ class GraphSimplifier(BaseProcessor):
         logger.info(f"  Graph simplified in {elapsed:.2f}s")
 
     def _rekey_edges(self) -> None:
-        """Replace the row-number edge_id with a deterministic hash of the edge's identity
-        (osm_id, source, target, is_reverse).
+        """Replace the row-number edge_id with a deterministic content hash of the edge's identity
+        ``(osm_id, source, target)`` — direction-free.
 
-        Position-based ids (row_number) change on every rebuild, forcing every downstream
-        consumer keyed on edge_id (map-matching, joins, the regime/simulation pipelines) to
-        re-run and re-match. A content hash is STABLE: an unchanged edge keeps its id across
-        rebuilds, so only added/removed/changed edges shift. BIGINT holds the 63-bit hash.
+        ``is_reverse`` is NOT in the hash: direction is already given by ``source -> target`` (the
+        forward and reverse of a two-way road get distinct ids because their endpoints are swapped),
+        and after self-loops / two-way antiparallel arcs are split with virtual nodes
+        (``_split_self_loops`` / ``_split_antiparallel_pairs``), ``(osm_id, source, target)`` is
+        globally unique, so the flag is redundant here. It stays as a column. See
+        ``docs/design/drop_is_reverse_from_edge_id.md``.
+
+        Position-based ids (row_number) change on every rebuild, forcing every downstream consumer
+        keyed on edge_id to re-run and re-match. A content hash is STABLE: an unchanged edge keeps its
+        id across rebuilds. BIGINT holds the 63-bit hash.
         """
-        # De-duplicate, then re-key. (osm_id, source, target, is_reverse) is unique EXCEPT for
-        # self-crossing ways that pass the same junction pair twice in the SAME direction — e.g.
-        # a lead-in chord plus a loop arc, both A->B. (A genuine loop splits into A->B and B->A:
-        # opposite orientation, distinct keys, so it is never affected here.) For such a
-        # same-direction parallel, the longer arc is never the optimal route between the two
-        # junctions — its interior nodes aren't junctions, so nothing branches off it — so keep
-        # the shortest. This makes the natural key unique with no addition to it.
+        # De-duplicate on the natural key, then re-key. After the loop/antiparallel splits,
+        # (osm_id, source, target) is unique EXCEPT for same-direction parallels — a self-crossing
+        # way with a lead-in chord + loop arc, both A->B. The longer is never the optimal route
+        # between the two junctions (its interior nodes aren't junctions), so keep the shortest.
         self.execute("""
             CREATE OR REPLACE TABLE edges AS
             SELECT
-                (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT AS edge_id,
+                (hash(osm_id, source, target) >> 1)::BIGINT AS edge_id,
                 source, target, osm_id, highway, name, maxspeed, oneway, lanes,
                 surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
             FROM (
                 SELECT * EXCLUDE (edge_id), row_number() OVER (
-                    PARTITION BY osm_id, source, target, is_reverse
+                    PARTITION BY osm_id, source, target
                     ORDER BY length_m, refs::VARCHAR) AS _rn
                 FROM edges
             ) WHERE _rn = 1
         """)
-        dup = self.fetchone("SELECT COUNT(*) - COUNT(DISTINCT edge_id) FROM edges")[0]
-        if dup:
-            raise RuntimeError(f"edge_id still has {dup} duplicate ids after de-dup — unexpected.")
+        n = self.fetchone("SELECT COUNT(*) FROM edges")[0]
+        du = self.fetchone("SELECT COUNT(DISTINCT edge_id) FROM edges")[0]
+        dt = self.fetchone("SELECT COUNT(*) FROM (SELECT DISTINCT osm_id, source, target FROM edges)")[0]
+        if du != n or dt != n:
+            raise RuntimeError(
+                f"edge_id not unique after re-key: {n} edges, {du} distinct edge_id, "
+                f"{dt} distinct (osm_id, source, target) — the loop/antiparallel splits should make "
+                f"these equal.")
 
     def _num_batches(self) -> int:
         """Number of way-id buckets to build the simplified graph in."""
@@ -556,7 +564,7 @@ class GraphSimplifier(BaseProcessor):
         single forward edge is drivable the right way), and a two-way chain is oriented
         deterministically by node id (its reverse edge is generated afterward, so either
         direction is valid). The merged edge keeps its FIRST member's osm_id (the source-end
-        segment), so the stable edge_id hash (osm_id, source, target, is_reverse) stays
+        segment), so the stable edge_id hash (osm_id, source, target) stays
         well-defined. Runs on forward edges only, before reverse edges and the re-key.
         """
         # Each forward edge as two half-edges (at its source, at its target), carrying the
@@ -709,13 +717,13 @@ class GraphSimplifier(BaseProcessor):
                 FROM _chains c, UNNEST(c.edge_set) WITH ORDINALITY AS m(eid, seq)
                 JOIN simplified_edges_forward e ON e.edge_id = m.eid
             )
-            SELECT (hash(mem.osm_id, mem.source, mem.target, FALSE) >> 1)::BIGINT AS old_edge_id,
-                   (hash(cm.osm_id, cm.source, cm.target, FALSE) >> 1)::BIGINT AS new_edge_id,
+            SELECT (hash(mem.osm_id, mem.source, mem.target) >> 1)::BIGINT AS old_edge_id,
+                   (hash(cm.osm_id, cm.source, cm.target) >> 1)::BIGINT AS new_edge_id,
                    mem.seq::INTEGER AS seq, FALSE AS is_reverse, mem.osm_id AS osm_id
             FROM mem JOIN _cmeta cm USING (cid)
             UNION ALL
-            SELECT (hash(mem.osm_id, mem.target, mem.source, TRUE) >> 1)::BIGINT,
-                   (hash(cm.osm_id, cm.target, cm.source, TRUE) >> 1)::BIGINT,
+            SELECT (hash(mem.osm_id, mem.target, mem.source) >> 1)::BIGINT,
+                   (hash(cm.osm_id, cm.target, cm.source) >> 1)::BIGINT,
                    mem.seq::INTEGER, TRUE, mem.osm_id
             FROM mem JOIN _cmeta cm USING (cid)
             WHERE NOT cm.oneway
