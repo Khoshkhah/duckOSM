@@ -38,7 +38,9 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     if not edge_cols:
         logger.warning(f"viz[{mode}]: no edges table to render")
         return None
-    info = [c for c in ("lanes", "maxspeed_kmh") if c in edge_cols]      # extra tooltip fields
+    # Extra tooltip fields, shown when the build carries them: lane count, speed, and the pedestrian/
+    # cyclist functional class (walk_type on the walking graph, cycle_type on the cycling graph).
+    info = [c for c in ("lanes", "maxspeed_kmh", "walk_type", "cycle_type") if c in edge_cols]
     # bridge/tunnel/layer drive roadstyle's grade-separation ordering (tunnels under, bridges over,
     # else the sign of the OSM layer tag). roadstyle reads these exact column names by default, so
     # passing them straight through is enough — they're carried onto every edge by the build.
