@@ -219,6 +219,64 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
 
 @main.command()
 @click.argument('db', type=click.Path(exists=True))
+@click.argument('osm_id', type=int)
+@click.option('--mode', '-m', 'modes', multiple=True,
+              help='Mode schema(s) to include (default: every mode present in the db)')
+@click.option('--geom/--no-geom', default=False, show_default=True,
+              help='Include the edge geometry as WKT (wide!)')
+@click.option('--out', '-o', type=click.Path(), default=None,
+              help='Write the table to a file instead of printing '
+                   '(format by extension: .csv, .parquet, or .json)')
+def way(db, osm_id, modes, geom, out):
+    """Everything this db knows about one OSM_ID, across all modes, in one table.
+
+    Prints the raw way row (tags + node refs), then the union of the per-mode edges
+    extracted from it — one row per (mode, edge), columns NULL-filled where a mode
+    doesn't carry them — in traversal order, so the cross-mode segmentation can be
+    compared at a glance (same edge_id/edge_ref across modes = aligned). A negative
+    OSM_ID inspects synthetic PathConnector connector edges.
+    """
+    import duckdb
+
+    from duckosm.query import way_raw, way_table_sql
+
+    con = duckdb.connect(db, read_only=True)
+    con.execute("INSTALL spatial; LOAD spatial;")
+
+    raw = way_raw(con, osm_id)
+    if raw:
+        click.echo(f"raw way {raw['osm_id']}: {len(raw['refs'])} node refs")
+        click.echo(f"  tags: {raw['tags']}")
+        click.echo(f"  refs: {raw['refs']}")
+    elif osm_id > 0:
+        click.echo(f"raw way {osm_id}: not in raw.ways (clip build, or id not in this extract)")
+    else:
+        click.echo(f"osm_id {osm_id} is synthetic (PathConnector connector; -min of the "
+                   "two joined ways)")
+
+    try:
+        sql = way_table_sql(con, osm_id, modes=list(modes) or None, geometry=geom)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    n = con.execute(f"SELECT count(*) FROM ({sql})").fetchone()[0]
+    if n == 0:
+        raise click.ClickException(f"osm_id {osm_id} has no edges in any requested mode")
+    if out:
+        fmt = Path(out).suffix.lower().lstrip('.')
+        copy_opts = {"csv": "(FORMAT CSV, HEADER)", "parquet": "(FORMAT PARQUET)",
+                     "json": "(FORMAT JSON, ARRAY true)"}
+        if fmt not in copy_opts:
+            raise click.ClickException(f"unsupported extension .{fmt} — use .csv, .parquet or .json")
+        con.execute(f"COPY ({sql}) TO '{out}' {copy_opts[fmt]}")
+        click.echo(f"wrote {n} rows -> {out}")
+    else:
+        # very large max_width so NO column is ever hidden behind "…" — the table wraps in a
+        # narrow terminal instead of silently dropping columns (use -o file.csv for a clean copy)
+        con.sql(sql).show(max_rows=1000, max_width=1_000_000)
+
+
+@main.command()
+@click.argument('db', type=click.Path(exists=True))
 @click.option('--mode', '-m', default='driving', show_default=True,
               help='Mode schema to export')
 @click.option('--out-dir', default='sumo', show_default=True,
