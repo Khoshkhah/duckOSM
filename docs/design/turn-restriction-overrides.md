@@ -1,7 +1,7 @@
 # Design: turn-restriction overrides (synthetic OSM restrictions)
 
 **Status:** implemented & verified
-**Related:** `docs/known_osm_issues.md` #6, `config/osm_overrides.yaml`, `processors/restrictions.py`,
+**Related:** `osm_overrides/known_osm_issues.md` #6, `osm_overrides/osm_overrides.yaml`, `processors/restrictions.py`,
 `processors/edge_graph.py`
 
 ## Problem
@@ -32,7 +32,7 @@ routing, GMNS movements, exports, and the viz all honour it automatically.
 
 ## Proposed change
 
-### 1. `config/osm_overrides.yaml` — new `turn_restrictions:` list
+### 1. `osm_overrides/osm_overrides.yaml` — new `turn_restrictions:` list
 
 ```yaml
 turn_restrictions:

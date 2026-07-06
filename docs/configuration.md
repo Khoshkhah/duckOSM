@@ -20,7 +20,7 @@ CLI flags override the corresponding config values (see `duckosm build --help`).
 | `h3_cell` | string \| null | `null` | Optional single H3 cell id to clip to (alternative to `boundary_path`). |
 | `modes` | list | `["driving"]` | One output schema per mode: any of `driving`, `walking`, `cycling`. |
 | `options` | map | see below | Processing options. |
-| `osm_overrides` | string \| null | `"config/osm_overrides.yaml"` | Path to a global rules file of local corrections for known OSM errors, applied per mode between road-filtering and edge-building. Silent no-op if the file is absent. See [`osm_overrides`](#osm_overrides--local-corrections-for-known-osm-errors). |
+| `osm_overrides` | string \| null | `"osm_overrides/osm_overrides.yaml"` | Path to a global rules file of local corrections for known OSM errors, applied per mode between road-filtering and edge-building. Silent no-op if the file is absent. See [`osm_overrides`](#osm_overrides--local-corrections-for-known-osm-errors). |
 
 ## `options`
 
@@ -86,9 +86,9 @@ spatially selects). Set at most one of `path` / `place` / `bbox` / `h3_cell`.
 Some OSM source data is wrong or ambiguous — a missing `oneway` tag, an undercounted `lanes` value.
 When fixing it upstream in OpenStreetMap isn't practical, duckOSM can patch the affected ways locally
 from a single global rules file so every rebuild reproduces the correction. The catalogue of issues
-these rules address lives in [`known_osm_issues.md`](known_osm_issues.md).
+these rules address lives in [`known_osm_issues.md`](../osm_overrides/known_osm_issues.md).
 
-The top-level `osm_overrides` key points at the file (default `config/osm_overrides.yaml`); set it to
+The top-level `osm_overrides` key points at the file (default `osm_overrides/osm_overrides.yaml`); set it to
 `null` to disable. The rules are applied to the `ways` table **after `RoadFilter` and before
 `GraphBuilder`, once per mode** — placement matters: `oneway` is *topological* (it decides whether a
 reverse-twin edge is created), so it cannot be patched on the finished DB.
@@ -97,7 +97,7 @@ Each rule is keyed by OSM `osm_id` and is a **silent no-op in any area that does
 so one global file is safe to apply to every build.
 
 ```yaml
-# config/osm_overrides.yaml
+# osm_overrides/osm_overrides.yaml
 overrides:
   - osm_id: 4392632          # Hökens Gata, Södermalm — missing oneway (known_osm_issues #1)
     oneway: true

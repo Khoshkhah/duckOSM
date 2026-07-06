@@ -1,4 +1,4 @@
-# Local corrections for known OSM source-data errors — see docs/known_osm_issues.md.
+# Local corrections for known OSM source-data errors — see known_osm_issues.md (same folder).
 #
 # Applied to the `ways` table after RoadFilter and before GraphBuilder (once per mode), so both
 # `oneway` (topological — decides whether a reverse-twin edge is created) and `lanes` take effect

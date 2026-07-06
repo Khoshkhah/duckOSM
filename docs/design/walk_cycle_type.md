@@ -169,4 +169,4 @@ Keep these as their own attributes; do not overload the functional enum with str
   `residential` street), or is `highway` enough alongside it? (Proposed: keep it in `highway`.)
 - Coverage: `footway=*` and `cycleway:<side>=*` are sparsely tagged in some regions — the enum
   degrades gracefully to `footpath` / `mixed_traffic`, but a coverage report per area would help
-  decide where the column is trustworthy (cf. `docs/known_osm_issues.md`).
+  decide where the column is trustworthy (cf. `osm_overrides/known_osm_issues.md`).

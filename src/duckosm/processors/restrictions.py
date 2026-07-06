@@ -2,8 +2,9 @@
 Restriction processor - extracts and maps turn restrictions.
 
 Also injects **synthetic** turn restrictions from the OSM-overrides file (`turn_restrictions:` in
-`config/osm_overrides.yaml`) for junctions where OSM is missing a `type=restriction` relation that
-physically exists — see `docs/design/turn-restriction-overrides.md` and `docs/known_osm_issues.md` #6.
+`osm_overrides/osm_overrides.yaml`) for junctions where OSM is missing a `type=restriction` relation
+that physically exists — see `docs/design/turn-restriction-overrides.md` and
+`osm_overrides/known_osm_issues.md` #6.
 Synthetic rules ride the same `from_way → via_node → to_way` mapping as OSM restrictions, so merged and
 reverse edges are handled identically, and the edge graph / routing / GMNS / exports all honour them.
 """

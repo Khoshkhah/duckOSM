@@ -2,7 +2,8 @@
 
 Some OSM source data is wrong or ambiguous (missing `oneway`, undercounted `lanes`, …). When a fix
 upstream in OpenStreetMap isn't practical, this processor patches the affected ways locally, from a
-single global rules file, so every rebuild reproduces the correction. See `docs/known_osm_issues.md`.
+single global rules file, so every rebuild reproduces the correction. See
+`osm_overrides/known_osm_issues.md`.
 
 **Where it runs matters.** It executes AFTER `RoadFilter` (the `ways` table exists, with
 `oneway` / `lanes_fwd` / `lanes_bwd`) and BEFORE `GraphBuilder` — because `oneway` is *topological*

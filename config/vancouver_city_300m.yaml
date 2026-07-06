@@ -1,7 +1,7 @@
 # Vancouver (City) + 300 m margin — built from the Metro Vancouver PBF, clipped to the City of
 # Vancouver admin boundary buffered outward by 300 m. The margin ensures roadside sensors that sit
 # just outside the city edge (bridge crossings, boundary arterials) still land on the network.
-# Same options as vancouver_city.yaml; OSM overrides (config/osm_overrides.yaml) apply.
+# Same options as vancouver_city.yaml; OSM overrides (osm_overrides/osm_overrides.yaml) apply.
 name: vancouver_city_300m
 output_path: data/db
 source:

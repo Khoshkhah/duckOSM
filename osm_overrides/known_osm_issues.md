@@ -67,7 +67,7 @@ Gata result, which stays two-way because residential roads are correctly two-way
 | **Area** | Södermalm (`pbf/sodermalm_pbf.osm.pbf`) |
 | **OSM way** | `233761079` (`highway=residential`, `name=Katarina Bangata`) |
 | **Edges** | `224569842445438623` (forward) + `8329252562982974380` (reverse twin) |
-| **Status** | **CONFIRMED OSM error** — the street is one-way (56 sibling segments tagged `oneway=yes`); way `233761079` just omits the tag. Local override **enabled** in `config/osm_overrides.yaml`. |
+| **Status** | **CONFIRMED OSM error** — the street is one-way (56 sibling segments tagged `oneway=yes`); way `233761079` just omits the tag. Local override **enabled** in `osm_overrides.yaml`. |
 
 Same class as #1. The raw way `233761079` carries **no `oneway` tag** and no `junction=roundabout`
 (full tags: `highway=residential`, `lit=yes`, `maxspeed=30`, `name=Katarina Bangata`,
@@ -81,7 +81,7 @@ street is one-way and this segment is simply **missing the tag** — exactly the
 duckOSM bug.
 
 **Fix.** Add `oneway=yes` to way `233761079` in OpenStreetMap (benefits every consumer), or — as now
-applied — a local override (`osm_id: 233761079, oneway: true`) in `config/osm_overrides.yaml`.
+applied — a local override (`osm_id: 233761079, oneway: true`) in `osm_overrides.yaml`.
 
 ---
 
@@ -157,7 +157,7 @@ rebuild, or apply a local override. Verified via `ST_READOSM`.
 | **OSM way** | `1429337399` (`highway=service`, `service=driveway`, `layer=-1`) — an underground-parking ramp |
 | **Edges** | split at junction node `13139650528` into `761090243668882770` (17.4 m, junction side) + `2063175062303482770` (75.2 m) — plus reverse twins; **all inherit `layer=-1`** |
 | **Neighbour** | way `1429337400` (`6219894338208087916`, `service=driveway`, no `layer` = grade) **joins at the shared node** `13139650528` |
-| **Status** | **CONFIRMED OSM mapping shortcut** — override **enabled** in `config/osm_overrides.yaml`. |
+| **Status** | **CONFIRMED OSM mapping shortcut** — override **enabled** in `osm_overrides.yaml`. |
 
 The ramp descends from the surface (where it meets the level-0 driveway `1429337400` at a shared node)
 down to underground parking, but the **whole OSM way carries a single `layer=-1`** — there is no
@@ -168,7 +168,7 @@ faded/dashed — even though it is at grade with the driveway it joins.
 
 Properly this way should be **split in OSM at the level-transition node** into a `layer=0` part and a
 `layer=-1` part. As a shortcut we bring the whole way to grade: local override
-`osm_id: 1429337399, layer: 0` in `config/osm_overrides.yaml` (there is no real tunnel, so rendering it
+`osm_id: 1429337399, layer: 0` in `osm_overrides.yaml` (there is no real tunnel, so rendering it
 at grade end-to-end is acceptable). Takes effect on the next rebuild.
 
 ---
@@ -181,7 +181,7 @@ at grade end-to-end is acceptable). Takes effect on the next rebuild.
 | **Junction** | node `330045016` (two-way Tähe meets a one-way link) |
 | **OSM ways** | from `1307524008` (one-way inbound) · via node `330045016` · to `997402723` (Tähe, opposing/westbound) |
 | **Movement** | `2048307190992484263 → 5604449516676458023` (typed `uturn`, mvmt_code `EBU`) |
-| **Status** | **CONFIRMED OSM gap** — no restriction relation at the node; synthetic override **enabled** (`turn_restrictions:` in `config/osm_overrides.yaml`; takes effect on the next driving rebuild) |
+| **Status** | **CONFIRMED OSM gap** — no restriction relation at the node; synthetic override **enabled** (`turn_restrictions:` in `osm_overrides.yaml`; takes effect on the next driving rebuild) |
 
 At node `330045016` the one-way link `2048307190992484263` (way `1307524008`) arrives heading ~101°
 (ESE). It has a legitimate `thru` onto **eastbound** Tähe (`8788328652948037784`, way `207110404`,
@@ -194,6 +194,6 @@ lane-connectivity view as an extra "outgoing" from that lane.)
 
 **Fix.** Add the restriction upstream in OSM (`type=restriction`, `restriction=no_u_turn`; from way
 `1307524008`, via node `330045016`, to way `997402723`) and rebuild — or, locally, the synthetic
-turn-restriction override in `config/osm_overrides.yaml` (mechanism in
+turn-restriction override in `osm_overrides.yaml` (mechanism in
 `docs/design/turn-restriction-overrides.md`). Verified against the movement / edge-graph tables: the
 `thru` movement is correct and untouched; only the U-turn is spurious.

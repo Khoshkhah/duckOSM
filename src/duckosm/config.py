@@ -130,9 +130,10 @@ class Config:
     name: str = "default"
     pbf_path: str = ""                             # back-compat (== source.pbf_path)
     output_path: str = "output.duckdb"
-    # Global rules file of local corrections for known OSM errors (see docs/known_osm_issues.md),
-    # applied to `ways` between RoadFilter and GraphBuilder. Silent no-op if the file is absent.
-    osm_overrides: Optional[str] = "config/osm_overrides.yaml"
+    # Global rules file of local corrections for known OSM errors (see
+    # osm_overrides/known_osm_issues.md), applied to `ways` between RoadFilter and GraphBuilder.
+    # Silent no-op if the file is absent.
+    osm_overrides: Optional[str] = "osm_overrides/osm_overrides.yaml"
     boundary_path: Optional[str] = None            # back-compat (== boundary.path)
     h3_cell: Optional[str] = None
     modes: list[str] = field(default_factory=lambda: ["driving"])
@@ -186,7 +187,7 @@ class Config:
             name=data.get("name", "default"),
             pbf_path=source.pbf_path or data.get("pbf_path", "") or "",
             output_path=data.get("output_path", "output.duckdb"),
-            osm_overrides=data.get("osm_overrides", "config/osm_overrides.yaml"),
+            osm_overrides=data.get("osm_overrides", "osm_overrides/osm_overrides.yaml"),
             boundary_path=boundary.path or data.get("boundary_path"),
             h3_cell=boundary.h3_cell or data.get("h3_cell"),
             modes=data.get("modes") or ["driving"],
