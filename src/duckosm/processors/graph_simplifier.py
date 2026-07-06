@@ -72,6 +72,12 @@ class GraphSimplifier(BaseProcessor):
         if self.merge_segments:
             self._contract_chains()
 
+        # 4c. Break two-way antiparallel forward pairs (A->B and B->A on the same osm_id, incl. the
+        #     halves _split_self_loops just produced) by splitting the longer arc with a virtual node.
+        #     After the reverse twins are added this keeps every directed (osm_id, source, target)
+        #     unique — the precondition for dropping is_reverse from the edge_id hash (step 1).
+        self._split_antiparallel_pairs()
+
         # 5. Finalize tables
         self._finalize_tables()
 
@@ -443,6 +449,94 @@ class GraphSimplifier(BaseProcessor):
         """)
         self.execute("DROP TABLE simplified_edges_forward")
         self.execute("ALTER TABLE simplified_edges_forward_new RENAME TO simplified_edges_forward")
+
+    def _split_antiparallel_pairs(self) -> None:
+        """Split two-way antiparallel forward pairs with a virtual node so ``(osm_id, source,
+        target)`` is unique among forward edges (and thus, after reverse twins, globally).
+
+        A self-crossing / doubling-back way can produce two forward edges ``A->B`` and ``B->A`` for
+        the same ``osm_id`` (different arcs of a lollipop; also the ``A->M`` / ``M->A`` halves that
+        ``_split_self_loops`` emits). On a **two-way** road, once reverse twins are added the directed
+        pair ``A->B`` then appears twice (the forward ``A->B`` arc + the reverse of the ``B->A`` arc) —
+        only ``is_reverse`` tells them apart. Inserting a virtual node in the **longer** arc
+        (geometry-preserving: the arc is split at its midpoint, not dropped) removes the antiparallel
+        pair, so no directed node-pair repeats. One-way pairs never collide (no reverse twins) and are
+        left alone. Runs on forward edges, after contraction, before reverse edges.
+        """
+        # The longer edge of each two-way antiparallel pair — exactly one per pair (tiebreak by
+        # edge_id). Real endpoints only; residual self-loops are handled by _split_self_loops.
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _ap AS
+            SELECT e1.edge_id
+            FROM simplified_edges_forward e1
+            JOIN simplified_edges_forward e2
+              ON e1.osm_id = e2.osm_id AND e1.source = e2.target AND e1.target = e2.source
+            WHERE NOT e1.oneway AND NOT e2.oneway
+              AND e1.source <> e1.target
+              AND (e1.length_m > e2.length_m
+                   OR (e1.length_m = e2.length_m AND e1.edge_id > e2.edge_id))
+        """)
+        if self.fetchone("SELECT COUNT(*) FROM _ap")[0] == 0:
+            self.execute("DROP TABLE IF EXISTS _ap;")
+            return
+
+        # Split each selected arc at its 50%-by-length midpoint into two forward halves joined by a
+        # virtual node. The virtual id is negative + deterministic, salted with the target so it can't
+        # collide with a self-loop virtual (-(hash(osm_id, source) >> 2)).
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _ap_split AS
+            WITH tosplit AS (
+                SELECT e.*,
+                       -((hash(e.osm_id, e.source, e.target) >> 2)::BIGINT) AS vnid,
+                       ST_LineInterpolatePoint(e.geometry, 0.5) AS mid
+                FROM simplified_edges_forward e
+                WHERE e.edge_id IN (SELECT edge_id FROM _ap)
+                  AND ST_NPoints(e.geometry) >= 2
+            )
+            SELECT source, vnid AS target, osm_id, highway, name, maxspeed, oneway, lanes,
+                   surface, junction, layer, bridge, tunnel, service,
+                   refs[1 : len(refs) / 2 + 1] AS refs,
+                   ST_AsText(ST_LineSubstring(geometry, 0, 0.5)) AS gtext,
+                   FALSE AS is_reverse, length_m / 2 AS length_m,
+                   vnid, ST_AsText(mid) AS mtext
+            FROM tosplit
+            UNION ALL
+            SELECT vnid AS source, target, osm_id, highway, name, maxspeed, oneway, lanes,
+                   surface, junction, layer, bridge, tunnel, service,
+                   refs[len(refs) / 2 + 1 : ] AS refs,
+                   ST_AsText(ST_LineSubstring(geometry, 0.5, 1)) AS gtext,
+                   FALSE AS is_reverse, length_m / 2 AS length_m,
+                   vnid, ST_AsText(mid) AS mtext
+            FROM tosplit
+        """)
+
+        # Rebuild forward edges: untouched edges + the split halves, with fresh row-number ids.
+        self.execute("""
+            CREATE OR REPLACE TABLE simplified_edges_forward AS
+            SELECT (row_number() OVER ())::INTEGER AS edge_id, *
+            FROM (
+                SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
+                       surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
+                FROM simplified_edges_forward
+                WHERE edge_id NOT IN (SELECT edge_id FROM _ap)
+                UNION ALL
+                SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
+                       surface, junction, layer, bridge, tunnel, service, refs,
+                       ST_GeomFromText(gtext) AS geometry, is_reverse, length_m
+                FROM _ap_split
+                WHERE gtext IS NOT NULL AND ST_NPoints(ST_GeomFromText(gtext)) >= 2
+            )
+        """)
+
+        # Register the new virtual midpoint nodes (create the table if _split_self_loops didn't).
+        self.execute("CREATE TABLE IF NOT EXISTS virtual_nodes (node_id BIGINT, geom GEOMETRY)")
+        self.execute("""
+            INSERT INTO virtual_nodes
+            SELECT DISTINCT vnid, ST_GeomFromText(mtext) FROM _ap_split
+        """)
+        n = self.fetchone("SELECT COUNT(*) FROM _ap")[0]
+        logger.info(f"  antiparallel split: {n:,} two-way antiparallel arc(s) split with a virtual node")
+        self.execute("DROP TABLE IF EXISTS _ap; DROP TABLE IF EXISTS _ap_split;")
 
     def _contract_chains(self) -> None:
         """Merge maximal chains of consecutive forward segments that are the SAME road.
