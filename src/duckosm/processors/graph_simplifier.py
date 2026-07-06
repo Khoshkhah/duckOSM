@@ -122,6 +122,15 @@ class GraphSimplifier(BaseProcessor):
         n_refs = self.fetchone("SELECT COUNT(*) FROM way_nodes")[0] or 0
         return max(1, math.ceil(n_refs / NODE_REFS_PER_BATCH))
 
+    def _use_global_junctions(self) -> bool:
+        """True when the mode-agnostic ``main.global_junctions`` table exists (built by
+        :class:`GlobalJunctions` as a pre-pass). When present, roads are segmented at that one shared
+        junction set so a road keeps the same ``edge_id`` across driving/walking/cycling; when absent
+        (flag off / clip build), fall back to the mode-local ``junctions`` table."""
+        return bool(self.fetchone(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_name = 'global_junctions'")[0])
+
     def _find_junctions(self) -> None:
         """Identify junction nodes, and which of them are ROAD junctions.
 
@@ -182,17 +191,28 @@ class GraphSimplifier(BaseProcessor):
         batch of ways; partitioning by way_id keeps each way's nodes together so the
         window functions stay correct.
         """
+        # Roads split at ROAD junctions; paths/footways split at every junction. When the
+        # mode-agnostic main.global_junctions set is present, roads use IT (so a road-class way that
+        # another mode drops still marks the junction here — cross-mode edge_id alignment); otherwise
+        # fall back to this mode's local `junctions.is_road_junction`.
+        if self._use_global_junctions():
+            split_here = (f"CASE WHEN {_IS_ROAD} THEN (gj.node_id IS NOT NULL) "
+                          f"ELSE (j.node_id IS NOT NULL) END")
+            gj_join = "LEFT JOIN main.global_junctions gj ON wn.node_id = gj.node_id"
+        else:
+            split_here = (f"(j.node_id IS NOT NULL AND "
+                          f"(NOT {_IS_ROAD} OR COALESCE(j.is_road_junction, FALSE)))")
+            gj_join = ""
         self.execute(f"""
             CREATE OR REPLACE TABLE way_segments AS
             WITH nodes AS (
                 SELECT
                     wn.way_id, wn.node_id, wn.seq,
-                    -- a ROAD splits only at ROAD junctions; a path/footway splits at every junction
-                    (j.node_id IS NOT NULL AND (NOT {_IS_ROAD} OR COALESCE(j.is_road_junction, FALSE)))
-                        AS split_here
+                    {split_here} AS split_here
                 FROM way_nodes wn
                 LEFT JOIN ways w ON w.osm_id = wn.way_id
                 LEFT JOIN junctions j ON wn.node_id = j.node_id
+                {gj_join}
                 WHERE {way_filter}
             ),
             marked AS (
@@ -465,10 +485,16 @@ class GraphSimplifier(BaseProcessor):
         # out (sum=2) or both in (sum=0) at their shared node — still a valid degree-2 through
         # point (the reverse halves exist and the walk reverses refs per-step). Demanding
         # sum(fwd)=1 there wrongly skipped such chains; gate it on bool_or(oneway).
-        self.execute("""
+        # A global road junction is a HARD split that must survive contraction: even when a mode drops
+        # the crossing road (so the node is locally degree-2), re-merging here would undo cross-mode
+        # edge_id alignment. Exclude those nodes from contraction when the global set is present.
+        gj_protect = ("AND node NOT IN (SELECT node_id FROM main.global_junctions)"
+                      if self._use_global_junctions() else "")
+        self.execute(f"""
             CREATE OR REPLACE TEMP TABLE _node2 AS
             SELECT node FROM _inc
             WHERE node > 0
+            {gj_protect}
             GROUP BY node
             HAVING count(*) = 2 AND (NOT bool_or(oneway) OR sum(fwd::INT) = 1)
                AND count(DISTINCT highway) = 1

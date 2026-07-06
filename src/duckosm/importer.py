@@ -24,6 +24,7 @@ from duckosm.processors import (
     H3Indexer,
     EdgeGraphBuilder,
     GraphSimplifier,
+    GlobalJunctions,
     PathConnector,
     ComponentFilter,
     DuckdbClipper,
@@ -107,6 +108,11 @@ class DuckOSM:
                 global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
                 if self.config.options.boundary_cells:
                     global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
+            # Mode-agnostic road-junction set, built once from raw.* before the per-mode loop, so every
+            # mode segments roads at the same junctions and shares edge_ids. See _build_global_junctions.
+            if self.config.options.simplify and self.config.options.global_junctions:
+                global_steps.append(("global_junctions", "Building global junctions",
+                                     self._build_global_junctions))
 
         # 2. Mode-specific steps (run for each mode)
         def get_mode_steps(mode):
@@ -561,10 +567,18 @@ class DuckOSM:
         self.stats['edge_build_time'] = time.time() - start
         logger.info(f"  Created {self.stats['edge_count']:,} edges in {self.stats['edge_build_time']:.2f}s")
 
+    def _build_global_junctions(self) -> None:
+        """Build main.global_junctions (mode-agnostic road-junction set) once, before the mode loop.
+
+        GraphSimplifier auto-detects this table and, when present, segments every mode's roads at this
+        shared set so a road keeps the same edge_id across driving/walking/cycling.
+        """
+        GlobalJunctions(self.con).run()
+
     def _simplify_graph(self) -> None:
         """Simplify the road network graph."""
         start = time.time()
-        
+
         GraphSimplifier(self.con, batches=self.config.options.simplify_batches,
                         merge_segments=self.config.options.merge_segments).run()
         
