@@ -87,6 +87,10 @@ class Validation:
     assert_single_component: bool = True
     assert_no_stranded_named: bool = True
     assert_edge_id_stable: bool = False
+    assert_unique_node_id: bool = True             # no duplicate node_id in nodes (virtual incl.)
+    assert_way_length_conserved: bool = True       # no interior stretch of a kept way silently
+                                                   #   deleted in favour of a parallel arc — see
+                                                   #   docs/design/split_same_direction_parallels.md
 
 
 @dataclass

@@ -30,11 +30,13 @@ python scripts/validate_geometry.py --db data/output/somerset.duckdb
 
 ## Virtual Node ID Scheme
 
-When splitting self-loop edges (circular roads), virtual nodes are created:
+When splitting self-loops, same-direction parallel arcs, or antiparallel arcs, virtual nodes
+are created:
 
 - **Identification**: `node_id < 0`
-- **ID Formula**: `virtual_node_id = -(original_edge_id)`
-- **Example**: Edge `456` → Virtual node `-456`
+- **ID Formula**: `-(hash(osm_id, source, refs) >> 2)` (self-loop midpoint) /
+  `-(hash(osm_id, source, target, refs) >> 2)` (arc-split midpoint) — content-derived, so
+  stable across rebuilds and unique per arc (see `docs/design/split_same_direction_parallels.md`)
 
 ---
 

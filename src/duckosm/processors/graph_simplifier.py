@@ -72,7 +72,13 @@ class GraphSimplifier(BaseProcessor):
         if self.merge_segments:
             self._contract_chains()
 
-        # 4c. Break two-way antiparallel forward pairs (A->B and B->A on the same osm_id, incl. the
+        # 4c. Break same-direction parallel forward pairs (two arcs of one way, both A->B — a
+        #     figure-8 / double-lollipop) by splitting every arc but the shortest with a virtual
+        #     node. Runs BEFORE the antiparallel split so it only ever sees whole arcs. See
+        #     docs/design/split_same_direction_parallels.md.
+        self._split_parallel_pairs()
+
+        # 4d. Break two-way antiparallel forward pairs (A->B and B->A on the same osm_id, incl. the
         #     halves _split_self_loops just produced) by splitting the longer arc with a virtual node.
         #     After the reverse twins are added this keeps every directed (osm_id, source, target)
         #     unique — the precondition for dropping is_reverse from the edge_id hash (step 1).
@@ -103,10 +109,23 @@ class GraphSimplifier(BaseProcessor):
         keyed on edge_id to re-run and re-match. A content hash is STABLE: an unchanged edge keeps its
         id across rebuilds. BIGINT holds the 63-bit hash.
         """
-        # De-duplicate on the natural key, then re-key. After the loop/antiparallel splits,
-        # (osm_id, source, target) is unique EXCEPT for same-direction parallels — a self-crossing
-        # way with a lead-in chord + loop arc, both A->B. The longer is never the optimal route
-        # between the two junctions (its interior nodes aren't junctions), so keep the shortest.
+        # After the loop / same-direction-parallel / antiparallel splits, (osm_id, source, target)
+        # is unique BY CONSTRUCTION — verify that and FAIL LOUDLY on a residual duplicate rather
+        # than silently deleting geometry (the old keep-shortest dedup did exactly that to a
+        # figure-8's second arc; see docs/design/split_same_direction_parallels.md). The dedup
+        # below stays as defence-in-depth but must remove zero rows.
+        dup = self.fetchone("""
+            SELECT count(*) FROM (
+                SELECT 1 FROM edges GROUP BY osm_id, source, target HAVING count(*) > 1)""")[0]
+        if dup:
+            ex = self.fetchone("""
+                SELECT osm_id, source, target, count(*) FROM edges
+                GROUP BY 1, 2, 3 HAVING count(*) > 1 LIMIT 1""")
+            raise RuntimeError(
+                f"{dup} duplicate (osm_id, source, target) group(s) survived the loop/parallel/"
+                f"antiparallel splits — e.g. osm_id={ex[0]} {ex[1]}->{ex[2]} x{ex[3]}. Refusing "
+                "to dedup: that would silently delete geometry. "
+                "See docs/design/split_same_direction_parallels.md.")
         # edge_ref: a human-readable secondary id '{osm_id}#{seq}{f|r}'. seq numbers the FORWARD edges
         # of a way in TRAVERSAL order (source-end segment = #1); a reverse edge inherits its forward
         # twin's seq, so the two directions of a two-way segment share seq (#2f / #2r) while two
@@ -395,9 +414,11 @@ class GraphSimplifier(BaseProcessor):
                     geometry,
                     length_m,
                     -- Deterministic virtual midpoint-node id (was -(edge_id), which depended on
-                    -- the volatile row-number edge_id). A loop is keyed by (osm_id, source);
-                    -- a stable negative id keeps the split edges reproducible across rebuilds.
-                    -((hash(osm_id, source) >> 2)::BIGINT) AS virtual_node_id,
+                    -- the volatile row-number edge_id). Keyed by (osm_id, source, refs): the refs
+                    -- salt keeps TWO loops of one way anchored at the SAME node distinct (matching
+                    -- the arc-split vnid scheme, see _split_arcs_at_midpoint); a stable negative id
+                    -- keeps the split edges reproducible across rebuilds.
+                    -((hash(osm_id, source, refs::VARCHAR) >> 2)::BIGINT) AS virtual_node_id,
                     -- Midpoint = the 50%-by-length point, i.e. exactly where the two halves are
                     -- cut below (ST_LineSubstring at 0.5). Using the middle *vertex*
                     -- (ST_PointN at npoints/2) instead put the node a few metres off the cut, so
@@ -500,9 +521,10 @@ class GraphSimplifier(BaseProcessor):
         left alone. Runs on forward edges, after contraction, before reverse edges.
         """
         # The longer edge of each two-way antiparallel pair — exactly one per pair (tiebreak by
-        # edge_id). Real endpoints only; residual self-loops are handled by _split_self_loops.
+        # refs, i.e. arc content, so the choice is rebuild-stable; edge_id is a volatile row
+        # number here). Real endpoints only; residual self-loops are handled by _split_self_loops.
         self.execute("""
-            CREATE OR REPLACE TEMP TABLE _ap AS
+            CREATE OR REPLACE TEMP TABLE _split_sel AS
             SELECT e1.edge_id
             FROM simplified_edges_forward e1
             JOIN simplified_edges_forward e2
@@ -510,23 +532,67 @@ class GraphSimplifier(BaseProcessor):
             WHERE NOT e1.oneway AND NOT e2.oneway
               AND e1.source <> e1.target
               AND (e1.length_m > e2.length_m
-                   OR (e1.length_m = e2.length_m AND e1.edge_id > e2.edge_id))
+                   OR (e1.length_m = e2.length_m AND e1.refs::VARCHAR > e2.refs::VARCHAR))
         """)
-        if self.fetchone("SELECT COUNT(*) FROM _ap")[0] == 0:
-            self.execute("DROP TABLE IF EXISTS _ap;")
-            return
+        n = self._split_arcs_at_midpoint()
+        if n:
+            logger.info(f"  antiparallel split: {n:,} two-way antiparallel arc(s) split "
+                        "with a virtual node")
 
-        # Split each selected arc at its 50%-by-length midpoint into two forward halves joined by a
-        # virtual node. The virtual id is negative + deterministic, salted with the target so it can't
-        # collide with a self-loop virtual (-(hash(osm_id, source) >> 2)).
+    def _split_parallel_pairs(self) -> None:
+        """Split same-direction parallel forward arcs with a virtual node so no two arcs of a way
+        share the same directed ``(osm_id, source, target)``.
+
+        A way that revisits the same junction pair in the same order (``A…B…A…B`` — a figure-8 /
+        double lollipop) yields two forward arcs ``A->B``. Only one can survive a unique
+        ``(osm_id, source, target)``; the re-key dedup used to silently DELETE the longer one
+        (104.5 m of a Burnaby parking aisle, see the design doc). Instead, keep the shortest arc
+        whole and split every other arc of the group at its midpoint — geometry-preserving, like
+        the self-loop / antiparallel treatments. Applies regardless of ``oneway``: two forward
+        ``A->B`` arcs collide with each other directly, no reverse twin involved. Runs after
+        contraction, before the antiparallel split (which then only sees whole arcs).
+        See docs/design/split_same_direction_parallels.md.
+        """
+        # Every arc that is longer than another arc with the SAME (osm_id, source, target) —
+        # i.e. all but the shortest of each group (tiebreak by refs: content, rebuild-stable).
+        self.execute("""
+            CREATE OR REPLACE TEMP TABLE _split_sel AS
+            SELECT e1.edge_id
+            FROM simplified_edges_forward e1
+            JOIN simplified_edges_forward e2
+              ON e1.osm_id = e2.osm_id AND e1.source = e2.source AND e1.target = e2.target
+             AND e1.edge_id <> e2.edge_id
+            WHERE e1.source <> e1.target
+              AND (e1.length_m > e2.length_m
+                   OR (e1.length_m = e2.length_m AND e1.refs::VARCHAR > e2.refs::VARCHAR))
+        """)
+        n = self._split_arcs_at_midpoint()
+        if n:
+            logger.info(f"  parallel split: {n:,} same-direction parallel arc(s) split "
+                        "with a virtual node")
+
+    def _split_arcs_at_midpoint(self) -> int:
+        """Split every forward arc listed in temp table ``_split_sel(edge_id)`` at its
+        50%-by-length midpoint into two halves joined by a virtual node; returns the arc count.
+
+        The virtual id is negative + deterministic: ``-(hash(osm_id, source, target,
+        refs::VARCHAR) >> 2)``. Salting with ``refs`` (the arc's node list) makes it unique PER
+        ARC — two parallel arcs sharing endpoints get distinct midpoints (endpoint-only hashing
+        gave a figure-8's two arcs the same virtual id with two different geometries, a duplicate
+        node_id). It also cannot collide with a self-loop virtual (same salt, different inputs).
+        """
+        if self.fetchone("SELECT COUNT(*) FROM _split_sel")[0] == 0:
+            self.execute("DROP TABLE IF EXISTS _split_sel;")
+            return 0
+
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _ap_split AS
             WITH tosplit AS (
                 SELECT e.*,
-                       -((hash(e.osm_id, e.source, e.target) >> 2)::BIGINT) AS vnid,
+                       -((hash(e.osm_id, e.source, e.target, e.refs::VARCHAR) >> 2)::BIGINT) AS vnid,
                        ST_LineInterpolatePoint(e.geometry, 0.5) AS mid
                 FROM simplified_edges_forward e
-                WHERE e.edge_id IN (SELECT edge_id FROM _ap)
+                WHERE e.edge_id IN (SELECT edge_id FROM _split_sel)
                   AND ST_NPoints(e.geometry) >= 2
             )
             SELECT source, vnid AS target, osm_id, highway, name, maxspeed, oneway, lanes,
@@ -554,7 +620,7 @@ class GraphSimplifier(BaseProcessor):
                 SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
                        surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
                 FROM simplified_edges_forward
-                WHERE edge_id NOT IN (SELECT edge_id FROM _ap)
+                WHERE edge_id NOT IN (SELECT edge_id FROM _split_sel)
                 UNION ALL
                 SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
                        surface, junction, layer, bridge, tunnel, service, refs,
@@ -570,9 +636,9 @@ class GraphSimplifier(BaseProcessor):
             INSERT INTO virtual_nodes
             SELECT DISTINCT vnid, ST_GeomFromText(mtext) FROM _ap_split
         """)
-        n = self.fetchone("SELECT COUNT(*) FROM _ap")[0]
-        logger.info(f"  antiparallel split: {n:,} two-way antiparallel arc(s) split with a virtual node")
-        self.execute("DROP TABLE IF EXISTS _ap; DROP TABLE IF EXISTS _ap_split;")
+        n = self.fetchone("SELECT COUNT(*) FROM _split_sel")[0]
+        self.execute("DROP TABLE IF EXISTS _split_sel; DROP TABLE IF EXISTS _ap_split;")
+        return n
 
     def _contract_chains(self) -> None:
         """Merge maximal chains of consecutive forward segments that are the SAME road.

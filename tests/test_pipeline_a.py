@@ -85,6 +85,8 @@ def test_validator_flags_fragment():
         assert_single_component = True
         assert_no_stranded_named = False
         assert_edge_id_stable = False
+        assert_unique_node_id = False
+        assert_way_length_conserved = False
         fail_on_error = True
     with pytest.raises(ValidationError):
         Validator(con, "driving", V()).run()
