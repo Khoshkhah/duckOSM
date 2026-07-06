@@ -30,7 +30,8 @@ Self-loop edges (cul-de-sacs) are split at midpoint, creating virtual nodes:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `edge_id` | BIGINT | Unique edge identifier — a **stable content hash** of the edge's identity, `(hash(osm_id, source, target, is_reverse) >> 1)` (forward and reverse directions get distinct ids). See *Stable edge ids* below. |
+| `edge_id` | BIGINT | Unique edge identifier — a **stable content hash** of the edge's identity, `(hash(osm_id, source, target) >> 1)`. Forward and reverse directions get distinct ids (their endpoints are swapped). See *Stable edge ids* below. |
+| `edge_ref` | VARCHAR | Human-readable secondary id `{osm_id}#{seq}{f\|r}` (e.g. `41790239#2f`). `seq` ranks the way's forward edges; a reverse edge shares its forward twin's seq; `f`/`r` = direction. Self-describing / parseable, but **not** a join key (positional seq isn't rebuild-stable) — use `edge_id`. |
 | `source` | BIGINT | Starting node ID |
 | `target` | BIGINT | Ending node ID |
 | `osm_id` | BIGINT | Original OSM way ID |
@@ -49,13 +50,20 @@ Self-loop edges (cul-de-sacs) are split at midpoint, creating virtual nodes:
 | `lca_res` | TINYINT | Resolution of Lowest Common Ancestor between from/to cells |
 
 #### Stable edge ids
-`edge_id` is a **deterministic hash** of the edge's identity `(osm_id, source, target, is_reverse)`,
-not a sequential row number. Because OSM way/node ids and direction are stable, the same physical
-edge gets the **same `edge_id` on every rebuild** — so a rebuild (or a filter/OSM change) only
-shifts the ids of edges that were genuinely added, removed or re-geometried, and downstream
-consumers keyed on `edge_id` (map-matching, joins) survive without a full re-key. `osm_id` is part
-of the key so parallel ways between the same node pair don't collide; `is_reverse` distinguishes the
-two directions of a two-way edge.
+`edge_id` is a **deterministic hash** of the edge's identity `(osm_id, source, target)`, not a
+sequential row number. Because OSM way/node ids are stable, the same physical edge gets the **same
+`edge_id` on every rebuild** — so a rebuild (or a filter/OSM change) only shifts the ids of edges
+that were genuinely added, removed or re-geometried, and downstream consumers keyed on `edge_id`
+(map-matching, joins) survive without a full re-key. `osm_id` is part of the key so parallel ways
+between the same node pair don't collide.
+
+`is_reverse` is **not** in the hash — direction is already encoded by `source → target` (the forward
+and reverse of a two-way road hash differently because their endpoints are swapped). For this to be
+collision-free, `(osm_id, source, target)` must be globally unique, which the segmentation guarantees
+by splitting self-loops and two-way antiparallel arcs with virtual nodes (see
+`docs/design/drop_is_reverse_from_edge_id.md`). The previous formula
+`(hash(osm_id, source, target, is_reverse) >> 1)` remains available as the `edge_id_hash_v1` macro
+for building old→new crosswalks.
 
 ---
 
