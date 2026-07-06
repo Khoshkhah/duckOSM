@@ -43,7 +43,12 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     # else the sign of the OSM layer tag). roadstyle reads these exact column names by default, so
     # passing them straight through is enough — they're carried onto every edge by the build.
     grade = [c for c in ("bridge", "tunnel", "layer") if c in edge_cols]
-    select = "CAST(edge_id AS VARCHAR) AS edge_id, highway, COALESCE(name, '') AS name"
+    # osm_id (the parent OSM way) and, when the build has it, the readable edge_ref are shown in the
+    # hover tooltip. Both id-like fields are cast to VARCHAR so large ids survive JS Number precision.
+    idcols = ["osm_id"] + (["edge_ref"] if "edge_ref" in edge_cols else [])
+    select = ("CAST(edge_id AS VARCHAR) AS edge_id, CAST(osm_id AS VARCHAR) AS osm_id"
+              + (", edge_ref" if "edge_ref" in edge_cols else "")
+              + ", highway, COALESCE(name, '') AS name")
     select += "".join(f", {c}" for c in info)
     select += "".join(f", {c}" for c in grade)
     if arrows and "oneway" in edge_cols:
@@ -69,7 +74,7 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", "highway", "name", *info], copy_field="edge_id",
+        tooltip=["edge_id", *idcols, "highway", "name", *info], copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
         arrows=arrows, arrow_col=("oneway" if arrows else None),
         boundary=(_boundary_geojson(con) if boundary else None),
