@@ -411,7 +411,10 @@ class GraphSimplifier(BaseProcessor):
                     tunnel,
                     service,
                     refs,
-                    geometry,
+                    -- Drop repeated points so the cut below never sees a zero-length lead segment
+                    -- (which makes ST_LineSubstring emit a `-nan -nan` vertex); the halves read this
+                    -- cleaned `geometry`, and the midpoint is taken from the same cleaned line.
+                    ST_RemoveRepeatedPoints(geometry) AS geometry,
                     length_m,
                     -- Deterministic virtual midpoint-node id (was -(edge_id), which depended on
                     -- the volatile row-number edge_id). Keyed by (osm_id, source, refs): the refs
@@ -423,10 +426,10 @@ class GraphSimplifier(BaseProcessor):
                     -- cut below (ST_LineSubstring at 0.5). Using the middle *vertex*
                     -- (ST_PointN at npoints/2) instead put the node a few metres off the cut, so
                     -- the half-edges' shared endpoint did not equal the virtual node's coord.
-                    ST_LineInterpolatePoint(geometry, 0.5) AS midpoint_geom
+                    ST_LineInterpolatePoint(ST_RemoveRepeatedPoints(geometry), 0.5) AS midpoint_geom
                 FROM simplified_edges_forward
                 WHERE source = target
-                  AND ST_NPoints(geometry) >= 3
+                  AND ST_NPoints(ST_RemoveRepeatedPoints(geometry)) >= 3
             )
             -- First half: source -> midpoint
             SELECT
@@ -588,12 +591,17 @@ class GraphSimplifier(BaseProcessor):
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _ap_split AS
             WITH tosplit AS (
-                SELECT e.*,
+                SELECT e.* EXCLUDE (geometry),
+                       -- ST_RemoveRepeatedPoints: an earlier substring cut that lands exactly on a
+                       -- vertex leaves a zero-length lead segment (a duplicated point). Splitting
+                       -- such an arc again makes DuckDB's ST_LineSubstring emit a `-nan -nan` vertex
+                       -- (invalid geometry). Dropping repeated points first keeps the cut clean.
+                       ST_RemoveRepeatedPoints(e.geometry) AS geometry,
                        -((hash(e.osm_id, e.source, e.target, e.refs::VARCHAR) >> 2)::BIGINT) AS vnid,
-                       ST_LineInterpolatePoint(e.geometry, 0.5) AS mid
+                       ST_LineInterpolatePoint(ST_RemoveRepeatedPoints(e.geometry), 0.5) AS mid
                 FROM simplified_edges_forward e
                 WHERE e.edge_id IN (SELECT edge_id FROM _split_sel)
-                  AND ST_NPoints(e.geometry) >= 2
+                  AND ST_NPoints(ST_RemoveRepeatedPoints(e.geometry)) >= 2
             )
             SELECT source, vnid AS target, osm_id, highway, name, maxspeed, oneway, lanes,
                    surface, junction, layer, bridge, tunnel, service,

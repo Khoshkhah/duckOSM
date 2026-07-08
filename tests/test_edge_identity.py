@@ -58,6 +58,10 @@ def _assert_identity_invariants(con):
     # edge_id: the direction-free content hash, always positive
     assert one(f"SELECT count(*) FROM edges WHERE edge_id <> {ID_HASH}") == 0
     assert one("SELECT count(*) FROM edges WHERE edge_id <= 0") == 0
+    # every edge geometry is valid — a split cut landing on a vertex leaves a zero-length lead
+    # segment, which made a subsequent ST_LineSubstring emit a `-nan -nan` vertex (invalid geometry).
+    assert one("SELECT count(*) FROM edges WHERE NOT ST_IsValid(geometry) "
+               "OR ST_AsText(geometry) LIKE '%nan%'") == 0, "invalid / NaN edge geometry"
     # edge_ref parses back: osm_id prefix, f/r suffix matches is_reverse
     assert one("""SELECT count(*) FROM edges WHERE
         split_part(edge_ref, '#', 1) <> osm_id::VARCHAR
@@ -137,6 +141,18 @@ def test_classic_lollipop_keeps_loop_geometry():
     _assert_identity_invariants(con)
     _assert_no_ref_lost(con)
     assert con.execute("SELECT count(*) FROM edges WHERE source = target").fetchone()[0] == 0
+
+
+def test_lollipop_midpoint_cut_on_vertex_no_nan_geometry():
+    # Real failing case — Nacka OSM way 324885236 ("Trossvägen"): a lollipop whose self-loop split
+    # cuts exactly on an existing vertex, leaving a zero-length lead segment; the follow-on
+    # antiparallel split's ST_LineSubstring then emitted a `-nan -nan` vertex (invalid geometry).
+    # These are the way's real coordinates; the validity invariant must hold (ST_RemoveRepeatedPoints).
+    nodes = {1: (18.2594068, 59.2876533), 2: (18.2593757, 59.2878397), 3: (18.2593702, 59.2880503),
+             4: (18.259103, 59.2880485), 5: (18.2591085, 59.2878379)}
+    con = _build([(324885236, "service", False, [1, 2, 3, 4, 5, 2])], nodes)
+    _assert_identity_invariants(con)   # includes the no-NaN / valid-geometry assertion
+    _assert_no_ref_lost(con)
 
 
 def test_two_loops_same_anchor_get_distinct_virtual_nodes():
