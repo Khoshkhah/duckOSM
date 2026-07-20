@@ -190,7 +190,8 @@ class GraphSimplifier(BaseProcessor):
         (flag off / clip build), fall back to the mode-local ``junctions`` table."""
         return bool(self.fetchone(
             "SELECT count(*) FROM information_schema.tables "
-            "WHERE table_schema = 'main' AND table_name = 'global_junctions'")[0])
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = 'main' AND table_name = 'global_junctions'")[0])
 
     def _find_junctions(self) -> None:
         """Identify junction nodes, and which of them are ROAD junctions.

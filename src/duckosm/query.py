@@ -25,7 +25,8 @@ def _mode_schemas(con, modes=None):
     """The mode schemas that actually exist in this db (optionally restricted)."""
     have = {r[0] for r in con.execute(
         "SELECT DISTINCT table_schema FROM information_schema.tables "
-        "WHERE table_name = 'edges'").fetchall()}
+        "WHERE table_catalog = current_database() "      # not an attached parent's modes
+        "AND table_name = 'edges'").fetchall()}
     return [m for m in (modes or MODES) if m in have]
 
 
@@ -78,7 +79,8 @@ def way_raw(con, osm_id):
     """The raw OSM way row (tags + refs), or None (synthetic osm_id / clip build w/o raw)."""
     has_raw = con.execute(
         "SELECT count(*) FROM information_schema.tables "
-        "WHERE table_schema = 'raw' AND table_name = 'ways'").fetchone()[0]
+        "WHERE table_catalog = current_database() "      # a clip has no raw schema of its own
+        "AND table_schema = 'raw' AND table_name = 'ways'").fetchone()[0]
     if not has_raw:
         return None
     row = con.execute(
