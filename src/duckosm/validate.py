@@ -78,9 +78,15 @@ class Validator:
             results.append(("unique_node_id", dups == 0,
                             f"{dups} duplicate node_id(s) in nodes"))
 
+        # `table_catalog = current_database()` is load-bearing: a CLIP build runs with the parent
+        # ATTACHED, and information_schema spans every attached database. Without it this saw
+        # `parent.driving.ways`, concluded the clipped db had a ways table, and the check below then
+        # died with "Catalog Error: Table with name ways does not exist" — a clip that produced a
+        # perfectly good database still exited non-zero.
         has_ways = bool(self.con.execute(
             "SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = ? AND table_name = 'ways'", [self.mode]).fetchone())
+            "WHERE table_catalog = current_database() "
+            "AND table_schema = ? AND table_name = 'ways'", [self.mode]).fetchone())
         if self.cfg.assert_way_length_conserved and not has_ways:
             results.append(("way_length_conserved", True,
                             "skipped (no per-mode ways table — clip build)"))
