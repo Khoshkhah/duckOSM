@@ -87,9 +87,34 @@ def test_validator_flags_fragment():
         assert_edge_id_stable = False
         assert_unique_node_id = False
         assert_way_length_conserved = False
+        warn_layer_without_structure = False
         fail_on_error = True
     with pytest.raises(ValidationError):
         Validator(con, "driving", V()).run()
+
+
+def test_validator_layer_without_structure_warns_not_fails():
+    con = _toy_graph()
+    con.execute("CREATE SCHEMA driving")
+    # every edge layer=1 with no bridge/tunnel → the warn-only check must flag it without raising
+    con.execute('CREATE TABLE driving.edges AS SELECT edge_id, source, target, '
+                "CAST(NULL AS VARCHAR) AS name, '1' AS layer, "
+                'CAST(NULL AS VARCHAR) AS bridge, CAST(NULL AS VARCHAR) AS tunnel FROM edges')
+
+    class V:  # minimal validation config
+        assert_single_component = False
+        assert_no_stranded_named = False
+        assert_edge_id_stable = False
+        assert_unique_node_id = False
+        assert_way_length_conserved = False
+        warn_layer_without_structure = True
+        fail_on_error = True
+    res = {c: ok for c, ok, _ in Validator(con, "driving", V()).run()}  # no raise despite fail_on_error
+    assert res["layer_without_structure"] is None  # None == WARN
+
+    con.execute("UPDATE driving.edges SET bridge = 'yes'")
+    res = {c: ok for c, ok, _ in Validator(con, "driving", V()).run()}
+    assert res["layer_without_structure"] is True
 
 
 # ---- duckdb clip integration (skips if the parent isn't built) ---------------------

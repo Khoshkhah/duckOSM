@@ -73,6 +73,7 @@ validation:
   assert_single_component: true        # <=1 dominant component after clip
   assert_no_stranded_named: true       # no named drivable through-street left disconnected
   assert_edge_id_stable: true          # regression vs fixture (pbf) / vs parent (duckdb)
+  warn_layer_without_structure: true   # WARN: layer≠0 without bridge/tunnel (OSM tagging smell)
 
 # ---- MULTIMODAL (intermodal walk<->drive<->cycle routing; see docs/multimodal.md) --
 multimodal:

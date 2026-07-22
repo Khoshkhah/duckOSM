@@ -25,12 +25,12 @@ def _db():
         (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.08 59.32)')})""")
     # `refs BIGINT[]` and `maxspeed_kmh` (>10 chars) exercise the list-drop + shp-rename paths
     con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, "
-                "highway VARCHAR, name VARCHAR, oneway BOOLEAN, lanes INTEGER, length_m FLOAT, "
-                "maxspeed_kmh FLOAT, refs BIGINT[], geometry GEOMETRY)")
+                "highway VARCHAR, name VARCHAR, oneway BOOLEAN, lanes INTEGER, length_m DOUBLE, "
+                "maxspeed_kmh FLOAT, cost_s DOUBLE, refs BIGINT[], geometry GEOMETRY)")
     con.execute(f"""INSERT INTO driving.edges VALUES
-        ({E1},1,2,'residential','A St',false,1,123.4,30,[1,2],
+        ({E1},1,2,'residential','A St',false,1,123.456789,30,14.8148146,[1,2],
             {p('LINESTRING(18.06 59.32,18.07 59.32)')}),
-        ({E2},2,3,'tertiary',NULL,true,2,567.8,50,[2,3],
+        ({E2},2,3,'tertiary',NULL,true,2,567.8,50,40.8816,[2,3],
             {p('LINESTRING(18.07 59.32,18.08 59.32)')})""")
     con.execute("CREATE TABLE boundary(osm_id INTEGER, name VARCHAR, geom GEOMETRY)")
     con.execute(f"INSERT INTO boundary VALUES (99,'area',"
@@ -61,6 +61,15 @@ def test_shp_preserves_edge_id_and_drops_list_columns(tmp_path):
     # int64 ids are cast to text for shp — a DBF numeric field would truncate the 19-digit hash
     ids = [r[0] for r in con.execute(f"SELECT edge_id FROM ST_Read('{edges_shp}')").fetchall()]
     assert set(ids) == {str(E1), str(E2)}                    # content-hash ids intact (exact, as text)
+
+
+def test_length_and_cost_rounded_to_2_decimals(tmp_path):
+    con = _db()
+    to_gis(con, str(tmp_path), fmt="shp", name="soder")
+    rows = con.execute(
+        f"SELECT length_m, cost_s FROM ST_Read('{tmp_path}/soder_edges_driving.shp') "
+        "ORDER BY length_m").fetchall()
+    assert rows == [(123.46, 14.81), (567.8, 40.88)]
 
 
 def test_only_selected_mode_exported(tmp_path):

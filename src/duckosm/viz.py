@@ -12,7 +12,7 @@ from pathlib import Path
 logger = logging.getLogger("duckosm")
 
 # Base maps offered as a toggleable layer switcher in the output HTML.
-BASEMAP_LAYERS = ["voyager", "positron", "esri_gray", "osm", "satellite"]
+BASEMAP_LAYERS = ["voyager", "positron", "dark_matter", "osm", "satellite", "blank"]
 
 
 def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows=False,
@@ -78,6 +78,9 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         g, theme="light", basemap=basemap, basemaps=layers,
         tooltip=["edge_id", *idcols, "highway", "name", *info], copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
+        # view_3d builds the extruded bridge decks the in-map 2D/3D toggle needs; pitch=0 still
+        # opens the map flat.
+        view_3d=True, pitch=0,
         arrows=arrows, arrow_col=("oneway" if arrows else None),
         boundary=(_boundary_geojson(con) if boundary else None),
     )

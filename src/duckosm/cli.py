@@ -170,7 +170,7 @@ def admin(args):
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode schema(s) to render (default: every mode present in the db)')
 @click.option('--basemap', default='voyager', show_default=True,
-              help='Default base map: voyager, positron, esri_gray, osm, satellite')
+              help='Default base map: voyager, positron, dark_matter, osm, satellite, blank')
 @click.option('--out-dir', default='reports', show_default=True,
               help='Output directory for <name>_<mode>_network.html')
 @click.option('--arrows/--no-arrows', default=False, show_default=True,

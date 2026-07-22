@@ -9,9 +9,18 @@
 # `edge_id` (a content hash) unchanged, so this area is a stable view of its parent and every match
 # result is directly comparable with the full-city run.
 #
-# The 250 m margin is deliberate, and matters more here than it would for a bbox: the island proper is
-# only ~500 m across, the match stage buffers 105 m around each source edge's hourglass, and the
-# Granville Bridge approaches — the most interesting geometry — land just off the island itself.
+# The 500 m margin is DELIBERATELY WIDER than the source's own 250 m clip, and that asymmetry was
+# measured, not assumed. Matching the two exactly (250 m, 394 driving edges) looks tidier but starves
+# the matcher at the rim: a source edge on the boundary has its true partner's continuation cut off,
+# so the window sees a wall instead of a road. Same hyperparameters, same 164 source edges:
+#
+#     margin   ref edges   anchored   junction   coherence   J
+#     250 m          394       53.7       39.6        47.6   0.223
+#     500 m        1,290       54.4       44.4        50.8   0.261
+#
+# Surplus reference edges DO cost the report a coverage denominator — but that is the report's to fix
+# (clip the denominator to the source's reach, as the QA map's `ref_extent` already does), not a
+# reason to degrade the match.
 name: granville_island
 output_path: data/db
 source:
@@ -19,7 +28,7 @@ source:
   source_db: data/db/vancouver_city.duckdb
 boundary:
   path: data/boundaries/granville_island.geojson
-  buffer_m: 250
+  buffer_m: 500
 clip: {predicate: intersects, keep_largest_component: false}
 modes: [driving, walking, cycling]
 options:

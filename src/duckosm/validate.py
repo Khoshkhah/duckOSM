@@ -15,6 +15,12 @@ Checks (per mode):
                             silently deleted instead of split (implemented topologically over the
                             way refs, which implies per-way length conservation). See
                             docs/design/split_same_direction_parallels.md.
+  - layer_without_structure : WARN-only — edges tagged layer≠0 with no bridge/tunnel tag (an OSM
+                            tagging smell; such edges get grade-separated draw order but no 3D
+                            deck). Never fails the build.
+
+A check result's `ok` is True (OK), False (FAIL — fatal under fail_on_error) or None
+(WARN — reported but never fatal).
 """
 import logging
 from collections import Counter
@@ -128,11 +134,31 @@ class Validator:
                             f"{lost} deleted parallel arc(s) (way stretch missing while a kept "
                             "edge bridges its endpoints)"))
 
+        if self.cfg.warn_layer_without_structure:
+            cols = {r[0] for r in self.con.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_catalog = current_database() "
+                "AND table_schema = ? AND table_name = 'edges'", [self.mode]).fetchall()}
+            if {"layer", "bridge", "tunnel"} <= cols:
+                # bridge/tunnel='no' is an explicit negative — still no structure.
+                n = self.con.execute(f"""
+                    SELECT count(*) FROM {self.mode}.edges
+                    WHERE COALESCE(TRY_CAST(layer AS INTEGER), 0) <> 0
+                      AND COALESCE(bridge, 'no') = 'no'
+                      AND COALESCE(tunnel, 'no') = 'no'""").fetchone()[0]
+                results.append(("layer_without_structure", None if n else True,
+                                f"{n} edge(s) with layer≠0 but no bridge/tunnel tag "
+                                "(OSM tagging; drawn grade-separated, no 3D deck)"))
+            else:
+                results.append(("layer_without_structure", True,
+                                "skipped (no layer/bridge/tunnel columns)"))
+
         for check, ok, detail in results:
             (logger.info if ok else logger.warning)(
-                f"  validate[{self.mode}] {check}: {'OK' if ok else 'FAIL'} — {detail}")
+                f"  validate[{self.mode}] {check}: "
+                f"{'OK' if ok else 'WARN' if ok is None else 'FAIL'} — {detail}")
 
-        failed = [(c, d) for c, ok, d in results if not ok]
+        failed = [(c, d) for c, ok, d in results if ok is False]
         if failed and self.cfg.fail_on_error:
             raise ValidationError(
                 f"[{self.mode}] {len(failed)} validation check(s) failed: "

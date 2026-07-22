@@ -78,6 +78,10 @@ def _select_sql(con, schema, table, for_shp):
         expr = f'"{name}"'
         if for_shp and ("BIGINT" in d or "HUGEINT" in d):       # keep int64 ids exact as text
             expr = f'CAST("{name}" AS VARCHAR)'
+        if name in ("length_m", "cost_s") and ("DOUBLE" in d or "FLOAT" in d):
+            # cm / centisecond accuracy suffices; CAST first — ROUND on a FLOAT stays FLOAT,
+            # whose base-2 noise (57.849998) would leak into the written file
+            expr = f'ROUND(CAST({expr} AS DOUBLE), 2)'
         parts.append(f'{expr} AS "{alias}"')
     return f'SELECT {", ".join(parts)} FROM "{schema}"."{table}"'
 
