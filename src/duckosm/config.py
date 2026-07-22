@@ -91,6 +91,8 @@ class Validation:
     assert_way_length_conserved: bool = True       # no interior stretch of a kept way silently
                                                    #   deleted in favour of a parallel arc — see
                                                    #   docs/design/split_same_direction_parallels.md
+    warn_layer_without_structure: bool = True      # layer≠0 but no bridge/tunnel tag (OSM tagging
+                                                   #   smell; warn-only, never fails the build)
 
 
 @dataclass

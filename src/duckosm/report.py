@@ -45,7 +45,8 @@ def write_report(con, config, mode_stats, validation_results, out_dir="reports",
         L += ["", "## Validation", "", "| mode · check | result | detail |", "|---|:---:|---|"]
         for mode, results in validation_results.items():
             for check, ok, detail in results:
-                L.append(f"| {mode} · {check} | {'✅' if ok else '❌'} | {detail} |")
+                L.append(f"| {mode} · {check} | {'✅' if ok else '⚠️' if ok is None else '❌'} "
+                         f"| {detail} |")
 
     md = "\n".join(L) + "\n"
     md_path = out / f"{config.name}_{ts}.md"
