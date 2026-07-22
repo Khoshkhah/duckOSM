@@ -15,9 +15,10 @@ class RoadFilter(BaseProcessor):
         - way_nodes: Way-node relationships
     """
     
-    def __init__(self, con, mode: str = "driving"):
+    def __init__(self, con, mode: str = "driving", cycling_dismount: bool = True):
         super().__init__(con)
         self.mode = mode
+        self.cycling_dismount = cycling_dismount
     
     def run(self) -> None:
         """Extract highway features."""
@@ -99,6 +100,18 @@ class RoadFilter(BaseProcessor):
                     )
                 )
             """
+            if self.cycling_dismount:
+                # Dismount (push-the-bike) ways: footway/pedestrian enter the cycling graph even
+                # with bicycle=no — pushing is walking — but access=private/no or foot=no still
+                # excludes. See docs/design/cycling_dismount_edges.md.
+                where_clause = f"""
+                    ({where_clause})
+                    OR (
+                        map_extract(tags, 'highway')[1] IN ('footway', 'pedestrian')
+                        AND COALESCE(map_extract(tags, 'access')[1], '') NOT IN ('private', 'no')
+                        AND COALESCE(map_extract(tags, 'foot')[1], '') <> 'no'
+                    )
+                """
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
 
@@ -199,8 +212,17 @@ class RoadFilter(BaseProcessor):
                 END
             """
         if self.mode == "cycling":
-            return """
+            # A dismount way is walked, not ridden — bidirectional regardless of any
+            # oneway/oneway:bicycle tag (which governs riding). Rideable footways
+            # (bicycle=yes/designated/permissive) keep the normal rules below.
+            dismount_case = """
+                    WHEN map_extract(tags, 'highway')[1] IN ('footway', 'pedestrian')
+                         AND COALESCE(map_extract(tags, 'bicycle')[1], '')
+                             NOT IN ('yes', 'designated', 'permissive') THEN FALSE
+            """ if self.cycling_dismount else ""
+            return f"""
                 CASE
+                    {dismount_case}
                     WHEN map_extract(tags, 'oneway:bicycle')[1] = 'no' THEN FALSE
                     WHEN map_extract(tags, 'oneway:bicycle')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
                     WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
