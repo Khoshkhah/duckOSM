@@ -1,7 +1,11 @@
 # Cycling dismount edges (stop deleting orphaned cycleways)
 
-**Status:** proposed (2026-07-22). Evidence measured on `sodermalm.duckdb`; missing-way tags
-verified against `sweden-latest.osm.pbf` via `ST_READOSM`.
+**Status:** implemented (2026-07-22, same day as proposed). `RoadFilter` (dismount WHERE branch
++ bidirectional oneway case), `DismountMarker` (the `dismount` column), `SpeedProcessor`
+(walking-speed CASE), `FunctionalType` (`cycle_type='dismount'`); flag
+`options.cycling_dismount`, default **on**; tests in `tests/test_cycling_dismount.py`.
+Evidence measured on `sodermalm.duckdb`; missing-way tags verified against
+`sweden-latest.osm.pbf` via `ST_READOSM`.
 
 ## Summary
 

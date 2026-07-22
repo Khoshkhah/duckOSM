@@ -73,6 +73,10 @@ class FunctionalType(BaseProcessor):
 
     def _cycle_type(self) -> None:
         self.execute("ALTER TABLE edges ADD COLUMN IF NOT EXISTS cycle_type VARCHAR")
+        # Dismount edges (see DismountMarker) classify as 'dismount' — column only exists
+        # when options.cycling_dismount is on.
+        dm = ("WHEN edges.dismount THEN 'dismount'"
+              if "dismount" in {r[0] for r in self.fetchall("DESCRIBE edges")} else "")
         # cw_side = the cycleway tag on the side matching the edge's direction of travel:
         # forward reads cycleway:right, reverse reads cycleway:left; both fall back to
         # cycleway:both / cycleway.
@@ -83,6 +87,7 @@ class FunctionalType(BaseProcessor):
             map_extract(w.tags, 'cycleway')[1])"""
         self.execute(f"""
             UPDATE edges SET cycle_type = CASE
+                {dm}
                 WHEN edges.highway = 'cycleway'                          THEN 'cycleway'
                 WHEN {cw_side} = 'track'                                 THEN 'cycle_track'
                 WHEN {cw_side} = 'lane'                                  THEN 'cycle_lane'

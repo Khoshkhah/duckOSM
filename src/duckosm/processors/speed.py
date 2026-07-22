@@ -49,7 +49,14 @@ class SpeedProcessor(BaseProcessor):
         if self.mode == "walking":
             update_sql = f"UPDATE edges SET maxspeed_kmh = {self.WALKING_SPEED}"
         elif self.mode == "cycling":
-            update_sql = f"UPDATE edges SET maxspeed_kmh = {self.CYCLING_SPEED}"
+            # Dismount (push-the-bike) edges move at walking speed — that CASE is the whole
+            # cost model for the feature (CostCalculator just reads maxspeed_kmh).
+            cols = {r[0] for r in self.fetchall("DESCRIBE edges")}
+            update_sql = (
+                f"UPDATE edges SET maxspeed_kmh = CASE WHEN dismount THEN {self.WALKING_SPEED} "
+                f"ELSE {self.CYCLING_SPEED} END"
+                if "dismount" in cols else
+                f"UPDATE edges SET maxspeed_kmh = {self.CYCLING_SPEED}")
         else:
             # Driving mode uses existing logic
             cases = "\n".join(

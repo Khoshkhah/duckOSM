@@ -146,6 +146,12 @@ class DuckOSM:
                 steps.append(("connect_paths", f"[{mode}] Connecting dangling paths",
                               lambda: self._connect_paths(mode)))
 
+            # Flag push-the-bike edges BEFORE speeds — SpeedProcessor keys the walking-speed
+            # CASE off the dismount column.
+            if mode == "cycling" and self.config.options.cycling_dismount:
+                steps.append(("mark_dismount", f"[{mode}] Marking dismount edges",
+                              self._mark_dismount))
+
             if self.config.options.process_speeds:
                 steps.append(("process_speeds", f"[{mode}] Processing speeds", lambda: self._process_speeds(mode)))
 
@@ -537,7 +543,8 @@ class DuckOSM:
         logger.info(f"[{mode}] Filtering roads...")
         start = time.time()
         
-        RoadFilter(self.con, mode=mode).run()
+        RoadFilter(self.con, mode=mode,
+                   cycling_dismount=self.config.options.cycling_dismount).run()
         
         self.stats['road_filter_time'] = time.time() - start
         
@@ -584,6 +591,11 @@ class DuckOSM:
     def _add_functional_type(self, mode: str) -> None:
         """Add walk_type / cycle_type to the mode's edges from OSM sub-tags (walking/cycling only)."""
         FunctionalType(self.con, mode=mode).run()
+
+    def _mark_dismount(self) -> None:
+        """Flag cycling edges that are walked, not ridden (dismount column)."""
+        from duckosm.processors.dismount import DismountMarker
+        DismountMarker(self.con).run()
 
     def _simplify_graph(self) -> None:
         """Simplify the road network graph."""

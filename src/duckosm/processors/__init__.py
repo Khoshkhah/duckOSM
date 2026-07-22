@@ -12,6 +12,7 @@ from duckosm.processors.h3_indexer import H3Indexer
 from duckosm.processors.edge_graph import EdgeGraphBuilder
 from duckosm.processors.graph_simplifier import GraphSimplifier
 from duckosm.processors.global_junctions import GlobalJunctions
+from duckosm.processors.dismount import DismountMarker
 from duckosm.processors.functional_type import FunctionalType
 from duckosm.processors.path_connector import PathConnector
 from duckosm.processors.component_filter import ComponentFilter
@@ -31,6 +32,7 @@ __all__ = [
     "EdgeGraphBuilder",
     "GraphSimplifier",
     "GlobalJunctions",
+    "DismountMarker",
     "FunctionalType",
     "PathConnector",
     "ComponentFilter",
