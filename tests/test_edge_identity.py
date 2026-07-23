@@ -155,6 +155,22 @@ def test_lollipop_midpoint_cut_on_vertex_no_nan_geometry():
     _assert_no_ref_lost(con)
 
 
+def test_pure_closed_loop_two_way_no_nan_geometry():
+    # Real failing case — Vancouver OSM way 1303298781 ("parking_aisle"): a PURE closed loop
+    # (first ref == last, no stick — the whole way is a self-loop A-B-C-D-A). It is tagged
+    # oneway=yes, but WALKING drops oneway (pedestrians go both ways), so its two self-loop
+    # halves become an antiparallel pair and one is split again. That second ST_LineSubstring
+    # emitted a `-nan -nan` vertex, which reprojected to (inf, inf) on export. Build it as the
+    # walking graph sees it (oneway=False); the no-NaN / valid-geometry invariant must hold.
+    nodes = {1: (-123.1309396, 49.2632661), 2: (-123.1309456, 49.2631048),
+             3: (-123.1303185, 49.263094800000005), 4: (-123.1303125, 49.2632561)}
+    con = _build([(1303298781, "service", False, [1, 2, 3, 4, 1])], nodes)
+    _assert_identity_invariants(con)   # includes the no-NaN / valid-geometry assertion
+    _assert_no_ref_lost(con)
+    # the antiparallel re-split of a loop half yields an edge between two virtual nodes (fwd+rev)
+    assert con.execute("SELECT count(*) FROM edges WHERE source < 0 AND target < 0").fetchone()[0] == 2
+
+
 def test_two_loops_same_anchor_get_distinct_virtual_nodes():
     # One way anchoring TWO closed loops at the SAME node: the refs-salted virtual ids must
     # differ (the old -(hash(osm_id, source)) collided here -> duplicate node_id).
