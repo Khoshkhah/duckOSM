@@ -78,7 +78,7 @@ needs `geopandas` + [`roadstyle`](../roadstyle).
 ### CLI
 
 With the venv activated, the `duckosm` command has several subcommands (`build`, `extract`, `admin`,
-`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `lanelet2`, `lane-graph`, `route-lanes`, `multimodal`). Run `duckosm --help` for the list, or
+`viz`, `sumo`, `export-graph`, `export-gis`, `gis-debug`, `gmns`, `gmns-viz`, `gmns-map`, `matsim`, `matsim-lanes`, `opendrive`, `railml`, `lanelet2`, `lane-graph`, `route-lanes`, `multimodal`, `elevation`). Run `duckosm --help` for the list, or
 `duckosm <command> --help` for a command's options.
 
 **`build`** — build a network from a PBF, or clip one from a parent db:
@@ -297,6 +297,23 @@ including `walking`; writes the `mm` schema in place. Route the result with
 ```bash
 duckosm multimodal data/db/sodermalm.duckdb --transfer-cost 60    # flat transfer penalty (seconds)
 # or enable it during a build: modes: [driving, walking] + multimodal: {enabled: true} in the config
+```
+
+**`elevation`** — sample a **DEM** at every node and add ground elevation to a built db **in place**:
+`<mode>.nodes.ele` and `<mode>.edges.z_from`/`z_to` (2 dp) across all modes, plus a
+`main.elevation_metadata` provenance row. A **post-processing** step (not part of the build), so a
+plain build stays dependency-free. Either point `--dem` at any GDAL raster, or let `--source` fetch a
+global DEM: `auto` (default) reads the db's bbox and picks the best provider whose coverage contains
+it — **EU-DTM** (bare-earth) inside Europe when `OPENTOPOGRAPHY_API_KEY` is set, else **Copernicus
+GLO-30** streamed from AWS over `/vsicurl` (no auth, worldwide). No country-specific code — a coverage
+test. Once run, the z-aware exporters emit real height (`matsim` node `z`, `opendrive`
+`<elevationProfile>`). Needs `pip install duckosm[elevation]` (rasterio + pyproj). See
+[`docs/design/elevation.md`](docs/design/elevation.md):
+
+```bash
+duckosm elevation data/db/sodermalm.duckdb                        # --source auto (Copernicus, streamed)
+duckosm elevation data/db/sodermalm.duckdb --dem markhojd_1m.tif  # a local high-res DTM (e.g. Lantmäteriet 1 m)
+duckosm elevation data/db/sodermalm.duckdb -m driving --nodata-fill 0   # one mode; fill for DEM voids
 ```
 
 Not activated? Use `.venv/bin/duckosm <command> ...`, `python -m duckosm <command> ...`,

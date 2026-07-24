@@ -67,6 +67,18 @@ def _nodes_xy(con, modes, crs):
         f"ST_Transform(geom, 'EPSG:4326', ?, always_xy := true) t FROM ({union}))", [crs]).fetchall()}
 
 
+def _nodes_ele(con, modes):
+    """{node_id: ele} over the modes' nodes when an ``ele`` column is present (added by
+    ``duckosm elevation``); ``{}`` otherwise, so a network built without elevation is unchanged."""
+    have = con.execute(
+        "SELECT count(*) FROM duckdb_columns() WHERE schema_name = ? AND table_name = 'nodes' "
+        "AND column_name = 'ele'", [modes[0]]).fetchone()[0]
+    if not have:
+        return {}
+    union = " UNION ".join(f"SELECT node_id, ele FROM {m}.nodes WHERE ele IS NOT NULL" for m in modes)
+    return {nid: e for nid, e in con.execute(union).fetchall()}
+
+
 def _link_row(eid, src, tgt, length_m, freespeed, hw, permlanes, modes_str):
     length = float(length_m) if length_m and length_m > 0 else 1.0
     capacity = _CAPACITY.get(_norm_hw(hw), 800) * permlanes
@@ -137,6 +149,7 @@ def to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True):
     con.execute("INSTALL spatial; LOAD spatial;")
     modes = _resolve_modes(con, mode)
     node_xy = _nodes_xy(con, modes, crs)
+    node_ele = _nodes_ele(con, modes)                    # {} unless `duckosm elevation` was run
     raw = _single_links(con, modes[0]) if len(modes) == 1 else _multi_links(con, modes)
     con.close()
 
@@ -155,7 +168,9 @@ def to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True):
            '\t</attributes>', '\t<nodes>']
     for nid in sorted(used):
         x, y = node_xy[nid]
-        out.append(f'\t\t<node id="{nid}" x="{x:.2f}" y="{y:.2f}"/>')
+        z = node_ele.get(nid)
+        zattr = f' z="{z:.2f}"' if z is not None else ""     # network_v2 allows an optional node z
+        out.append(f'\t\t<node id="{nid}" x="{x:.2f}" y="{y:.2f}"{zattr}/>')
     out.append('\t</nodes>')
     out.append('\t<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">')
     for eid, src, tgt, length, freespeed, capacity, permlanes, modes_str in links:

@@ -44,6 +44,25 @@ def _cols(con, source, **kw):
     return [c[0] for c in con.execute(f"DESCRIBE SELECT * FROM ST_Read({args})").fetchall()]
 
 
+def test_elevation_columns_exported(tmp_path):
+    # ele (nodes) + z_from/z_to (edges) from `duckosm elevation` flow through as scalar attributes
+    con = duckdb.connect(); con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY, ele DOUBLE)")
+    con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')},12.5),"
+                f"(2,{p('POINT(18.07 59.32)')},40.0)")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, "
+                "highway VARCHAR, length_m DOUBLE, cost_s DOUBLE, z_from DOUBLE, z_to DOUBLE, geometry GEOMETRY)")
+    con.execute(f"INSERT INTO driving.edges VALUES ({E1},1,2,'residential',100,10,12.5,40.0,"
+                f"{p('LINESTRING(18.06 59.32,18.07 59.32)')})")
+    to_gis(con, str(tmp_path), fmt="shp", name="soder", boundary=False)
+    assert "ele" in _cols(con, str(tmp_path / "soder_nodes_driving.shp"))
+    ecols = _cols(con, str(tmp_path / "soder_edges_driving.shp"))
+    assert "z_from" in ecols and "z_to" in ecols
+    con.close()
+
+
 def test_shp_preserves_edge_id_and_drops_list_columns(tmp_path):
     con = _db()
     res = to_gis(con, str(tmp_path), fmt="shp", name="soder")

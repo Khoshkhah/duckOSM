@@ -39,6 +39,7 @@ viz = ["folium", "leafmap"]
 tz = ["timezonefinder>=6.0"]
 routing = ["networkx"]
 sumo = ["eclipse-sumo", "sumolib"]
+elevation = ["rasterio>=1.3", "pyproj>=3.0"]
 dev = ["pytest", "black", "ruff", "networkx", "lxml"]   # lxml: MATSim network_v2 DTD validation in tests
 
 [project.urls]

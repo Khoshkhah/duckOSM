@@ -59,6 +59,32 @@ def test_road_length_equals_planview(tmp_path):
         assert float(r.get("length")) == pytest.approx(seglen, abs=1e-3)
 
 
+def test_no_elevation_profile_without_z(tmp_path):
+    # the standard fixture has no z_from/z_to → flat roads, no <elevationProfile>
+    to_opendrive(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xodr")
+    _, roads = _roads(tmp_path / "n.xodr")
+    assert all(r.find("elevationProfile") is None for r in roads.values())
+
+
+def test_elevation_profile_from_z(tmp_path):
+    # z_from/z_to (from `duckosm elevation`) → a linear <elevationProfile> between planView and lanes
+    path = tmp_path / "s.duckdb"
+    con = duckdb.connect(str(path)); con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, name VARCHAR, "
+                "lanes INTEGER, length_m FLOAT, z_from DOUBLE, z_to DOUBLE, geometry GEOMETRY)")
+    con.execute(f"INSERT INTO driving.edges VALUES ({A},1,2,'Hill',1,100,10.0,40.0,"
+                f"ST_GeomFromText('LINESTRING(18.06 59.32, 18.07 59.32)'))")
+    con.close()
+    to_opendrive(str(path), tmp_path / "n.xodr")
+    r = _roads(tmp_path / "n.xodr")[1][str(A)]
+    e = r.find("./elevationProfile/elevation")
+    assert e is not None and float(e.get("a")) == pytest.approx(10.0)      # z_from at s=0
+    assert float(e.get("b")) == pytest.approx((40.0 - 10.0) / float(r.get("length")), abs=1e-5)  # grade (6 dp)
+    tags = [c.tag for c in r]
+    assert tags.index("planView") < tags.index("elevationProfile") < tags.index("lanes")   # schema order
+
+
 def test_georeference_and_metric_coords(tmp_path):
     to_opendrive(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xodr", crs="EPSG:3006")
     root, roads = _roads(tmp_path / "n.xodr")

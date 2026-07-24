@@ -76,6 +76,15 @@ def _lanes(n):
     return o
 
 
+def _elevation_profile(z0, z1, length):
+    """A linear <elevationProfile> (elev(s) = a + b·s) from z0 at the road start to z1 at its end.
+    Endpoint ground elevations from edges.z_from/z_to (bare terrain) — Phase-1 straight ramp."""
+    b = (z1 - z0) / length if length and length > 0 else 0.0
+    return ['\t\t<elevationProfile>',
+            f'\t\t\t<elevation s="0" a="{z0:.4f}" b="{b:.6f}" c="0" d="0"/>',
+            '\t\t</elevationProfile>']
+
+
 def _header(name, xs, ys, crs):
     return [f'\t<header revMajor="1" revMinor="7" name={quoteattr(name)} version="1.00" '
             f'north="{max(ys):.2f}" south="{min(ys):.2f}" east="{max(xs):.2f}" west="{min(xs):.2f}">',
@@ -87,10 +96,15 @@ def _tx(col):
 
 
 def _build_phase1(con, mode, crs, name):
-    rows = con.execute(f"SELECT edge_id, COALESCE(lanes, 1), name, {_tx('geometry')} "
+    # z_from/z_to (from `duckosm elevation`) are optional — emit an <elevationProfile> only when present.
+    have_z = con.execute("SELECT count(*) FROM duckdb_columns() WHERE schema_name = ? "
+                         "AND table_name = 'edges' AND column_name = 'z_from'", [mode]).fetchone()[0] > 0
+    zsel = ", z_from, z_to" if have_z else ""
+    rows = con.execute(f"SELECT edge_id, COALESCE(lanes, 1), name, {_tx('geometry')}{zsel} "
                        f"FROM {mode}.edges WHERE geometry IS NOT NULL", [crs]).fetchall()
     xs, ys, o = [], [], []
-    for eid, lanes, nm, wkt in rows:
+    for row in rows:
+        (eid, lanes, nm, wkt), (z_from, z_to) = row[:4], (row[4:6] if have_z else (None, None))
         pts = _coords(wkt)
         if len(pts) < 2:
             continue
@@ -99,7 +113,10 @@ def _build_phase1(con, mode, crs, name):
             continue
         xs += [p[0] for p in pts]; ys += [p[1] for p in pts]
         o.append(f'\t<road name={quoteattr(nm or "")} length="{total:.4f}" id="{eid}" junction="-1">')
-        o += _planview(segs) + _lanes(max(int(lanes), 1)) + ['\t</road>']
+        o += _planview(segs)
+        if z_from is not None and z_to is not None:
+            o += _elevation_profile(z_from, z_to, total)     # after planView, before lanes (schema order)
+        o += _lanes(max(int(lanes), 1)) + ['\t</road>']
     body = ['<?xml version="1.0" encoding="UTF-8"?>', '<OpenDRIVE>'] + _header(name, xs, ys, crs) + o
     body.append('</OpenDRIVE>\n')
     return "\n".join(body), {"roads": sum(1 for line in o if line.startswith('\t<road '))}

@@ -15,6 +15,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm matsim        export a MATSim network.xml from a built duckOSM db (nodes + links)
   duckosm matsim-lanes  export MATSim lanes.xml + signals from a GMNS db (turn lanes, signalised nodes)
   duckosm opendrive     export an ASAM OpenDRIVE .xodr from a built duckOSM db (roads + lanes)
+  duckosm elevation     sample a DEM into a built db (nodes.ele + edges.z_from/z_to, in place)
   duckosm railml        export a railML 2.4 rail infrastructure file from a built duckOSM db's raw OSM
   duckosm lanelet2      export a Lanelet2 HD-map (.osm) from a GMNS db's per-lane geometry
   duckosm lane-graph    build a lane-level routing graph (lane->lane turns + lane-changes) in a GMNS db
@@ -703,6 +704,44 @@ def opendrive(db, mode, crs, junctions, out):
         raise click.ClickException(str(e))
     extra = f" + {res['connecting_roads']} connecting roads, {res['junctions']} junctions" if junctions else ""
     click.echo(f"wrote {out} — {res['roads']} roads{extra}")
+
+
+@main.command(name="elevation")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--dem', default=None,
+              help='Local/remote raster (GeoTIFF/COG/VRT/.img/.asc/.hgt — any GDAL format). '
+                   'Takes precedence over --source.')
+@click.option('--source', default='auto', show_default=True,
+              help="Global DEM to auto-fetch if no --dem: 'auto' (best for the db's area), "
+                   "'copernicus' (GLO-30, anonymous), or 'eudtm' (Europe bare-earth, needs "
+                   "OPENTOPOGRAPHY_API_KEY)")
+@click.option('--mode', '-m', 'modes', multiple=True,
+              help='Mode schema(s) to enrich (default: every mode present in the db)')
+@click.option('--nodata-fill', type=float, default=0.0, show_default=True,
+              help='Elevation written where the DEM has a void / does not cover the node')
+def elevation(db, dem, source, modes, nodata_fill):
+    """Sample a DEM at every node and add elevation to a built db, in place.
+
+    Adds <mode>.nodes.ele and <mode>.edges.z_from/z_to, and records provenance in
+    main.elevation_metadata. Either point --dem at any GDAL-readable raster, or let
+    --source auto-fetch a global DEM. `--source auto` (default) reads the db's node
+    bbox and picks the best provider whose coverage contains it: EU-DTM (bare-earth)
+    inside Europe when OPENTOPOGRAPHY_API_KEY is set, else Copernicus GLO-30 (streamed
+    from AWS, no auth, works anywhere). Re-runnable — a second pass overwrites. The db
+    is modified in place. Needs `pip install duckosm[elevation]` (rasterio + pyproj).
+    See docs/design/elevation.md.
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+
+    from duckosm.elevation import to_elevation
+
+    try:
+        res = to_elevation(db, dem=dem, source=source, modes=list(modes) or None,
+                           nodata_fill=nodata_fill)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.echo(f"elevation added from {res['source']} — {res['n_nodes']} nodes "
+               f"({res['n_nodata']} nodata/fill) across {len(res['modes'])} mode(s)")
 
 
 @main.command(name="matsim-lanes")
