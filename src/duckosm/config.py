@@ -239,6 +239,16 @@ class Config:
                 raise ValueError("pbf_path (or source.pbf_path) is required")
             if not Path(self.effective_pbf_path).exists():
                 raise FileNotFoundError(f"PBF file not found: {self.effective_pbf_path}")
+            # Restrictions are mapped to edges through `refs` (the stitched node list), and only
+            # the simplifier writes that column — so this pair would die deep in the build with a
+            # bare binder error. Fail here instead, before any work. (Options are mostly inert for
+            # a duckdb clip, hence the pbf-only scope.)
+            if self.options.extract_restrictions and not self.options.simplify:
+                raise ValueError(
+                    "options.extract_restrictions requires options.simplify: turn restrictions are "
+                    "mapped onto edges via edges.refs, which only the simplifier writes. "
+                    "Set simplify: true, or extract_restrictions: false."
+                )
         if self.effective_boundary_path and not Path(self.effective_boundary_path).exists():
             raise FileNotFoundError(f"Boundary file not found: {self.effective_boundary_path}")
 
