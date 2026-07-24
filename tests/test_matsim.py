@@ -195,6 +195,33 @@ def test_multimodal_subset(tmp_path):
     assert ids == {str(SH), str(D_ONLY), str(C_ONLY)}          # no W_ONLY
 
 
+def test_node_z_from_ele(tmp_path):
+    # nodes carrying `ele` (from `duckosm elevation`) → each <node> gets a z attribute (2 dp)
+    path = tmp_path / "s.duckdb"
+    con = duckdb.connect(str(path)); con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY, ele DOUBLE)")
+    con.execute("INSERT INTO driving.nodes VALUES (1, ST_GeomFromText('POINT(18.06 59.32)'), 12.5),"
+                "(2, ST_GeomFromText('POINT(18.07 59.32)'), 40.0)")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, highway VARCHAR, "
+                "lanes INTEGER, maxspeed_kmh FLOAT, length_m FLOAT, cost_s FLOAT, geometry GEOMETRY)")
+    con.execute(f"INSERT INTO driving.edges VALUES ({A},1,2,'primary',2,50,80,6,"
+                f"ST_GeomFromText('LINESTRING(18.06 59.32,18.07 59.32)'))")
+    con.close()
+    to_matsim(str(path), tmp_path / "n.xml", gzip=False)
+    nodes = {n.get("id"): n for n in _parse(tmp_path / "n.xml", gz=False).findall("./nodes/node")}
+    assert nodes["1"].get("z") == "12.50" and nodes["2"].get("z") == "40.00"
+    lxml_etree = pytest.importorskip("lxml.etree")             # z is DTD-valid (network_v2 #IMPLIED)
+    dtd = lxml_etree.DTD(str(_DTD))
+    assert dtd.validate(lxml_etree.parse(str(tmp_path / "n.xml")))
+
+
+def test_no_node_z_without_ele(tmp_path):
+    # the standard fixture has no `ele` column → nodes have no z attribute (unchanged output)
+    to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xml", gzip=False)
+    assert all(n.get("z") is None for n in _parse(tmp_path / "n.xml", gz=False).findall("./nodes/node"))
+
+
 def test_multimodal_dtd_valid(tmp_path):
     lxml_etree = pytest.importorskip("lxml.etree")
     to_matsim(str(_multi_src(tmp_path / "s.duckdb")), tmp_path / "n.xml", mode="all", gzip=False)

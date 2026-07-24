@@ -5,6 +5,10 @@
 the next target after [GMNS](gmns_export.md). Emits a MATSim **`network.xml`** from a built duckOSM
 routing db, plugging duckOSM into the MATSim / **BEAM** / eqasim agent-based ecosystem.
 
+**Elevation:** if the db was enriched by [`duckosm elevation`](design/elevation.md) (a `nodes.ele`
+column), each `<node>` also gets a `z` attribute (metres, 2 dp) — a valid `network_v2` optional
+attribute. A network built without elevation is byte-identical to before (no `z`).
+
 ## What MATSim's network is
 
 A MATSim network is deliberately simple: a directed graph of **nodes** + **links**, one XML file

@@ -10,6 +10,11 @@ commercial-micro** target: one `.xodr` opens **CARLA, esmini** (AV) *and* **PTV 
 Södermalm: 2,876 roads, well-formed, per-road `length` = Σ planView segments, metric SWEREF99 TM
 reference lines.
 
+**Elevation:** if the db was enriched by [`duckosm elevation`](design/elevation.md)
+(`edges.z_from`/`z_to`), each `<road>` gets an `<elevationProfile>` with a linear `<elevation>`
+(`a` = `z_from`, `b` = grade to `z_to`) between `planView` and `lanes` — so the reference line has
+real height instead of a flat z = 0. Absent those columns, roads stay flat (unchanged output).
+
 ## What OpenDRIVE is (and why it's the hard one)
 
 ASAM OpenDRIVE describes a road as a **reference line** (`planView` geometry) plus **lanes defined as

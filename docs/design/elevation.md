@@ -11,12 +11,15 @@ deps `rasterio` + `pyproj` (extra `[elevation]`); tests in `tests/test_elevation
 the full suite). Idea adapted from OSM2World's elevation model — **minus** its constraint solver,
 which its own docs call *"currently very fragile and deactivated by default."*
 
-**Still to do (follow-on):** the exporter z-fields (`matsim` node z, `opendrive`
-`elevationProfile`, `lanelet2`/`gis`) that *consume* these columns — see [Exporters that gain
-z](#exporters-that-gain-z-mostly-one-field-each). The EU-DTM/OpenTopography and Copernicus network
-paths are unit-tested for provider selection + tiling, but their live fetch is unproven from CI (no
-key / sandboxed network) — worth one manual run each. Phase 2 (absolute structure heights) remains
-deferred.
+**Done since:** the exporter z-fields for **`matsim`** (node `z`) and **`opendrive`**
+(`<elevationProfile>`, linear ramp from `z_from` to `z_to`) — both emit real height when the columns
+are present and are unchanged otherwise; live-verified on the enriched Södermalm db. Copernicus
+GLO-30 live streaming from AWS is proven end-to-end.
+
+**Still to do (follow-on):** `lanelet2`/`gis` z-fields — see [Exporters that gain
+z](#exporters-that-gain-z-mostly-one-field-each). The **EU-DTM/OpenTopography** fetch is unit-tested
+for provider selection but its live download is unproven (no API key in CI) — worth one manual run.
+Phase 2 (absolute structure heights) remains deferred.
 
 **Implementation note (PROJ / eclipse-sumo clash):** eclipse-sumo's `import sumo` sets
 `PROJ_LIB`/`PROJ_DATA` to its own bundled, GDAL-incompatible `proj.db`, which then makes rasterio
