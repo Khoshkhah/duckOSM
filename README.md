@@ -599,6 +599,11 @@ duckosm extract --source data/db/sweden.duckdb \
 - **Standalone roadstyle map**: `scripts/roadstyle_map.py --db <db> [--palette highsat|carto|mono]
   [--color-by <col>]` — the same map with **palette selection** (incl. the
   grayscale `mono`) and data-driven colouring.
+- **Elevation report**: `scripts/elevation_report.py --db <db>` — a roadstyle **web report** of an
+  [elevation](#usage)-enriched db: roads coloured by ground elevation with a *Colour by* dropdown
+  (Elevation / Class / Max speed / Lanes), base-map switcher, hover read-out and (when roadstyle's
+  report sidebar is available) a gradient legend, filter and search. The title self-labels the DEM
+  source from `main.elevation_metadata`. Run `duckosm elevation <db>` first.
 - **Comparison**: `scripts/compare_results.py` — validate output against other tools
 
 ## License
