@@ -370,6 +370,16 @@ real deck clearance):
 
 `z_from`/`z_to` would then become `terrain + ramped offset`; `nodes.ele` stays bare terrain.
 
+## Visualisation
+
+`scripts/elevation_report.py --db <db>` renders an enriched db as a roadstyle **web report** —
+roads coloured by mean edge elevation (`(z_from+z_to)/2`), a *Colour by* dropdown
+(Elevation / Class / Max speed / Lanes), base-map switcher, hover read-out, and (when roadstyle's
+`ui/report/sidebar.html` is found in the roadstyle checkout) a gradient legend + filter + search.
+The title self-labels the DEM source from `main.elevation_metadata`, so a Copernicus vs EU-DTM build
+is distinguishable at a glance. The report HTML is a gitignored generated artifact; the script is the
+committed recipe.
+
 ## roadstyle follow-up (separate, tiny)
 
 roadstyle fakes deck heights on flat ground today. Once `edges.z_from`/`z_to` exist, one optional
@@ -378,8 +388,8 @@ setting lets decks sit on real terrain. A roadstyle change downstream of this �
 ## Footprint
 
 New files: `src/duckosm/elevation.py`, `docs/design/elevation.md` (this),
-`tests/test_elevation.py`. Touched: `cli.py` (+`elevation` subcommand),
-`docs/data_dictionary.md` (+3 columns, +`main.elevation_metadata` table), and Phase-1 exporters
-`matsim.py` / `opendrive.py`. Opt-in
-deps `rasterio` + `pyproj` (extra `[elevation]`). **No change to `importer.py`, `config.py`, or any
-existing build** — a network without an elevation pass is byte-identical to today's.
+`tests/test_elevation.py`, `scripts/elevation_report.py`. Touched: `cli.py` (+`elevation`
+subcommand), `README.md`, `docs/data_dictionary.md` (+3 columns, +`main.elevation_metadata` table),
+and the z-consumers `matsim.py` / `opendrive.py` (`gis` needs none — scalar columns pass through).
+Opt-in deps `rasterio` + `pyproj` (extra `[elevation]`). **No change to `importer.py`, `config.py`,
+or any existing build** — a network without an elevation pass is byte-identical to today's.
