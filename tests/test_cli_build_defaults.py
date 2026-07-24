@@ -26,6 +26,22 @@ def test_from_args_defaults_simplify_on():
 
 
 @pytest.mark.skipif(not PBF.exists(), reason="needs pbf/sodermalm.complete_ways.osm.pbf")
+def test_explicit_simplify_false_with_restrictions_is_rejected():
+    """An explicit simplify: false still can't extract restrictions — say so before building."""
+    cfg = Config.from_args(pbf_path=str(PBF), output_path="/tmp/x.duckdb", simplify=False)
+    with pytest.raises(ValueError, match="requires options.simplify"):
+        cfg.validate()
+
+
+@pytest.mark.skipif(not PBF.exists(), reason="needs pbf/sodermalm.complete_ways.osm.pbf")
+def test_simplify_false_without_restrictions_is_allowed():
+    """Opting out of both is a legitimate (if crude) build — the guard must not block it."""
+    cfg = Config.from_args(pbf_path=str(PBF), output_path="/tmp/x.duckdb",
+                           simplify=False, extract_restrictions=False)
+    cfg.validate()      # must not raise
+
+
+@pytest.mark.skipif(not PBF.exists(), reason="needs pbf/sodermalm.complete_ways.osm.pbf")
 def test_cli_args_build_extracts_restrictions(tmp_path):
     """End-to-end on the CLI path: the build completes and turn restrictions land."""
     out = tmp_path / "cli.duckdb"
