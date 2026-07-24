@@ -11,15 +11,22 @@ deps `rasterio` + `pyproj` (extra `[elevation]`); tests in `tests/test_elevation
 the full suite). Idea adapted from OSM2World's elevation model — **minus** its constraint solver,
 which its own docs call *"currently very fragile and deactivated by default."*
 
-**Done since:** the exporter z-fields for **`matsim`** (node `z`) and **`opendrive`**
-(`<elevationProfile>`, linear ramp from `z_from` to `z_to`) — both emit real height when the columns
-are present and are unchanged otherwise; live-verified on the enriched Södermalm db. Copernicus
-GLO-30 live streaming from AWS is proven end-to-end.
+**Done since:** the z-consumers **`matsim`** (node `z`), **`opendrive`** (`<elevationProfile>`,
+linear ramp from `z_from` to `z_to`) and **`gis`** (`ele`/`z_from`/`z_to` flow through as attributes
+— the GeoPackage/shapefile export keeps every scalar column, so no code path of its own). All emit
+height when the columns exist and are unchanged otherwise; live-verified on the enriched Södermalm
+db. Copernicus GLO-30 live streaming from AWS is proven end-to-end.
 
-**Still to do (follow-on):** `lanelet2`/`gis` z-fields — see [Exporters that gain
-z](#exporters-that-gain-z-mostly-one-field-each). The **EU-DTM/OpenTopography** fetch is unit-tested
-for provider selection but its live download is unproven (no API key in CI) — worth one manual run.
-Phase 2 (absolute structure heights) remains deferred.
+**Deliberately not done — `lanelet2`:** it reads a **GMNS** db (whose `node.z_coord` is currently
+`NULL`) and its boundaries are centreline *offsets*, not graph nodes — so elevation would mean
+plumbing z through the whole GMNS export (link table across its meso/micro/combined variants) and
+then interpolating onto offset points. That's a disproportionate change to drape coarse 30 m DEM z
+onto a map its own docstring calls *"not survey-grade"* — false precision, low value. Deferred until
+a real Autoware/lanelet2 consumer needs z.
+
+**Still to do:** the **EU-DTM/OpenTopography** fetch is unit-tested for provider selection but its
+live download is unproven (no API key in CI) — worth one manual run. Phase 2 (absolute structure
+heights) remains deferred.
 
 **Implementation note (PROJ / eclipse-sumo clash):** eclipse-sumo's `import sumo` sets
 `PROJ_LIB`/`PROJ_DATA` to its own bundled, GDAL-incompatible `proj.db`, which then makes rasterio
@@ -191,14 +198,12 @@ VRT over their `/vsicurl` URLs, open once, sample all. GDAL streams only the win
 
 ### Exporters that gain z (mostly one field each)
 
-| Exporter        | z field                                          | Notes |
+| Exporter        | z field                                          | Status |
 |-----------------|--------------------------------------------------|-------|
-| `opendrive`     | `<elevation>` on each road's `elevationProfile`  | **Biggest external win** — flat OpenDRIVE→CARLA/esmini is the current gap |
-| `matsim`        | `<node z="…">`                                   | MATSim reads 3D node coords |
-| `lanelet2`      | `ele` tag on boundary nodes                      | |
-| `gis` / `export-gis` | optional PointZ / LineStringZ output flag   | |
-
-Wire opportunistically — ship on `opendrive` + `matsim` first; the rest follow. Each is one field.
+| `opendrive`     | `<elevation>` on each road's `elevationProfile`  | **done** — biggest external win (flat OpenDRIVE→CARLA/esmini was the gap) |
+| `matsim`        | `<node z="…">`                                   | **done** — valid `network_v2` optional attribute |
+| `gis` / `export-gis` | `ele`/`z_from`/`z_to` as attributes         | **done** — free (export keeps every scalar column); geometry stays 2D |
+| `lanelet2`      | `ele` tag on boundary nodes                      | deferred — needs GMNS z plumbing + interpolation for a non-survey-grade map (see above) |
 
 ### Test (`tests/test_elevation.py`)
 
