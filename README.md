@@ -458,6 +458,11 @@ See [`config/template.yaml`](config/template.yaml) for the full schema (`source`
 `boundary` / `clip` / `validation` / `report` / `viz`) and
 [`docs/pipeline.md`](docs/pipeline.md) for the stages. Tests: `pytest tests/`.
 
+To cross-check a build against an independent extractor, see
+[`docs/osmnx_comparison.md`](docs/osmnx_comparison.md) — how to line duckOSM's `driving` network up
+with OSMnx (`drive_service` + `truncate_by_edge`), and why a naive comparison reports a ~48%
+discrepancy that is entirely filter and boundary handling.
+
 ## Output
 
 Each transport mode gets its own schema (`driving`, `walking`, `cycling`):
