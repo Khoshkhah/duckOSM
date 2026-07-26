@@ -113,6 +113,44 @@ def test_unknown_source_errors(tmp_path):
         to_elevation(src, source="nope")
 
 
+def test_suffix_keeps_two_surfaces(tmp_path):
+    """A DTM in `ele` and a DSM in `ele_dsm` coexist — that difference is the whole point
+    (object height above ground), so the second pass must not clobber the first."""
+    ground = _dem(tmp_path / "ground.tif")
+    # a "surface" 12 m above the same ramp everywhere — stands in for trees/buildings
+    surface = _dem(tmp_path / "surface.tif")
+    import rasterio
+    with rasterio.open(surface, "r+") as ds:
+        ds.write(ds.read(1) + 12.0, 1)
+
+    nodes = [(1, 18.06, 59.32), (2, 18.07, 59.32)]
+    src = _src(tmp_path / "s.duckdb", nodes, [(A, 1, 2)])
+    to_elevation(src, dem=ground)
+    res = to_elevation(src, dem=surface, suffix="dsm")
+    assert res["column"] == "ele_dsm"
+
+    con = duckdb.connect(src, read_only=True)
+    row = con.execute("SELECT ele, ele_dsm, ele_dsm - ele FROM driving.nodes "
+                      "WHERE node_id = 1").fetchone()
+    assert row[0] == pytest.approx(_ramp(18.06, 59.32), abs=2.0)   # DTM survived the 2nd pass
+    assert row[2] == pytest.approx(12.0, abs=0.5)                  # object height
+    z = con.execute("SELECT z_from, z_from_dsm FROM driving.edges WHERE edge_id = ?",
+                    [A]).fetchone()
+    assert z[1] - z[0] == pytest.approx(12.0, abs=0.5)             # edges carry both too
+
+    # one provenance row per column, and the DTM's row is still there
+    meta = dict(con.execute("SELECT ele_column, n_nodes FROM main.elevation_metadata").fetchall())
+    assert set(meta) == {"ele", "ele_dsm"}
+    con.close()
+
+
+def test_suffix_rejects_non_identifier(tmp_path):
+    # the suffix is interpolated into DDL — anything but a bare identifier must be refused
+    src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32)], [])
+    with pytest.raises(ValueError, match="bare identifier"):
+        to_elevation(src, dem=_dem(tmp_path / "r.tif"), suffix="dsm; DROP TABLE driving.nodes")
+
+
 # ---- auto source resolution (pure logic, no network / no db) --------------------------------
 SWEDEN = (18.0, 59.3, 18.1, 59.35)          # inside Europe
 VANCOUVER = (-123.2, 49.2, -123.0, 49.3)    # outside Europe

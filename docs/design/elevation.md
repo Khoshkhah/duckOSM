@@ -111,7 +111,31 @@ duckosm elevation <db>
   --source NAME         global DEM if no --dem: 'auto' (default) | 'copernicus' | 'eudtm'
   --modes m1,m2         default: all mode schemas present
   --nodata-fill FLOAT   value for raster voids / out-of-coverage (default 0.0 = sea level)
+  --suffix NAME         store as a second surface: ele_NAME / z_from_NAME / z_to_NAME
 ```
+
+### Two surfaces in one db (`--suffix`)
+
+A bare-earth **DTM** and a **DSM** (top of buildings and trees) answer different questions, so they
+are columns, not alternatives: road gradient wants the DTM — a DSM puts a street node on the tree
+canopy above it — while `ele_dsm - ele` is object height above ground, the input to building heights,
+canopy height, and shadow modelling.
+
+```bash
+duckosm elevation burnaby.duckdb --dem .../BC-Lower_Mainland_2016-1m-dtm.vrt
+duckosm elevation burnaby.duckdb --dem .../BC-Lower_Mainland_2016-1m-dsm.vrt --suffix dsm
+```
+
+The suffix is interpolated into DDL, so it is validated as a bare identifier. `elevation_metadata`
+holds **one row per column** (keyed by `ele_column`), upserted — re-running the DTM pass leaves the
+DSM's provenance row intact.
+
+**Resolution decides whether this is meaningful.** The difference is only real when the DEM resolves
+the objects: Canada's HRDEM ships a matched 1 m DTM/DSM pair from one LiDAR flight, and gives sane
+heights (Metrotown 9.4 m, SFU 32.7 m). Two *independent* 30 m global products do not — differencing
+EU-DTM against Copernicus GLO-30 over Södermalm put the "surface" **below** bare earth at 38 % of
+nodes, i.e. the result was inter-dataset noise, not objects. Pair a DTM and DSM from the same
+acquisition, at a resolution finer than what you are measuring.
 
 ### One reader, not per-source importers
 
@@ -141,6 +165,8 @@ provider's raster."** Not source × format.
 |---------|-------------------|--------------------------------------------------------------|
 | `nodes` | `ele DOUBLE`      | ground elevation, m (2 dp)                                   |
 | `edges` | `z_from` / `z_to` | DOUBLE — endpoint ground elevation, m (2 dp; bare terrain — no structure offset in v1) |
+| `nodes` | `ele_<name>`      | DOUBLE — a second surface from `--suffix <name>` (e.g. `ele_dsm`) |
+| `edges` | `z_from_<name>` / `z_to_<name>` | DOUBLE — the same surface at the edge endpoints |
 
 Geometry stays 2D. No 3D `LINESTRING Z` vertices in v1 — DuckDB spatial's Z support is thin and
 nothing consumes per-vertex z; endpoint scalars cover every current exporter.
