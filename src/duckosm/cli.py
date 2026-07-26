@@ -719,7 +719,10 @@ def opendrive(db, mode, crs, junctions, out):
               help='Mode schema(s) to enrich (default: every mode present in the db)')
 @click.option('--nodata-fill', type=float, default=0.0, show_default=True,
               help='Elevation written where the DEM has a void / does not cover the node')
-def elevation(db, dem, source, modes, nodata_fill):
+@click.option('--suffix', default='', metavar='NAME',
+              help="Store as a SECOND surface instead of overwriting: --suffix dsm writes "
+                   "ele_dsm / z_from_dsm / z_to_dsm. Object height = ele_dsm - ele.")
+def elevation(db, dem, source, modes, nodata_fill, suffix):
     """Sample a DEM at every node and add elevation to a built db, in place.
 
     Adds <mode>.nodes.ele and <mode>.edges.z_from/z_to, and records provenance in
@@ -729,6 +732,9 @@ def elevation(db, dem, source, modes, nodata_fill):
     inside Europe when OPENTOPOGRAPHY_API_KEY is set, else Copernicus GLO-30 (streamed
     from AWS, no auth, works anywhere). Re-runnable — a second pass overwrites. The db
     is modified in place. Needs `pip install duckosm[elevation]` (rasterio + pyproj).
+
+    --suffix keeps a second surface side by side, so a bare-earth DTM and a DSM can both
+    live in one db and `ele_dsm - ele` gives height above ground.
     See docs/design/elevation.md.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
@@ -737,11 +743,12 @@ def elevation(db, dem, source, modes, nodata_fill):
 
     try:
         res = to_elevation(db, dem=dem, source=source, modes=list(modes) or None,
-                           nodata_fill=nodata_fill)
+                           nodata_fill=nodata_fill, suffix=suffix)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"elevation added from {res['source']} — {res['n_nodes']} nodes "
-               f"({res['n_nodata']} nodata/fill) across {len(res['modes'])} mode(s)")
+               f"({res['n_nodata']} nodata/fill) across {len(res['modes'])} mode(s) "
+               f"-> {res['column']}")
 
 
 @main.command(name="matsim-lanes")

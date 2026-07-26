@@ -5,7 +5,12 @@ read-write and adds, in place,
 
   - ``<mode>.nodes.ele``            ground elevation (m) at each node
   - ``<mode>.edges.z_from/z_to``    endpoint ground elevation (m)
-  - ``main.elevation_metadata``     one-row provenance record
+  - ``main.elevation_metadata``     provenance, one row per elevation column
+
+``suffix="dsm"`` writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` instead of overwriting, so a
+bare-earth DTM and a surface model (buildings + canopy) live side by side and ``ele_dsm - ele`` is
+height above ground. Only meaningful when both come from one acquisition at a resolution that
+resolves the objects — see docs/design/elevation.md.
 
 Two ways to supply the DEM:
 
@@ -25,6 +30,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -276,19 +282,31 @@ def _db_bbox(con, modes):
     return (w, s, e, n)
 
 
-def _write_metadata(con, meta, nodata_fill, n_nodes, n_nodata):
+def _write_metadata(con, meta, nodata_fill, n_nodes, n_nodata, ele_column):
+    """One provenance row per elevation COLUMN, so a DTM and a DSM pass can coexist.
+
+    Upsert, not replace: re-sampling `ele` must not delete the `ele_dsm` row written by an
+    earlier run. Pre-suffix dbs have the table without `ele_column` — backfilled to 'ele'."""
     from duckosm import __version__
-    con.execute("""CREATE OR REPLACE TABLE main.elevation_metadata(
-        source VARCHAR, source_type VARCHAR, uri VARCHAR, resolution_m DOUBLE, product VARCHAR,
-        dem_crs VARCHAR, vertical_datum VARCHAR, license VARCHAR, nodata_fill DOUBLE,
-        n_nodes BIGINT, n_nodata BIGINT, sampled_at VARCHAR, duckosm_version VARCHAR)""")
-    con.execute("INSERT INTO main.elevation_metadata VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+    con.execute("""CREATE TABLE IF NOT EXISTS main.elevation_metadata(
+        ele_column VARCHAR, source VARCHAR, source_type VARCHAR, uri VARCHAR,
+        resolution_m DOUBLE, product VARCHAR, dem_crs VARCHAR, vertical_datum VARCHAR,
+        license VARCHAR, nodata_fill DOUBLE, n_nodes BIGINT, n_nodata BIGINT,
+        sampled_at VARCHAR, duckosm_version VARCHAR)""")
+    con.execute("ALTER TABLE main.elevation_metadata ADD COLUMN IF NOT EXISTS ele_column VARCHAR")
+    con.execute("UPDATE main.elevation_metadata SET ele_column = 'ele' WHERE ele_column IS NULL")
+    con.execute("DELETE FROM main.elevation_metadata WHERE ele_column = ?", [ele_column])
+    con.execute("""INSERT INTO main.elevation_metadata
+        (ele_column, source, source_type, uri, resolution_m, product, dem_crs, vertical_datum,
+         license, nodata_fill, n_nodes, n_nodata, sampled_at, duckosm_version)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
+        ele_column,
         meta["source"], meta["source_type"], meta["uri"], meta["resolution_m"], meta["product"],
         meta["dem_crs"], meta["vertical_datum"], meta["license"], float(nodata_fill),
         n_nodes, n_nodata, datetime.now(timezone.utc).isoformat(timespec="seconds"), __version__])
 
 
-def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0):
+def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix=""):
     """Add elevation to a built duckOSM db in place. Returns a stats dict.
 
     Args:
@@ -298,6 +316,10 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0):
             (``copernicus`` / ``eudtm``). Ignored when ``dem`` is given.
         modes: mode schema(s) to enrich (default: every mode present).
         nodata_fill: value written where the DEM has a void / doesn't cover the node.
+        suffix: name a SECOND elevation surface instead of overwriting the first — ``dsm``
+            writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` alongside the plain ``ele``.
+            Object height above ground is then ``ele_dsm - ele`` (needs a DTM in ``ele`` and
+            a DSM here, both at a resolution fine enough to resolve the objects).
     """
     _fix_polluted_proj()                                    # before any rasterio/pyproj CRS op
     try:
@@ -307,6 +329,13 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0):
     except ImportError as e:
         raise RuntimeError("elevation needs rasterio + pyproj — "
                            "pip install 'duckosm[elevation]'") from e
+
+    # the suffix is interpolated into DDL, so it must be an identifier, not arbitrary SQL
+    suffix = (suffix or "").strip().lstrip("_")
+    if suffix and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", suffix):
+        raise ValueError(f"--suffix must be a bare identifier (letters/digits/_), got {suffix!r}")
+    sfx = f"_{suffix}" if suffix else ""
+    ele_col, zf_col, zt_col = f"ele{sfx}", f"z_from{sfx}", f"z_to{sfx}"
 
     con = duckdb.connect(str(db))                           # read-write: enriches in place
     con.execute("INSTALL spatial; LOAD spatial;")
@@ -339,29 +368,29 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0):
             # ADD IF NOT EXISTS (not drop-then-add): DuckDB blocks DROP/ALTER-COLUMN on a table
             # that has any index, but ADD is allowed. The column is DOUBLE from the start, so a
             # fresh db is 2 dp-clean; a re-run keeps the DOUBLE column and just overwrites values.
-            con.execute(f"ALTER TABLE {m}.nodes ADD COLUMN IF NOT EXISTS ele DOUBLE")
+            con.execute(f"ALTER TABLE {m}.nodes ADD COLUMN IF NOT EXISTS {ele_col} DOUBLE")
             con.execute("CREATE OR REPLACE TEMP TABLE _ele(node_id BIGINT, ele DOUBLE)")
             # store to 2 dp (cm) — DEM accuracy is metre-scale, so more digits are false precision
             con.executemany("INSERT INTO _ele VALUES (?, ?)",
                             list(zip(ids, (round(float(e), 2) for e in eles))))
-            con.execute(f"UPDATE {m}.nodes n SET ele = "
+            con.execute(f"UPDATE {m}.nodes n SET {ele_col} = "
                         f"(SELECT ele FROM _ele t WHERE t.node_id = n.node_id)")
-            con.execute(f"ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS z_from DOUBLE")
-            con.execute(f"ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS z_to DOUBLE")
+            con.execute(f"ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS {zf_col} DOUBLE")
+            con.execute(f"ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS {zt_col} DOUBLE")
             con.execute(f"UPDATE {m}.edges e SET "
-                        f"z_from = (SELECT ele FROM {m}.nodes n WHERE n.node_id = e.source), "
-                        f"z_to   = (SELECT ele FROM {m}.nodes n WHERE n.node_id = e.target)")
+                        f"{zf_col} = (SELECT {ele_col} FROM {m}.nodes n WHERE n.node_id = e.source), "
+                        f"{zt_col} = (SELECT {ele_col} FROM {m}.nodes n WHERE n.node_id = e.target)")
 
             per_mode[m] = {"nodes": len(ids), "nodata": n_nd}
             total_nodes += len(ids)
             total_nodata += n_nd
-            logger.info(f"  [{m}] {len(ids)} nodes sampled ({n_nd} nodata/fill)")
+            logger.info(f"  [{m}] {len(ids)} nodes sampled ({n_nd} nodata/fill) -> {ele_col}")
 
-        _write_metadata(con, meta, nodata_fill, total_nodes, total_nodata)
+        _write_metadata(con, meta, nodata_fill, total_nodes, total_nodata, ele_col)
         con.execute("CHECKPOINT")
     finally:
         if closer is not None:
             closer()
         con.close()
-    return {"source": meta["source"], "modes": per_mode,
+    return {"source": meta["source"], "modes": per_mode, "column": ele_col,
             "n_nodes": total_nodes, "n_nodata": total_nodata}
