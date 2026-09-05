@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" width="100%" height="100%">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="duckGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF176"/>
+      <stop offset="50%" stop-color="#FFD54F"/>
+      <stop offset="100%" stop-color="#FF9800"/>
+    </linearGradient>
+
+    <linearGradient id="duckBeak" x1="0%" y1="0%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#FFCA28"/>
+      <stop offset="100%" stop-color="#F57C00"/>
+    </linearGradient>
+
+    <linearGradient id="routeCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE"/>
+      <stop offset="100%" stop-color="#4FACFE"/>
+    </linearGradient>
+
+    <linearGradient id="routeTeal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#05DFD7"/>
+      <stop offset="100%" stop-color="#00B4D8"/>
+    </linearGradient>
+
+    <linearGradient id="routeGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4EED97"/>
+      <stop offset="100%" stop-color="#06D6A0"/>
+    </linearGradient>
+
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F2FE"/>
+      <stop offset="100%" stop-color="#4EED97"/>
+    </linearGradient>
+
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A0E17"/>
+      <stop offset="50%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#070A10"/>
+    </linearGradient>
+
+    <!-- Node Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background Card with rounded corners -->
+  <rect width="800" height="240" rx="16" fill="url(#bgGrad)" stroke="#1E293B" stroke-width="1.5"/>
+
+  <!-- Subtle H3 / Grid Background Lines -->
+  <g opacity="0.08" stroke="#00F2FE" stroke-width="1" fill="none">
+    <polygon points="120,40 150,22 180,40 180,75 150,92 120,75"/>
+    <polygon points="60,75 90,57 120,75 120,110 90,127 60,110"/>
+    <polygon points="120,110 150,92 180,110 180,145 150,162 120,145"/>
+    <polygon points="180,75 210,57 240,75 240,110 210,127 180,110"/>
+    <polygon points="60,145 90,127 120,145 120,180 90,197 60,180"/>
+  </g>
+
+  <!-- Left Side: Network Duck Icon (Centered around x=125, y=120) -->
+  <g transform="translate(10, 0)">
+    <!-- Duck Body Silhouette Base (Subtle ambient glow) -->
+    <path d="M 75 140 C 65 110, 85 85, 120 75 C 130 50, 155 35, 180 45 C 195 52, 205 68, 200 85 C 220 100, 225 130, 205 155 C 185 180, 125 185, 85 165 Z"
+          fill="#00F2FE" opacity="0.04"/>
+
+    <!-- Duck Bill (Golden DuckDB accent) -->
+    <path d="M 192 68 L 245 74 C 248 75, 248 79, 244 82 L 195 94 Z" 
+          fill="url(#duckBeak)" stroke="#FFB300" stroke-width="1.5" stroke-linejoin="round"/>
+    <!-- Bill nostrils and detail -->
+    <circle cx="218" cy="77" r="1.5" fill="#B26A00"/>
+    <path d="M 195 82 L 235 81" stroke="#FF8F00" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Duck Eye (Waypoint Node) -->
+    <circle cx="172" cy="62" r="5" fill="#0A0E17" stroke="#FFF" stroke-width="2"/>
+    <circle cx="172" cy="62" r="2.5" fill="#00F2FE"/>
+
+    <!-- Road Network Edges / Routing Graph (Body & Head) -->
+    <!-- Head & Neck graph lines -->
+    <path d="M 150 50 L 172 62 L 190 70 L 175 92 L 145 80 Z" 
+          fill="none" stroke="url(#routeCyan)" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M 150 50 L 135 72 L 145 80 L 140 108" 
+          fill="none" stroke="url(#routeCyan)" stroke-width="2"/>
+    <path d="M 175 92 L 170 120 L 140 108" 
+          fill="none" stroke="url(#routeTeal)" stroke-width="2.5"/>
+
+    <!-- Main Highway Arteries / Graph Edges in Body -->
+    <path d="M 140 108 L 105 125 L 85 150 L 115 168 L 155 165 L 188 145 L 195 115 L 170 120" 
+          fill="none" stroke="url(#routeTeal)" stroke-width="2.5" stroke-linejoin="round"/>
+
+    <!-- Express Route / Shortcut (Highlighting DuckDB speed) -->
+    <path d="M 85 150 L 125 138 L 165 142 L 195 115" 
+          fill="none" stroke="url(#duckGold)" stroke-width="3" stroke-linecap="round" stroke-dasharray="8 3" filter="url(#glow)"/>
+
+    <!-- Cross connectors / Local streets -->
+    <path d="M 105 125 L 125 138 L 115 168" fill="none" stroke="url(#routeGreen)" stroke-width="1.8"/>
+    <path d="M 140 108 L 125 138 L 155 165" fill="none" stroke="url(#routeCyan)" stroke-width="1.8"/>
+    <path d="M 170 120 L 165 142 L 155 165" fill="none" stroke="url(#routeGreen)" stroke-width="1.8"/>
+    <path d="M 170 120 L 188 145" fill="none" stroke="url(#routeCyan)" stroke-width="1.8"/>
+
+    <!-- Duck Tail Feathers (Vector flow paths) -->
+    <path d="M 85 150 L 52 142 C 50 141, 52 138, 55 138 L 78 139" fill="none" stroke="url(#routeCyan)" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M 75 155 L 45 152 C 43 151, 45 147, 48 148 L 72 153" fill="none" stroke="url(#routeTeal)" stroke-width="2" stroke-linecap="round"/>
+    <path d="M 72 163 L 55 166 C 53 166, 54 162, 57 161 L 85 165" fill="none" stroke="url(#routeGreen)" stroke-width="1.8" stroke-linecap="round"/>
+
+    <!-- Directional Routing Arrowheads -->
+    <polygon points="120,136 128,138 122,143" fill="#FFD54F"/>
+    <polygon points="175,128 182,124 180,133" fill="#FFD54F"/>
+
+    <!-- Graph Nodes (Junctions / Vertices) with glowing rings -->
+    <circle cx="150" cy="50" r="3.5" fill="#FFF" filter="url(#glow)"/>
+    <circle cx="135" cy="72" r="3" fill="#00F2FE"/>
+    <circle cx="145" cy="80" r="3" fill="#06D6A0"/>
+    <circle cx="175" cy="92" r="3.5" fill="#00F2FE"/>
+    <circle cx="140" cy="108" r="4" fill="#FFD54F" filter="url(#glow)"/>
+    <circle cx="170" cy="120" r="4" fill="#00F2FE" filter="url(#glow)"/>
+    <circle cx="195" cy="115" r="3.5" fill="#4EED97"/>
+    <circle cx="105" cy="125" r="3.5" fill="#00F2FE"/>
+    <circle cx="125" cy="138" r="4.5" fill="#FFC107" filter="url(#glow)"/>
+    <circle cx="165" cy="142" r="4" fill="#FFD54F" filter="url(#glow)"/>
+    <circle cx="188" cy="145" r="3" fill="#00F2FE"/>
+    <circle cx="85" cy="150" r="4" fill="#06D6A0" filter="url(#glow)"/>
+    <circle cx="115" cy="168" r="3.5" fill="#00F2FE"/>
+    <circle cx="155" cy="165" r="3.5" fill="#4EED97"/>
+  </g>
+
+  <!-- Right Side: Brand Typography & Tech Badges -->
+  <g transform="translate(290, 52)">
+    <!-- Main Title: duckOSM -->
+    <text x="0" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="54" font-weight="800" letter-spacing="-1">
+      <tspan fill="#F8FAFC">duck</tspan>
+      <tspan fill="url(#textGrad)">OSM</tspan>
+    </text>
+
+    <!-- Subtitle / Tagline -->
+    <text x="2" y="92" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="15.5" font-weight="500" fill="#94A3B8" letter-spacing="0.2">
+      High-performance OSM to routing network converter
+    </text>
+
+    <!-- Badges / Tech Highlights Pill Row -->
+    <g transform="translate(2, 114)">
+      <!-- Badge 1: DuckDB Powered -->
+      <g transform="translate(0, 0)">
+        <rect width="105" height="26" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+        <circle cx="14" cy="13" r="4.5" fill="#FFD54F"/>
+        <text x="25" y="17" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5" font-weight="600" fill="#E2E8F0">DuckDB</text>
+      </g>
+
+      <!-- Badge 2: OpenStreetMap -->
+      <g transform="translate(113, 0)">
+        <rect width="130" height="26" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+        <circle cx="14" cy="13" r="4.5" fill="#06D6A0"/>
+        <text x="25" y="17" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5" font-weight="600" fill="#E2E8F0">OpenStreetMap</text>
+      </g>
+
+      <!-- Badge 3: H3 Spatial -->
+      <g transform="translate(251, 0)">
+        <rect width="90" height="26" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+        <circle cx="14" cy="13" r="4.5" fill="#00F2FE"/>
+        <text x="25" y="17" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5" font-weight="600" fill="#E2E8F0">H3 Index</text>
+      </g>
+
+      <!-- Badge 4: Fast Graph -->
+      <g transform="translate(349, 0)">
+        <rect width="100" height="26" rx="6" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+        <circle cx="14" cy="13" r="4.5" fill="#FF70A6"/>
+        <text x="25" y="17" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5" font-weight="600" fill="#E2E8F0">Fast Graph</text>
+      </g>
+    </g>
+  </g>
+</svg>

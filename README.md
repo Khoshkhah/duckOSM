@@ -1,6 +1,6 @@
-# duckOSM
-
-High-performance OSM-to-routing-network converter built on DuckDB.
+<p align="center">
+  <img src="images/duckosm-banner.svg" alt="duckOSM — high-performance OSM to routing network converter built on DuckDB" width="800">
+</p>
 
 ## Features
 
