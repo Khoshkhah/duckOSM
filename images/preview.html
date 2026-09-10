@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>duckOSM Brand & Logo Showcase</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #090D16;
+      --card-dark: #111827;
+      --border-dark: #1F2937;
+      --text-main: #F9FAFB;
+      --text-muted: #9CA3AF;
+      --accent-gold: #F59E0B;
+      --accent-cyan: #06B6D4;
+      --accent-teal: #10B981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-main);
+      line-height: 1.6;
+      padding: 40px 24px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(6, 182, 212, 0.12);
+      color: #38BDF8;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: 2.8rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+      background: linear-gradient(135deg, #FFF 40%, #38BDF8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 1.15rem;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 28px;
+      margin-bottom: 40px;
+    }
+
+    .card {
+      background: var(--card-dark);
+      border: 1px solid var(--border-dark);
+      border-radius: 20px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .card:hover {
+      border-color: rgba(56, 189, 248, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .card-preview {
+      background: #0D1117;
+      padding: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 280px;
+      position: relative;
+    }
+
+    .card-preview.light-bg {
+      background: #F8FAFC;
+    }
+
+    .card-preview img {
+      max-width: 100%;
+      max-height: 240px;
+      object-fit: contain;
+      border-radius: 12px;
+    }
+
+    .card-body {
+      padding: 24px;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .format-tag {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: #1F2937;
+      color: #94A3B8;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .card-desc {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 18px;
+      flex-grow: 1;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border-radius: 10px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #0284C7;
+      color: #FFF;
+      flex: 1;
+    }
+
+    .btn-primary:hover {
+      background: #0369A1;
+    }
+
+    .full-width-card {
+      grid-column: 1 / -1;
+    }
+
+    .code-block {
+      background: #0A0E17;
+      border: 1px solid #1E293B;
+      border-radius: 12px;
+      padding: 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88rem;
+      color: #E2E8F0;
+      overflow-x: auto;
+      margin-top: 16px;
+    }
+
+    .avatar-preview-box {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .github-avatar-circle {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 3px solid #38BDF8;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+    }
+
+    .github-avatar-circle img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .github-avatar-square {
+      width: 110px;
+      height: 110px;
+      border-radius: 24px;
+      overflow: hidden;
+      border: 2px solid #334155;
+    }
+
+    .github-avatar-square img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge">Open Source Branding</div>
+      <h1>duckOSM Logo Suite</h1>
+      <p class="subtitle">High-performance OSM-to-routing-network converter built on DuckDB. Designed for GitHub READMEs, social previews, docs, and avatars.</p>
+    </header>
+
+    <div class="grid">
+      <!-- Banner Card (Full Width) -->
+      <div class="card full-width-card">
+        <div class="card-preview">
+          <img src="duckosm-banner.svg" alt="duckOSM Banner SVG" style="width: 100%; max-height: 240px;">
+        </div>
+        <div class="card-body">
+          <div class="card-title">
+            <span>README Header Banner</span>
+            <span class="format-tag">SVG (Scalable Vector)</span>
+          </div>
+          <p class="card-desc">Perfect for placing at the top of your GitHub repository <code>README.md</code>. Crisp vector scaling, embedded typography, technology badges (DuckDB, OpenStreetMap, H3 Index, Fast Graph), and dark-mode aesthetic.</p>
+          <div class="btn-row">
+            <a href="duckosm-banner.svg" download class="btn btn-primary">Download Banner SVG</a>
+          </div>
+          <div class="code-block">
+&lt;p align="center"&gt;
+  &lt;img src="assets/duckosm-banner.svg" alt="duckOSM Banner" width="100%" /&gt;
+&lt;/p&gt;
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Illustrated Master Artwork -->
+      <div class="card">
+        <div class="card-preview">
+          <img src="duckosm-logo.jpg" alt="duckOSM AI Master Artwork">
+        </div>
+        <div class="card-body">
+          <div class="card-title">
+            <span>Master Illustrated Logo</span>
+            <span class="format-tag">1024x1024 High-Res</span>
+          </div>
+          <p class="card-desc">Intricate concept artwork featuring a geometric duck body woven from OpenStreetMap road networks, direction vectors, topology contours, and a vibrant DuckDB yellow beak.</p>
+          <div class="btn-row">
+            <a href="duckosm-logo.png" download class="btn btn-primary">Download PNG</a>
+            <a href="duckosm-logo.jpg" download class="btn btn-primary" style="background:#334155;">Download JPG</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- App Icon / Repo Avatar -->
+      <div class="card">
+        <div class="card-preview">
+          <div class="avatar-preview-box">
+            <div class="github-avatar-circle" title="Simulated GitHub Profile / Organization Avatar">
+              <img src="duckosm-icon.svg" alt="GitHub Circular Avatar">
+            </div>
+            <div class="github-avatar-square" title="Simulated App / Package Icon">
+              <img src="duckosm-icon.svg" alt="Square App Icon">
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-title">
+            <span>Repo Avatar & App Icon</span>
+            <span class="format-tag">SVG / 512x512</span>
+          </div>
+          <p class="card-desc">Optimized for small sizes like GitHub repo icons, social cards, browser favicons, and Streamlit app icons. Includes subtle H3 spatial grid background.</p>
+          <div class="btn-row">
+            <a href="duckosm-icon.svg" download class="btn btn-primary">Download Icon SVG</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transparent Vector Mark -->
+      <div class="card">
+        <div class="card-preview" style="background: radial-gradient(circle, #1E293B 0%, #0F172A 100%);">
+          <img src="duckosm-mark.svg" alt="duckOSM Transparent Mark">
+        </div>
+        <div class="card-body">
+          <div class="card-title">
+            <span>Transparent Logo Mark</span>
+            <span class="format-tag">SVG (No Background)</span>
+          </div>
+          <p class="card-desc">Clean vector mascot mark with no background card. Seamlessly overlays on documentation sites (MkDocs, Docusaurus), slide decks, diagrams, and stickers.</p>
+          <div class="btn-row">
+            <a href="duckosm-mark.svg" download class="btn btn-primary">Download Mark SVG</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

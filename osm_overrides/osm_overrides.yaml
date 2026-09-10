@@ -23,9 +23,13 @@ overrides:
     oneway: true
     note: "Hökens Gata missing oneway; adjacent segment 676781760 is oneway=yes"
 
-  - osm_id: 233761079        # Katarina Bangata — missing oneway (known_osm_issues #2, CONFIRMED)
-    oneway: true
-    note: "56 sibling Katarina Bangata segments are oneway=yes; this one just omits the tag (Overpass, 2026-07)"
+  # REMOVED 2026-09-10: way 233761079 (Katarina Bangata) was forced oneway: true on the note that
+  # "56 sibling segments are oneway=yes; this one just omits the tag". That evidence does not hold.
+  # OSM carries no oneway tag on it, and Overture (record w233761079@6) has no access restriction
+  # either - both say TWO-WAY. Overture's 22 Katarina Bangata segments are 11 two-way and 11
+  # one-way, so the street is not uniformly one-way and there was no omission to repair. Kaveh
+  # confirmed on the ground that this stretch is two-way. Dropping the rule restores the reverse
+  # edge; without it the junction at node 1392932069 had 8 veh/h arriving and 360 leaving.
 
   # --- Vancouver ---
   - osm_id: 507979055        # Trans-Canada WB @ Second Narrows — lanes undercount (known_osm_issues #3)
@@ -47,6 +51,15 @@ overrides:
 #   no_straight_on|only_*, default no_u_turn) · note
 # Takes effect on the next driving rebuild (RestrictionProcessor runs it, then the edge graph drops it).
 turn_restrictions:
+  # --- Södermalm ---
+  - from_way: 1422121352     # Katarina Bangata: no left turn at node 1392932069
+    via_node: 1392932069
+    to_way: 1278310886
+    restriction: no_left_turn
+    note: "OSM lacks the restriction; the 149-degree left off Katarina Bangata onto its opposing
+      carriageway is forbidden on the ground (Kaveh, 2026-09-10). Without it duckOSM allowed the
+      movement and 180 veh/h could only reach the eastbound edge through it."
+
   # --- Tartu ---
   - from_way: 1307524008     # no U-turn onto the opposing Tähe carriageway (known_osm_issues #6)
     via_node: 330045016

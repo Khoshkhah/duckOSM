@@ -67,18 +67,37 @@ Gata result, which stays two-way because residential roads are correctly two-way
 | **Area** | Södermalm (`pbf/sodermalm_pbf.osm.pbf`) |
 | **OSM way** | `233761079` (`highway=residential`, `name=Katarina Bangata`) |
 | **Edges** | `224569842445438623` (forward) + `8329252562982974380` (reverse twin) |
-| **Status** | **CONFIRMED OSM error** — the street is one-way (56 sibling segments tagged `oneway=yes`); way `233761079` just omits the tag. Local override **enabled** in `osm_overrides.yaml`. |
+| **Status** | **WITHDRAWN 2026-09-10** — the override was wrong and is removed. This stretch is **two-way**; OSM is right to omit the tag. |
 
 Same class as #1. The raw way `233761079` carries **no `oneway` tag** and no `junction=roundabout`
 (full tags: `highway=residential`, `lit=yes`, `maxspeed=30`, `name=Katarina Bangata`,
 `parking:both=no`, `parking:both:restriction=no_parking`, `surface=asphalt`, `wikidata=Q1692894`,
 `wikipedia=sv:Katarina Bangata`), so duckOSM correctly defaults it to **two-way** — faithful to the input.
 
-**Confirmed (it IS one-way).** An Overpass query for every way `name="Katarina Bangata"` (verified via
-live OSM, 2026-07) returns **56 residential segments tagged `oneway=yes`** and only a few untagged —
-`233761079` among them. All oneway values are `yes` (none `-1`), i.e. digitisation-forward. So the
-street is one-way and this segment is simply **missing the tag** — exactly the #1 pattern, not a
-duckOSM bug.
+**Withdrawn — the street is NOT uniformly one-way.** The 2026-07 Overpass count of "56 segments
+tagged `oneway=yes`" was taken across every way named *Katarina Bangata*, and read as proof that the
+untagged ones were omissions. Checked against two sources on 2026-09-10:
+
+| source | way `233761079` |
+| --- | --- |
+| OSM raw tags (this extract) | no `oneway` — two-way |
+| Overture Maps (`w233761079@6`) | `access_restrictions` NULL — two-way |
+
+And Overture's 22 Katarina Bangata segments split **11 two-way / 11 one-way**, so the street changes
+character along its length rather than being one-way with a few tags missing. Kaveh confirmed on the
+ground that this stretch is two-way.
+
+**What the wrong override cost.** `oneway: true` is *topological* — it suppresses the reverse twin.
+With the reverse edge gone, node `1392932069` had 8 veh/h arriving and 360 leaving in the Södermalm
+flow-map priors: a 45x conservation break that looked like a matching error and was not one. The
+lesson is in the file's own warning, which was already there: *"an unverified `oneway` flip silently
+drops the reverse edge."* Here it was flipped on evidence that had not been checked against the
+individual way.
+
+**A related gap.** `oneway` in the rules file is a **bool**, so it can only mean "one-way along the
+way's digitisation". OSM itself distinguishes `oneway=yes` from `oneway=-1`, and `road_filter.py`
+already reads both. A rule cannot currently express "one-way against the node order", so any street
+that needs that correction cannot be fixed here at all.
 
 **Fix.** Add `oneway=yes` to way `233761079` in OpenStreetMap (benefits every consumer), or — as now
 applied — a local override (`osm_id: 233761079, oneway: true`) in `osm_overrides.yaml`.
