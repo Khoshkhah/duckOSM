@@ -85,7 +85,9 @@ untagged ones were omissions. Checked against two sources on 2026-09-10:
 
 And Overture's 22 Katarina Bangata segments split **11 two-way / 11 one-way**, so the street changes
 character along its length rather than being one-way with a few tags missing. Kaveh confirmed on the
-ground that this stretch is two-way.
+ground that this stretch is two-way. The 149-degree left at node `1392932069` is also banned on the
+ground, but no restriction override was added: with the reverse edge restored the movement is an
+ordinary turn between two directions of the same street, and it is not what broke conservation.
 
 **What the wrong override cost.** `oneway: true` is *topological* — it suppresses the reverse twin.
 With the reverse edge gone, node `1392932069` had 8 veh/h arriving and 360 leaving in the Södermalm

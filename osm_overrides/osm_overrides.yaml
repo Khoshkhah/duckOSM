@@ -51,15 +51,6 @@ overrides:
 #   no_straight_on|only_*, default no_u_turn) · note
 # Takes effect on the next driving rebuild (RestrictionProcessor runs it, then the edge graph drops it).
 turn_restrictions:
-  # --- Södermalm ---
-  - from_way: 1422121352     # Katarina Bangata: no left turn at node 1392932069
-    via_node: 1392932069
-    to_way: 1278310886
-    restriction: no_left_turn
-    note: "OSM lacks the restriction; the 149-degree left off Katarina Bangata onto its opposing
-      carriageway is forbidden on the ground (Kaveh, 2026-09-10). Without it duckOSM allowed the
-      movement and 180 veh/h could only reach the eastbound edge through it."
-
   # --- Tartu ---
   - from_way: 1307524008     # no U-turn onto the opposing Tähe carriageway (known_osm_issues #6)
     via_node: 330045016
