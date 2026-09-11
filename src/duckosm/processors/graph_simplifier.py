@@ -158,7 +158,7 @@ class GraphSimplifier(BaseProcessor):
                 d.osm_id || '#' || COALESCE(ff.seq, fr.seq)
                     || (CASE WHEN d.is_reverse THEN 'r' ELSE 'f' END) AS edge_ref,
                 d.source, d.target, d.osm_id, d.highway, d.name, d.maxspeed, d.oneway, d.lanes,
-                d.surface, d.junction, d.layer, d.bridge, d.tunnel, d.service, d.refs, d.geometry,
+                d.surface, d.access, d.junction, d.layer, d.bridge, d.tunnel, d.service, d.refs, d.geometry,
                 d.is_reverse, d.length_m
             FROM deduped d
             LEFT JOIN fseq ff ON NOT d.is_reverse
@@ -351,6 +351,7 @@ class GraphSimplifier(BaseProcessor):
                 w.oneway,
                 w.lanes_fwd AS lanes,
                 w.surface,
+                w.access,
                 w.junction,
                 w.layer,
                 w.bridge,
@@ -406,6 +407,7 @@ class GraphSimplifier(BaseProcessor):
                     oneway,
                     lanes,
                     surface,
+                    access,
                     junction,
                     layer,
                     bridge,
@@ -444,6 +446,7 @@ class GraphSimplifier(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                access,
                 junction,
                 layer,
                 bridge,
@@ -469,6 +472,7 @@ class GraphSimplifier(BaseProcessor):
                 oneway,
                 lanes,
                 surface,
+                access,
                 junction,
                 layer,
                 bridge,
@@ -498,11 +502,13 @@ class GraphSimplifier(BaseProcessor):
         self.execute("""
             CREATE TABLE simplified_edges_forward_new AS
             SELECT edge_id, source, target, osm_id, highway, name, maxspeed, oneway, lanes, surface,
+                   access,
                    junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
             FROM simplified_edges_forward
             WHERE source != target
             UNION ALL
             SELECT edge_id, source, target, osm_id, highway, name, maxspeed, oneway, lanes, surface,
+                   access,
                    junction, layer, bridge, tunnel, service, refs, ST_GeomFromText(geometry_text) AS geometry, is_reverse, length_m
             FROM split_loops
             WHERE geometry_text IS NOT NULL
@@ -605,7 +611,7 @@ class GraphSimplifier(BaseProcessor):
                   AND ST_NPoints(ST_RemoveRepeatedPoints(e.geometry)) >= 2
             )
             SELECT source, vnid AS target, osm_id, highway, name, maxspeed, oneway, lanes,
-                   surface, junction, layer, bridge, tunnel, service,
+                   surface, access, junction, layer, bridge, tunnel, service,
                    refs[1 : len(refs) / 2 + 1] AS refs,
                    ST_AsText(ST_LineSubstring(geometry, 0, 0.5)) AS gtext,
                    FALSE AS is_reverse, length_m / 2 AS length_m,
@@ -613,7 +619,7 @@ class GraphSimplifier(BaseProcessor):
             FROM tosplit
             UNION ALL
             SELECT vnid AS source, target, osm_id, highway, name, maxspeed, oneway, lanes,
-                   surface, junction, layer, bridge, tunnel, service,
+                   surface, access, junction, layer, bridge, tunnel, service,
                    refs[len(refs) / 2 + 1 : ] AS refs,
                    ST_AsText(ST_LineSubstring(geometry, 0.5, 1)) AS gtext,
                    FALSE AS is_reverse, length_m / 2 AS length_m,
@@ -627,12 +633,12 @@ class GraphSimplifier(BaseProcessor):
             SELECT (row_number() OVER ())::INTEGER AS edge_id, *
             FROM (
                 SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
-                       surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
+                       surface, access, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
                 FROM simplified_edges_forward
                 WHERE edge_id NOT IN (SELECT edge_id FROM _split_sel)
                 UNION ALL
                 SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
-                       surface, junction, layer, bridge, tunnel, service, refs,
+                       surface, access, junction, layer, bridge, tunnel, service, refs,
                        ST_GeomFromText(gtext) AS geometry, is_reverse, length_m
                 FROM _ap_split
                 WHERE gtext IS NOT NULL AND ST_NPoints(ST_GeomFromText(gtext)) >= 2
@@ -675,11 +681,11 @@ class GraphSimplifier(BaseProcessor):
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _inc AS
             SELECT edge_id, source AS node, target AS other, refs, TRUE  AS fwd,
-                   highway, name, oneway, maxspeed, lanes, surface, junction, layer, bridge, tunnel, service
+                   highway, name, oneway, maxspeed, lanes, surface, access, junction, layer, bridge, tunnel, service
             FROM simplified_edges_forward
             UNION ALL
             SELECT edge_id, target AS node, source AS other, refs, FALSE AS fwd,
-                   highway, name, oneway, maxspeed, lanes, surface, junction, layer, bridge, tunnel, service
+                   highway, name, oneway, maxspeed, lanes, surface, access, junction, layer, bridge, tunnel, service
             FROM simplified_edges_forward
         """)
         # Contraction nodes: degree-2, real, and the two edges identical on every attribute
@@ -708,6 +714,8 @@ class GraphSimplifier(BaseProcessor):
                AND count(DISTINCT coalesce(maxspeed, chr(1))) = 1
                AND count(DISTINCT coalesce(CAST(lanes AS VARCHAR), chr(1))) = 1
                AND count(DISTINCT coalesce(surface, chr(1))) = 1
+               -- a bus-only carriageway must never merge into a public one
+               AND count(DISTINCT coalesce(access, chr(1))) = 1
                AND count(DISTINCT coalesce(junction, chr(1))) = 1
                AND count(DISTINCT coalesce(layer, chr(1))) = 1
                AND count(DISTINCT coalesce(bridge, chr(1))) = 1
@@ -772,7 +780,7 @@ class GraphSimplifier(BaseProcessor):
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _cmeta AS
             SELECT c.cid, c.source, c.target, c.refs_acc, e.osm_id,
-                   e.highway, e.name, e.maxspeed, e.oneway, e.lanes, e.surface, e.junction,
+                   e.highway, e.name, e.maxspeed, e.oneway, e.lanes, e.surface, e.access, e.junction,
                    e.layer, e.bridge, e.tunnel, e.service
             FROM _chains c
             JOIN simplified_edges_forward e ON e.edge_id = c.edge_set[1]
@@ -792,7 +800,7 @@ class GraphSimplifier(BaseProcessor):
             )
             SELECT
                 a.source, a.target, a.osm_id, a.highway, a.name, a.maxspeed, a.oneway,
-                a.lanes, a.surface, a.junction, a.layer, a.bridge, a.tunnel, a.service, a.refs_acc AS refs,
+                a.lanes, a.surface, a.access, a.junction, a.layer, a.bridge, a.tunnel, a.service, a.refs_acc AS refs,
                 ST_GeomFromText('LINESTRING(' || list_aggregate(
                     list_transform(range(1, len(c.lons) + 1), i -> c.lons[i] || ' ' || c.lats[i]),
                     'string_agg', ', ') || ')') AS geometry,
@@ -838,10 +846,10 @@ class GraphSimplifier(BaseProcessor):
             SELECT (row_number() OVER ())::INTEGER AS edge_id, *
             FROM (
                 SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
-                       surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m FROM _merged
+                       surface, access, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m FROM _merged
                 UNION ALL
                 SELECT source, target, osm_id, highway, name, maxspeed, oneway, lanes,
-                       surface, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
+                       surface, access, junction, layer, bridge, tunnel, service, refs, geometry, is_reverse, length_m
                 FROM simplified_edges_forward
                 WHERE edge_id NOT IN (SELECT UNNEST(edge_set) FROM _chains)
             )
@@ -885,6 +893,7 @@ class GraphSimplifier(BaseProcessor):
                 -- Reverse edge carries the backward lane count.
                 w.lanes_bwd AS lanes,
                 sef.surface,
+                sef.access,
                 sef.junction,
                 sef.layer,
                 sef.bridge,

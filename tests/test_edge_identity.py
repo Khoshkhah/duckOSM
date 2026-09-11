@@ -32,13 +32,13 @@ def _build(ways, nodes):
     con.execute("CREATE TABLE raw.ways(osm_id BIGINT, refs BIGINT[])")
     con.execute("""CREATE TABLE ways(osm_id BIGINT, highway VARCHAR, name VARCHAR,
         maxspeed VARCHAR, oneway BOOLEAN, lanes_fwd INTEGER, lanes_bwd INTEGER,
-        surface VARCHAR, junction VARCHAR, layer VARCHAR, bridge VARCHAR, tunnel VARCHAR,
-        service VARCHAR)""")
+        surface VARCHAR, access VARCHAR, junction VARCHAR, layer VARCHAR, bridge VARCHAR,
+        tunnel VARCHAR, service VARCHAR)""")
     con.execute("CREATE TABLE way_nodes(way_id BIGINT, node_id BIGINT, seq INTEGER)")
     for osm_id, highway, oneway, refs in ways:
         con.execute("INSERT INTO raw.ways VALUES (?, ?)", [osm_id, refs])
         con.execute("INSERT INTO ways VALUES (?, ?, NULL, NULL, ?, 1, 1, NULL, NULL, "
-                    "NULL, NULL, NULL, NULL)", [osm_id, highway, oneway])
+                    "NULL, NULL, NULL, NULL, NULL)", [osm_id, highway, oneway])
         con.executemany("INSERT INTO way_nodes VALUES (?, ?, ?)",
                         [(osm_id, n, i) for i, n in enumerate(refs)])
     # dummy tables the simplifier finalization replaces
@@ -202,8 +202,8 @@ def test_path_connector_synthetic_ids():
     con.execute("INSTALL spatial; LOAD spatial;")
     con.execute("""CREATE TABLE edges(edge_id BIGINT, edge_ref VARCHAR, source BIGINT,
         target BIGINT, osm_id BIGINT, highway VARCHAR, name VARCHAR, oneway BOOLEAN,
-        lanes INTEGER, surface VARCHAR, junction VARCHAR, layer VARCHAR, bridge VARCHAR,
-        tunnel VARCHAR, service VARCHAR, refs BIGINT[], geometry GEOMETRY,
+        lanes INTEGER, surface VARCHAR, access VARCHAR, junction VARCHAR, layer VARCHAR,
+        bridge VARCHAR, tunnel VARCHAR, service VARCHAR, refs BIGINT[], geometry GEOMETRY,
         is_reverse BOOLEAN, length_m DOUBLE)""")
     con.execute("CREATE TABLE nodes(node_id BIGINT, geom GEOMETRY)")
     pts = {71: (0.0, 0.0), 72: (0.0002, 0.0),                  # road
@@ -218,7 +218,7 @@ def test_path_connector_synthetic_ids():
             (3, "800#1f", 81, 82, 800, "footway", False),
             (4, "800#1r", 82, 81, 800, "footway", True)]:
         con.execute(f"""INSERT INTO edges VALUES ({eid}, '{ref}', {s}, {t}, {o}, '{hw}',
-            NULL, FALSE, NULL, NULL, NULL, NULL, NULL, NULL, NULL, [{s}, {t}],
+            NULL, FALSE, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, [{s}, {t}],
             {line(s, t)}, {rev}, 20)""")
     PathConnector(con, snap_m=10.0).run()
 

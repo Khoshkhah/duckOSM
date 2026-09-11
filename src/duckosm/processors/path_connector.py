@@ -90,7 +90,7 @@ class PathConnector(BaseProcessor):
         self.con.executemany("INSERT INTO _pairs VALUES (?, ?, ?, ?, ?)", pairs)
         self.execute("""
             INSERT INTO edges (edge_id, edge_ref, source, target, osm_id, highway, name, oneway, lanes,
-                               surface, junction, layer, bridge, tunnel, service, refs,
+                               surface, access, junction, layer, bridge, tunnel, service, refs,
                                geometry, is_reverse, length_m)
             WITH base AS (
                 SELECT p.source, p.target, p.highway, p.length_m, p.osm_id, sn.geom AS sgeom, tn.geom AS tgeom
@@ -108,8 +108,11 @@ class PathConnector(BaseProcessor):
                        || dense_rank() OVER (PARTITION BY osm_id
                                              ORDER BY least(source, target), greatest(source, target))
                        || (CASE WHEN is_reverse THEN 'r' ELSE 'f' END) AS edge_ref,
+                   -- name, oneway, lanes, surface, access, junction, layer, bridge, tunnel,
+                   -- service: a snap connector has none of them. Positional, so this list must
+                   -- stay the same length as the column list above.
                    source, target, osm_id, highway, NULL, FALSE, NULL,
-                   NULL, NULL, NULL, NULL, NULL, NULL, [source, target]::BIGINT[],
+                   NULL, NULL, NULL, NULL, NULL, NULL, NULL, [source, target]::BIGINT[],
                    ST_MakeLine(sgeom, tgeom), is_reverse, length_m
             FROM dir
         """)

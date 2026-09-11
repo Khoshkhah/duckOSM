@@ -34,6 +34,7 @@ class GraphBuilder(BaseProcessor):
                     w.oneway,
                     w.lanes_fwd,
                     w.surface,
+                    w.access,
                     w.junction,
                     w.refs[1] AS source,
                     w.refs[len(w.refs)] AS target,
@@ -53,6 +54,7 @@ class GraphBuilder(BaseProcessor):
                 oneway,
                 lanes_fwd AS lanes,
                 surface,
+                access,
                 junction,
                 node_count,
                 -- Haversine distance in meters
@@ -95,6 +97,7 @@ class GraphBuilder(BaseProcessor):
                 -- Reverse edge carries the backward lane count.
                 w.lanes_bwd AS lanes,
                 e.surface,
+                e.access,
                 e.junction,
                 e.node_count,
                 e.length_m,
