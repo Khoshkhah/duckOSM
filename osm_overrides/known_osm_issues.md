@@ -219,3 +219,28 @@ lane-connectivity view as an extra "outgoing" from that lane.)
 turn-restriction override in `osm_overrides.yaml` (mechanism in
 `docs/design/turn-restriction-overrides.md`). Verified against the movement / edge-graph tables: the
 `thru` movement is correct and untouched; only the U-turn is spurious.
+
+## 7. Katarina Västra Kyrkogata — missing `oneway` tag on way 120860763 (rendered two-way)
+
+| field | value |
+| --- | --- |
+| **Area** | Södermalm (`config/sodermalm.yaml`) |
+| **OSM way** | `120860763` (`highway=residential`, `name=Katarina Västra Kyrkogata`) |
+| **Edges** | `8889359159650646290` (forward, `1354121015 → 194903`) + `6435483818528014804` (reverse twin, `194903 → 1354121015`) |
+| **Status** | **CONFIRMED OSM error** — override **enabled** (`osm_overrides.yaml`); takes effect on the next Södermalm rebuild |
+
+Found 2026-09-27 from SonoFlow's Model Explorer: the reverse twin `6435483818528014804` had no
+turning movement at all - its only way on at node `1354121015` was a U-turn back onto itself.
+At that node the street continues as way `1280759567` (same name, **`oneway=yes`**), which runs
+`11888148255 → 1354121015` INTO the node, and the traffic goes on along `120860763` forward. So the
+street is one-way end to end; `120860763` carries only `highway, name, maxspeed=30, lit, surface`
+and no `oneway`, and the OSM default made it two-way. The reverse twin runs against the one-way.
+
+**Other candidates, NOT verified - keep them out of the rules until checked on the ground.** In
+SonoFlow's Södermalm network, 12 of the 28 edges with no turning movement end where a one-way way
+begins or ends (same pattern): ways `24488730` Timmermansgatan, `1197353428` Maria Prästgårdsgata,
+`1281907887` Tjurbergsgatan, `388628833` Pustegränd, `1280486052` Hökens Gata (a second piece;
+`4392632`, issue #1, is already fixed), `1280486031` Peter Myndes Backe, `1280522019` Kapellgränd,
+`24682324` Hornsgatan, `140726414` Bohusgatan (issue #4), `525976008` and `821371670` (service).
+Some may be genuine two-way ends.
+
