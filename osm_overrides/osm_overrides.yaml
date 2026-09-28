@@ -36,13 +36,12 @@ overrides:
     oneway: true
     note: "continues the same-name oneway=yes way 151083837 in its own direction; its reverse twin dead-ended in a U-turn"
 
-  - osm_id: 1422725593       # Noe Arksfaret exit ramp (tunnel) — not drivable (known_osm_issues #8)
-    exclude_modes: [driving]
-    note: "highway=service tunnel=yes oneway=yes, no access tag; Street View shows the tunnel part is not drivable (Kaveh, 2026-09-27)"
-
-  - osm_id: 1422725594       # Noe Arksfaret entry ramp (tunnel) — not drivable (known_osm_issues #8)
-    exclude_modes: [driving]
-    note: "highway=service tunnel=yes oneway=yes, no access tag; Street View shows the tunnel part is not drivable (Kaveh, 2026-09-27)"
+  # NOT ENABLED - UNVERIFIED (known_osm_issues #8): the Noe Arksfaret tunnel ramps may not be drivable,
+  # an impression from Street View, not a confirmed fact. Enable only once it is confirmed.
+  # - osm_id: 1422725593       # Noe Arksfaret exit ramp (tunnel)
+  #   exclude_modes: [driving]
+  # - osm_id: 1422725594       # Noe Arksfaret entry ramp (tunnel)
+  #   exclude_modes: [driving]
 
   # REMOVED 2026-09-10: way 233761079 (Katarina Bangata) was forced oneway: true on the note that
   # "56 sibling segments are oneway=yes; this one just omits the tag". That evidence does not hold.
