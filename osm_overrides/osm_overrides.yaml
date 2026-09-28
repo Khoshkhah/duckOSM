@@ -27,6 +27,14 @@ overrides:
     oneway: true
     note: "continues the oneway=yes way 1280759567 at node 1354121015; untagged, so it got a reverse twin that dead-ends in a U-turn"
 
+  - osm_id: 1280522019       # Kapellgränd — missing oneway (known_osm_issues #7, CONFIRMED by pattern)
+    oneway: true
+    note: "continues the same-name oneway=yes way 323129897 in its own direction; its reverse twin dead-ended in a U-turn"
+
+  - osm_id: 140726414        # Bohusgatan — missing oneway (known_osm_issues #4 and #7, CONFIRMED by pattern)
+    oneway: true
+    note: "continues the same-name oneway=yes way 151083837 in its own direction; its reverse twin dead-ended in a U-turn"
+
   # REMOVED 2026-09-10: way 233761079 (Katarina Bangata) was forced oneway: true on the note that
   # "56 sibling segments are oneway=yes; this one just omits the tag". That evidence does not hold.
   # OSM carries no oneway tag on it, and Overture (record w233761079@6) has no access restriction

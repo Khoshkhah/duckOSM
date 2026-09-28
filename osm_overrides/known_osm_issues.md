@@ -236,11 +236,21 @@ At that node the street continues as way `1280759567` (same name, **`oneway=yes`
 street is one-way end to end; `120860763` carries only `highway, name, maxspeed=30, lit, surface`
 and no `oneway`, and the OSM default made it two-way. The reverse twin runs against the one-way.
 
-**Other candidates, NOT verified - keep them out of the rules until checked on the ground.** In
-SonoFlow's Södermalm network, 12 of the 28 edges with no turning movement end where a one-way way
-begins or ends (same pattern): ways `24488730` Timmermansgatan, `1197353428` Maria Prästgårdsgata,
-`1281907887` Tjurbergsgatan, `388628833` Pustegränd, `1280486052` Hökens Gata (a second piece;
-`4392632`, issue #1, is already fixed), `1280486031` Peter Myndes Backe, `1280522019` Kapellgränd,
-`24682324` Hornsgatan, `140726414` Bohusgatan (issue #4), `525976008` and `821371670` (service).
-Some may be genuine two-way ends.
+**The other candidates, checked 2026-09-27 against LIVE OpenStreetMap.** In SonoFlow's Södermalm
+network, 12 of the 28 edges with no turning movement end at a node where a one-way way begins or
+ends. For each, the question is whether a SAME-NAME one-way continues in this way's own drawn
+direction - only then does `oneway: true` remove the right edge (it keeps the forward one):
 
+| way | street | verdict |
+| --- | --- | --- |
+| `120860763` | Katarina Västra Kyrkogata | **enabled** - continues `1280759567` forward |
+| `1280522019` | Kapellgränd | **enabled** - continues `323129897` forward |
+| `140726414` | Bohusgatan | **enabled** - continues `151083837` forward (also issue #4) |
+| `1280486052` | Hökens Gata | not needed - live OSM now tags it `oneway=yes`; a newer extract fixes it |
+| `1197353428` | Maria Prästgårdsgata | one-way AGAINST its drawn direction (continues `30678670` in reverse). `oneway: true` would drop the wrong edge; needs a reversed override, which this file cannot express yet |
+| `525976008` | (service) | unsure - the one-way it meets (`106080038`) is also unnamed, so "same name" proves nothing |
+| `24488730`, `1281907887`, `388628833`, `1280486031`, `24682324`, `821371670` | Timmermansgatan, Tjurbergsgatan, Pustegränd, Peter Myndes Backe, Hornsgatan, Noe Arksfaret | not this error - each ends where a DIFFERENT one-way street arrives, a real dead end for that direction |
+
+**Also found:** `RoadFilter` documents `oneway=-1` as one-way against the drawn direction, but
+`GraphBuilder` has no `-1` branch, so such a way would be built in its drawn direction - the wrong
+one. Södermalm has none; other areas are unchecked.
