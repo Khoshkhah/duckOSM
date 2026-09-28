@@ -56,3 +56,19 @@ def test_missing_file_is_noop():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_exclude_modes_removes_the_way_only_in_that_mode(tmp_path):
+    rules = _rules(tmp_path, """
+overrides:
+  - osm_id: 999
+    exclude_modes: [driving]
+""")
+    con = _ways()
+    assert OsmOverrides(con, rules, mode="driving").run() == 1
+    assert con.execute("SELECT count(*) FROM ways WHERE osm_id=999").fetchone()[0] == 0
+    assert con.execute("SELECT count(*) FROM ways").fetchone()[0] == 2        # the others stay
+    con = _ways()
+    assert OsmOverrides(con, rules, mode="walking").run() == 0               # kept for walking
+    assert con.execute("SELECT count(*) FROM ways WHERE osm_id=999").fetchone()[0] == 1
+

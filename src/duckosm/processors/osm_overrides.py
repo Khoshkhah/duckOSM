@@ -22,7 +22,9 @@ Rules file (YAML), keyed by OSM `osm_id`; each is a silent no-op in areas that d
 
 Fields: `oneway` (bool) · `lanes` (int, per-direction — sets both directions) ·
 `lanes_forward` / `lanes_backward` (int, for asymmetric roads) · `layer` (signed int — vertical
-stacking level; overrides a wrong OSM `layer` tag, e.g. an at-grade way mis-tagged `layer=-1`).
+stacking level; overrides a wrong OSM `layer` tag, e.g. an at-grade way mis-tagged `layer=-1`) ·
+`exclude_modes` (list of `driving` / `cycling` / `walking` — the way is REMOVED from those modes'
+networks, for a way OSM tags as usable that is not, e.g. a tunnel ramp seen closed on Street View).
 """
 import logging
 from pathlib import Path
@@ -39,9 +41,10 @@ _BOOL = {True: "TRUE", False: "FALSE"}
 class OsmOverrides(BaseProcessor):
     """Patch the `ways` table with local OSM corrections from a global rules file."""
 
-    def __init__(self, con, overrides_path):
+    def __init__(self, con, overrides_path, mode: str | None = None):
         super().__init__(con)
         self.path = Path(overrides_path) if overrides_path else None
+        self.mode = mode          # the network being built; `exclude_modes` needs it
 
     def run(self) -> int:
         """Apply matching overrides to `ways`; return how many were applied (ways present here)."""
@@ -52,6 +55,14 @@ class OsmOverrides(BaseProcessor):
         for r in rules:
             osm_id = r.get("osm_id")
             if osm_id is None:
+                continue
+            # NOT IN THIS MODE: remove the way before any edge is built from it
+            if self.mode and self.mode in (r.get("exclude_modes") or []):
+                if self.fetchone(f"SELECT count(*) FROM ways WHERE osm_id = {int(osm_id)}")[0]:
+                    self.execute(f"DELETE FROM ways WHERE osm_id = {int(osm_id)}")
+                    applied += 1
+                    note = f"  ({r['note']})" if r.get("note") else ""
+                    logger.info(f"  override osm_id={int(osm_id)}: removed from {self.mode}{note}")
                 continue
             sets = self._assignments(r)
             if not sets:

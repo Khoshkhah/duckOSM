@@ -134,7 +134,7 @@ class DuckOSM:
             # before GraphBuilder, because `oneway` is topological (decides the reverse twin).
             if self.config.osm_overrides:
                 steps.append(("apply_osm_overrides", f"[{mode}] Applying OSM overrides",
-                              self._apply_osm_overrides))
+                              lambda m=mode: self._apply_osm_overrides(m)))
             steps.append(("build_edges", f"[{mode}] Building edges", self._build_edges))
 
             if self.config.options.simplify:
@@ -559,10 +559,10 @@ class DuckOSM:
         logger.info(f"  Filtered to {self.stats['node_count']:,} nodes, "
                    f"{self.stats['way_count']:,} ways in {self.stats['road_filter_time']:.2f}s")
     
-    def _apply_osm_overrides(self) -> None:
+    def _apply_osm_overrides(self, mode: str | None = None) -> None:
         """Patch `ways` with local corrections for known OSM errors (before edges are built)."""
         logger.info("Applying OSM overrides...")
-        n = OsmOverrides(self.con, self.config.osm_overrides).run()
+        n = OsmOverrides(self.con, self.config.osm_overrides, mode=mode).run()
         self.stats['osm_overrides_applied'] = self.stats.get('osm_overrides_applied', 0) + n
         if not n:
             logger.info("  no OSM overrides matched this area")

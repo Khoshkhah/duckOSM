@@ -254,3 +254,21 @@ direction - only then does `oneway: true` remove the right edge (it keeps the fo
 **Also found:** `RoadFilter` documents `oneway=-1` as one-way against the drawn direction, but
 `GraphBuilder` has no `-1` branch, so such a way would be built in its drawn direction - the wrong
 one. Södermalm has none; other areas are unchecked.
+
+## 8. Noe Arksfaret tunnel ramps — tagged drivable, not drivable on the ground
+
+| field | value |
+| --- | --- |
+| **Area** | Södermalm |
+| **OSM ways** | `1422725593` (up, edge `2968865871607388503`) · `1422725594` (down, edge `603796184701625785`) |
+| **Status** | **CONFIRMED on Street View** (Kaveh, 2026-09-27) — `exclude_modes: [driving]` enabled |
+
+Two 21-24 m one-way ramps, `highway=service, tunnel=yes, layer=-1, oneway=yes`, no `access` tag,
+joining the underground parking aisle Noe Arksfaret (`821371670`, `service=parking_aisle`,
+`indoor=level`) at one end and nothing mapped at the other. OSM's default makes an untagged service
+road drivable, so both came into the driving network; Street View shows the tunnel part is not
+drivable. Found from SonoFlow's Model Explorer, where the down ramp had no turning movement at
+all. Fixed with the new `exclude_modes` field, which removes a way from a mode's network before
+any edge is built (`OsmOverrides(mode=...)`). The real fix is an `access=no` (or `motor_vehicle=no`)
+tag in OpenStreetMap.
+
