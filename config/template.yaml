@@ -63,7 +63,7 @@ options:
   simplify_batches: 0                  # 0 = auto-size by node count; 1 = single pass
   global_junctions: true               # every mode splits roads at the same points -> same edge_id in every mode
   functional_types: true               # walk_type (walking) / cycle_type (cycling)
-  build_features: false                # the features.* base-map layers
+  build_features: true                 # the features.* base-map layers (water, land, buildings, POIs…)
   clip_strategy: null                  # osmium cut: smart | complete_ways | simple; null = smart with features, else complete_ways
 
 # ---- VALIDATION (run after build; fail loudly on a broken invariant) -------

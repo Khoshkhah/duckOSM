@@ -244,11 +244,11 @@ class DuckOSM:
                     progress.update(main_task, description="Building multimodal graph...")
                     self._build_multimodal()
 
-                # Base-map feature layers (features.*) — everything duckmap needs (roads, water,
-                # land, buildings, POIs, transit, places, …), extracted once from raw.* into THIS
-                # db so duckmap renders from it instead of building its own. Runs after modes
-                # (needs raw.*, still present until _cleanup); guarded by options.build_features.
-                if self.config.options.build_features:
+                # Base-map feature layers (features.*: water, land, buildings, POIs, transit,
+                # places, …), extracted once from raw.* into THIS db for base maps (mapstyle).
+                # Runs after modes (needs raw.*, still present until _cleanup), so only when
+                # building from a PBF; on by default, options.build_features / --no-features.
+                if self.config.options.build_features and self.config.source.type == "pbf":
                     progress.update(main_task, description="Building feature layers...")
                     self._build_features()
 
@@ -733,8 +733,8 @@ class DuckOSM:
             logger.warning(f"  multimodal build failed: {e}")
 
     def _build_features(self) -> None:
-        """Build the features.* base-map schema (Shortbread layers) from raw.*. Optional post-mode
-        step; everything duckmap needs, extracted once into this db. Never aborts the build."""
+        """Build the features.* base-map schema (Shortbread layers) from raw.*: the base map
+        (mapstyle draws it). Never aborts the build."""
         from duckosm.features import FeaturesBuilder
         logger.info("Building base-map feature layers (features.*)...")
         start = time.time()

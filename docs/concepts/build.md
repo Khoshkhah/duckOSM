@@ -46,7 +46,7 @@ flowchart TB
 
     classDef optional stroke-dasharray: 5 4
     classDef file stroke:#ffd43b,stroke-width:3px
-    class PRE,FIX,MM,FEAT optional
+    class PRE,FIX,MM optional
     class PBF,DB file
 ```
 
@@ -105,7 +105,7 @@ Config keys are shown with their default.
 | ② | Indexes | always |
 | ② | Validate | `validation.enabled` (off; on in the config template). See [Check a build](../guides/check-build.md) |
 | ③ | Intermodal graph `mm.*` | `multimodal.enabled` (off); needs walking plus another mode. See [Routing across modes](multimodal.md) |
-| ③ | Base-map layers `features.*` | `options.build_features` (off) |
+| ③ | Base-map layers `features.*` | a build from a PBF and `options.build_features` (on); `build --no-features` turns it off |
 | ③ | `edge_id_hash` macros | always |
 | ③ | `main.visualization_metadata` and the time zone | always; a build fails if the area's time zone can't be found |
 | ③ | Report / map | `report.enabled` / `viz.enabled` (both off) |

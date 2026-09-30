@@ -5,9 +5,11 @@ duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson -m driving -m walkin
 ```
 
 This writes `monaco.duckdb`: one schema per mode (`driving`, `walking`, `cycling`), each with its
-edges, nodes, the graph of legal turns and, for driving, the turn restrictions. With a boundary
-(`-b`), the build first cuts the PBF to it (a copy is kept in `./pbf/` for the next build, until the boundary or the PBF changes) and removes
-small pieces of network that don't connect to the rest. What each step does:
+edges, nodes, the graph of legal turns and, for driving, the turn restrictions; and the
+[base-map layers](../reference/features.md) (`features`: water, land, buildings, POIs). With a
+boundary (`-b`), the build first cuts the PBF to it (a copy is kept in `./pbf/` for the next build,
+until the boundary or the PBF changes) and removes small pieces of network that don't connect to the
+rest. What each step does:
 [How a build works](../concepts/build.md).
 
 ## Options
@@ -23,6 +25,7 @@ small pieces of network that don't connect to the rest. What each step does:
 | `--graph` / `--no-graph` | build the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution` | H3 resolution, 0–15 | `8` |
+| `--no-features` | skip the [base-map layers](../reference/features.md) (water, land, buildings, POIs) | built |
 | `--fixes` | a rules file of [fixes for OSM errors](fix-osm-errors.md) | none |
 | `--log-file` | also write the log to a file | console only |
 

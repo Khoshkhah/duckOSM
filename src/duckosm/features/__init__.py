@@ -1,8 +1,8 @@
 """OSM base-map feature extraction — the ``features.*`` schema (Shortbread layers).
 
-duckOSM extracts every OSM theme duckmap needs (roads, water, land, buildings, POIs, transit,
-places, …) once, into the same db as the routing graphs. duckmap consumes ``features.*`` for
-rendering only. See docs/reference/features.md.
+duckOSM extracts every OSM theme a base map needs (roads, water, land, buildings, POIs, transit,
+places, …) once, into the same db as the routing graphs; built by default on PBF builds. Base-map
+renderers (mapstyle) read ``features.*``. See docs/reference/features.md.
 """
 
 from duckosm.features.builder import FeaturesBuilder

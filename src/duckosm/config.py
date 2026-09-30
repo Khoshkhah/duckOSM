@@ -41,7 +41,7 @@ class Options:
     boundary_cells: bool = False
     boundary_cell_resolutions: Optional[list[int]] = None
 
-    build_features: bool = False           # build the features.* base-map schema (Shortbread layers) for duckmap to render
+    build_features: bool = True            # build the features.* base-map layers (water, land, buildings, POIs…) for base maps (mapstyle); PBF builds only
     clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
 
 

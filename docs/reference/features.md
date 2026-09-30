@@ -7,9 +7,12 @@ them.
 
 ## Build them
 
+Every build from a PBF makes them (Monaco: 10 layers, 3 MB, under a second). To leave them out:
+`duckosm build --no-features`, or in a config file:
+
 ```yaml
 options:
-  build_features: true
+  build_features: false
 ```
 
 The layers are built from `raw.*` at the end of the build. With a boundary, the PBF is then cut with

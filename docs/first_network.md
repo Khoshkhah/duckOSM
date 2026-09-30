@@ -41,8 +41,9 @@ duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson \
 ```
 
 About ten seconds later you have **`monaco.duckdb`**: one file holding a driving, a walking and a
-cycling network, each in its own schema. Roads that cross the border are kept whole, and small pieces
-that don't connect to the rest are removed.
+cycling network, each in its own schema, plus the [base-map layers](reference/features.md) (water,
+buildings, POIs…). Roads that cross the border are kept whole, and small pieces that don't connect to
+the rest are removed.
 
 ## 5. Query it
 

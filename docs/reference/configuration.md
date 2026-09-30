@@ -94,7 +94,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. Needs `simplify` |
 | `options.boundary_cells` | `false` | | write `main.boundary_cells`, the H3 cells that cover the boundary. Needs a boundary |
 | `options.boundary_cell_resolutions` | none | | resolutions for `boundary_cells`, e.g. `[6, 7, 8]`; none means `[h3_resolution]` |
-| `options.build_features` | `false` | | build the [base-map layers](features.md), `features.*`. Needs `raw.*`, so a `duckdb` build can't make them |
+| `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it |
 | `options.clip_strategy` | none | | how `osmium` cuts the PBF: `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
 | `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default |
 | `options.threads` | none | | number of DuckDB threads; none is DuckDB's default |

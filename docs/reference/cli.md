@@ -37,6 +37,7 @@ duckosm build [OPTIONS]
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
+| `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); also replaces the config's `osm_overrides` | none |
 | `--log-file FILE` | also write the log to this file | console only |
 
