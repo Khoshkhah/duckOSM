@@ -2,8 +2,7 @@
 
 **Status:** **Phase 1 + 2 shipped** 2026-07-04 (`to_opendrive` / `duckosm opendrive [--junctions]`) —
 Phase 1: roads + lanes + geometry; Phase 2 (`--junctions`, from a GMNS db): routable junctions +
-turn connecting roads. Tier 2 on the
-[export roadmap](../../product/simulation-export-targets.md) — the premium **AV / driving-sim +
+turn connecting roads. It is the premium **AV / driving-sim +
 commercial-micro** target: one `.xodr` opens **CARLA, esmini** (AV) *and* **PTV Vissim, Aimsun**
 (commercial micro). It's the export that finally cashes in the lane-level geometry from
 [micro](gmns_micro.md) + [drive-side offset & smooth connectors](gmns_map_realism.md). Verified on

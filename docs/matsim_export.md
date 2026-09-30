@@ -1,8 +1,7 @@
 # MATSim network export → `duckosm matsim` (design)
 
 **Status:** **shipped** 2026-07-04 (`to_matsim` / `duckosm matsim`) — single-mode **and** multimodal
-(`--mode all`). Tier 1, item 2 on the [export roadmap](../../product/simulation-export-targets.md) —
-the next target after [GMNS](gmns_export.md). Emits a MATSim **`network.xml`** from a built duckOSM
+(`--mode all`). Emits a MATSim **`network.xml`** from a built duckOSM
 routing db, plugging duckOSM into the MATSim / **BEAM** / eqasim agent-based ecosystem.
 
 **Elevation:** if the db was enriched by [`duckosm elevation`](design/elevation.md) (a `nodes.ele`

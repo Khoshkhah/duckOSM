@@ -1,0 +1,105 @@
+site_name: duckOSM
+site_description: OpenStreetMap to a routable road network in one DuckDB file, with edge IDs that survive every rebuild, clip and export.
+site_url: https://khoshkhah.github.io/duckOSM/
+repo_url: https://github.com/Khoshkhah/duckOSM
+repo_name: Khoshkhah/duckOSM
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/duckosm-mark.svg
+  favicon: assets/duckosm-mark.svg
+  font:
+    text: IBM Plex Sans
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle: { icon: material/weather-sunny, name: Light mode }
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - assets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+      # GitHub-style anchors, so the docs' existing in-page links work on the site too
+      slugify: !!python/object/apply:pymdownx.slugs.slugify { kwds: { case: lower } }
+
+# internal launch notes; everything else under docs/ is published
+exclude_docs: |
+  design/public_launch.md
+
+nav:
+  - Home: index.md
+  - Get started:
+      - User manual: user_manual.md
+      - Walkthrough: walkthrough.md
+      - Configuration: configuration.md
+  - Build:
+      - Pipeline: pipeline.md
+      - Driving, walking, cycling: multi_mode.md
+      - Segment merging: merging.md
+      - Global junctions: global_junction_segmentation.md
+      - Connectivity repair: connectivity_repair.md
+      - Admin boundaries: admin_boundaries.md
+  - Data:
+      - Data dictionary: data_dictionary.md
+      - Query cookbook: query_cookbook.md
+      - OSMnx comparison: osmnx_comparison.md
+  - Exports:
+      - GeoPackage / shapefile: gis_export.md
+      - MATSim network: matsim_export.md
+      - MATSim lanes & signals: matsim_lanes_signals.md
+      - GMNS: gmns_export.md
+  - Experimental:
+      - OpenDRIVE: opendrive_export.md
+      - Lanelet2: lanelet2_export.md
+      - railML: railml_export.md
+      - Lane routing: lane_routing.md
+      - Lane map: lane_map.md
+      - GMNS meso: gmns_meso.md
+      - GMNS micro: gmns_micro.md
+      - GMNS viewer: gmns_viewer.md
+      - GMNS maps: gmns_map.md
+      - GMNS map realism: gmns_map_realism.md
+      - GMNS round-out: gmns_roundout.md
+      - Intermodal routing: multimodal.md
+      - Elevation: design/elevation.md
+      - Base-map features: features_schema.md
+  - Internals:
+      - Architecture: architecture.md
+      - Testing: testing.md
+      - Design notes:
+          - Cycling dismount edges: design/cycling_dismount_edges.md
+          - Dropping is_reverse from edge_id: design/drop_is_reverse_from_edge_id.md
+          - Splitting same-direction parallels: design/split_same_direction_parallels.md
+          - Turn-restriction overrides: design/turn-restriction-overrides.md
+          - Walk / cycle type: design/walk_cycle_type.md
+          - Pipeline update plan: design/pipeline_update_plan.md

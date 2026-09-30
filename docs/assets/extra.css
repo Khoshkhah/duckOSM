@@ -1,0 +1,91 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap");
+
+/* duckOSM brand: ink + one yellow, as in the logo (images/duckosm-*.svg) */
+:root {
+  --dk-ink: #17191f;
+  --dk-yellow: #ffd43b;
+  --dk-paper: #f6f4ee;
+}
+
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--dk-ink);
+  --md-primary-fg-color--light: #2a2d36;
+  --md-primary-fg-color--dark: #0d0e12;
+  --md-primary-bg-color: var(--dk-paper);
+  --md-primary-bg-color--light: #f6f4eeb3;
+}
+
+/* accent = hover/focus colour; yellow is unreadable as text on white, so use a dark amber there */
+[data-md-color-scheme="default"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: #9a6b00;
+  --md-typeset-a-color: #7a5500;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #111318;
+}
+/* slate re-sets the primary colours with a more specific selector; restate them for dark mode */
+[data-md-color-scheme="slate"][data-md-color-primary="custom"] {
+  --md-primary-fg-color: #1b1e25;
+  --md-primary-fg-color--light: #2a2d36;
+  --md-primary-fg-color--dark: #0d0e12;
+  --md-primary-bg-color: var(--dk-paper);
+  --md-primary-bg-color--light: #f6f4eeb3;
+}
+/* outline buttons are drawn in the primary colour, which is dark-on-dark here */
+[data-md-color-scheme="slate"] .md-typeset .md-button:not(.md-button--primary) {
+  color: var(--dk-paper);
+  border-color: #f6f4ee80;
+}
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--dk-yellow);
+  --md-typeset-a-color: var(--dk-yellow);
+}
+
+/* headings in the logo's wordmark face */
+.md-typeset h1, .md-typeset h2, .md-typeset h3, .md-header__title {
+  font-family: "Space Grotesk", var(--md-text-font-family), sans-serif;
+}
+
+/* ---- home page ---- */
+.dk-hero {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  margin: 1rem 0 2rem;
+}
+.dk-hero img {
+  width: 7.5rem;
+  height: 7.5rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+/* the mark's dark disc needs an edge against the dark page */
+[data-md-color-scheme="slate"] .dk-hero img {
+  box-shadow: 0 0 0 2px #3a3e48;
+}
+.dk-hero h1 {
+  margin: 0 0 0.4rem;
+  color: var(--md-default-fg-color);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.dk-hero p {
+  margin: 0;
+  font-size: 1.15em;
+}
+@media screen and (max-width: 44.9375em) {
+  .dk-hero { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .dk-hero img { width: 5rem; height: 5rem; }
+}
+
+.md-typeset .md-button--primary {
+  background-color: var(--dk-yellow);
+  border-color: var(--dk-yellow);
+  color: var(--dk-ink);
+}
+.md-typeset .md-button--primary:hover {
+  background-color: #f2c200;
+  border-color: #f2c200;
+  color: var(--dk-ink);
+}

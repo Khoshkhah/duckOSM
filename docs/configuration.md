@@ -1,7 +1,7 @@
 # Configuration
 
 duckOSM is driven by a YAML config file (or equivalent CLI flags). A ready-to-edit
-template is at [`config/template.yaml`](../config/template.yaml).
+template is at [`config/template.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/config/template.yaml).
 
 ```bash
 duckosm build --config config/my_import.yaml
@@ -86,7 +86,7 @@ spatially selects). Set at most one of `path` / `place` / `bbox` / `h3_cell`.
 Some OSM source data is wrong or ambiguous — a missing `oneway` tag, an undercounted `lanes` value.
 When fixing it upstream in OpenStreetMap isn't practical, duckOSM can patch the affected ways locally
 from a single global rules file so every rebuild reproduces the correction. The catalogue of issues
-these rules address lives in [`known_osm_issues.md`](../osm_overrides/known_osm_issues.md).
+these rules address lives in [`known_osm_issues.md`](https://github.com/Khoshkhah/duckOSM/blob/main/osm_overrides/known_osm_issues.md).
 
 The top-level `osm_overrides` key points at the file (default `osm_overrides/osm_overrides.yaml`); set it to
 `null` to disable. The rules are applied to the `ways` table **after `RoadFilter` and before
@@ -145,5 +145,5 @@ options:
   simplify: true
 ```
 
-See [`config/template.yaml`](../config/template.yaml) for the fully annotated version
-and the existing files in [`config/`](../config) for more examples.
+See [`config/template.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/config/template.yaml) for the fully annotated version
+and the existing files in [`config/`](https://github.com/Khoshkhah/duckOSM/tree/main/config) for more examples.

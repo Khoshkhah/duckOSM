@@ -5,8 +5,7 @@
 Extract **every GMNS table that OSM can support** — including **lane detail** — into **one new,
 self-contained `.duckdb` file**. The output stands alone: it doesn't reference the source build, it
 carries native geometry so it's queryable and **renderable (down to individual lanes)**, and it can
-be dumped to spec-standard GMNS CSVs on demand. This is the #1
-[Tier‑1 export target](../../product/simulation-export-targets.md), and it keeps duckOSM's
+be dumped to spec-standard GMNS CSVs on demand. It keeps duckOSM's
 signature: the stable `edge_id` becomes the GMNS `link_id`.
 
 ---
@@ -217,5 +216,4 @@ Module `src/duckosm/gmns.py` (`to_gmns(source_db, out_path, …)`): opens a **ne
 `CREATE TABLE AS SELECT` from `nodes`/`edges`/`edge_graph`; and `lane`/`curb_seg` from a raw-tag
 parser (with shapely lane-offset geometry). `--to-csv` `COPY`s each table out (dropping the non-spec
 `geom`/`turn` columns). Reads the same tables as the other exporters plus `raw.ways`/`raw.nodes` for
-lane / signal / curb detail; needs the DuckDB spatial extension (+ shapely for lane offsets). See the
-[export roadmap](../../product/simulation-export-targets.md).
+lane / signal / curb detail; needs the DuckDB spatial extension (+ shapely for lane offsets).

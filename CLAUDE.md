@@ -16,6 +16,7 @@ pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim
 .venv/bin/duckosm build --config config/sodermalm.yaml     # build an area (no --config → config/default.yaml)
 .venv/bin/duckosm <command> --help                         # every exporter/tool is a click subcommand
 python scripts/validate_geometry.py --db data/db/<area>.duckdb   # self-loop / endpoint / zero-length checks
+mkdocs build --strict                                      # docs site (pip install "mkdocs<2" "mkdocs-material<10"); CI deploys it to Pages
 ```
 
 Several tests skip themselves unless local artifacts or tools exist: `pbf/sodermalm*.osm.pbf`,

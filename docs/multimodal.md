@@ -40,7 +40,7 @@ networkx needed). `enforce_sequence=True` (default) restricts a trip to `walk* (
 — at most one contiguous vehicular segment, entered and left via walking.
 
 **Visualise a route by mode** (walking green, driving red, cycling blue) with the sibling
-[`mapstyle`](../../mapstyle) deck.gl viewer:
+`mapstyle` deck.gl viewer:
 
 ```bash
 # auto-picks a walk->drive->walk trip across Sodermalm and renders it
@@ -217,7 +217,7 @@ Why they can't just be another mode filter:
 3. **Bus rides the road graph** — it runs on `driving` edges restricted to a route, stopping at
    stops; there is no separate "bus network" to build. Only **rail** has its own physical network
    (`railway=*`), which *can* be extracted from OSM like the road modes — but that is for rail
-   *simulation* (railML/OpenTrack, see export targets), not journey planning.
+   *simulation* (railML/OpenTrack), not journey planning.
 
 Sequencing:
 
@@ -259,7 +259,7 @@ router open to a transit layer; don't build it now.
 7. **Config:** add `options.multimodal` (bool), default transfer penalties per mode pair, and the
    category list — follow the pattern in `config/default.yaml` / `src/duckosm/config.py`.
 8. **Optional exports:** a unified `mm.edges` also unlocks *multimodal* SUMO export (SUMO simulates
-   mixed traffic) and a `mode`-tagged GMNS — see [simulation export targets in the product notes].
+   mixed traffic) and a `mode`-tagged GMNS.
 
 ## Key decisions & gotchas (don't relearn these)
 

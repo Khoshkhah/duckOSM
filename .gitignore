@@ -33,3 +33,6 @@ Thumbs.db
 reports/
 pbf/
 screenshots/
+
+# mkdocs build output
+site/

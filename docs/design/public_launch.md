@@ -58,6 +58,8 @@ PyPI package that reads PBFs with DuckDB).
 - [x] README rewrite per the tiers above (draft, awaiting review)
 - [x] Logo: concept D1 "Edge" (one road edge on a disc; ideas from DuckDB's logo, no duck) → banner / icon / mark, wordmark outlined in Space Grotesk
 - [x] README images and links as absolute URLs (relative paths break on the PyPI page)
-- [ ] At release (repo public): switch the README banner to an absolute URL so it shows on PyPI too — a relative path works on GitHub but not on PyPI, and an absolute raw URL 404s while the repo is private
-- [ ] Make the GitHub repo public (needed before PyPI, for the README images)
+- [x] README banner as an absolute raw URL (served as image/svg+xml, so it shows on GitHub and PyPI now the repo is public)
+- [x] Make the GitHub repo public (2026-09-30; history rewritten first so commits carry the noreply email)
+- [x] Docs site on GitHub Pages: MkDocs Material, `.github/workflows/docs.yml`, https://khoshkhah.github.io/duckOSM/
+- [x] README shortened to a front page that points to the site
 - [ ] Publish 0.1.0 to PyPI (the `duckosm` name is already reserved by the 0.0.1 placeholder)
