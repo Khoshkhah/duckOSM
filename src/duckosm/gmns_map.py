@@ -210,5 +210,5 @@ function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#0a0d13';ctx.fillRe
   ctx.lineCap='round';ctx.lineJoin='round';const m=GPM*v.s*dpr;
   ctx.strokeStyle='#161b24';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m);ctx.beginPath();poly(L,2);ctx.stroke();}
   for(const L of D.lanes){ctx.strokeStyle=LC[L[0]];ctx.lineWidth=Math.max(.8,L[1]*m*0.84);ctx.beginPath();poly(L,2);ctx.stroke();}
-  ctx.strokeStyle='#39c6d6';const cw=Math.max(.8,1.0*m);for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
+  ctx.strokeStyle='#39c6d6';ctx.lineCap='butt';const cw=Math.max(.8,.6*m);for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
 """ + _PANZOOM + "})();</script>"
