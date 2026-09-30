@@ -1,4 +1,4 @@
-duckdb>=1.0.0
+duckdb>=1.0.0,<2
 shapely>=2.0.0
 pyyaml>=6.0
 click>=8.0

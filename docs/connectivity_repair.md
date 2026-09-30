@@ -53,7 +53,7 @@ connector is naturally part of the edge graph and the component filter sees the 
 | field | value |
 |---|---|
 | `osm_id` | **`-min(a, b)`** — where `a`, `b` are the osm_ids of the two roads being joined (the dangling path, and the road at the target node = the min osm_id of the segments touching that node). Negative marks it synthetic (`osm_id < 0`, never collides with real OSM ids, trivially filterable) **and points back to a real connected road** for traceability. No hashing needed. |
-| `edge_id` | `(hash(osm_id, source, target, is_reverse) >> 1)::BIGINT` — same scheme as every other edge, so it's a normal stable id. (Two connectors can share an `osm_id` when they bridge the same pair of roads — they still get distinct `edge_id`s via their different `source`/`target`.) |
+| `edge_id` | `(hash(osm_id, source, target) >> 1)::BIGINT` — same scheme as every other edge, so it's a normal stable id. (Two connectors can share an `osm_id` when they bridge the same pair of roads — they still get distinct `edge_id`s via their different `source`/`target`.) |
 | `source` / `target` | dangle node / nearest node (and swapped for the reverse edge). |
 | `geometry` | straight `LINESTRING(dangle_coord, nearest_coord)`. |
 | `highway` | the dangling path's class (`cycleway` / `footway` / …) so it stays traversable and styles like a path. |
