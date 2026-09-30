@@ -58,6 +58,6 @@ PyPI package that reads PBFs with DuckDB).
 - [x] README rewrite per the tiers above (draft, awaiting review)
 - [x] Logo: concept D1 "Edge" (one road edge on a disc; ideas from DuckDB's logo, no duck) → banner / icon / mark, wordmark outlined in Space Grotesk
 - [x] README images and links as absolute URLs (relative paths break on the PyPI page)
-- [ ] After going public: check the SVG banner renders on GitHub and PyPI (`?sanitize=true`); fall back to a PNG if not
+- [ ] At release (repo public): switch the README banner to an absolute URL so it shows on PyPI too — a relative path works on GitHub but not on PyPI, and an absolute raw URL 404s while the repo is private
 - [ ] Make the GitHub repo public (needed before PyPI, for the README images)
 - [ ] Publish 0.1.0 to PyPI (the `duckosm` name is already reserved by the 0.0.1 placeholder)

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/duckosm-banner.svg?sanitize=true" alt="duckOSM" width="720">
+  <img src="images/duckosm-banner.svg" alt="duckOSM" width="720">
 </p>
 
 <p align="center">
