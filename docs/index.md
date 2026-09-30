@@ -58,20 +58,6 @@ different ids. None of the three is a number duckOSM makes up, so the id stays t
 
 [How the id is built, in detail](architecture.md#stable-edge-ids)
 
-One street segment, **Högbergsgatan in Stockholm** (51 m), looked up in six places:
-
-| Where we looked | How it got there | Its `edge_id` |
-|---|---|---|
-| Stockholm County database | built from OpenStreetMap | `7968481847680619937` |
-| Södermalm database | built separately from OpenStreetMap | `7968481847680619937` |
-| Södermalm, cut out of the county database | `duckosm extract` | `7968481847680619937` |
-| SUMO network file | `duckosm sumo` | `7968481847680619937` |
-| MATSim network file | `duckosm matsim` | `7968481847680619937` |
-| GMNS database | `duckosm gmns` | `7968481847680619937` |
-
-The same number every time. So anything you store against it (a traffic count, a speed, a map
-match, demand) stays attached to the right road.
-
 ## Quick start
 
 ```bash
