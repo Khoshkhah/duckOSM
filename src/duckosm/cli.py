@@ -8,6 +8,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm extract  slice a sub-area out of an existing build into a new db
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
+  duckosm route-map  an interactive route planner page (click start and end; routes in the browser)
   duckosm sumo     export a built network to a SUMO net (edge_id preserved)
   duckosm export-graph  export a built network as a networkx graph file (GraphML / gpickle)
   duckosm export-gis    export a built network to GeoPackage / shapefile (edge_id preserved)
@@ -796,6 +797,34 @@ def opendrive(db, mode, crs, junctions, out):
         raise click.ClickException(str(e))
     extra = f" + {res['connecting_roads']} connecting roads, {res['junctions']} junctions" if junctions else ""
     click.echo(f"wrote {out} — {res['roads']} roads{extra} (CRS {res['crs']})")
+
+
+@main.command(name="route-map")
+@click.argument('db', type=click.Path(exists=True))
+@click.option('--mode', '-m', 'modes', multiple=True,
+              help='Mode(s) to include; repeat for several (default: every mode in the db)')
+@click.option('--basemap', default='osm', show_default=True,
+              help='First base map: osm, voyager, positron, dark_matter, satellite, blank')
+@click.option('--out', '-o', default=None, help='Output HTML (default: reports/<name>_route_map.html)')
+def route_map_cmd(db, modes, basemap, out):
+    """Write an interactive route planner for a built db: click a start and an end, pick a mode
+    (or walk + drive), see the route. Routing runs in the browser (no server), with the same answers
+    as route() / route_multimodal(). Walk + drive needs `duckosm multimodal` first. Needs duckosm[viz].
+    """
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    import duckdb
+
+    from duckosm.route_map import write_route_map
+
+    con = duckdb.connect(db, read_only=True)
+    con.execute("INSTALL spatial; LOAD spatial;")
+    name = Path(db).stem
+    try:
+        path = write_route_map(con, out or f"reports/{name}_route_map.html", list(modes) or None,
+                               basemap, name)
+    except (ImportError, ValueError) as e:
+        raise click.ClickException(str(e))
+    click.echo(f"wrote {path} — open it in a browser")
 
 
 @main.command(name="elevation")

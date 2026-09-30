@@ -71,8 +71,8 @@ nav:
       - Build a network: guides/build.md
       - Fix OSM errors: guides/fix-osm-errors.md
       - Query the database: guides/query.md
-      - Route: guides/route.md
       - Draw a map: guides/draw-map.md
+      - Route: guides/route.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md
