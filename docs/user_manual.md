@@ -3,101 +3,99 @@
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/duckOSM.git
-cd duckOSM
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+pip install duckosm                      # core
+pip install "duckosm[routing]"           # + networkx, for route() / Router / to_networkx
 ```
 
-## Quick Start
+Other extras: `[sumo]` (SUMO export), `[elevation]` (DEM sampling), `[tz]` (time zones), `[viz]`
+(notebook maps). To work on duckOSM itself, install from source: see [Development](development.md).
+
+## Build a network
 
 ```bash
-# Using config file (recommended)
-duckosm build --config config/sweden.yaml
+# From a config file (recommended)
+duckosm build --config config/my_area.yaml
 
-# Or with CLI options
-duckosm build --pbf input.osm.pbf --output network.duckdb
+# Or from CLI options
+duckosm build --pbf input.osm.pbf --output network.duckdb -m driving -m walking
 ```
 
-## CLI Options
+With no `--config` and no `--pbf` / `--source-db`, `build` loads `config/default.yaml` if it exists.
+
+### CLI options (`duckosm build`)
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--pbf`, `-p` | Input PBF file path | Required |
-| `--output`, `-o` | Output DuckDB file | `output.duckdb` |
-| `--config`, `-c` | YAML config file | None |
-| `--modes` | Transportation modes | `driving` |
+| `-c`, `--config` | YAML config file | none |
+| `-p`, `--pbf` | Input `.osm.pbf` (or give a config / `--source-db`) | none |
+| `-o`, `--output` | Output DuckDB file | `data/output/network.duckdb` |
+| `-b`, `--boundary` | GeoJSON boundary to clip to | none |
+| `--source-db` | Parent duckOSM db to clip from (instead of a PBF) | none |
+| `-m`, `--modes` | `driving`, `walking` or `cycling`; repeat for several (`-m driving -m walking`) | `driving` |
+| `--graph` / `--no-graph` | Build the `edge_graph` table | on |
+| `--h3-index` / `--no-h3-index` | Add H3 cells to nodes and edges | on |
 | `--h3-resolution` | H3 resolution (0-15) | `8` |
+| `--h3-cell` | Clip to a single H3 cell | none |
 
-## Configuration File
+### Configuration file
+
+Copy the fully commented [`config/template.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/config/template.yaml)
+and edit it; every field is described in [Configuration](configuration.md). The core of it:
 
 ```yaml
-# config/my_import.yaml
-name: "my_region"
-pbf_path: "data/maps/region.osm.pbf"
-output_path: "data/output/region.duckdb"
+name: my_area                          # output file: <output_path>/<name>.duckdb
+output_path: data/db                   # a directory, or a full *.duckdb path
+
+source:
+  type: pbf                            # 'pbf' (build from OSM) | 'duckdb' (clip a built db)
+  pbf_path: data/maps/input.osm.pbf
+
+boundary:                              # optional clip region: set at most one
+  path: null                           # GeoJSON polygon file
+  # place: "Södermalm, Stockholm"      # OR a Nominatim place name
+  # bbox: [min_lon, min_lat, max_lon, max_lat]
+
+modes: [driving, walking, cycling]
 
 options:
-  simplify: true
-  build_graph: true
-  h3_indexing: true
   h3_resolution: 8
-  process_speeds: true
-  extract_restrictions: true
-  calculate_costs: true
+  simplify: true                       # contract degree-2 nodes and merge same-road chains
 
-modes:
-  - driving
-  - walking
-  - cycling
+validation:
+  enabled: true                        # fail the build on a broken invariant
 ```
 
-## Output Tables
+## Clip an area from a bigger build
 
-Each mode has its own schema (e.g., `driving.edges`, `walking.edges`).
+Build a large region once, then cut areas out of it. No OSM is re-read, and every `edge_id` is the
+parent's, so data keyed on the parent's ids works on the area as-is.
 
-### `nodes`
-| Column | Type | Description |
-|--------|------|-------------|
-| `node_id` | BIGINT | OSM node ID (negative = virtual node) |
-| `geom` | GEOMETRY | Point geometry |
-| `h3_cell` | UBIGINT | H3 spatial index |
+```bash
+duckosm build --config config/sweden.yaml                       # slow, once
 
-### `edges`
-The full column-by-column reference lives in [`data_dictionary.md`](data_dictionary.md); the
-highlights:
+duckosm extract --source data/db/sweden.duckdb \
+    --db data/db/sodermalm.duckdb --boundary sodermalm.geojson   # seconds
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `edge_id` | BIGINT | Stable content hash `(hash(osm_id, source, target) >> 1)` — same edge, same id across rebuilds |
-| `edge_ref` | VARCHAR | Readable secondary id `{osm_id}#{seq}{f\|r}` (not a join key) |
-| `source` / `target` | BIGINT | Endpoint node IDs (negative = virtual node) |
-| `osm_id` | BIGINT | Original OSM way ID (negative = synthetic connector edge) |
-| `highway`, `name`, `oneway`, `lanes`, `surface`, `junction`, `service`, `layer`, `bridge`, `tunnel` | | Way attributes carried onto every edge (e.g. `service` = `driveway`/`parking_aisle`/`alley`/…) |
-| `walk_type` / `cycle_type` | VARCHAR | Mode functional class (walking / cycling schema only) |
-| `length_m`, `maxspeed_kmh`, `cost_s` | FLOAT | Length, normalized speed, travel time |
-| `geometry`, `refs`, `is_reverse` | | LineString, shape-point node ids, direction flag |
-| `from_cell`, `to_cell`, `lca_res` | | H3 cells of the endpoints (when H3 indexing is on) |
+`extract` selects the area by `--boundary` (GeoJSON), or by `--name` / `--osm-id` when the parent
+has [admin boundaries](admin_boundaries.md). Edges that intersect the area are kept whole. The same
+clip also runs inside a build with `source.type: duckdb` and `source_db:` in the config; see
+[Pipeline](pipeline.md).
 
-### `edge_graph`
-Edge-based routing graph (line graph), built from **all** edges — every road, incl.
-`highway=service` (driveways/alleys), is routable.
+## What a build contains
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `from_edge` | INTEGER | Incoming edge |
-| `to_edge` | INTEGER | Outgoing edge |
-| `via_edge` | INTEGER | Same as to_edge |
-| `cost` | FLOAT | Travel cost of from_edge |
+Each mode gets its own schema (`driving`, `walking`, `cycling`) with:
 
-### `turn_restrictions`
-| Column | Type | Description |
-|--------|------|-------------|
-| `restriction_id` | BIGINT | OSM relation ID |
-| `restriction_type` | VARCHAR | e.g., `no_left_turn` |
-| `from_edge_id` | INTEGER | Restricted from edge |
-| `to_edge_id` | INTEGER | Restricted to edge |
+| Table | |
+|---|---|
+| `edges` | directed road segments: `edge_id`, `source` → `target`, geometry, `length_m`, `maxspeed_kmh`, `cost_s`, `lanes`, `oneway`, `highway`, `name`, … |
+| `nodes` | junctions and end points (`node_id < 0` = virtual node) |
+| `edge_graph` | legal edge → edge turns (`from_edge`, `to_edge`): the routing graph, built from every edge incl. `highway=service` |
+| `turn_restrictions` | OSM turn restrictions (driving only) |
+
+Every id column (`edge_id`, `source`, `target`, `from_edge`, …) is `BIGINT`; keep it `BIGINT` when
+you join. H3 columns (`nodes.h3_cell`, `edges.from_cell` / `to_cell` / `lca_res`) exist only when
+H3 indexing is on. Every column is described in the [data dictionary](data_dictionary.md).
 
 ## Python API
 
@@ -105,9 +103,8 @@ Edge-based routing graph (line graph), built from **all** edges — every road, 
 from duckosm import DuckOSM, Config
 
 # From YAML config
-config = Config.from_yaml("config/my_import.yaml")
-importer = DuckOSM(config)
-output_path = importer.run()
+config = Config.from_yaml("config/my_area.yaml")
+output_path = DuckOSM(config).run()
 
 # Query results
 import duckdb
@@ -118,25 +115,27 @@ edges = con.sql("SELECT * FROM driving.edges LIMIT 10").fetchall()
 ## Example Queries
 
 ```sql
--- Find fastest roads
-SELECT name, highway, maxspeed_kmh, length_m 
-FROM driving.edges 
+-- Fastest roads
+SELECT name, highway, maxspeed_kmh, length_m
+FROM driving.edges
 ORDER BY maxspeed_kmh DESC LIMIT 10;
 
--- Count edges by type
-SELECT highway, count(*) 
-FROM driving.edges 
-GROUP BY highway ORDER BY count DESC;
+-- Edges by road class
+SELECT highway, count(*) AS n
+FROM driving.edges
+GROUP BY highway ORDER BY n DESC;
 
--- Find connected edges (line graph)
-SELECT to_edge, cost 
-FROM driving.edge_graph 
-WHERE from_edge = 123;
+-- Legal next edges after one edge (the line graph)
+SELECT to_edge, cost
+FROM driving.edge_graph
+WHERE from_edge = 7968481847680619937;
 
--- Edges in an H3 cell
-SELECT * FROM driving.edges 
+-- Edges starting in one H3 cell (needs H3 indexing)
+SELECT * FROM driving.edges
 WHERE from_cell = 617700169958293503;
 ```
+
+More in the [query cookbook](query_cookbook.md).
 
 ### One way across all modes
 
@@ -268,7 +267,19 @@ write_graph(con, "sodermalm.graphml")                     # node graph, GraphML 
 write_graph(con, "routing.gpickle", graph="edge")         # edge-based routing graph, gpickle
 ```
 
-## SUMO export
+## Exports
+
+Every exporter keeps `edge_id` as the target format's own id.
+
+| Format | Command | Details |
+|---|---|---|
+| SUMO | `duckosm sumo` | below |
+| MATSim | `duckosm matsim`, `matsim-lanes` | [MATSim network](matsim_export.md), [lanes & signals](matsim_lanes_signals.md) |
+| GMNS | `duckosm gmns` | [GMNS](gmns_export.md) |
+| GeoPackage / shapefile | `duckosm export-gis` | [GeoPackage / shapefile](gis_export.md) |
+| networkx | `duckosm export-graph` | above |
+
+### SUMO export
 
 Export the network to a [SUMO](https://eclipse.dev/sumo/) simulation net whose edge ids **are** the
 duckOSM `edge_id`. `to_sumo` writes SUMO plain-XML — `.nod.xml`, `.edg.xml` (ids = `edge_id`) and
