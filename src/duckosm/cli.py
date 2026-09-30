@@ -266,7 +266,7 @@ def admin(args):
               help='Default base map: voyager, positron, dark_matter, osm, satellite, blank')
 @click.option('--out-dir', default='reports', show_default=True,
               help='Output directory for <name>_<mode>_network.html')
-@click.option('--arrows/--no-arrows', default=False, show_default=True,
+@click.option('--arrows/--no-arrows', default=True, show_default=True,
               help='Overlay one-way direction arrows (gray chevrons, shown when zoomed in)')
 @click.option('--boundary/--no-boundary', default=True, show_default=True,
               help='Overlay the clip/area boundary outline (main.boundary), if present')

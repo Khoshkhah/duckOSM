@@ -106,7 +106,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id"],
-        arrows=False, filter_control=False, name=f"{name}: route planner",
+        filter_control=False, name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
 

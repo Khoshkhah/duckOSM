@@ -15,7 +15,7 @@ logger = logging.getLogger("duckosm")
 BASEMAP_LAYERS = ["voyager", "positron", "dark_matter", "osm", "satellite", "blank"]
 
 
-def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows=False,
+def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows=True,
                    boundary=True):
     try:
         import geopandas as gpd

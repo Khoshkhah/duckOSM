@@ -17,7 +17,7 @@ Try it: this is Monaco's driving map, as `duckosm viz` wrote it.
 | Option | Does |
 |---|---|
 | `-m driving` | one mode only (default: every mode) |
-| `--arrows` | direction arrows on one-way roads (zoom in to see them) |
+| `--no-arrows` | no direction arrows (on by default, on one-way roads; zoom in to see them) |
 | `--basemap positron` | first base map: `voyager` (default), `positron`, `dark_matter`, `osm`, `satellite`, `blank` |
 | `--no-boundary` | hide the dashed outline of the clip area |
 | `--out-dir maps` | output folder (default `reports`) |
