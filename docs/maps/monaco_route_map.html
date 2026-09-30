@@ -1432,29 +1432,49 @@ window.map = map;
   function fmtLen(m) { return m < 1000 ? Math.round(m) + " m" : (m / 1000).toFixed(1) + " km"; }
   function inMode(mode) { return (k) => G[mode].pos.has(k); }
 
-  function segDist(p, a, b) {                          // pixel distance from p to segment ab
-    const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
-    const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
-    return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
-  }
-  // The roads of the mode nearest the point, within 80 px: all of those as close as the nearest,
-  // since a two-way road's two directions share one line and either may give the better route.
-  function pick(lngLat, ok) {
-    const p = map.project(lngLat);
-    for (const r of [10, 30, 80]) {
-      const fs = map.queryRenderedFeatures([[p.x - r, p.y - r], [p.x + r, p.y + r]])
-        .filter((f) => f.properties && f.properties.k !== undefined && ok(+f.properties.k));
-      if (!fs.length) continue;
-      const dk = new Map();
-      for (const f of fs) {
-        const g = f.geometry, lines = g.type === "LineString" ? [g.coordinates] : g.coordinates, k = +f.properties.k;
-        for (const line of lines) for (let i = 1; i < line.length; i++) {
-          const d = segDist(p, map.project(line[i - 1]), map.project(line[i]));
-          if (d < (dk.has(k) ? dk.get(k) : Infinity)) dk.set(k, d);
-        }
+  // ---- snapping a marker to a road: the nearest in the map's data, not among the roads drawn on
+  // screen, so it works at any zoom and with the other marker off screen ------------------------
+  const CELL = 0.002;                                  // grid cell, degrees (~200 m)
+  let GEO = null, GRID = null, KX = 1;
+  function buildIndex() {
+    const fs = map.getSource("roads")._data.features;  // roadstyle's inline source (route-map never tiles)
+    GEO = new Array(D.n); GRID = new Map();
+    KX = Math.cos(fs[0].geometry.coordinates[0][1] * Math.PI / 180);
+    for (const f of fs) {
+      const k = +f.properties.k, c = f.geometry.coordinates; GEO[k] = c;
+      for (let i = 1; i < c.length; i++) {
+        const [xa, ya] = c[i - 1], [xb, yb] = c[i];
+        for (let x = Math.floor(Math.min(xa, xb) / CELL); x <= Math.floor(Math.max(xa, xb) / CELL); x++)
+          for (let y = Math.floor(Math.min(ya, yb) / CELL); y <= Math.floor(Math.max(ya, yb) / CELL); y++) {
+            const key = x + "," + y; if (!GRID.has(key)) GRID.set(key, new Set()); GRID.get(key).add(k);
+          }
       }
+    }
+  }
+  function segM(p, a, b) {                             // metres from p to segment ab (local flat frame)
+    const ax = (a[0] - p[0]) * KX, ay = a[1] - p[1], dx = (b[0] - a[0]) * KX, dy = b[1] - a[1], L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L)) : 0;
+    return Math.hypot(ax + t * dx, ay + t * dy) * 111320;
+  }
+  // The roads of the mode nearest the point (within ~600 m), as two tiers: all of those as close as
+  // the nearest (a two-way road's two directions share one line and either may route better), then
+  // the others within 30 m of it, tried when the nearest can't route (a one-way road cut by the
+  // area's boundary leads nowhere).
+  function pick(lngLat, ok) {
+    const p = [lngLat.lng, lngLat.lat], cx = Math.floor(p[0] / CELL), cy = Math.floor(p[1] / CELL);
+    for (let r = 1; r <= 3; r++) {
+      const dk = new Map();
+      for (let x = cx - r; x <= cx + r; x++) for (let y = cy - r; y <= cy + r; y++)
+        for (const k of GRID.get(x + "," + y) || []) if (!dk.has(k) && ok(k)) {
+          const c = GEO[k]; let d = Infinity;
+          for (let i = 1; i < c.length; i++) d = Math.min(d, segM(p, c[i - 1], c[i]));
+          dk.set(k, d);
+        }
+      if (!dk.size) continue;
       const near = Math.min(...dk.values());
-      return [...dk].filter(([, d]) => d <= near + 1).map(([k]) => k);
+      if (near > r * CELL * 111320 * KX && r < 3) continue;   // a nearer road may sit in the next ring
+      const tier = (lo, hi) => [...dk].filter(([, d]) => d > lo && d <= hi).sort((a, b) => a[1] - b[1]).map(([k]) => k);
+      return [tier(-1, near + 1), tier(near + 1, near + 30)];
     }
     return null;
   }
@@ -1532,11 +1552,14 @@ window.map = map;
     }
   }
 
-  function best(S, T, run, cost) {                    // the cheapest route over the snap candidates
-    let b = {s: S[0], t: T[0], res: null};
-    for (const s of S) for (const t of T) {
-      const res = run(s, t);
-      if (res && (!b.res || cost(res) < cost(b.res))) b = {s, t, res};
+  function best(S, T, run, cost) {   // the cheapest route between the nearest roads; if none routes, the next ones
+    let b = {s: S[0][0], t: T[0][0], res: null};
+    for (const [ss, tt] of [[S[0], T[0]], [S[0].concat(S[1]), T[0].concat(T[1])]]) {
+      for (const s of ss) for (const t of tt) {
+        const res = run(s, t);
+        if (res && (!b.res || cost(res) < cost(b.res))) b = {s, t, res};
+      }
+      if (b.res) break;
     }
     return b;
   }
@@ -1552,6 +1575,7 @@ window.map = map;
   function init() {
     const ids = rsQuery(() => true), props = rsGetProps(ids);
     fid = new Array(D.n); for (let i = 0; i < ids.length; i++) fid[props[i].k] = ids[i];
+    buildIndex();
     $("rm-mode").innerHTML = CHOICES.map((c, i) => `<option value="${i}">${c.label}</option>`).join("");
     $("rm-mode").addEventListener("change", update);
     for (const r of document.querySelectorAll('input[name="rm-w"]')) r.addEventListener("change", update);
