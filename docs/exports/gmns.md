@@ -83,9 +83,9 @@ duckosm gmns-map monaco_gmns.duckdb --style lane    # every lane at its width
 Each writes one HTML file that opens offline. `-m` picks the mode.
 
 Monaco's lanes, as `gmns-map --style lane` draws them (scroll to zoom, drag to move): each lane is a
-strip of road with its lane lines and an arrow for its direction; the cyan strokes are the
-movements, a turn from one lane into the next road (the short ones in the middle of a road go
-straight on where OSM splits it).
+strip of road with its lane lines and an arrow for its direction. **Click a lane**: it turns red,
+and the lanes its movements lead into turn green. Bus and bike lanes get their own colour, but
+Monaco's OSM data tags none (`psv:lanes`, `bicycle:lanes`), so this map has only traffic lanes.
 
 <iframe src="../../maps/monaco_gmns_lanes.html" title="Monaco's lanes, drawn by duckosm gmns-map --style lane"
         loading="lazy" style="width: 100%; height: 560px; border: 0; border-radius: 8px"></iframe>

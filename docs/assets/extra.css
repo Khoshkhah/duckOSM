@@ -113,3 +113,4 @@
   background: var(--md-default-bg-color); color: var(--md-default-fg-color);
   display: inline-flex; align-items: center; gap: 0.35em; }
 .dk-fullscreen:hover { border-color: var(--md-accent-fg-color); color: var(--md-accent-fg-color); }
+.md-content img:fullscreen { object-fit: contain; background: #fff; }

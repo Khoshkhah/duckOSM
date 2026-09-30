@@ -5,10 +5,11 @@ Pretty, self-contained HTML maps of a GMNS DuckDB — a presentation counterpart
   * ``road`` — one **carriageway ribbon per direction** (a two-way road splits into two), width =
     lane count × lane-width, offset to the travel side, coloured by road class and cased.
   * ``lane`` — **every lane** as a ribbon of its real width (metres) along its own geometry, coloured
-    by use (auto / bus / bike), with thin gaps as lane markings.
+    by use (auto / bus / bike), with white lane lines and an arrow for its direction; click a lane to
+    see the lanes its movements lead into.
 
-Both overlay the smooth Bézier turn connectors, render on a dark canvas with a neon-ish glow/casing,
-and support pan/zoom. Needs only ``duckdb`` (+ spatial); geometry is drawn client-side.
+The road style overlays the smooth Bézier turn connectors. Both draw on a light canvas and support
+pan/zoom. Needs only ``duckdb`` (+ spatial); geometry is drawn client-side.
 
     from duckosm.gmns_map import write_map
     write_map("sodermalm_gmns.duckdb", "road.html", style="road")
@@ -98,9 +99,15 @@ def build_road_payload(con, mode="driving"):
 
 def build_lane_payload(con, mode="driving"):
     g = f"gmns_{mode}"
-    lanes = con.execute(f"SELECT allowed_uses, COALESCE(width,{_LW}), ST_AsText(geom) "
+    lanes = con.execute(f"SELECT allowed_uses, COALESCE(width,{_LW}), link_id, lane_num, ST_AsText(geom) "
                         f"FROM {g}.lane WHERE geom IS NOT NULL").fetchall()
-    conns = _conns(con, mode)
+    links = sorted({r[2] for r in lanes})
+    li = {k: i for i, k in enumerate(links)}
+    names = dict(con.execute(f"SELECT link_id, name FROM {g}.link").fetchall())
+    # a movement: from link (lanes start..end, 0 = all) into link (lanes start..end, 0 = all)
+    mv = [[li[a], li[b], s1 or 0, e1 or 0, s2 or 0, e2 or 0] for a, b, s1, e1, s2, e2 in con.execute(
+          f"SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+          f"FROM {g}.movement").fetchall() if a in li and b in li]
     foc = con.execute(f"""SELECT n.x_coord,n.y_coord FROM {g}.node n
       JOIN {g}.link l ON l.to_node_id=n.node_id
       WHERE n.node_id IN (SELECT node_id FROM {g}.movement)
@@ -110,11 +117,12 @@ def build_lane_payload(con, mode="driving"):
     if not foc:
         foc = ((bb[0]+bb[1])/2, (bb[2]+bb[3])/2)
     fx, fy = qx(foc[0]), qy(foc[1]); half = round(48*scale/111320)
+    uses = [_USE.get(u, 0) for u, *_ in lanes]
     return {"grid": grid, "focus": [fx-half, fy-half, fx+half, fy+half], "gpm": scale/111320.0,
-            "lanes": [[_USE.get(u, 0), round(wm, 2)] + flat(w) for u, wm, w in lanes],
-            "conn": [flat(w) for w in conns],
-            "n": {"lanes": len(lanes), "bus": sum(1 for u, *_ in lanes if u == "bus"),
-                  "conn": len(conns), "file": ""}}
+            "lanes": [[_USE.get(u, 0), round(wm, 2), li[k], n] + flat(w) for u, wm, k, n, w in lanes],
+            "links": [[str(k), names.get(k) or ""] for k in links],
+            "mv": mv, "uses": sorted(set(uses)),
+            "n": {"lanes": len(lanes), "bus": uses.count(1), "bike": uses.count(2), "mv": len(mv), "file": ""}}
 
 
 def write_map(gmns_db, out, style="road", mode="driving", standalone=True):
@@ -144,17 +152,17 @@ def write_map(gmns_db, out, style="road", mode="driving", standalone=True):
 _CHROME = r"""<style>
 :root{--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{margin:0}
-.hero{position:relative;height:100vh;min-height:560px;background:#0b0f15;overflow:hidden;font-family:var(--sans);color:#e6edf3}
+.hero{position:relative;height:100vh;min-height:520px;background:#eef1f4;overflow:hidden;font-family:var(--sans);color:#1f2530}
 .hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none;opacity:0;transition:opacity 1s ease}
 .hero canvas.in{opacity:1}.hero canvas:active{cursor:grabbing}
-.vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(125% 95% at 50% 42%,transparent 55%,rgba(4,6,10,.75) 100%)}
-.cap{position:absolute;left:16px;top:16px;padding:10px 14px 12px;border-radius:8px;background:rgba(11,15,21,.97);pointer-events:none}
-.cap .k{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#6a8a92}
-.cap h1{margin:6px 0 0;font-size:25px;font-weight:600;letter-spacing:-.015em;line-height:1.12;text-shadow:0 2px 22px rgba(0,0,0,.6)}
-.cap h1 b{color:#f0b25a;font-weight:600}.cap p{margin:9px 0 0;font-family:var(--mono);font-size:12px;color:#8397a6;max-width:36ch}
-.leg{position:absolute;left:16px;bottom:16px;padding:8px 12px;border-radius:8px;background:rgba(11,15,21,.97);display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:12px;color:#9fb1c0;pointer-events:none}
+.vig{display:none}
+.cap{position:absolute;left:16px;top:16px;padding:10px 14px 12px;border-radius:8px;background:rgba(255,255,255,.95);box-shadow:0 1px 4px rgba(0,0,0,.12);pointer-events:none}
+.cap .k{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#6b7785}
+.cap h1{margin:6px 0 0;font-size:23px;font-weight:600;letter-spacing:-.015em;line-height:1.12;color:#1f2530}
+.cap h1 b{color:#c7701a;font-weight:600}.cap p{margin:9px 0 0;font-family:var(--mono);font-size:12px;color:#4a5261;max-width:40ch}
+.leg{position:absolute;left:16px;bottom:16px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,.95);box-shadow:0 1px 4px rgba(0,0,0,.12);display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:12px;color:#3b4350;pointer-events:none}
 .leg span{display:inline-flex;align-items:center;gap:7px}.leg i{width:15px;height:9px;border-radius:2px;display:inline-block}
-.hint{position:absolute;right:22px;bottom:22px;font-family:var(--mono);font-size:11px;color:#5f7183;pointer-events:none}
+.hint{position:absolute;right:16px;bottom:16px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.95);font-family:var(--mono);font-size:11px;color:#4a5261;pointer-events:none}
 @media(prefers-reduced-motion:reduce){.hero canvas{transition:none}}
 @media(max-width:900px){.hint{display:none}}
 </style>"""
@@ -177,7 +185,7 @@ _ROAD_T = _CHROME + r"""
     <h1>Roads by <b>direction</b> — one carriageway each way</h1><p id="sub"></p></div>
   <div class="leg"><span><i style="background:#e8663c"></i>trunk</span><span><i style="background:#f0a44a"></i>primary</span>
     <span><i style="background:#e6c95c"></i>secondary</span><span><i style="background:#aebac6"></i>tertiary</span>
-    <span><i style="background:#7f8c99"></i>local</span><span><i style="background:#39c6d6"></i>turn</span></div>
+    <span><i style="background:#7f8c99"></i>local</span><span><i style="background:#0e9aa7"></i>turn</span></div>
   <div class="hint">scroll to zoom · drag to pan</div></div>
 <script>const D=/*__P__*/null;(function(){const $=i=>document.getElementById(i);
 $('file').textContent='duckOSM · GMNS · '+D.n.file;
@@ -185,38 +193,64 @@ $('sub').textContent=D.n.roads.toLocaleString()+' directed carriageways · two-w
 const cv=$('c'),ctx=cv.getContext('2d'),GPM=D.gpm;let dpr=Math.min(window.devicePixelRatio||1,2),v={s:1,tx:0,ty:0};
 const X=x=>(x*v.s+v.tx)*dpr,Y=y=>(y*v.s+v.ty)*dpr,FILL=['#7f8c99','#aebac6','#e6c95c','#f0a44a','#e8663c'];
 function poly(g,o){ctx.moveTo(X(g[o]),Y(g[o+1]));for(let i=o+2;i<g.length;i+=2)ctx.lineTo(X(g[i]),Y(g[i+1]));}
-function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#0b0f15';ctx.fillRect(0,0,cv.width,cv.height);
+function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#eef1f4';ctx.fillRect(0,0,cv.width,cv.height);
   ctx.lineCap='round';ctx.lineJoin='round';const byC=[[],[],[],[],[]];for(const R of D.roads)byC[R[0]].push(R);
   for(let ci=0;ci<5;ci++){const arr=byC[ci];if(!arr.length)continue;
-    ctx.strokeStyle='#0c1017';for(const R of arr){ctx.lineWidth=Math.max(2,R[1]*GPM*v.s*dpr+2.5*dpr);ctx.beginPath();poly(R,2);ctx.stroke();}
+    ctx.strokeStyle='#4a525e';for(const R of arr){ctx.lineWidth=Math.max(2,R[1]*GPM*v.s*dpr+2.5*dpr);ctx.beginPath();poly(R,2);ctx.stroke();}
     ctx.strokeStyle=FILL[ci];for(const R of arr){ctx.lineWidth=Math.max(1,R[1]*GPM*v.s*dpr);ctx.beginPath();poly(R,2);ctx.stroke();}}
-  ctx.strokeStyle='#39c6d6';const cw=Math.max(.8,2.6*GPM*v.s*dpr);
+  ctx.strokeStyle='#0e9aa7';const cw=Math.max(.8,2.6*GPM*v.s*dpr);
   for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
 """ + _PANZOOM + "})();</script>"
 
 _LANE_T = _CHROME + r"""
-<div class="hero"><canvas id="c"></canvas><div class="vig"></div>
+<style>#sel{position:absolute;right:16px;bottom:62px;max-width:300px;padding:9px 12px;border-radius:8px;background:rgba(255,255,255,.95);
+box-shadow:0 1px 4px rgba(0,0,0,.12);font-family:var(--mono);font-size:12px;line-height:1.5;color:#3b4350;pointer-events:none}
+#sel b{color:#1f2530}</style>
+<div class="hero"><canvas id="c"></canvas>
   <div class="cap"><div class="k" id="file"></div>
-    <h1>Every lane, its own <b>width &amp; geometry</b></h1><p id="sub"></p></div>
-  <div class="leg"><span><i style="background:#3d4654;outline:1px solid #e6ebf0"></i>traffic lane</span><span><i style="background:#8a5a33;outline:1px solid #e6ebf0"></i>bus lane</span>
-    <span><i style="background:#2f6488;outline:1px solid #e6ebf0"></i>bike lane</span><span><i style="background:#39c6d6"></i>turn connector</span></div>
-  <div class="hint">scroll to zoom · drag to pan · widths in metres</div></div>
+    <h1>Every lane, its own <b>width &amp; direction</b></h1><p id="sub"></p></div>
+  <div id="sel">Click a lane to see the lanes it can turn into.</div>
+  <div class="leg" id="leg"></div>
+  <div class="hint">scroll to zoom · drag to pan</div></div>
 <script>const D=/*__P__*/null;(function(){const $=i=>document.getElementById(i);
 $('file').textContent='duckOSM · GMNS · '+D.n.file;
-$('sub').textContent=D.n.lanes.toLocaleString()+' lanes as width ribbons · '+D.n.bus+' bus · '+D.n.conn.toLocaleString()+' smooth turn connectors';
+$('sub').textContent=D.n.lanes.toLocaleString()+' lanes · '+D.n.mv.toLocaleString()+' movements (the turns from lane to lane)';
+const LC=['#7d8693','#c9783a','#3f8fc9'],LN=['traffic lane','bus lane','bike lane'],SEL='#e0453a',OUT='#149a86';
+$('leg').innerHTML=D.uses.map(u=>`<span><i style="background:${LC[u]}"></i>${LN[u]}</span>`).join('')+
+  `<span><i style="background:${SEL}"></i>clicked lane</span><span><i style="background:${OUT}"></i>lanes it can turn into</span>`;
 const cv=$('c'),ctx=cv.getContext('2d'),GPM=D.gpm;let dpr=Math.min(window.devicePixelRatio||1,2),v={s:1,tx:0,ty:0};
-const X=x=>(x*v.s+v.tx)*dpr,Y=y=>(y*v.s+v.ty)*dpr,LC=['#3d4654','#8a5a33','#2f6488'];
+const X=x=>(x*v.s+v.tx)*dpr,Y=y=>(y*v.s+v.ty)*dpr;
+const byLink={};D.lanes.forEach((L,i)=>(byLink[L[2]]=byLink[L[2]]||[]).push(i));
+let sel=-1,out=new Set();
 function poly(g,o){ctx.moveTo(X(g[o]),Y(g[o+1]));for(let i=o+2;i<g.length;i+=2)ctx.lineTo(X(g[i]),Y(g[i+1]));}
-function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#0a0d13';ctx.fillRect(0,0,cv.width,cv.height);
+function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#eef1f4';ctx.fillRect(0,0,cv.width,cv.height);
   ctx.lineCap='round';ctx.lineJoin='round';const m=GPM*v.s*dpr;
-  // white under, asphalt on top: what is left of the white between two lanes is the lane line
-  ctx.strokeStyle='#e6ebf0';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m);ctx.beginPath();poly(L,2);ctx.stroke();}
-  for(const L of D.lanes){const w=L[1]*m;ctx.strokeStyle=LC[L[0]];
-    ctx.lineWidth=Math.max(.8,w-Math.min(w*.3,Math.max(1.2*dpr,.3*m)));ctx.beginPath();poly(L,2);ctx.stroke();}
-  if(3.25*m>14){ctx.fillStyle='rgba(230,235,240,.85)';const a=.9*m;       // one arrow per lane: its direction
-    for(const L of D.lanes){const n=(L.length-2)/2,j=Math.floor((n-1)/2),i=2+2*j;if(n<2)continue;
+  // dark edge, then white, then asphalt: the white left between two lanes is the lane line
+  ctx.strokeStyle='#4a525e';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m+2*dpr);ctx.beginPath();poly(L,4);ctx.stroke();}
+  ctx.strokeStyle='#ffffff';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m);ctx.beginPath();poly(L,4);ctx.stroke();}
+  const lane=(L,c)=>{const w=L[1]*m;ctx.strokeStyle=c;
+    ctx.lineWidth=Math.max(.8,w-Math.min(w*.3,Math.max(1.2*dpr,.3*m)));ctx.beginPath();poly(L,4);ctx.stroke();};
+  D.lanes.forEach((L,i)=>{if(i!==sel&&!out.has(i))lane(L,LC[L[0]]);});    // the clicked lane and its turns on top
+  out.forEach(i=>lane(D.lanes[i],OUT));if(sel>=0)lane(D.lanes[sel],SEL);
+  if(3.25*m>14){ctx.fillStyle='rgba(255,255,255,.9)';const a=.9*m;        // one arrow per lane: its direction
+    for(const L of D.lanes){const n=(L.length-4)/2,j=Math.floor((n-1)/2),i=4+2*j;if(n<2)continue;
       const x0=X(L[i]),y0=Y(L[i+1]),x1=X(L[i+2]),y1=Y(L[i+3]),dx=x1-x0,dy=y1-y0,d=Math.hypot(dx,dy);if(d<3*a)continue;
       const ux=dx/d,uy=dy/d,cx=(x0+x1)/2,cy=(y0+y1)/2;ctx.beginPath();
-      ctx.moveTo(cx+ux*a,cy+uy*a);ctx.lineTo(cx-ux*a-uy*a*.6,cy-uy*a+ux*a*.6);ctx.lineTo(cx-ux*a+uy*a*.6,cy-uy*a-ux*a*.6);ctx.fill();}}
-  ctx.strokeStyle='#39c6d6';ctx.lineCap='butt';const cw=Math.max(.8,.6*m);for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
+      ctx.moveTo(cx+ux*a,cy+uy*a);ctx.lineTo(cx-ux*a-uy*a*.6,cy-uy*a+ux*a*.6);ctx.lineTo(cx-ux*a+uy*a*.6,cy-uy*a-ux*a*.6);ctx.fill();}}}
+// click a lane: it and the lanes its movements lead into
+function segd(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,l=dx*dx+dy*dy,t=l?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l)):0;
+  return Math.hypot(px-ax-t*dx,py-ay-t*dy);}
+let down=null;cv.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
+cv.addEventListener('click',e=>{if(down&&Math.hypot(e.clientX-down[0],e.clientY-down[1])>4)return;
+  const r=cv.getBoundingClientRect(),gx=(e.clientX-r.left-v.tx)/v.s,gy=(e.clientY-r.top-v.ty)/v.s;
+  let best=-1,bd=Infinity;D.lanes.forEach((L,i)=>{for(let k=4;k+3<L.length;k+=2){const d=segd(gx,gy,L[k],L[k+1],L[k+2],L[k+3]);
+    if(d<bd){bd=d;best=i;}}});
+  if(best<0||bd>Math.max(D.lanes[best][1]*GPM/2,6/v.s)){sel=-1;out=new Set();
+    $('sel').textContent='Click a lane to see the lanes it can turn into.';draw();return;}
+  sel=best;out=new Set();const L=D.lanes[sel],num=L[3];
+  for(const M of D.mv){if(M[0]!==L[2]||(M[2]&&(num<M[2]||num>M[3])))continue;
+    for(const j of byLink[M[1]]||[]){const n=D.lanes[j][3];if(!M[4]||(n>=M[4]&&n<=M[5]))out.add(j);}}
+  const k=D.links[L[2]];
+  $('sel').innerHTML=`<b>lane ${num}</b> of ${k[1]||'an unnamed road'}<br>link_id ${k[0]}<br>`+
+    `<span style="color:${OUT}">turns into ${out.size} lane${out.size===1?'':'s'}</span>`;draw();});
 """ + _PANZOOM + "})();</script>"

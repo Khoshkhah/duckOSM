@@ -1,6 +1,6 @@
-// A "Full screen" button above every embedded map (iframe) in the docs.
+// A "Full screen" button above every embedded map (iframe) and picture in the docs.
 document.addEventListener("DOMContentLoaded", () => {
-  for (const f of document.querySelectorAll(".md-content iframe")) {
+  for (const f of document.querySelectorAll('.md-content iframe, .md-content img[src*="images/"]')) {
     const bar = document.createElement("div"), b = document.createElement("button");
     bar.className = "dk-frame-bar";
     b.type = "button"; b.className = "dk-fullscreen";

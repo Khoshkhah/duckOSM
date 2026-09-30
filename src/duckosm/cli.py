@@ -951,8 +951,8 @@ def matsim_lanes(gmns_db, mode, signals, cycle, out_dir):
 def gmns_map(gmns_db, style, mode, out):
     """Write a pretty, self-contained HTML map of a GMNS DuckDB (a presentation counterpart to
     `gmns-viz`). `--style road` draws one carriageway per direction coloured by road class;
-    `--style lane` draws every lane as a ribbon of its real width. Both overlay the smooth turn
-    connectors, on a dark canvas with pan/zoom. Needs only DuckDB (geometry drawn client-side).
+    `--style lane` draws every lane at its real width, with lane lines and direction arrows; click
+    a lane to see the lanes it can turn into. Pan/zoom. Needs only DuckDB (geometry drawn client-side).
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 

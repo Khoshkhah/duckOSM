@@ -47,7 +47,10 @@ def test_lane_payload(tmp_path):
     con.execute("LOAD spatial;")
     p = build_lane_payload(con, mode="driving")
     assert p["n"]["lanes"] == 5                                 # A(2)+B(1)+AR(2) lane rows
-    assert all(len(L) > 2 for L in p["lanes"])                 # [useIdx, width_m, ...coords]
+    assert all(len(L) > 4 for L in p["lanes"])                 # [useIdx, width_m, link, lane_num, ...coords]
+    links = [int(k) for k, _ in p["links"]]
+    assert [links.index(A), links.index(B)] in [m[:2] for m in p["mv"]]   # the A -> B turn
+    assert p["uses"] == [0]                                     # traffic lanes only: no bus / bike legend
 
 
 def test_write_map_both_styles(tmp_path):
