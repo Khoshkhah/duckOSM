@@ -36,3 +36,10 @@ screenshots/
 
 # mkdocs build output
 site/
+
+# Area configs are local (they point at local PBFs / boundaries); only the template and the sample
+# are published. `duckosm init-config` writes the template for pip users.
+config/*.yaml
+!config/template.yaml
+!config/sample_monaco.yaml
+/*.duckdb

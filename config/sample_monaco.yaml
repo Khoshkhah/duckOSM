@@ -1,0 +1,17 @@
+# Sample: build all three networks for Monaco from the small extract in data/sample/.
+# Run from the repo root:   duckosm build --config config/sample_monaco.yaml   (a few seconds)
+# Writes ./monaco.duckdb. For every field, see config/template.yaml.
+name: monaco
+output_path: .
+
+source:
+  type: pbf
+  pbf_path: data/sample/monaco.osm.pbf
+
+modes:
+  - driving
+  - walking
+  - cycling
+
+validation:
+  enabled: true

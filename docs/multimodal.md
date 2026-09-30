@@ -254,7 +254,7 @@ router open to a transit layer; don't build it now.
 6. **CLI:** `duckosm multimodal <db> [--transfer-cost 60] [--realistic]` builds the `mm.*` tables
    into an existing db (mirror how `admin` / `sumo` wrap a built db).
 7. **Config:** add `options.multimodal` (bool), default transfer penalties per mode pair, and the
-   category list — follow the pattern in `config/default.yaml` / `src/duckosm/config.py`.
+   category list — follow the pattern in `src/duckosm/config.py`.
 8. **Optional exports:** a unified `mm.edges` also unlocks *multimodal* SUMO export (SUMO simulates
    mixed traffic) and a `mode`-tagged GMNS.
 
@@ -288,7 +288,7 @@ assert:
 - `src/duckosm/importer.py` — optional post-mode step guarded by `config.options.multimodal`.
 - `src/duckosm/routing.py` — `route_multimodal(...)` (+ maybe a `to_networkx_multimodal`).
 - `src/duckosm/cli.py` — `multimodal` subcommand.
-- `src/duckosm/config.py`, `config/default.yaml` — `options.multimodal`, transfer costs, categories.
+- `src/duckosm/config.py` — `options.multimodal`, transfer costs, categories.
 - `tests/test_multimodal.py` — the cases above.
 
 ## Related

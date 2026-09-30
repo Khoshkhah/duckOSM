@@ -13,7 +13,8 @@ pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim
 .venv/bin/pytest tests/test_merge_segments.py -q    # one file
 .venv/bin/pytest tests/test_gmns.py -k lane -q      # one test by name
 
-.venv/bin/duckosm build --config config/sodermalm.yaml     # build an area (no --config → config/default.yaml)
+.venv/bin/duckosm build --config config/sample_monaco.yaml # the published sample (seconds)
+.venv/bin/duckosm build --config config/<area>.yaml        # Kaveh's area configs: local, git-ignored
 .venv/bin/duckosm <command> --help                         # every exporter/tool is a click subcommand
 python scripts/validate_geometry.py --db data/db/<area>.duckdb   # self-loop / endpoint / zero-length checks
 mkdocs build --strict                                      # docs site (pip install "mkdocs<2" "mkdocs-material<10"); CI deploys it to Pages

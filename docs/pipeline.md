@@ -35,8 +35,8 @@ downstream consumers.
 
 Build the parent once, then clip sub-areas cheaply:
 ```bash
-duckosm build --config config/sweden.yaml        # data/db/sweden.duckdb  (slow, once)
-duckosm build --config config/sodermalm.yaml     # data/db/sodermalm.duckdb (fast clip)
+duckosm build --config sweden.yaml        # source.type: pbf     (slow, once)
+duckosm build --config sodermalm.yaml     # source.type: duckdb  (fast clip of sweden.duckdb)
 ```
 
 ## ComponentFilter

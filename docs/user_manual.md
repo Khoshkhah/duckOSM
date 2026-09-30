@@ -39,13 +39,14 @@ With no `--config` and no `--pbf` / `--source-db`, `build` loads `config/default
 | `--graph` / `--no-graph` | Build the `edge_graph` table | on |
 | `--h3-index` / `--no-h3-index` | Add H3 cells to nodes and edges | on |
 | `--h3-resolution` | H3 resolution (0-15) | `8` |
-| `--h3-cell` | Clip to a single H3 cell | none |
 | `--log-file` | Also write the log to this file | none (console only) |
 
 ### Configuration file
 
 `duckosm init-config my_area.yaml` writes the fully commented [template](https://github.com/Khoshkhah/duckOSM/blob/main/src/duckosm/templates/config.yaml); every field is
-described in [Configuration](configuration.md). The core of it:
+described in [Configuration](configuration.md). In a clone of the repo, `config/sample_monaco.yaml`
+builds the bundled Monaco extract in seconds: `duckosm build --config config/sample_monaco.yaml`.
+The core of the template:
 
 ```yaml
 name: my_area                          # output file: <output_path>/<name>.duckdb
@@ -55,10 +56,8 @@ source:
   type: pbf                            # 'pbf' (build from OSM) | 'duckdb' (clip a built db)
   pbf_path: data/maps/input.osm.pbf
 
-boundary:                              # optional clip region: set at most one
+boundary:                              # optional clip region
   path: null                           # GeoJSON polygon file
-  # place: "Södermalm, Stockholm"      # OR a Nominatim place name
-  # bbox: [min_lon, min_lat, max_lon, max_lat]
 
 modes: [driving, walking, cycling]
 
@@ -76,7 +75,7 @@ Build a large region once, then cut areas out of it. No OSM is re-read, and ever
 parent's, so data keyed on the parent's ids works on the area as-is.
 
 ```bash
-duckosm build --config config/sweden.yaml                       # slow, once
+duckosm build --config sweden.yaml                              # slow, once
 
 duckosm extract --source data/db/sweden.duckdb \
     --db data/db/sodermalm.duckdb --boundary sodermalm.geojson   # seconds
@@ -108,7 +107,7 @@ H3 indexing is on. Every column is described in the [data dictionary](data_dicti
 from duckosm import DuckOSM, Config
 
 # From YAML config
-config = Config.from_yaml("config/my_area.yaml")
+config = Config.from_yaml("my_area.yaml")
 output_path = DuckOSM(config).run()
 
 # Query results
