@@ -284,7 +284,7 @@ _JS = r"""
   // bands, on its "roads" source: same geometry, no second copy of it).
   const BANDS = [["<", "roads-casing"], ["==", "roads-bridge-casing"], [">", "roads-highlight"]];
   function paint(legs) {
-    BANDS.forEach((_, b) => ["", "-casing"].forEach((c) => { if (map.getLayer(`rm-route${c}-${b}`)) map.removeLayer(`rm-route${c}-${b}`); }));
+    [0, 1, 2, "p"].forEach((b) => ["", "-casing"].forEach((c) => { if (map.getLayer(`rm-route${c}-${b}`)) map.removeLayer(`rm-route${c}-${b}`); }));
     const seen = new Set(), color = ["match", ["id"]];
     for (const l of legs || []) {
       const ids = l.edges.map((k) => fid[k]).filter((i) => !seen.has(i) && seen.add(i));
@@ -299,6 +299,15 @@ _JS = r"""
       map.addLayer({id: `rm-route-casing-${b}`, ...line, paint: {"line-color": "#fff", "line-width": w(6, 14)}}, at);
       map.addLayer({id: `rm-route-${b}`, ...line, paint: {"line-color": [...color, "#000"], "line-width": w(3.5, 9)}}, at);
     });
+    // tunnel mouths (roadstyle's "portals" source, keyed on __rs_road): the route runs into the
+    // tunnel at street level instead of stopping at the surface road's casing
+    if (map.getSource("portals")) {
+      const road = ["get", "__rs_road"], at = map.getLayer("roads-bridge-casing") ? "roads-bridge-casing" : undefined;
+      const line = {type: "line", source: "portals", layout: {"line-cap": "round", "line-join": "round"},
+                    filter: ["in", road, ["literal", [...seen]]]};
+      map.addLayer({id: "rm-route-casing-p", ...line, paint: {"line-color": "#fff", "line-width": w(6, 14)}}, at);
+      map.addLayer({id: "rm-route-p", ...line, paint: {"line-color": [color[0], road, ...color.slice(2), "#000"], "line-width": w(3.5, 9)}}, at);
+    }
   }
 
   function show(res, multi) {
