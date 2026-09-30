@@ -1,14 +1,15 @@
 # duckOSM configuration — FULL TEMPLATE
 # Copy, edit, and run with:
 #   duckosm build --config config/<your>.yaml
-# Every key shows its default; omit any key to accept that default.
+# Every key shows its default (except validation and report, which this template turns on);
+# omit any key to accept its default.
 #
 # Two source modes:
 #   source.type: pbf     -> build a network from OSM (download / clip / filter / graph)
 #   source.type: duckdb  -> CLIP an existing duckOSM db (e.g. sodermalm <- sweden),
 #                           preserving edge_ids (no re-hash, no cross-project re-key).
 #
-# Full reference: docs/configuration.md · https://khoshkhah.github.io/duckOSM/concepts/build/ · docs/design/pipeline_update_plan.md
+# Every field: https://khoshkhah.github.io/duckOSM/reference/configuration/ · how a build works: https://khoshkhah.github.io/duckOSM/concepts/build/
 
 name: my_import                        # REQUIRED — logical name + output filename (<name>.duckdb)
 output_path: .                         # a directory (-> ./<name>.duckdb) OR a full *.duckdb path.
@@ -34,8 +35,9 @@ clip:
   predicate: intersects                # 'within' | 'intersects' | 'centroid'  (edge-vs-boundary test)
   keep_largest_component: true         # drop disconnected boundary stubs -> one clean network
   min_component_edges: 1               # also drop weak components smaller than this
-  connectivity_rescue: true            # re-admit a 'maybe' connector iff it reconnects a drive component
-  strongly_connected: false            # false = weakly-connected keep; true = require routable round-trip
+  connectivity_rescue: true            # walking/cycling: join dangling path ends to the network (connector edges)
+  connect_snap_m: 10.0                 # ... to the nearest node within this many metres
+  strongly_connected: false            # not implemented: logs a warning, weakly-connected keep is used
 
 # ---- MODES -----------------------------------------------------------------
 modes:
@@ -59,6 +61,10 @@ options:
   memory_limit: null                   # e.g. "16GB"; null = DuckDB default
   threads: null                        # cap worker threads; null = DuckDB default
   simplify_batches: 0                  # 0 = auto-size by node count; 1 = single pass
+  global_junctions: true               # every mode splits roads at the same points -> same edge_id in every mode
+  functional_types: true               # walk_type (walking) / cycle_type (cycling)
+  build_features: false                # the features.* base-map layers
+  clip_strategy: null                  # osmium cut: smart | complete_ways | simple; null = smart with features, else complete_ways
 
 # ---- VALIDATION (run after build; fail loudly on a broken invariant) -------
 validation:
@@ -66,7 +72,7 @@ validation:
   fail_on_error: true
   assert_single_component: true        # <=1 dominant component after clip
   assert_no_stranded_named: true       # no named drivable through-street left disconnected
-  assert_edge_id_stable: true          # regression vs fixture (pbf) / vs parent (duckdb)
+  assert_edge_id_stable: false         # not implemented: always reported as skipped
   warn_layer_without_structure: true   # WARN: layer≠0 without bridge/tunnel (OSM tagging smell)
 
 # ---- MULTIMODAL (intermodal walk<->drive<->cycle routing; see https://khoshkhah.github.io/duckOSM/concepts/multimodal/) --
@@ -83,7 +89,7 @@ report:
   enabled: true                        # write reports/<name>_<ts>.{md,html} (stats, filter audit, components, validation)
 viz:
   enabled: false                       # roadstyle map -> reports/<name>_network.html (+ .png)
-  basemap: carto-voyager               # carto-voyager | carto-positron | carto-dark | osm
+  basemap: voyager                     # voyager | positron | dark_matter | osm | satellite | blank
 
 # ---- LOCAL OSM FIXES AND CACHING ---------------------------------------------
 osm_overrides: null                    # a rules file of fixes for OSM errors (docs: "Fix OSM errors");

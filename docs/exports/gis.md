@@ -21,7 +21,7 @@ One pair per mode, plus the area boundary. Monaco:
 
 Every column of the `edges` and `nodes` tables comes along as an attribute: `edge_id`, `source`,
 `target`, `osm_id`, `highway`, `name`, `oneway`, `lanes`, `length_m`, `maxspeed_kmh`, `cost_s`, …
-([what each means](../data_dictionary.md)); with [elevation](../guides/elevation.md), `ele`,
+([what each means](../reference/database.md)); with [elevation](../guides/elevation.md), `ele`,
 `z_from`, `z_to` too. Coordinates are longitude / latitude (EPSG:4326).
 
 Only the map layers are exported: the graph of legal turns and the turn restrictions are not GIS

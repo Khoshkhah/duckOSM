@@ -73,7 +73,7 @@ duckosm extract --source sweden-latest.duckdb --db sodermalm.duckdb --boundary s
 
 `extract` keeps edges that cross the border whole. It can also find the area by `--name` or `--osm-id`
 if the parent has [administrative boundaries](admin-boundaries.md). The same cut can run as a build
-from a config file with `source.type: duckdb`; see [Configuration](../configuration.md).
+from a config file with `source.type: duckdb`; see [Configuration](../reference/configuration.md).
 
 ## Cut a smaller PBF
 
@@ -85,4 +85,4 @@ duckosm clip-pbf sweden-latest.osm.pbf sodermalm.geojson      # -> sodermalm.osm
 
 It needs [osmium](../install.md#tools-outside-python). By default, ways that cross the border are kept
 whole (`--strategy complete_ways`); `--strategy smart` also keeps rivers and other areas whole, which
-the [base-map layers](../features_schema.md) need.
+the [base-map layers](../reference/features.md) need.

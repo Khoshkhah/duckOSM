@@ -44,7 +44,7 @@ duckosm elevation monaco.duckdb --dem my_dtm.tif          # any GDAL raster
 | `--nodata-fill` | height written where the model has no value | `0` |
 | `--suffix dsm` | store as a second surface (`ele_dsm`, `z_from_dsm`, …) instead of replacing | |
 
-Where to get elevation data, and how the sources compare: [Elevation sources](../elevation.md).
+Where to get elevation data, and how the sources compare: [Elevation sources](../reference/elevation-sources.md).
 
 ## What the heights mean
 

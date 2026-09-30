@@ -6,7 +6,7 @@ ingests OSM or builds its own db.
 
 Flow: ``raw`` -> geometry foundation (``geom.*``) -> thematic ``features.*`` layers -> drop ``geom``.
 Dropping the scaffolding means each geometry ends up in exactly one place (its feature table); no
-lasting duplication (see docs/features_schema.md).
+lasting duplication (see docs/reference/features.md).
 """
 
 import logging

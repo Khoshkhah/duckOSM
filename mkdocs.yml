@@ -99,9 +99,10 @@ nav:
       - Routing across modes: concepts/multimodal.md
       - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:
-      - Configuration: configuration.md
-      - Data dictionary: data_dictionary.md
-      - Base-map features: features_schema.md
-      - Elevation sources: elevation.md
+      - Command line: reference/cli.md
+      - Configuration: reference/configuration.md
+      - Database schema: reference/database.md
+      - Base-map layers: reference/features.md
+      - Elevation sources: reference/elevation-sources.md
   - Development:
       - Development: development.md

@@ -30,7 +30,7 @@ validate[driving] layer_without_structure: WARN — 9 edge(s) with layer≠0 but
 | `layer_without_structure` | never: a warning about OSM tagging (a road on another level with no bridge or tunnel tag) |
 
 The first two only run when the build has a boundary: a whole region can legitimately have separate
-pieces (islands, for example). Each check can be switched off; see [Configuration](../configuration.md).
+pieces (islands, for example). Each check can be switched off; see [Configuration](../reference/configuration.md).
 Set `fail_on_error: false` to be warned instead of stopped.
 
 ## A report of the build

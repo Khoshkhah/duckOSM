@@ -19,7 +19,7 @@
   <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
   <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/guides/build/">Guides</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/data_dictionary/">Data dictionary</a> ·
+  <a href="https://khoshkhah.github.io/duckOSM/reference/database/">Database schema</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/guides/query/">Query the database</a>
 </p>
 

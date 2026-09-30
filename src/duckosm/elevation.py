@@ -10,7 +10,7 @@ read-write and adds, in place,
 ``suffix="dsm"`` writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` instead of overwriting, so a
 bare-earth DTM and a surface model (buildings + canopy) live side by side and ``ele_dsm - ele`` is
 height above ground. Only meaningful when both come from one acquisition at a resolution that
-resolves the objects — see docs/elevation.md.
+resolves the objects — see docs/reference/elevation-sources.md.
 
 Two ways to supply the DEM:
 

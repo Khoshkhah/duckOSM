@@ -50,7 +50,7 @@ validation:
 
 A config file also reaches settings the command line doesn't have: [validation](check-build.md),
 [fixes for OSM errors](fix-osm-errors.md), memory limits, and more. Every field:
-[Configuration](../configuration.md). In a clone of the repo, `config/sample_monaco.yaml` is a ready
+[Configuration](../reference/configuration.md). In a clone of the repo, `config/sample_monaco.yaml` is a ready
 example.
 
 ## Large areas

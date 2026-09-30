@@ -2,7 +2,7 @@
 
 duckOSM extracts every OSM theme duckmap needs (roads, water, land, buildings, POIs, transit,
 places, …) once, into the same db as the routing graphs. duckmap consumes ``features.*`` for
-rendering only. See docs/features_schema.md.
+rendering only. See docs/reference/features.md.
 """
 
 from duckosm.features.builder import FeaturesBuilder

@@ -872,7 +872,7 @@ def elevation(db, dem, source, modes, nodata_fill, suffix):
 
     --suffix keeps a second surface side by side, so a bare-earth DTM and a DSM can both
     live in one db and `ele_dsm - ele` gives height above ground.
-    See docs/elevation.md.
+    See https://khoshkhah.github.io/duckOSM/guides/elevation/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 

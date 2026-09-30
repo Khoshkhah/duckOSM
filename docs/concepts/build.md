@@ -133,4 +133,4 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 Besides the routing tables (`edges`, `nodes`, `edge_graph`, `turn_restrictions`), a PBF build keeps
 the parsed OSM data (`raw.*`), each mode's filtered `ways` and `way_nodes`, `virtual_nodes`,
 `edge_id_map`, and `main.global_junctions`. Every table and column:
-[Data dictionary](../data_dictionary.md).
+[Database schema](../reference/database.md).
