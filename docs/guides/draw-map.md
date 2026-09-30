@@ -9,7 +9,7 @@ Each map shows the roads coloured by class, with a legend, a base-map switcher, 
 a 2D/3D button. Click a road to copy its `edge_id`. Tunnels are drawn under the roads above them,
 bridges on top.
 
-Try it: this is Monaco's driving map, as `duckosm viz` wrote it ([full screen](../maps/monaco_driving.html)).
+Try it: this is Monaco's driving map, as `duckosm viz` wrote it.
 
 <iframe src="../../maps/monaco_driving.html" title="Monaco's driving network, drawn by duckosm viz"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>

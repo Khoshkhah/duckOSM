@@ -90,7 +90,7 @@ duckosm viz monaco.duckdb -m driving       # -> reports/monaco_driving_network.h
 ```
 
 Open the file in a browser. This is that file, live: zoom, hover a road, click one to copy its
-`edge_id`, toggle road classes in the legend ([full screen](maps/monaco_driving.html)):
+`edge_id`, toggle road classes in the legend:
 
 <iframe src="../maps/monaco_driving.html" title="Monaco's driving network, drawn by duckosm viz"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>

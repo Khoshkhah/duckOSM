@@ -97,7 +97,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
         geometry=[_wkt.loads(r[9]) for r in rows], crs="EPSG:4326")
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
-        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway"],
+        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id"],
         road_popup=False, street_view=False, arrows=False, filter_control=False, name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
@@ -130,6 +130,8 @@ _CSS = """<style>
 #rm-result .rm-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 #rm-result ol{margin:6px 0 0;padding-left:20px;color:#444;font-size:13px}
 #rm-panel button{padding:5px 12px;border:1px solid #bbb;border-radius:6px;background:#f7f7f7;cursor:pointer}
+#rm-result .rm-edges{margin-top:8px;font-size:12px} #rm-result .rm-edges summary{cursor:pointer;color:#555}
+#rm-result .rm-edges code{font-size:11px;user-select:all}
 #rm-panel .rm-note{margin-top:10px;color:#777;font-size:12px}
 </style>
 """
@@ -246,21 +248,24 @@ _JS = r"""
     const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
     return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
   }
-  function pick(lngLat, ok) {                        // the nearest road of the mode, within 80 px
+  // The roads of the mode nearest the point, within 80 px: all of those as close as the nearest,
+  // since a two-way road's two directions share one line and either may give the better route.
+  function pick(lngLat, ok) {
     const p = map.project(lngLat);
     for (const r of [10, 30, 80]) {
       const fs = map.queryRenderedFeatures([[p.x - r, p.y - r], [p.x + r, p.y + r]])
         .filter((f) => f.properties && f.properties.k !== undefined && ok(+f.properties.k));
       if (!fs.length) continue;
-      let best = null, bestD = Infinity;
+      const dk = new Map();
       for (const f of fs) {
-        const g = f.geometry, lines = g.type === "LineString" ? [g.coordinates] : g.coordinates;
+        const g = f.geometry, lines = g.type === "LineString" ? [g.coordinates] : g.coordinates, k = +f.properties.k;
         for (const line of lines) for (let i = 1; i < line.length; i++) {
           const d = segDist(p, map.project(line[i - 1]), map.project(line[i]));
-          if (d < bestD) { bestD = d; best = +f.properties.k; }
+          if (d < (dk.has(k) ? dk.get(k) : Infinity)) dk.set(k, d);
         }
       }
-      return best;
+      const near = Math.min(...dk.values());
+      return [...dk].filter(([, d]) => d <= near + 1).map(([k]) => k);
     }
     return null;
   }
@@ -297,6 +302,9 @@ _JS = r"""
     }
     const names = []; for (const l of res.legs) for (const k of l.edges) { const n = D.name[k]; if (n && n !== names[names.length - 1]) names.push(n); }
     if (names.length) h += "<ol>" + names.slice(0, 15).map((n) => `<li>${n}</li>`).join("") + (names.length > 15 ? "<li>…</li>" : "") + "</ol>";
+    const ks = res.legs.flatMap((l) => l.edges), ids = rsGetProps(ks.map((k) => fid[k])).map((p) => p.edge_id);
+    h += `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
+         ks.map((k, i) => `<li><code>${ids[i]}</code> ${D.name[k] || ""}</li>`).join("") + "</ol></details>";
     out.innerHTML = h;
     paint(res.legs);
   }
@@ -309,20 +317,30 @@ _JS = r"""
     if (!markers.A || !markers.B) return;
     if (!multi) {
       const ok = inMode(modes[0]);
-      const s = pick(markers.A.getLngLat(), ok), t = pick(markers.B.getLngLat(), ok);
-      if (s === null || t === null) { $("rm-result").textContent = "Move the markers onto roads of this mode."; return; }
+      const S = pick(markers.A.getLngLat(), ok), T = pick(markers.B.getLngLat(), ok);
+      if (S === null || T === null) { $("rm-result").textContent = "Move the markers onto roads of this mode."; return; }
       const w = document.querySelector('input[name="rm-w"]:checked').value;
-      const res = routeOne(modes[0], s, t, w);
-      window.rmLast = {modes, s, t, res};                // for tests and scripts
-      show(res, false);
+      const b = best(S, T, (s, t) => routeOne(modes[0], s, t, w), (r) => w === "length" ? r.len : r.time);
+      window.rmLast = {modes, ...b};                     // for tests and scripts
+      show(b.res, false);
     } else {
       const ok = inMode("walking");
-      const s = pick(markers.A.getLngLat(), ok), t = pick(markers.B.getLngLat(), ok);
-      if (s === null || t === null) { $("rm-result").textContent = "Move the markers onto walkable roads."; return; }
-      const res = routeMulti(D.src[s], D.tgt[t], new Set(modes.map((m) => D.modes.indexOf(m))));
-      window.rmLast = {modes, s, t, sNode: D.src[s], tNode: D.tgt[t], res};
-      show(res, true);
+      const S = pick(markers.A.getLngLat(), ok), T = pick(markers.B.getLngLat(), ok);
+      if (S === null || T === null) { $("rm-result").textContent = "Move the markers onto walkable roads."; return; }
+      const allowed = new Set(modes.map((m) => D.modes.indexOf(m)));
+      const b = best(S, T, (s, t) => routeMulti(D.src[s], D.tgt[t], allowed), (r) => r.time);
+      window.rmLast = {modes, ...b, sNode: D.src[b.s], tNode: D.tgt[b.t]};
+      show(b.res, true);
     }
+  }
+
+  function best(S, T, run, cost) {                    // the cheapest route over the snap candidates
+    let b = {s: S[0], t: T[0], res: null};
+    for (const s of S) for (const t of T) {
+      const res = run(s, t);
+      if (res && (!b.res || cost(res) < cost(b.res))) b = {s, t, res};
+    }
+    return b;
   }
 
   function setMarker(which, lngLat) {

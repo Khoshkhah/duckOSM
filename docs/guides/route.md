@@ -30,7 +30,7 @@ duckosm route-map monaco.duckdb -m driving     # -> reports/monaco_route_map.htm
 
 One HTML page, no server: click the map for the start, again for the end, and drag the markers to
 move them. The route is computed in the page over the same graph, so it gives the same answer as
-`route()` ([full screen](../maps/monaco_route_map.html)):
+`route()`:
 
 <iframe src="../../maps/monaco_route_map.html" title="A route planner for Monaco, made by duckosm route-map"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
