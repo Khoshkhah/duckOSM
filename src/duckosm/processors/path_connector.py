@@ -10,7 +10,7 @@ A connector's osm_id is **`-min(a, b)`**, where a/b are the osm_ids of the two r
 dangling path and the road at the target node). Negative marks it synthetic (`osm_id < 0`, never
 collides with real OSM ids) and points back to the connected roads. edge_id is the usual
 `hash(osm_id, source, target)>>1`. Runs on the active schema's `edges`/`nodes` (after
-`simplify_graph`, before `build_edge_graph`). See docs/connectivity_repair.md.
+`simplify_graph`, before `build_edge_graph`). See docs/design/connectivity_repair.md.
 """
 import logging
 import math

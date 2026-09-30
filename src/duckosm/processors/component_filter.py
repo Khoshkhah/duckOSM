@@ -29,7 +29,7 @@ class ComponentFilter(BaseProcessor):
 
     def run(self) -> None:
         # connectivity_rescue is now handled UPSTREAM by PathConnector (adds connector edges before
-        # this runs; see docs/connectivity_repair.md). strongly_connected is still a no-op.
+        # this runs; see docs/design/connectivity_repair.md). strongly_connected is still a no-op.
         if self.strongly_connected:
             logger.warning("  ComponentFilter: strongly_connected not yet implemented — "
                            "using weakly-connected keep-largest")

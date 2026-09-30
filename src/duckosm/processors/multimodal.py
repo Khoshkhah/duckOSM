@@ -16,7 +16,7 @@ graph** so a trip can *switch mode mid-route* (walk → drive → walk / park-an
 Everything is weighted in **seconds** (``edges.cost_s``), so the flat transfer penalty adds directly
 to travel cost. Route across the result with :func:`duckosm.routing.route_multimodal`.
 
-Two fidelity levels (see docs/multimodal.md):
+Two fidelity levels (see docs/design/multimodal.md):
 
 * **v1 coarse** (implemented, default): a transfer at *every* junction shared by walking and a
   vehicular mode. Good for reachability/coverage; unrealistic for trip planning (you can "grab a

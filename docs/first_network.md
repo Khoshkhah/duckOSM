@@ -81,7 +81,7 @@ r["edges"]                          # the 25 edge_ids along the way
 ```
 
 Every `edge_id` stays the same when you rebuild, cut out a smaller area, or export: see
-[Stable edge ids](architecture.md#stable-edge-ids).
+[Stable edge ids](concepts/edge-ids.md).
 
 ## 7. Draw it
 

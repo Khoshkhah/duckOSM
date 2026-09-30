@@ -8,7 +8,7 @@ This writes `monaco.duckdb`: one schema per mode (`driving`, `walking`, `cycling
 edges, nodes, the graph of legal turns and, for driving, the turn restrictions. With a boundary
 (`-b`), the build first cuts the PBF to it (a copy is kept in `./pbf/` for the next build) and removes
 small pieces of network that don't connect to the rest. What each step does:
-[How a build works](../architecture.md).
+[How a build works](../concepts/build.md).
 
 ## Options
 

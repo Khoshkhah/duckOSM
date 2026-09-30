@@ -157,7 +157,7 @@ Keep these as their own attributes; do not overload the functional enum with str
 - **Multimodal / side-accurate structure.** `walk_type='crossing'` edges are literally the links
   between the two sides of a street, and `walk_type='sidewalk'` are the through-edges — the exact
   scaffolding needed for side-accurate pedestrian routing and for placing multimodal transfers
-  realistically (see `docs/multimodal.md`).
+  realistically (see `docs/design/multimodal.md`).
 
 ## Non-goals / open questions
 

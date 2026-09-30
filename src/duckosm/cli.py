@@ -423,7 +423,7 @@ def multimodal(db, transfer_cost, schema, realistic):
     Stitches the per-mode networks (driving/walking/cycling) into one layered graph so a trip can
     switch mode mid-route (walk->drive->walk / park-and-ride). Needs >=2 modes including walking.
     Route the result with `duckosm.route_multimodal(con, src_node, dst_node)`. See
-    docs/multimodal.md. The db is modified in place (writes the `mm` schema).
+    https://khoshkhah.github.io/duckOSM/concepts/multimodal/. The db is modified in place (writes the `mm` schema).
     """
     import duckdb
 

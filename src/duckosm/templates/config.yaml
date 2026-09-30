@@ -8,7 +8,7 @@
 #   source.type: duckdb  -> CLIP an existing duckOSM db (e.g. sodermalm <- sweden),
 #                           preserving edge_ids (no re-hash, no cross-project re-key).
 #
-# Full reference: docs/configuration.md · docs/pipeline.md · docs/design/pipeline_update_plan.md
+# Full reference: docs/configuration.md · https://khoshkhah.github.io/duckOSM/concepts/build/ · docs/design/pipeline_update_plan.md
 
 name: my_import                        # REQUIRED — logical name + output filename (<name>.duckdb)
 output_path: .                         # a directory (-> ./<name>.duckdb) OR a full *.duckdb path.
@@ -69,7 +69,7 @@ validation:
   assert_edge_id_stable: true          # regression vs fixture (pbf) / vs parent (duckdb)
   warn_layer_without_structure: true   # WARN: layer≠0 without bridge/tunnel (OSM tagging smell)
 
-# ---- MULTIMODAL (intermodal walk<->drive<->cycle routing; see docs/multimodal.md) --
+# ---- MULTIMODAL (intermodal walk<->drive<->cycle routing; see https://khoshkhah.github.io/duckOSM/concepts/multimodal/) --
 multimodal:
   enabled: false                       # build the mm.* transfer graph after the per-mode builds
   transfer_s: 60                       # flat transfer penalty (seconds) at each shared junction (v1 coarse)

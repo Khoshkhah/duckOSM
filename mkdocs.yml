@@ -92,14 +92,12 @@ nav:
           - railML: exports/railml.md
           - Lane-level routing: exports/lane-routing.md
   - Concepts:
-      - Architecture: architecture.md
-      - Pipeline: pipeline.md
-      - Driving, walking, cycling: multi_mode.md
-      - Segment merging: merging.md
-      - Global junctions: global_junction_segmentation.md
-      - Connectivity repair: connectivity_repair.md
-      - duckOSM and OSMnx: osmnx_comparison.md
-      - Routing across modes: multimodal.md
+      - How a build works: concepts/build.md
+      - Stable edge ids: concepts/edge-ids.md
+      - What each network contains: concepts/networks.md
+      - Network clean-up: concepts/cleanup.md
+      - Routing across modes: concepts/multimodal.md
+      - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:
       - Configuration: configuration.md
       - Data dictionary: data_dictionary.md

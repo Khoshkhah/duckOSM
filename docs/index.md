@@ -56,7 +56,7 @@ different ids. None of the three is a number duckOSM makes up, so the id stays t
 
 </div>
 
-[How the id is built, in detail](architecture.md#stable-edge-ids)
+[How the id is built, in detail](concepts/edge-ids.md)
 
 ## Quick start
 

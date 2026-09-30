@@ -102,7 +102,7 @@ A YAML rules file of way fixes (`oneway`, `lanes`, `layer`, `exclude_modes`) and
 | `viz.enabled` | bool | `false` | Write a roadstyle network map (needs `geopandas` + `roadstyle`). |
 | `viz.basemap` | string | `voyager` | `voyager` \| `positron` \| `esri_gray` \| `osm`. |
 
-See [`docs/pipeline.md`](pipeline.md) for the full stage order and the two source modes.
+The full step order and the two ways to build: [How a build works](concepts/build.md).
 
 ## Minimal example
 

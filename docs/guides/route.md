@@ -96,4 +96,4 @@ r["time_s"], r["transfers"]                                       # 393 s includ
 
 It returns `None` if the two points aren't connected. Changing mode is allowed at any shared
 junction, so a trip can "pick up a car" anywhere: good for comparing modes, not a real trip planner.
-Public transport isn't included. How it works: [Routing across modes](../multimodal.md).
+Public transport isn't included. How it works: [Routing across modes](../concepts/multimodal.md).

@@ -29,7 +29,7 @@ class Options:
     h3_resolution: int = 8
     simplify: bool = True                  # contract degree-2 nodes. Must match the shipped configs: the simplifier is what writes edges.refs, which extract_restrictions requires (and the unsimplified edges table is a straight-line approximation, not a supported product)
     merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
-    global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/global_junction_segmentation.md
+    global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/design/global_junction_segmentation.md
     functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/design/walk_cycle_type.md
     cycling_dismount: bool = True          # cycling also gets footway/pedestrian as dismount=TRUE edges (push-the-bike: walking speed, bidirectional) so cycleways connected only via them survive the component clean-up. See docs/design/cycling_dismount_edges.md
     process_speeds: bool = True
@@ -77,7 +77,7 @@ class Clip:
     min_component_edges: int = 1
     connectivity_rescue: bool = True               # reconnect dangling path ends (PathConnector,
     connect_snap_m: float = 10.0                   #   cycling/walking) within this many metres,
-    strongly_connected: bool = False               #   BEFORE the component filter. See docs/connectivity_repair.md
+    strongly_connected: bool = False               #   BEFORE the component filter. See docs/design/connectivity_repair.md
 
 
 @dataclass
@@ -98,7 +98,7 @@ class Validation:
 
 @dataclass
 class Multimodal:
-    """Intermodal (walk↔drive↔cycle) transfer graph — the `mm.*` tables. See docs/multimodal.md.
+    """Intermodal (walk↔drive↔cycle) transfer graph — the `mm.*` tables. See docs/design/multimodal.md.
 
     When ``enabled``, a post-mode step builds ``mm.edges`` (the per-mode ``edges`` unioned with a
     ``mode`` column) and ``mm.transfers`` (the mode-change arcs), so a single trip can switch mode

@@ -9,7 +9,7 @@ driving / walking / cycling graphs.
 Without it, a road-class way that one mode drops (e.g. a ``service`` driveway removed from cycling by
 ``access=private``) makes a shared node a junction in one mode but not another, so the crossing road
 is segmented differently per mode and its ``edge_id`` diverges. See
-``docs/global_junction_segmentation.md`` (Kalevi example).
+``docs/design/global_junction_segmentation.md`` (Kalevi example).
 
 Runs **once** (a global pre-pass, before the per-mode loop), writing to the ``main`` schema so every
 mode reads the same table.

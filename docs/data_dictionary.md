@@ -127,7 +127,7 @@ Line graph for edge-based routing.
 ## `mm` Schema *(optional — intermodal routing)*
 
 Built by `duckosm multimodal` / `multimodal.enabled`. Stitches the per-mode graphs into one layered
-graph so a trip can switch mode mid-route. See [multimodal.md](multimodal.md).
+graph so a trip can switch mode mid-route. See [Routing across modes](concepts/multimodal.md).
 
 | Table | Key Columns |
 |-------|-------------|

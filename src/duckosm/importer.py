@@ -620,7 +620,7 @@ class DuckOSM:
 
     def _connect_paths(self, mode: str) -> None:
         """Reconnect dangling cycleway/footway ends to the network (PathConnector) before the
-        component filter would drop them. See docs/connectivity_repair.md."""
+        component filter would drop them. See docs/design/connectivity_repair.md."""
         before = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
         PathConnector(self.con, snap_m=self.config.clip.connect_snap_m).run()
         after = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
