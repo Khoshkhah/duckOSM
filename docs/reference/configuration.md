@@ -8,13 +8,16 @@ duckosm init-config my_area.yaml
 duckosm build -c my_area.yaml
 ```
 
-- A key you leave out takes the **default** in the tables below. An unknown key (a typo, or a key
-  that no longer exists) is ignored with a warning.
+- A key you leave out takes the **default** in the tables below. An unknown key anywhere (at the top
+  level, a section name, or inside a section) is ignored with a warning. That covers a typo and a
+  key that no longer exists.
 - Relative paths resolve against the folder you run `duckosm` in, not the config file's folder.
 - With `-c`, a `build` option you type overrides the file (e.g. `-c monaco.yaml -m walking
   --no-features`); options you don't type leave the file's values. The **Flag** column shows the
   option for each field ([Command line](cli.md#build)).
 - The template sets a few keys to a value other than the default; the **Template** column shows them.
+  It turns on `validation` and `report`, and gives example values for `name`, `output_path` and
+  `source.pbf_path`.
 
 In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 
@@ -22,7 +25,7 @@ In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 
 | Key | Default | Template | Flag | Does |
 |---|---|---|---|---|
-| `name` | `default` | `my_import` | name of `-o`, `-b` or `-p` | the area's name: the output file is `<name>.duckdb` when `output_path` is a folder; also names the cached PBF cut (below) and the report files |
+| `name` | `default` | `my_import` | stem of `-o`, else of `-b`, else of `-p` or `--source-db` | the area's name: the output file is `<name>.duckdb` when `output_path` is a folder; also names the cached PBF cut (below) and the report files |
 | `output_path` | `output.duckdb` | `.` | `-o` | a path ending in `.duckdb` is the output file; anything else is a folder, and the file is `<output_path>/<name>.duckdb` |
 | `modes` | `[driving]` | `[driving]` | `-m` | the networks to build: any of `driving`, `walking`, `cycling`, one schema each |
 | `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md). Used only when named |
@@ -32,7 +35,7 @@ In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 
 With a boundary, the PBF is first cut to it and the cut is kept as `pbf/<name>.<strategy>.<key>.osm.pbf`,
 where `<key>` is a fingerprint of the boundary and the PBF. The next build reuses it while both are
-unchanged; after a change it cuts again and removes the old cut.
+unchanged; after a change it cuts again and removes the old cut of the same name and strategy.
 
 ## `source`
 
@@ -42,7 +45,7 @@ Where the network comes from. [How a build works](../concepts/build.md) describe
 |---|---|---|---|
 | `source.type` | `pbf` | `--source-db` sets `duckdb` | `pbf`: build from OSM data. `duckdb`: cut an area out of a built database, keeping its edge ids |
 | `source.pbf_path` | none | `-p` | the `.osm.pbf` file; required for `pbf` |
-| `source.source_db` | none | `--source-db` | the built database to cut from; required for `duckdb`, together with `boundary.path` |
+| `source.source_db` | none | `--source-db` | the built database to cut from; required for `duckdb`, together with a boundary (`path`, `place`, `bbox` or `h3_cell`) |
 
 ## `boundary`
 
@@ -89,7 +92,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.cycling_dismount` | `true` | | add footways and pedestrian streets to cycling as [dismount edges](../concepts/networks.md#dismount-edges) |
 | `options.process_speeds` | `true` | | add `maxspeed_kmh` to edges. [Speeds and travel time](../concepts/networks.md#speeds-and-travel-time) |
 | `options.calculate_costs` | `true` | | add `cost_s`, the travel time in seconds. Routing and `multimodal` need it |
-| `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. |
+| `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. [Turn restrictions](../concepts/networks.md#turn-restrictions) |
 | `options.boundary_cells` | `false` | | write `main.boundary_cells`, the H3 cells that cover the boundary. Needs a boundary |
 | `options.boundary_cell_resolutions` | none | | resolutions for `boundary_cells`, e.g. `[6, 7, 8]`; none means `[h3_resolution]` |
 | `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it |
@@ -106,8 +109,8 @@ Checks each mode at the end of the build. What each check means: [Check a build]
 |---|---|---|---|
 | `validation.enabled` | `false` | `true` | run the checks |
 | `validation.fail_on_error` | `true` | `true` | stop the build when a check fails; `false` only warns |
-| `validation.assert_single_component` | `true` | `true` | one connected network. Skipped without a boundary |
-| `validation.assert_no_stranded_named` | `true` | `true` | no named road outside the main network. Skipped without a boundary |
+| `validation.assert_single_component` | `true` | `true` | one connected network. Skipped when no component clean-up runs: no boundary, no edge graph, or `clip.keep_largest_component: false` with `clip.min_component_edges: 1` |
+| `validation.assert_no_stranded_named` | `true` | `true` | no named road outside the main network. Skipped when no component clean-up runs, as above |
 | `validation.assert_unique_node_id` | `true` | | no two nodes with the same `node_id` |
 | `validation.assert_way_length_conserved` | `true` | | no part of an OSM way lost when it was split into edges. Skipped in a `duckdb` build |
 | `validation.warn_layer_without_structure` | `true` | `true` | warn (never fail) about edges with a `layer` but no `bridge` or `tunnel` tag |
@@ -133,3 +136,6 @@ Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
 | `viz.basemap` | `voyager` | | first base map, a roadstyle name: `voyager`, `positron`, `dark_matter`, `osm`, `satellite`, `blank`, … |
 
 A failed report or map logs a warning; the build still succeeds.
+
+The values of `modes`, `options.clip_strategy` and `clip.predicate` are not checked when the file is
+loaded. An unknown `clip.predicate` is treated as `intersects`.

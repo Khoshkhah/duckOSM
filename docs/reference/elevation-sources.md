@@ -5,7 +5,8 @@ Where `duckosm elevation` can get its heights, and how the sources compare. How 
 
 There are two ways to give it a model:
 
-- `--source` downloads a **global** model for the area: nothing to set up, 30 m.
+- `--source` fetches a 30 m model for the area. `copernicus` works anywhere with nothing to set up;
+  `eudtm` is Europe only and needs a free key.
 - `--dem` reads a **file** you have, in any raster format GDAL reads: best where a national 1 m
   model exists.
 
@@ -15,9 +16,15 @@ There are two ways to give it a model:
 |---|---|---|---|---|---|
 | `copernicus` | Copernicus GLO-30 | 30 m | the whole world | DSM | nothing: streamed from AWS |
 | `eudtm` | Continental Europe DTM (EU-DTM), from OpenTopography | 30 m | Europe | DTM | a free key in `OPENTOPOGRAPHY_API_KEY` |
-| `auto` (default) | `eudtm` when the network lies completely inside Europe (longitude −25 to 45, latitude 34 to 72) and the key is set; otherwise `copernicus` | | | | |
+| `auto` (default) | `eudtm` when the network lies completely inside the Europe rectangle (longitude −25 to 45, latitude 34 to 72) and the key is set; otherwise `copernicus` | | | | |
 
-Both use the EGM2008 vertical datum. A **DSM** is the top surface (roofs, trees); a **DTM** is the
+The Europe rectangle also covers North Africa north of 34°N, Turkey, Cyprus and the Caucasus.
+`--dem` wins over `--source`. Copernicus has no tiles over open sea: nodes there get `--nodata-fill`
+(default `0.0`).
+
+Both use the EGM2008 vertical datum. The licence is stored in `main.elevation_metadata.license`:
+`copernicus` records "Copernicus open (attribution)", free with attribution; `eudtm` records
+"EU-DTM via OpenTopography (see provider terms)". A **DSM** is the top surface (roofs, trees); a **DTM** is the
 bare ground ([below](#dtm-or-dsm)).
 
 ## Other global models
@@ -26,9 +33,9 @@ To use one of these, download it and pass it with `--dem`.
 
 | Model | Resolution | Covers | Type | Access | Licence |
 |---|---|---|---|---|---|
-| Copernicus GLO-90 | 90 m | world | DSM | COG on AWS `copernicus-dem-90m`, no account | free, commercial use allowed (attribution) |
+| Copernicus GLO-90 | 90 m | world | DSM | COG (Cloud-Optimized GeoTIFF, [below](#file-formats)) on AWS `copernicus-dem-90m`, no account | free, commercial use allowed (attribution) |
 | EU-DEM v1.1 | 25 m | Europe | close to DTM | GeoTIFF in EPSG:3035, no account | Copernicus open, commercial use allowed |
-| FABDEM v1.2 | 30 m | world (to 84°N) | DTM | GeoTIFF, no account | CC-BY-NC-SA: **not for commercial use** |
+| FABDEM v1.2 | 30 m | world (60°S to 80°N) | DTM | GeoTIFF, no account | CC-BY-NC-SA: **not for commercial use** |
 | SRTM v3 | 30 m | **60°N to 56°S only** | DSM | HGT / GeoTIFF, NASA Earthdata account | public domain |
 | NASADEM | 30 m | **60°N to 56°S only** | DSM | GeoTIFF / HGT, NASA Earthdata account | public domain |
 | ASTER GDEM v3 | 30 m | 83°N to 83°S | DSM | COG, NASA Earthdata account | free (attribution) |
@@ -43,7 +50,7 @@ roads.
 Many countries publish a 1 m DTM made from LiDAR. It shows cliffs, cuttings and bridge ramps that a
 30 m model can't. Some examples:
 
-| Country | Model | Resolution | CRS | Access | Licence |
+| Country | Model | Resolution | CRS (coordinate system) | Access | Licence |
 |---|---|---|---|---|---|
 | Sweden | Lantmäteriet Markhöjdmodell Nedladdning, grid 1+ | 1 m DTM (also a DSM) | EPSG:3006, heights RH2000 | STAC API `STAC-hojd`, after a free GeoTorget registration | CC0 |
 | Estonia | Maa-amet Digital Terrain Model | 1, 5, 10, 25 m DTM (also a DSM) | EPSG:3301, heights EH2000 | map-sheet tiles or whole-country files, no account | open |

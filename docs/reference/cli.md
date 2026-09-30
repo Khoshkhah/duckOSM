@@ -29,7 +29,7 @@ duckosm build [OPTIONS]
 |---|---|---|
 | `-c`, `--config PATH` | a [config file](configuration.md). An option below that you type overrides the file | |
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
-| `-o`, `--output PATH` | output file | `<boundary name>.duckdb`, else `<pbf name>.duckdb` |
+| `-o`, `--output PATH` | output file | `<name>.duckdb`, named after the boundary file, else the PBF, else the `--source-db` file |
 | `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
 | `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#several-areas-from-one-region)) | |
 | `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
@@ -38,7 +38,7 @@ duckosm build [OPTIONS]
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
-| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); also replaces the config's `osm_overrides` | none |
+| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); overrides the config's `osm_overrides` key | none |
 | `--log-file FILE` | also write the log to this file | console only |
 
 With none of `-c`, `-p` and `--source-db`, it uses `config/default.yaml` if that file exists.
@@ -395,7 +395,7 @@ duckosm elevation [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `--dem TEXT` | an elevation file or URL, any format GDAL reads; wins over `--source` | |
-| `--source TEXT` | `auto`, `copernicus` or `eudtm` (needs `OPENTOPOGRAPHY_API_KEY`) | `auto` |
+| `--source TEXT` | `auto`, `copernicus` or `eudtm` (needs `OPENTOPOGRAPHY_API_KEY`). `auto` picks EU-DTM in Europe when the key is set, else Copernicus | `auto` |
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
 | `--nodata-fill FLOAT` | height written where the model has no value | `0.0` |
 | `--suffix NAME` | store as a second surface: `--suffix dsm` writes `ele_dsm`, `z_from_dsm`, `z_to_dsm` | |

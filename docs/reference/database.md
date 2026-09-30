@@ -16,16 +16,16 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | Table | Present when |
 |---|---|
 | [`edges`](#edges) | always |
-| [`private_edges`](#private_edges) | always |
+| [`private_edges`](#private_edges) | a new build; in a clip or extract, only if the parent has it |
 | [`nodes`](#nodes) | always |
-| [`edge_graph`](#edge_graph) | `options.build_graph` (on) |
-| [`turn_restrictions`](#turn_restrictions) | driving, with `options.extract_restrictions` (on) |
+| [`edge_graph`](#edge_graph) | `options.build_graph` (on); in a clip or extract, only if the parent has it |
+| [`turn_restrictions`](#turn_restrictions) | driving, with `options.extract_restrictions` (on); in a clip or extract, only if the parent has it |
 | [`ways`](#ways), [`way_nodes`](#way_nodes) | a build from a PBF, and `duckosm extract` |
 | [`edge_id_map`](#edge_id_map) | a build from a PBF with `options.merge_segments` (on) |
 | [`virtual_nodes`](#virtual_nodes) | a build from a PBF; always empty |
 
 A build cut from a parent database (`source.type: duckdb`) has only `edges`, `private_edges`,
-`nodes`, `edge_graph` and `turn_restrictions`.
+`nodes`, `edge_graph` and `turn_restrictions`, and each of the last three only if the parent has it.
 
 ### `edges`
 
@@ -41,7 +41,7 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `osm_id` | BIGINT | the OSM way. A merged edge has the way at its `source` end. Negative for a [connector edge](../concepts/cleanup.md#connect-dangling-paths) |
 | `highway` | VARCHAR | the OSM `highway` value |
 | `name` | VARCHAR | the OSM `name` |
-| `oneway` | BOOLEAN | TRUE when the edge has no reverse twin. Never NULL. [One-way roads](../concepts/networks.md#one-way-roads) |
+| `oneway` | BOOLEAN | TRUE when the edge has no reverse twin of the same way. Never NULL. [One-way roads](../concepts/networks.md#one-way-roads) |
 | `lanes` | INTEGER | lanes in this edge's direction. Never NULL, except on connector edges (`osm_id < 0`). [Lanes](../concepts/networks.md#lanes) |
 | `surface` | VARCHAR | the OSM `surface` tag |
 | `access` | VARCHAR | the mode's access: the value of its most specific access tag (driving: `motorcar`, `motor_vehicle`, `vehicle`, `access`; walking: `foot`, `access`; cycling: `bicycle`, `vehicle`, `access`). NULL when none is tagged. Never `private`: those edges are in `private_edges`. [Access](../concepts/networks.md#access-private-and-forbidden-roads) |
@@ -153,7 +153,7 @@ The nodes of `ways`, one row per node.
 
 ### `edge_id_map`
 
-For each merged edge, the edges it was made from. Columns and use:
+For each merged edge, the edges it was made from. It may be empty (driving in Monaco: no roads merge). Columns and use:
 [`edge_id_map`](../concepts/edge-ids.md#edge_id_map).
 
 | Column | Type |
@@ -180,9 +180,9 @@ Left over from the build and always empty: the virtual nodes are in `nodes`, wit
 | [`visualization_metadata`](#visualization_metadata) | always |
 | [`boundary`](#boundary) | a boundary is set |
 | [`global_junctions`](#global_junctions) | a build from a PBF, with `options.global_junctions` (on) |
-| [`boundary_cells`](#boundary_cells) | `options.boundary_cells`, with a boundary |
+| [`boundary_cells`](#boundary_cells) | a build from a PBF, with `options.boundary_cells` (off) and a boundary |
 | [`elevation_metadata`](#elevation_metadata) | after `duckosm elevation` |
-| [`admin_boundaries`](#admin_boundaries) | after `duckosm admin` |
+| [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 
 `main` also holds two macros: `edge_id_hash(osm_id, source, target)` gives the `edge_id` formula,
 and `edge_id_hash_v1(osm_id, source, target, is_reverse)` the old one.
@@ -195,15 +195,15 @@ One row: where to open a map, and the area's time zone.
 | Column | Type | Description |
 |---|---|---|
 | `boundary_geojson` | JSON | the boundary; without one, the box around all OSM nodes |
-| `center_lat` | DOUBLE | latitude of the centre of that box |
-| `center_lon` | DOUBLE | longitude of the centre |
-| `initial_zoom` | INTEGER | a map zoom level that shows the area, 1–14 |
+| `center_lat` | DOUBLE | latitude of the centre of the boundary's bounding box (of all OSM nodes if there is no boundary; in a `duckosm extract` result, the centre of the area) |
+| `center_lon` | DOUBLE | longitude of the same centre |
+| `initial_zoom` | INTEGER | a map zoom level that shows the area, 1–14 (1–16 in a `duckosm extract` result) |
 | `timezone` | VARCHAR | the area's IANA time zone, e.g. `Europe/Monaco`, found at the network node nearest the middle of all nodes. Always set: the build fails without it |
 
 ### `boundary`
 
-The boundary file, as read by DuckDB: one row per feature, a column per GeoJSON property, and the
-shape in `geom` (GEOMETRY). A file from [`duckosm boundary`](../guides/prepare-area.md) gives
+In a build from a PBF, the boundary file as read by DuckDB: one row per feature, a column per
+GeoJSON property, and the shape in `geom` (GEOMETRY). A `duckosm extract` result has `geom` only. A file from [`duckosm boundary`](../guides/prepare-area.md) gives
 `OGC_FID`, `name`, `osm_id`, `admin_level`, `area_km2`, `source`, `geom`. With `boundary.buffer_m`,
 this is the grown boundary.
 
@@ -310,10 +310,10 @@ change goes through walking.
 | `node_id` | BIGINT | the node where you change |
 | `from_mode` | VARCHAR | the mode you leave |
 | `to_mode` | VARCHAR | the mode you take |
-| `cost_s` | DOUBLE | seconds the change costs (`--transfer-cost`, `multimodal.transfer_s`) |
+| `cost_s` | DOUBLE | seconds the change costs: the flat cost (`--transfer-cost`, `multimodal.transfer_s`), unless `multimodal.transfer_costs` sets that pair |
 | `kind` | VARCHAR | `park`, `retrieve` (driving), `bike_park`, `bike_unpark` (cycling) |
 
 ## `features` schema
 
 The base-map layers: one table per layer, all with the columns `osm_id`, `osm_type`, `kind`,
-`name`, `tags`, `geom`. Every layer: [Base-map layers](features.md).
+`name`, `tags`, `geom`; `traffic` also has `bearing` (DOUBLE). Every layer: [Base-map layers](features.md).

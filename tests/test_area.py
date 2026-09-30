@@ -118,6 +118,16 @@ def test_unknown_config_key_warns(tmp_path, caplog):
     assert "strongly_connected" in caplog.text and c.clip.keep_largest_component
 
 
+def test_misspelled_section_warns(tmp_path, caplog):
+    """A misspelled section (`clipp:`) once dropped its settings without a word."""
+    from duckosm import Config
+    y = tmp_path / "c.yaml"
+    y.write_text("name: a\nclipp:\n  predicate: within\npbf_path: x.pbf\n")
+    with caplog.at_level("WARNING", logger="duckosm"):
+        Config.from_yaml(str(y))
+    assert "clipp" in caplog.text and "pbf_path" not in caplog.text     # the flat shorthand is known
+
+
 def test_typed_build_flags_override_the_config(tmp_path, monkeypatch):
     """With -c, flags typed on the command line win over the file; untyped defaults don't."""
     from click.testing import CliRunner

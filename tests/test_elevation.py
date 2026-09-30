@@ -179,3 +179,12 @@ def test_auto_with_key_picks_eudtm_in_europe(monkeypatch):
     monkeypatch.setenv("OPENTOPOGRAPHY_API_KEY", "test-key")
     assert _resolve_provider("auto", SWEDEN) == "eudtm"         # Europe + key → bare-earth EU-DTM
     assert _resolve_provider("auto", VANCOUVER) == "copernicus"  # outside Europe → still copernicus
+
+
+def test_dem_uri_keeps_urls():
+    from pathlib import Path
+    from duckosm.elevation import _dem_uri
+    assert _dem_uri("https://example.org/dem.tif") == "https://example.org/dem.tif"
+    assert _dem_uri("/vsicurl/https://example.org/dem.tif") == "/vsicurl/https://example.org/dem.tif"
+    assert _dem_uri("dem.tif") == str(Path("dem.tif").resolve())
+

@@ -28,6 +28,12 @@ def _only_known(cls, data: dict) -> dict:
     return {k: v for k, v in (data or {}).items() if k in known}
 
 
+# every key a config file may have at the top level (sections, and the flat shorthands)
+_TOP_LEVEL_KEYS = {"name", "output_path", "osm_overrides", "modes", "options", "source", "boundary",
+                   "clip", "validation", "report", "viz", "multimodal",
+                   "pbf_path", "boundary_path", "h3_cell"}
+
+
 @dataclass
 class Options:
     """Processing options (used by source.type: pbf; mostly inert for a duckdb clip)."""
@@ -169,6 +175,10 @@ class Config:
     def from_yaml(cls, path: str) -> "Config":
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
+        # a misspelled section (`clipp:`) would otherwise drop its settings without a word
+        unknown = sorted(set(data) - _TOP_LEVEL_KEYS)
+        if unknown:
+            logging.getLogger("duckosm").warning(f"config: ignoring unknown key(s): {', '.join(unknown)}")
 
         options = Options(**_only_known(Options, data.get("options")))
         if data.get("source"):

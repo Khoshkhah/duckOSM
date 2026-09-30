@@ -141,7 +141,7 @@ def main(argv=None) -> int:
 
     # main schema: boundary, intersecting admin_boundaries, fresh viz metadata
     out.execute("CREATE SCHEMA IF NOT EXISTS main")
-    out.execute("CREATE OR REPLACE TABLE main.boundary AS SELECT geom AS geometry FROM _clip")
+    out.execute("CREATE OR REPLACE TABLE main.boundary AS SELECT geom FROM _clip")
     if "admin_boundaries" in present.get("main", set()):
         # Keep only boundaries nested INSIDE the area (interior point within the
         # clip), excluding the area itself — i.e. its sub-areas. This drops parent

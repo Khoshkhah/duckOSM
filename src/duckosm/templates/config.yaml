@@ -1,7 +1,8 @@
 # duckOSM configuration — FULL TEMPLATE
 # Copy, edit, and run with:
 #   duckosm build --config config/<your>.yaml
-# Every key shows its default (except validation and report, which this template turns on);
+# Every key shows its default, except validation and report (turned on here) and name, output_path
+# and source.pbf_path (example values);
 # omit any key to accept its default.
 #
 # Two source modes:
@@ -11,7 +12,7 @@
 #
 # Every field: https://khoshkhah.github.io/duckOSM/reference/configuration/ · how a build works: https://khoshkhah.github.io/duckOSM/concepts/build/
 
-name: my_import                        # REQUIRED — logical name + output filename (<name>.duckdb)
+name: my_import                        # names the output file (<name>.duckdb) and the reports (default: default)
 output_path: .                         # a directory (-> ./<name>.duckdb) OR a full *.duckdb path.
                                        # Relative paths resolve against the folder you run duckosm in.
 
@@ -86,7 +87,7 @@ multimodal:
 report:
   enabled: true                        # write reports/<name>_<ts>.{md,html} (stats, filter audit, components, validation)
 viz:
-  enabled: false                       # roadstyle map -> reports/<name>_network.html (+ .png)
+  enabled: false                       # roadstyle map per mode -> reports/<name>_<mode>_network.html
   basemap: voyager                     # voyager | positron | dark_matter | osm | satellite | blank
 
 # ---- LOCAL OSM FIXES AND CACHING ---------------------------------------------

@@ -2,8 +2,8 @@
 
 The `features` schema holds what a base map draws besides the routing networks: water, land use,
 buildings, points of interest, place names. Each layer is one table, with classes from the
-[Shortbread](https://shortbread-tiles.org/) vector-tile schema. mapstyle renders
-them.
+[Shortbread](https://shortbread-tiles.org/) vector-tile schema. mapstyle, duckOSM's full base-map
+library built on roadstyle, draws them.
 
 ## Build them
 
@@ -55,20 +55,20 @@ In drawing order, bottom first. Monaco counts are from the sample build.
 
 | Layer | Shape | From OSM | `kind` | Monaco |
 |---|---|---|---|---|
-| `land` | area | `landuse` = `forest`, `grass`, `residential`, `industrial`, `cemetery`, …; `natural` = `wood`, `scrub`, `heath`, `sand`, `beach`, `wetland`, …; `leisure` = `park`, `garden`, `pitch`, `stadium`, `playground`, … | the tag value; `natural=wood` becomes `forest` | 237 |
+| `land` | area | `landuse` = `forest`, `grass`, `residential`, `industrial`, `cemetery`, …; `natural` = `wood`, `scrub`, `heath`, `sand`, `beach`, `wetland`, …; `leisure` = `park`, `garden`, `pitch`, `stadium`, `playground`, … | the `landuse` value, else `natural`, else `leisure`; `natural=wood` becomes `forest` | 237 |
 | `water_polygons` | area | `natural` = `water` / `glacier`, `waterway=riverbank`, `landuse` = `reservoir` / `basin`, any `water` tag | `water`, `river`, `canal`, `reservoir`, `basin`, `dock`, `glacier` | 27 |
 | `water_lines` | line | `waterway` = `river`, `stream`, `canal`, `ditch`, `drain` | the value; `drain` becomes `ditch` | 4 |
 | `sites` | area | `amenity` = `parking`, `bicycle_parking`, `bus_station`, `university`, `college`, `school`, `kindergarten`, `hospital`, `prison`; `public_transport` = `platform` / `station`; `leisure=sports_centre`, `landuse=construction`, `military=danger_area`, `man_made=bridge` | the value | 79 |
-| `buildings` | area | `building`, except `building=no` | the `building` value | 1,262 |
+| `buildings` | area | `building`, except `building=no` | the raw `building` value (`yes` is common); not a Shortbread class | 1,262 |
 | `streets` | line | every way with `highway`, and `railway` = `rail`, `narrow_gauge`, `tram`, `light_rail`, `funicular`, `subway`, `monorail` | the `highway` value, else the `railway` value | 3,496 |
 | `public_transport` | point | `highway=bus_stop`, `railway` = `station`, `halt`, `tram_stop`; `amenity` = `bus_station`, `ferry_terminal`; `aeroway` = `aerodrome`, `helipad`; `aerialway=station` | `bus_stop`, `station`, `halt`, `tram_stop`, `ferry_terminal`, `aerialway_station`, … | 107 |
-| `pois` | point | `amenity` (not parking or transport), `shop`, `tourism`, `office`, `leisure` (not the `land` areas), `man_made` | the first of those tags that is set | 1,645 |
+| `pois` | point | `amenity` except `parking`, `bicycle_parking`, `bus_station`, `ferry_terminal`; `shop`, `tourism`, `office`; `leisure` except the values used by `land` and `sites`; `man_made` | the first of those tags that is set | 1,645 |
 | `traffic` | point | `highway` = `traffic_signals`, `crossing` | the `highway` value | 575 |
 | `place_labels` | point | `place` = `city`, `town`, `village`, `hamlet`, `suburb`, `quarter`, `neighbourhood`, `isolated_dwelling`, `farm`, `island`, `locality` | the `place` value | 10 |
 
 `traffic` is not a Shortbread layer. On a crossing, `bearing` is the direction of the road it lies
-on, in degrees from north, so a map can draw the zebra marking across the road; NULL on traffic
-signals.
+on, in degrees from north, so a map can draw the zebra marking across the road. `bearing` is NULL on traffic
+signals, and on a crossing that lies on no road.
 
 `streets` is every OSM way with a `highway` tag, whatever the modes keep; it is for drawing, not
 routing. Routable roads are in the [mode schemas](database.md#mode-schema).

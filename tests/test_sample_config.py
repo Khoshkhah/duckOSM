@@ -43,6 +43,14 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     ids = {m: {r[0] for r in con.execute(f"SELECT edge_id FROM {m}.edges WHERE osm_id = 586268007").fetchall()}
            for m in ("walking", "cycling")}
     assert len(ids["walking"]) == 4 and ids["walking"] == ids["cycling"]
+    # an extract keeps the boundary in `geom`, like a build, so maps can draw its outline
+    # (it once wrote `geometry`, and the viz / route-map outline silently disappeared)
+    from duckosm.extract import main as extract
+    from duckosm.viz import _boundary_geojson
+    part = tmp_path / "part.duckdb"
+    extract(["--source", str(tmp_path / "monaco.duckdb"), "--db", str(part),
+             "--boundary", str(ROOT / "data" / "sample" / "monaco.geojson")])
+    assert _boundary_geojson(duckdb.connect(str(part), read_only=True)) is not None
     # every area db stores its time zone (required, not an option)
     # looked up on the network, not at the bbox centre (which for this extract is at sea, in France)
     assert con.execute("SELECT timezone FROM main.visualization_metadata").fetchone()[0] == "Europe/Monaco"

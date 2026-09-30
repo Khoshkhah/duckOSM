@@ -100,6 +100,13 @@ def _fix_polluted_proj():
             os.environ.pop(var, None)
 
 
+def _dem_uri(dem) -> str:
+    """Where a --dem raster came from: a URL or GDAL virtual path as given, a file as its full path
+    (resolving a URL as a path once recorded `/cwd/https:/host/dem.tif`)."""
+    d = str(dem)
+    return d if "://" in d or d.startswith("/vsi") else str(Path(d).resolve())
+
+
 def _copernicus_url(lat_floor: int, lon_floor: int) -> str:
     """/vsicurl URL of the GLO-30 tile whose SW corner is (lat_floor, lon_floor)."""
     ns, ew = ("N" if lat_floor >= 0 else "S"), ("E" if lon_floor >= 0 else "W")
@@ -194,7 +201,7 @@ def _make_sampler(dem, provider, nodata_fill, bbox):
 
     if dem:
         ds = rasterio.open(dem)
-        meta = {"source": Path(dem).name, "source_type": "file", "uri": str(Path(dem).resolve()),
+        meta = {"source": Path(dem).name, "source_type": "file", "uri": _dem_uri(dem),
                 "resolution_m": _dem_resolution_m(ds), "product": "unknown",
                 "dem_crs": ds.crs.to_string() if ds.crs else "unknown",
                 "vertical_datum": "unknown", "license": "unknown"}
