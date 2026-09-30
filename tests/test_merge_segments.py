@@ -223,6 +223,20 @@ def test_contract_chains_edge_id_map():
     assert con.execute("SELECT osm_id FROM edge_id_map WHERE seq = 2 AND NOT is_reverse").fetchone()[0] == 200
 
 
+def test_edge_id_map_pieces_point_the_same_way_as_the_merged_edge():
+    """A two-way chain is oriented by node id (1 -> 3); its second piece is drawn 3 -> 2, against it.
+    Each old id must map to the merged edge running the SAME way: 2 -> 3 onto 1 -> 3, 3 -> 2 onto
+    3 -> 1 (it once mapped the drawn 3 -> 2 onto 1 -> 3, putting per-direction data on the wrong side)."""
+    con = _graph()
+    con.execute("UPDATE simplified_edges_forward SET source = 3, target = 2, refs = [3, 2], "
+                "geometry = ST_GeomFromText('LINESTRING(3 0,1 0)') WHERE osm_id = 200")
+    GraphSimplifier(con)._contract_chains()
+    h = lambda o, s_, t_: con.execute(f"SELECT (hash({o}::BIGINT, {s_}::BIGINT, {t_}::BIGINT) >> 1)::BIGINT").fetchone()[0]
+    m = {(r[0], r[1]): r[2] for r in con.execute("SELECT old_edge_id, new_edge_id, is_reverse FROM edge_id_map").fetchall()}
+    assert m == {(h(100, 1, 2), h(100, 1, 3)): False, (h(200, 2, 3), h(100, 1, 3)): True,
+                 (h(100, 2, 1), h(100, 3, 1)): True, (h(200, 3, 2), h(100, 3, 1)): False}
+
+
 def test_contract_chains_no_candidates_writes_empty_map():
     """No same-road chain -> _contract_chains still creates an (empty) edge_id_map."""
     con = _graph()

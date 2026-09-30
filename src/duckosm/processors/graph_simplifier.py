@@ -253,11 +253,13 @@ class GraphSimplifier(BaseProcessor):
         """
         # Roads split at ROAD junctions; paths/footways split at every junction. When the
         # mode-agnostic main.global_junctions set is present, roads use IT (so a road-class way that
-        # another mode drops still marks the junction here — cross-mode edge_id alignment); otherwise
-        # fall back to this mode's local `junctions.is_road_junction`.
+        # another mode drops still marks the junction here — cross-mode edge_id alignment), and
+        # paths/footways are cut there too: a crossing over a road this mode doesn't have (a
+        # secondary without sidewalks, in walking) is cut where cycling cuts it, so it keeps the same
+        # edge_ids. Otherwise fall back to this mode's local `junctions.is_road_junction`.
         if self._use_global_junctions():
             split_here = (f"CASE WHEN {_IS_ROAD} THEN (gj.node_id IS NOT NULL) "
-                          f"ELSE (j.node_id IS NOT NULL) END")
+                          f"ELSE (j.node_id IS NOT NULL OR gj.node_id IS NOT NULL) END")
             gj_join = "LEFT JOIN main.global_junctions gj ON wn.node_id = gj.node_id"
         else:
             split_here = (f"(j.node_id IS NOT NULL AND "
@@ -818,22 +820,30 @@ class GraphSimplifier(BaseProcessor):
         # segment's way, so (ORDER BY seq) is the merged edge's constituent ways source->target
         # (seq 1 = source-end / first, MAX(seq) = target-end / last). Stable-hash ids on both
         # sides (same formula as _rekey_edges), forward + reverse (reverse only two-way).
-        # Edges NOT in this table are unchanged by the merge.
+        # Each segment is taken in the direction it runs along the chain (a two-way chain is
+        # oriented by node id, and a segment can be drawn the other way), so old and new ids
+        # always point the same way; is_reverse says whether that old edge runs against its way's
+        # drawing. Edges NOT in this table are unchanged by the merge.
         self.execute("""
             CREATE OR REPLACE TABLE edge_id_map AS
             WITH mem AS (
-                SELECT c.cid, m.seq, e.osm_id, e.source, e.target
+                SELECT c.cid, m.seq, e.osm_id,
+                       list_position(c.refs_acc, e.source) > list_position(c.refs_acc, e.target) AS against,
+                       CASE WHEN list_position(c.refs_acc, e.source) < list_position(c.refs_acc, e.target)
+                            THEN e.source ELSE e.target END AS a,      -- along the chain: a -> b
+                       CASE WHEN list_position(c.refs_acc, e.source) < list_position(c.refs_acc, e.target)
+                            THEN e.target ELSE e.source END AS b
                 FROM _chains c, UNNEST(c.edge_set) WITH ORDINALITY AS m(eid, seq)
                 JOIN simplified_edges_forward e ON e.edge_id = m.eid
             )
-            SELECT (hash(mem.osm_id, mem.source, mem.target) >> 1)::BIGINT AS old_edge_id,
+            SELECT (hash(mem.osm_id, mem.a, mem.b) >> 1)::BIGINT AS old_edge_id,
                    (hash(cm.osm_id, cm.source, cm.target) >> 1)::BIGINT AS new_edge_id,
-                   mem.seq::INTEGER AS seq, FALSE AS is_reverse, mem.osm_id AS osm_id
+                   mem.seq::INTEGER AS seq, mem.against AS is_reverse, mem.osm_id AS osm_id
             FROM mem JOIN _cmeta cm USING (cid)
             UNION ALL
-            SELECT (hash(mem.osm_id, mem.target, mem.source) >> 1)::BIGINT,
+            SELECT (hash(mem.osm_id, mem.b, mem.a) >> 1)::BIGINT,
                    (hash(cm.osm_id, cm.target, cm.source) >> 1)::BIGINT,
-                   mem.seq::INTEGER, TRUE, mem.osm_id
+                   mem.seq::INTEGER, NOT mem.against, mem.osm_id
             FROM mem JOIN _cmeta cm USING (cid)
             WHERE NOT cm.oneway
         """)

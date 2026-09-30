@@ -31,3 +31,20 @@ don't cut. Pieces are merged back only where no other way touches (as before).
 **Ids change once** for the roads that now get cut (their pieces have new end nodes, so new
 `hash(osm_id, source, target)`): projects keyed on driving ids re-match those edges once; ids are
 stable across rebuilds again from then on.
+
+## Update 2026-10-01: paths are cut there too
+
+Only roads were cut at `main.global_junctions`; footways and paths were cut only where another way
+*of the same mode* touched them. In walking, a road without sidewalks isn't in the network, so a
+crossing over it (e.g. way 586268007, edge 5645184677067318427, over secondary way 25082741 at node
+5601806444) stayed one edge in walking but was cut in cycling: the same crossing had different
+`edge_id`s. Now footways and paths are also cut at every global junction, in every mode.
+
+| Monaco | before | after |
+|---|---|---|
+| driving edges | 2,765 | 2,765 (unchanged, same ids) |
+| walking edges | 10,706 | 10,952 |
+| cycling edges | 10,228 | 10,274 |
+
+Ids change once for the walking and cycling paths that are now cut; driving ids don't change.
+

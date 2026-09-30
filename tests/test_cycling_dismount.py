@@ -70,11 +70,13 @@ def _edges_db():
                 "(2, MAP {'highway': 'footway', 'bicycle': 'yes'}), "
                 "(3, MAP {'highway': 'cycleway'})")
     con.execute("CREATE TABLE edges(edge_id BIGINT, osm_id BIGINT, highway VARCHAR, "
-                "is_reverse BOOLEAN, maxspeed VARCHAR, length_m DOUBLE)")
+                "is_reverse BOOLEAN, maxspeed VARCHAR, length_m DOUBLE, source BIGINT, target BIGINT)")
     con.execute("INSERT INTO edges VALUES "
-                "(10, 1, 'footway',  false, NULL, 100), "   # dismount
-                "(20, 2, 'footway',  false, NULL, 100), "   # rideable footway
-                "(30, 3, 'cycleway', false, NULL, 100)")
+                "(10, 1, 'footway',  false, NULL, 100, 1, 2), "    # dismount
+                "(20, 2, 'footway',  false, NULL, 100, 5, 6), "    # rideable footway
+                "(30, 3, 'cycleway', false, NULL, 100, 7, 8), "
+                "(40, -1, 'footway', false, NULL, 5, 2, 9), "      # connector extending the dismount one
+                "(50, -2, 'footway', false, NULL, 5, 6, 9)")       # connector extending the rideable one
     return con
 
 
@@ -82,15 +84,16 @@ def test_marker_speed_and_cycle_type():
     con = _edges_db()
     DismountMarker(con).run()
     flags = dict(con.execute("SELECT edge_id, dismount FROM edges").fetchall())
-    assert flags == {10: True, 20: False, 30: False}
+    assert flags == {10: True, 20: False, 30: False, 40: True, 50: False}   # a connector follows its path
 
     SpeedProcessor(con, mode="cycling").run()
     speeds = dict(con.execute("SELECT edge_id, maxspeed_kmh FROM edges").fetchall())
-    assert speeds[10] == 5.0 and speeds[20] == 15.0 and speeds[30] == 15.0
+    assert speeds[10] == 5.0 and speeds[20] == 15.0 and speeds[30] == 15.0 and speeds[40] == 5.0
 
     FunctionalType(con, mode="cycling").run()
     types = dict(con.execute("SELECT edge_id, cycle_type FROM edges").fetchall())
     assert types[10] == "dismount" and types[30] == "cycleway"
+    assert types[40] == "dismount" and types[50] == "mixed_traffic"          # connectors (no raw way)
 
 
 def test_speed_without_dismount_column_unchanged():

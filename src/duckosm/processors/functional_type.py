@@ -104,8 +104,9 @@ class FunctionalType(BaseProcessor):
             FROM raw.ways w WHERE w.osm_id = edges.osm_id
         """)
         # Connector / tagless edges (no matching raw way): highway-only fallback.
-        self.execute("""
+        self.execute(f"""
             UPDATE edges SET cycle_type = CASE
+                {dm.replace("edges.dismount", "dismount")}
                 WHEN highway = 'cycleway'                        THEN 'cycleway'
                 WHEN highway IN ('path', 'track', 'bridleway')   THEN 'shared_path'
                 ELSE 'mixed_traffic'
