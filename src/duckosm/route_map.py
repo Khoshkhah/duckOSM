@@ -32,6 +32,10 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
         return con.execute("SELECT count(*) FROM information_schema.tables "
                            "WHERE table_schema = ? AND table_name = ?", [schema, table]).fetchone()[0] > 0
 
+    def has_col(schema, col):
+        return con.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema = ? "
+                           "AND table_name = 'edges' AND column_name = ?", [schema, col]).fetchone()[0] > 0
+
     present = [m for m in MODES if has(m, "edges") and has(m, "edge_graph")]
     modes = [m for m in (modes or present) if m in present]
     if not modes:
@@ -40,10 +44,12 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     # One map feature per edge_id: the same id in several modes is the same stretch of road.
     union = " UNION ALL ".join(
         f"SELECT edge_id, source, target, COALESCE(name, '') AS name, highway, bridge, tunnel, layer, "
-        f"length_m, ST_AsText(geometry) AS wkt FROM {m}.edges" for m in modes)
+        f"length_m, ST_AsText(geometry) AS wkt, {'junction' if has_col(m, 'junction') else 'NULL'} AS junction "
+        f"FROM {m}.edges" for m in modes)
     rows = con.execute(
         f"SELECT edge_id, any_value(source), any_value(target), any_value(name), any_value(highway), "
-        f"any_value(bridge), any_value(tunnel), any_value(layer), any_value(length_m), any_value(wkt) "
+        f"any_value(bridge), any_value(tunnel), any_value(layer), any_value(length_m), any_value(wkt), "
+        f"any_value(junction) "
         f"FROM ({union}) GROUP BY edge_id ORDER BY edge_id").fetchall()
     if len(rows) > WARN_EDGES:
         logger.warning(f"route-map: {len(rows):,} edges make a heavy page; clip an area first "
@@ -60,6 +66,8 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
         "tgt": [n_of[r[2]] for r in rows],
         "name": [r[3] for r in rows],
         "len": [round(r[8] or 0.0, 1) for r in rows],
+        "hw": [r[4] or "" for r in rows],
+        "rb": [k for k, r in enumerate(rows) if r[10] in ("roundabout", "circular")],   # for directions
         "graphs": {},
         "mm": None,
     }
@@ -137,6 +145,8 @@ _CSS = """<style>
 #rm-result .rm-leg{display:flex;gap:6px;align-items:center;margin-top:4px}
 #rm-result .rm-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 #rm-result ol{margin:6px 0 0;padding-left:20px;color:#444;font-size:13px}
+#rm-result .rm-steps li{cursor:pointer;margin:2px 0} #rm-result .rm-steps li:hover{color:#111}
+#rm-result .rm-dist{color:#888;font-size:12px;white-space:nowrap}
 #rm-result .rm-edges{margin-top:8px;font-size:12px} #rm-result .rm-edges summary{cursor:pointer;color:#555}
 #rm-result .rm-edges code{font-size:11px;user-select:all}
 #rm-panel .rm-clicked{margin:8px 0 0;font-size:12px;color:#555} #rm-panel .rm-clicked code{user-select:all}
@@ -306,6 +316,87 @@ _JS = r"""
     rsColor(legs ? legs.map((l) => [l.edges.map((k) => fid[k]), COLORS[l.mode]]) : null);
   }
 
+  // ---- directions: route-guidance's maneuver rules (OSRM model), ported --------------------------
+  const RB = new Set(D.rb), OUT = {}, R_EARTH = 6371000, RAD = Math.PI / 180;
+  const COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+  function outOf(mode) {                               // mode -> node -> the edges leaving it
+    if (!OUT[mode]) { const m = new Map(); for (const k of G[mode].k) { const n = D.src[k]; if (!m.has(n)) m.set(n, []); m.get(n).push(k); } OUT[mode] = m; }
+    return OUT[mode];
+  }
+  function hav(a, b) {
+    const dl = (b[1] - a[1]) * RAD, dn = (b[0] - a[0]) * RAD;
+    const h = Math.sin(dl / 2) ** 2 + Math.cos(a[1] * RAD) * Math.cos(b[1] * RAD) * Math.sin(dn / 2) ** 2;
+    return 2 * R_EARTH * Math.asin(Math.sqrt(h));
+  }
+  function brg(a, b) {
+    const f1 = a[1] * RAD, f2 = b[1] * RAD, dn = (b[0] - a[0]) * RAD;
+    const y = Math.sin(dn) * Math.cos(f2), x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dn);
+    return (Math.atan2(y, x) / RAD + 360) % 360;
+  }
+  function headAt(c, fromStart) {                      // heading over the first / last 18 m of a line
+    let acc = 0;
+    if (fromStart) { for (let i = 1; i < c.length; i++) { acc += hav(c[i - 1], c[i]); if (acc >= 18 || i === c.length - 1) return brg(c[0], c[i]); } }
+    else { for (let i = c.length - 2; i >= 0; i--) { acc += hav(c[i], c[i + 1]); if (acc >= 18 || i === 0) return brg(c[i], c[c.length - 1]); } }
+    return 0;
+  }
+  const turn = (b0, b1) => ((b1 - b0 + 540) % 360) - 180;    // + = right
+  function modifier(a) {
+    const x = Math.abs(a), side = a > 0 ? "right" : "left";
+    return x < 20 ? "straight" : x >= 170 ? "uturn" : x < 45 ? "slight " + side : x < 135 ? side : "sharp " + side;
+  }
+  const isTurn = (m) => ["left", "right", "uturn"].includes(m) || m.startsWith("sharp");
+  function directions(legs) {
+    const E = legs.flatMap((l) => l.edges.map((k) => ({k, mode: l.mode, c: GEO[k], name: D.name[k], hw: D.hw[k],
+      len: D.len[k], rb: RB.has(k), out: outOf(l.mode).get(D.src[k]) || []})));
+    if (!E.length) return [];
+    const same = (a, b) => a.name || b.name ? a.name === b.name : a.hw === b.hw;
+    const step = (type, mod, e) => ({type, mod, name: e.name, mode: e.mode, at: e.c[0], len: 0});
+    const steps = []; let cur = null, rb = null, outB = 0;
+    for (let i = 0; i < E.length; i++) {
+      const e = E[i], eIn = headAt(e.c, true), eOut = headAt(e.c, false);
+      if (e.rb) {                                      // a roundabout: one "take the Nth exit"
+        if (!rb) { if (cur) steps.push(cur); cur = null; rb = step("roundabout", "", e); rb.name = ""; rb.exit = 0; }
+        rb.exit++; rb.len += e.len; outB = eOut; continue;
+      }
+      if (rb) { rb.name = e.name; cur = rb; rb = null; cur.len += e.len; outB = eOut; continue; }
+      if (!cur) cur = step("depart", COMPASS[Math.floor(((eIn + 22.5) % 360) / 45)], e);
+      else {
+        const prev = E[i - 1], mod = modifier(turn(outB, eIn)), sharp = mod === "uturn" || mod.startsWith("sharp");
+        const junction = e.out.length >= 3, named = !same(prev, e) && !!e.name;
+        let fork = null;                               // 2+ ways forward: keep left / right
+        if (junction && !isTurn(mod)) {
+          const mine = turn(outB, eIn);
+          const sibs = e.out.map((k) => headAt(GEO[k], true)).filter((b) => Math.abs(turn(eIn, b)) > 8).map((b) => turn(outB, b));
+          if (Math.abs(mine) >= 12 && Math.abs(mine) < 50 && !sibs.some((t) => Math.abs(t) < 12) &&
+              sibs.some((t) => Math.abs(t) < 50 && (t < 0) !== (mine < 0))) fork = mine < 0 ? "left" : "right";
+        }
+        const next = e.mode !== prev.mode ? step("mode", mod, e) : sharp || (junction && isTurn(mod)) ? step("turn", mod, e)
+          : fork ? step("fork", fork, e) : named ? step("new name", mod, e) : null;
+        if (next) { steps.push(cur); cur = next; }
+      }
+      cur.len += e.len; outB = eOut;
+    }
+    if (rb) steps.push(rb); else if (cur) steps.push(cur);
+    const last = E[E.length - 1].c;
+    steps.push({type: "arrive", mod: "", name: "", at: last[last.length - 1], len: 0});
+    return steps;
+  }
+  const VERB = {walking: "on foot", cycling: "by bike", driving: "by car"};
+  function say(s) {
+    const onto = s.name ? " onto " + s.name : "", on = s.name ? " on " + s.name : "";
+    const nth = (n) => n + ((n % 100 >= 11 && n % 100 <= 13) ? "th" : ({1: "st", 2: "nd", 3: "rd"}[n % 10] || "th"));
+    switch (s.type) {
+      case "depart": return (s.mode === "walking" ? "Walk " : "Head ") + s.mod + on;
+      case "turn": return s.mod === "uturn" ? "Make a U-turn" + onto : "Turn " + s.mod + onto;
+      case "fork": return "Keep " + s.mod + " at the fork" + onto;
+      case "new name": return "Continue" + onto;
+      case "roundabout": return "At the roundabout, take the " + nth(s.exit) + " exit" + onto;
+      case "mode": return "Continue " + (VERB[s.mode] || "") + onto;
+      case "arrive": return "Arrive at your destination";
+    }
+    return s.type;
+  }
+
   function show(res, multi) {
     const out = $("rm-result");
     if (!res) { out.textContent = "No route between these points with these modes."; paint(null); return; }
@@ -314,12 +405,16 @@ _JS = r"""
       for (const l of res.legs) h += `<div class="rm-leg"><span class="rm-dot" style="background:${COLORS[l.mode]}"></span>${LABEL[l.mode]}: ${fmtTime(l.time)}, ${fmtLen(l.len)}</div>`;
       if (res.transfers) h += `<div class="rm-leg">${res.transfers} change${res.transfers > 1 ? "s" : ""} of mode</div>`;
     }
-    const names = []; for (const l of res.legs) for (const k of l.edges) { const n = D.name[k]; if (n && n !== names[names.length - 1]) names.push(n); }
-    if (names.length) h += "<ol>" + names.slice(0, 15).map((n) => `<li>${n}</li>`).join("") + (names.length > 15 ? "<li>…</li>" : "") + "</ol>";
+    const steps = directions(res.legs);
+    h += '<ol class="rm-steps">' + steps.map((st, i) => `<li data-i="${i}">${say(st)}` +
+         (st.len ? ` <span class="rm-dist">${fmtLen(st.len)}</span>` : "") + "</li>").join("") + "</ol>";
     const ks = res.legs.flatMap((l) => l.edges), ps = rsGetProps(ks.map((k) => fid[k]));
     h += `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
          ks.map((k, i) => `<li><code>${ps[i].edge_id}</code> ${D.name[k] || ""}</li>`).join("") + "</ol></details>";
     out.innerHTML = h;
+    for (const li of out.querySelectorAll(".rm-steps li"))       // a step -> the map at that maneuver
+      li.addEventListener("click", () => map.flyTo({center: steps[+li.dataset.i].at, zoom: Math.max(map.getZoom(), 17)}));
+    window.rmSteps = steps.map(say);                              // for tests and scripts
     paint(res.legs);
   }
 

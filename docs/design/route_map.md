@@ -30,6 +30,38 @@ duckosm route-map monaco.duckdb                  # -> reports/monaco_route_map.h
   the streets in order, and for a trip across modes, each leg in its mode's colour (walking green,
   driving red, cycling blue).
 
+## Directions (turn by turn) — implemented 2026-09-30
+
+Under the result, the route as instructions, like route-viewer's (from the private
+`route-guidance` library, OSRM's maneuver model), e.g. (illustrative):
+
+```text
+1. Head north on Avenue des Castelans                 250 m
+2. Turn right onto Rue du Campanin                    120 m
+3. At the roundabout, take the 2nd exit onto Avenue des Papalins    400 m
+4. Keep left at the fork onto Tunnel Rocher Palais    600 m
+5. Continue onto Boulevard Albert 1er                 1.1 km
+6. Arrive at your destination
+```
+
+- **Computed in the page** from the route's edges (routes change as you drag, so it can't be
+  precomputed): route-guidance's rules ported to ~150 lines of JavaScript. The heading change
+  between edges gives the turn (straight < 20°, slight < 45°, turn < 135°, sharp, U-turn ≥ 170°);
+  runs on the same street are merged; a new street name gives "Continue onto"; `junction=roundabout`
+  edges collapse into "At the roundabout, take the Nth exit"; a turn is only announced at a real
+  junction (3+ roads), so bends on one street stay silent.
+- **The page needs** each edge's `junction` tag (new, a small list) and the number of roads at each
+  node (counted in the page from the graph it already has).
+- **Click a step** to zoom the map to that maneuver.
+- For walk + drive, a "Continue by car / on foot" step where the mode changes.
+
+Not in this first version: lane advice ("use the left 2 lanes"), exit numbers on motorways,
+spoken directions.
+
+Checked against route-guidance itself on 40 random Monaco trips: the same steps on all 40 (with
+"Make a U-turn" for its "Turn uturn"). Approved by Kaveh to copy its rules (not its code) into
+duckOSM; when the planner moves into mapstyle, the same JavaScript moves with it.
+
 ## Same answers as the Python API
 
 The page embeds compact JSON graphs (node ids remapped to small integers: some ids pass 2**53) and
@@ -58,7 +90,6 @@ routes in the page with `route()` / `route_multimodal()`.
 
 - Everything is in the page: fine for a city (Monaco, all modes: ~20 k edges, a few MB), heavy for a
   country; above ~100 k edges the command warns and suggests clipping an area first.
-- Later: turn-by-turn directions (route-viewer gets them from the private route-guidance).
 - **Not truly multimodal yet.** `route_multimodal` is walk + one vehicle, with the vehicle available
   at any junction. Walk + cycle is left out of the menu until there are bike-share stations. Real
   multimodal needs where you can change: bike-share stations, parking, bus stops, and bus

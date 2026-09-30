@@ -39,6 +39,7 @@ def test_route_map_embeds_the_turn_graph(tmp_path):
     assert all(7.40 <= p[0] <= 7.43 for p in (rm["start"], rm["end"]))   # opens with a route between these
     # features ordered by edge_id: 10, 20, 30 -> k 0, 1, 2
     assert rm["name"] == ["B", "", "A"]
+    assert rm["hw"] == ["residential", "service", "residential"] and rm["rb"] == []   # for directions
     assert max(rm["src"] + rm["tgt"]) < 4                  # 4 nodes, remapped to 0..3
     assert rm["tgt"][0] == rm["src"][1]                    # B ends where the service road starts (BIG)
     d = rm["graphs"]["driving"]
