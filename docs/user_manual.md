@@ -60,9 +60,24 @@ duckosm boundary Monaco --pbf monaco-latest.osm.pbf       # -> monaco.geojson
 ```
 
 It looks for the area's official border inside the PBF (offline; needs GDAL's `ogr2ogr`), then asks
-OpenStreetMap's Nominatim search online. Case, accents and hyphens don't matter. If a name is
-ambiguous it takes the exact name with the largest area (the Monaco extract has two: the country and
-the municipality); `--osm-id` picks one exactly. It prints what it found. You can also use any
+OpenStreetMap's Nominatim search online. Case, accents and hyphens don't matter. It prints what it
+picked, and, if the name matched more than one border, the others with their OSM ids:
+
+```text
+wrote monaco.geojson: Monaco (admin level 2, OSM relation 1124039, 79.8 km²), from PBF monaco-latest.osm.pbf
+also matched (pick one with --osm-id):
+  Monaco (admin level 8, OSM relation 2220322, 2.39 km²)
+  Monaco-Ville (admin level 10, OSM relation 2220207, 0.2 km²)
+```
+
+It picks the exact name with the largest area, here the country. To take another one, pass its id:
+
+```bash
+duckosm boundary --osm-id 2220322 --pbf monaco-latest.osm.pbf -o monaco_town.geojson
+```
+
+You can also look an id up on [openstreetmap.org](https://www.openstreetmap.org): search for the area,
+click it, and the page address ends in `relation/<id>`. Or skip `duckosm boundary` and use any
 GeoJSON polygon you already have.
 
 ### B. Build the network

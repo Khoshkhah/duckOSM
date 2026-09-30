@@ -16,6 +16,7 @@ def test_boundary_by_name_from_the_pbf():
     _, info = find_boundary("Monaco", pbf=PBF, offline=True)
     # two borders are called "Monaco": the exact-name rule then prefers the larger, the country
     assert (info["osm_id"], info["admin_level"]) == (1124039, 2)
+    assert 2220322 in [o["osm_id"] for o in info["others"]]                 # listed, to pick with --osm-id
     _, info = find_boundary("monte carlo", pbf=PBF, offline=True)          # case, spaces, partial
     assert info["name"] == "Monte-Carlo"
 

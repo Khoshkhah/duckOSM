@@ -165,9 +165,14 @@ def boundary(name, pbf, osm_id, offline, out):
         raise click.ClickException(str(e))
     out = out or f"{(name or info['name']).split(',')[0].strip().lower().replace(' ', '_')}.geojson"
     write_boundary(geom, info, out)
-    level = f"admin level {info['admin_level']}, " if info["admin_level"] is not None else ""
-    click.echo(f"wrote {out}: {info['name']} ({level}OSM relation {info['osm_id']}, "
-               f"{info['area_km2']} km², from {info['source']})")
+    def describe(i):
+        level = f"admin level {i['admin_level']}, " if i["admin_level"] is not None else ""
+        return f"{i['name']} ({level}OSM relation {i['osm_id']}, {i['area_km2']} km²)"
+    click.echo(f"wrote {out}: {describe(info)}, from {info['source']}")
+    if info.get("others"):
+        click.echo("also matched (pick one with --osm-id):")
+        for o in info["others"]:
+            click.echo(f"  {describe(o)}")
 
 
 @main.command(name="clip-pbf")

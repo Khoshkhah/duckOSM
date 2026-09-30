@@ -22,7 +22,7 @@ logger = logging.getLogger("duckosm")
 NOMINATIM = "https://nominatim.openstreetmap.org"
 
 
-def admin_match_sql(table, has_en=True):
+def admin_match_sql(table, has_en=True, limit=1):
     """SELECT the best admin boundary in ``table`` for the name ``$q``: case, accents and hyphens
     ignored ("monte carlo" finds Monte-Carlo), ``name:en`` matched too, an exact name before a
     partial one, then the largest area. Shared by ``extract --name`` and ``duckosm boundary``."""
@@ -31,14 +31,16 @@ def admin_match_sql(table, has_en=True):
     en = norm("coalesce(name_en, '')") if has_en else "''"
     return (f"SELECT geometry AS geom, osm_id, name, admin_level FROM {table} "
             f"WHERE {nm} LIKE '%' || {q} || '%' OR {en} LIKE '%' || {q} || '%' "
-            f"ORDER BY ({nm} = {q} OR {en} = {q}) DESC, ST_Area(geometry) DESC LIMIT 1")
+            f"ORDER BY ({nm} = {q} OR {en} = {q}) DESC, ST_Area(geometry) DESC LIMIT {int(limit)}")
 
 
 def find_boundary(name=None, pbf=None, osm_id=None, offline=False):
     """Return ``(geometry_geojson, info)`` for the area called ``name`` (or OSM relation ``osm_id``).
 
     Looks in ``pbf``'s own borders first, then asks Nominatim unless ``offline``. ``info`` holds
-    ``name``, ``osm_id``, ``admin_level``, ``area_km2`` and ``source``. Raises LookupError."""
+    ``name``, ``osm_id``, ``admin_level``, ``area_km2``, ``source`` and ``others``: the other borders
+    that matched the name (best first), so an ambiguous name can be resolved with ``osm_id``.
+    Raises LookupError."""
     if pbf:
         if shutil.which("ogr2ogr"):
             hit = _from_pbf(Path(pbf), name, osm_id)
@@ -65,20 +67,20 @@ def _from_pbf(pbf, name, osm_id):
         load_boundaries(gpkg, db)
         con = duckdb.connect(str(db))
         con.execute("LOAD spatial")
+        pick = "SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, " \
+               "ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM "
         if osm_id is not None:
-            sql = ("SELECT geometry AS geom, osm_id, name, admin_level FROM admin_boundaries "
-                   f"WHERE osm_id = {int(osm_id)}")
-            row = con.execute(f"SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, "
-                              f"ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM ({sql})").fetchone()
+            rows = con.execute(pick + "(SELECT geometry AS geom, osm_id, name, admin_level "
+                               f"FROM admin_boundaries WHERE osm_id = {int(osm_id)})").fetchall()
         else:
-            row = con.execute(f"SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, "
-                              f"ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM ({admin_match_sql('admin_boundaries')})",
-                              {"q": name}).fetchone()
+            rows = con.execute(pick + f"({admin_match_sql('admin_boundaries', limit=6)})",
+                               {"q": name}).fetchall()
         con.close()
-    if not row:
+    if not rows:
         return None
-    return row[0], {"name": row[2], "osm_id": row[1], "admin_level": row[3],
-                    "area_km2": round(row[4], 2), "source": f"PBF {pbf.name}"}
+    info = lambda r: {"name": r[2], "osm_id": r[1], "admin_level": r[3], "area_km2": round(r[4], 2)}
+    return rows[0][0], {**info(rows[0]), "source": f"PBF {pbf.name}",
+                        "others": [info(r) for r in rows[1:]]}
 
 
 def _from_nominatim(name, osm_id):
@@ -98,22 +100,26 @@ def _from_nominatim(name, osm_id):
     except OSError as e:
         logger.warning(f"  Nominatim not reachable: {e}")
         return None
-    for f in features:                                    # a place can come back as a point: skip those
+    found = []                                            # a place can come back as a point: skip those
+    for f in features:
         if f.get("geometry", {}).get("type") in ("Polygon", "MultiPolygon"):
             p, geom = f["properties"], json.dumps(f["geometry"])
             area = duckdb.execute("INSTALL spatial; LOAD spatial; SELECT ST_Area_Spheroid("
                                   "ST_FlipCoordinates(ST_GeomFromGeoJSON(?))) / 1e6", [geom]).fetchone()[0]
-            return geom, {"name": p.get("name") or p.get("display_name"), "osm_id": p.get("osm_id"),
-                          "admin_level": None, "area_km2": round(area, 2), "source": "Nominatim"}
-    return None
+            found.append((geom, {"name": p.get("display_name") or p.get("name"), "osm_id": p.get("osm_id"),
+                                 "admin_level": None, "area_km2": round(area, 2)}))
+    if not found:
+        return None
+    return found[0][0], {**found[0][1], "source": "Nominatim", "others": [i for _, i in found[1:]]}
 
 
 def write_boundary(geometry_geojson, info, out):
     """Write a boundary as a one-feature GeoJSON FeatureCollection (``info`` as its properties)."""
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    props = {k: v for k, v in info.items() if k != "others"}
     out.write_text(json.dumps({"type": "FeatureCollection", "features": [
-        {"type": "Feature", "properties": info, "geometry": json.loads(geometry_geojson)}]}))
+        {"type": "Feature", "properties": props, "geometry": json.loads(geometry_geojson)}]}))
     return out
 
 
