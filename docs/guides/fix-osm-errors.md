@@ -21,13 +21,25 @@ turn_restrictions:           # turns OSM should forbid but doesn't
     restriction: no_left_turn
 ```
 
-Point the build at it in your [config file](build.md#with-a-config-file):
+Give it to the build, on the command line or in your [config file](build.md#with-a-config-file):
+
+```bash
+duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson -m driving -m cycling --fixes fixes.yaml
+```
 
 ```yaml
 osm_overrides: fixes.yaml
 ```
 
-The build log confirms each rule it applied. On Monaco, the file above gives:
+The build log says how many rules matched, per network:
+
+```text
+OSM fixes (fixes.yaml, driving): 1 of 2 way rules matched this area
+OSM fixes (fixes.yaml): 1 of 1 turn rule matched this area
+OSM fixes (fixes.yaml, cycling): 2 of 2 way rules matched this area
+```
+
+On Monaco, the file above gives:
 
 | | Without | With |
 |---|---|---|
@@ -36,8 +48,7 @@ The build log confirms each rule it applied. On Monaco, the file above gives:
 | turns from Avenue Delphine onto Avenue Saint-Romain | 1 | 0 |
 
 A rule for a way or junction that isn't in the area does nothing, so one file can hold fixes for
-every area you build. The default is `osm_overrides/osm_overrides.yaml` in the folder you run in;
-without that file, nothing is changed.
+every area you build. Fixes are only applied when you name the file.
 
 ## Way fixes (`overrides`)
 

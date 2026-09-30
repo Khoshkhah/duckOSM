@@ -133,10 +133,10 @@ class Config:
     name: str = "default"
     pbf_path: str = ""                             # back-compat (== source.pbf_path)
     output_path: str = "output.duckdb"
-    # Global rules file of local corrections for known OSM errors (see
-    # osm_overrides/known_osm_issues.md), applied to `ways` between RoadFilter and GraphBuilder.
-    # Silent no-op if the file is absent.
-    osm_overrides: Optional[str] = "osm_overrides/osm_overrides.yaml"
+    # Rules file of fixes for known OSM errors (way rules + turn rules; docs: "Fix OSM errors"),
+    # applied only when named here or with `build --fixes`. No default: a build never picks up a
+    # rules file just because one sits in the working directory.
+    osm_overrides: Optional[str] = None
     boundary_path: Optional[str] = None            # back-compat (== boundary.path)
     h3_cell: Optional[str] = None
     modes: list[str] = field(default_factory=lambda: ["driving"])
@@ -190,7 +190,7 @@ class Config:
             name=data.get("name", "default"),
             pbf_path=source.pbf_path or data.get("pbf_path", "") or "",
             output_path=data.get("output_path", "output.duckdb"),
-            osm_overrides=data.get("osm_overrides", "osm_overrides/osm_overrides.yaml"),
+            osm_overrides=data.get("osm_overrides"),
             boundary_path=boundary.path or data.get("boundary_path"),
             h3_cell=boundary.h3_cell or data.get("h3_cell"),
             modes=data.get("modes") or ["driving"],
@@ -210,6 +210,7 @@ class Config:
         modes: list[str] = None,
         source_db: Optional[str] = None,
         source_type: Optional[str] = None,
+        osm_overrides: Optional[str] = None,
         **options_kwargs
     ) -> "Config":
         options = Options(**{k: v for k, v in options_kwargs.items() if v is not None})
@@ -223,6 +224,7 @@ class Config:
             boundary_path=boundary_path,
             h3_cell=h3_cell,
             modes=modes if modes else ["driving"],
+            osm_overrides=osm_overrides,
             options=options, source=source, boundary=boundary,
         )
 
@@ -249,6 +251,8 @@ class Config:
                     "mapped onto edges via edges.refs, which only the simplifier writes. "
                     "Set simplify: true, or extract_restrictions: false."
                 )
+        if self.osm_overrides and not Path(self.osm_overrides).exists():
+            raise FileNotFoundError(f"OSM fixes file not found: {self.osm_overrides}")
         if self.effective_boundary_path and not Path(self.effective_boundary_path).exists():
             raise FileNotFoundError(f"Boundary file not found: {self.effective_boundary_path}")
 

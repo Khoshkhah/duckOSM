@@ -36,8 +36,15 @@ class RestrictionProcessor(BaseProcessor):
 
     def run(self) -> None:
         """Extract and process restrictions."""
+        self._n_turn_rules = 0
         self._extract_raw_restrictions()
         self._map_to_edges()
+        if self._n_turn_rules:                    # synthetic rules carry negative restriction_ids
+            matched = self.fetchone(
+                "SELECT count(DISTINCT restriction_id) FROM turn_restrictions WHERE restriction_id < 0")[0]
+            rule = "turn rule" if self._n_turn_rules == 1 else "turn rules"
+            logger.info(f"  OSM fixes ({self.overrides_path.name}): "
+                        f"{matched} of {self._n_turn_rules} {rule} matched this area")
     
     def _extract_raw_restrictions(self) -> None:
         """Extract restriction relations from raw OSM data."""
@@ -83,7 +90,7 @@ class RestrictionProcessor(BaseProcessor):
         """)
         
         # Add any synthetic restrictions (from osm_overrides.yaml) — same shape, so they map below too.
-        self._inject_overrides()
+        self._n_turn_rules = self._inject_overrides()
 
         # Map to edge IDs by the way that is INCIDENT to the via node — i.e. each edge's END
         # segment, not its single representative osm_id. A merged edge spans several ways and
@@ -154,5 +161,4 @@ class RestrictionProcessor(BaseProcessor):
             "INSERT INTO restrictions_pivoted (restriction_id, restriction_type, from_way, via_node, to_way) "
             f"SELECT * FROM (VALUES {','.join(vals)}) "
             "AS t(restriction_id, restriction_type, from_way, via_node, to_way)")
-        logger.info(f"  injected {len(vals)} synthetic turn-restriction override(s)")
         return len(vals)

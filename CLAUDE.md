@@ -65,9 +65,10 @@ produced by `duckosm gmns`, not the core db. `railml` re-extracts rail from `raw
 - `edges.lanes` is an INTEGER **per direction**; `oneway` is topological (decides whether the
   reverse twin exists), which is why OSM overrides must run before GraphBuilder.
 - `highway=service` stays in `edges` and `edge_graph` — there is no separate service table.
-- `osm_overrides/osm_overrides.yaml` is one global file applied to every build (rules keyed by
-  `osm_id`, silent no-op elsewhere). Only enable a rule once verified; provenance goes in
-  `known_osm_issues.md`. Synthetic turn restrictions live there under `turn_restrictions:`.
+- `osm_overrides/osm_overrides.yaml` holds Kaveh's fixes for OSM errors (way rules + synthetic
+  `turn_restrictions:`, keyed by OSM ids, a no-op where the ways aren't present). It is applied only
+  when named: config `osm_overrides:` or `build --fixes` (no default since 2026-09-30; Kaveh's local
+  area configs name it). Only enable a rule once verified; provenance goes in `known_osm_issues.md`.
 
 ## Conventions
 

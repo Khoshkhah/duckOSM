@@ -569,11 +569,8 @@ class DuckOSM:
     
     def _apply_osm_overrides(self, mode: str | None = None) -> None:
         """Patch `ways` with local corrections for known OSM errors (before edges are built)."""
-        logger.info("Applying OSM overrides...")
         n = OsmOverrides(self.con, self.config.osm_overrides, mode=mode).run()
         self.stats['osm_overrides_applied'] = self.stats.get('osm_overrides_applied', 0) + n
-        if not n:
-            logger.info("  no OSM overrides matched this area")
 
     def _build_edges(self) -> None:
         """Create directed edges from ways."""

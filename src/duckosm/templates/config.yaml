@@ -86,7 +86,7 @@ viz:
   basemap: carto-voyager               # carto-voyager | carto-positron | carto-dark | osm
 
 # ---- LOCAL OSM FIXES AND CACHING ---------------------------------------------
-osm_overrides: osm_overrides/osm_overrides.yaml   # local fixes for known OSM errors (see the docs);
-                                                 # a missing file is a no-op
+osm_overrides: null                    # a rules file of fixes for OSM errors (docs: "Fix OSM errors");
+                                       # only used when named here or with `build --fixes`
 # With a boundary (and osmium installed) the PBF is first clipped to it; the clipped copy is
 # cached in ./pbf/ and reused by the next build of the same area.

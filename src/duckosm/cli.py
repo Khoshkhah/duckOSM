@@ -84,9 +84,11 @@ def main():
 @click.option('--h3-index/--no-h3-index', default=True, help='Add H3 spatial indexing')
 @click.option('--h3-resolution', type=int, default=8, help='H3 resolution (0-15)')
 @click.option('--modes', '-m', multiple=True, help='Transportation modes (driving, walking, cycling); repeat for several')
+@click.option('--fixes', type=click.Path(exists=True, dir_okay=False),
+              help='Rules file of fixes for OSM errors (config key: osm_overrides)')
 @click.option('--log-file', type=click.Path(dir_okay=False), help='Also write the log to this file')
 def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3_resolution, modes,
-          log_file):
+          fixes, log_file):
     """Build a routing network from a PBF, or clip one from a parent db.
 
     \b
@@ -119,6 +121,7 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
                 h3_indexing=h3_index,
                 h3_resolution=h3_resolution,
                 modes=list(modes) if modes else ["driving"],
+                osm_overrides=fixes,
             )
         else:
             raise click.ClickException(
@@ -129,6 +132,8 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
     except Exception as e:
         raise click.ClickException(f"loading config: {e}")
 
+    if fixes:
+        cfg.osm_overrides = fixes                  # --fixes also overrides a config file's setting
     setup_logging(log_file)
     try:
         output_path = DuckOSM(cfg).run()

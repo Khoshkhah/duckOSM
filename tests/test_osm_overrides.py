@@ -72,3 +72,26 @@ overrides:
     assert OsmOverrides(con, rules, mode="walking").run() == 0               # kept for walking
     assert con.execute("SELECT count(*) FROM ways WHERE osm_id=999").fetchone()[0] == 1
 
+
+
+def test_fixes_file_is_only_used_when_named(tmp_path, monkeypatch):
+    """No hidden default: a rules file sitting in the working directory is NOT picked up."""
+    from duckosm import Config
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "osm_overrides").mkdir()
+    (tmp_path / "osm_overrides" / "osm_overrides.yaml").write_text("overrides: []\n")
+    assert Config.from_args(pbf_path="x.osm.pbf", output_path="x.duckdb").osm_overrides is None
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("name: t\nsource: {pbf_path: x.osm.pbf}\n")
+    assert Config.from_yaml(str(cfg)).osm_overrides is None
+
+
+def test_a_named_fixes_file_must_exist(tmp_path):
+    import pytest
+    from duckosm import Config
+    pbf = tmp_path / "x.osm.pbf"
+    pbf.write_bytes(b"")
+    cfg = Config.from_args(pbf_path=str(pbf), output_path=str(tmp_path / "x.duckdb"),
+                           osm_overrides=str(tmp_path / "missing.yaml"))
+    with pytest.raises(FileNotFoundError, match="OSM fixes file not found"):
+        cfg.validate()

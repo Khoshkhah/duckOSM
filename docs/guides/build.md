@@ -23,6 +23,7 @@ small pieces of network that don't connect to the rest. What each step does:
 | `--graph` / `--no-graph` | build the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution` | H3 resolution, 0–15 | `8` |
+| `--fixes` | a rules file of [fixes for OSM errors](fix-osm-errors.md) | none |
 | `--log-file` | also write the log to a file | console only |
 
 ## With a config file

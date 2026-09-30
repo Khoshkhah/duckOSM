@@ -75,8 +75,9 @@ class OsmOverrides(BaseProcessor):
             applied += 1
             note = f"  ({r['note']})" if r.get("note") else ""
             logger.info(f"  override osm_id={int(osm_id)}: {', '.join(sets)}{note}")
-        if applied:
-            logger.info(f"  applied {applied}/{len(rules)} OSM override(s) to `ways`")
+        way = "way rule" if len(rules) == 1 else "way rules"
+        logger.info(f"  OSM fixes ({self.path.name}, {self.mode or 'all modes'}): "
+                    f"{applied} of {len(rules)} {way} matched this area")
         return applied
 
     @staticmethod
