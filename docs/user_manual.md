@@ -165,51 +165,28 @@ got. A negative `osm_id` looks up the short connector edges duckOSM adds to join
 ## Visualization
 
 ```bash
-duckosm viz monaco.duckdb
+pip install "duckosm[viz]"
+duckosm viz monaco.duckdb        # -> reports/monaco_<mode>_network.html, one map per mode
 ```
 
-Writes an interactive HTML map per mode (`reports/<name>_<mode>_network.html`), drawn with
-[roadstyle](https://github.com/Khoshkhah/roadstyle): edges styled by road class, a legend that
-toggles each class, a base-map switcher, a hover tooltip (`edge_id`, road class, name, lanes,
-speed), click-to-copy `edge_id`, and a 2D/3D button that raises bridges. Needs
-`pip install "duckosm[viz]"`.
+Each map shows the roads coloured by class, with a legend, a base-map switcher, a hover tooltip and
+a 2D/3D button. Click a road to copy its `edge_id`. Tunnels are drawn under the roads above them,
+bridges on top.
 
-Options: `-m driving` renders one mode (default: every mode in the db); `--basemap` picks the base
-map shown first (`voyager` (default), `positron`, `dark_matter`, `osm`, `satellite`, `blank`);
-`--out-dir` changes the output folder.
+| Option | Does |
+|---|---|
+| `-m driving` | one mode only (default: every mode) |
+| `--arrows` | direction arrows on one-way roads (zoom in to see them) |
+| `--basemap positron` | first base map: `voyager` (default), `positron`, `dark_matter`, `osm`, `satellite`, `blank` |
+| `--no-boundary` | hide the dashed outline of the clip area |
+| `--out-dir maps` | output folder (default `reports`) |
 
-Add `--arrows` to overlay **one-way direction arrows** — a small gray chevron at
-each one-way edge's midpoint pointing `source → target` (the legal travel
-direction). They are zoom-gated (rendered only at zoom ≥ 18) so the zoomed-out
-view stays clean; zoom in to a one-way street to see them. Two-way roads are not
-arrowed (each is a forward+reverse edge pair, so arrowing all edges is too heavy).
+**Other palettes, or colour by a column** (needs a clone of the repo):
 
 ```bash
-duckosm viz monaco.duckdb --arrows
+python scripts/roadstyle_map.py --db monaco.duckdb --palette mono           # highsat | carto | mono
+python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
-
-The clip/area **boundary** (`main.boundary`) is overlaid as a dashed outline by default, so the
-map shows the extent the network was clipped to; turn it off with `--no-boundary`.
-
-**Grade separation.** Both `duckosm viz` and the standalone renderer carry the
-`bridge` / `tunnel` / `layer` columns into roadstyle, which draws **tunnels underneath, bridges on
-top with a solid casing**, and z-orders edges so over/underpasses don't look connected. Every road,
-including `highway=service`, lives in `edges`, so the map shows the whole network.
-
-### Standalone renderer & palettes
-
-`scripts/roadstyle_map.py` is a standalone alternative to `duckosm viz` that adds **palette
-selection**. It lives in the repo's `scripts/` folder (not in the pip package), so it needs a clone:
-
-```bash
-python scripts/roadstyle_map.py --db monaco.duckdb --palette mono     # -> monaco_driving.html
-```
-
-`--palette` picks the roadstyle palette — `highsat` (default, high-contrast), `carto`
-(OSM-standard look), or `mono` (grayscale). It renders the same bridge/tunnel grade separation.
-`--color-by <column>` colours edges by a numeric/categorical column instead of road class;
-`--mode` picks the mode (default `driving`); `--out` (default `<db>_<mode>.html`) / `--basemap` /
-`--theme` tweak the output.
 
 ## Routing (shortest path)
 
