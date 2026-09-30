@@ -5,21 +5,22 @@ Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. Mona
 | Mode | Edges | Nodes | Speed |
 |---|---|---|---|
 | `driving` | 2,765 | 1,719 | the speed limit, or a default per road class |
-| `walking` | 10,706 | 3,996 | 5 km/h |
-| `cycling` | 10,228 | 4,128 | 15 km/h; 5 km/h on dismount edges |
+| `walking` | 10,952 | 4,116 | 5 km/h |
+| `cycling` | 10,274 | 4,151 | 15 km/h; 5 km/h on dismount edges |
 
 ## Which OSM ways each mode keeps
 
 | Mode | Keeps |
 |---|---|
-| `driving` | `highway` = `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`s), `unclassified`, `residential`, `service`, `living_street`, `road`. Also `highway=pedestrian` when `motorcar` or `motor_vehicle` is `yes` / `designated` / `permissive`, or `access` is `delivery` / `destination` / `agricultural`: these become `living_street` |
-| `walking` | `highway` = `footway`, `path`, `pedestrian`, `steps`, `living_street`, `residential`, `service`, `platform`, `corridor`; and any way tagged `sidewalk` = `yes` / `both` / `left` / `right`, or `foot` = `yes` / `designated` |
+| `driving` | `highway` = `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`s), `unclassified`, `residential`, `service`, `living_street`, `road`. Also `highway=pedestrian` when `motorcar` or `motor_vehicle` is `yes` / `designated` / `permissive`, or `access` is `delivery` / `destination`: these become `living_street` |
+| `walking` | `highway` = `footway`, `path`, `pedestrian`, `steps`, `living_street`, `residential`, `service`, `platform`, `corridor`; and any way tagged `sidewalk` = `yes` / `both` / `left` / `right`, or `foot` = `yes` / `designated`. A main road (`primary`, `secondary`, `tertiary`, `unclassified`) without such a tag is not walkable |
 | `cycling` | `highway` = `cycleway`, `path`, `track`, `bridleway`, `living_street`, `residential`, `service`, `unclassified`, `tertiary`, `secondary`, `primary` (and their `_link`s); any way tagged `bicycle` = `yes` / `designated` / `permissive`, or with a `cycleway` tag other than `no` / `none` / `separate`. Plus [dismount edges](#dismount-edges) |
 
 Then the [access tags](#access-private-and-forbidden-roads) decide, per mode.
 
 A way tagged `foot` or `bicycle` is kept even without a `highway` tag. In Monaco this brings the
-ferry (`route=ferry`, `foot=yes`) into walking.
+ferry (`route=ferry`, `foot=yes`) into walking, where it is walked at 5 km/h like a footpath, and the
+outline of a pedestrian area tagged `bicycle=yes` into cycling, as a ring of edges.
 
 `highway=service` (driveways, parking aisles, alleys) is part of the network like any other road.
 
@@ -35,7 +36,7 @@ For each mode, the most specific access tag decides:
 
 | Its value | The road in that mode |
 |---|---|
-| `no` (driving also `agricultural`, `forestry`, `emergency`, `psv`) | **not there.** It stays in the other modes that may use it: a bus-only road is still walkable |
+| `no` (driving also `agricultural`, `forestry`, `emergency`, `psv`) | **not there.** It stays in the other modes that may use it: a road tagged `motor_vehicle=no` is still walkable |
 | `private` | **visible, never routable**: in `<mode>.private_edges`, not in `edges` |
 | anything else (`yes`, `destination`, `delivery`, …) or none | a normal road |
 
@@ -44,7 +45,7 @@ affect walking or cycling. The mode's value is kept in `edges.access`.
 
 **Private roads** (a driveway, a gated street, a company road) are built like every other road,
 with the same `edge_id` formula, then moved from `edges` to `private_edges`, which has the same
-columns. So routing, the graph of legal turns and every export use only roads you may use, and a
+columns except the H3 ones. The component filter doesn't prune `private_edges`. So routing, the graph of legal turns and every export use only roads you may use, and a
 road you can reach only through a private one is dropped with the
 [component filter](cleanup.md#component-filter). The maps still draw private roads, marked
 ([Draw a map](../guides/draw-map.md)). Monaco:
@@ -52,8 +53,8 @@ road you can reach only through a private one is dropped with the
 | Mode | Routable edges | Private edges |
 |---|---|---|
 | `driving` | 2,765 | 196 |
-| `walking` | 10,706 | 154 |
-| `cycling` | 10,228 | 133 |
+| `walking` | 10,952 | 154 |
+| `cycling` | 10,274 | 133 |
 
 A way a mode leaves out is still in `raw.ways`, with all its tags. To remove or keep one road
 yourself, use a [fix](../guides/fix-osm-errors.md).
@@ -95,11 +96,12 @@ no traffic, no delay at junctions. Routing and the edge graph use it.
 
 ## Lanes
 
-`lanes` is the number of lanes in the edge's own direction, never empty:
+`lanes` is the number of lanes in the edge's own direction, never empty, except on
+[connector edges](cleanup.md#connect-dangling-paths) (walking, cycling), where it is NULL:
 
 1. `lanes:forward` / `lanes:backward`, when tagged.
 2. A one-way road: all of `lanes`.
-3. A two-way road: `lanes` split in two; the drawing direction gets the larger half.
+3. A two-way road: `lanes` split in two, at least 1 each way; the drawing direction gets the larger half.
 4. Nothing tagged: 2 for `motorway` and `trunk`, otherwise 1.
 
 A `lanes:reversible` lane is added to both directions. Monaco: 1,165 of the 2,765 driving edges are on
@@ -110,8 +112,9 @@ a way with a lanes tag.
 Cycling also gets footways and pedestrian streets, so that cycleways joined only by them stay
 connected. On those where riding isn't allowed (`bicycle` isn't `yes` / `designated` /
 `permissive`), `dismount` is `TRUE`: the bike is pushed, at 5 km/h, in both directions, and
-`cycle_type` is `dismount`. They are left out when `access` is `private` / `no` or `foot=no`.
-Monaco: 6,238 of the 10,228 cycling edges. For a ride-only network, use `WHERE NOT dismount`;
+`cycle_type` is `dismount`. Their access is the walking one (`foot`, then `access`): `no` leaves
+them out, `private` moves them to `private_edges`. A [connector edge](cleanup.md#connect-dangling-paths)
+that extends a dismount path is dismount too. Monaco: 7,240 of the 10,274 cycling edges. For a ride-only network, use `WHERE NOT dismount`;
 `options.cycling_dismount: false` leaves them out of the build.
 
 ## `walk_type` and `cycle_type`
@@ -137,7 +140,7 @@ Walking and cycling edges get a type from OSM sub-tags. The first rule that matc
 | `cycleway` | `highway=cycleway` |
 | `cycle_track` / `cycle_lane` / `shared_lane` / `bus_cycle_lane` | the cycleway tag on the edge's side: `track` / `lane` / `shared_lane` / `share_busway` |
 | `segregated_path` / `shared_path` | `path`, `track`, `bridleway`, with / without `segregated=yes` |
-| `mixed_traffic` | anything else |
+| `mixed_traffic` | anything else, including a footway or pedestrian street you may ride (`bicycle=yes`) |
 
 The side is `cycleway:right` for an edge in the drawing direction and `cycleway:left` for its
 reverse, then `cycleway:both`, then `cycleway`.

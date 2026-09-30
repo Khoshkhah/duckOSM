@@ -5,8 +5,8 @@ by the area's border. Two steps deal with them, then an optional check.
 
 | Step | Modes | Runs when |
 |---|---|---|
-| [Connect dangling paths](#connect-dangling-paths) | walking, cycling | `clip.connectivity_rescue` (on) |
-| [Component filter](#component-filter) | all | a boundary is set |
+| [Connect dangling paths](#connect-dangling-paths) | walking, cycling | `clip.connectivity_rescue` (on), in a build from a PBF |
+| [Component filter](#component-filter) | all | a boundary is set, and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
 | [Validation](#validation) | all | `validation.enabled` (off; on in the config template) |
 
 ## Connect dangling paths
@@ -20,15 +20,16 @@ A connector edge has:
 
 - a negative `osm_id`, `-min(a, b)`: `a` and `b` are the `osm_id`s of the path and of the road at the
   node it joins. Select connectors with `osm_id < 0`.
-- the `highway` of the path, no `name`, and `oneway = FALSE`.
+- the `highway` of the path and `oneway = FALSE`; no `name`, `lanes` or other tags (NULL). In cycling, a
+  connector that extends a [dismount](networks.md#dismount-edges) path is dismount too.
 - an `edge_id` from the [usual formula](edge-ids.md).
 
 Monaco:
 
 | Mode | Dangling ends joined | Connector edges added | Left after the component filter |
 |---|---|---|---|
-| walking | 248 | 496 | 486 |
-| cycling | 512 | 1,024 | 982 |
+| walking | 254 | 508 | 490 |
+| cycling | 512 | 1,024 | 986 |
 
 Limits: it joins the nearest *node*, not the nearest point of an edge, so a connector can be longer
 than the real gap. The distance ignores levels, so it can join a path to a road on a bridge above
@@ -39,11 +40,12 @@ it. An end with no node within the distance is not joined. Driving isn't repaire
 The filter keeps the largest connected piece of each network and drops the rest: stubs cut off by
 the border and small isolated pieces. It counts pieces by edges, and ignores direction (weakly
 connected). Dropped edges also leave `edge_graph`, `turn_restrictions`, `nodes` and `edge_id_map`.
+It works on the routable `edges` only: `private_edges` are not filtered.
 
 | Key | Default | Does |
 |---|---|---|
 | `clip.keep_largest_component` | `true` | keep only the largest piece |
-| `clip.min_component_edges` | `1` | with `keep_largest_component: false`, also keep every piece with at least this many edges |
+| `clip.min_component_edges` | `1` | also keep every other piece with at least this many edges |
 
 It runs only when a boundary is set (a whole country has real islands) and, for a PBF build, when
 the edge graph is built. It runs in clip builds too. Monaco:
@@ -51,15 +53,16 @@ the edge graph is built. It runs in clip builds too. Monaco:
 | Mode | Edges dropped | Pieces dropped |
 |---|---|---|
 | driving | 79 | 15 |
-| walking | 248 | 50 |
-| cycling | 233 | 36 |
+| walking | 268 | 51 |
+| cycling | 225 | 35 |
 
 Because direction is ignored, the kept network can still hold a one-way dead end: an edge you can
-reach but not leave.
+reach but not leave. Monaco, driving: 25 such edges.
 
 ## Where the border cuts
 
-**Build from a PBF.** The PBF is cut with `osmium` (`complete_ways`): every way with a node inside
+**Build from a PBF.** The PBF is cut with `osmium` (strategy `smart` by default, `complete_ways` when
+`options.build_features: false`; `options.clip_strategy` sets it): every way with a node inside
 the boundary is kept whole, so roads that cross the border stick out past it. Then the component
 filter removes what doesn't connect. `boundary.buffer_m` grows the boundary first.
 
@@ -75,7 +78,7 @@ filter removes what doesn't connect. `boundary.buffer_m` grows the boundary firs
 
 ## Validation
 
-With `validation.enabled`, each mode is checked at the end of the build. A failed check stops the
+With `validation.enabled`, each mode is checked once it is built. A failed check stops the
 build unless `validation.fail_on_error: false`. How to switch it on and what the output looks like:
 [Check a build](../guides/check-build.md).
 

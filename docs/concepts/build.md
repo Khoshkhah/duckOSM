@@ -24,7 +24,7 @@ flowchart TB
         direction TB
         NET["<b>Network</b><br/>filter roads · OSM fixes · build edges · simplify and merge"]
         FIX["<b>Repair</b><br/>connect dangling paths · mark dismount edges"]
-        ATTR["<b>Attributes</b><br/>speeds · travel-time costs · walk / cycle type"]
+        ATTR["<b>Attributes</b><br/>speeds · travel-time costs · walk / cycle type · private roads apart"]
         ROUTE["<b>Routing</b><br/>turn restrictions · edge graph of legal turns"]
         CHECK["<b>Clean and check</b><br/>drop disconnected pieces · H3 · indexes · validate"]
         NET --> FIX --> ATTR --> ROUTE --> CHECK
@@ -52,8 +52,9 @@ flowchart TB
 
 ## Clip from a parent build
 
-`source.type: duckdb` in a config (or `duckosm build --source-db`) reads no OSM. It copies the rows
-inside the boundary out of an existing build, so every `edge_id` is the parent's.
+`source.type: duckdb` in a config (or `duckosm build --source-db`) reads no OSM. It copies every edge
+that touches the boundary, whole (`clip.predicate`, default `intersects`), out of an existing build,
+so every `edge_id` is the parent's.
 How to use it: [Several areas from one region](../guides/prepare-area.md#several-areas-from-one-region).
 
 ```mermaid
@@ -75,8 +76,8 @@ flowchart LR
     class PARENT,DB file
 ```
 
-A clip build needs a boundary. It copies `edges`, `nodes`, `edge_graph` and `turn_restrictions`
-only: no `raw.*`, `ways` or `edge_id_map`.
+A clip build needs a boundary. It copies `edges`, `private_edges`, `nodes`, `edge_graph` and
+`turn_restrictions` only: no `raw.*`, `ways`, `edge_id_map`, `global_junctions` or `features.*`.
 
 ## Every step, in order
 
@@ -84,7 +85,7 @@ Config keys are shown with their default.
 
 | Stage | Step | Runs when |
 |---|---|---|
-| ① | Pre-clip the PBF (`osmium extract`) | a boundary is set and `osmium` is installed (else the whole PBF is read, with a warning); the result is cached in `pbf/`, and cut again when the boundary or the PBF changes |
+| ① | Pre-clip the PBF (`osmium extract`) | a boundary is set and `osmium` is installed (else the whole PBF is read, with a warning); the result is cached in `pbf/` in the current folder, and cut again when the boundary or the PBF changes |
 | ① | Parse OSM into `raw.*` (`ST_READOSM`) | always |
 | ① | Load the boundary into `main.boundary` | a boundary is set; `boundary.buffer_m` (0) grows it |
 | ① | Boundary cells (`main.boundary_cells`) | a boundary is set and `options.boundary_cells` (off) |
@@ -98,6 +99,7 @@ Config keys are shown with their default.
 | ② | Speeds | `options.process_speeds` (on) |
 | ② | Travel-time costs | `options.calculate_costs` (on) |
 | ② | Walk / cycle type | walking and cycling; `options.functional_types` (on) |
+| ② | Move private roads to `private_edges` | always; see [Access](networks.md#access-private-and-forbidden-roads) |
 | ② | Turn restrictions | driving only; `options.extract_restrictions` (on) |
 | ② | Edge graph | `options.build_graph` (on) |
 | ② | Component filter | a boundary is set, `build_graph` is on, and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
@@ -108,7 +110,10 @@ Config keys are shown with their default.
 | ③ | Base-map layers `features.*` | a build from a PBF and `options.build_features` (on); `build --no-features` turns it off |
 | ③ | `edge_id_hash` macros | always |
 | ③ | `main.visualization_metadata` and the time zone | always; a build fails if the area's time zone can't be found |
-| ③ | Report / map | `report.enabled` / `viz.enabled` (both off) |
+| ③ | Report / map | `report.enabled` / `viz.enabled` (both off; the config template turns the report on) |
+
+The steps in ③ never stop a build: if one fails, the build logs a warning and goes on (the time
+zone is the exception).
 
 Each mode runs in its own schema (`driving`, `walking`, `cycling`), so the same tables exist once
 per mode. The steps in ② are explained in [Stable edge ids](edge-ids.md) (build, simplify, merge),
@@ -122,7 +127,7 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 | After | Result |
 |---|---|
 | Filter roads | 1,126 OSM ways |
-| Build edges | 1,588 edges (one per way, plus the reverse of two-way ways) |
+| Build edges | 1,588 edges (one per way, plus the reverse of two-way ways; a closed way waits for the next step) |
 | Simplify and merge | 3,040 edges: ways split at junctions |
 | Private roads | 196 edges moved to `private_edges` |
 | Turn restrictions | 38 restrictions mapped to edges |
@@ -131,6 +136,7 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 ## What stays in the database
 
 Besides the routing tables (`edges`, `nodes`, `edge_graph`, `turn_restrictions`), a PBF build keeps
-the parsed OSM data (`raw.*`), each mode's filtered `ways` and `way_nodes`, `virtual_nodes`,
-`edge_id_map`, and `main.global_junctions`. Every table and column:
+the parsed OSM data (`raw.*`), each mode's `private_edges`, filtered `ways` and `way_nodes` and
+`edge_id_map`, and `main.global_junctions`, `main.boundary` and the base-map layers `features.*`.
+Virtual nodes are in `nodes` (`node_id < 0`). Every table and column:
 [Database schema](../reference/database.md).

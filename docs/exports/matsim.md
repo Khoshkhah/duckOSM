@@ -35,7 +35,7 @@ to_matsim("monaco.duckdb", "network.xml.gz", mode="driving")    # -> {"nodes", "
 ## All modes in one network
 
 ```bash
-duckosm matsim monaco.duckdb -m all -o network.xml.gz      # 4,470 nodes, 12,969 links
+duckosm matsim monaco.duckdb -m all -o network.xml.gz      # 4,481 nodes, 12,789 links
 ```
 
 A road used by several modes is one link with every mode on it (`modes="car,bike,walk"`), since

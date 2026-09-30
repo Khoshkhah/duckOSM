@@ -42,7 +42,7 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `highway` | VARCHAR | the OSM `highway` value |
 | `name` | VARCHAR | the OSM `name` |
 | `oneway` | BOOLEAN | TRUE when the edge has no reverse twin. Never NULL. [One-way roads](../concepts/networks.md#one-way-roads) |
-| `lanes` | INTEGER | lanes in this edge's direction. Never NULL. [Lanes](../concepts/networks.md#lanes) |
+| `lanes` | INTEGER | lanes in this edge's direction. Never NULL, except on connector edges (`osm_id < 0`). [Lanes](../concepts/networks.md#lanes) |
 | `surface` | VARCHAR | the OSM `surface` tag |
 | `access` | VARCHAR | the mode's access: the value of its most specific access tag (driving: `motorcar`, `motor_vehicle`, `vehicle`, `access`; walking: `foot`, `access`; cycling: `bicycle`, `vehicle`, `access`). NULL when none is tagged. Never `private`: those edges are in `private_edges`. [Access](../concepts/networks.md#access-private-and-forbidden-roads) |
 | `junction` | VARCHAR | the OSM `junction` tag (`roundabout`, `circular`, …) |
@@ -209,9 +209,10 @@ this is the grown boundary.
 
 ### `global_junctions`
 
-The nodes where every mode splits its roads, so a road has the same edges in every mode: nodes of a
+The nodes where every mode cuts its ways, so a way has the same edges in every mode: nodes of a
 road that another highway way in `raw.ways` also uses (a road, footway, path, cycleway, …; not
 `proposed` / `construction` / `abandoned` / `razed` / `disused` ones), and nodes where a road ends.
+A footway or path that passes through one is cut there too, even in a mode without the road.
 
 | Column | Type | Description |
 |---|---|---|

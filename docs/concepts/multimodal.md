@@ -8,7 +8,9 @@ and route with `route_multimodal`: [Route across modes](../guides/route.md#acros
 ## What it adds
 
 It writes a schema `mm` into the database (or the build does, with `multimodal.enabled: true`). It
-needs walking and at least one other mode.
+needs walking and at least one other mode; without them it only warns and writes an empty
+`mm.transfers`. `mm.edges` is a view, but `mm.transfers` is a table: run `duckosm multimodal` again
+after rebuilding a mode.
 
 | Table | Contents |
 |---|---|
@@ -16,7 +18,8 @@ needs walking and at least one other mode.
 | `mm.transfers` | one row per change of mode: `node_id`, `from_mode`, `to_mode`, `cost_s`, `kind` |
 
 A transfer is made at every node that walking shares with another mode, in both directions. A
-`node_id` is the OSM node id, the same in every mode, so a shared node is the same junction.
+`node_id` is the OSM node id (or a [virtual node](edge-ids.md#one-id-per-edge), `node_id < 0`), the
+same in every mode, so a shared node is the same junction.
 
 | From → to | `kind` |
 |---|---|
@@ -25,7 +28,7 @@ A transfer is made at every node that walking shares with another mode, in both 
 
 There is no transfer between driving and cycling: every change of mode goes through walking.
 
-Monaco: walking shares 1,271 nodes with driving and 3,654 with cycling, so `mm.transfers` has 9,850
+Monaco: walking shares 1,382 nodes with driving and 3,786 with cycling, so `mm.transfers` has 10,336
 rows (`duckosm multimodal monaco.duckdb`).
 
 ## The model
@@ -37,7 +40,7 @@ the sum of its edges' `cost_s` plus the sum of its transfers' `cost_s`.
 By default (`enforce_sequence=True`) a trip has this shape:
 
 ```text
-walk*  (drive | cycle)*  walk*
+walk*  (drive* | cycle*)  walk*
 ```
 
 It starts and ends in `start_mode` and `end_mode` (both `walking` by default), has at most one
@@ -57,6 +60,9 @@ multimodal:
     "walking->driving": 60
     "driving->walking": 30
 ```
+
+`duckosm multimodal` takes only the one `--transfer-cost`; costs per direction need a build with the
+config above.
 
 ## Limits
 

@@ -31,8 +31,8 @@ UNION ALL SELECT 'cycling', count(*), round(sum(length_m) / 1000, 1) FROM cyclin
 | mode | edges | km |
 |---|---:|---:|
 | driving | 2765 | 92.6 |
-| walking | 10706 | 244.1 |
-| cycling | 10228 | 245.5 |
+| walking | 10952 | 244.1 |
+| cycling | 10274 | 245.5 |
 
 ## Roads
 

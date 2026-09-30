@@ -70,7 +70,7 @@ Driving by default; `--meso-mode cycling` / `--micro-mode cycling` for cycling.
 ## All modes in one network
 
 `--combined` adds `gmns_all`: one `link` table for every mode, a road shared by several modes
-being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 12,969 links.
+being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 12,789 links.
 
 ## See it
 
