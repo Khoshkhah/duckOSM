@@ -57,7 +57,7 @@ layer: `config, node, link, geometry, lane, movement, use_definition, use_group`
 ## Output: one standalone `.duckdb` file
 
 ```bash
-duckosm gmns data/db/sodermalm.duckdb -o sodermalm_gmns.duckdb
+duckosm gmns monaco.duckdb -o monaco_gmns.duckdb
 ```
 
 - **One file, a schema per mode** — `gmns_driving`, `gmns_walking`, `gmns_cycling` — because
@@ -168,9 +168,9 @@ EPSG:4326 lon/lat · length & width in metres · `free_speed` km/h · ids 64-bit
 ## Usage
 
 ```bash
-duckosm gmns data/db/sodermalm.duckdb                       # -> sodermalm_pbf_gmns.duckdb (all modes)
-duckosm gmns data/db/sodermalm.duckdb -m driving            # driving schema only
-duckosm gmns data/db/sodermalm.duckdb -o out.duckdb --to-csv gmns/   # also dump spec CSVs
+duckosm gmns monaco.duckdb                       # -> monaco_gmns.duckdb (all modes)
+duckosm gmns monaco.duckdb -m driving            # driving schema only
+duckosm gmns monaco.duckdb -o out.duckdb --to-csv gmns/   # also dump spec CSVs
 ```
 
 ## Comparison with osm2gmns

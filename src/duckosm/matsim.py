@@ -133,13 +133,14 @@ def _multi_links(con, modes):
     return out
 
 
-def to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True):
+def to_matsim(source, out_path, mode="driving", crs=None, gzip=True):
     """Write a MATSim ``network.xml`` from a built duckOSM db (schema ``<mode>.edges``/``.nodes``).
 
     ``mode`` selects the network: a single mode name (``"driving"``) → a single-mode network;
     ``"all"``, a comma-string, or a list → a **multimodal** network where each link carries its
     allowed ``modes`` (``car,bike,walk``), merged by the mode-stable ``edge_id``. ``crs`` is the
-    projected metric CRS node coordinates are reprojected into (recorded in the network attributes).
+    projected metric CRS node coordinates are reprojected into (recorded in the network attributes);
+    ``None`` picks the UTM zone of the data's centre.
     Writes gzip (MATSim convention) when ``gzip`` else plain XML. Returns ``{"nodes": n, "links": n}``.
     Only nodes referenced by an exported link are written.
     """
@@ -148,6 +149,9 @@ def to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True):
     con = duckdb.connect(str(source), read_only=True)
     con.execute("INSTALL spatial; LOAD spatial;")
     modes = _resolve_modes(con, mode)
+    if crs is None:
+        from duckosm.utils import data_utm_crs
+        crs = data_utm_crs(con, f"{modes[0]}.nodes")
     node_xy = _nodes_xy(con, modes, crs)
     node_ele = _nodes_ele(con, modes)                    # {} unless `duckosm elevation` was run
     raw = _single_links(con, modes[0]) if len(modes) == 1 else _multi_links(con, modes)
@@ -190,4 +194,4 @@ def to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True):
         out_path.write_text(xml, encoding="utf-8")
     logger.info(f"MATSim[{'+'.join(modes)}] {len(used):,} nodes, {len(links):,} links "
                 f"(CRS {crs}) -> {out_path}")
-    return {"nodes": len(used), "links": len(links)}
+    return {"nodes": len(used), "links": len(links), "crs": crs}

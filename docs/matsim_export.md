@@ -19,7 +19,7 @@ A MATSim network is deliberately simple: a directed graph of **nodes** + **links
 <!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
 <network>
   <attributes>
-    <attribute name="coordinateReferenceSystem" class="java.lang.String">EPSG:3006</attribute>
+    <attribute name="coordinateReferenceSystem" class="java.lang.String">EPSG:32632</attribute>
   </attributes>
   <nodes>
     <node id="123" x="674032.11" y="6580123.44"/>
@@ -60,8 +60,9 @@ MATSim is a **metric** simulator: `freespeed × Δt` must equal a length in the 
 coordinates, so lon/lat degrees are wrong. duckOSM stores nodes in EPSG:4326, so we **reproject** node
 coordinates with `ST_Transform` to a projected metric CRS and record it in the network `<attributes>`.
 
-- Default **`EPSG:3006`** (SWEREF99 TM) — the Swedish national grid, right for the Stockholm/Tartu
-  builds. Configurable via `--crs` (e.g. a UTM zone for other regions).
+- Default: the **UTM zone of the data's centre** (e.g. `EPSG:32632` for Monaco, `EPSG:32634` for
+  Stockholm), a metric CRS that fits any area. Pass `--crs` for a specific one, e.g. `EPSG:3006`
+  (SWEREF99 TM, the Swedish national grid).
 - `length` stays `length_m` (already true metres from the graph), independent of the node CRS — so
   lengths remain exact even though they're not recomputed from the projected coords.
 
@@ -72,23 +73,23 @@ coordinates with `ST_Transform` to a projected metric CRS and record it in the n
 - **capacity**: `_CAPACITY[highway_class] × permlanes` (the `_CAPACITY` dict is imported from
   `gmns.py`, so GMNS and MATSim agree; values are per-lane veh/h).
 - **permlanes**: `edges.lanes` (INTEGER per-direction fill, class default where OSM untagged — see
-  [[lanes-mechanism]]); floored at 1.
+  the [data dictionary](data_dictionary.md)); floored at 1.
 
 ## CLI & API
 
 ```bash
-duckosm matsim sodermalm_pbf.duckdb                        # -> sodermalm_pbf_network.xml.gz (driving, EPSG:3006)
-duckosm matsim sodermalm_pbf.duckdb -m driving --no-gzip -o net.xml
-duckosm matsim tartu_pbf.duckdb --crs EPSG:32635           # UTM 35N for Tartu
+duckosm matsim monaco.duckdb                        # -> monaco_network.xml.gz (driving, UTM 32N)
+duckosm matsim monaco.duckdb -m driving --no-gzip -o net.xml
+duckosm matsim monaco.duckdb --crs EPSG:2154        # a specific CRS instead (here Lambert-93)
 ```
 
 ```python
 from duckosm import to_matsim
-to_matsim("sodermalm_pbf.duckdb", "network.xml.gz", mode="driving", crs="EPSG:3006")
+to_matsim("monaco.duckdb", "network.xml.gz", mode="driving")      # crs=None: UTM zone of the data
 ```
 
-- `to_matsim(source, out_path, mode="driving", crs="EPSG:3006", gzip=True)` → returns counts
-  `{"nodes": …, "links": …}`. Writes `.xml.gz` when `gzip` (MATSim convention) else plain `.xml`.
+- `to_matsim(source, out_path, mode="driving", crs=None, gzip=True)` → returns
+  `{"nodes": …, "links": …, "crs": …}` (the CRS actually used). Writes `.xml.gz` when `gzip` (MATSim convention) else plain `.xml`.
 - Only nodes that are actually referenced by an exported link are written (drops isolated nodes).
 
 ## Scope
@@ -132,8 +133,8 @@ nodes**.
 **API / CLI.** Extend `mode` to accept a **list**, `"all"`, or a comma string (single string stays
 single-mode → backward compatible; existing calls/tests unchanged):
 ```bash
-duckosm matsim sodermalm_pbf.duckdb --mode all              # merge every present mode
-duckosm matsim sodermalm_pbf.duckdb --mode driving,cycling  # a subset
+duckosm matsim monaco.duckdb --mode all              # merge every present mode
+duckosm matsim monaco.duckdb --mode driving,cycling  # a subset
 ```
 `to_matsim(src, out, mode=["driving","cycling","walking"], …)` → one modes-tagged network.
 

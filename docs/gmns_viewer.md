@@ -7,13 +7,13 @@ turn-connector network) are separate **toggleable layers**, and **hovering any l
 id, attributes).
 
 ```bash
-duckosm gmns-viz sodermalm_pbf_gmns.duckdb                 # -> sodermalm_pbf_gmns_viewer.html
-duckosm gmns-viz sodermalm_pbf_gmns.duckdb -m cycling -o out.html
+duckosm gmns-viz monaco_gmns.duckdb                 # -> monaco_gmns_viewer.html
+duckosm gmns-viz monaco_gmns.duckdb -m cycling -o out.html
 ```
 
 ```python
 from duckosm.gmns_viewer import write_viewer
-write_viewer("sodermalm_pbf_gmns.duckdb", "reports/viewer.html", mode="driving")
+write_viewer("monaco_gmns.duckdb", "reports/viewer.html", mode="driving")
 ```
 
 Input is a GMNS DuckDB built by [`duckosm gmns`](gmns_export.md) (the meso layer needs

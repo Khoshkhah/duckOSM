@@ -69,7 +69,7 @@ model that maps cleanly from OSM ways. Scope is **infrastructure only** (no time
 ## CLI / API
 
 ```bash
-duckosm railml sodermalm_pbf.duckdb                        # -> sodermalm_pbf.railml.xml (railML 2.4)
+duckosm railml monaco.duckdb                        # -> monaco.railml.xml (railML 2.4)
 ```
 `to_railml(source_db, out_path, rail_types=(...))` → counts `{tracks, switches, signals, ocps}`.
 Reads the built db's `raw` schema (railway ways/nodes), so no re-parse of the PBF.

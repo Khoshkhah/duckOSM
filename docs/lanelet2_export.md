@@ -84,7 +84,7 @@ longitudinal connectivity, from a GMNS db. A valid, loadable, renderable Lanelet
 ## CLI / API
 
 ```bash
-duckosm lanelet2 sodermalm_pbf_gmns.duckdb                 # -> sodermalm_pbf_gmns.lanelet2.osm
+duckosm lanelet2 monaco_gmns.duckdb                 # -> monaco_gmns.lanelet2.osm
 ```
 `to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01)` → `{lanelets, ways, nodes}`. Reads
 `gmns_<mode>.lane` + `link`.

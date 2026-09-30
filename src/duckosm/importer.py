@@ -399,7 +399,8 @@ class DuckOSM:
         lon, lat = self.con.execute(
             f"SELECT ST_X(ST_Centroid(geom)), ST_Y(ST_Centroid(geom)) "
             f"FROM ST_Read('{raw_p}') LIMIT 1").fetchone()
-        srid = (32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1   # UTM zone from centroid
+        from duckosm.utils import utm_epsg
+        srid = utm_epsg(lon, lat).removeprefix("EPSG:")                 # UTM zone from centroid
         out = raw_p.with_name(f"{raw_p.stem}.buffer{int(buf)}m.geojson")
         self.con.execute(f"""
             COPY (

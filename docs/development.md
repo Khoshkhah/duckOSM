@@ -27,7 +27,7 @@ else. Some tests skip themselves when an optional tool or local data is missing:
 | `osmium` | osmium-tool |
 | `rasterio` | `pip install "duckosm[elevation]"` |
 | `geopandas` | `pip install geopandas` |
-| a local PBF or built db (`pbf/sodermalm*.osm.pbf`, `data/db/sodermalm*.duckdb`) | build it with the matching `config/*.yaml` |
+| the maintainer's local area data (`pbf/sodermalm*.osm.pbf`, `data/db/sodermalm*.duckdb`) | not needed: the Monaco sample (`tests/test_sample_config.py`) covers a full build |
 
 A skip is not a pass: run `-rs` to see what didn't run.
 
@@ -42,7 +42,7 @@ fail on a breach: `validation.enabled: true` (on in the config template, off by 
 For the geometry of a finished db:
 
 ```bash
-python scripts/validate_geometry.py --db data/db/<area>.duckdb
+python scripts/validate_geometry.py --db monaco.duckdb
 ```
 
 | Check | Expected |

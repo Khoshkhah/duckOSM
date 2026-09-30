@@ -60,7 +60,7 @@ CLI flags override the corresponding config values (see `duckosm build --help`).
 | `source.type` | `pbf` \| `duckdb` | `pbf` | Build from OSM, or clip an existing duckOSM db. |
 | `source.pbf_path` | string | — | (pbf) source PBF. Also accepted as the flat top-level `pbf_path`. |
 | `source.country` / `country_url` | string \| null | `null` | (pbf) reserved — Geofabrik auto-download. |
-| `source.source_db` | string | — | (duckdb) parent db to clip from, e.g. `data/db/sweden.duckdb`. |
+| `source.source_db` | string | — | (duckdb) parent db to clip from, e.g. `sweden.duckdb`. |
 | `source.source_modes` | list \| null | `null` | (duckdb) schemas to clip; `null` = same as `modes`. |
 | `source.preserve_edge_ids` | bool | `true` | (duckdb) keep the parent's `edge_id`s (recommended). |
 

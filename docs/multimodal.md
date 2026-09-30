@@ -12,7 +12,7 @@ Build the intermodal graph into a network that already has ≥2 modes including 
 
 ```bash
 # add mm.edges + mm.transfers to an existing built db (writes the `mm` schema in place)
-duckosm multimodal data/db/sodermalm.duckdb --transfer-cost 60
+duckosm multimodal monaco.duckdb --transfer-cost 60
 
 # or build it as part of a fresh build — in the YAML config:
 #   modes: [driving, walking]
@@ -25,7 +25,7 @@ Then route a trip that switches mode (walk → drive → walk / park-and-ride):
 import duckdb
 from duckosm import route_multimodal
 
-con = duckdb.connect("data/db/sodermalm.duckdb")     # read-write only needed for the build step
+con = duckdb.connect("monaco.duckdb")     # read-write only needed for the build step
 r = route_multimodal(con, SRC_NODE, DST_NODE)        # OSM junction node_ids; default walking↔walking
 r["time_s"]                                          # door-to-door seconds = Σ edge cost_s + Σ transfer cost_s
 r["legs"]                                            # [{mode, edges, time_s, path}, …] grouped by mode

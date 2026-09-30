@@ -37,7 +37,8 @@ def _roads(path):
 
 def test_structure_and_counts(tmp_path):
     res = to_opendrive(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xodr")
-    assert res == {"roads": 2}
+    assert res["roads"] == 2 and res["crs"].startswith("EPSG:326")    # default: UTM zone of the data
+    assert "+proj=utm" in (tmp_path / "n.xodr").read_text()             # geoReference says so
     root, roads = _roads(tmp_path / "n.xodr")
     assert set(roads) == {str(A), str(B)}
     a = roads[str(A)]

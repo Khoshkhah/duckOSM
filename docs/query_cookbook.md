@@ -92,7 +92,7 @@ removed). The one-call helper returns the route between two edge_ids:
 import duckdb
 from duckosm import route
 
-con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+con = duckdb.connect("monaco.duckdb", read_only=True)
 r = route(con, FROM_EDGE, TO_EDGE)            # defaults: fastest (time), service roads excluded
 #   r["edges"]    -> ordered list of edge_ids
 #   r["time_s"]   -> total travel time (door-to-door)

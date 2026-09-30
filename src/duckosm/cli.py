@@ -571,8 +571,9 @@ def gmns_viz(gmns_db, mode, out):
 @click.option('--mode', '-m', default='driving', show_default=True,
               help="Mode(s): a single mode, 'all', or a comma-list (e.g. driving,cycling) → one "
                    "multimodal network with modes= per link")
-@click.option('--crs', default='EPSG:3006', show_default=True,
-              help='Projected metric CRS for node coords (default SWEREF99 TM; e.g. EPSG:32635 for Tartu)')
+@click.option('--crs', default=None,
+              help='Projected metric CRS for node coords (default: the UTM zone of the data; '
+                   'e.g. EPSG:3006 for SWEREF99 TM)')
 @click.option('--gzip/--no-gzip', 'gzip', default=True, show_default=True, help='Gzip the output (MATSim convention)')
 @click.option('--out', '-o', default=None, help='Output path (default: <name>_network.xml[.gz])')
 def matsim(db, mode, crs, gzip, out):
@@ -591,7 +592,7 @@ def matsim(db, mode, crs, gzip, out):
         res = to_matsim(db, out, mode=mode, crs=crs, gzip=gzip)
     except Exception as e:
         raise click.ClickException(str(e))
-    click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links")
+    click.echo(f"wrote {out} — {res['nodes']} nodes, {res['links']} links (CRS {res['crs']})")
 
 
 @main.command(name="lane-graph")
@@ -698,8 +699,8 @@ def railml(db, out):
 @main.command(name="opendrive")
 @click.argument('db', type=click.Path(exists=True))
 @click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to export')
-@click.option('--crs', default='EPSG:3006', show_default=True,
-              help='Projected metric CRS for the reference line (default SWEREF99 TM)')
+@click.option('--crs', default=None,
+              help='Projected metric CRS for the reference line (default: the UTM zone of the data)')
 @click.option('--junctions', is_flag=True, default=False,
               help='Phase 2: routable junctions + connecting roads (requires a GMNS db, not the core db)')
 @click.option('--out', '-o', default=None, help='Output .xodr (default: <name>.xodr)')
@@ -720,7 +721,7 @@ def opendrive(db, mode, crs, junctions, out):
     except Exception as e:
         raise click.ClickException(str(e))
     extra = f" + {res['connecting_roads']} connecting roads, {res['junctions']} junctions" if junctions else ""
-    click.echo(f"wrote {out} — {res['roads']} roads{extra}")
+    click.echo(f"wrote {out} — {res['roads']} roads{extra} (CRS {res['crs']})")
 
 
 @main.command(name="elevation")

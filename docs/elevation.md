@@ -51,8 +51,8 @@ without a rebuild:
 
 ```bash
 duckosm build -c  sodermalm.yaml                                    # unchanged — no elevation
-duckosm elevation data/db/sodermalm.duckdb --dem markhojd_1m.tif     # local high-res DTM
-duckosm elevation data/db/sodermalm.duckdb --source copernicus       # or stream a global DEM
+duckosm elevation monaco.duckdb --dem markhojd_1m.tif     # local high-res DTM
+duckosm elevation monaco.duckdb --source copernicus       # or stream a global DEM
 ```
 
 **Global by default, zero country-specific code.** duckOSM converts OSM anywhere on Earth, so

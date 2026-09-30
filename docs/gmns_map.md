@@ -5,13 +5,13 @@ utilitarian [`gmns-viz`](gmns_viewer.md) viewer. Two styles, both on a dark canv
 server / tiles / external assets (geometry drawn client-side; needs only DuckDB).
 
 ```bash
-duckosm gmns-map sodermalm_pbf_gmns.duckdb                  # -> sodermalm_pbf_gmns_road.html (road style)
-duckosm gmns-map sodermalm_pbf_gmns.duckdb --style lane     # every lane as a width ribbon
+duckosm gmns-map monaco_gmns.duckdb                  # -> monaco_gmns_road.html (road style)
+duckosm gmns-map monaco_gmns.duckdb --style lane     # every lane as a width ribbon
 ```
 
 ```python
 from duckosm.gmns_map import write_map
-write_map("sodermalm_pbf_gmns.duckdb", "road.html", style="road")
+write_map("monaco_gmns.duckdb", "road.html", style="road")
 ```
 
 ## `--style road` — one carriageway per direction

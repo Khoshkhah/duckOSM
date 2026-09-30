@@ -42,8 +42,8 @@ model — the reason it reaches micro/AV simulators the graph formats can't.
 
 ## Mapping: duckOSM → OpenDRIVE
 
-Read from the **core routing db** (`driving.edges`/`nodes`), reprojected to a metric CRS (default
-`EPSG:3006`, same as MATSim; the proj4 string goes in `<geoReference>`). duckOSM already **segments
+Read from the **core routing db** (`driving.edges`/`nodes`), reprojected to a metric CRS (default:
+the UTM zone of the data's centre, same as MATSim; the proj4 string goes in `<geoReference>`). duckOSM already **segments
 edges at junctions only**, so *one edge = one road between junctions* — a clean fit.
 
 | OpenDRIVE | ← duckOSM |
@@ -132,16 +132,16 @@ well-formed; connecting-road count = movements at junction nodes.
 ## CLI / API
 
 ```bash
-duckosm opendrive sodermalm_pbf.duckdb                     # -> sodermalm_pbf.xodr (driving, EPSG:3006)
-duckosm opendrive tartu_pbf.duckdb --crs EPSG:32635        # UTM 35N
+duckosm opendrive monaco.duckdb                     # -> monaco.xodr (driving, UTM 32N)
+duckosm opendrive monaco.duckdb --crs EPSG:2154     # a specific CRS instead (here Lambert-93)
 ```
 
 ```python
 from duckosm import to_opendrive
-to_opendrive("sodermalm_pbf.duckdb", "network.xodr", mode="driving", crs="EPSG:3006")
+to_opendrive("monaco.duckdb", "network.xodr", mode="driving")    # crs=None: UTM zone of the data
 ```
 
-`to_opendrive(source, out_path, mode="driving", crs="EPSG:3006")` → `{"roads": n}`.
+`to_opendrive(source, out_path, mode="driving", crs=None)` → `{"roads": n, "crs": …}`.
 
 ## Fidelity
 
@@ -159,4 +159,4 @@ markings, and signals are out of scope.
   the XSD is later obtained, add an `lxml` schema test.
 - Tests (`tests/test_opendrive.py`): a road per edge; `planView` segment count = polyline segments;
   per-road `length` = Σ segment lengths; N right `driving` lanes with width and decreasing negative
-  ids; center lane id 0; `junction="-1"`; metric coords; exact SWEREF99 TM `geoReference`.
+  ids; center lane id 0; `junction="-1"`; metric coords; an exact `geoReference` (UTM or SWEREF99 TM).

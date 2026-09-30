@@ -77,8 +77,8 @@ parent's, so data keyed on the parent's ids works on the area as-is.
 ```bash
 duckosm build --config sweden.yaml                              # slow, once
 
-duckosm extract --source data/db/sweden.duckdb \
-    --db data/db/sodermalm.duckdb --boundary sodermalm.geojson   # seconds
+duckosm extract --source sweden.duckdb \
+    --db sodermalm.duckdb --boundary sodermalm.geojson   # seconds
 ```
 
 `extract` selects the area by `--boundary` (GeoJSON), or by `--name` / `--osm-id` when the parent
@@ -165,7 +165,7 @@ got. A negative `osm_id` looks up the short connector edges duckOSM adds to join
 ## Visualization
 
 ```bash
-duckosm viz data/db/sodermalm.duckdb
+duckosm viz monaco.duckdb
 ```
 
 Renders a publication-quality roadstyle HTML map per mode
@@ -181,7 +181,7 @@ view stays clean; zoom in to a one-way street to see them. Two-way roads are not
 arrowed (each is a forward+reverse edge pair, so arrowing all edges is too heavy).
 
 ```bash
-duckosm viz data/db/sodermalm.duckdb --arrows
+duckosm viz monaco.duckdb --arrows
 ```
 
 The clip/area **boundary** (`main.boundary`) is overlaid as a dashed outline by default, so the
@@ -198,7 +198,7 @@ including `highway=service`, lives in `edges`, so the map shows the whole networ
 selection**. It lives in the repo's `scripts/` folder (not in the pip package), so it needs a clone:
 
 ```bash
-python scripts/roadstyle_map.py --db data/db/sodermalm.duckdb --palette mono
+python scripts/roadstyle_map.py --db sodermalm.duckdb --palette mono
 ```
 
 `--palette` picks the roadstyle palette — `highsat` (default, high-contrast), `carto`
@@ -215,7 +215,7 @@ removed). The helpers wrap it with `networkx` — `pip install duckosm[routing]`
 import duckdb
 from duckosm import route, Router
 
-con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+con = duckdb.connect("monaco.duckdb", read_only=True)
 
 # one-off: shortest route between two edge_ids (defaults: fastest by time)
 r = route(con, FROM_EDGE, TO_EDGE)
@@ -262,14 +262,14 @@ Python-only. Defaults to the node-based graph; pass `graph="edge"` / `-g edge` f
 routing graph. Needs `networkx`.
 
 ```bash
-duckosm export-graph data/db/sodermalm.duckdb              # -> sodermalm_driving.graphml (node graph)
-duckosm export-graph data/db/sodermalm.duckdb -o sm.gpickle   # gpickle (lossless)
-duckosm export-graph data/db/sodermalm.duckdb -g edge -o routing.graphml  # edge-based routing graph
+duckosm export-graph monaco.duckdb              # -> monaco_driving.graphml (node graph)
+duckosm export-graph monaco.duckdb -o sm.gpickle   # gpickle (lossless)
+duckosm export-graph monaco.duckdb -g edge -o routing.graphml  # edge-based routing graph
 ```
 
 ```python
 from duckosm import write_graph
-write_graph(con, "sodermalm.graphml")                     # node graph, GraphML (format from extension)
+write_graph(con, "monaco.graphml")                     # node graph, GraphML (format from extension)
 write_graph(con, "routing.gpickle", graph="edge")         # edge-based routing graph, gpickle
 ```
 
@@ -299,7 +299,7 @@ identity** (no geometry conflation) **and turn restrictions are honoured** (move
 import duckdb
 from duckosm import to_sumo
 
-con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
+con = duckdb.connect("monaco.duckdb", read_only=True)
 out = to_sumo(con, "sumo/")                  # sumo/network.{nod,edg,con}.xml + .netccfg + .net.xml
 out["net"], out["n_edges"], out["n_connections"]
 
@@ -308,7 +308,7 @@ to_sumo(con, "sumo/", config={"junctions.join": "true"})   # override default ne
 to_sumo(con, "sumo/", config="my.netccfg")             # or drive it with your own config file
 ```
 
-Or from the CLI: `duckosm sumo data/db/sodermalm.duckdb` (`--no-netconvert` for plain-XML only,
+Or from the CLI: `duckosm sumo monaco.duckdb` (`--no-netconvert` for plain-XML only,
 `--no-connections` to let netconvert infer turns, `-c my.netccfg` for a custom config, `--out-dir` /
 `--name`). Edge `shape`, `numLanes`, `speed`, `priority`/`type` and true `length` are carried over;
 coordinates are geographic and netconvert projects them. The netconvert options come from a built-in

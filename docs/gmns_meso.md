@@ -37,10 +37,10 @@ A **`meso_driving`** schema in the same GMNS DuckDB (alongside `gmns_driving`), 
 existing `gmns_<mode>` tables (`link`, `lane`, `movement`), so it needs the GMNS db, not the raw OSM.
 
 ```bash
-duckosm gmns data/db/sodermalm.duckdb --meso            # build gmns_* AND meso_driving in one file
-duckosm gmns data/db/sodermalm.duckdb --meso cycling    # also build meso_cycling (opt-in)
+duckosm gmns monaco.duckdb --meso            # build gmns_* AND meso_driving in one file
+duckosm gmns monaco.duckdb --meso --meso-mode cycling   # meso for cycling instead (opt-in)
 # or, on an already-built GMNS db:
-python -c "from duckosm.gmns import to_meso; to_meso('sodermalm_gmns.duckdb', modes=['driving'])"
+python -c "from duckosm.gmns import to_meso; to_meso('monaco_gmns.duckdb', modes=['driving'])"
 ```
 
 ---

@@ -106,8 +106,8 @@ for size (bigger cells → fewer rows).
 ## Usage (proposed)
 
 ```bash
-duckosm gmns data/db/sodermalm.duckdb --meso --micro            # build meso + micro (driving)
-duckosm gmns data/db/sodermalm.duckdb --micro --micro-mode cycling
+duckosm gmns monaco.duckdb --meso --micro            # build meso + micro (driving)
+duckosm gmns monaco.duckdb --micro --micro-mode cycling
 ```
 
 `--micro` implies `--meso` (micro reuses the meso connectors / needs the section ids).

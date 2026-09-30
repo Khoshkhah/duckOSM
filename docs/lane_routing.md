@@ -39,7 +39,7 @@ router reads it). `build_lane_graph(gmns_db, mode)` → counts.
 
 ```python
 from duckosm import route_lanes
-path = route_lanes("sodermalm_pbf_gmns.duckdb", from_lane, to_lane, mode="driving")
+path = route_lanes("monaco_gmns.duckdb", from_lane, to_lane, mode="driving")
 # -> {"lanes": [lane_id, …], "cost": …, "geometry": "LINESTRING(…)", "maneuvers": ["change L→R", "left turn", …]}
 ```
 

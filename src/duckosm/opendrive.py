@@ -29,6 +29,10 @@ def _geo_ref(crs):
     """proj4 string for the geoReference header (so sims know the projection)."""
     if crs in _PROJ4:
         return _PROJ4[crs]
+    code = crs.upper().removeprefix("EPSG:")
+    if code.isdigit() and 32601 <= int(code) <= 32760 and int(code) % 100 <= 60:      # WGS84 UTM
+        south = " +south" if int(code) >= 32701 else ""
+        return f"+proj=utm +zone={int(code) % 100}{south} +datum=WGS84 +units=m +no_defs"
     try:
         import warnings
 
@@ -205,14 +209,17 @@ def _build_junctions(con, g, crs, name):
     return "\n".join(body), counts
 
 
-def to_opendrive(source, out_path, mode="driving", crs="EPSG:3006", junctions=False):
-    """Write an OpenDRIVE ``.xodr`` from a built duckOSM db, reprojected to the metric ``crs``.
+def to_opendrive(source, out_path, mode="driving", crs=None, junctions=False):
+    """Write an OpenDRIVE ``.xodr`` from a built duckOSM db, reprojected to the metric ``crs``
+    (``None``: the UTM zone of the data's centre).
 
     ``junctions=False`` (Phase 1): read ``<mode>.edges`` → roads + lanes, no junctions.
     ``junctions=True`` (Phase 2): read a **GMNS db** (``gmns_<mode>.link`` + ``.movement``) → roads
     that link through ``<junction>`` elements whose connecting roads carry the turn geometry.
     Returns counts."""
     import duckdb
+
+    from duckosm.utils import data_utm_crs
 
     con = duckdb.connect(str(source), read_only=True)
     con.execute("INSTALL spatial; LOAD spatial;")
@@ -222,12 +229,16 @@ def to_opendrive(source, out_path, mode="driving", crs="EPSG:3006", junctions=Fa
                        [g]).fetchone()[0] == 0:
             con.close()
             raise ValueError(f"--junctions needs a GMNS db (no '{g}.movement' in {source}) — build with duckosm gmns")
+        if crs is None:
+            crs = data_utm_crs(con, f"{g}.link")
         xml, counts = _build_junctions(con, g, crs, Path(source).stem)
     else:
         if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='edges'",
                        [mode]).fetchone()[0] == 0:
             con.close()
             raise ValueError(f"no '{mode}.edges' in {source} — is this a built duckOSM db with mode '{mode}'?")
+        if crs is None:
+            crs = data_utm_crs(con, f"{mode}.edges", "geometry")
         xml, counts = _build_phase1(con, mode, crs, Path(source).stem)
     con.close()
 
@@ -237,4 +248,5 @@ def to_opendrive(source, out_path, mode="driving", crs="EPSG:3006", junctions=Fa
     extra = (f", {counts['connecting_roads']:,} connecting roads, {counts['junctions']:,} junctions"
              if junctions else "")
     logger.info(f"OpenDRIVE[{mode}]: {counts['roads']:,} roads{extra} (CRS {crs}) -> {out_path}")
+    counts["crs"] = crs
     return counts

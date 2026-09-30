@@ -89,10 +89,10 @@ def _parse(path, gz=True):
 def test_structure_and_counts(tmp_path):
     src = _src(tmp_path / "s.duckdb")
     res = to_matsim(str(src), tmp_path / "net.xml.gz")
-    assert res == {"nodes": 3, "links": 3}
+    assert res == {"nodes": 3, "links": 3, "crs": "EPSG:32634"}      # default: UTM zone of the data
     root = _parse(tmp_path / "net.xml.gz")
     assert root.tag == "network"
-    assert root.find("./attributes/attribute").text == "EPSG:3006"
+    assert root.find("./attributes/attribute").text == "EPSG:32634"
     nodes = root.findall("./nodes/node"); links = root.findall("./links/link")
     assert len(nodes) == 3 and len(links) == 3
     nid = {n.get("id") for n in nodes}
@@ -178,7 +178,7 @@ def test_gzip_roundtrip(tmp_path):
 
 def test_multimodal_merge(tmp_path):
     res = to_matsim(str(_multi_src(tmp_path / "s.duckdb")), tmp_path / "n.xml", mode="all", gzip=False)
-    assert res == {"nodes": 4, "links": 4}                       # 4 distinct edge_ids, node union
+    assert res == {"nodes": 4, "links": 4, "crs": "EPSG:32634"}  # 4 distinct edge_ids, node union
     links = {l.get("id"): l for l in _parse(tmp_path / "n.xml", gz=False).findall("./links/link")}
     sh = links[str(SH)]                                          # shared driving+cycling segment
     assert sh.get("modes") == "car,bike"                        # union of modes on one link
@@ -228,3 +228,11 @@ def test_multimodal_dtd_valid(tmp_path):
     dtd = lxml_etree.DTD(str(_DTD))
     tree = lxml_etree.parse(str(tmp_path / "n.xml"))
     assert dtd.validate(tree), "\n".join(e.message for e in dtd.error_log)   # modes="car,bike,walk" valid CDATA
+
+
+def test_utm_zone_default():
+    from duckosm.utils import utm_epsg
+    assert utm_epsg(7.42, 43.73) == "EPSG:32632"       # Monaco
+    assert utm_epsg(18.06, 59.33) == "EPSG:32634"      # Stockholm
+    assert utm_epsg(151.2, -33.87) == "EPSG:32756"     # Sydney: southern hemisphere
+    assert utm_epsg(180.0, 10.0) == "EPSG:32601"       # the antimeridian wraps to zone 1

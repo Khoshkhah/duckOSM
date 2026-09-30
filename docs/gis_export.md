@@ -17,17 +17,17 @@ come through automatically as attributes — no flag, no code path of their own.
 the `ele` attribute in QGIS/ArcGIS instead.
 
 ```bash
-duckosm export-gis data/db/sodermalm.duckdb                    # -> sodermalm.gpkg (all modes + boundary)
-duckosm export-gis data/db/sodermalm.duckdb -m driving         # only the driving schema
-duckosm export-gis data/db/sodermalm.duckdb -o out/net.gpkg    # explicit output file
-duckosm export-gis data/db/sodermalm.duckdb --format shp -o gis/   # shapefile set into gis/
+duckosm export-gis monaco.duckdb                    # -> monaco.gpkg (all modes + boundary)
+duckosm export-gis monaco.duckdb -m driving         # only the driving schema
+duckosm export-gis monaco.duckdb -o out/net.gpkg    # explicit output file
+duckosm export-gis monaco.duckdb --format shp -o gis/   # shapefile set into gis/
 ```
 
 ```python
 import duckdb
 from duckosm import to_gis
-con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
-to_gis(con, "sodermalm.gpkg")                    # GeoPackage, every mode present + boundary
+con = duckdb.connect("monaco.duckdb", read_only=True)
+to_gis(con, "monaco.gpkg")                    # GeoPackage, every mode present + boundary
 ```
 
 ## What gets exported — geometry only, not routing adjacency
@@ -123,8 +123,8 @@ To verify an export actually round-tripped, `duckosm gis-debug` reads the file *
 the file on disk, not the duckOSM database:
 
 ```bash
-duckosm gis-debug sodermalm.gpkg --source-db data/db/sodermalm.duckdb
-duckosm gis-debug gis/ --source-db data/db/sodermalm.duckdb   # a shapefile directory
+duckosm gis-debug monaco.gpkg --source-db monaco.duckdb
+duckosm gis-debug gis/ --source-db monaco.duckdb   # a shapefile directory
 ```
 
 The page has a canvas map of every layer (edges by highway class, nodes, boundary; per-mode toggles,

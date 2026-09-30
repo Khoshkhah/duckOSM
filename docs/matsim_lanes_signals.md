@@ -63,8 +63,8 @@ For each **signalised node** (`ctrl_type='signal'`, 11 on Södermalm) with movem
 ## CLI / API
 
 ```bash
-duckosm matsim         sodermalm_pbf.duckdb                 # network.xml (existing, from core db)
-duckosm gmns           sodermalm_pbf.duckdb -o gmns.duckdb  # movements + signals (prereq)
+duckosm matsim         monaco.duckdb                 # network.xml (existing, from core db)
+duckosm gmns           monaco.duckdb -o gmns.duckdb  # movements + signals (prereq)
 duckosm matsim-lanes   gmns.duckdb                          # -> lanes.xml + signalSystems/Groups/Control.xml
 duckosm matsim-lanes   gmns.duckdb --no-signals             # lanes.xml only
 ```
