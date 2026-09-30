@@ -299,35 +299,11 @@ _JS = r"""
     return null;
   }
 
-  // The route as its own line, drawn at the top of its level: over the roads it crosses at an
-  // intersection, but still under a bridge above it (tunnel / ground / bridge are roadstyle's three
-  // bands, on its "roads" source: same geometry, no second copy of it).
-  const BANDS = [["<", "roads-casing"], ["==", "roads-high-casing"], [">", "roads-highlight"]];
+  // The route is its roads, recoloured by leg (rsColor): roadstyle keeps their style and raises
+  // them to the top of their level, so a crossing street doesn't cover the route but a bridge
+  // above it still does.
   function paint(legs) {
-    [0, 1, 2, "p"].forEach((b) => ["", "-casing"].forEach((c) => { if (map.getLayer(`rm-route${c}-${b}`)) map.removeLayer(`rm-route${c}-${b}`); }));
-    const seen = new Set(), color = ["match", ["id"]];
-    for (const l of legs || []) {
-      const ids = l.edges.map((k) => fid[k]).filter((i) => !seen.has(i) && seen.add(i));
-      if (ids.length) color.push(ids, COLORS[l.mode]);
-    }
-    if (!seen.size) return;
-    const w = (a, b) => ["interpolate", ["linear"], ["zoom"], 12, a, 18, b];
-    BANDS.forEach(([op, before], b) => {
-      const line = {type: "line", source: "roads", layout: {"line-cap": "round", "line-join": "round"},
-                    filter: ["all", ["in", ["id"], ["literal", [...seen]]], [op, ["coalesce", ["get", "lvl"], 0], 0]]};
-      const at = map.getLayer(before) ? before : b === 1 && map.getLayer("roads-bridge-casing") ? "roads-bridge-casing" : undefined;
-      map.addLayer({id: `rm-route-casing-${b}`, ...line, paint: {"line-color": "#fff", "line-width": w(6, 14)}}, at);
-      map.addLayer({id: `rm-route-${b}`, ...line, paint: {"line-color": [...color, "#000"], "line-width": w(3.5, 9)}}, at);
-    });
-    // tunnel mouths (roadstyle's "portals" source, keyed on __rs_road): the route runs into the
-    // tunnel at street level instead of stopping at the surface road's casing
-    if (map.getSource("portals")) {
-      const road = ["get", "__rs_road"], at = ["roads-high-casing", "roads-bridge-casing"].find((id) => map.getLayer(id));
-      const line = {type: "line", source: "portals", layout: {"line-cap": "round", "line-join": "round"},
-                    filter: ["in", road, ["literal", [...seen]]]};
-      map.addLayer({id: "rm-route-casing-p", ...line, paint: {"line-color": "#fff", "line-width": w(6, 14)}}, at);
-      map.addLayer({id: "rm-route-p", ...line, paint: {"line-color": [color[0], road, ...color.slice(2), "#000"], "line-width": w(3.5, 9)}}, at);
-    }
+    rsColor(legs ? legs.map((l) => [l.edges.map((k) => fid[k]), COLORS[l.mode]]) : null);
   }
 
   function show(res, multi) {
