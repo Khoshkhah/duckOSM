@@ -141,24 +141,26 @@ WHERE from_cell = 617700169958293503;
 
 More in the [query cookbook](query_cookbook.md).
 
-### One way across all modes
+### Look up one OSM way by its `osm_id`
 
-Everything the db knows about one `osm_id` — the raw way row plus its edges in every mode,
-unioned into one table (columns NULL-filled where a mode doesn't carry them, traversal order):
+`duckosm way` shows all the data a build has for one OSM **way** (the OpenStreetMap object for a
+street, or a stretch of one): first its raw OSM tags and node list, then every edge built from it,
+in every mode, as one table.
 
 ```bash
-duckosm way data/db/tartu.duckdb 223203426          # add -m driving to restrict, --geom for WKT
-duckosm way data/db/tartu.duckdb 223203426 -o way.csv   # write to file (.csv / .parquet / .json)
+duckosm way monaco.duckdb 24672722                  # Avenue Delphine; -m driving for one mode, --geom for WKT
+duckosm way monaco.duckdb 24672722 -o way.csv       # write the table to a file (.csv / .parquet / .json)
 ```
 
 ```python
 from duckosm.query import way_table
-way_table(con, 223203426).show()                    # same table from Python / a notebook
+way_table(con, 24672722).show()                     # the same table in Python / a notebook
 ```
 
-A row per (mode, edge): the same `edge_id`/`edge_ref` appearing under several modes is the
-cross-mode alignment invariant at work; `walk_type` / `cycle_type` / `maxspeed_kmh` / `cost_s`
-sit side by side. A negative `osm_id` inspects synthetic PathConnector connector edges.
+The table has one row per edge per mode, in travel order. A two-way street gives two edges, one per
+direction, and the same stretch of road has the same `edge_id` in every mode. Use it when a
+particular street looks wrong: how it was split, which edges came from it, what speed and cost each
+got. A negative `osm_id` looks up the short connector edges duckOSM adds to join dangling paths.
 
 ## Visualization
 
