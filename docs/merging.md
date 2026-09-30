@@ -106,7 +106,7 @@ geometry endpoints matching `source`/`target`.)
 ### `osm_id` and the stable `edge_id`
 
 A merged edge spans several `osm_id`s. The stable id is
-`edge_id = hash(osm_id, source, target, is_reverse)`, so the merged edge needs one `osm_id`:
+`edge_id = hash(osm_id, source, target)`, so the merged edge needs one `osm_id`:
 it takes its **first contributing member's** `osm_id` — the segment at the chain's `source`
 end (`edge_set[1]`). This keeps the id scheme and the natural-key join intact with no schema
 change. (`refs` still carries the full node list, so turn-restriction matching is unaffected.)
@@ -118,7 +118,7 @@ value, but **only** `osm_id`: the predicate already forced every other carried a
 along the chain, so nothing else is lost.
 
 The discarded `osm_id`s are still recoverable, but **not** from `edge_id_map` — that table's
-`old_edge_id` is the hash `hash(osm_id, source, target, is_reverse)`, which bakes `osm_id`
+`old_edge_id` is the hash `hash(osm_id, source, target)`, which bakes `osm_id`
 in rather than storing it, and the pre-merge segment rows don't exist in a merged build.
 Recover the full constituent set from the merged edge's `refs` (the complete node sequence
 is preserved) joined to `<mode>.way_nodes`:
@@ -141,7 +141,7 @@ on the pre-merge ids translate to the merged ids:
 
 | column | meaning |
 |--------|---------|
-| `old_edge_id` | the segment's id in a **no-merge** build (`hash(osm_id, source, target, is_reverse)`) |
+| `old_edge_id` | the segment's id in a **no-merge** build (`hash(osm_id, source, target)`) |
 | `new_edge_id` | the id of the merged edge it became part of |
 | `seq` | the segment's position along the road (forward direction, 1…k) |
 | `is_reverse` | `false` = forward edge, `true` = the two-way reverse edge |

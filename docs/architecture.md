@@ -222,18 +222,30 @@ FROM ways;
 ```
 
 ### Stable edge ids
-`edge_id` is **not** a row number — it is a deterministic hash of the edge's identity
-`(osm_id, source, target, is_reverse)`. Since OSM way/node ids and direction are stable, an
-unchanged edge keeps the **same id across rebuilds**, so a rebuild only re-numbers edges that
-were genuinely added/removed/re-geometried; everything downstream keyed on `edge_id`
-(map-matching, joins, derived pipelines) survives a rebuild without a full re-key. When the
-graph is simplified, the final `_rekey_edges` step re-applies this hash after segmentation,
-reverse-edge creation and self-loop splitting (whose virtual-node ids are likewise made
-deterministic). Before re-keying, the rare **same-direction parallel segments** produced by
-self-crossing ways (one way that passes the same junction pair twice in the *same* direction —
-e.g. a lead-in chord plus a loop arc, both `A→B`) are **de-duplicated to the shortest**, so the
-key is unique without widening it. A genuine loop is unaffected: its two halves are `A→B` and
-`B→A` — distinct keys. A build-time guard fails if any duplicate remains.
+
+`edge_id` is **not** a row number. It is a hash of three ids that OpenStreetMap already gives the
+segment:
+
+```sql
+edge_id = (hash(osm_id, source, target) >> 1)::BIGINT      -- DuckDB's hash()
+```
+
+- **`osm_id`**: the OSM way the segment comes from. A merged edge (several ways joined by
+  [`merge_segments`](merging.md)) takes the `osm_id` of its first segment, at its `source` end.
+- **`source`, `target`**: the OSM node ids where the segment starts and ends. Their order is the
+  direction: the two directions of a two-way street swap them, so each direction has its own id.
+
+The triple has to be unique. Where the geometry would repeat it (a self-loop with
+`source = target`, a way that passes the same pair of junctions twice, the two arcs of a two-way
+loop), the simplifier splits the edge at a **virtual node**: `node_id < 0`, itself a hash of the
+segment's content, so it is just as stable. A build-time guard fails if a duplicate triple
+survives.
+
+Because every input is an OpenStreetMap id, an unchanged segment gets the same `edge_id` on every
+rebuild, in every area clipped from the same build, and in every export. It changes only when that
+way or its end nodes change in OSM. `hash()` is DuckDB-internal and not guaranteed across DuckDB
+major versions, which is why duckOSM requires `duckdb<2`; to match ids from another tool, join on
+`(osm_id, source, target)` instead.
 
 ---
 

@@ -23,7 +23,16 @@ Most OSM-to-network tools number their edges `0, 1, 2, …`. Rebuild with freshe
 a smaller area, or export to a simulator, and the numbers change, so every table keyed on them
 (traffic counts, speeds, map matches, demand) has to be matched to the network again.
 
-duckOSM's `edge_id` is a **content hash** of the road segment, so it stays the same:
+duckOSM's `edge_id` is a **content hash** of three ids that OpenStreetMap already gives the road
+segment: the OSM **way** it comes from (`osm_id`) and the OSM **nodes** where it starts and ends
+(`source`, `target`):
+
+```text
+edge_id = hash(osm_id, source, target)
+```
+
+The order of `source` and `target` is the direction, so the two directions of a two-way street get
+different ids. None of the three is a number duckOSM makes up, so the id stays the same:
 
 <div class="grid cards" markdown>
 
@@ -31,7 +40,7 @@ duckOSM's `edge_id` is a **content hash** of the road segment, so it stays the s
 
     ---
 
-    The same OSM data gives the same ids. An id only changes where that road was edited in OSM.
+    The same OSM data gives the same ids. An id only changes if that way or its end nodes change in OSM.
 
 -   :material-crop:{ .lg .middle } **Across clips**
 
@@ -46,6 +55,8 @@ duckOSM's `edge_id` is a **content hash** of the road segment, so it stays the s
     SUMO, MATSim, GMNS, GeoPackage and networkx all use the `edge_id` as their own id.
 
 </div>
+
+[How the id is built, in detail](architecture.md#stable-edge-ids)
 
 One street segment, **Högbergsgatan in Stockholm** (51 m), looked up in six places:
 

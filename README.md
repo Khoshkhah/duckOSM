@@ -28,8 +28,17 @@
 
 Most OSM-to-network tools number their edges `0, 1, 2, …`, so the numbers change whenever you
 rebuild, cut out an area or export, and every table keyed on them has to be matched again.
-duckOSM's `edge_id` is a **content hash** of the road segment, so it stays the same **across
-rebuilds, clips and exports**.
+duckOSM's `edge_id` is a **content hash** of three ids that OpenStreetMap already gives the road
+segment: the OSM **way** it comes from (`osm_id`) and the OSM **nodes** where it starts and ends
+(`source`, `target`):
+
+```text
+edge_id = hash(osm_id, source, target)
+```
+
+The order of `source` and `target` is the direction, so the two directions of a two-way street get
+different ids. None of the three is a number duckOSM makes up, so the id stays the same **across rebuilds, clips and exports**
+([details](https://khoshkhah.github.io/duckOSM/architecture/#stable-edge-ids)).
 
 One street segment, **Högbergsgatan in Stockholm** (51 m), looked up in six places:
 
