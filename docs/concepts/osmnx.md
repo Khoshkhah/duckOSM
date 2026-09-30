@@ -13,10 +13,11 @@ counts.
 |---|---|
 | OSMnx `drive` | none |
 | OSMnx `drive_service` | yes, but not parking aisles or emergency access |
-| duckOSM `driving` | all, including parking aisles and driveways |
+| duckOSM `driving` | all, including parking aisles and driveways; private ones are drawn but not routable |
 
-OSMnx also drops ways tagged `access=private` or `motor_vehicle=no`; duckOSM keeps them (see
-[What each network contains](networks.md#which-osm-ways-each-mode-keeps)).
+Both leave out roads where cars are forbidden (`motor_vehicle=no`). OSMnx drops `access=private`
+roads; duckOSM keeps them in `private_edges`, drawn on its maps but never routed (see
+[Access](networks.md#access-private-and-forbidden-roads)).
 
 **Border.** `graph_from_bbox` drops every edge that crosses the box. Pass `truncate_by_edge=True`,
 and cut both networks to the box before measuring.
@@ -46,7 +47,8 @@ duck = con.execute("""
 ## An example
 
 Measured on Granville Island, Vancouver: bbox `(-123.142, 49.265, -123.128, 49.275)`, metres of
-road inside the box.
+road inside the box, before duckOSM moved private roads out of `edges`: its service figure included
+private driveways then.
 
 | `highway` | OSMnx `drive` | `drive` + truncate | `drive_service` + truncate | duckOSM | Difference |
 |---|--:|--:|--:|--:|--:|

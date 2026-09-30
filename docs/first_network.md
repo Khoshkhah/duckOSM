@@ -58,8 +58,8 @@ con.sql("""SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS 
 
 | highway | edges | km |
 |---|---:|---:|
-| residential | 610 | 32.8 |
-| service | 701 | 28.4 |
+| residential | 600 | 31.7 |
+| service | 518 | 20.1 |
 | secondary | 339 | 14.9 |
 | tertiary | 254 | 12.5 |
 | primary | 184 | 11.2 |

@@ -2,7 +2,7 @@
 
 ```bash
 duckosm gmns monaco.duckdb                  # the lanes first
-duckosm lanelet2 monaco_gmns.duckdb         # -> monaco_gmns.lanelet2.osm: 2,469 lanelets
+duckosm lanelet2 monaco_gmns.duckdb         # -> monaco_gmns.lanelet2.osm: 2,276 lanelets
 ```
 
 A [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) map, the lane-map format

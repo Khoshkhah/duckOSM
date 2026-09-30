@@ -4,9 +4,9 @@ Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. Mona
 
 | Mode | Edges | Nodes | Speed |
 |---|---|---|---|
-| `driving` | 2,133 | 1,246 | the speed limit, or a default per road class |
-| `walking` | 9,232 | 3,602 | 5 km/h |
-| `cycling` | 8,440 | 3,561 | 15 km/h; 5 km/h on dismount edges |
+| `driving` | 1,940 | 1,160 | the speed limit, or a default per road class |
+| `walking` | 8,948 | 3,491 | 5 km/h |
+| `cycling` | 8,448 | 3,566 | 15 km/h; 5 km/h on dismount edges |
 
 ## Which OSM ways each mode keeps
 
@@ -88,7 +88,7 @@ when it ends in `mph`, and otherwise (untagged, or a value like `RU:urban` or `w
 | `living_street`, `service` | 20 |
 | any other class | 50 |
 
-Monaco: 643 of the 2,133 driving edges have a `maxspeed` tag.
+Monaco: 639 of the 1,940 driving edges have a `maxspeed` tag.
 
 `cost_s`, the travel time in seconds, is `length_m / (maxspeed_kmh / 3.6)`. It uses the speed limit:
 no traffic, no delay at junctions. Routing and the edge graph use it.
@@ -102,7 +102,7 @@ no traffic, no delay at junctions. Routing and the edge graph use it.
 3. A two-way road: `lanes` split in two; the drawing direction gets the larger half.
 4. Nothing tagged: 2 for `motorway` and `trunk`, otherwise 1.
 
-A `lanes:reversible` lane is added to both directions. Monaco: 884 of the 2,133 driving edges are on
+A `lanes:reversible` lane is added to both directions. Monaco: 883 of the 1,940 driving edges are on
 a way with a lanes tag.
 
 ## Dismount edges
@@ -111,7 +111,7 @@ Cycling also gets footways and pedestrian streets, so that cycleways joined only
 connected. On those where riding isn't allowed (`bicycle` isn't `yes` / `designated` /
 `permissive`), `dismount` is `TRUE`: the bike is pushed, at 5 km/h, in both directions, and
 `cycle_type` is `dismount`. They are left out when `access` is `private` / `no` or `foot=no`.
-Monaco: 5,300 of the 8,440 cycling edges. For a ride-only network, use `WHERE NOT dismount`;
+Monaco: 5,306 of the 8,448 cycling edges. For a ride-only network, use `WHERE NOT dismount`;
 `options.cycling_dismount: false` leaves them out of the build.
 
 ## `walk_type` and `cycle_type`

@@ -14,11 +14,11 @@ It's off by default (and a build from the command line alone can't switch it on)
 [config template](build.md#with-a-config-file) turns it on. On Monaco it prints, per mode:
 
 ```text
-validate[driving] single_component: OK — 1 component(s), largest 2,133/2,133 (100.0%)
+validate[driving] single_component: OK — 1 component(s), largest 1,940/1,940 (100.0%)
 validate[driving] no_stranded_named: OK — 0 named edge(s) outside the largest component
 validate[driving] unique_node_id: OK — 0 duplicate node_id(s) in nodes
 validate[driving] way_length_conserved: OK — 0 deleted parallel arc(s) (way stretch missing while a kept edge bridges its endpoints)
-validate[driving] layer_without_structure: WARN — 11 edge(s) with layer≠0 but no bridge/tunnel tag (OSM tagging; drawn grade-separated, no 3D deck)
+validate[driving] layer_without_structure: WARN — 9 edge(s) with layer≠0 but no bridge/tunnel tag (OSM tagging; drawn grade-separated, no 3D deck)
 ```
 
 | Check | Fails the build when |

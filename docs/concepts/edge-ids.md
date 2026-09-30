@@ -22,14 +22,14 @@ part of the id.
 way that runs between the same two junctions twice, or goes from A to B and back), the build splits
 the edge at its midpoint with a **virtual node**. A virtual node has `node_id < 0` and its id is a
 hash of the edge's content, so it is as stable as the rest. If a repeated triple still survives, the
-build stops with an error. Monaco: 5 virtual nodes in driving, 23 in walking, 21 in cycling.
+build stops with an error. Monaco: 2 virtual nodes in driving, 19 in walking, 21 in cycling.
 
 ## The same id in every mode
 
 Every mode splits roads at one shared set of points, `main.global_junctions`: each node where two
 road ways meet, or a road ends. It is made once from all OSM ways, before any mode filters them.
 So a road that is in two modes is cut into the same pieces and has the same `edge_id` in both.
-Monaco: 1,997 of the 2,133 driving edges have the same `edge_id` in cycling, 1,371 in walking.
+Monaco: 1,927 of the 1,940 driving edges have the same `edge_id` in cycling, 1,129 in walking.
 The others are roads that mode doesn't include.
 
 Footways, paths, cycleways, steps, pedestrian streets, bridleways and corridors don't split a road
@@ -51,9 +51,9 @@ only chains of footways, paths and the like are. Monaco:
 
 | Mode | Edges with merging | Edges with `merge_segments: false` |
 |---|---|---|
-| driving | 2,133 | 2,133 |
-| walking | 9,232 | 10,298 |
-| cycling | 8,440 | 9,778 |
+| driving | 1,940 | 1,940 |
+| walking | 8,948 | 9,980 |
+| cycling | 8,448 | 9,794 |
 
 ### `edge_id_map`
 
@@ -69,8 +69,8 @@ for the reverse direction of a two-way road.
 | `osm_id` | the piece's own OSM way |
 
 An edge that is not in the table was not merged. Rows of edges removed by the
-[component filter](cleanup.md#component-filter) are removed too. Monaco, walking: 1,794 rows for
-738 merged edges. The OSM ways of one merged edge, in order:
+[component filter](cleanup.md#component-filter) are removed too. Monaco, walking: 1,738 rows for
+718 merged edges. The OSM ways of one merged edge, in order:
 
 ```sql
 SELECT seq, osm_id FROM walking.edge_id_map WHERE new_edge_id = ? ORDER BY seq;

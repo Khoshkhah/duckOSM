@@ -1,9 +1,9 @@
 # OpenDRIVE (experimental)
 
 ```bash
-duckosm opendrive monaco.duckdb                               # -> monaco.xodr: 2,133 roads
+duckosm opendrive monaco.duckdb                               # -> monaco.xodr: 1,940 roads
 duckosm gmns monaco.duckdb                                    # for junctions: a GMNS db first
-duckosm opendrive monaco_gmns.duckdb --junctions -o monaco.xodr   # + 2,013 connecting roads, 526 junctions
+duckosm opendrive monaco_gmns.duckdb --junctions -o monaco.xodr   # + 1,720 connecting roads, 470 junctions
 ```
 
 An ASAM OpenDRIVE 1.7 `.xodr`, for driving simulators (CARLA, esmini) and microsimulators (PTV

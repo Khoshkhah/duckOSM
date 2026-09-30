@@ -27,8 +27,8 @@ Monaco:
 
 | Mode | Dangling ends joined | Connector edges added | Left after the component filter |
 |---|---|---|---|
-| walking | 312 | 624 | 576 |
-| cycling | 553 | 1,106 | 1,006 |
+| walking | 310 | 620 | 568 |
+| cycling | 555 | 1,110 | 1,008 |
 
 Limits: it joins the nearest *node*, not the nearest point of an edge, so a connector can be longer
 than the real gap. The distance ignores levels, so it can join a path to a road on a bridge above
@@ -51,9 +51,9 @@ the edge graph is built. It runs in clip builds too. Monaco:
 
 | Mode | Edges dropped | Pieces dropped |
 |---|---|---|
-| driving | 49 | 8 |
-| walking | 622 | 93 |
-| cycling | 445 | 79 |
+| driving | 77 | 15 |
+| walking | 616 | 101 |
+| cycling | 447 | 80 |
 
 Because direction is ignored, the kept network can still hold a one-way dead end: an edge you can
 reach but not leave.

@@ -121,11 +121,12 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 
 | After | Result |
 |---|---|
-| Filter roads | 1,135 OSM ways |
-| Build edges | 1,603 edges (one per way, plus the reverse of two-way ways) |
-| Simplify and merge | 2,182 edges: ways split at junctions |
+| Filter roads | 1,126 OSM ways |
+| Build edges | 1,588 edges (one per way, plus the reverse of two-way ways) |
+| Simplify and merge | 2,167 edges: ways split at junctions |
+| Private roads | 150 edges moved to `private_edges` |
 | Turn restrictions | 38 restrictions mapped to edges |
-| Component filter | 2,133 edges: 49 edges in 8 small pieces dropped |
+| Component filter | 1,940 edges: 77 edges in 15 small pieces dropped |
 
 ## What stays in the database
 

@@ -56,7 +56,7 @@ near = """SELECT edge_id FROM driving.edges
           ORDER BY ST_Distance_Sphere(ST_FlipCoordinates(ST_Centroid(geometry)), ST_Point(?, ?)) LIMIT 1"""
 from_edge = con.execute(near, [43.7285, 7.4155]).fetchone()[0]     # Fontvieille
 to_edge = con.execute(near, [43.7480, 7.4400]).fetchone()[0]       # Larvotto
-route(con, from_edge, to_edge)["time_s"]                            # 324 s, 3.8 km by car
+route(con, from_edge, to_edge)["time_s"]                            # 300 s, 3.8 km by car
 ```
 
 **On the map:** in the route map above, click a road to copy its `edge_id`.

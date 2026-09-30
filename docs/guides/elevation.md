@@ -8,11 +8,11 @@ duckosm elevation monaco.duckdb
 ```
 
 ```text
-  source=auto → copernicus (bbox 7.41, 43.72, 7.44, 43.75)
-  [cycling] 3561 nodes sampled (0 nodata/fill) -> ele
-  [driving] 1246 nodes sampled (0 nodata/fill) -> ele
-  [walking] 3602 nodes sampled (0 nodata/fill) -> ele
-elevation added from Copernicus GLO-30 — 8409 nodes (0 nodata/fill) across 3 mode(s) -> ele
+  source=auto → copernicus (bbox 7.41, 43.73, 7.44, 43.75)
+  [cycling] 3566 nodes sampled (0 nodata/fill) -> ele
+  [driving] 1160 nodes sampled (0 nodata/fill) -> ele
+  [walking] 3491 nodes sampled (0 nodata/fill) -> ele
+elevation added from Copernicus GLO-30 — 8217 nodes (0 nodata/fill) across 3 mode(s) -> ele
 ```
 
 It adds:

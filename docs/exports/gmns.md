@@ -19,11 +19,11 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 
 | Table | Rows | What |
 |---|---|---|
-| `node` | 1,246 | junctions; `ctrl_type = 'signal'` at traffic lights |
-| `link` | 2,133 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity, `facility_type` (the OSM `highway`), name |
-| `lane` | 2,469 | one row per lane, with its turns, allowed uses and width where OSM tags them |
-| `movement` | 2,826 | legal turns (from `edge_graph`): type (left, thru, right, uturn), code (`NBL`, `EBT`, …), the lanes that feed it, a curved turn path |
-| `geometry` | 2,133 | link shapes |
+| `node` | 1,160 | junctions; `ctrl_type = 'signal'` at traffic lights |
+| `link` | 1,940 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity, `facility_type` (the OSM `highway`), name |
+| `lane` | 2,276 | one row per lane, with its turns, allowed uses and width where OSM tags them |
+| `movement` | 2,520 | legal turns (from `edge_graph`): type (left, thru, right, uturn), code (`NBL`, `EBT`, …), the lanes that feed it, a curved turn path |
+| `geometry` | 1,940 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
 | `config`, `use_definition`, `use_group` | | units (metres, km/h), CRS (EPSG:4326), modes |
@@ -56,9 +56,9 @@ duckosm gmns monaco.duckdb --meso --micro
 ```
 
 - **Meso** (`meso_driving`): each road becomes a section, and each legal turn a connector
-  between sections. Monaco: 2,133 sections + 2,826 connectors.
+  between sections. Monaco: 1,940 sections + 2,520 connectors.
 - **Micro** (`micro_driving`): each lane cut into 7 m cells, with lane-change links between side-by-side
-  cells and turn links across junctions. Monaco: 27,661 links.
+  cells and turn links across junctions. Monaco: 25,671 links.
 
 Both follow osm2gmns' layout. Their ids are built from `edge_id` (`M<edge_id>` for a section,
 `X<from>-<to>` for a connector), so they stay the same across rebuilds and lead back to the road.
@@ -67,7 +67,7 @@ Driving by default; `--meso-mode cycling` / `--micro-mode cycling` for cycling.
 ## All modes in one network
 
 `--combined` adds `gmns_all`: one `link` table for every mode, a road shared by several modes
-being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 10,999 links.
+being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 10,773 links.
 
 ## See it
 
