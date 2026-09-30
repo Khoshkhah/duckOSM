@@ -199,24 +199,47 @@ from duckosm import route, Router
 
 con = duckdb.connect("monaco.duckdb", read_only=True)
 
-r = route(con, from_edge, to_edge)        # fastest route
-r["edges"], r["time_s"], r["length_m"]    # ordered edge_ids, seconds, metres
-r["path"]                                 # per edge: name, highway, length_m, cost_s, geometry
+r = route(con, from_edge, to_edge)                  # fastest, by car
+r["edges"], r["time_s"], r["length_m"]              # ordered edge_ids, seconds, metres
+r["path"]                                           # per edge: name, highway, length_m, cost_s, geometry
 
-router = Router(con)                      # many routes: build the graph once
+route(con, from_edge, to_edge, weight="length")     # shortest instead of fastest
+route(con, from_edge, to_edge, mode="walking")      # on the walking network (or "cycling")
+
+router = Router(con, mode="driving")                # many routes: build the graph once
 router.route(from_edge, to_edge)
 ```
 
-`weight="length"` gives the shortest route instead of the fastest; `mode="walking"` or `"cycling"`
-routes on that network (default `"driving"`). Both work on every function here (`weight` except on
-`to_networkx_nodes`). The graph is held in memory: fine for a city, heavy for a country.
+The graph is held in memory: fine for a city, heavy for a country.
+
+### Across modes (walk → drive → walk)
+
+`duckosm multimodal` joins the walking, cycling and driving networks at the junctions they share (a
+mode change costs 60 s; `--transfer-cost` changes it). `route_multimodal` then finds the fastest
+trip that may change mode on the way. It goes from one junction to another (OSM `node_id`s), starts
+and ends on foot, and returns `None` if the two points aren't connected. *Experimental.*
+
+```bash
+duckosm multimodal monaco.duckdb             # adds the mm.* tables to the db
+```
+
+```python
+from duckosm import route_multimodal
+
+r = route_multimodal(con, from_node, to_node)
+r["time_s"], r["legs"]                       # e.g. 552 s: walk 7 s -> drive 264 s -> walk 161 s
+```
+
+More in [Intermodal routing](multimodal.md).
 
 ### As a networkx graph
 
 | Function | Nodes | Edges |
 |---|---|---|
-| `to_networkx(con)` | edges (`edge_id`), with name, highway, length, speed, geometry | legal turns, weighted by time |
+| `to_networkx(con)` | edges (`edge_id`), with name, highway, length, speed, geometry | legal turns, weighted by time (`weight="length"`: metres) |
 | `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout) |
+
+Both take `mode=` too.
 
 To save either one to a file (the format comes from the extension):
 
