@@ -98,7 +98,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway"],
-        road_popup=False, street_view=False, arrows=False, name=f"{name}: route planner",
+        road_popup=False, street_view=False, arrows=False, filter_control=False, name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
 
@@ -151,7 +151,6 @@ _HTML = """<div id="rm-panel">
 _JS = r"""
 (function () {
   const COLORS = {walking: "#16a34a", driving: "#dc2626", cycling: "#2563eb"};
-  const ONE_COLOR = "#7c3aed";
   const LABEL = {walking: "Walk", driving: "Drive", cycling: "Cycle"};
   const D = RM, hub = D.modes.indexOf("walking");
   let fid = null, markers = {A: null, B: null}, picked = {A: null, B: null};
@@ -277,7 +276,7 @@ _JS = r"""
     const names = []; for (const l of res.legs) for (const k of l.edges) { const n = D.name[k]; if (n && n !== names[names.length - 1]) names.push(n); }
     if (names.length) h += "<ol>" + names.slice(0, 15).map((n) => `<li>${n}</li>`).join("") + (names.length > 15 ? "<li>…</li>" : "") + "</ol>";
     out.innerHTML = h;
-    rsColor(res.legs.map((l) => [l.edges.map((k) => fid[k]), multi ? COLORS[l.mode] : ONE_COLOR]));
+    rsColor(res.legs.map((l) => [l.edges.map((k) => fid[k]), COLORS[l.mode]]));
   }
 
   function update() {

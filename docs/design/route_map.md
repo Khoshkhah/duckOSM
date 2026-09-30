@@ -2,8 +2,9 @@
 
 **Status:** implemented 2026-09-30 (`src/duckosm/route_map.py`, `duckosm route-map`); in the browser
 the page gives the same answers as `route()` / `route_multimodal()` (checked on Monaco: 8 of 8 trips).
-**Pending:** roadstyle must draw foot / cycle networks and route highlights clearly (they vanish at city
-zoom today); then tests and the docs (Route guide).
+Tests (`tests/test_route_map.py`) and the Route guide (a driving map) done 2026-09-30. **Next:** it
+moves into mapstyle as `ms.render_route_planner` (`../mapstyle/docs/PLAN.md`), where walking and
+cycling get their own styles; until then duckOSM's docs show driving only.
 
 ## Goal
 

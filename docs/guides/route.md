@@ -22,6 +22,22 @@ router.route(from_edge, to_edge)
 
 The graph is held in memory: fine for a city, heavy for a country.
 
+## On a map
+
+```bash
+duckosm route-map monaco.duckdb -m driving     # -> reports/monaco_route_map.html
+```
+
+One HTML page, no server: click the map for the start, again for the end, and drag the markers to
+move them. The route is computed in the page over the same graph, so it gives the same answer as
+`route()` ([full screen](../maps/monaco_route_map.html)):
+
+<iframe src="../../maps/monaco_route_map.html" title="A route planner for Monaco, made by duckosm route-map"
+        loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
+
+Needs `pip install "duckosm[viz]"`. Everything is inside the page, so keep it to a city: above
+100,000 edges the command warns.
+
 ## Find the edges to route between
 
 **By street name:**
