@@ -150,7 +150,7 @@ GROUP BY highway ORDER BY n DESC;
 -- Legal next edges after one edge (the line graph)
 SELECT to_edge, cost
 FROM driving.edge_graph
-WHERE from_edge = 7968481847680619937;
+WHERE from_edge = 2226047604433257818;    -- Avenue Delphine, from `duckosm way`
 
 -- Edges starting in one H3 cell (needs H3 indexing)
 SELECT * FROM driving.edges
@@ -166,19 +166,37 @@ street, or a stretch of one): first its raw OSM tags and node list, then every e
 in every mode, as one table.
 
 ```bash
-duckosm way monaco.duckdb 24672722                  # Avenue Delphine; -m driving for one mode, --geom for WKT
-duckosm way monaco.duckdb 24672722 -o way.csv       # write the table to a file (.csv / .parquet / .json)
+duckosm way monaco.duckdb 4230100                   # Avenue Delphine; -m driving for one mode, --geom for WKT
+duckosm way monaco.duckdb 4230100 -o way.csv        # write the table to a file (.csv / .parquet / .json)
 ```
+
+```text
+raw way 4230100: 10 node refs
+  tags: {'highway': 'residential', 'name': 'Avenue Delphine'}
+  refs: [21923931, 12421715488, 21924090, 25243156, 3625098865, ...]
+```
+
+| mode | edge_id | edge_ref | source → target | length_m | maxspeed_kmh | cost_s | walk_type / cycle_type |
+|---|---|---|---|---|---|---|---|
+| cycling | 2226047604433257818 | 4230100#1f | 21923931 → 21924057 | 88.3 | 15 | 21.2 | mixed_traffic |
+| driving | 2226047604433257818 | 4230100#1f | 21923931 → 21924057 | 88.3 | 30 | 10.6 | |
+| walking | 2226047604433257818 | 4230100#1f | 21923931 → 21924057 | 88.3 | 5 | 63.6 | shared_road |
+| cycling | 3664387098764709418 | 4230100#1r | 21924057 → 21923931 | 88.3 | 15 | 21.2 | mixed_traffic |
+| driving | 3664387098764709418 | 4230100#1r | 21924057 → 21923931 | 88.3 | 30 | 10.6 | |
+| walking | 3664387098764709418 | 4230100#1r | 21924057 → 21923931 | 88.3 | 5 | 63.6 | shared_road |
+
+(A selection of the columns; the real table has every `edges` column.) This two-way street became two
+edges, one per direction (`#1f` forward, `#1r` reverse). Each has the same `edge_id` in all three
+modes, with that mode's own speed and travel time.
 
 ```python
 from duckosm.query import way_table
-way_table(con, 24672722).show()                     # the same table in Python / a notebook
+way_table(con, 4230100).show()                      # the same table in Python / a notebook
 ```
 
-The table has one row per edge per mode, in travel order. A two-way street gives two edges, one per
-direction, and the same stretch of road has the same `edge_id` in every mode. Use it when a
-particular street looks wrong: how it was split, which edges came from it, what speed and cost each
-got. A negative `osm_id` looks up the short connector edges duckOSM adds to join dangling paths.
+Use it when a particular street looks wrong: how it was split, which edges came from it, what speed
+and cost each got. A negative `osm_id` looks up the short connector edges duckOSM adds to join
+dangling paths.
 
 ## Visualization
 
