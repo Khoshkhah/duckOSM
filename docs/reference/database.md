@@ -209,9 +209,9 @@ this is the grown boundary.
 
 ### `global_junctions`
 
-The nodes where every mode splits its roads, so a road has the same edges in every mode: nodes where
-two road ways meet or a road way ends, over all road ways in `raw.ways` (not footways, paths,
-cycleways, steps, pedestrian streets, bridleways, corridors).
+The nodes where every mode splits its roads, so a road has the same edges in every mode: nodes of a
+road that another highway way in `raw.ways` also uses (a road, footway, path, cycleway, …; not
+`proposed` / `construction` / `abandoned` / `razed` / `disused` ones), and nodes where a road ends.
 
 | Column | Type | Description |
 |---|---|---|

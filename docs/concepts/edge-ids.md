@@ -26,15 +26,17 @@ build stops with an error. Monaco: 2 virtual nodes in driving, 19 in walking, 21
 
 ## The same id in every mode
 
-Every mode splits roads at one shared set of points, `main.global_junctions`: each node where two
-road ways meet, or a road ends. It is made once from all OSM ways, before any mode filters them.
+Every mode splits roads at one shared set of points, `main.global_junctions`: each node of a road
+that another OSM way also uses (another road, or a footway, path or cycleway, such as a crosswalk),
+and each node where a road ends. It is made once from all OSM ways, before any mode filters them.
 So a road that is in two modes is cut into the same pieces and has the same `edge_id` in both.
 Monaco: 1,927 of the 1,940 driving edges have the same `edge_id` in cycling, 1,129 in walking.
 The others are roads that mode doesn't include.
 
-Footways, paths, cycleways, steps, pedestrian streets, bridleways and corridors don't split a road
-they touch; they split only themselves. `options.global_junctions: false` makes each mode split at
-its own junctions, and the ids of a road can then differ between modes.
+So a crosswalk cuts the road it crosses in driving too: walkers and cyclists connect to the road
+there, and the road's pieces are the same in every mode. Ways that don't exist on the ground
+(`highway=proposed`, `construction`, …) cut nothing. `options.global_junctions: false` makes each mode
+split at its own junctions, and the ids of a road can then differ between modes.
 
 Because the mode is not in the id, the same `edge_id` can be in several schemas. Across modes, the key
 is `(mode, edge_id)`.

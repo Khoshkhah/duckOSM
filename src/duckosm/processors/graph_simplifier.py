@@ -197,12 +197,10 @@ class GraphSimplifier(BaseProcessor):
         """Identify junction nodes, and which of them are ROAD junctions.
 
         A node is a graph junction if it is shared by >1 way or is a way endpoint (kept as a routing
-        node). It is additionally a ROAD junction (`is_road_junction`) when >=2 ROAD ways meet there
-        or a road ends there. Roads are split ONLY at road junctions, so a footway/path/cycleway
-        joining a road mid-segment does not fragment it — the road keeps the SAME segmentation (and
-        edge_id) across the driving / walking / cycling graphs. Non-road ways still split at every
-        junction (their own routing). With no paths present (e.g. a driving-only build) every way is
-        a road, so `is_road_junction` marks every junction and behaviour is unchanged.
+        node). It is a junction for ROADS (`is_road_junction`) when another way of this mode shares
+        it (a road, or a footway / path / cycleway joining it mid-way) or a road ends there. With the
+        shared ``main.global_junctions`` (the default) roads use that set instead, built from every
+        OSM way, so a road is cut at the same points, and keeps the same edge_id, in every mode.
         """
         self.execute(f"""
             CREATE OR REPLACE TEMP TABLE node_counts AS
@@ -227,7 +225,7 @@ class GraphSimplifier(BaseProcessor):
         self.execute("""
             CREATE OR REPLACE TABLE junctions AS
             SELECT node_id,
-                   (road_way_count > 1 OR road_endpoint_count > 0) AS is_road_junction
+                   (way_count > 1 OR road_endpoint_count > 0) AS is_road_junction
             FROM node_counts
             WHERE way_count > 1        -- shared between ways (kept as a routing node)
                OR endpoint_count > 0   -- endpoint of a way
