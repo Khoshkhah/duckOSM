@@ -156,6 +156,7 @@ _CHROME = r"""<style>
 .leg span{display:inline-flex;align-items:center;gap:7px}.leg i{width:15px;height:9px;border-radius:2px;display:inline-block}
 .hint{position:absolute;right:22px;bottom:22px;font-family:var(--mono);font-size:11px;color:#5f7183;pointer-events:none}
 @media(prefers-reduced-motion:reduce){.hero canvas{transition:none}}
+@media(max-width:900px){.hint{display:none}}
 </style>"""
 
 _PANZOOM = r"""
@@ -197,18 +198,25 @@ _LANE_T = _CHROME + r"""
 <div class="hero"><canvas id="c"></canvas><div class="vig"></div>
   <div class="cap"><div class="k" id="file"></div>
     <h1>Every lane, its own <b>width &amp; geometry</b></h1><p id="sub"></p></div>
-  <div class="leg"><span><i style="background:#8fa2b4"></i>traffic lane</span><span><i style="background:#e8944a"></i>bus lane</span>
-    <span><i style="background:#5ab0e6"></i>bike lane</span><span><i style="background:#39c6d6"></i>turn connector</span></div>
+  <div class="leg"><span><i style="background:#3d4654;outline:1px solid #e6ebf0"></i>traffic lane</span><span><i style="background:#8a5a33;outline:1px solid #e6ebf0"></i>bus lane</span>
+    <span><i style="background:#2f6488;outline:1px solid #e6ebf0"></i>bike lane</span><span><i style="background:#39c6d6"></i>turn connector</span></div>
   <div class="hint">scroll to zoom · drag to pan · widths in metres</div></div>
 <script>const D=/*__P__*/null;(function(){const $=i=>document.getElementById(i);
 $('file').textContent='duckOSM · GMNS · '+D.n.file;
 $('sub').textContent=D.n.lanes.toLocaleString()+' lanes as width ribbons · '+D.n.bus+' bus · '+D.n.conn.toLocaleString()+' smooth turn connectors';
 const cv=$('c'),ctx=cv.getContext('2d'),GPM=D.gpm;let dpr=Math.min(window.devicePixelRatio||1,2),v={s:1,tx:0,ty:0};
-const X=x=>(x*v.s+v.tx)*dpr,Y=y=>(y*v.s+v.ty)*dpr,LC=['#8fa2b4','#e8944a','#5ab0e6'];
+const X=x=>(x*v.s+v.tx)*dpr,Y=y=>(y*v.s+v.ty)*dpr,LC=['#3d4654','#8a5a33','#2f6488'];
 function poly(g,o){ctx.moveTo(X(g[o]),Y(g[o+1]));for(let i=o+2;i<g.length;i+=2)ctx.lineTo(X(g[i]),Y(g[i+1]));}
 function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#0a0d13';ctx.fillRect(0,0,cv.width,cv.height);
   ctx.lineCap='round';ctx.lineJoin='round';const m=GPM*v.s*dpr;
-  ctx.strokeStyle='#161b24';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m);ctx.beginPath();poly(L,2);ctx.stroke();}
-  for(const L of D.lanes){ctx.strokeStyle=LC[L[0]];ctx.lineWidth=Math.max(.8,L[1]*m*0.84);ctx.beginPath();poly(L,2);ctx.stroke();}
+  // white under, asphalt on top: what is left of the white between two lanes is the lane line
+  ctx.strokeStyle='#e6ebf0';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m);ctx.beginPath();poly(L,2);ctx.stroke();}
+  for(const L of D.lanes){const w=L[1]*m;ctx.strokeStyle=LC[L[0]];
+    ctx.lineWidth=Math.max(.8,w-Math.min(w*.3,Math.max(1.2*dpr,.3*m)));ctx.beginPath();poly(L,2);ctx.stroke();}
+  if(3.25*m>14){ctx.fillStyle='rgba(230,235,240,.85)';const a=.9*m;       // one arrow per lane: its direction
+    for(const L of D.lanes){const n=(L.length-2)/2,j=Math.floor((n-1)/2),i=2+2*j;if(n<2)continue;
+      const x0=X(L[i]),y0=Y(L[i+1]),x1=X(L[i+2]),y1=Y(L[i+3]),dx=x1-x0,dy=y1-y0,d=Math.hypot(dx,dy);if(d<3*a)continue;
+      const ux=dx/d,uy=dy/d,cx=(x0+x1)/2,cy=(y0+y1)/2;ctx.beginPath();
+      ctx.moveTo(cx+ux*a,cy+uy*a);ctx.lineTo(cx-ux*a-uy*a*.6,cy-uy*a+ux*a*.6);ctx.lineTo(cx-ux*a+uy*a*.6,cy-uy*a-ux*a*.6);ctx.fill();}}
   ctx.strokeStyle='#39c6d6';ctx.lineCap='butt';const cw=Math.max(.8,.6*m);for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
 """ + _PANZOOM + "})();</script>"
