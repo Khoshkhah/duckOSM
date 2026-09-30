@@ -39,7 +39,7 @@ networkx needed). `enforce_sequence=True` (default) restricts a trip to `walk* (
 — at most one contiguous vehicular segment, entered and left via walking.
 
 **Visualise a route by mode** (walking green, driving red, cycling blue) as one self-contained
-HTML file:
+HTML file, with a script from the repo's `scripts/` folder (needs a clone; not in the pip package):
 
 ```bash
 python scripts/multimodal_route_standalone.py --db <db>                          # picks a trip itself

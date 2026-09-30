@@ -37,7 +37,7 @@ CI (`.github/workflows/ci.yml`) runs the tests on Python 3.10 and 3.12 and build
 ## Checking a build
 
 Every build can check its own invariants (single dominant component, no stranded named edge) and
-fail on a breach: `validation.enabled: true` (on in `config/template.yaml`, off by default in code).
+fail on a breach: `validation.enabled: true` (on in the config template, off by default in code).
 
 For the geometry of a finished db:
 

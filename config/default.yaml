@@ -1,5 +1,5 @@
 # duckOSM default config — loaded automatically by `duckosm build` when no --config
-# is given. See config/template.yaml for the fully-commented reference; edit the
+# is given. `duckosm init-config` writes the fully-commented reference; edit the
 # values below for your area.
 
 name: default                          # output -> data/db/default.duckdb

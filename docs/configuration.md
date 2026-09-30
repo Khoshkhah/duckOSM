@@ -1,11 +1,15 @@
 # Configuration
 
-duckOSM is driven by a YAML config file (or equivalent CLI flags). A ready-to-edit
-template is at [`config/template.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/config/template.yaml).
+duckOSM is driven by a YAML config file (or equivalent CLI flags). Write the fully commented
+template to a file, edit it, and build from it:
 
 ```bash
-duckosm build --config config/my_import.yaml
+duckosm init-config my_area.yaml        # the template ships inside the package
+duckosm build --config my_area.yaml
 ```
+
+Relative paths in a config (`output_path`, `pbf_path`, `boundary.path`, `osm_overrides`, …) resolve
+against the folder you run `duckosm` in, not against the config file or the install.
 
 CLI flags override the corresponding config values (see `duckosm build --help`).
 
@@ -88,8 +92,9 @@ When fixing it upstream in OpenStreetMap isn't practical, duckOSM can patch the 
 from a single global rules file so every rebuild reproduces the correction. The catalogue of issues
 these rules address lives in [`known_osm_issues.md`](https://github.com/Khoshkhah/duckOSM/blob/main/osm_overrides/known_osm_issues.md).
 
-The top-level `osm_overrides` key points at the file (default `osm_overrides/osm_overrides.yaml`); set it to
-`null` to disable. The rules are applied to the `ways` table **after `RoadFilter` and before
+The top-level `osm_overrides` key points at the file (default `osm_overrides/osm_overrides.yaml`,
+relative to the folder you run in); set it to `null` to disable. The repo's rules file is not part of
+the pip package: to use it or your own, put the file at that path or point the key at it. The rules are applied to the `ways` table **after `RoadFilter` and before
 `GraphBuilder`, once per mode** — placement matters: `oneway` is *topological* (it decides whether a
 reverse-twin edge is created), so it cannot be patched on the finished DB.
 
@@ -145,5 +150,5 @@ options:
   simplify: true
 ```
 
-See [`config/template.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/config/template.yaml) for the fully annotated version
+See the [config template](https://github.com/Khoshkhah/duckOSM/blob/main/src/duckosm/templates/config.yaml) (what `duckosm init-config` writes) for the fully annotated version
 and the existing files in [`config/`](https://github.com/Khoshkhah/duckOSM/tree/main/config) for more examples.

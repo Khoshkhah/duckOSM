@@ -10,11 +10,15 @@ pip install "duckosm[routing]"           # + networkx, for route() / Router / to
 Other extras: `[sumo]` (SUMO export), `[elevation]` (DEM sampling), `[tz]` (time zones), `[viz]`
 (notebook maps). To work on duckOSM itself, install from source: see [Development](development.md).
 
+Every relative path duckOSM uses (outputs, configs, reports) resolves against the folder you run
+`duckosm` in.
+
 ## Build a network
 
 ```bash
 # From a config file (recommended)
-duckosm build --config config/my_area.yaml
+duckosm init-config my_area.yaml          # write the commented template, then edit it
+duckosm build --config my_area.yaml
 
 # Or from CLI options
 duckosm build --pbf input.osm.pbf --output network.duckdb -m driving -m walking
@@ -28,7 +32,7 @@ With no `--config` and no `--pbf` / `--source-db`, `build` loads `config/default
 |--------|-------------|---------|
 | `-c`, `--config` | YAML config file | none |
 | `-p`, `--pbf` | Input `.osm.pbf` (or give a config / `--source-db`) | none |
-| `-o`, `--output` | Output DuckDB file | `data/output/network.duckdb` |
+| `-o`, `--output` | Output DuckDB file | `<pbf name>.duckdb` in the current folder (`<boundary name>.duckdb` for a clip) |
 | `-b`, `--boundary` | GeoJSON boundary to clip to | none |
 | `--source-db` | Parent duckOSM db to clip from (instead of a PBF) | none |
 | `-m`, `--modes` | `driving`, `walking` or `cycling`; repeat for several (`-m driving -m walking`) | `driving` |
@@ -36,15 +40,16 @@ With no `--config` and no `--pbf` / `--source-db`, `build` loads `config/default
 | `--h3-index` / `--no-h3-index` | Add H3 cells to nodes and edges | on |
 | `--h3-resolution` | H3 resolution (0-15) | `8` |
 | `--h3-cell` | Clip to a single H3 cell | none |
+| `--log-file` | Also write the log to this file | none (console only) |
 
 ### Configuration file
 
-Copy the fully commented [`config/template.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/config/template.yaml)
-and edit it; every field is described in [Configuration](configuration.md). The core of it:
+`duckosm init-config my_area.yaml` writes the fully commented [template](https://github.com/Khoshkhah/duckOSM/blob/main/src/duckosm/templates/config.yaml); every field is
+described in [Configuration](configuration.md). The core of it:
 
 ```yaml
 name: my_area                          # output file: <output_path>/<name>.duckdb
-output_path: data/db                   # a directory, or a full *.duckdb path
+output_path: .                         # a directory, or a full *.duckdb path
 
 source:
   type: pbf                            # 'pbf' (build from OSM) | 'duckdb' (clip a built db)
@@ -189,7 +194,7 @@ including `highway=service`, lives in `edges`, so the map shows the whole networ
 ### Standalone renderer & palettes
 
 `scripts/roadstyle_map.py` is a standalone alternative to `duckosm viz` that adds **palette
-selection**:
+selection**. It lives in the repo's `scripts/` folder (not in the pip package), so it needs a clone:
 
 ```bash
 python scripts/roadstyle_map.py --db data/db/sodermalm.duckdb --palette mono

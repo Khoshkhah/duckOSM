@@ -2,6 +2,7 @@
 CLI for duckOSM — a subcommand-based command line interface.
 
   duckosm build    build a routing network from a PBF, or clip one from a parent db
+  duckosm init-config  write the commented config template to a file, to edit and build from
   duckosm extract  slice a sub-area out of an existing build into a new db
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
@@ -26,7 +27,6 @@ arguments verbatim, so `duckosm extract --help` shows the full underlying option
 """
 
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import click
@@ -35,20 +35,28 @@ from duckosm.config import Config
 from duckosm.importer import DuckOSM
 
 
-def setup_logging(name="duckosm"):
-    """Configure logging to both console and a per-area file logs/<name>_<ts>.log."""
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = log_dir / f"{name}_{timestamp}.log"
+def setup_logging(log_file=None):
+    """Log to the console, and also to ``log_file`` when one is given (nothing is written to disk
+    otherwise, so running duckosm doesn't leave folders behind in the current directory)."""
+    handlers = [logging.StreamHandler()]
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file))
     logging.basicConfig(
         level=logging.INFO,
         format='[%(asctime)s] [%(levelname)s] %(message)s',
         datefmt='%H:%M:%S',
-        handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
+        handlers=handlers,
         force=True,
     )
-    return log_file
+
+
+def _stem(path):
+    """'maps/monaco-latest.osm.pbf' -> 'monaco-latest' (also strips .geojson / .duckdb)."""
+    name = Path(path).name
+    for suffix in (".pbf", ".osm", ".geojson", ".json", ".duckdb"):
+        name = name.removesuffix(suffix)
+    return name
 
 
 @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
@@ -64,23 +72,27 @@ def main():
 @main.command()
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to YAML configuration file')
 @click.option('--pbf', '-p', type=click.Path(exists=True), help='Path to PBF file')
-@click.option('--output', '-o', type=click.Path(), default='data/output/network.duckdb', help='Output DuckDB file path')
+@click.option('--output', '-o', type=click.Path(),
+              help='Output DuckDB file (default: <pbf name>.duckdb, or <boundary name>.duckdb for a clip, '
+                   'in the current folder)')
 @click.option('--boundary', '-b', type=click.Path(exists=True), help='GeoJSON boundary file for filtering')
 @click.option('--source-db', type=click.Path(exists=True), help='Parent duckOSM db to clip from (source.type=duckdb)')
 @click.option('--h3-cell', help='H3 cell ID for filtering')
 @click.option('--graph/--no-graph', default=True, help='Build edge graph table')
 @click.option('--h3-index/--no-h3-index', default=True, help='Add H3 spatial indexing')
 @click.option('--h3-resolution', type=int, default=8, help='H3 resolution (0-15)')
-@click.option('--modes', '-m', multiple=True, help='Transportation modes (driving, walking, cycling)')
-def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3_resolution, modes):
+@click.option('--modes', '-m', multiple=True, help='Transportation modes (driving, walking, cycling); repeat for several')
+@click.option('--log-file', type=click.Path(dir_okay=False), help='Also write the log to this file')
+def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3_resolution, modes,
+          log_file):
     """Build a routing network from a PBF, or clip one from a parent db.
 
     \b
     Examples:
-        # From a YAML config
-        duckosm build --config config/default.yaml
-        # From CLI arguments
-        duckosm build --pbf input.pbf --output network.duckdb --graph
+        # From a YAML config (duckosm init-config writes a commented one)
+        duckosm build --config my_area.yaml
+        # From CLI arguments: writes ./input.duckdb
+        duckosm build --pbf input.osm.pbf -m driving -m walking
     """
     # Default to config/default.yaml if it exists and no config/pbf/source given.
     default_config = Path("config/default.yaml")
@@ -91,9 +103,13 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
         if config:
             cfg = Config.from_yaml(config)
         elif pbf or source_db:
+            # Name the output after the input rather than a fixed path, so a pip user running
+            # `duckosm build --pbf maps/monaco-latest.osm.pbf` gets ./monaco-latest.duckdb.
+            name = _stem(output) if output else _stem(pbf or boundary or source_db)
             cfg = Config.from_args(
                 pbf_path=pbf or "",
-                output_path=output,
+                output_path=output or f"{name}.duckdb",
+                name=name,
                 boundary_path=boundary,
                 source_db=source_db,
                 h3_cell=h3_cell,
@@ -111,12 +127,30 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
     except Exception as e:
         raise click.ClickException(f"loading config: {e}")
 
-    setup_logging(cfg.name)
+    setup_logging(log_file)
     try:
         output_path = DuckOSM(cfg).run()
         click.echo(f"\nOutput: {output_path}")
     except Exception as e:
         raise click.ClickException(str(e))
+
+
+@main.command(name="init-config")
+@click.argument("path", default="duckosm.yaml", type=click.Path(dir_okay=False))
+@click.option("--force", is_flag=True, help="Overwrite PATH if it already exists")
+def init_config(path, force):
+    """Write the fully commented config template to PATH (default: duckosm.yaml).
+
+    Edit it, then run `duckosm build --config PATH`.
+    """
+    from importlib.resources import files
+
+    dst = Path(path)
+    if dst.exists() and not force:
+        raise click.ClickException(f"{dst} already exists (use --force to overwrite)")
+    dst.write_text(files("duckosm").joinpath("templates/config.yaml").read_text(encoding="utf-8"),
+                   encoding="utf-8")
+    click.echo(f"Wrote {dst}. Edit it, then: duckosm build --config {dst}")
 
 
 # extract/admin forward all arguments to an argparse-based script: don't let Click

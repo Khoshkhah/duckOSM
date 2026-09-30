@@ -11,7 +11,8 @@
 # Full reference: docs/configuration.md · docs/pipeline.md · docs/design/pipeline_update_plan.md
 
 name: my_import                        # REQUIRED — logical name + output filename (<name>.duckdb)
-output_path: data/db                   # a directory (-> data/db/<name>.duckdb) OR a full *.duckdb path
+output_path: .                         # a directory (-> ./<name>.duckdb) OR a full *.duckdb path.
+                                       # Relative paths resolve against the folder you run duckosm in.
 
 # ---- SOURCE: where the network comes from (set type, fill that block) -------
 source:
@@ -93,4 +94,6 @@ viz:
   basemap: carto-voyager               # carto-voyager | carto-positron | carto-dark | osm
 
 # ---- INPUT CACHING (downloads/boundary only; the network db always rebuilds)
+osm_overrides: osm_overrides/osm_overrides.yaml   # local fixes for known OSM errors (see the docs);
+                                                 # a missing file is a no-op
 cache_dir: pbf                         # reuse a downloaded country PBF / fetched boundary if present

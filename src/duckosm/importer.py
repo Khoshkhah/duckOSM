@@ -83,7 +83,7 @@ class DuckOSM:
         # Component clean-up only makes sense when clipping to an AREA. A whole-region /
         # whole-country build (no boundary) legitimately has separate components (islands)
         # and 2.35M-edge union-find would be slow — so require a boundary.
-        do_components = (self.config.effective_boundary_path is not None) and (
+        self._do_components = do_components = (self.config.effective_boundary_path is not None) and (
             self.config.clip.keep_largest_component
             or self.config.clip.min_component_edges > 1)
         console.print(f"[bold blue]duckOSM {'Clip' if is_clip else 'Import'}[/bold blue]")
@@ -534,9 +534,16 @@ class DuckOSM:
 
     # ---- validation (C) ---------------------------------------------------------------
     def _validate(self, mode: str) -> None:
+        from dataclasses import replace
+
         from duckosm.validate import Validator
-        self.validation_results[mode] = Validator(
-            self.con, mode, self.config.validation).run()
+        vcfg = self.config.validation
+        # "One connected network" only holds after ComponentFilter, which needs a boundary. A plain
+        # extract legitimately has islands and fragments, so don't fail it on them.
+        if not self._do_components and (vcfg.assert_single_component or vcfg.assert_no_stranded_named):
+            logger.info("  no component clean-up ran: skipping the single-component checks")
+            vcfg = replace(vcfg, assert_single_component=False, assert_no_stranded_named=False)
+        self.validation_results[mode] = Validator(self.con, mode, vcfg).run()
 
     def _filter_roads(self, mode: str) -> None:
         """Filter to highway ways only."""

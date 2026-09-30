@@ -43,7 +43,9 @@ list from the config and executes it; read it first — step order carries real 
 
 Each stage is a `BaseProcessor` subclass in `src/duckosm/processors/` that runs SQL on the shared
 connection — logic lives in SQL, not Python loops. `config.py` holds the YAML schema
-(`config/template.yaml` is the commented reference; `docs/configuration.md` every field).
+(`src/duckosm/templates/config.yaml` is the commented reference `duckosm init-config` writes;
+`docs/configuration.md` every field). Relative paths resolve against the current folder: a pip
+install has no repo, so only files inside `src/duckosm/` ship.
 
 **Exporters** (`sumo.py`, `matsim*.py`, `gmns*.py`, `opendrive.py`, `lanelet2.py`, `railml.py`,
 `gis.py`, `routing.py`) read a *finished* db and are wired as subcommands in `cli.py`. Lane-level

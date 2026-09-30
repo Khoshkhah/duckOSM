@@ -395,7 +395,7 @@ real deck clearance):
 
 ## Visualisation
 
-`scripts/elevation_report.py --db <db>` renders an enriched db as a roadstyle **web report** —
+`scripts/elevation_report.py --db <db>` (in the repo's `scripts/` folder; needs a clone) renders an enriched db as a roadstyle **web report** —
 roads coloured by mean edge elevation (`(z_from+z_to)/2`), a *Colour by* dropdown
 (Elevation / Class / Max speed / Lanes), base-map switcher, hover read-out, and (when roadstyle's
 `ui/report/sidebar.html` is found in the roadstyle checkout) a gradient legend + filter + search.

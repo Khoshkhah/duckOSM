@@ -49,3 +49,6 @@ Issues = "https://github.com/khoshkhah/duckOSM/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+duckosm = ["templates/*.yaml"]    # `duckosm init-config` writes it out
