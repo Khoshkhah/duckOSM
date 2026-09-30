@@ -37,3 +37,20 @@ def test_clip_pbf_to_the_boundary(tmp_path):
     assert json.loads(b.read_text())["features"][0]["properties"]["osm_id"] == 1124039
     out = clip_pbf(PBF, b, tmp_path / "monaco.osm.pbf")
     assert 0 < out.stat().st_size < PBF.stat().st_size                        # the French edges are cut
+
+
+def test_db_named_like_a_schema_is_refused(tmp_path):
+    """DuckDB names a database after its file: `driving.duckdb` / `mm.duckdb` make every
+    `driving.edges` / `mm.edges` ambiguous. The CLI refuses such a file with a clear message."""
+    import duckdb
+    from click.testing import CliRunner
+    from duckosm.cli import main
+    from duckosm.utils import check_db_name
+    for bad in ("driving.duckdb", "mm.duckdb", "Walking.duckdb"):
+        with pytest.raises(ValueError, match="Rename it"):
+            check_db_name(tmp_path / bad)
+    check_db_name(tmp_path / "monaco.duckdb")
+    db = tmp_path / "mm.duckdb"
+    duckdb.connect(str(db)).close()
+    r = CliRunner().invoke(main, ["multimodal", str(db)])
+    assert r.exit_code != 0 and "Rename it" in r.output

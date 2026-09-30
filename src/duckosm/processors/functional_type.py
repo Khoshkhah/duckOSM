@@ -47,6 +47,9 @@ class FunctionalType(BaseProcessor):
                 WHEN edges.highway = 'pedestrian' AND map_extract(w.tags, 'area')[1] = 'yes' THEN 'plaza'
                 WHEN edges.highway = 'pedestrian'                                     THEN 'pedestrian_street'
                 WHEN edges.highway = 'living_street'                                  THEN 'shared_street'
+                -- a road kept for walking because it has a sidewalk: you walk its sidewalk
+                WHEN COALESCE(map_extract(w.tags, 'sidewalk')[1], 'no') NOT IN ('no', 'none', 'separate')
+                     AND edges.highway NOT IN ('path', 'track', 'bridleway', 'corridor', 'platform') THEN 'sidewalk'
                 WHEN edges.highway IN ('residential', 'service', 'unclassified')      THEN 'shared_road'
                 WHEN edges.highway = 'corridor' OR map_extract(w.tags, 'indoor')[1] = 'yes' THEN 'corridor'
                 WHEN edges.highway = 'platform'                                       THEN 'platform'

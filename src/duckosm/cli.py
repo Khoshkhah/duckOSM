@@ -36,6 +36,22 @@ import click
 
 from duckosm.config import Config
 from duckosm.importer import DuckOSM
+from duckosm.utils import check_db_name
+
+
+class _DbPath(click.Path):
+    """An existing database file, not named like a duckOSM schema (see check_db_name)."""
+
+    def convert(self, value, param, ctx):
+        value = super().convert(value, param, ctx)
+        try:
+            check_db_name(value)
+        except ValueError as e:
+            self.fail(str(e), param, ctx)
+        return value
+
+
+DB_PATH = _DbPath(exists=True)
 
 
 def setup_logging(log_file=None):
@@ -259,7 +275,7 @@ def admin(args):
 
 
 @main.command()
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode schema(s) to render (default: every mode present in the db)')
 @click.option('--basemap', default='voyager', show_default=True,
@@ -311,7 +327,7 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
 
 
 @main.command()
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.argument('osm_id', type=int)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode schema(s) to include (default: every mode present in the db)')
@@ -369,7 +385,7 @@ def way(db, osm_id, modes, geom, out):
 
 
 @main.command()
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', default='driving', show_default=True,
               help='Mode schema to export')
 @click.option('--out-dir', default='sumo', show_default=True,
@@ -410,7 +426,7 @@ def sumo(db, mode, out_dir, name, connections, config, netconvert):
 
 
 @main.command()
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--transfer-cost', type=float, default=60.0, show_default=True,
               help='Flat transfer penalty in seconds at each shared junction (v1 coarse)')
 @click.option('--schema', default='mm', show_default=True,
@@ -446,7 +462,7 @@ def multimodal(db, transfer_cost, schema, realistic):
 
 
 @main.command(name="export-graph")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', default='driving', show_default=True,
               help='Mode schema to export')
 @click.option('--out', '-o', default=None,
@@ -490,7 +506,7 @@ def export_graph(db, mode, out, graph_kind, fmt, weight, geometry):
 
 
 @main.command(name="export-gis")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode schema(s) to export (default: every mode present in the db)')
 @click.option('--format', '-f', 'fmt', type=click.Choice(['gpkg', 'shp']), default='gpkg',
@@ -555,7 +571,7 @@ def gis_debug(export_path, source_db, out, name):
 
 
 @main.command(name="gmns")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--out', '-o', default=None,
               help='Output GMNS .duckdb file (default: <name>_gmns.duckdb)')
 @click.option('--mode', '-m', 'modes', multiple=True,
@@ -642,7 +658,7 @@ def gmns_viz(gmns_db, mode, out):
 
 
 @main.command(name="matsim")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', default='driving', show_default=True,
               help="Mode(s): a single mode, 'all', or a comma-list (e.g. driving,cycling) → one "
                    "multimodal network with modes= per link")
@@ -750,7 +766,7 @@ def lanelet2(gmns_db, mode, out):
 
 
 @main.command(name="railml")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--out', '-o', default=None, help='Output file (default: <name>.railml.xml)')
 def railml(db, out):
     """Export a railML 2.4 rail infrastructure file from a built duckOSM db — a NEW rail extraction
@@ -772,7 +788,7 @@ def railml(db, out):
 
 
 @main.command(name="opendrive")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to export')
 @click.option('--crs', default=None,
               help='Projected metric CRS for the reference line (default: the UTM zone of the data)')
@@ -800,7 +816,7 @@ def opendrive(db, mode, crs, junctions, out):
 
 
 @main.command(name="route-map")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode(s) to include; repeat for several (default: every mode in the db)')
 @click.option('--basemap', default='osm', show_default=True,
@@ -828,7 +844,7 @@ def route_map_cmd(db, modes, basemap, out):
 
 
 @main.command(name="elevation")
-@click.argument('db', type=click.Path(exists=True))
+@click.argument('db', type=DB_PATH)
 @click.option('--dem', default=None,
               help='Local/remote raster (GeoTIFF/COG/VRT/.img/.asc/.hgt — any GDAL format). '
                    'Takes precedence over --source.')

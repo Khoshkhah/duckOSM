@@ -12,7 +12,8 @@ edge_id = (hash(osm_id, source, target) >> 1)::BIGINT      -- DuckDB's hash()
 same `edge_id` on every rebuild, in every area cut from the same build, and in every export. An id
 changes only when its edge changes: a new way id, new end nodes, or a new junction that splits it.
 
-The `is_reverse` column says whether an edge runs against the way's drawing direction. It is not
+The `is_reverse` column says whether an edge runs against the way's drawing direction (a way tagged
+`oneway=-1` is turned round first, so its one edge is not a reverse). It is not
 part of the id.
 
 ## One id per edge

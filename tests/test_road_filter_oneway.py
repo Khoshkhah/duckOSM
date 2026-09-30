@@ -4,7 +4,7 @@ Pedestrians are not bound by vehicular ``oneway``: a ``oneway=yes`` street is wa
 in both directions, so the walking network must be undirected (``oneway=FALSE``) unless an
 explicit ``oneway:foot`` says otherwise. Driving and cycling still honour vehicular
 ``oneway`` (cycling with the usual ``oneway:bicycle`` contraflow override). Regression guard
-for the walking branch of ``_oneway_expression()``.
+for the walking branch of ``_direction_expression()``.
 
 ``highway=residential`` is kept by every mode's road filter, so it is the shared way used to
 compare the same tags across modes.
@@ -58,3 +58,25 @@ def test_vehicular_modes_stay_directed():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def _refs(mode, tags):
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA raw")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+    kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
+    con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2, 3])")
+    RoadFilter(con, mode=mode)._create_ways_table()
+    return con.execute("SELECT refs, oneway, lanes_fwd FROM ways WHERE osm_id = 1").fetchone()
+
+
+def test_oneway_minus_one_is_turned_round():
+    """OSM oneway=-1 is one-way AGAINST the drawing: the way is reversed, so its single edge runs
+    the legal way (it used to run as drawn: the wrong way). Its lanes are the backward ones."""
+    assert _refs("driving", {"highway": "primary", "oneway": "-1", "lanes:backward": "2"}) == ([3, 2, 1], True, 2)
+    assert _refs("driving", {"highway": "primary", "oneway": "yes"})[0] == [1, 2, 3]
+    assert _refs("driving", {"highway": "motorway"})[0] == [1, 2, 3]
+    assert _refs("cycling", {"highway": "residential", "oneway:bicycle": "-1"})[0] == [3, 2, 1]
+    assert _refs("cycling", {"highway": "residential", "oneway": "-1", "oneway:bicycle": "no"})[:2] == ([1, 2, 3], False)
+    assert _refs("walking", {"highway": "steps", "oneway:foot": "-1"})[0] == [3, 2, 1]
+    assert _refs("walking", {"highway": "residential", "oneway": "-1"})[:2] == ([1, 2, 3], False)

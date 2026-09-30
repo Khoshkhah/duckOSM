@@ -13,6 +13,7 @@ import duckdb
 import shutil
 
 from duckosm.config import Config
+from duckosm.utils import check_db_name
 from duckosm.processors import (
     RoadFilter,
     OsmOverrides,
@@ -292,6 +293,7 @@ class DuckOSM:
     def _connect(self) -> None:
         """Connect to DuckDB and load extensions."""
         logger.info("Connecting to DuckDB...")
+        check_db_name(self.output_path)       # before anything is written or removed
         # Start every build from a clean database file so a rebuild can never inherit stale
         # tables from a previous run (e.g. tables a since-removed pipeline step used to write).
         # Only the OUTPUT file is removed here — a clip's source/parent db is a different file.

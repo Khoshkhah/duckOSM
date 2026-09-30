@@ -35,9 +35,8 @@ A one-way edge has no reverse twin, so the road can only be used from `source` t
 | `cycling` | as driving (without the motorway rule), but `oneway:bicycle=no` makes it two-way and `oneway:bicycle=yes` one-way. Dismount edges are always two-way |
 | `walking` | only `oneway:foot` = `yes` / `1` / `true` / `-1` |
 
-!!! warning
-    `oneway=-1` means one-way against the way's drawing direction, but the edge is made in the
-    drawing direction. Such roads point the wrong way.
+`oneway=-1` (one-way against the way's drawing direction) is turned round, so its edge runs the
+legal way.
 
 ## Speeds and travel time
 
@@ -92,11 +91,12 @@ Walking and cycling edges get a type from OSM sub-tags. The first rule that matc
 | `sidewalk` / `crossing` / `footpath` | `highway=footway` with `footway=sidewalk` / `footway=crossing` / anything else |
 | `plaza` / `pedestrian_street` | `highway=pedestrian`, with / without `area=yes` |
 | `shared_street` | `living_street` |
+| `sidewalk` | any other road with a `sidewalk` tag (not `no` / `none` / `separate`): you walk its sidewalk |
 | `shared_road` | `residential`, `service`, `unclassified` |
 | `corridor` | `highway=corridor`, or `indoor=yes` |
 | `platform` | `highway=platform` |
 | `path` | `path`, `track`, `bridleway` |
-| `footpath` | anything else, including main roads kept for their `sidewalk` tag |
+| `footpath` | anything else |
 
 | `cycle_type` | From |
 |---|---|

@@ -57,7 +57,7 @@ midpoint, creating virtual nodes:
 | `walk_type` | VARCHAR | **walking schema only** — pedestrian functional class derived from OSM sub-tags: `sidewalk` / `crossing` / `footpath` / `steps` / `escalator` / `pedestrian_street` / `plaza` / `shared_street` / `shared_road` / `corridor` / `platform` / `path`. See `docs/design/walk_cycle_type.md` |
 | `cycle_type` | VARCHAR | **cycling schema only** — cyclist functional class, directional (`cycleway:right` on forward, `cycleway:left` on reverse): `cycleway` / `cycle_track` / `cycle_lane` / `shared_lane` / `bus_cycle_lane` / `segregated_path` / `shared_path` / `mixed_traffic`. See `docs/design/walk_cycle_type.md` |
 | `geometry` | GEOMETRY | LineString geometry |
-| `is_reverse` | BOOLEAN | True if opposite direction |
+| `is_reverse` | BOOLEAN | TRUE for the reverse twin of a two-way road (runs against the way's drawing; a `oneway=-1` way is turned round first) |
 | `refs` | BIGINT[] | Shape point node IDs |
 | `from_cell` | BIGINT | H3 cell of source node |
 | `to_cell` | BIGINT | H3 cell of target node |

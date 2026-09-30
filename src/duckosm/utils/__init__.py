@@ -1,3 +1,18 @@
+# DuckDB names a database after its file, so a file called like one of duckOSM's schemas makes
+# every `driving.edges`-style reference ambiguous ("Ambiguous reference to catalog or schema").
+RESERVED_DB_NAMES = ("driving", "walking", "cycling", "mm", "raw", "features", "main")
+
+
+def check_db_name(path):
+    """Raise ValueError when a database file is named like a duckOSM schema (``driving.duckdb``)."""
+    from pathlib import Path
+    stem = Path(path).stem
+    if stem.lower() in RESERVED_DB_NAMES:
+        raise ValueError(f"a database can't be called {Path(path).name}: DuckDB names a database after "
+                         f"its file, and '{stem}' is also one of duckOSM's schemas "
+                         f"({', '.join(RESERVED_DB_NAMES)}). Rename it, e.g. {stem}_network.duckdb")
+
+
 def utm_epsg(lon, lat):
     """EPSG code of the WGS84 UTM zone containing (lon, lat), e.g. 'EPSG:32632' for Monaco."""
     return f"EPSG:{(32600 if lat >= 0 else 32700) + int((lon + 180) // 6) % 60 + 1}"

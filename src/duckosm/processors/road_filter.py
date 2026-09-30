@@ -115,7 +115,7 @@ class RoadFilter(BaseProcessor):
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
 
-        oneway_expr = self._oneway_expression()
+        direction_expr = self._direction_expression()
             
         self.execute(f"""
             CREATE OR REPLACE TABLE ways AS
@@ -125,9 +125,9 @@ class RoadFilter(BaseProcessor):
                     {highway_expr} AS highway,
                     map_extract(tags, 'name')[1] AS name,
                     map_extract(tags, 'maxspeed')[1] AS maxspeed,
-                    -- One-way flag as a boolean (mode-aware; see _oneway_expression).
-                    -- Never NULL: two-way / untagged -> FALSE.
-                    {oneway_expr} AS oneway,
+                    -- Travel direction (mode-aware; see _direction_expression): 1 one-way as
+                    -- drawn, -1 one-way against the drawing (OSM oneway=-1), 0 two-way.
+                    {direction_expr} AS dir,
                     map_extract(tags, 'surface')[1] AS surface,
                     -- service subtag (driveway/parking_aisle/alley/...) — drives the
                     -- narrow-vs-wide service-road rendering, like openstreetmap-carto.
@@ -155,7 +155,8 @@ class RoadFilter(BaseProcessor):
                 highway,
                 name,
                 maxspeed,
-                oneway,
+                -- One-way flag as a boolean. Never NULL: two-way / untagged -> FALSE.
+                dir <> 0 AS oneway,
                 surface,
                 service,
                 access,
@@ -171,8 +172,10 @@ class RoadFilter(BaseProcessor):
                 -- Lions Gate Bridge (lanes=3, forward=1, backward=1, reversible=1) -> 2 each way.
                 -- COALESCE(n_rev, 0) is a no-op for the vast majority of roads (no reversible tag).
                 CASE
+                    -- one-way against the drawing: its lanes are the backward ones (refs reversed below)
+                    WHEN dir = -1 THEN COALESCE(n_bwd, n_total, CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
                     WHEN n_fwd IS NOT NULL THEN n_fwd
-                    WHEN oneway
+                    WHEN dir <> 0
                         THEN COALESCE(n_total, CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
                     WHEN n_total IS NOT NULL AND n_bwd IS NOT NULL THEN GREATEST(n_total - n_bwd, 1)
                     WHEN n_total IS NOT NULL THEN GREATEST(CAST(CEIL(n_total / 2.0) AS INTEGER), 1)
@@ -188,27 +191,33 @@ class RoadFilter(BaseProcessor):
                     ELSE CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END
                 END + COALESCE(n_rev, 0) AS lanes_bwd,
                 tags,
-                refs
+                -- A way that is one-way against its drawing (OSM -1) is turned round here, so every
+                -- later step sees its legal direction as the forward one: edges, merging, restrictions
+                -- and edge_id. ponytail: its direction-specific tags (turn:lanes:forward,
+                -- cycleway:left/right) aren't swapped with it; rare on one-way roads.
+                CASE WHEN dir = -1 THEN list_reverse(refs) ELSE refs END AS refs
             FROM base
         """)
 
-    def _oneway_expression(self) -> str:
-        """SQL boolean expression for the one-way flag, tailored to the mode.
+    def _direction_expression(self) -> str:
+        """SQL integer expression for the travel direction, tailored to the mode: 1 = one-way in
+        the way's drawing direction, -1 = one-way against it (OSM ``-1``), 0 = two-way.
 
-        Roundabouts and OSM ``oneway`` in (yes/1/true/-1) are one-way; ``-1`` means
-        one-way against the digitisation direction. ``motorway`` / ``motorway_link``
-        are **implicitly** one-way per the OSM convention even when untagged, unless an
-        explicit ``oneway=no`` says otherwise. For cycling, ``oneway:bicycle`` overrides
-        the generic ``oneway`` so contraflow cycling on one-way streets (very common in
-        Europe) yields a reverse edge. For walking, vehicular ``oneway`` is ignored
-        entirely (pedestrians may walk either way); only an explicit ``oneway:foot``
+        Roundabouts and OSM ``oneway`` in (yes/1/true) are one-way as drawn, ``-1`` against.
+        ``motorway`` / ``motorway_link`` are **implicitly** one-way per the OSM convention even
+        when untagged, unless an explicit ``oneway=no`` says otherwise. For cycling,
+        ``oneway:bicycle`` overrides the generic ``oneway`` so contraflow cycling on one-way
+        streets (very common in Europe) yields a reverse edge. For walking, vehicular ``oneway``
+        is ignored entirely (pedestrians may walk either way); only an explicit ``oneway:foot``
         makes a walking edge one-way.
         """
+        yes = "IN ('yes', '1', 'true')"
         if self.mode == "walking":
-            return """
+            return f"""
                 CASE
-                    WHEN map_extract(tags, 'oneway:foot')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
-                    ELSE FALSE
+                    WHEN map_extract(tags, 'oneway:foot')[1] {yes} THEN 1
+                    WHEN map_extract(tags, 'oneway:foot')[1] = '-1' THEN -1
+                    ELSE 0
                 END
             """
         if self.mode == "cycling":
@@ -218,27 +227,30 @@ class RoadFilter(BaseProcessor):
             dismount_case = """
                     WHEN map_extract(tags, 'highway')[1] IN ('footway', 'pedestrian')
                          AND COALESCE(map_extract(tags, 'bicycle')[1], '')
-                             NOT IN ('yes', 'designated', 'permissive') THEN FALSE
+                             NOT IN ('yes', 'designated', 'permissive') THEN 0
             """ if self.cycling_dismount else ""
             return f"""
                 CASE
                     {dismount_case}
-                    WHEN map_extract(tags, 'oneway:bicycle')[1] = 'no' THEN FALSE
-                    WHEN map_extract(tags, 'oneway:bicycle')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
-                    WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
-                    WHEN map_extract(tags, 'oneway')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
-                    ELSE FALSE
+                    WHEN map_extract(tags, 'oneway:bicycle')[1] = 'no' THEN 0
+                    WHEN map_extract(tags, 'oneway:bicycle')[1] {yes} THEN 1
+                    WHEN map_extract(tags, 'oneway:bicycle')[1] = '-1' THEN -1
+                    WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN 1
+                    WHEN map_extract(tags, 'oneway')[1] {yes} THEN 1
+                    WHEN map_extract(tags, 'oneway')[1] = '-1' THEN -1
+                    ELSE 0
                 END
             """
-        return """
+        return f"""
             CASE
-                WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN TRUE
-                WHEN map_extract(tags, 'oneway')[1] IN ('yes', '1', 'true', '-1') THEN TRUE
+                WHEN map_extract(tags, 'junction')[1] IN ('roundabout', 'circular') THEN 1
+                WHEN map_extract(tags, 'oneway')[1] {yes} THEN 1
+                WHEN map_extract(tags, 'oneway')[1] = '-1' THEN -1
                 -- an explicit oneway=no wins over the implicit motorway rule below
-                WHEN map_extract(tags, 'oneway')[1] IN ('no', 'false', '0') THEN FALSE
+                WHEN map_extract(tags, 'oneway')[1] IN ('no', 'false', '0') THEN 0
                 -- motorways / motorway slip roads are implicitly one-way even when untagged
-                WHEN map_extract(tags, 'highway')[1] IN ('motorway', 'motorway_link') THEN TRUE
-                ELSE FALSE
+                WHEN map_extract(tags, 'highway')[1] IN ('motorway', 'motorway_link') THEN 1
+                ELSE 0
             END
         """
 
