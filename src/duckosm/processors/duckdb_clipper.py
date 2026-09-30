@@ -40,6 +40,15 @@ class DuckdbClipper(BaseProcessor):
             SELECT e.* FROM {p}.{m}.edges e
             WHERE EXISTS (SELECT 1 FROM main.boundary b WHERE {pred})
         """)
+        # private roads inside the boundary (visible on maps, not routable), when the parent has them
+        try:
+            self.execute(f"""
+                CREATE OR REPLACE TABLE private_edges AS
+                SELECT e.* FROM {p}.{m}.private_edges e
+                WHERE EXISTS (SELECT 1 FROM main.boundary b WHERE {pred})
+            """)
+        except Exception:
+            pass                                              # parent built before private_edges existed
         # nodes touched by surviving edges
         self.execute(f"""
             CREATE OR REPLACE TABLE nodes AS

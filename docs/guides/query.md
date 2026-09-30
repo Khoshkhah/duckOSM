@@ -15,8 +15,10 @@ con.sql("SELECT count(*) FROM driving.edges").show()
 
 Each mode has its own schema: `driving.edges`, `walking.edges`, `cycling.edges`, and so on. Always
 name the schema, or switch to it with `USE driving;`. A tool that shows no tables is usually looking at
-the empty default schema `main`. Builds from a PBF also keep the parsed OSM data in `raw`. Every table
-and column: [Database schema](../data_dictionary.md).
+the empty default schema `main`. Builds from a PBF also keep the parsed OSM data in `raw`. Private
+roads (driveways, gated streets) are in `driving.private_edges` and the like, not in `edges`: you can
+see them but not route on them ([why](../concepts/networks.md#access-private-and-forbidden-roads)).
+Every table and column: [Database schema](../data_dictionary.md).
 
 ## The size of each network
 

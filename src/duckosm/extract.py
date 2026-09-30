@@ -127,6 +127,11 @@ def main(argv=None) -> int:
             f"SELECT * FROM src.{sch}.edges "
             f"WHERE {bbox} AND ST_Intersects(geometry, (SELECT geom FROM _clip))")
         n_edges = out.execute(f"SELECT count(*) FROM {sch}.edges").fetchone()[0]
+        if "private_edges" in present[sch]:                # visible on maps, not routable
+            out.execute(
+                f"CREATE OR REPLACE TABLE {sch}.private_edges AS "
+                f"SELECT * FROM src.{sch}.private_edges "
+                f"WHERE {bbox} AND ST_Intersects(geometry, (SELECT geom FROM _clip))")
         for tbl, pred in MODE_TABLES.items():
             if tbl in present[sch]:
                 out.execute(

@@ -48,6 +48,7 @@ midpoint, creating virtual nodes:
 | `length_m` | FLOAT | Length in meters |
 | `maxspeed_kmh` | FLOAT | Normalized speed (km/h) |
 | `cost_s` | FLOAT | Travel time in seconds |
+| `access` | VARCHAR | The mode's access: the value of its most specific access tag (driving: `motorcar` > `motor_vehicle` > `vehicle` > `access`; walking: `foot` > `access`; cycling: `bicycle` > `vehicle` > `access`). NULL when none is tagged. Never `private` here: those roads are in `private_edges` |
 | `surface` | VARCHAR | OSM `surface` tag (`asphalt`, `gravel`, `paving_stones`, …); NULL when untagged |
 | `junction` | VARCHAR | OSM `junction` tag (`roundabout`, `circular`, …); NULL for ordinary edges. Roundabouts are also normalised to `oneway=TRUE` |
 | `service` | VARCHAR | OSM `service` subtag — for `highway=service` roads, what *kind*: `driveway`, `parking_aisle`, `alley`, `drive-through`, `slipway`, … NULL for non-service roads or untagged service roads. Used to style/filter parking-lot plumbing apart from real minor roads |
@@ -82,6 +83,14 @@ nodes (see `docs/design/drop_is_reverse_from_edge_id.md` and
 being silently deduplicated). The previous formula
 `(hash(osm_id, source, target, is_reverse) >> 1)` remains available as the `edge_id_hash_v1` macro
 for building old→new crosswalks.
+
+---
+
+### Table: `private_edges`
+
+Private roads of the mode (its access is `private`): the same columns as `edges`, built the same
+way, but never routable: not in `edge_graph`, `turn_restrictions` or any export. The maps draw them,
+marked. See [Access: private and forbidden roads](concepts/networks.md#access-private-and-forbidden-roads).
 
 ---
 

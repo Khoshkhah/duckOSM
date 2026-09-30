@@ -14,16 +14,49 @@ Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. Mona
 |---|---|
 | `driving` | `highway` = `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`s), `unclassified`, `residential`, `service`, `living_street`, `road`. Also `highway=pedestrian` when `motorcar` or `motor_vehicle` is `yes` / `designated` / `permissive`, or `access` is `delivery` / `destination` / `agricultural`: these become `living_street` |
 | `walking` | `highway` = `footway`, `path`, `pedestrian`, `steps`, `living_street`, `residential`, `service`, `platform`, `corridor`; and any way tagged `sidewalk` = `yes` / `both` / `left` / `right`, or `foot` = `yes` / `designated` |
-| `cycling` | `highway` = `cycleway`, `path`, `track`, `bridleway`, `living_street`, `residential`, `service`, `unclassified`, `tertiary`, `secondary`, `primary` (and their `_link`s); any way tagged `bicycle` = `yes` / `designated` / `permissive`, or with a `cycleway` tag other than `no` / `none` / `separate`. Then drops `bicycle=no`, and `access=private` / `no` unless bicycles are allowed. Plus [dismount edges](#dismount-edges) |
+| `cycling` | `highway` = `cycleway`, `path`, `track`, `bridleway`, `living_street`, `residential`, `service`, `unclassified`, `tertiary`, `secondary`, `primary` (and their `_link`s); any way tagged `bicycle` = `yes` / `designated` / `permissive`, or with a `cycleway` tag other than `no` / `none` / `separate`. Plus [dismount edges](#dismount-edges) |
 
-Access tags don't remove a road from driving or walking: a way tagged `access=private`,
-`motor_vehicle=no` or `foot=no` stays in. Monaco: 108 driving edges and 242 walking edges are on such
-ways. To remove a way, use a [fix](../guides/fix-osm-errors.md) with `exclude_modes`.
+Then the [access tags](#access-private-and-forbidden-roads) decide, per mode.
 
 A way tagged `foot` or `bicycle` is kept even without a `highway` tag. In Monaco this brings the
 ferry (`route=ferry`, `foot=yes`) into walking.
 
 `highway=service` (driveways, parking aisles, alleys) is part of the network like any other road.
+
+## Access: private and forbidden roads
+
+For each mode, the most specific access tag decides:
+
+| Mode | Tags, most specific first |
+|---|---|
+| `driving` | `motorcar`, `motor_vehicle`, `vehicle`, `access` |
+| `walking` | `foot`, `access` |
+| `cycling` | `bicycle`, `vehicle`, `access`; on a [dismount edge](#dismount-edges): `foot`, `access` |
+
+| Its value | The road in that mode |
+|---|---|
+| `no` (driving also `agricultural`, `forestry`, `emergency`, `psv`) | **not there.** It stays in the other modes that may use it: a bus-only road is still walkable |
+| `private` | **visible, never routable**: in `<mode>.private_edges`, not in `edges` |
+| anything else (`yes`, `destination`, `delivery`, …) or none | a normal road |
+
+So `access=private` + `motor_vehicle=yes` is a normal road for driving, and `motor_vehicle=no` doesn't
+affect walking or cycling. The mode's value is kept in `edges.access`.
+
+**Private roads** (a driveway, a gated street, a company road) are built like every other road,
+with the same `edge_id` formula, then moved from `edges` to `private_edges`, which has the same
+columns. So routing, the graph of legal turns and every export use only roads you may use, and a
+road you can reach only through a private one is dropped with the
+[component filter](cleanup.md#component-filter). The maps still draw private roads, marked
+([Draw a map](../guides/draw-map.md)). Monaco:
+
+| Mode | Routable edges | Private edges |
+|---|---|---|
+| `driving` | 1,940 | 150 |
+| `walking` | 8,948 | 138 |
+| `cycling` | 8,448 | 119 |
+
+A way a mode leaves out is still in `raw.ways`, with all its tags. To remove or keep one road
+yourself, use a [fix](../guides/fix-osm-errors.md).
 
 ## One-way roads
 

@@ -5,6 +5,21 @@ Road filter processor - extracts highway features from raw OSM data.
 from duckosm.processors.base import BaseProcessor
 
 
+# Access (docs/design/access_private.md): per mode, the most specific access tag decides. A value
+# in FORBIDDEN keeps the way out of that mode; 'private' keeps it, but the build moves it to
+# <mode>.private_edges (visible on maps, never routable).
+FORBIDDEN = {"driving": "'no', 'agricultural', 'forestry', 'emergency', 'psv'",
+             "walking": "'no'", "cycling": "'no'"}
+
+
+def _tag(k):
+    return f"map_extract(tags, '{k}')[1]"
+
+
+def _most_specific(*keys):
+    return f"COALESCE({', '.join(_tag(k) for k in keys)})"
+
+
 class RoadFilter(BaseProcessor):
     """
     Filter OSM data to highway features only.
@@ -72,6 +87,7 @@ class RoadFilter(BaseProcessor):
                 OR map_extract(tags, 'sidewalk')[1] IN ('yes', 'both', 'left', 'right')
                 OR map_extract(tags, 'foot')[1] IN ('yes', 'designated')
             """
+
         elif self.mode == "cycling":
             where_clause = """
                 (
@@ -91,31 +107,22 @@ class RoadFilter(BaseProcessor):
                             AND map_extract(tags, 'cycleway')[1] NOT IN ('no', 'none', 'separate')
                         )
                     )
-                    -- Drop ways where cycling is explicitly forbidden ...
-                    AND COALESCE(map_extract(tags, 'bicycle')[1], '') <> 'no'
-                    -- ... or that are private/closed, unless bicycles are explicitly allowed.
-                    AND (
-                        COALESCE(map_extract(tags, 'access')[1], '') NOT IN ('private', 'no')
-                        OR map_extract(tags, 'bicycle')[1] IN ('yes', 'designated', 'permissive')
-                    )
                 )
             """
             if self.cycling_dismount:
                 # Dismount (push-the-bike) ways: footway/pedestrian enter the cycling graph even
-                # with bicycle=no — pushing is walking — but access=private/no or foot=no still
-                # excludes. See docs/design/cycling_dismount_edges.md.
+                # with bicycle=no — pushing is walking, so their access is the walking one (below).
+                # See docs/design/cycling_dismount_edges.md.
                 where_clause = f"""
                     ({where_clause})
-                    OR (
-                        map_extract(tags, 'highway')[1] IN ('footway', 'pedestrian')
-                        AND COALESCE(map_extract(tags, 'access')[1], '') NOT IN ('private', 'no')
-                        AND COALESCE(map_extract(tags, 'foot')[1], '') <> 'no'
-                    )
+                    OR map_extract(tags, 'highway')[1] IN ('footway', 'pedestrian')
                 """
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
 
         direction_expr = self._direction_expression()
+        access_expr = self._access_expression()
+        where_clause = f"({where_clause}) AND COALESCE({access_expr}, '') NOT IN ({FORBIDDEN[self.mode]})"
             
         self.execute(f"""
             CREATE OR REPLACE TABLE ways AS
@@ -132,7 +139,9 @@ class RoadFilter(BaseProcessor):
                     -- service subtag (driveway/parking_aisle/alley/...) — drives the
                     -- narrow-vs-wide service-road rendering, like openstreetmap-carto.
                     map_extract(tags, 'service')[1] AS service,
-                    map_extract(tags, 'access')[1] AS access,
+                    -- the mode's effective access: its most specific access tag (_access_expression);
+                    -- 'private' ways are moved to private_edges later in the build
+                    {access_expr} AS access,
                     map_extract(tags, 'junction')[1] AS junction,
                     -- Vertical layering: layer (signed int as string), bridge, tunnel — for
                     -- draw-order (z_order += 10*layer) and bridge/tunnel styling downstream.
@@ -198,6 +207,20 @@ class RoadFilter(BaseProcessor):
                 CASE WHEN dir = -1 THEN list_reverse(refs) ELSE refs END AS refs
             FROM base
         """)
+
+    def _access_expression(self) -> str:
+        """The value of the most specific access tag for the mode (OSM's hierarchy), or NULL."""
+        if self.mode == "driving":
+            return _most_specific("motorcar", "motor_vehicle", "vehicle", "access")
+        if self.mode == "walking":
+            return _most_specific("foot", "access")
+        ride = _most_specific("bicycle", "vehicle", "access")
+        if not self.cycling_dismount:
+            return ride
+        # a dismount way (a footway / pedestrian street you may not ride) is walked: walking access
+        return f"""CASE WHEN {_tag('highway')} IN ('footway', 'pedestrian')
+                         AND COALESCE({_tag('bicycle')}, '') NOT IN ('yes', 'designated', 'permissive')
+                        THEN {_most_specific('foot', 'access')} ELSE {ride} END"""
 
     def _direction_expression(self) -> str:
         """SQL integer expression for the travel direction, tailored to the mode: 1 = one-way in

@@ -57,9 +57,15 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         select += ", oneway"
     select += ", ST_AsText(geometry) AS wkt"
 
-    # Every road, incl. highway='service', lives in the single edges table.
+    # Every road, incl. highway='service', lives in the single edges table; private roads (in
+    # private_edges: never routable) are drawn too, greyed out (docs/design/access_private.md).
+    has_private = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = ? "
+                              "AND table_name = 'private_edges'", [mode]).fetchone()[0] > 0
+    sql = f"SELECT {select}, NULL AS private FROM {mode}.edges"
+    if has_private:
+        sql += f" UNION ALL SELECT {select}, 'yes' AS private FROM {mode}.private_edges"
     try:
-        df = con.execute(f"SELECT {select} FROM {mode}.edges").df()
+        df = con.execute(sql).df()
     except Exception as e:
         logger.warning(f"viz[{mode}]: cannot read edges ({e})")
         return None
@@ -76,7 +82,9 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", *idcols, "highway", "name", *info], copy_field="edge_id",
+        tooltip=["edge_id", *idcols, "highway", "name", *info, "private"], copy_field="edge_id",
+        road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "private"],
+        **private_look(df),
         name=f"{name} ({mode})", legend=True,
         # view_3d builds the extruded bridge decks the in-map 2D/3D toggle needs; pitch=0 still
         # opens the map flat.
@@ -90,6 +98,19 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     m.save(str(path))
     logger.info(f"  Viz: {path}")
     return path
+
+
+def private_look(df, color="#c8c8c8"):
+    """roadstyle keywords that paint private roads (column ``private`` = 'yes') in ``color`` (grey)
+    and keep every other road in its class colour; nothing when the area has none."""
+    if "private" not in df or not (df["private"] == "yes").any():
+        return {}
+    # option 0 never falls back to the class colours, so the class look is option 0 and the map
+    # opens on option 1: private roads in `color`, the rest in their class colour ("missing": base)
+    return {"color_options": {"Road class": {},
+                              "Road class, private roads marked": {"color_by": "private", "colors": {"yes": color},
+                                                                   "missing": "base"}},
+            "color_active": 1}
 
 
 def _boundary_geojson(con):

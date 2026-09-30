@@ -30,8 +30,10 @@ def test_footway_kept_as_dismount_even_bicycle_no():
     assert _ways_row("cycling", {"highway": "pedestrian"}) is not None
 
 
-def test_private_or_foot_no_still_excluded():
-    assert _ways_row("cycling", {"highway": "footway", "access": "private"}) is None
+def test_private_kept_for_the_map_foot_no_excluded():
+    """A dismount way is walked, so walking access decides: foot=no keeps it out; access=private
+    keeps it as a private road (moved to private_edges by the build: seen, never routed)."""
+    assert _ways_row("cycling", {"highway": "footway", "access": "private"}) is not None
     assert _ways_row("cycling", {"highway": "footway", "foot": "no"}) is None
 
 
