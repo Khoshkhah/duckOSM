@@ -67,7 +67,7 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         return None
 
     df["geometry"] = df["wkt"].map(_wkt.loads)
-    g = add_level(gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry="geometry", crs="EPSG:4326"))
+    g = gpd.GeoDataFrame(df.drop(columns=["wkt"]), geometry="geometry", crs="EPSG:4326")
 
     # No color_by => roadstyle's classic OSM highway-class casing+fill.
     # basemaps=[...] adds the toggleable base-map layer switcher (chosen one first).
@@ -76,9 +76,7 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", *idcols, "highway", "name", *info, "bridge", "tunnel", "layer", "level"],
-        road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "layer", "level"],
-        copy_field="edge_id",
+        tooltip=["edge_id", *idcols, "highway", "name", *info], copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
         # view_3d builds the extruded bridge decks the in-map 2D/3D toggle needs; pitch=0 still
         # opens the map flat.
@@ -92,24 +90,6 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     m.save(str(path))
     logger.info(f"  Viz: {path}")
     return path
-
-
-def add_level(g):
-    """Add ``level``: the road's draw level, as roadstyle orders it: the OSM ``layer`` when tagged
-    (not 0); else a bridge is 1, a tunnel -1, any other road 0."""
-    import pandas as pd
-
-    def flag(col):
-        if col not in g:
-            return pd.Series(False, index=g.index)
-        v = g[col].astype(str).str.lower()
-        return g[col].notna() & ~v.isin(["", "no", "false", "0", "none", "nan"])
-
-    ly = (pd.to_numeric(g["layer"], errors="coerce").fillna(0).astype(int) if "layer" in g
-          else pd.Series(0, index=g.index))
-    default = pd.Series(0, index=g.index).mask(flag("tunnel"), -1).mask(flag("bridge"), 1)
-    g["level"] = ly.where(ly != 0, default)
-    return g
 
 
 def _boundary_geojson(con):

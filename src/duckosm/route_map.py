@@ -26,7 +26,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     import roadstyle as rs
     from shapely import wkt as _wkt
 
-    from duckosm.viz import BASEMAP_LAYERS, _boundary_geojson, add_level
+    from duckosm.viz import BASEMAP_LAYERS, _boundary_geojson
 
     def has(schema, table):
         return con.execute("SELECT count(*) FROM information_schema.tables "
@@ -103,11 +103,9 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
          "highway": [r[4] for r in rows], "bridge": [r[5] for r in rows], "tunnel": [r[6] for r in rows],
          "layer": [r[7] for r in rows]},
         geometry=[_wkt.loads(r[9]) for r in rows], crs="EPSG:4326")
-    add_level(g)
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
-        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id", "bridge", "tunnel", "layer", "level"],
-        road_popup=["name", "edge_id", "highway", "bridge", "tunnel", "layer", "level"],
+        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id"],
         arrows=False, filter_control=False, name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
@@ -140,7 +138,7 @@ _CSS = """<style>
 #rm-result .rm-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 #rm-result ol{margin:6px 0 0;padding-left:20px;color:#444;font-size:13px}
 #rm-result .rm-edges{margin-top:8px;font-size:12px} #rm-result .rm-edges summary{cursor:pointer;color:#555}
-#rm-result .rm-edges code{font-size:11px;user-select:all} #rm-result .rm-lvl{color:#9a6b00;font-size:11px}
+#rm-result .rm-edges code{font-size:11px;user-select:all}
 #rm-panel .rm-clicked{margin:8px 0 0;font-size:12px;color:#555} #rm-panel .rm-clicked code{user-select:all}
 #rm-panel .rm-note{margin-top:10px;color:#777;font-size:12px}
 </style>
@@ -323,11 +321,8 @@ _JS = r"""
     const names = []; for (const l of res.legs) for (const k of l.edges) { const n = D.name[k]; if (n && n !== names[names.length - 1]) names.push(n); }
     if (names.length) h += "<ol>" + names.slice(0, 15).map((n) => `<li>${n}</li>`).join("") + (names.length > 15 ? "<li>…</li>" : "") + "</ol>";
     const ks = res.legs.flatMap((l) => l.edges), ps = rsGetProps(ks.map((k) => fid[k]));
-    const is = (v) => v != null && !["", "no", "false", "0"].includes(String(v).toLowerCase());
-    const grade = (p) => (p.level || is(p.layer)) ? ` <span class="rm-lvl">${is(p.bridge) ? "bridge, " : is(p.tunnel) ? "tunnel, " : ""}` +
-                         `layer ${is(p.layer) ? p.layer : "–"}, level ${p.level}</span>` : "";
     h += `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
-         ks.map((k, i) => `<li><code>${ps[i].edge_id}</code> ${D.name[k] || ""}${grade(ps[i])}</li>`).join("") + "</ol></details>";
+         ks.map((k, i) => `<li><code>${ps[i].edge_id}</code> ${D.name[k] || ""}</li>`).join("") + "</ol></details>";
     out.innerHTML = h;
     paint(res.legs);
   }
