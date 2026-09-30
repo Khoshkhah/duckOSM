@@ -6,28 +6,110 @@ duckOSM converts OpenStreetMap PBF files to routing-ready DuckDB databases using
 
 ## Pipeline Overview
 
+`DuckOSM(config).run()` (`src/duckosm/importer.py`) builds an ordered list of steps from the config
+and runs it. There are two ways in: **build from a PBF**, or **clip from a parent build**.
+
+### Build from a PBF
+
+Dashed boxes only run under a condition (see the table below).
+
+```mermaid
+flowchart TB
+    PBF[(".osm.pbf")]
+
+    subgraph ONCE["① Once per build"]
+        direction TB
+        PRE["<b>Pre-clip</b><br/>osmium extract to the boundary"]
+        LOAD["<b>Parse OSM</b><br/>ST_READOSM → raw.nodes · raw.ways · raw.relations"]
+        GJ["<b>Global junctions</b><br/>one set of split points shared by every mode"]
+        PRE --> LOAD --> GJ
+    end
+
+    subgraph MODE["② Per mode: driving · walking · cycling, each in its own schema"]
+        direction TB
+        NET["<b>Network</b><br/>filter roads · OSM overrides · build edges · simplify and merge"]
+        FIX["<b>Repair</b><br/>connect dangling paths · mark dismount edges"]
+        ATTR["<b>Attributes</b><br/>speeds · travel-time costs · walk / cycle type"]
+        ROUTE["<b>Routing</b><br/>turn restrictions · edge graph of legal turns"]
+        CHECK["<b>Clean and check</b><br/>drop disconnected fragments · H3 · indexes · validate"]
+        NET --> FIX --> ATTR --> ROUTE --> CHECK
+    end
+
+    subgraph AFTER["③ Once, after all modes"]
+        direction TB
+        MM["<b>Intermodal graph</b> mm.*"]
+        FEAT["<b>Base-map layers</b> features.*"]
+        FIN["<b>Finish</b><br/>edge_id_hash macros · metadata · report · map"]
+    end
+
+    DB[("network.duckdb")]
+
+    PBF --> ONCE
+    ONCE --> MODE
+    MODE --> AFTER
+    AFTER --> DB
+
+    classDef optional stroke-dasharray: 5 4
+    classDef file stroke:#ffd43b,stroke-width:3px
+    class PRE,FIX,MM,FEAT optional
+    class PBF,DB file
 ```
-                     ┌─────────────────────────────────────────┐
-                     │             GLOBAL (Once)               │
-                     ├─────────────────────────────────────────┤
-                     │  1. Connect to DuckDB                   │
-                     │  2. Load PBF (ST_READOSM)               │
-                     │     → raw.nodes, raw.ways, raw.relations│
-                     └─────────────────────────────────────────┘
-                                      │
-            ┌─────────────────────────┼─────────────────────────┐
-            ▼                         ▼                         ▼
-     ┌───────────┐             ┌───────────┐             ┌───────────┐
-     │  driving  │             │  walking  │             │  cycling  │
-     └─────┬─────┘             └─────┬─────┘             └─────┬─────┘
-           │                         │                         │
-           ▼                         ▼                         ▼
-     ┌─────────────────────────────────────────────────────────────┐
-     │  1. Filter Roads  →  2. Build Edges  →  3. Simplify Graph  │
-     │  4. Process Speeds → 5. Calculate Costs → 6. Restrictions  │
-     │  7. Edge Graph  →  8. H3 Indexing  →  9. Create Indexes    │
-     └─────────────────────────────────────────────────────────────┘
+
+### Clip from a parent build
+
+`source.type: duckdb` (or `duckosm extract`) never reads OSM. It copies the rows inside the
+boundary out of an existing build, so every `edge_id` is the parent's.
+
+```mermaid
+flowchart LR
+    PARENT[("parent build<br/>e.g. sweden.duckdb")]
+    BOUND["boundary<br/>GeoJSON"]
+    CLIP["<b>DuckdbClipper</b><br/>per mode: copy edges, nodes,<br/>edge graph, restrictions"]
+    COMP["<b>Component filter</b><br/>drop boundary stubs"]
+    DONE["indexes · validate<br/>metadata · report"]
+    DB[("area.duckdb")]
+
+    PARENT --> CLIP
+    BOUND --> CLIP
+    CLIP --> COMP --> DONE --> DB
+
+    classDef optional stroke-dasharray: 5 4
+    classDef file stroke:#ffd43b,stroke-width:3px
+    class COMP optional
+    class PARENT,DB file
 ```
+
+### Every step, in order
+
+| Stage | Step | Code | Runs when (config key, default) |
+|---|---|---|---|
+| ① | Pre-clip the PBF | `osmium extract` | a boundary is set; cached in `pbf/` |
+| ① | Parse OSM into `raw.*` | `ST_READOSM` | always |
+| ① | Boundary cells | `BoundaryCellsBuilder` | a boundary is set and `options.boundary_cells` (off) |
+| ① | Global junctions | `GlobalJunctions` | `options.simplify` and `options.global_junctions` (both on) |
+| ② | Filter roads | `RoadFilter` | always |
+| ② | OSM overrides | `OsmOverrides` | `osm_overrides` file exists (default path `osm_overrides/osm_overrides.yaml`) |
+| ② | Build edges | `GraphBuilder` | always |
+| ② | Simplify and merge | `GraphSimplifier` | `options.simplify`, `options.merge_segments` (both on) |
+| ② | Connect dangling paths | `PathConnector` | walking and cycling; `clip.connectivity_rescue` (on) |
+| ② | Mark dismount edges | `DismountMarker` | cycling; `options.cycling_dismount` (on) |
+| ② | Speeds | `SpeedProcessor` | `options.process_speeds` (on) |
+| ② | Travel-time costs | `CostCalculator` | `options.calculate_costs` (on) |
+| ② | Walk / cycle type | `FunctionalType` | walking and cycling; `options.functional_types` (on) |
+| ② | Turn restrictions | `RestrictionProcessor` | driving only; `options.extract_restrictions` (on) |
+| ② | Edge graph | `EdgeGraphBuilder` | `options.build_graph` (on) |
+| ② | Component filter | `ComponentFilter` | a boundary is set and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
+| ② | H3 cells | `H3Indexer` | `options.h3_indexing` (on) |
+| ② | Indexes | `CREATE INDEX` | always |
+| ② | Validate | `Validator` | `validation.enabled` (off in code, on in `config/template.yaml`) |
+| ③ | Intermodal graph | `MultimodalBuilder` | `multimodal.enabled` (off); needs walking plus one other mode |
+| ③ | Base-map layers | `FeaturesBuilder` | `options.build_features` (off) |
+| ③ | `edge_id_hash` macros | `create_edge_id_macro` | always |
+| ③ | Metadata | `main.visualization_metadata` | always; time zone with `options.timezone` (off) |
+| ③ | Report / map | `write_report` / `render_network` | `report.enabled` / `viz.enabled` (both off) |
+
+The per-mode stages run once for each mode in `modes`, in its own schema (`USE driving`), which is
+why the processors can use unqualified table names like `edges` and `nodes`.
 
 ---
 

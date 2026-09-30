@@ -29,19 +29,21 @@
 Most OSM-to-network tools number their edges `0, 1, 2, …`, so the numbers change whenever you
 rebuild, cut out an area or export, and every table keyed on them has to be matched again.
 duckOSM's `edge_id` is a **content hash** of the road segment, so it stays the same **across
-rebuilds, clips and exports**. One real segment of Högbergsgatan, Stockholm:
+rebuilds, clips and exports**.
 
-```text
-stockholm_county.duckdb   driving.edges      edge_id = 7968481847680619937   # county build
-sodermalm.duckdb          driving.edges      edge_id = 7968481847680619937   # separate Södermalm build
-sodermalm (clipped)       driving.edges      edge_id = 7968481847680619937   # duckosm extract from the county
-SUMO    soder.edg.xml     <edge id="7968481847680619937" from="7767910376" to="21761577" …>
-MATSim  network.xml       <link id="7968481847680619937" from="7767910376" to="21761577" …>
-GMNS    gmns_driving.link  link_id = 7968481847680619937
-```
+One street segment, **Högbergsgatan in Stockholm** (51 m), looked up in six places:
 
-Attach your data (counts, speeds, map matches, demand) to an `edge_id` once and it follows the
-road everywhere.
+| Where we looked | How it got there | Its `edge_id` |
+|---|---|---|
+| Stockholm County database | built from OpenStreetMap | `7968481847680619937` |
+| Södermalm database | built separately from OpenStreetMap | `7968481847680619937` |
+| Södermalm, cut out of the county database | `duckosm extract` | `7968481847680619937` |
+| SUMO network file | `duckosm sumo` | `7968481847680619937` |
+| MATSim network file | `duckosm matsim` | `7968481847680619937` |
+| GMNS database | `duckosm gmns` | `7968481847680619937` |
+
+The same number every time. So anything you store against it (a traffic count, a speed, a map
+match, demand) stays attached to the right road.
 
 ## Quick start
 
