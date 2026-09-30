@@ -75,7 +75,7 @@ class GraphSimplifier(BaseProcessor):
         # 4c. Break same-direction parallel forward pairs (two arcs of one way, both A->B — a
         #     figure-8 / double-lollipop) by splitting every arc but the shortest with a virtual
         #     node. Runs BEFORE the antiparallel split so it only ever sees whole arcs. See
-        #     docs/design/split_same_direction_parallels.md.
+        #     docs/architecture.md (Stable edge ids).
         self._split_parallel_pairs()
 
         # 4d. Break two-way antiparallel forward pairs (A->B and B->A on the same osm_id, incl. the
@@ -103,7 +103,7 @@ class GraphSimplifier(BaseProcessor):
         and after self-loops / two-way antiparallel arcs are split with virtual nodes
         (``_split_self_loops`` / ``_split_antiparallel_pairs``), ``(osm_id, source, target)`` is
         globally unique, so the flag is redundant here. It stays as a column. See
-        ``docs/design/drop_is_reverse_from_edge_id.md``.
+        ``docs/architecture.md (Stable edge ids)``.
 
         Position-based ids (row_number) change on every rebuild, forcing every downstream consumer
         keyed on edge_id to re-run and re-match. A content hash is STABLE: an unchanged edge keeps its
@@ -112,7 +112,7 @@ class GraphSimplifier(BaseProcessor):
         # After the loop / same-direction-parallel / antiparallel splits, (osm_id, source, target)
         # is unique BY CONSTRUCTION — verify that and FAIL LOUDLY on a residual duplicate rather
         # than silently deleting geometry (the old keep-shortest dedup did exactly that to a
-        # figure-8's second arc; see docs/design/split_same_direction_parallels.md). The dedup
+        # figure-8's second arc; see docs/architecture.md (Stable edge ids)). The dedup
         # below stays as defence-in-depth but must remove zero rows.
         dup = self.fetchone("""
             SELECT count(*) FROM (
@@ -125,7 +125,7 @@ class GraphSimplifier(BaseProcessor):
                 f"{dup} duplicate (osm_id, source, target) group(s) survived the loop/parallel/"
                 f"antiparallel splits — e.g. osm_id={ex[0]} {ex[1]}->{ex[2]} x{ex[3]}. Refusing "
                 "to dedup: that would silently delete geometry. "
-                "See docs/design/split_same_direction_parallels.md.")
+                "See docs/architecture.md (Stable edge ids).")
         # edge_ref: a human-readable secondary id '{osm_id}#{seq}{f|r}'. seq numbers the FORWARD edges
         # of a way in TRAVERSAL order (source-end segment = #1); a reverse edge inherits its forward
         # twin's seq, so the two directions of a two-way segment share seq (#2f / #2r) while two
@@ -561,7 +561,7 @@ class GraphSimplifier(BaseProcessor):
         the self-loop / antiparallel treatments. Applies regardless of ``oneway``: two forward
         ``A->B`` arcs collide with each other directly, no reverse twin involved. Runs after
         contraction, before the antiparallel split (which then only sees whole arcs).
-        See docs/design/split_same_direction_parallels.md.
+        See docs/architecture.md (Stable edge ids).
         """
         # Every arc that is longer than another arc with the SAME (osm_id, source, target) —
         # i.e. all but the shortest of each group (tiebreak by refs: content, rebuild-stable).

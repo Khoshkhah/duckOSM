@@ -28,7 +28,7 @@ midpoint, creating virtual nodes:
   across rebuilds; the old `-(edge_id)` scheme depended on the volatile row-number id) and
   **arc-unique**: the `refs` salt keeps two parallel arcs sharing endpoints, or two loops
   anchored at the same node, on distinct virtual nodes. See
-  `docs/design/split_same_direction_parallels.md`.
+  [Stable edge ids](architecture.md#stable-edge-ids).
 
 ---
 
@@ -54,8 +54,8 @@ midpoint, creating virtual nodes:
 | `layer` | VARCHAR | OSM `layer` tag (vertical order, `-2`…`2`); NULL = ground level. Drives grade-separation rendering |
 | `bridge` | VARCHAR | OSM `bridge` tag (`yes`, `viaduct`, …); NULL when not a bridge |
 | `tunnel` | VARCHAR | OSM `tunnel` tag (`yes`, `building_passage`, …); NULL when not a tunnel |
-| `walk_type` | VARCHAR | **walking schema only** — pedestrian functional class derived from OSM sub-tags: `sidewalk` / `crossing` / `footpath` / `steps` / `escalator` / `pedestrian_street` / `plaza` / `shared_street` / `shared_road` / `corridor` / `platform` / `path`. See `docs/design/walk_cycle_type.md` |
-| `cycle_type` | VARCHAR | **cycling schema only** — cyclist functional class, directional (`cycleway:right` on forward, `cycleway:left` on reverse): `cycleway` / `cycle_track` / `cycle_lane` / `shared_lane` / `bus_cycle_lane` / `segregated_path` / `shared_path` / `mixed_traffic`. See `docs/design/walk_cycle_type.md` |
+| `walk_type` | VARCHAR | **walking schema only** — pedestrian functional class derived from OSM sub-tags: `sidewalk` / `crossing` / `footpath` / `steps` / `escalator` / `pedestrian_street` / `plaza` / `shared_street` / `shared_road` / `corridor` / `platform` / `path`. |
+| `cycle_type` | VARCHAR | **cycling schema only** — cyclist functional class, directional (`cycleway:right` on forward, `cycleway:left` on reverse): `cycleway` / `cycle_track` / `cycle_lane` / `shared_lane` / `bus_cycle_lane` / `segregated_path` / `shared_path` / `mixed_traffic`. |
 | `geometry` | GEOMETRY | LineString geometry |
 | `is_reverse` | BOOLEAN | True if opposite direction |
 | `refs` | BIGINT[] | Shape point node IDs |
@@ -77,8 +77,7 @@ between the same node pair don't collide.
 and reverse of a two-way road hash differently because their endpoints are swapped). For this to be
 collision-free, `(osm_id, source, target)` must be globally unique, which the segmentation guarantees
 by splitting self-loops, same-direction parallel arcs, and two-way antiparallel arcs with virtual
-nodes (see `docs/design/drop_is_reverse_from_edge_id.md` and
-`docs/design/split_same_direction_parallels.md`; a residual duplicate fails the build rather than
+nodes (see [Stable edge ids](architecture.md#stable-edge-ids); a residual duplicate fails the build rather than
 being silently deduplicated). The previous formula
 `(hash(osm_id, source, target, is_reverse) >> 1)` remains available as the `edge_id_hash_v1` macro
 for building old→new crosswalks.

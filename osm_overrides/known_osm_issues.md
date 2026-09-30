@@ -216,8 +216,7 @@ lane-connectivity view as an extra "outgoing" from that lane.)
 
 **Fix.** Add the restriction upstream in OSM (`type=restriction`, `restriction=no_u_turn`; from way
 `1307524008`, via node `330045016`, to way `997402723`) and rebuild — or, locally, the synthetic
-turn-restriction override in `osm_overrides.yaml` (mechanism in
-`docs/design/turn-restriction-overrides.md`). Verified against the movement / edge-graph tables: the
+turn-restriction override in `osm_overrides.yaml`. Verified against the movement / edge-graph tables: the
 `thru` movement is correct and untouched; only the U-turn is spurious.
 
 ## 7. Katarina Västra Kyrkogata — missing `oneway` tag on way 120860763 (rendered two-way)

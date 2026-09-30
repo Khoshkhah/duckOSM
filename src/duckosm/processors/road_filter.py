@@ -103,7 +103,7 @@ class RoadFilter(BaseProcessor):
             if self.cycling_dismount:
                 # Dismount (push-the-bike) ways: footway/pedestrian enter the cycling graph even
                 # with bicycle=no — pushing is walking — but access=private/no or foot=no still
-                # excludes. See docs/design/cycling_dismount_edges.md.
+                # excludes. See docs/data_dictionary.md.
                 where_clause = f"""
                     ({where_clause})
                     OR (

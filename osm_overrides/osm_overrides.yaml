@@ -66,7 +66,7 @@ overrides:
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
 # (RestrictionProcessor) so the edge graph, routing, GMNS movements, exports and the lane viz all drop
 # the turn. Each rule maps from_way -> via_node -> to_way to edge ids (handles merged/reverse edges),
-# and is a global no-op in areas that don't contain the ways. See docs/design/turn-restriction-overrides.md.
+# and is a global no-op in areas that don't contain the ways. See known_osm_issues.md #6.
 #   from_way, via_node, to_way  (required, OSM ids) · restriction (no_u_turn|no_left_turn|no_right_turn|
 #   no_straight_on|only_*, default no_u_turn) · note
 # Takes effect on the next driving rebuild (RestrictionProcessor runs it, then the edge graph drops it).

@@ -12,7 +12,7 @@ on ``osm_id``:
   forward edges and ``cycleway:left`` on reverse edges (``is_reverse``), like ``lanes``.
 
 Runs after the graph is simplified (``raw.ways`` must still be present). Synthetic connector edges
-(``osm_id < 0``, no raw way) fall back to a highway-only class. See ``docs/design/walk_cycle_type.md``.
+(``osm_id < 0``, no raw way) fall back to a highway-only class. See ``docs/data_dictionary.md``.
 """
 import logging
 

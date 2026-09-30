@@ -72,5 +72,5 @@ produced by `duckosm gmns`, not the core db. `railml` re-extracts rail from `raw
   inside functions; the core install is duckdb/shapely/h3/click/rich/pyyaml only.
 - Maps go through **roadstyle** (`duckosm viz`, `scripts/roadstyle_map.py`), not hand-rolled
   folium/matplotlib.
-- Design docs for non-trivial changes live in `docs/design/`; update the matching `docs/*.md`
-  (`data_dictionary.md` for schema changes) alongside code.
+- Update the matching `docs/*.md` (`data_dictionary.md` for schema changes) alongside code. Design
+  notes are kept outside this repo; don't add a `docs/design/` folder.
