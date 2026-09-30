@@ -84,7 +84,6 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         g, theme="light", basemap=basemap, basemaps=layers,
         tooltip=["edge_id", *idcols, "highway", "name", *info, "private"], copy_field="edge_id",
         road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "private"],
-        **private_look(df),
         name=f"{name} ({mode})", legend=True,
         # view_3d builds the extruded bridge decks the in-map 2D/3D toggle needs; pitch=0 still
         # opens the map flat.
@@ -95,9 +94,42 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}_{mode}_network.html"
-    m.save(str(path))
+    html = m.html
+    if (df["private"] == "yes").any():                   # private roads: grey, and their own toggle
+        html = html.replace("</body>", PRIVATE_ROADS_JS + "</body>", 1)
+    path.write_text(html, encoding="utf-8")
     logger.info(f"  Viz: {path}")
     return path
+
+
+# Private roads (private_edges, never routable) on a viz map: painted grey on every road layer, and a
+# "Private roads" row in roadstyle's roads box (after Bridges / Tunnels) that hides and shows them.
+PRIVATE_ROADS_JS = """<script>
+(function () {
+  var GREY = "#c8c8c8";
+  (function init() {
+    var body = document.querySelector(".flt-body");
+    if (!(window.map && window.rsQuery && map.isStyleLoaded() && body)) return setTimeout(init, 200);
+    var priv = rsQuery(function (p) { return p.private === "yes"; });
+    if (!priv.length) return;
+    var hide = {}; priv.forEach(function (i) { hide[i] = 1; });
+    var rest = rsQuery(function () { return true; }).filter(function (i) { return !hide[i]; });
+    map.getStyle().layers.forEach(function (l) {
+      if (l.type !== "line" || !/^roads-.*fill/.test(l.id)) return;
+      var c = map.getPaintProperty(l.id, "line-color");
+      map.setPaintProperty(l.id, "line-color", ["case", ["==", ["get", "private"], "yes"], GREY, c]);
+    });
+    var lab = document.createElement("label"), cb = document.createElement("input"), sw = document.createElement("span");
+    if (!body.querySelector(".flt-grade")) lab.style.cssText = "margin-top:4px;padding-top:4px;border-top:1px solid #ddd";
+    cb.type = "checkbox"; cb.checked = true; cb.id = "dk-flt-private";
+    cb.onchange = function () { rsFilter(cb.checked ? null : rest); };
+    sw.className = "flt-sw"; sw.style.background = GREY;
+    lab.appendChild(cb); lab.appendChild(sw); lab.appendChild(document.createTextNode(" Private roads"));
+    body.appendChild(lab);
+  })();
+})();
+</script>
+"""
 
 
 def private_look(df, color="#c8c8c8"):

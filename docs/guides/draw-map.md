@@ -8,8 +8,8 @@ duckosm viz monaco.duckdb        # one map per mode, in reports/
 Each map shows the roads coloured by class, with a legend, a base-map switcher, a hover tooltip and
 a 2D/3D button. Click a road to see its `edge_id`. Tunnels are drawn under the roads above them,
 bridges on top. Private roads are grey: you see them, but they are not in the network
-([why](../concepts/networks.md#access-private-and-forbidden-roads)); the colour menu switches to
-plain road classes.
+([why](../concepts/networks.md#access-private-and-forbidden-roads)). In the Roads box, the
+Bridges, Tunnels and Private roads rows hide or show those roads.
 
 Try it: this is Monaco's driving map, as `duckosm viz` wrote it.
 
