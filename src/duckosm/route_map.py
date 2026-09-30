@@ -265,9 +265,31 @@ _JS = r"""
     return null;
   }
 
+  // The route as its own line, drawn at the top of its level: over the roads it crosses at an
+  // intersection, but still under a bridge above it (tunnel / ground / bridge are roadstyle's three
+  // bands, on its "roads" source: same geometry, no second copy of it).
+  const BANDS = [["<", "roads-casing"], ["==", "roads-bridge-casing"], [">", "roads-highlight"]];
+  function paint(legs) {
+    BANDS.forEach((_, b) => ["", "-casing"].forEach((c) => { if (map.getLayer(`rm-route${c}-${b}`)) map.removeLayer(`rm-route${c}-${b}`); }));
+    const seen = new Set(), color = ["match", ["id"]];
+    for (const l of legs || []) {
+      const ids = l.edges.map((k) => fid[k]).filter((i) => !seen.has(i) && seen.add(i));
+      if (ids.length) color.push(ids, COLORS[l.mode]);
+    }
+    if (!seen.size) return;
+    const w = (a, b) => ["interpolate", ["linear"], ["zoom"], 12, a, 18, b];
+    BANDS.forEach(([op, before], b) => {
+      const line = {type: "line", source: "roads", layout: {"line-cap": "round", "line-join": "round"},
+                    filter: ["all", ["in", ["id"], ["literal", [...seen]]], [op, ["coalesce", ["get", "lvl"], 0], 0]]};
+      const at = map.getLayer(before) ? before : undefined;
+      map.addLayer({id: `rm-route-casing-${b}`, ...line, paint: {"line-color": "#fff", "line-width": w(6, 14)}}, at);
+      map.addLayer({id: `rm-route-${b}`, ...line, paint: {"line-color": [...color, "#000"], "line-width": w(3.5, 9)}}, at);
+    });
+  }
+
   function show(res, multi) {
     const out = $("rm-result");
-    if (!res) { out.textContent = "No route between these points with these modes."; rsColor(null); return; }
+    if (!res) { out.textContent = "No route between these points with these modes."; paint(null); return; }
     let h = `<div class="rm-total">${fmtTime(res.time)} · ${fmtLen(res.len)}</div>`;
     if (multi) {
       for (const l of res.legs) h += `<div class="rm-leg"><span class="rm-dot" style="background:${COLORS[l.mode]}"></span>${LABEL[l.mode]}: ${fmtTime(l.time)}, ${fmtLen(l.len)}</div>`;
@@ -276,7 +298,7 @@ _JS = r"""
     const names = []; for (const l of res.legs) for (const k of l.edges) { const n = D.name[k]; if (n && n !== names[names.length - 1]) names.push(n); }
     if (names.length) h += "<ol>" + names.slice(0, 15).map((n) => `<li>${n}</li>`).join("") + (names.length > 15 ? "<li>…</li>" : "") + "</ol>";
     out.innerHTML = h;
-    rsColor(res.legs.map((l) => [l.edges.map((k) => fid[k]), COLORS[l.mode]]));
+    paint(res.legs);
   }
 
   function update() {
@@ -319,10 +341,10 @@ _JS = r"""
     for (const r of document.querySelectorAll('input[name="rm-w"]')) r.addEventListener("change", update);
     $("rm-clear").addEventListener("click", () => {
       for (const w of ["A", "B"]) if (markers[w]) { markers[w].remove(); markers[w] = null; }
-      rsColor(null); $("rm-result").textContent = "No route yet.";
+      paint(null); $("rm-result").textContent = "No route yet.";
     });
     map.on("click", (e) => {
-      if (!markers.A || markers.B) { if (markers.B) { markers.B.remove(); markers.B = null; } setMarker("A", e.lngLat); $("rm-result").textContent = "Now click the end."; rsColor(null); }
+      if (!markers.A || markers.B) { if (markers.B) { markers.B.remove(); markers.B = null; } setMarker("A", e.lngLat); $("rm-result").textContent = "Now click the end."; paint(null); }
       else { setMarker("B", e.lngLat); update(); }
     });
     window.rmRoute = function (a, b) { setMarker("A", a); setMarker("B", b); update(); };  // for scripted use

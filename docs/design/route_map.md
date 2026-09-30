@@ -24,7 +24,8 @@ duckosm route-map monaco.duckdb                  # -> reports/monaco_route_map.h
   marker snaps to the nearest road.
 - **A mode menu:** Drive, Walk, Cycle (the modes the db has), and **Walk + drive** when the db has
   the `mm` tables; fastest / shortest for one mode.
-- The route is drawn by recolouring its roads (roadstyle `rsColor`); a panel shows time, length and
+- The route is drawn as its own line at the top of its level (over the roads it crosses, under a
+  bridge above it), from roadstyle's road source; a panel shows time, length and
   the streets in order, and for a trip across modes, each leg in its mode's colour (walking green,
   driving red, cycling blue).
 
