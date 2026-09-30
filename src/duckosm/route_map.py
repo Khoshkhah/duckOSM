@@ -26,7 +26,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     import roadstyle as rs
     from shapely import wkt as _wkt
 
-    from duckosm.viz import BASEMAP_LAYERS, _boundary_geojson, private_look
+    from duckosm.viz import BASEMAP_LAYERS, _boundary_geojson, private_roads_js
 
     def has(schema, table):
         return con.execute("SELECT count(*) FROM information_schema.tables "
@@ -117,11 +117,13 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
         geometry=[_wkt.loads(r[9]) for r in rows], crs="EPSG:4326")
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
-        g, palette="mono", basemap=basemap, **private_look(g, "#ecd9c6"), basemaps=layers, tooltip=["name", "highway", "edge_id", "private"],
+        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id", "private"],
         road_popup=["name", "edge_id", "highway", "bridge", "tunnel", "private"],
-        filter_control=False, name=f"{name}: route planner",
+        name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
+    if (g["private"] == "yes").any():                    # private roads: tinted, and their own toggle
+        html = html.replace("</body>", private_roads_js("#ecd9c6") + "</body>", 1)
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)

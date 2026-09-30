@@ -31,7 +31,8 @@ duckosm route-map monaco.duckdb -m driving     # -> reports/monaco_route_map.htm
 One HTML page, no server: drag the two markers to set the start and the end. The route is computed
 in the page over the same graph, so it gives the same answer as `route()`. The panel lists the
 directions ("Turn left onto …", "At the roundabout, take the 2nd exit …"); click one to go to it on
-the map. Click a road to copy its `edge_id`; the Street View button shows the street:
+the map. Click a road to copy its `edge_id`; the Street View button shows the street. The Roads
+box hides road classes, bridges, tunnels or private roads, as on the [drawn maps](draw-map.md):
 
 <iframe src="../../maps/monaco_route_map.html" allow="clipboard-write" title="A route planner for Monaco, made by duckosm route-map"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>

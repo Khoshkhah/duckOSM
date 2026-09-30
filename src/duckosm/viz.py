@@ -96,17 +96,26 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     path = out / f"{name}_{mode}_network.html"
     html = m.html
     if (df["private"] == "yes").any():                   # private roads: grey, and their own toggle
-        html = html.replace("</body>", PRIVATE_ROADS_JS + "</body>", 1)
+        html = html.replace("</body>", private_roads_js() + "</body>", 1)
     path.write_text(html, encoding="utf-8")
     logger.info(f"  Viz: {path}")
     return path
 
 
-# Private roads (private_edges, never routable) on a viz map: painted grey on every road layer, and a
-# "Private roads" row in roadstyle's roads box (after Bridges / Tunnels) that hides and shows them.
-PRIVATE_ROADS_JS = """<script>
+# Private roads (private_edges, never routable) on a viz / route map: painted `color` on every road
+# layer (again after each rsColor, which rebuilds the road colours), and a "Private roads" row in
+# roadstyle's roads box (after Bridges / Tunnels) that hides and shows them.
+_PRIVATE_ROADS_JS = """<script>
 (function () {
-  var GREY = "#c8c8c8";
+  var GREY = "__COLOR__", IS_PRIV = ["==", ["get", "private"], "yes"];
+  function paint() {
+    map.getStyle().layers.forEach(function (l) {
+      if (l.type !== "line" || !/^roads-.*fill/.test(l.id)) return;
+      var c = map.getPaintProperty(l.id, "line-color");
+      if (c[0] === "case" && JSON.stringify(c[1]) === JSON.stringify(IS_PRIV)) return;   // painted already
+      map.setPaintProperty(l.id, "line-color", ["case", IS_PRIV, GREY, c]);
+    });
+  }
   (function init() {
     var body = document.querySelector(".flt-body");
     if (!(window.map && window.rsQuery && map.isStyleLoaded() && body)) return setTimeout(init, 200);
@@ -114,11 +123,8 @@ PRIVATE_ROADS_JS = """<script>
     if (!priv.length) return;
     var hide = {}; priv.forEach(function (i) { hide[i] = 1; });
     var rest = rsQuery(function () { return true; }).filter(function (i) { return !hide[i]; });
-    map.getStyle().layers.forEach(function (l) {
-      if (l.type !== "line" || !/^roads-.*fill/.test(l.id)) return;
-      var c = map.getPaintProperty(l.id, "line-color");
-      map.setPaintProperty(l.id, "line-color", ["case", ["==", ["get", "private"], "yes"], GREY, c]);
-    });
+    paint();
+    document.addEventListener("rs:colorchange", paint);
     var lab = document.createElement("label"), cb = document.createElement("input"), sw = document.createElement("span");
     if (!body.querySelector(".flt-grade")) lab.style.cssText = "margin-top:4px;padding-top:4px;border-top:1px solid #ddd";
     cb.type = "checkbox"; cb.checked = true; cb.id = "dk-flt-private";
@@ -132,17 +138,9 @@ PRIVATE_ROADS_JS = """<script>
 """
 
 
-def private_look(df, color="#c8c8c8"):
-    """roadstyle keywords that paint private roads (column ``private`` = 'yes') in ``color`` (grey)
-    and keep every other road in its class colour; nothing when the area has none."""
-    if "private" not in df or not (df["private"] == "yes").any():
-        return {}
-    # option 0 never falls back to the class colours, so the class look is option 0 and the map
-    # opens on option 1: private roads in `color`, the rest in their class colour ("missing": base)
-    return {"color_options": {"Road class": {},
-                              "Road class, private roads marked": {"color_by": "private", "colors": {"yes": color},
-                                                                   "missing": "base"}},
-            "color_active": 1}
+def private_roads_js(color="#c8c8c8"):
+    """The <script> for private roads (see above), painting them in ``color``."""
+    return _PRIVATE_ROADS_JS.replace("__COLOR__", color)
 
 
 def _boundary_geojson(con):
