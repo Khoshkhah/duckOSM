@@ -21,11 +21,10 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm lane-graph    build a lane-level routing graph (lane->lane turns + lane-changes) in a GMNS db
   duckosm route-lanes   plan a lane-level route (lane sequence + geometry + maneuvers) over a GMNS db
 
-The `extract`/`admin` subcommands wrap the matching scripts/ tools and forward their
+The `extract`/`admin` subcommands wrap duckosm.extract / duckosm.admin and forward their
 arguments verbatim, so `duckosm extract --help` shows the full underlying options.
 """
 
-import importlib.util
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -34,24 +33,6 @@ import click
 
 from duckosm.config import Config
 from duckosm.importer import DuckOSM
-
-# scripts/ lives at the repo root (this package is normally installed editable from the
-# checkout). The extract/admin subcommands load and delegate to those scripts.
-_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
-
-
-def _load_script(filename):
-    """Import scripts/<filename> by path and return the module (for delegation)."""
-    path = _SCRIPTS_DIR / filename
-    if not path.exists():
-        raise click.ClickException(
-            f"{path} not found. This subcommand wraps scripts/{filename}, which ships "
-            "with the source checkout — run duckosm from the repo (pip install -e .)."
-        )
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def setup_logging(name="duckosm"):
@@ -149,10 +130,11 @@ _PASSTHROUGH = dict(context_settings=dict(ignore_unknown_options=True, help_opti
 def extract(args):
     """Slice a sub-area out of an existing build into a new, self-contained db.
 
-    Wraps scripts/extract_area.py — run `duckosm extract --help` for options
+    Wraps duckosm.extract — run `duckosm extract --help` for options
     (--source, --db, and one of --name / --osm-id / --boundary).
     """
-    raise SystemExit(_load_script("extract_area.py").main(list(args)))
+    from duckosm.extract import main as extract_main
+    raise SystemExit(extract_main(list(args)))
 
 
 @main.command(**_PASSTHROUGH)
@@ -160,10 +142,11 @@ def extract(args):
 def admin(args):
     """Add OSM administrative boundaries (admin_boundaries table) to a built db.
 
-    Wraps scripts/add_admin_boundaries.py — run `duckosm admin --help` for options
+    Wraps duckosm.admin — run `duckosm admin --help` for options
     (--pbf, --db, optional --gpkg). Requires ogr2ogr (GDAL).
     """
-    raise SystemExit(_load_script("add_admin_boundaries.py").main(list(args)))
+    from duckosm.admin import main as admin_main
+    raise SystemExit(admin_main(list(args)))
 
 
 @main.command()

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Add an ``admin_boundaries`` table (all OSM administrative levels) to a duckOSM DB.
 
 OSM stores administrative areas as *boundary relations* whose member ways must be
