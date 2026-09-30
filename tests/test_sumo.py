@@ -21,23 +21,23 @@ def _have_netconvert():
 HAVE_NETCONVERT = _have_netconvert()
 
 
-def _db():
+def _db(mode="driving"):
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")
-    con.execute("CREATE SCHEMA driving")
-    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute(f"CREATE SCHEMA {mode}; USE {mode}")
+    con.execute("CREATE TABLE nodes(node_id BIGINT, geom GEOMETRY)")
     p = lambda w: f"ST_GeomFromText('{w}')"
-    con.execute(f"""INSERT INTO driving.nodes VALUES
+    con.execute(f"""INSERT INTO nodes VALUES
         (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.08 59.32)')})""")
-    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, "
+    con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT, "
                 "highway VARCHAR, name VARCHAR, lanes INTEGER, maxspeed_kmh FLOAT, length_m FLOAT, "
                 "geometry GEOMETRY)")
-    con.execute(f"""INSERT INTO driving.edges VALUES
+    con.execute(f"""INSERT INTO edges VALUES
         ({E1},1,2,'residential','A & B',1,30,123.4,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
         ({E2},2,3,'tertiary',NULL,2,50,567.8,{p('LINESTRING(18.07 59.32,18.08 59.32)')})""")
     # legal-successor line graph (turn restrictions already excluded): only E1 -> E2 is allowed
-    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
-    con.execute(f"INSERT INTO driving.edge_graph VALUES ({E1},{E2},1.0)")
+    con.execute("CREATE TABLE edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
+    con.execute(f"INSERT INTO edge_graph VALUES ({E1},{E2},1.0)")
     return con
 
 
@@ -56,6 +56,8 @@ def test_plain_xml_preserves_edge_id_and_emits_connections(tmp_path):
     assert out["n_connections"] == 1
     conx = (tmp_path / "network.con.xml").read_text()
     assert f'<connection from="{E1}" to="{E2}"/>' in conx
+    assert f'<connection from="{E2}"/>' in conx               # no legal successor: none invented
+    assert "allow=" not in edg                                # driving: every vehicle class
     nod = (tmp_path / "network.nod.xml").read_text()
     assert 'id="1"' in nod and 'x="18.06' in nod
 
@@ -69,7 +71,7 @@ def test_missing_values_are_omitted(tmp_path):
 
 def test_no_edge_graph_falls_back_to_inference(tmp_path):
     con = _db()
-    con.execute("DROP TABLE driving.edge_graph")
+    con.execute("DROP TABLE edge_graph")
     out = to_sumo(con, str(tmp_path), run_netconvert=False)
     assert "con" not in out                                   # no edge_graph -> no .con.xml emitted
 
@@ -102,7 +104,16 @@ def test_netccfg_default_and_override(tmp_path):
     cfg = open(out["netccfg"]).read()
     assert "<configuration>" in cfg                               # standard SUMO config format
     assert '<geometry.remove value="false"/>' in cfg
-    assert '<proj.plain-geo value="true"/>' in cfg
+    assert '<proj.utm value="true"/>' in cfg
+    net = open(out["net"]).read()
+    assert "+proj=utm +zone=34" in net                            # metres, not degrees (18.07 E)
+    x1 = float(re.search(r'convBoundary="[\d.]+,[\d.]+,([\d.]+)', net).group(1))
+    assert 1000 < x1 < 1200                                       # 0.02° of longitude ≈ 1.1 km
     out2 = to_sumo(_db(), str(tmp_path / "b"), net_name="d",
                    config={"geometry.remove": "true"})           # dict override merged onto default
     assert '<geometry.remove value="true"/>' in open(out2["netccfg"]).read()
+
+
+def test_walking_edges_are_for_pedestrians(tmp_path):
+    to_sumo(_db("walking"), str(tmp_path), mode="walking", run_netconvert=False)
+    assert 'allow="pedestrian"' in (tmp_path / "network.edg.xml").read_text()

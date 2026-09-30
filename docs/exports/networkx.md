@@ -5,8 +5,8 @@ Needs `pip install "duckosm[routing]"`.
 
 | Function | Nodes | Edges |
 |---|---|---|
-| `to_networkx(con)` | edges (`edge_id`), with name, highway, length, speed, geometry | legal turns, weighted by time (`weight="length"`: metres) |
-| `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout) |
+| `to_networkx(con)` | edges (`edge_id`), with `name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry` (WKT) | legal turns; `weight` is the time of the edge you leave (`weight="length"`: its metres) |
+| `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout, but the length is `length_m`, not `length`) |
 
 Both take `mode=` too.
 
@@ -17,5 +17,5 @@ duckosm export-graph monaco.duckdb                            # -> monaco_drivin
 duckosm export-graph monaco.duckdb -g edge -o routing.gpickle # the routing graph
 ```
 
-GraphML opens in any tool but stores lists and geometry as text; gpickle keeps everything but only
-loads in Python. From Python: `write_graph(con, "monaco.graphml")`.
+GraphML opens in any tool but stores lists and geometry as text; gpickle keeps lists and types but
+only loads in Python (add `--geometry shapely` for shapely geometries on the junction graph). From Python: `write_graph(con, "monaco.graphml")`.

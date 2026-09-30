@@ -25,7 +25,8 @@ assemble the `.net.xml`. Because netconvert keeps the ids and the explicit conne
 The netconvert options come from a built-in default (``DEFAULT_NETCFG``); pass ``config=`` to
 override them — a dict of ``{netconvert-option: value}`` merged onto the default, or a path to your
 own ``.netccfg`` to drive netconvert directly. netconvert ships with SUMO (``pip install
-duckosm[sumo]``). Coordinates are geographic; the default config projects them (``--proj.plain-geo``).
+duckosm[sumo]``). Coordinates are geographic; the default config projects them to the UTM zone of
+the data (``--proj.utm``).
 """
 import logging
 import os
@@ -34,6 +35,9 @@ import subprocess
 from xml.sax.saxutils import quoteattr
 
 logger = logging.getLogger("duckosm")
+
+# which SUMO vehicle classes may use an edge of a non-driving mode (driving: SUMO's default, all)
+_MODE_ALLOW = {"walking": "pedestrian", "cycling": "bicycle"}
 
 # right-of-way hint for netconvert's junction building (explicit connections still gate movements).
 _HIGHWAY_PRIORITY = {
@@ -46,7 +50,7 @@ _HIGHWAY_PRIORITY = {
 # Default netconvert options, written into the generated `.netccfg` (standard SUMO config format).
 # Tuned to keep the duckOSM topology verbatim: 1:1 edge ids (no merge), explicit turns honoured.
 DEFAULT_NETCFG = {
-    "proj.plain-geo": "true",                # interpret node/edge coords as lon/lat and project (UTM)
+    "proj.utm": "true",                      # node/edge coords are lon/lat: project them to UTM
     "geometry.remove": "false",              # do NOT merge degree-2 ways -> edge_id stays 1:1
     "junctions.join": "false",               # do NOT merge nearby nodes
     "no-turnarounds.except-deadend": "true",  # honour the explicit topology (no invented U-turns)
@@ -198,6 +202,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs.append(f'length="{float(length_m):.2f}"')       # true graph length
             if highway:
                 attrs.append(f'type={quoteattr(str(highway))}')
+            if mode in _MODE_ALLOW:
+                attrs.append(f'allow="{_MODE_ALLOW[mode]}"')
             shape = _linestring_points(wkt)
             if shape:
                 attrs.append(f'shape="{shape}"')
@@ -218,10 +224,16 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                        f"(turn restrictions NOT enforced)")
     if use_conns:
         cs = con.execute(f"SELECT from_edge, to_edge FROM {graph_tbl}").fetchall()
+        # an edge with no legal successor gets a from-only connection ("no connections"), or
+        # netconvert would invent its own there (it once brought back a banned left turn)
+        stuck = con.execute(f"SELECT edge_id FROM {mode}.edges WHERE source <> target "
+                            f"AND edge_id NOT IN (SELECT from_edge FROM {graph_tbl})").fetchall()
         with open(con_path, "w", encoding="utf-8") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n<connections>\n')
             for fe, te in cs:
                 f.write(f'  <connection from="{fe}" to="{te}"/>\n')
+            for (fe,) in stuck:
+                f.write(f'  <connection from="{fe}"/>\n')
             f.write('</connections>\n')
         out["con"], out["n_connections"] = con_path, len(cs)
         logger.info(f"SUMO connections[{mode}]: {len(cs):,} legal successors -> {con_path}")
@@ -240,6 +252,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         out["netccfg"] = config
     else:                                                # default config, or a dict override of it
         opts = dict(DEFAULT_NETCFG)
+        if mode == "walking":                            # SUMO pedestrians cross junctions on these
+            opts["walkingareas"] = "true"
         if isinstance(config, dict):
             opts.update(config)
         cfg_path = os.path.join(out_dir, f"{net_name}.netccfg")

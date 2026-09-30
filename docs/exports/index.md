@@ -17,6 +17,7 @@ exported network.
 | CARLA, esmini, Vissim | [OpenDRIVE](opendrive.md) `.xodr` (experimental) | `duckosm opendrive` |
 | Autoware, the lanelet2 library | [Lanelet2](lanelet2.md) `.osm` (experimental) | `duckosm lanelet2` |
 | OpenTrack, RailSys, Viriato | [railML 2.4](railml.md) (experimental) | `duckosm railml` |
+| Your own lane-level routing | [a lane graph](lane-routing.md) (experimental) | `duckosm lane-graph`, `route-lanes` |
 
 **Experimental** exports work and are tested for structure, but haven't been loaded in the target
 tools yet. If you try one, an issue saying how it went helps.

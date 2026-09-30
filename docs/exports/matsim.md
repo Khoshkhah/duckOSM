@@ -12,9 +12,9 @@ edge becomes one directed link:
 | `id` | `edge_id` |
 | `from`, `to` | `source`, `target` (node ids) |
 | `length` | `length_m` |
-| `freespeed` | `maxspeed_kmh` / 3.6 (m/s); without a speed limit, from the edge's travel time |
+| `freespeed` | `maxspeed_kmh` / 3.6 (m/s) |
 | `permlanes` | `lanes` (per direction) |
-| `capacity` | a per-lane value for the road class × `permlanes` (veh/h; motorway 2,000 … service 300) |
+| `capacity` | a per-lane value for the road class × `permlanes` (veh/h; motorway 2,000 … service 300, paths 800) |
 | `modes` | `car`, `bike` or `walk` |
 
 Node coordinates are in metres, in the UTM zone of the data (written in the file's attributes);
@@ -39,21 +39,21 @@ duckosm matsim monaco.duckdb -m all -o network.xml.gz      # 4,470 nodes, 12,969
 ```
 
 A road used by several modes is one link with every mode on it (`modes="car,bike,walk"`), since
-its `edge_id` is the same in each network. MATSim changes mode wherever the links meet, so no
-transfer links are needed.
+its `edge_id` is the same in each network. MATSim routes each leg of a trip on the links that
+allow its mode, and the links are shared, so no transfer links are needed.
 
 ## Lanes and signals
 
 ```bash
 duckosm gmns monaco.duckdb                  # the lanes and turns first
-duckosm matsim-lanes monaco_gmns.duckdb     # -> lanes.xml + signalSystems / signalGroups / signalControl.xml
+duckosm matsim-lanes monaco_gmns.duckdb     # -> ./lanes.xml + signalSystems / signalGroups / signalControl.xml (-o: folder)
 ```
 
 Reads a [GMNS database](gmns.md). The link ids are the same `edge_id`s, so these files go with the
 `network.xml` from the same build.
 
 - **`lanes.xml`**: for each link, its lanes and which links each lane leads to, so only legal turns
-  are possible. Where OSM tags `turn:lanes`, each lane gets its own turns; elsewhere every lane
+  are possible. Turning back on the same road is allowed only at a dead end. Where OSM tags `turn:lanes`, each lane gets its own turns; elsewhere every lane
   may take every legal turn.
 - **Signals**: one signal system per junction with traffic lights in OSM (Monaco: 1). **The timing
   is a placeholder**, a fixed 90 s cycle in two phases, since OSM has no signal plans: calibrate it.
@@ -61,6 +61,8 @@ Reads a [GMNS database](gmns.md). The link ids are the same `edge_id`s, so these
 
 ## Limits
 
+- `network.xml` alone has no turns: MATSim lets a car take any link at a junction, banned turns
+  included. Add `lanes.xml` for legal turns only.
 - `freespeed` and `capacity` come from class defaults where OSM has no speed limit or lane count.
 - No demand, plans, transit or `config.xml`: those are your scenario.
 - Checked against MATSim's official DTD and XSD schemas (in the tests).

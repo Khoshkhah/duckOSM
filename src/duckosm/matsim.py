@@ -4,8 +4,8 @@ the directed node+link substrate MATSim / BEAM / eqasim run agents on. See https
 
 A MATSim link is directed, and duckOSM ``edges`` are already one row per direction, so each edge maps
 straight to one link (a two-way street is already two edges → two links). MATSim is a metric
-simulator, so node coordinates are reprojected from EPSG:4326 to a projected CRS (default EPSG:3006,
-SWEREF99 TM); ``length`` stays the true graph metres. Capacity reuses GMNS's per-class table so the
+simulator, so node coordinates are reprojected from EPSG:4326 to a projected CRS (default: the UTM
+zone of the data); ``length`` stays the true graph metres. Capacity reuses GMNS's per-class table so the
 two exporters agree.
 
     from duckosm import to_matsim

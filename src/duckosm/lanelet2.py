@@ -1,7 +1,7 @@
 """
 Lanelet2 export — a built GMNS db's per-lane geometry → a **Lanelet2** map (OSM XML), the dominant
 open autonomous-driving lane-map format (Autoware / the ``lanelet2`` library). See
-docs/lanelet2_export.md.
+docs/exports/lanelet2.md.
 
 This is an HD-map *skeleton in the AD-standard format* — correct lane structure/topology/semantics —
 **not** a survey-grade HD map (geometry is OSM centerlines offset by assumed widths). A lanelet is

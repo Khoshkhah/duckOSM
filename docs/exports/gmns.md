@@ -9,7 +9,9 @@ duckosm gmns monaco.duckdb --to-csv gmns/     # also the spec CSVs
 open table format of DTALite, Path4GMNS and other network-modelling tools. duckOSM writes every
 GMNS table that OSM has data for into **one new DuckDB file** that stands alone: it doesn't need
 the source database, and its tables carry real geometry, so you can query and draw them.
-`--to-csv` also writes the standard `node.csv`, `link.csv`, `lane.csv`, … for each mode.
+`--to-csv DIR` also writes the standard `node.csv`, `link.csv`, `lane.csv`, … into `DIR/<mode>/`.
+The CSVs have only the columns the spec defines, so the geometries and each lane's turns stay in the
+DuckDB file.
 
 ![Lanes and smooth turn connectors at a Södermalm junction](../images/gmns_junction.png)
 
@@ -20,9 +22,9 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | Table | Rows | What |
 |---|---|---|
 | `node` | 1,719 | junctions; `ctrl_type = 'signal'` at traffic lights |
-| `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity, `facility_type` (the OSM `highway`), name |
+| `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name |
 | `lane` | 3,182 | one row per lane, with its turns, allowed uses and width where OSM tags them |
-| `movement` | 3,488 | legal turns (from `edge_graph`; turning back along the same road only at a dead end): type (left, thru, right, uturn), code (`NBL`, `EBT`, …), the lanes that feed it, a curved turn path |
+| `movement` | 3,488 | legal turns (from `edge_graph`; turning back along the same road only at a dead end): type (left, thru, right, uturn), code (`NBL`, `EBT`, …), the lanes that feed it (where `turn:lanes` is tagged), a curved turn path |
 | `geometry` | 2,765 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
@@ -39,13 +41,14 @@ Every link gets its lanes from its lane count; where OSM has the details, they'r
 |---|---|
 | `lanes`, `lanes:forward`, `lanes:backward` | the number of lanes each way |
 | `turn:lanes` | each lane's turns, and which lanes feed each movement |
-| `width:lanes` | lane width (else 3.25 m) |
-| `bicycle:lanes`, `psv:lanes`, `busway` | bus and bike lanes |
-| `change:lanes` | where lane changes are not allowed |
+| `width:lanes` | lane width (empty where untagged) |
+| `bicycle:lanes`, `psv:lanes` | bike and bus lanes |
 
-Most ways have none of these (`turn:lanes` is on 1–2 % of ways), so most lanes are general lanes
-3.25 m wide. Lane details need the raw OSM tags, which a PBF build keeps. Each lane also has a
-centre line drawn beside the road, on the traffic side (`--drive-side left` for left-hand traffic).
+Most ways have none of these (Monaco: `turn:lanes` on 0.4 % of roads), so most lanes are general
+lanes with no width. Lane details need the raw OSM tags, which a PBF build keeps; an area clipped
+from a bigger build (`source.type: duckdb`, `duckosm extract`) gets lane counts only. Each lane also
+has a centre line drawn beside the road, on the traffic side, 3.25 m apart (`--drive-side left` for
+left-hand traffic).
 
 ## Meso and micro networks
 
@@ -61,7 +64,7 @@ duckosm gmns monaco.duckdb --meso --micro
   cells and turn links across junctions. Monaco: 27,131 links.
 
 Both follow osm2gmns' layout. Their ids are built from `edge_id` (`M<edge_id>` for a section,
-`X<from>-<to>` for a connector), so they stay the same across rebuilds and lead back to the road.
+`X<from edge_id>-<to edge_id>` for a meso connector), so they stay the same across rebuilds and lead back to the road.
 Driving by default; `--meso-mode cycling` / `--micro-mode cycling` for cycling.
 
 ## All modes in one network
@@ -72,7 +75,7 @@ being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 12,969 links.
 ## See it
 
 ```bash
-duckosm gmns-viz monaco_gmns.duckdb                 # inspect: lanes / meso / micro layers, hover for ids
+duckosm gmns-viz monaco_gmns.duckdb                 # inspect: lanes (+ meso / micro if built), hover for ids
 duckosm gmns-map monaco_gmns.duckdb                 # present: one ribbon per direction, by road class
 duckosm gmns-map monaco_gmns.duckdb --style lane    # every lane at its width
 ```
