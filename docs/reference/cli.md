@@ -27,12 +27,12 @@ duckosm build [OPTIONS]
 
 | Option | Does | Default |
 |---|---|---|
-| `-c`, `--config PATH` | a [config file](configuration.md). With it, only `--fixes` and `--log-file` of the options below are used | |
+| `-c`, `--config PATH` | a [config file](configuration.md). An option below that you type overrides the file | |
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
 | `-o`, `--output PATH` | output file | `<boundary name>.duckdb`, else `<pbf name>.duckdb` |
 | `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
 | `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#several-areas-from-one-region)) | |
-| `--h3-cell TEXT` | accepted, but does nothing | |
+| `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
@@ -429,4 +429,3 @@ duckosm multimodal [OPTIONS] DB
 |---|---|---|
 | `--transfer-cost FLOAT` | seconds added at each change of mode | `60.0` |
 | `--schema TEXT` | schema for the two tables | `mm` |
-| `--realistic` | park-and-ride at parking places only: not implemented, the command stops with an error | |

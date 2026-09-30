@@ -305,9 +305,12 @@ def _build_movement(con, sch, mode, uses):
         JOIN s.{mode}.edges fe ON fe.edge_id = eg.from_edge
         JOIN s.{mode}.edges te ON te.edge_id = eg.to_edge
         -- drop the immediate reversal (U-turn back onto the same physical segment): an edge_graph
-        -- artifact for routing completeness, not a modelled movement. Real intersection U-turns
-        -- (a different osm_id) are kept and typed 'uturn'.
-        WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source)
+        -- artifact for routing completeness, not a modelled movement -- except at a dead end, where
+        -- turning round is the only way on (lane routing would be stuck without it). Real
+        -- intersection U-turns (a different osm_id) are kept too; both are typed 'uturn'.
+        WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source
+                   AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph o
+                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge))
       ), b AS (
         SELECT ib, ob, node_id, ibg, obg,
           atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,

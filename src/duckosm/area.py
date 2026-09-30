@@ -113,6 +113,26 @@ def _from_nominatim(name, osm_id):
     return found[0][0], {**found[0][1], "source": "Nominatim", "others": [i for _, i in found[1:]]}
 
 
+def bbox_geojson(bbox):
+    """A ``[west, south, east, north]`` box (degrees) as a GeoJSON Polygon string."""
+    try:
+        w, s, e, n = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        raise ValueError(f"boundary.bbox must be [west, south, east, north], got {bbox!r}")
+    if not (-180 <= w < e <= 180 and -90 <= s < n <= 90):
+        raise ValueError(f"boundary.bbox must be [west, south, east, north] in degrees, got {bbox!r}")
+    return json.dumps({"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]})
+
+
+def h3_geojson(cell):
+    """The outline of H3 cell ``cell`` (hex string) as a GeoJSON Polygon string."""
+    import h3
+    if not h3.is_valid_cell(str(cell)):
+        raise ValueError(f"not an H3 cell: {cell!r}")
+    ring = [[lng, lat] for lat, lng in h3.cell_to_boundary(str(cell))]
+    return json.dumps({"type": "Polygon", "coordinates": [ring + ring[:1]]})
+
+
 def write_boundary(geometry_geojson, info, out):
     """Write a boundary as a one-feature GeoJSON FeatureCollection (``info`` as its properties)."""
     out = Path(out)

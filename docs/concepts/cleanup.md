@@ -44,7 +44,6 @@ connected). Dropped edges also leave `edge_graph`, `turn_restrictions`, `nodes` 
 |---|---|---|
 | `clip.keep_largest_component` | `true` | keep only the largest piece |
 | `clip.min_component_edges` | `1` | with `keep_largest_component: false`, also keep every piece with at least this many edges |
-| `clip.strongly_connected` | `false` | not implemented: `true` logs a warning and the filter works as above |
 
 It runs only when a boundary is set (a whole country has real islands) and, for a PBF build, when
 the edge graph is built. It runs in clip builds too. Monaco:
@@ -87,7 +86,6 @@ build unless `validation.fail_on_error: false`. How to switch it on and what the
 | `assert_unique_node_id` | no `node_id` appears twice in `nodes` |
 | `assert_way_length_conserved` | no stretch of a kept OSM way is missing while an edge of the same way joins its two ends |
 | `warn_layer_without_structure` | a warning only: edges with `layer` ≠ 0 but no `bridge` or `tunnel` tag |
-| `assert_edge_id_stable` | not implemented: reports "skipped" |
 
 The first two run only when the component filter ran. `assert_way_length_conserved` is skipped in a
 clip build, which has no `ways` table.

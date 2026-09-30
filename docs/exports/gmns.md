@@ -22,7 +22,7 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | `node` | 1,160 | junctions; `ctrl_type = 'signal'` at traffic lights |
 | `link` | 1,940 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity, `facility_type` (the OSM `highway`), name |
 | `lane` | 2,276 | one row per lane, with its turns, allowed uses and width where OSM tags them |
-| `movement` | 2,520 | legal turns (from `edge_graph`): type (left, thru, right, uturn), code (`NBL`, `EBT`, …), the lanes that feed it, a curved turn path |
+| `movement` | 2,663 | legal turns (from `edge_graph`; turning back along the same road only at a dead end): type (left, thru, right, uturn), code (`NBL`, `EBT`, …), the lanes that feed it, a curved turn path |
 | `geometry` | 1,940 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
@@ -56,9 +56,9 @@ duckosm gmns monaco.duckdb --meso --micro
 ```
 
 - **Meso** (`meso_driving`): each road becomes a section, and each legal turn a connector
-  between sections. Monaco: 1,940 sections + 2,520 connectors.
+  between sections. Monaco: 1,940 sections + 2,663 connectors.
 - **Micro** (`micro_driving`): each lane cut into 7 m cells, with lane-change links between side-by-side
-  cells and turn links across junctions. Monaco: 25,671 links.
+  cells and turn links across junctions. Monaco: 25,814 links.
 
 Both follow osm2gmns' layout. Their ids are built from `edge_id` (`M<edge_id>` for a section,
 `X<from>-<to>` for a connector), so they stay the same across rebuilds and lead back to the road.

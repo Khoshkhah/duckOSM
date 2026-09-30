@@ -272,7 +272,6 @@ def test_config_multimodal_block(tmp_path):
     assert c.multimodal.enabled is True
     assert c.multimodal.transfer_s == 45
     assert c.multimodal.transfer_costs == {"walking->driving": 90}
-    assert c.multimodal.realistic is False           # default off
 
 
 def test_config_multimodal_default_disabled():

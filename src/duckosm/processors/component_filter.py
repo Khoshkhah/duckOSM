@@ -8,7 +8,7 @@ active schema (`USE <mode>`): edges / nodes / edge_graph / turn_restrictions.
 
 Weakly-connected components are computed in Python via union-find on (source, target) —
 fast for the area-sized graphs this runs on. `connectivity_rescue` is implemented upstream by
-`PathConnector` (reconnects dangling paths before this step); `strongly_connected` is still a no-op.
+`PathConnector` (reconnects dangling paths before this step).
 """
 import logging
 from collections import Counter
@@ -20,19 +20,15 @@ logger = logging.getLogger("duckosm")
 
 class ComponentFilter(BaseProcessor):
     def __init__(self, con, keep_largest=True, min_component_edges=1,
-                 connectivity_rescue=False, strongly_connected=False):
+                 connectivity_rescue=False):
         super().__init__(con)
         self.keep_largest = keep_largest
         self.min_component_edges = max(1, int(min_component_edges))
         self.connectivity_rescue = connectivity_rescue
-        self.strongly_connected = strongly_connected
 
     def run(self) -> None:
-        # connectivity_rescue is now handled UPSTREAM by PathConnector (adds connector edges before
-        # this runs; see docs/design/connectivity_repair.md). strongly_connected is still a no-op.
-        if self.strongly_connected:
-            logger.warning("  ComponentFilter: strongly_connected not yet implemented — "
-                           "using weakly-connected keep-largest")
+        # connectivity_rescue is handled UPSTREAM by PathConnector (adds connector edges before
+        # this runs; see docs/design/connectivity_repair.md). Components are weakly connected.
 
         edges = self.fetchall("SELECT edge_id, source, target FROM edges")
         if not edges:

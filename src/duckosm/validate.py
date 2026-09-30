@@ -8,7 +8,6 @@ that the per-way filter + component clean-up are supposed to satisfy.
 Checks (per mode):
   - single_component      : the graph is one dominant weakly-connected component
   - no_stranded_named     : no NAMED edge sits outside the largest component
-  - edge_id_stable        : reserved (needs a fixture/parent baseline) — reported as skipped
   - unique_node_id        : no duplicate node_id in nodes (catches colliding virtual nodes)
   - way_length_conserved  : no interior stretch of a kept way is missing while a kept edge of the
                             same way bridges its endpoints — the exact signature of a parallel arc
@@ -72,9 +71,6 @@ class Validator:
                 stranded = [eid for eid, s, t, nm in rows if nm and comp[eid] != largest]
                 results.append(("no_stranded_named", not stranded,
                                 f"{len(stranded)} named edge(s) outside the largest component"))
-
-        if self.cfg.assert_edge_id_stable:
-            results.append(("edge_id_stable", True, "skipped (no baseline configured)"))
 
         if self.cfg.assert_unique_node_id:
             dups = self.con.execute(f"""

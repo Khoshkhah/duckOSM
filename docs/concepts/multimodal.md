@@ -62,7 +62,6 @@ multimodal:
 
 - **A vehicle is waiting at every shared junction.** Transfers aren't limited to car parks or bike
   stands, so a trip can "pick up a car" anywhere. Good for comparing modes, not a real trip planner.
-  `--realistic` (transfers only at parking) is not implemented and stops with an error.
 - **No turn restrictions.** `route_multimodal` routes over nodes, not over the graph of legal
   turns, so a driving leg can take a banned turn. For one mode, use `route()`, which obeys them.
 - **No public transport.** OSM has stops and lines but no timetables.

@@ -528,8 +528,7 @@ class DuckOSM:
         c = self.config.clip
         ComponentFilter(self.con, keep_largest=c.keep_largest_component,
                         min_component_edges=c.min_component_edges,
-                        connectivity_rescue=c.connectivity_rescue,
-                        strongly_connected=c.strongly_connected).run()
+                        connectivity_rescue=c.connectivity_rescue).run()
         self.stats['edge_count'] = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
         self.stats['node_count'] = self.con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
         try:
@@ -709,26 +708,20 @@ class DuckOSM:
                    f"{self.stats['edge_graph_time']:.2f}s")
 
     def _build_multimodal(self) -> None:
-        """Build the intermodal mm.* transfer graph (walk<->drive<->cycle). Optional post-mode step.
-
-        A realistic (v2) build isn't implemented yet, so `multimodal.realistic: true` logs a warning
-        and leaves the coarse tables — it never aborts the build.
-        """
+        """Build the intermodal mm.* transfer graph (walk<->drive<->cycle). Optional post-mode step;
+        never aborts the build."""
         from duckosm.processors import MultimodalBuilder
         mm = self.config.multimodal
         logger.info("Building multimodal transfer graph (mm.*)...")
         start = time.time()
         try:
             stats = MultimodalBuilder(self.con, transfer_s=mm.transfer_s,
-                                      transfer_costs=mm.transfer_costs,
-                                      realistic=mm.realistic).run()
+                                      transfer_costs=mm.transfer_costs).run()
             self.stats['mm_edge_count'] = stats.get('edge_count', 0)
             self.stats['mm_transfer_count'] = stats.get('transfer_count', 0)
             logger.info(f"  Multimodal graph built in {time.time() - start:.2f}s: "
                         f"{self.stats['mm_edge_count']:,} edges, "
                         f"{self.stats['mm_transfer_count']:,} transfers")
-        except NotImplementedError as e:
-            logger.warning(f"  multimodal (realistic) skipped: {e}")
         except Exception as e:
             logger.warning(f"  multimodal build failed: {e}")
 

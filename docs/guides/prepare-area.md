@@ -59,6 +59,19 @@ also matched (pick one with --osm-id):
 
 Any GeoJSON polygon you already have works as a boundary too.
 
+### Or let the build make it
+
+In a [config file](build.md#with-a-config-file), give the area instead of a file:
+
+```yaml
+boundary:
+  place: Monaco                        # found like `duckosm boundary Monaco`
+  # bbox: [7.40, 43.72, 7.44, 43.75]   # or a box: west, south, east, north
+  # h3_cell: 883969a403fffff           # or one H3 cell (also: build --h3-cell)
+```
+
+The build writes it to `<name>.boundary.geojson` next to the output and uses that file.
+
 ## Several areas from one region
 
 To build many areas of one country, build the country once and cut the areas out of it. Cutting

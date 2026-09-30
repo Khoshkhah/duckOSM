@@ -12,12 +12,19 @@ source.type: pbf. See templates/config.yaml (`duckosm init-config`) and docs/ref
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Optional
+import logging
+
 import yaml
 
 
 def _only_known(cls, data: dict) -> dict:
-    """Keep only keys that are fields of dataclass `cls` (ignore extras like report/viz)."""
+    """Keep only keys that are fields of dataclass `cls`; warn about the others (a typo, or a key
+    that no longer exists), so they aren't ignored silently."""
     known = {f.name for f in fields(cls)}
+    unknown = sorted(set(data or {}) - known)
+    if unknown:
+        logging.getLogger("duckosm").warning(
+            f"config: ignoring unknown {cls.__name__.lower()} key(s): {', '.join(unknown)}")
     return {k: v for k, v in (data or {}).items() if k in known}
 
 
@@ -51,21 +58,17 @@ class Source:
     type: str = "pbf"                              # 'pbf' | 'duckdb'
     # type: pbf
     pbf_path: Optional[str] = None
-    country: Optional[str] = None                  # Geofabrik code (auto-download) — reserved
-    country_url: Optional[str] = None
-    # type: duckdb (derive this area by clipping a parent build)
+    # type: duckdb (derive this area by clipping a parent build; edge ids are copied as they are)
     source_db: Optional[str] = None
-    source_modes: Optional[list[str]] = None
-    preserve_edge_ids: bool = True
 
 
 @dataclass
 class Boundary:
     """The clip region."""
-    path: Optional[str] = None
-    place: Optional[str] = None                    # Nominatim — reserved
-    bbox: Optional[list[float]] = None
-    h3_cell: Optional[str] = None
+    path: Optional[str] = None                     # a GeoJSON file; wins over the three below
+    place: Optional[str] = None                    # a place name: the PBF's borders, else Nominatim
+    bbox: Optional[list[float]] = None             # [west, south, east, north], degrees
+    h3_cell: Optional[str] = None                  # an H3 cell id (hex)
     buffer_m: float = 0.0
 
 
@@ -77,7 +80,7 @@ class Clip:
     min_component_edges: int = 1
     connectivity_rescue: bool = True               # reconnect dangling path ends (PathConnector,
     connect_snap_m: float = 10.0                   #   cycling/walking) within this many metres,
-    strongly_connected: bool = False               #   BEFORE the component filter. See docs/design/connectivity_repair.md
+                                                   #   BEFORE the component filter. See docs/design/connectivity_repair.md
 
 
 @dataclass
@@ -87,7 +90,6 @@ class Validation:
     fail_on_error: bool = True
     assert_single_component: bool = True
     assert_no_stranded_named: bool = True
-    assert_edge_id_stable: bool = False
     assert_unique_node_id: bool = True             # no duplicate node_id in nodes (virtual incl.)
     assert_way_length_conserved: bool = True       # no interior stretch of a kept way silently
                                                    #   deleted in favour of a parallel arc — see
@@ -106,11 +108,9 @@ class Multimodal:
     """
     enabled: bool = False
     transfer_s: float = 60.0                        # flat transfer penalty (seconds), v1 coarse
-    realistic: bool = False                         # v2 park-and-ride (not yet implemented)
     # optional per-direction overrides, keyed "from->to" e.g. {"walking->driving": 60,
     # "driving->walking": 30}; any pair not listed falls back to `transfer_s`.
     transfer_costs: Optional[dict] = None
-    categories: Optional[list] = None               # v2 OSM POI categories (reserved)
 
 
 @dataclass
@@ -228,7 +228,27 @@ class Config:
             options=options, source=source, boundary=boundary,
         )
 
+    def materialize_boundary(self) -> None:
+        """Turn ``boundary.bbox`` / ``h3_cell`` / ``place`` into a GeoJSON file next to the output
+        (``<name>.boundary.geojson``), so every later step treats all kinds of boundary alike. A
+        ``boundary.path`` wins; with none of them, nothing happens."""
+        b = self.boundary
+        cell = b.h3_cell or self.h3_cell
+        if self.effective_boundary_path or not (b.bbox or cell or b.place):
+            return
+        from duckosm.area import bbox_geojson, find_boundary, h3_geojson, write_boundary
+        if b.bbox:
+            geom, info = bbox_geojson(b.bbox), {"name": self.name, "source": "bbox"}
+        elif cell:
+            geom, info = h3_geojson(cell), {"name": self.name, "source": f"h3 {cell}"}
+        else:
+            geom, info = find_boundary(b.place, pbf=self.effective_pbf_path)
+        out = self.get_db_path().with_name(f"{self.name}.boundary.geojson")
+        write_boundary(geom, info, out)
+        b.path = str(out)
+
     def validate(self) -> None:
+        self.materialize_boundary()
         if self.source_type == "duckdb":
             if not self.source_db:
                 raise ValueError("source.source_db is required for source.type: duckdb")

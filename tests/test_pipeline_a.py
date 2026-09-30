@@ -84,7 +84,6 @@ def test_validator_flags_fragment():
     class V:  # minimal validation config
         assert_single_component = True
         assert_no_stranded_named = False
-        assert_edge_id_stable = False
         assert_unique_node_id = False
         assert_way_length_conserved = False
         warn_layer_without_structure = False
@@ -104,7 +103,6 @@ def test_validator_layer_without_structure_warns_not_fails():
     class V:  # minimal validation config
         assert_single_component = False
         assert_no_stranded_named = False
-        assert_edge_id_stable = False
         assert_unique_node_id = False
         assert_way_length_conserved = False
         warn_layer_without_structure = True

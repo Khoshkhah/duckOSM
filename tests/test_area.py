@@ -70,3 +70,72 @@ def test_pbf_cut_is_keyed_on_boundary_and_pbf(tmp_path):
     os.utime(pbf, ns=(1, 1))
     assert p1 != pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)          # newer PBF
     assert p1.name.startswith("area.complete_ways.") and p1.name.endswith(".osm.pbf")
+
+
+def test_boundary_from_bbox_h3_or_place(tmp_path, monkeypatch):
+    """boundary.bbox / h3_cell / place become a GeoJSON file next to the output; path wins."""
+    import json
+    from duckosm import Config
+    from duckosm.config import Boundary
+    pbf = tmp_path / "x.osm.pbf"
+    pbf.write_bytes(b"x")
+
+    def cfg(**b):
+        return Config(name="area", pbf_path=str(pbf), output_path=str(tmp_path / "area.duckdb"),
+                      boundary=Boundary(**b))
+
+    c = cfg(bbox=[7.40, 43.72, 7.44, 43.75])
+    c.materialize_boundary()
+    ring = json.loads(open(c.boundary.path).read())["features"][0]["geometry"]["coordinates"][0]
+    assert c.boundary.path.endswith("area.boundary.geojson") and ring[0] == [7.40, 43.72] and len(ring) == 5
+    with pytest.raises(ValueError, match="west, south, east, north"):
+        cfg(bbox=[7.44, 43.72, 7.40, 43.75]).materialize_boundary()
+
+    c = cfg(h3_cell="883969a403fffff")
+    c.materialize_boundary()
+    assert len(json.loads(open(c.boundary.path).read())["features"][0]["geometry"]["coordinates"][0]) == 7
+    with pytest.raises(ValueError, match="H3"):
+        cfg(h3_cell="nope").materialize_boundary()
+
+    monkeypatch.setattr("duckosm.area.find_boundary",
+                        lambda name, pbf=None: ('{"type": "Point", "coordinates": [7.42, 43.73]}',
+                                                {"name": name, "source": "test"}))
+    c = cfg(place="Monaco")
+    c.materialize_boundary()
+    assert json.loads(open(c.boundary.path).read())["features"][0]["properties"]["name"] == "Monaco"
+
+    c = cfg(path="given.geojson", bbox=[7.40, 43.72, 7.44, 43.75])
+    c.materialize_boundary()
+    assert c.boundary.path == "given.geojson"                                   # path wins
+
+
+def test_unknown_config_key_warns(tmp_path, caplog):
+    from duckosm import Config
+    y = tmp_path / "c.yaml"
+    y.write_text("name: a\nclip:\n  strongly_connected: true\n  keep_largest_component: true\n")
+    with caplog.at_level("WARNING", logger="duckosm"):
+        c = Config.from_yaml(str(y))
+    assert "strongly_connected" in caplog.text and c.clip.keep_largest_component
+
+
+def test_typed_build_flags_override_the_config(tmp_path, monkeypatch):
+    """With -c, flags typed on the command line win over the file; untyped defaults don't."""
+    from click.testing import CliRunner
+    from duckosm import cli
+    seen = {}
+
+    class Fake:
+        def __init__(self, cfg):
+            seen["cfg"] = cfg
+
+        def run(self):
+            return "x.duckdb"
+
+    monkeypatch.setattr(cli, "DuckOSM", Fake)
+    y = tmp_path / "c.yaml"
+    y.write_text("name: a\nmodes: [driving]\noptions:\n  build_graph: true\n  h3_resolution: 9\n")
+    r = CliRunner().invoke(cli.main, ["build", "-c", str(y), "-m", "walking", "--no-features", "--no-graph"])
+    assert r.exit_code == 0, r.output
+    c = seen["cfg"]
+    assert c.modes == ["walking"] and c.options.build_features is False and c.options.build_graph is False
+    assert c.options.h3_resolution == 9                       # --h3-resolution not typed: file wins

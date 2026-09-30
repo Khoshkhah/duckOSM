@@ -88,6 +88,29 @@ def main():
     """
 
 
+def _override(cfg, ctx, **values):
+    """With --config, a build flag typed on the command line overrides the file's value (a flag left
+    at its default doesn't)."""
+    from click.core import ParameterSource
+    typed = {k: v for k, v in values.items() if ctx.get_parameter_source(k) == ParameterSource.COMMANDLINE}
+    if "pbf" in typed:
+        cfg.source.type, cfg.source.pbf_path, cfg.pbf_path = "pbf", typed["pbf"], typed["pbf"]
+    if "source_db" in typed:
+        cfg.source.type, cfg.source.source_db = "duckdb", typed["source_db"]
+    if "output" in typed:
+        cfg.output_path = typed["output"]
+    if "boundary" in typed:
+        cfg.boundary.path = cfg.boundary_path = typed["boundary"]
+    if "h3_cell" in typed:
+        cfg.boundary.h3_cell = cfg.h3_cell = typed["h3_cell"]
+    if "modes" in typed:
+        cfg.modes = list(typed["modes"])
+    for flag, option in (("graph", "build_graph"), ("h3_index", "h3_indexing"),
+                         ("h3_resolution", "h3_resolution"), ("features", "build_features")):
+        if flag in typed:
+            setattr(cfg.options, option, typed[flag])
+
+
 @main.command()
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to YAML configuration file')
 @click.option('--pbf', '-p', type=click.Path(exists=True), help='Path to PBF file')
@@ -96,7 +119,7 @@ def main():
                    '<pbf name>.duckdb, in the current folder)')
 @click.option('--boundary', '-b', type=click.Path(exists=True), help='GeoJSON boundary file for filtering')
 @click.option('--source-db', type=click.Path(exists=True), help='Parent duckOSM db to clip from (source.type=duckdb)')
-@click.option('--h3-cell', help='H3 cell ID for filtering')
+@click.option('--h3-cell', help='Build the area of this H3 cell (its outline is the boundary)')
 @click.option('--graph/--no-graph', default=True, help='Build edge graph table')
 @click.option('--h3-index/--no-h3-index', default=True, help='Add H3 spatial indexing')
 @click.option('--h3-resolution', type=int, default=8, help='H3 resolution (0-15)')
@@ -152,6 +175,10 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
     except Exception as e:
         raise click.ClickException(f"loading config: {e}")
 
+    if config:
+        _override(cfg, click.get_current_context(), pbf=pbf, output=output, boundary=boundary,
+                  source_db=source_db, h3_cell=h3_cell, graph=graph, h3_index=h3_index,
+                  h3_resolution=h3_resolution, modes=modes, features=features)
     if fixes:
         cfg.osm_overrides = fixes                  # --fixes also overrides a config file's setting
     setup_logging(log_file)
@@ -434,9 +461,7 @@ def sumo(db, mode, out_dir, name, connections, config, netconvert):
               help='Flat transfer penalty in seconds at each shared junction (v1 coarse)')
 @click.option('--schema', default='mm', show_default=True,
               help='Target schema for the mm.edges / mm.transfers tables')
-@click.option('--realistic', is_flag=True, default=False,
-              help='v2 park-and-ride (restrict transfers to parking POIs) — NOT yet implemented')
-def multimodal(db, transfer_cost, schema, realistic):
+def multimodal(db, transfer_cost, schema):
     """Build the intermodal transfer graph (mm.edges + mm.transfers) into a built db.
 
     Stitches the per-mode networks (driving/walking/cycling) into one layered graph so a trip can
@@ -451,8 +476,7 @@ def multimodal(db, transfer_cost, schema, realistic):
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     con = duckdb.connect(db)                     # read-write: this writes the mm.* tables
     try:
-        stats = MultimodalBuilder(con, transfer_s=transfer_cost, realistic=realistic,
-                                  schema=schema).run()
+        stats = MultimodalBuilder(con, transfer_s=transfer_cost, schema=schema).run()
         con.execute("CHECKPOINT")
     except NotImplementedError as e:
         raise click.ClickException(str(e))

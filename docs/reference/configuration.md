@@ -8,11 +8,12 @@ duckosm init-config my_area.yaml
 duckosm build -c my_area.yaml
 ```
 
-- A key you leave out takes the **default** in the tables below. Unknown keys are ignored.
+- A key you leave out takes the **default** in the tables below. An unknown key (a typo, or a key
+  that no longer exists) is ignored with a warning.
 - Relative paths resolve against the folder you run `duckosm` in, not the config file's folder.
-- With `-c`, the other `build` options are not used, except `--fixes` (replaces `osm_overrides`)
-  and `--log-file`. The **Flag** column shows the option that sets the same field when you build
-  without a config file ([Command line](cli.md#build)).
+- With `-c`, a `build` option you type overrides the file (e.g. `-c monaco.yaml -m walking
+  --no-features`); options you don't type leave the file's values. The **Flag** column shows the
+  option for each field ([Command line](cli.md#build)).
 - The template sets a few keys to a value other than the default; the **Template** column shows them.
 
 In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
@@ -27,7 +28,7 @@ In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 | `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md). Used only when named |
 | `pbf_path` | none | | | short for `source.pbf_path` |
 | `boundary_path` | none | | | short for `boundary.path` |
-| `h3_cell` | none | | `--h3-cell` | short for `boundary.h3_cell`; does nothing |
+| `h3_cell` | none | | `--h3-cell` | short for `boundary.h3_cell` |
 
 With a boundary, the PBF is first cut to it and the cut is kept as `pbf/<name>.<strategy>.<key>.osm.pbf`,
 where `<key>` is a fingerprint of the boundary and the PBF. The next build reuses it while both are
@@ -42,10 +43,6 @@ Where the network comes from. [How a build works](../concepts/build.md) describe
 | `source.type` | `pbf` | `--source-db` sets `duckdb` | `pbf`: build from OSM data. `duckdb`: cut an area out of a built database, keeping its edge ids |
 | `source.pbf_path` | none | `-p` | the `.osm.pbf` file; required for `pbf` |
 | `source.source_db` | none | `--source-db` | the built database to cut from; required for `duckdb`, together with `boundary.path` |
-| `source.country` | none | | reserved; does nothing |
-| `source.country_url` | none | | reserved; does nothing |
-| `source.source_modes` | none | | reserved; does nothing. A `duckdb` build copies the modes in `modes` |
-| `source.preserve_edge_ids` | `true` | | reserved; does nothing. Edge ids are always kept |
 
 ## `boundary`
 
@@ -53,11 +50,14 @@ The area to build.
 
 | Key | Default | Flag | Does |
 |---|---|---|---|
-| `boundary.path` | none | `-b` | a GeoJSON polygon. Without one, the whole PBF is built and the component filter doesn't run |
+| `boundary.path` | none | `-b` | a GeoJSON polygon. With none of the four boundary keys, the whole PBF is built and the component filter doesn't run |
 | `boundary.buffer_m` | `0` | | grow the boundary outwards by this many metres first (measured in the local UTM zone) |
-| `boundary.place` | none | | reserved; does nothing |
-| `boundary.bbox` | none | | reserved; does nothing |
-| `boundary.h3_cell` | none | `--h3-cell` | reserved; does nothing |
+| `boundary.place` | none | | a place name, e.g. `Monaco`: looked up in the PBF's own borders, else on Nominatim, as [`duckosm boundary`](cli.md#boundary) does |
+| `boundary.bbox` | none | | a box, `[west, south, east, north]` in degrees |
+| `boundary.h3_cell` | none | `--h3-cell` | an H3 cell id: its outline is the area |
+
+Give one of `path`, `place`, `bbox`, `h3_cell`; `path` wins. The other three are written to
+`<name>.boundary.geojson` next to the output, and the build uses that file.
 
 To make a boundary file: [Prepare an area](../guides/prepare-area.md).
 
@@ -72,7 +72,6 @@ The clean-up after the area is cut. Details: [Network clean-up](../concepts/clea
 | `clip.min_component_edges` | `1` | with `keep_largest_component: false`, keep every piece with at least this many edges |
 | `clip.connectivity_rescue` | `true` | walking and cycling, `pbf` build: [join dangling path ends](../concepts/cleanup.md#connect-dangling-paths) to the nearest node. Runs with or without a boundary |
 | `clip.connect_snap_m` | `10.0` | the largest gap, in metres, that `connectivity_rescue` joins |
-| `clip.strongly_connected` | `false` | not implemented: `true` only logs a warning |
 
 ## `options`
 
@@ -113,7 +112,6 @@ Checks each mode at the end of the build. What each check means: [Check a build]
 | `validation.assert_unique_node_id` | `true` | | no two nodes with the same `node_id` |
 | `validation.assert_way_length_conserved` | `true` | | no part of an OSM way lost when it was split into edges. Skipped in a `duckdb` build |
 | `validation.warn_layer_without_structure` | `true` | `true` | warn (never fail) about edges with a `layer` but no `bridge` or `tunnel` tag |
-| `validation.assert_edge_id_stable` | `false` |  | does nothing: always reports "skipped" |
 
 ## `multimodal`
 
@@ -126,8 +124,6 @@ Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
 | `multimodal.enabled` | `false` | build the `mm` tables |
 | `multimodal.transfer_s` | `60.0` | seconds added at each change of mode |
 | `multimodal.transfer_costs` | none | seconds per direction, e.g. `{"walking->driving": 60, "driving->walking": 30}`; a pair not listed uses `transfer_s` |
-| `multimodal.realistic` | `false` | not implemented: `true` logs a warning and `mm.transfers` stays empty |
-| `multimodal.categories` | none | reserved; does nothing |
 
 ## `report` and `viz`
 

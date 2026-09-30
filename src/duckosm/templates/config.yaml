@@ -26,8 +26,11 @@ source:
   source_db: null                      # parent duckOSM db, e.g. sweden.duckdb; edge_ids are kept
 
 # ---- BOUNDARY: the clip region (optional; needed for type: duckdb) ---------
-boundary:
+boundary:                              # give one of path / place / bbox / h3_cell (path wins)
   path: null                           # GeoJSON polygon file
+  place: null                          # a place name, e.g. "Monaco": the PBF's borders, else Nominatim
+  bbox: null                           # [west, south, east, north] in degrees
+  h3_cell: null                        # an H3 cell id, e.g. 883969a403fffff
   buffer_m: 0                          # optional outward buffer (metres) before clipping
 
 # ---- CLIP behaviour (clean-up applied after selection / extraction) ---------
@@ -37,7 +40,6 @@ clip:
   min_component_edges: 1               # also drop weak components smaller than this
   connectivity_rescue: true            # walking/cycling: join dangling path ends to the network (connector edges)
   connect_snap_m: 10.0                 # ... to the nearest node within this many metres
-  strongly_connected: false            # not implemented: logs a warning, weakly-connected keep is used
 
 # ---- MODES -----------------------------------------------------------------
 modes:
@@ -72,16 +74,13 @@ validation:
   fail_on_error: true
   assert_single_component: true        # <=1 dominant component after clip
   assert_no_stranded_named: true       # no named drivable through-street left disconnected
-  assert_edge_id_stable: false         # not implemented: always reported as skipped
   warn_layer_without_structure: true   # WARN: layer≠0 without bridge/tunnel (OSM tagging smell)
 
 # ---- MULTIMODAL (intermodal walk<->drive<->cycle routing; see https://khoshkhah.github.io/duckOSM/concepts/multimodal/) --
 multimodal:
   enabled: false                       # build the mm.* transfer graph after the per-mode builds
   transfer_s: 60                       # flat transfer penalty (seconds) at each shared junction (v1 coarse)
-  realistic: false                     # v2 park-and-ride (extract parking POIs) — NOT yet implemented
   transfer_costs: null                 # optional per-direction overrides, e.g. {"walking->driving": 60, "driving->walking": 30}
-  categories: null                     # v2 OSM POI categories (reserved)
   # NOTE: needs >=2 modes AND `walking` present (walking is the pedestrian hub between modes).
 
 # ---- REPORT + VISUALIZATION ------------------------------------------------
