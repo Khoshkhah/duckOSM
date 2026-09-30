@@ -108,9 +108,9 @@
 
 /* embedded maps: a "Full screen" button above each (assets/fullscreen.js) */
 .dk-frame-bar { display: flex; justify-content: flex-end; margin: 0.6em 0 0.3em; }
-.dk-fullscreen { font: inherit; font-size: 0.72rem; padding: 0.2em 0.7em; cursor: pointer;
-  border: 1px solid var(--md-default-fg-color--lighter); border-radius: 4px;
-  background: var(--md-default-bg-color); color: var(--md-default-fg-color);
-  display: inline-flex; align-items: center; gap: 0.35em; }
-.dk-fullscreen:hover { border-color: var(--md-accent-fg-color); color: var(--md-accent-fg-color); }
+.dk-fullscreen { font: inherit; font-size: 0.8rem; font-weight: 600; padding: 0.4em 1em; cursor: pointer;
+  border: 0; border-radius: 4px; background: var(--dk-yellow); color: var(--dk-ink);
+  display: inline-flex; align-items: center; gap: 0.45em; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.dk-fullscreen:hover { filter: brightness(0.9); }
+.md-content img[src*="images/"] { cursor: zoom-in; }
 .md-content img:fullscreen { object-fit: contain; background: #fff; }
