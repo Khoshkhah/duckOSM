@@ -64,39 +64,41 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Get started:
+      - Install: install.md
+      - Your first network: first_network.md
+  - Guides:
       - User manual: user_manual.md
-      - Walkthrough: walkthrough.md
-      - Configuration: configuration.md
-  - Build:
-      - Pipeline: pipeline.md
-      - Driving, walking, cycling: multi_mode.md
-      - Segment merging: merging.md
-      - Global junctions: global_junction_segmentation.md
-      - Connectivity repair: connectivity_repair.md
-      - Admin boundaries: admin_boundaries.md
-  - Data:
-      - Data dictionary: data_dictionary.md
       - Query cookbook: query_cookbook.md
-      - OSMnx comparison: osmnx_comparison.md
+      - Admin boundaries: admin_boundaries.md
+      - Routing across modes: multimodal.md
+      - Elevation: elevation.md
   - Exports:
       - GeoPackage / shapefile: gis_export.md
       - MATSim network: matsim_export.md
       - MATSim lanes & signals: matsim_lanes_signals.md
       - GMNS: gmns_export.md
-  - Experimental:
-      - OpenDRIVE: opendrive_export.md
-      - Lanelet2: lanelet2_export.md
-      - railML: railml_export.md
-      - Lane routing: lane_routing.md
       - GMNS meso: gmns_meso.md
       - GMNS micro: gmns_micro.md
       - GMNS viewer: gmns_viewer.md
       - GMNS maps: gmns_map.md
       - GMNS map realism: gmns_map_realism.md
       - GMNS extras: gmns_roundout.md
-      - Intermodal routing: multimodal.md
-      - Elevation: elevation.md
-      - Base-map features: features_schema.md
-  - Internals:
+      - Experimental:
+          - OpenDRIVE: opendrive_export.md
+          - Lanelet2: lanelet2_export.md
+          - railML: railml_export.md
+          - Lane routing: lane_routing.md
+  - Concepts:
       - Architecture: architecture.md
+      - Pipeline: pipeline.md
+      - Driving, walking, cycling: multi_mode.md
+      - Segment merging: merging.md
+      - Global junctions: global_junction_segmentation.md
+      - Connectivity repair: connectivity_repair.md
+      - duckOSM and OSMnx: osmnx_comparison.md
+  - Reference:
+      - Configuration: configuration.md
+      - Data dictionary: data_dictionary.md
+      - Base-map features: features_schema.md
+  - Development:
       - Development: development.md

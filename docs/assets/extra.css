@@ -46,6 +46,10 @@
 .md-typeset h1, .md-typeset h2, .md-typeset h3, .md-header__title {
   font-family: "Space Grotesk", var(--md-text-font-family), sans-serif;
 }
+/* Material draws page titles light grey; full colour reads better */
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+}
 
 /* header logo: a touch larger than Material's 1.2rem default */
 .md-header__button.md-logo img,

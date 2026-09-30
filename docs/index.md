@@ -14,7 +14,7 @@ with **edge IDs that survive every rebuild, clip and export**.
 </div>
 </div>
 
-[Get started](user_manual.md){ .md-button .md-button--primary }
+[Get started](first_network.md){ .md-button .md-button--primary }
 [View on GitHub](https://github.com/Khoshkhah/duckOSM){ .md-button }
 
 ## Why duckOSM
