@@ -107,8 +107,7 @@ remain accepted as shorthand for `source.type: pbf` for back-compat.
   location/road), **validation results**. New `src/duckosm/report.py`.
 
 ### E · Visualization (roadstyle)
-- `duckosm viz` + `src/duckosm/viz.py` using `import roadstyle as rs` (the package at
-  `/home/kaveh/projects/roadstyle`, as in `traffic_tube/.../11_roadstyle_map.py`):
+- `duckosm viz` + `src/duckosm/viz.py` using `import roadstyle as rs` ([roadstyle](https://github.com/Khoshkhah/roadstyle)):
   - **network map** — edges by highway class (roadstyle casing+fill, CARTO basemap, legend);
   - **QA map** — kept network vs dropped stubs vs rescued connectors, per-class layer toggles +
     hover detail (the roadstyle successor to the throwaway `duckosm_errors.html`).

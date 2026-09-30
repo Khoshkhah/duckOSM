@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Extract a sub-area from an existing duckOSM database into a new, self-contained DB.
 
 Instead of re-running the OSM pipeline, this slices a built database (e.g. a whole

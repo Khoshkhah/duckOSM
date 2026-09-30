@@ -45,9 +45,6 @@ are created:
 ```bash
 # Full validation
 python scripts/validate_geometry.py --db data/output/somerset.duckdb
-
-# Compare with legacy importer
-python scripts/compare_results.py
 ```
 
 ---

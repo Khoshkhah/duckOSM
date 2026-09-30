@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>OpenStreetMap → a routable network in one portable DuckDB file.</b><br>
-  ~100× faster PBF parsing · stable edge ids · driving / walking / cycling · intermodal routing ·
+  built on DuckDB's fast ST_READOSM · stable edge ids · driving / walking / cycling · intermodal routing ·
   exports to SUMO, MATSim, GMNS, OpenDRIVE, Lanelet2, railML, GIS and networkx
 </p>
 
@@ -36,20 +36,26 @@
 ```bash
 git clone https://github.com/Khoshkhah/duckOSM.git && cd duckOSM
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .
+pip install -e ".[routing]"                         # [routing] adds networkx for route()
 
-# PBF -> routable network
-duckosm build --pbf data/maps/input.osm.pbf --output data/db/city.duckdb --modes driving
-duckosm viz   data/db/city.duckdb                   # -> reports/city_network.html
+# a small OSM extract to try it on: Monaco, 0.7 MB, from Geofabrik
+curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
+
+# PBF -> routable network (a few seconds)
+duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
 ```
 
 ```python
 import duckdb
 from duckosm import route
 
-con = duckdb.connect("data/db/city.duckdb", read_only=True)
-r = route(con, FROM_EDGE, TO_EDGE)     # fastest path; weight="length" for distance
-r["time_s"], r["length_m"], r["edges"]
+con = duckdb.connect("monaco.duckdb", read_only=True)
+q = "SELECT min(edge_id) FROM driving.edges WHERE name = ?"
+a = con.execute(q, ["Boulevard du Larvotto"]).fetchone()[0]
+b = con.execute(q, ["Avenue Princesse Grace"]).fetchone()[0]
+
+r = route(con, a, b)                   # fastest path; weight="length" for distance
+r["time_s"], r["length_m"], r["edges"]  # ~130 s, ~1.7 km, the ordered edge_ids
 ```
 
 > **Activate the venv in every new shell.** `duckosm` and its dependencies live inside `.venv`, so
@@ -58,26 +64,26 @@ r["time_s"], r["length_m"], r["edges"]
 
 Optional extras: `".[viz]"` (notebook maps: folium/leafmap), `".[routing]"` (networkx), `".[sumo]"`,
 `".[elevation]"`, `".[tz]"`, `".[dev]"`. The `duckosm viz` map additionally needs `geopandas` +
-[`roadstyle`](../roadstyle).
+[`roadstyle`](https://github.com/Khoshkhah/roadstyle).
 
 ## What you get
 
 |  |  |
 |---|---|
-| **Fast** | native `ST_READOSM` — ~100× faster PBF parsing |
+| **Fast** | the PBF is read by DuckDB's native, multithreaded `ST_READOSM`, and every stage after that is SQL |
 | **Memory efficient** | streaming SQL; simplification auto-batches, so country-scale extracts fit in RAM |
 | **Multi-modal** | separate `driving` / `walking` / `cycling` networks with mode-aware filtering, speeds and one-way handling (incl. cycling contraflow) |
 | **Access-aware driving** | keeps drivable shared streets (`highway=pedestrian` + `motor_vehicle=yes`, reclassed `living_street`), drops drivable classes that forbid cars (`motor_vehicle=no` / `access=no`) |
 | **Intermodal routing** | one layered graph (`mm.edges` + `mm.transfers`) so a trip can switch mode mid-route — walk → drive → walk. [`docs/multimodal.md`](docs/multimodal.md) |
-| **Stable ids** | `edge_id` is a deterministic content hash — rebuilds don't renumber the graph, downstream matches survive. [↓ details](#stable-edge_id--reusing-the-hash-elsewhere) |
+| **Stable ids** | `edge_id` is a deterministic content hash — rebuilding from the same OSM data gives the same ids, so downstream matches survive; an id changes only where that road is edited in OSM. [↓ details](#stable-edge_id--reusing-the-hash-elsewhere) |
 | **Two source modes** | build from a PBF, **or clip an area out of an existing build** (`sodermalm ← sweden`) preserving edge_ids. [`docs/pipeline.md`](docs/pipeline.md) |
 | **Clean clipped areas** | in-pipeline `osmium` boundary clip + connected-component clean-up that drops boundary stubs |
 | **Routing-ready** | degree-2 simplified graph, edge-adjacency line graph, turn restrictions, H3 indexing, travel-time costs, `route()` / `Router` |
-| **Base-map features** | optional `features.*` schema — every OSM base-map theme mapped to the **Shortbread** vector-tile schema, extracted once into the same db so a renderer like [duckmap](../duckmap) never re-ingests OSM. [`docs/features_schema.md`](docs/features_schema.md) |
-| **Exporters** | networkx · SUMO · MATSim (+lanes/signals) · GMNS (+meso/micro) · OpenDRIVE · Lanelet2 · railML · GeoPackage/shapefile. [↓ Exports](#exports) |
+| **Base-map features** | optional `features.*` schema — every OSM base-map theme mapped to the **Shortbread** vector-tile schema, extracted once into the same db so a map renderer never re-ingests OSM. [`docs/features_schema.md`](docs/features_schema.md) |
+| **Exporters** | networkx · SUMO · MATSim (+lanes/signals) · GMNS (+meso/micro) · OpenDRIVE · Lanelet2 · railML · GeoPackage/shapefile — how well each is verified: [↓ Exports](#exports) |
 | **Elevation** | sample any DEM (or stream a global one) into node/edge heights, in place |
 | **Admin boundaries** | optional table of every OSM administrative level with a derived parent hierarchy |
-| **Validation & reports** | build-time invariant checks, a `reports/<name>.{md,html}` build report, optional [roadstyle](../roadstyle) map |
+| **Validation & reports** | build-time invariant checks, a `reports/<name>.{md,html}` build report, optional [roadstyle](https://github.com/Khoshkhah/roadstyle) map |
 | **Portable** | a single `.duckdb` file, queryable anywhere |
 
 ```mermaid
@@ -229,6 +235,16 @@ duckosm elevation data/db/sodermalm.duckdb -m driving --nodata-fill 0   # one mo
 
 Every exporter keeps the stable `edge_id` as the target format's own id, so per-edge data (flows,
 regimes, demand) maps onto the exported network **by identity — no conflation step**.
+
+How far each export is verified:
+
+| Export | Verified by |
+|---|---|
+| networkx, GeoPackage / shapefile | unit tests; `gis-debug` re-reads a GIS export through GDAL and diffs its `edge_id`s |
+| SUMO | SUMO's own `netconvert` assembles and checks the network |
+| MATSim (+ lanes, signals) | validated in the tests against MATSim's official DTD (network) and XSD schemas (lanes, signals) |
+| GMNS | follows the GMNS table spec; not yet run through DTALite / Path4GMNS |
+| OpenDRIVE, Lanelet2, railML | **best effort**: structural checks only (the official schemas aren't freely available); not yet load-tested in a simulator — please report problems |
 
 <details>
 <summary><b><code>export-graph</code> — networkx GraphML / gpickle</b></summary>
@@ -570,21 +586,24 @@ Shared tables: `raw.*` (parsed OSM), `main.visualization_metadata`, and the opti
 
 ## Stable `edge_id` — reusing the hash elsewhere
 
-`edge_id = (hash(osm_id, source, target, is_reverse) >> 1)::BIGINT` (DuckDB's `hash`). It is
-deterministic — the same physical edge keeps the same id across rebuilds — so other projects can
-recompute or match it. Three ways:
+`edge_id = (hash(osm_id, source, target) >> 1)::BIGINT` (DuckDB's `hash`). It is deterministic —
+rebuilding from the same OSM data gives every edge the same id — so other projects can recompute or
+match it. An id changes only when its OSM way or that way's junction nodes change. Direction is
+encoded by `source → target`: the two directions of a two-way road have swapped endpoints, and
+self-loops and antiparallel pairs are split with virtual nodes, so the triple is unique. Three ways
+to reuse it:
 
 **1. DuckDB SQL — the persisted macro** (shipped in every output db, incl. sub-area extracts):
 
 ```sql
-SELECT edge_id_hash(osm_id, source, target, is_reverse) AS edge_id FROM my_edges;
+SELECT edge_id_hash(osm_id, source, target) AS edge_id FROM my_edges;
 ```
 
 **2. Python helper:**
 
 ```python
 from duckosm import edge_id_hash, edge_id_expr
-edge_id_hash(832010768, 7767910376, 21761577, False)   # -> 6183985562678836213
+edge_id_hash(832010768, 7767910376, 21761577)   # -> 7968481847680619937
 # bulk: embed the SQL fragment in your own query / over a dataframe `df`
 import duckdb
 duckdb.sql(f"SELECT *, {edge_id_expr()} AS edge_id FROM df").df()
@@ -593,13 +612,17 @@ duckdb.sql(f"SELECT *, {edge_id_expr()} AS edge_id FROM df").df()
 **3. Just need the id? Join on the natural key** — version-proof, never touches the hash:
 
 ```sql
-... JOIN driving.edges USING (osm_id, source, target, is_reverse)
+... JOIN driving.edges USING (osm_id, source, target)
 ```
 
-Notes: argument **order matters** (`osm_id, source, target, is_reverse`); integer types are
-interchangeable (`INTEGER`≡`BIGINT`) and `BOOLEAN`≡`0/1`. `hash()` is a DuckDB-internal function —
-reproducible only in DuckDB and **not guaranteed identical across major DuckDB versions**, so for
+Notes: argument **order matters** (`osm_id, source, target`); integer types are interchangeable
+(`INTEGER`≡`BIGINT`). `hash()` is a DuckDB-internal function — reproducible only in DuckDB and **not
+guaranteed identical across major DuckDB versions**, so duckOSM requires `duckdb<2`; for
 cross-project id matching pin the DuckDB version or use the join (option 3).
+
+Databases built before this scheme used `edge_id_hash_v1(osm_id, source, target, is_reverse)`. Both
+macros ship in every db (and `edge_id_hash_v1` / `edge_id_expr_v1` in Python), so an old→new
+crosswalk is one query.
 
 ## Configuration
 
@@ -616,7 +639,6 @@ output_path: data/db                   # a directory, or a full *.duckdb path
 source:
   type: pbf                            # 'pbf' (build from OSM) | 'duckdb' (clip a built db)
   pbf_path: data/maps/input.osm.pbf    # type: pbf — local extract
-  # country: sweden                    #   OR a Geofabrik code to auto-download
   # source_db: data/db/sweden.duckdb   # type: duckdb — parent build to clip from
 
 boundary:                              # the clip region (set at most one)
@@ -678,7 +700,6 @@ Requires `ogr2ogr` (GDAL). The OSM `admin_level` meaning is country-specific —
   (Elevation / Class / Max speed / Lanes), base-map switcher, hover read-out and (when roadstyle's
   report sidebar is available) a gradient legend, filter and search. The title self-labels the DEM
   source from `main.elevation_metadata`. Run `duckosm elevation <db>` first.
-- `scripts/compare_results.py` — validate output against other tools.
 
 ## License
 

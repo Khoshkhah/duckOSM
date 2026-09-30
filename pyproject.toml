@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-    "duckdb>=1.0.0",
+    "duckdb>=1.0.0,<2",   # edge_id uses DuckDB's hash(): pin the major version
     "shapely>=2.0.0",
     "pyyaml>=6.0",
     "click>=8.0",

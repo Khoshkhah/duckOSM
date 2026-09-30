@@ -11,7 +11,7 @@ legend) via the `roadstyle` package.
   # colour by a numeric column instead of highway class:
   python scripts/roadstyle_map.py --db net.duckdb --color-by cost_s --cmap viridis
 
-Needs: geopandas + roadstyle (pip install geopandas /home/kaveh/projects/roadstyle).
+Needs: geopandas + roadstyle (pip install geopandas roadstyle).
 """
 import argparse
 from pathlib import Path

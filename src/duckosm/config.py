@@ -6,7 +6,7 @@ Supports two source modes:
   source.type: duckdb  -> clip an area out of an existing duckOSM db, preserving edge_ids
 
 The old flat keys (pbf_path, boundary_path, h3_cell) are still accepted as shorthand for
-source.type: pbf. See config/template.yaml and PLAN.md for the full schema.
+source.type: pbf. See config/template.yaml and docs/configuration.md for the full schema.
 """
 
 from dataclasses import dataclass, field, fields
