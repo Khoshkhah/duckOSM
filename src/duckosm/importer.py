@@ -122,7 +122,7 @@ class DuckOSM:
                     global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
             # Mode-agnostic road-junction set, built once from raw.* before the per-mode loop, so every
             # mode segments roads at the same junctions and shares edge_ids. See _build_global_junctions.
-            if self.config.options.simplify and self.config.options.global_junctions:
+            if self.config.options.global_junctions:
                 global_steps.append(("global_junctions", "Building global junctions",
                                      self._build_global_junctions))
 
@@ -148,8 +148,8 @@ class DuckOSM:
                               lambda m=mode: self._apply_osm_overrides(m)))
             steps.append(("build_edges", f"[{mode}] Building edges", self._build_edges))
 
-            if self.config.options.simplify:
-                steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
+            # Cut ways into edges where they meet (the network itself: always runs).
+            steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
 
             # Reconnect dangling cycleway/footway ends to the network BEFORE the component filter, so
             # disconnected paths aren't pruned. Cycling/walking only (driving networks are connected).

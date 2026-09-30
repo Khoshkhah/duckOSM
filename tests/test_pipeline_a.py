@@ -36,12 +36,11 @@ def test_config_backcompat_flat(tmp_path):
     y = tmp_path / "c.yaml"
     y.write_text(
         "name: b\npbf_path: /x/in.osm.pbf\noutput_path: /tmp/b\n"
-        "boundary_path: /x/bnd.geojson\noptions: {simplify: true}\n")
+        "boundary_path: /x/bnd.geojson\n")
     c = Config.from_yaml(str(y))
     assert c.source_type == "pbf"
     assert c.effective_pbf_path == "/x/in.osm.pbf"
     assert c.effective_boundary_path == "/x/bnd.geojson"
-    assert c.options.simplify is True
 
 
 # ---- ComponentFilter unit ----------------------------------------------------------

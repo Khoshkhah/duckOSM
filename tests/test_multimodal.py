@@ -306,7 +306,7 @@ def test_multimodal_integration_build(tmp_path):
         f"source: {{type: pbf, pbf_path: {_PBF}}}\n"
         f"boundary: {{path: {bbox}}}\n"
         "modes: [driving, walking]\n"
-        "options: {simplify: true, h3_indexing: false}\n"
+        "options: {h3_indexing: false}\n"
         "validation: {enabled: false}\nreport: {enabled: false}\n"
         "multimodal: {enabled: true, transfer_s: 60}\n")
 
