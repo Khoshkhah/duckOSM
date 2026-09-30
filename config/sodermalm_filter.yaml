@@ -6,7 +6,7 @@
 #
 # Why duckdb-clip instead of a PBF build: Södermalm edges keep the EXACT edge_id they have in
 # Sweden (same geometry + source/target -> same hash), so this db is a stable view of its parent
-# and downstream projects that key on edge_id never re-match. See PLAN.md §2.1.
+# and downstream projects that key on edge_id never re-match. See docs/design/pipeline_update_plan.md §2.1.
 
 name: sodermalm_filter
 output_path: data/db                   # -> data/db/sodermalm.duckdb

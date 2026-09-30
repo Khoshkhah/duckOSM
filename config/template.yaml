@@ -8,7 +8,7 @@
 #   source.type: duckdb  -> CLIP an existing duckOSM db (e.g. sodermalm <- sweden),
 #                           preserving edge_ids (no re-hash, no cross-project re-key).
 #
-# Full reference: docs/configuration.md · docs/pipeline.md · PLAN.md
+# Full reference: docs/configuration.md · docs/pipeline.md · docs/design/pipeline_update_plan.md
 
 name: my_import                        # REQUIRED — logical name + output filename (<name>.duckdb)
 output_path: data/db                   # a directory (-> data/db/<name>.duckdb) OR a full *.duckdb path

@@ -4,7 +4,7 @@
 #
 # This is the PARENT build: derive sub-areas cheaply by clipping it (source.type: duckdb),
 # e.g. config/sodermalm.yaml. Clipped areas keep Sweden's exact edge_ids, so downstream
-# projects that key on edge_id never re-match. See PLAN.md §2.1.
+# projects that key on edge_id never re-match. See docs/design/pipeline_update_plan.md §2.1.
 
 name: sweden                           # -> data/db/sweden.duckdb
 output_path: data/db                   # a directory (-> data/db/<name>.duckdb)
