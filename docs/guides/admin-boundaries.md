@@ -1,20 +1,24 @@
-# Administrative boundaries
+# Add administrative boundaries
 
-The `admin_boundaries` table holds OpenStreetMap administrative areas (countries,
-counties, municipalities, districts, …) for the imported region, with a derived
-parent link so the hierarchy can be traversed.
-
-It is **not** built by the core import pipeline. Add it to an existing duckOSM
-database with:
+`duckosm admin` adds every administrative area of a region (country, counties, municipalities,
+districts, …) to a built database, as the table `main.admin_boundaries`, with each area's parent so
+the hierarchy can be walked. It needs [GDAL](../install.md#tools-outside-python).
 
 ```bash
-duckosm admin --pbf <file.osm.pbf> --db <file.duckdb>
+duckosm admin --pbf monaco-latest.osm.pbf --db monaco.duckdb
 ```
 
-This extracts `boundary='administrative'` multipolygons from the PBF with
-`ogr2ogr` (GDAL assembles the boundary relations' member ways into polygons —
-something the bundled DuckDB spatial extension can't do, as it lacks
-`ST_Polygonize`), loads them, and computes `parent_osm_id`.
+```text
+admin_boundaries: 11 features
+  admin_level    2: 1
+  admin_level    8: 1
+  admin_level   10: 9
+```
+
+Use it to tag roads by district, or to cut areas by name with
+[`extract --name`](prepare-area.md#several-areas-from-one-region). (To get one area's boundary as a
+file, [`duckosm boundary`](prepare-area.md#make-the-boundary-file) is simpler.) Reading the borders of a
+whole country takes a while; `--gpkg FILE` reuses an earlier extraction.
 
 ## What `admin_level` means
 
@@ -89,33 +93,48 @@ On the full Sweden extract this links **1,456 of 1,472** boundaries, e.g.
 
 ## Example queries
 
+On Monaco:
+
 ```sql
--- All counties (län)
-SELECT name FROM admin_boundaries WHERE admin_level = 4 ORDER BY name;
+-- how many areas at each level
+SELECT admin_level, count(*) AS areas FROM admin_boundaries GROUP BY 1 ORDER BY 1;
 
--- Each boundary with its immediate parent
-SELECT c.name, c.admin_level, p.name AS parent, p.admin_level AS parent_level
-FROM admin_boundaries c
-LEFT JOIN admin_boundaries p ON c.parent_osm_id = p.osm_id;
+-- each district with its parent
+SELECT c.name, c.admin_level, p.name AS parent
+FROM admin_boundaries c LEFT JOIN admin_boundaries p ON c.parent_osm_id = p.osm_id
+WHERE c.admin_level = 10 ORDER BY c.name;
 
--- Full ancestry chain of one area (kommun -> county -> country)
+-- which district contains a point (lon, lat)?          -> Monte-Carlo
+SELECT name FROM admin_boundaries
+WHERE admin_level = 10 AND ST_Contains(geometry, ST_Point(7.4270, 43.7397));
+
+-- driving edges per district
+SELECT d.name AS district, count(*) AS edges
+FROM driving.edges e
+JOIN admin_boundaries d ON d.admin_level = 10 AND ST_Contains(d.geometry, ST_PointOnSurface(e.geometry))
+GROUP BY 1 ORDER BY edges DESC;
+```
+
+```text
+┌──────────────┬───────┐
+│   district   │ edges │
+├──────────────┼───────┤
+│ Monte-Carlo  │   429 │
+│ Fontvieille  │   371 │
+│ La Condamine │   357 │
+│ Larvotto     │   238 │
+│ …            │       │
+└──────────────┴───────┘
+```
+
+The full ancestry of an area (district → municipality → country):
+
+```sql
 WITH RECURSIVE up AS (
-    SELECT osm_id, name, admin_level, parent_osm_id
-    FROM admin_boundaries WHERE name = 'Lidingö kommun'
+    SELECT osm_id, name, admin_level, parent_osm_id FROM admin_boundaries WHERE name = 'Monte-Carlo'
     UNION ALL
     SELECT b.osm_id, b.name, b.admin_level, b.parent_osm_id
     FROM admin_boundaries b JOIN up ON b.osm_id = up.parent_osm_id
 )
 SELECT admin_level, name FROM up ORDER BY admin_level DESC;
-
--- Which county contains a point (lon, lat)?
-SELECT name FROM admin_boundaries
-WHERE admin_level = 4 AND ST_Contains(geometry, ST_Point(18.07, 59.33));
-
--- Tag every driving edge with the kommun it lies in (interior point match)
-SELECT e.edge_id, k.name AS kommun
-FROM driving.edges e
-JOIN admin_boundaries k
-  ON k.admin_level = 7
- AND ST_Contains(k.geometry, ST_PointOnSurface(e.geometry));
 ```

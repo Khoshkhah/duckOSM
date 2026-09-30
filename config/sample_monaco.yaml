@@ -9,7 +9,7 @@ source:
   type: pbf
   pbf_path: data/sample/monaco.osm.pbf
 
-boundary:                          # made with: duckosm boundary Monaco --pbf data/sample/monaco.osm.pbf
+boundary:                          # Monaco's land border: duckosm boundary --osm-id 2220322 --pbf data/sample/monaco.osm.pbf
   path: data/sample/monaco.geojson
 
 modes:

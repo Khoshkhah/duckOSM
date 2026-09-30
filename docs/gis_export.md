@@ -114,7 +114,7 @@ COPY (SELECT edge_id, …, geometry FROM driving.edges)
 - **Shapefile** needs no assembly — each layer is a direct `COPY … DRIVER 'ESRI Shapefile'`.
 
 The exporter is a self-contained module (`src/duckosm/gis.py`, `to_gis`) reading the same `edges` /
-`nodes` tables as every other exporter — see [user_manual.md](user_manual.md) for the other exporters.
+`nodes` tables as every other exporter — see the other exports in the menu.
 
 ## Debugging an export (`duckosm gis-debug`)
 

@@ -67,13 +67,17 @@ nav:
       - Install: install.md
       - Your first network: first_network.md
   - Guides:
-      - User manual: user_manual.md
-      - Query cookbook: query_cookbook.md
-      - Admin boundaries: admin_boundaries.md
-      - Routing across modes: multimodal.md
-      - Elevation: elevation.md
+      - Prepare an area: guides/prepare-area.md
+      - Build a network: guides/build.md
+      - Fix OSM errors: guides/fix-osm-errors.md
+      - Query the database: guides/query.md
+      - Route: guides/route.md
+      - Draw a map: guides/draw-map.md
+      - Add elevation: guides/elevation.md
+      - Add administrative boundaries: guides/admin-boundaries.md
+      - Check a build: guides/check-build.md
   - Exports:
-      - GeoPackage / shapefile: gis_export.md
+      - SUMO: exports/sumo.md
       - MATSim network: matsim_export.md
       - MATSim lanes & signals: matsim_lanes_signals.md
       - GMNS: gmns_export.md
@@ -83,6 +87,8 @@ nav:
       - GMNS maps: gmns_map.md
       - GMNS map realism: gmns_map_realism.md
       - GMNS extras: gmns_roundout.md
+      - GeoPackage / shapefile: gis_export.md
+      - networkx: exports/networkx.md
       - Experimental:
           - OpenDRIVE: opendrive_export.md
           - Lanelet2: lanelet2_export.md
@@ -96,9 +102,11 @@ nav:
       - Global junctions: global_junction_segmentation.md
       - Connectivity repair: connectivity_repair.md
       - duckOSM and OSMnx: osmnx_comparison.md
+      - Routing across modes: multimodal.md
   - Reference:
       - Configuration: configuration.md
       - Data dictionary: data_dictionary.md
       - Base-map features: features_schema.md
+      - Elevation sources: elevation.md
   - Development:
       - Development: development.md

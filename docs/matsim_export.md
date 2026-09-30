@@ -40,7 +40,7 @@ is needed (or exists) in the format.
 ## Mapping: duckOSM → MATSim
 
 Read from a **built duckOSM routing db** (per-mode schema `driving.edges` / `driving.nodes`, like
-[`to_sumo`](user_manual.md) / [`to_gis`](gis_export.md)) — *not* the GMNS db.
+[`to_sumo`](exports/sumo.md) / [`to_gis`](gis_export.md)) — *not* the GMNS db.
 
 | MATSim | Source | Notes |
 |---|---|---|

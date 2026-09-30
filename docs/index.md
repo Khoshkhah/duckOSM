@@ -80,8 +80,8 @@ r = route(con, a, b)                     # fastest path; weight="length" for dis
 r["time_s"], r["length_m"], r["edges"]   # ~130 s, ~1.7 km, the ordered edge_ids
 ```
 
-Next: the [user manual](user_manual.md) for every command, or the
-[data dictionary](data_dictionary.md) for what's in a build.
+Next: [Your first network](first_network.md) walks through it step by step, and the
+[guides](guides/build.md) cover each task.
 
 ## Exports
 

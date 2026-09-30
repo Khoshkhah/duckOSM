@@ -5,9 +5,12 @@ It takes a few minutes. You need duckOSM [installed](install.md) with `pip insta
 
 ## 1. Choose your area
 
-Search for **Monaco** on [openstreetmap.org](https://www.openstreetmap.org) and click the result whose
-border is drawn on the map. The page address ends in
-[`relation/1124039`](https://www.openstreetmap.org/relation/1124039): **1124039** is Monaco's OSM id.
+Search for **Monaco** on [openstreetmap.org](https://www.openstreetmap.org) and click a result whose
+border is drawn on the map. The page address ends in `relation/<id>`: that number is the area's
+**OSM id**. Monaco has two: the country, [relation/1124039](https://www.openstreetmap.org/relation/1124039),
+whose border reaches far out to sea (its territorial waters), and its land area,
+[relation/2220322](https://www.openstreetmap.org/relation/2220322). For roads we want the land:
+**2220322**.
 
 ## 2. Download the map data
 
@@ -23,11 +26,11 @@ For your own area, download the smallest region that contains it.
 ## 3. Make the boundary file
 
 ```bash
-duckosm boundary --osm-id 1124039 --pbf monaco-latest.osm.pbf
+duckosm boundary --osm-id 2220322 --pbf monaco-latest.osm.pbf
 ```
 
 ```text
-wrote monaco.geojson: Monaco (admin level 2, OSM relation 1124039, 79.8 km²), from PBF monaco-latest.osm.pbf
+wrote monaco.geojson: Monaco (admin level 8, OSM relation 2220322, 2.39 km²), from PBF monaco-latest.osm.pbf
 ```
 
 ## 4. Build the network
@@ -100,5 +103,7 @@ Open the file in a browser. This is that file, live: zoom, hover a road, click o
 ## Next
 
 - Build your own area: the same steps, with your area's id and region file.
-- [User manual](user_manual.md): every build option, routing across modes, and more.
-- [Exports](user_manual.md#exports): SUMO, MATSim, GMNS, GIS and more.
+- [Guides](guides/prepare-area.md): prepare other areas, build options, fix OSM errors, query, route,
+  maps, elevation.
+- Exports: [SUMO](exports/sumo.md), [MATSim](matsim_export.md), [GMNS](gmns_export.md),
+  [GIS](gis_export.md), [networkx](exports/networkx.md).

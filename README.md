@@ -18,9 +18,9 @@
 <p align="center">
   <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
   <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/user_manual/">User manual</a> ·
+  <a href="https://khoshkhah.github.io/duckOSM/guides/build/">Guides</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/data_dictionary/">Data dictionary</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/query_cookbook/">Query cookbook</a>
+  <a href="https://khoshkhah.github.io/duckOSM/guides/query/">Query the database</a>
 </p>
 
 ---

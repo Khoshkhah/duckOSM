@@ -207,4 +207,4 @@ cell per resolution in `boundary_cell_resolutions`, default `[h3_resolution]`).
 | `geometry` | GEOMETRY | Hexagon polygon, EPSG:4326 |
 
 ### Table: `admin_boundaries` *(optional)*
-Added by `duckosm admin` (`duckosm/admin.py`). See [`admin_boundaries.md`](admin_boundaries.md).
+Added by `duckosm admin` (`duckosm/admin.py`). See [Add administrative boundaries](guides/admin-boundaries.md).
