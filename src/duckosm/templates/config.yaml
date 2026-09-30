@@ -56,7 +56,6 @@ options:
   calculate_costs: true                # cost_s travel time
   boundary_cells: false                # main.boundary_cells H3 grid (needs a boundary)
   boundary_cell_resolutions: null      # e.g. [6, 7, 8]; null = [h3_resolution]
-  timezone: false                      # IANA tz on visualization_metadata (needs `timezonefinder`)
   memory_limit: null                   # e.g. "16GB"; null = DuckDB default
   threads: null                        # cap worker threads; null = DuckDB default
   simplify_batches: 0                  # 0 = auto-size by node count; 1 = single pass

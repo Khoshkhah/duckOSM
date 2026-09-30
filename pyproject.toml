@@ -29,6 +29,7 @@ dependencies = [
     "h3>=4.0.0",
     "rich>=13.0.0",
     "pandas",             # gmns exporter (lane/curb tables); numpy already comes with shapely
+    "timezonefinder>=6.0",  # every area db stores its IANA time zone
 ]
 
 [project.scripts]
@@ -36,7 +37,6 @@ duckosm = "duckosm.cli:main"
 
 [project.optional-dependencies]
 viz = ["folium", "leafmap"]
-tz = ["timezonefinder>=6.0"]
 routing = ["networkx"]
 sumo = ["eclipse-sumo", "sumolib"]
 elevation = ["rasterio>=1.3", "pyproj>=3.0"]

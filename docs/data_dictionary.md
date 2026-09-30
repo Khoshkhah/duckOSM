@@ -170,7 +170,7 @@ Stores computed metadata for frontend visualization.
 | `center_lat` | DOUBLE | Latitude of map center |
 | `center_lon` | DOUBLE | Longitude of map center |
 | `initial_zoom` | INTEGER | Recommended initial zoom level (1-14) |
-| `timezone` | VARCHAR | IANA timezone of the centroid — only when `options.timezone` is enabled |
+| `timezone` | VARCHAR | IANA time zone of the area, e.g. `Europe/Stockholm`, looked up at the network node nearest the median of all nodes; always set |
 
 ### Table: `elevation_metadata` *(optional)*
 DEM provenance, written by `duckosm elevation` alongside the `ele` / `z_from` / `z_to` columns —

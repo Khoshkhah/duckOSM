@@ -39,7 +39,6 @@ CLI flags override the corresponding config values (see `duckosm build --help`).
 | `calculate_costs` | bool | `true` | Compute travel-time `cost_s` per edge. |
 | `boundary_cells` | bool | `false` | Write `main.boundary_cells` (H3 grid over the boundary). Needs `boundary_path`. |
 | `boundary_cell_resolutions` | list[int] \| null | `null` | Resolutions for `boundary_cells`; `null` = `[h3_resolution]`. |
-| `timezone` | bool | `false` | Add an IANA `timezone` column to `visualization_metadata` (from the centroid). Needs the optional `timezonefinder` package (`pip install timezonefinder` or `pip install -e .[tz]`); skipped with a warning if absent. |
 | `memory_limit` | string \| null | `null` | Cap DuckDB memory, e.g. `"16GB"`. `null` = DuckDB default (~80% of RAM). |
 | `threads` | int \| null | `null` | Cap worker threads. `null` = DuckDB default. |
 | `simplify_batches` | int | `0` | Way-id buckets for the simplifier. `0` = auto-size by node count (bounds peak RAM at country scale); `1` = single pass. |

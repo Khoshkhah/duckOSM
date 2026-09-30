@@ -7,7 +7,7 @@ pip install duckosm                      # core
 pip install "duckosm[routing]"           # + networkx, for route() / Router / to_networkx
 ```
 
-Other extras: `[sumo]` (SUMO export), `[elevation]` (DEM sampling), `[tz]` (time zones), `[viz]`
+Other extras: `[sumo]` (SUMO export), `[elevation]` (DEM sampling), `[viz]`
 (notebook maps). To work on duckOSM itself, install from source: see [Development](development.md).
 
 Every relative path duckOSM uses (outputs, configs, reports) resolves against the folder you run

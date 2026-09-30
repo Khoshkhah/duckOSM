@@ -26,3 +26,6 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     for mode in ("driving", "walking", "cycling"):
         assert con.execute(f"SELECT count(*) FROM {mode}.edges").fetchone()[0] > 100
     assert con.execute("SELECT count(*) FROM driving.edge_graph").fetchone()[0] > 0
+    # every area db stores its time zone (required, not an option)
+    # looked up on the network, not at the bbox centre (which for this extract is at sea, in France)
+    assert con.execute("SELECT timezone FROM main.visualization_metadata").fetchone()[0] == "Europe/Monaco"

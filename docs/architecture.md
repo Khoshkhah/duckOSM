@@ -105,7 +105,7 @@ flowchart LR
 | ③ | Intermodal graph | `MultimodalBuilder` | `multimodal.enabled` (off); needs walking plus one other mode |
 | ③ | Base-map layers | `FeaturesBuilder` | `options.build_features` (off) |
 | ③ | `edge_id_hash` macros | `create_edge_id_macro` | always |
-| ③ | Metadata | `main.visualization_metadata` | always; time zone with `options.timezone` (off) |
+| ③ | Metadata | `main.visualization_metadata` | always, incl. the area's IANA time zone (a build fails without one) |
 | ③ | Report / map | `write_report` / `render_network` | `report.enabled` / `viz.enabled` (both off) |
 
 The per-mode stages run once for each mode in `modes`, in its own schema (`USE driving`), which is
