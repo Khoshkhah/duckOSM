@@ -65,17 +65,13 @@ WHERE length_m > 100 AND name IS NOT NULL AND tunnel IS NULL AND bridge IS NULL
 ORDER BY abs(z_to - z_from) / length_m DESC LIMIT 5;
 ```
 
-```text
-┌───────────────────────┬────────┬────────┬──────────┬───────────┐
-│         name          │ z_from │  z_to  │ length_m │ grade_pct │
-├───────────────────────┼────────┼────────┼──────────┼───────────┤
-│ Boulevard de Belgique │   86.0 │  111.0 │    110.0 │      22.5 │
-│ Boulevard de Belgique │  111.0 │   86.0 │    110.0 │     -22.5 │
-│ Rue Louis Auréglia    │   58.0 │   36.0 │    164.0 │     -12.9 │
-│ Boulevard du Larvotto │   36.0 │   51.0 │    116.0 │      12.8 │
-│ Avenue de Monte-Carlo │   36.0 │   50.0 │    106.0 │      12.7 │
-└───────────────────────┴────────┴────────┴──────────┴───────────┘
-```
+| name | z_from | z_to | length_m | grade_pct |
+|---|---:|---:|---:|---:|
+| Boulevard de Belgique | 86.0 | 111.0 | 110.0 | 22.5 |
+| Boulevard de Belgique | 111.0 | 86.0 | 110.0 | -22.5 |
+| Rue Louis Auréglia | 58.0 | 36.0 | 164.0 | -12.9 |
+| Boulevard du Larvotto | 36.0 | 51.0 | 116.0 | 12.8 |
+| Avenue de Monte-Carlo | 36.0 | 50.0 | 106.0 | 12.7 |
 
 With Copernicus, the tunnels of Monaco would top this list: Tunnel Albert II "falls" from 336 m to
 32 m, the height of the hill above it.

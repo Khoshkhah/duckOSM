@@ -26,15 +26,11 @@ UNION ALL SELECT 'walking', count(*), round(sum(length_m) / 1000, 1) FROM walkin
 UNION ALL SELECT 'cycling', count(*), round(sum(length_m) / 1000, 1) FROM cycling.edges;
 ```
 
-```text
-┌─────────┬───────┬───────┐
-│  mode   │ edges │  km   │
-├─────────┼───────┼───────┤
-│ driving │  2133 │ 102.1 │
-│ walking │  9232 │ 245.0 │
-│ cycling │  8440 │ 243.3 │
-└─────────┴───────┴───────┘
-```
+| mode | edges | km |
+|---|---:|---:|
+| driving | 2133 | 102.1 |
+| walking | 9232 | 245.0 |
+| cycling | 8440 | 243.3 |
 
 ## Roads
 
@@ -59,14 +55,10 @@ FROM driving.edge_graph g JOIN driving.edges e ON e.edge_id = g.to_edge
 WHERE g.from_edge = 2226047604433257818;          -- the end of Avenue Delphine
 ```
 
-```text
-┌─────────────────────┬─────────────────────┬─────────────┐
-│       edge_id       │        name         │   highway   │
-├─────────────────────┼─────────────────────┼─────────────┤
-│ 4105183032679836683 │ Avenue Saint-Romain │ residential │
-│ 3664387098764709418 │ Avenue Delphine     │ residential │
-└─────────────────────┴─────────────────────┴─────────────┘
-```
+| edge_id | name | highway |
+|---:|---|---|
+| 4105183032679836683 | Avenue Saint-Romain | residential |
+| 3664387098764709418 | Avenue Delphine | residential |
 
 ```sql
 -- junctions with the most turn restrictions
@@ -86,15 +78,11 @@ SELECT name, highway,
 FROM driving.edges ORDER BY metres LIMIT 3;
 ```
 
-```text
-┌────────────────────────┬─────────────┬────────┐
-│          name          │   highway   │ metres │
-├────────────────────────┼─────────────┼────────┤
-│ Allées des Boulingrins │ service     │   19.0 │
-│ Avenue de Monte-Carlo  │ residential │   21.0 │
-│ Avenue de Monte-Carlo  │ residential │   21.0 │
-└────────────────────────┴─────────────┴────────┘
-```
+| name | highway | metres |
+|---|---|---:|
+| Allées des Boulingrins | service | 19.0 |
+| Avenue de Monte-Carlo | residential | 21.0 |
+| Avenue de Monte-Carlo | residential | 21.0 |
 
 ```sql
 -- edges per H3 cell (the cell of each edge's start)

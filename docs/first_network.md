@@ -56,18 +56,13 @@ con.sql("""SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS 
            FROM driving.edges GROUP BY highway ORDER BY km DESC LIMIT 5""").show()
 ```
 
-```text
-┌─────────────┬───────┬────────┐
-│   highway   │ edges │   km   │
-│   varchar   │ int64 │ double │
-├─────────────┼───────┼────────┤
-│ residential │   610 │   32.8 │
-│ service     │   701 │   28.4 │
-│ secondary   │   339 │   14.9 │
-│ tertiary    │   254 │   12.5 │
-│ primary     │   184 │   11.2 │
-└─────────────┴───────┴────────┘
-```
+| highway | edges | km |
+|---|---:|---:|
+| residential | 610 | 32.8 |
+| service | 701 | 28.4 |
+| secondary | 339 | 14.9 |
+| tertiary | 254 | 12.5 |
+| primary | 184 | 11.2 |
 
 ## 6. Find a route
 

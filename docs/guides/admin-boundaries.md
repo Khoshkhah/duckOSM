@@ -115,17 +115,13 @@ JOIN admin_boundaries d ON d.admin_level = 10 AND ST_Contains(d.geometry, ST_Poi
 GROUP BY 1 ORDER BY edges DESC;
 ```
 
-```text
-┌──────────────┬───────┐
-│   district   │ edges │
-├──────────────┼───────┤
-│ Monte-Carlo  │   429 │
-│ Fontvieille  │   371 │
-│ La Condamine │   357 │
-│ Larvotto     │   238 │
-│ …            │       │
-└──────────────┴───────┘
-```
+| district | edges |
+|---|---:|
+| Monte-Carlo | 429 |
+| Fontvieille | 371 |
+| La Condamine | 357 |
+| Larvotto | 238 |
+| … |  |
 
 The full ancestry of an area (district → municipality → country):
 
