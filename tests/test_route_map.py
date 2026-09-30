@@ -36,6 +36,7 @@ def test_route_map_embeds_the_turn_graph(tmp_path):
     rm = json.loads(html.split("const RM = ", 1)[1].split(";</script>", 1)[0])
 
     assert rm["modes"] == ["driving"] and rm["n"] == 3 and rm["mm"] is None
+    assert all(7.40 <= p[0] <= 7.43 for p in (rm["start"], rm["end"]))   # opens with a route between these
     # features ordered by edge_id: 10, 20, 30 -> k 0, 1, 2
     assert rm["name"] == ["B", "", "A"]
     assert max(rm["src"] + rm["tgt"]) < 4                  # 4 nodes, remapped to 0..3

@@ -20,8 +20,9 @@ duckosm route-map monaco.duckdb                  # -> reports/monaco_route_map.h
 ## The page
 
 - A roadstyle map, roads in neutral grey so the route stands out.
-- **Click the map to drop the start, click again for the end;** drag either marker to move it. Each
-  marker snaps to the nearest road.
+- **The page opens with a route; drag either marker to move the start or the end.** Each marker
+  snaps to the nearest road (both directions of a two-way road are tried). A click on a road shows
+  roadstyle's popup and copies its `edge_id`; Street View is on.
 - **A mode menu:** Drive, Walk, Cycle (the modes the db has), and **Walk + drive** when the db has
   the `mm` tables; fastest / shortest for one mode.
 - The route is drawn as its own line at the top of its level (over the roads it crosses, under a

@@ -28,9 +28,9 @@ The graph is held in memory: fine for a city, heavy for a country.
 duckosm route-map monaco.duckdb -m driving     # -> reports/monaco_route_map.html
 ```
 
-One HTML page, no server: click the map for the start, again for the end, and drag the markers to
-move them. The route is computed in the page over the same graph, so it gives the same answer as
-`route()`:
+One HTML page, no server: drag the two markers to set the start and the end. The route is computed
+in the page over the same graph, so it gives the same answer as `route()`. Click a road to copy its
+`edge_id`; the Street View button shows the street:
 
 <iframe src="../../maps/monaco_route_map.html" allow="clipboard-write" title="A route planner for Monaco, made by duckosm route-map"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
@@ -58,7 +58,7 @@ to_edge = con.execute(near, [43.7480, 7.4400]).fetchone()[0]       # Larvotto
 route(con, from_edge, to_edge)["time_s"]                            # 324 s, 3.8 km by car
 ```
 
-**On the map:** in a [`duckosm viz`](draw-map.md) map, click a road to copy its `edge_id`.
+**On the map:** in the route map above, click a road to copy its `edge_id`.
 
 Each mode has its own edges: for `mode="walking"`, take the ids from `walking.edges`.
 

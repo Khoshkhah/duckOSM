@@ -89,7 +89,7 @@ Every `edge_id` stays the same when you rebuild, cut out a smaller area, or expo
 duckosm viz monaco.duckdb -m driving       # -> reports/monaco_driving_network.html
 ```
 
-Open the file in a browser. This is that file, live: zoom, hover a road, click one to copy its
+Open the file in a browser. This is that file, live: zoom, hover a road, click one to see its
 `edge_id`, toggle road classes in the legend:
 
 <iframe src="../maps/monaco_driving.html" title="Monaco's driving network, drawn by duckosm viz"

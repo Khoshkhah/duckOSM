@@ -90,6 +90,14 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
                  if fm in mi and tm in mi and n in n_of]
         data["mm"] = {"edges": mm_edges, "transfers": mm_tr, "nodes": len(node_ids)}
 
+    # The page opens with a route: markers on the roads nearest 30 % and 70 % along the diagonal.
+    x0, y0, x1, y1 = con.execute(f"SELECT min(ST_XMin(geometry)), min(ST_YMin(geometry)), max(ST_XMax(geometry)), "
+                                 f"max(ST_YMax(geometry)) FROM {modes[0]}.edges").fetchone()
+    near = (f"SELECT ST_X(p), ST_Y(p) FROM (SELECT ST_LineInterpolatePoint(geometry, 0.5) AS p FROM {modes[0]}.edges "
+            f"ORDER BY ST_Distance(ST_Centroid(geometry), ST_Point(?, ?)) LIMIT 1)")
+    data["start"], data["end"] = (list(con.execute(near, [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f]).fetchone())
+                                  for f in (0.3, 0.7))
+
     g = gpd.GeoDataFrame(
         {"k": list(range(len(rows))), "edge_id": [str(r[0]) for r in rows], "name": [r[3] for r in rows],
          "highway": [r[4] for r in rows], "bridge": [r[5] for r in rows], "tunnel": [r[6] for r in rows],
@@ -98,7 +106,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id"],
-        road_popup=False, street_view=False, arrows=False, filter_control=False, name=f"{name}: route planner",
+        arrows=False, filter_control=False, name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
 
@@ -129,26 +137,24 @@ _CSS = """<style>
 #rm-result .rm-leg{display:flex;gap:6px;align-items:center;margin-top:4px}
 #rm-result .rm-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 #rm-result ol{margin:6px 0 0;padding-left:20px;color:#444;font-size:13px}
-#rm-panel button{padding:5px 12px;border:1px solid #bbb;border-radius:6px;background:#f7f7f7;cursor:pointer}
 #rm-result .rm-edges{margin-top:8px;font-size:12px} #rm-result .rm-edges summary{cursor:pointer;color:#555}
 #rm-result .rm-edges code{font-size:11px;user-select:all}
-.rm-id{margin:2px 0 6px;font:12px/1.4 system-ui,sans-serif} .rm-id code{user-select:all;font-size:12px}
-.rm-id button{margin-left:6px;font-size:11px;padding:1px 6px;cursor:pointer} .rm-id-name{color:#666;font-size:11px}
+#rm-panel .rm-clicked{margin:8px 0 0;font-size:12px;color:#555} #rm-panel .rm-clicked code{user-select:all}
 #rm-panel .rm-note{margin-top:10px;color:#777;font-size:12px}
 </style>
 """
 
 _HTML = """<div id="rm-panel">
   <h3>Route planner</h3>
-  <p class="rm-hint">Click the map to set the start, then the end. Drag the markers to move them.
-  Right-click a road for its <code>edge_id</code>.</p>
+  <p class="rm-hint">Drag the two markers to set the start and the end. Click a road to copy its
+  <code>edge_id</code>.</p>
   <fieldset><select id="rm-mode"></select></fieldset>
   <fieldset id="rm-weight">
     <label><input type="radio" name="rm-w" value="time" checked> fastest</label>
     <label><input type="radio" name="rm-w" value="length"> shortest</label>
   </fieldset>
-  <div id="rm-result">No route yet.</div>
-  <button id="rm-clear">Clear</button>
+  <div id="rm-result"></div>
+  <p class="rm-clicked" id="rm-clicked"></p>
   <p class="rm-note" id="rm-note"></p>
 </div>
 """
@@ -360,29 +366,15 @@ _JS = r"""
     $("rm-mode").innerHTML = CHOICES.map((c, i) => `<option value="${i}">${c.label}</option>`).join("");
     $("rm-mode").addEventListener("change", update);
     for (const r of document.querySelectorAll('input[name="rm-w"]')) r.addEventListener("change", update);
-    $("rm-clear").addEventListener("click", () => {
-      for (const w of ["A", "B"]) if (markers[w]) { markers[w].remove(); markers[w] = null; }
-      paint(null); $("rm-result").textContent = "No route yet.";
-    });
-    map.on("click", (e) => {
-      if (!markers.A || markers.B) { if (markers.B) { markers.B.remove(); markers.B = null; } setMarker("A", e.lngLat); $("rm-result").textContent = "Now click the end."; paint(null); }
-      else { setMarker("B", e.lngLat); update(); }
-    });
-    // Right-click a road: its edge_id(s) in a popup, to copy (both directions of a two-way road).
-    map.on("contextmenu", (e) => {
-      const ks = pick(e.lngLat, () => true); if (!ks) return;
-      const rows = rsGetProps(ks.map((k) => fid[k])).map((p) =>
-        `<div class="rm-id"><code>${p.edge_id}</code><button data-id="${p.edge_id}">Copy</button>` +
-        `<div class="rm-id-name">${p.name || ""} · ${p.highway}</div></div>`).join("");
-      const pop = new maplibregl.Popup({maxWidth: "320px"}).setLngLat(e.lngLat).setHTML(rows).addTo(map);
-      for (const b of pop.getElement().querySelectorAll("button[data-id]")) b.addEventListener("click", () => {
-        const done = () => { b.textContent = "Copied"; };
-        if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.id).then(done, () => { b.textContent = "Select it"; });
-        else b.textContent = "Select it";
-      });
+    // A click on a road (roadstyle's popup): its edge_id is copied and kept in the panel.
+    document.addEventListener("rs:select", (e) => {
+      const id = !e.detail.overlay && e.detail.properties && e.detail.properties.edge_id;
+      if (!id) return;
+      $("rm-clicked").innerHTML = `Clicked road: <code>${id}</code> <span id="rm-copied"></span>`;
+      if (navigator.clipboard) navigator.clipboard.writeText(String(id)).then(() => { $("rm-copied").textContent = "(copied)"; }, () => {});
     });
     window.rmRoute = function (a, b) { setMarker("A", a); setMarker("B", b); update(); };  // for scripted use
-    update();
+    rmRoute(D.start, D.end);              // opens with a route; drag the markers to change it
   }
 
   (function wait() {
