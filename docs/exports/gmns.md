@@ -82,7 +82,7 @@ duckosm gmns-map monaco_gmns.duckdb --style lane    # every lane at its width
 
 Each writes one HTML file that opens offline. `-m` picks the mode.
 
-![Boulevard Princesse Charlotte in Monaco, drawn by gmns-map --style lane](../images/gmns_lanes.png)
+![Boulevard Princesse Charlotte in Monaco, drawn by gmns-map --style lane](../images/gmns_lanes_zoom.png)
 
 `gmns-map --style lane`, zoomed in on Boulevard Princesse Charlotte in Monaco: each grey strip is one
 lane at its width (three lanes on the boulevard, one or two on the side streets), and each cyan
