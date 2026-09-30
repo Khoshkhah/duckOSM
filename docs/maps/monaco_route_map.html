@@ -1598,7 +1598,7 @@ window.map = map;
          (st.len ? ` <span class="rm-dist">${fmtLen(st.len)}</span>` : "") + "</li>").join("") + "</ol>";
     const ks = res.legs.flatMap((l) => l.edges), ps = rsGetProps(ks.map((k) => fid[k]));
     h += `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
-         ks.map((k, i) => `<li><code>${ps[i].edge_id}</code> ${D.name[k] || ""}</li>`).join("") + "</ol></details>";
+         ps.map((p) => `<li><code>${p.edge_id}</code></li>`).join("") + "</ol></details>";
     out.innerHTML = h;
     for (const li of out.querySelectorAll(".rm-steps li"))       // a step -> the map at that maneuver
       li.addEventListener("click", () => map.flyTo({center: steps[+li.dataset.i].at, zoom: Math.max(map.getZoom(), 17)}));
