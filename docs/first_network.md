@@ -59,11 +59,11 @@ con.sql("""SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS 
 
 | highway | edges | km |
 |---|---:|---:|
-| residential | 600 | 31.7 |
-| service | 518 | 20.1 |
-| secondary | 339 | 14.9 |
-| tertiary | 254 | 12.5 |
-| primary | 184 | 11.2 |
+| residential | 919 | 31.7 |
+| service | 781 | 20.1 |
+| secondary | 428 | 14.9 |
+| tertiary | 387 | 12.5 |
+| primary | 197 | 11.2 |
 
 ## 6. Find a route
 
@@ -77,8 +77,8 @@ a = con.execute(q, ["Boulevard du Larvotto"]).fetchone()[0]
 b = con.execute(q, ["Avenue Princesse Grace"]).fetchone()[0]
 
 r = route(con, a, b)
-r["time_s"], r["length_m"]          # (130.0, 1734.3): about 2 minutes, 1.7 km
-r["edges"]                          # the 25 edge_ids along the way
+r["time_s"], r["length_m"]          # (114.1, 1513.0): about 2 minutes, 1.5 km
+r["edges"]                          # the 29 edge_ids along the way
 ```
 
 Every `edge_id` stays the same when you rebuild, cut out a smaller area, or export: see

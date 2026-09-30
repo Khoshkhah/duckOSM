@@ -25,7 +25,7 @@ A transfer is made at every node that walking shares with another mode, in both 
 
 There is no transfer between driving and cycling: every change of mode goes through walking.
 
-Monaco: walking shares 729 nodes with driving and 3,082 with cycling, so `mm.transfers` has 7,622
+Monaco: walking shares 1,271 nodes with driving and 3,654 with cycling, so `mm.transfers` has 9,850
 rows (`duckosm multimodal monaco.duckdb`).
 
 ## The model

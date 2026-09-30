@@ -1,7 +1,7 @@
 # MATSim
 
 ```bash
-duckosm matsim monaco.duckdb           # -> monaco_network.xml.gz: 1,160 nodes, 1,940 links
+duckosm matsim monaco.duckdb           # -> monaco_network.xml.gz: 1,719 nodes, 2,765 links
 ```
 
 A MATSim `network.xml` (the `network_v2` format), which MATSim, BEAM and eqasim read. Each duckOSM
@@ -35,7 +35,7 @@ to_matsim("monaco.duckdb", "network.xml.gz", mode="driving")    # -> {"nodes", "
 ## All modes in one network
 
 ```bash
-duckosm matsim monaco.duckdb -m all -o network.xml.gz      # 3,976 nodes, 10,773 links
+duckosm matsim monaco.duckdb -m all -o network.xml.gz      # 4,470 nodes, 12,969 links
 ```
 
 A road used by several modes is one link with every mode on it (`modes="car,bike,walk"`), since

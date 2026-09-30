@@ -44,7 +44,7 @@ On Monaco, the file above gives:
 | | Without | With |
 |---|---|---|
 | driving edges of Avenue Delphine | 2 | 1 (one-way) |
-| cycling edges of Avenue Saint-Romain | 12 | 0 |
+| cycling edges of Avenue Saint-Romain | 18 | 0 |
 | turns from Avenue Delphine onto Avenue Saint-Romain | 1 | 0 |
 
 A rule for a way or junction that isn't in the area does nothing, so one file can hold fixes for

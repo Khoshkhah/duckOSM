@@ -14,9 +14,9 @@ One pair per mode, plus the area boundary. Monaco:
 
 | Layer | Features |
 |---|---|
-| `edges_driving`, `nodes_driving` | 1,940, 1,160 |
-| `edges_walking`, `nodes_walking` | 8,948, 3,491 |
-| `edges_cycling`, `nodes_cycling` | 8,448, 3,566 |
+| `edges_driving`, `nodes_driving` | 2,765, 1,719 |
+| `edges_walking`, `nodes_walking` | 10,706, 3,996 |
+| `edges_cycling`, `nodes_cycling` | 10,228, 4,128 |
 | `boundary` | 1 |
 
 Every column of the `edges` and `nodes` tables comes along as an attribute: `edge_id`, `source`,

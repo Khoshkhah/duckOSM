@@ -117,10 +117,10 @@ GROUP BY 1 ORDER BY edges DESC;
 
 | district | edges |
 |---|---:|
-| Monte-Carlo | 429 |
-| Fontvieille | 371 |
-| La Condamine | 357 |
-| Larvotto | 238 |
+| Monte-Carlo | 636 |
+| Fontvieille | 494 |
+| La Condamine | 469 |
+| Larvotto | 269 |
 | … |  |
 
 The full ancestry of an area (district → municipality → country):

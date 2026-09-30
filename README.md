@@ -60,7 +60,7 @@ a = con.execute(q, ["Boulevard du Larvotto"]).fetchone()[0]
 b = con.execute(q, ["Avenue Princesse Grace"]).fetchone()[0]
 
 r = route(con, a, b)                     # fastest path; weight="length" for distance
-r["time_s"], r["length_m"], r["edges"]   # ~130 s, ~1.7 km, the ordered edge_ids
+r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 ```
 
 ## What you get

@@ -10,8 +10,8 @@ def validate_geometry(db_path):
     con = duckdb.connect(db_path)
     con.execute("INSTALL spatial; LOAD spatial;")
     
-    # Get all mode schemas
-    schemas = [r[0] for r in con.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'main', 'raw')").fetchall()]
+    # Get all mode schemas: those with both an edges and a nodes table (not features.*, mm.*)
+    schemas = [r[0] for r in con.execute("SELECT table_schema FROM information_schema.tables WHERE table_name IN ('edges', 'nodes') GROUP BY 1 HAVING count(DISTINCT table_name) = 2 ORDER BY 1").fetchall()]
     
     overall_passed = True
     

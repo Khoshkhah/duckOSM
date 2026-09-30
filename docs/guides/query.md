@@ -30,9 +30,9 @@ UNION ALL SELECT 'cycling', count(*), round(sum(length_m) / 1000, 1) FROM cyclin
 
 | mode | edges | km |
 |---|---:|---:|
-| driving | 1940 | 92.6 |
-| walking | 8948 | 235.3 |
-| cycling | 8448 | 243.3 |
+| driving | 2765 | 92.6 |
+| walking | 10706 | 244.1 |
+| cycling | 10228 | 245.5 |
 
 ## Roads
 
@@ -59,7 +59,7 @@ WHERE g.from_edge = 2226047604433257818;          -- the end of Avenue Delphine
 
 | edge_id | name | highway |
 |---:|---|---|
-| 4105183032679836683 | Avenue Saint-Romain | residential |
+| 8072509973910824634 | Avenue Saint-Romain | residential |
 | 3664387098764709418 | Avenue Delphine | residential |
 
 ```sql
@@ -77,13 +77,13 @@ latitude first, so flip the geometry:
 -- the roads nearest a point (the Casino de Monte-Carlo: lat 43.7397, lon 7.4270)
 SELECT name, highway,
        round(ST_Distance_Sphere(ST_FlipCoordinates(ST_Centroid(geometry)), ST_Point(43.7397, 7.4270))) AS metres
-FROM driving.edges ORDER BY metres LIMIT 3;
+FROM driving.edges ORDER BY metres, edge_id LIMIT 3;
 ```
 
 | name | highway | metres |
 |---|---|---:|
 | Allées des Boulingrins | service | 19.0 |
-| Avenue de Monte-Carlo | residential | 21.0 |
+| Allées des Boulingrins | residential | 19.0 |
 | Avenue de Monte-Carlo | residential | 21.0 |
 
 ```sql

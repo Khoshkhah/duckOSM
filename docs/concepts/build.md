@@ -88,17 +88,17 @@ Config keys are shown with their default.
 | ① | Parse OSM into `raw.*` (`ST_READOSM`) | always |
 | ① | Load the boundary into `main.boundary` | a boundary is set; `boundary.buffer_m` (0) grows it |
 | ① | Boundary cells (`main.boundary_cells`) | a boundary is set and `options.boundary_cells` (off) |
-| ① | Global junctions (`main.global_junctions`) | `options.simplify` and `options.global_junctions` (both on) |
+| ① | Global junctions (`main.global_junctions`) | `options.global_junctions` (on) |
 | ② | Filter roads | always; the rules per mode: [What each network contains](networks.md) |
 | ② | OSM fixes | a fixes file is named: `osm_overrides:` in the config, or `build --fixes`. There is no default file. See [Fix OSM errors](../guides/fix-osm-errors.md) |
 | ② | Build edges | always |
-| ② | Simplify and merge | `options.simplify` and `options.merge_segments` (both on) |
+| ② | Simplify and merge | always (cut ways into edges where they meet); merging: `options.merge_segments` (on) |
 | ② | Connect dangling paths | walking and cycling; `clip.connectivity_rescue` (on) |
 | ② | Mark dismount edges | cycling; `options.cycling_dismount` (on) |
 | ② | Speeds | `options.process_speeds` (on) |
 | ② | Travel-time costs | `options.calculate_costs` (on) |
 | ② | Walk / cycle type | walking and cycling; `options.functional_types` (on) |
-| ② | Turn restrictions | driving only; `options.extract_restrictions` (on), which needs `simplify` |
+| ② | Turn restrictions | driving only; `options.extract_restrictions` (on) |
 | ② | Edge graph | `options.build_graph` (on) |
 | ② | Component filter | a boundary is set, `build_graph` is on, and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
 | ② | H3 cells | `options.h3_indexing` (on) |
@@ -123,10 +123,10 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 |---|---|
 | Filter roads | 1,126 OSM ways |
 | Build edges | 1,588 edges (one per way, plus the reverse of two-way ways) |
-| Simplify and merge | 2,167 edges: ways split at junctions |
-| Private roads | 150 edges moved to `private_edges` |
+| Simplify and merge | 3,040 edges: ways split at junctions |
+| Private roads | 196 edges moved to `private_edges` |
 | Turn restrictions | 38 restrictions mapped to edges |
-| Component filter | 1,940 edges: 77 edges in 15 small pieces dropped |
+| Component filter | 2,765 edges: 79 edges in 15 small pieces dropped |
 
 ## What stays in the database
 

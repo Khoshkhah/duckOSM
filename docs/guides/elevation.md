@@ -9,10 +9,10 @@ duckosm elevation monaco.duckdb
 
 ```text
   source=auto → copernicus (bbox 7.41, 43.73, 7.44, 43.75)
-  [cycling] 3566 nodes sampled (0 nodata/fill) -> ele
-  [driving] 1160 nodes sampled (0 nodata/fill) -> ele
-  [walking] 3491 nodes sampled (0 nodata/fill) -> ele
-elevation added from Copernicus GLO-30 — 8217 nodes (0 nodata/fill) across 3 mode(s) -> ele
+  [cycling] 4128 nodes sampled (0 nodata/fill) -> ele
+  [driving] 1719 nodes sampled (0 nodata/fill) -> ele
+  [walking] 3996 nodes sampled (0 nodata/fill) -> ele
+elevation added from Copernicus GLO-30 — 9843 nodes (0 nodata/fill) across 3 mode(s) -> ele
 ```
 
 It adds:
@@ -69,9 +69,9 @@ ORDER BY abs(z_to - z_from) / length_m DESC LIMIT 5;
 |---|---:|---:|---:|---:|
 | Boulevard de Belgique | 86.0 | 111.0 | 110.0 | 22.5 |
 | Boulevard de Belgique | 111.0 | 86.0 | 110.0 | -22.5 |
-| Rue Louis Auréglia | 58.0 | 36.0 | 164.0 | -12.9 |
-| Boulevard du Larvotto | 36.0 | 51.0 | 116.0 | 12.8 |
-| Avenue de Monte-Carlo | 36.0 | 50.0 | 106.0 | 12.7 |
+| Boulevard du Jardin Exotique | 117.0 | 97.0 | 123.0 | -16.5 |
+| Boulevard du Jardin Exotique | 97.0 | 117.0 | 123.0 | 16.5 |
+| Avenue de La Quarantaine | 32.0 | 8.0 | 144.0 | -16.1 |
 
 With Copernicus, the tunnels of Monaco would top this list: Tunnel Albert II "falls" from 336 m to
 32 m, the height of the hill above it.

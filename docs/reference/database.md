@@ -179,7 +179,7 @@ Left over from the build and always empty: the virtual nodes are in `nodes`, wit
 |---|---|
 | [`visualization_metadata`](#visualization_metadata) | always |
 | [`boundary`](#boundary) | a boundary is set |
-| [`global_junctions`](#global_junctions) | a build from a PBF, with `options.simplify` and `options.global_junctions` (both on) |
+| [`global_junctions`](#global_junctions) | a build from a PBF, with `options.global_junctions` (on) |
 | [`boundary_cells`](#boundary_cells) | `options.boundary_cells`, with a boundary |
 | [`elevation_metadata`](#elevation_metadata) | after `duckosm elevation` |
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin` |

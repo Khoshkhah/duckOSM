@@ -22,7 +22,7 @@ part of the id.
 way that runs between the same two junctions twice, or goes from A to B and back), the build splits
 the edge at its midpoint with a **virtual node**. A virtual node has `node_id < 0` and its id is a
 hash of the edge's content, so it is as stable as the rest. If a repeated triple still survives, the
-build stops with an error. Monaco: 2 virtual nodes in driving, 19 in walking, 21 in cycling.
+build stops with an error. Monaco: 1 virtual node in driving, 19 in walking, 21 in cycling.
 
 ## The same id in every mode
 
@@ -30,7 +30,7 @@ Every mode splits roads at one shared set of points, `main.global_junctions`: ea
 that another OSM way also uses (another road, or a footway, path or cycleway, such as a crosswalk),
 and each node where a road ends. It is made once from all OSM ways, before any mode filters them.
 So a road that is in two modes is cut into the same pieces and has the same `edge_id` in both.
-Monaco: 1,927 of the 1,940 driving edges have the same `edge_id` in cycling, 1,129 in walking.
+Monaco: 2,754 of the 2,765 driving edges have the same `edge_id` in cycling, 1,882 in walking.
 The others are roads that mode doesn't include.
 
 So a crosswalk cuts the road it crosses in driving too: walkers and cyclists connect to the road
@@ -53,9 +53,9 @@ only chains of footways, paths and the like are. Monaco:
 
 | Mode | Edges with merging | Edges with `merge_segments: false` |
 |---|---|---|
-| driving | 1,940 | 1,940 |
-| walking | 8,948 | 9,980 |
-| cycling | 8,448 | 9,794 |
+| driving | 2,765 | 2,765 |
+| walking | 10,706 | 11,128 |
+| cycling | 10,228 | 10,782 |
 
 ### `edge_id_map`
 
@@ -71,8 +71,8 @@ for the reverse direction of a two-way road.
 | `osm_id` | the piece's own OSM way |
 
 An edge that is not in the table was not merged. Rows of edges removed by the
-[component filter](cleanup.md#component-filter) are removed too. Monaco, walking: 1,738 rows for
-718 merged edges. The OSM ways of one merged edge, in order:
+[component filter](cleanup.md#component-filter) are removed too. Monaco, walking: 786 rows for
+362 merged edges. The OSM ways of one merged edge, in order:
 
 ```sql
 SELECT seq, osm_id FROM walking.edge_id_map WHERE new_edge_id = ? ORDER BY seq;

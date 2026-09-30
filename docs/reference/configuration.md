@@ -83,14 +83,13 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns. The component filter needs it |
 | `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res` |
 | `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` |
-| `options.simplify` | `true` | | split ways into edges at junctions, with full geometry. `false` is not a supported network, and needs `extract_restrictions: false` |
 | `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
-| `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. Needs `simplify`. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
+| `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
 | `options.functional_types` | `true` | | add `walk_type` (walking) and `cycle_type` (cycling). [`walk_type` and `cycle_type`](../concepts/networks.md#walk_type-and-cycle_type) |
 | `options.cycling_dismount` | `true` | | add footways and pedestrian streets to cycling as [dismount edges](../concepts/networks.md#dismount-edges) |
 | `options.process_speeds` | `true` | | add `maxspeed_kmh` to edges. [Speeds and travel time](../concepts/networks.md#speeds-and-travel-time) |
 | `options.calculate_costs` | `true` | | add `cost_s`, the travel time in seconds. Routing and `multimodal` need it |
-| `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. Needs `simplify` |
+| `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. |
 | `options.boundary_cells` | `false` | | write `main.boundary_cells`, the H3 cells that cover the boundary. Needs a boundary |
 | `options.boundary_cell_resolutions` | none | | resolutions for `boundary_cells`, e.g. `[6, 7, 8]`; none means `[h3_resolution]` |
 | `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it |
