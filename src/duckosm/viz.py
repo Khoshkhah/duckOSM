@@ -95,8 +95,8 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
 
 
 def add_level(g):
-    """Add ``level``: the road's level as roadstyle draws it. A bridge is at least 1, a tunnel at
-    most -1 (both carry their OSM ``layer`` beyond that), any other road 0 or its negative layer."""
+    """Add ``level``: the road's draw level, as roadstyle orders it: the OSM ``layer`` when tagged
+    (not 0); else a bridge is 1, a tunnel -1, any other road 0."""
     import pandas as pd
 
     def flag(col):
@@ -107,8 +107,8 @@ def add_level(g):
 
     ly = (pd.to_numeric(g["layer"], errors="coerce").fillna(0).astype(int) if "layer" in g
           else pd.Series(0, index=g.index))
-    g["level"] = (ly.clip(upper=0).where(~flag("tunnel"), ly.clip(upper=-1))
-                  .where(~flag("bridge"), ly.clip(lower=1)))
+    default = pd.Series(0, index=g.index).mask(flag("tunnel"), -1).mask(flag("bridge"), 1)
+    g["level"] = ly.where(ly != 0, default)
     return g
 
 

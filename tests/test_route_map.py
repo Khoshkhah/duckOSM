@@ -53,11 +53,11 @@ def test_route_map_unknown_mode_raises(tmp_path):
 
 
 def test_level_as_roadstyle_draws_it():
-    """`level` (hover, popup, route list): a bridge at least 1, a tunnel at most -1, else 0."""
+    """`level` (hover, popup, route list): the OSM layer when tagged, else bridge 1 / tunnel -1 / 0."""
     import geopandas as gpd
     from shapely.geometry import Point
     from duckosm.viz import add_level
     g = gpd.GeoDataFrame({"bridge": ["yes", None, None, None, "yes"],
                           "tunnel": [None, "yes", "building_passage", None, None],
                           "layer": [None, "-2", None, "1", "3"]}, geometry=[Point(0, 0)] * 5)
-    assert add_level(g)["level"].tolist() == [1, -2, -1, 0, 3]
+    assert add_level(g)["level"].tolist() == [1, -2, -1, 1, 3]    # a layer=1 road is above ground
