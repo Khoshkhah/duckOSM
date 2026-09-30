@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" font-family="Inter, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title>One junction in GMNS: a node, links, lanes and movements</title>
+  <defs>
+    <marker id="ab" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2f6fdf"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#e8772e"/></marker>
+    <marker id="ak" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><circle cx="5" cy="5" r="3" fill="#1f2530"/></marker>
+    <style>
+      .h { font-size: 15px; font-weight: 600; fill: #1f2530; }
+      .s { font-size: 13px; fill: #4a5261; }
+      .halo { paint-order: stroke; stroke: #f6f7f9; stroke-width: 4px; stroke-linejoin: round; }
+      .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 12.5px; }
+    </style>
+  </defs>
+  <rect width="900" height="470" fill="#f6f7f9"/>
+
+  <!-- roads: an east-west road (2 lanes each way) and a north-south road (1 lane each way) -->
+  <rect x="0" y="150" width="900" height="136" fill="#cfd4db"/>
+  <rect x="560" y="0" width="68" height="470" fill="#cfd4db"/>
+
+  <!-- the link coming in from the west: its two lanes, tinted -->
+  <rect x="0" y="218" width="560" height="34" fill="#2f6fdf" fill-opacity="0.18"/>
+  <rect x="0" y="252" width="560" height="34" fill="#e8772e" fill-opacity="0.18"/>
+
+  <!-- road markings -->
+  <g stroke="#ffffff" fill="none">
+    <path d="M0,218 H556 M632,218 H900" stroke-width="3"/>
+    <path d="M0,184 H556 M632,184 H900 M0,252 H530 M632,252 H900 M594,0 V146 M594,290 V470" stroke-width="2" stroke-dasharray="14 10"/>
+    <path d="M556,218 V286" stroke-width="5"/>
+  </g>
+  <!-- painted lane arrows: lane 1 left, lane 2 through + right -->
+  <g fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M470,235 H505 Q518,235 518,224"/><path d="M512,229 L518,222 L524,229"/>
+    <path d="M470,269 H522"/><path d="M515,263 L523,269 L515,275"/>
+    <path d="M492,269 Q505,269 505,279"/><path d="M499,275 L505,282 L511,275"/>
+  </g>
+  <!-- direction of the other lanes -->
+  <g fill="#9aa3af">
+    <path d="M300,162 l-12,5 l12,5 z M300,196 l-12,5 l12,5 z M780,162 l-12,5 l12,5 z M780,196 l-12,5 l12,5 z"/>
+    <path d="M780,230 l12,5 l-12,5 z M780,264 l12,5 l-12,5 z"/>
+    <path d="M572,60 l5,12 l5,-12 z M606,72 l5,-12 l5,12 z M572,400 l5,12 l5,-12 z M606,412 l5,-12 l5,12 z"/>
+  </g>
+
+  <!-- movements from the incoming link -->
+  <g fill="none" stroke-width="5" stroke-linecap="round">
+    <path d="M556,235 C598,235 611,212 611,160 V112" stroke="#2f6fdf" marker-end="url(#ab)"/>
+    <path d="M556,269 H706" stroke="#e8772e" marker-end="url(#ao)"/>
+    <path d="M556,269 C574,269 577,280 577,300 V340" stroke="#e8772e" marker-end="url(#ao)"/>
+  </g>
+
+  <!-- node -->
+  <circle cx="594" cy="218" r="7" fill="#1f2530" stroke="#ffffff" stroke-width="2.5"/>
+  <path d="M594,218 L700,110" stroke="#1f2530" stroke-width="1.2" fill="none"/>
+  <text x="706" y="98" class="h halo">node</text>
+  <text x="706" y="116" class="s halo">the junction</text>
+  <text x="706" y="133" class="s halo"><tspan class="mono">ctrl_type = signal</tspan> at lights</text>
+
+  <!-- movement labels -->
+  <text x="640" y="46" class="h halo" fill="#2f6fdf" style="fill:#2f6fdf">movement EBL</text>
+  <text x="640" y="64" class="s halo">left, from lane 1</text>
+  <text x="660" y="314" class="h halo" style="fill:#c15f1f">movement EBT</text>
+  <text x="660" y="332" class="s halo">through, from lane 2</text>
+  <text x="640" y="372" class="h halo" style="fill:#c15f1f">movement EBR</text>
+  <text x="640" y="390" class="s halo">right, from lane 2</text>
+
+  <!-- lane labels -->
+  <text x="24" y="240" class="h" style="fill:#1d4fb0">lane 1 <tspan class="s" style="fill:#1d4fb0">turn: left</tspan></text>
+  <text x="24" y="274" class="h" style="fill:#a4501a">lane 2 <tspan class="s" style="fill:#a4501a">turn: through;right</tspan></text>
+
+  <!-- link label -->
+  <path d="M8,300 V310 H548 V300" stroke="#1f2530" stroke-width="1.2" fill="none"/>
+  <text x="24" y="336" class="h">link: one direction of a road</text>
+  <text x="24" y="355" class="s"><tspan class="mono">link_id</tspan> = the duckOSM <tspan class="mono">edge_id</tspan> · <tspan class="mono">lanes = 2</tspan></text>
+  <text x="24" y="374" class="s">from OSM: <tspan class="mono">turn:lanes = left|through;right</tspan></text>
+</svg>

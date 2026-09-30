@@ -62,13 +62,9 @@ def _quantizer(wkts):
 
 
 def _conns(con, mode):
-    m = f"meso_{mode}"
-    if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='meso_link'",
-                   [m]).fetchone()[0] == 0:
-        return []
+    """The turn curves: every GMNS movement's geometry (WKT), so no meso network is needed."""
     return [r[0] for r in con.execute(
-        f"SELECT ST_AsText(geom) FROM {m}.meso_link WHERE meso_type='movement' AND geom IS NOT NULL"
-    ).fetchall()]
+        f"SELECT geometry FROM gmns_{mode}.movement WHERE geometry IS NOT NULL").fetchall()]
 
 
 def build_road_payload(con, mode="driving"):
@@ -152,11 +148,11 @@ _CHROME = r"""<style>
 .hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none;opacity:0;transition:opacity 1s ease}
 .hero canvas.in{opacity:1}.hero canvas:active{cursor:grabbing}
 .vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(125% 95% at 50% 42%,transparent 55%,rgba(4,6,10,.75) 100%)}
-.cap{position:absolute;left:26px;top:24px;pointer-events:none}
+.cap{position:absolute;left:16px;top:16px;padding:10px 14px 12px;border-radius:8px;background:rgba(11,15,21,.97);pointer-events:none}
 .cap .k{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#6a8a92}
 .cap h1{margin:6px 0 0;font-size:25px;font-weight:600;letter-spacing:-.015em;line-height:1.12;text-shadow:0 2px 22px rgba(0,0,0,.6)}
 .cap h1 b{color:#f0b25a;font-weight:600}.cap p{margin:9px 0 0;font-family:var(--mono);font-size:12px;color:#8397a6;max-width:36ch}
-.leg{position:absolute;left:26px;bottom:22px;display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:12px;color:#9fb1c0;pointer-events:none}
+.leg{position:absolute;left:16px;bottom:16px;padding:8px 12px;border-radius:8px;background:rgba(11,15,21,.97);display:flex;flex-wrap:wrap;gap:14px;font-family:var(--mono);font-size:12px;color:#9fb1c0;pointer-events:none}
 .leg span{display:inline-flex;align-items:center;gap:7px}.leg i{width:15px;height:9px;border-radius:2px;display:inline-block}
 .hint{position:absolute;right:22px;bottom:22px;font-family:var(--mono);font-size:11px;color:#5f7183;pointer-events:none}
 @media(prefers-reduced-motion:reduce){.hero canvas{transition:none}}
@@ -214,5 +210,5 @@ function draw(){ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#0a0d13';ctx.fillRe
   ctx.lineCap='round';ctx.lineJoin='round';const m=GPM*v.s*dpr;
   ctx.strokeStyle='#161b24';for(const L of D.lanes){ctx.lineWidth=Math.max(1,L[1]*m);ctx.beginPath();poly(L,2);ctx.stroke();}
   for(const L of D.lanes){ctx.strokeStyle=LC[L[0]];ctx.lineWidth=Math.max(.8,L[1]*m*0.84);ctx.beginPath();poly(L,2);ctx.stroke();}
-  ctx.strokeStyle='#39c6d6';const cw=Math.max(.8,3.0*m*0.7);for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
+  ctx.strokeStyle='#39c6d6';const cw=Math.max(.8,1.0*m);for(const g of D.conn){ctx.lineWidth=cw;ctx.beginPath();poly(g,0);ctx.stroke();}}
 """ + _PANZOOM + "})();</script>"

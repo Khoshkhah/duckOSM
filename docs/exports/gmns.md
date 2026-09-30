@@ -13,7 +13,7 @@ the source database, and its tables carry real geometry, so you can query and dr
 The CSVs have only the columns the spec defines, so the geometries and each lane's turns stay in the
 DuckDB file.
 
-![Lanes and smooth turn connectors at a Södermalm junction](../images/gmns_junction.png)
+![One junction in GMNS: a node, a link with two lanes, and the movements each lane may take](../images/gmns_junction.svg)
 
 ## What's in it
 
@@ -82,7 +82,7 @@ duckosm gmns-map monaco_gmns.duckdb --style lane    # every lane at its width
 
 Each writes one HTML file that opens offline. `-m` picks the mode.
 
-![Roads by direction (gmns-map)](../images/gmns_road_direction.png)
+![Monaco drawn by gmns-map --style lane: every lane at its width, and the turns in cyan](../images/gmns_lanes.png)
 
 ## Options
 
