@@ -238,8 +238,8 @@ class DuckOSM:
                     self._build_features()
 
                 # Persist the canonical stable-edge_id macro (callable anywhere as
-                # `edge_id_hash(osm_id, source, target, is_reverse)`), so the formula travels
-                # with the db and other projects reuse one implementation.
+                # `edge_id_hash(osm_id, source, target)`, plus the legacy `edge_id_hash_v1`), so
+                # the formula travels with the db and other projects reuse one implementation.
                 from duckosm.edge_id import create_edge_id_macro
                 create_edge_id_macro(self.con)
 
