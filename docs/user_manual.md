@@ -22,9 +22,10 @@ The work has two parts: **preparing the input** (the map data and your area's bo
 flowchart LR
     subgraph PREP["A · Prepare the input"]
         direction TB
-        A1["Download a region<br/>.osm.pbf (Geofabrik)"]
-        A2["Find your area's border<br/>duckosm boundary"]
-        A1 --> A2
+        A1["Find your area<br/>on openstreetmap.org"]
+        A2["Download the region<br/>.osm.pbf (Geofabrik)"]
+        A3["Make the boundary file<br/>duckosm boundary"]
+        A1 --> A2 --> A3
     end
     subgraph BUILD["B · Build the network (duckOSM)"]
         direction TB
@@ -36,7 +37,15 @@ flowchart LR
 
 ### A. Prepare the input
 
-#### A1. Download OpenStreetMap data
+#### A1. Find your area on openstreetmap.org
+
+Search for your city or district on [openstreetmap.org](https://www.openstreetmap.org) and click the
+result whose border is drawn on the map. The page address ends in `relation/<id>`: that number is
+the area's **OSM id**. Monaco is [relation/1124039](https://www.openstreetmap.org/relation/1124039).
+Seeing the outline on the map is the easiest way to be sure it's the right area (there is a Södermalm
+in Stockholm and another one in Sundsvall). Skip this step to build a whole region.
+
+#### A2. Download the region's map data
 
 duckOSM reads OpenStreetMap data as an `.osm.pbf` file. The usual source is
 [Geofabrik](https://download.geofabrik.de): free extracts of every continent, country and many
@@ -50,35 +59,31 @@ curl -LO https://download.geofabrik.de/europe/sweden-latest.osm.pbf     # 835 MB
 
 Any `.osm.pbf` works, up to the [whole planet](https://planet.openstreetmap.org).
 
-#### A2. Find your area's boundary
-
-Skip this step to build the whole downloaded region. Otherwise, find the border of the city or
-district you want:
+#### A3. Make the boundary file
 
 ```bash
-duckosm boundary Monaco --pbf monaco-latest.osm.pbf       # -> monaco.geojson
+duckosm boundary --osm-id 1124039 --pbf monaco-latest.osm.pbf     # -> monaco.geojson
 ```
 
-It looks for the area's official border inside the PBF (offline; needs GDAL's `ogr2ogr`), then asks
-OpenStreetMap's Nominatim search online. Case, accents and hyphens don't matter. It prints what it
-picked, and, if the name matched more than one border, the others with their OSM ids:
+This reads the area's border from the PBF (offline; needs GDAL's `ogr2ogr`), or from OpenStreetMap
+online without `--pbf`. It prints what it wrote:
 
 ```text
 wrote monaco.geojson: Monaco (admin level 2, OSM relation 1124039, 79.8 km²), from PBF monaco-latest.osm.pbf
+```
+
+**Shortcut: search by name.** `duckosm boundary Monaco --pbf monaco-latest.osm.pbf` finds the border by
+name instead (case, accents and hyphens don't matter). If the name matches more than one border, it
+takes the exact name with the largest area and lists the others with their ids, so you can rerun with
+the right `--osm-id`:
+
+```text
 also matched (pick one with --osm-id):
   Monaco (admin level 8, OSM relation 2220322, 2.39 km²)
   Monaco-Ville (admin level 10, OSM relation 2220207, 0.2 km²)
 ```
 
-It picks the exact name with the largest area, here the country. To take another one, pass its id:
-
-```bash
-duckosm boundary --osm-id 2220322 --pbf monaco-latest.osm.pbf -o monaco_town.geojson
-```
-
-You can also look an id up on [openstreetmap.org](https://www.openstreetmap.org): search for the area,
-click it, and the page address ends in `relation/<id>`. Or skip `duckosm boundary` and use any
-GeoJSON polygon you already have.
+Any GeoJSON polygon you already have works too.
 
 ### B. Build the network
 
@@ -107,15 +112,15 @@ Build the big region once, then cut areas out of it in seconds. No OSM is re-rea
 
 ```bash
 duckosm build --pbf sweden-latest.osm.pbf -m driving        # slow, once -> sweden-latest.duckdb
-duckosm boundary Södermalm --pbf sweden-latest.osm.pbf      # -> södermalm.geojson
-duckosm extract --source sweden-latest.duckdb --db sodermalm.duckdb --boundary södermalm.geojson
+duckosm boundary --osm-id 2017432 -o sodermalm.geojson      # Södermalm, Stockholm
+duckosm extract --source sweden-latest.duckdb --db sodermalm.duckdb --boundary sodermalm.geojson
 ```
 
 `extract` also takes `--name` / `--osm-id` when the parent has [admin boundaries](admin_boundaries.md).
 Edges that cross the border are kept whole.
 
 To get just a smaller PBF of the area, e.g. for another tool:
-`duckosm clip-pbf sweden-latest.osm.pbf södermalm.geojson` (→ `södermalm.osm.pbf`).
+`duckosm clip-pbf sweden-latest.osm.pbf sodermalm.geojson` (→ `sodermalm.osm.pbf`).
 
 ## Build options
 
