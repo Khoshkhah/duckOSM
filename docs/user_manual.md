@@ -333,25 +333,6 @@ r["time_s"], r["legs"]                       # e.g. 552 s: walk 7 s -> drive 264
 
 More in [Intermodal routing](multimodal.md).
 
-### As a networkx graph
-
-| Function | Nodes | Edges |
-|---|---|---|
-| `to_networkx(con)` | edges (`edge_id`), with name, highway, length, speed, geometry | legal turns, weighted by time (`weight="length"`: metres) |
-| `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout) |
-
-Both take `mode=` too.
-
-To save either one to a file (the format comes from the extension):
-
-```bash
-duckosm export-graph monaco.duckdb                            # -> monaco_driving.graphml (junctions)
-duckosm export-graph monaco.duckdb -g edge -o routing.gpickle # the routing graph
-```
-
-GraphML opens in any tool but stores lists and geometry as text; gpickle keeps everything but only
-loads in Python. From Python: `write_graph(con, "monaco.graphml")`.
-
 ## Exports
 
 Every exporter keeps `edge_id` as the target format's own id.
@@ -362,7 +343,7 @@ Every exporter keeps `edge_id` as the target format's own id.
 | MATSim | `duckosm matsim`, `matsim-lanes` | [MATSim network](matsim_export.md), [lanes & signals](matsim_lanes_signals.md) |
 | GMNS | `duckosm gmns` | [GMNS](gmns_export.md) |
 | GeoPackage / shapefile | `duckosm export-gis` | [GeoPackage / shapefile](gis_export.md) |
-| networkx | `duckosm export-graph` | above |
+| networkx | `duckosm export-graph`, `to_networkx(con)` | [below](#networkx) |
 
 ### SUMO export
 
@@ -393,6 +374,28 @@ Or from the CLI: `duckosm sumo monaco.duckdb` (`--no-netconvert` for plain-XML o
 coordinates are geographic and netconvert projects them. The netconvert options come from a built-in
 default (`DEFAULT_NETCFG`), written as a standard `.netccfg`; pass `config=` (a dict merged onto the
 default, or a `.netccfg` path) to change them.
+
+### networkx
+
+Load the network into [networkx](https://networkx.org) for your own analysis, or save it to a file.
+Needs `pip install "duckosm[routing]"`.
+
+| Function | Nodes | Edges |
+|---|---|---|
+| `to_networkx(con)` | edges (`edge_id`), with name, highway, length, speed, geometry | legal turns, weighted by time (`weight="length"`: metres) |
+| `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout) |
+
+Both take `mode=` too.
+
+To save either one to a file (the format comes from the extension):
+
+```bash
+duckosm export-graph monaco.duckdb                            # -> monaco_driving.graphml (junctions)
+duckosm export-graph monaco.duckdb -g edge -o routing.gpickle # the routing graph
+```
+
+GraphML opens in any tool but stores lists and geometry as text; gpickle keeps everything but only
+loads in Python. From Python: `write_graph(con, "monaco.graphml")`.
 
 ## Troubleshooting
 
