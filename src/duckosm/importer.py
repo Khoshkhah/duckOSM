@@ -11,7 +11,6 @@ from typing import Optional
 import duckdb
 
 import shutil
-import subprocess
 
 from duckosm.config import Config
 from duckosm.processors import (
@@ -475,13 +474,12 @@ class DuckOSM:
         if clipped == self.pbf_path:
             return                                            # already the clipped file
         if not clipped.exists():
+            from duckosm.area import clip_pbf
             logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium, --strategy {strategy}) ...")
-            r = subprocess.run(
-                [osmium, "extract", "--strategy", strategy, "--polygon", str(boundary),
-                 "--output", str(clipped), "--overwrite", str(self.pbf_path)],
-                capture_output=True, text=True)
-            if r.returncode != 0:
-                logger.warning(f"osmium clip failed ({r.stderr.strip()[:200]}); using PBF as-is")
+            try:
+                clip_pbf(self.pbf_path, boundary, clipped, strategy)
+            except RuntimeError as e:
+                logger.warning(f"{e}; using PBF as-is")
                 return
         self.pbf_path = clipped
 

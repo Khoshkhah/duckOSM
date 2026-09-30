@@ -18,7 +18,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      # Tests that need local PBFs / built dbs / netconvert / GDAL skip themselves.
+      # GDAL (ogr2ogr) and osmium: duckosm boundary / clip-pbf and the sample build's pre-clip.
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool
+      # Tests that need local PBFs / built dbs / netconvert skip themselves.
       - run: pip install -e ".[dev,routing]"
       - run: pytest tests/ -q -rs
 

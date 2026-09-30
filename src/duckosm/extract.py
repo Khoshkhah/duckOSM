@@ -65,16 +65,9 @@ def build_clip(out, name, osm_id, boundary):
                 "SELECT geometry AS geom, osm_id, name, admin_level FROM src.main.admin_boundaries "
                 f"WHERE osm_id = {int(osm_id)}")
         else:
-            has_en = "name_en" in cols
-            en = "strip_accents(lower(coalesce(name_en,'')))" if has_en else "''"
-            out.execute(
-                "CREATE TEMP TABLE _clip AS "
-                "SELECT geometry AS geom, osm_id, name, admin_level FROM src.main.admin_boundaries "
-                f"WHERE strip_accents(lower(name)) LIKE '%' || strip_accents(lower($q)) || '%' "
-                f"   OR {en} LIKE '%' || strip_accents(lower($q)) || '%' "
-                f"ORDER BY (strip_accents(lower(name)) = strip_accents(lower($q)) "
-                f"          OR {en} = strip_accents(lower($q))) DESC, ST_Area(geometry) DESC "
-                "LIMIT 1", {"q": name})
+            from duckosm.area import admin_match_sql
+            out.execute("CREATE TEMP TABLE _clip AS "
+                        + admin_match_sql("src.main.admin_boundaries", "name_en" in cols), {"q": name})
         row = out.execute("SELECT name, admin_level FROM _clip").fetchone()
         if row is None:
             sys.exit(f"No admin boundary matched '{name or osm_id}'.")

@@ -3,6 +3,8 @@ CLI for duckOSM — a subcommand-based command line interface.
 
   duckosm build    build a routing network from a PBF, or clip one from a parent db
   duckosm init-config  write the commented config template to a file, to edit and build from
+  duckosm boundary     find an area's boundary by name (in a PBF, else Nominatim) -> GeoJSON
+  duckosm clip-pbf     cut a PBF down to a boundary (osmium)
   duckosm extract  slice a sub-area out of an existing build into a new db
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
@@ -73,8 +75,8 @@ def main():
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to YAML configuration file')
 @click.option('--pbf', '-p', type=click.Path(exists=True), help='Path to PBF file')
 @click.option('--output', '-o', type=click.Path(),
-              help='Output DuckDB file (default: <pbf name>.duckdb, or <boundary name>.duckdb for a clip, '
-                   'in the current folder)')
+              help='Output DuckDB file (default: <boundary name>.duckdb if a boundary is given, else '
+                   '<pbf name>.duckdb, in the current folder)')
 @click.option('--boundary', '-b', type=click.Path(exists=True), help='GeoJSON boundary file for filtering')
 @click.option('--source-db', type=click.Path(exists=True), help='Parent duckOSM db to clip from (source.type=duckdb)')
 @click.option('--h3-cell', help='H3 cell ID for filtering')
@@ -105,7 +107,7 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
         elif pbf or source_db:
             # Name the output after the input rather than a fixed path, so a pip user running
             # `duckosm build --pbf maps/monaco-latest.osm.pbf` gets ./monaco-latest.duckdb.
-            name = _stem(output) if output else _stem(pbf or boundary or source_db)
+            name = _stem(output) if output else _stem(boundary or pbf or source_db)   # the area, if given
             cfg = Config.from_args(
                 pbf_path=pbf or "",
                 output_path=output or f"{name}.duckdb",
@@ -133,6 +135,68 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
         click.echo(f"\nOutput: {output_path}")
     except Exception as e:
         raise click.ClickException(str(e))
+
+
+@main.command()
+@click.argument("name", required=False)
+@click.option("--pbf", type=click.Path(exists=True),
+              help="Search the borders stored in this PBF first (offline; needs GDAL's ogr2ogr)")
+@click.option("--osm-id", type=int, help="Pick one exact OSM boundary relation (for ambiguous names)")
+@click.option("--offline", is_flag=True, help="Never ask OpenStreetMap's Nominatim search online")
+@click.option("--out", "-o", type=click.Path(dir_okay=False), help="Output GeoJSON (default: <name>.geojson)")
+def boundary(name, pbf, osm_id, offline, out):
+    """Find the boundary of the area called NAME and write it as GeoJSON.
+
+    Looks in --pbf's own borders first (offline), then asks Nominatim online.
+
+    \b
+    Examples:
+        duckosm boundary Monaco --pbf monaco-latest.osm.pbf     # -> monaco.geojson
+        duckosm boundary "Södermalm, Stockholm"                 # online
+    """
+    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
+    from duckosm.area import find_boundary, write_boundary
+
+    if not name and osm_id is None:
+        raise click.ClickException("give a NAME or --osm-id")
+    try:
+        geom, info = find_boundary(name, pbf, osm_id, offline)
+    except LookupError as e:
+        raise click.ClickException(str(e))
+    out = out or f"{(name or info['name']).split(',')[0].strip().lower().replace(' ', '_')}.geojson"
+    write_boundary(geom, info, out)
+    level = f"admin level {info['admin_level']}, " if info["admin_level"] is not None else ""
+    click.echo(f"wrote {out}: {info['name']} ({level}OSM relation {info['osm_id']}, "
+               f"{info['area_km2']} km², from {info['source']})")
+
+
+@main.command(name="clip-pbf")
+@click.argument("pbf", type=click.Path(exists=True))
+@click.argument("boundary", type=click.Path(exists=True))
+@click.option("--out", "-o", type=click.Path(dir_okay=False),
+              help="Output PBF (default: <boundary name>.osm.pbf)")
+@click.option("--strategy", type=click.Choice(["complete_ways", "smart", "simple"]),
+              default="complete_ways", show_default=True,
+              help="complete_ways keeps roads crossing the border whole; smart also completes "
+                   "multipolygons (rivers, land cover) for a base-map build")
+def clip_pbf_cmd(pbf, boundary, out, strategy):
+    """Cut PBF down to the area in BOUNDARY (a GeoJSON polygon), with osmium.
+
+    \b
+    Example:
+        duckosm clip-pbf sweden-latest.osm.pbf sodermalm.geojson   # -> sodermalm.osm.pbf
+    """
+    from duckosm.area import clip_pbf
+
+    out = out or f"{_stem(boundary)}.osm.pbf"
+    if Path(out).resolve() == Path(pbf).resolve():
+        raise click.ClickException("the output would overwrite the input PBF; pass --out")
+    try:
+        clip_pbf(pbf, boundary, out, strategy)
+    except RuntimeError as e:
+        raise click.ClickException(str(e))
+    mb = lambda p: Path(p).stat().st_size / 1e6
+    click.echo(f"wrote {out} ({mb(out):.1f} MB, from {mb(pbf):.1f} MB)")
 
 
 @main.command(name="init-config")

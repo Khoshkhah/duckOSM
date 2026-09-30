@@ -32,7 +32,7 @@ With no `--config` and no `--pbf` / `--source-db`, `build` loads `config/default
 |--------|-------------|---------|
 | `-c`, `--config` | YAML config file | none |
 | `-p`, `--pbf` | Input `.osm.pbf` (or give a config / `--source-db`) | none |
-| `-o`, `--output` | Output DuckDB file | `<pbf name>.duckdb` in the current folder (`<boundary name>.duckdb` for a clip) |
+| `-o`, `--output` | Output DuckDB file | `<boundary name>.duckdb` if a boundary is given, else `<pbf name>.duckdb`, in the current folder |
 | `-b`, `--boundary` | GeoJSON boundary to clip to | none |
 | `--source-db` | Parent duckOSM db to clip from (instead of a PBF) | none |
 | `-m`, `--modes` | `driving`, `walking` or `cycling`; repeat for several (`-m driving -m walking`) | `driving` |
@@ -68,6 +68,24 @@ options:
 validation:
   enabled: true                        # fail the build on a broken invariant
 ```
+
+## Build one area by name
+
+To build a city or district from a bigger extract, find its boundary first, then build inside it:
+
+```bash
+duckosm boundary Monaco --pbf monaco-latest.osm.pbf           # -> monaco.geojson
+duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson   # -> monaco.duckdb
+```
+
+`duckosm boundary` looks for the area's official border inside the PBF (offline; needs GDAL's
+`ogr2ogr`), then asks OpenStreetMap's Nominatim search online. Case, accents and hyphens don't
+matter. If a name is ambiguous it takes the exact name with the largest area (the Monaco extract
+has two: the country and the municipality); `--osm-id` picks one exactly. It prints what it found.
+
+With a boundary, the build keeps only what's inside and removes small disconnected pieces, so every
+point of the network can reach every other. To get just the smaller PBF, e.g. for another tool:
+`duckosm clip-pbf monaco-latest.osm.pbf monaco.geojson` (→ `monaco.osm.pbf`).
 
 ## Clip an area from a bigger build
 
