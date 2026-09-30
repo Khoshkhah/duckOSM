@@ -8,7 +8,7 @@ pip install "duckosm[routing]"           # + networkx, for route() / Router / to
 ```
 
 Other extras: `[sumo]` (SUMO export), `[elevation]` (DEM sampling), `[viz]`
-(notebook maps). To work on duckOSM itself, install from source: see [Development](development.md).
+(`duckosm viz` maps). To work on duckOSM itself, install from source: see [Development](development.md).
 
 Every relative path duckOSM uses (outputs, configs, reports) resolves against the folder you run
 `duckosm` in.
@@ -168,11 +168,15 @@ got. A negative `osm_id` looks up the short connector edges duckOSM adds to join
 duckosm viz monaco.duckdb
 ```
 
-Renders a publication-quality roadstyle HTML map per mode
-(`reports/<name>_<mode>_network.html`): edges styled by highway class, a
-toggleable base-map switcher, a legend, and click-to-copy `edge_id`. Needs
-`geopandas` + `roadstyle` installed. Use `--mode driving` to render a single
-mode, or `--basemap` / `--out-dir` to tweak the output.
+Writes an interactive HTML map per mode (`reports/<name>_<mode>_network.html`), drawn with
+[roadstyle](https://github.com/Khoshkhah/roadstyle): edges styled by road class, a legend that
+toggles each class, a base-map switcher, a hover tooltip (`edge_id`, road class, name, lanes,
+speed), click-to-copy `edge_id`, and a 2D/3D button that raises bridges. Needs
+`pip install "duckosm[viz]"`.
+
+Options: `-m driving` renders one mode (default: every mode in the db); `--basemap` picks the base
+map shown first (`voyager` (default), `positron`, `dark_matter`, `osm`, `satellite`, `blank`);
+`--out-dir` changes the output folder.
 
 Add `--arrows` to overlay **one-way direction arrows** — a small gray chevron at
 each one-way edge's midpoint pointing `source → target` (the legal travel
@@ -198,13 +202,14 @@ including `highway=service`, lives in `edges`, so the map shows the whole networ
 selection**. It lives in the repo's `scripts/` folder (not in the pip package), so it needs a clone:
 
 ```bash
-python scripts/roadstyle_map.py --db sodermalm.duckdb --palette mono
+python scripts/roadstyle_map.py --db monaco.duckdb --palette mono     # -> monaco_driving.html
 ```
 
 `--palette` picks the roadstyle palette — `highsat` (default, high-contrast), `carto`
 (OSM-standard look), or `mono` (grayscale). It renders the same bridge/tunnel grade separation.
 `--color-by <column>` colours edges by a numeric/categorical column instead of road class;
-`--out` / `--basemap` / `--theme` tweak the output.
+`--mode` picks the mode (default `driving`); `--out` (default `<db>_<mode>.html`) / `--basemap` /
+`--theme` tweak the output.
 
 ## Routing (shortest path)
 
