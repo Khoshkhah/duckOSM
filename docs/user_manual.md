@@ -188,10 +188,10 @@ python scripts/roadstyle_map.py --db monaco.duckdb --palette mono           # hi
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
 
-## Routing (shortest path)
+## Routing
 
-`edge_graph` is the edge-based routing graph (nodes = `edge_id`s; illegal turns already
-removed). The helpers wrap it with `networkx` — `pip install duckosm[routing]`:
+A route goes from one edge to another over `edge_graph`, so it only takes legal turns. Needs
+`pip install "duckosm[routing]"`.
 
 ```python
 import duckdb
@@ -199,61 +199,34 @@ from duckosm import route, Router
 
 con = duckdb.connect("monaco.duckdb", read_only=True)
 
-# one-off: shortest route between two edge_ids (defaults: fastest by time)
-r = route(con, FROM_EDGE, TO_EDGE)
-r["edges"]        # ordered edge_ids
-r["time_s"]       # total travel time (door-to-door)
-r["length_m"]     # total length
-r["path"]         # per-edge name/highway/length_m/cost_s/geometry, in order
+r = route(con, from_edge, to_edge)        # fastest route
+r["edges"], r["time_s"], r["length_m"]    # ordered edge_ids, seconds, metres
+r["path"]                                 # per edge: name, highway, length_m, cost_s, geometry
 
-# many routes: build the graph once, reuse it
-router = Router(con)
-router.route(FROM_EDGE, TO_EDGE)
+router = Router(con)                      # many routes: build the graph once
+router.route(from_edge, to_edge)
 ```
 
-Options: `weight="length"` routes by distance instead of time (every road, incl. `highway=service`,
-is in the graph). `to_networkx(con, ...)` returns the weighted `DiGraph`
-directly for your own networkx algorithms — by default each node (`edge_id`) carries its road
-metadata (`name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`); pass
-`node_attrs=False` for a bare, faster graph. This loads the graph into memory — fine for a city;
-for country scale prefer an on-disk A\* over `edge_graph`.
+`weight="length"` gives the shortest route instead of the fastest; `mode="walking"` or `"cycling"`
+routes on that network (default `"driving"`). Both work on every function here (`weight` except on
+`to_networkx_nodes`). The graph is held in memory: fine for a city, heavy for a country.
 
-For the **geographic** (node-based) view, `to_networkx_nodes(con, mode=...)` returns a
-`networkx.MultiDiGraph` in the osmnx layout: nodes are OSM junction `node_id`s (each with `x`/`y`
-lon-lat plus any extra node columns such as `h3_cell`), and every edge is a road segment from
-`<mode>.edges` keyed by `edge_id`, carrying its **full attribute set** (`osm_id`, `highway`, `name`,
-`oneway`, `lanes`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry`, …). Parallel ways between the
-same two junctions are preserved, so osmnx / momepy tooling consumes it directly. Geometry is a WKT
-string by default; pass `geometry="shapely"` for shapely objects or `geometry="none"` to drop it.
+### As a networkx graph
 
-```python
-from duckosm import to_networkx_nodes
+| Function | Nodes | Edges |
+|---|---|---|
+| `to_networkx(con)` | edges (`edge_id`), with name, highway, length, speed, geometry | legal turns, weighted by time |
+| `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout) |
 
-G = to_networkx_nodes(con, mode="driving")    # MultiDiGraph; nodes = junctions, edges = roads
-G.nodes[node_id]["x"], G.nodes[node_id]["y"]  # lon, lat
-G[u][v][edge_id]["highway"]                   # full edge attrs, keyed by edge_id
-```
-
-### networkx file export (`export-graph`)
-
-To persist either graph to disk, use `write_graph(con, path, ...)` or the `duckosm export-graph`
-CLI. The format is inferred from the output extension: **GraphML** (`.graphml`) is portable but
-scalar-only — list attributes like `refs` and the geometry are stringified and null values dropped;
-**gpickle** (`.gpickle`) round-trips the graph losslessly (including shapely geometry) but is
-Python-only. Defaults to the node-based graph; pass `graph="edge"` / `-g edge` for the edge-based
-routing graph. Needs `networkx`.
+To save either one to a file (the format comes from the extension):
 
 ```bash
-duckosm export-graph monaco.duckdb              # -> monaco_driving.graphml (node graph)
-duckosm export-graph monaco.duckdb -o sm.gpickle   # gpickle (lossless)
-duckosm export-graph monaco.duckdb -g edge -o routing.graphml  # edge-based routing graph
+duckosm export-graph monaco.duckdb                            # -> monaco_driving.graphml (junctions)
+duckosm export-graph monaco.duckdb -g edge -o routing.gpickle # the routing graph
 ```
 
-```python
-from duckosm import write_graph
-write_graph(con, "monaco.graphml")                     # node graph, GraphML (format from extension)
-write_graph(con, "routing.gpickle", graph="edge")         # edge-based routing graph, gpickle
-```
+GraphML opens in any tool but stores lists and geometry as text; gpickle keeps everything but only
+loads in Python. From Python: `write_graph(con, "monaco.graphml")`.
 
 ## Exports
 
