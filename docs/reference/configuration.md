@@ -29,9 +29,9 @@ In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 | `boundary_path` | none | | | short for `boundary.path` |
 | `h3_cell` | none | | `--h3-cell` | short for `boundary.h3_cell`; does nothing |
 
-With a boundary, the PBF is first cut to it and the cut is kept as `pbf/<name>.<strategy>.osm.pbf`.
-The next build with the same `name` reuses that file, even if the boundary changed: delete it after
-changing the boundary.
+With a boundary, the PBF is first cut to it and the cut is kept as `pbf/<name>.<strategy>.<key>.osm.pbf`,
+where `<key>` is a fingerprint of the boundary and the PBF. The next build reuses it while both are
+unchanged; after a change it cuts again and removes the old cut.
 
 ## `source`
 

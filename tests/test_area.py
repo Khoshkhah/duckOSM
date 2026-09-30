@@ -54,3 +54,19 @@ def test_db_named_like_a_schema_is_refused(tmp_path):
     duckdb.connect(str(db)).close()
     r = CliRunner().invoke(main, ["multimodal", str(db)])
     assert r.exit_code != 0 and "Rename it" in r.output
+
+
+def test_pbf_cut_is_keyed_on_boundary_and_pbf(tmp_path):
+    """A changed boundary or a newer PBF must never reuse an old osmium cut (it silently built the
+    old area): the cached file name carries a fingerprint of both."""
+    import os
+    from duckosm.importer import pbf_cut_path
+    pbf, b1, b2 = tmp_path / "x.osm.pbf", tmp_path / "a.geojson", tmp_path / "b.geojson"
+    pbf.write_bytes(b"pbf"); b1.write_text('{"a": 1}'); b2.write_text('{"a": 2}')
+    p1 = pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)
+    assert p1 == pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)          # stable
+    assert p1 != pbf_cut_path("pbf", "area", "complete_ways", pbf, b2)          # new boundary
+    assert p1 != pbf_cut_path("pbf", "area", "smart", pbf, b1)                  # other strategy
+    os.utime(pbf, ns=(1, 1))
+    assert p1 != pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)          # newer PBF
+    assert p1.name.startswith("area.complete_ways.") and p1.name.endswith(".osm.pbf")

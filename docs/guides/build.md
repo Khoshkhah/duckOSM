@@ -6,7 +6,7 @@ duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson -m driving -m walkin
 
 This writes `monaco.duckdb`: one schema per mode (`driving`, `walking`, `cycling`), each with its
 edges, nodes, the graph of legal turns and, for driving, the turn restrictions. With a boundary
-(`-b`), the build first cuts the PBF to it (a copy is kept in `./pbf/` for the next build) and removes
+(`-b`), the build first cuts the PBF to it (a copy is kept in `./pbf/` for the next build, until the boundary or the PBF changes) and removes
 small pieces of network that don't connect to the rest. What each step does:
 [How a build works](../concepts/build.md).
 

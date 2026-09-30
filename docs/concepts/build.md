@@ -84,7 +84,7 @@ Config keys are shown with their default.
 
 | Stage | Step | Runs when |
 |---|---|---|
-| ① | Pre-clip the PBF (`osmium extract`) | a boundary is set and `osmium` is installed (else the whole PBF is read, with a warning); the result is cached in `pbf/` |
+| ① | Pre-clip the PBF (`osmium extract`) | a boundary is set and `osmium` is installed (else the whole PBF is read, with a warning); the result is cached in `pbf/`, and cut again when the boundary or the PBF changes |
 | ① | Parse OSM into `raw.*` (`ST_READOSM`) | always |
 | ① | Load the boundary into `main.boundary` | a boundary is set; `boundary.buffer_m` (0) grows it |
 | ① | Boundary cells (`main.boundary_cells`) | a boundary is set and `options.boundary_cells` (off) |

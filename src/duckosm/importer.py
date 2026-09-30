@@ -34,6 +34,17 @@ from duckosm.processors import (
 logger = logging.getLogger("duckosm")
 
 
+def pbf_cut_path(cache_dir, name, strategy, pbf, boundary) -> Path:
+    """Where the osmium cut of ``pbf`` to ``boundary`` is cached: ``<name>.<strategy>.<key>.osm.pbf``,
+    the key a fingerprint of the boundary file's content and the PBF (path, size, modification
+    time), so a changed boundary or a newer PBF never reuses an old cut."""
+    import hashlib
+    st = Path(pbf).stat()
+    h = hashlib.sha256(Path(boundary).read_bytes())
+    h.update(f"{Path(pbf).resolve()}|{st.st_size}|{st.st_mtime_ns}".encode())
+    return Path(cache_dir) / f"{name}.{strategy}.{h.hexdigest()[:10]}.osm.pbf"
+
+
 class DuckOSM:
     """
     High-performance OSM-to-routing-network converter.
@@ -475,10 +486,13 @@ class DuckOSM:
             "smart" if self.config.options.build_features else "complete_ways")
         # Strategy is part of the cache key: a clip made with a different strategy is NOT
         # interchangeable (complete_ways drops multipolygon members smart keeps), so it must never be
-        # silently reused — that once dropped the Emajõgi river polygon on a features build.
-        clipped = (cache_dir / f"{self.config.name}.{strategy}.osm.pbf").resolve()
-        if clipped == self.pbf_path:
-            return                                            # already the clipped file
+        # silently reused — that once dropped the Emajõgi river polygon on a features build. So are
+        # the boundary and the source PBF: a new area or a newer download is cut again.
+        clipped = pbf_cut_path(cache_dir, self.config.name, strategy, self.pbf_path, boundary).resolve()
+        for old in cache_dir.glob(f"{self.config.name}.{strategy}.*osm.pbf"):
+            if old.resolve() not in (clipped, self.pbf_path.resolve()):   # an outdated cut of this area
+                logger.info(f"Removing outdated cut {old.name} (the boundary or the PBF changed)")
+                old.unlink()
         if not clipped.exists():
             from duckosm.area import clip_pbf
             logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium, --strategy {strategy}) ...")
