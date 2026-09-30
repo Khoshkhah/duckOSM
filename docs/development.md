@@ -60,4 +60,5 @@ mkdocs build --strict         # what CI runs: a broken link fails the build
 ```
 
 `.github/workflows/docs.yml` builds the site and deploys it to GitHub Pages on every push to `main`
-that touches `docs/` or `mkdocs.yml`.
+that touches `docs/` or `mkdocs.yml`. Pages under `docs/design/` are design notes: they stay in the
+repo but are not published.

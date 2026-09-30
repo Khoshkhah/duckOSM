@@ -4,7 +4,7 @@ Identity invariants for osm_id / edge_id / edge_ref, and the geometry-preserving
 
 Fixtures drive the real GraphSimplifier.run() end-to-end on synthetic ways (same style as
 test_merge_segments), so segmentation, the splits, reverse twins and the re-key all run for
-real. See docs/architecture.md (Stable edge ids). Run: pytest tests/ -q
+real. See docs/design/split_same_direction_parallels.md. Run: pytest tests/ -q
 """
 import duckdb
 import pytest

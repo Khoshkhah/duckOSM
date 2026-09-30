@@ -30,8 +30,8 @@ class Options:
     simplify: bool = True                  # contract degree-2 nodes. Must match the shipped configs: the simplifier is what writes edges.refs, which extract_restrictions requires (and the unsimplified edges table is a straight-line approximation, not a supported product)
     merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
     global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/global_junction_segmentation.md
-    functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/data_dictionary.md
-    cycling_dismount: bool = True          # cycling also gets footway/pedestrian as dismount=TRUE edges (push-the-bike: walking speed, bidirectional) so cycleways connected only via them survive the component clean-up. See docs/data_dictionary.md
+    functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/design/walk_cycle_type.md
+    cycling_dismount: bool = True          # cycling also gets footway/pedestrian as dismount=TRUE edges (push-the-bike: walking speed, bidirectional) so cycleways connected only via them survive the component clean-up. See docs/design/cycling_dismount_edges.md
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True
@@ -91,7 +91,7 @@ class Validation:
     assert_unique_node_id: bool = True             # no duplicate node_id in nodes (virtual incl.)
     assert_way_length_conserved: bool = True       # no interior stretch of a kept way silently
                                                    #   deleted in favour of a parallel arc — see
-                                                   #   docs/architecture.md (Stable edge ids)
+                                                   #   docs/design/split_same_direction_parallels.md
     warn_layer_without_structure: bool = True      # layer≠0 but no bridge/tunnel tag (OSM tagging
                                                    #   smell; warn-only, never fails the build)
 

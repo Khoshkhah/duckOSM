@@ -1,7 +1,7 @@
 """Cycling dismount edges: footway/pedestrian enter the cycling graph as push-the-bike
 edges — kept by the filter, bidirectional, flagged dismount=TRUE, costed at walking speed,
 classified cycle_type='dismount'. Gated by options.cycling_dismount (default on); flag off
-restores the pre-feature graph. See docs/data_dictionary.md."""
+restores the pre-feature graph. See docs/design/cycling_dismount_edges.md."""
 import duckdb
 import pytest
 

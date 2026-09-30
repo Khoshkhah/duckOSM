@@ -1,6 +1,6 @@
 """Synthetic turn-restriction overrides — RestrictionProcessor injects `turn_restrictions:` rules from
 the OSM-overrides file into `restrictions_pivoted` (then the normal mapping turns them into edge-level
-restrictions). See osm_overrides/known_osm_issues.md #6."""
+restrictions). See docs/design/turn-restriction-overrides.md and known_osm_issues.md #6."""
 import duckdb
 import pytest
 

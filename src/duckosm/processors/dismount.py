@@ -6,7 +6,7 @@ These are the push-the-bike connectors that keep the cycling graph connected (an
 cycleway fragments alive through the component clean-up) while staying legally correct —
 ``SpeedProcessor`` costs them at walking speed. Runs after the graph is built and before
 speeds (``raw.ways`` must still be present); synthetic connector edges (``osm_id < 0``, no
-raw way) stay FALSE. See ``docs/data_dictionary.md``.
+raw way) stay FALSE. See ``docs/design/cycling_dismount_edges.md``.
 """
 import logging
 

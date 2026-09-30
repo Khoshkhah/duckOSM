@@ -14,7 +14,7 @@ Checks (per mode):
                             same way bridges its endpoints — the exact signature of a parallel arc
                             silently deleted instead of split (implemented topologically over the
                             way refs, which implies per-way length conservation). See
-                            docs/architecture.md (Stable edge ids).
+                            docs/design/split_same_direction_parallels.md.
   - layer_without_structure : WARN-only — edges tagged layer≠0 with no bridge/tunnel tag (an OSM
                             tagging smell; such edges get grade-separated draw order but no 3D
                             deck). Never fails the build.

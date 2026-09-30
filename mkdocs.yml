@@ -56,8 +56,9 @@ markdown_extensions:
       # GitHub-style anchors, so the docs' existing in-page links work on the site too
       slugify: !!python/object/apply:pymdownx.slugs.slugify { kwds: { case: lower } }
 
-# an unbuilt spec: stays in the repo but isn't published
+# design notes and unbuilt specs stay in the repo but aren't published
 exclude_docs: |
+  design/
   lane_map.md
 
 nav:
