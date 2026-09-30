@@ -22,7 +22,7 @@ It adds:
 - a row in `main.elevation_metadata` saying where the heights came from (source, resolution,
   vertical datum, licence).
 
-The [MATSim](../matsim_export.md), [OpenDRIVE](../opendrive_export.md) and [GIS](../gis_export.md)
+The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md) and [GIS](../exports/gis.md)
 exports then include the heights.
 
 ## Where the heights come from

@@ -1,7 +1,7 @@
 """
 MATSim turn **lanes** (``lanes.xml``, laneDefinitions_v2.0) and traffic **signals**
 (``signalSystems`` / ``signalGroups`` / ``signalControl`` v2.0) from a GMNS db — the detailed-
-intersection companion to the [network export](matsim.py). See docs/matsim_lanes_signals.md.
+intersection companion to the [network export](matsim.py). See https://khoshkhah.github.io/duckOSM/exports/matsim/#lanes-and-signals.
 
 Source is a GMNS db because ``gmns_<mode>.movement`` already is the lane→turn→downstream model
 (``ib_link_id`` → ``ob_link_id``, ``turn:lanes`` in ``start_ib_lane``/``end_ib_lane``, restrictions

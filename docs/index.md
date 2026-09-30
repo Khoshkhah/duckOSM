@@ -87,15 +87,16 @@ Next: [Your first network](first_network.md) walks through it step by step, and 
 
 | Format | Command | How it's verified |
 |---|---|---|
-| **SUMO** | `duckosm sumo` | SUMO's own `netconvert` assembles the network; turn restrictions become explicit connections |
-| **MATSim** | `duckosm matsim`, `matsim-lanes` | validated against MATSim's official DTD and XSD schemas |
-| **GMNS** | `duckosm gmns` | follows the GMNS table spec |
-| **GeoPackage / shapefile** | `duckosm export-gis` | `duckosm gis-debug` reads the file back through GDAL and diffs every `edge_id` |
-| **networkx** | `duckosm export-graph` | unit tests; GraphML or lossless gpickle |
+| [**SUMO**](exports/sumo.md) | `duckosm sumo` | SUMO's own `netconvert` assembles the network; turn restrictions become explicit connections |
+| [**MATSim**](exports/matsim.md) | `duckosm matsim`, `matsim-lanes` | validated against MATSim's official DTD and XSD schemas |
+| [**GMNS**](exports/gmns.md) | `duckosm gmns` | follows the GMNS table spec |
+| [**GeoPackage / shapefile**](exports/gis.md) | `duckosm export-gis` | `duckosm gis-debug` reads the file back through GDAL and diffs every `edge_id` |
+| [**networkx**](exports/networkx.md) | `duckosm export-graph` | unit tests; GraphML or lossless gpickle |
 
 **Experimental:** OpenDRIVE, Lanelet2, railML, lane-level routing, GMNS meso/micro networks,
 intermodal routing, elevation, admin boundaries and base-map layers. They work and are
-structure-tested, but haven't been checked in the target tools yet. See the **Experimental** tab.
+structure-tested, but haven't been checked in the target tools yet. Which export for which tool:
+[Exports](exports/index.md).
 
 ---
 

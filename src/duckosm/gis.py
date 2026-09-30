@@ -7,7 +7,7 @@ and any tool with a GIS importer — Aimsun, PTV Visum, …) with no DuckDB know
 *geographic* tables are written — ``<mode>.edges`` (layer ``edges_<mode>``), ``<mode>.nodes``
 (``nodes_<mode>``) and ``main.boundary`` (``boundary``). The routing adjacency (``edge_graph`` /
 ``turn_restrictions``) is a topology GIS tools can't act on and belongs in the NetworkX / SUMO
-exports, not here. See ``docs/gis_export.md`` for the format spec.
+exports, not here. See https://khoshkhah.github.io/duckOSM/exports/gis/ for the format spec.
 
     import duckdb
     from duckosm.gis import to_gis

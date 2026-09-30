@@ -1,7 +1,7 @@
 """
 railML 2.4 **infrastructure** export — a *new* rail-network extraction from raw OSM (duckOSM has no
 rail mode of its own), emitting the open format that feeds OpenTrack / RailSys / FBS / Viriato.
-See docs/railml_export.md.
+See https://khoshkhah.github.io/duckOSM/exports/railml/.
 
 Pipeline: pull ``railway`` ways from ``raw.ways``, split them at shared/switch nodes into **tracks**,
 wire the **topology** (connections / buffer stops / open ends at shared nodes), and attach

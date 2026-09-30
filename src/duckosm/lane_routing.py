@@ -1,7 +1,7 @@
 """
 Lane-level routing — a **lane graph** (lane→lane adjacency) + a Dijkstra router over it, so a route is
 planned *per lane* (which lane, when to change), not just road-to-road. Mirrors duckOSM's
-``edge_graph`` → ``Router`` pattern one level down. See docs/lane_routing.md.
+``edge_graph`` → ``Router`` pattern one level down. See https://khoshkhah.github.io/duckOSM/exports/lane-routing/.
 
 Nodes are ``gmns_<mode>.lane`` rows; edges are **turns** (lane→lane across a junction, from
 ``movement``) and **lane-changes** (adjacent lanes on a link). ``build_lane_graph`` persists them as

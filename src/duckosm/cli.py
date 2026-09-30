@@ -655,7 +655,7 @@ def matsim(db, mode, crs, gzip, out):
     """Export a MATSim network.xml from a built duckOSM db — the directed node+link substrate for
     MATSim / BEAM / eqasim. Each edge becomes one directed link (edge_id preserved), with length,
     freespeed, capacity, permlanes and modes; node coordinates reprojected to a metric CRS.
-    See docs/matsim_export.md.
+    See https://khoshkhah.github.io/duckOSM/exports/matsim/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -675,7 +675,7 @@ def matsim(db, mode, crs, gzip, out):
 @click.option('--mode', '-m', default='driving', show_default=True, help='GMNS mode schema')
 def lane_graph(gmns_db, mode):
     """Build a lane-level routing graph in a GMNS db — lane->lane turn edges (from movements) +
-    lane-change edges (adjacent lanes), written as lane_<mode>.lane_edges. See docs/lane_routing.md.
+    lane-change edges (adjacent lanes), written as lane_<mode>.lane_edges. See https://khoshkhah.github.io/duckOSM/exports/lane-routing/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -697,7 +697,7 @@ def lane_graph(gmns_db, mode):
 @click.option('--out', '-o', default=None, help='Write the route as GeoJSON to this path')
 def route_lanes_cmd(gmns_db, from_lane, to_lane, mode, out):
     """Plan a lane-level route between two lanes (each a lane_id or an edge_id → its lane 1). Prints the
-    lane count / cost / maneuvers; with -o writes the route geometry as GeoJSON. See docs/lane_routing.md.
+    lane count / cost / maneuvers; with -o writes the route geometry as GeoJSON. See https://khoshkhah.github.io/duckOSM/exports/lane-routing/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -734,7 +734,7 @@ def lanelet2(gmns_db, mode, out):
     """Export a Lanelet2 HD-map (.osm) from a GMNS db — each per-lane geometry becomes a lanelet
     (left/right boundaries from centerline ± half-width) with subtype/one_way/speed_limit tags, for
     Autoware / the lanelet2 library. A lane-level map skeleton in the AD standard (OSM XML, renders
-    natively) — not survey-grade. See docs/lanelet2_export.md.
+    natively) — not survey-grade. See https://khoshkhah.github.io/duckOSM/exports/lanelet2/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -755,7 +755,7 @@ def lanelet2(gmns_db, mode, out):
 def railml(db, out):
     """Export a railML 2.4 rail infrastructure file from a built duckOSM db — a NEW rail extraction
     (duckOSM has no rail mode): railway ways from the raw OSM are split into tracks with topology,
-    switches, signals and OCPs/stations, for OpenTrack / RailSys / Viriato. See docs/railml_export.md.
+    switches, signals and OCPs/stations, for OpenTrack / RailSys / Viriato. See https://khoshkhah.github.io/duckOSM/exports/railml/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -783,7 +783,7 @@ def opendrive(db, mode, crs, junctions, out):
     """Export an ASAM OpenDRIVE .xodr from a built duckOSM db — roads with a reprojected reference line
     and lane-level width offsets, for AV sims (CARLA/esmini) and commercial micro (Vissim/Aimsun).
     Phase 1 (default): geometry + lanes. `--junctions` adds routable junctions + turn connecting roads
-    (needs a GMNS db). See docs/opendrive_export.md.
+    (needs a GMNS db). See https://khoshkhah.github.io/duckOSM/exports/opendrive/.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
@@ -883,7 +883,7 @@ def matsim_lanes(gmns_db, mode, signals, cycle, out_dir):
     """Export MATSim lanes.xml (+ signalSystems/Groups/Control.xml) from a GMNS db. Turn lanes come
     from the movement table; signals from signalised nodes with a default fixed-time plan (the timing
     is a synthetic placeholder — OSM has no signal plans). Pair with `duckosm matsim` (same edge_id
-    link ids). See docs/matsim_lanes_signals.md.
+    link ids). See https://khoshkhah.github.io/duckOSM/exports/matsim/#lanes-and-signals.
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 

@@ -100,5 +100,5 @@ Open the file in a browser. This is that file, live: zoom, hover a road, click o
 - Build your own area: the same steps, with your area's id and region file.
 - [Guides](guides/prepare-area.md): prepare other areas, build options, fix OSM errors, query, route,
   maps, elevation.
-- Exports: [SUMO](exports/sumo.md), [MATSim](matsim_export.md), [GMNS](gmns_export.md),
-  [GIS](gis_export.md), [networkx](exports/networkx.md).
+- Exports: [SUMO](exports/sumo.md), [MATSim](exports/matsim.md), [GMNS](exports/gmns.md),
+  [GIS](exports/gis.md), [networkx](exports/networkx.md).

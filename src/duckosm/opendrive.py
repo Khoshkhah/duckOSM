@@ -1,7 +1,7 @@
 """
 ASAM OpenDRIVE (.xodr) export — a built duckOSM db → roads with a reprojected reference line and
 lane-level width offsets, the continuous-geometry format that reaches AV sims (CARLA / esmini) and
-commercial micro (PTV Vissim / Aimsun). See docs/opendrive_export.md.
+commercial micro (PTV Vissim / Aimsun). See https://khoshkhah.github.io/duckOSM/exports/opendrive/.
 
 **Phase 1 (this module):** one ``<road>`` per directed edge (``road id = edge_id``, oneway, lanes on
 the right), with a metric reference line (piecewise ``<line>``) and ``lanes.lanes`` driving lanes of

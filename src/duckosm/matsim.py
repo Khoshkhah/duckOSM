@@ -1,6 +1,6 @@
 """
 MATSim network export — a built duckOSM routing db → a MATSim ``network.xml`` (``network_v2`` DTD),
-the directed node+link substrate MATSim / BEAM / eqasim run agents on. See docs/matsim_export.md.
+the directed node+link substrate MATSim / BEAM / eqasim run agents on. See https://khoshkhah.github.io/duckOSM/exports/matsim/.
 
 A MATSim link is directed, and duckOSM ``edges`` are already one row per direction, so each edge maps
 straight to one link (a two-way street is already two edges → two links). MATSim is a metric
