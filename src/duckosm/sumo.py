@@ -113,12 +113,18 @@ def _table_exists(con, qualified):
 
 
 def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
-    """Write a standard SUMO netconvert config (`.netccfg`) wiring the inputs/output + options."""
+    """Write a standard SUMO netconvert config (`.netccfg`) wiring the inputs/output + options.
+
+    Paths are written relative to the config's own folder: that is how SUMO resolves them (a path
+    relative to the working directory, e.g. ``sumo/x.nod.xml`` for out_dir ``sumo``, made netconvert
+    look for ``sumo/sumo/x.nod.xml`` and fail with "No nodes loaded")."""
+    here = os.path.dirname(os.path.abspath(cfg_path))
+    rel = lambda p: os.path.relpath(os.path.abspath(p), here)
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<configuration>",
-             f'  <node-files value="{nod}"/>', f'  <edge-files value="{edg}"/>']
+             f'  <node-files value="{rel(nod)}"/>', f'  <edge-files value="{rel(edg)}"/>']
     if con_xml:
-        lines.append(f'  <connection-files value="{con_xml}"/>')
-    lines.append(f'  <output-file value="{net}"/>')
+        lines.append(f'  <connection-files value="{rel(con_xml)}"/>')
+    lines.append(f'  <output-file value="{rel(net)}"/>')
     for key, val in opts.items():
         lines.append(f'  <{key} value="{val}"/>')
     lines += ["</configuration>", ""]

@@ -87,6 +87,16 @@ def test_netconvert_preserves_ids_and_connections(tmp_path):
 
 @pytest.mark.skipif(not HAVE_NETCONVERT,
                     reason="netconvert not installed (pip install duckosm[sumo])")
+def test_netconvert_with_a_relative_out_dir(tmp_path, monkeypatch):
+    """SUMO resolves .netccfg paths against the config's folder: a relative out_dir (the CLI default,
+    `sumo`) once produced `sumo/sumo/...` paths and netconvert failed with "No nodes loaded"."""
+    monkeypatch.chdir(tmp_path)
+    out = to_sumo(_db(), "sumo", net_name="t")
+    assert (tmp_path / "sumo" / "t.net.xml").exists(), out
+
+
+@pytest.mark.skipif(not HAVE_NETCONVERT,
+                    reason="netconvert not installed (pip install duckosm[sumo])")
 def test_netccfg_default_and_override(tmp_path):
     out = to_sumo(_db(), str(tmp_path / "a"), net_name="d")       # default config
     cfg = open(out["netccfg"]).read()

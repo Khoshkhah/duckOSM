@@ -339,41 +339,36 @@ Every exporter keeps `edge_id` as the target format's own id.
 
 | Format | Command | Details |
 |---|---|---|
-| SUMO | `duckosm sumo` | below |
+| SUMO | `duckosm sumo` | [below](#sumo) |
 | MATSim | `duckosm matsim`, `matsim-lanes` | [MATSim network](matsim_export.md), [lanes & signals](matsim_lanes_signals.md) |
 | GMNS | `duckosm gmns` | [GMNS](gmns_export.md) |
 | GeoPackage / shapefile | `duckosm export-gis` | [GeoPackage / shapefile](gis_export.md) |
 | networkx | `duckosm export-graph`, `to_networkx(con)` | [below](#networkx) |
 
-### SUMO export
+### SUMO
 
-Export the network to a [SUMO](https://eclipse.dev/sumo/) simulation net whose edge ids **are** the
-duckOSM `edge_id`. `to_sumo` writes SUMO plain-XML — `.nod.xml`, `.edg.xml` (ids = `edge_id`) and
-`.con.xml` (the legal successors from `edge_graph`) — plus a standard netconvert config (`.netccfg`),
-then runs **netconvert** to assemble the `.net.xml`. netconvert keeps the ids and the explicit
-connections, so per-edge data (flow / demand / a regime table) maps onto the simulation **by
-identity** (no geometry conflation) **and turn restrictions are honoured** (movements limited to the
-`edge_graph` successors, not guessed). Needs `pip install duckosm[sumo]`.
-
-```python
-import duckdb
-from duckosm import to_sumo
-
-con = duckdb.connect("monaco.duckdb", read_only=True)
-out = to_sumo(con, "sumo/")                  # sumo/network.{nod,edg,con}.xml + .netccfg + .net.xml
-out["net"], out["n_edges"], out["n_connections"]
-
-to_sumo(con, "sumo/", run_netconvert=False)            # only the plain-XML (assemble it yourself)
-to_sumo(con, "sumo/", config={"junctions.join": "true"})   # override default netconvert options
-to_sumo(con, "sumo/", config="my.netccfg")             # or drive it with your own config file
+```bash
+pip install "duckosm[sumo]"          # brings SUMO's netconvert
+duckosm sumo monaco.duckdb           # -> sumo/monaco.net.xml
 ```
 
-Or from the CLI: `duckosm sumo monaco.duckdb` (`--no-netconvert` for plain-XML only,
-`--no-connections` to let netconvert infer turns, `-c my.netccfg` for a custom config, `--out-dir` /
-`--name`). Edge `shape`, `numLanes`, `speed`, `priority`/`type` and true `length` are carried over;
-coordinates are geographic and netconvert projects them. The netconvert options come from a built-in
-default (`DEFAULT_NETCFG`), written as a standard `.netccfg`; pass `config=` (a dict merged onto the
-default, or a `.netccfg` path) to change them.
+duckOSM writes the network in SUMO's plain-XML format and runs SUMO's own `netconvert` to build the
+`.net.xml`. Every SUMO edge id is the duckOSM `edge_id`, and each junction allows only the turns in
+`edge_graph`, so turn restrictions are kept.
+
+| Option | Does |
+|---|---|
+| `--no-netconvert` | only write the plain-XML inputs (`.nod`, `.edg`, `.con` and a `.netccfg`) |
+| `--no-connections` | let netconvert work out the turns itself |
+| `-c my.netccfg` | use your own netconvert settings |
+| `-m walking` | another mode (default `driving`) |
+| `--out-dir`, `--name` | output folder (default `sumo`) and file name (default: the db's name) |
+
+```python
+from duckosm import to_sumo
+out = to_sumo(con, "sumo/")                                  # -> sumo/network.net.xml
+to_sumo(con, "sumo/", config={"junctions.join": "true"})     # change one netconvert option
+```
 
 ### networkx
 

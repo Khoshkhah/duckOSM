@@ -21,7 +21,8 @@ jobs:
       # GDAL (ogr2ogr) and osmium: duckosm boundary / clip-pbf and the sample build's pre-clip.
       - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool
       # Tests that need local PBFs / built dbs / netconvert skip themselves.
-      - run: pip install -e ".[dev,routing]"
+      # [sumo] brings netconvert, so the SUMO export is tested for real
+      - run: pip install -e ".[dev,routing,sumo]"
       - run: pytest tests/ -q -rs
 
   package:
