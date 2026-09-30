@@ -76,8 +76,8 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", *idcols, "highway", "name", *info, "bridge", "tunnel", "level"],
-        road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "level"],
+        tooltip=["edge_id", *idcols, "highway", "name", *info, "bridge", "tunnel", "layer", "level"],
+        road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "layer", "level"],
         copy_field="edge_id",
         name=f"{name} ({mode})", legend=True,
         # view_3d builds the extruded bridge decks the in-map 2D/3D toggle needs; pitch=0 still

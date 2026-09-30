@@ -987,7 +987,7 @@ function _rrows(p, only){   // the side panel's layout: big name, then aligned k
   const [name, kv]=_rpairs(p, only);
   return (name ? '<div class="rs-name">'+name+'</div>' : "")+
     kv.map(([k,s])=>'<div class="rs-kv"><span>'+k+'</span><b>'+s+'</b></div>').join(""); }
-const _popupFields = ["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "level"];   // curated field list, or null => all columns
+const _popupFields = ["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "layer", "level"];   // curated field list, or null => all columns
 // GOOGLE STREET VIEW of the clicked edge (the window, the side-by-side page, or a plain link),
 // looking the way the edge runs. A plain maps URL, no API key; where it stands is below.
 const _streetView = true;
@@ -1218,7 +1218,7 @@ function rsSelect(id){
   }
 }
 window.rsSelect = rsSelect;
-const _ttip = ["edge_id", "osm_id", "edge_ref", "highway", "name", "lanes", "maxspeed_kmh", "bridge", "tunnel", "level"], _ttipOnly = Array.isArray(_ttip) ? _ttip : null;  // false | true | [fields]
+const _ttip = ["edge_id", "osm_id", "edge_ref", "highway", "name", "lanes", "maxspeed_kmh", "bridge", "tunnel", "layer", "level"], _ttipOnly = Array.isArray(_ttip) ? _ttip : null;  // false | true | [fields]
 const _tip = _ttip ? new maplibregl.Popup(
   {closeButton:false, closeOnClick:false, maxWidth:"260px", offset:10, className:"rs-tip"}) : null;
 function hoverFrame(){ _raf=0; if(!_pt) return;

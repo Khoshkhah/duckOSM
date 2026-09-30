@@ -106,8 +106,8 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     add_level(g)
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
-        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id", "bridge", "tunnel", "level"],
-        road_popup=["name", "edge_id", "highway", "bridge", "tunnel", "level"],
+        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id", "bridge", "tunnel", "layer", "level"],
+        road_popup=["name", "edge_id", "highway", "bridge", "tunnel", "layer", "level"],
         arrows=False, filter_control=False, name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
@@ -324,7 +324,8 @@ _JS = r"""
     if (names.length) h += "<ol>" + names.slice(0, 15).map((n) => `<li>${n}</li>`).join("") + (names.length > 15 ? "<li>…</li>" : "") + "</ol>";
     const ks = res.legs.flatMap((l) => l.edges), ps = rsGetProps(ks.map((k) => fid[k]));
     const is = (v) => v != null && !["", "no", "false", "0"].includes(String(v).toLowerCase());
-    const grade = (p) => p.level ? ` <span class="rm-lvl">${is(p.bridge) ? "bridge, " : is(p.tunnel) ? "tunnel, " : ""}level ${p.level}</span>` : "";
+    const grade = (p) => (p.level || is(p.layer)) ? ` <span class="rm-lvl">${is(p.bridge) ? "bridge, " : is(p.tunnel) ? "tunnel, " : ""}` +
+                         `layer ${is(p.layer) ? p.layer : "–"}, level ${p.level}</span>` : "";
     h += `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
          ks.map((k, i) => `<li><code>${ps[i].edge_id}</code> ${D.name[k] || ""}${grade(ps[i])}</li>`).join("") + "</ol></details>";
     out.innerHTML = h;
