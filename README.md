@@ -39,7 +39,7 @@ edge_id = hash(osm_id, source, target)
 
 The order of `source` and `target` is the direction, so the two directions of a two-way street get
 different ids. None of the three is a number duckOSM makes up, so the id stays the same
-**across rebuilds, clips and exports** ([details](https://khoshkhah.github.io/duckOSM/architecture/#stable-edge-ids)).
+**across rebuilds, clips and exports** ([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
 
 ## Quick start
 
@@ -63,9 +63,19 @@ r = route(con, a, b)                     # fastest path; weight="length" for dis
 r["time_s"], r["length_m"], r["edges"]   # ~130 s, ~1.7 km, the ordered edge_ids
 ```
 
-A build holds one schema per mode (`driving`, `walking`, `cycling`) with `edges`, `nodes`, the
-`edge_graph` of legal turns and, for driving, `turn_restrictions`. Build a country once, then cut
-areas out of it in seconds with `duckosm extract`; the ids match the parent.
+## What you get
+
+- **A driving, a walking and a cycling network** in one file, one schema each, split at the same
+  junctions so a road has the same `edge_id` in every mode. OSM access tags are respected: private
+  roads are kept for the map but never routed ([details](https://khoshkhah.github.io/duckOSM/concepts/networks/#access-private-and-forbidden-roads)).
+- **The graph of legal turns** (`edge_graph`), with OSM turn restrictions, for routing in SQL,
+  Python or networkx.
+- **Base-map layers** (`features.*`: water, land use, buildings, POIs) in the same file.
+- **Maps in one offline HTML page:** `duckosm viz` draws each network; `duckosm route-map` is a route
+  planner where you drag a start and an end and get turn-by-turn directions ([try it](https://khoshkhah.github.io/duckOSM/guides/route/)).
+- **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
+  area's border by name, and `duckosm extract` cuts a city out of a country build in seconds.
+- **Your own fixes for OSM errors**, applied on every build ([how](https://khoshkhah.github.io/duckOSM/guides/fix-osm-errors/)).
 
 ## Exports
 

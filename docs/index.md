@@ -83,6 +83,23 @@ r["time_s"], r["length_m"], r["edges"]   # ~130 s, ~1.7 km, the ordered edge_ids
 Next: [Your first network](first_network.md) walks through it step by step, and the
 [guides](guides/build.md) cover each task.
 
+## What you get
+
+- **A driving, a walking and a cycling network** in one file, one schema each, split at the same
+  junctions so a road has the same `edge_id` in every mode. OSM access tags are respected: private
+  roads are kept for the map but never routed ([details](concepts/networks.md#access-private-and-forbidden-roads)).
+- **The graph of legal turns** (`edge_graph`), with OSM turn restrictions, for routing in SQL,
+  Python or networkx ([Route](guides/route.md)).
+- **Base-map layers** (`features.*`: water, land use, buildings, POIs) in the same file
+  ([Base-map layers](reference/features.md)).
+- **Maps in one offline HTML page:** `duckosm viz` draws each network ([Draw a map](guides/draw-map.md));
+  `duckosm route-map` is a route planner where you drag a start and an end and get turn-by-turn
+  directions ([try it](guides/route.md#on-a-map)).
+- **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
+  area's border by name, and `duckosm extract` cuts a city out of a country build in seconds
+  ([Prepare an area](guides/prepare-area.md)).
+- **Your own fixes for OSM errors**, applied on every build ([Fix OSM errors](guides/fix-osm-errors.md)).
+
 ## Exports
 
 | Format | Command | How it's verified |
