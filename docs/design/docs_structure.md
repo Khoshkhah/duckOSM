@@ -1,6 +1,6 @@
 # Documentation structure
 
-**Status:** proposal, for sign-off before any page moves.
+**Status:** done 2026-09-30: all six sections rewritten and published (Get started, Guides, Exports, Concepts, Reference, Development).
 
 Based on a full read of all 32 published pages and the 8 design notes (2026-09-30).
 
