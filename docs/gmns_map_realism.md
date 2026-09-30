@@ -1,13 +1,12 @@
 # Map realism — drive-side lane offset + smooth turn connectors
 
-**Status:** **shipped** 2026-07-04 — §1 drive-side offset (`--drive-side`, default right) and §2
-smooth Bézier turn connectors. Two contained geometry refinements that make the **lanes / meso /
-micro** maps read like a real road, not a schematic. Both improve everything already built and are the
-foundation the [micro network](gmns_micro.md) draws on.
+Two geometry refinements that make the lanes / meso / micro maps read like real roads: §1 the
+drive-side offset (`--drive-side`, default right) and §2 smooth Bézier turn connectors. The
+[micro network](gmns_micro.md) builds on both.
 
 These fix *geometry realism*; they don't invent data — lane **counts/widths** are still only as good
 as OSM tags (see [gmns_micro.md](gmns_micro.md#geometry--width-what-s-real-vs-assumed); for measured
-Swedish lanes the real source is **NVDB** via the `fetching-sweden-data` sibling).
+Swedish lanes the authoritative source is **NVDB**).
 
 ---
 

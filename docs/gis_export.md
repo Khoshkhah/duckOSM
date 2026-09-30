@@ -11,7 +11,7 @@ attribute, so measured data, sensor readings and flows keyed to `edge_id` drape 
 the GIS layer after a round-trip.
 
 **Elevation:** the export keeps every scalar column, so if the db was enriched by
-[`duckosm elevation`](design/elevation.md) the `ele` (nodes) and `z_from`/`z_to` (edges) columns
+[`duckosm elevation`](elevation.md) the `ele` (nodes) and `z_from`/`z_to` (edges) columns
 come through automatically as attributes — no flag, no code path of their own. Geometry stays 2D
 (edges only carry endpoint z, so a 3D `LineStringZ` would be degenerate); symbolise or analyse by
 the `ele` attribute in QGIS/ArcGIS instead.

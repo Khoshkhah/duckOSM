@@ -1,7 +1,6 @@
-# `features.*` — the base-map schema (Shortbread), and the duckmap migration
+# `features.*` — the base-map schema (Shortbread)
 
-> **Status:** Phase A implemented (duckOSM extracts `features.*`). Phase B (duckmap renders from it)
-> pending. Enable with `options.build_features: true`.
+> Enable with `options.build_features: true` (off by default).
 
 ## Goal — one db, two consumers
 

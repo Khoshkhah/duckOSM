@@ -1,11 +1,8 @@
-# Lane-level routing → lane graph + `route_lanes` (design)
+# Lane-level routing → lane graph + `route_lanes`
 
-**Status:** **shipped** 2026-07-04 (`build_lane_graph` / `route_lanes`; `duckosm lane-graph` /
-`route-lanes`). Step 1 of the *"lane-level map + lane-level routing"* goal: a **lane graph** (lane→lane
-adjacency) and a router over it, so a route can be planned **per lane** (which lane to be in, when to
-change) — not just road-to-road. It's the shared substrate the lane map (Step 2) then renders. Verified
-on Södermalm: 3,193 lanes → 6,376 edges (5,742 turn + 634 lane-change), one weakly-connected component
-of 3,191; a 64-lane cross-network route returns a lane sequence + geometry + turn/lane-change maneuvers.
+`duckosm lane-graph` / `route-lanes` (`build_lane_graph` / `route_lanes`). A **lane graph**
+(lane→lane adjacency) and a router over it, so a route can be planned **per lane** (which lane to
+be in, when to change), not just road to road.
 
 ## The idea — mirror `edge_graph` → `Router`, at lane resolution
 

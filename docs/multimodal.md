@@ -1,11 +1,10 @@
-# Multimodal (intermodal) routing — design & build spec
+# Multimodal (intermodal) routing
 
-> **Status:** ✅ **Phase 1 (v1 coarse) implemented.** walk ↔ drive ↔ cycle transfers, OSM-only,
-> static Dijkstra. Build the `mm.*` tables with `duckosm multimodal <db>` (or `multimodal.enabled`
-> in a build config) and route with `duckosm.route_multimodal`. The **v2 realistic** park-and-ride
-> path (`--realistic`) is wired but stubbed (raises `NotImplementedError`); transit (Phase 3) is
-> out of scope. The remaining sections below are the original design spec, kept as the rationale
-> and the roadmap for v2/transit.
+> `duckosm multimodal <db>` (or `multimodal.enabled` in a build config) builds the `mm.*` tables;
+> route with `duckosm.route_multimodal`. Walk ↔ drive ↔ cycle transfers, from OSM only, static
+> Dijkstra. The realistic park-and-ride mode (`--realistic`) is not implemented yet (it raises
+> `NotImplementedError`), and public transit is out of scope. The sections below are the original
+> design, kept as the rationale.
 
 ## Usage (Phase 1, v1 coarse)
 
@@ -39,14 +38,12 @@ route_multimodal(con, SRC, DST, enforce_sequence=False)   # allow any mode alter
 networkx needed). `enforce_sequence=True` (default) restricts a trip to `walk* (drive|cycle)* walk*`
 — at most one contiguous vehicular segment, entered and left via walking.
 
-**Visualise a route by mode** (walking green, driving red, cycling blue) with the sibling
-`mapstyle` deck.gl viewer:
+**Visualise a route by mode** (walking green, driving red, cycling blue) as one self-contained
+HTML file:
 
 ```bash
-# auto-picks a walk->drive->walk trip across Sodermalm and renders it
-python scripts/multimodal_route_map.py --db data/db/sodermalm_pbf.duckdb
-python scripts/multimodal_route_map.py --db <db> --src <node_id> --dst <node_id> --out-dir reports/mm
-python reports/<db-stem>_multimodal_route/serve.py     # then open the printed http URL
+python scripts/multimodal_route_standalone.py --db <db>                          # picks a trip itself
+python scripts/multimodal_route_standalone.py --db <db> --src <node_id> --dst <node_id> --out route.html
 ```
 
 Implementation: `MultimodalBuilder` in `src/duckosm/processors/multimodal.py`, `route_multimodal` in

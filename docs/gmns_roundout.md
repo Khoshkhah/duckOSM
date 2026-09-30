@@ -1,9 +1,7 @@
-# Round out GMNS — capacity, richer movements, cycling meso, combined mode-tagged
+# GMNS extras — capacity, richer movements, cycling meso, combined mode-tagged
 
-**Status:** **shipped** 2026-07-04 — Phase 1 (capacity + movement enrichment + cycling meso) and
-Phase 2 (combined mode-tagged `gmns_all`, `duckosm gmns --combined`). Fills currently-NULL spec
-columns and adds the multimodal variant — no restructuring of what shipped. Sits before the
-[micro network](#then-micro) on the roadmap.
+Fills GMNS spec columns the base export leaves empty (capacity, movement details), adds a cycling
+meso network, and a combined mode-tagged network `gmns_all` (`duckosm gmns --combined`).
 
 Confirmed on Södermalm driving: `link.capacity` 0/2,876, `movement.mvmt_code`/`geometry`/
 `start_ib_lane`/`end_ib_lane` all 0/4,503 — these are populated columns in the spec that we leave

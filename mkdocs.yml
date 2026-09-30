@@ -7,7 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  logo: assets/duckosm-mark.svg
+  logo: assets/duckosm-mark-inverse.svg   # the header is dark: yellow disc reads, the dark one doesn't
   favicon: assets/duckosm-mark.svg
   font:
     text: IBM Plex Sans
@@ -56,9 +56,10 @@ markdown_extensions:
       # GitHub-style anchors, so the docs' existing in-page links work on the site too
       slugify: !!python/object/apply:pymdownx.slugs.slugify { kwds: { case: lower } }
 
-# internal launch notes; everything else under docs/ is published
+# design notes and unbuilt specs stay in the repo but aren't published
 exclude_docs: |
-  design/public_launch.md
+  design/
+  lane_map.md
 
 nav:
   - Home: index.md
@@ -87,23 +88,15 @@ nav:
       - Lanelet2: lanelet2_export.md
       - railML: railml_export.md
       - Lane routing: lane_routing.md
-      - Lane map: lane_map.md
       - GMNS meso: gmns_meso.md
       - GMNS micro: gmns_micro.md
       - GMNS viewer: gmns_viewer.md
       - GMNS maps: gmns_map.md
       - GMNS map realism: gmns_map_realism.md
-      - GMNS round-out: gmns_roundout.md
+      - GMNS extras: gmns_roundout.md
       - Intermodal routing: multimodal.md
-      - Elevation: design/elevation.md
+      - Elevation: elevation.md
       - Base-map features: features_schema.md
   - Internals:
       - Architecture: architecture.md
-      - Testing: testing.md
-      - Design notes:
-          - Cycling dismount edges: design/cycling_dismount_edges.md
-          - Dropping is_reverse from edge_id: design/drop_is_reverse_from_edge_id.md
-          - Splitting same-direction parallels: design/split_same_direction_parallels.md
-          - Turn-restriction overrides: design/turn-restriction-overrides.md
-          - Walk / cycle type: design/walk_cycle_type.md
-          - Pipeline update plan: design/pipeline_update_plan.md
+      - Development: development.md

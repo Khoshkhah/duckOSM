@@ -1,15 +1,12 @@
 # Elevation (put the network on real terrain)
 
-**Status:** **core implemented** (2026-07-23). A **post-processing feature**, not a build-pipeline
-stage: the standalone `duckosm elevation <db>` command (module `src/duckosm/elevation.py`, sibling
-of `matsim.py` / `opendrive.py` / `gmns.py`) enriches an already-built db in place — adds
-`<mode>.nodes.ele`, `<mode>.edges.z_from`/`z_to` (all modes present, virtual nodes included) and a
-`main.elevation_metadata` provenance row. `--dem <file>` (any GDAL raster), or `--source` with a
-coverage-based **auto** resolver (default): EU-DTM bare-earth inside Europe when
-`OPENTOPOGRAPHY_API_KEY` is set, else Copernicus GLO-30 (streamed from AWS, no auth, global). Opt-in
-deps `rasterio` + `pyproj` (extra `[elevation]`); tests in `tests/test_elevation.py` (9, green in
-the full suite). Idea adapted from OSM2World's elevation model — **minus** its constraint solver,
-which its own docs call *"currently very fragile and deactivated by default."*
+A post-processing step, not part of the build: `duckosm elevation <db>` (`src/duckosm/elevation.py`)
+enriches a built db in place with `<mode>.nodes.ele`, `<mode>.edges.z_from` / `z_to` (every mode,
+virtual nodes included) and a `main.elevation_metadata` provenance row. Use `--dem <file>` (any
+GDAL raster), or `--source` (default `auto`): EU-DTM bare-earth inside Europe when
+`OPENTOPOGRAPHY_API_KEY` is set, else Copernicus GLO-30 (streamed from AWS, no account needed,
+worldwide). Needs `pip install "duckosm[elevation]"` (`rasterio`, `pyproj`). The idea is adapted
+from OSM2World's elevation model, without its constraint solver.
 
 **Done since:** the z-consumers **`matsim`** (node `z`), **`opendrive`** (`<elevationProfile>`,
 linear ramp from `z_from` to `z_to`) and **`gis`** (`ele`/`z_from`/`z_to` flow through as attributes
@@ -413,7 +410,7 @@ setting lets decks sit on real terrain. A roadstyle change downstream of this �
 
 ## Footprint
 
-New files: `src/duckosm/elevation.py`, `docs/design/elevation.md` (this),
+New files: `src/duckosm/elevation.py`, `docs/elevation.md` (this),
 `tests/test_elevation.py`, `scripts/elevation_report.py`. Touched: `cli.py` (+`elevation`
 subcommand), `README.md`, `docs/data_dictionary.md` (+3 columns, +`main.elevation_metadata` table),
 and the z-consumers `matsim.py` / `opendrive.py` (`gis` needs none — scalar columns pass through).

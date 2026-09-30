@@ -1,7 +1,7 @@
 # Mesoscopic network — `duckosm gmns --meso`
 
-**Status:** shipped 2026-07-04 (`to_meso` / `duckosm gmns --meso`). Driving by default; **cycling**
-supported via `--meso-mode cycling`; walking excluded (no lanes).
+`duckosm gmns --meso` (`to_meso`). Driving by default; cycling via `--meso-mode cycling`; walking
+is excluded (it has no lanes).
 
 Build a **lane-level mesoscopic network** from the GMNS extract, into the same standalone GMNS
 DuckDB. It's the bridge between the macro (link-level) network and a micro (cell-level) one, and the

@@ -141,7 +141,7 @@ tags** (`raw.ways`), present in PBF-mode builds; a duckdb-clip build would read 
 
 Because the output carries native `GEOMETRY`, it renders with no extra step:
 
-- **Network level** — `link.geom` / `node.geom` draw with roadstyle / duckmap or the
+- **Network level** — `link.geom` / `node.geom` draw with roadstyle or the
   self-contained viewer, exactly like a duckOSM db.
 - **Lane level** — each `lane` row optionally carries a `geom`: the link centerline **offset** by
   `(lane_num − center) × width` (right-hand-drive aware), so a renderer draws parallel lanes with

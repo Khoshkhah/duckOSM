@@ -1,11 +1,8 @@
 # Lanelet2 export → `duckosm lanelet2` (design)
 
-**Status:** **shipped** 2026-07-04 (`to_lanelet2` / `duckosm lanelet2`, infrastructure v1). A lane-level
-HD-map export in **Lanelet2** — the dominant open format for autonomous-driving lane maps (Autoware,
-the `lanelet2` C++/Python library). Gives duckOSM a lane-level *standard* that is also **natively
-renderable** (it's OSM XML), answering the mapstyle lane-level-visualization goal. Verified on
-Södermalm: **3,193 lanelets, 6,386 boundary ways, 46,581 nodes**; every lanelet has one `left`+one
-`right` boundary and all node refs resolve.
+`duckosm lanelet2` (`to_lanelet2`). A lane-level HD-map export in **Lanelet2**, the main open
+format for autonomous-driving lane maps (Autoware, the `lanelet2` C++/Python library). Lanelet2 is
+OSM XML, so the result also renders in ordinary OSM tools.
 
 > **What this is (and isn't).** This produces an **HD-map *skeleton* in the AD-standard format** — the
 > correct lane structure, topology and semantic tags — **not a survey-grade HD map**. The geometry is
@@ -19,8 +16,8 @@ Södermalm: **3,193 lanelets, 6,386 boundary ways, 46,581 nodes**; every lanelet
 ## Why Lanelet2 fits duckOSM especially well
 
 - **It's OSM XML** (`.osm`): nodes / ways / relations with Lanelet2 tags — the same primitive world
-  duckOSM already lives in, and it **renders directly** in any OSM/deck.gl pipeline (mapstyle can draw
-  the boundary ways with zero conversion).
+  duckOSM already lives in, and it **renders directly** in any OSM/deck.gl pipeline (the boundary ways draw
+  with zero conversion).
 - **It uses lat/lon** — the loader projects to a local metric frame itself, so unlike MATSim/OpenDRIVE
   we **don't reproject**; our native EPSG:4326 lane geometry goes straight in.
 - We already produce the exact source: `gmns_<mode>.lane` (3,193 lanes on Södermalm) has a **drive-side

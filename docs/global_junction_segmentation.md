@@ -1,14 +1,13 @@
 # Global-junction segmentation (cross-mode `edge_id` alignment)
 
-**Status:** implemented (branch `edge-id-segmentation-overhaul`; config `global_junctions`, default
-on; falls back to per-mode junctions when off / for clip builds). Fixes the cross-mode `edge_id` misalignment so the
-same physical road carries the **same `edge_id`** in the driving / walking / cycling graphs.
+Config `options.global_junctions` (default on; falls back to per-mode junctions when off, and for
+clip builds). It makes the same physical road carry the **same `edge_id`** in the driving, walking
+and cycling graphs.
 
 ## The problem
 
-`edge_id` is a content hash of a road segment; downstream tools (flow matchers in
-`fetching-sweden-data`, `traffic_tube_measurements_Stockholm`, the `merge_modes` debug viewer) pin to
-it and JOIN across modes on it. That only works if a physical stretch of road is **segmented the same
+`edge_id` is a content hash of a road segment; downstream tools (map matchers, per-edge
+data tables) pin to it and JOIN across modes on it. That only works if a physical stretch of road is **segmented the same
 way** in every mode — same split nodes → same geometry hash → same `edge_id`.
 
 Today it is **not** always the same, so a single street fragments across modes.
@@ -128,9 +127,8 @@ profiles. Track as **P2**; this doc is **P1** (alignment). Both want the same re
 
 ## Rebuild & verification
 
-`edge_id`s change for affected roads (re-hash) → **full rebuild of all areas/modes** and re-run of the
-downstream matchers pinned to `edge_id` — the same propagation done for the `edge_id` hash migration
-(`fetching-sweden-data` ×4 matchers, `traffic_tube_measurements_Stockholm`). Verify:
+`edge_id`s change for affected roads (re-hash) → **full rebuild of all areas/modes** and re-run of any
+downstream matchers pinned to `edge_id`. Verify:
 
 1. `223470794` has matching `edge_id`s across driving & cycling (and walking once P2 lands).
 2. `merge_modes` renders Kalevi as a single **"all 3"** street (no drive-only/cycle-only fragments).

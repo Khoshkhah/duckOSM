@@ -1,10 +1,10 @@
-# MATSim network export → `duckosm matsim` (design)
+# MATSim network export → `duckosm matsim`
 
-**Status:** **shipped** 2026-07-04 (`to_matsim` / `duckosm matsim`) — single-mode **and** multimodal
-(`--mode all`). Emits a MATSim **`network.xml`** from a built duckOSM
-routing db, plugging duckOSM into the MATSim / **BEAM** / eqasim agent-based ecosystem.
+`duckosm matsim` (`to_matsim`), single-mode or multimodal (`--mode all`). Emits a MATSim
+**`network.xml`** from a built duckOSM routing db, for the MATSim / **BEAM** / eqasim agent-based
+ecosystem.
 
-**Elevation:** if the db was enriched by [`duckosm elevation`](design/elevation.md) (a `nodes.ele`
+**Elevation:** if the db was enriched by [`duckosm elevation`](elevation.md) (a `nodes.ele`
 column), each `<node>` also gets a `z` attribute (metres, 2 dp) — a valid `network_v2` optional
 attribute. A network built without elevation is byte-identical to before (no `z`).
 

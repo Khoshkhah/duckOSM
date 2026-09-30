@@ -47,6 +47,13 @@
   font-family: "Space Grotesk", var(--md-text-font-family), sans-serif;
 }
 
+/* header logo: a touch larger than Material's 1.2rem default */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.7rem;
+  width: 1.7rem;
+}
+
 /* ---- home page ---- */
 .dk-hero {
   display: flex;

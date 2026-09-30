@@ -1,9 +1,7 @@
-# railML export → `duckosm railml` (design)
+# railML export → `duckosm railml`
 
-**Status:** **shipped** 2026-07-04 (`to_railml` / `duckosm railml`) — full infrastructure v1, railML
-2.4. A single open **railML infrastructure** file feeds **OpenTrack, RailSys, FBS, Viriato,
-OpenTimeTable**. Verified on Södermalm: **105 tracks, 41 switches, 68 signals, 7 OCPs**; every track
-has begin+end topology and all connection `ref`s cross-resolve.
+`duckosm railml` (`to_railml`): rail infrastructure in railML 2.4. A single open **railML
+infrastructure** file feeds **OpenTrack, RailSys, FBS, Viriato, OpenTimeTable**.
 
 ## The scope reality (read first)
 

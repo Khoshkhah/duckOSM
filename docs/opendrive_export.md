@@ -1,15 +1,12 @@
-# OpenDRIVE (.xodr) export → `duckosm opendrive` (design)
+# OpenDRIVE (.xodr) export → `duckosm opendrive`
 
-**Status:** **Phase 1 + 2 shipped** 2026-07-04 (`to_opendrive` / `duckosm opendrive [--junctions]`) —
-Phase 1: roads + lanes + geometry; Phase 2 (`--junctions`, from a GMNS db): routable junctions +
-turn connecting roads. It is the premium **AV / driving-sim +
-commercial-micro** target: one `.xodr` opens **CARLA, esmini** (AV) *and* **PTV Vissim, Aimsun**
-(commercial micro). It's the export that finally cashes in the lane-level geometry from
-[micro](gmns_micro.md) + [drive-side offset & smooth connectors](gmns_map_realism.md). Verified on
-Södermalm: 2,876 roads, well-formed, per-road `length` = Σ planView segments, metric SWEREF99 TM
-reference lines.
+`duckosm opendrive [--junctions]` (`to_opendrive`): roads, lanes and geometry; with `--junctions`
+(reading a GMNS db), routable junctions and turn connecting roads. One `.xodr` opens in AV
+simulators (**CARLA, esmini**) and commercial microsimulators (**PTV Vissim, Aimsun**). It uses the
+lane-level geometry from [micro](gmns_micro.md) and the
+[drive-side offset and smooth connectors](gmns_map_realism.md).
 
-**Elevation:** if the db was enriched by [`duckosm elevation`](design/elevation.md)
+**Elevation:** if the db was enriched by [`duckosm elevation`](elevation.md)
 (`edges.z_from`/`z_to`), each `<road>` gets an `<elevationProfile>` with a linear `<elevation>`
 (`a` = `z_from`, `b` = grade to `z_to`) between `planView` and `lanes` — so the reference line has
 real height instead of a flat z = 0. Absent those columns, roads stay flat (unchanged output).

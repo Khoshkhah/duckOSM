@@ -1,12 +1,10 @@
-# MATSim lanes.xml + signals (design)
+# MATSim lanes.xml + signals
 
-**Status:** **shipped** 2026-07-04 (`to_matsim_lanes` / `duckosm matsim-lanes`). The detailed-
-intersection follow-on to [`matsim`](matsim_export.md): turn **lanes** (`lanes.xml`) and traffic
-**signals** (`signalSystems` / `signalGroups` / `signalControl`), so a MATSim run can model lane-level
-turn restrictions and signalised junctions on top of the network. Every file is validated against the
-official MATSim **XSD** schemas (v2.0, namespaced — *not* DTDs like `network.xml`; the schemas are
-vendored under `tests/fixtures/matsim_xsd/`). Verified on Södermalm: 2,527 lane assignments, 11 signal
-systems, all four files XSD-valid.
+`duckosm matsim-lanes` (`to_matsim_lanes`). The detailed-intersection companion to
+[`matsim`](matsim_export.md): turn **lanes** (`lanes.xml`) and traffic **signals**
+(`signalSystems` / `signalGroups` / `signalControl`), so a MATSim run can model lane-level turn
+restrictions and signalised junctions. Every file is validated against the official MATSim **XSD**
+schemas (v2.0; vendored under `tests/fixtures/matsim_xsd/`).
 
 **Source = a GMNS db**, not the core routing db — because the [GMNS `movement`](gmns_export.md) table
 already is the lane→turn→downstream model (`ib_link_id` → `ob_link_id`, with `start_ib_lane`/
