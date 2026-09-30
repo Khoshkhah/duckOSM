@@ -1319,11 +1319,14 @@ window.map = map;
 #rm-panel button{padding:5px 12px;border:1px solid #bbb;border-radius:6px;background:#f7f7f7;cursor:pointer}
 #rm-result .rm-edges{margin-top:8px;font-size:12px} #rm-result .rm-edges summary{cursor:pointer;color:#555}
 #rm-result .rm-edges code{font-size:11px;user-select:all}
+.rm-id{margin:2px 0 6px;font:12px/1.4 system-ui,sans-serif} .rm-id code{user-select:all;font-size:12px}
+.rm-id button{margin-left:6px;font-size:11px;padding:1px 6px;cursor:pointer} .rm-id-name{color:#666;font-size:11px}
 #rm-panel .rm-note{margin-top:10px;color:#777;font-size:12px}
 </style>
 <div id="rm-panel">
   <h3>Route planner</h3>
-  <p class="rm-hint">Click the map to set the start, then the end. Drag the markers to move them.</p>
+  <p class="rm-hint">Click the map to set the start, then the end. Drag the markers to move them.
+  Right-click a road for its <code>edge_id</code>.</p>
   <fieldset><select id="rm-mode"></select></fieldset>
   <fieldset id="rm-weight">
     <label><input type="radio" name="rm-w" value="time" checked> fastest</label>
@@ -1548,6 +1551,19 @@ window.map = map;
     map.on("click", (e) => {
       if (!markers.A || markers.B) { if (markers.B) { markers.B.remove(); markers.B = null; } setMarker("A", e.lngLat); $("rm-result").textContent = "Now click the end."; paint(null); }
       else { setMarker("B", e.lngLat); update(); }
+    });
+    // Right-click a road: its edge_id(s) in a popup, to copy (both directions of a two-way road).
+    map.on("contextmenu", (e) => {
+      const ks = pick(e.lngLat, () => true); if (!ks) return;
+      const rows = rsGetProps(ks.map((k) => fid[k])).map((p) =>
+        `<div class="rm-id"><code>${p.edge_id}</code><button data-id="${p.edge_id}">Copy</button>` +
+        `<div class="rm-id-name">${p.name || ""} · ${p.highway}</div></div>`).join("");
+      const pop = new maplibregl.Popup({maxWidth: "320px"}).setLngLat(e.lngLat).setHTML(rows).addTo(map);
+      for (const b of pop.getElement().querySelectorAll("button[data-id]")) b.addEventListener("click", () => {
+        const done = () => { b.textContent = "Copied"; };
+        if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.id).then(done, () => { b.textContent = "Select it"; });
+        else b.textContent = "Select it";
+      });
     });
     window.rmRoute = function (a, b) { setMarker("A", a); setMarker("B", b); update(); };  // for scripted use
     update();
