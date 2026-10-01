@@ -763,3 +763,23 @@ def test_trimming_keeps_at_least_two_metres(tmp_path):
                                         (16, 2, 6, 2, 800, True), (17, 3, 7, 2, 900, True)])
     for k in (1, 2):
         assert _m(con, f"SELECT ST_Length_Spheroid(ST_FlipCoordinates(geom)) FROM gmns_driving.lane WHERE lane_id='12_{k}'") >= 1.95
+
+
+def test_a_roundabout_ring_closes(tmp_path):
+    """A roundabout drawn as 4 one-way ways around a square: the run is a ring, so the closing joint
+    (last piece into the first) meets like the others, with no connector anywhere on the ring."""
+    src, out = tmp_path / "ring.duckdb", tmp_path / "ring_gmns.duckdb"
+    d = 12 / 111320
+    nodes = {1: (18.06, 59.32), 2: (18.06 + d * 2, 59.32), 3: (18.06 + d * 2, 59.32 + d), 4: (18.06, 59.32 + d)}
+    _way_source(src, nodes, [(11, 1, 2, 2, 501, True), (12, 2, 3, 2, 502, True), (13, 3, 4, 2, 503, True), (14, 4, 1, 2, 504, True)])
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE raw.ways SET tags = MAP{'junction':'roundabout'}")
+    c.close()
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    for a, b in ((11, 12), (12, 13), (13, 14), (14, 11)):
+        gap = con.execute(f"SELECT max(ST_Distance_Sphere(ST_EndPoint(x.geom), ST_StartPoint(y.geom))) FROM gmns_driving.lane x, "
+                          f"gmns_driving.lane y WHERE x.link_id={a} AND y.link_id={b} AND x.lane_num = y.lane_num").fetchone()[0]
+        assert gap < 0.05, (a, b, gap)
+    assert con.execute("SELECT count(*) FROM gmns_driving.lane_connector").fetchone()[0] == 0

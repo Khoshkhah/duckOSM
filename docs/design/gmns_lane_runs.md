@@ -55,8 +55,14 @@ shape only. Lane routing, lanestyle and the meso / micro networks read the same 
 | | before | after |
 |---|---|---|
 | lane continuations along one road needing a connector or leaving a gap | 678 | 10 (9 at junctions, 1 offset) |
-| lanes shorter than 2 m | 288 | 77 |
-| connectors | 2,866 | 1,827 (2,144 with same-way runs only) |
+| lanes shorter than 2 m | 288 | 75 |
+| connectors | 2,866 | 1,798 (2,144 with same-way runs only) |
+
+**Rings.** A roundabout's run is a ring: the last piece goes on into the first. Its closing joint
+was the one rough joint left per roundabout (Kaveh's pictures). The ring is offset by buffering the
+polygon it encloses (GEOS's offset curve of a closed line returns a fragment on the inside), with the
+seam in the middle of the first piece, and "goes on" wraps from the last piece to the first. Monaco:
+265 lane joints on roundabout rings, 0 rough.
 
 One more rule turned out necessary: a lane that goes on **and** turns (lane 2 straight on, a right
 turn from it too) was still cut at its end for the turn's S-curve. A kept end stays put; the turn's

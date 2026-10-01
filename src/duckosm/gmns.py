@@ -133,7 +133,8 @@ def _chain_runs(info):
     a roundabout (OSM draws one as several ways), or a way going on into another way of the same
     name straight ahead (within 30 degrees). Each joint one-to-one. ``info``: ``edge_id -> (osm_id,
     is_reverse, source, target, oneway, lane widths, name, roundabout, heading in, heading out)``.
-    Returns ``(runs, where)``: the runs as edge lists in order, ``edge_id -> (run index, position)``."""
+    Returns ``(runs, where, closed)``: the runs as edge lists in order, ``edge_id -> (run index,
+    position)``, and the set of run indexes that are rings (the last piece goes on into the first)."""
     from collections import Counter, defaultdict
 
     at_src, nxt = defaultdict(list), {}
@@ -166,35 +167,65 @@ def _chain_runs(info):
             run.append(x)
             x = nxt.get(x)
         runs.append(run)
-    return runs, {e: (i, k) for i, run in enumerate(runs) for k, e in enumerate(run)}
+    closed = {i for i, run in enumerate(runs) if len(run) > 1 and nxt.get(run[-1]) == run[0]}
+    return runs, {e: (i, k) for i, run in enumerate(runs) for k, e in enumerate(run)}, closed
 
 
-def _run_lane_wkts(piece_wkts, offs):
+def _run_lane_wkts(piece_wkts, offs, closed=False):
     """The lanes of a run: each lane offset once from the run's merged line (so a bend is one curve
     and the pieces' lanes meet exactly), then cut back into the pieces at the joints (the lane point
-    nearest each joint). Returns ``[[lane wkt, ...] per piece]``, or None when the geometry won't do
-    (a joint folding back on the offset curve): the caller then falls back to per-piece offsets."""
+    nearest each joint). A ``closed`` run (a roundabout) is offset by buffering the ring it encloses
+    (GEOS's offset curve of a closed line is unreliable on the inside), with the seam in the middle
+    of the first piece, which is stitched back together. Returns
+    ``[[lane wkt, ...] per piece]``, or None when the geometry won't do (a joint folding back on
+    the offset curve): the caller then falls back to per-piece offsets."""
     from shapely import wkt as _w
-    from shapely.geometry import LineString, Point
+    from shapely.geometry import LinearRing, LineString, Point, Polygon
     from shapely.ops import substring
 
     lines = [_w.loads(w) for w in piece_wkts]
     if any(ln.is_empty or ln.geom_type != "LineString" for ln in lines):
         return None
+    n = len(lines)
     x0, y0 = lines[0].coords[0]
     kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
     loc = [LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in ln.coords]) for ln in lines]
-    coords, joints = list(loc[0].coords), []
-    for ln in loc[1:]:
+    ring = closed and n > 1 and loc[0].coords[0] == loc[-1].coords[-1] or (
+        closed and n > 1 and Point(loc[0].coords[0]).distance(Point(loc[-1].coords[-1])) < 0.01)
+    if ring:                                     # seam at the first piece's midpoint
+        half = loc[0].length / 2
+        head, tail = substring(loc[0], 0, half), substring(loc[0], half, loc[0].length)
+        order = [tail] + loc[1:] + [head]
+    else:
+        order = loc
+    coords, joints = list(order[0].coords), []
+    for ln in order[1:]:
         c = list(ln.coords)
         joints.append(Point(coords[-1]))
         if Point(c[0]).distance(Point(coords[-1])) < 0.01:
             c = c[1:]
         coords += c
     merged = LineString(coords)
-    out = [[] for _ in loc]
+    out = [[] for _ in range(n)]
     for off in offs:
-        line = merged.offset_curve(off) if abs(off) > 1e-6 else merged
+        if abs(off) <= 1e-6:
+            line = merged
+        elif ring:                               # the ring's polygon, buffered in or out
+            poly = Polygon(coords)
+            if not poly.is_valid or poly.area < 1.0:
+                return None
+            ccw = LinearRing(coords).is_ccw
+            buf = poly.buffer(-abs(off) if (off > 0) == ccw else abs(off))    # left (+) is inside a ccw ring
+            if buf.is_empty or buf.geom_type != "Polygon":
+                return None
+            bd = list(buf.exterior.coords)
+            if LinearRing(bd).is_ccw != ccw:
+                bd = bd[::-1]
+            line = LineString(bd)
+            s0 = line.project(Point(coords[0]))  # start at the seam
+            line = LineString(list(substring(line, s0, line.length).coords) + list(substring(line, 0, s0).coords)[1:])
+        else:
+            line = merged.offset_curve(off)
         if line.is_empty:
             return None
         if line.geom_type == "MultiLineString":
@@ -202,8 +233,10 @@ def _run_lane_wkts(piece_wkts, offs):
         ds = [0.0] + [line.project(j) for j in joints] + [line.length]
         if any(ds[i + 1] - ds[i] < 0.3 for i in range(len(ds) - 1)):
             return None
-        for i in range(len(loc)):
-            seg = substring(line, ds[i], ds[i + 1])
+        segs = [substring(line, ds[i], ds[i + 1]) for i in range(len(ds) - 1)]
+        if ring:                                 # the first piece: its head (at the end) + its tail (at the start)
+            segs = [LineString(list(segs[-1].coords) + list(segs[0].coords)[1:])] + segs[1:-1]
+        for i, seg in enumerate(segs):
             if seg.geom_type != "LineString" or len(seg.coords) < 2:
                 return None
             out[i].append(LineString([(x / (kx * M) + x0, y / M + y0) for x, y in seg.coords]).wkt)
@@ -807,15 +840,22 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
                for lk, ls in by_link.items()}
     runs = {}                                    # link -> (run, position), from _build_lane_curb
     try:
-        runs = {lk: (r, k) for lk, r, k in con.execute("SELECT link_id, run_id, seq FROM _lane_runs").fetchall()}
+        runs = {lk: (r, k, n, c) for lk, r, k, n, c in con.execute(
+            "SELECT link_id, run_id, seq, n, closed FROM _lane_runs").fetchall()}
     except Exception:                            # noqa: BLE001 - no run table (lanes without geometry)
         pass
     num_of = {lid: num for lid, _, num, _, _ in lanes}
 
     def continues(a, b):
-        """Lane b is lane a going on into the next piece of the same run: one road, not cut, no connector."""
+        """Lane b is lane a going on into the next piece of the same run: one road, not cut, no
+        connector. Only when the two really meet (the run's offset curve may have fallen back to
+        per-piece offsets): otherwise the pair is trimmed and connected like any other."""
         ra, rb = runs.get(link_of[a]), runs.get(link_of[b])
-        return ra is not None and rb is not None and ra[0] == rb[0] and rb[1] == ra[1] + 1 and num_of[a] == num_of[b]
+        if ra is None or rb is None or ra[0] != rb[0] or num_of[a] != num_of[b]:
+            return False
+        if not (rb[1] == ra[1] + 1 or (ra[3] and ra[1] == ra[2] - 1 and rb[1] == 0)):   # a ring wraps
+            return False
+        return Point(geom[a].coords[-1]).distance(Point(geom[b].coords[0])) <= 0.3
 
     pairs = []                                   # (mvmt_id, from lane, to lane): the k-th into the k-th
     for mid, ib, ob, si, ei, so in con.execute(
@@ -964,7 +1004,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         h0, h1 = headings(wkt) if wkt else (0.0, 0.0)
         info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway), tuple(w_each), name,
                          tags.get("junction") == "roundabout", h0, h1)
-    runs, where = _chain_runs(info)
+    runs, where, closed = _chain_runs(info)
     wkt_of = {r[0]: r[6] for r in rows}
     merged = {}                                  # run index -> the run's line, lon/lat wkt
     for i, run in enumerate(runs):
@@ -1006,13 +1046,13 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     if lane_geometry:
         for i, run in enumerate(runs):
             if len(run) > 1 and i in merged:
-                per_piece = _run_lane_wkts([wkt_of[e] for e in run], offsets(run[0]))
+                per_piece = _run_lane_wkts([wkt_of[e] for e in run], offsets(run[0]), closed=i in closed)
                 if per_piece:
                     for e, lane_wkts in zip(run, per_piece, strict=True):
                         run_geoms[e] = lane_wkts
         import pandas as pd
-        con.register("_runs_df", pd.DataFrame([(e, i, k) for e, (i, k) in where.items()],
-                                              columns=["link_id", "run_id", "seq"]))
+        con.register("_runs_df", pd.DataFrame([(e, i, k, len(runs[i]), i in closed) for e, (i, k) in where.items()],
+                                              columns=["link_id", "run_id", "seq", "n", "closed"]))
         con.execute("CREATE OR REPLACE TEMP TABLE _lane_runs AS SELECT * FROM _runs_df")
         con.unregister("_runs_df")
 
