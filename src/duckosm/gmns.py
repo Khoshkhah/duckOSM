@@ -52,6 +52,19 @@ def _bezier_line_sql(x0, y0, cx0, cy0, cx1, cy1, x1, y1, n=10):
     by = f"pow(1-u,3)*{y0} + 3*pow(1-u,2)*u*{cy0} + 3*(1-u)*pow(u,2)*{cy1} + pow(u,3)*{y1}"
     return f"ST_MakeLine(list_transform([{ts}], u -> ST_Point({bx}, {by})))"
 
+def _len_m(g):
+    """SQL: the length in metres of a lon/lat geometry, on the ellipsoid. (A degree of longitude is shorter
+    than one of latitude, so ``ST_Length(g) * 111320`` is wrong everywhere but along a meridian.)"""
+    return f"ST_Length_Spheroid(ST_FlipCoordinates({g}))"
+
+
+def _src_cols(con, mode, table):
+    """The columns of the source db's ``<mode>.<table>``."""
+    return {c for (c,) in con.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+        "AND table_name = ?", [mode, table]).fetchall()}
+
+
 # OSM `cycleway` / `sidewalk` -> GMNS's category lists (spec/shared_categories.json); NULL stays NULL.
 _BIKE_FACILITY = ("CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN 'lane' THEN 'unseparated bike lane' WHEN 'track' THEN 'separated bike lane' "
                   "WHEN 'share_busway' THEN 'shared lane' WHEN 'shared_lane' THEN 'shared lane' "
@@ -387,7 +400,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         if lane_geometry:
             _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
         _build_signal_controller(con, sch)
-        _build_location(con, sch, has_raw)
+        _build_location(con, sch, mode, has_raw)
         _build_zone(con, sch)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
@@ -474,9 +487,10 @@ def _build_fixed(con, sch, name, mode, uses):
 
 
 def _build_node(con, sch, mode):
+    z = "n.ele::DOUBLE" if "ele" in _src_cols(con, mode, "nodes") else "NULL::DOUBLE"   # `duckosm elevation`
     con.execute(f"""CREATE TABLE {sch}.node AS SELECT
       n.node_id, NULL::VARCHAR AS name, ST_X(n.geom) AS x_coord, ST_Y(n.geom) AS y_coord,
-      NULL::DOUBLE AS z_coord, NULL::VARCHAR AS node_type,
+      {z} AS z_coord, NULL::VARCHAR AS node_type,
       CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
       NULL::VARCHAR AS zone_id, NULL::BIGINT AS parent_node_id, n.geom
     FROM s.{mode}.nodes n LEFT JOIN _sig sig ON sig.osm_id = n.node_id
@@ -491,14 +505,21 @@ def _build_link(con, sch, mode, uses, has_raw):
         "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges'", [mode]).fetchall()}
     lvl = ", ".join(f"e.{c}" if c in cols else f"NULL::VARCHAR AS {c}" for c in ("bridge", "tunnel", "layer"))
+    # grade (%) from `duckosm elevation`'s end heights. Not on a bridge or in a tunnel: there the height is the
+    # ground below or above, not the road; and the spec's limit is 100 %
+    glen = _len_m("e.geometry")                         # the same length as `length`: rise over run
+    structure = " OR ".join(f"COALESCE(e.{c}, 'no') NOT IN ('no', '')" for c in ("tunnel", "bridge") if c in cols) or "false"
+    grade = ("NULL::DOUBLE" if not {"z_from", "z_to"} <= cols else
+             f"CASE WHEN NOT ({structure}) AND abs(100.0 * (e.z_to - e.z_from) / NULLIF({glen}, 0)) <= 100 "
+             f"THEN 100.0 * (e.z_to - e.z_from) / {glen} END")
     hw = "regexp_replace(split_part(e.highway, ';', 1), '_link$', '')"
     motor = "true" if mode == "driving" else f"{hw} NOT IN ({', '.join(repr(h) for h in _NON_MOTOR)})"
     con.execute(f"""CREATE TABLE {sch}.link AS SELECT
       e.edge_id AS link_id, e.name AS name, e.source AS from_node_id, e.target AS to_node_id,
       true AS directed, e.edge_id AS geometry_id, ST_AsText(e.geometry) AS geometry,
       NULL::BIGINT AS parent_link_id, 1 AS dir_flag,
-      ST_Length_Spheroid(ST_FlipCoordinates(e.geometry)) AS length,   -- the geometry's own length, metres
-      NULL::DOUBLE AS grade,
+      {glen} AS length,   -- the geometry's own length, metres
+      {grade}::DOUBLE AS grade,
       e.highway AS facility_type,
       CASE WHEN {motor} THEN {_capacity_case(hw)}::DOUBLE END AS capacity,
       e.maxspeed_kmh AS free_speed, CASE WHEN {motor} THEN e.lanes END AS lanes,
@@ -982,13 +1003,21 @@ _LOC_HIGHWAY = ("crossing", "bus_stop", "give_way", "stop", "traffic_signals", "
                 "mini_roundabout", "speed_camera")
 
 
-def _build_location(con, sch, has_raw):
+def _build_location(con, sch, mode, has_raw):
     """``location``: the OSM nodes that lie on a link and carry one of the tags above, one row per link they
     lie on. ``lr`` is the distance in metres from the link's from-node, along its shape. Needs the raw tags
     (no ``raw`` schema, no table). docs/exports/gmns_tables.md."""
     if not has_raw:
         return
     hw = ", ".join(repr(h) for h in _LOC_HIGHWAY)
+    ecols = _src_cols(con, mode, "edges")
+    # height: between the link's two end heights, by distance along it (not on a bridge or in a tunnel)
+    elev = {"z_from", "z_to"} <= ecols
+    z = "e.z_from + (e.z_to - e.z_from) * lr / NULLIF(link_len, 0)" if elev else "NULL"
+    struct = [f"COALESCE(e.{c}, 'no') NOT IN ('no', '')" for c in ("tunnel", "bridge") if c in ecols]
+    zskip = " OR ".join(struct) if elev and struct else "false"
+    need = ", ".join(["edge_id"] + [c for c in ("z_from", "z_to", "tunnel", "bridge") if c in ecols])
+    ej = f"LEFT JOIN (SELECT {need} FROM s.{mode}.edges) e ON e.edge_id = pos.link_id" if elev else ""
     con.execute(f"""CREATE TABLE {sch}.location AS
       WITH pts AS (
         SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p,
@@ -1004,12 +1033,15 @@ def _build_location(con, sch, has_raw):
                ST_LineLocatePoint(k.geom, pts.p) AS f
         FROM pts JOIN {sch}.link k ON ST_DWithin(k.geom, pts.p, 2e-6)   -- ~0.2 m: on the link's shape
       )
-      SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id,
-             CASE WHEN f <= 0 THEN 0.0 WHEN f >= 1 THEN link_len
-                  ELSE ST_Length_Spheroid(ST_FlipCoordinates(ST_LineSubstring(lg, 0, f))) END AS lr,
-             lon AS x_coord, lat AS y_coord, NULL::DOUBLE AS z_coord, loc_type, NULL::VARCHAR AS zone_id,
+      , pos AS (
+        SELECT hit.*, CASE WHEN f <= 0 THEN 0.0 WHEN f >= 1 THEN link_len
+                           ELSE ST_Length_Spheroid(ST_FlipCoordinates(ST_LineSubstring(lg, 0, f))) END AS lr
+        FROM hit)
+      SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id, lr,
+             lon AS x_coord, lat AS y_coord,
+             CASE WHEN {zskip} THEN NULL ELSE ({z})::DOUBLE END AS z_coord, loc_type, NULL::VARCHAR AS zone_id,
              NULL::VARCHAR AS gtfs_stop_id, osm_id, p AS geom
-      FROM hit ORDER BY link_id, lr""")
+      FROM pos {ej} ORDER BY link_id, lr""")
 
 
 def _build_zone(con, sch):
@@ -1238,8 +1270,9 @@ def to_micro(gmns_db, modes=None, cell_length_m=7.0):
         # micro nodes: one per (lane, cell boundary k = 0..nc)
         con.execute(f"""CREATE TABLE {mc}.micro_node AS
           WITH L AS (SELECT lane_id, link_id, lane_num, geom,
-                            GREATEST(1, CEIL(ST_Length(geom) * 111320.0 / {cl}))::BIGINT AS nc
-                     FROM {g}.lane WHERE geom IS NOT NULL)
+                            GREATEST(1, CEIL({_len_m('geom')} / {cl}))::BIGINT AS nc
+                     FROM (SELECT lane_id, link_id, lane_num, ST_RemoveRepeatedPoints(geom) AS geom
+                           FROM {g}.lane WHERE geom IS NOT NULL) WHERE ST_NPoints(geom) >= 2)
           SELECT lane_id, k AS cell_k, lane_id || '@' || k AS node_id,
                  ST_X(ST_LineInterpolatePoint(geom, k::DOUBLE / nc)) AS x_coord,
                  ST_Y(ST_LineInterpolatePoint(geom, k::DOUBLE / nc)) AS y_coord,
@@ -1250,12 +1283,13 @@ def to_micro(gmns_db, modes=None, cell_length_m=7.0):
         con.execute(f"""CREATE TABLE {mc}.micro_link AS
           WITH L AS (SELECT la.lane_id, la.link_id, la.lane_num, la.allowed_uses, la.width, la.geom,
                             lk.free_speed, lk.facility_type,
-                            GREATEST(1, CEIL(ST_Length(la.geom) * 111320.0 / {cl}))::BIGINT AS nc
-                     FROM {g}.lane la JOIN {g}.link lk ON lk.link_id = la.link_id
-                     WHERE la.geom IS NOT NULL)
+                            GREATEST(1, CEIL({_len_m('la.geom')} / {cl}))::BIGINT AS nc
+                     FROM (SELECT * REPLACE (ST_RemoveRepeatedPoints(geom) AS geom) FROM {g}.lane
+                           WHERE geom IS NOT NULL) la JOIN {g}.link lk ON lk.link_id = la.link_id
+                     WHERE ST_NPoints(la.geom) >= 2)
           SELECT 'C' || lane_id || '#' || k AS link_id, lane_id || '@' || k AS from_node_id,
                  lane_id || '@' || (k + 1) AS to_node_id, 1 AS dir_flag,
-                 (ST_Length(ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc))) * 111320)::DOUBLE AS length,
+                 {_len_m('ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc))')}::DOUBLE AS length,
                  1 AS lanes, width, free_speed, facility_type, allowed_uses,
                  ST_AsText(ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc))) AS geometry,
                  ST_LineSubstring(geom, k::DOUBLE/nc, LEAST(1.0,(k+1.0)/nc)) AS geom,
@@ -1265,30 +1299,40 @@ def to_micro(gmns_db, modes=None, cell_length_m=7.0):
         # lane-change micro links: adjacent lanes of a link, one cell forward (both directions)
         con.execute(f"""INSERT INTO {mc}.micro_link ({_MICRO_COLS})
           SELECT 'H' || a.node_id || '-' || b.node_id, a.node_id, b.node_id, 1,
-                 ST_Distance(a.geom, b.geom) * 111320, 1, NULL::DOUBLE, NULL::DOUBLE, 'lane_change',
+                 {_len_m('ST_MakeLine(a.geom, b.geom)')}, 1, NULL::DOUBLE, NULL::DOUBLE, 'lane_change',
                  NULL::VARCHAR, ST_AsText(ST_MakeLine(a.geom, b.geom)), ST_MakeLine(a.geom, b.geom),
                  a.macro_link_id, 'M' || a.macro_link_id, NULL::INTEGER, 'lane_change',
                  NULL::VARCHAR, NULL::VARCHAR
           FROM {mc}.micro_node a JOIN {mc}.micro_node b
             ON a.macro_link_id = b.macro_link_id AND abs(a.lane_no - b.lane_no) = 1
                AND b.cell_k = a.cell_k + 1""")
-        # movement (turn) micro links: inbound lane end -> outbound lane start, smooth Bézier
+        # movement (turn) micro links: inbound lane end -> outbound lane start. The path is the lane_connector's
+        # curve for that lane pair where there is one (lanes stop short of a junction, and it joins their ends);
+        # otherwise the lanes already meet and a straight line joins the two cell nodes
+        has_lc = con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? AND table_name = "
+                             "'lane_connector'", [g]).fetchone()[0] > 0
+        path = "COALESCE(lc.geom, ST_MakeLine(ie.pt, oe.pt))" if has_lc else "ST_MakeLine(ie.pt, oe.pt)"
+        lc_join = (f"LEFT JOIN {g}.lane_connector lc ON lc.mvmt_id = m.mvmt_id AND lc.from_lane_id = ie.lane_id "
+                   f"AND lc.to_lane_id = oe.lane_id") if has_lc else ""
         con.execute(f"""INSERT INTO {mc}.micro_link ({_MICRO_COLS})
-          WITH ie AS (SELECT macro_link_id AS lk, lane_no, arg_max(node_id, cell_k) AS node
+          WITH ie AS (SELECT macro_link_id AS lk, lane_no, arg_max(node_id, cell_k) AS node,
+                             arg_max(geom, cell_k) AS pt, arg_max(lane_id, cell_k) AS lane_id
                       FROM {mc}.micro_node GROUP BY macro_link_id, lane_no),
-               oe AS (SELECT macro_link_id AS lk, lane_no, arg_min(node_id, cell_k) AS node
-                      FROM {mc}.micro_node GROUP BY macro_link_id, lane_no)
-          SELECT 'X' || ie.node || '-' || oe.node, ie.node, oe.node, 1,
-                 ST_Length(ST_GeomFromText(m.geometry)) * 111320, 1, NULL::DOUBLE, il.free_speed,
-                 'connector', m.allowed_uses, m.geometry, ST_GeomFromText(m.geometry),
-                 NULL::BIGINT, 'M' || m.ib_link_id, NULL::INTEGER, 'movement', m.mvmt_code, m.ctrl_type
-          FROM {g}.movement m          -- one connector per lane pair of the movement's ranges, in order
-          JOIN ie ON ie.lk = m.ib_link_id
-            AND ie.lane_no BETWEEN COALESCE(m.start_ib_lane, 1) AND COALESCE(m.end_ib_lane, m.start_ib_lane, 1)
-          JOIN oe ON oe.lk = m.ob_link_id
-            AND oe.lane_no = COALESCE(m.start_ob_lane, 1) + ie.lane_no - COALESCE(m.start_ib_lane, 1)
-          JOIN {g}.link il ON il.link_id = m.ib_link_id
-          WHERE m.geometry IS NOT NULL""")
+               oe AS (SELECT macro_link_id AS lk, lane_no, arg_min(node_id, cell_k) AS node,
+                             arg_min(geom, cell_k) AS pt, arg_min(lane_id, cell_k) AS lane_id
+                      FROM {mc}.micro_node GROUP BY macro_link_id, lane_no),
+               t AS (SELECT m.*, il.free_speed, ie.node AS inode, oe.node AS onode, {path} AS path
+                     FROM {g}.movement m      -- one connector per lane pair of the movement's ranges, in order
+                     JOIN ie ON ie.lk = m.ib_link_id
+                       AND ie.lane_no BETWEEN COALESCE(m.start_ib_lane, 1) AND COALESCE(m.end_ib_lane, m.start_ib_lane, 1)
+                     JOIN oe ON oe.lk = m.ob_link_id
+                       AND oe.lane_no = COALESCE(m.start_ob_lane, 1) + ie.lane_no - COALESCE(m.start_ib_lane, 1)
+                     JOIN {g}.link il ON il.link_id = m.ib_link_id
+                     {lc_join})
+          SELECT 'X' || inode || '-' || onode, inode, onode, 1, {_len_m('path')}, 1, NULL::DOUBLE, free_speed,
+                 'connector', allowed_uses, ST_AsText(path), path,
+                 NULL::BIGINT, 'M' || ib_link_id, NULL::INTEGER, 'movement', mvmt_code, ctrl_type
+          FROM t""")
         r = {
             "micro_node": con.execute(f"SELECT count(*) FROM {mc}.micro_node").fetchone()[0],
             "cell": con.execute(f"SELECT count(*) FROM {mc}.micro_link WHERE cell_type='normal'").fetchone()[0],
@@ -1372,7 +1416,7 @@ def _build_meso_links(con, g, ms, trim_m):
                         LEAST(0.35, {trim_m} / GREATEST("length", 0.1)) AS tf FROM {g}.link)
       SELECT 'M' || link_id::VARCHAR AS link_id,
              link_id::VARCHAR || 'u' AS from_node_id, link_id::VARCHAR || 'd' AS to_node_id,
-             1 AS dir_flag, (len * (1 - 2 * tf))::DOUBLE AS length, lanes::INTEGER AS lanes,
+             1 AS dir_flag, {_len_m('ST_LineSubstring(geom, tf, 1 - tf)')}::DOUBLE AS length, lanes::INTEGER AS lanes,
              NULL::DOUBLE AS capacity, free_speed, facility_type, allowed_uses,
              ST_AsText(ST_LineSubstring(geom, tf, 1 - tf)) AS geometry,
              ST_LineSubstring(geom, tf, 1 - tf) AS geom,
@@ -1381,24 +1425,50 @@ def _build_meso_links(con, g, ms, trim_m):
              NULL::VARCHAR AS ctrl_type
       FROM L""")
 
+    # connectors: a smooth curve from the end of the inbound section to the start of the outbound one (the
+    # sections are trimmed at both ends, so the macro movement's curve would start and end short of them)
+    k = 111320.0
     con.execute(f"""INSERT INTO {ms}.meso_link
       (link_id, from_node_id, to_node_id, dir_flag, length, lanes, capacity, free_speed,
        facility_type, allowed_uses, geometry, geom, meso_type, macro_link_id, movement_id,
        mvmt_txt_id, start_ib_lane, end_ib_lane, ctrl_type)
-      SELECT 'X' || m.ib_link_id::VARCHAR || '-' || m.ob_link_id::VARCHAR,
-             m.ib_link_id::VARCHAR || 'd', m.ob_link_id::VARCHAR || 'u', 1,
-             (ST_Length(ST_GeomFromText(m.geometry)) * 111320.0)::DOUBLE,   -- smooth Bézier length
-             COALESCE(m.end_ib_lane - m.start_ib_lane + 1, 1)::INTEGER, NULL::DOUBLE, il.free_speed,
-             'connector', m.allowed_uses,
-             m.geometry, ST_GeomFromText(m.geometry),          -- reuse the movement's smooth connector
-             'movement', NULL::BIGINT, m.mvmt_id,
-             CASE m.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' WHEN 'uturn' THEN 'U'
-                         ELSE 'T' END,
-             m.start_ib_lane, m.end_ib_lane, m.ctrl_type          -- the movement's own lanes
-      FROM {g}.movement m
-      JOIN {ms}.meso_node nd ON nd.node_id = m.ib_link_id::VARCHAR || 'd'
-      JOIN {ms}.meso_node nu ON nu.node_id = m.ob_link_id::VARCHAR || 'u'
-      JOIN {g}.link il ON il.link_id = m.ib_link_id""")
+      WITH c1 AS (
+        SELECT m.*, il.free_speed AS fs,
+               ST_X(ST_EndPoint(ib.geom)) AS x0, ST_Y(ST_EndPoint(ib.geom)) AS y0,
+               ST_X(ST_StartPoint(ob.geom)) AS x1, ST_Y(ST_StartPoint(ob.geom)) AS y1,
+               ST_X(ST_PointN(ib.geom, (ST_NPoints(ib.geom) - 1)::INTEGER)) AS px,
+               ST_Y(ST_PointN(ib.geom, (ST_NPoints(ib.geom) - 1)::INTEGER)) AS py,
+               ST_X(ST_PointN(ob.geom, 2)) AS nx, ST_Y(ST_PointN(ob.geom, 2)) AS ny
+        FROM {g}.movement m
+        JOIN {ms}.meso_link ib ON ib.link_id = 'M' || m.ib_link_id::VARCHAR AND ib.meso_type = 'normal'
+        JOIN {ms}.meso_link ob ON ob.link_id = 'M' || m.ob_link_id::VARCHAR AND ob.meso_type = 'normal'
+        JOIN {g}.link il ON il.link_id = m.ib_link_id
+      ), c2 AS (   -- unit directions in metres (x scaled by cos latitude), and the chord's length
+        SELECT *, cos(radians(y0)) AS kx,
+               (x0 - px) * cos(radians(y0)) AS dx0, (y0 - py) AS dy0,
+               (nx - x1) * cos(radians(y1)) AS dx1, (ny - y1) AS dy1,
+               sqrt(pow((x1 - x0) * cos(radians(y0)) * {k}, 2) + pow((y1 - y0) * {k}, 2)) AS chord
+        FROM c1
+      ), cp AS (   -- control points 40 % of the chord out along each end's direction
+        SELECT *, x0 + dx0 / GREATEST(sqrt(dx0*dx0 + dy0*dy0), 1e-12) * 0.4 * chord / ({k} * kx) AS cx0,
+                  y0 + dy0 / GREATEST(sqrt(dx0*dx0 + dy0*dy0), 1e-12) * 0.4 * chord / {k} AS cy0,
+                  x1 - dx1 / GREATEST(sqrt(dx1*dx1 + dy1*dy1), 1e-12) * 0.4 * chord / ({k} * kx) AS cx1,
+                  y1 - dy1 / GREATEST(sqrt(dx1*dx1 + dy1*dy1), 1e-12) * 0.4 * chord / {k} AS cy1
+        FROM c2
+      ), t AS (
+        SELECT *, {_bezier_line_sql('x0', 'y0', 'cx0', 'cy0', 'cx1', 'cy1', 'x1', 'y1')} AS path FROM cp
+      )
+      SELECT 'X' || ib_link_id::VARCHAR || '-' || ob_link_id::VARCHAR,
+             ib_link_id::VARCHAR || 'd', ob_link_id::VARCHAR || 'u', 1,
+             {_len_m('path')}::DOUBLE,
+             COALESCE(end_ib_lane - start_ib_lane + 1, 1)::INTEGER, NULL::DOUBLE, fs,
+             'connector', allowed_uses,
+             ST_AsText(path), path,
+             'movement', NULL::BIGINT, mvmt_id,
+             CASE type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' WHEN 'uturn' THEN 'U'
+                       ELSE 'T' END,
+             start_ib_lane, end_ib_lane, ctrl_type          -- the movement's own lanes
+      FROM t""")
 
 
 def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):

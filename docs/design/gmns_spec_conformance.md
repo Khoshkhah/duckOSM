@@ -169,3 +169,30 @@ left-hand two-way road had its arrows, bus and bike uses and movement lane range
 (`offsets` in `_build_lane_curb`): lane 1 is the leftmost lane on either side. Checked on Monaco built both
 ways: lane 1 is left of the last lane on all 419 multi-lane links; the right-hand output is identical to
 before, lane for lane. `tests/test_gmns_values.py` keeps it so.
+
+## Meso and micro, and elevation (2026-10-01)
+
+**Meso / micro audit** (Monaco, Tartu; osm2gmns 0.7.6 run on the same PBF for the layout). Consistent: ids unique,
+every link end exists, one section per macro link, one connector per movement, one micro turn link per movement
+lane pair, lane changes join adjacent lanes. Defects, all fixed:
+
+1. Lengths were `ST_Length(geom) * 111320`: degrees without the cosine of the latitude, so wrong everywhere
+   but along a meridian (micro cells up to 38 % too long in Monaco, about twice at Tartu's latitude), and the
+   number of cells too. Now the length on the ellipsoid (`_len_m`).
+2. Meso section lengths were approximated (`length * (1 - 2 * trim)`): 259 of Monaco's 3,092 were more than
+   2 % off their geometry. Now measured.
+3. Meso connectors used the macro movement's curve, but the sections are trimmed at both ends: 3,956 of
+   3,957 connectors started or ended up to 65 m from their section nodes. Now a Bézier from the end of the
+   inbound section to the start of the outbound one. Micro turn links did the same: now the `lane_connector`
+   curve for the lane pair, or a straight line where the lanes already meet.
+4. 7 micro cells had a NaN length (repeated points in a lane): the lanes are cleaned first.
+
+`tests/test_gmns_meso_micro.py` keeps it so (a network at 59.3 N). The docs said the meso and micro networks
+"follow osm2gmns' layout": reworded to "modelled on", with the differences listed.
+
+**Elevation.** `duckosm elevation` already writes `nodes.ele` and `edges.z_from` / `z_to` into the source db; no
+new tool is needed, the GMNS export carries them over: `node.z_coord`, `link.grade` (percent, from the
+geodesic length; empty on bridges and in tunnels, where the height is the ground below or above, and beyond
+the spec's 100 %), `location.z_coord` (interpolated along the link). Without heights, all three stay empty.
+Checked end to end on Granville Island (heights streamed from Copernicus): the CSVs have them, structures have
+no grade. `tests/test_gmns_elevation.py`.

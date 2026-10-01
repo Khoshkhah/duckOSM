@@ -71,7 +71,7 @@ duckosm gmns monaco.duckdb --meso --micro
 - **Micro** (`micro_driving`): each lane cut into 7 m cells, with lane-change links between side-by-side
   cells and turn links across junctions. Monaco: 25,423 links.
 
-Both follow osm2gmns' layout. Their ids are built from `edge_id` (`M<edge_id>` for a section,
+Both are modelled on osm2gmns' (not identical: see [GMNS tables](gmns_tables.md#meso-and-micro-networks)); their ids are built from `edge_id` (`M<edge_id>` for a section,
 `X<from edge_id>-<to edge_id>` for a meso connector), so they stay the same across rebuilds and lead back to the road.
 Driving by default; `--meso-mode cycling` / `--micro-mode cycling` for cycling.
 

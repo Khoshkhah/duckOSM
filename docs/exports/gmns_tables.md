@@ -130,7 +130,8 @@ it is not an OSM node.
 | `node_id` | BIGINT | ✅ key | the OSM node id; negative for the cut points above |
 | `x_coord`, `y_coord` | DOUBLE | ✅ | longitude, latitude |
 | `ctrl_type` | VARCHAR | ✅ | `signal` where the OSM node is a `highway=traffic_signals`; empty elsewhere. (Stop and give-way signs are in [`location`](#location).) |
-| `name`, `z_coord`, `node_type`, `zone_id`, `parent_node_id` | | ∅ | empty |
+| `z_coord` | DOUBLE | ✅ | metres: the node's height, when the source was given heights with [`duckosm elevation`](../guides/elevation.md); empty otherwise |
+| `name`, `node_type`, `zone_id`, `parent_node_id` | | ∅ | empty |
 | `geom` | GEOMETRY | ➕ | the point |
 
 ## link
@@ -155,7 +156,8 @@ walked both ways).
 | `bike_facility` | VARCHAR | ✅ | from OSM `cycleway`, in the standard's words: `unseparated bike lane`, `separated bike lane`, `shared lane`, `counter-flow bike lane`, `paved shoulder`, `none`, `other` |
 | `ped_facility` | VARCHAR | ✅ | from OSM `sidewalk`: `sidewalk` (either side or both: which side is lost), `offstreet_path` (`separate`), `none`, `unknown` |
 | `allowed_uses` | VARCHAR | ✅ | the mode's use: `auto`, `walk` or `bike` |
-| `parking`, `grade`, `toll`, `jurisdiction`, `row_width`, `parent_link_id` | | ∅ | empty (parking is in [`curb_seg`](#curb_seg)) |
+| `grade` | DOUBLE | ✅ | percent, negative downhill: `100 × (height at the end − height at the start) / length`, when the source has heights (`duckosm elevation`). Empty on a bridge or in a tunnel (there the height is the ground below or above, not the road) and where the slope would pass 100 %, the spec's limit. A coarse elevation model makes short links noisy: see the [elevation guide](../guides/elevation.md#what-the-heights-mean) |
+| `parking`, `toll`, `jurisdiction`, `row_width`, `parent_link_id` | | ∅ | empty (parking is in [`curb_seg`](#curb_seg)) |
 | `osm_id` | BIGINT | ➕ | the OSM way the link comes from: one way gives several links (one per piece and direction) |
 | `bridge`, `tunnel`, `layer` | VARCHAR | ➕ | the OSM tags as they are (`yes`, `-1`, …): which links are on a bridge or in a tunnel, and the drawing order |
 | `geom` | GEOMETRY | ➕ | the shape |
@@ -306,7 +308,8 @@ table needs the raw OSM tags, like lane details do: an area clipped from a bigge
 | `lr` | DOUBLE | ✅ | metres from `ref_node_id` along the link's shape |
 | `x_coord`, `y_coord` | DOUBLE | ✅ | longitude, latitude of the OSM node |
 | `loc_type` | VARCHAR | ✅ | the OSM tag value: `crossing`, `bus_stop`, `give_way`, … (the standard recommends OSM names) |
-| `z_coord`, `zone_id`, `gtfs_stop_id` | | ∅ | empty (no GTFS in the data) |
+| `z_coord` | DOUBLE | ✅ | metres, between the link's two end heights by distance along it (empty without heights, and on a bridge or in a tunnel) |
+| `zone_id`, `gtfs_stop_id` | | ∅ | empty (no GTFS in the data) |
 | `osm_id` | BIGINT | ➕ | the OSM node id |
 | `geom` | GEOMETRY | ➕ | the point |
 
@@ -333,18 +336,31 @@ the per-mode schemas.
 
 ## Meso and micro networks
 
-`--meso` and `--micro` build networks for simulators, in osm2gmns' layout (not the standard's; the
-standard has no meso or micro tables). Their ids are built from the `link_id`, so they lead back to the
-road.
+`--meso` and `--micro` build networks for simulators. They are **modelled on osm2gmns' meso and micro
+networks** (the same idea, and many of the same column names), but they are not its files and the standard
+has no meso or micro tables. Their ids are built from the `link_id`, so they lead back to the road. Lengths
+are in metres, measured on each link's own geometry, and **every link starts and ends exactly at its nodes**.
 
-| Schema.table | Rows | One row is | Main columns |
+- **Meso:** each road becomes a *section*, shortened by about 6 m at both ends (at most 35 % of the road), and
+  each legal turn a *connector*: a smooth curve from the end of the inbound section to the start of the
+  outbound one.
+- **Micro:** each lane is cut into cells of about 7 m. Cells in a row are linked; side-by-side cells of
+  adjacent lanes are linked by a *lane change*; and each lane pair of a movement is a *turn* link from the end
+  of the inbound lane to the start of the outbound lane, along the [`lane_connector`](#lane_connector) curve
+  where there is one.
+
+| Schema.table | Rows (Monaco) | One row is | Main columns |
 |---|---|---|---|
-| `meso_<mode>.meso_node` | 5,752 | a section end | `node_id`, `x_coord`, `y_coord`, `macro_node_id`, `macro_link_id`, `geom` |
-| `meso_<mode>.meso_link` | 7,379 | a road **section** (`meso_type = 'normal'`) or a turn **connector** (`'movement'`) | `link_id`, `from_node_id`, `to_node_id`, `length`, `lanes`, `capacity`, `free_speed`, `macro_link_id`, `movement_id`, `mvmt_txt_id`, `start_ib_lane`, `end_ib_lane`, `geometry`, `geom` |
-| `micro_<mode>.micro_node` | 54,730 | the start of a 7 m **cell** of a lane | `node_id` (`<lane_id>@<k>`), `x_coord`, `y_coord`, `lane_id`, `cell_k`, `geom` |
-| `micro_<mode>.micro_link` | 70,535 | a cell, a lane change between side-by-side cells, or a turn across a junction (`cell_type`) | `link_id`, `from_node_id`, `to_node_id`, `length`, `width`, `lane_no`, `macro_link_id`, `meso_link_id`, `geometry`, `geom` |
+| `meso_<mode>.meso_node` | 6,184 | a section end | `node_id` (`<link_id>u` start, `<link_id>d` end), `x_coord`, `y_coord`, `macro_node_id`, `macro_link_id`, `geom` |
+| `meso_<mode>.meso_link` | 7,049 | a road **section** (`meso_type = 'normal'`) or a turn **connector** (`'movement'`) | `link_id` (`M<link_id>` / `X<ib>-<ob>`), `from_node_id`, `to_node_id`, `length`, `lanes`, `capacity` (empty: it follows from the lanes), `free_speed`, `facility_type`, `macro_link_id`, `movement_id`, `mvmt_txt_id`, `start_ib_lane`, `end_ib_lane`, `geometry`, `geom` |
+| `micro_<mode>.micro_node` | 22,553 | the start of a cell of a lane | `node_id` (`<lane_id>@<k>`), `x_coord`, `y_coord`, `lane_id`, `cell_k`, `macro_link_id`, `lane_no`, `geom` |
+| `micro_<mode>.micro_link` | 27,123 | a cell, a lane change, or a turn (`cell_type` = `normal`, `lane_change`, `movement`) | `link_id` (`C<lane_id>#<k>`, `H…`, `X…`), `from_node_id`, `to_node_id`, `length`, `width`, `lane_no`, `macro_link_id`, `meso_link_id`, `geometry`, `geom` |
 
-(Södermalm, driving.)
+**Compared with osm2gmns 0.7.6** (run on the same Monaco PBF): osm2gmns names the road class `link_type_name`
+and codes it as a number `link_type`, and codes `cell_type` as 1 / 2; we write the OSM `highway` in
+`facility_type` and text in `cell_type`. It has `macro_node_id`, `zone_id`, `activity_type`, `is_boundary`
+and a micro `capacity` that we do not; we have `geom`, `meso_type`, the lane ranges, `width` and `cell_k` that it
+does not. Its network is also coarser (Monaco: 1,280 links against our 3,092, since it merges junctions).
 
 ## What is not written, and why
 

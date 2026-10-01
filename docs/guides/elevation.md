@@ -22,8 +22,8 @@ It adds:
 - a row in `main.elevation_metadata` saying where the heights came from (source, resolution,
   vertical datum, licence).
 
-The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md) and [GIS](../exports/gis.md)
-exports then include the heights.
+The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md), [GIS](../exports/gis.md) and
+[GMNS](../exports/gmns_tables.md) exports then include the heights (GMNS: `node.z_coord`, `link.grade`).
 
 ## Where the heights come from
 
