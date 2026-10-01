@@ -73,7 +73,7 @@ produced by `duckosm gmns`, not the core db. `railml` re-extracts rail from `raw
 ## Conventions
 
 - Heavy/optional deps (geopandas, networkx, rasterio, roadstyle, sumolib) are imported lazily
-  inside functions; the core install is duckdb/shapely/h3/click/rich/pyyaml only.
+  inside functions; the core install is duckdb/shapely/h3/click/rich/pyyaml/pandas/timezonefinder only.
 - Maps go through **roadstyle** (`duckosm viz`, `scripts/roadstyle_map.py`), not hand-rolled
   folium/matplotlib.
 - Design docs for non-trivial changes live in `docs/design/`; update the matching `docs/*.md`
