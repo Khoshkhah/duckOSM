@@ -25,7 +25,7 @@ def _source(path):
     con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
     con.execute("INSERT INTO raw.ways VALUES "
                 "(100, MAP{'turn:lanes':'through|right','bicycle:lanes':'no|designated',"
-                "'parking:right':'lane'}, [1,2]), (101, MAP{}, [2,3])")
+                "'parking:right':'lane'}, [1,2]), (101, MAP{'sidewalk':'separate','cycleway':'track'}, [2,3])")
     p = lambda w: f"ST_GeomFromText('{w}')"
     con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
     con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),"
@@ -60,6 +60,16 @@ def test_all_tables_and_link_id_is_edge_id(tmp_path):
             "use_group", "signal_controller", "curb_seg"} <= tables
     ids = {r[0] for r in con.execute("SELECT link_id FROM gmns_driving.link").fetchall()}
     assert ids == {A, B, AR}                                     # link_id == edge_id, exact
+
+
+def test_every_lane_use_is_defined_and_config_has_the_spec_columns(tmp_path):
+    con = _gmns(tmp_path)
+    q = lambda s: con.execute(s).fetchall()
+    assert not q("SELECT DISTINCT allowed_uses FROM gmns_driving.lane WHERE allowed_uses NOT IN "
+                 "(SELECT use FROM gmns_driving.use_definition)")
+    assert {"auto", "bus", "bike"} <= {r[0] for r in q("SELECT use FROM gmns_driving.use_definition")}
+    cols = [r[0] for r in q("DESCRIBE gmns_driving.config")]
+    assert "currency" in cols and q("SELECT version_number FROM gmns_driving.config") == [(0.97,)]
 
 
 def test_referential_integrity(tmp_path):
@@ -174,9 +184,10 @@ def test_capacity_and_movement_enrichment(tmp_path):
     r = con.execute(f"SELECT mvmt_code, start_ib_lane, end_ib_lane, geometry "
                     f"FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={B}").fetchone()
     assert r[0] == "EBR" and (r[1], r[2]) == (2, 2) and r[3] is not None
-    # every movement gets a code + a connector geometry
-    n, coded = con.execute("SELECT count(*), count(mvmt_code) FROM gmns_driving.movement").fetchone()
-    assert coded == n and n > 0
+    # every movement gets a connector geometry and a code, except a U-turn (the spec's code has no U)
+    n, coded, uturns = con.execute("SELECT count(*), count(mvmt_code), count(*) FILTER (type = 'uturn') "
+                                   "FROM gmns_driving.movement").fetchone()
+    assert n > 0 and coded == n - uturns
 
 
 def test_cycling_meso(tmp_path):

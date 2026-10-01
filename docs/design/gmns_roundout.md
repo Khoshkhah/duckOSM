@@ -30,7 +30,7 @@ default (a downstream model can override).
 
 Three NULL columns, all derivable from data we already have:
 
-- **`mvmt_code`** → the standard **direction+turn code** (`NBL`, `EBT`, `WBR`, `SBU`…). Inbound
+- **`mvmt_code`** → the standard **direction+turn code** (`NBL`, `EBT`, `WBR`…; a U-turn has none, as the spec's code has no U: [conformance](gmns_spec_conformance.md)). Inbound
   *cardinal* from the inbound link's bearing at the junction — compass-binned `NB/EB/SB/WB`
   (N=[315,45), E=[45,135), S=[135,225), W=[225,315)) — plus the turn letter from the existing `type`
   (`left→L`, `thru→T`, `right→R`, `uturn→U`). We already compute the inbound bearing for `type`.
