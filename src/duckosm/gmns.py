@@ -111,8 +111,68 @@ def _offset_wkt(line_wkt, off_m):
     return LineString(back).wkt if len(back) >= 2 else line_wkt
 
 
+def _paired_gaps(edges, side_sign, step_m=2.0):
+    """One-way edges placed as one side of a two-way road (docs/design/gmns_paired_carriageways.md).
+
+    ``edges``: ``(edge_id, wkt, half_width_m)`` of the one-way edges. Returns ``{edge_id: d}``, the
+    median gap in metres between an edge's centre line and its partner(s): one-way edges running the
+    opposite way on its inner side (left for right-hand traffic) closer than ``half_A + half_B``,
+    alongside it for at least half its length. Sampled every ``step_m`` metres."""
+    import statistics
+
+    from shapely import STRtree
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    geoms = [_w.loads(w) for _, w, _ in edges]
+    if not geoms:
+        return {}
+    x0, y0 = geoms[0].coords[0]                          # one local metre frame for the whole area
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    lines = [LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in g.coords]) for g in geoms]
+    half = [h for _, _, h in edges]
+    tree = STRtree(lines)
+    reach = max(half)
+
+    def tangent(ln, s):
+        a, b = ln.interpolate(max(s - 0.5, 0)), ln.interpolate(min(s + 0.5, ln.length))
+        dx, dy = b.x - a.x, b.y - a.y
+        n = math.hypot(dx, dy) or 1.0
+        return dx / n, dy / n
+
+    gaps = {}
+    for i, A in enumerate(lines):
+        if A.length < step_m:
+            continue
+        cand = [j for j in tree.query(A.buffer(half[i] + reach)) if j != i]
+        if not cand:
+            continue
+        found, samples = [], 0
+        for k in range(int(A.length // step_m) + 1):
+            s = min(k * step_m, A.length)
+            p, (tx, ty) = A.interpolate(s), tangent(A, s)
+            samples += 1
+            best = None
+            for j in cand:
+                B = lines[j]
+                sb = B.project(p)
+                q = B.interpolate(sb)
+                d = p.distance(q)
+                if d >= half[i] + half[j] or (best is not None and d >= best):
+                    continue
+                bx, by = tangent(B, sb)
+                cross = tx * (q.y - p.y) - ty * (q.x - p.x)  # > 0: q is left of A
+                if tx * bx + ty * by < -0.866 and cross * side_sign < 0:
+                    best = d
+            if best is not None:
+                found.append(best)
+        if found and len(found) >= samples / 2:
+            gaps[edges[i][0]] = statistics.median(found)
+    return gaps
+
+
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False,
-            drive_side="right"):
+            drive_side="right", pair_carriageways=True):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -123,6 +183,9 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     to_csv : if set, also dump spec-standard GMNS CSVs into this directory (per-mode subfolders when
         more than one mode).
     lane_geometry : compute a per-lane offset ``geom`` for lane-level rendering (needs shapely).
+    pair_carriageways : place a one-way edge with an opposite one-way partner close on its inner side
+        as one side of a two-way road, from the line midway between them (default; False = centred
+        on its own way, as before). docs/design/gmns_paired_carriageways.md
     combined : also write a single **mode-tagged** ``gmns_all`` network (node + link), the per-mode
         links merged on ``link_id`` (= ``edge_id``) with ``allowed_uses`` unioned across the modes that
         contain each edge. Needs ≥2 modes.
@@ -170,7 +233,8 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_node(con, sch, mode)
         _build_link(con, sch, mode, uses, has_raw)
         _build_geometry(con, sch, mode)
-        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side)  # before movement
+        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
+                         pair_carriageways)  # before movement
         _build_movement(con, sch, mode, uses)
         _build_signal_controller(con, sch)
         result["modes"][mode] = {
@@ -373,12 +437,15 @@ def _build_signal_controller(con, sch):
     FROM {sch}.node WHERE ctrl_type = 'signal'""")
 
 
-def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="right"):
+def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="right",
+                     pair_carriageways=True):
     """Per-lane rows from OSM lane tags (+ optional offset geometry) and curb_seg from parking tags.
 
     Lane offset is **drive-side aware**: a one-way road's lanes are centered on its carriageway, but a
     two-way road's lanes are shifted to the direction's travel side (right for ``drive_side='right'``),
-    so the forward and reverse edges separate onto opposite physical sides instead of overlapping."""
+    so the forward and reverse edges separate onto opposite physical sides instead of overlapping.
+    A one-way edge with an opposite one-way partner closer than their lanes need (``_paired_gaps``)
+    is placed like a two-way road's side, from the line midway between the two."""
     import pandas as pd
 
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
@@ -397,17 +464,29 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         return tags.get(base + ":backward") if is_rev else (
             tags.get(base + ":forward") or tags.get(base))
 
+    def lane_widths(tags, lanes, is_rev):
+        turns = _split(pick(tags, "turn:lanes", is_rev))
+        widths = _split(pick(tags, "width:lanes", is_rev))
+        n = max(len(turns) if turns else int(lanes or 1), 1)
+        return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W
+                               for i in range(n)]
+
+    gaps = {}
+    if lane_geometry and pair_carriageways:
+        gaps = _paired_gaps([(r[0], r[6], sum(lane_widths(r[7] or {}, r[2], r[1])[2]) / 2.0)
+                             for r in rows if r[5] and r[6]], side_sign)
+        if gaps:
+            logger.info(f"GMNS[{mode}]: {len(gaps):,} one-way edges placed with their opposite carriageway")
+
     lane_rows, curb_rows = [], []
     for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags in rows:
         tags = tags or {}
-        turns = _split(pick(tags, "turn:lanes", is_rev))
-        widths = _split(pick(tags, "width:lanes", is_rev))
+        turns, widths, w_each = lane_widths(tags, lanes, is_rev)
         bikes = _split(pick(tags, "bicycle:lanes", is_rev))
         psvs = _split(pick(tags, "psv:lanes", is_rev))
-        n = len(turns) if turns else int(lanes or 1)
-        n = max(n, 1)
-        w_each = [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W for i in range(n)]
+        n = len(w_each)
         half = sum(w_each) / 2.0
+        gap = gaps.get(edge_id)
         run = 0.0
         for i in range(n):
             u = uses
@@ -417,7 +496,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                 u = "bus"
             width = _num(widths[i]) if i < len(widths) else None
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
-            if oneway:                                       # one-way: lanes centered on the carriageway
+            if oneway and gap is not None:                   # one side of a road mapped as 2 ways
+                off_m = side_sign * (run + w_each[i] / 2.0 - gap / 2.0)
+            elif oneway:                                     # one-way: lanes centered on the carriageway
                 off_m = half - (run + w_each[i] / 2.0)
             else:                                            # two-way: this direction's lanes on its travel side
                 off_m = side_sign * (run + w_each[i] / 2.0)

@@ -254,3 +254,60 @@ def test_to_csv_is_spec_clean(tmp_path):
         cols = next(csv.reader(f))
     assert "geom" not in cols and "turn" not in cols            # non-spec columns dropped for CSV
     assert cols[:3] == ["lane_id", "link_id", "lane_num"]
+
+
+def _pair_source(path, gap_m, b_north=True):
+    """Two one-way 2-lane edges of one road, mapped as two ways: P (1->2) east, Q (3->4) west,
+    ``gap_m`` metres north (or south) of P."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("INSERT INTO raw.ways VALUES (200, MAP{}, [1,2]), (201, MAP{}, [3,4])")
+    y = 59.32 + (1 if b_north else -1) * gap_m / 111320
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),"
+                f"(3,{p(f'POINT(18.07 {y})')}),(4,{p(f'POINT(18.06 {y})')})")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
+                "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
+    con.execute(f"""INSERT INTO driving.edges VALUES
+        (11,1,2,200,'primary','Road',2,false,true,560,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+        (12,3,4,201,'primary','Road',2,false,true,560,50,{p(f'LINESTRING(18.07 {y},18.06 {y})')})""")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    con.close()
+
+
+def _lane_y(tmp_path, gap_m, **kw):
+    """Each lane's offset north of P's line, in metres, by lane id."""
+    tag = f"{gap_m}_{kw.get('b_north', True)}_{kw.get('drive_side', 'r')}_{kw.get('pair_carriageways', 1)}"
+    src, out = tmp_path / f"pair_{tag}.duckdb", tmp_path / f"pair_{tag}_gmns.duckdb"
+    _pair_source(src, gap_m, b_north=kw.pop("b_north", True))
+    to_gmns(str(src), str(out), **kw)
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    rows = con.execute("SELECT lane_id, ST_Y(ST_StartPoint(geom)) FROM gmns_driving.lane").fetchall()
+    return {k: round((y - 59.32) * 111320, 2) for k, y in rows}
+
+
+def test_one_way_carriageways_of_one_road_are_placed_as_one_road(tmp_path):
+    """docs/design/gmns_paired_carriageways.md: two 2-lane one-way ways 4 m apart (they need 13 m)
+    are placed from the line midway between them, 2 m from each: no overlap, lane 1s 3.25 m apart."""
+    y = _lane_y(tmp_path, 4.0)
+    assert y["11_1"] == pytest.approx(0.375, abs=0.05) and y["11_2"] == pytest.approx(-2.875, abs=0.05)
+    assert y["12_1"] == pytest.approx(3.625, abs=0.05) and y["12_2"] == pytest.approx(6.875, abs=0.05)
+    assert y["12_1"] - y["11_1"] == pytest.approx(3.25, abs=0.05)
+
+
+def test_far_apart_or_off_keeps_one_way_lanes_centred(tmp_path):
+    assert _lane_y(tmp_path, 20.0)["11_1"] == pytest.approx(1.625, abs=0.05)     # far apart: as before
+    assert _lane_y(tmp_path, 4.0, pair_carriageways=False)["11_1"] == pytest.approx(1.625, abs=0.05)
+
+
+def test_partner_must_be_on_the_inner_side(tmp_path):
+    """Right-hand traffic: the opposite direction is on the left; a partner on the right isn't one.
+    Left-hand traffic mirrors it."""
+    assert _lane_y(tmp_path, 4.0, b_north=False)["11_1"] == pytest.approx(1.625, abs=0.05)
+    y = _lane_y(tmp_path, 4.0, b_north=False, drive_side="left")
+    assert y["11_1"] == pytest.approx(-0.375, abs=0.05) and y["12_1"] - y["11_1"] == pytest.approx(-3.25, abs=0.05)

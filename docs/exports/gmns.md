@@ -48,7 +48,10 @@ Most ways have none of these (Monaco: `turn:lanes` on 0.4 % of roads), so most l
 lanes with no width. Lane details need the raw OSM tags, which a PBF build keeps; an area clipped
 from a bigger build (`source.type: duckdb`, `duckosm extract`) gets lane counts only. Each lane also
 has a centre line drawn beside the road, on the traffic side, 3.25 m apart (`--drive-side left` for
-left-hand traffic).
+left-hand traffic). A road mapped as two one-way ways, one per direction, drawn closer together
+than its lanes need, is placed as one road: each direction's lanes start from the line midway
+between the two ways, so the directions never overlap (`--no-pair-carriageways` turns this off;
+[design](../design/gmns_paired_carriageways.md)).
 
 ## Meso and micro networks
 
@@ -101,6 +104,7 @@ Monaco's OSM data tags none (`psv:lanes`, `bicycle:lanes`), so this map has only
 | `--meso-mode`, `--micro-mode` | their modes | `driving` |
 | `--combined` | also write `gmns_all` | off |
 | `--drive-side` | `right` or `left` traffic | `right` |
+| `--no-pair-carriageways` | centre each one-way way's lanes on it, even beside its opposite direction | paired |
 | `--no-lane-geometry` | skip the lane centre lines | computed |
 
 ```python
