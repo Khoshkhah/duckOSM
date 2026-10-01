@@ -495,9 +495,11 @@ def _assign_lanes(con, sch, drive_side="right"):
     import pandas as pd
 
     nl = dict(con.execute(f"SELECT link_id, max(lane_num) FROM {sch}.lane GROUP BY 1").fetchall())
-    kinds = defaultdict(dict)                    # link -> {lane_num: types}, tagged lanes only
-    for lk, num, turn in con.execute(f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE turn IS NOT NULL").fetchall():
-        kinds[lk][num] = _turn_kinds(turn)
+    kinds = defaultdict(dict)        # link -> {lane_num: types}, for links with turn:lanes; a lane left
+    for lk, num, turn in con.execute(  # empty there ('|' or 'none', stored NULL) has no arrow: straight on
+            f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE link_id IN "
+            f"(SELECT link_id FROM {sch}.lane WHERE turn IS NOT NULL)").fetchall():
+        kinds[lk][num] = _turn_kinds(turn) if turn is not None else {"thru"}
     by_ib = defaultdict(list)
     for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
         by_ib[ib].append((mid, ob, typ, ang or 0.0))
@@ -576,6 +578,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         turns, widths, w_each = lane_widths(tags, lanes, is_rev)
         bikes = _split(pick(tags, "bicycle:lanes", is_rev))
         psvs = _split(pick(tags, "psv:lanes", is_rev))
+        buses = _split(pick(tags, "bus:lanes", is_rev))     # bus lanes are tagged either way
         n = len(w_each)
         half = sum(w_each) / 2.0
         gap = gaps.get(edge_id)
@@ -584,7 +587,8 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             u = uses
             if i < len(bikes) and bikes[i] in ("designated", "yes"):
                 u = "bike"
-            elif i < len(psvs) and psvs[i] in ("designated", "yes"):
+            elif (i < len(psvs) and psvs[i] in ("designated", "yes")) or \
+                    (i < len(buses) and buses[i] in ("designated", "yes")):
                 u = "bus"
             width = _num(widths[i]) if i < len(widths) else None
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None

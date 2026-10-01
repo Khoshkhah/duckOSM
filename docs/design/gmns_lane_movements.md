@@ -1,7 +1,7 @@
 # GMNS movements at lane level: a better calculation from more OSM data
 
-**Status:** approved by Kaveh 2026-09-30 (with osm2gmns's separate lanes). Steps 1-3 built (branch
-`paired-carriageways`); steps 4-6 next. Improves GMNS's own calculation in
+**Status:** approved by Kaveh 2026-09-30 (with osm2gmns's separate lanes). Steps 1-5 built (branch
+`paired-carriageways`); step 6 next. Improves GMNS's own calculation in
 `_build_movement` (`gmns.py`); it doesn't replace it. Which turns exist stays as today: `edge_graph`
 (OSM restrictions applied) plus GMNS's rule for immediate U-turns (kept where they're the only way on
 or the only way in). This note is about **which lanes** feed and receive each turn. Checked on Monaco
@@ -81,6 +81,11 @@ the comparison). The alternative was shared lanes (straight on from every lane, 
 straight on): closer to many real roads without arrows, but our own rule, and it would make our GMNS
 read differently from other GMNS data.
 
+**U-turns keep their own lane, as osm2gmns (Kaveh, 2026-09-30, option A).** On 3 multi-lane approaches
+in Monaco a U-turn into the other carriageway takes lane 1 to itself (e.g. Boulevard du Larvotto,
+5405468474044964645: lane 1 U-turn only, straight on from lane 2). Option B, U-turns left out of the
+split and sharing lane 1, is the fallback if a case shows A is wrong.
+
 ### Step 4: the tools read the ranges the same way
 
 - **lane routing:** honour the outbound range too, pairing in order.
@@ -92,6 +97,11 @@ read differently from other GMNS data.
 
 Monaco has 6 ways with each. `bus:lanes=designated` makes a bus lane, as `psv:lanes` already does.
 `access:lanes=no` together with a bus or psv designation makes the lane closed to cars.
+
+**Built (step 5):** Monaco has 8 bus lanes now, all on Boulevard Princesse Charlotte. Its 3-lane
+road narrows to 2 where the bus lane ends: straight on pairs lanes 1-2 into 1-2 (osm2gmns keeps the
+leftmost), so a bus changes into lane 2 before the end (lane routing has lane changes). Also fixed in
+step 1: a lane left empty in `turn:lanes` (stored NULL) counts as straight on.
 
 ### Step 6: lane geometry from `placement`
 

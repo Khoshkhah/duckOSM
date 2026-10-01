@@ -378,3 +378,37 @@ def test_lane_graph_pairs_movement_lanes_in_order(tmp_path):
     got = con.execute(f"SELECT from_lane, to_lane FROM lane_driving.lane_edges WHERE kind <> 'lane_change' "
                       f"AND from_lane LIKE '{A}_%' AND to_lane LIKE '{B}_%'").fetchall()
     assert got == [(f"{A}_2", f"{B}_1")]
+
+
+def test_bus_lane_from_bus_lanes(tmp_path):
+    """Step 5: bus:lanes=designated makes a bus lane, as psv:lanes does (Monaco, Boulevard Princesse
+    Charlotte: '||designated' with access:lanes '||no')."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE raw.ways SET tags = MAP{'bus:lanes':'|designated','access:lanes':'|no'} WHERE osm_id = 100")
+    c.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    uses = dict(duckdb.connect(str(out)).execute(
+        f"SELECT lane_num, allowed_uses FROM gmns_driving.lane WHERE link_id = {A}").fetchall())
+    assert uses == {1: "auto", 2: "bus"}
+
+
+def test_empty_turn_lane_goes_straight_on(tmp_path):
+    """A lane left empty in turn:lanes ('through|') has no arrow, so straight on: the thru movement
+    starts from both lanes (Monaco, Boulevard Princesse Charlotte: its bus lane had no turn)."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    c = duckdb.connect(str(src))
+    c.execute("LOAD spatial; UPDATE raw.ways SET tags = MAP{'turn:lanes':'through|'} WHERE osm_id = 100")
+    c.execute("INSERT INTO driving.nodes VALUES (4, ST_GeomFromText('POINT(18.08 59.32)'))")
+    c.execute("INSERT INTO driving.edges VALUES (88,2,4,103,'primary','Main',2,false,80,50,"
+              "ST_GeomFromText('LINESTRING(18.07 59.32,18.08 59.32)'))")
+    c.execute(f"INSERT INTO driving.edge_graph VALUES ({A},88,88,1.0)")
+    c.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    assert duckdb.connect(str(out)).execute(
+        f"SELECT start_ib_lane, end_ib_lane FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id=88"
+    ).fetchone() == (1, 2)
