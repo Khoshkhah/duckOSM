@@ -249,7 +249,8 @@ cv.addEventListener('click',e=>{if(down&&Math.hypot(e.clientX-down[0],e.clientY-
     $('sel').textContent='Click a lane to see the lanes it can turn into.';draw();return;}
   sel=best;out=new Set();const L=D.lanes[sel],num=L[3];
   for(const M of D.mv){if(M[0]!==L[2]||(M[2]&&(num<M[2]||num>M[3])))continue;
-    for(const j of byLink[M[1]]||[]){const n=D.lanes[j][3];if(!M[4]||(n>=M[4]&&n<=M[5]))out.add(j);}}
+    for(const j of byLink[M[1]]||[]){const n=D.lanes[j][3];   // the k-th lane of each range, in order
+      if(!M[4]||(M[2]?n===M[4]+num-M[2]:(n>=M[4]&&n<=M[5])))out.add(j);}}
   const k=D.links[L[2]];
   $('sel').innerHTML=`<b>lane ${num}</b> of ${k[1]||'an unnamed road'}<br>link_id ${k[0]}<br>`+
     `<span style="color:${OUT}">turns into ${out.size} lane${out.size===1?'':'s'}</span>`;draw();});

@@ -82,14 +82,32 @@ def test_lane_detail_from_osm_tags(tmp_path):
 
 
 def test_movement_drops_immediate_uturn_and_types_turns(tmp_path):
-    con = _gmns(tmp_path)
-    # A->AR is the immediate reversal → excluded; A->B (turning north) kept and typed
+    """A->AR is the immediate reversal: dropped when A has another way on (B) and AR another way in
+    (C, a road from node 3 into node 2). A->B (turning north) is kept and typed."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    c = duckdb.connect(str(src))
+    c.execute("LOAD spatial; INSERT INTO driving.edges VALUES (77,3,2,102,'residential',NULL,1,false,110,30,"
+              "ST_GeomFromText('LINESTRING(18.07 59.31,18.07 59.32)'))")
+    c.execute(f"INSERT INTO driving.edge_graph VALUES (77,{AR},{AR},1.0)")
+    c.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
     assert con.execute(
         f"SELECT count(*) FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()[0] == 0
     row = con.execute(
         f"SELECT type, ctrl_type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={B}").fetchone()
     assert row is not None and row[0] in ("left", "right")       # a real turn at the junction
     assert row[1] == "signal"                                    # node 2 is signalized
+
+
+def test_movement_keeps_the_uturn_that_is_the_only_way_in(tmp_path):
+    """Node 2: A arrives, AR and B leave, nothing else arrives. A can go on (to B), but the U-turn is
+    the only way into AR, so it's kept; without it AR's lanes can't be reached (Monaco, 10 links)."""
+    row = _gmns(tmp_path).execute(
+        f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()
+    assert row == ("uturn",)
 
 
 def test_movement_keeps_the_uturn_at_a_dead_end(tmp_path):
@@ -254,3 +272,407 @@ def test_to_csv_is_spec_clean(tmp_path):
         cols = next(csv.reader(f))
     assert "geom" not in cols and "turn" not in cols            # non-spec columns dropped for CSV
     assert cols[:3] == ["lane_id", "link_id", "lane_num"]
+
+
+def _pair_source(path, gap_m, b_north=True):
+    """Two one-way 2-lane edges of one road, mapped as two ways: P (1->2) east, Q (3->4) west,
+    ``gap_m`` metres north (or south) of P."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("INSERT INTO raw.ways VALUES (200, MAP{}, [1,2]), (201, MAP{}, [3,4])")
+    y = 59.32 + (1 if b_north else -1) * gap_m / 111320
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),"
+                f"(3,{p(f'POINT(18.07 {y})')}),(4,{p(f'POINT(18.06 {y})')})")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
+                "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
+    con.execute(f"""INSERT INTO driving.edges VALUES
+        (11,1,2,200,'primary','Road',2,false,true,560,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+        (12,3,4,201,'primary','Road',2,false,true,560,50,{p(f'LINESTRING(18.07 {y},18.06 {y})')})""")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    con.close()
+
+
+def _lane_y(tmp_path, gap_m, **kw):
+    """Each lane's offset north of P's line, in metres, by lane id."""
+    tag = f"{gap_m}_{kw.get('b_north', True)}_{kw.get('drive_side', 'r')}_{kw.get('pair_carriageways', 1)}"
+    src, out = tmp_path / f"pair_{tag}.duckdb", tmp_path / f"pair_{tag}_gmns.duckdb"
+    _pair_source(src, gap_m, b_north=kw.pop("b_north", True))
+    to_gmns(str(src), str(out), **kw)
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    rows = con.execute("SELECT lane_id, ST_Y(ST_StartPoint(geom)) FROM gmns_driving.lane").fetchall()
+    return {k: round((y - 59.32) * 111320, 2) for k, y in rows}
+
+
+def test_one_way_carriageways_of_one_road_are_placed_as_one_road(tmp_path):
+    """docs/design/gmns_paired_carriageways.md: two 2-lane one-way ways 4 m apart (they need 13 m)
+    are placed from the line midway between them, 2 m from each: no overlap, lane 1s 3.25 m apart."""
+    y = _lane_y(tmp_path, 4.0)
+    assert y["11_1"] == pytest.approx(0.375, abs=0.05) and y["11_2"] == pytest.approx(-2.875, abs=0.05)
+    assert y["12_1"] == pytest.approx(3.625, abs=0.05) and y["12_2"] == pytest.approx(6.875, abs=0.05)
+    assert y["12_1"] - y["11_1"] == pytest.approx(3.25, abs=0.05)
+
+
+def test_far_apart_or_off_keeps_one_way_lanes_centred(tmp_path):
+    assert _lane_y(tmp_path, 20.0)["11_1"] == pytest.approx(1.625, abs=0.05)     # far apart: as before
+    assert _lane_y(tmp_path, 4.0, pair_carriageways=False)["11_1"] == pytest.approx(1.625, abs=0.05)
+
+
+def test_partner_must_be_on_the_inner_side(tmp_path):
+    """Right-hand traffic: the opposite direction is on the left; a partner on the right isn't one.
+    Left-hand traffic mirrors it."""
+    assert _lane_y(tmp_path, 4.0, b_north=False)["11_1"] == pytest.approx(1.625, abs=0.05)
+    y = _lane_y(tmp_path, 4.0, b_north=False, drive_side="left")
+    assert y["11_1"] == pytest.approx(-0.375, abs=0.05) and y["12_1"] - y["11_1"] == pytest.approx(-3.25, abs=0.05)
+
+
+def test_turn_lanes_values_feed_every_turn_they_name():
+    """docs/design/gmns_lane_movements.md step 1: 'through;slight_right' feeds thru and right (it was
+    read as thru only); a slight turn also feeds thru (typed so under 30 degrees)."""
+    from duckosm.gmns import _turn_kinds
+    assert _turn_kinds("through;slight_right") == {"thru", "right"}
+    assert _turn_kinds("through;right") == {"thru", "right"}
+    assert _turn_kinds("left") == {"left"} and _turn_kinds("reverse") == {"uturn"}
+    assert _turn_kinds("") == {"thru"} and _turn_kinds("none") == {"thru"}
+
+
+def test_default_lanes_follow_osm2gmns():
+    """Steps 2-3, osm2gmns 0.7.6 (autoconintd.py): separate lanes per turn, equal-length ranges
+    read in order. Outbound links sorted left to right, 0-based lanes."""
+    from duckosm.gmns import _default_lanes
+    # 3 lanes, a 4-way junction (left, thru, right; 2 lanes each): left 1, thru 2, right 3
+    assert _default_lanes(3, [2, 2, 2]) == [((0, 0), (0, 0)), ((1, 1), (1, 1)), ((2, 2), (1, 1))]
+    # 2 lanes, two ways on: the right one gets the right lane, the left one the rest
+    assert _default_lanes(2, [2, 2]) == [((0, 0), (0, 0)), ((1, 1), (1, 1))]
+    # one way on: as many lanes as both have, from the left, lane k into lane k
+    assert _default_lanes(3, [2]) == [((0, 1), (0, 1))]
+    # 1 lane: every turn from it; the leftmost link entered at its lane 1, the others at the right
+    assert _default_lanes(1, [2, 3, 2]) == [((0, 0), (0, 0)), ((0, 0), (2, 2)), ((0, 0), (1, 1))]
+    # 4 lanes, 4 ways on: two middle links share the 2 middle lanes, one each
+    assert _default_lanes(4, [1, 1, 1, 1]) == [((0, 0), (0, 0)), ((1, 1), (0, 0)), ((2, 2), (0, 0)), ((3, 3), (0, 0))]
+
+
+def test_movement_lanes_from_turn_lanes(tmp_path):
+    """Way 100 (A) has turn:lanes 'through|right': its right turn into B starts from lane 2 only,
+    into B's single lane. Every movement has both ranges, equal length."""
+    con = _gmns(tmp_path)
+    assert con.execute(f"SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
+                       f"WHERE ib_link_id={A} AND ob_link_id={B}").fetchone() == (2, 2, 1, 1)
+    assert con.execute("SELECT count(*) FROM gmns_driving.movement WHERE start_ib_lane IS NULL OR start_ob_lane IS NULL "
+                       "OR end_ib_lane - start_ib_lane <> end_ob_lane - start_ob_lane").fetchone()[0] == 0
+
+
+def test_lane_graph_pairs_movement_lanes_in_order(tmp_path):
+    """Step 4: lane routing follows the movement's ranges: A's right turn into B (turn:lanes
+    'through|right') leaves from lane 2 only, so the lane graph has A_2 -> B_1 and not A_1 -> B_1."""
+    from duckosm.lane_routing import build_lane_graph
+    _gmns(tmp_path).close()
+    out = tmp_path / "out_gmns.duckdb"
+    build_lane_graph(str(out))
+    con = duckdb.connect(str(out))
+    got = con.execute(f"SELECT from_lane, to_lane FROM lane_driving.lane_edges WHERE kind <> 'lane_change' "
+                      f"AND from_lane LIKE '{A}_%' AND to_lane LIKE '{B}_%'").fetchall()
+    assert got == [(f"{A}_2", f"{B}_1")]
+
+
+def test_bus_lane_from_bus_lanes(tmp_path):
+    """Step 5: bus:lanes=designated makes a bus lane, as psv:lanes does (Monaco, Boulevard Princesse
+    Charlotte: '||designated' with access:lanes '||no')."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE raw.ways SET tags = MAP{'bus:lanes':'|designated','access:lanes':'|no'} WHERE osm_id = 100")
+    c.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    uses = dict(duckdb.connect(str(out)).execute(
+        f"SELECT lane_num, allowed_uses FROM gmns_driving.lane WHERE link_id = {A}").fetchall())
+    assert uses == {1: "auto", 2: "bus"}
+
+
+def test_empty_turn_lane_goes_straight_on(tmp_path):
+    """A lane left empty in turn:lanes ('through|') has no arrow, so straight on: the thru movement
+    starts from both lanes (Monaco, Boulevard Princesse Charlotte: its bus lane had no turn)."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    c = duckdb.connect(str(src))
+    c.execute("LOAD spatial; UPDATE raw.ways SET tags = MAP{'turn:lanes':'through|'} WHERE osm_id = 100")
+    c.execute("INSERT INTO driving.nodes VALUES (4, ST_GeomFromText('POINT(18.08 59.32)'))")
+    c.execute("INSERT INTO driving.edges VALUES (88,2,4,103,'primary','Main',2,false,80,50,"
+              "ST_GeomFromText('LINESTRING(18.07 59.32,18.08 59.32)'))")
+    c.execute(f"INSERT INTO driving.edge_graph VALUES ({A},88,88,1.0)")
+    c.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    assert duckdb.connect(str(out)).execute(
+        f"SELECT start_ib_lane, end_ib_lane FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id=88"
+    ).fetchone() == (1, 2)
+
+
+def test_placement_says_where_the_line_lies(tmp_path):
+    """Step 6: placement=right_of:2 on a 2-lane one-way way: the line is the right edge of lane 2, so
+    lane 1 sits 4.875 m and lane 2 1.625 m left of it (north, for an eastbound way), not centred."""
+    src, out = tmp_path / "pl.duckdb", tmp_path / "pl_gmns.duckdb"
+    _pair_source(src, 40.0)                                   # Q far away: no pairing
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE raw.ways SET tags = MAP{'placement':'right_of:2'} WHERE osm_id = 200")
+    c.close()
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    y = dict(con.execute("SELECT lane_id, round((ST_Y(ST_StartPoint(geom)) - 59.32) * 111320, 2) "
+                         "FROM gmns_driving.lane WHERE link_id = 11").fetchall())
+    assert y["11_1"] == pytest.approx(4.875, abs=0.05) and y["11_2"] == pytest.approx(1.625, abs=0.05)
+
+
+def test_placement_values():
+    from duckosm.gmns import _placement
+    w = [3.25, 3.25, 3.0]
+    assert _placement("left_of:1", w) == 0 and _placement("middle_of:2", w) == 4.875
+    assert _placement("right_of:3", w) == 9.5
+    assert _placement("transition", w) is None and _placement("left_of:4", w) is None and _placement(None, w) is None
+
+
+def _source_with(path, tags, edges, graph):
+    """_source plus extra edges (id, source, target, osm_id, lanes, is_reverse, wkt) and edge_graph
+    rows, way 100 (A) tagged ``tags``; extra nodes 4/5 east and south-east of node 2."""
+    _source(path)
+    c = duckdb.connect(str(path))
+    c.execute("LOAD spatial")
+    c.execute(f"UPDATE raw.ways SET tags = MAP{{{', '.join(f'{k!r}:{v!r}' for k, v in tags.items())}}} WHERE osm_id = 100")
+    c.execute("INSERT INTO driving.nodes VALUES (4, ST_GeomFromText('POINT(18.08 59.32)')), "
+              "(5, ST_GeomFromText('POINT(18.08 59.3185)'))")
+    for e, a, b, osm, n, rev, wkt in edges:
+        c.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{osm},'primary','Main',{n},{rev},80,50,"
+                  f"ST_GeomFromText('{wkt}'))")
+    for a, b in graph:
+        c.execute(f"INSERT INTO driving.edge_graph VALUES ({a},{b},{b},1.0)")
+    c.close()
+
+
+def _ranges(tmp_path, ib, ob):
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(tmp_path / "src.duckdb"), str(out))
+    return duckdb.connect(str(out)).execute(
+        f"SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
+        f"WHERE ib_link_id={ib} AND ob_link_id={ob}").fetchone()
+
+
+def test_turn_lanes_apply_where_the_way_ends(tmp_path):
+    """Way 100 'through|right' continues past node 2 as edge 88 (the same way): the arrows apply only
+    at the way's end, so at node 2 both lanes go on, lane by lane, into 88 (lane 1 had been sent
+    into lane 2 and the right lane had no way on: Monaco, Boulevard Charles III)."""
+    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
+                 [(88, 2, 4, 100, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)")], [(A, 88)])
+    assert _ranges(tmp_path, A, 88) == (1, 2, 1, 2)
+
+
+def test_arrows_match_exits_by_their_place(tmp_path):
+    """At the way's end, a slight right fork (16 degrees, typed thru by its angle) takes the 'right'
+    lane and the straight exit the 'through' lane."""
+    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
+                 [(88, 2, 4, 103, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)"),
+                  (89, 2, 5, 104, 2, "false", "LINESTRING(18.07 59.32,18.08 59.3185)")], [(A, 88), (A, 89)])
+    assert _ranges(tmp_path, A, 88)[:2] == (1, 1)                 # straight on from the 'through' lane
+    assert _ranges(tmp_path, A, 89)[:2] == (2, 2)                 # the fork from the 'right' lane
+
+
+def test_slight_fork_is_typed_thru(tmp_path):
+    """Guard for the test above: the fork really is typed thru by its angle."""
+    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
+                 [(88, 2, 4, 103, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)"),
+                  (89, 2, 5, 104, 2, "false", "LINESTRING(18.07 59.32,18.08 59.3185)")], [(A, 88), (A, 89)])
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(tmp_path / "src.duckdb"), str(out))
+    assert duckdb.connect(str(out)).execute(
+        f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id=89").fetchone() == ("thru",)
+
+
+def _mini_source(path, nodes, edges, graph):
+    """A bare source db: nodes {id: (lon, lat)}, edges (id, a, b, lanes) as straight lines (one OSM
+    way each, one-way), edge_graph rows (from, to)."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    for n, (x, y) in nodes.items():
+        con.execute(f"INSERT INTO driving.nodes VALUES ({n}, ST_Point({x}, {y}))")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
+                "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
+    for e, a, b, n, *two in edges:               # (id, a, b, lanes[, osm way of a two-way road])
+        (xa, ya), (xb, yb) = nodes[a], nodes[b]
+        osm = two[0] if two else e
+        con.execute(f"INSERT INTO raw.ways VALUES ({e}, MAP{{}}, [{a},{b}])")
+        con.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{osm},'primary',NULL,{n},{'true' if two and a > b else 'false'},"
+                    f"{'false' if two else 'true'},100,50,ST_GeomFromText('LINESTRING({xa} {ya},{xb} {yb})'))")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    for a, b in graph:
+        con.execute(f"INSERT INTO driving.edge_graph VALUES ({a},{b},{b},1.0)")
+    con.close()
+
+
+def _mini_movements(tmp_path, nodes, edges, graph):
+    src, out = tmp_path / "mini.duckdb", tmp_path / "mini_gmns.duckdb"
+    _mini_source(src, nodes, edges, graph)
+    to_gmns(str(src), str(out))
+    return {(r[0], r[1]): r[2:] for r in duckdb.connect(str(out)).execute(
+        "SELECT ib_link_id, ob_link_id, type, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+        "FROM gmns_driving.movement").fetchall()}
+
+
+def test_merge_lanes_follow_osm2gmns():
+    from duckosm.gmns import _merge_lanes
+    assert _merge_lanes([2, 1], 3) == [((0, 1), (0, 1)), ((0, 0), (2, 2))]   # main left, ramp into lane 3
+    assert _merge_lanes([1, 1], 2) == [((0, 0), (0, 0)), ((0, 0), (1, 1))]
+    assert _merge_lanes([2, 2], 2) == [((0, 1), (0, 1)), ((0, 1), (0, 1))]   # 2 into 2: both all lanes
+
+
+def test_merge_stacks_the_joining_roads_and_is_typed_merge(tmp_path):
+    """A 2-lane road (11) and a 1-lane ramp from the right (12, joining at 16 degrees) merge into a
+    3-lane road (13): the road takes lanes 1-2, the ramp lane 3 (both had gone into lane 1), and
+    both movements are typed 'merge'."""
+    mv = _mini_movements(tmp_path, {1: (18.06, 59.32), 3: (18.06, 59.3185), 2: (18.07, 59.32), 4: (18.08, 59.32)},
+                         [(11, 1, 2, 2), (12, 3, 2, 1), (13, 2, 4, 3)], [(11, 13), (12, 13)])
+    assert mv[(11, 13)] == ("merge", 1, 2, 1, 2)
+    assert mv[(12, 13)] == ("merge", 1, 1, 3, 3)
+
+
+def test_fork_is_typed_diverge(tmp_path):
+    """One road (11) splits into a straight road (12) and a slight right branch (13, 16 degrees):
+    both movements 'diverge'. A crossroads with a 90-degree turn stays a junction."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3185), 6: (18.07, 59.31)}
+    mv = _mini_movements(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 1), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    assert mv[(11, 12)][0] == "diverge" and mv[(11, 13)][0] == "diverge"
+    cross = tmp_path / "cross"
+    cross.mkdir()
+    mv = _mini_movements(cross, nodes, [(11, 1, 2, 2), (12, 2, 4, 1), (14, 2, 6, 1)], [(11, 12), (11, 14)])
+    assert mv[(11, 12)][0] == "thru" and mv[(11, 14)][0] == "right"
+
+
+def _gmns_of(tmp_path, nodes, edges, graph):
+    src, out = tmp_path / "lc.duckdb", tmp_path / "lc_gmns.duckdb"
+    _mini_source(src, nodes, edges, graph)
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    return con
+
+
+def _pt(con, sql):
+    x, y = con.execute(sql).fetchone()
+    return x * 111320 * 0.5101, y * 111320                    # metres near 59.32 N (cos = 0.51)
+
+
+def test_lane_connector_joins_lane_ends(tmp_path):
+    """docs/design/gmns_lane_connectors.md: a turn's connector starts exactly at the inbound lane's
+    end and ends at the outbound lane's start (base network: A's right turn into B)."""
+    con = _gmns(tmp_path)
+    c = con.execute(f"SELECT from_lane_id, to_lane_id FROM gmns_driving.lane_connector "
+                    f"WHERE from_lane_id = '{A}_2' AND to_lane_id = '{B}_1'").fetchone()
+    assert c is not None
+    gap = con.execute(f"""SELECT ST_Distance(ST_StartPoint(c.geom), ST_EndPoint(a.geom)) + ST_Distance(ST_EndPoint(c.geom), ST_StartPoint(b.geom))
+        FROM gmns_driving.lane_connector c, gmns_driving.lane a, gmns_driving.lane b
+        WHERE c.from_lane_id = '{A}_2' AND c.to_lane_id = '{B}_1' AND a.lane_id = '{A}_2' AND b.lane_id = '{B}_1'""").fetchone()[0]
+    assert gap < 1e-6
+
+
+def test_one_way_into_two_way_gets_an_s_curve(tmp_path):
+    """A one-way lane (centred) going on into a two-way road (lanes 1.625 m to the side): no jump at
+    the node; both lanes stop short and a connector shifts across (Avenue de la Costa)."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1), (12, 2, 3, 1, 500), (13, 3, 2, 1, 500)], [(11, 12)])
+    row = con.execute("SELECT ST_Length_Spheroid(ST_FlipCoordinates(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1' "
+                      "AND to_lane_id = '12_1'").fetchone()
+    assert row is not None and 3.0 < row[0] < 6.0               # a short S-curve, not a 1.6 m step
+    y0 = _pt(con, "SELECT ST_X(ST_StartPoint(geom)), ST_Y(ST_StartPoint(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1'")[1]
+    y1 = _pt(con, "SELECT ST_X(ST_EndPoint(geom)), ST_Y(ST_EndPoint(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1'")[1]
+    assert abs((y0 - y1) - 1.625) < 0.1                         # it shifts the lane 1.625 m to the right
+
+
+def test_straight_road_needs_no_connector(tmp_path):
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1), (12, 2, 3, 1)], [(11, 12)])
+    assert con.execute("SELECT count(*) FROM gmns_driving.lane_connector").fetchone()[0] == 0
+    end = con.execute("SELECT ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE lane_id = '11_1'").fetchone()[0]
+    assert abs(end - 18.07) < 1e-7                              # not shortened
+
+
+def test_lanes_stop_at_a_junction(tmp_path):
+    """At a junction (3 neighbours) a lane stops where it leaves the other roads' lanes, not at the node:
+    lane 2 of 11 (the south side) runs into the road leaving south (14, 6.5 m wide); lane 1 doesn't."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.07, 59.31)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 2)], [(11, 12), (11, 14)])
+    end = dict(con.execute("SELECT lane_id, ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE link_id = 11").fetchall())
+    assert (18.07 - end["11_2"]) * 111320 * 0.5101 > 2.0        # stops before the crossing road
+
+
+def test_fork_lanes_unit():
+    """Option B: the main exit keeps all its lanes, a branch shares the lanes on its side."""
+    from duckosm.gmns import _fork_lanes
+    # 2 lanes; a 1-lane branch on the left (index 0), the road going on (index 1, 2 lanes)
+    assert _fork_lanes(2, [1, 2], 1) == [((0, 0), (0, 0)), ((0, 1), (0, 1))]
+    # a branch on the right: it shares the right lane
+    assert _fork_lanes(2, [2, 1], 0) == [((0, 1), (0, 1)), ((1, 1), (0, 0))]
+
+
+def test_main_road_keeps_its_lanes_at_a_fork(tmp_path):
+    """Boulevard du Larvotto (Kaveh): a 2-lane road going on under its own name and a 1-lane unnamed
+    road branching off to the left at a shallow angle. Both lanes go on; lane 1 may also branch off
+    (osm2gmns had sent lane 1 into the branch only)."""
+    src, out = tmp_path / "fk.duckdb", tmp_path / "fk_gmns.duckdb"
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}
+    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE driving.edges SET name = 'Main' WHERE edge_id IN (11, 12)")
+    c.close()
+    to_gmns(str(src), str(out))
+    mv = {(a, b): r for a, b, *r in duckdb.connect(str(out)).execute(
+        "SELECT ib_link_id, ob_link_id, type, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+        "FROM gmns_driving.movement").fetchall()}
+    assert mv[(11, 12)] == ["diverge", 1, 2, 1, 2]
+    assert mv[(11, 13)] == ["diverge", 1, 1, 1, 1]
+
+
+def _mv_of(tmp_path, nodes, edges, graph, names=None, tags=None):
+    src, out = tmp_path / "jn.duckdb", tmp_path / "jn_gmns.duckdb"
+    _mini_source(src, nodes, edges, graph)
+    c = duckdb.connect(str(src))
+    for e, nm in (names or {}).items():
+        c.execute(f"UPDATE driving.edges SET name = '{nm}' WHERE edge_id = {e}")
+    for e, t in (tags or {}).items():
+        c.execute(f"UPDATE raw.ways SET tags = MAP{{{', '.join(f'{k!r}:{v!r}' for k, v in t.items())}}} WHERE osm_id = {e}")
+    c.close()
+    to_gmns(str(src), str(out))
+    return {(a, b): tuple(r) for a, b, *r in duckdb.connect(str(out)).execute(
+        "SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement").fetchall()}
+
+
+def test_road_going_on_keeps_its_lanes_at_a_junction(tmp_path):
+    """3358160335623944038 (Kaveh): a 2-lane road X goes on straight past a side road. Straight on
+    keeps both lanes (osm2gmns gave the right lane to the right turn only), the right turn shares
+    lane 2, and a single right turn from the side road enters the rightmost lane (osm2gmns: lane 1),
+    so lane 2 of the road ahead has a way in."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.0702, 59.31), 7: (18.0698, 59.31)}
+    mv = _mv_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 1), (15, 7, 2, 1)],
+                [(11, 12), (11, 14), (15, 12)], names={11: "X", 12: "X"})
+    assert mv[(11, 12)] == (1, 2, 1, 2)          # straight on from both lanes
+    assert mv[(11, 14)] == (2, 2, 1, 1)          # the right turn shares the right lane
+    assert mv[(15, 12)] == (1, 1, 2, 2)          # a lone right turn enters the right lane
+
+
+def test_arrows_without_their_exit_go_ahead(tmp_path):
+    """Avenue de Fontvieille: turn:lanes 'left|left|' where the way ends at a fork with no left exit
+    (straight on, a slight right branch). The left lanes go ahead with the unmarked lane (they had no
+    way on), the branch shares the right lane."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3185)}
+    mv = _mv_of(tmp_path, nodes, [(11, 1, 2, 3), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)],
+                tags={11: {"turn:lanes": "left|left|"}})
+    assert mv[(11, 12)][:2] == (1, 2)            # lanes 1-2 (both left arrows) go on
+    assert mv[(11, 13)][:2] == (3, 3)

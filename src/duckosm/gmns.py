@@ -111,8 +111,84 @@ def _offset_wkt(line_wkt, off_m):
     return LineString(back).wkt if len(back) >= 2 else line_wkt
 
 
+def _placement(value, w_each):
+    """OSM ``placement`` (``left_of:N`` / ``middle_of:N`` / ``right_of:N``) -> where the way's line
+    lies across its lanes, in metres from the left edge of lane 1 (lanes left to right in the
+    direction of travel). None for ``transition``, a missing tag or a lane number the edge doesn't
+    have: then the default placement stands (docs/design/gmns_lane_movements.md, step 6)."""
+    try:
+        kind, n = str(value).split(":")
+        n = int(n)
+    except ValueError:
+        return None
+    if not 1 <= n <= len(w_each):
+        return None
+    left = sum(w_each[:n - 1])
+    return {"left_of": left, "middle_of": left + w_each[n - 1] / 2, "right_of": left + w_each[n - 1]}.get(kind)
+
+
+def _paired_gaps(edges, side_sign, step_m=2.0):
+    """One-way edges placed as one side of a two-way road (docs/design/gmns_paired_carriageways.md).
+
+    ``edges``: ``(edge_id, wkt, half_width_m)`` of the one-way edges. Returns ``{edge_id: d}``, the
+    median gap in metres between an edge's centre line and its partner(s): one-way edges running the
+    opposite way on its inner side (left for right-hand traffic) closer than ``half_A + half_B``,
+    alongside it for at least half its length. Sampled every ``step_m`` metres."""
+    import statistics
+
+    from shapely import STRtree
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    geoms = [_w.loads(w) for _, w, _ in edges]
+    if not geoms:
+        return {}
+    x0, y0 = geoms[0].coords[0]                          # one local metre frame for the whole area
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    lines = [LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in g.coords]) for g in geoms]
+    half = [h for _, _, h in edges]
+    tree = STRtree(lines)
+    reach = max(half)
+
+    def tangent(ln, s):
+        a, b = ln.interpolate(max(s - 0.5, 0)), ln.interpolate(min(s + 0.5, ln.length))
+        dx, dy = b.x - a.x, b.y - a.y
+        n = math.hypot(dx, dy) or 1.0
+        return dx / n, dy / n
+
+    gaps = {}
+    for i, A in enumerate(lines):
+        if A.length < step_m:
+            continue
+        cand = [j for j in tree.query(A.buffer(half[i] + reach)) if j != i]
+        if not cand:
+            continue
+        found, samples = [], 0
+        for k in range(int(A.length // step_m) + 1):
+            s = min(k * step_m, A.length)
+            p, (tx, ty) = A.interpolate(s), tangent(A, s)
+            samples += 1
+            best = None
+            for j in cand:
+                B = lines[j]
+                sb = B.project(p)
+                q = B.interpolate(sb)
+                d = p.distance(q)
+                if d >= half[i] + half[j] or (best is not None and d >= best):
+                    continue
+                bx, by = tangent(B, sb)
+                cross = tx * (q.y - p.y) - ty * (q.x - p.x)  # > 0: q is left of A
+                if tx * bx + ty * by < -0.866 and cross * side_sign < 0:
+                    best = d
+            if best is not None:
+                found.append(best)
+        if found and len(found) >= samples / 2:
+            gaps[edges[i][0]] = statistics.median(found)
+    return gaps
+
+
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False,
-            drive_side="right"):
+            drive_side="right", pair_carriageways=True):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -123,6 +199,9 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     to_csv : if set, also dump spec-standard GMNS CSVs into this directory (per-mode subfolders when
         more than one mode).
     lane_geometry : compute a per-lane offset ``geom`` for lane-level rendering (needs shapely).
+    pair_carriageways : place a one-way edge with an opposite one-way partner close on its inner side
+        as one side of a two-way road, from the line midway between them (default; False = centred
+        on its own way, as before). docs/design/gmns_paired_carriageways.md
     combined : also write a single **mode-tagged** ``gmns_all`` network (node + link), the per-mode
         links merged on ``link_id`` (= ``edge_id``) with ``allowed_uses`` unioned across the modes that
         contain each edge. Needs ≥2 modes.
@@ -170,8 +249,11 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_node(con, sch, mode)
         _build_link(con, sch, mode, uses, has_raw)
         _build_geometry(con, sch, mode)
-        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side)  # before movement
-        _build_movement(con, sch, mode, uses)
+        _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
+                         pair_carriageways)  # before movement
+        _build_movement(con, sch, mode, uses, drive_side)
+        if lane_geometry:
+            _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
         _build_signal_controller(con, sch)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
@@ -285,7 +367,7 @@ def _build_geometry(con, sch, mode):
     FROM s.{mode}.edges""")
 
 
-def _build_movement(con, sch, mode, uses):
+def _build_movement(con, sch, mode, uses, drive_side="right"):
     """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction."""
     if not _exists(con, "s", mode, "edge_graph"):
         con.execute(f"""CREATE TABLE {sch}.movement(
@@ -305,32 +387,27 @@ def _build_movement(con, sch, mode, uses):
         JOIN s.{mode}.edges fe ON fe.edge_id = eg.from_edge
         JOIN s.{mode}.edges te ON te.edge_id = eg.to_edge
         -- drop the immediate reversal (U-turn back onto the same physical segment): an edge_graph
-        -- artifact for routing completeness, not a modelled movement -- except at a dead end, where
-        -- turning round is the only way on (lane routing would be stuck without it). Real
-        -- intersection U-turns (a different osm_id) are kept too; both are typed 'uturn'.
+        -- artifact for routing completeness, not a modelled movement -- except where turning round
+        -- is the only way on (a dead end) or the only way into the reverse edge (every other road
+        -- at the node leaves it, Monaco Avenue de l'Annonciade): lane routing would be stuck, the
+        -- lane unreachable. Real intersection U-turns (a different osm_id) are kept too; all 'uturn'.
         WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source
                    AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph o
-                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge))
+                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge)
+                   AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph i
+                               WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge))
       ), b AS (
         SELECT ib, ob, node_id, ibg, obg,
           atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,
           atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) AS out_b
         FROM mv
       ), t AS (
-        SELECT ib, ob, node_id, ibg, obg,
+        SELECT ib, ob, node_id, ibg, obg, ang,
           CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
                WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
           -- inbound compass heading (0=N, clockwise) = (90 - math-bearing) mod 360
           ((90 - degrees(in_b)) - floor((90 - degrees(in_b)) / 360) * 360) AS hdg
         FROM (SELECT *, ((degrees(out_b - in_b) + 180) - floor((degrees(out_b - in_b) + 180) / 360) * 360) - 180 AS ang FROM b)
-      ), lt AS (                        -- inbound lanes feeding each turn category, from turn:lanes
-        SELECT link_id AS ib,
-          CASE WHEN turn ILIKE '%through%' OR turn = 'thru' THEN 'thru'
-               WHEN turn ILIKE '%reverse%' OR turn ILIKE '%uturn%' THEN 'uturn'
-               WHEN turn ILIKE '%left%' THEN 'left'
-               WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
-          min(lane_num) AS mn, max(lane_num) AS mx
-        FROM {sch}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
       ), pts AS (                        -- turn-connector endpoints + tangent anchors, hugging the junction
         SELECT t.*,
           ST_X(ST_LineInterpolatePoint(ibg, 0.94)) AS x0, ST_Y(ST_LineInterpolatePoint(ibg, 0.94)) AS y0,
@@ -351,7 +428,7 @@ def _build_movement(con, sch, mode, uses):
         FROM pts
       )
       SELECT t.ib::VARCHAR || '-' || t.ob::VARCHAR AS mvmt_id, t.node_id, NULL::VARCHAR AS name,
-             t.ib AS ib_link_id, lt.mn AS start_ib_lane, lt.mx AS end_ib_lane,
+             t.ib AS ib_link_id, NULL::INT AS start_ib_lane, NULL::INT AS end_ib_lane,
              t.ob AS ob_link_id, NULL::INT AS start_ob_lane, NULL::INT AS end_ob_lane, t.type,
              NULL::DOUBLE AS penalty, NULL::DOUBLE AS capacity,
              CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
@@ -361,10 +438,356 @@ def _build_movement(con, sch, mode, uses):
                              WHEN 'uturn' THEN 'U' ELSE 'T' END) AS mvmt_code,
              '{uses}' AS allowed_uses,
              ST_AsText({_bezier_line_sql('t.x0', 't.y0', 't.cx0', 't.cy0',
-                                         't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry
+                                         't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry,
+             t.ang AS _ang
       FROM cp t
-      LEFT JOIN lt ON lt.ib = t.ib AND lt.cat = t.type
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
+    _assign_lanes(con, sch, mode, drive_side)
+
+
+# turn:lanes part -> the movement types a lane feeds (docs/design/gmns_lane_movements.md, step 1); a
+# slight turn under 30 degrees is typed thru by its angle, so slight_* feeds thru too
+_TURN_KINDS = {"through": {"thru"}, "left": {"left"}, "sharp_left": {"left"}, "slight_left": {"left", "thru"},
+               "right": {"right"}, "sharp_right": {"right"}, "slight_right": {"right", "thru"},
+               "reverse": {"uturn"}, "merge_to_left": {"thru"}, "merge_to_right": {"thru"},
+               "none": {"thru"}, "": {"thru"}}
+
+
+def _turn_kinds(turn):
+    """One lane's ``turn:lanes`` value (``through;right``) -> the movement types it feeds."""
+    return set().union(*(_TURN_KINDS.get(p.strip(), set()) for p in str(turn).split(";")))
+
+
+def _default_lanes(n, obs):
+    """osm2gmns 0.7.6's lane rule (movement/autoconintd.py), for an inbound link with ``n`` lanes and
+    its outbound links' lane counts ``obs``, sorted left to right. Per outbound link a pair of 0-based
+    ranges ``((ib0, ib1), (ob0, ob1))`` of equal length, read in order; None where it gets no lane.
+    Separate lanes per turn: the leftmost link the leftmost lane, the rightmost the rightmost, the
+    ones between share the rest (docs/design/gmns_lane_movements.md, steps 2-3)."""
+    k, out = len(obs), [None] * len(obs)
+    if n == 1:
+        out[0] = ((0, 0), (0, 0))
+        for j in range(1, k):
+            out[j] = ((0, 0), (obs[j] - 1, obs[j] - 1))
+        return out
+    if k == 1:
+        c = min(n, obs[0])
+        return [((0, c - 1), (0, c - 1))]
+    if k == 2:
+        c = min(n - 1, obs[0])
+        return [((0, c - 1), (0, c - 1)), ((n - 1, n - 1), (obs[1] - 1, obs[1] - 1))]
+    out[0], mids = ((0, 0), (0, 0)), list(range(1, k - 1))
+    if n - 2 >= len(mids):                       # enough middle lanes: deal them out in turn
+        left, room, got = n - 2, [obs[j] for j in mids], [0] * len(mids)
+        while left > 0 and sum(room) > 0:
+            for x in range(len(mids)):
+                if room[x] == 0:
+                    continue
+                if left == 0:
+                    break
+                room[x], got[x], left = room[x] - 1, got[x] + 1, left - 1
+        start = 1
+        for x, j in enumerate(mids):
+            if got[x]:
+                out[j] = ((start, start + got[x] - 1), (obs[j] - got[x], obs[j] - 1))
+            start += got[x]
+    elif n < len(mids):                          # fewer lanes than middle links: the last lane shared
+        for x, j in enumerate(mids):
+            lane = min(x, n - 1)
+            out[j] = ((lane, lane), (obs[j] - 1, obs[j] - 1))
+    else:                                        # one lane per middle link
+        start = 1 if n - 1 == len(mids) else 0
+        for x, j in enumerate(mids):
+            out[j] = ((start + x, start + x), (obs[j] - 1, obs[j] - 1))
+    out[-1] = ((n - 1, n - 1), (obs[-1] - 1, obs[-1] - 1))
+    return out
+
+
+def _turn_side(ms):
+    """The ``turn:lanes`` arrow each exit takes, by its place among the exits (sorted left to right),
+    not by the angle type: the straightest exit within 45 degrees is ``thru``, exits left of it
+    ``left``, right of it ``right``; a U-turn ``uturn``. So a slight right fork typed ``thru`` by its
+    angle still takes the right-turn lanes (Monaco, Boulevard Charles III)."""
+    real = [k for k, m in enumerate(ms) if m[2] != "uturn"]
+    s = min(real, key=lambda k: abs(ms[k][3]), default=None)
+    s = s if s is not None and abs(ms[s][3]) < 45 else None
+    return ["uturn" if m[2] == "uturn" else "thru" if k == s
+            else ("left" if (k < s if s is not None else m[3] > 0) else "right") for k, m in enumerate(ms)]
+
+
+def _merge_lanes(ns, m):
+    """osm2gmns 0.7.6's merge rule (movement/autoconm.py): inbound links with ``ns`` lanes, sorted left
+    to right, joining one outbound link of ``m`` lanes. The leftmost link's rightmost lanes go into
+    the outbound's leftmost lanes, every other link's leftmost lanes into its rightmost lanes. Per
+    inbound link a pair of 0-based ranges ``((ib0, ib1), (ob0, ob1))`` of equal length."""
+    out = []
+    for k, n in enumerate(ns):
+        c = min(m, n)
+        out.append(((n - c, n - 1), (0, c - 1)) if k == 0 else ((0, c - 1), (m - c, m - 1)))
+    return out
+
+
+# road classes, high to low: at a fork the exit of the highest class goes on as the main road
+_CLASS_RANK = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+               "living_street", "service"]
+
+
+def _fork_lanes(n, obs, main, angs=None):
+    """Lanes where a road goes on (Kaveh, 2026-09-30, option B; forks and junctions): the exit that
+    goes on as the road (index ``main`` in ``obs``, sorted left to right) keeps all its lanes, lane by
+    lane, on the side away from the others; every other exit shares the inbound lanes on its own side
+    (left of the main exit: the leftmost lanes, right of it: the rightmost) - as many as it has at a
+    fork, one at a junction (a turn of 45 degrees or more, ``angs``), as osm2gmns gives a turn. Per
+    exit a pair of 0-based ranges of equal length."""
+    out, m = [], obs[main]
+    c = min(n, m)
+    left_only = main > 0 and main == len(obs) - 1
+    for k, mb in enumerate(obs):
+        if k == main:
+            out.append(((n - c, n - 1), (m - c, m - 1)) if left_only else ((0, c - 1), (0, c - 1)))
+        else:
+            b = 1 if angs is not None and abs(angs[k]) >= 45 else min(mb, n)
+            out.append(((0, b - 1), (0, b - 1)) if k < main else ((n - b, n - 1), (mb - b, mb - 1)))
+    return out
+
+
+def _assign_lanes(con, sch, mode, drive_side="right"):
+    """Fill each movement's inbound / outbound lane ranges (docs/design/gmns_lane_movements.md):
+
+    - ``turn:lanes`` only on the last piece of its OSM way, at the junction where the way ends (the
+      arrows apply "to the junction", OSM wiki Key:turn): each exit takes the lanes whose arrow
+      matches its place among the exits (``_turn_side``);
+    - along a way (a movement into the next piece of the same way, same direction) every lane
+      continues lane by lane, so marked lanes run on to their junction;
+    - into a merge (a node with one outbound link), osm2gmns's merge rule (``_merge_lanes``);
+    - at a fork, the road that goes on keeps all its lanes and a branch shares its side (``_fork_lanes``);
+    - else osm2gmns's junction rule (``_default_lanes``).
+
+    Ranges have equal length and pair in order: the k-th inbound lane into the k-th outbound lane.
+    Then the GMNS types ``diverge`` / ``merge`` (``_fork_types``). Drops the helper column ``_ang``."""
+    from collections import defaultdict
+
+    import pandas as pd
+
+    nl = dict(con.execute(f"SELECT link_id, max(lane_num) FROM {sch}.lane GROUP BY 1").fetchall())
+    kinds = defaultdict(dict)        # link -> {lane_num: types}, for links with turn:lanes; a lane left
+    for lk, num, turn in con.execute(  # empty there ('|' or 'none', stored NULL) has no arrow: straight on
+            f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE link_id IN "
+            f"(SELECT link_id FROM {sch}.lane WHERE turn IS NOT NULL)").fetchall():
+        kinds[lk][num] = _turn_kinds(turn) if turn is not None else {"thru"}
+    way = {}                         # edge -> (OSM way, direction), to tell a way's pieces apart
+    if _exists(con, "s", mode, "edges"):
+        rev = "is_reverse" if "is_reverse" in {c for (c,) in con.execute(
+            "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+            "AND table_name = 'edges'", [mode]).fetchall()} else "false"
+        way = {e: (o, r) for e, o, r in con.execute(f"SELECT edge_id, osm_id, {rev} FROM s.{mode}.edges").fetchall()}
+    by_ib = defaultdict(list)
+    for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
+        by_ib[ib].append((mid, ob, typ, ang or 0.0))
+    along = lambda ib, ob: ib in way and way.get(ob) == way[ib]      # the next piece of the same way
+    # merges as osm2gmns sees them: a node with one outbound link; its inbound links (bar the outbound
+    # link's own reverse), sorted left to right by the turn into it
+    ends = dict(con.execute(f"SELECT link_id, to_node_id FROM {sch}.link").fetchall())
+    starts = dict(con.execute(f"SELECT link_id, from_node_id FROM {sch}.link").fetchall())
+    outs = defaultdict(list)
+    for lk, nd in starts.items():
+        outs[nd].append(lk)
+    merge = {}                                   # movement id -> its ranges by the merge rule
+    into = defaultdict(list)
+    for ib, ms in by_ib.items():
+        for mid, ob, typ, ang in ms:
+            if (typ != "uturn" and len(outs.get(starts.get(ob), [])) == 1
+                    and starts.get(ib) != ends.get(ob)):            # not the outbound link's own reverse
+                into[ob].append((ang, mid, ib))
+    for ob, ins in into.items():
+        if len(ins) >= 2:
+            ins.sort(key=lambda x: x[0], reverse=True)
+            for (_, mid, ib), rng in zip(ins, _merge_lanes([nl.get(x[2], 1) for x in ins], nl.get(ob, 1))):
+                merge[mid] = rng
+    uturn_side = 180.0 if drive_side == "right" else -180.0    # a U-turn is the leftmost (right-hand traffic)
+    name_of, cls_of = {}, {}
+    for lk, nm, ft in con.execute(f"SELECT link_id, name, facility_type FROM {sch}.link").fetchall():
+        name_of[lk], cls_of[lk] = nm, ft
+    n_in = defaultdict(int)
+    for nd in ends.values():
+        n_in[nd] += 1
+    rank = lambda lk: _CLASS_RANK.index(str(cls_of.get(lk) or "").replace("_link", "")) \
+        if str(cls_of.get(lk) or "").replace("_link", "") in _CLASS_RANK else len(_CLASS_RANK)
+    rows = []
+    for ib, ms in by_ib.items():
+        n = nl.get(ib, 1)
+        ms.sort(key=lambda m: uturn_side if m[2] == "uturn" else m[3], reverse=True)   # left to right
+        obs = [nl.get(m[1], 1) for m in ms]
+        way_ends = not any(along(ib, m[1]) for m in ms)  # the way ends here: its arrows apply
+        default = _default_lanes(n, obs)
+        real = [k for k, m in enumerate(ms) if m[2] != "uturn"]
+        ahead = [k for k in real if abs(ms[k][3]) < 45]
+        if len(real) >= 2 and ahead:
+            # a road that goes on (fork or junction): the exit ahead that continues it (its name, its OSM
+            # way, the higher class, the straightest) keeps its lanes, the others share their side;
+            # U-turns keep osm2gmns's lane
+            main = min(ahead, key=lambda k: (name_of.get(ms[k][1]) is None or name_of.get(ms[k][1]) != name_of.get(ib),
+                                             not along(ib, ms[k][1]), rank(ms[k][1]), abs(ms[k][3])))
+            for k, rng in zip(real, _fork_lanes(n, [obs[x] for x in real], real.index(main), [ms[x][3] for x in real])):
+                default[k] = rng
+        elif len(real) == 1 and abs(ms[real[0]][3]) >= 45:
+            # a single turn enters from its own side: a right turn into the rightmost lanes (osm2gmns
+            # fills from the left, so a right turn went into lane 1)
+            k = real[0]
+            c = min(n, obs[k])
+            default[k] = ((n - c, n - 1), (obs[k] - c, obs[k] - 1)) if ms[k][3] < 0 else ((0, c - 1), (0, c - 1))
+        sides = _turn_side(ms)
+        extra = defaultdict(set)         # arrows no exit matches go to the nearest exit on their side,
+        if way_ends and ib in kinds:     # else to the exit ahead (Avenue de Fontvieille: left|left|)
+            here = set().union(*kinds[ib].values())
+            thru = next((k for k in real if sides[k] == "thru"), None)
+            for kind in ("left", "right"):
+                if kind in here and kind not in {sides[k] for k in real}:
+                    side_ks = [k for k in real if thru is None or (k < thru if kind == "left" else k > thru)]
+                    target = (side_ks[0] if kind == "left" else side_ks[-1]) if side_ks else thru
+                    if target is not None:
+                        extra[target].add(kind)
+        for k, ((mid, ob, typ, _), mo, rng, side) in enumerate(zip(ms, obs, default, sides)):
+            want = {side} | extra.get(k, set())
+            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if ks & want) if way_ends else []
+            if along(ib, ob):                    # along the way: every lane on, lane by lane
+                c = min(n, mo)
+                rng = ((0, c - 1), (0, c - 1))
+            elif tagged:                         # turn:lanes: its lanes, into as many lanes as fit
+                a, c = tagged[0] - 1, min(tagged[-1] - tagged[0] + 1, mo)
+                rng = ((a, a + c - 1), (0, c - 1) if side in ("left", "uturn") else (mo - c, mo - 1))
+            elif mid in merge:                   # joining at a merge: stacked side by side
+                rng = merge[mid]
+            if rng is None:                      # osm2gmns gives it no lane: the rightmost pair
+                rng = ((n - 1, n - 1), (mo - 1, mo - 1))
+            (i0, i1), (o0, o1) = rng
+            rows.append((mid, i0 + 1, i1 + 1, o0 + 1, o1 + 1))
+    if rows:
+        _lanes = pd.DataFrame(rows, columns=["mvmt_id", "si", "ei", "so", "eo"])  # noqa: F841 (read by SQL)
+        con.execute(f"""UPDATE {sch}.movement m SET start_ib_lane = l.si, end_ib_lane = l.ei,
+                          start_ob_lane = l.so, end_ob_lane = l.eo FROM _lanes l WHERE l.mvmt_id = m.mvmt_id""")
+    _fork_types(con, sch)
+    con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN _ang")
+
+
+def _fork_types(con, sch, max_ang=45.0):
+    """The GMNS movement types ``diverge`` and ``merge`` (docs/design/gmns_lane_movements.md):
+    ``diverge`` at a fork, a node one link arrives at, its 2+ ways on (U-turns aside) all within
+    ``max_ang`` degrees of straight on; ``merge`` into a node one link leaves, its 2+ inbound links
+    all joining within ``max_ang``. The angle bound keeps an ordinary junction (a one-way street
+    meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T)."""
+    con.execute(f"""UPDATE {sch}.movement m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
+        SELECT f.node_id FROM {sch}.movement f
+        WHERE (SELECT count(*) FROM {sch}.link k WHERE k.to_node_id = f.node_id) = 1 AND f.type <> 'uturn'
+        GROUP BY f.node_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
+    con.execute(f"""UPDATE {sch}.movement m SET type = 'merge' WHERE type <> 'uturn' AND m.ob_link_id IN (
+        SELECT f.ob_link_id FROM {sch}.movement f
+        WHERE (SELECT count(*) FROM {sch}.link k WHERE k.from_node_id = f.node_id) = 1 AND f.type <> 'uturn'
+        GROUP BY f.ob_link_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
+
+
+def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5):
+    """Lanes that connect (docs/design/gmns_lane_connectors.md): shorten each lane where it ends
+    inside a junction (the other links' lanes, but its own link's reverse) or doesn't meet the lane
+    it leads into, then join every lane pair of a movement with a cubic Bézier along both lanes, in
+    ``lane_connector``. Works in one local metre frame for the area."""
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import LineString, Point
+    from shapely.ops import substring
+
+    lanes = con.execute(f"SELECT lane_id, link_id, lane_num, COALESCE(width, {_DEFAULT_LANE_W}), ST_AsText(geom) "
+                        f"FROM {sch}.lane WHERE geom IS NOT NULL").fetchall()
+    con.execute(f"""CREATE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR,
+                      to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY)""")
+    if not lanes:
+        return
+    x0, y0 = _w.loads(lanes[0][4]).coords[0]
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    to_m = lambda g: LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in g.coords])
+    geom = {lid: to_m(_w.loads(w)) for lid, _, _, _, w in lanes}
+    link_of = {lid: lk for lid, lk, _, _, _ in lanes}
+    width = {lid: w for lid, _, _, w, _ in lanes}
+    by_link = {}
+    for lid, lk, num, _, _ in lanes:
+        by_link.setdefault(lk, {})[num] = lid
+    ends = {lk: (a, b) for lk, a, b in con.execute(f"SELECT link_id, from_node_id, to_node_id FROM {sch}.link").fetchall()}
+    nb = {}
+    for a, b in ends.values():
+        nb.setdefault(a, set()).add(b)
+        nb.setdefault(b, set()).add(a)
+    at = {}
+    for lk, (a, b) in ends.items():
+        at.setdefault(a, set()).add(lk)
+        at.setdefault(b, set()).add(lk)
+    surface = {lk: shapely.union_all([geom[l].buffer(width[l] / 2, cap_style="flat") for l in ls.values() if l in geom])
+               for lk, ls in by_link.items()}
+    pairs = []                                   # (mvmt_id, from lane, to lane): the k-th into the k-th
+    for mid, ib, ob, si, ei, so in con.execute(
+            f"SELECT mvmt_id, ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane FROM {sch}.movement "
+            f"WHERE start_ib_lane IS NOT NULL AND start_ob_lane IS NOT NULL").fetchall():
+        for k in range(ei - si + 1):
+            a, b = by_link.get(ib, {}).get(si + k), by_link.get(ob, {}).get(so + k)
+            if a in geom and b in geom:
+                pairs.append((mid, a, b))
+
+    def inside_len(line, node, link, at_end):
+        """How far from its end (at_end) or start the lane lies inside the other links' lanes at a junction."""
+        if len(nb.get(node, ())) < 3:
+            return 0.0
+        a, b = ends[link]
+        other = [surface[k] for k in at.get(node, ()) if k != link and k in surface and ends[k] != (b, a)]
+        if not other:
+            return 0.0
+        u, n, step = shapely.union_all(other), line.length, 0.5
+        s = 0.0
+        while s < n * max_trim and u.contains(line.interpolate(n - s if at_end else s)):
+            s += step
+        return s + junction_pad if s else 0.0
+
+    trim = {lid: [0.0, 0.0] for lid in geom}     # [at the start, at the end] in metres
+    for lid, line in geom.items():
+        a, b = ends[link_of[lid]]
+        trim[lid] = [inside_len(line, a, link_of[lid], False), inside_len(line, b, link_of[lid], True)]
+    for _, a, b in pairs:                        # room for an S-curve where the lanes don't meet
+        gap = Point(geom[a].coords[-1]).distance(Point(geom[b].coords[0]))
+        if gap > gap_ok:
+            need = max(3.0, 2.5 * gap) / 2
+            trim[a][1], trim[b][0] = max(trim[a][1], need), max(trim[b][0], need)
+    cut = {}
+    for lid, line in geom.items():
+        n = line.length
+        s0, s1 = (min(t, n * max_trim) for t in trim[lid])
+        cut[lid] = substring(line, s0, n - s1) if s0 or s1 else line
+
+    def tangent(line, at_end):
+        n = line.length
+        p, q = (line.interpolate(max(n - 1.0, 0)), line.interpolate(n)) if at_end else (line.interpolate(0), line.interpolate(min(1.0, n)))
+        dx, dy = q.x - p.x, q.y - p.y
+        d = math.hypot(dx, dy) or 1.0
+        return dx / d, dy / d
+
+    to_ll = lambda pts: "LINESTRING(" + ", ".join(f"{x / (kx * M) + x0:.8f} {y / M + y0:.8f}" for x, y in pts) + ")"
+    rows = []
+    for mid, a, b in pairs:
+        p0, p3 = cut[a].coords[-1], cut[b].coords[0]
+        chord = math.dist(p0, p3)
+        if chord < 0.3:
+            continue
+        (ax, ay), (bx, by) = tangent(cut[a], True), tangent(cut[b], False)
+        p1, p2 = (p0[0] + ax * 0.4 * chord, p0[1] + ay * 0.4 * chord), (p3[0] - bx * 0.4 * chord, p3[1] - by * 0.4 * chord)
+        pts = [tuple((1 - t) ** 3 * u + 3 * (1 - t) ** 2 * t * v + 3 * (1 - t) * t ** 2 * w + t ** 3 * z
+                     for u, v, w, z in zip(p0, p1, p2, p3)) for t in (i / 12 for i in range(13))]
+        rows.append((f"{a}>{b}", mid, a, b, min(width[a], width[b]), to_ll(pts)))
+    import pandas as pd
+    _cut = pd.DataFrame([(lid, to_ll(line.coords)) for lid, line in cut.items() if line is not geom[lid]],  # noqa: F841
+                        columns=["lane_id", "wkt"])
+    if len(_cut):
+        con.execute(f"UPDATE {sch}.lane l SET geom = ST_GeomFromText(c.wkt) FROM _cut c WHERE c.lane_id = l.lane_id")
+    if rows:
+        _con = pd.DataFrame(rows, columns=["connector_id", "mvmt_id", "from_lane_id", "to_lane_id", "width", "wkt"])  # noqa: F841
+        con.execute(f"INSERT INTO {sch}.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, "
+                    f"ST_GeomFromText(wkt) FROM _con")
 
 
 def _build_signal_controller(con, sch):
@@ -373,12 +796,15 @@ def _build_signal_controller(con, sch):
     FROM {sch}.node WHERE ctrl_type = 'signal'""")
 
 
-def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="right"):
+def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="right",
+                     pair_carriageways=True):
     """Per-lane rows from OSM lane tags (+ optional offset geometry) and curb_seg from parking tags.
 
     Lane offset is **drive-side aware**: a one-way road's lanes are centered on its carriageway, but a
     two-way road's lanes are shifted to the direction's travel side (right for ``drive_side='right'``),
-    so the forward and reverse edges separate onto opposite physical sides instead of overlapping."""
+    so the forward and reverse edges separate onto opposite physical sides instead of overlapping.
+    A one-way edge with an opposite one-way partner closer than their lanes need (``_paired_gaps``)
+    is placed like a two-way road's side, from the line midway between the two."""
     import pandas as pd
 
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
@@ -397,27 +823,48 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         return tags.get(base + ":backward") if is_rev else (
             tags.get(base + ":forward") or tags.get(base))
 
+    def lane_widths(tags, lanes, is_rev):
+        turns = _split(pick(tags, "turn:lanes", is_rev))
+        widths = _split(pick(tags, "width:lanes", is_rev))
+        n = max(len(turns) if turns else int(lanes or 1), 1)
+        return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W
+                               for i in range(n)]
+
+    gaps = {}
+    if lane_geometry and pair_carriageways:
+        gaps = _paired_gaps([(r[0], r[6], sum(lane_widths(r[7] or {}, r[2], r[1])[2]) / 2.0)
+                             for r in rows if r[5] and r[6]], side_sign)
+        if gaps:
+            logger.info(f"GMNS[{mode}]: {len(gaps):,} one-way edges placed with their opposite carriageway")
+
     lane_rows, curb_rows = [], []
     for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags in rows:
         tags = tags or {}
-        turns = _split(pick(tags, "turn:lanes", is_rev))
-        widths = _split(pick(tags, "width:lanes", is_rev))
+        turns, widths, w_each = lane_widths(tags, lanes, is_rev)
         bikes = _split(pick(tags, "bicycle:lanes", is_rev))
         psvs = _split(pick(tags, "psv:lanes", is_rev))
-        n = len(turns) if turns else int(lanes or 1)
-        n = max(n, 1)
-        w_each = [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W for i in range(n)]
+        buses = _split(pick(tags, "bus:lanes", is_rev))     # bus lanes are tagged either way
+        n = len(w_each)
         half = sum(w_each) / 2.0
+        gap = gaps.get(edge_id)
+        # placement says where the line really is; a two-way edge only in right-hand traffic, where
+        # lane 1 is the leftmost lane (left-hand two-way lanes are numbered from the other side)
+        place = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or side_sign < 0) else None
         run = 0.0
         for i in range(n):
             u = uses
             if i < len(bikes) and bikes[i] in ("designated", "yes"):
                 u = "bike"
-            elif i < len(psvs) and psvs[i] in ("designated", "yes"):
+            elif (i < len(psvs) and psvs[i] in ("designated", "yes")) or \
+                    (i < len(buses) and buses[i] in ("designated", "yes")):
                 u = "bus"
             width = _num(widths[i]) if i < len(widths) else None
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
-            if oneway:                                       # one-way: lanes centered on the carriageway
+            if place is not None:                            # OSM placement: from where the line lies
+                off_m = place - (run + w_each[i] / 2.0)
+            elif oneway and gap is not None:                 # one side of a road mapped as 2 ways
+                off_m = side_sign * (run + w_each[i] / 2.0 - gap / 2.0)
+            elif oneway:                                     # one-way: lanes centered on the carriageway
                 off_m = half - (run + w_each[i] / 2.0)
             else:                                            # two-way: this direction's lanes on its travel side
                 off_m = side_sign * (run + w_each[i] / 2.0)
@@ -530,9 +977,11 @@ def to_micro(gmns_db, modes=None, cell_length_m=7.0):
                  ST_Length(ST_GeomFromText(m.geometry)) * 111320, 1, NULL::DOUBLE, il.free_speed,
                  'connector', m.allowed_uses, m.geometry, ST_GeomFromText(m.geometry),
                  NULL::BIGINT, 'M' || m.ib_link_id, NULL::INTEGER, 'movement', m.mvmt_code, m.ctrl_type
-          FROM {g}.movement m
-          JOIN ie ON ie.lk = m.ib_link_id AND ie.lane_no = COALESCE(m.start_ib_lane, 1)
-          JOIN oe ON oe.lk = m.ob_link_id AND oe.lane_no = 1
+          FROM {g}.movement m          -- one connector per lane pair of the movement's ranges, in order
+          JOIN ie ON ie.lk = m.ib_link_id
+            AND ie.lane_no BETWEEN COALESCE(m.start_ib_lane, 1) AND COALESCE(m.end_ib_lane, m.start_ib_lane, 1)
+          JOIN oe ON oe.lk = m.ob_link_id
+            AND oe.lane_no = COALESCE(m.start_ob_lane, 1) + ie.lane_no - COALESCE(m.start_ib_lane, 1)
           JOIN {g}.link il ON il.link_id = m.ib_link_id
           WHERE m.geometry IS NOT NULL""")
         r = {
@@ -631,29 +1080,20 @@ def _build_meso_links(con, g, ms, trim_m):
       (link_id, from_node_id, to_node_id, dir_flag, length, lanes, capacity, free_speed,
        facility_type, allowed_uses, geometry, geom, meso_type, macro_link_id, movement_id,
        mvmt_txt_id, start_ib_lane, end_ib_lane, ctrl_type)
-      WITH lt AS (                        -- lanes feeding each (inbound link, turn category)
-        SELECT link_id AS ib,
-          CASE WHEN turn ILIKE '%through%' OR turn = 'thru' THEN 'thru'
-               WHEN turn ILIKE '%reverse%' OR turn ILIKE '%uturn%' THEN 'uturn'
-               WHEN turn ILIKE '%left%' THEN 'left'
-               WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
-          min(lane_num) AS mn, max(lane_num) AS mx, count(*) AS cnt
-        FROM {g}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
-      )
       SELECT 'X' || m.ib_link_id::VARCHAR || '-' || m.ob_link_id::VARCHAR,
              m.ib_link_id::VARCHAR || 'd', m.ob_link_id::VARCHAR || 'u', 1,
              (ST_Length(ST_GeomFromText(m.geometry)) * 111320.0)::DOUBLE,   -- smooth Bézier length
-             COALESCE(lt.cnt, 1)::INTEGER, NULL::DOUBLE, il.free_speed, 'connector', m.allowed_uses,
+             COALESCE(m.end_ib_lane - m.start_ib_lane + 1, 1)::INTEGER, NULL::DOUBLE, il.free_speed,
+             'connector', m.allowed_uses,
              m.geometry, ST_GeomFromText(m.geometry),          -- reuse the movement's smooth connector
              'movement', NULL::BIGINT, m.mvmt_id,
              CASE m.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' WHEN 'uturn' THEN 'U'
                          ELSE 'T' END,
-             lt.mn, lt.mx, m.ctrl_type
+             m.start_ib_lane, m.end_ib_lane, m.ctrl_type          -- the movement's own lanes
       FROM {g}.movement m
       JOIN {ms}.meso_node nd ON nd.node_id = m.ib_link_id::VARCHAR || 'd'
       JOIN {ms}.meso_node nu ON nu.node_id = m.ob_link_id::VARCHAR || 'u'
-      JOIN {g}.link il ON il.link_id = m.ib_link_id
-      LEFT JOIN lt ON lt.ib = m.ib_link_id AND lt.cat = m.type""")
+      JOIN {g}.link il ON il.link_id = m.ib_link_id""")
 
 
 def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):

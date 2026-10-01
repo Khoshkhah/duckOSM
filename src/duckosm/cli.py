@@ -676,11 +676,14 @@ def gis_debug(export_path, source_db, out, name, as_json):
               help='Also write a single mode-tagged gmns_all network (links merged, allowed_uses unioned)')
 @click.option('--drive-side', type=click.Choice(['right', 'left']), default='right', show_default=True,
               help='Traffic side: two-way lanes offset to this side so the directions separate')
+@click.option('--pair-carriageways/--no-pair-carriageways', default=True, show_default=True,
+              help='Place a one-way road mapped next to its opposite direction as one two-way road '
+                   '(lanes from the line between them), so the two directions never overlap')
 @click.option('--micro', is_flag=True, default=False,
               help='Also build a microscopic (cell-based) network — micro_<mode> schemas')
 @click.option('--micro-mode', 'micro_modes', multiple=True, help='Modes to build micro for (default: driving)')
-def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side, micro,
-         micro_modes):
+def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side,
+         pair_carriageways, micro, micro_modes):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -696,7 +699,7 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
         out = f"{Path(db).stem}_gmns.duckdb"
     try:
         res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry,
-                      combined=combined, drive_side=drive_side)
+                      combined=combined, drive_side=drive_side, pair_carriageways=pair_carriageways)
         meso_res = to_meso(out, modes=list(meso_modes) or ["driving"]) if meso else None
         micro_res = to_micro(out, modes=list(micro_modes) or ["driving"]) if micro else None
     except Exception as e:

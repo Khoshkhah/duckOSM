@@ -26,7 +26,9 @@ reads as one line, not two lane-sets.
 - Config: `drive_side = 'right' | 'left'` (default **right** — Sweden and most of the world).
 
 Applies in `_build_lane_curb` (the `lane.geom` offset), so it improves the lanes, meso and micro views
-at once. One-way roads are unaffected visually (still a single bundle).
+at once. One-way roads are unaffected visually (still a single bundle), except one-way ways that
+are one road's two directions mapped close together: see
+[gmns_paired_carriageways.md](gmns_paired_carriageways.md).
 
 ## 2. Smooth (curved) turn connectors
 
