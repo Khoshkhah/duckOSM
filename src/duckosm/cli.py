@@ -661,8 +661,11 @@ def gis_debug(export_path, source_db, out, name, as_json):
 @click.option('--micro', is_flag=True, default=False,
               help='Also build a microscopic (cell-based) network — micro_<mode> schemas')
 @click.option('--micro-mode', 'micro_modes', multiple=True, help='Modes to build micro for (default: driving)')
+@click.option('--check', is_flag=True, default=False,
+              help='Check the values of the result (ends on nodes, lengths, lane numbers, movements); '
+                   'exit 1 if any check fails')
 def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side,
-         pair_carriageways, micro, micro_modes):
+         pair_carriageways, micro, micro_modes, check):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -700,6 +703,15 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
                        f"{m['lane_change']} lane-change + {m['movement']} turn), {m['micro_node']} nodes")
     if res.get('csv'):
         click.echo(f"  + GMNS CSVs -> {res['csv']}")
+    if check:
+        from duckosm.gmns_check import check_gmns
+        rows = check_gmns(out, modes=list(modes) or None)
+        failed = [r for r in rows if r[2]]
+        for schema, name, bad, total in failed:
+            click.echo(f"  CHECK FAILED {schema}: {name}: {bad} of {total}", err=True)
+        click.echo(f"  checks: {len(rows) - len(failed)} of {len(rows)} passed")
+        if failed:
+            raise SystemExit(1)
 
 
 @main.command(name="gmns-viz")

@@ -107,6 +107,7 @@ get their own colour.
 | `--drive-side` | `right` or `left` traffic | `right` |
 | `--no-pair-carriageways` | centre each one-way way's lanes on it, even beside its opposite direction | paired |
 | `--no-lane-geometry` | skip the lane centre lines | computed |
+| `--check` | check the values of the result (see Conformance) and exit 1 if one fails | off |
 
 ```python
 from duckosm import to_gmns, to_meso, to_micro
@@ -127,6 +128,12 @@ duckosm gmns area.duckdb --to-csv gmns/
 # put the spec's datapackage.json and *.schema.json (release v0.97) next to the CSVs, then
 frictionless validate datapackage.json
 ```
+
+The spec's validators check the shape of the tables, not what the values say about each other.
+`duckosm gmns ... --check` does (`duckosm.check_gmns(path)` from Python): a link starts and ends on its
+nodes; `link.length` is its geometry's length; `lane_num` runs 1..n and `link.lanes` is the number of
+lane rows; a movement turns at the node where its inbound link ends, and its lane ranges exist and are
+as long on both sides. Run on Monaco, Södermalm, Tartu and Granville Island, in every mode: all pass.
 
 What differs from the spec, on purpose: the DuckDB file has extra columns (`geom` on `node`, `link`,
 `geometry` and `lane`; `lane.turn`; `link.bridge`, `tunnel`, `layer`; `signal_controller.node_id`,

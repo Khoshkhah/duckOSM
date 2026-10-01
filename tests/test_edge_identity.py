@@ -62,6 +62,10 @@ def _assert_identity_invariants(con):
     # segment, which made a subsequent ST_LineSubstring emit a `-nan -nan` vertex (invalid geometry).
     assert one("SELECT count(*) FROM edges WHERE NOT ST_IsValid(geometry) "
                "OR ST_AsText(geometry) LIKE '%nan%'") == 0, "invalid / NaN edge geometry"
+    # length_m is the length of the edge's own geometry (the splits once gave both halves of a bent
+    # edge the same length_m / 2: up to 23 % off); sphere vs ellipsoid explains < 0.5 %
+    assert one("""SELECT count(*) FROM edges WHERE abs(length_m / NULLIF(
+        ST_Length_Spheroid(ST_FlipCoordinates(geometry)), 0) - 1) > 0.01""") == 0, "length_m off its geometry"
     # edge_ref parses back: osm_id prefix, f/r suffix matches is_reverse
     assert one("""SELECT count(*) FROM edges WHERE
         split_part(edge_ref, '#', 1) <> osm_id::VARCHAR

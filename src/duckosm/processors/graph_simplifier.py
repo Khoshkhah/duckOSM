@@ -175,6 +175,29 @@ class GraphSimplifier(BaseProcessor):
                 f"edge id/ref not unique after re-key: {n} edges, {du} distinct edge_id, "
                 f"{dt} distinct (osm_id, source, target), {dr} distinct edge_ref — the "
                 f"loop/antiparallel splits should make these equal.")
+        self._fix_split_lengths()
+
+    def _fix_split_lengths(self) -> None:
+        """Make ``length_m`` the length of the edge's own geometry.
+
+        The loop and parallel-arc splits cut an edge at half its *degree* length (ST_LineSubstring)
+        but gave each half ``length_m / 2``, and a degree of longitude is shorter than one of latitude,
+        so the halves of a bent edge got the wrong length (up to 23 %, ~0.5 % of edges).
+        Fixed here, after the ids are final: the splits order edges by ``length_m``, so correcting it
+        earlier changes which edges are split and with it some ``edge_id`` (Monaco: 8 of 3,092), and
+        downstream matchers pin to ``edge_id``. Only edges more than 0.1 % off are touched; the rest
+        keep their value (same haversine over the vertices as everywhere else)."""
+        pt = lambda i: f"ST_PointN(geometry, ({i})::INTEGER)"
+        hav = (f"12742000 * ASIN(SQRT(POWER(SIN(RADIANS(ST_Y({pt('i + 1')}) - ST_Y({pt('i')})) / 2), 2) + "
+               f"COS(RADIANS(ST_Y({pt('i')}))) * COS(RADIANS(ST_Y({pt('i + 1')}))) * "
+               f"POWER(SIN(RADIANS(ST_X({pt('i + 1')}) - ST_X({pt('i')})) / 2), 2)))")
+        self.execute(f"""
+            UPDATE edges SET length_m = c.m FROM (
+                SELECT edge_id AS id,
+                       CAST(list_sum(list_transform(range(1, ST_NPoints(geometry)::INTEGER),
+                                                    i -> {hav})) AS FLOAT) AS m
+                FROM edges) c
+            WHERE edges.edge_id = c.id AND c.m > 0 AND abs(edges.length_m / c.m - 1) > 0.001""")
 
     def _num_batches(self) -> int:
         """Number of way-id buckets to build the simplified graph in."""

@@ -65,3 +65,53 @@ the spec; the combined `gmns_all` schema (it reuses the per-mode builders, so it
 1. **U-turn `mvmt_code`: empty (A).** `type = uturn` says it. The micro / meso builders copy the NULL;
    `matsim_lanes._orient` ignores empty codes, so a U-turn no longer votes for a signal phase.
 2. **Spec schemas vendored** in `tests/data/gmns_spec/` (v0.97, Apache-2.0, 76 KB).
+
+## Audit 2: more areas and modes, and the values (2026-10-01)
+
+Built `gmns --combined` for Monaco (driving), Södermalm, Tartu and Granville Island (driving, walking,
+cycling and the combined network), then ran two kinds of check.
+
+**Schema level** (frictionless on the CSVs, as the test does): all 14 CSV sets pass, categories too.
+
+**Value level** (what no validator sees; a script of 25 checks per mode, run on the DuckDB files):
+
+| Check | Result |
+|---|---|
+| link ends on its `from` / `to` node; no loops, no missing nodes; no orphan nodes; node coordinates in range | all pass, every area and mode |
+| `lane_num` is 1..n with no gaps or duplicates; every link has lane rows; every lane has a geometry | all pass |
+| movements: `node_id` is the inbound link's end and the outbound link's start; lane ranges inside the link's lanes; ib and ob ranges of equal length; no duplicates | all pass |
+| `curb_seg` inside the link; `geometry` table = one row per link; speeds and capacities positive | all pass |
+| **`link.length` against the geometry's length** | **0.4 to 0.8 % of links are more than 2 % off, up to 23 %** (Tartu driving 226 of 28,340) |
+| **`link.lanes` against the number of lane rows** | **0.02 to 0.09 % differ** (Tartu driving 18) |
+| `link.lanes` empty | 0 in driving; 3 to 4 % in walking and cycling (472 of 14,717 in Södermalm walking) |
+
+Looked at and **expected, not defects:** links with no way on or no way in (dead ends, the area's edge:
+0.2 to 0.3 %); duplicate walking links (two OSM ways drawn on the same line, in the source data);
+lanes shorter than 0.5 m (the link itself is under 1 m in OSM); lanes more than 10 m from the link line
+(5 to 10 lane roads: the outer lane is half the road's width away).
+
+**Causes:**
+
+- **`length`:** `link.length` is `edges.length_m` as it is. In the source, the same value sits on pairs
+  of different geometries (46.84 m on edges of 35.1 m and 58.9 m): `graph_simplifier.py` splits a loop or
+  a pair of parallel edges and gives each part `length_m / 2` instead of its own length (lines 458,
+  484, 617, 625). That is upstream of GMNS and also affects routing costs.
+- **`lanes`:** OSM tags disagree. `lanes:forward=2` but `turn:lanes:forward=left|through|right` (3
+  entries) on Aida street in Tartu: `link.lanes` is 2, the lane rows (from `turn:lanes`) are 3.
+
+**Fixes (Kaveh: "do all", 2026-10-01):**
+
+1. `link.length` = the geodesic length of the link's geometry (`_build_link`). Does not touch routing.
+2. `link.lanes` = the number of lane rows (an `UPDATE` after the lanes are built). Fills the empty
+   `lanes` of walking and cycling links too.
+3. Upstream, `graph_simplifier`: `length_m` of split loop and parallel-arc halves. **Not fixed where the
+   splits are, on purpose:** the splits order edges by `length_m`, so correcting it there changes which
+   edges are split and with it 8 of Monaco's 3,092 `edge_id`s (tried, reverted). Downstream matchers
+   pin to `edge_id`. Instead `_fix_split_lengths` runs after the ids are final and sets `length_m` to
+   the length of the edge's own geometry for the edges more than 0.1 % off (18 in Monaco; every other
+   `length_m` and all `edge_id`s are unchanged: checked against the existing Monaco build).
+4. The value checks live in `src/duckosm/gmns_check.py` (16 checks per mode), run by
+   `duckosm gmns --check` and by `tests/test_gmns_values.py`, which also breaks each thing on purpose and
+   expects the matching check to fail. `tests/test_edge_identity.py` gets the length invariant.
+
+Result: all four areas, every mode and the combined network pass all checks.

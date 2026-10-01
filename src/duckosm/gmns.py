@@ -378,6 +378,10 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_geometry(con, sch, mode)
         _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
                          pair_carriageways)  # before movement
+        # the lane rows carry more than the count (OSM's `lanes` and `turn:lanes` can disagree), so the
+        # link's `lanes` is their number: link and lane never contradict each other
+        con.execute(f"UPDATE {sch}.link SET lanes = n FROM (SELECT link_id AS id, count(*)::INTEGER AS n "
+                    f"FROM {sch}.lane GROUP BY link_id) l WHERE link.link_id = l.id")
         _build_movement(con, sch, mode, uses, drive_side)
         if lane_geometry:
             _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
@@ -487,7 +491,9 @@ def _build_link(con, sch, mode, uses, has_raw):
     con.execute(f"""CREATE TABLE {sch}.link AS SELECT
       e.edge_id AS link_id, e.name AS name, e.source AS from_node_id, e.target AS to_node_id,
       true AS directed, e.edge_id AS geometry_id, ST_AsText(e.geometry) AS geometry,
-      NULL::BIGINT AS parent_link_id, 1 AS dir_flag, e.length_m AS length, NULL::DOUBLE AS grade,
+      NULL::BIGINT AS parent_link_id, 1 AS dir_flag,
+      ST_Length_Spheroid(ST_FlipCoordinates(e.geometry)) AS length,   -- the geometry's own length, metres
+      NULL::DOUBLE AS grade,
       e.highway AS facility_type,
       {_capacity_case("regexp_replace(split_part(e.highway, ';', 1), '_link$', '')")}::DOUBLE AS capacity,
       e.maxspeed_kmh AS free_speed, e.lanes,
