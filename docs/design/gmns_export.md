@@ -96,7 +96,8 @@ parent_node_id` blank*. Plus non-spec `geom` (POINT) for rendering.
 `free_speed`(`maxspeed_kmh`, km/h) · `lanes`(count) · `capacity`(class default, pce/hr/lane) ·
 `facility_type`(**`highway`** — GMNS's field, not `link_type`) · `name` · `allowed_uses`(mode) ·
 `bike_facility`/`ped_facility`(from `highway`/`cycleway`/`sidewalk`) · *`grade,toll,parking,
-jurisdiction,row_width,geometry_id,parent_link_id` blank*. Plus non-spec `geom` (LINESTRING).
+jurisdiction,row_width,geometry_id,parent_link_id` blank*. Plus non-spec `geom` (LINESTRING) and
+`bridge`/`tunnel`/`layer` (from `edges`, for lanestyle's level order), left out of the CSVs.
 
 **`lane`** — one row per lane of a directed link: `lane_id`✅ · `link_id`✅(`edge_id`) ·
 `lane_num`✅(1…N, GMNS left-to-right) · `allowed_uses`(per-lane, from `*:lanes` tags, else the mode) ·

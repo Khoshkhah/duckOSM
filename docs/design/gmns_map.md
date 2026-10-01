@@ -1,5 +1,8 @@
 # GMNS pretty maps — `duckosm gmns-map`
 
+> **Superseded (2026-10-01):** `gmns-map` now calls [lanestyle](https://github.com/Khoshkhah/lanestyle)
+> (`from_gmns` + `render_lanes`); the canvas renderer below is gone. Kept as history.
+
 Write a **pretty, self-contained HTML map** of a GMNS DuckDB — a presentation counterpart to the
 utilitarian [`gmns-viz`](gmns_viewer.md) viewer. Two styles, both on a dark canvas with pan/zoom, no
 server / tiles / external assets (geometry drawn client-side; needs only DuckDB).

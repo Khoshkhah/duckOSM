@@ -260,8 +260,8 @@ duckosm gmns [OPTIONS] DB
 
 ### `gmns-map`
 
-Writes an HTML map of a GMNS database: one ribbon per direction, or every lane at its width.
-Page: [See it](../exports/gmns.md#see-it).
+Writes an HTML map of a GMNS database with [lanestyle](https://github.com/Khoshkhah/lanestyle):
+every lane at its width, on a base map. Needs `pip install "duckosm[viz]"`. Page: [See it](../exports/gmns.md#see-it).
 
 ```text
 duckosm gmns-map [OPTIONS] GMNS_DB
@@ -269,9 +269,10 @@ duckosm gmns-map [OPTIONS] GMNS_DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--style` | `road`: one ribbon per direction, by class; `lane`: every lane | `road` |
 | `-m`, `--mode TEXT` | the GMNS mode | `driving` |
-| `-o`, `--out TEXT` | output HTML | `<name>_<style>.html` |
+| `--palette TEXT` | road colours: `mono`, `carto` or `highsat` | `mono` |
+| `--source-db PATH` | the core db, for bridges and tunnels in a GMNS file made before links had them | |
+| `-o`, `--out TEXT` | output HTML | `<name>_lanes.html` |
 
 ### `gmns-viz`
 

@@ -53,7 +53,7 @@ def _bezier_line_sql(x0, y0, cx0, cy0, cx1, cy1, x1, y1, n=10):
     return f"ST_MakeLine(list_transform([{ts}], u -> ST_Point({bx}, {by})))"
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
-_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom"], "geometry": ["geom"], "lane": ["geom", "turn"]}
+_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"]}
 
 
 def _mode_schemas(con, src):
@@ -430,7 +430,8 @@ def _build_combined(con, modes, name):
              any_value(parking) AS parking,
              string_agg(DISTINCT allowed_uses, ',' ORDER BY allowed_uses) AS allowed_uses,
              any_value(toll) AS toll, any_value(jurisdiction) AS jurisdiction,
-             any_value(row_width) AS row_width, any_value(geom) AS geom
+             any_value(row_width) AS row_width, any_value(bridge) AS bridge,
+             any_value(tunnel) AS tunnel, any_value(layer) AS layer, any_value(geom) AS geom
       FROM u GROUP BY link_id""")
     return {t: con.execute(f"SELECT count(*) FROM gmns_all.{t}").fetchone()[0]
             for t in ("node", "link")}
@@ -464,6 +465,10 @@ def _build_link(con, sch, mode, uses, has_raw):
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
     bike = "w.tags['cycleway']" if has_raw else "NULL::VARCHAR"
     ped = "w.tags['sidewalk']" if has_raw else "NULL::VARCHAR"
+    cols = {c for (c,) in con.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+        "AND table_name = 'edges'", [mode]).fetchall()}
+    lvl = ", ".join(f"e.{c}" if c in cols else f"NULL::VARCHAR AS {c}" for c in ("bridge", "tunnel", "layer"))
     con.execute(f"""CREATE TABLE {sch}.link AS SELECT
       e.edge_id AS link_id, e.name AS name, e.source AS from_node_id, e.target AS to_node_id,
       true AS directed, e.edge_id AS geometry_id, ST_AsText(e.geometry) AS geometry,
@@ -473,7 +478,7 @@ def _build_link(con, sch, mode, uses, has_raw):
       e.maxspeed_kmh AS free_speed, e.lanes,
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
       '{uses}' AS allowed_uses, NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction,
-      NULL::DOUBLE AS row_width, e.geometry AS geom
+      NULL::DOUBLE AS row_width, {lvl}, e.geometry AS geom
     FROM s.{mode}.edges e {raw_join}""")
 
 

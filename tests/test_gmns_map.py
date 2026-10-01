@@ -1,9 +1,8 @@
-"""Tests for duckosm.gmns_map — pretty road / lane HTML maps of a GMNS DuckDB."""
+"""Tests for duckosm.gmns_map — the lanestyle lane map of a GMNS DuckDB — and the link levels it reads."""
 import duckdb
 import pytest
 
-from duckosm.gmns import to_gmns, to_meso
-from duckosm.gmns_map import build_road_payload, build_lane_payload, write_map
+from duckosm.gmns import to_gmns
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
 
@@ -19,49 +18,28 @@ def _gmns_db(tmp_path):
                 f"(2,{p('POINT(18.07 59.32)')}),(3,{p('POINT(18.07 59.31)')})")
     con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
                 "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, length_m FLOAT, "
-                "maxspeed_kmh FLOAT, geometry GEOMETRY)")
+                "maxspeed_kmh FLOAT, bridge VARCHAR, tunnel VARCHAR, layer VARCHAR, geometry GEOMETRY)")
     con.execute(f"""INSERT INTO driving.edges VALUES
-        ({A},1,2,100,'primary','Main',2,false,80,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
-        ({B},2,3,101,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.07 59.31)')}),
-        ({AR},2,1,100,'primary','Main',2,true,80,50,{p('LINESTRING(18.07 59.32,18.06 59.32)')})""")
+        ({A},1,2,100,'primary','Main',2,false,80,50,'yes',NULL,'1',{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+        ({B},2,3,101,'residential',NULL,1,false,110,30,NULL,NULL,NULL,{p('LINESTRING(18.07 59.32,18.07 59.31)')}),
+        ({AR},2,1,100,'primary','Main',2,true,80,50,'yes',NULL,'1',{p('LINESTRING(18.07 59.32,18.06 59.32)')})""")
     con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
     con.execute(f"INSERT INTO driving.edge_graph VALUES ({A},{B},{B},1.0)")
     con.close()
     out = tmp_path / "gmns.duckdb"
     to_gmns(str(src), str(out))
-    to_meso(str(out), modes=["driving"])
     return out
 
 
-def test_road_payload(tmp_path):
+def test_link_carries_levels(tmp_path):
     con = duckdb.connect(str(_gmns_db(tmp_path)), read_only=True)
-    con.execute("LOAD spatial;")
-    p = build_road_payload(con, mode="driving")
-    assert p["n"]["roads"] == 3 and p["gpm"] > 0                # 3 directed carriageways
-    assert len(p["conn"]) >= 1                                  # A->B turn connector present
-    assert all(len(r) > 2 for r in p["roads"])                 # [classIdx, width, ...coords]
+    got = dict(con.execute("SELECT link_id, bridge || '/' || layer FROM gmns_driving.link").fetchall())
+    assert got[A] == "yes/1" and got[B] is None
 
 
-def test_lane_payload(tmp_path):
-    con = duckdb.connect(str(_gmns_db(tmp_path)), read_only=True)
-    con.execute("LOAD spatial;")
-    p = build_lane_payload(con, mode="driving")
-    assert p["n"]["lanes"] == 5                                 # A(2)+B(1)+AR(2) lane rows
-    assert all(len(L) > 4 for L in p["lanes"])                 # [useIdx, width_m, link, lane_num, ...coords]
-    links = [int(k) for k, _ in p["links"]]
-    assert [links.index(A), links.index(B)] in [m[:2] for m in p["mv"]]   # the A -> B turn
-    assert p["uses"] == [0]                                     # traffic lanes only: no bus / bike legend
-
-
-def test_write_map_both_styles(tmp_path):
-    db = _gmns_db(tmp_path)
-    for style in ("road", "lane"):
-        out = tmp_path / f"{style}.html"
-        write_map(str(db), str(out), style=style)
-        h = out.read_text()
-        assert h.startswith("<!doctype html>") and "const D=" in h and "/*__P__*/" not in h
-
-
-def test_bad_style(tmp_path):
-    with pytest.raises(ValueError, match="style"):
-        write_map(str(_gmns_db(tmp_path)), str(tmp_path / "x.html"), style="wobble")
+def test_write_map(tmp_path):
+    pytest.importorskip("lanestyle")
+    from duckosm.gmns_map import write_map
+    out = write_map(_gmns_db(tmp_path), tmp_path / "lanes.html")
+    html = out.read_text()
+    assert "maplibre" in html.lower() and str(A) in html

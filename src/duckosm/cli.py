@@ -15,7 +15,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm gis-debug     read a GIS export back through GDAL and write an HTML debug/QA page
   duckosm gmns          extract a built network to a standalone GMNS DuckDB (lanes, movements, …)
   duckosm gmns-viz      write an interactive HTML viewer for a GMNS DuckDB (lanes / meso, tooltips)
-  duckosm gmns-map      write a pretty HTML map of a GMNS DuckDB (road-by-direction / lane-width)
+  duckosm gmns-map      write a lane-level HTML map of a GMNS DuckDB (lanestyle)
   duckosm matsim        export a MATSim network.xml from a built duckOSM db (nodes + links)
   duckosm matsim-lanes  export MATSim lanes.xml + signals from a GMNS db (turn lanes, signalised nodes)
   duckosm opendrive     export an ASAM OpenDRIVE .xodr from a built duckOSM db (roads + lanes)
@@ -992,24 +992,22 @@ def matsim_lanes(gmns_db, mode, signals, cycle, out_dir):
 
 @main.command(name="gmns-map")
 @click.argument('gmns_db', type=click.Path(exists=True))
-@click.option('--style', type=click.Choice(['road', 'lane']), default='road', show_default=True,
-              help="'road': one carriageway ribbon per direction, by class; 'lane': every lane as a width ribbon")
 @click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to map')
-@click.option('--out', '-o', default=None, help='Output HTML (default: <name>_<style>.html)')
-def gmns_map(gmns_db, style, mode, out):
-    """Write a pretty, self-contained HTML map of a GMNS DuckDB (a presentation counterpart to
-    `gmns-viz`). `--style road` draws one carriageway per direction coloured by road class;
-    `--style lane` draws every lane at its real width, with lane lines and direction arrows; click
-    a lane to see the lanes it can turn into. Pan/zoom. Needs only DuckDB (geometry drawn client-side).
+@click.option('--palette', default='mono', show_default=True, help="roadstyle palette: 'mono', 'carto' or 'highsat'")
+@click.option('--source-db', type=click.Path(exists=True), default=None,
+              help='Core db for bridge / tunnel / layer, for a GMNS file written before links carried them')
+@click.option('--out', '-o', default=None, help='Output HTML (default: <name>_lanes.html)')
+def gmns_map(gmns_db, mode, palette, source_db, out):
+    """Write a lane-level HTML map of a GMNS DuckDB with lanestyle: every lane at its real width over
+    a base map, bridges over tunnels; click a lane to see the lanes it can turn into.
+    Needs `pip install "duckosm[viz]"`.
     """
-    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
-
     from duckosm.gmns_map import write_map
 
     if out is None:
-        out = f"{Path(gmns_db).stem}_{style}.html"
+        out = f"{Path(gmns_db).stem}_lanes.html"
     try:
-        path = write_map(gmns_db, out, style=style, mode=mode)
+        path = write_map(gmns_db, out, mode=mode, palette=palette, source_db=source_db)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {path} — open in a browser")

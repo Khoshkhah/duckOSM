@@ -22,10 +22,10 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | Table | Rows | What |
 |---|---|---|
 | `node` | 1,719 | junctions; `ctrl_type = 'signal'` at traffic lights |
-| `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name |
+| `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name, and (DuckDB only) `bridge` / `tunnel` / `layer` |
 | `lane` | 3,182 | one row per lane, with its turns, allowed uses and width where OSM tags them |
 | `movement` | 3,500 | legal turns (from `edge_graph`; turning back along the same road only at a dead end, or where it's the only way into the road's other direction): type (left, thru, right, uturn, merge, diverge), code (`NBL`, `EBT`, …), the lanes it starts from and ends in (equal-length ranges read in order: from `turn:lanes` where tagged, else osm2gmns's rule, [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_movements.md)), a curved turn path |
-| `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md)) A road's pieces are placed as one run, so a lane going on through a junction or a bend is one continuous line ([design](../design/gmns_lane_runs.md)). |
+| `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md)) A road's pieces are placed as one run, so a lane going on through a junction or a bend is one continuous line ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_runs.md)). |
 | `geometry` | 2,765 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
@@ -80,18 +80,18 @@ being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 12,789 links.
 
 ```bash
 duckosm gmns-viz monaco_gmns.duckdb                 # inspect: lanes (+ meso / micro if built), hover for ids
-duckosm gmns-map monaco_gmns.duckdb                 # present: one ribbon per direction, by road class
-duckosm gmns-map monaco_gmns.duckdb --style lane    # every lane at its width
+duckosm gmns-map monaco_gmns.duckdb                 # present: every lane at its width, on a base map
 ```
 
-Each writes one HTML file that opens offline. `-m` picks the mode.
+Each writes one HTML file. `-m` picks the mode. `gmns-map` draws with
+[lanestyle](https://github.com/Khoshkhah/lanestyle) (`pip install "duckosm[viz]"`).
 
-Monaco's lanes, as `gmns-map --style lane` draws them (scroll to zoom, drag to move): each lane is a
-strip of road with its lane lines and an arrow for its direction. **Click a lane**: it turns red,
-and the lanes its movements lead into turn green. Bus and bike lanes get their own colour, but
-Monaco's OSM data tags none (`psv:lanes`, `bicycle:lanes`), so this map has only traffic lanes.
+Monaco's lanes, as `gmns-map` draws them (scroll to zoom, drag to move): each lane is a strip of
+road with its lane lines and an arrow for its direction, and bridges and tunnels keep their order.
+**Click a lane**: it turns red, and the lanes its movements lead into turn green. Bus and bike lanes
+get their own colour.
 
-<iframe src="../../maps/monaco_gmns_lanes.html" title="Monaco's lanes, drawn by duckosm gmns-map --style lane"
+<iframe src="../../maps/monaco_gmns_lanes.html" title="Monaco's lanes, drawn by duckosm gmns-map"
         loading="lazy" style="width: 100%; height: 560px; border: 0; border-radius: 8px"></iframe>
 
 ## Options
