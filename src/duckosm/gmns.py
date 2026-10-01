@@ -883,11 +883,15 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
     going_on = {(a, b) for _, a, b in pairs if continues(a, b)}
     keep_end = {a for a, _ in going_on}          # these ends stay where they are: the road goes on
     keep_start = {b for _, b in going_on}
+    # a node a road goes on through: a lane joining or leaving there isn't cut back from the road's
+    # surface either (cut along its centre line it left a triangle of background at its far corner);
+    # it runs to the node and overlaps the through road, which is drawn in the same colour
+    through = {ends[link_of[a]][1] for a, _ in going_on}
     trim = {lid: [0.0, 0.0] for lid in geom}     # [at the start, at the end] in metres
     for lid, line in geom.items():
         a, b = ends[link_of[lid]]
-        trim[lid] = [0.0 if lid in keep_start else inside_len(line, a, link_of[lid], False),
-                     0.0 if lid in keep_end else inside_len(line, b, link_of[lid], True)]
+        trim[lid] = [0.0 if lid in keep_start or a in through else inside_len(line, a, link_of[lid], False),
+                     0.0 if lid in keep_end or b in through else inside_len(line, b, link_of[lid], True)]
     for _, a, b in pairs:                        # room for an S-curve where the lanes don't meet
         if (a, b) in going_on:
             continue

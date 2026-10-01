@@ -64,6 +64,11 @@ polygon it encloses (GEOS's offset curve of a closed line returns a fragment on 
 seam in the middle of the first piece, and "goes on" wraps from the last piece to the first. Monaco:
 265 lane joints on roundabout rings, 0 rough.
 
+**A node a road goes on through.** A lane joining or leaving there isn't cut back from the through
+road's surface either: cut along its centre line (plus the pad) its far corner left a triangle of
+background where it met the road at an angle. It runs to the node and overlaps the through road,
+drawn in the same colour; its lane lines still stop at the road's edge (lanestyle).
+
 One more rule turned out necessary: a lane that goes on **and** turns (lane 2 straight on, a right
 turn from it too) was still cut at its end for the turn's S-curve. A kept end stays put; the turn's
 connector leaves from it.
