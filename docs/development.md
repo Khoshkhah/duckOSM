@@ -105,7 +105,8 @@ repo but are not published.
 The three maps embedded in the docs are built from the Monaco sample, run from the repo root (it
 writes `monaco.duckdb` and `monaco_gmns.duckdb` there; both are git-ignored). Draw them with the
 released roadstyle from PyPI (the `viz` extra), not a local roadstyle checkout, so they show what
-users get:
+users get. Set the project's CARTO key first (`export CARTO_API_KEY=...`): roadstyle writes it into
+the CARTO tile URLs, and without it the CARTO backgrounds show an "API KEY REQUIRED" watermark:
 
 ```bash
 duckosm build -c config/sample_monaco.yaml && duckosm multimodal monaco.duckdb
