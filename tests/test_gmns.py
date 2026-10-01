@@ -506,11 +506,12 @@ def _mini_source(path, nodes, edges, graph):
     con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
                 "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
                 "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
-    for e, a, b, n in edges:
+    for e, a, b, n, *two in edges:               # (id, a, b, lanes[, osm way of a two-way road])
         (xa, ya), (xb, yb) = nodes[a], nodes[b]
+        osm = two[0] if two else e
         con.execute(f"INSERT INTO raw.ways VALUES ({e}, MAP{{}}, [{a},{b}])")
-        con.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{e},'primary',NULL,{n},false,true,100,50,"
-                    f"ST_GeomFromText('LINESTRING({xa} {ya},{xb} {yb})'))")
+        con.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{osm},'primary',NULL,{n},{'true' if two and a > b else 'false'},"
+                    f"{'false' if two else 'true'},100,50,ST_GeomFromText('LINESTRING({xa} {ya},{xb} {yb})'))")
     con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
     for a, b in graph:
         con.execute(f"INSERT INTO driving.edge_graph VALUES ({a},{b},{b},1.0)")
@@ -553,3 +554,60 @@ def test_fork_is_typed_diverge(tmp_path):
     cross.mkdir()
     mv = _mini_movements(cross, nodes, [(11, 1, 2, 2), (12, 2, 4, 1), (14, 2, 6, 1)], [(11, 12), (11, 14)])
     assert mv[(11, 12)][0] == "thru" and mv[(11, 14)][0] == "right"
+
+
+def _gmns_of(tmp_path, nodes, edges, graph):
+    src, out = tmp_path / "lc.duckdb", tmp_path / "lc_gmns.duckdb"
+    _mini_source(src, nodes, edges, graph)
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    return con
+
+
+def _pt(con, sql):
+    x, y = con.execute(sql).fetchone()
+    return x * 111320 * 0.5101, y * 111320                    # metres near 59.32 N (cos = 0.51)
+
+
+def test_lane_connector_joins_lane_ends(tmp_path):
+    """docs/design/gmns_lane_connectors.md: a turn's connector starts exactly at the inbound lane's
+    end and ends at the outbound lane's start (base network: A's right turn into B)."""
+    con = _gmns(tmp_path)
+    c = con.execute(f"SELECT from_lane_id, to_lane_id FROM gmns_driving.lane_connector "
+                    f"WHERE from_lane_id = '{A}_2' AND to_lane_id = '{B}_1'").fetchone()
+    assert c is not None
+    gap = con.execute(f"""SELECT ST_Distance(ST_StartPoint(c.geom), ST_EndPoint(a.geom)) + ST_Distance(ST_EndPoint(c.geom), ST_StartPoint(b.geom))
+        FROM gmns_driving.lane_connector c, gmns_driving.lane a, gmns_driving.lane b
+        WHERE c.from_lane_id = '{A}_2' AND c.to_lane_id = '{B}_1' AND a.lane_id = '{A}_2' AND b.lane_id = '{B}_1'""").fetchone()[0]
+    assert gap < 1e-6
+
+
+def test_one_way_into_two_way_gets_an_s_curve(tmp_path):
+    """A one-way lane (centred) going on into a two-way road (lanes 1.625 m to the side): no jump at
+    the node; both lanes stop short and a connector shifts across (Avenue de la Costa)."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1), (12, 2, 3, 1, 500), (13, 3, 2, 1, 500)], [(11, 12)])
+    row = con.execute("SELECT ST_Length_Spheroid(ST_FlipCoordinates(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1' "
+                      "AND to_lane_id = '12_1'").fetchone()
+    assert row is not None and 3.0 < row[0] < 6.0               # a short S-curve, not a 1.6 m step
+    y0 = _pt(con, "SELECT ST_X(ST_StartPoint(geom)), ST_Y(ST_StartPoint(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1'")[1]
+    y1 = _pt(con, "SELECT ST_X(ST_EndPoint(geom)), ST_Y(ST_EndPoint(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1'")[1]
+    assert abs((y0 - y1) - 1.625) < 0.1                         # it shifts the lane 1.625 m to the right
+
+
+def test_straight_road_needs_no_connector(tmp_path):
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1), (12, 2, 3, 1)], [(11, 12)])
+    assert con.execute("SELECT count(*) FROM gmns_driving.lane_connector").fetchone()[0] == 0
+    end = con.execute("SELECT ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE lane_id = '11_1'").fetchone()[0]
+    assert abs(end - 18.07) < 1e-7                              # not shortened
+
+
+def test_lanes_stop_at_a_junction(tmp_path):
+    """At a junction (3 neighbours) a lane stops where it leaves the other roads' lanes, not at the node:
+    lane 2 of 11 (the south side) runs into the road leaving south (14, 6.5 m wide); lane 1 doesn't."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.07, 59.31)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 2)], [(11, 12), (11, 14)])
+    end = dict(con.execute("SELECT lane_id, ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE link_id = 11").fetchall())
+    assert (18.07 - end["11_2"]) * 111320 * 0.5101 > 2.0        # stops before the crossing road

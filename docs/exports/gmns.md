@@ -25,6 +25,7 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name |
 | `lane` | 3,182 | one row per lane, with its turns, allowed uses and width where OSM tags them |
 | `movement` | 3,488 | legal turns (from `edge_graph`; turning back along the same road only at a dead end, or where it's the only way into the road's other direction): type (left, thru, right, uturn, merge, diverge), code (`NBL`, `EBT`, …), the lanes it starts from and ends in (equal-length ranges read in order: from `turn:lanes` where tagged, else osm2gmns's rule, [design](../design/gmns_lane_movements.md)), a curved turn path |
+| `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](../design/gmns_lane_connectors.md)) |
 | `geometry` | 2,765 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
