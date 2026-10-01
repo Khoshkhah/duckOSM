@@ -15,11 +15,19 @@ def _db(box="POLYGON((7.409 43.725, 7.439 43.725, 7.439 43.752, 7.409 43.752, 7.
 
 
 def test_area_box_grows_by_a_tenth_and_at_least_500_m():
-    x0, y0, x1, y1 = ocean.area_box(_db())
+    x0, _, _, y1 = ocean.area_box(_db())
     assert x0 == pytest.approx(7.409 - 500 / (111320 * 0.7225), rel=0.01)   # 3 km wide: 500 m wins
     assert y1 == pytest.approx(43.752 + 500 / 111320, rel=1e-6)
     big = _db("POLYGON((17 59, 19 59, 19 60, 17 60, 17 59))")
     assert ocean.area_box(big)[0] == pytest.approx(16.8)                     # 10 % of 2 degrees
+
+
+def test_without_a_boundary_the_box_is_the_extracts_nodes():
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA raw; CREATE TABLE raw.nodes AS SELECT * FROM "
+                "(VALUES (7.41, 43.72), (7.44, 43.75)) t(lon, lat)")
+    x0, y0, x1, y1 = ocean.area_box(con)
+    assert x0 < 7.41 and x1 > 7.44 and y0 < 43.72 and y1 > 43.75
 
 
 def test_offline_leaves_an_empty_table_and_never_fails(monkeypatch):

@@ -55,7 +55,7 @@ In drawing order, bottom first. Monaco counts are from the sample build.
 
 | Layer | Shape | From OSM | `kind` | Monaco |
 |---|---|---|---|---|
-| `ocean` | area | the sea: not from the extract (OSM has only `natural=coastline` lines) but Overture Maps' ocean polygons, built from OSM's coastline, read for the area's box (+10 %, at least 500 m) | `ocean` | 1 |
+| `ocean` | area | the sea: not from the extract (OSM has only `natural=coastline` lines) but Overture Maps' ocean polygons, built from OSM's coastline, read for the area's box (the boundary's, else the extract's; +10 %, at least 500 m) | `ocean` | 1 |
 | `land` | area | `landuse` = `forest`, `grass`, `residential`, `industrial`, `cemetery`, …; `natural` = `wood`, `scrub`, `heath`, `sand`, `beach`, `wetland`, …; `leisure` = `park`, `garden`, `pitch`, `stadium`, `playground`, … | the `landuse` value, else `natural`, else `leisure`; `natural=wood` becomes `forest` | 237 |
 | `water_polygons` | area | `natural` = `water` / `glacier`, `waterway=riverbank`, `landuse` = `reservoir` / `basin`, any `water` tag | `water`, `river`, `canal`, `reservoir`, `basin`, `dock`, `glacier` | 27 |
 | `water_lines` | line | `waterway` = `river`, `stream`, `canal`, `ditch`, `drain` | the value; `drain` becomes `ditch` | 4 |

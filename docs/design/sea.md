@@ -45,7 +45,7 @@ big download, no cache to manage, a few seconds per build. Checked point by poin
 - **Table:** `features.ocean` (geometry only), Shortbread's own layer name for the sea (Shortbread
   takes it from B; we take the same thing from A).
 - **Built** when `build_features` is true, after the other feature layers.
-- **Extent:** the boundary's bounding box grown by 10 % (at least 500 m), clipped with
+- **Extent:** the boundary's bounding box (without a boundary, the extract's nodes') grown by 10 % (at least 500 m), clipped with
   `ST_Intersection`, so the sea also fills the view a little beyond the area's edge, where the
   other feature layers (complete ways from the smart clip) reach too.
 - **Inland areas** (Tartu): no `ocean` rows, an empty table, no error. (Södermalm is coastal:
