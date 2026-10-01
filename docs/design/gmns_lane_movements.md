@@ -128,6 +128,21 @@ applies only in right-hand traffic. Monaco: 14 ways, mostly 1-lane one-way ramps
 `right_of:1`, 6 `transition`); Boulevard Charles III's `placement:forward=left_of:1` matches the
 two-way default.
 
+### Step 7 (Kaveh, 2026-09-30): merges and forks
+
+- **Lanes at a merge:** osm2gmns's merge rule (`autoconm.py`, ported as `_merge_lanes`), for a node
+  with one outbound link. The inbound links are sorted left to right; the leftmost one's rightmost
+  lanes go into the outbound link's leftmost lanes, every other link's leftmost lanes into its
+  rightmost lanes. Before, every joining road went into lane 1.
+- **Types `merge` and `diverge`** (GMNS allows them; osm2gmns doesn't set them), in `_fork_types`:
+  - `diverge` at a fork: one link arrives, and its 2+ ways on (U-turns aside) are all within 45° of
+    straight on;
+  - `merge` into a node one link leaves, its 2+ inbound links all joining within 45°.
+
+  The 45° bound keeps an ordinary junction a junction. `mvmt_code` keeps the angle's letter (the
+  GMNS pattern allows only R/L/T); lane routing costs them like straight on.
+- **Monaco:** 143 diverge and 133 merge movements. Lanes no movement leads into: 200 → 140.
+
 ### Not now: `connectivity` relations
 
 `type=connectivity` relations give explicit lane → lane mappings and would override steps 2 and 3

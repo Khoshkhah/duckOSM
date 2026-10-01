@@ -491,3 +491,65 @@ def test_slight_fork_is_typed_thru(tmp_path):
     to_gmns(str(tmp_path / "src.duckdb"), str(out))
     assert duckdb.connect(str(out)).execute(
         f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id=89").fetchone() == ("thru",)
+
+
+def _mini_source(path, nodes, edges, graph):
+    """A bare source db: nodes {id: (lon, lat)}, edges (id, a, b, lanes) as straight lines (one OSM
+    way each, one-way), edge_graph rows (from, to)."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    for n, (x, y) in nodes.items():
+        con.execute(f"INSERT INTO driving.nodes VALUES ({n}, ST_Point({x}, {y}))")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
+                "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
+    for e, a, b, n in edges:
+        (xa, ya), (xb, yb) = nodes[a], nodes[b]
+        con.execute(f"INSERT INTO raw.ways VALUES ({e}, MAP{{}}, [{a},{b}])")
+        con.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{e},'primary',NULL,{n},false,true,100,50,"
+                    f"ST_GeomFromText('LINESTRING({xa} {ya},{xb} {yb})'))")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    for a, b in graph:
+        con.execute(f"INSERT INTO driving.edge_graph VALUES ({a},{b},{b},1.0)")
+    con.close()
+
+
+def _mini_movements(tmp_path, nodes, edges, graph):
+    src, out = tmp_path / "mini.duckdb", tmp_path / "mini_gmns.duckdb"
+    _mini_source(src, nodes, edges, graph)
+    to_gmns(str(src), str(out))
+    return {(r[0], r[1]): r[2:] for r in duckdb.connect(str(out)).execute(
+        "SELECT ib_link_id, ob_link_id, type, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+        "FROM gmns_driving.movement").fetchall()}
+
+
+def test_merge_lanes_follow_osm2gmns():
+    from duckosm.gmns import _merge_lanes
+    assert _merge_lanes([2, 1], 3) == [((0, 1), (0, 1)), ((0, 0), (2, 2))]   # main left, ramp into lane 3
+    assert _merge_lanes([1, 1], 2) == [((0, 0), (0, 0)), ((0, 0), (1, 1))]
+    assert _merge_lanes([2, 2], 2) == [((0, 1), (0, 1)), ((0, 1), (0, 1))]   # 2 into 2: both all lanes
+
+
+def test_merge_stacks_the_joining_roads_and_is_typed_merge(tmp_path):
+    """A 2-lane road (11) and a 1-lane ramp from the right (12, joining at 16 degrees) merge into a
+    3-lane road (13): the road takes lanes 1-2, the ramp lane 3 (both had gone into lane 1), and
+    both movements are typed 'merge'."""
+    mv = _mini_movements(tmp_path, {1: (18.06, 59.32), 3: (18.06, 59.3185), 2: (18.07, 59.32), 4: (18.08, 59.32)},
+                         [(11, 1, 2, 2), (12, 3, 2, 1), (13, 2, 4, 3)], [(11, 13), (12, 13)])
+    assert mv[(11, 13)] == ("merge", 1, 2, 1, 2)
+    assert mv[(12, 13)] == ("merge", 1, 1, 3, 3)
+
+
+def test_fork_is_typed_diverge(tmp_path):
+    """One road (11) splits into a straight road (12) and a slight right branch (13, 16 degrees):
+    both movements 'diverge'. A crossroads with a 90-degree turn stays a junction."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3185), 6: (18.07, 59.31)}
+    mv = _mini_movements(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 1), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    assert mv[(11, 12)][0] == "diverge" and mv[(11, 13)][0] == "diverge"
+    cross = tmp_path / "cross"
+    cross.mkdir()
+    mv = _mini_movements(cross, nodes, [(11, 1, 2, 2), (12, 2, 4, 1), (14, 2, 6, 1)], [(11, 12), (11, 14)])
+    assert mv[(11, 12)][0] == "thru" and mv[(11, 14)][0] == "right"

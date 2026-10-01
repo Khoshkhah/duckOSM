@@ -513,6 +513,18 @@ def _turn_side(ms):
             else ("left" if (k < s if s is not None else m[3] > 0) else "right") for k, m in enumerate(ms)]
 
 
+def _merge_lanes(ns, m):
+    """osm2gmns 0.7.6's merge rule (movement/autoconm.py): inbound links with ``ns`` lanes, sorted left
+    to right, joining one outbound link of ``m`` lanes. The leftmost link's rightmost lanes go into
+    the outbound's leftmost lanes, every other link's leftmost lanes into its rightmost lanes. Per
+    inbound link a pair of 0-based ranges ``((ib0, ib1), (ob0, ob1))`` of equal length."""
+    out = []
+    for k, n in enumerate(ns):
+        c = min(m, n)
+        out.append(((n - c, n - 1), (0, c - 1)) if k == 0 else ((0, c - 1), (m - c, m - 1)))
+    return out
+
+
 def _assign_lanes(con, sch, mode, drive_side="right"):
     """Fill each movement's inbound / outbound lane ranges (docs/design/gmns_lane_movements.md):
 
@@ -521,10 +533,11 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
       matches its place among the exits (``_turn_side``);
     - along a way (a movement into the next piece of the same way, same direction) every lane
       continues lane by lane, so marked lanes run on to their junction;
-    - else osm2gmns's rule (``_default_lanes``).
+    - into a merge (a node with one outbound link), osm2gmns's merge rule (``_merge_lanes``);
+    - else osm2gmns's junction rule (``_default_lanes``).
 
     Ranges have equal length and pair in order: the k-th inbound lane into the k-th outbound lane.
-    Drops the helper column ``_ang``."""
+    Then the GMNS types ``diverge`` / ``merge`` (``_fork_types``). Drops the helper column ``_ang``."""
     from collections import defaultdict
 
     import pandas as pd
@@ -545,6 +558,25 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
     for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
         by_ib[ib].append((mid, ob, typ, ang or 0.0))
     along = lambda ib, ob: ib in way and way.get(ob) == way[ib]      # the next piece of the same way
+    # merges as osm2gmns sees them: a node with one outbound link; its inbound links (bar the outbound
+    # link's own reverse), sorted left to right by the turn into it
+    ends = dict(con.execute(f"SELECT link_id, to_node_id FROM {sch}.link").fetchall())
+    starts = dict(con.execute(f"SELECT link_id, from_node_id FROM {sch}.link").fetchall())
+    outs = defaultdict(list)
+    for lk, nd in starts.items():
+        outs[nd].append(lk)
+    merge = {}                                   # movement id -> its ranges by the merge rule
+    into = defaultdict(list)
+    for ib, ms in by_ib.items():
+        for mid, ob, typ, ang in ms:
+            if (typ != "uturn" and len(outs.get(starts.get(ob), [])) == 1
+                    and starts.get(ib) != ends.get(ob)):            # not the outbound link's own reverse
+                into[ob].append((ang, mid, ib))
+    for ob, ins in into.items():
+        if len(ins) >= 2:
+            ins.sort(key=lambda x: x[0], reverse=True)
+            for (_, mid, ib), rng in zip(ins, _merge_lanes([nl.get(x[2], 1) for x in ins], nl.get(ob, 1))):
+                merge[mid] = rng
     uturn_side = 180.0 if drive_side == "right" else -180.0    # a U-turn is the leftmost (right-hand traffic)
     rows = []
     for ib, ms in by_ib.items():
@@ -560,6 +592,8 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
             elif tagged:                         # turn:lanes: its lanes, into as many lanes as fit
                 a, c = tagged[0] - 1, min(tagged[-1] - tagged[0] + 1, mo)
                 rng = ((a, a + c - 1), (0, c - 1) if side in ("left", "uturn") else (mo - c, mo - 1))
+            elif mid in merge:                   # joining at a merge: stacked side by side
+                rng = merge[mid]
             if rng is None:                      # osm2gmns gives it no lane: the rightmost pair
                 rng = ((n - 1, n - 1), (mo - 1, mo - 1))
             (i0, i1), (o0, o1) = rng
@@ -568,7 +602,24 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
         _lanes = pd.DataFrame(rows, columns=["mvmt_id", "si", "ei", "so", "eo"])  # noqa: F841 (read by SQL)
         con.execute(f"""UPDATE {sch}.movement m SET start_ib_lane = l.si, end_ib_lane = l.ei,
                           start_ob_lane = l.so, end_ob_lane = l.eo FROM _lanes l WHERE l.mvmt_id = m.mvmt_id""")
+    _fork_types(con, sch)
     con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN _ang")
+
+
+def _fork_types(con, sch, max_ang=45.0):
+    """The GMNS movement types ``diverge`` and ``merge`` (docs/design/gmns_lane_movements.md):
+    ``diverge`` at a fork, a node one link arrives at, its 2+ ways on (U-turns aside) all within
+    ``max_ang`` degrees of straight on; ``merge`` into a node one link leaves, its 2+ inbound links
+    all joining within ``max_ang``. The angle bound keeps an ordinary junction (a one-way street
+    meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T)."""
+    con.execute(f"""UPDATE {sch}.movement m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
+        SELECT f.node_id FROM {sch}.movement f
+        WHERE (SELECT count(*) FROM {sch}.link k WHERE k.to_node_id = f.node_id) = 1 AND f.type <> 'uturn'
+        GROUP BY f.node_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
+    con.execute(f"""UPDATE {sch}.movement m SET type = 'merge' WHERE type <> 'uturn' AND m.ob_link_id IN (
+        SELECT f.ob_link_id FROM {sch}.movement f
+        WHERE (SELECT count(*) FROM {sch}.link k WHERE k.from_node_id = f.node_id) = 1 AND f.type <> 'uturn'
+        GROUP BY f.ob_link_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
 
 
 def _build_signal_controller(con, sch):

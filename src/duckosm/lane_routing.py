@@ -18,8 +18,9 @@ logger = logging.getLogger("duckosm")
 
 _LC_PEN = 25.0                                          # lane-change penalty (m-equivalent)
 _M = "ST_Length_Spheroid(ST_FlipCoordinates({}))"         # a lane's length in metres (geom is lon/lat)
-_TURN_PEN = {"left": 30.0, "uturn": 60.0, "right": 10.0, "thru": 3.0}
-_LABEL = {"left": "left turn", "right": "right turn", "uturn": "U-turn", "lane_change": "lane change"}
+_TURN_PEN = {"left": 30.0, "uturn": 60.0, "right": 10.0, "thru": 3.0, "merge": 3.0, "diverge": 3.0}
+_LABEL = {"left": "left turn", "right": "right turn", "uturn": "U-turn", "lane_change": "lane change",
+          "merge": "merge", "diverge": "fork"}
 
 
 def _lc_sql(g):
