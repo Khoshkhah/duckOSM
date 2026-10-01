@@ -365,3 +365,16 @@ def test_movement_lanes_from_turn_lanes(tmp_path):
                        f"WHERE ib_link_id={A} AND ob_link_id={B}").fetchone() == (2, 2, 1, 1)
     assert con.execute("SELECT count(*) FROM gmns_driving.movement WHERE start_ib_lane IS NULL OR start_ob_lane IS NULL "
                        "OR end_ib_lane - start_ib_lane <> end_ob_lane - start_ob_lane").fetchone()[0] == 0
+
+
+def test_lane_graph_pairs_movement_lanes_in_order(tmp_path):
+    """Step 4: lane routing follows the movement's ranges: A's right turn into B (turn:lanes
+    'through|right') leaves from lane 2 only, so the lane graph has A_2 -> B_1 and not A_1 -> B_1."""
+    from duckosm.lane_routing import build_lane_graph
+    _gmns(tmp_path).close()
+    out = tmp_path / "out_gmns.duckdb"
+    build_lane_graph(str(out))
+    con = duckdb.connect(str(out))
+    got = con.execute(f"SELECT from_lane, to_lane FROM lane_driving.lane_edges WHERE kind <> 'lane_change' "
+                      f"AND from_lane LIKE '{A}_%' AND to_lane LIKE '{B}_%'").fetchall()
+    assert got == [(f"{A}_2", f"{B}_1")]

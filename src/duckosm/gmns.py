@@ -703,9 +703,11 @@ def to_micro(gmns_db, modes=None, cell_length_m=7.0):
                  ST_Length(ST_GeomFromText(m.geometry)) * 111320, 1, NULL::DOUBLE, il.free_speed,
                  'connector', m.allowed_uses, m.geometry, ST_GeomFromText(m.geometry),
                  NULL::BIGINT, 'M' || m.ib_link_id, NULL::INTEGER, 'movement', m.mvmt_code, m.ctrl_type
-          FROM {g}.movement m
-          JOIN ie ON ie.lk = m.ib_link_id AND ie.lane_no = COALESCE(m.start_ib_lane, 1)
-          JOIN oe ON oe.lk = m.ob_link_id AND oe.lane_no = 1
+          FROM {g}.movement m          -- one connector per lane pair of the movement's ranges, in order
+          JOIN ie ON ie.lk = m.ib_link_id
+            AND ie.lane_no BETWEEN COALESCE(m.start_ib_lane, 1) AND COALESCE(m.end_ib_lane, m.start_ib_lane, 1)
+          JOIN oe ON oe.lk = m.ob_link_id
+            AND oe.lane_no = COALESCE(m.start_ob_lane, 1) + ie.lane_no - COALESCE(m.start_ib_lane, 1)
           JOIN {g}.link il ON il.link_id = m.ib_link_id
           WHERE m.geometry IS NOT NULL""")
         r = {
@@ -804,29 +806,20 @@ def _build_meso_links(con, g, ms, trim_m):
       (link_id, from_node_id, to_node_id, dir_flag, length, lanes, capacity, free_speed,
        facility_type, allowed_uses, geometry, geom, meso_type, macro_link_id, movement_id,
        mvmt_txt_id, start_ib_lane, end_ib_lane, ctrl_type)
-      WITH lt AS (                        -- lanes feeding each (inbound link, turn category)
-        SELECT link_id AS ib,
-          CASE WHEN turn ILIKE '%through%' OR turn = 'thru' THEN 'thru'
-               WHEN turn ILIKE '%reverse%' OR turn ILIKE '%uturn%' THEN 'uturn'
-               WHEN turn ILIKE '%left%' THEN 'left'
-               WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
-          min(lane_num) AS mn, max(lane_num) AS mx, count(*) AS cnt
-        FROM {g}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
-      )
       SELECT 'X' || m.ib_link_id::VARCHAR || '-' || m.ob_link_id::VARCHAR,
              m.ib_link_id::VARCHAR || 'd', m.ob_link_id::VARCHAR || 'u', 1,
              (ST_Length(ST_GeomFromText(m.geometry)) * 111320.0)::DOUBLE,   -- smooth Bézier length
-             COALESCE(lt.cnt, 1)::INTEGER, NULL::DOUBLE, il.free_speed, 'connector', m.allowed_uses,
+             COALESCE(m.end_ib_lane - m.start_ib_lane + 1, 1)::INTEGER, NULL::DOUBLE, il.free_speed,
+             'connector', m.allowed_uses,
              m.geometry, ST_GeomFromText(m.geometry),          -- reuse the movement's smooth connector
              'movement', NULL::BIGINT, m.mvmt_id,
              CASE m.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' WHEN 'uturn' THEN 'U'
                          ELSE 'T' END,
-             lt.mn, lt.mx, m.ctrl_type
+             m.start_ib_lane, m.end_ib_lane, m.ctrl_type          -- the movement's own lanes
       FROM {g}.movement m
       JOIN {ms}.meso_node nd ON nd.node_id = m.ib_link_id::VARCHAR || 'd'
       JOIN {ms}.meso_node nu ON nu.node_id = m.ob_link_id::VARCHAR || 'u'
-      JOIN {g}.link il ON il.link_id = m.ib_link_id
-      LEFT JOIN lt ON lt.ib = m.ib_link_id AND lt.cat = m.type""")
+      JOIN {g}.link il ON il.link_id = m.ib_link_id""")
 
 
 def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):

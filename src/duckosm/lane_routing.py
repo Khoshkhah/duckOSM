@@ -35,6 +35,10 @@ def _turn_sql(g):
             f"JOIN {g}.lane il ON il.link_id = m.ib_link_id "
             f"  AND (m.start_ib_lane IS NULL OR il.lane_num BETWEEN m.start_ib_lane AND m.end_ib_lane) "
             f"JOIN {g}.lane ol ON ol.link_id = m.ob_link_id "
+            # the k-th inbound lane of the range into the k-th outbound lane (equal-length ranges,
+            # docs/design/gmns_lane_movements.md); a GMNS file without outbound ranges: every lane
+            f"  AND (m.start_ob_lane IS NULL OR m.start_ib_lane IS NULL "
+            f"       OR ol.lane_num = m.start_ob_lane + il.lane_num - m.start_ib_lane) "
             f"WHERE m.ib_link_id IS NOT NULL AND m.ob_link_id IS NOT NULL")
 
 
