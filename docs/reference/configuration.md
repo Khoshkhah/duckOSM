@@ -137,5 +137,5 @@ Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
 
 A failed report or map logs a warning; the build still succeeds.
 
-The values of `modes`, `options.clip_strategy` and `clip.predicate` are not checked when the file is
-loaded. An unknown `clip.predicate` is treated as `intersects`.
+A value of `modes`, `options.clip_strategy` or `clip.predicate` outside its choices stops the build
+before it starts, with an error that lists the choices.

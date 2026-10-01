@@ -257,6 +257,15 @@ class Config:
         b.path = str(out)
 
     def validate(self) -> None:
+        # values with a fixed set of choices: a typo would otherwise be accepted (an unknown
+        # clip.predicate quietly became intersects)
+        for key, val, allowed in (
+                ("modes", self.modes, {"driving", "walking", "cycling"}),
+                ("options.clip_strategy", [self.options.clip_strategy or "smart"], {"smart", "complete_ways", "simple"}),
+                ("clip.predicate", [self.clip.predicate], {"intersects", "within", "centroid"})):
+            bad = [v for v in val if v not in allowed]
+            if bad:
+                raise ValueError(f"{key}: {', '.join(map(str, bad))} is not one of {', '.join(sorted(allowed))}")
         self.materialize_boundary()
         if self.source_type == "duckdb":
             if not self.source_db:

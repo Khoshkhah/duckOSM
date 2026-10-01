@@ -17,19 +17,20 @@ import logging
 logger = logging.getLogger("duckosm")
 
 _LC_PEN = 25.0                                          # lane-change penalty (m-equivalent)
+_M = "ST_Length_Spheroid(ST_FlipCoordinates({}))"         # a lane's length in metres (geom is lon/lat)
 _TURN_PEN = {"left": 30.0, "uturn": 60.0, "right": 10.0, "thru": 3.0}
 _LABEL = {"left": "left turn", "right": "right turn", "uturn": "U-turn", "lane_change": "lane change"}
 
 
 def _lc_sql(g):
-    return (f"SELECT a.lane_id, b.lane_id, 'lane_change', ST_Length(b.geom) * 111320 + {_LC_PEN} "
+    return (f"SELECT a.lane_id, b.lane_id, 'lane_change', {_M.format('b.geom')} + {_LC_PEN} "
             f"FROM {g}.lane a JOIN {g}.lane b ON a.link_id = b.link_id AND abs(a.lane_num - b.lane_num) = 1")
 
 
 def _turn_sql(g):
     case = " ".join(f"WHEN '{k}' THEN {v}" for k, v in _TURN_PEN.items())
     return (f"SELECT il.lane_id, ol.lane_id, m.type, "
-            f"ST_Length(ol.geom) * 111320 + CASE m.type {case} ELSE 15.0 END "
+            f"{_M.format('ol.geom')} + CASE m.type {case} ELSE 15.0 END "
             f"FROM {g}.movement m "
             f"JOIN {g}.lane il ON il.link_id = m.ib_link_id "
             f"  AND (m.start_ib_lane IS NULL OR il.lane_num BETWEEN m.start_ib_lane AND m.end_ib_lane) "

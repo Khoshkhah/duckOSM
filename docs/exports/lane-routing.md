@@ -10,13 +10,13 @@ duckosm route-lanes monaco_gmns.duckdb <from> <to> -o route.geojson
 ```
 
 ```text
-route: 112 lanes, cost 4830, maneuvers: right turn, right turn, right turn, right turn, U-turn
+route: 112 lanes, cost 4146, maneuvers: right turn, right turn, right turn, right turn, U-turn
 ```
 
 `<from>` and `<to>` are lane ids (`<edge_id>_<lane number>`, e.g. `4737533508550016661_1`), or
 `edge_id`s (then their lane 1). An unknown id gives "no lane route", as an unreachable lane does. The
 lane graph links each lane to the lanes it can turn into (legal turns only) and to the lanes beside
-it (a lane change). The cost is roughly metres, plus a penalty for each turn and lane change.
+it (a lane change). The cost is metres, plus a penalty for each turn and lane change.
 `lane-graph` saves the graph in the GMNS database (`lane_driving.lane_edges`) so that repeated
 routes are faster; `route-lanes` also works without it. Needs `pip install "duckosm[routing]"`.
 
@@ -29,6 +29,4 @@ r["lanes"], r["cost"], r["maneuvers"], r["geometry"]
 
 **Limits:** where OSM has no `turn:lanes` (most roads), any lane may take any legal turn, so a
 route can turn from a lane a real driver would leave first. Good for planning, not for lane-accurate
-control. The cost's lengths are measured in degrees and overstate east–west distances away from the
-equator (Monaco: about 1.2×). Driving by default; `-m cycling` runs too, but
-cycling roads mostly have one lane.
+control. Driving by default; `-m cycling` runs too, but cycling roads mostly have one lane.

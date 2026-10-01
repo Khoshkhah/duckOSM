@@ -149,3 +149,18 @@ def test_typed_build_flags_override_the_config(tmp_path, monkeypatch):
     c = seen["cfg"]
     assert c.modes == ["walking"] and c.options.build_features is False and c.options.build_graph is False
     assert c.options.h3_resolution == 9                       # --h3-resolution not typed: file wins
+
+
+@pytest.mark.parametrize("yaml_text, bad", [
+    ("modes: [driving, flying]", "flying"),
+    ("options:\n  clip_strategy: smrt", "smrt"),
+    ("clip:\n  predicate: inside", "inside")])
+def test_wrong_choice_values_stop_the_build(tmp_path, yaml_text, bad):
+    """A typo in a value with fixed choices stops the build (an unknown clip.predicate once quietly
+    became intersects)."""
+    from duckosm import Config
+    y = tmp_path / "c.yaml"
+    y.write_text(f"name: a\n{yaml_text}\n")
+    with pytest.raises(ValueError, match=bad):
+        Config.from_yaml(str(y)).validate()
+

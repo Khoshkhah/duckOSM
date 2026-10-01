@@ -47,6 +47,17 @@ def test_build_lane_graph(tmp_path):
     assert n == 1
 
 
+def test_costs_are_metres(tmp_path):
+    """Lane A runs 0.01° of longitude at 59.32°N: about 568 m on the ground. The cost once used
+    degrees × 111,320 (1,113 m here), too long east–west away from the equator."""
+    db = _gmns(tmp_path)
+    build_lane_graph(str(db))
+    con = duckdb.connect(str(db), read_only=True)
+    cost = con.execute("SELECT cost FROM lane_driving.lane_edges WHERE kind='lane_change' "
+                       f"AND from_lane='{A}_1' AND to_lane='{A}_2'").fetchone()[0]
+    assert 550 < cost - 25 < 590                                          # the lane, plus the 25 penalty
+
+
 def test_route_lanes(tmp_path):
     db = _gmns(tmp_path)
     build_lane_graph(str(db))
