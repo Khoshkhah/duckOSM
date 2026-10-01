@@ -611,3 +611,30 @@ def test_lanes_stop_at_a_junction(tmp_path):
     con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 2)], [(11, 12), (11, 14)])
     end = dict(con.execute("SELECT lane_id, ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE link_id = 11").fetchall())
     assert (18.07 - end["11_2"]) * 111320 * 0.5101 > 2.0        # stops before the crossing road
+
+
+def test_fork_lanes_unit():
+    """Option B: the main exit keeps all its lanes, a branch shares the lanes on its side."""
+    from duckosm.gmns import _fork_lanes
+    # 2 lanes; a 1-lane branch on the left (index 0), the road going on (index 1, 2 lanes)
+    assert _fork_lanes(2, [1, 2], 1) == [((0, 0), (0, 0)), ((0, 1), (0, 1))]
+    # a branch on the right: it shares the right lane
+    assert _fork_lanes(2, [2, 1], 0) == [((0, 1), (0, 1)), ((1, 1), (0, 0))]
+
+
+def test_main_road_keeps_its_lanes_at_a_fork(tmp_path):
+    """Boulevard du Larvotto (Kaveh): a 2-lane road going on under its own name and a 1-lane unnamed
+    road branching off to the left at a shallow angle. Both lanes go on; lane 1 may also branch off
+    (osm2gmns had sent lane 1 into the branch only)."""
+    src, out = tmp_path / "fk.duckdb", tmp_path / "fk_gmns.duckdb"
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}
+    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE driving.edges SET name = 'Main' WHERE edge_id IN (11, 12)")
+    c.close()
+    to_gmns(str(src), str(out))
+    mv = {(a, b): r for a, b, *r in duckdb.connect(str(out)).execute(
+        "SELECT ib_link_id, ob_link_id, type, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+        "FROM gmns_driving.movement").fetchall()}
+    assert mv[(11, 12)] == ["diverge", 1, 2, 1, 2]
+    assert mv[(11, 13)] == ["diverge", 1, 1, 1, 1]

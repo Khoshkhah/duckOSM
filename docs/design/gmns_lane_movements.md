@@ -143,6 +143,14 @@ two-way default.
   GMNS pattern allows only R/L/T); lane routing costs them like straight on.
 - **Monaco:** 143 diverge and 133 merge movements. Lanes no movement leads into: 200 → 140.
 
+**Forks, option B (Kaveh, 2026-09-30, after Boulevard du Larvotto 5171742468918694234):** at a fork,
+the exit that goes on as the road (same name, else the same OSM way, else the higher class, else the
+straightest) keeps all its lanes, and a branch shares the inbound lanes on its own side
+(`_fork_lanes`). osm2gmns had split the lanes by side only, so the main road lost its left lane to a
+minor branch: 24 of Monaco's 47 multi-lane forks. Now 1, where `turn:lanes` decides
+(`left|left|` on Avenue de Fontvieille, with no left exit there). Lanes no movement leads into:
+140 → 93.
+
 ### Not now: `connectivity` relations
 
 `type=connectivity` relations give explicit lane → lane mappings and would override steps 2 and 3

@@ -527,6 +527,28 @@ def _merge_lanes(ns, m):
     return out
 
 
+# road classes, high to low: at a fork the exit of the highest class goes on as the main road
+_CLASS_RANK = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+               "living_street", "service"]
+
+
+def _fork_lanes(n, obs, main):
+    """Lanes at a fork (Kaveh, 2026-09-30, option B): the exit that goes on as the road (index
+    ``main`` in ``obs``, sorted left to right) keeps all its lanes, lane by lane, on the side away
+    from the branches; a branch shares the inbound lanes on its own side (left of the main exit: the
+    leftmost lanes, right of it: the rightmost). Per exit a pair of 0-based ranges of equal length."""
+    out, m = [], obs[main]
+    c = min(n, m)
+    left_only = main > 0 and main == len(obs) - 1
+    for k, mb in enumerate(obs):
+        if k == main:
+            out.append(((n - c, n - 1), (m - c, m - 1)) if left_only else ((0, c - 1), (0, c - 1)))
+        else:
+            b = min(mb, n)
+            out.append(((0, b - 1), (0, b - 1)) if k < main else ((n - b, n - 1), (mb - b, mb - 1)))
+    return out
+
+
 def _assign_lanes(con, sch, mode, drive_side="right"):
     """Fill each movement's inbound / outbound lane ranges (docs/design/gmns_lane_movements.md):
 
@@ -536,6 +558,7 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
     - along a way (a movement into the next piece of the same way, same direction) every lane
       continues lane by lane, so marked lanes run on to their junction;
     - into a merge (a node with one outbound link), osm2gmns's merge rule (``_merge_lanes``);
+    - at a fork, the road that goes on keeps all its lanes and a branch shares its side (``_fork_lanes``);
     - else osm2gmns's junction rule (``_default_lanes``).
 
     Ranges have equal length and pair in order: the k-th inbound lane into the k-th outbound lane.
@@ -580,14 +603,31 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
             for (_, mid, ib), rng in zip(ins, _merge_lanes([nl.get(x[2], 1) for x in ins], nl.get(ob, 1))):
                 merge[mid] = rng
     uturn_side = 180.0 if drive_side == "right" else -180.0    # a U-turn is the leftmost (right-hand traffic)
+    name_of, cls_of = {}, {}
+    for lk, nm, ft in con.execute(f"SELECT link_id, name, facility_type FROM {sch}.link").fetchall():
+        name_of[lk], cls_of[lk] = nm, ft
+    n_in = defaultdict(int)
+    for nd in ends.values():
+        n_in[nd] += 1
+    rank = lambda lk: _CLASS_RANK.index(str(cls_of.get(lk) or "").replace("_link", "")) \
+        if str(cls_of.get(lk) or "").replace("_link", "") in _CLASS_RANK else len(_CLASS_RANK)
     rows = []
     for ib, ms in by_ib.items():
         n = nl.get(ib, 1)
         ms.sort(key=lambda m: uturn_side if m[2] == "uturn" else m[3], reverse=True)   # left to right
         obs = [nl.get(m[1], 1) for m in ms]
-        ends = not any(along(ib, m[1]) for m in ms)      # the way ends here: its arrows apply
-        for (mid, ob, typ, _), mo, rng, side in zip(ms, obs, _default_lanes(n, obs), _turn_side(ms)):
-            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if side in ks) if ends else []
+        way_ends = not any(along(ib, m[1]) for m in ms)  # the way ends here: its arrows apply
+        default = _default_lanes(n, obs)
+        real = [k for k, m in enumerate(ms) if m[2] != "uturn"]
+        if n_in.get(ends.get(ib)) == 1 and len(real) >= 2 and all(abs(ms[k][3]) < 45 for k in real):
+            # a fork: the exit that goes on as the road (its name, its OSM way, the higher class, the
+            # straightest) keeps its lanes; U-turns keep osm2gmns's lane
+            main = min(real, key=lambda k: (name_of.get(ms[k][1]) is None or name_of.get(ms[k][1]) != name_of.get(ib),
+                                            not along(ib, ms[k][1]), rank(ms[k][1]), abs(ms[k][3])))
+            for k, rng in zip(real, _fork_lanes(n, [obs[x] for x in real], real.index(main))):
+                default[k] = rng
+        for (mid, ob, typ, _), mo, rng, side in zip(ms, obs, default, _turn_side(ms)):
+            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if side in ks) if way_ends else []
             if along(ib, ob):                    # along the way: every lane on, lane by lane
                 c = min(n, mo)
                 rng = ((0, c - 1), (0, c - 1))
