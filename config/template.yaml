@@ -66,6 +66,7 @@ options:
   global_junctions: true               # every mode splits roads at the same points -> same edge_id in every mode
   functional_types: true               # walk_type (walking) / cycle_type (cycling)
   build_features: true                 # the features.* base-map layers (water, land, buildings, POIs…)
+  sea: overture                        # features.ocean, the sea, from Overture Maps (needs the network); false = none
   clip_strategy: null                  # osmium cut: smart | complete_ways | simple; null = smart with features, else complete_ways
 
 # ---- VALIDATION (run after build; fail loudly on a broken invariant) -------

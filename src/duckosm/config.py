@@ -54,6 +54,7 @@ class Options:
     boundary_cell_resolutions: Optional[list[int]] = None
 
     build_features: bool = True            # build the features.* base-map layers (water, land, buildings, POIs…) for base maps (mapstyle); PBF builds only
+    sea: Optional[str] = "overture"        # features.ocean, the sea (OSM only has coastline lines): 'overture' = Overture Maps' ocean polygons, read for the area from S3 (needs the network; offline it is skipped), or false. See docs/design/sea.md
     clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
 
 
@@ -262,7 +263,8 @@ class Config:
         for key, val, allowed in (
                 ("modes", self.modes, {"driving", "walking", "cycling"}),
                 ("options.clip_strategy", [self.options.clip_strategy or "smart"], {"smart", "complete_ways", "simple"}),
-                ("clip.predicate", [self.clip.predicate], {"intersects", "within", "centroid"})):
+                ("clip.predicate", [self.clip.predicate], {"intersects", "within", "centroid"}),
+                ("options.sea", [self.options.sea or "false"], {"overture", "false"})):
             bad = [v for v in val if v not in allowed]
             if bad:
                 raise ValueError(f"{key}: {', '.join(map(str, bad))} is not one of {', '.join(sorted(allowed))}")

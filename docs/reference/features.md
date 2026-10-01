@@ -55,6 +55,7 @@ In drawing order, bottom first. Monaco counts are from the sample build.
 
 | Layer | Shape | From OSM | `kind` | Monaco |
 |---|---|---|---|---|
+| `ocean` | area | the sea: not from the extract (OSM has only `natural=coastline` lines) but Overture Maps' ocean polygons, built from OSM's coastline, read for the area's box (+10 %, at least 500 m) | `ocean` | 1 |
 | `land` | area | `landuse` = `forest`, `grass`, `residential`, `industrial`, `cemetery`, …; `natural` = `wood`, `scrub`, `heath`, `sand`, `beach`, `wetland`, …; `leisure` = `park`, `garden`, `pitch`, `stadium`, `playground`, … | the `landuse` value, else `natural`, else `leisure`; `natural=wood` becomes `forest` | 237 |
 | `water_polygons` | area | `natural` = `water` / `glacier`, `waterway=riverbank`, `landuse` = `reservoir` / `basin`, any `water` tag | `water`, `river`, `canal`, `reservoir`, `basin`, `dock`, `glacier` | 27 |
 | `water_lines` | line | `waterway` = `river`, `stream`, `canal`, `ditch`, `drain` | the value; `drain` becomes `ditch` | 4 |
@@ -65,6 +66,11 @@ In drawing order, bottom first. Monaco counts are from the sample build.
 | `pois` | point | `amenity` except `parking`, `bicycle_parking`, `bus_station`, `ferry_terminal`; `shop`, `tourism`, `office`; `leisure` except the values used by `land` and `sites`; `man_made` | the first of those tags that is set | 1,645 |
 | `traffic` | point | `highway` = `traffic_signals`, `crossing` | the `highway` value | 575 |
 | `place_labels` | point | `place` = `city`, `town`, `village`, `hamlet`, `suburb`, `quarter`, `neighbourhood`, `isolated_dwelling`, `farm`, `island`, `locality` | the `place` value | 10 |
+
+`ocean` comes from Overture Maps (`options.sea: overture`, the default; `false` turns it off). The
+build reads it from Overture's public files on S3, so it needs the network: offline, the table is
+empty and the build goes on. Its `source` column names the Overture release; `osm_id` and `name`
+are NULL. Design: `docs/design/sea.md`.
 
 `traffic` is not a Shortbread layer. On a crossing, `bearing` is the direction of the road it lies
 on, in degrees from north, so a map can draw the zebra marking across the road. `bearing` is NULL on traffic

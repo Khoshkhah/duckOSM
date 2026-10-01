@@ -737,6 +737,9 @@ class DuckOSM:
         start = time.time()
         try:
             stats = FeaturesBuilder(self.con).run()
+            if self.config.options.sea == "overture":   # the sea: OSM has only coastline lines
+                from duckosm.features.ocean import build_ocean
+                stats['ocean'] = build_ocean(self.con)
             self.stats['feature_layers'] = [k for k, v in stats.items() if v and v >= 0]
             logger.info(f"  Feature layers built in {time.time() - start:.2f}s: "
                         f"{len(self.stats['feature_layers'])} layers")
