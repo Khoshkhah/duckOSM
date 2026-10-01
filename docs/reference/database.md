@@ -199,6 +199,8 @@ One row: where to open a map, and the area's time zone.
 | `center_lon` | DOUBLE | longitude of the same centre |
 | `initial_zoom` | INTEGER | a map zoom level that shows the area, 1–14 (1–16 in a `duckosm extract` result) |
 | `timezone` | VARCHAR | the area's IANA time zone, e.g. `Europe/Monaco`, found at the network node nearest the middle of all nodes. Always set: the build fails without it |
+| `built_at` | TIMESTAMP | when the database was built (or extracted); NULL in a database built before duckOSM recorded it |
+| `duckosm_version` | VARCHAR | the duckOSM version that built it; NULL like `built_at` |
 
 ### `boundary`
 

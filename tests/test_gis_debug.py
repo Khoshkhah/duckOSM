@@ -81,3 +81,16 @@ def test_render_html_standalone_and_body(tmp_path):
     assert doc.startswith("<!doctype html>") and "const DATA = {" in doc and "/*__PAYLOAD__*/" not in doc
     body = render_html(payload, standalone=False)
     assert "<!doctype" not in body and body.startswith("<title>")
+
+
+def test_cli_json(tmp_path, monkeypatch):
+    """`gis-debug --json` prints the check for an agent: the verdict, the summary, each layer."""
+    import json
+    from click.testing import CliRunner
+    from duckosm.cli import main
+    to_gis(_db(), str(tmp_path / "shp"), fmt="shp", name="t", boundary=False)
+    monkeypatch.chdir(tmp_path)
+    r = CliRunner().invoke(main, ["gis-debug", str(tmp_path / "shp"), "--json"])
+    assert r.exit_code == 0, r.output
+    d = json.loads(r.output[r.output.index("{"):])
+    assert d["verdict"] == "pass" and d["summary"]["modes"] == ["driving"] and d["layers"]

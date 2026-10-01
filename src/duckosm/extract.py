@@ -161,8 +161,9 @@ def main(argv=None) -> int:
         "            AS initial_zoom "
         "FROM _clip")
 
-    from duckosm.utils import add_timezone
+    from duckosm.utils import add_timezone, stamp_build
     print(f"  Timezone: {add_timezone(out)}")
+    stamp_build(out)
 
     out.execute("DROP TABLE _clip")
     out.execute("DETACH src")

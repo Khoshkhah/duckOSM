@@ -91,6 +91,16 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 routing, elevation, admin boundaries, base-map layers. See the
 [documentation](https://khoshkhah.github.io/duckOSM/).
 
+## For AI agents
+
+- To use duckOSM: the agent skill [`skills/duckosm/SKILL.md`](skills/duckosm/SKILL.md) (also a
+  Claude Code plugin: `/plugin marketplace add Khoshkhah/duckOSM`), and the whole documentation as
+  one text file: [`llms-full.txt`](https://khoshkhah.github.io/duckOSM/llms-full.txt)
+  ([`llms.txt`](https://khoshkhah.github.io/duckOSM/llms.txt) is its index).
+- `duckosm info DB --json` says what a database holds; `way`, `route-lanes` and `gis-debug` also
+  take `--json`.
+- To change duckOSM: the rules are in [`AGENTS.md`](AGENTS.md).
+
 ## License
 
 MIT. duckOSM is built on [DuckDB](https://duckdb.org) and its spatial extension; it is an

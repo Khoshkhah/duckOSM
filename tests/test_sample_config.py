@@ -51,6 +51,23 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     extract(["--source", str(tmp_path / "monaco.duckdb"), "--db", str(part),
              "--boundary", str(ROOT / "data" / "sample" / "monaco.geojson")])
     assert _boundary_geojson(duckdb.connect(str(part), read_only=True)) is not None
+    # `duckosm info` and `way --json`, the commands an agent reads first
+    import json
+    from click.testing import CliRunner
+    from duckosm import __version__
+    from duckosm.cli import main
+    r = CliRunner().invoke(main, ["info", str(tmp_path / "monaco.duckdb"), "--json"])
+    assert r.exit_code == 0, r.output
+    d = json.loads(r.output)
+    assert [m["mode"] for m in d["modes"]] == ["driving", "walking", "cycling"]
+    assert d["modes"][0]["edges"] > 100 and d["modes"][0]["turn_restrictions"] > 0
+    assert d["timezone"] == "Europe/Monaco" and d["duckosm_version"] == __version__ and d["built_at"]
+    assert d["raw"] and d["boundary"] and len(d["features"]) >= 5
+    text = CliRunner().invoke(main, ["info", str(tmp_path / "monaco.duckdb")]).output
+    assert "driving" in text and "time zone Europe/Monaco" in text
+    r = CliRunner().invoke(main, ["way", str(tmp_path / "monaco.duckdb"), "4230100", "--json"])
+    w = json.loads(r.output)
+    assert w["raw"]["tags"]["name"] == "Avenue Delphine" and {e["mode"] for e in w["edges"]} >= {"driving"}
     # every area db stores its time zone (required, not an option)
     # looked up on the network, not at the bbox centre (which for this extract is at sea, in France)
     assert con.execute("SELECT timezone FROM main.visualization_metadata").fetchone()[0] == "Europe/Monaco"

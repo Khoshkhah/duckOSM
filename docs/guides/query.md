@@ -18,7 +18,8 @@ name the schema, or switch to it with `USE driving;`. A tool that shows no table
 the empty default schema `main`. Builds from a PBF also keep the parsed OSM data in `raw`. Private
 roads (driveways, gated streets) are in `driving.private_edges` and the like, not in `edges`: you can
 see them but not route on them ([why](../concepts/networks.md#access-private-and-forbidden-roads)).
-Every table and column: [Database schema](../reference/database.md).
+Every table and column: [Database schema](../reference/database.md). To see what one database
+holds (modes, counts, time zone, build date), run `duckosm info monaco.duckdb`.
 
 ## The size of each network
 

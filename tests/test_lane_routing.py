@@ -92,3 +92,15 @@ def test_bad_db_raises(tmp_path):
     duckdb.connect(str(bare)).close()
     with pytest.raises(ValueError, match="lane"):
         build_lane_graph(str(bare))
+
+
+def test_cli_json(tmp_path):
+    import json
+    from click.testing import CliRunner
+    from duckosm.cli import main
+    db = _gmns(tmp_path)
+    r = CliRunner().invoke(main, ["route-lanes", str(db), f"{A}_1", f"{C}_1", "--json"])
+    assert r.exit_code == 0, r.output
+    d = json.loads(r.output[r.output.index("{"):])
+    assert d["lanes"][0] == f"{A}_1" and d["lanes"][-1] == f"{C}_1" and d["cost"] > 0
+

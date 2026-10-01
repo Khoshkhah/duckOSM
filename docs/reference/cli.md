@@ -106,6 +106,32 @@ duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --bound
 
 ## Query and inspect
 
+### `info`
+
+Prints what a built database holds: per mode its edges, nodes, private edges, km, legal turns
+(`edge_graph`) and turn restrictions; when and by which duckOSM version it was built; its time zone;
+and the other schemas (raw OSM data, base-map layers, `mm`, boundary, elevation). Reads only.
+
+```text
+duckosm info [OPTIONS] DB
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--json` | print one JSON object instead of a table | |
+
+```text
+$ duckosm info monaco.duckdb
+monaco.duckdb  (built 2026-10-01 18:20, duckOSM 0.1.0; time zone Europe/Monaco)
+mode      edges  nodes  private_edges     km  edge_graph  turn_restrictions
+driving   2,765  1,719            196   92.6       4,953                 38
+walking  10,952  4,116            154  244.1      32,476                  -
+cycling  10,274  4,151            133  245.5      28,851                  -
+also: raw (OSM data), features (10 layers), mm (across modes), boundary
+```
+
+A database built before this command existed has no build date; the rest is the same.
+
 ### `way`
 
 Prints everything the database knows about one OSM way: its raw row, then its edges in every mode,
@@ -121,6 +147,7 @@ duckosm way [OPTIONS] DB OSM_ID
 | `-m`, `--mode TEXT` | modes to include; repeat for several | every mode in the db |
 | `--geom` / `--no-geom` | add the edge geometry as WKT | off |
 | `-o`, `--out PATH` | write the table to a `.csv`, `.parquet` or `.json` file instead of printing it | |
+| `--json` | print one JSON object: the raw way (`tags`, `refs`) and its edges | |
 
 ## Maps and routing
 
@@ -290,6 +317,7 @@ duckosm gis-debug [OPTIONS] EXPORT_PATH
 | `--source-db PATH` | the database to compare against (every `edge_id` must match) | |
 | `-o`, `--out TEXT` | output HTML | `<name>_gis_debug.html` |
 | `--name TEXT` | name shown on the page | the export file name |
+| `--json` | also print the check as JSON: verdict, summary, each layer | |
 
 ### `export-graph`
 
@@ -379,6 +407,7 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 |---|---|---|
 | `-m`, `--mode TEXT` | the GMNS mode | `driving` |
 | `-o`, `--out TEXT` | also write the route as GeoJSON | |
+| `--json` | print the route as JSON: `lanes`, `cost`, `maneuvers`, `geometry` (WKT) | |
 
 ## Enrich a built database
 

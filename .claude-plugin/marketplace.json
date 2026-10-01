@@ -1,0 +1,15 @@
+{
+  "name": "duckosm",
+  "description": "Routable road networks from OpenStreetMap: the duckOSM agent skill.",
+  "owner": {
+    "name": "Kaveh",
+    "url": "https://github.com/Khoshkhah"
+  },
+  "plugins": [
+    {
+      "name": "duckosm",
+      "source": "./",
+      "description": "Routable road networks from OpenStreetMap in one DuckDB file: a skill for building, querying, routing and exporting duckOSM networks."
+    }
+  ]
+}

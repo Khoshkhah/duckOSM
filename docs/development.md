@@ -90,7 +90,7 @@ python scripts/validate_geometry.py --db monaco.duckdb
 ## Docs
 
 ```bash
-pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10"
+pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6"
 mkdocs serve                  # live preview at http://127.0.0.1:8000
 mkdocs build --strict         # a broken link fails the build: run it before you push
 ```
@@ -98,7 +98,8 @@ mkdocs build --strict         # a broken link fails the build: run it before you
 `mkdocs build` prints a long warning banner from the Material theme about MkDocs 2.0; it is harmless.
 `.github/workflows/docs.yml` builds the site with `--strict` and deploys it to GitHub Pages on every
 push to `main` that touches `docs/`, `mkdocs.yml` or the workflow file (it can also be run by hand).
-Pull requests don't build the docs. Pages under `docs/design/` are design notes: they stay in the
+Pull requests don't build the docs. The build also writes `llms.txt` (an index of the site for AI
+agents) and `llms-full.txt` (every page as Markdown, in one file). Pages under `docs/design/` are design notes: they stay in the
 repo but are not published.
 
 The three maps embedded in the docs are built from the Monaco sample, run from the repo root (it

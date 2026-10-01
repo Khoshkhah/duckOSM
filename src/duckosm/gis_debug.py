@@ -314,8 +314,9 @@ def render_html(payload, standalone=True):
             f"<title>{title}</title>\n</head>\n<body>\n{content}\n</body>\n</html>\n")
 
 
-def write_debug(path, source_db=None, out=None, name=None, standalone=True):
-    """Build + write the debug page for an export. Returns the output path."""
+def write_debug(path, source_db=None, out=None, name=None, standalone=True, return_payload=False):
+    """Build + write the debug page for an export. Returns the output path (and the page's data,
+    with ``return_payload=True``: verdict, summary, per-layer checks)."""
     payload = build_payload(path, source_db=source_db, name=name)
     if out is None:
         out = f"{Path(path).stem}_gis_debug.html"
@@ -324,7 +325,7 @@ def write_debug(path, source_db=None, out=None, name=None, standalone=True):
     v = payload["verdict"].upper()
     logger.info(f"GIS debug [{v}]: {payload['summary']['layers']} layers, "
                 f"{payload['summary']['features']:,} features -> {out}")
-    return out
+    return (out, payload) if return_payload else out
 
 
 # ---------------------------------------------------------------------------------------------------

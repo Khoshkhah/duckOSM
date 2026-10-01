@@ -88,3 +88,39 @@ def way_raw(con, osm_id):
     if row is None:
         return None
     return {"osm_id": row[0], "refs": row[1], "tags": row[2]}
+
+
+def db_info(con):
+    """What a built database holds (``duckosm info``): per mode its edges, nodes, private edges, km,
+    legal turns and turn restrictions, then the build metadata and the other schemas. Read-only."""
+    tables = {(s_, t) for s_, t in con.execute(
+        "SELECT table_schema, table_name FROM information_schema.tables "
+        "WHERE table_catalog = current_database()").fetchall()}
+    count = lambda sch, t: (con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
+                            if (sch, t) in tables else None)
+    modes = []
+    for m in _mode_schemas(con):
+        edges, km = con.execute(f"SELECT count(*), round(coalesce(sum(length_m), 0) / 1000, 1) "
+                                f"FROM {m}.edges").fetchone()
+        modes.append({"mode": m, "edges": edges, "nodes": count(m, "nodes"),
+                      "private_edges": count(m, "private_edges"), "km": km,
+                      "edge_graph": count(m, "edge_graph"),
+                      "turn_restrictions": count(m, "turn_restrictions")})
+    meta = {}
+    if ("main", "visualization_metadata") in tables:
+        cols = [r[0] for r in con.execute("DESCRIBE main.visualization_metadata").fetchall()]
+        want = [c for c in ("timezone", "built_at", "duckosm_version") if c in cols]
+        if want:
+            row = con.execute(f"SELECT {', '.join(want)} FROM main.visualization_metadata LIMIT 1").fetchone()
+            meta = {c: (str(v) if v is not None else None) for c, v in zip(want, row or [])}
+    schemas = {s_ for s_, _ in tables}
+    return {"modes": modes,
+            "timezone": meta.get("timezone"), "built_at": meta.get("built_at"),
+            "duckosm_version": meta.get("duckosm_version"),
+            "raw": ("raw", "ways") in tables,
+            "features": sorted(t for s_, t in tables if s_ == "features"),
+            "multimodal": "mm" in schemas,
+            "boundary": ("main", "boundary") in tables,
+            "admin_boundaries": count("main", "admin_boundaries") or 0,
+            "elevation": ("main", "elevation_metadata") in tables}
+

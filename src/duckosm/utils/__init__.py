@@ -25,6 +25,16 @@ def data_utm_crs(con, table, geom="geom"):
     return utm_epsg(lon, lat)
 
 
+def stamp_build(con, table="main.visualization_metadata"):
+    """Store when the database was made and by which duckOSM version (``built_at``,
+    ``duckosm_version``), so ``duckosm info`` can say what a database is."""
+    from duckosm import __version__
+
+    con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS built_at TIMESTAMP")
+    con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS duckosm_version VARCHAR")
+    con.execute(f"UPDATE {table} SET built_at = now()::TIMESTAMP, duckosm_version = ?", [__version__])
+
+
 def add_timezone(con, table="main.visualization_metadata"):
     """Store the IANA time zone of the area (e.g. 'Europe/Stockholm') in ``table``.
 

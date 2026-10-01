@@ -1,0 +1,13 @@
+{
+  "name": "duckosm",
+  "version": "0.1.0",
+  "description": "Routable road networks from OpenStreetMap in one DuckDB file: a skill for building, querying, routing and exporting duckOSM networks.",
+  "author": {
+    "name": "Kaveh",
+    "url": "https://github.com/Khoshkhah"
+  },
+  "homepage": "https://khoshkhah.github.io/duckOSM/",
+  "repository": "https://github.com/Khoshkhah/duckOSM",
+  "license": "MIT",
+  "keywords": ["openstreetmap", "osm", "road-network", "routing", "duckdb", "gis", "sumo", "matsim", "gmns", "skill"]
+}

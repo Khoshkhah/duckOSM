@@ -60,6 +60,57 @@ markdown_extensions:
       slugify: !!python/object/apply:pymdownx.slugs.slugify { kwds: { case: lower } }
 
 # design notes and unbuilt specs stay in the repo but aren't published
+plugins:
+  - search
+  # /llms.txt (an index for AI agents, llmstxt.org) and /llms-full.txt (every page as Markdown)
+  - llmstxt:
+      full_output: llms-full.txt
+      markdown_description: >
+        duckOSM turns OpenStreetMap data into routable road networks (driving, walking, cycling) in
+        one DuckDB file, with stable edge ids, legal turns, and exports to SUMO, MATSim, GMNS and more.
+        An agent skill with the essentials: https://github.com/Khoshkhah/duckOSM/blob/main/skills/duckosm/SKILL.md
+      sections:
+        Get started:
+          - index.md
+          - install.md
+          - first_network.md
+        Guides:
+          - guides/prepare-area.md
+          - guides/build.md
+          - guides/fix-osm-errors.md
+          - guides/query.md
+          - guides/draw-map.md
+          - guides/route.md
+          - guides/elevation.md
+          - guides/admin-boundaries.md
+          - guides/check-build.md
+        Exports:
+          - exports/index.md
+          - exports/sumo.md
+          - exports/matsim.md
+          - exports/gmns.md
+          - exports/gis.md
+          - exports/networkx.md
+          - exports/opendrive.md
+          - exports/lanelet2.md
+          - exports/railml.md
+          - exports/lane-routing.md
+        Concepts:
+          - concepts/build.md
+          - concepts/edge-ids.md
+          - concepts/networks.md
+          - concepts/cleanup.md
+          - concepts/multimodal.md
+          - concepts/osmnx.md
+        Reference:
+          - reference/cli.md
+          - reference/configuration.md
+          - reference/database.md
+          - reference/features.md
+          - reference/elevation-sources.md
+        Development:
+          - development.md
+
 exclude_docs: |
   design/
   lane_map.md

@@ -358,6 +358,45 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
 
 @main.command()
 @click.argument('db', type=DB_PATH)
+@click.option('--json', 'as_json', is_flag=True, help='Print one JSON object instead of a table')
+def info(db, as_json):
+    """What a built database holds: per mode its edges, nodes, private edges, km, legal turns and
+    turn restrictions; when and by which duckOSM version it was built; its time zone; and the
+    other schemas (raw OSM data, base-map layers, across modes, boundary, elevation). Read-only."""
+    import json
+
+    import duckdb
+
+    from duckosm.query import db_info
+
+    con = duckdb.connect(db, read_only=True)
+    d = db_info(con)
+    if as_json:
+        click.echo(json.dumps(d, indent=1))
+        return
+    built = (f"built {d['built_at'][:16]}, duckOSM {d['duckosm_version']}" if d["built_at"]
+             else "build date not recorded")
+    click.echo(f"{Path(db).name}  ({built}; time zone {d['timezone'] or 'not recorded'})")
+    if not d["modes"]:
+        click.echo("no mode schemas (no <mode>.edges table)")
+    else:
+        cols = ["mode", "edges", "nodes", "private_edges", "km", "edge_graph", "turn_restrictions"]
+        fmt = lambda v: "-" if v is None else (f"{v:,}" if isinstance(v, int) else str(v))
+        rows = [cols] + [[fmt(m[c]) if c != "mode" else m[c] for c in cols] for m in d["modes"]]
+        w = [max(len(r[i]) for r in rows) for i in range(len(cols))]
+        for r in rows:
+            click.echo("  ".join(v.ljust(w[i]) if i == 0 else v.rjust(w[i]) for i, v in enumerate(r)))
+    also = [label for label, on in (
+        ("raw (OSM data)", d["raw"]),
+        (f"features ({len(d['features'])} layers)", d["features"]),
+        ("mm (across modes)", d["multimodal"]), ("boundary", d["boundary"]),
+        (f"admin_boundaries ({d['admin_boundaries']})", d["admin_boundaries"]),
+        ("elevation", d["elevation"])) if on]
+    click.echo("also: " + (", ".join(also) if also else "nothing else"))
+
+
+@main.command()
+@click.argument('db', type=DB_PATH)
 @click.argument('osm_id', type=int)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode schema(s) to include (default: every mode present in the db)')
@@ -366,7 +405,9 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
 @click.option('--out', '-o', type=click.Path(), default=None,
               help='Write the table to a file instead of printing '
                    '(format by extension: .csv, .parquet, or .json)')
-def way(db, osm_id, modes, geom, out):
+@click.option('--json', 'as_json', is_flag=True,
+              help='Print one JSON object: the raw way (tags, refs) and its edges')
+def way(db, osm_id, modes, geom, out, as_json):
     """Everything this db knows about one OSM_ID, across all modes, in one table.
 
     Prints the raw way row (tags + node refs), then the union of the per-mode edges
@@ -383,6 +424,17 @@ def way(db, osm_id, modes, geom, out):
     con.execute("INSTALL spatial; LOAD spatial;")
 
     raw = way_raw(con, osm_id)
+    if as_json:
+        import json
+        try:
+            cur = con.execute(way_table_sql(con, osm_id, modes=list(modes) or None, geometry=geom))
+        except ValueError as e:
+            raise click.ClickException(str(e))
+        cols = [c[0] for c in cur.description]
+        click.echo(json.dumps({"osm_id": osm_id, "raw": raw,
+                               "edges": [dict(zip(cols, r)) for r in cur.fetchall()]},
+                              indent=1, default=str))
+        return
     if raw:
         click.echo(f"raw way {raw['osm_id']}: {len(raw['refs'])} node refs")
         click.echo(f"  tags: {raw['tags']}")
@@ -577,7 +629,9 @@ def export_gis(db, modes, fmt, out, boundary, name):
               help='Built duckOSM db to round-trip against (checks every exported edge_id matches)')
 @click.option('--out', '-o', default=None, help='Output HTML (default: <name>_gis_debug.html)')
 @click.option('--name', default=None, help='Display name (default: the export filename stem)')
-def gis_debug(export_path, source_db, out, name):
+@click.option('--json', 'as_json', is_flag=True,
+              help='Also print the check as JSON: verdict, summary, per-layer checks')
+def gis_debug(export_path, source_db, out, name, as_json):
     """Debug an export: read the GeoPackage/shapefile back through GDAL and write a self-contained
     HTML page — a canvas map of every layer plus a QA audit (feature counts, CRS, edge_id integrity,
     and a round-trip diff vs --source-db). Verifies the file on disk, not the db. Needs geopandas.
@@ -591,10 +645,17 @@ def gis_debug(export_path, source_db, out, name):
     if out is None:
         out = f"{Path(export_path).stem or 'export'}_gis_debug.html"
     try:
-        path = write_debug(export_path, source_db=source_db, out=out, name=name)
+        path, payload = write_debug(export_path, source_db=source_db, out=out, name=name,
+                                    return_payload=True)
     except Exception as e:
         raise click.ClickException(str(e))
-    click.echo(f"wrote {path} — open in a browser")
+    if as_json:
+        import json
+        click.echo(json.dumps({"out": str(path), "verdict": payload["verdict"],
+                               "summary": payload["summary"], "layers": payload["layers"]},
+                              indent=1, default=str))
+    else:
+        click.echo(f"wrote {path} — open in a browser")
 
 
 @main.command(name="gmns")
@@ -738,7 +799,9 @@ def lane_graph(gmns_db, mode):
 @click.argument('to_lane')
 @click.option('--mode', '-m', default='driving', show_default=True, help='GMNS mode schema')
 @click.option('--out', '-o', default=None, help='Write the route as GeoJSON to this path')
-def route_lanes_cmd(gmns_db, from_lane, to_lane, mode, out):
+@click.option('--json', 'as_json', is_flag=True,
+              help='Print the route as JSON: lanes, cost, maneuvers, geometry (WKT)')
+def route_lanes_cmd(gmns_db, from_lane, to_lane, mode, out, as_json):
     """Plan a lane-level route between two lanes (each a lane_id or an edge_id → its lane 1). Prints the
     lane count / cost / maneuvers; with -o writes the route geometry as GeoJSON. See https://khoshkhah.github.io/duckOSM/exports/lane-routing/.
     """
@@ -750,11 +813,15 @@ def route_lanes_cmd(gmns_db, from_lane, to_lane, mode, out):
         res = route_lanes(gmns_db, from_lane, to_lane, mode=mode)
     except Exception as e:
         raise click.ClickException(str(e))
-    if not res["lanes"]:
+    if as_json:
+        import json
+        click.echo(json.dumps({"from": from_lane, "to": to_lane, **res}, indent=1))
+    elif not res["lanes"]:
         click.echo(f"no lane route from {from_lane} to {to_lane}")
         return
-    click.echo(f"route: {len(res['lanes'])} lanes, cost {res['cost']:.0f}, "
-               f"maneuvers: {', '.join(res['maneuvers']) or '(none)'}")
+    else:
+        click.echo(f"route: {len(res['lanes'])} lanes, cost {res['cost']:.0f}, "
+                   f"maneuvers: {', '.join(res['maneuvers']) or '(none)'}")
     if out and res["geometry"]:
         import json
 
@@ -766,7 +833,8 @@ def route_lanes_cmd(gmns_db, from_lane, to_lane, mode, out):
                              "maneuvers": res["maneuvers"]},
               "geometry": {"type": "LineString", "coordinates": coords}}]}
         Path(out).write_text(json.dumps(fc))
-        click.echo(f"wrote {out}")
+        if not as_json:
+            click.echo(f"wrote {out}")
 
 
 @main.command(name="lanelet2")
