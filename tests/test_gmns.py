@@ -329,3 +329,39 @@ def test_partner_must_be_on_the_inner_side(tmp_path):
     assert _lane_y(tmp_path, 4.0, b_north=False)["11_1"] == pytest.approx(1.625, abs=0.05)
     y = _lane_y(tmp_path, 4.0, b_north=False, drive_side="left")
     assert y["11_1"] == pytest.approx(-0.375, abs=0.05) and y["12_1"] - y["11_1"] == pytest.approx(-3.25, abs=0.05)
+
+
+def test_turn_lanes_values_feed_every_turn_they_name():
+    """docs/design/gmns_lane_movements.md step 1: 'through;slight_right' feeds thru and right (it was
+    read as thru only); a slight turn also feeds thru (typed so under 30 degrees)."""
+    from duckosm.gmns import _turn_kinds
+    assert _turn_kinds("through;slight_right") == {"thru", "right"}
+    assert _turn_kinds("through;right") == {"thru", "right"}
+    assert _turn_kinds("left") == {"left"} and _turn_kinds("reverse") == {"uturn"}
+    assert _turn_kinds("") == {"thru"} and _turn_kinds("none") == {"thru"}
+
+
+def test_default_lanes_follow_osm2gmns():
+    """Steps 2-3, osm2gmns 0.7.6 (autoconintd.py): separate lanes per turn, equal-length ranges
+    read in order. Outbound links sorted left to right, 0-based lanes."""
+    from duckosm.gmns import _default_lanes
+    # 3 lanes, a 4-way junction (left, thru, right; 2 lanes each): left 1, thru 2, right 3
+    assert _default_lanes(3, [2, 2, 2]) == [((0, 0), (0, 0)), ((1, 1), (1, 1)), ((2, 2), (1, 1))]
+    # 2 lanes, two ways on: the right one gets the right lane, the left one the rest
+    assert _default_lanes(2, [2, 2]) == [((0, 0), (0, 0)), ((1, 1), (1, 1))]
+    # one way on: as many lanes as both have, from the left, lane k into lane k
+    assert _default_lanes(3, [2]) == [((0, 1), (0, 1))]
+    # 1 lane: every turn from it; the leftmost link entered at its lane 1, the others at the right
+    assert _default_lanes(1, [2, 3, 2]) == [((0, 0), (0, 0)), ((0, 0), (2, 2)), ((0, 0), (1, 1))]
+    # 4 lanes, 4 ways on: two middle links share the 2 middle lanes, one each
+    assert _default_lanes(4, [1, 1, 1, 1]) == [((0, 0), (0, 0)), ((1, 1), (0, 0)), ((2, 2), (0, 0)), ((3, 3), (0, 0))]
+
+
+def test_movement_lanes_from_turn_lanes(tmp_path):
+    """Way 100 (A) has turn:lanes 'through|right': its right turn into B starts from lane 2 only,
+    into B's single lane. Every movement has both ranges, equal length."""
+    con = _gmns(tmp_path)
+    assert con.execute(f"SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
+                       f"WHERE ib_link_id={A} AND ob_link_id={B}").fetchone() == (2, 2, 1, 1)
+    assert con.execute("SELECT count(*) FROM gmns_driving.movement WHERE start_ib_lane IS NULL OR start_ob_lane IS NULL "
+                       "OR end_ib_lane - start_ib_lane <> end_ob_lane - start_ob_lane").fetchone()[0] == 0

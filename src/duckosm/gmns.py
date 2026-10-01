@@ -235,7 +235,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_geometry(con, sch, mode)
         _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
                          pair_carriageways)  # before movement
-        _build_movement(con, sch, mode, uses)
+        _build_movement(con, sch, mode, uses, drive_side)
         _build_signal_controller(con, sch)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
@@ -349,7 +349,7 @@ def _build_geometry(con, sch, mode):
     FROM s.{mode}.edges""")
 
 
-def _build_movement(con, sch, mode, uses):
+def _build_movement(con, sch, mode, uses, drive_side="right"):
     """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction."""
     if not _exists(con, "s", mode, "edge_graph"):
         con.execute(f"""CREATE TABLE {sch}.movement(
@@ -384,20 +384,12 @@ def _build_movement(con, sch, mode, uses):
           atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) AS out_b
         FROM mv
       ), t AS (
-        SELECT ib, ob, node_id, ibg, obg,
+        SELECT ib, ob, node_id, ibg, obg, ang,
           CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
                WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
           -- inbound compass heading (0=N, clockwise) = (90 - math-bearing) mod 360
           ((90 - degrees(in_b)) - floor((90 - degrees(in_b)) / 360) * 360) AS hdg
         FROM (SELECT *, ((degrees(out_b - in_b) + 180) - floor((degrees(out_b - in_b) + 180) / 360) * 360) - 180 AS ang FROM b)
-      ), lt AS (                        -- inbound lanes feeding each turn category, from turn:lanes
-        SELECT link_id AS ib,
-          CASE WHEN turn ILIKE '%through%' OR turn = 'thru' THEN 'thru'
-               WHEN turn ILIKE '%reverse%' OR turn ILIKE '%uturn%' THEN 'uturn'
-               WHEN turn ILIKE '%left%' THEN 'left'
-               WHEN turn ILIKE '%right%' THEN 'right' END AS cat,
-          min(lane_num) AS mn, max(lane_num) AS mx
-        FROM {sch}.lane WHERE turn IS NOT NULL GROUP BY 1, 2
       ), pts AS (                        -- turn-connector endpoints + tangent anchors, hugging the junction
         SELECT t.*,
           ST_X(ST_LineInterpolatePoint(ibg, 0.94)) AS x0, ST_Y(ST_LineInterpolatePoint(ibg, 0.94)) AS y0,
@@ -418,7 +410,7 @@ def _build_movement(con, sch, mode, uses):
         FROM pts
       )
       SELECT t.ib::VARCHAR || '-' || t.ob::VARCHAR AS mvmt_id, t.node_id, NULL::VARCHAR AS name,
-             t.ib AS ib_link_id, lt.mn AS start_ib_lane, lt.mx AS end_ib_lane,
+             t.ib AS ib_link_id, NULL::INT AS start_ib_lane, NULL::INT AS end_ib_lane,
              t.ob AS ob_link_id, NULL::INT AS start_ob_lane, NULL::INT AS end_ob_lane, t.type,
              NULL::DOUBLE AS penalty, NULL::DOUBLE AS capacity,
              CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
@@ -428,10 +420,107 @@ def _build_movement(con, sch, mode, uses):
                              WHEN 'uturn' THEN 'U' ELSE 'T' END) AS mvmt_code,
              '{uses}' AS allowed_uses,
              ST_AsText({_bezier_line_sql('t.x0', 't.y0', 't.cx0', 't.cy0',
-                                         't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry
+                                         't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry,
+             t.ang AS _ang
       FROM cp t
-      LEFT JOIN lt ON lt.ib = t.ib AND lt.cat = t.type
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
+    _assign_lanes(con, sch, drive_side)
+
+
+# turn:lanes part -> the movement types a lane feeds (docs/design/gmns_lane_movements.md, step 1); a
+# slight turn under 30 degrees is typed thru by its angle, so slight_* feeds thru too
+_TURN_KINDS = {"through": {"thru"}, "left": {"left"}, "sharp_left": {"left"}, "slight_left": {"left", "thru"},
+               "right": {"right"}, "sharp_right": {"right"}, "slight_right": {"right", "thru"},
+               "reverse": {"uturn"}, "merge_to_left": {"thru"}, "merge_to_right": {"thru"},
+               "none": {"thru"}, "": {"thru"}}
+
+
+def _turn_kinds(turn):
+    """One lane's ``turn:lanes`` value (``through;right``) -> the movement types it feeds."""
+    return set().union(*(_TURN_KINDS.get(p.strip(), set()) for p in str(turn).split(";")))
+
+
+def _default_lanes(n, obs):
+    """osm2gmns 0.7.6's lane rule (movement/autoconintd.py), for an inbound link with ``n`` lanes and
+    its outbound links' lane counts ``obs``, sorted left to right. Per outbound link a pair of 0-based
+    ranges ``((ib0, ib1), (ob0, ob1))`` of equal length, read in order; None where it gets no lane.
+    Separate lanes per turn: the leftmost link the leftmost lane, the rightmost the rightmost, the
+    ones between share the rest (docs/design/gmns_lane_movements.md, steps 2-3)."""
+    k, out = len(obs), [None] * len(obs)
+    if n == 1:
+        out[0] = ((0, 0), (0, 0))
+        for j in range(1, k):
+            out[j] = ((0, 0), (obs[j] - 1, obs[j] - 1))
+        return out
+    if k == 1:
+        c = min(n, obs[0])
+        return [((0, c - 1), (0, c - 1))]
+    if k == 2:
+        c = min(n - 1, obs[0])
+        return [((0, c - 1), (0, c - 1)), ((n - 1, n - 1), (obs[1] - 1, obs[1] - 1))]
+    out[0], mids = ((0, 0), (0, 0)), list(range(1, k - 1))
+    if n - 2 >= len(mids):                       # enough middle lanes: deal them out in turn
+        left, room, got = n - 2, [obs[j] for j in mids], [0] * len(mids)
+        while left > 0 and sum(room) > 0:
+            for x in range(len(mids)):
+                if room[x] == 0:
+                    continue
+                if left == 0:
+                    break
+                room[x], got[x], left = room[x] - 1, got[x] + 1, left - 1
+        start = 1
+        for x, j in enumerate(mids):
+            if got[x]:
+                out[j] = ((start, start + got[x] - 1), (obs[j] - got[x], obs[j] - 1))
+            start += got[x]
+    elif n < len(mids):                          # fewer lanes than middle links: the last lane shared
+        for x, j in enumerate(mids):
+            lane = min(x, n - 1)
+            out[j] = ((lane, lane), (obs[j] - 1, obs[j] - 1))
+    else:                                        # one lane per middle link
+        start = 1 if n - 1 == len(mids) else 0
+        for x, j in enumerate(mids):
+            out[j] = ((start + x, start + x), (obs[j] - 1, obs[j] - 1))
+    out[-1] = ((n - 1, n - 1), (obs[-1] - 1, obs[-1] - 1))
+    return out
+
+
+def _assign_lanes(con, sch, drive_side="right"):
+    """Fill each movement's inbound / outbound lane ranges (docs/design/gmns_lane_movements.md):
+    ``turn:lanes`` where the inbound link has it (every lane whose value feeds the movement's type),
+    else osm2gmns's rule (``_default_lanes``). Ranges have equal length and pair in order: the k-th
+    inbound lane turns into the k-th outbound lane. Drops the helper column ``_ang``."""
+    from collections import defaultdict
+
+    import pandas as pd
+
+    nl = dict(con.execute(f"SELECT link_id, max(lane_num) FROM {sch}.lane GROUP BY 1").fetchall())
+    kinds = defaultdict(dict)                    # link -> {lane_num: types}, tagged lanes only
+    for lk, num, turn in con.execute(f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE turn IS NOT NULL").fetchall():
+        kinds[lk][num] = _turn_kinds(turn)
+    by_ib = defaultdict(list)
+    for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
+        by_ib[ib].append((mid, ob, typ, ang or 0.0))
+    uturn_side = 180.0 if drive_side == "right" else -180.0    # a U-turn is the leftmost (right-hand traffic)
+    rows = []
+    for ib, ms in by_ib.items():
+        n = nl.get(ib, 1)
+        ms.sort(key=lambda m: uturn_side if m[2] == "uturn" else m[3], reverse=True)   # left to right
+        obs = [nl.get(m[1], 1) for m in ms]
+        for (mid, ob, typ, _), mo, rng in zip(ms, obs, _default_lanes(n, obs)):
+            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if typ in ks)
+            if tagged:                           # turn:lanes: its lanes, into as many lanes as fit
+                a, c = tagged[0] - 1, min(tagged[-1] - tagged[0] + 1, mo)
+                rng = ((a, a + c - 1), (0, c - 1) if typ in ("left", "uturn") else (mo - c, mo - 1))
+            if rng is None:                      # osm2gmns gives it no lane: the rightmost pair
+                rng = ((n - 1, n - 1), (mo - 1, mo - 1))
+            (i0, i1), (o0, o1) = rng
+            rows.append((mid, i0 + 1, i1 + 1, o0 + 1, o1 + 1))
+    if rows:
+        _lanes = pd.DataFrame(rows, columns=["mvmt_id", "si", "ei", "so", "eo"])  # noqa: F841 (read by SQL)
+        con.execute(f"""UPDATE {sch}.movement m SET start_ib_lane = l.si, end_ib_lane = l.ei,
+                          start_ob_lane = l.so, end_ob_lane = l.eo FROM _lanes l WHERE l.mvmt_id = m.mvmt_id""")
+    con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN _ang")
 
 
 def _build_signal_controller(con, sch):
