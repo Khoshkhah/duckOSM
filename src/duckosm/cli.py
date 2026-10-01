@@ -307,52 +307,31 @@ def admin(args):
 @main.command()
 @click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
-              help='Mode schema(s) to render (default: every mode present in the db)')
-@click.option('--basemap', default='voyager', show_default=True,
-              help='Default base map: voyager, positron, dark_matter, osm, satellite, blank')
+              help='Mode(s) to draw a page of, repeat for several (default: every mode, plus a page '
+                   'with all modes)')
+@click.option('--basemap', default=None,
+              help="First background: the database's own layers (default), or voyager, positron, "
+                   "osm, satellite, …")
 @click.option('--out-dir', default='reports', show_default=True,
-              help='Output directory for <name>_<mode>_network.html')
+              help='Output folder for <name>_map.html and <name>_<mode>_network.html')
 @click.option('--arrows/--no-arrows', default=True, show_default=True,
-              help='Overlay one-way direction arrows (gray chevrons, shown when zoomed in)')
+              help='Direction arrows on one-way roads (shown when zoomed in)')
 @click.option('--boundary/--no-boundary', default=True, show_default=True,
-              help='Overlay the clip/area boundary outline (main.boundary), if present')
+              help="Draw the area's boundary (main.boundary), if present")
 def viz(db, modes, basemap, out_dir, arrows, boundary):
-    """Render a roadstyle HTML map of a built network.
-
-    Writes <out-dir>/<name>_<mode>_network.html per mode, with edges styled by
-    highway class. Needs geopandas + roadstyle installed.
+    """Draw the maps of a built network with mapstyle: one page with every mode
+    (<name>_map.html) and one per mode (<name>_<mode>_network.html), over the database's own base
+    map. With -m, only those modes' pages. Needs duckosm[viz].
     """
-    import duckdb
-
-    from duckosm.viz import render_network
+    from duckosm.viz import render_maps
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
-
-    con = duckdb.connect(db, read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
-
-    present = [r[0] for r in con.execute(
-        "SELECT DISTINCT schema_name FROM duckdb_tables() "
-        "WHERE table_name = 'edges' "
-        "AND schema_name NOT IN ('information_schema', 'pg_catalog', 'main', 'raw') "
-        "ORDER BY schema_name").fetchall()]
-    chosen = list(modes) if modes else present
-    if not chosen:
-        raise click.ClickException(f"no mode schemas with an 'edges' table in {db}")
-    unknown = [m for m in chosen if m not in present]
-    if unknown:
-        raise click.ClickException(
-            f"mode(s) {unknown} not found in {db} (present: {present or 'none'})")
-
-    name = Path(db).stem
-    rendered = [render_network(con, m, name, basemap=basemap, out_dir=out_dir, arrows=arrows,
-                               boundary=boundary)
-                for m in chosen]
-    rendered = [p for p in rendered if p]
-    if not rendered:
-        raise click.ClickException(
-            "nothing rendered — install geopandas + roadstyle, or check the db has edges")
-    for p in rendered:
+    try:
+        paths = render_maps(db, modes=list(modes) or None, out_dir=out_dir, basemap=basemap,
+                            arrows=arrows, boundary=boundary, all_modes=not modes)
+    except (ImportError, ValueError) as e:
+        raise click.ClickException(str(e))
+    for p in paths:
         click.echo(f"wrote {p}")
 
 
@@ -915,27 +894,25 @@ def opendrive(db, mode, crs, junctions, out):
 
 @main.command(name="route-map")
 @click.argument('db', type=DB_PATH)
-@click.option('--mode', '-m', 'modes', multiple=True,
-              help='Mode(s) to include; repeat for several (default: every mode in the db)')
-@click.option('--basemap', default='osm', show_default=True,
-              help='First base map: osm, voyager, positron, dark_matter, satellite, blank')
+@click.option('--mode', '-m', default=None,
+              type=click.Choice(['driving', 'walking', 'cycling', 'walk+drive']),
+              help='The first choice and the network in front (walk+drive: every mode; needs '
+                   '`duckosm multimodal`); the page offers every mode')
+@click.option('--basemap', default=None,
+              help="First background: the database's own layers (default), or voyager, positron, osm, …")
 @click.option('--out', '-o', default=None, help='Output HTML (default: reports/<name>_route_map.html)')
-def route_map_cmd(db, modes, basemap, out):
-    """Write an interactive route planner for a built db: click a start and an end, pick a mode
-    (or walk + drive), see the route. Routing runs in the browser (no server), with the same answers
-    as route() / route_multimodal(). Walk + drive needs `duckosm multimodal` first. Needs duckosm[viz].
+def route_map_cmd(db, mode, basemap, out):
+    """Write a route planner page for a built db, drawn by mapstyle: drag a start and an end, pick
+    Drive, Walk, Cycle or Walk + drive (needs `duckosm multimodal` first), get the route and
+    turn-by-turn directions. It routes in the browser with the same answers as route_points() /
+    route_multimodal_points() and directions(). Needs duckosm[viz].
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
-    import duckdb
-
     from duckosm.route_map import write_route_map
 
-    con = duckdb.connect(db, read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
     name = Path(db).stem
     try:
-        path = write_route_map(con, out or f"reports/{name}_route_map.html", list(modes) or None,
-                               basemap, name)
+        path = write_route_map(db, out or f"reports/{name}_route_map.html", mode=mode, basemap=basemap)
     except (ImportError, ValueError) as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {path} — open it in a browser")

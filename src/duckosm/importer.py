@@ -283,14 +283,6 @@ class DuckOSM:
                                      self.validation_results)
                     except Exception as e:
                         logger.warning(f"Report generation failed: {e}")
-                if self.config.viz.enabled:
-                    try:
-                        from duckosm.viz import render_network
-                        for mode in self.config.modes:
-                            render_network(self.con, mode, self.config.name,
-                                           self.config.viz.basemap)
-                    except Exception as e:
-                        logger.warning(f"Viz generation failed: {e}")
 
                 # Final checkpoint to ensure disk persistence
                 self._checkpoint()
@@ -298,6 +290,14 @@ class DuckOSM:
         finally:
             if self.con:
                 self.con.close()
+        # maps (mapstyle) once the database is closed: mapstyle opens it again, read-only
+        if self.config.viz.enabled:
+            try:
+                from duckosm.viz import render_maps
+                render_maps(self.config.get_db_path(), name=self.config.name,
+                            basemap=self.config.viz.basemap)
+            except Exception as e:
+                logger.warning(f"Viz generation failed: {e}")
             
         total_time = time.time() - total_start
         console.print(f"\n[bold green]✓ Import completed in {total_time:.2f}s[/bold green]")

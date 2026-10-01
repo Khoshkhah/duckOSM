@@ -71,10 +71,10 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 - **The graph of legal turns** (`edge_graph`), with OSM turn restrictions, for routing in SQL,
   Python or networkx.
 - **Base-map layers** (`features.*`: water, land use, buildings, POIs) in the same file.
-- **Maps in one offline HTML page:** `duckosm viz` draws each network; `duckosm route-map` is a route
-  planner where you drag a start and an end and get turn-by-turn directions ([try it](https://khoshkhah.github.io/duckOSM/guides/route/)).
-  For a full base map drawn from the database and a walk + drive planner, see
-  [mapstyle](https://github.com/Khoshkhah/mapstyle) (`pip install mapstyle`).
+- **Maps in one offline HTML page:** `duckosm viz` draws the network and the base map from the
+  database; `duckosm route-map` is a route planner (drive, walk, cycle, walk + drive) where you drag a
+  start and an end and get turn-by-turn directions ([try it](https://khoshkhah.github.io/duckOSM/guides/route/)).
+  The pages are drawn by [mapstyle](https://github.com/Khoshkhah/mapstyle).
 - **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
   area's border by name, and `duckosm extract` cuts a city out of a country build in seconds.
 - **Your own fixes for OSM errors**, applied on every build ([how](https://khoshkhah.github.io/duckOSM/guides/fix-osm-errors/)).

@@ -57,7 +57,7 @@ A skip is not a pass: run `-rs` to see what didn't run.
 
 CI (`.github/workflows/ci.yml`) installs GDAL and osmium, runs the tests on Python 3.10 and 3.12
 with `pip install -e ".[dev,routing,sumo]"`, and builds the package with `twine check --strict`, on
-every push to `main` and every pull request. The route-map tests (`tests/test_route_map.py`) need
+every push to `main` and every pull request. The map tests (`tests/test_maps.py`) need
 the `viz` extra, which CI doesn't install, so they are skipped there: run them locally with
 `pip install -e ".[dev,routing,viz]"`. The `dev` extra also installs `black` and `ruff`; CI doesn't
 run them.
@@ -102,18 +102,19 @@ Pull requests don't build the docs. The build also writes `llms.txt` (an index o
 agents) and `llms-full.txt` (every page as Markdown, in one file). Pages under `docs/design/` are design notes: they stay in the
 repo but are not published.
 
-The three maps embedded in the docs are built from the Monaco sample, run from the repo root (it
-writes `monaco.duckdb` and `monaco_gmns.duckdb` there; both are git-ignored). Draw them with the
-released roadstyle from PyPI (the `viz` extra), not a local roadstyle checkout, so they show what
-users get. Set the project's docs CARTO key first (`export CARTO_API_KEY=...`): roadstyle writes it
-into the CARTO tile URLs, and without it the CARTO backgrounds show an "API KEY REQUIRED" watermark.
-That key only works on `khoshkhah.github.io`, so the CARTO background stays empty when you open these
-pages locally:
+The maps embedded in the docs are built from the Monaco sample, run from the repo root (it writes
+`monaco.duckdb` and `monaco_gmns.duckdb` there; both are git-ignored). Draw them with the released
+mapstyle and roadstyle from PyPI (the `viz` extra), not local checkouts, so they show what users get.
+Set the project's docs CARTO key first (`export CARTO_API_KEY=$CARTO_DOCS_KEY`): the background
+switcher offers CARTO maps, and roadstyle writes the key into their tile URLs (without it they show an
+"API KEY REQUIRED" watermark). That key only works on `khoshkhah.github.io`, so those backgrounds stay
+empty when you open the pages locally:
 
 ```bash
 duckosm build -c config/sample_monaco.yaml && duckosm multimodal monaco.duckdb
-duckosm viz monaco.duckdb -m driving && cp reports/monaco_driving_network.html docs/maps/monaco_driving.html
-duckosm route-map monaco.duckdb -m driving -o docs/maps/monaco_route_map.html
+duckosm viz monaco.duckdb --out-dir docs/maps -m driving && mv docs/maps/monaco_driving_network.html docs/maps/monaco_driving.html
+duckosm viz monaco.duckdb --out-dir docs/maps && rm docs/maps/monaco_*_network.html   # keeps monaco_map.html
+duckosm route-map monaco.duckdb -m walk+drive -o docs/maps/monaco_route_map.html
 duckosm gmns monaco.duckdb -m driving && duckosm gmns-map monaco_gmns.duckdb --style lane -o docs/maps/monaco_gmns_lanes.html
 ```
 

@@ -25,30 +25,26 @@ The graph is held in memory: fine for a city, heavy for a country.
 ## On a map
 
 ```bash
-duckosm route-map monaco.duckdb -m driving     # -> reports/monaco_route_map.html
+duckosm multimodal monaco.duckdb               # optional: the tables Walk + drive needs
+duckosm route-map monaco.duckdb -m walk+drive  # -> reports/monaco_route_map.html
 ```
 
-One HTML page, no server: drag the two markers to set the start and the end. The route is computed
-in the page over the same graph, so it gives the same answer as `route()`. The panel lists the
-directions ("Turn left onto …", "At the roundabout, take the 2nd exit …"); click one to go to it on
-the map. Click a road to copy its `edge_id`; the Street View button shows the street. The Roads
-box hides road classes, bridges, tunnels, private roads or bus lanes, as on the [drawn maps](draw-map.md):
+One HTML page, no server: drag the two markers to set the start and the end, and pick Drive, Walk,
+Cycle, or Walk + drive (walk to the car, drive, walk from it; it needs `duckosm multimodal` first).
+A marker joins the roads within the off-road distance by a walk, and the first and last roads count
+only the part travelled, as in [`route_points()`](#between-two-points). The panel lists the
+directions ("Turn left onto …", "At the roundabout, take the 2nd exit …"), the same as
+[`directions()`](#turn-by-turn-directions); click one to go to it on the map. Click a road to copy its
+`edge_id`; the Street View button shows the street. The Roads box hides road classes, bridges,
+tunnels, private roads or bus lanes, as on the [drawn maps](draw-map.md). The map under the route is
+drawn by mapstyle; the routing is duckOSM's.
 
 <iframe src="../../maps/monaco_route_map.html" allow="clipboard-write" title="A route planner for Monaco, made by duckosm route-map"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
 
 Needs `pip install "duckosm[viz]"`. Everything is inside the page, so keep it to a city: above
-100,000 edges the command warns.
-
-**Walking, cycling, and walk + drive on a map.** `duckosm route-map` plans by car. The route planner
-of [mapstyle](https://khoshkhah.github.io/mapstyle/) also walks, cycles, and combines walking and
-driving (walk to the car, drive, walk from it), over a full base map drawn from the database:
-
-```bash
-pip install mapstyle
-duckosm multimodal monaco.duckdb                     # the tables Walk + drive needs
-mapstyle monaco.duckdb --planner -o planner.html     # Drive / Walk / Cycle / Walk + drive
-```
+100,000 edges the command warns. `-m driving` puts that mode in front and picks it first;
+`-m walk+drive` shows every mode and opens on Walk + drive, as the map above does.
 
 ## Find the edges to route between
 
@@ -87,7 +83,7 @@ starting in the middle of a 300 m street costs 150 m of it.
 from duckosm import route_points
 
 r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480), mode="driving",   # (lon, lat)
-                 radius_m=50, access_kmh=4.5)
+                 radius_m=200, access_kmh=4.5)        # Larvotto's point is on the beach, ~100 m from a road
 r["time_s"], r["length_m"]        # door to door: the walks to the road + the parts of edges used
 r["start"]                        # {point, road_point, edge_id, fraction, access_m, access_s}
 r["path"][0]["from_fraction"]     # where on the first edge the trip begins (0 to 1)
@@ -98,6 +94,33 @@ point between a street and a footpath takes whichever gives the faster trip. A p
 within the radius raises `ValueError` ("no road within 50 m of the start"). For walk → drive →
 walk, `route_multimodal_points(con, a, b, radius_m=50)` does the same over the `mm` tables (below).
 Design: [point routing](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/point_routing.md).
+
+## Turn-by-turn directions
+
+`directions(con, route)` turns any route (from `route`, `route_points`, `route_multimodal` or
+`route_multimodal_points`) into steps, the ones the route map lists:
+
+```python
+from duckosm import directions
+
+for s in directions(con, r):                     # r from route_points above
+    print(s["text"], round(s["length_m"]))
+```
+
+```text
+Head northwest on Avenue des Castelans 23
+At the roundabout, take the 1st exit onto Avenue Albert II 179
+At the roundabout, take the 3rd exit onto Avenue Albert II 189
+Continue onto Tunnel Rocher Palais 207
+…
+At the roundabout, take the 4th exit onto Avenue Princesse Grace 172
+Arrive at your destination 0
+```
+
+Each step also has `type` (`depart`, `turn`, `fork`, `new name`, `roundabout`, `mode`, `arrive`),
+`modifier` (`left`, `slight right`, `uturn`, …), `name`, `mode`, `at` (the `(lon, lat)` where it
+happens) and, for a roundabout, `exit`. A step's `length_m` is the distance to the next one. The
+rules are route-guidance's (the OSRM model); the route map runs the same rules in the page.
 
 ## Across modes (walk → drive → walk)
 

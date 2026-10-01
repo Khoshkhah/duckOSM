@@ -36,7 +36,7 @@ dependencies = [
 duckosm = "duckosm.cli:main"
 
 [project.optional-dependencies]
-viz = ["roadstyle>=0.11.0"]           # duckosm viz (roadstyle brings geopandas)
+viz = ["mapstyle>=0.2.0"]             # duckosm viz / route-map (mapstyle brings roadstyle, geopandas)
 routing = ["networkx"]
 sumo = ["eclipse-sumo", "sumolib"]
 elevation = ["rasterio>=1.3", "pyproj>=3.0"]
@@ -51,4 +51,4 @@ Issues = "https://github.com/khoshkhah/duckOSM/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-duckosm = ["templates/*.yaml"]    # `duckosm init-config` writes it out
+duckosm = ["templates/*.yaml", "templates/*.html"]    # init-config template; the route planner page

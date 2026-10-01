@@ -2,27 +2,35 @@
 
 ```bash
 pip install "duckosm[viz]"
-duckosm viz monaco.duckdb        # one map per mode, in reports/
+duckosm viz monaco.duckdb        # in reports/: monaco_map.html (every mode) + one page per mode
 ```
 
-Each map shows the roads coloured by class, with a legend, a base-map switcher, a hover tooltip and
-a 2D/3D button. Click a road to see its `edge_id`. Tunnels are drawn under the roads above them,
-bridges on top. Private roads are grey and bus lanes a muted blue: you see them, but they are not in
-the network ([why](../concepts/networks.md#access-private-and-forbidden-roads)). In the Roads box,
-the Bridges, Tunnels, Private roads and Bus lanes rows hide or show those roads.
+The maps are drawn by [mapstyle](https://khoshkhah.github.io/mapstyle/), duckOSM's map library, from
+the database itself: water, land, buildings and the sea ([base-map layers](../reference/features.md))
+under the roads, so the page needs no background from the web (one can still be picked). The roads
+are coloured by class, with a hover tooltip and a 2D/3D button; click a road to copy its `edge_id`.
+Tunnels are drawn under the roads above them, bridges on top. Private roads are grey and bus lanes a
+muted blue: you see them, but they are not in the network
+([why](../concepts/networks.md#access-private-and-forbidden-roads)). In the Roads box, the road
+classes and the Bridges, Tunnels, Private roads and Bus lanes rows hide or show those roads.
 
-Try it: this is Monaco's driving map, as `duckosm viz` wrote it.
+`monaco_map.html` has every mode; each `monaco_<mode>_network.html` brings one mode to the front.
+Try it: this is Monaco with every mode, as `duckosm viz` wrote it.
 
-<iframe src="../../maps/monaco_driving.html" title="Monaco's driving network, drawn by duckosm viz"
+<iframe src="../../maps/monaco_map.html" title="Monaco, every mode, drawn by duckosm viz"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
 
 | Option | Does |
 |---|---|
-| `-m driving` | one mode only (default: every mode) |
+| `-m driving` | only that mode's page (repeat for several); without `-m`: every mode's page plus `<name>_map.html` |
+| `--basemap voyager` | a background from the web under the map: `voyager`, `positron`, `osm`, `satellite` (default: none, the database's own layers) |
 | `--no-arrows` | no direction arrows (on by default, on one-way roads; zoom in to see them) |
-| `--basemap positron` | first base map: `voyager` (default), `positron`, `dark_matter`, `osm`, `satellite`, `blank` |
-| `--no-boundary` | hide the dashed outline of the clip area |
+| `--no-boundary` | hide the dashed outline of the area |
 | `--out-dir maps` | output folder (default `reports`) |
+
+A page holds the whole network, so keep it to a city. For other looks, or to build your own
+dashboard, use mapstyle directly (`pip install mapstyle`; its themes, path styles and dashboard
+page are in its [docs](https://khoshkhah.github.io/mapstyle/)).
 
 **Other palettes, or colour by a column** (needs a clone of the repo):
 
@@ -30,17 +38,3 @@ Try it: this is Monaco's driving map, as `duckosm viz` wrote it.
 python scripts/roadstyle_map.py --db monaco.duckdb --palette mono           # highsat | carto | mono
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
-
-## A full base map: mapstyle
-
-`duckosm viz` draws the roads over a background from the web. [mapstyle](https://khoshkhah.github.io/mapstyle/),
-duckOSM's companion map library, draws the whole map from the database itself: water, land, buildings,
-the sea ([base-map layers](../reference/features.md)) and every network, on one offline page.
-
-```bash
-pip install mapstyle
-mapstyle monaco.duckdb -o monaco_map.html          # every mode; --mode walking brings the paths to the front
-```
-
-It doesn't draw private roads or bus lanes yet; `duckosm viz` does.
-

@@ -88,8 +88,8 @@ multimodal:
 report:
   enabled: true                        # write reports/<name>_<ts>.{md,html} (stats, filter audit, components, validation)
 viz:
-  enabled: false                       # roadstyle map per mode -> reports/<name>_<mode>_network.html
-  basemap: voyager                     # voyager | positron | dark_matter | osm | satellite | blank
+  enabled: false                       # maps (mapstyle) -> reports/<name>_map.html + <name>_<mode>_network.html
+  basemap: null                        # first background: null = the database's own layers; or voyager | positron | osm | satellite
 
 # ---- LOCAL OSM FIXES AND CACHING ---------------------------------------------
 osm_overrides: null                    # a rules file of fixes for OSM errors (docs: "Fix OSM errors");

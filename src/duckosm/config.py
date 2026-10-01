@@ -127,9 +127,9 @@ class Report:
 
 @dataclass
 class Viz:
-    """roadstyle network visualization (reports/<name>_network.html)."""
+    """Maps after the build, drawn by mapstyle: reports/<name>_map.html and <name>_<mode>_network.html."""
     enabled: bool = False
-    basemap: str = "voyager"
+    basemap: Optional[str] = None          # first background; None = the database's own layers
 
 
 @dataclass

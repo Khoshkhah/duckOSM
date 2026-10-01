@@ -133,8 +133,8 @@ Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
 | Key | Default | Template | Does |
 |---|---|---|---|
 | `report.enabled` | `false` | `true` | write `reports/<name>_<time>.md` and `.html`: counts per mode, what the road filter kept, network pieces, validation results |
-| `viz.enabled` | `false` | `false` | write a map of each mode, `reports/<name>_<mode>_network.html`, like [`duckosm viz`](cli.md#viz). Needs `duckosm[viz]` |
-| `viz.basemap` | `voyager` | | first base map, a roadstyle name: `voyager`, `positron`, `dark_matter`, `osm`, `satellite`, `blank`, … |
+| `viz.enabled` | `false` | `false` | write the maps after the build, `reports/<name>_map.html` and `<name>_<mode>_network.html`, like [`duckosm viz`](cli.md#viz). Needs `duckosm[viz]` |
+| `viz.basemap` | none | | a background from the web under the maps (`voyager`, `positron`, `osm`, `satellite`, …); none = the database's own layers |
 
 A failed report or map logs a warning; the build still succeeds.
 

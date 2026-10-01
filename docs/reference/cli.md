@@ -153,8 +153,9 @@ duckosm way [OPTIONS] DB OSM_ID
 
 ### `viz`
 
-Writes an HTML map of each mode, roads styled by class, with [roadstyle](../guides/draw-map.md).
-Needs `duckosm[viz]`.
+Draws the maps of a built network with [mapstyle](https://khoshkhah.github.io/mapstyle/): one page with
+every mode and one per mode, over the database's own base map. Needs `duckosm[viz]`. Guide:
+[Draw a map](../guides/draw-map.md).
 
 ```text
 duckosm viz [OPTIONS] DB
@@ -162,16 +163,17 @@ duckosm viz [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `-m`, `--mode TEXT` | modes to draw; repeat for several | every mode in the db |
-| `--basemap TEXT` | first base map: `voyager`, `positron`, `dark_matter`, `osm`, `satellite`, `blank` | `voyager` |
-| `--out-dir TEXT` | output folder; files are `<name>_<mode>_network.html` | `reports` |
+| `-m`, `--mode TEXT` | only these modes' pages; repeat for several | every mode's page, plus `<name>_map.html` with all modes |
+| `--basemap TEXT` | a background from the web: `voyager`, `positron`, `osm`, `satellite`, … | none: the database's own layers |
+| `--out-dir TEXT` | output folder; files are `<name>_map.html` and `<name>_<mode>_network.html` | `reports` |
 | `--arrows` / `--no-arrows` | one-way arrows, shown when zoomed in | on |
 | `--boundary` / `--no-boundary` | draw `main.boundary`, if there is one | on |
 
 ### `route-map`
 
-Writes an interactive route planner: click a start and an end, pick a mode. Routing runs in the
-browser. Walk + drive needs [`multimodal`](#multimodal) first. Needs `duckosm[viz]`. Guide:
+Writes duckOSM's route planner over a map drawn by mapstyle: drag a start and an end, pick Drive,
+Walk, Cycle or Walk + drive. Routing runs in the browser with the same answers as `route_points()`
+and `directions()`. Walk + drive needs [`multimodal`](#multimodal) first. Needs `duckosm[viz]`. Guide:
 [On a map](../guides/route.md#on-a-map).
 
 ```text
@@ -180,8 +182,8 @@ duckosm route-map [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `-m`, `--mode TEXT` | modes to include; repeat for several | every mode in the db |
-| `--basemap TEXT` | first base map: `osm`, `voyager`, `positron`, `dark_matter`, `satellite`, `blank` | `osm` |
+| `-m`, `--mode [driving\|walking\|cycling\|walk+drive]` | the first choice and the mode in front (`walk+drive`: every mode; needs `multimodal`); the page offers every mode | the first mode, walking in front |
+| `--basemap TEXT` | a background from the web: `voyager`, `positron`, `osm`, `satellite`, … | none: the database's own layers |
 | `-o`, `--out TEXT` | output HTML | `reports/<name>_route_map.html` |
 
 ## Exports

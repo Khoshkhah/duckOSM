@@ -87,7 +87,7 @@ Every `edge_id` stays the same when you rebuild, cut out a smaller area, or expo
 ## 7. Draw it
 
 ```bash
-duckosm viz monaco.duckdb -m driving       # -> reports/monaco_driving_network.html
+duckosm viz monaco.duckdb -m driving       # -> reports/monaco_driving_network.html (drawn by mapstyle)
 ```
 
 Open the file in a browser. This is that file, live: zoom, hover a road, click one to see its
