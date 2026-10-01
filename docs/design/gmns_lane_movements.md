@@ -151,6 +151,20 @@ minor branch: 24 of Monaco's 47 multi-lane forks. Now 1, where `turn:lanes` deci
 (`left|left|` on Avenue de Fontvieille, with no left exit there). Lanes no movement leads into:
 140 → 93.
 
+**The same at junctions, option B (Kaveh, 2026-09-30, after 3358160335623944038_2 had no way in):**
+1. **Wherever a road goes on** (an exit within 45° of straight, preferring the same name, the same OSM
+   way, the higher class), that exit keeps all its lanes. A turn shares one lane on its side (the
+   rightmost for a right turn), a fork branch as many lanes as it has. osm2gmns had kept the right
+   lane for the right turn only, so straight on lost it.
+2. **A single exit enters from its own side:** a right turn into the rightmost lanes (osm2gmns fills
+   from the left, so a lone right turn went into lane 1).
+3. **Arrows no exit matches** go to the nearest exit on their side, else to the exit ahead.
+   Avenue de Fontvieille's `left|left|` with no left exit: lanes 1-2 now go on, lane 3 takes the
+   right branch.
+
+Plain junctions where no road goes on keep osm2gmns's rule. Monaco: lanes no movement leads into
+93 → 56, lanes with no way out 47 → 41.
+
 ### Not now: `connectivity` relations
 
 `type=connectivity` relations give explicit lane → lane mappings and would override steps 2 and 3

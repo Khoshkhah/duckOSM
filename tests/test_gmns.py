@@ -638,3 +638,41 @@ def test_main_road_keeps_its_lanes_at_a_fork(tmp_path):
         "FROM gmns_driving.movement").fetchall()}
     assert mv[(11, 12)] == ["diverge", 1, 2, 1, 2]
     assert mv[(11, 13)] == ["diverge", 1, 1, 1, 1]
+
+
+def _mv_of(tmp_path, nodes, edges, graph, names=None, tags=None):
+    src, out = tmp_path / "jn.duckdb", tmp_path / "jn_gmns.duckdb"
+    _mini_source(src, nodes, edges, graph)
+    c = duckdb.connect(str(src))
+    for e, nm in (names or {}).items():
+        c.execute(f"UPDATE driving.edges SET name = '{nm}' WHERE edge_id = {e}")
+    for e, t in (tags or {}).items():
+        c.execute(f"UPDATE raw.ways SET tags = MAP{{{', '.join(f'{k!r}:{v!r}' for k, v in t.items())}}} WHERE osm_id = {e}")
+    c.close()
+    to_gmns(str(src), str(out))
+    return {(a, b): tuple(r) for a, b, *r in duckdb.connect(str(out)).execute(
+        "SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement").fetchall()}
+
+
+def test_road_going_on_keeps_its_lanes_at_a_junction(tmp_path):
+    """3358160335623944038 (Kaveh): a 2-lane road X goes on straight past a side road. Straight on
+    keeps both lanes (osm2gmns gave the right lane to the right turn only), the right turn shares
+    lane 2, and a single right turn from the side road enters the rightmost lane (osm2gmns: lane 1),
+    so lane 2 of the road ahead has a way in."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.0702, 59.31), 7: (18.0698, 59.31)}
+    mv = _mv_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 1), (15, 7, 2, 1)],
+                [(11, 12), (11, 14), (15, 12)], names={11: "X", 12: "X"})
+    assert mv[(11, 12)] == (1, 2, 1, 2)          # straight on from both lanes
+    assert mv[(11, 14)] == (2, 2, 1, 1)          # the right turn shares the right lane
+    assert mv[(15, 12)] == (1, 1, 2, 2)          # a lone right turn enters the right lane
+
+
+def test_arrows_without_their_exit_go_ahead(tmp_path):
+    """Avenue de Fontvieille: turn:lanes 'left|left|' where the way ends at a fork with no left exit
+    (straight on, a slight right branch). The left lanes go ahead with the unmarked lane (they had no
+    way on), the branch shares the right lane."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3185)}
+    mv = _mv_of(tmp_path, nodes, [(11, 1, 2, 3), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)],
+                tags={11: {"turn:lanes": "left|left|"}})
+    assert mv[(11, 12)][:2] == (1, 2)            # lanes 1-2 (both left arrows) go on
+    assert mv[(11, 13)][:2] == (3, 3)

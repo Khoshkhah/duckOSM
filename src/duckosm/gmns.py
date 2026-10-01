@@ -532,11 +532,13 @@ _CLASS_RANK = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclass
                "living_street", "service"]
 
 
-def _fork_lanes(n, obs, main):
-    """Lanes at a fork (Kaveh, 2026-09-30, option B): the exit that goes on as the road (index
-    ``main`` in ``obs``, sorted left to right) keeps all its lanes, lane by lane, on the side away
-    from the branches; a branch shares the inbound lanes on its own side (left of the main exit: the
-    leftmost lanes, right of it: the rightmost). Per exit a pair of 0-based ranges of equal length."""
+def _fork_lanes(n, obs, main, angs=None):
+    """Lanes where a road goes on (Kaveh, 2026-09-30, option B; forks and junctions): the exit that
+    goes on as the road (index ``main`` in ``obs``, sorted left to right) keeps all its lanes, lane by
+    lane, on the side away from the others; every other exit shares the inbound lanes on its own side
+    (left of the main exit: the leftmost lanes, right of it: the rightmost) - as many as it has at a
+    fork, one at a junction (a turn of 45 degrees or more, ``angs``), as osm2gmns gives a turn. Per
+    exit a pair of 0-based ranges of equal length."""
     out, m = [], obs[main]
     c = min(n, m)
     left_only = main > 0 and main == len(obs) - 1
@@ -544,7 +546,7 @@ def _fork_lanes(n, obs, main):
         if k == main:
             out.append(((n - c, n - 1), (m - c, m - 1)) if left_only else ((0, c - 1), (0, c - 1)))
         else:
-            b = min(mb, n)
+            b = 1 if angs is not None and abs(angs[k]) >= 45 else min(mb, n)
             out.append(((0, b - 1), (0, b - 1)) if k < main else ((n - b, n - 1), (mb - b, mb - 1)))
     return out
 
@@ -619,15 +621,35 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
         way_ends = not any(along(ib, m[1]) for m in ms)  # the way ends here: its arrows apply
         default = _default_lanes(n, obs)
         real = [k for k, m in enumerate(ms) if m[2] != "uturn"]
-        if n_in.get(ends.get(ib)) == 1 and len(real) >= 2 and all(abs(ms[k][3]) < 45 for k in real):
-            # a fork: the exit that goes on as the road (its name, its OSM way, the higher class, the
-            # straightest) keeps its lanes; U-turns keep osm2gmns's lane
-            main = min(real, key=lambda k: (name_of.get(ms[k][1]) is None or name_of.get(ms[k][1]) != name_of.get(ib),
-                                            not along(ib, ms[k][1]), rank(ms[k][1]), abs(ms[k][3])))
-            for k, rng in zip(real, _fork_lanes(n, [obs[x] for x in real], real.index(main))):
+        ahead = [k for k in real if abs(ms[k][3]) < 45]
+        if len(real) >= 2 and ahead:
+            # a road that goes on (fork or junction): the exit ahead that continues it (its name, its OSM
+            # way, the higher class, the straightest) keeps its lanes, the others share their side;
+            # U-turns keep osm2gmns's lane
+            main = min(ahead, key=lambda k: (name_of.get(ms[k][1]) is None or name_of.get(ms[k][1]) != name_of.get(ib),
+                                             not along(ib, ms[k][1]), rank(ms[k][1]), abs(ms[k][3])))
+            for k, rng in zip(real, _fork_lanes(n, [obs[x] for x in real], real.index(main), [ms[x][3] for x in real])):
                 default[k] = rng
-        for (mid, ob, typ, _), mo, rng, side in zip(ms, obs, default, _turn_side(ms)):
-            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if side in ks) if way_ends else []
+        elif len(real) == 1 and abs(ms[real[0]][3]) >= 45:
+            # a single turn enters from its own side: a right turn into the rightmost lanes (osm2gmns
+            # fills from the left, so a right turn went into lane 1)
+            k = real[0]
+            c = min(n, obs[k])
+            default[k] = ((n - c, n - 1), (obs[k] - c, obs[k] - 1)) if ms[k][3] < 0 else ((0, c - 1), (0, c - 1))
+        sides = _turn_side(ms)
+        extra = defaultdict(set)         # arrows no exit matches go to the nearest exit on their side,
+        if way_ends and ib in kinds:     # else to the exit ahead (Avenue de Fontvieille: left|left|)
+            here = set().union(*kinds[ib].values())
+            thru = next((k for k in real if sides[k] == "thru"), None)
+            for kind in ("left", "right"):
+                if kind in here and kind not in {sides[k] for k in real}:
+                    side_ks = [k for k in real if thru is None or (k < thru if kind == "left" else k > thru)]
+                    target = (side_ks[0] if kind == "left" else side_ks[-1]) if side_ks else thru
+                    if target is not None:
+                        extra[target].add(kind)
+        for k, ((mid, ob, typ, _), mo, rng, side) in enumerate(zip(ms, obs, default, sides)):
+            want = {side} | extra.get(k, set())
+            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if ks & want) if way_ends else []
             if along(ib, ob):                    # along the way: every lane on, lane by lane
                 c = min(n, mo)
                 rng = ((0, c - 1), (0, c - 1))
