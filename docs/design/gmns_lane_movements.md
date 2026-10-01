@@ -1,7 +1,7 @@
 # GMNS movements at lane level: a better calculation from more OSM data
 
-**Status:** approved by Kaveh 2026-09-30 (with osm2gmns's separate lanes). Steps 1-5 built (branch
-`paired-carriageways`); step 6 next. Improves GMNS's own calculation in
+**Status:** approved by Kaveh 2026-09-30 (with osm2gmns's separate lanes). Steps 1-6 built (branch
+`paired-carriageways`), checked on Monaco. Improves GMNS's own calculation in
 `_build_movement` (`gmns.py`); it doesn't replace it. Which turns exist stays as today: `edge_graph`
 (OSM restrictions applied) plus GMNS's rule for immediate U-turns (kept where they're the only way on
 or the only way in). This note is about **which lanes** feed and receive each turn. Checked on Monaco
@@ -110,6 +110,13 @@ Monaco has 13 ways with it. `placement` says where the OSM line lies across the 
 centre (one-way) or the centre line (two-way). With `placement`, the lanes are offset from where the
 line really is. This is a geometry step, next to
 [gmns_paired_carriageways.md](gmns_paired_carriageways.md).
+
+**Built (step 6):** `left_of:N` / `middle_of:N` / `right_of:N` give the line's position across the
+lanes, and each lane is offset from there (`_placement`). Placement is data, so it wins over the
+paired-carriageway estimate. `transition` and unusable values keep the default. On a two-way way it
+applies only in right-hand traffic. Monaco: 14 ways, mostly 1-lane one-way ramps (`left_of:1` /
+`right_of:1`, 6 `transition`); Boulevard Charles III's `placement:forward=left_of:1` matches the
+two-way default.
 
 ### Not now: `connectivity` relations
 

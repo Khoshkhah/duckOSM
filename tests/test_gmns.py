@@ -412,3 +412,27 @@ def test_empty_turn_lane_goes_straight_on(tmp_path):
     assert duckdb.connect(str(out)).execute(
         f"SELECT start_ib_lane, end_ib_lane FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id=88"
     ).fetchone() == (1, 2)
+
+
+def test_placement_says_where_the_line_lies(tmp_path):
+    """Step 6: placement=right_of:2 on a 2-lane one-way way: the line is the right edge of lane 2, so
+    lane 1 sits 4.875 m and lane 2 1.625 m left of it (north, for an eastbound way), not centred."""
+    src, out = tmp_path / "pl.duckdb", tmp_path / "pl_gmns.duckdb"
+    _pair_source(src, 40.0)                                   # Q far away: no pairing
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE raw.ways SET tags = MAP{'placement':'right_of:2'} WHERE osm_id = 200")
+    c.close()
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    y = dict(con.execute("SELECT lane_id, round((ST_Y(ST_StartPoint(geom)) - 59.32) * 111320, 2) "
+                         "FROM gmns_driving.lane WHERE link_id = 11").fetchall())
+    assert y["11_1"] == pytest.approx(4.875, abs=0.05) and y["11_2"] == pytest.approx(1.625, abs=0.05)
+
+
+def test_placement_values():
+    from duckosm.gmns import _placement
+    w = [3.25, 3.25, 3.0]
+    assert _placement("left_of:1", w) == 0 and _placement("middle_of:2", w) == 4.875
+    assert _placement("right_of:3", w) == 9.5
+    assert _placement("transition", w) is None and _placement("left_of:4", w) is None and _placement(None, w) is None

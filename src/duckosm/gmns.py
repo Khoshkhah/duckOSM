@@ -111,6 +111,22 @@ def _offset_wkt(line_wkt, off_m):
     return LineString(back).wkt if len(back) >= 2 else line_wkt
 
 
+def _placement(value, w_each):
+    """OSM ``placement`` (``left_of:N`` / ``middle_of:N`` / ``right_of:N``) -> where the way's line
+    lies across its lanes, in metres from the left edge of lane 1 (lanes left to right in the
+    direction of travel). None for ``transition``, a missing tag or a lane number the edge doesn't
+    have: then the default placement stands (docs/design/gmns_lane_movements.md, step 6)."""
+    try:
+        kind, n = str(value).split(":")
+        n = int(n)
+    except ValueError:
+        return None
+    if not 1 <= n <= len(w_each):
+        return None
+    left = sum(w_each[:n - 1])
+    return {"left_of": left, "middle_of": left + w_each[n - 1] / 2, "right_of": left + w_each[n - 1]}.get(kind)
+
+
 def _paired_gaps(edges, side_sign, step_m=2.0):
     """One-way edges placed as one side of a two-way road (docs/design/gmns_paired_carriageways.md).
 
@@ -582,6 +598,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         n = len(w_each)
         half = sum(w_each) / 2.0
         gap = gaps.get(edge_id)
+        # placement says where the line really is; a two-way edge only in right-hand traffic, where
+        # lane 1 is the leftmost lane (left-hand two-way lanes are numbered from the other side)
+        place = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or side_sign < 0) else None
         run = 0.0
         for i in range(n):
             u = uses
@@ -592,7 +611,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                 u = "bus"
             width = _num(widths[i]) if i < len(widths) else None
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
-            if oneway and gap is not None:                   # one side of a road mapped as 2 ways
+            if place is not None:                            # OSM placement: from where the line lies
+                off_m = place - (run + w_each[i] / 2.0)
+            elif oneway and gap is not None:                 # one side of a road mapped as 2 ways
                 off_m = side_sign * (run + w_each[i] / 2.0 - gap / 2.0)
             elif oneway:                                     # one-way: lanes centered on the carriageway
                 off_m = half - (run + w_each[i] / 2.0)
