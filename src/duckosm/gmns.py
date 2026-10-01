@@ -128,24 +128,31 @@ def _placement(value, w_each):
 
 
 def _chain_runs(info):
-    """Runs of pieces (docs/design/gmns_lane_runs.md): consecutive edges of one OSM way and direction,
-    joined end to start, with the same ``oneway`` and lane widths, each joint one-to-one. ``info``:
-    ``edge_id -> (osm_id, is_reverse, source, target, oneway, lane widths)``. Returns
-    ``(runs, where)``: the runs as edge lists in order, and ``edge_id -> (run index, position)``."""
+    """Runs of pieces (docs/design/gmns_lane_runs.md): consecutive edges joined end to start, with the
+    same ``oneway`` and lane widths, that are one road: pieces of one OSM way and direction, pieces of
+    a roundabout (OSM draws one as several ways), or a way going on into another way of the same
+    name straight ahead (within 30 degrees). Each joint one-to-one. ``info``: ``edge_id -> (osm_id,
+    is_reverse, source, target, oneway, lane widths, name, roundabout, heading in, heading out)``.
+    Returns ``(runs, where)``: the runs as edge lists in order, ``edge_id -> (run index, position)``."""
     from collections import Counter, defaultdict
 
-    by_key, nxt = defaultdict(list), {}
-    for e, (osm, rev, *_rest) in info.items():
-        by_key[(osm, rev)].append(e)
-    for es in by_key.values():
-        at_src = defaultdict(list)
-        for e in es:
-            at_src[info[e][2]].append(e)
-        for e in es:
-            _, _, _, tgt, ow, w = info[e]
-            c = [f for f in at_src.get(tgt, []) if f != e and info[f][4] == ow and info[f][5] == w]
-            if len(c) == 1:
-                nxt[e] = c[0]
+    at_src, nxt = defaultdict(list), {}
+    for e, d in info.items():
+        at_src[d[2]].append(e)
+
+    def one_road(a, b):
+        ea, eb = info[a], info[b]
+        if ea[4] != eb[4] or ea[5] != eb[5]:
+            return False
+        if (ea[0], ea[1]) == (eb[0], eb[1]) or (ea[7] and eb[7]):
+            return True
+        turn = abs((eb[8] - ea[9] + 180) % 360 - 180)
+        return bool(ea[6]) and ea[6] == eb[6] and turn < 30
+
+    for e, d in info.items():
+        c = [f for f in at_src.get(d[3], []) if f != e and one_road(e, f)]
+        if len(c) == 1:
+            nxt[e] = c[0]
     taken = Counter(nxt.values())
     nxt = {e: f for e, f in nxt.items() if taken[f] == 1}
     prv = {f: e for e, f in nxt.items()}
@@ -918,7 +925,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         "AND table_name = 'edges' AND column_name = 'oneway'", [mode]).fetchone()[0] > 0
     oneway_sel = "e.oneway" if has_oneway else "false"      # older/synthetic edges: treat as two-way
     rows = con.execute(f"""SELECT e.edge_id, e.is_reverse, e.lanes, e.length_m, e.source,
-      {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id
+      {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name
       FROM s.{mode}.edges e {raw_join}""").fetchall()
     side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
 
@@ -936,13 +943,27 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
 
     # runs of pieces (docs/design/gmns_lane_runs.md): one road is a chain of edges of one OSM way;
     # its lanes are placed once for the whole run (pairing, placement, the offset curve)
+    def headings(wkt):
+        """The way's heading at its start and at its end, degrees, from its first / last 2 points."""
+        try:
+            pts = [tuple(map(float, p.split())) for p in wkt[wkt.index("(") + 1:wkt.rindex(")")].split(",")]
+        except (ValueError, AttributeError):
+            return 0.0, 0.0
+        if len(pts) < 2:
+            return 0.0, 0.0
+        k = math.cos(math.radians(pts[0][1]))
+        h = lambda p, q: math.degrees(math.atan2(q[1] - p[1], (q[0] - p[0]) * k))  # noqa: E731
+        return h(pts[0], pts[1]), h(pts[-2], pts[-1])
+
     info, w_of, place_of = {}, {}, {}
-    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, name in rows:
         tags = tags or {}
         w_each = lane_widths(tags, lanes, is_rev)[2]
         w_of[edge_id] = w_each
         place_of[edge_id] = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or side_sign < 0) else None
-        info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway), tuple(w_each))
+        h0, h1 = headings(wkt) if wkt else (0.0, 0.0)
+        info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway), tuple(w_each), name,
+                         tags.get("junction") == "roundabout", h0, h1)
     runs, where = _chain_runs(info)
     wkt_of = {r[0]: r[6] for r in rows}
     merged = {}                                  # run index -> the run's line, lon/lat wkt
@@ -967,7 +988,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
 
     def offsets(edge_id):
         """Each lane's offset from the road line (left +), the rule per edge as before."""
-        w_each, (_, _, _, _, oneway, _) = w_of[edge_id], info[edge_id]
+        w_each, oneway = w_of[edge_id], info[edge_id][4]
         half, gap, place, out, run = sum(w_each) / 2.0, gaps.get(edge_id), run_place[where[edge_id][0]], [], 0.0
         for w in w_each:
             if place is not None:                            # OSM placement: from where the line lies
@@ -996,7 +1017,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         con.unregister("_runs_df")
 
     lane_rows, curb_rows = [], []
-    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name in rows:
         tags = tags or {}
         turns, widths, w_each = lane_widths(tags, lanes, is_rev)
         bikes = _split(pick(tags, "bicycle:lanes", is_rev))

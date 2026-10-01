@@ -23,9 +23,12 @@ stubs whose edge lines fan out like spokes (the Tunnel Dorsale roundabout).
 
 ## Proposal
 
-**1. Runs.** Before placing lanes, chain the edges into runs: consecutive edges of the same OSM way
-and direction (`osm_id`, `is_reverse`), joined end to start, with the same lane count and the same
-`oneway`. A run is one road.
+**1. Runs.** Before placing lanes, chain the edges into runs: consecutive edges joined end to start,
+with the same lane widths and the same `oneway`, that are one road: pieces of the same OSM way and
+direction (`osm_id`, `is_reverse`); pieces of a **roundabout** (`junction=roundabout`: OSM draws one
+as several ways, Monaco's Charles III roundabout is 13 pieces across 11 ways, so Kaveh still saw
+wedges there); or a way going on into another way of the **same name** straight ahead (within 30°).
+Each joint must be one-to-one. A run is one road.
 
 **2. One placement per run.**
 - Pairing (`_paired_gaps`) is decided for the run from its whole length, not per piece, so a 4 m
@@ -52,8 +55,8 @@ shape only. Lane routing, lanestyle and the meso / micro networks read the same 
 | | before | after |
 |---|---|---|
 | lane continuations along one road needing a connector or leaving a gap | 678 | 10 (9 at junctions, 1 offset) |
-| lanes shorter than 2 m | 288 | 87 (53 on links under 2 m, 32 on 2-4 m links, 2 at the 2 m floor) |
-| connectors | 2,866 | 2,144 |
+| lanes shorter than 2 m | 288 | 77 |
+| connectors | 2,866 | 1,827 (2,144 with same-way runs only) |
 
 One more rule turned out necessary: a lane that goes on **and** turns (lane 2 straight on, a right
 turn from it too) was still cut at its end for the turn's S-curve. A kept end stays put; the turn's
