@@ -72,6 +72,10 @@ from duckosm import route                                       # needs the rout
 r = route(con, a, b)                                            # over legal turns; mode="walking" too
 r["time_s"], r["length_m"], r["edges"]
 
+from duckosm import route_points                                # between two points, exact:
+r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480), radius_m=50)   # (lon, lat)
+r["time_s"], r["start"]["access_m"]                             # walk to the road + partial edges
+
 # where you can go next from an edge
 con.sql(f"SELECT to_edge FROM driving.edge_graph WHERE from_edge = {a}").show()
 ```

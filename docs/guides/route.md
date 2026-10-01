@@ -64,6 +64,29 @@ route(con, from_edge, to_edge)["time_s"]                            # 287 s, 3.7
 
 Each mode has its own edges: for `mode="walking"`, take the ids from `walking.edges`.
 
+## Between two points
+
+`route_points` routes from one place to another, not from edge to edge. Each point joins the
+network at its nearest road point within `radius_m`; the straight walk to it costs walking time
+(`access_kmh`), whatever the mode; and the first and last edges count only the part you travel:
+starting in the middle of a 300 m street costs 150 m of it.
+
+```python
+from duckosm import route_points
+
+r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480), mode="driving",   # (lon, lat)
+                 radius_m=50, access_kmh=4.5)
+r["time_s"], r["length_m"]        # door to door: the walks to the road + the parts of edges used
+r["start"]                        # {point, road_point, edge_id, fraction, access_m, access_s}
+r["path"][0]["from_fraction"]     # where on the first edge the trip begins (0 to 1)
+```
+
+Every road of the mode within the radius is tried, both directions of a two-way street, so a
+point between a street and a footpath takes whichever gives the faster trip. A point with no road
+within the radius raises `ValueError` ("no road within 50 m of the start"). For walk → drive →
+walk, `route_multimodal_points(con, a, b, radius_m=50)` does the same over the `mm` tables (below).
+Design: [point routing](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/point_routing.md).
+
 ## Across modes (walk → drive → walk)
 
 `duckosm multimodal` joins the walking, cycling and driving networks at the junctions they share,

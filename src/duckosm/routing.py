@@ -392,7 +392,8 @@ _HUB_MODE = "walking"
 
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
-                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None):
+                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None,
+                     _virtual=None):
     """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
 
     Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
@@ -427,6 +428,11 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
 
     ``None`` if the two nodes aren't connected (e.g. no transfers → the layers are disconnected).
     Raises ``ValueError`` if an endpoint isn't present in its mode's layer.
+
+    ``_virtual`` (private, :func:`duckosm.point_routing.route_multimodal_points`): extra arcs
+    ``(mode, from_node, to_node, edge_id, cost_s, fraction, access_s)`` from / to temporary nodes
+    (a point beside a road): ``cost_s`` is the part ``fraction`` of the edge, ``access_s`` the walk
+    off the road; the result then also has ``access_s``.
     """
     import heapq
 
@@ -444,7 +450,7 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
             f"SELECT mode, source, target, edge_id, cost_s FROM {schema}.edges").fetchall():
         if allow is not None and mode not in allow:
             continue
-        adj.setdefault((mode, s), []).append((t, eid, float(cost) if cost is not None else 0.0))
+        adj.setdefault((mode, s), []).append((t, eid, float(cost) if cost is not None else 0.0, 1.0, 0.0))
         nm = nodes_by_mode.setdefault(mode, set())
         nm.add(s)
         nm.add(t)
@@ -455,9 +461,14 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
             continue
         tadj.setdefault((fm, nid), []).append((tm, float(cost) if cost is not None else 0.0, kind))
 
-    if src_node not in nodes_by_mode.get(start_mode, set()):
+    extra = set()
+    for mode, s, t, eid, cost, frac, acc in _virtual or ():   # a point beside a road (point_routing)
+        if allow is None or mode in allow:
+            adj.setdefault((mode, s), []).append((t, eid, cost, frac, acc))
+            extra.update((s, t))
+    if src_node not in nodes_by_mode.get(start_mode, set()) and src_node not in extra:
         raise ValueError(f"src node {src_node} not in the '{start_mode}' layer of {schema}.edges")
-    if dst_node not in nodes_by_mode.get(end_mode, set()):
+    if dst_node not in nodes_by_mode.get(end_mode, set()) and dst_node not in extra:
         raise ValueError(f"dst node {dst_node} not in the '{end_mode}' layer of {schema}.edges")
 
     # --- Dijkstra over states (node_id, mode, phase) --------------------------------------------
@@ -477,12 +488,12 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
             goal = state
             break
         # intra-mode edges — never change mode/phase
-        for nbr, eid, cost in adj.get((mode, node), ()):
+        for nbr, eid, cost, frac, acc in adj.get((mode, node), ()):
             ns = (nbr, mode, phase)
-            nd = d + cost
+            nd = d + cost + acc
             if nd < dist.get(ns, INF):
                 dist[ns] = nd
-                prev[ns] = (state, ("edge", eid, mode, cost))
+                prev[ns] = (state, ("edge", eid, mode, cost, frac, acc))
                 heapq.heappush(pq, (nd, nbr, mode, phase))
         # inter-mode transfers — same node, change mode (+ enforce the walk* veh* walk* phase)
         for tm, cost, kind in tadj.get((mode, node), ()):
@@ -519,18 +530,21 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     edges_seq: list = []                 # (mode, edge_id) in order
     legs: list = []
     transfers: list = []
+    access_s = 0.0
     nodes: list = [state_path[0][0]]
     for b in state_path[1:]:
         a, step = prev[b]
         if a[0] != nodes[-1]:
             nodes.append(a[0])
         if step[0] == "edge":
-            _, eid, mode, cost = step
+            _, eid, mode, cost, frac, acc = step
             edges_seq.append((mode, eid))
             if not legs or legs[-1]["mode"] != mode:
-                legs.append({"mode": mode, "edges": [], "time_s": 0.0})
+                legs.append({"mode": mode, "edges": [], "time_s": 0.0, "_fr": []})
             legs[-1]["edges"].append(eid)
+            legs[-1]["_fr"].append(frac)
             legs[-1]["time_s"] += cost
+            access_s += acc
         else:
             _, fm, tm, cost, kind = step
             transfers.append({"node_id": a[0], "from_mode": fm, "to_mode": tm,
@@ -551,17 +565,23 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     length_m = 0.0
     for leg in legs:
         leg["path"] = []
-        for eid in leg["edges"]:
+        for eid, frac in zip(leg["edges"], leg.pop("_fr"), strict=True):
             r = detail.get((leg["mode"], eid))
             if r is None:
                 continue
-            leg["path"].append({"edge_id": eid, "name": r[2], "highway": r[3],
-                                "length_m": r[4], "cost_s": r[5], "geometry": r[6]})
+            row = {"edge_id": eid, "name": r[2], "highway": r[3],
+                   "length_m": r[4], "cost_s": r[5], "geometry": r[6]}
+            if frac != 1.0:                  # part of an edge (a point beside a road)
+                row.update(fraction=frac, length_m=(r[4] or 0.0) * frac, cost_s=(r[5] or 0.0) * frac)
+            leg["path"].append(row)
             if r[4] is not None:
-                length_m += r[4]
+                length_m += r[4] * frac
 
-    time_s = sum(leg["time_s"] for leg in legs) + sum(t["cost_s"] for t in transfers)
+    time_s = sum(leg["time_s"] for leg in legs) + sum(t["cost_s"] for t in transfers) + access_s
     logger.info(f"route_multimodal: {src_node} -> {dst_node}: {len(legs)} leg(s), "
                 f"{len(transfers)} transfer(s), {time_s:.1f}s")
-    return {"time_s": time_s, "length_m": length_m, "edges": edges_seq, "legs": legs,
-            "transfers": transfers, "nodes": nodes}
+    out = {"time_s": time_s, "length_m": length_m, "edges": edges_seq, "legs": legs,
+           "transfers": transfers, "nodes": nodes}
+    if _virtual:
+        out["access_s"] = access_s
+    return out
