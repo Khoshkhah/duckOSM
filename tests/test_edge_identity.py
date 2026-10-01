@@ -33,12 +33,12 @@ def _build(ways, nodes):
     con.execute("""CREATE TABLE ways(osm_id BIGINT, highway VARCHAR, name VARCHAR,
         maxspeed VARCHAR, oneway BOOLEAN, lanes_fwd INTEGER, lanes_bwd INTEGER,
         surface VARCHAR, access VARCHAR, junction VARCHAR, layer VARCHAR, bridge VARCHAR,
-        tunnel VARCHAR, service VARCHAR)""")
+        tunnel VARCHAR, service VARCHAR, bus_back BOOLEAN DEFAULT FALSE)""")
     con.execute("CREATE TABLE way_nodes(way_id BIGINT, node_id BIGINT, seq INTEGER)")
     for osm_id, highway, oneway, refs in ways:
         con.execute("INSERT INTO raw.ways VALUES (?, ?)", [osm_id, refs])
         con.execute("INSERT INTO ways VALUES (?, ?, NULL, NULL, ?, 1, 1, NULL, NULL, "
-                    "NULL, NULL, NULL, NULL, NULL)", [osm_id, highway, oneway])
+                    "NULL, NULL, NULL, NULL, NULL, FALSE)", [osm_id, highway, oneway])
         con.executemany("INSERT INTO way_nodes VALUES (?, ?, ?)",
                         [(osm_id, n, i) for i, n in enumerate(refs)])
     # dummy tables the simplifier finalization replaces

@@ -51,6 +51,13 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     extract(["--source", str(tmp_path / "monaco.duckdb"), "--db", str(part),
              "--boundary", str(ROOT / "data" / "sample" / "monaco.geojson")])
     assert _boundary_geojson(duckdb.connect(str(part), read_only=True)) is not None
+    # a bus lane against a one-way street is in driving, with the private roads: Boulevard des Moulins
+    # (way 166009794) is one-way for cars, its reverse a bus lane (docs/design/bus_only_edges.md)
+    lane = 1964280132851416298                                   # that reverse; the same id in cycling
+    assert con.execute(f"SELECT access FROM driving.private_edges WHERE edge_id = {lane}").fetchone() == ("bus",)
+    assert con.execute(f"SELECT count(*) FROM driving.edges WHERE edge_id = {lane}").fetchone()[0] == 0
+    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge)").fetchone()[0] == 0
+    assert con.execute(f"SELECT count(*) FROM cycling.edges WHERE edge_id = {lane}").fetchone()[0] == 1
     # `duckosm info` and `way --json`, the commands an agent reads first
     import json
     from click.testing import CliRunner

@@ -617,16 +617,19 @@ class DuckOSM:
         FunctionalType(self.con, mode=mode).run()
 
     def _split_private(self) -> None:
-        """Move the mode's private roads out of `edges` into `private_edges` (same columns), so
-        routing, the graph of legal turns and every export only see roads you may use; the maps
-        still draw them. See docs/design/access_private.md."""
-        self.con.execute("CREATE OR REPLACE TABLE private_edges AS SELECT * FROM edges WHERE access = 'private'")
-        n = self.con.execute("SELECT count(*) FROM private_edges").fetchone()[0]
+        """Move the roads you may not use out of `edges` into `private_edges` (same columns):
+        private roads, and in driving the bus-only roads and bus lanes (access 'bus'). Routing, the
+        graph of legal turns and every export then only see roads you may use; the maps still draw
+        them. See docs/design/access_private.md and docs/design/bus_only_edges.md."""
+        self.con.execute("CREATE OR REPLACE TABLE private_edges AS SELECT * FROM edges "
+                         "WHERE access IN ('private', 'bus')")
+        n, n_bus = self.con.execute("SELECT count(*), count(*) FILTER (WHERE access = 'bus') "
+                                    "FROM private_edges").fetchone()
         if n:
-            self.con.execute("DELETE FROM edges WHERE access = 'private'")
+            self.con.execute("DELETE FROM edges WHERE access IN ('private', 'bus')")
             self.con.execute("DELETE FROM nodes WHERE node_id NOT IN "
                              "(SELECT source FROM edges UNION SELECT target FROM edges)")
-        logger.info(f"  {n:,} private edges moved to private_edges")
+        logger.info(f"  {n:,} edges moved to private_edges ({n_bus:,} for buses only)")
 
     def _mark_dismount(self) -> None:
         """Flag cycling edges that are walked, not ridden (dismount column)."""

@@ -26,7 +26,7 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     import roadstyle as rs
     from shapely import wkt as _wkt
 
-    from duckosm.viz import BASEMAP_LAYERS, _boundary_geojson, private_roads_js
+    from duckosm.viz import BASEMAP_LAYERS, _boundary_geojson, restricted_roads_js
 
     def has(schema, table):
         return con.execute("SELECT count(*) FROM information_schema.tables "
@@ -41,19 +41,20 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     if not modes:
         raise ValueError(f"no mode with edges + edge_graph in the db (present: {present or 'none'})")
 
-    # One map feature per edge_id: the same id in several modes is the same stretch of road. Private
-    # roads (private_edges) are drawn too, but they are in no graph: never snapped to, never routed.
-    cols = lambda m, private: (  # noqa: E731
+    # One map feature per edge_id: the same id in several modes is the same stretch of road. Roads you
+    # may not use (private_edges: private, or for buses only) are drawn too, but they are in no graph:
+    # never snapped to, never routed. `access` says which (NULL = routable in some mode).
+    cols = lambda m, access: (  # noqa: E731
         f"SELECT edge_id, source, target, COALESCE(name, '') AS name, highway, bridge, tunnel, layer, "
         f"length_m, ST_AsText(geometry) AS wkt, {'junction' if has_col(m, 'junction') else 'NULL'} AS junction, "
-        f"{private} AS private")
+        f"{access} AS access")
     union = " UNION ALL ".join(
         [f"{cols(m, 'NULL')} FROM {m}.edges" for m in modes]
-        + [f"{cols(m, chr(39) + 'yes' + chr(39))} FROM {m}.private_edges" for m in modes if has(m, "private_edges")])
+        + [f"{cols(m, 'access')} FROM {m}.private_edges" for m in modes if has(m, "private_edges")])
     rows = con.execute(
         f"SELECT edge_id, any_value(source), any_value(target), any_value(name), any_value(highway), "
         f"any_value(bridge), any_value(tunnel), any_value(layer), any_value(length_m), any_value(wkt), "
-        f"any_value(junction), CASE WHEN count(*) FILTER (WHERE private IS NULL) = 0 THEN 'yes' END "
+        f"any_value(junction), CASE WHEN count(*) FILTER (WHERE access IS NULL) = 0 THEN any_value(access) END "
         f"FROM ({union}) GROUP BY edge_id ORDER BY edge_id").fetchall()
     if len(rows) > WARN_EDGES:
         logger.warning(f"route-map: {len(rows):,} edges make a heavy page; clip an area first "
@@ -113,17 +114,17 @@ def write_route_map(con, out, modes=None, basemap="osm", name="network"):
     g = gpd.GeoDataFrame(
         {"k": list(range(len(rows))), "edge_id": [str(r[0]) for r in rows], "name": [r[3] for r in rows],
          "highway": [r[4] for r in rows], "bridge": [r[5] for r in rows], "tunnel": [r[6] for r in rows],
-         "layer": [r[7] for r in rows], "private": [r[11] for r in rows]},
+         "layer": [r[7] for r in rows], "access": [r[11] for r in rows]},
         geometry=[_wkt.loads(r[9]) for r in rows], crs="EPSG:4326")
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
-        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id", "private"],
-        road_popup=["name", "edge_id", "highway", "bridge", "tunnel", "private"],
+        g, palette="mono", basemap=basemap, basemaps=layers, tooltip=["name", "highway", "edge_id", "access"],
+        road_popup=["name", "edge_id", "highway", "bridge", "tunnel", "access"],
         name=f"{name}: route planner",
         boundary=_boundary_geojson(con))
     html = m.html.replace("</body>", _panel(data) + "</body>", 1)
-    if (g["private"] == "yes").any():                    # private roads: tinted, and their own toggle
-        html = html.replace("</body>", private_roads_js("#ecd9c6") + "</body>", 1)
+    if g["access"].notna().any():                        # roads you may not use: tinted + own toggle
+        html = html.replace("</body>", restricted_roads_js("#ecd9c6", "#c9d8ec") + "</body>", 1)
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)

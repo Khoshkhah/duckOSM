@@ -901,7 +901,8 @@ class GraphSimplifier(BaseProcessor):
                 -- Reverse edge carries the backward lane count.
                 w.lanes_bwd AS lanes,
                 sef.surface,
-                sef.access,
+                -- the reverse of a one-way way exists only as its bus lane (bus_back): access 'bus'
+                CASE WHEN sef.oneway THEN 'bus' ELSE sef.access END AS access,
                 sef.junction,
                 sef.layer,
                 sef.bridge,
@@ -916,7 +917,7 @@ class GraphSimplifier(BaseProcessor):
             JOIN ways w ON w.osm_id = sef.osm_id
             -- Two-way roads get a reverse edge. oneway is the single source of truth
             -- (roundabouts were already normalised to oneway=TRUE upstream).
-            WHERE NOT sef.oneway
+            WHERE NOT sef.oneway OR w.bus_back
         """)
         
         # 3. Replace the main edges table

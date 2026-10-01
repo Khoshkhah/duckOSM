@@ -57,13 +57,14 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
         select += ", oneway"
     select += ", ST_AsText(geometry) AS wkt"
 
-    # Every road, incl. highway='service', lives in the single edges table; private roads (in
-    # private_edges: never routable) are drawn too, greyed out (docs/design/access_private.md).
+    # Every road, incl. highway='service', lives in the single edges table; roads you may not use
+    # (private_edges: private, or for buses only; never routable) are drawn too, in their own colour
+    # (docs/design/access_private.md, bus_only_edges.md). `access` says which; NULL = routable.
     has_private = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = ? "
                               "AND table_name = 'private_edges'", [mode]).fetchone()[0] > 0
-    sql = f"SELECT {select}, NULL AS private FROM {mode}.edges"
+    sql = f"SELECT {select}, NULL AS access FROM {mode}.edges"
     if has_private:
-        sql += f" UNION ALL SELECT {select}, 'yes' AS private FROM {mode}.private_edges"
+        sql += f" UNION ALL SELECT {select}, access FROM {mode}.private_edges"
     try:
         df = con.execute(sql).df()
     except Exception as e:
@@ -82,8 +83,8 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     layers = [basemap] + [b for b in BASEMAP_LAYERS if b != basemap]
     m = rs.render_edges(
         g, theme="light", basemap=basemap, basemaps=layers,
-        tooltip=["edge_id", *idcols, "highway", "name", *info, "private"], copy_field="edge_id",
-        road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "private"],
+        tooltip=["edge_id", *idcols, "highway", "name", *info, "access"], copy_field="edge_id",
+        road_popup=["name", "edge_id", "edge_ref", "highway", "lanes", "bridge", "tunnel", "access"],
         name=f"{name} ({mode})", legend=True,
         # view_3d builds the extruded bridge decks the in-map 2D/3D toggle needs; pitch=0 still
         # opens the map flat.
@@ -95,52 +96,64 @@ def render_network(con, mode, name, basemap="voyager", out_dir="reports", arrows
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{name}_{mode}_network.html"
     html = m.html
-    if (df["private"] == "yes").any():                   # private roads: grey, and their own toggle
-        html = html.replace("</body>", private_roads_js() + "</body>", 1)
+    if df["access"].notna().any():                       # roads you may not use: own colour + toggle
+        html = html.replace("</body>", restricted_roads_js() + "</body>", 1)
     path.write_text(html, encoding="utf-8")
     logger.info(f"  Viz: {path}")
     return path
 
 
-# Private roads (private_edges, never routable) on a viz / route map: painted `color` on every road
-# layer (again after each rsColor, which rebuilds the road colours), and a "Private roads" row in
-# roadstyle's roads box (after Bridges / Tunnels) that hides and shows them.
-_PRIVATE_ROADS_JS = """<script>
+# Roads you may not use (private_edges: private roads, and in driving bus-only roads and bus lanes)
+# on a viz / route map: painted in their own colour on every road layer (again after each rsColor,
+# which rebuilds the road colours), and a row each in roadstyle's roads box (after Bridges / Tunnels),
+# "Private roads" and "Bus lanes", that hides and shows them. Read from the `access` property.
+_RESTRICTED_ROADS_JS = """<script>
 (function () {
-  var GREY = "__COLOR__", IS_PRIV = ["==", ["get", "private"], "yes"];
+  var KINDS = [["private", "__PRIVATE__", " Private roads", "dk-flt-private"],
+               ["bus", "__BUS__", " Bus lanes", "dk-flt-bus"]];
+  var is = function (v) { return ["==", ["get", "access"], v]; };
   function paint() {
     map.getStyle().layers.forEach(function (l) {
       if (l.type !== "line" || !/^roads-.*fill/.test(l.id)) return;
       var c = map.getPaintProperty(l.id, "line-color");
-      if (c[0] === "case" && JSON.stringify(c[1]) === JSON.stringify(IS_PRIV)) return;   // painted already
-      map.setPaintProperty(l.id, "line-color", ["case", IS_PRIV, GREY, c]);
+      if (c[0] === "case" && JSON.stringify(c[1]) === JSON.stringify(is("private"))) return;   // painted already
+      map.setPaintProperty(l.id, "line-color", ["case", is("private"), KINDS[0][1], is("bus"), KINDS[1][1], c]);
     });
   }
   (function init() {
     var body = document.querySelector(".flt-body");
     if (!(window.map && window.rsQuery && map.isStyleLoaded() && body)) return setTimeout(init, 200);
-    var priv = rsQuery(function (p) { return p.private === "yes"; });
-    if (!priv.length) return;
-    var hide = {}; priv.forEach(function (i) { hide[i] = 1; });
-    var rest = rsQuery(function () { return true; }).filter(function (i) { return !hide[i]; });
+    var ids = {}, hidden = {}, all = rsQuery(function () { return true; });
+    KINDS.forEach(function (k) { ids[k[0]] = rsQuery(function (p) { return p.access === k[0]; }); });
+    if (!ids.private.length && !ids.bus.length) return;
     paint();
     document.addEventListener("rs:colorchange", paint);
-    var lab = document.createElement("label"), cb = document.createElement("input"), sw = document.createElement("span");
-    if (!body.querySelector(".flt-grade")) lab.style.cssText = "margin-top:4px;padding-top:4px;border-top:1px solid #ddd";
-    cb.type = "checkbox"; cb.checked = true; cb.id = "dk-flt-private";
-    cb.onchange = function () { rsFilter(cb.checked ? null : rest); };
-    sw.className = "flt-sw"; sw.style.background = GREY;
-    lab.appendChild(cb); lab.appendChild(sw); lab.appendChild(document.createTextNode(" Private roads"));
-    body.appendChild(lab);
+    function apply() {
+      var off = {};
+      KINDS.forEach(function (k) { if (hidden[k[0]]) ids[k[0]].forEach(function (i) { off[i] = 1; }); });
+      rsFilter(Object.keys(off).length ? all.filter(function (i) { return !off[i]; }) : null);
+    }
+    var first = !body.querySelector(".flt-grade");
+    KINDS.forEach(function (k) {
+      if (!ids[k[0]].length) return;
+      var lab = document.createElement("label"), cb = document.createElement("input"), sw = document.createElement("span");
+      if (first) { lab.style.cssText = "margin-top:4px;padding-top:4px;border-top:1px solid #ddd"; first = false; }
+      cb.type = "checkbox"; cb.checked = true; cb.id = k[3];
+      cb.onchange = function () { hidden[k[0]] = !cb.checked; apply(); };
+      sw.className = "flt-sw"; sw.style.background = k[1];
+      lab.appendChild(cb); lab.appendChild(sw); lab.appendChild(document.createTextNode(k[2]));
+      body.appendChild(lab);
+    });
   })();
 })();
 </script>
 """
 
 
-def private_roads_js(color="#c8c8c8"):
-    """The <script> for private roads (see above), painting them in ``color``."""
-    return _PRIVATE_ROADS_JS.replace("__COLOR__", color)
+def restricted_roads_js(private="#c8c8c8", bus="#9db8d9"):
+    """The <script> for roads you may not use (see above): private ones in ``private``, bus-only
+    ones in ``bus``."""
+    return _RESTRICTED_ROADS_JS.replace("__PRIVATE__", private).replace("__BUS__", bus)
 
 
 def _boundary_geojson(con):

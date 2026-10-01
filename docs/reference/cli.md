@@ -124,7 +124,7 @@ duckosm info [OPTIONS] DB
 $ duckosm info monaco.duckdb
 monaco.duckdb  (built 2026-10-01 18:20, duckOSM 0.1.0; time zone Europe/Monaco)
 mode      edges  nodes  private_edges     km  edge_graph  turn_restrictions
-driving   2,765  1,719            196   92.6       4,953                 38
+driving   2,765  1,719            214   92.6       4,953                 38
 walking  10,952  4,116            154  244.1      32,476                  -
 cycling  10,274  4,151            133  245.5      28,851                  -
 also: raw (OSM data), features (10 layers), mm (across modes), boundary

@@ -97,7 +97,8 @@ class GraphBuilder(BaseProcessor):
                 -- Reverse edge carries the backward lane count.
                 w.lanes_bwd AS lanes,
                 e.surface,
-                e.access,
+                -- the reverse of a one-way way exists only as its bus lane (bus_back): access 'bus'
+                CASE WHEN e.oneway THEN 'bus' ELSE e.access END AS access,
                 e.junction,
                 e.node_count,
                 e.length_m,
@@ -108,5 +109,5 @@ class GraphBuilder(BaseProcessor):
             JOIN ways w ON w.osm_id = e.osm_id
             -- Two-way roads get a reverse edge. oneway is the single source of truth
             -- (roundabouts were already normalised to oneway=TRUE upstream).
-            WHERE NOT e.oneway
+            WHERE NOT e.oneway OR w.bus_back
         """)

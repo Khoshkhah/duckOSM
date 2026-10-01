@@ -44,7 +44,7 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `oneway` | BOOLEAN | TRUE when the edge has no reverse twin of the same way. Never NULL. [One-way roads](../concepts/networks.md#one-way-roads) |
 | `lanes` | INTEGER | lanes in this edge's direction. Never NULL, except on connector edges (`osm_id < 0`). [Lanes](../concepts/networks.md#lanes) |
 | `surface` | VARCHAR | the OSM `surface` tag |
-| `access` | VARCHAR | the mode's access: the value of its most specific access tag (driving: `motorcar`, `motor_vehicle`, `vehicle`, `access`; walking: `foot`, `access`; cycling: `bicycle`, `vehicle`, `access`). NULL when none is tagged. Never `private`: those edges are in `private_edges`. [Access](../concepts/networks.md#access-private-and-forbidden-roads) |
+| `access` | VARCHAR | the mode's access: the value of its most specific access tag (driving: `motorcar`, `motor_vehicle`, `vehicle`, `access`; walking: `foot`, `access`; cycling: `bicycle`, `vehicle`, `access`). NULL when none is tagged. Never `private` or `bus`: those edges are in `private_edges`. [Access](../concepts/networks.md#access-private-and-forbidden-roads) |
 | `junction` | VARCHAR | the OSM `junction` tag (`roundabout`, `circular`, …) |
 | `layer` | VARCHAR | the OSM `layer` tag; NULL is ground level |
 | `bridge` | VARCHAR | the OSM `bridge` tag (`yes`, `viaduct`, …) |
@@ -71,7 +71,9 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 
 ### `private_edges`
 
-The mode's private roads (`access` is `private`): built like `edges` and then moved out of it. They
+The roads the mode may not use, built like `edges` and then moved out of it: private roads
+(`access` is `private`) and, in driving, bus-only roads and bus lanes (`access` is `bus`; [bus
+lanes](../concepts/networks.md#access-private-and-forbidden-roads)). They
 are never routable: not in `edge_graph`, `turn_restrictions` or any export, and `nodes` holds only
 the ends of routable edges. The maps draw them, marked. [Access: private and forbidden roads](../concepts/networks.md#access-private-and-forbidden-roads).
 

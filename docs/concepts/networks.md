@@ -36,8 +36,9 @@ For each mode, the most specific access tag decides:
 
 | Its value | The road in that mode |
 |---|---|
-| `no` (driving also `agricultural`, `forestry`, `emergency`, `psv`) | **not there.** It stays in the other modes that may use it: a road tagged `motor_vehicle=no` is still walkable |
+| `no` (driving also `agricultural`, `forestry`, `emergency`) | **not there.** It stays in the other modes that may use it: a road tagged `motor_vehicle=no` is still walkable |
 | `private` | **visible, never routable**: in `<mode>.private_edges`, not in `edges` |
+| driving only: for buses only (below) | **visible, never routable**, like a private road: in `driving.private_edges` with `access = 'bus'` |
 | anything else (`yes`, `destination`, `delivery`, …) or none | a normal road |
 
 So `access=private` + `motor_vehicle=yes` is a normal road for driving, and `motor_vehicle=no` doesn't
@@ -48,11 +49,21 @@ with the same `edge_id` formula, then moved from `edges` to `private_edges`, whi
 columns except the H3 ones. The component filter doesn't prune `private_edges`. So routing, the graph of legal turns and every export use only roads you may use, and a
 road you can reach only through a private one is dropped with the
 [component filter](cleanup.md#component-filter). The maps still draw private roads, marked
-([Draw a map](../guides/draw-map.md)). Monaco:
+([Draw a map](../guides/draw-map.md)).
 
-| Mode | Routable edges | Private edges |
+**Bus lanes and bus-only roads** are cars' private roads too: in driving they are built, then moved to
+`private_edges` with `access = 'bus'`. A bus-only road is one with `highway=busway`, or whose driving
+access is `psv`, or `no` / `private` while `bus` or `psv` is `yes` / `designated` (`psv` means buses
+and taxis; both count as `bus`). A **bus lane against a one-way street** (`oneway=yes` with
+`oneway:bus=no` or `oneway:psv=no`) adds the reverse edge, as a bus lane: its `edge_id` is the same as
+that direction in cycling and walking. Monaco: 18 bus edges, among them the contraflow bus lane of
+Boulevard des Moulins.
+
+Monaco:
+
+| Mode | Routable edges | In `private_edges` |
 |---|---|---|
-| `driving` | 2,765 | 196 |
+| `driving` | 2,765 | 214 (196 private, 18 for buses) |
 | `walking` | 10,952 | 154 |
 | `cycling` | 10,274 | 133 |
 

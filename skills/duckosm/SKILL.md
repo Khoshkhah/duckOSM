@@ -46,7 +46,8 @@ holds every option.
   is two edges, one per direction.
 - `<mode>.nodes(node_id, geom)`, `<mode>.edge_graph(from_edge, to_edge, via_edge, cost)`: the legal turns
   (banned turns already removed); `driving.turn_restrictions`.
-- `<mode>.private_edges`: private roads (driveways, gated streets). The columns of `edges` without
+- `<mode>.private_edges`: private roads (driveways, gated streets) and, in driving, bus lanes and
+  bus-only roads (`access = 'bus'`). The columns of `edges` without
   the H3 ones; drawn
   on maps, never routed. They are not in `edges` or `edge_graph`.
 - `raw.nodes` / `raw.ways` / `raw.relations`: every OSM element with all its `tags` (a MAP), for

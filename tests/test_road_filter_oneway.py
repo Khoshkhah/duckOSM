@@ -100,7 +100,10 @@ def test_access_most_specific_tag_decides():
     res = {"highway": "residential"}
     assert _access("driving", {**res, "access": "no"}) == (False, None)
     assert _access("driving", {**res, "motor_vehicle": "no"}) == (False, None)
-    assert _access("driving", {**res, "access": "psv"}) == (False, None)            # bus-only
+    assert _access("driving", {**res, "access": "psv"}) == (True, "bus")            # bus-only: kept as 'bus'
+    assert _access("driving", {**res, "motor_vehicle": "no", "bus": "yes"}) == (True, "bus")
+    assert _access("driving", {"highway": "busway"}) == (True, "bus")
+    assert _access("driving", {**res, "access": "no", "bus": "no"}) == (False, None)  # closed to all
     assert _access("driving", {**res, "access": "private"}) == (True, "private")
     assert _access("driving", {**res, "access": "private", "motor_vehicle": "yes"}) == (True, "yes")
     assert _access("driving", {**res, "access": "no", "motorcar": "destination"}) == (True, "destination")
@@ -110,3 +113,23 @@ def test_access_most_specific_tag_decides():
     assert _access("cycling", {**res, "vehicle": "no"}) == (False, None)             # was ignored
     assert _access("cycling", {**res, "vehicle": "no", "bicycle": "yes"}) == (True, "yes")
     assert _access("cycling", {**res, "access": "private"}) == (True, "private")
+
+
+def test_bus_lane_against_a_one_way_street():
+    """docs/design/bus_only_edges.md: oneway=yes + oneway:bus=no marks the way bus_back (the build adds
+    its reverse as a bus lane); only in driving, only on a one-way way."""
+    def bus_back(mode, tags):
+        con = duckdb.connect()
+        con.execute("CREATE SCHEMA raw")
+        con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+        kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
+        con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2])")
+        RoadFilter(con, mode=mode)._create_ways_table()
+        return con.execute("SELECT bus_back FROM ways").fetchone()[0]
+    one = {"highway": "tertiary", "oneway": "yes"}
+    assert bus_back("driving", {**one, "oneway:bus": "no"}) is True
+    assert bus_back("driving", {**one, "oneway:psv": "no"}) is True
+    assert bus_back("driving", one) is False
+    assert bus_back("driving", {"highway": "tertiary", "oneway:bus": "no"}) is False    # two-way anyway
+    assert bus_back("cycling", {**one, "oneway:bus": "no"}) is False
+

@@ -7,8 +7,9 @@ from duckosm.processors.base import BaseProcessor
 
 # Access (docs/design/access_private.md): per mode, the most specific access tag decides. A value
 # in FORBIDDEN keeps the way out of that mode; 'private' keeps it, but the build moves it to
-# <mode>.private_edges (visible on maps, never routable).
-FORBIDDEN = {"driving": "'no', 'agricultural', 'forestry', 'emergency', 'psv'",
+# <mode>.private_edges (visible on maps, never routable). In driving, a road only buses (or taxis,
+# `psv`) may use is kept as 'bus' and moved there too (docs/design/bus_only_edges.md).
+FORBIDDEN = {"driving": "'no', 'agricultural', 'forestry', 'emergency'",
              "walking": "'no'", "cycling": "'no'"}
 
 
@@ -60,7 +61,7 @@ class RoadFilter(BaseProcessor):
                 'motorway', 'motorway_link', 'trunk', 'trunk_link',
                 'primary', 'primary_link', 'secondary', 'secondary_link',
                 'tertiary', 'tertiary_link', 'unclassified', 'residential',
-                'service', 'living_street', 'road',
+                'service', 'living_street', 'road', 'busway',      # busway: bus-only, see _access_expression
             ]
             road_list = ", ".join(f"'{h}'" for h in road_classes)
             mv = ("COALESCE(map_extract(tags, 'motorcar')[1], "
@@ -122,6 +123,8 @@ class RoadFilter(BaseProcessor):
 
         direction_expr = self._direction_expression()
         access_expr = self._access_expression()
+        bus_back_expr = (f"COALESCE({_tag('oneway:bus')} = 'no' OR {_tag('oneway:psv')} = 'no', FALSE)"
+                         if self.mode == "driving" else "FALSE")
         where_clause = f"({where_clause}) AND COALESCE({access_expr}, '') NOT IN ({FORBIDDEN[self.mode]})"
             
         self.execute(f"""
@@ -135,6 +138,8 @@ class RoadFilter(BaseProcessor):
                     -- Travel direction (mode-aware; see _direction_expression): 1 one-way as
                     -- drawn, -1 one-way against the drawing (OSM oneway=-1), 0 two-way.
                     {direction_expr} AS dir,
+                    -- driving: buses may also go against this one-way way (a contraflow bus lane)
+                    {bus_back_expr} AS bus_contra,
                     map_extract(tags, 'surface')[1] AS surface,
                     -- service subtag (driveway/parking_aisle/alley/...) — drives the
                     -- narrow-vs-wide service-road rendering, like openstreetmap-carto.
@@ -166,6 +171,9 @@ class RoadFilter(BaseProcessor):
                 maxspeed,
                 -- One-way flag as a boolean. Never NULL: two-way / untagged -> FALSE.
                 dir <> 0 AS oneway,
+                -- a one-way way whose reverse is a bus lane: the build adds that reverse edge as
+                -- access 'bus' (moved to private_edges, drawn but never routed)
+                dir <> 0 AND bus_contra AS bus_back,
                 surface,
                 service,
                 access,
@@ -211,7 +219,13 @@ class RoadFilter(BaseProcessor):
     def _access_expression(self) -> str:
         """The value of the most specific access tag for the mode (OSM's hierarchy), or NULL."""
         if self.mode == "driving":
-            return _most_specific("motorcar", "motor_vehicle", "vehicle", "access")
+            car = _most_specific("motorcar", "motor_vehicle", "vehicle", "access")
+            bus_ok = (f"({_tag('bus')} IN ('yes', 'designated') "
+                      f"OR {_tag('psv')} IN ('yes', 'designated'))")
+            # a road only buses (or taxis, psv) may use: 'bus', kept like a private road
+            return f"""CASE WHEN {_tag('highway')} = 'busway' OR {car} = 'psv'
+                                  OR ({car} IN ('no', 'private') AND {bus_ok}) THEN 'bus'
+                             ELSE {car} END"""
         if self.mode == "walking":
             return _most_specific("foot", "access")
         ride = _most_specific("bicycle", "vehicle", "access")

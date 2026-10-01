@@ -24,7 +24,7 @@ flowchart TB
         direction TB
         NET["<b>Network</b><br/>filter roads · OSM fixes · build edges · simplify and merge"]
         FIX["<b>Repair</b><br/>connect dangling paths · mark dismount edges"]
-        ATTR["<b>Attributes</b><br/>speeds · travel-time costs · walk / cycle type · private roads apart"]
+        ATTR["<b>Attributes</b><br/>speeds · travel-time costs · walk / cycle type · private and bus-only roads apart"]
         ROUTE["<b>Routing</b><br/>turn restrictions · edge graph of legal turns"]
         CHECK["<b>Clean and check</b><br/>drop disconnected pieces · H3 · indexes · validate"]
         NET --> FIX --> ATTR --> ROUTE --> CHECK
@@ -99,7 +99,7 @@ Config keys are shown with their default.
 | ② | Speeds | `options.process_speeds` (on) |
 | ② | Travel-time costs | `options.calculate_costs` (on) |
 | ② | Walk / cycle type | walking and cycling; `options.functional_types` (on) |
-| ② | Move private roads to `private_edges` | always; see [Access](networks.md#access-private-and-forbidden-roads) |
+| ② | Move private roads (and, in driving, bus-only roads and bus lanes) to `private_edges` | always; see [Access](networks.md#access-private-and-forbidden-roads) |
 | ② | Turn restrictions | driving only; `options.extract_restrictions` (on) |
 | ② | Edge graph | `options.build_graph` (on) |
 | ② | Component filter | a boundary is set, `build_graph` is on, and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
@@ -129,7 +129,7 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 | Filter roads | 1,126 OSM ways |
 | Build edges | 1,588 edges (one per way, plus the reverse of two-way ways; a closed way waits for the next step) |
 | Simplify and merge | 3,040 edges: ways split at junctions |
-| Private roads | 196 edges moved to `private_edges` |
+| Private roads | 214 edges moved to `private_edges` (18 of them for buses only) |
 | Turn restrictions | 38 restrictions mapped to edges |
 | Component filter | 2,765 edges: 79 edges in 15 small pieces dropped |
 
