@@ -82,14 +82,32 @@ def test_lane_detail_from_osm_tags(tmp_path):
 
 
 def test_movement_drops_immediate_uturn_and_types_turns(tmp_path):
-    con = _gmns(tmp_path)
-    # A->AR is the immediate reversal → excluded; A->B (turning north) kept and typed
+    """A->AR is the immediate reversal: dropped when A has another way on (B) and AR another way in
+    (C, a road from node 3 into node 2). A->B (turning north) is kept and typed."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    c = duckdb.connect(str(src))
+    c.execute("LOAD spatial; INSERT INTO driving.edges VALUES (77,3,2,102,'residential',NULL,1,false,110,30,"
+              "ST_GeomFromText('LINESTRING(18.07 59.31,18.07 59.32)'))")
+    c.execute(f"INSERT INTO driving.edge_graph VALUES (77,{AR},{AR},1.0)")
+    c.close()
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
     assert con.execute(
         f"SELECT count(*) FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()[0] == 0
     row = con.execute(
         f"SELECT type, ctrl_type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={B}").fetchone()
     assert row is not None and row[0] in ("left", "right")       # a real turn at the junction
     assert row[1] == "signal"                                    # node 2 is signalized
+
+
+def test_movement_keeps_the_uturn_that_is_the_only_way_in(tmp_path):
+    """Node 2: A arrives, AR and B leave, nothing else arrives. A can go on (to B), but the U-turn is
+    the only way into AR, so it's kept; without it AR's lanes can't be reached (Monaco, 10 links)."""
+    row = _gmns(tmp_path).execute(
+        f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()
+    assert row == ("uturn",)
 
 
 def test_movement_keeps_the_uturn_at_a_dead_end(tmp_path):
