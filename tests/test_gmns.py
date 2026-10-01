@@ -676,3 +676,90 @@ def test_arrows_without_their_exit_go_ahead(tmp_path):
                 tags={11: {"turn:lanes": "left|left|"}})
     assert mv[(11, 12)][:2] == (1, 2)            # lanes 1-2 (both left arrows) go on
     assert mv[(11, 13)][:2] == (3, 3)
+
+
+def _way_source(path, nodes, edges):
+    """A bare source db where edges share OSM ways: edges (id, a, b, lanes, osm_id, oneway)."""
+    con = duckdb.connect(str(path))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    for n, (x, y) in nodes.items():
+        con.execute(f"INSERT INTO driving.nodes VALUES ({n}, ST_Point({x}, {y}))")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
+                "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
+                "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
+    for osm in {e[4] for e in edges}:
+        con.execute(f"INSERT INTO raw.ways VALUES ({osm}, MAP{{}}, [])")
+    for e, a, b, n, osm, ow in edges:
+        (xa, ya), (xb, yb) = nodes[a], nodes[b]
+        con.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{osm},'primary','Main',{n},false,{str(ow).lower()},"
+                    f"100,50,ST_GeomFromText('LINESTRING({xa} {ya},{xb} {yb})'))")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    for e, a, b, *_ in edges:
+        for f, c, d, *_ in edges:
+            if b == c and e != f:
+                con.execute(f"INSERT INTO driving.edge_graph VALUES ({e},{f},{f},1.0)")
+    con.close()
+
+
+def _runs_gmns(tmp_path, nodes, edges):
+    src, out = tmp_path / "runs.duckdb", tmp_path / "runs_gmns.duckdb"
+    _way_source(src, nodes, edges)
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    return con
+
+
+def _m(con, sql):
+    """A distance query's result, degrees -> metres near 59.32 N isn't needed: use ST_Distance_Sphere."""
+    return con.execute(sql).fetchone()[0]
+
+
+def test_lane_is_one_curve_across_a_bend(tmp_path):
+    """docs/design/gmns_lane_runs.md: a way in two pieces with a 35-degree bend at node 2 (no other
+    road there). Offset per piece, the lanes left a wedge at the node; offset once per run, lane 11_1
+    ends exactly where 12_1 starts, and no connector is made."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.078, 59.3235)}
+    con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 2, 500, True), (12, 2, 3, 2, 500, True)])
+    for k in (1, 2):
+        gap = _m(con, f"SELECT ST_Distance_Sphere(ST_EndPoint(a.geom), ST_StartPoint(b.geom)) FROM gmns_driving.lane a, "
+                      f"gmns_driving.lane b WHERE a.lane_id='11_{k}' AND b.lane_id='12_{k}'")
+        assert gap < 0.05, gap
+    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector") == 0
+
+
+def test_short_piece_inherits_the_runs_pairing(tmp_path):
+    """A 2-lane one-way road in two pieces (10 m, then 4 m) with its opposite carriageway 4 m to the
+    left: the 4 m piece alone was too short to be paired and its lanes jumped back to centred. Paired
+    per run, lane 1 is at the same offset in both pieces."""
+    y, d = 59.32, 4.0 / 111320
+    nodes = {1: (18.0600, y), 2: (18.00018 + 18.0600, y), 3: (18.00025 + 18.0600, y), 5: (18.0603, y + d), 6: (18.0600, y + d)}
+    con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 2, 500, True), (12, 2, 3, 2, 500, True), (21, 5, 6, 2, 600, True)])
+    off = lambda lid: _m(con, f"SELECT (ST_Y(ST_LineInterpolatePoint(l.geom, 0.5)) - {y}) * 111320 FROM gmns_driving.lane l WHERE lane_id='{lid}'")
+    assert abs(off("11_1") - off("12_1")) < 0.05 and abs(off("11_2") - off("12_2")) < 0.05
+    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector WHERE from_lane_id LIKE '11_%' AND to_lane_id LIKE '12_%'") == 0
+
+
+def test_lane_going_on_through_a_junction_is_not_cut(tmp_path):
+    """Way 500 goes straight through node 2, where a 2-lane side road leaves south. Its lanes used to
+    be cut inside the side road's lanes and joined back by a connector; now they run through intact."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32), 6: (18.07, 59.31)}
+    con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 2, 500, True), (12, 2, 3, 2, 500, True), (14, 2, 6, 2, 700, True)])
+    end_x = _m(con, "SELECT ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE lane_id = '11_2'")
+    assert abs(end_x - 18.07) < 1e-7                              # not trimmed at the junction
+    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector WHERE from_lane_id LIKE '11_%' AND to_lane_id LIKE '12_%'") == 0
+    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_2' AND to_lane_id = '14_2'") == 1
+
+
+def test_trimming_keeps_at_least_two_metres(tmp_path):
+    """A 4 m piece of its own way between two junctions (a 1-lane road into a 2-lane piece into a
+    1-lane road, side roads at both nodes) used to be cut to a stub; it keeps at least 2 m."""
+    d4 = 4.0 / 111320 / 0.5101
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.07 + d4, 59.32), 4: (18.08, 59.32), 6: (18.07, 59.31), 7: (18.07 + d4, 59.31)}
+    con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 1, 500, True), (12, 2, 3, 2, 600, True), (13, 3, 4, 1, 700, True),
+                                        (16, 2, 6, 2, 800, True), (17, 3, 7, 2, 900, True)])
+    for k in (1, 2):
+        assert _m(con, f"SELECT ST_Length_Spheroid(ST_FlipCoordinates(geom)) FROM gmns_driving.lane WHERE lane_id='12_{k}'") >= 1.95

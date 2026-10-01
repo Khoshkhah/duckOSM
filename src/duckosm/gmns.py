@@ -127,6 +127,82 @@ def _placement(value, w_each):
     return {"left_of": left, "middle_of": left + w_each[n - 1] / 2, "right_of": left + w_each[n - 1]}.get(kind)
 
 
+def _chain_runs(info):
+    """Runs of pieces (docs/design/gmns_lane_runs.md): consecutive edges of one OSM way and direction,
+    joined end to start, with the same ``oneway`` and lane widths, each joint one-to-one. ``info``:
+    ``edge_id -> (osm_id, is_reverse, source, target, oneway, lane widths)``. Returns
+    ``(runs, where)``: the runs as edge lists in order, and ``edge_id -> (run index, position)``."""
+    from collections import Counter, defaultdict
+
+    by_key, nxt = defaultdict(list), {}
+    for e, (osm, rev, *_rest) in info.items():
+        by_key[(osm, rev)].append(e)
+    for es in by_key.values():
+        at_src = defaultdict(list)
+        for e in es:
+            at_src[info[e][2]].append(e)
+        for e in es:
+            _, _, _, tgt, ow, w = info[e]
+            c = [f for f in at_src.get(tgt, []) if f != e and info[f][4] == ow and info[f][5] == w]
+            if len(c) == 1:
+                nxt[e] = c[0]
+    taken = Counter(nxt.values())
+    nxt = {e: f for e, f in nxt.items() if taken[f] == 1}
+    prv = {f: e for e, f in nxt.items()}
+    runs, seen = [], set()
+    for start in [e for e in info if e not in prv] + list(info):   # chain starts first, then any cycle
+        if start in seen:
+            continue
+        run, x = [], start
+        while x is not None and x not in seen:
+            seen.add(x)
+            run.append(x)
+            x = nxt.get(x)
+        runs.append(run)
+    return runs, {e: (i, k) for i, run in enumerate(runs) for k, e in enumerate(run)}
+
+
+def _run_lane_wkts(piece_wkts, offs):
+    """The lanes of a run: each lane offset once from the run's merged line (so a bend is one curve
+    and the pieces' lanes meet exactly), then cut back into the pieces at the joints (the lane point
+    nearest each joint). Returns ``[[lane wkt, ...] per piece]``, or None when the geometry won't do
+    (a joint folding back on the offset curve): the caller then falls back to per-piece offsets."""
+    from shapely import wkt as _w
+    from shapely.geometry import LineString, Point
+    from shapely.ops import substring
+
+    lines = [_w.loads(w) for w in piece_wkts]
+    if any(ln.is_empty or ln.geom_type != "LineString" for ln in lines):
+        return None
+    x0, y0 = lines[0].coords[0]
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    loc = [LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in ln.coords]) for ln in lines]
+    coords, joints = list(loc[0].coords), []
+    for ln in loc[1:]:
+        c = list(ln.coords)
+        joints.append(Point(coords[-1]))
+        if Point(c[0]).distance(Point(coords[-1])) < 0.01:
+            c = c[1:]
+        coords += c
+    merged = LineString(coords)
+    out = [[] for _ in loc]
+    for off in offs:
+        line = merged.offset_curve(off) if abs(off) > 1e-6 else merged
+        if line.is_empty:
+            return None
+        if line.geom_type == "MultiLineString":
+            line = max(line.geoms, key=lambda s: s.length)
+        ds = [0.0] + [line.project(j) for j in joints] + [line.length]
+        if any(ds[i + 1] - ds[i] < 0.3 for i in range(len(ds) - 1)):
+            return None
+        for i in range(len(loc)):
+            seg = substring(line, ds[i], ds[i + 1])
+            if seg.geom_type != "LineString" or len(seg.coords) < 2:
+                return None
+            out[i].append(LineString([(x / (kx * M) + x0, y / M + y0) for x, y in seg.coords]).wkt)
+    return out
+
+
 def _paired_gaps(edges, side_sign, step_m=2.0):
     """One-way edges placed as one side of a two-way road (docs/design/gmns_paired_carriageways.md).
 
@@ -686,7 +762,7 @@ def _fork_types(con, sch, max_ang=45.0):
         GROUP BY f.ob_link_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
 
 
-def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5):
+def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5, min_keep_m=2.0):
     """Lanes that connect (docs/design/gmns_lane_connectors.md): shorten each lane where it ends
     inside a junction (the other links' lanes, but its own link's reverse) or doesn't meet the lane
     it leads into, then join every lane pair of a movement with a cubic Bézier along both lanes, in
@@ -722,6 +798,18 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
         at.setdefault(b, set()).add(lk)
     surface = {lk: shapely.union_all([geom[l].buffer(width[l] / 2, cap_style="flat") for l in ls.values() if l in geom])
                for lk, ls in by_link.items()}
+    runs = {}                                    # link -> (run, position), from _build_lane_curb
+    try:
+        runs = {lk: (r, k) for lk, r, k in con.execute("SELECT link_id, run_id, seq FROM _lane_runs").fetchall()}
+    except Exception:                            # noqa: BLE001 - no run table (lanes without geometry)
+        pass
+    num_of = {lid: num for lid, _, num, _, _ in lanes}
+
+    def continues(a, b):
+        """Lane b is lane a going on into the next piece of the same run: one road, not cut, no connector."""
+        ra, rb = runs.get(link_of[a]), runs.get(link_of[b])
+        return ra is not None and rb is not None and ra[0] == rb[0] and rb[1] == ra[1] + 1 and num_of[a] == num_of[b]
+
     pairs = []                                   # (mvmt_id, from lane, to lane): the k-th into the k-th
     for mid, ib, ob, si, ei, so in con.execute(
             f"SELECT mvmt_id, ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane FROM {sch}.movement "
@@ -745,19 +833,33 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
             s += step
         return s + junction_pad if s else 0.0
 
+    going_on = {(a, b) for _, a, b in pairs if continues(a, b)}
+    keep_end = {a for a, _ in going_on}          # these ends stay where they are: the road goes on
+    keep_start = {b for _, b in going_on}
     trim = {lid: [0.0, 0.0] for lid in geom}     # [at the start, at the end] in metres
     for lid, line in geom.items():
         a, b = ends[link_of[lid]]
-        trim[lid] = [inside_len(line, a, link_of[lid], False), inside_len(line, b, link_of[lid], True)]
+        trim[lid] = [0.0 if lid in keep_start else inside_len(line, a, link_of[lid], False),
+                     0.0 if lid in keep_end else inside_len(line, b, link_of[lid], True)]
     for _, a, b in pairs:                        # room for an S-curve where the lanes don't meet
+        if (a, b) in going_on:
+            continue
         gap = Point(geom[a].coords[-1]).distance(Point(geom[b].coords[0]))
-        if gap > gap_ok:
+        if gap > gap_ok:                         # an end that goes on stays: the turn's curve leaves from it
             need = max(3.0, 2.5 * gap) / 2
-            trim[a][1], trim[b][0] = max(trim[a][1], need), max(trim[b][0], need)
+            if a not in keep_end:
+                trim[a][1] = max(trim[a][1], need)
+            if b not in keep_start:
+                trim[b][0] = max(trim[b][0], need)
     cut = {}
     for lid, line in geom.items():
         n = line.length
         s0, s1 = (min(t, n * max_trim) for t in trim[lid])
+        room = n - max(min_keep_m, 0.5 * n)      # trimming never leaves less than 2 m / half the lane
+        if s0 + s1 > room > 0:
+            s0, s1 = s0 * room / (s0 + s1), s1 * room / (s0 + s1)
+        elif room <= 0:
+            s0 = s1 = 0.0
         cut[lid] = substring(line, s0, n - s1) if s0 or s1 else line
 
     def tangent(line, at_end):
@@ -770,6 +872,8 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
     to_ll = lambda pts: "LINESTRING(" + ", ".join(f"{x / (kx * M) + x0:.8f} {y / M + y0:.8f}" for x, y in pts) + ")"
     rows = []
     for mid, a, b in pairs:
+        if (a, b) in going_on:                   # one road going on: nothing to connect
+            continue
         p0, p3 = cut[a].coords[-1], cut[b].coords[0]
         chord = math.dist(p0, p3)
         if chord < 0.3:
@@ -814,7 +918,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         "AND table_name = 'edges' AND column_name = 'oneway'", [mode]).fetchone()[0] > 0
     oneway_sel = "e.oneway" if has_oneway else "false"      # older/synthetic edges: treat as two-way
     rows = con.execute(f"""SELECT e.edge_id, e.is_reverse, e.lanes, e.length_m, e.source,
-      {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags
+      {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id
       FROM s.{mode}.edges e {raw_join}""").fetchall()
     side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
 
@@ -830,26 +934,76 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W
                                for i in range(n)]
 
+    # runs of pieces (docs/design/gmns_lane_runs.md): one road is a chain of edges of one OSM way;
+    # its lanes are placed once for the whole run (pairing, placement, the offset curve)
+    info, w_of, place_of = {}, {}, {}
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id in rows:
+        tags = tags or {}
+        w_each = lane_widths(tags, lanes, is_rev)[2]
+        w_of[edge_id] = w_each
+        place_of[edge_id] = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or side_sign < 0) else None
+        info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway), tuple(w_each))
+    runs, where = _chain_runs(info)
+    wkt_of = {r[0]: r[6] for r in rows}
+    merged = {}                                  # run index -> the run's line, lon/lat wkt
+    for i, run in enumerate(runs):
+        cs = []
+        for e in run:
+            if not wkt_of[e]:
+                break
+            w = wkt_of[e]
+            c = [p.strip() for p in w[w.index("(") + 1:w.rindex(")")].split(",")]   # "LINESTRING (x y, ...)"
+            cs += c[1:] if cs and c[0] == cs[-1] else c
+        else:
+            merged[i] = "LINESTRING (" + ", ".join(cs) + ")"
     gaps = {}
     if lane_geometry and pair_carriageways:
-        gaps = _paired_gaps([(r[0], r[6], sum(lane_widths(r[7] or {}, r[2], r[1])[2]) / 2.0)
-                             for r in rows if r[5] and r[6]], side_sign)
+        run_gaps = _paired_gaps([(i, merged[i], sum(w_of[run[0]]) / 2.0) for i, run in enumerate(runs)
+                                 if i in merged and info[run[0]][4]], side_sign)
+        gaps = {e: run_gaps[i] for i, run in enumerate(runs) if i in run_gaps for e in run}
         if gaps:
             logger.info(f"GMNS[{mode}]: {len(gaps):,} one-way edges placed with their opposite carriageway")
+    run_place = {i: next((place_of[e] for e in run if place_of[e] is not None), None) for i, run in enumerate(runs)}
+
+    def offsets(edge_id):
+        """Each lane's offset from the road line (left +), the rule per edge as before."""
+        w_each, (_, _, _, _, oneway, _) = w_of[edge_id], info[edge_id]
+        half, gap, place, out, run = sum(w_each) / 2.0, gaps.get(edge_id), run_place[where[edge_id][0]], [], 0.0
+        for w in w_each:
+            if place is not None:                            # OSM placement: from where the line lies
+                out.append(place - (run + w / 2.0))
+            elif oneway and gap is not None:                 # one side of a road mapped as 2 ways
+                out.append(side_sign * (run + w / 2.0 - gap / 2.0))
+            elif oneway:                                     # one-way: lanes centered on the carriageway
+                out.append(half - (run + w / 2.0))
+            else:                                            # two-way: this direction's lanes on its travel side
+                out.append(side_sign * (run + w / 2.0))
+            run += w
+        return out
+
+    run_geoms = {}                               # edge -> [lane wkt per lane], from the run's one curve
+    if lane_geometry:
+        for i, run in enumerate(runs):
+            if len(run) > 1 and i in merged:
+                per_piece = _run_lane_wkts([wkt_of[e] for e in run], offsets(run[0]))
+                if per_piece:
+                    for e, lane_wkts in zip(run, per_piece, strict=True):
+                        run_geoms[e] = lane_wkts
+        import pandas as pd
+        con.register("_runs_df", pd.DataFrame([(e, i, k) for e, (i, k) in where.items()],
+                                              columns=["link_id", "run_id", "seq"]))
+        con.execute("CREATE OR REPLACE TEMP TABLE _lane_runs AS SELECT * FROM _runs_df")
+        con.unregister("_runs_df")
 
     lane_rows, curb_rows = [], []
-    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id in rows:
         tags = tags or {}
         turns, widths, w_each = lane_widths(tags, lanes, is_rev)
         bikes = _split(pick(tags, "bicycle:lanes", is_rev))
         psvs = _split(pick(tags, "psv:lanes", is_rev))
         buses = _split(pick(tags, "bus:lanes", is_rev))     # bus lanes are tagged either way
         n = len(w_each)
-        half = sum(w_each) / 2.0
-        gap = gaps.get(edge_id)
-        # placement says where the line really is; a two-way edge only in right-hand traffic, where
-        # lane 1 is the leftmost lane (left-hand two-way lanes are numbered from the other side)
-        place = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or side_sign < 0) else None
+        offs = offsets(edge_id)
         run = 0.0
         for i in range(n):
             u = uses
@@ -860,16 +1014,13 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                 u = "bus"
             width = _num(widths[i]) if i < len(widths) else None
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
-            if place is not None:                            # OSM placement: from where the line lies
-                off_m = place - (run + w_each[i] / 2.0)
-            elif oneway and gap is not None:                 # one side of a road mapped as 2 ways
-                off_m = side_sign * (run + w_each[i] / 2.0 - gap / 2.0)
-            elif oneway:                                     # one-way: lanes centered on the carriageway
-                off_m = half - (run + w_each[i] / 2.0)
-            else:                                            # two-way: this direction's lanes on its travel side
-                off_m = side_sign * (run + w_each[i] / 2.0)
             run += w_each[i]
-            geom = _offset_wkt(wkt, off_m) if lane_geometry else None
+            if not lane_geometry:
+                geom = None
+            elif edge_id in run_geoms:                       # from the run's one offset curve
+                geom = run_geoms[edge_id][i]
+            else:
+                geom = _offset_wkt(wkt, offs[i])
             lane_rows.append((f"{edge_id}_{i + 1}", edge_id, i + 1, u, None, None, width, turn, geom))
         for side in ("left", "right", "both"):
             val = tags.get(f"parking:{side}") or tags.get(f"parking:lane:{side}")
