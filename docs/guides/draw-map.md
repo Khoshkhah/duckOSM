@@ -30,3 +30,17 @@ Try it: this is Monaco's driving map, as `duckosm viz` wrote it.
 python scripts/roadstyle_map.py --db monaco.duckdb --palette mono           # highsat | carto | mono
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
+
+## A full base map: mapstyle
+
+`duckosm viz` draws the roads over a background from the web. [mapstyle](https://khoshkhah.github.io/mapstyle/),
+duckOSM's companion map library, draws the whole map from the database itself: water, land, buildings,
+the sea ([base-map layers](../reference/features.md)) and every network, on one offline page.
+
+```bash
+pip install mapstyle
+mapstyle monaco.duckdb -o monaco_map.html          # every mode; --mode walking brings the paths to the front
+```
+
+It doesn't draw private roads or bus lanes yet; `duckosm viz` does.
+

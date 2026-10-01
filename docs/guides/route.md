@@ -40,6 +40,16 @@ box hides road classes, bridges, tunnels, private roads or bus lanes, as on the 
 Needs `pip install "duckosm[viz]"`. Everything is inside the page, so keep it to a city: above
 100,000 edges the command warns.
 
+**Walking, cycling, and walk + drive on a map.** `duckosm route-map` plans by car. The route planner
+of [mapstyle](https://khoshkhah.github.io/mapstyle/) also walks, cycles, and combines walking and
+driving (walk to the car, drive, walk from it), over a full base map drawn from the database:
+
+```bash
+pip install mapstyle
+duckosm multimodal monaco.duckdb                     # the tables Walk + drive needs
+mapstyle monaco.duckdb --planner -o planner.html     # Drive / Walk / Cycle / Walk + drive
+```
+
 ## Find the edges to route between
 
 **By street name:**

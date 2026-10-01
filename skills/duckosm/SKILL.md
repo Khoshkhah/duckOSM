@@ -89,6 +89,10 @@ duckosm export-gis monaco.duckdb              # -> monaco.gpkg
 duckosm viz monaco.duckdb -m driving          # -> reports/monaco_driving_network.html
 ```
 
+Full base map (water, land, buildings, sea) and a walk / cycle / walk + drive route planner from the
+same database: `pip install mapstyle`, then `mapstyle monaco.duckdb` or `mapstyle monaco.duckdb --planner`
+(Walk + drive needs `duckosm multimodal` first).
+
 Join your own data the stable way: carry `(osm_id, source, target)` and join on them, or keep the
 `edge_id` itself (`SELECT ... FROM driving.edges e JOIN my_data d USING (edge_id)`).
 

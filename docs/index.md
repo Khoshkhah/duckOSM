@@ -94,7 +94,8 @@ Next: [Your first network](first_network.md) walks through it step by step, and 
   ([Base-map layers](reference/features.md)).
 - **Maps in one offline HTML page:** `duckosm viz` draws each network ([Draw a map](guides/draw-map.md));
   `duckosm route-map` is a route planner where you drag a start and an end and get turn-by-turn
-  directions ([try it](guides/route.md#on-a-map)).
+  directions ([try it](guides/route.md#on-a-map)). For a full base map drawn from the database and a
+  walk + drive planner: [mapstyle](https://khoshkhah.github.io/mapstyle/).
 - **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
   area's border by name, and `duckosm extract` cuts a city out of a country build in seconds
   ([Prepare an area](guides/prepare-area.md)).
