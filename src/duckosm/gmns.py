@@ -350,7 +350,8 @@ def _build_geometry(con, sch, mode):
 
 
 def _build_movement(con, sch, mode, uses):
-    """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction."""
+    """One row per edge_graph turn (the movement graph, OSM restrictions already applied), none
+    dropped; turn `type` from the bearing change at the junction."""
     if not _exists(con, "s", mode, "edge_graph"):
         con.execute(f"""CREATE TABLE {sch}.movement(
           mvmt_id VARCHAR, node_id BIGINT, name VARCHAR, ib_link_id BIGINT, start_ib_lane INT,
@@ -368,16 +369,9 @@ def _build_movement(con, sch, mode, uses):
         FROM s.{mode}.edge_graph eg
         JOIN s.{mode}.edges fe ON fe.edge_id = eg.from_edge
         JOIN s.{mode}.edges te ON te.edge_id = eg.to_edge
-        -- drop the immediate reversal (U-turn back onto the same physical segment): an edge_graph
-        -- artifact for routing completeness, not a modelled movement -- except where turning round
-        -- is the only way on (a dead end) or the only way into the reverse edge (every other road
-        -- at the node leaves it, Monaco Avenue de l'Annonciade): lane routing would be stuck, the
-        -- lane unreachable. Real intersection U-turns (a different osm_id) are kept too; all 'uturn'.
-        WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source
-                   AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph o
-                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge)
-                   AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph i
-                               WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge))
+        -- every edge_graph turn, none dropped: edge_graph IS the movement graph, built once with
+        -- the OSM restrictions applied (EdgeGraph); GMNS is the same graph at lane level, so a
+        -- U-turn there is a movement here (typed 'uturn'). docs/design/gmns_export.md
       ), b AS (
         SELECT ib, ob, node_id, ibg, obg,
           atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,

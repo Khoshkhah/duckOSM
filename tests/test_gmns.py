@@ -2,8 +2,8 @@
 
 Builds a tiny source db (with raw OSM tags, a signal, lane tags, parking) on disk, runs the
 extractor, and checks the GMNS tables: link_id=edge_id, referential integrity, per-lane detail from
-OSM tags, movement turn types with the immediate-reversal U-turn dropped (kept at a dead end),
-signals, and curb.
+OSM tags, movement = edge_graph at lane level (U-turns typed 'uturn', none dropped), signals, and
+curb.
 """
 import duckdb
 import pytest
@@ -81,48 +81,22 @@ def test_lane_detail_from_osm_tags(tmp_path):
     assert all(l[3] for l in lanes)                              # offset geometry present
 
 
-def test_movement_drops_immediate_uturn_and_types_turns(tmp_path):
-    """A->AR is the immediate reversal: dropped when A has another way on (B) and AR another way in
-    (C, a road from node 3 into node 2). A->B (turning north) is kept and typed."""
-    src = tmp_path / "src.duckdb"
-    _source(src)
-    c = duckdb.connect(str(src))
-    c.execute("LOAD spatial; INSERT INTO driving.edges VALUES (77,3,2,102,'residential',NULL,1,false,110,30,"
-              "ST_GeomFromText('LINESTRING(18.07 59.31,18.07 59.32)'))")
-    c.execute(f"INSERT INTO driving.edge_graph VALUES (77,{AR},{AR},1.0)")
-    c.close()
-    out = tmp_path / "out_gmns.duckdb"
-    to_gmns(str(src), str(out))
-    con = duckdb.connect(str(out))
-    assert con.execute(
-        f"SELECT count(*) FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()[0] == 0
+def test_movement_is_edge_graph_and_types_turns(tmp_path):
+    """GMNS movement is duckOSM's edge_graph at lane level, one row per turn, none dropped:
+    A->B (turning south) typed left/right, signalised; A->AR, the U-turn back along way 100, typed
+    'uturn' (edge_graph holds it, so it isn't forbidden in OSM)."""
+    con = _gmns(tmp_path)
+    src = duckdb.connect(str(tmp_path / "src.duckdb"))
+    n_eg = src.execute("SELECT count(*) FROM driving.edge_graph").fetchone()[0]
+    src.close()
+    assert con.execute("SELECT count(*) FROM gmns_driving.movement").fetchone()[0] == n_eg
     row = con.execute(
         f"SELECT type, ctrl_type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={B}").fetchone()
     assert row is not None and row[0] in ("left", "right")       # a real turn at the junction
     assert row[1] == "signal"                                    # node 2 is signalized
-
-
-def test_movement_keeps_the_uturn_that_is_the_only_way_in(tmp_path):
-    """Node 2: A arrives, AR and B leave, nothing else arrives. A can go on (to B), but the U-turn is
-    the only way into AR, so it's kept; without it AR's lanes can't be reached (Monaco, 10 links)."""
-    row = _gmns(tmp_path).execute(
+    row = con.execute(
         f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()
-    assert row == ("uturn",)
-
-
-def test_movement_keeps_the_uturn_at_a_dead_end(tmp_path):
-    """Where turning round is the only way on (A has no other turn), the reversal is kept as a
-    'uturn' movement; lane-level routing is stuck at a dead end without it."""
-    src = tmp_path / "src.duckdb"
-    _source(src)
-    c = duckdb.connect(str(src))
-    c.execute(f"DELETE FROM driving.edge_graph WHERE from_edge = {A} AND to_edge = {B}")
-    c.close()
-    out = tmp_path / "out_gmns.duckdb"
-    to_gmns(str(src), str(out))
-    row = duckdb.connect(str(out)).execute(
-        f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={AR}").fetchone()
-    assert row == ("uturn",)
+    assert row is not None and row[0] == "uturn"
 
 
 def test_signal_and_curb(tmp_path):

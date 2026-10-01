@@ -108,9 +108,11 @@ jurisdiction,row_width,geometry_id,parent_link_id` blank*. Plus non-spec `geom` 
 thru/uturn from the bearing change at the junction) · `mvmt_code`(direction+turn, `NBL`/`EBT`… from
 the inbound compass bearing) · `start_ib_lane`/`end_ib_lane`(the inbound lanes feeding the turn, from
 `turn:lanes`) · `geometry`(a short turn-path connector) · `ctrl_type`(signal if the node is
-signalized) · *rest blank*. The **immediate reversal** (turning back onto the same physical segment — `edge_graph`
-carries it for routing completeness) is dropped; genuine intersection U-turns (a different `osm_id`)
-stay and are typed `uturn`.
+signalized) · *rest blank*. **Every `edge_graph` turn becomes a movement, none dropped** (Kaveh,
+2026-09-30): `edge_graph` is the movement graph, built once with the OSM restrictions applied, and
+GMNS is that graph at lane level. A U-turn back along the same way is typed `uturn`. (Until
+2026-09-30 GMNS dropped it as a routing artifact, except at a dead end, which left lanes with no way
+in: Monaco, 10 links.)
 
 **`use_definition`** — `use`, `persons_per_vehicle`, `pce` (defaults: auto 1.0/1.0, etc.).
 **`use_group`** — `use_group`, `uses`, `description`.
