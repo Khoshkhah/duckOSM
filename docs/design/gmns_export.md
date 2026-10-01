@@ -107,7 +107,7 @@ jurisdiction,row_width,geometry_id,parent_link_id` blank*. Plus non-spec `geom` 
 **`movement`** — one row per legal turn (`edge_graph`): `mvmt_id`✅ · `node_id`✅(junction) ·
 `ib_link_id`✅(`from_edge`) · `ob_link_id`✅(`to_edge`) · `allowed_uses`(mode) · `type`(left/right/
 thru/uturn from the bearing change at the junction) · `mvmt_code`(direction+turn, `NBL`/`EBT`… from
-the inbound compass bearing) · `start_ib_lane`/`end_ib_lane`(the inbound lanes feeding the turn, from
+the inbound compass bearing; none for a U-turn, the spec's code has no U) · `start_ib_lane`/`end_ib_lane`(the inbound lanes feeding the turn, from
 `turn:lanes`) · `geometry`(a short turn-path connector) · `ctrl_type`(signal if the node is
 signalized) · *rest blank*. The **immediate reversal** (turning back onto the same physical segment — `edge_graph`
 carries it for routing completeness) is dropped; genuine intersection U-turns (a different `osm_id`)

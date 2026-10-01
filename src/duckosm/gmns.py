@@ -52,8 +52,19 @@ def _bezier_line_sql(x0, y0, cx0, cy0, cx1, cy1, x1, y1, n=10):
     by = f"pow(1-u,3)*{y0} + 3*pow(1-u,2)*u*{cy0} + 3*(1-u)*pow(u,2)*{cy1} + pow(u,3)*{y1}"
     return f"ST_MakeLine(list_transform([{ts}], u -> ST_Point({bx}, {by})))"
 
+# OSM `cycleway` / `sidewalk` -> GMNS's category lists (spec/shared_categories.json); NULL stays NULL.
+_BIKE_FACILITY = ("CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN 'lane' THEN 'unseparated bike lane' WHEN 'track' THEN 'separated bike lane' "
+                  "WHEN 'share_busway' THEN 'shared lane' WHEN 'shared_lane' THEN 'shared lane' "
+                  "WHEN 'opposite' THEN 'counter-flow bike lane' WHEN 'opposite_lane' THEN 'counter-flow bike lane' "
+                  "WHEN 'shoulder' THEN 'paved shoulder' WHEN 'no' THEN 'none' WHEN 'none' THEN 'none' "
+                  "ELSE 'other' END END")
+_PED_FACILITY = ("CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN 'both' THEN 'sidewalk' WHEN 'left' THEN 'sidewalk' WHEN 'right' THEN 'sidewalk' "
+                 "WHEN 'yes' THEN 'sidewalk' WHEN 'separate' THEN 'offstreet_path' WHEN 'no' THEN 'none' "
+                 "WHEN 'none' THEN 'none' ELSE 'unknown' END END")
+
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
-_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"]}
+_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
+    "signal_controller": ["node_id", "control_type"]}
 
 
 def _mode_schemas(con, src):
@@ -403,7 +414,7 @@ def _build_combined(con, modes, name):
     con.execute("CREATE SCHEMA gmns_all")
     con.execute(f"""CREATE TABLE gmns_all.config AS SELECT * FROM (VALUES
       ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
-    ) t(dataset_name, long_length, short_length, speed, crs, geometry_field_format,
+    ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format,
         currency, version_number, id_type)""")
     con.execute("CREATE TABLE gmns_all.use_definition AS "
                 + " UNION ".join(f"SELECT * FROM gmns_{m}.use_definition" for m in modes))
@@ -441,7 +452,7 @@ def _build_fixed(con, sch, name, mode, uses):
     """config + use_definition + use_group — the small fixed tables."""
     con.execute(f"""CREATE TABLE {sch}.config AS SELECT * FROM (VALUES
       ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
-    ) t(dataset_name, long_length, short_length, speed, crs, geometry_field_format,
+    ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format,
         currency, version_number, id_type)""")
     # every use a lane can carry must be defined (spec: lane.allowed_uses): a driving network's lanes
     # are auto, bus or bike
@@ -467,8 +478,8 @@ def _build_node(con, sch, mode):
 
 def _build_link(con, sch, mode, uses, has_raw):
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
-    bike = "w.tags['cycleway']" if has_raw else "NULL::VARCHAR"
-    ped = "w.tags['sidewalk']" if has_raw else "NULL::VARCHAR"
+    bike = _BIKE_FACILITY.format(v="w.tags['cycleway']") if has_raw else "NULL::VARCHAR"
+    ped = _PED_FACILITY.format(v="w.tags['sidewalk']") if has_raw else "NULL::VARCHAR"
     cols = {c for (c,) in con.execute(
         "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges'", [mode]).fetchall()}
@@ -557,10 +568,11 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
              t.ob AS ob_link_id, NULL::INT AS start_ob_lane, NULL::INT AS end_ob_lane, t.type,
              NULL::DOUBLE AS penalty, NULL::DOUBLE AS capacity,
              CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
-             (CASE WHEN t.hdg < 45 OR t.hdg >= 315 THEN 'NB' WHEN t.hdg < 135 THEN 'EB'
-                   WHEN t.hdg < 225 THEN 'SB' ELSE 'WB' END)
-             || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R'
-                             WHEN 'uturn' THEN 'U' ELSE 'T' END) AS mvmt_code,
+             CASE WHEN t.type = 'uturn' THEN NULL   -- the spec's code has no U: `type` says it
+                  ELSE (CASE WHEN t.hdg < 45 OR t.hdg >= 315 THEN 'NB' WHEN t.hdg < 135 THEN 'EB'
+                             WHEN t.hdg < 225 THEN 'SB' ELSE 'WB' END)
+                       || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' ELSE 'T' END)
+             END AS mvmt_code,
              '{uses}' AS allowed_uses,
              ST_AsText({_bezier_line_sql('t.x0', 't.y0', 't.cx0', 't.cy0',
                                          't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry,
@@ -800,7 +812,7 @@ def _fork_types(con, sch, max_ang=45.0):
     ``diverge`` at a fork, a node one link arrives at, its 2+ ways on (U-turns aside) all within
     ``max_ang`` degrees of straight on; ``merge`` into a node one link leaves, its 2+ inbound links
     all joining within ``max_ang``. The angle bound keeps an ordinary junction (a one-way street
-    meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T)."""
+    meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T; none for a U-turn)."""
     con.execute(f"""UPDATE {sch}.movement m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
         SELECT f.node_id FROM {sch}.movement f
         WHERE (SELECT count(*) FROM {sch}.link k WHERE k.to_node_id = f.node_id) = 1 AND f.type <> 'uturn'

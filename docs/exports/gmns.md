@@ -115,6 +115,27 @@ to_meso("monaco_gmns.duckdb")          # on an existing GMNS db
 to_micro("monaco_gmns.duckdb", cell_length_m=7.0)
 ```
 
+## Conformance to the GMNS standard
+
+The CSV output (`--to-csv`) is checked against the spec's own schemas, release v0.97, with
+[frictionless](https://framework.frictionlessdata.io/): `tests/test_gmns_spec.py` runs it on every test
+build, using the schemas in `tests/data/gmns_spec/`. It also checks the values the spec lists as
+categories (`ped_facility`, `bike_facility`, movement `type`, `ctrl_type`). Run it on your own output:
+
+```bash
+duckosm gmns area.duckdb --to-csv gmns/
+# put the spec's datapackage.json and *.schema.json (release v0.97) next to the CSVs, then
+frictionless validate datapackage.json
+```
+
+What differs from the spec, on purpose: the DuckDB file has extra columns (`geom` on `node`, `link`,
+`geometry` and `lane`; `lane.turn`; `link.bridge`, `tunnel`, `layer`; `signal_controller.node_id`,
+`control_type`) and a `lane_connector` table; the CSV leaves them out. A U-turn has no `mvmt_code`
+(the spec's code has no U; `type` is `uturn`). OSM `sidewalk` and `cycleway` are mapped to the spec's
+categories, so which side a sidewalk is on is lost. The optional spec tables `zone`, `location`,
+`segment*`, `*_tod` and the signal timing tables are not written. Design and audit:
+[gmns_spec_conformance](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_spec_conformance.md).
+
 ## duckOSM and osm2gmns
 
 [osm2gmns](https://github.com/jiawlu/OSM2GMNS) is the established OSM-to-GMNS tool. Run on the same
