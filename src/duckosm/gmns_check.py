@@ -82,3 +82,71 @@ def check_gmns(path, modes=None):
                 if (s, "location") in have or ".location" not in bad]
     finally:
         con.close()
+
+
+def graph_report(path, modes=None):
+    """How connected each ``gmns_<mode>`` network is, as information (the GMNS validation notebooks do the same):
+    ``[(schema, nodes, links, largest strongly connected part, its share of the nodes, strongly connected parts,
+    dead-end links), ...]``. Not a check: an OSM extract is clipped, so pieces of it are cut off, and a one-way
+    road leaves a part you cannot return from. A *dead-end link* is one whose end node has no way on."""
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        schemas = [r[0] for r in con.execute(
+            "SELECT DISTINCT table_schema FROM information_schema.tables WHERE table_name = 'link' "
+            "AND table_schema LIKE 'gmns\\_%' ESCAPE '\\' AND table_schema <> 'gmns_all' ORDER BY 1").fetchall()]
+        out = []
+        for s in schemas:
+            if modes and s[len("gmns_"):] not in modes:
+                continue
+            edges = con.execute(f"SELECT from_node_id, to_node_id FROM {s}.link").fetchall()
+            nodes = con.execute(f"SELECT count(*) FROM {s}.node").fetchone()[0]
+            sizes = _strong_components(edges)
+            outgoing = {a for a, _ in edges}
+            dead = sum(1 for _, b in edges if b not in outgoing)
+            big = max(sizes, default=0)
+            out.append((s, nodes, len(edges), big, big / nodes if nodes else 0.0, len(sizes), dead))
+        return out
+    finally:
+        con.close()
+
+
+def _strong_components(edges):
+    """Sizes of the strongly connected components of a directed graph (Kosaraju, no recursion: a city is deep)."""
+    from collections import defaultdict
+
+    fwd, back, nodes = defaultdict(list), defaultdict(list), set()
+    for a, b in edges:
+        fwd[a].append(b)
+        back[b].append(a)
+        nodes.update((a, b))
+    order, seen = [], set()
+    for root in nodes:                                   # pass 1: finishing order on the graph
+        if root in seen:
+            continue
+        seen.add(root)
+        stack = [(root, iter(fwd[root]))]
+        while stack:
+            v, it = stack[-1]
+            for w in it:
+                if w not in seen:
+                    seen.add(w)
+                    stack.append((w, iter(fwd[w])))
+                    break
+            else:
+                order.append(v)
+                stack.pop()
+    sizes, done = [], set()
+    for root in reversed(order):                         # pass 2: sweep the reversed graph in that order
+        if root in done:
+            continue
+        done.add(root)
+        stack, size = [root], 0
+        while stack:
+            v = stack.pop()
+            size += 1
+            for w in back[v]:
+                if w not in done:
+                    done.add(w)
+                    stack.append(w)
+        sizes.append(size)
+    return sizes

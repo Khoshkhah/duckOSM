@@ -88,3 +88,19 @@ def test_lane_1_is_the_leftmost_lane_whichever_side_traffic_drives(tmp_path, dri
     assert len(lane) == 2 and side(lane[1]) > side(lane[2])        # lane 1 is further left than lane 2
     # and the pair sits on the traffic side of the road line: right of it for right-hand traffic
     assert (side(lane[1]) + side(lane[2]) < 0) == (drive_side == "right")
+
+
+def test_graph_report_counts_strongly_connected_parts_and_dead_ends(out):
+    from duckosm.gmns_check import _strong_components, graph_report
+    # A and AR join nodes 1 and 2 both ways; B leaves node 2 for node 3 and nothing comes back
+    [(schema, nodes, links, big, share, parts, dead)] = graph_report(out)
+    assert (schema, nodes, links, big, parts, dead) == ("gmns_driving", 3, 3, 2, 2, 1)
+    assert share == pytest.approx(2 / 3)
+    # a ring of three, a tail into it, a loop on its own, a pair one way
+    ring = [(1, 2), (2, 3), (3, 1), (4, 1), (5, 5), (6, 7)]
+    assert sorted(_strong_components(ring)) == [1, 1, 1, 1, 3]
+
+
+def test_the_graph_report_survives_a_long_chain(out):
+    from duckosm.gmns_check import _strong_components
+    assert _strong_components([(i, i + 1) for i in range(200000)]) == [1] * 200001      # no recursion limit

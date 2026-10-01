@@ -111,7 +111,10 @@ get their own colour.
 | `--drive-side` | `right` or `left` traffic | `right` |
 | `--no-pair-carriageways` | centre each one-way way's lanes on it, even beside its opposite direction | paired |
 | `--no-lane-geometry` | skip the lane centre lines | computed |
-| `--check` | check the values of the result (see Conformance) and exit 1 if one fails | off |
+| `--gtfs FEED` | a GTFS feed (`.zip` or folder, repeatable): its stops become `location` rows with their `gtfs_stop_id` ([how](gmns_tables.md#transit-stops-from-a-gtfs-feed)) | none |
+| `--gtfs-max-m` | how far from a link a GTFS stop may be and still be put on it | 30 |
+| `--csv-extensions` | keep duckOSM's extra columns in the CSVs, as `u_`-prefixed user-defined fields | standard columns only |
+| `--check` | check the values of the result (see Conformance) and exit 1 if one fails; also prints how connected each network is (information only) | off |
 
 ```python
 from duckosm import to_gmns, to_meso, to_micro

@@ -661,11 +661,19 @@ def gis_debug(export_path, source_db, out, name, as_json):
 @click.option('--micro', is_flag=True, default=False,
               help='Also build a microscopic (cell-based) network — micro_<mode> schemas')
 @click.option('--micro-mode', 'micro_modes', multiple=True, help='Modes to build micro for (default: driving)')
+@click.option('--gtfs', 'gtfs', multiple=True, type=click.Path(exists=True),
+              help='A GTFS feed (.zip or folder; repeat for several): its stops become location rows with their '
+                   'gtfs_stop_id, snapped to the nearest link of each mode')
+@click.option('--gtfs-max-m', default=30.0, show_default=True,
+              help='How far from a link, in metres, a GTFS stop may be and still be put on it')
+@click.option('--csv-extensions', is_flag=True, default=False,
+              help="Keep duckOSM's extra columns in the CSVs too, as user-defined fields with a u_ prefix "
+                   "(u_osm_id, u_bridge, u_turn, ...); the CSVs otherwise have only the standard columns")
 @click.option('--check', is_flag=True, default=False,
               help='Check the values of the result (ends on nodes, lengths, lane numbers, movements); '
                    'exit 1 if any check fails')
 def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side,
-         pair_carriageways, micro, micro_modes, check):
+         pair_carriageways, micro, micro_modes, gtfs, gtfs_max_m, csv_extensions, check):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -681,7 +689,8 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
         out = f"{Path(db).stem}_gmns.duckdb"
     try:
         res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry,
-                      combined=combined, drive_side=drive_side, pair_carriageways=pair_carriageways)
+                      combined=combined, drive_side=drive_side, pair_carriageways=pair_carriageways,
+                      csv_extensions=csv_extensions, gtfs=list(gtfs) or None, gtfs_max_m=gtfs_max_m)
         meso_res = to_meso(out, modes=list(meso_modes) or ["driving"]) if meso else None
         micro_res = to_micro(out, modes=list(micro_modes) or ["driving"]) if micro else None
     except Exception as e:
@@ -704,8 +713,11 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
     if res.get('csv'):
         click.echo(f"  + GMNS CSVs -> {res['csv']}")
     if check:
-        from duckosm.gmns_check import check_gmns
+        from duckosm.gmns_check import check_gmns, graph_report
         rows = check_gmns(out, modes=list(modes) or None)
+        for schema, n, links, big, share, parts, dead in graph_report(out, modes=list(modes) or None):
+            click.echo(f"  graph {schema}: {n:,} nodes, {links:,} links; the largest strongly connected part has "
+                       f"{big:,} nodes ({share:.0%}), {parts:,} parts in all; {dead:,} dead-end links")
         failed = [r for r in rows if r[2]]
         for schema, name, bad, total in failed:
             click.echo(f"  CHECK FAILED {schema}: {name}: {bad} of {total}", err=True)

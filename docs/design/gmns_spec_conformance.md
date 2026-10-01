@@ -215,3 +215,28 @@ on them (`tests/test_gmns_interop.py` keeps it so, skipped without `path4gmns`).
 
 Still open from the same reading: bus stops and `gtfs_stop_id`; `ctrl_type` `stop` / `yield`; graph checks (connectedness)
 in `--check`; `node_type`; user-defined columns with a `u_` prefix in the CSV.
+
+Done next, from the same list (Kaveh: "go ahead"):
+
+5. **`ctrl_type` stop / yield** from OSM `highway=stop` / `give_way`. In Södermalm and Tartu these are on interior way
+   nodes (almost never on the junction node) and mostly carry `direction`, so a sign is the inbound link's when it
+   is within 50 m before the link's end and its `direction` (forward / backward / both) matches; no direction, or
+   on the junction node itself: left out (it says nothing about which approach). Movements get `stop` / `yield`
+   (signals win); nodes get the spec's `stop_4_way`, `stop`, `stop_2_way` or `yield`. Södermalm driving: 81 movements and
+   43 nodes `yield`.
+6. **Graph report** in `--check`, information only (`graph_report`): the largest strongly connected part's share of the
+   nodes, the parts in all, dead-end links. Södermalm: driving 97 %, cycling 99 %, walking 100 %. Not a failure: OSM extracts are clipped.
+7. **`node_type`** in OSM names (`turning_circle`, `mini_roundabout`, `intersection`, `dead_end`) and `--csv-extensions`
+   (the extension columns in the CSVs as `u_` fields, as the spec's own profiles name theirs).
+
+Open: **bus stops and `gtfs_stop_id`**, waiting for a GTFS feed to test with.
+
+## GTFS (2026-10-01): feeding a transit feed to GMNS
+
+The README says to use GTFS for transit and the spec has `location.gtfs_stop_id`. `duckosm gmns --gtfs FEED` (zip or folder,
+repeatable; `duckosm/gtfs.py` reads it) writes the feed's stops as `location` rows: each on the nearest link of each mode
+within `--gtfs-max-m` (30 m), the kerb-side link of a two-way road, bus stops only in the driving schema and every stop in
+the walking and cycling ones; `loc_type` in OSM's words from the route types; an OSM `bus_stop` within 25 m is replaced.
+Tested on the real Monaco bus feed (CAM, Licence Ouverte 2.0, transport.data.gouv.fr/datasets/gtfs-3): 97 stops, 95 of the 96
+bus-served ones placed on a road link, none lost to OSM (it has no bus stop on a Monaco road link). `tests/test_gmns_gtfs.py`
+uses a small synthetic feed. Not done: GTFS `stop_times` as services on links, `shapes.txt` as routes.

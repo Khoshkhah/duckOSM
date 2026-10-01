@@ -14,7 +14,7 @@ the standard itself, see the [GMNS specification](https://zephyr-data-specs.gith
 SELECT count(*) FROM gmns_driving.link;      -- ATTACH the file, or open it directly
 ```
 
-**Column marks.** The *Spec* column says where a column comes from:
+**Column marks.** The *Spec* column says where a column comes from (`--csv-extensions` keeps the ➕ columns in the CSVs too, as the spec's user-defined fields, with a `u_` prefix: `u_osm_id`, `u_bridge`, `u_turn`, …; the native `geom` columns never go to a CSV):
 
 | Mark | Meaning | In the CSVs (`--to-csv`)? |
 |---|---|---|
@@ -129,10 +129,11 @@ it is not an OSM node.
 |---|---|---|---|
 | `node_id` | BIGINT | ✅ key | the OSM node id; negative for the cut points above |
 | `x_coord`, `y_coord` | DOUBLE | ✅ | longitude, latitude |
-| `ctrl_type` | VARCHAR | ✅ | `signal` where the OSM node is a `highway=traffic_signals`; empty elsewhere. (Stop and give-way signs are in [`location`](#location).) |
+| `ctrl_type` | VARCHAR | ✅ | `signal` where the OSM node is a `highway=traffic_signals`; else from the stop and give-way signs on its approaches: `stop_4_way` (every approach stops, four or more), `stop` (every approach, fewer), `stop_2_way` (some approaches), `yield`; empty where there is none. See [`movement`](#movement) for which signs count |
 | `z_coord` | DOUBLE | ✅ | metres: the node's height, when the source was given heights with [`duckosm elevation`](../guides/elevation.md); empty otherwise |
 | `zone_id` | BIGINT | ✅ | `1`: every node is in the [`zone`](#zone). (Tools such as Path4GMNS refuse nodes with no zone.) |
-| `name`, `node_type`, `parent_node_id` | | ∅ | empty |
+| `node_type` | VARCHAR | ✅ | OSM names, as the spec's FAQ recommends: the OSM `highway` value for a `turning_circle`, `mini_roundabout` or `motorway_junction`; else `intersection` (three or more neighbouring nodes), `dead_end` (one); empty where a road is merely cut |
+| `name`, `parent_node_id` | | ∅ | empty |
 | `geom` | GEOMETRY | ➕ | the point |
 
 ## link
@@ -239,7 +240,7 @@ direction.
 | `start_ib_lane`, `end_ib_lane` | INTEGER | ✅ | the inbound lanes the turn starts from, `lane_num` from..to |
 | `start_ob_lane`, `end_ob_lane` | INTEGER | ✅ | the outbound lanes it ends in. The two ranges are the same length and match in order: the first inbound lane goes to the first outbound lane |
 | `allowed_uses` | VARCHAR | ✅ | the mode's use |
-| `ctrl_type` | VARCHAR | ✅ | `signal` at a signalised junction |
+| `ctrl_type` | VARCHAR | ✅ | `signal` at a signalised junction; otherwise `stop` or `yield` where an OSM `highway=stop` / `give_way` sign applies to the inbound link (cars and bikes, not walking). A sign lies on a way node on the approach, so it counts when it is within 50 m of the end of the inbound link, before the junction, and its `direction` (`forward`, `backward` or `both`, along the way) matches the link's. Signs with no `direction`, or exactly on the junction node, say nothing about which approach and are left out |
 | `geometry` | VARCHAR | ✅ | a short curve from the end of the inbound link to the start of the outbound link, WKT |
 | `name`, `penalty`, `capacity` | | ∅ | empty |
 
@@ -321,9 +322,39 @@ table needs the raw OSM tags, like lane details do: an area clipped from a bigge
 | `loc_type` | VARCHAR | ✅ | the OSM tag value: `crossing`, `bus_stop`, `give_way`, … (the standard recommends OSM names) |
 | `z_coord` | DOUBLE | ✅ | metres, between the link's two end heights by distance along it (empty without heights, and on a bridge or in a tunnel) |
 | `zone_id` | BIGINT | ✅ | `1`, the [`zone`](#zone) |
-| `gtfs_stop_id` | | ∅ | empty (no GTFS in the data) |
-| `osm_id` | BIGINT | ➕ | the OSM node id |
+| `gtfs_stop_id` | VARCHAR | ✅ | the GTFS `stop_id`, on the rows made from a GTFS feed (`--gtfs`, below); empty on the OpenStreetMap rows |
+| `osm_id` | BIGINT | ➕ | the OSM node id; empty on GTFS rows |
+| `name` | VARCHAR | ➕ | the stop's name: OSM's `name` tag, or the GTFS `stop_name` |
 | `geom` | GEOMETRY | ➕ | the point |
+
+### Transit stops from a GTFS feed
+
+The GMNS README recommends GTFS for transit and the spec has `location.gtfs_stop_id` to point at it. Give the feed to
+`duckosm gmns`:
+
+```bash
+duckosm gmns monaco.duckdb --gtfs monaco_gtfs.zip              # a .zip or an unzipped folder; repeat for several feeds
+duckosm gmns monaco.duckdb --gtfs a.zip --gtfs b.zip --gtfs-max-m 40
+```
+
+Only `stops.txt` is needed. With `stop_times.txt`, `trips.txt` and `routes.txt` the stops are told apart by the
+service that calls there (`route_type`): `bus_stop`, `tram_stop`, `train_station`, `subway_station`,
+`ferry_terminal`, … in OpenStreetMap's words, and `entrance` for a station entrance (`location_type` 2). Stations (1)
+and boarding areas (4) only group stops and are left out. Each stop becomes a `location` row:
+
+- **On the nearest link of each mode within 30 m** (`--gtfs-max-m`): in the driving schema the stops a **bus** calls
+  at (a tram or train stop has no place on a road); in the walking and cycling schemas every stop, since people
+  walk to a tram or train stop too. Of a two-way road's two links the stop is put on the one it is on the **kerb
+  side** of (its right with right-hand traffic). A stop farther than that from any link of the mode is not written
+  there (the log says how many).
+- `lr` is the distance along the link; `x_coord`, `y_coord` are the stop's own coordinates; `gtfs_stop_id` and
+  `name` come from the feed.
+- An OpenStreetMap `bus_stop` node within 25 m of a GTFS bus stop is the same stop: its row is replaced by the GTFS
+  one, which carries the id.
+
+Example: the Monaco bus network's feed ([Compagnie des Autobus de Monaco, on transport.data.gouv.fr](https://transport.data.gouv.fr/datasets/gtfs-3),
+Licence Ouverte 2.0) has 97 stops; 95 of the 96 that a bus serves go onto a road link of Monaco (OpenStreetMap alone
+has none there: its bus stops are platform nodes beside the road).
 
 ## zone
 

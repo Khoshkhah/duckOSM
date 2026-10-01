@@ -55,7 +55,7 @@ def test_a_sidewalk_has_the_road_it_runs_along_as_parent(tmp_path):
 
 
 def _bike_lane(tmp_path, tags, drive_side="right"):
-    src = tmp_path / f"b_{drive_side}_{abs(hash(tags))}.duckdb"
+    src = tmp_path / f"b_{len(list(tmp_path.glob('b_*.duckdb')))}.duckdb"
     _source(src)
     con = duckdb.connect(str(src))
     con.execute(f"UPDATE raw.ways SET tags = {tags} WHERE osm_id = 101")           # way 101 is link B, one lane
@@ -94,3 +94,70 @@ def test_path4gmns_loads_the_csv_and_routes_on_it(tmp_path):
             f.unlink()
     net = pg.read_network(input_dir=str(tmp_path / "csv"))
     assert net.find_shortest_path(1, 3, mode="auto", seq_type="node", cost_type="distance")
+
+
+def _signs(tmp_path, tags, signal=False):
+    """A sign on way 100's node 6 at (18.0695, 59.32): on link A (east), 28 m before node 2; node 2 has no signal."""
+    src = tmp_path / f"sign_{len(list(tmp_path.glob('sign_*.duckdb')))}.duckdb"
+    _source(src)
+    con = duckdb.connect(str(src))
+    con.execute("LOAD spatial")
+    if not signal:
+        con.execute("UPDATE raw.nodes SET tags = MAP{} WHERE osm_id = 2")
+    con.execute(f"INSERT INTO raw.nodes VALUES (6, 59.32, 18.0695, {tags})")
+    con.close()
+    out = str(src).replace(".duckdb", "_gmns.duckdb")
+    to_gmns(str(src), out)
+    return duckdb.connect(out, read_only=True)
+
+
+def test_a_give_way_or_stop_sign_on_the_approach_sets_the_movement_and_node_control(tmp_path):
+    for tags, want in (("MAP{'highway':'give_way','direction':'forward'}", "yield"),
+                       ("MAP{'highway':'stop','direction':'forward'}", "stop"),
+                       ("MAP{'highway':'give_way','direction':'both'}", "yield")):
+        c = _signs(tmp_path, tags)
+        assert {r[0] for r in c.execute(f"SELECT ctrl_type FROM gmns_driving.movement WHERE ib_link_id = {A}").fetchall()} == {want}
+        # node 2 has one approach (A) and it stops: every approach, fewer than four -> 'stop'; a yield stays 'yield'
+        assert c.execute("SELECT ctrl_type FROM gmns_driving.node WHERE node_id = 2").fetchone()[0] == want
+        assert c.execute(f"SELECT count(ctrl_type) FROM gmns_driving.movement WHERE ib_link_id <> {A}").fetchone()[0] == 0
+
+
+def test_signs_that_say_nothing_about_this_approach_are_left_out(tmp_path):
+    from tests.test_gmns import AR
+    for tags in ("MAP{'highway':'give_way'}",                                  # no direction
+                 "MAP{'highway':'give_way','direction':'backward'}",           # faces the other way: AR's, not A's
+                 "MAP{'highway':'traffic_calming'}"):
+        c = _signs(tmp_path, tags)
+        assert c.execute(f"SELECT count(ctrl_type) FROM gmns_driving.movement WHERE ib_link_id = {A}").fetchone()[0] == 0
+    c = _signs(tmp_path, "MAP{'highway':'give_way','direction':'backward'}")
+    # AR runs west from node 2; the sign is 28 m after node 2 along it, not before a junction: no control either
+    assert c.execute(f"SELECT count(ctrl_type) FROM gmns_driving.movement WHERE ib_link_id = {AR}").fetchone()[0] == 0
+    # a signalised node keeps its signal whatever signs there are
+    c = _signs(tmp_path, "MAP{'highway':'stop','direction':'forward'}", signal=True)
+    assert {r[0] for r in c.execute(f"SELECT ctrl_type FROM gmns_driving.movement WHERE ib_link_id = {A}").fetchall()} == {"signal"}
+    assert c.execute("SELECT ctrl_type FROM gmns_driving.node WHERE node_id = 2").fetchone()[0] == "signal"
+
+
+def test_node_types_use_osm_names(tmp_path):
+    _source(tmp_path / "src.duckdb")
+    con = duckdb.connect(str(tmp_path / "src.duckdb"))
+    con.execute("INSERT INTO raw.nodes VALUES (3, 59.31, 18.07, MAP{'highway':'turning_circle'})")
+    con.close()
+    to_gmns(str(tmp_path / "src.duckdb"), str(tmp_path / "out.duckdb"))
+    t = dict(duckdb.connect(str(tmp_path / "out.duckdb"), read_only=True).execute(
+        "SELECT node_id, node_type FROM gmns_driving.node").fetchall())
+    assert t == {1: "dead_end", 2: None, 3: "turning_circle"}      # 2 is a cut in a road: two neighbours, no type
+
+
+def test_csv_extensions_are_kept_as_u_columns_only_when_asked(tmp_path):
+    import csv
+    _source(tmp_path / "src.duckdb")
+    to_gmns(str(tmp_path / "src.duckdb"), str(tmp_path / "plain.duckdb"), to_csv=str(tmp_path / "plain"))
+    to_gmns(str(tmp_path / "src.duckdb"), str(tmp_path / "ext.duckdb"), to_csv=str(tmp_path / "ext"), csv_extensions=True)
+    head = lambda d, t: next(csv.reader(open(tmp_path / d / f"{t}.csv", newline="")))   # noqa: E731
+    for table, extras in (("link", ["u_osm_id", "u_bridge", "u_tunnel", "u_layer"]), ("lane", ["u_turn"]),
+                          ("location", ["u_osm_id", "u_name"]), ("signal_controller", ["u_node_id", "u_control_type"])):
+        plain, ext = head("plain", table), head("ext", table)
+        assert ext == plain + extras, table                       # the standard columns first, unchanged
+        assert not any(c.startswith("u_") for c in plain)
+    assert "u_geom" not in head("ext", "link")                    # native geometry does not go to a CSV

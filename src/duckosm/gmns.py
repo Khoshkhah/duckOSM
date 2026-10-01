@@ -83,7 +83,7 @@ _NON_MOTOR = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway",
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
 _CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
-    "location": ["osm_id", "geom"], "zone": ["geom"],
+    "location": ["osm_id", "name", "geom"], "zone": ["geom"],
     "signal_controller": ["node_id", "control_type"]}
 
 
@@ -335,7 +335,7 @@ def _paired_gaps(edges, side_sign, step_m=2.0):
 
 
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False,
-            drive_side="right", pair_carriageways=True):
+            drive_side="right", pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -389,6 +389,11 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     name = os.path.splitext(os.path.basename(out_path))[0]
     area = re.sub(r"_gmns$", "", name)               # the zone's name when the area has no boundary
     result = {"path": out_path, "csv": None, "modes": {}}
+    stops = None
+    if gtfs:
+        from duckosm.gtfs import read_stops
+        stops = read_stops(gtfs)
+        logger.info(f"GTFS: {len(stops)} stops")
     for mode in chosen:
         sch = f"gmns_{mode}"
         uses = _MODE_USES.get(mode, mode)
@@ -405,7 +410,11 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         if lane_geometry:
             _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
         _build_signal_controller(con, sch)
-        _build_location(con, sch, mode, has_raw)
+        _build_location(con, sch, mode, has_raw, create_empty=stops is not None)
+        if stops is not None:
+            _add_transit_stops(con, sch, mode, stops, drive_side, gtfs_max_m)
+        _apply_signs(con, sch, mode, has_raw)
+        _node_types(con, sch, has_raw)
         _build_zone(con, sch, area)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
@@ -422,9 +431,9 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
                     f"(mode-tagged allowed_uses) -> gmns_all")
 
     if to_csv:
-        _dump_csv(con, chosen, to_csv)
+        _dump_csv(con, chosen, to_csv, csv_extensions=csv_extensions)
         if result["combined"]:
-            _dump_csv(con, ["all"], os.path.join(to_csv, "combined"), schema_prefix="gmns_")
+            _dump_csv(con, ["all"], os.path.join(to_csv, "combined"), schema_prefix="gmns_", csv_extensions=csv_extensions)
         result["csv"] = to_csv
 
     con.execute("DETACH s")
@@ -1068,11 +1077,15 @@ _LOC_HIGHWAY = ("crossing", "bus_stop", "give_way", "stop", "traffic_signals", "
                 "mini_roundabout", "speed_camera")
 
 
-def _build_location(con, sch, mode, has_raw):
+def _build_location(con, sch, mode, has_raw, create_empty=False):
     """``location``: the OSM nodes that lie on a link and carry one of the tags above, one row per link they
     lie on. ``lr`` is the distance in metres from the link's from-node, along its shape. Needs the raw tags
     (no ``raw`` schema, no table). docs/exports/gmns_tables.md."""
     if not has_raw:
+        if create_empty:               # the transit stops of a GTFS feed still go here
+            con.execute(f"""CREATE TABLE {sch}.location(loc_id VARCHAR, link_id BIGINT, ref_node_id BIGINT, lr DOUBLE,
+              x_coord DOUBLE, y_coord DOUBLE, z_coord DOUBLE, loc_type VARCHAR, zone_id BIGINT, gtfs_stop_id VARCHAR,
+              osm_id BIGINT, name VARCHAR, geom GEOMETRY)""")
         return
     hw = ", ".join(repr(h) for h in _LOC_HIGHWAY)
     ecols = _src_cols(con, mode, "edges")
@@ -1085,7 +1098,7 @@ def _build_location(con, sch, mode, has_raw):
     ej = f"LEFT JOIN (SELECT {need} FROM s.{mode}.edges) e ON e.edge_id = pos.link_id" if elev else ""
     con.execute(f"""CREATE TABLE {sch}.location AS
       WITH pts AS (
-        SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p,
+        SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p, n.tags['name'] AS name,
                CASE WHEN n.tags['highway'] IN ({hw}) THEN n.tags['highway']
                     WHEN n.tags['traffic_calming'] IS NOT NULL THEN 'traffic_calming'
                     WHEN n.tags['amenity'] = 'parking_entrance' THEN 'parking_entrance'
@@ -1105,8 +1118,112 @@ def _build_location(con, sch, mode, has_raw):
       SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id, lr,
              lon AS x_coord, lat AS y_coord,
              CASE WHEN {zskip} THEN NULL ELSE ({z})::DOUBLE END AS z_coord, loc_type, 1::BIGINT AS zone_id,
-             NULL::VARCHAR AS gtfs_stop_id, osm_id, p AS geom
+             NULL::VARCHAR AS gtfs_stop_id, osm_id, name, p AS geom
       FROM pos {ej} ORDER BY link_id, lr""")
+
+
+def _add_transit_stops(con, sch, mode, stops, drive_side, max_m=30.0):
+    """The GTFS stops as ``location`` rows with their ``gtfs_stop_id`` (the standard's link to GTFS).
+
+    Each stop goes on the nearest link of this mode within ``max_m`` metres: in the driving schema the stops a bus
+    calls at, in the walking and cycling schemas every stop (people walk to a tram or train stop too). Of a
+    two-way road's two links it takes the one the stop is on the kerb side of (right with right-hand traffic).
+    ``lr`` is the distance along the link; the coordinates are the stop's own. An OpenStreetMap ``bus_stop``
+    within 25 m of a GTFS stop is the same stop, so its row is replaced by the GTFS one."""
+    import numpy as np
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import Point
+    from shapely.strtree import STRtree
+
+    todo = stops[stops.is_bus] if mode == "driving" else stops
+    links = con.execute(f"SELECT link_id, from_node_id, length, ST_AsText(geom) FROM {sch}.link").fetchall()
+    if len(todo) == 0 or not links:
+        return
+    scale = np.array([math.cos(math.radians(float(todo.lat.iloc[0]))) * 111320.0, 111320.0])
+    geoms = [shapely.transform(_w.loads(l[3]), lambda c: c * scale) for l in links]
+    tree = STRtree(geoms)
+    kerb = -1.0 if drive_side == "right" else 1.0
+    rows, far = [], 0
+    for st in todo.itertuples():
+        p = Point(st.lon * scale[0], st.lat * scale[1])
+        best = None
+        for i in tree.query(p, predicate="dwithin", distance=max_m):
+            g = geoms[i]
+            t = g.project(p)
+            a, b = g.interpolate(max(t - 1.0, 0.0)), g.interpolate(min(t + 1.0, g.length))
+            q = g.interpolate(t)
+            side = (b.x - a.x) * (p.y - q.y) - (b.y - a.y) * (p.x - q.x)             # > 0: left of the link
+            key = (round(g.distance(p) * 2) / 2, 0 if side * kerb > 0 else 1)         # nearest, then kerb side
+            if best is None or key < best[0]:
+                best = (key, i, g.project(p, normalized=True))
+        if best is None:
+            far += 1
+            continue
+        link_id, from_node, length, _ = links[best[1]]
+        rows.append((f"gtfs_{st.stop_id}_{link_id}", link_id, from_node, best[2] * length, st.lon, st.lat,
+                     st.loc_type, st.stop_id, st.name))
+    if rows:
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=["loc_id", "link_id", "ref_node_id", "lr", "x_coord", "y_coord", "loc_type",
+                                         "gtfs_stop_id", "name"])
+        con.register("_gtfs_loc", df)
+        con.execute(f"""INSERT INTO {sch}.location SELECT loc_id, link_id, ref_node_id, lr, x_coord, y_coord,
+            NULL::DOUBLE, loc_type, 1::BIGINT, gtfs_stop_id, NULL::BIGINT, name, ST_Point(x_coord, y_coord)
+            FROM _gtfs_loc""")
+        con.unregister("_gtfs_loc")
+        con.execute(f"""DELETE FROM {sch}.location o WHERE o.gtfs_stop_id IS NULL AND o.loc_type = 'bus_stop' AND EXISTS (
+            SELECT 1 FROM {sch}.location g WHERE g.gtfs_stop_id IS NOT NULL AND g.loc_type = 'bus_stop'
+              AND sqrt(pow((o.x_coord - g.x_coord) * cos(radians(o.y_coord)) * 111320, 2)
+                       + pow((o.y_coord - g.y_coord) * 111320, 2)) < 25)""")
+    logger.info(f"GTFS[{mode}]: {len(rows)} of {len(todo)} stops on a link"
+                + (f", {far} farther than {max_m:g} m from any" if far else ""))
+
+
+def _apply_signs(con, sch, mode, has_raw, max_before_m=50.0):
+    """``ctrl_type`` ``stop`` / ``yield`` from OSM ``highway=stop`` / ``give_way`` signs (the spec's category
+    list: yield, stop, stop_2_way, stop_4_way, signal). A sign lies on a way node on the approach, so it is
+    the inbound link's sign when it is within ``max_before_m`` of the link's end, before the junction, and
+    its ``direction`` (forward / backward / both, the way's direction) matches the link's. Signs without a
+    direction, or exactly on the junction node, say nothing about which approach and are left out. Every
+    movement from such a link, unless its node is signalised, gets the control; the node gets ``stop_4_way``
+    (every approach stops, four or more), ``stop`` (every approach, fewer), ``stop_2_way`` (some) or ``yield``.
+    Cars and bikes only: pedestrians do not stop for a stop sign."""
+    if not has_raw or mode == "walking" or not _exists(con, "s", mode, "edges"):
+        return
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE _sign AS
+      SELECT x.link_id AS ib, bool_or(x.loc_type = 'stop') AS stop
+      FROM {sch}.location x JOIN {sch}.link k ON k.link_id = x.link_id
+        JOIN s.raw.nodes n ON n.osm_id = x.osm_id JOIN s.{mode}.edges e ON e.edge_id = x.link_id
+      WHERE x.loc_type IN ('stop', 'give_way') AND x.lr >= k.length - {max_before_m} AND x.lr < k.length - 0.5
+        AND ((n.tags['direction'] IN ('forward', 'both') AND NOT e.is_reverse)
+          OR (n.tags['direction'] IN ('backward', 'both') AND e.is_reverse))
+      GROUP BY 1""")
+    con.execute(f"""UPDATE {sch}.movement m SET ctrl_type = CASE WHEN g.stop THEN 'stop' ELSE 'yield' END
+      FROM _sign g WHERE m.ib_link_id = g.ib AND m.ctrl_type IS NULL""")
+    con.execute(f"""UPDATE {sch}.node SET ctrl_type = c.t FROM (
+        SELECT k.to_node_id AS node_id, count(*) AS n_in, count(g.ib) AS n_sign, count(*) FILTER (WHERE g.stop) AS n_stop,
+               CASE WHEN count(*) FILTER (WHERE g.stop) = count(*) AND count(*) >= 4 THEN 'stop_4_way'
+                    WHEN count(*) FILTER (WHERE g.stop) = count(*) THEN 'stop'
+                    WHEN count(*) FILTER (WHERE g.stop) > 0 THEN 'stop_2_way' ELSE 'yield' END AS t
+        FROM {sch}.link k LEFT JOIN _sign g ON g.ib = k.link_id GROUP BY 1 HAVING count(g.ib) > 0) c
+      WHERE node.node_id = c.node_id AND node.ctrl_type IS NULL""")
+
+
+def _node_types(con, sch, has_raw):
+    """``node_type``: OSM-style names, as the spec's FAQ recommends: the OSM ``highway`` value for a
+    turning circle, mini roundabout or motorway junction; else ``intersection`` where three or more
+    neighbours meet, ``dead_end`` where one does. Other nodes (where a road is merely cut) stay empty."""
+    osm = ("CASE WHEN n.tags['highway'] IN ('turning_circle', 'mini_roundabout', 'motorway_junction') "
+           "THEN n.tags['highway'] END") if has_raw else "NULL"
+    join = "LEFT JOIN s.raw.nodes n ON n.osm_id = nd.node_id" if has_raw else ""
+    con.execute(f"""UPDATE {sch}.node SET node_type = c.t FROM (
+        WITH nb AS (SELECT node_id, count(DISTINCT other) AS deg FROM (
+                      SELECT from_node_id AS node_id, to_node_id AS other FROM {sch}.link
+                      UNION ALL SELECT to_node_id, from_node_id FROM {sch}.link) GROUP BY 1)
+        SELECT nd.node_id, COALESCE({osm}, CASE WHEN nb.deg >= 3 THEN 'intersection' WHEN nb.deg = 1 THEN 'dead_end' END) AS t
+        FROM {sch}.node nd LEFT JOIN nb USING (node_id) {join}) c
+      WHERE node.node_id = c.node_id AND c.t IS NOT NULL""")
 
 
 def _build_zone(con, sch, area):
@@ -1561,7 +1678,7 @@ def _build_meso_links(con, g, ms, trim_m):
       FROM t""")
 
 
-def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):
+def _dump_csv(con, modes, to_csv, schema_prefix="gmns_", csv_extensions=False):
     """COPY each GMNS table to a spec-standard CSV (dropping the non-spec geom/turn columns).
     Skips tables a schema doesn't have (e.g. the combined ``gmns_all`` carries only node/link/config/
     use_*)."""
@@ -1577,5 +1694,9 @@ def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):
                 continue
             excl = _CSV_EXCLUDE.get(t)
             sel = f"* EXCLUDE ({', '.join(excl)})" if excl else "*"
+            if excl and csv_extensions:        # keep the extension columns, as the spec's user-defined `u_` fields
+                kinds = dict(con.execute("SELECT column_name, data_type FROM duckdb_columns() WHERE "
+                                         "schema_name = ? AND table_name = ?", [sch, t]).fetchall())
+                sel += "".join(f", {c} AS u_{c}" for c in excl if kinds.get(c) != "GEOMETRY")
             path = os.path.join(d, f"{t}.csv")
             con.execute(f"COPY (SELECT {sel} FROM {sch}.{t}) TO '{path}' (HEADER, DELIMITER ',')")
