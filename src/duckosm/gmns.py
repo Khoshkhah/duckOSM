@@ -440,7 +440,7 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
              t.ang AS _ang
       FROM cp t
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
-    _assign_lanes(con, sch, drive_side)
+    _assign_lanes(con, sch, mode, drive_side)
 
 
 # turn:lanes part -> the movement types a lane feeds (docs/design/gmns_lane_movements.md, step 1); a
@@ -501,11 +501,30 @@ def _default_lanes(n, obs):
     return out
 
 
-def _assign_lanes(con, sch, drive_side="right"):
+def _turn_side(ms):
+    """The ``turn:lanes`` arrow each exit takes, by its place among the exits (sorted left to right),
+    not by the angle type: the straightest exit within 45 degrees is ``thru``, exits left of it
+    ``left``, right of it ``right``; a U-turn ``uturn``. So a slight right fork typed ``thru`` by its
+    angle still takes the right-turn lanes (Monaco, Boulevard Charles III)."""
+    real = [k for k, m in enumerate(ms) if m[2] != "uturn"]
+    s = min(real, key=lambda k: abs(ms[k][3]), default=None)
+    s = s if s is not None and abs(ms[s][3]) < 45 else None
+    return ["uturn" if m[2] == "uturn" else "thru" if k == s
+            else ("left" if (k < s if s is not None else m[3] > 0) else "right") for k, m in enumerate(ms)]
+
+
+def _assign_lanes(con, sch, mode, drive_side="right"):
     """Fill each movement's inbound / outbound lane ranges (docs/design/gmns_lane_movements.md):
-    ``turn:lanes`` where the inbound link has it (every lane whose value feeds the movement's type),
-    else osm2gmns's rule (``_default_lanes``). Ranges have equal length and pair in order: the k-th
-    inbound lane turns into the k-th outbound lane. Drops the helper column ``_ang``."""
+
+    - ``turn:lanes`` only on the last piece of its OSM way, at the junction where the way ends (the
+      arrows apply "to the junction", OSM wiki Key:turn): each exit takes the lanes whose arrow
+      matches its place among the exits (``_turn_side``);
+    - along a way (a movement into the next piece of the same way, same direction) every lane
+      continues lane by lane, so marked lanes run on to their junction;
+    - else osm2gmns's rule (``_default_lanes``).
+
+    Ranges have equal length and pair in order: the k-th inbound lane into the k-th outbound lane.
+    Drops the helper column ``_ang``."""
     from collections import defaultdict
 
     import pandas as pd
@@ -516,20 +535,31 @@ def _assign_lanes(con, sch, drive_side="right"):
             f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE link_id IN "
             f"(SELECT link_id FROM {sch}.lane WHERE turn IS NOT NULL)").fetchall():
         kinds[lk][num] = _turn_kinds(turn) if turn is not None else {"thru"}
+    way = {}                         # edge -> (OSM way, direction), to tell a way's pieces apart
+    if _exists(con, "s", mode, "edges"):
+        rev = "is_reverse" if "is_reverse" in {c for (c,) in con.execute(
+            "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+            "AND table_name = 'edges'", [mode]).fetchall()} else "false"
+        way = {e: (o, r) for e, o, r in con.execute(f"SELECT edge_id, osm_id, {rev} FROM s.{mode}.edges").fetchall()}
     by_ib = defaultdict(list)
     for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
         by_ib[ib].append((mid, ob, typ, ang or 0.0))
+    along = lambda ib, ob: ib in way and way.get(ob) == way[ib]      # the next piece of the same way
     uturn_side = 180.0 if drive_side == "right" else -180.0    # a U-turn is the leftmost (right-hand traffic)
     rows = []
     for ib, ms in by_ib.items():
         n = nl.get(ib, 1)
         ms.sort(key=lambda m: uturn_side if m[2] == "uturn" else m[3], reverse=True)   # left to right
         obs = [nl.get(m[1], 1) for m in ms]
-        for (mid, ob, typ, _), mo, rng in zip(ms, obs, _default_lanes(n, obs)):
-            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if typ in ks)
-            if tagged:                           # turn:lanes: its lanes, into as many lanes as fit
+        ends = not any(along(ib, m[1]) for m in ms)      # the way ends here: its arrows apply
+        for (mid, ob, typ, _), mo, rng, side in zip(ms, obs, _default_lanes(n, obs), _turn_side(ms)):
+            tagged = sorted(num for num, ks in kinds.get(ib, {}).items() if side in ks) if ends else []
+            if along(ib, ob):                    # along the way: every lane on, lane by lane
+                c = min(n, mo)
+                rng = ((0, c - 1), (0, c - 1))
+            elif tagged:                         # turn:lanes: its lanes, into as many lanes as fit
                 a, c = tagged[0] - 1, min(tagged[-1] - tagged[0] + 1, mo)
-                rng = ((a, a + c - 1), (0, c - 1) if typ in ("left", "uturn") else (mo - c, mo - 1))
+                rng = ((a, a + c - 1), (0, c - 1) if side in ("left", "uturn") else (mo - c, mo - 1))
             if rng is None:                      # osm2gmns gives it no lane: the rightmost pair
                 rng = ((n - 1, n - 1), (mo - 1, mo - 1))
             (i0, i1), (o0, o1) = rng

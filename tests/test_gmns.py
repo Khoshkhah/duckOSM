@@ -436,3 +436,58 @@ def test_placement_values():
     assert _placement("left_of:1", w) == 0 and _placement("middle_of:2", w) == 4.875
     assert _placement("right_of:3", w) == 9.5
     assert _placement("transition", w) is None and _placement("left_of:4", w) is None and _placement(None, w) is None
+
+
+def _source_with(path, tags, edges, graph):
+    """_source plus extra edges (id, source, target, osm_id, lanes, is_reverse, wkt) and edge_graph
+    rows, way 100 (A) tagged ``tags``; extra nodes 4/5 east and south-east of node 2."""
+    _source(path)
+    c = duckdb.connect(str(path))
+    c.execute("LOAD spatial")
+    c.execute(f"UPDATE raw.ways SET tags = MAP{{{', '.join(f'{k!r}:{v!r}' for k, v in tags.items())}}} WHERE osm_id = 100")
+    c.execute("INSERT INTO driving.nodes VALUES (4, ST_GeomFromText('POINT(18.08 59.32)')), "
+              "(5, ST_GeomFromText('POINT(18.08 59.3185)'))")
+    for e, a, b, osm, n, rev, wkt in edges:
+        c.execute(f"INSERT INTO driving.edges VALUES ({e},{a},{b},{osm},'primary','Main',{n},{rev},80,50,"
+                  f"ST_GeomFromText('{wkt}'))")
+    for a, b in graph:
+        c.execute(f"INSERT INTO driving.edge_graph VALUES ({a},{b},{b},1.0)")
+    c.close()
+
+
+def _ranges(tmp_path, ib, ob):
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(tmp_path / "src.duckdb"), str(out))
+    return duckdb.connect(str(out)).execute(
+        f"SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
+        f"WHERE ib_link_id={ib} AND ob_link_id={ob}").fetchone()
+
+
+def test_turn_lanes_apply_where_the_way_ends(tmp_path):
+    """Way 100 'through|right' continues past node 2 as edge 88 (the same way): the arrows apply only
+    at the way's end, so at node 2 both lanes go on, lane by lane, into 88 (lane 1 had been sent
+    into lane 2 and the right lane had no way on: Monaco, Boulevard Charles III)."""
+    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
+                 [(88, 2, 4, 100, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)")], [(A, 88)])
+    assert _ranges(tmp_path, A, 88) == (1, 2, 1, 2)
+
+
+def test_arrows_match_exits_by_their_place(tmp_path):
+    """At the way's end, a slight right fork (16 degrees, typed thru by its angle) takes the 'right'
+    lane and the straight exit the 'through' lane."""
+    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
+                 [(88, 2, 4, 103, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)"),
+                  (89, 2, 5, 104, 2, "false", "LINESTRING(18.07 59.32,18.08 59.3185)")], [(A, 88), (A, 89)])
+    assert _ranges(tmp_path, A, 88)[:2] == (1, 1)                 # straight on from the 'through' lane
+    assert _ranges(tmp_path, A, 89)[:2] == (2, 2)                 # the fork from the 'right' lane
+
+
+def test_slight_fork_is_typed_thru(tmp_path):
+    """Guard for the test above: the fork really is typed thru by its angle."""
+    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
+                 [(88, 2, 4, 103, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)"),
+                  (89, 2, 5, 104, 2, "false", "LINESTRING(18.07 59.32,18.08 59.3185)")], [(A, 88), (A, 89)])
+    out = tmp_path / "out_gmns.duckdb"
+    to_gmns(str(tmp_path / "src.duckdb"), str(out))
+    assert duckdb.connect(str(out)).execute(
+        f"SELECT type FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id=89").fetchone() == ("thru",)

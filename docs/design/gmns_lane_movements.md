@@ -50,6 +50,16 @@ So `through;slight_right` feeds both the thru and the right movement. Movement t
 the angle at the junction, as today. A `slight_right` lane whose turn measures under 30° (typed
 `thru`) also feeds that thru movement, because `through` and `slight_*` both cover it.
 
+**Fixed after Kaveh's report (Boulevard Charles III, 6594925326949888649_2 / 7306218974710360300_2):**
+- `turn:lanes` applies only where its way ends ("to the junction", OSM wiki Key:turn). duckOSM splits
+  a way into pieces at other junctions, and every piece carried the arrows, so a right-turn lane had
+  no way on where no right turn exists. Now, along the way (a movement into the next piece of the same
+  OSM way, same direction), every lane continues lane by lane.
+- Arrows match exits by their place, not by the angle type (`_turn_side`): the straightest exit
+  within 45° takes `through`, exits left of it `left`, right of it `right`. A slight fork typed `thru`
+  by its angle still takes the right-turn lane.
+- Neither osm2gmns (its `turn:lanes` module is an empty stub) nor SUMO's docs say how they do this.
+
 ### Steps 2 and 3: default lanes where `turn:lanes` is missing (osm2gmns's rules)
 
 Separate lanes per turn, as osm2gmns does (`autoconintd.py`): the outbound links of an inbound link
