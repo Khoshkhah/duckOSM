@@ -68,7 +68,9 @@ Each mode has its own edges: for `mode="walking"`, take the ids from `walking.ed
 
 `route_points` routes from one place to another, not from edge to edge. Each point joins the
 network at its nearest road point within `radius_m`; the straight walk to it costs walking time
-(`access_kmh`), whatever the mode; and the first and last edges count only the part you travel:
+(`access_kmh`), whatever the mode, and never crosses another road (one of the mode, or any road
+for cars: it joins the first road in its way); and the first and last edges count only the part
+you travel:
 starting in the middle of a 300 m street costs 150 m of it.
 
 ```python

@@ -29,6 +29,11 @@ if the user uses half of an edge, the cost must be half of that edge."
    `(edge, fraction, access_m)`: the fraction of the edge's length at the projected point (0 at
    its start, 1 at its end), and the straight distance from the marker to that point. No edge
    within the radius: no route, "no road within R m".
+   **The straight walk may not cross another road** (Kaveh, 2026-10-01: "it can't jump from
+   roads"): an edge of the mode (you'd have joined that one), or any road for cars, in any mode (no
+   walking straight across a main road). Footways and paths may be crossed when driving, so a
+   sidewalk between a building and its street doesn't block the car. A road met within 0.5 m of
+   the road point only touches the walk (a junction there), so it doesn't count.
 2. **The off-road leg costs walking time**: `access_m / access_speed` (default 4.5 km/h, a
    parameter), whatever the mode (you walk to the road, or to the car). Its length counts in the
    trip's distance. It is drawn as a straight dashed line.

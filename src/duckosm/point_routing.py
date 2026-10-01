@@ -1,7 +1,8 @@
 """Routing between two points, not two edges (docs/design/point_routing.md).
 
 A point joins the network at its nearest road point within ``radius_m``: the straight walk to it
-(the access leg) costs walking time at ``access_kmh``, whatever the mode; the first and last edges
+(the access leg) costs walking time at ``access_kmh``, whatever the mode, and may not cross another
+road of the mode or any road for cars (Kaveh: "it can't jump from roads"); the first and last edges
 count only the part travelled (a trip from the middle of an edge pays half of it). Every edge within
 the radius, both directions of a two-way road, is a candidate; the route is the cheapest over all
 of them, access legs included.
@@ -13,11 +14,16 @@ import math
 INF = float("inf")
 
 
+TOUCH_M = 0.5        # a road meeting the access leg this close to its road point only touches it
+
+
 def candidates(con, schema, point, radius_m):
-    """The edges of ``schema.edges`` within ``radius_m`` of ``point`` (lon, lat), each with the
-    nearest point on it: ``{edge_id, source, target, cost_s, length_m, fraction, access_m,
-    road_point}``. ``fraction`` is how far along the edge (by length) that point lies, 0 to 1."""
-    from shapely import wkb
+    """The edges of ``schema.edges`` within ``radius_m`` of ``point`` (lon, lat) that the point can
+    walk straight to without crossing another road (an edge of ``schema`` or of ``driving``, the
+    roads for cars), each with the nearest point on it: ``{edge_id, source, target, cost_s,
+    length_m, fraction, access_m, road_point}``. ``fraction`` is how far along the edge (by length)
+    that point lies, 0 to 1."""
+    from shapely import STRtree, wkb
     from shapely.geometry import LineString, Point
 
     lon, lat = point
@@ -28,18 +34,35 @@ def candidates(con, schema, point, radius_m):
         f"SELECT edge_id, source, target, cost_s, length_m, ST_AsWKB(geometry) FROM {schema}.edges "
         f"WHERE ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))",
         [lon - dx, lat - dy, lon + dx, lat + dy]).fetchall()
+    to_local = lambda g: LineString([((x - lon) * kx, (y - lat) * ky) for x, y in wkb.loads(bytes(g)).coords])  # noqa: E731
     here, out = Point(0.0, 0.0), []
     for eid, s, t, cost, length, geom in rows:
-        local = LineString([((x - lon) * kx, (y - lat) * ky) for x, y in wkb.loads(bytes(geom)).coords])
+        local = to_local(geom)
         d = local.distance(here)
         if d > radius_m or local.length == 0:
             continue
         at = local.project(here)
-        p = local.interpolate(at)
         out.append({"edge_id": eid, "source": s, "target": t, "cost_s": float(cost or 0.0),
                     "length_m": float(length or 0.0), "fraction": at / local.length,
-                    "access_m": d, "road_point": (p.x / kx + lon, p.y / ky + lat)})
-    return out
+                    "access_m": d, "_p": local.interpolate(at)})
+    # the roads the walk may not cross: the mode's own, and the roads for cars
+    schemas = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.tables "
+                                         "WHERE table_name = 'edges'").fetchall()}
+    blockers = [to_local(g) for sch in {schema, "driving"} & schemas for (g,) in con.execute(
+        f"SELECT ST_AsWKB(geometry) FROM {sch}.edges WHERE ST_Intersects(geometry, ST_MakeEnvelope(?, ?, ?, ?))",
+        [lon - dx, lat - dy, lon + dx, lat + dy]).fetchall()]
+    tree = STRtree(blockers) if blockers else None
+    keep = []
+    for c in out:
+        p = c.pop("_p")
+        walk = LineString([(0.0, 0.0), (p.x, p.y)])
+        crossed = tree is not None and walk.length > 0 and any(
+            not walk.intersection(blockers[i]).difference(p.buffer(TOUCH_M)).is_empty
+            for i in tree.query(walk, predicate="intersects"))
+        if not crossed:
+            c["road_point"] = (p.x / kx + lon, p.y / ky + lat)
+            keep.append(c)
+    return keep
 
 
 def _ends(con, schema, a, b, radius_m):

@@ -98,3 +98,26 @@ def test_walk_drive_walk_from_the_middle_of_walking_edges():
 def test_walk_only_on_one_edge():
     r = route_multimodal_points(_mm(), (0.0002, 0), (0.0007, 0))
     assert [lg["mode"] for lg in r["legs"]] == ["walking"] and r["time_s"] == pytest.approx(40)
+
+
+def test_the_walk_to_the_road_never_crosses_another_road():
+    """Kaveh: "it can't jump from roads". Edge 7 lies between the point and edge 1: edge 1 is out
+    of reach, though within the radius; a road met only at the road point doesn't count."""
+    from duckosm.point_routing import candidates
+    con = _db()
+    con.execute(f"INSERT INTO driving.edges VALUES (7, 20, 21, 'r7', 'residential', 100, 10, "
+                f"ST_GeomFromText('{_line((0, 0.0001), (0.001, 0.0001))}'))")
+    assert {c["edge_id"] for c in candidates(con, "driving", (0.0005, 0.0002), 50)} == {7}
+    assert {c["edge_id"] for c in candidates(con, "driving", (0.0005, -0.0001), 50)} == {1}   # other side
+    # at a junction: the point beside the shared node reaches both edges that meet there
+    assert {c["edge_id"] for c in candidates(con, "driving", (0.001, -0.0001), 50)} == {1, 2}
+
+
+def test_a_road_for_cars_blocks_the_walk_even_when_it_isnt_walkable():
+    con = _mm()
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.edges AS SELECT * FROM walking.edges WHERE false")
+    con.execute(f"INSERT INTO driving.edges VALUES (90, 90, 91, 'main', 'primary', 100, 5, "
+                f"ST_GeomFromText('{_line((0, 0.0001), (0.001, 0.0001))}'))")
+    with pytest.raises(ValueError, match="no road within 50 m of the start"):
+        route_multimodal_points(con, (0.0005, 0.0002), (0.1005, 0))
