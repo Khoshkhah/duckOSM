@@ -2,7 +2,7 @@
 
 The spec's own validators check the *shape* of the tables (columns, types, keys, categories); this
 checks what the values say about each other: a link starts and ends on its nodes, its length is its
-geometry's, lane numbers run 1..n and agree with ``link.lanes``, a movement turns at the node where its
+geometry's, lane numbers run 1..n and ``link.lanes`` is no more than the lane rows, a movement turns at the node where its
 inbound link ends and uses lanes the links have. Plain SQL, per ``gmns_<mode>`` schema.
 
 ``check_gmns(path)`` returns one row per check: ``(schema, check, bad, total)``; ``bad == 0`` passes.
@@ -36,8 +36,12 @@ def _checks(s):
         ("link has lane rows", f"SELECT count(*) FROM {L} WHERE link_id NOT IN (SELECT link_id FROM {K})",
          f"SELECT count(*) FROM {L}"),
         ("lane_num is 1..n", f"SELECT count(*) FROM {cnt} WHERE lo <> 1 OR hi <> n", f"SELECT count(*) FROM {cnt}"),
-        ("link.lanes is the number of lane rows", f"""SELECT count(*) FROM {L} l JOIN {cnt} c USING (link_id)
-            WHERE l.lanes IS DISTINCT FROM c.n""", f"SELECT count(*) FROM {L}"),
+        # `lanes` counts motor lanes only (no turn pockets, bike lanes, shoulders), so it can be less than the
+        # lane rows, never more
+        ("link.lanes is not more than the lane rows", f"""SELECT count(*) FROM {L} l JOIN {cnt} c USING (link_id)
+            WHERE l.lanes > c.n""", f"SELECT count(*) FROM {L} WHERE lanes IS NOT NULL"),
+        ("location lies on its link", f"""SELECT count(*) FROM {s}.location x LEFT JOIN {L} l USING (link_id)
+            WHERE l.link_id IS NULL OR x.lr < 0 OR x.lr > l.length + 0.01""", f"SELECT count(*) FROM {s}.location"),
         ("movement turns where its inbound link ends", f"""SELECT count(*) FROM {M} m JOIN {L} l ON l.link_id = m.ib_link_id
             WHERE l.to_node_id <> m.node_id""", f"SELECT count(*) FROM {M}"),
         ("movement turns where its outbound link starts", f"""SELECT count(*) FROM {M} m JOIN {L} l ON l.link_id = m.ob_link_id
@@ -72,7 +76,9 @@ def check_gmns(path, modes=None):
             "AND table_schema LIKE 'gmns\\_%' ESCAPE '\\' ORDER BY 1").fetchall()]
         if modes:
             schemas = [s for s in schemas if s[len("gmns_"):] in modes]
+        have = {(a, b) for a, b in con.execute("SELECT table_schema, table_name FROM information_schema.tables").fetchall()}
         return [(s, name, con.execute(bad).fetchone()[0], con.execute(total).fetchone()[0])
-                for s in schemas for name, bad, total in _checks(s)]
+                for s in schemas for name, bad, total in _checks(s)
+                if (s, "location") in have or ".location" not in bad]
     finally:
         con.close()

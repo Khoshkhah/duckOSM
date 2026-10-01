@@ -62,8 +62,13 @@ _PED_FACILITY = ("CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN 'both' THEN
                  "WHEN 'yes' THEN 'sidewalk' WHEN 'separate' THEN 'offstreet_path' WHEN 'no' THEN 'none' "
                  "WHEN 'none' THEN 'none' ELSE 'unknown' END END")
 
+# Roads cars cannot use: in the walking / cycling schemas their `lanes` and `capacity` stay empty, since the
+# standard defines both for motor vehicles ("uncapacitated" bike and foot links; link.lanes excludes bike lanes)
+_NON_MOTOR = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform")
+
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
-_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
+_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
+    "location": ["osm_id", "geom"], "zone": ["geom"],
     "signal_controller": ["node_id", "control_type"]}
 
 
@@ -378,14 +383,12 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_geometry(con, sch, mode)
         _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
                          pair_carriageways)  # before movement
-        # the lane rows carry more than the count (OSM's `lanes` and `turn:lanes` can disagree), so the
-        # link's `lanes` is their number: link and lane never contradict each other
-        con.execute(f"UPDATE {sch}.link SET lanes = n FROM (SELECT link_id AS id, count(*)::INTEGER AS n "
-                    f"FROM {sch}.lane GROUP BY link_id) l WHERE link.link_id = l.id")
         _build_movement(con, sch, mode, uses, drive_side)
         if lane_geometry:
             _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
         _build_signal_controller(con, sch)
+        _build_location(con, sch, has_raw)
+        _build_zone(con, sch)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
             for t in ("node", "link", "lane", "movement", "signal_controller", "curb_seg")}
@@ -445,7 +448,7 @@ def _build_combined(con, modes, name):
              any_value(parking) AS parking,
              string_agg(DISTINCT allowed_uses, ',' ORDER BY allowed_uses) AS allowed_uses,
              any_value(toll) AS toll, any_value(jurisdiction) AS jurisdiction,
-             any_value(row_width) AS row_width, any_value(bridge) AS bridge,
+             any_value(row_width) AS row_width, any_value(osm_id) AS osm_id, any_value(bridge) AS bridge,
              any_value(tunnel) AS tunnel, any_value(layer) AS layer, any_value(geom) AS geom
       FROM u GROUP BY link_id""")
     return {t: con.execute(f"SELECT count(*) FROM gmns_all.{t}").fetchone()[0]
@@ -488,6 +491,8 @@ def _build_link(con, sch, mode, uses, has_raw):
         "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges'", [mode]).fetchall()}
     lvl = ", ".join(f"e.{c}" if c in cols else f"NULL::VARCHAR AS {c}" for c in ("bridge", "tunnel", "layer"))
+    hw = "regexp_replace(split_part(e.highway, ';', 1), '_link$', '')"
+    motor = "true" if mode == "driving" else f"{hw} NOT IN ({', '.join(repr(h) for h in _NON_MOTOR)})"
     con.execute(f"""CREATE TABLE {sch}.link AS SELECT
       e.edge_id AS link_id, e.name AS name, e.source AS from_node_id, e.target AS to_node_id,
       true AS directed, e.edge_id AS geometry_id, ST_AsText(e.geometry) AS geometry,
@@ -495,11 +500,11 @@ def _build_link(con, sch, mode, uses, has_raw):
       ST_Length_Spheroid(ST_FlipCoordinates(e.geometry)) AS length,   -- the geometry's own length, metres
       NULL::DOUBLE AS grade,
       e.highway AS facility_type,
-      {_capacity_case("regexp_replace(split_part(e.highway, ';', 1), '_link$', '')")}::DOUBLE AS capacity,
-      e.maxspeed_kmh AS free_speed, e.lanes,
+      CASE WHEN {motor} THEN {_capacity_case(hw)}::DOUBLE END AS capacity,
+      e.maxspeed_kmh AS free_speed, CASE WHEN {motor} THEN e.lanes END AS lanes,
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
       '{uses}' AS allowed_uses, NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction,
-      NULL::DOUBLE AS row_width, {lvl}, e.geometry AS geom
+      NULL::DOUBLE AS row_width, e.osm_id AS osm_id, {lvl}, e.geometry AS geom
     FROM s.{mode}.edges e {raw_join}""")
 
 
@@ -972,6 +977,55 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
                     f"ST_GeomFromText(wkt) FROM _con")
 
 
+# OSM point features that GMNS's `location` table holds (the standard recommends OSM names for loc_type)
+_LOC_HIGHWAY = ("crossing", "bus_stop", "give_way", "stop", "traffic_signals", "toll_gantry",
+                "mini_roundabout", "speed_camera")
+
+
+def _build_location(con, sch, has_raw):
+    """``location``: the OSM nodes that lie on a link and carry one of the tags above, one row per link they
+    lie on. ``lr`` is the distance in metres from the link's from-node, along its shape. Needs the raw tags
+    (no ``raw`` schema, no table). docs/exports/gmns_tables.md."""
+    if not has_raw:
+        return
+    hw = ", ".join(repr(h) for h in _LOC_HIGHWAY)
+    con.execute(f"""CREATE TABLE {sch}.location AS
+      WITH pts AS (
+        SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p,
+               CASE WHEN n.tags['highway'] IN ({hw}) THEN n.tags['highway']
+                    WHEN n.tags['traffic_calming'] IS NOT NULL THEN 'traffic_calming'
+                    WHEN n.tags['amenity'] = 'parking_entrance' THEN 'parking_entrance'
+                    WHEN n.tags['railway'] = 'level_crossing' THEN 'level_crossing' END AS loc_type
+        FROM s.raw.nodes n
+        WHERE n.tags['highway'] IN ({hw}) OR n.tags['traffic_calming'] IS NOT NULL
+           OR n.tags['amenity'] = 'parking_entrance' OR n.tags['railway'] = 'level_crossing'
+      ), hit AS (
+        SELECT pts.*, k.link_id, k.from_node_id, k.length AS link_len, k.geom AS lg,
+               ST_LineLocatePoint(k.geom, pts.p) AS f
+        FROM pts JOIN {sch}.link k ON ST_DWithin(k.geom, pts.p, 2e-6)   -- ~0.2 m: on the link's shape
+      )
+      SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id,
+             CASE WHEN f <= 0 THEN 0.0 WHEN f >= 1 THEN link_len
+                  ELSE ST_Length_Spheroid(ST_FlipCoordinates(ST_LineSubstring(lg, 0, f))) END AS lr,
+             lon AS x_coord, lat AS y_coord, NULL::DOUBLE AS z_coord, loc_type, NULL::VARCHAR AS zone_id,
+             NULL::VARCHAR AS gtfs_stop_id, osm_id, p AS geom
+      FROM hit ORDER BY link_id, lr""")
+
+
+def _build_zone(con, sch):
+    """``zone``: the outline of the area, one row, when the source db was built with a boundary."""
+    if not _exists(con, "s", "main", "boundary"):
+        return
+    cols = {c for (c,) in con.execute("SELECT column_name FROM duckdb_columns() WHERE database_name = 's' "
+                                      "AND schema_name = 'main' AND table_name = 'boundary'").fetchall()}
+    if "geom" not in cols or con.execute("SELECT count(*) FROM s.main.boundary").fetchone()[0] == 0:
+        return
+    name = "string_agg(DISTINCT name, ', ')" if "name" in cols else "NULL::VARCHAR"
+    con.execute(f"""CREATE TABLE {sch}.zone AS SELECT '1' AS zone_id, {name} AS name,
+      ST_AsText(ST_Union_Agg(geom)) AS boundary, NULL::VARCHAR AS super_zone, ST_Union_Agg(geom) AS geom
+      FROM s.main.boundary""")
+
+
 def _build_signal_controller(con, sch):
     con.execute(f"""CREATE TABLE {sch}.signal_controller AS SELECT
       'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
@@ -1008,7 +1062,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     def lane_widths(tags, lanes, is_rev):
         turns = _split(pick(tags, "turn:lanes", is_rev))
         widths = _split(pick(tags, "width:lanes", is_rev))
-        n = max(len(turns) if turns else int(lanes or 1), 1)
+        # one lane per `turn:lanes` entry, and never fewer than `lanes`: an OSM way tagged lanes=3 with only two
+        # turn entries has a third lane that the arrows say nothing about (a pocket can add lanes, never remove)
+        n = max(len(turns), int(lanes or 1), 1)
         return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W
                                for i in range(n)]
 
@@ -1344,7 +1400,7 @@ def _dump_csv(con, modes, to_csv, schema_prefix="gmns_"):
     Skips tables a schema doesn't have (e.g. the combined ``gmns_all`` carries only node/link/config/
     use_*)."""
     tables = ["config", "node", "link", "geometry", "lane", "movement",
-              "use_definition", "use_group", "signal_controller", "curb_seg"]
+              "use_definition", "use_group", "signal_controller", "curb_seg", "location", "zone"]
     for mode in modes:
         sch = f"{schema_prefix}{mode}"
         d = os.path.join(to_csv, mode) if len(modes) > 1 else to_csv

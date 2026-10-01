@@ -17,6 +17,8 @@ DuckDB file.
 
 ## What's in it
 
+Every table, column by column, with where each value comes from: [GMNS tables](gmns_tables.md).
+
 One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, driving:
 
 | Table | Rows | What |
@@ -28,11 +30,13 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md)) A road's pieces are placed as one run, so a lane going on through a junction or a bend is one continuous line ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_runs.md)). |
 | `geometry` | 2,765 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
-| `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
+| `curb_seg` | 2 | on-street parking, where OSM tags `parking:*` |
+| `location` | 1,803 | OSM points on a link: crossings, give-way and stop signs, signals, parking entrances |
+| `zone` | 0 or 1 | the area's outline, when the database was built with a boundary |
 | `config`, `use_definition`, `use_group` | | units (metres, km/h), CRS (EPSG:4326), modes |
 
-Tables GMNS defines but OSM has no data for (signal timing, zones, time-of-day) are left out, as
-the spec intends.
+Tables GMNS defines but OSM has no data for (signal timing, time-of-day) are left out, as the spec
+intends: see [GMNS tables](gmns_tables.md#what-is-not-written-and-why).
 
 ## Lanes from OSM tags
 
@@ -136,11 +140,12 @@ lane rows; a movement turns at the node where its inbound link ends, and its lan
 as long on both sides. Run on Monaco, Södermalm, Tartu and Granville Island, in every mode: all pass.
 
 What differs from the spec, on purpose: the DuckDB file has extra columns (`geom` on `node`, `link`,
-`geometry` and `lane`; `lane.turn`; `link.bridge`, `tunnel`, `layer`; `signal_controller.node_id`,
+`geometry`, `lane`, `location` and `zone`; `lane.turn`; `link.osm_id`, `bridge`, `tunnel`, `layer`; `location.osm_id`; `signal_controller.node_id`,
 `control_type`) and a `lane_connector` table; the CSV leaves them out. A U-turn has no `mvmt_code`
 (the spec's code has no U; `type` is `uturn`). OSM `sidewalk` and `cycleway` are mapped to the spec's
-categories, so which side a sidewalk is on is lost. The optional spec tables `zone`, `location`,
-`segment*`, `*_tod` and the signal timing tables are not written. Design and audit:
+categories, so which side a sidewalk is on is lost. The optional spec tables `segment*`, `*_tod` and
+the signal timing tables are not written. Walking and cycling links that cars cannot use have no `lanes` or
+`capacity` (the standard defines both for motor vehicles). Design and audit:
 [gmns_spec_conformance](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_spec_conformance.md).
 
 ## duckOSM and osm2gmns

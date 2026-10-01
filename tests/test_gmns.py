@@ -21,7 +21,8 @@ def _source(path):
     con.execute("INSTALL spatial; LOAD spatial;")
     con.execute("CREATE SCHEMA raw; CREATE SCHEMA driving")
     con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
-    con.execute("INSERT INTO raw.nodes VALUES (2, 59.32, 18.07, MAP{'highway':'traffic_signals'})")
+    con.execute("INSERT INTO raw.nodes VALUES (2, 59.32, 18.07, MAP{'highway':'traffic_signals'}), "
+                "(4, 59.32, 18.065, MAP{'highway':'crossing'}), (5, 59.30, 18.00, MAP{'highway':'crossing'})")  # 4 lies on A, 5 on no link
     con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
     con.execute("INSERT INTO raw.ways VALUES "
                 "(100, MAP{'turn:lanes':'through|right','bicycle:lanes':'no|designated',"
@@ -37,6 +38,8 @@ def _source(path):
         ({A},1,2,100,'primary','Main',2,false,80,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
         ({B},2,3,101,'residential',NULL,1,false,110,30,{p('LINESTRING(18.07 59.32,18.07 59.31)')}),
         ({AR},2,1,100,'primary','Main',2,true,80,50,{p('LINESTRING(18.07 59.32,18.06 59.32)')})""")
+    con.execute("CREATE TABLE main.boundary(name VARCHAR, geom GEOMETRY)")
+    con.execute(f"INSERT INTO main.boundary VALUES ('Testville', {p('POLYGON((18.0 59.3, 18.1 59.3, 18.1 59.4, 18.0 59.4, 18.0 59.3))')})")
     con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
     con.execute(f"INSERT INTO driving.edge_graph VALUES ({A},{B},{B},1.0),({A},{AR},{AR},1.0)")  # A->AR = U-turn
     con.close()

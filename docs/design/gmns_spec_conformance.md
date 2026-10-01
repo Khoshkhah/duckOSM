@@ -102,8 +102,15 @@ lanes shorter than 0.5 m (the link itself is under 1 m in OSM); lanes more than 
 **Fixes (Kaveh: "do all", 2026-10-01):**
 
 1. `link.length` = the geodesic length of the link's geometry (`_build_link`). Does not touch routing.
-2. `link.lanes` = the number of lane rows (an `UPDATE` after the lanes are built). Fills the empty
-   `lanes` of walking and cycling links too.
+2. ~~`link.lanes` = the number of lane rows.~~ **Wrong, reverted** (2026-10-01): the spec (and its README) say
+   `link.lanes` is the number of permanent *motor-vehicle* lanes, excluding turn pockets, bike lanes,
+   shoulders and parking lanes, and "may not be the same as the number of associated records in the lanes
+   table". The 18 Tartu "mismatches" were turn pockets: OSM's `lanes` was right. The check is now "`lanes` is
+   not more than the lane rows".
+2b. **New, from the spec's profiles:** in the walking and cycling schemas, links that cars cannot use (OSM
+   `highway` footway, path, cycleway, steps, pedestrian, bridleway, corridor, platform) had `lanes = 1` and
+   `capacity = 800` (an "else" default): both are motor-vehicle quantities and the spec treats foot and bike links
+   as uncapacitated. Now empty (about 97 % of Tartu's walking and cycling links).
 3. Upstream, `graph_simplifier`: `length_m` of split loop and parallel-arc halves. **Not fixed where the
    splits are, on purpose:** the splits order edges by `length_m`, so correcting it there changes which
    edges are split and with it 8 of Monaco's 3,092 `edge_id`s (tried, reverted). Downstream matchers
@@ -115,3 +122,40 @@ lanes shorter than 0.5 m (the link itself is under 1 m in OSM); lanes more than 
    expects the matching check to fail. `tests/test_edge_identity.py` gets the length invariant.
 
 Result: all four areas, every mode and the combined network pass all checks.
+
+## Which tables to write (decided 2026-10-01: `location`, `zone` and the `osm_id` column; built)
+
+The spec has 25 tables; we write 10 (`config`, `node`, `link`, `geometry`, `lane`, `movement`,
+`use_definition`, `use_group`, `signal_controller`, `curb_seg`). For each of the other 15: can OSM fill it,
+and does anyone need it?
+
+| Table | OSM has it? | Proposal |
+|---|---|---|
+| **`location`** (a point along a link: driveway, bus stop…; `loc_type` "OpenStreetMap feature names recommended") | **Yes.** Monaco: 639 crossings, 117 bus stops, 77 give-ways, 24 signals, 13 stops, 62 parking entrances; Tartu: 1,975 crossings, 370 bus stops, 189 signals | **Add** |
+| **`zone`** (a polygon; `boundary` as WKT) | The area's boundary, when the area was built with one (`main.boundary`; Tartu has it, Monaco not) | **Add**, one row, only when there is a boundary. lanestyle then draws the outline from the GMNS file |
+| `segment`, `segment_lane` (a lane added or dropped part-way along a link) | Not needed: duckOSM cuts an edge at every node that two ways share or a way ends at, so wherever OSM's `lanes` changes, the edge is already cut | Skip |
+| `link_tod`, `lane_tod`, `movement_tod`, `segment_tod`, `segment_lane_tod`, `time_set_definitions` | OSM `*:conditional` is on 4 of 6,249 ways in Monaco, 37 of 45,619 in Tartu, 822 of 11,427 in Södermalm (parking and loading rules, not travel lanes) | Skip |
+| `signal_timing_plan`, `signal_timing_phase`, `signal_phase_mvmt`, `signal_coordination`, `signal_detector` | OSM has no timing, phases or detectors; any value would be invented | Skip |
+
+Also, as columns (DuckDB only, the CSV leaves them out, like `bridge` / `tunnel` / `layer`):
+`link.osm_id` (the OSM way the link comes from; osm2gmns writes `osm_way_id`; lanestyle shows it in
+the popup and now needs the source db only for this), and `node.ctrl_type` from `highway=stop` /
+`give_way` where they sit on a junction node (today only `signal`).
+
+### `location` (design)
+
+- Source: nodes of `raw.nodes` with `highway` in (`crossing`, `bus_stop`, `give_way`, `stop`,
+  `traffic_signals`, `toll_gantry`, `mini_roundabout`, `speed_camera`), `traffic_calming`, `amenity=parking_entrance`,
+  `railway=level_crossing`. `loc_type` = that OSM value (the spec recommends OSM names).
+- Which link: a node that is a vertex of an edge's geometry (within 0.5 m), one row per link it lies on
+  (a junction node lies on several links: one row each). `ref_node_id` = the link's `from_node_id`,
+  `lr` = distance along the link from it, in metres (`ST_LineLocatePoint` × length). `x_coord`,
+  `y_coord` from the OSM node. A stop point beside the road (off any link) is not written.
+- Not written: `zone_id`, `gtfs_stop_id` (GTFS is not in the data), `z_coord`.
+- Test: a tiny network with a crossing mid-link and a bus stop at a junction: ids, `lr`, and that every
+  row validates against `location.schema.json` (vendored).
+
+### `zone` (design)
+
+One row: `zone_id` = 1, `name` = the boundary's name if it has one else the area, `boundary` =
+`ST_AsText` of the union of `main.boundary`. Written only if the source db has `main.boundary`.

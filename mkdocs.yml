@@ -89,6 +89,7 @@ plugins:
           - exports/sumo.md
           - exports/matsim.md
           - exports/gmns.md
+          - exports/gmns_tables.md
           - exports/gis.md
           - exports/networkx.md
           - exports/opendrive.md
@@ -135,6 +136,7 @@ nav:
       - SUMO: exports/sumo.md
       - MATSim: exports/matsim.md
       - GMNS: exports/gmns.md
+      - GMNS tables: exports/gmns_tables.md
       - GeoPackage / shapefile: exports/gis.md
       - networkx: exports/networkx.md
       - Experimental:
