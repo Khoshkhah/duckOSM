@@ -159,3 +159,13 @@ the popup and now needs the source db only for this), and `node.ctrl_type` from 
 
 One row: `zone_id` = 1, `name` = the boundary's name if it has one else the area, `boundary` =
 `ST_AsText` of the union of `main.boundary`. Written only if the source db has `main.boundary`.
+
+## Left-hand traffic (2026-10-01)
+
+`--drive-side left` put the lanes of a two-way road on the left of its centre line but counted them outward
+from that line, so lane 1 was the *rightmost* lane: the opposite of right-hand traffic, of one-way roads in
+the same build, of OSM's `turn:lanes` order and of the spec's "the left-most through lane is 1". Every
+left-hand two-way road had its arrows, bus and bike uses and movement lane ranges on the wrong lanes. Fixed
+(`offsets` in `_build_lane_curb`): lane 1 is the leftmost lane on either side. Checked on Monaco built both
+ways: lane 1 is left of the last lane on all 419 multi-lane links; the right-hand output is identical to
+before, lane for lane. `tests/test_gmns_values.py` keeps it so.

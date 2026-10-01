@@ -341,8 +341,13 @@ def test_partner_must_be_on_the_inner_side(tmp_path):
     """Right-hand traffic: the opposite direction is on the left; a partner on the right isn't one.
     Left-hand traffic mirrors it."""
     assert _lane_y(tmp_path, 4.0, b_north=False)["11_1"] == pytest.approx(1.625, abs=0.05)
+    # Left-hand traffic mirrors it: the lanes lie left of the line between the two ways, and lane 1 is the
+    # LEFTMOST lane, so the farthest from that line (tests/test_gmns_values.py): the inner lanes, nearest the
+    # line, are the 2nd lanes, 3.25 m apart
     y = _lane_y(tmp_path, 4.0, b_north=False, drive_side="left")
-    assert y["11_1"] == pytest.approx(-0.375, abs=0.05) and y["12_1"] - y["11_1"] == pytest.approx(-3.25, abs=0.05)
+    assert y["11_2"] == pytest.approx(-0.375, abs=0.05) and y["11_1"] == pytest.approx(2.875, abs=0.05)
+    assert y["12_2"] == pytest.approx(-3.625, abs=0.05) and y["12_1"] == pytest.approx(-6.875, abs=0.05)
+    assert y["11_2"] - y["12_2"] == pytest.approx(3.25, abs=0.05)
 
 
 def test_turn_lanes_values_feed_every_turn_they_name():

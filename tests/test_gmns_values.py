@@ -67,3 +67,24 @@ def test_a_way_tagged_with_more_lanes_than_turn_entries_still_gets_every_lane(tm
     con = duckdb.connect(str(tmp_path / "out.duckdb"), read_only=True)
     assert con.execute(f"SELECT count(*), max(lane_num) FROM gmns_driving.lane WHERE link_id = {A}").fetchone() == (3, 3)
     assert _failed(tmp_path / "out.duckdb") == set()
+
+
+@pytest.mark.parametrize("drive_side, left_of_lane_2", [("right", True), ("left", True)])
+def test_lane_1_is_the_leftmost_lane_whichever_side_traffic_drives(tmp_path, drive_side, left_of_lane_2):
+    """Lane 1 is the leftmost lane in the direction of travel (OSM's turn:lanes, the movements and the GMNS
+    convention count from the left): with left-hand traffic the lanes lie left of the centre line, so lane 1 is
+    the one farthest from it. Two-way road A has 2 lanes; its two lanes must not swap places between sides."""
+    from shapely import wkt
+    from tests.test_gmns import A
+    _source(tmp_path / "src.duckdb")
+    to_gmns(str(tmp_path / "src.duckdb"), str(tmp_path / "out.duckdb"), drive_side=drive_side)
+    con = duckdb.connect(str(tmp_path / "out.duckdb"), read_only=True)
+    con.execute("LOAD spatial")
+    link = wkt.loads(con.execute(f"SELECT ST_AsText(geom) FROM gmns_driving.link WHERE link_id = {A}").fetchone()[0])
+    (x0, y0), (x1, y1) = link.coords[0], link.coords[-1]
+    lane = {n: wkt.loads(g) for n, g in con.execute(
+        f"SELECT lane_num, ST_AsText(geom) FROM gmns_driving.lane WHERE link_id = {A} ORDER BY lane_num").fetchall()}
+    side = lambda g: (x1 - x0) * (g.centroid.y - y0) - (y1 - y0) * (g.centroid.x - x0)   # > 0: left of travel
+    assert len(lane) == 2 and side(lane[1]) > side(lane[2])        # lane 1 is further left than lane 2
+    # and the pair sits on the traffic side of the road line: right of it for right-hand traffic
+    assert (side(lane[1]) + side(lane[2]) < 0) == (drive_side == "right")

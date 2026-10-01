@@ -1116,16 +1116,22 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     def offsets(edge_id):
         """Each lane's offset from the road line (left +), the rule per edge as before."""
         w_each, oneway = w_of[edge_id], info[edge_id][4]
-        half, gap, place, out, run = sum(w_each) / 2.0, gaps.get(edge_id), run_place[where[edge_id][0]], [], 0.0
+        total = sum(w_each)
+        half, gap, place, out, run = total / 2.0, gaps.get(edge_id), run_place[where[edge_id][0]], [], 0.0
         for w in w_each:
+            # distance of this lane's centre from the line its direction's lanes start at (the centre line):
+            # lane 1 is always the LEFTMOST lane (OSM's turn:lanes, the movements and the GMNS convention
+            # count from the left). With right-hand traffic the lanes lie right of that line, so the leftmost
+            # is nearest it; with left-hand traffic they lie left of it, so the leftmost is the farthest.
+            d = run + w / 2.0 if side_sign < 0 else total - run - w / 2.0
             if place is not None:                            # OSM placement: from where the line lies
                 out.append(place - (run + w / 2.0))
             elif oneway and gap is not None:                 # one side of a road mapped as 2 ways
-                out.append(side_sign * (run + w / 2.0 - gap / 2.0))
+                out.append(side_sign * (d - gap / 2.0))
             elif oneway:                                     # one-way: lanes centered on the carriageway
                 out.append(half - (run + w / 2.0))
             else:                                            # two-way: this direction's lanes on its travel side
-                out.append(side_sign * (run + w / 2.0))
+                out.append(side_sign * d)
             run += w
         return out
 

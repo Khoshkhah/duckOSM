@@ -34,9 +34,10 @@ SELECT count(*) FROM gmns_driving.link;      -- ATTACH the file, or open it dire
   extension (`ST_*`) and draw. Only `geometry` goes to the CSVs.
 - **One link per direction.** A two-way road is two links with swapped nodes and reversed geometry; a
   one-way road is one. Every link has `directed = true`.
-- **Lane numbers** run from the left in the direction of travel: lane 1 is the leftmost lane, next to the
-  road's centre line (right-hand traffic, the default; `--drive-side left` is not yet checked against
-  this).
+- **Lane numbers** run from the left in the direction of travel: lane 1 is the leftmost lane, whichever side
+  traffic drives. (With right-hand traffic, the default, the leftmost lane is next to the road's centre line;
+  with `--drive-side left` the lanes lie left of it and the leftmost is the farthest.) OSM's `turn:lanes`
+  and `bicycle:lanes` list lanes in the same order, so entry *n* is lane *n*.
 
 ## The tables at a glance
 
@@ -189,7 +190,7 @@ its use, width and turns.
 |---|---|---|---|
 | `lane_id` | VARCHAR | ✅ key | `<link_id>_<lane_num>`, e.g. `8511077704723192952_2` |
 | `link_id` | BIGINT | ✅ | the [`link`](#link) |
-| `lane_num` | BIGINT | ✅ | 1 = leftmost, next to the centre line, up to the number of lanes |
+| `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes |
 | `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does (driving). `walk` / `bike` in the walking / cycling schemas |
 | `width` | DOUBLE | ✅ | metres, from `width:lanes`; **empty where untagged** (most lanes: drawing assumes 3.25 m) |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
