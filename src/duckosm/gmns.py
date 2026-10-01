@@ -25,12 +25,14 @@ degrades to the lane count and skips signal/curb.
 import logging
 import math
 import os
+import re
 
 logger = logging.getLogger("duckosm")
 
 # duckOSM mode schema -> GMNS use token, and use -> (persons_per_vehicle, pce)
 _MODE_USES = {"driving": "auto", "walking": "walk", "cycling": "bike"}
 _USE_DEF = {"auto": (1.0, 1.0), "walk": (1.0, 0.0), "bike": (1.0, 0.2), "bus": (25.0, 2.0)}
+_DEFAULT_BIKE_LANE_W = 1.5       # metres, an on-road bike lane without a width tag
 _DEFAULT_LANE_W = 3.25          # metres, when width:lanes is absent (used for lane offset spacing)
 # saturation capacity default (pce/hr/lane) by facility_type (normalized highway; _link → parent)
 _CAPACITY = {"motorway": 2000, "trunk": 1800, "primary": 1600, "secondary": 1400, "tertiary": 1200,
@@ -385,6 +387,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         logger.warning("GMNS: no 'raw' schema — lane/signal/curb detail limited (no OSM tags)")
 
     name = os.path.splitext(os.path.basename(out_path))[0]
+    area = re.sub(r"_gmns$", "", name)               # the zone's name when the area has no boundary
     result = {"path": out_path, "csv": None, "modes": {}}
     for mode in chosen:
         sch = f"gmns_{mode}"
@@ -394,6 +397,8 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_node(con, sch, mode)
         _build_link(con, sch, mode, uses, has_raw)
         _build_geometry(con, sch, mode)
+        if mode != "driving":
+            _sidewalk_parents(con, sch, has_raw, drive_side)
         _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
                          pair_carriageways)  # before movement
         _build_movement(con, sch, mode, uses, drive_side)
@@ -401,7 +406,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
             _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
         _build_signal_controller(con, sch)
         _build_location(con, sch, mode, has_raw)
-        _build_zone(con, sch)
+        _build_zone(con, sch, area)
         result["modes"][mode] = {
             t: con.execute(f"SELECT count(*) FROM {sch}.{t}").fetchone()[0]
             for t in ("node", "link", "lane", "movement", "signal_controller", "curb_seg")}
@@ -492,7 +497,7 @@ def _build_node(con, sch, mode):
       n.node_id, NULL::VARCHAR AS name, ST_X(n.geom) AS x_coord, ST_Y(n.geom) AS y_coord,
       {z} AS z_coord, NULL::VARCHAR AS node_type,
       CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
-      NULL::VARCHAR AS zone_id, NULL::BIGINT AS parent_node_id, n.geom
+      1::BIGINT AS zone_id, NULL::BIGINT AS parent_node_id, n.geom      -- every node is in the one zone
     FROM s.{mode}.nodes n LEFT JOIN _sig sig ON sig.osm_id = n.node_id
     WHERE n.geom IS NOT NULL""")
 
@@ -527,6 +532,64 @@ def _build_link(con, sch, mode, uses, has_raw):
       '{uses}' AS allowed_uses, NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction,
       NULL::DOUBLE AS row_width, e.osm_id AS osm_id, {lvl}, e.geometry AS geom
     FROM s.{mode}.edges e {raw_join}""")
+
+
+def _sidewalk_parents(con, sch, has_raw, drive_side, max_gap_m=30.0, max_turn_deg=30.0):
+    """``link.parent_link_id`` of a sidewalk (an OSM way with ``footway=sidewalk``): the road link it runs
+    along, as the standard's own example says ("for a sidewalk, this is the adjacent road"). The nearest
+    road link within ``max_gap_m`` metres that is roughly parallel (``max_turn_deg``). A two-way road is two
+    links with the same shape; the sidewalk's parent is the one it is on the kerb side of (its right-hand
+    side with right-hand traffic). A sidewalk with no such road keeps no parent."""
+    if not has_raw:
+        return
+    import numpy as np
+    import shapely
+    from shapely import wkt as _w
+    from shapely.strtree import STRtree
+
+    sw = con.execute(f"""SELECT k.link_id, ST_AsText(k.geom) FROM {sch}.link k
+                         JOIN s.raw.ways w ON w.osm_id = k.osm_id WHERE w.tags['footway'] = 'sidewalk'""").fetchall()
+    if not sw:
+        return
+    nonroad = ", ".join(repr(h) for h in _NON_MOTOR)
+    roads = con.execute(f"""SELECT link_id, ST_AsText(geom) FROM {sch}.link WHERE
+        regexp_replace(split_part(facility_type, ';', 1), '_link$', '') NOT IN ({nonroad})""").fetchall()
+    if not roads:
+        return
+    first = _w.loads(sw[0][1]).coords[0]
+    scale = np.array([math.cos(math.radians(first[1])) * 111320.0, 111320.0])        # lon/lat -> metres, locally
+    to_m = lambda w: shapely.transform(_w.loads(w), lambda c: c * scale)             # noqa: E731
+    road_ids, road_geoms = [r[0] for r in roads], [to_m(r[1]) for r in roads]
+    tree = STRtree(road_geoms)
+
+    def heading(g, t):                                  # the line's direction at distance t along it, radians
+        a, b = g.interpolate(max(t - 1.0, 0.0)), g.interpolate(min(t + 1.0, g.length))
+        return math.atan2(b.y - a.y, b.x - a.x)
+
+    kerb = -1.0 if drive_side == "right" else 1.0       # the sidewalk's side of its road link: right = negative
+    parents = []
+    for link_id, w in sw:
+        g = to_m(w)
+        if g.length < 1.0:
+            continue
+        mid = g.interpolate(0.5, normalized=True)
+        best = None
+        for i in tree.query(g, predicate="dwithin", distance=max_gap_m):
+            r = road_geoms[i]
+            t = r.project(mid)
+            turn = abs(((heading(r, t) - heading(g, g.project(mid)) + math.pi / 2) % math.pi) - math.pi / 2)
+            if math.degrees(turn) > max_turn_deg:
+                continue
+            p = r.interpolate(t)
+            a, b = r.interpolate(max(t - 1.0, 0.0)), r.interpolate(min(t + 1.0, r.length))
+            side = (b.x - a.x) * (mid.y - p.y) - (b.y - a.y) * (mid.x - p.x)         # > 0: left of the road link
+            key = (round(g.distance(r) * 2) / 2, 0 if side * kerb > 0 else 1)         # nearest, then kerb side
+            if best is None or key < best[0]:
+                best = (key, road_ids[i])
+        if best is not None:
+            parents.append((best[1], link_id))
+    if parents:
+        con.executemany(f"UPDATE {sch}.link SET parent_link_id = ? WHERE link_id = ?", parents)
 
 
 def _build_geometry(con, sch, mode):
@@ -738,7 +801,9 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
 
     import pandas as pd
 
-    nl = dict(con.execute(f"SELECT link_id, max(lane_num) FROM {sch}.lane GROUP BY 1").fetchall())
+    nl = dict(con.execute(f"""SELECT l.link_id, max(l.lane_num) FROM {sch}.lane l      -- the motor lanes: not the
+        LEFT JOIN _extra_lane x ON x.link_id = l.link_id AND x.lane_num = l.lane_num   -- bike lane beside them
+        WHERE x.link_id IS NULL GROUP BY 1""").fetchall())
     kinds = defaultdict(dict)        # link -> {lane_num: types}, for links with turn:lanes; a lane left
     for lk, num, turn in con.execute(  # empty there ('|' or 'none', stored NULL) has no arrow: straight on
             f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE link_id IN "
@@ -1039,23 +1104,26 @@ def _build_location(con, sch, mode, has_raw):
         FROM hit)
       SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id, lr,
              lon AS x_coord, lat AS y_coord,
-             CASE WHEN {zskip} THEN NULL ELSE ({z})::DOUBLE END AS z_coord, loc_type, NULL::VARCHAR AS zone_id,
+             CASE WHEN {zskip} THEN NULL ELSE ({z})::DOUBLE END AS z_coord, loc_type, 1::BIGINT AS zone_id,
              NULL::VARCHAR AS gtfs_stop_id, osm_id, p AS geom
       FROM pos {ej} ORDER BY link_id, lr""")
 
 
-def _build_zone(con, sch):
-    """``zone``: the outline of the area, one row, when the source db was built with a boundary."""
-    if not _exists(con, "s", "main", "boundary"):
-        return
-    cols = {c for (c,) in con.execute("SELECT column_name FROM duckdb_columns() WHERE database_name = 's' "
-                                      "AND schema_name = 'main' AND table_name = 'boundary'").fetchall()}
-    if "geom" not in cols or con.execute("SELECT count(*) FROM s.main.boundary").fetchone()[0] == 0:
-        return
-    name = "string_agg(DISTINCT name, ', ')" if "name" in cols else "NULL::VARCHAR"
-    con.execute(f"""CREATE TABLE {sch}.zone AS SELECT '1' AS zone_id, {name} AS name,
-      ST_AsText(ST_Union_Agg(geom)) AS boundary, NULL::VARCHAR AS super_zone, ST_Union_Agg(geom) AS geom
-      FROM s.main.boundary""")
+def _build_zone(con, sch, area):
+    """``zone``: the one zone every node is in (``node.zone_id`` = 1). Its outline is the area's boundary when
+    the source db was built with one; without, only the name (the output file's). GMNS consumers such as
+    Path4GMNS need at least one zone on the nodes."""
+    cols = _exists(con, "s", "main", "boundary") and {c for (c,) in con.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = 'main' "
+        "AND table_name = 'boundary'").fetchall()}
+    if cols and "geom" in cols and con.execute("SELECT count(*) FROM s.main.boundary").fetchone()[0] > 0:
+        name = "string_agg(DISTINCT name, ', ')" if "name" in cols else "NULL::VARCHAR"
+        con.execute(f"""CREATE TABLE {sch}.zone AS SELECT 1::BIGINT AS zone_id, coalesce({name}, ?) AS name,
+          ST_AsText(ST_Union_Agg(geom)) AS boundary, NULL::VARCHAR AS super_zone, ST_Union_Agg(geom) AS geom
+          FROM s.main.boundary""", [area])
+    else:
+        con.execute(f"""CREATE TABLE {sch}.zone AS SELECT 1::BIGINT AS zone_id, ? AS name,
+          NULL::VARCHAR AS boundary, NULL::VARCHAR AS super_zone, NULL::GEOMETRY AS geom""", [area])
 
 
 def _build_signal_controller(con, sch):
@@ -1091,14 +1159,29 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         return tags.get(base + ":backward") if is_rev else (
             tags.get(base + ":forward") or tags.get(base))
 
+    def bike_extra(tags, is_rev):
+        """An on-road bike lane (``cycleway=lane``) on the RIGHT of this edge's direction of travel, as
+        ``(drawn width, tagged width or None)``: the way's right side for its forward edge, its left side for
+        the reverse edge. Right-hand traffic only: with left-hand traffic the lane is on the left and would
+        renumber the motor lanes. None where a ``bicycle:lanes`` lane already is the bike lane."""
+        if (mode != "driving" or drive_side != "right"
+                or "designated" in (_split(pick(tags, "bicycle:lanes", is_rev)) or [])):
+            return None
+        for key in (f"cycleway:{'left' if is_rev else 'right'}", "cycleway:both", "cycleway"):
+            if tags.get(key) == "lane":
+                w = _num(tags.get(f"{key}:width")) or _num(tags.get("cycleway:width"))
+                return (w or _DEFAULT_BIKE_LANE_W, w)
+        return None
+
     def lane_widths(tags, lanes, is_rev):
         turns = _split(pick(tags, "turn:lanes", is_rev))
         widths = _split(pick(tags, "width:lanes", is_rev))
         # one lane per `turn:lanes` entry, and never fewer than `lanes`: an OSM way tagged lanes=3 with only two
         # turn entries has a third lane that the arrows say nothing about (a pocket can add lanes, never remove)
         n = max(len(turns), int(lanes or 1), 1)
+        extra = bike_extra(tags, is_rev)
         return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W
-                               for i in range(n)]
+                               for i in range(n)] + ([extra[0]] if extra else [])
 
     # runs of pieces (docs/design/gmns_lane_runs.md): one road is a chain of edges of one OSM way;
     # its lanes are placed once for the whole run (pairing, placement, the offset curve)
@@ -1181,7 +1264,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         con.execute("CREATE OR REPLACE TEMP TABLE _lane_runs AS SELECT * FROM _runs_df")
         con.unregister("_runs_df")
 
-    lane_rows, curb_rows = [], []
+    lane_rows, curb_rows, extra_lanes = [], [], []
     for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name in rows:
         tags = tags or {}
         turns, widths, w_each = lane_widths(tags, lanes, is_rev)
@@ -1189,16 +1272,20 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         psvs = _split(pick(tags, "psv:lanes", is_rev))
         buses = _split(pick(tags, "bus:lanes", is_rev))     # bus lanes are tagged either way
         n = len(w_each)
+        extra = bike_extra(tags, is_rev)                     # the last lane, beside the motor lanes
         offs = offsets(edge_id)
         run = 0.0
         for i in range(n):
             u = uses
-            if i < len(bikes) and bikes[i] in ("designated", "yes"):
+            if extra and i == n - 1:
+                u = "bike"
+                extra_lanes.append((edge_id, i + 1))
+            elif i < len(bikes) and bikes[i] in ("designated", "yes"):
                 u = "bike"
             elif (i < len(psvs) and psvs[i] in ("designated", "yes")) or \
                     (i < len(buses) and buses[i] in ("designated", "yes")):
                 u = "bus"
-            width = _num(widths[i]) if i < len(widths) else None
+            width = extra[1] if extra and i == n - 1 else (_num(widths[i]) if i < len(widths) else None)
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
             run += w_each[i]
             if not lane_geometry:
@@ -1213,6 +1300,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             if val and val not in ("no", "separate", "none"):
                 curb_rows.append((f"{edge_id}_{side}", edge_id, source, 0.0, length_m, val, None))
 
+    con.execute("CREATE TEMP TABLE IF NOT EXISTS _extra_lane(link_id BIGINT, lane_num INTEGER)")
+    if extra_lanes:       # bike lanes beside the motor lanes: movements, forks and merges ignore them
+        con.executemany("INSERT INTO _extra_lane VALUES (?, ?)", extra_lanes)
     lane_df = pd.DataFrame(lane_rows, columns=[
         "lane_id", "link_id", "lane_num", "allowed_uses", "r_barrier", "l_barrier",
         "width", "turn", "geom_wkt"])

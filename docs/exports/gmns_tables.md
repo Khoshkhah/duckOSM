@@ -55,7 +55,7 @@ SELECT count(*) FROM gmns_driving.link;      -- ATTACH the file, or open it dire
 | [`curb_seg`](#curb_seg) | yes | a stretch of kerb with a rule | 2 | on-street parking |
 | [`signal_controller`](#signal_controller) | yes | a traffic signal | 1 | where the signals are |
 | [`location`](#location) | yes | a point along a link | 1,803 | crossings, signs, parking entrances |
-| [`zone`](#zone) | yes | an area | 0 or 1 | the area's outline |
+| [`zone`](#zone) | yes | an area | 1 | the area's name and, when known, outline |
 | [`gmns_all`](#gmns_all-all-modes-in-one) | | all modes in one `node` + `link` | | one network for every mode |
 | [`meso_*`, `micro_*`](#meso-and-micro-networks) | osm2gmns layout | sections, connectors, cells | | simulators |
 
@@ -131,7 +131,8 @@ it is not an OSM node.
 | `x_coord`, `y_coord` | DOUBLE | ✅ | longitude, latitude |
 | `ctrl_type` | VARCHAR | ✅ | `signal` where the OSM node is a `highway=traffic_signals`; empty elsewhere. (Stop and give-way signs are in [`location`](#location).) |
 | `z_coord` | DOUBLE | ✅ | metres: the node's height, when the source was given heights with [`duckosm elevation`](../guides/elevation.md); empty otherwise |
-| `name`, `node_type`, `zone_id`, `parent_node_id` | | ∅ | empty |
+| `zone_id` | BIGINT | ✅ | `1`: every node is in the [`zone`](#zone). (Tools such as Path4GMNS refuse nodes with no zone.) |
+| `name`, `node_type`, `parent_node_id` | | ∅ | empty |
 | `geom` | GEOMETRY | ➕ | the point |
 
 ## link
@@ -157,7 +158,8 @@ walked both ways).
 | `ped_facility` | VARCHAR | ✅ | from OSM `sidewalk`: `sidewalk` (either side or both: which side is lost), `offstreet_path` (`separate`), `none`, `unknown` |
 | `allowed_uses` | VARCHAR | ✅ | the mode's use: `auto`, `walk` or `bike` |
 | `grade` | DOUBLE | ✅ | percent, negative downhill: `100 × (height at the end − height at the start) / length`, when the source has heights (`duckosm elevation`). Empty on a bridge or in a tunnel (there the height is the ground below or above, not the road) and where the slope would pass 100 %, the spec's limit. A coarse elevation model makes short links noisy: see the [elevation guide](../guides/elevation.md#what-the-heights-mean) |
-| `parking`, `toll`, `jurisdiction`, `row_width`, `parent_link_id` | | ∅ | empty (parking is in [`curb_seg`](#curb_seg)) |
+| `parent_link_id` | BIGINT | ✅ | for a sidewalk (an OSM way with `footway=sidewalk`) in the walking and cycling schemas, the road link it runs along: the nearest, roughly parallel one within 30 m, and of a two-way road the link the sidewalk is on the kerb side of (its right with right-hand traffic). Empty on roads and on a sidewalk with no road beside it |
+| `parking`, `toll`, `jurisdiction`, `row_width` | | ∅ | empty (parking is in [`curb_seg`](#curb_seg)) |
 | `osm_id` | BIGINT | ➕ | the OSM way the link comes from: one way gives several links (one per piece and direction) |
 | `bridge`, `tunnel`, `layer` | VARCHAR | ➕ | the OSM tags as they are (`yes`, `-1`, …): which links are on a bridge or in a tunnel, and the drawing order |
 | `geom` | GEOMETRY | ➕ | the shape |
@@ -192,15 +194,24 @@ its use, width and turns.
 |---|---|---|---|
 | `lane_id` | VARCHAR | ✅ key | `<link_id>_<lane_num>`, e.g. `8511077704723192952_2` |
 | `link_id` | BIGINT | ✅ | the [`link`](#link) |
-| `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes |
-| `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does (driving). `walk` / `bike` in the walking / cycling schemas |
+| `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes. An on-road bike lane is the last |
+| `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does, or for an on-road bike lane (see below) (driving). `walk` / `bike` in the walking / cycling schemas |
 | `width` | DOUBLE | ✅ | metres, from `width:lanes`; **empty where untagged** (most lanes: drawing assumes 3.25 m) |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
 | `turn` | VARCHAR | ➕ | the lane's `turn:lanes` value (`left`, `through;right`, …), empty where untagged |
 | `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap) |
 
-How many rows: the lane count, plus a lane for each extra entry of `turn:lanes` (a turn pocket). That is
-why a link can have `lanes = 2` and three `lane` rows.
+How many rows: the lane count, plus a lane for each extra entry of `turn:lanes` (a turn pocket), plus one for an
+on-road bike lane. That is why a link can have `lanes = 2` and three `lane` rows.
+
+**On-road bike lanes.** Where OSM tags `cycleway=lane` (or `cycleway:right=lane` / `:both`) on the right of
+the direction of travel (for the way's reverse direction: `cycleway:left` / `:both`), the link gets one more lane
+row, `allowed_uses = 'bike'`, the *last* lane, to the right of the motor lanes; its `width` is the
+`cycleway:right:width` tag, drawn 1.5 m if untagged. The GMNS FAQ says on-road bike lanes belong in the lane
+table. It is not a place to turn into: movements, forks and merges use the motor lanes only, and `link.lanes`
+stays the motor lane count. Not done for left-hand traffic (`--drive-side left`: the lane would be on the left
+and renumber the motor lanes), for separated tracks (they are their own links in the cycling schema) or where
+`bicycle:lanes` already marks a lane.
 
 ```sql
 -- the lanes of one street, with their uses
@@ -309,21 +320,24 @@ table needs the raw OSM tags, like lane details do: an area clipped from a bigge
 | `x_coord`, `y_coord` | DOUBLE | ✅ | longitude, latitude of the OSM node |
 | `loc_type` | VARCHAR | ✅ | the OSM tag value: `crossing`, `bus_stop`, `give_way`, … (the standard recommends OSM names) |
 | `z_coord` | DOUBLE | ✅ | metres, between the link's two end heights by distance along it (empty without heights, and on a bridge or in a tunnel) |
-| `zone_id`, `gtfs_stop_id` | | ∅ | empty (no GTFS in the data) |
+| `zone_id` | BIGINT | ✅ | `1`, the [`zone`](#zone) |
+| `gtfs_stop_id` | | ∅ | empty (no GTFS in the data) |
 | `osm_id` | BIGINT | ➕ | the OSM node id |
 | `geom` | GEOMETRY | ➕ | the point |
 
 ## zone
 
-An area, as a polygon. duckOSM writes **one** zone: the outline of the area you built, when the
-database was built with a boundary (`--boundary`, an H3 cell, an admin area; Tartu has one, Monaco does not).
-Without one, there is no `zone` table. [lanestyle](https://github.com/Khoshkhah/lanestyle) draws this outline.
+An area. duckOSM writes **one** zone, and every node (and every [`location`](#location)) is in it. Its outline
+is the area you built, when the database was built with a boundary (`--boundary`, an H3 cell, an admin area;
+Tartu has one, Monaco does not); without one the zone has a name (the output file's) and no outline. A zone is
+needed because GMNS tools such as [Path4GMNS](https://github.com/jiaweizhang/path4gmns) refuse a network whose
+nodes are in no zone. [lanestyle](https://github.com/Khoshkhah/lanestyle) draws the outline.
 
 | Column | Type | Spec | Holds |
 |---|---|---|---|
-| `zone_id` | VARCHAR | ✅ key | `1` |
-| `name` | VARCHAR | ✅ | the boundary's name, if it has one |
-| `boundary` | VARCHAR | ✅ | the outline as WKT `POLYGON` / `MULTIPOLYGON` |
+| `zone_id` | BIGINT | ✅ key | `1` |
+| `name` | VARCHAR | ✅ | the boundary's name if it has one, else the area (the output file's name without `_gmns`) |
+| `boundary` | VARCHAR | ✅ | the outline as WKT `POLYGON` / `MULTIPOLYGON`; empty without a boundary |
 | `super_zone` | VARCHAR | ∅ | empty |
 | `geom` | GEOMETRY | ➕ | the same outline, native |
 

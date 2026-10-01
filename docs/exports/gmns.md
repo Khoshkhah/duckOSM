@@ -32,7 +32,7 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 2 | on-street parking, where OSM tags `parking:*` |
 | `location` | 1,803 | OSM points on a link: crossings, give-way and stop signs, signals, parking entrances |
-| `zone` | 0 or 1 | the area's outline, when the database was built with a boundary |
+| `zone` | 1 | the area: every node is in it; its outline when the database was built with a boundary |
 | `config`, `use_definition`, `use_group` | | units (metres, km/h), CRS (EPSG:4326), modes |
 
 Tables GMNS defines but OSM has no data for (signal timing, time-of-day) are left out, as the spec

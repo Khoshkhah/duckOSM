@@ -196,3 +196,22 @@ geodesic length; empty on bridges and in tunnels, where the height is the ground
 the spec's 100 %), `location.z_coord` (interpolated along the link). Without heights, all three stay empty.
 Checked end to end on Granville Island (heights streamed from Copernicus): the CSVs have them, structures have
 no grade. `tests/test_gmns_elevation.py`.
+
+## From the GMNS README (2026-10-01): zone, sidewalk parents, bike lanes
+
+Read against the README, section by section. Tested with a consumer it names, Path4GMNS: it refused our
+`node.csv` ("NO VALID zones": `zone_id` empty); with one zone it loads Monaco's 1,904 nodes and 3,092 links and routes
+on them (`tests/test_gmns_interop.py` keeps it so, skipped without `path4gmns`).
+
+1. **A zone every node is in.** `zone` is always written (one row, the boundary's outline when the area has one);
+   `node.zone_id` and `location.zone_id` are 1; ids are integers (`id_type` is `integer`).
+2. **`link.parent_link_id` for sidewalks:** "for a sidewalk, this is the adjacent road". OSM `footway=sidewalk` ways in
+   the walking and cycling schemas get the nearest roughly parallel road link within 30 m (kerb side of a two-way
+   road). Södermalm walking: 630 of 1,044 sidewalk links; Tartu: 3,738 of 4,814. The rest have no road beside them
+   (or none that is parallel).
+3. **On-road bike lanes as lane rows:** the FAQ says "on-road bike lanes as explicit lanes in the lane table".
+   `cycleway=lane` on the right of the direction of travel adds a last lane (`bike`); movements ignore it
+   (`_extra_lane`). Driving: Monaco 7, Södermalm 102 more, Tartu 331 (was none).
+
+Still open from the same reading: bus stops and `gtfs_stop_id`; `ctrl_type` `stop` / `yield`; graph checks (connectedness)
+in `--check`; `node_type`; user-defined columns with a `u_` prefix in the CSV.
