@@ -24,8 +24,8 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | `node` | 1,719 | junctions; `ctrl_type = 'signal'` at traffic lights |
 | `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name |
 | `lane` | 3,182 | one row per lane, with its turns, allowed uses and width where OSM tags them |
-| `movement` | 3,488 | legal turns (from `edge_graph`; turning back along the same road only at a dead end, or where it's the only way into the road's other direction): type (left, thru, right, uturn, merge, diverge), code (`NBL`, `EBT`, …), the lanes it starts from and ends in (equal-length ranges read in order: from `turn:lanes` where tagged, else osm2gmns's rule, [design](../design/gmns_lane_movements.md)), a curved turn path |
-| `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](../design/gmns_lane_connectors.md)) |
+| `movement` | 3,500 | legal turns (from `edge_graph`; turning back along the same road only at a dead end, or where it's the only way into the road's other direction): type (left, thru, right, uturn, merge, diverge), code (`NBL`, `EBT`, …), the lanes it starts from and ends in (equal-length ranges read in order: from `turn:lanes` where tagged, else osm2gmns's rule, [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_movements.md)), a curved turn path |
+| `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md)) |
 | `geometry` | 2,765 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
 | `curb_seg` | 0 | on-street parking, where OSM tags `parking:*` |
@@ -52,7 +52,7 @@ has a centre line drawn beside the road, on the traffic side, 3.25 m apart (`--d
 left-hand traffic). A road mapped as two one-way ways, one per direction, drawn closer together
 than its lanes need, is placed as one road: each direction's lanes start from the line midway
 between the two ways, so the directions never overlap (`--no-pair-carriageways` turns this off;
-[design](../design/gmns_paired_carriageways.md)).
+[design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_paired_carriageways.md)).
 
 ## Meso and micro networks
 
@@ -63,9 +63,9 @@ duckosm gmns monaco.duckdb --meso --micro
 ```
 
 - **Meso** (`meso_driving`): each road becomes a section, and each legal turn a connector
-  between sections. Monaco: 2,765 sections + 3,488 connectors.
+  between sections. Monaco: 2,765 sections + 3,500 connectors.
 - **Micro** (`micro_driving`): each lane cut into 7 m cells, with lane-change links between side-by-side
-  cells and turn links across junctions. Monaco: 27,131 links.
+  cells and turn links across junctions. Monaco: 25,423 links.
 
 Both follow osm2gmns' layout. Their ids are built from `edge_id` (`M<edge_id>` for a section,
 `X<from edge_id>-<to edge_id>` for a meso connector), so they stay the same across rebuilds and lead back to the road.

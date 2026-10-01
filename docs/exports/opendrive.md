@@ -3,7 +3,7 @@
 ```bash
 duckosm opendrive monaco.duckdb                               # -> monaco.xodr: 2,765 roads
 duckosm gmns monaco.duckdb                                    # for junctions: a GMNS db first
-duckosm opendrive monaco_gmns.duckdb --junctions                  # -> monaco_gmns.xodr: + 1,720 connecting roads, 470 junctions
+duckosm opendrive monaco_gmns.duckdb --junctions                  # -> monaco_gmns.xodr: + 1,744 connecting roads, 482 junctions
 ```
 
 An ASAM OpenDRIVE 1.7 `.xodr`, for driving simulators (CARLA, esmini) and microsimulators (PTV
@@ -19,8 +19,8 @@ a road simply continues, the two roads link directly.
 
 **Limits:** checked for structure only, not against the ASAM schema, and not yet loaded in CARLA or
 esmini. A connecting road has one lane, linked to the rightmost lane of the roads it joins. It starts
-and ends near the road ends, usually about 1 m off but sometimes tens of metres (Monaco: 215 of
-1,720 more than 5 m), which a strict simulator may report. No road type or speed limit, road
+and ends near the road ends, usually about 2 m off but sometimes tens of metres (Monaco: 220 of
+1,744 more than 5 m), which a strict simulator may report. No road type or speed limit, road
 markings, signals or banking.
 
 ```python

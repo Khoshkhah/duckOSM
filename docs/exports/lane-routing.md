@@ -5,12 +5,12 @@ A route that says **which lane** to be in, not only which road. It runs on a
 
 ```bash
 duckosm gmns monaco.duckdb
-duckosm lane-graph monaco_gmns.duckdb       # 3,182 lanes, 4,999 turn + 834 lane-change links
+duckosm lane-graph monaco_gmns.duckdb       # 3,182 lanes, 3,890 turn + 834 lane-change links
 duckosm route-lanes monaco_gmns.duckdb <from> <to> -o route.geojson
 ```
 
 ```text
-route: 112 lanes, cost 4146, maneuvers: right turn, right turn, right turn, right turn, U-turn
+route: 115 lanes, cost 3876, maneuvers: right turn, right turn, merge, fork, lane change, … (25 in all), right turn, U-turn
 ```
 
 `<from>` and `<to>` are lane ids (`<edge_id>_<lane number>`, e.g. `4737533508550016661_1`), or

@@ -14,7 +14,7 @@ of Autoware and the `lanelet2` library. It is OSM XML, so it also opens in OSM t
 
 **It is a starting map, not a survey-grade HD map.** The borders come from OSM centre lines and a
 3.25 m default width, accurate to about a metre, not centimetres. Lanelets touch where roads meet
-but mostly don't share both end points (Monaco: 6 % of the legal turns do), so the `lanelet2`
+but mostly don't share both end points (Monaco: 4 % of the legal turns do), so the `lanelet2`
 router can't route across them yet. Not yet: routing between lanelets, lane-change neighbours,
 traffic lights and stop lines. Checked for structure only; not yet loaded in Autoware.
 

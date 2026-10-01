@@ -7,7 +7,7 @@ library built on roadstyle, draws them.
 
 ## Build them
 
-Every build from a PBF makes them (Monaco: 10 layers, 3 MB, under a second). To leave them out:
+Every build from a PBF makes them (Monaco: 11 layers, under a second). To leave them out:
 `duckosm build --no-features`, or in a config file:
 
 ```yaml
