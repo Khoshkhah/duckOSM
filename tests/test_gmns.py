@@ -62,6 +62,16 @@ def test_all_tables_and_link_id_is_edge_id(tmp_path):
     assert ids == {A, B, AR}                                     # link_id == edge_id, exact
 
 
+def test_every_lane_use_is_defined_and_config_has_the_spec_columns(tmp_path):
+    con = _gmns(tmp_path)
+    q = lambda s: con.execute(s).fetchall()
+    assert not q("SELECT DISTINCT allowed_uses FROM gmns_driving.lane WHERE allowed_uses NOT IN "
+                 "(SELECT use FROM gmns_driving.use_definition)")
+    assert {"auto", "bus", "bike"} <= {r[0] for r in q("SELECT use FROM gmns_driving.use_definition")}
+    cols = [r[0] for r in q("DESCRIBE gmns_driving.config")]
+    assert "currency" in cols and q("SELECT version_number FROM gmns_driving.config") == [(0.97,)]
+
+
 def test_referential_integrity(tmp_path):
     con = _gmns(tmp_path)
     q = lambda s: con.execute(s).fetchone()[0]

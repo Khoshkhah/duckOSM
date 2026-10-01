@@ -402,9 +402,9 @@ def _build_combined(con, modes, name):
     ``allowed_uses`` unioned across the modes that contain it. Lane/movement stay per-mode."""
     con.execute("CREATE SCHEMA gmns_all")
     con.execute(f"""CREATE TABLE gmns_all.config AS SELECT * FROM (VALUES
-      ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', '0.97', 'integer')
+      ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
     ) t(dataset_name, long_length, short_length, speed, crs, geometry_field_format,
-        version_number, id_type)""")
+        currency, version_number, id_type)""")
     con.execute("CREATE TABLE gmns_all.use_definition AS "
                 + " UNION ".join(f"SELECT * FROM gmns_{m}.use_definition" for m in modes))
     con.execute("CREATE TABLE gmns_all.use_group AS "
@@ -440,13 +440,17 @@ def _build_combined(con, modes, name):
 def _build_fixed(con, sch, name, mode, uses):
     """config + use_definition + use_group — the small fixed tables."""
     con.execute(f"""CREATE TABLE {sch}.config AS SELECT * FROM (VALUES
-      ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', '0.97', 'integer')
+      ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
     ) t(dataset_name, long_length, short_length, speed, crs, geometry_field_format,
-        version_number, id_type)""")
-    ppv, pce = _USE_DEF.get(uses, (1.0, 1.0))
-    con.execute(f"""CREATE TABLE {sch}.use_definition AS SELECT
-      '{uses}' AS use, {ppv} AS persons_per_vehicle, {pce} AS pce,
-      NULL::VARCHAR AS special_conditions, NULL::VARCHAR AS description""")
+        currency, version_number, id_type)""")
+    # every use a lane can carry must be defined (spec: lane.allowed_uses): a driving network's lanes
+    # are auto, bus or bike
+    defined = [uses] + (["bus", "bike"] if mode == "driving" else [])
+    rows = ", ".join(f"('{u}', {_USE_DEF.get(u, (1.0, 1.0))[0]}, {_USE_DEF.get(u, (1.0, 1.0))[1]})"
+                     for u in defined)
+    con.execute(f"""CREATE TABLE {sch}.use_definition AS SELECT use, persons_per_vehicle, pce,
+      NULL::VARCHAR AS special_conditions, NULL::VARCHAR AS description
+      FROM (VALUES {rows}) t(use, persons_per_vehicle, pce)""")
     con.execute(f"""CREATE TABLE {sch}.use_group AS SELECT
       '{mode}' AS use_group, '{uses}' AS uses, NULL::VARCHAR AS description""")
 

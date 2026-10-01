@@ -85,7 +85,7 @@ Columns are the **GMNS spec columns**; *Source* is how OSM/duckOSM fills each. S
 source are listed so the full shape is visible.
 
 **`config`** (one row): `dataset_name`, `long_length=meter`, `short_length=meter`, `speed=kmh`,
-`crs=EPSG:4326`, `geometry_field_format=wkt`, `version_number=0.97`, `id_type=integer`.
+`crs=EPSG:4326`, `geometry_field_format=wkt`, `currency` blank, `version_number=0.97`, `id_type=integer`.
 
 **`node`** — `node_id`✅(`nodes.node_id`) · `x_coord`✅(lon) · `y_coord`✅(lat) ·
 `ctrl_type`(`'signal'` if the node is an OSM `traffic_signals`) · *`name,z_coord,node_type,zone_id,
