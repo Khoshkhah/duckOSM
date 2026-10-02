@@ -51,7 +51,7 @@ SELECT count(*) FROM gmns_driving.link;      -- ATTACH the file, or open it dire
 | [`geometry`](#geometry) | yes | the shape of a link | 3,092 | link shapes, keyed by id |
 | [`lane`](#lane) | yes | one lane of a link | 3,520 | lane use, width, turns |
 | [`movement`](#movement) | yes | one legal turn at a junction | 3,957 | which link may follow which, from which lanes |
-| [`lane_connector`](#lane_connector) | ➕ extension | one lane-to-lane path across a junction | 1,788 | drawing lanes through junctions |
+| [`lane_connector`](#lane_connector) | ➕ extension | one lane-to-lane path across a junction (driving), and a footway's [join](#footway-joins) to a road lane (walking) | 1,813 + 542 | drawing lanes through junctions |
 | [`crossing`](#crossing) | ➕ extension | one pedestrian crossing painted on the driving lanes | 741 | drawing zebra crossings |
 | [`lane_crossing`](#lane_crossing) | ➕ extension | one lane a crossing covers, and which stretch of it | 909 | painting the stripes lane by lane |
 | [`link_along`](#link_along) | ➕ extension | one road a footpath runs along (a footpath often runs along several) | — | matching a sidewalk to its whole street |
@@ -275,8 +275,8 @@ a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 | `connector_id` | VARCHAR | `<from_lane_id>><to_lane_id>` |
 | `mvmt_id` | VARCHAR | the [`movement`](#movement) it belongs to |
 | `from_lane_id`, `to_lane_id` | VARCHAR | the two [`lane`](#lane)s |
-| `width` | DOUBLE | metres (the lane width, 3.25 m by default) |
-| `geom` | GEOMETRY | a curve from the end of the first lane to the start of the second |
+| `width` | DOUBLE | metres (the lane width, 3.25 m by default; a U-turn is as wide as its lanes, never more than the gap between them) |
+| `geom` | GEOMETRY | a curve from the end of the first lane to the start of the second; for a U-turn between lanes that face opposite ways, a half-circle through the two ends ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_uturn_arc.md)) |
 
 Lanes stop where a junction starts, or where they would jump sideways; the connector joins them. Not in
 the standard, so never in the CSVs. See the [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md).
