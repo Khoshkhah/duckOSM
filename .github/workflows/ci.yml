@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30      # a hung test must not hold the runner for GitHub's 6 hours
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +24,8 @@ jobs:
       # Tests that need local PBFs / built dbs / netconvert skip themselves.
       # [sumo] brings netconvert, so the SUMO export is tested for real
       - run: pip install -e ".[dev,routing,sumo]"
-      - run: pytest tests/ -q -rs
+      # python -m pytest puts the repo root on the path: tests import each other as `tests.test_gmns`
+      - run: python -m pytest tests/ -q -rs
 
   package:
     runs-on: ubuntu-latest
