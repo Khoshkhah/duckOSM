@@ -54,6 +54,14 @@ install has no repo, so only files inside `src/duckosm/` ship.
 exporters (`matsim-lanes`, `lanelet2`, `opendrive --junctions`, `lane-graph`) take a **GMNS db**
 produced by `duckosm gmns`, not the core db. `railml` re-extracts rail from `raw.*`.
 
+## GMNS lanes, movements and footpaths (2026-10-02, branch `gmns-values`)
+
+Data holes are fixed here, in `gmns.py`, not in a reader (lanestyle only draws). Design notes in `docs/design/gmns_lane_connectors.md`, `gmns_crossings.md`, `gmns_walking_frame.md`:
+lane width by road class where OSM has none (`_LANE_W_BY_CLASS`, written to `lane.width`); `_inherit_lanes` (an untagged one-way edge takes the lane count of the road it plainly
+continues); `_continuation_movements` (a car lane the road has no room for ahead merges, a bike lane continues; skipped where `turn:lanes` marks the lanes); connector width fitted to its curve
+(`_fit_width`); `link_along` + `along_*` (the roads a footpath runs along: cars-only roads of its own level, matched by how long the road runs along it; a `footway=crossing` only when long and parallel
+or continuing a matched footpath); `--walk-frame` (moves footpaths to the kerb) is opt-in and off. Matching and crossings compare the exact level (`_level`: layer, else bridge 1 / tunnel -1).
+
 ## Invariants that are easy to break
 
 - **`edge_id` is a stable content hash**, not a sequence:
