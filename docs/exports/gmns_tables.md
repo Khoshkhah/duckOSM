@@ -267,7 +267,7 @@ WHERE m.type = 'left';
 
 ## lane_connector
 
-duckOSM's own table (only in `gmns_driving`: a footway has no turning path through a junction in OSM, and its lane runs to its node), for drawing and for lane-level routing: the **path from one lane to the next** across
+duckOSM's own table (in `gmns_driving`; a footway has no turning path through a junction in OSM, its lane runs to its node, so `gmns_walking` has only the short [footway joins](#footway-joins)), for drawing and for lane-level routing: the **path from one lane to the next** across
 a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 
 | Column | Type | Holds |
@@ -280,6 +280,13 @@ a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 
 Lanes stop where a junction starts, or where they would jump sideways; the connector joins them. Not in
 the standard, so never in the CSVs. See the [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md).
+
+### Footway joins
+
+When both `driving` and `walking` are exported, `gmns_walking.lane_connector` holds one straight connector per footway end that meets a road at a node
+both links share, from the nearest road lane's end to the footway lane's end, when the two are 0.3-6 m apart (a road lane sits beside its link's line, a footway lane
+on it). `from_lane_id` is the road lane (the same id in `gmns_driving` and `gmns_walking`), `to_lane_id` the footway lane, `width` the footway's, `mvmt_id` the walking
+movement between the two links, or NULL. Nothing moves: the footway still runs to its OSM node. See the [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_walk_joins.md).
 
 ## crossing
 

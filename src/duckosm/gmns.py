@@ -490,6 +490,9 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         logger.info(f"GMNS[{mode}]: {r['node']:,} nodes, {r['link']:,} links, {r['lane']:,} lanes, "
                     f"{r['movement']:,} movements, {r['signal_controller']} signals -> {sch}")
 
+    if "driving" in chosen and "walking" in chosen:
+        _build_walk_joins(con)              # after both modes: the road lane ends come from gmns_driving (docs/design/gmns_walk_joins.md)
+
     result["combined"] = None
     if combined and len(chosen) > 1:
         c = _build_combined(con, chosen, name)
@@ -506,6 +509,54 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     con.execute("DETACH s")
     con.close()
     return result
+
+
+def _build_walk_joins(con, max_gap_m=6.0, min_gap_m=0.3):
+    """Where a footway meets a road (docs/design/gmns_walk_joins.md): a road lane sits beside its link's line, a footway lane on it, so at a node both
+    links share the two lane ends are up to a lane width apart. One straight connector per footway end, from the nearest road lane's end to the
+    footway's, into ``gmns_walking.lane_connector`` (``from_lane_id`` the road lane, ``to_lane_id`` the footway lane), when the ends are
+    ``min_gap_m``-``max_gap_m`` apart. Only at a node both links share in the data, never between links that share none. A footway link is a walking
+    link that is not a driving one and shares no OSM way with one (the walking twin of a one-way road is that road)."""
+    import math
+
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    con.execute("""CREATE TABLE gmns_walking.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR,
+                      to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY)""")
+    roads = con.execute("""SELECT l.lane_id, k.from_node_id, k.to_node_id, ST_AsText(l.geom), l.link_id
+                           FROM gmns_driving.lane l JOIN gmns_driving.link k ON k.link_id = l.link_id WHERE l.geom IS NOT NULL""").fetchall()
+    foots = con.execute(f"""SELECT l.lane_id, k.from_node_id, k.to_node_id, ST_AsText(l.geom), l.link_id, COALESCE(l.width, {_DEFAULT_WALK_W})
+                            FROM gmns_walking.lane l JOIN gmns_walking.link k ON k.link_id = l.link_id
+                            WHERE l.geom IS NOT NULL AND l.allowed_uses = 'walk'
+                              AND k.link_id NOT IN (SELECT link_id FROM gmns_driving.link)
+                              AND k.osm_id NOT IN (SELECT osm_id FROM s.driving.edges WHERE osm_id IS NOT NULL)""").fetchall()
+    if not roads or not foots:
+        return
+    mvmt = {(ib, ob): m for m, ib, ob in con.execute("SELECT mvmt_id, ib_link_id, ob_link_id FROM gmns_walking.movement").fetchall()}
+    y0 = _w.loads(roads[0][3]).coords[0][1]
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    dist = lambda p, q: math.hypot((p[0] - q[0]) * kx * M, (p[1] - q[1]) * M)       # noqa: E731
+    ends = {}                                              # node -> [(lane_id, link_id, end point)]
+    for lid, a, b, wkt, lk in roads:
+        c = _w.loads(wkt).coords
+        for node, pt in ((a, c[0]), (b, c[-1])):
+            ends.setdefault(node, []).append((lid, lk, pt))
+    rows, seen = [], set()
+    for lid, a, b, wkt, lk, w in foots:
+        c = _w.loads(wkt).coords
+        for node, pt in ((a, c[0]), (b, c[-1])):
+            near = [(dist(pt, q), rl, rk, q) for rl, rk, q in ends.get(node, [])]
+            if not near:
+                continue
+            d, rl, rk, q = min(near, key=lambda r: r[0])
+            key = (round(pt[0], 7), round(pt[1], 7), round(q[0], 7), round(q[1], 7))
+            if min_gap_m < d <= max_gap_m and key not in seen:
+                seen.add(key)
+                rows.append((f"{rl}>{lid}", mvmt.get((lk, rk)) or mvmt.get((rk, lk)), rl, lid, float(w), LineString([q, pt]).wkt))
+    if rows:
+        con.executemany("INSERT INTO gmns_walking.lane_connector VALUES (?, ?, ?, ?, ?, ST_GeomFromText(?::VARCHAR))", rows)
+    logger.info(f"GMNS[walking]: {len(rows):,} footway joins (a road lane's end to a footway's, at a shared node)")
 
 
 def _build_combined(con, modes, name):
