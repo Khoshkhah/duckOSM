@@ -1556,6 +1556,7 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
         return dx / d, dy / d
 
     to_ll = lambda pts: "LINESTRING(" + ", ".join(f"{x / (kx * M) + x0:.8f} {y / M + y0:.8f}" for x, y in pts) + ")"
+    uturns = {m for (m,) in con.execute(f"SELECT mvmt_id FROM {sch}.movement WHERE type = 'uturn'").fetchall()}
     rows = []
     for mid, a, b in pairs:
         if (a, b) in going_on:                   # one road going on: nothing to connect
@@ -1565,6 +1566,15 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
         if chord < 0.3:
             continue
         (ax, ay), (bx, by) = tangent(cut[a], True), tangent(cut[b], False)
+        if mid in uturns and ax * bx + ay * by < -0.9 and chord >= 0.5:          # docs/design/gmns_uturn_arc.md: a half-circle as wide as the lanes
+            ux, uy = (p0[0] - p3[0]) / chord, (p0[1] - p3[1]) / chord              # from the far end to this one
+            fx, fy = ax - (ax * ux + ay * uy) * ux, ay - (ax * ux + ay * uy) * uy   # forward from the inbound lane, square to the chord
+            fn = math.hypot(fx, fy) or 1.0
+            cx, cy, r = (p0[0] + p3[0]) / 2, (p0[1] + p3[1]) / 2, chord / 2
+            pts = [(cx + r * (math.cos(t) * ux + math.sin(t) * fx / fn), cy + r * (math.cos(t) * uy + math.sin(t) * fy / fn))
+                   for t in (math.pi * i / 24 for i in range(25))]
+            rows.append((f"{a}>{b}", mid, a, b, min(width[a], width[b], chord), to_ll(pts)))
+            continue
         p1, p2 = (p0[0] + ax * 0.4 * chord, p0[1] + ay * 0.4 * chord), (p3[0] - bx * 0.4 * chord, p3[1] - by * 0.4 * chord)
         pts = [tuple((1 - t) ** 3 * u + 3 * (1 - t) ** 2 * t * v + 3 * (1 - t) * t ** 2 * w + t ** 3 * z
                      for u, v, w, z in zip(p0, p1, p2, p3)) for t in (i / 12 for i in range(13))]

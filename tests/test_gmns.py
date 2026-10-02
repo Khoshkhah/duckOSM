@@ -816,3 +816,17 @@ def test_a_roundabout_ring_closes(tmp_path):
                           f"gmns_driving.lane y WHERE x.link_id={a} AND y.link_id={b} AND x.lane_num = y.lane_num").fetchone()[0]
         assert gap < 0.05, (a, b, gap)
     assert con.execute("SELECT count(*) FROM gmns_driving.lane_connector").fetchone()[0] == 0
+
+
+def test_a_uturn_at_a_road_end_is_a_half_circle_as_wide_as_its_lanes(tmp_path):
+    """docs/design/gmns_uturn_arc.md: a dead-end road's two lane ends are one lane width apart; the U-turn joins them with a half-circle (every point
+    of its centre line chord/2 from the middle of the two ends) and is as wide as the chord, not narrowed to 1.8 x the tightest radius."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1, 500), (12, 2, 1, 1, 500)], [(11, 12)])
+    w, wkt = con.execute("SELECT width, ST_AsText(geom) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1' AND to_lane_id = '12_1'").fetchone()
+    pts = [tuple(float(v) for v in p.split()) for p in wkt[wkt.index("(") + 1:-1].split(", ")]
+    m = lambda p: (p[0] * 111320 * 0.5101, p[1] * 111320)                # noqa: E731  metres near 59.32 N
+    (x0, y0), (x1, y1) = m(pts[0]), m(pts[-1])
+    chord, mid = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5, ((x0 + x1) / 2, (y0 + y1) / 2)
+    assert chord == pytest.approx(3.25, abs=0.05) and w == pytest.approx(chord, abs=0.02)      # one lane apart, as wide as the lanes
+    assert all(abs(((m(p)[0] - mid[0]) ** 2 + (m(p)[1] - mid[1]) ** 2) ** 0.5 - chord / 2) < 0.1 for p in pts)

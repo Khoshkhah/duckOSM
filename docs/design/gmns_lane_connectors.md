@@ -87,7 +87,7 @@ gaps; they bulged past lane ends and showed as discs in translucent tunnels).
 - **A connector no wider than its curve** (`_fit_width`): at most 1.8 × the tightest radius of its Bézier, never under 60 % of the lane width.
   A 90° turn in 3-5 m (a right turn off a service road, a U-turn) cannot carry a full lane; before, they folded over each other into a blob.
 - Open: a dead end where three connectors leave one point still draws as a bulge (Monaco, `156780348#1f`); a half-circle curve for U-turns
-  is not built.
+  is built since 2026-10-02: `gmns_uturn_arc.md`.
 
 ## A lane no movement leaves, and a road without a lane count (Kaveh, 2026-10-02: `167625718#2f` lanes 2 and 3 "don't have any way out", the tunnel `80378487#1f` "has 3 lanes, not 2")
 
