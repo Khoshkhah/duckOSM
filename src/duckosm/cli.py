@@ -658,6 +658,12 @@ def gis_debug(export_path, source_db, out, name, as_json):
 @click.option('--pair-carriageways/--no-pair-carriageways', default=True, show_default=True,
               help='Place a one-way road mapped next to its opposite direction as one two-way road '
                    '(lanes from the line between them), so the two directions never overlap')
+@click.option('--walk-frame/--no-walk-frame', default=False, show_default=True,
+              help='Move a mapped sidewalk (footway=sidewalk) off the carriageway: placed just outside its road\'s kerb-side lane, '
+                   'or pushed to the nearer kerb, and the footways that meet it joined to its new end. Off: every footway stays exactly '
+                   'where OSM maps it, connected only where OSM connects it')
+@click.option('--walk-clearance', default=0.0, show_default=True,
+              help='Gap in metres between the kerb and a footpath placed by --walk-frame')
 @click.option('--micro', is_flag=True, default=False,
               help='Also build a microscopic (cell-based) network — micro_<mode> schemas')
 @click.option('--micro-mode', 'micro_modes', multiple=True, help='Modes to build micro for (default: driving)')
@@ -673,7 +679,8 @@ def gis_debug(export_path, source_db, out, name, as_json):
               help='Check the values of the result (ends on nodes, lengths, lane numbers, movements); '
                    'exit 1 if any check fails')
 def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, drive_side,
-         pair_carriageways, micro, micro_modes, gtfs, gtfs_max_m, csv_extensions, check):
+         pair_carriageways, walk_frame, walk_clearance, micro, micro_modes, gtfs, gtfs_max_m,
+         csv_extensions, check):
     """Extract a built network to a standalone GMNS DuckDB — every GMNS table OSM can support
     (config, node, link, geometry, lane, movement, use_definition/use_group, signal_controller,
     curb_seg), with native geometry and lane detail, keeping duckOSM edge_id as link_id.
@@ -690,6 +697,7 @@ def gmns(db, out, modes, to_csv, lane_geometry, meso, meso_modes, combined, driv
     try:
         res = to_gmns(db, out, modes=list(modes) or None, to_csv=to_csv, lane_geometry=lane_geometry,
                       combined=combined, drive_side=drive_side, pair_carriageways=pair_carriageways,
+                      walk_frame=walk_frame, walk_clearance_m=walk_clearance,
                       csv_extensions=csv_extensions, gtfs=list(gtfs) or None, gtfs_max_m=gtfs_max_m)
         meso_res = to_meso(out, modes=list(meso_modes) or ["driving"]) if meso else None
         micro_res = to_micro(out, modes=list(micro_modes) or ["driving"]) if micro else None

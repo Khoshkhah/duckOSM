@@ -70,7 +70,7 @@ def _bike_lane(tmp_path, tags, drive_side="right"):
 def test_cycleway_lane_is_an_explicit_bike_lane_beside_the_motor_lanes(tmp_path):
     c = _bike_lane(tmp_path, "MAP{'cycleway:right':'lane', 'cycleway:right:width':'1.8'}")
     assert c.execute(f"SELECT lane_num, allowed_uses, width FROM gmns_driving.lane WHERE link_id = {B} ORDER BY lane_num").fetchall() \
-        == [(1, "auto", None), (2, "bike", 1.8)]
+        == [(1, "auto", 3.25), (2, "bike", 1.8)]
     assert c.execute(f"SELECT lanes FROM gmns_driving.link WHERE link_id = {B}").fetchone()[0] == 1      # motor lanes only
     # the movement into B still uses lane 1 only: the bike lane is not a place to turn into
     assert c.execute(f"SELECT start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE ob_link_id = {B}").fetchone() == (1, 1)
@@ -155,9 +155,31 @@ def test_csv_extensions_are_kept_as_u_columns_only_when_asked(tmp_path):
     to_gmns(str(tmp_path / "src.duckdb"), str(tmp_path / "plain.duckdb"), to_csv=str(tmp_path / "plain"))
     to_gmns(str(tmp_path / "src.duckdb"), str(tmp_path / "ext.duckdb"), to_csv=str(tmp_path / "ext"), csv_extensions=True)
     head = lambda d, t: next(csv.reader(open(tmp_path / d / f"{t}.csv", newline="")))   # noqa: E731
-    for table, extras in (("link", ["u_osm_id", "u_bridge", "u_tunnel", "u_layer"]), ("lane", ["u_turn"]),
+    for table, extras in (("link", ["u_osm_id", "u_edge_ref", "u_footway", "u_crossing", "u_crossing_markings", "u_along_link_id", "u_along_mode", "u_along_gap_m", "u_along_kind", "u_bridge", "u_tunnel", "u_layer"]), ("lane", ["u_turn"]),
                           ("location", ["u_osm_id", "u_name"]), ("signal_controller", ["u_node_id", "u_control_type"])):
         plain, ext = head("plain", table), head("ext", table)
         assert ext == plain + extras, table                       # the standard columns first, unchanged
         assert not any(c.startswith("u_") for c in plain)
     assert "u_geom" not in head("ext", "link")                    # native geometry does not go to a CSV
+
+
+def test_default_lane_width_by_class_and_connector_fit():
+    from duckosm.gmns import _default_lane_w, _fit_width
+    assert (_default_lane_w("service"), _default_lane_w("residential_link"), _default_lane_w("primary")) == (2.5, 3.0, 3.25)
+    import math
+    arc = lambda r: [(r * math.cos(t / 12 * math.pi), r * math.sin(t / 12 * math.pi)) for t in range(13)]   # a half circle
+    assert _fit_width(arc(5), 3.25) == 3.25 and abs(_fit_width(arc(1), 3.25) - 1.95) < 1e-9     # roomy / tight: floor 60 %
+    assert abs(_fit_width(arc(1.5), 3.25) - 2.7) < 0.01 and _fit_width([(0, 0), (1, 0), (2, 0)], 3.0) == 3.0
+
+
+def test_an_untagged_one_way_road_takes_the_lanes_of_the_road_it_continues():
+    from duckosm.gmns import _inherit_lanes
+
+    def e(i, a, b, lanes, tagged, cls="secondary", oneway=True):
+        return dict(edge_id=i, source=a, target=b, cls=cls, lanes=lanes, tagged=tagged, oneway=oneway)
+    chain = [e(1, 1, 2, 2, True), e(2, 2, 3, 1, False), e(3, 3, 4, 1, False)]          # a 2-lane road, then two untagged pieces (a tunnel under another name)
+    assert _inherit_lanes(chain) == {2: 2, 3: 2}                                         # piece by piece
+    assert _inherit_lanes([e(1, 1, 2, 2, True), e(2, 2, 3, 1, True)]) == {}               # a tagged lanes=1 stays
+    assert _inherit_lanes([e(1, 1, 2, 2, True, cls="primary"), e(2, 2, 3, 1, False)]) == {}   # another class
+    assert _inherit_lanes([e(1, 1, 2, 2, True), e(4, 4, 2, 3, True), e(2, 2, 3, 1, False)]) == {}   # a junction: two roads lead in
+    assert _inherit_lanes([e(1, 1, 2, 2, True), e(2, 2, 3, 1, False), e(5, 2, 6, 1, True, oneway=False)]) == {}   # a side road at the node

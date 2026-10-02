@@ -52,6 +52,9 @@ SELECT count(*) FROM gmns_driving.link;      -- ATTACH the file, or open it dire
 | [`lane`](#lane) | yes | one lane of a link | 3,520 | lane use, width, turns |
 | [`movement`](#movement) | yes | one legal turn at a junction | 3,957 | which link may follow which, from which lanes |
 | [`lane_connector`](#lane_connector) | ➕ extension | one lane-to-lane path across a junction | 1,788 | drawing lanes through junctions |
+| [`crossing`](#crossing) | ➕ extension | one pedestrian crossing painted on the driving lanes | 741 | drawing zebra crossings |
+| [`lane_crossing`](#lane_crossing) | ➕ extension | one lane a crossing covers, and which stretch of it | 909 | painting the stripes lane by lane |
+| [`link_along`](#link_along) | ➕ extension | one road a footpath runs along (a footpath often runs along several) | — | matching a sidewalk to its whole street |
 | [`curb_seg`](#curb_seg) | yes | a stretch of kerb with a rule | 2 | on-street parking |
 | [`signal_controller`](#signal_controller) | yes | a traffic signal | 1 | where the signals are |
 | [`location`](#location) | yes | a point along a link | 1,803 | crossings, signs, parking entrances |
@@ -161,7 +164,11 @@ walked both ways).
 | `grade` | DOUBLE | ✅ | percent, negative downhill: `100 × (height at the end − height at the start) / length`, when the source has heights (`duckosm elevation`). Empty on a bridge or in a tunnel (there the height is the ground below or above, not the road) and where the slope would pass 100 %, the spec's limit. A coarse elevation model makes short links noisy: see the [elevation guide](../guides/elevation.md#what-the-heights-mean) |
 | `parent_link_id` | BIGINT | ✅ | for a sidewalk (an OSM way with `footway=sidewalk`) in the walking and cycling schemas, the road link it runs along: the nearest, roughly parallel one within 30 m, and of a two-way road the link the sidewalk is on the kerb side of (its right with right-hand traffic). Empty on roads and on a sidewalk with no road beside it |
 | `parking`, `toll`, `jurisdiction`, `row_width` | | ∅ | empty (parking is in [`curb_seg`](#curb_seg)) |
-| `osm_id` | BIGINT | ➕ | the OSM way the link comes from: one way gives several links (one per piece and direction) |
+| `osm_id` | BIGINT | ➕ | the OSM way the link comes from: one way gives several links (one per piece and direction). A way duckOSM had to split carries a *virtual* negative id in its edges (`edge_ref` `-1525349445#1f`); this column is always the real way (its absolute value), and the way's tags (`highway`, `footway`, `crossing`, lane tags) are read from it |
+| `edge_ref` | VARCHAR | ➕ | duckOSM's readable id of the link, `<osm_id>#<n><f or r>` (`503633032#2f`): `n` counts a way's pieces along it, `f` / `r` is the direction. The two directions of one two-way piece share `<osm_id>#<n>` (`#2f` and `#2r`), so two links with the same way and number are twins; links of different ways (`503633032#2f`, `503633034#3f`) never are. Not a key (`link_id` is) |
+| `footway` | VARCHAR | ➕ | the OSM `footway` tag (`sidewalk`, `crossing`, `link`, …), empty without raw tags: a `crossing` lies on the road it crosses (a reader draws it over the road) |
+| `crossing`, `crossing_markings` | VARCHAR | ➕ | on a `footway=crossing` link, the OSM `crossing` (`marked`, `zebra`, `uncontrolled`, `unmarked`, `traffic_signals`, …) and `crossing:markings` (`yes`, `zebra`, `no`, …) tags; empty on every other link |
+| `along_link_id`, `along_mode`, `along_gap_m`, `along_kind` | BIGINT, VARCHAR, DOUBLE, VARCHAR | ➕ | on a footpath link, the road it runs along: the nearest roughly parallel road of the footpath's own level (within 30 m, on its kerb side), even where that road is only in `gmns_driving` (`link_id` is the same hash in every schema); the network it is in (`walking` / `driving`); the metres between the two lines; and `along_kind`: `sidewalk` (a `footway=sidewalk` way) or `adjacent` (any other footway, path, pedestrian or cycleway link, not a link or steps, that lies within 5 m of the road's edge: a label of closeness, nothing is moved; a `footway=crossing` link only when it runs along the road for most of its length and is either 10 m or longer (a footpath OSM tagged by mistake) or shares a node with a matched footpath that runs along the same road (a sidewalk's crossing of a side street, which also runs along the main road)). The road is one cars can use: a road only people walk on is not one to run along. Empty on every other link. `parent_link_id` is the same road for a `sidewalk` only, and only when it is a link of this table |
 | `bridge`, `tunnel`, `layer` | VARCHAR | ➕ | the OSM tags as they are (`yes`, `-1`, …): which links are on a bridge or in a tunnel, and the drawing order |
 | `geom` | GEOMETRY | ➕ | the shape |
 
@@ -197,7 +204,7 @@ its use, width and turns.
 | `link_id` | BIGINT | ✅ | the [`link`](#link) |
 | `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes. An on-road bike lane is the last |
 | `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does, or for an on-road bike lane (see below) (driving). `walk` / `bike` in the walking / cycling schemas |
-| `width` | DOUBLE | ✅ | metres, from `width:lanes`; **empty where untagged** (most lanes: drawing assumes 3.25 m) |
+| `width` | DOUBLE | ✅ | metres, from `width:lanes`; else the class default (service 2.5, residential / living street / unclassified 3.0, others 3.25); **empty on a bike or walk lane without a width** |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
 | `turn` | VARCHAR | ➕ | the lane's `turn:lanes` value (`left`, `through;right`, …), empty where untagged |
 | `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap) |
@@ -260,7 +267,7 @@ WHERE m.type = 'left';
 
 ## lane_connector
 
-duckOSM's own table, for drawing and for lane-level routing: the **path from one lane to the next** across
+duckOSM's own table (only in `gmns_driving`: a footway has no turning path through a junction in OSM, and its lane runs to its node), for drawing and for lane-level routing: the **path from one lane to the next** across
 a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 
 | Column | Type | Holds |
@@ -273,6 +280,58 @@ a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 
 Lanes stop where a junction starts, or where they would jump sideways; the connector joins them. Not in
 the standard, so never in the CSVs. See the [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md).
+
+## crossing
+
+duckOSM's own table (only in `gmns_driving`), for drawing: **one pedestrian crossing painted on the road**, from the OSM
+`footway=crossing` ways and from the `highway=crossing` nodes that no crossing way has. The zebra is the **best rectangle for the links it crosses** (below), then projected on each lane. Rows exist only where the crossing lies
+across a driving lane **of its own level** (a ground crossing over a road in a tunnel is no crossing of that road; level: the OSM `layer`, else bridge 1 / tunnel -1) (30 degrees or more from the lane, not winding); a crossing way and the nodes on it are one crossing, and two
+on one place are one (the longer wins).
+
+| Column | Type | Holds |
+|---|---|---|
+| `crossing_id` | VARCHAR | `w<osm_id>` (a crossing way; `w<osm_id>#2` for its second piece, across a dual carriageway) or `n<osm_id>` (a node) |
+| `source` | VARCHAR | `way` (its line is the zebra's) or `node` (a crossing node with no way: the line is square across the road, through the node) |
+| `crossing_type` | VARCHAR | the OSM `crossing` tag (`marked`, `zebra`, `uncontrolled`, `unmarked`, `traffic_signals`, …) |
+| `markings` | VARCHAR | the OSM `crossing:markings` tag (`yes`, `zebra`, `no`, …) |
+| `painted` | BOOLEAN | are stripes painted: false for `crossing=unmarked`, `crossing:markings=no`, signals alone and no tag at all |
+| `width` | DOUBLE | the zebra's width along the road, metres: the OSM `width` if tagged, else estimated from the width of the road it crosses (`length`): 0.4 × that, between 2.5 and 4 m |
+| `length` | DOUBLE | the rectangle's size across the road, metres, from the first covered lane's outer edge to the last |
+| `osm_id` | BIGINT | the OSM way or node |
+| `geom` | GEOMETRY | the zebra's **rectangle** (a polygon): `width` along the road, `length` across it |
+
+## lane_crossing
+
+duckOSM's own table (only in `gmns_driving`): **one row per crossing for each driving lane it covers**, so a zebra is painted lane
+by lane and follows a curved lane. Only `auto` and `bus` lanes: a bike lane is no part of a zebra.
+
+| Column | Type | Holds |
+|---|---|---|
+| `crossing_id` | VARCHAR | the [`crossing`](#crossing) |
+| `lane_id` | VARCHAR | the [`lane`](#lane), or the `connector_id` of a [`lane_connector`](#lane_connector) (road surface too: a zebra over the joint of two lanes is on both lanes and the connector between them) |
+| `link_id` | BIGINT | its [`link`](#link) (a connector's: that of the lane it leaves) |
+| `start_lr`, `end_lr` | DOUBLE | the stretch of this lane the rectangle covers, metres from the lane's start: where the rectangle really overlaps the lane's own shape, so a lane that is short or ends inside the zebra still has its part (`end_lr - start_lr` is up to `width`) |
+| `across_from`, `across_to` | DOUBLE | the extent of that overlap across the rectangle: metres from the rectangle's first side to the overlap's two sides. Stripes laid in that one frame stay continuous from lane to lane |
+| `to_left` | BOOLEAN | which way `across` grows in this lane: true to the lane's left (in its direction of travel), false to its right |
+
+To paint: cut the lane's geometry between `start_lr` and `end_lr`, and put in it the stripes (pitch `stripe + gap` from
+`across = 0`) whose centre lies between `across_from` and `across_to`, each a strip along the lane (so parallel to it) at the lateral position that `across` and `to_left` give (a lane that is not square to the rectangle's axis: the part of it). Not in the standard, so never in the CSVs. See the
+[design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_crossings.md).
+
+## link_along
+
+duckOSM's own table (filled in `gmns_walking`, where the footpaths are; empty in the other networks): **one row per footpath link for each road it runs along**. A sidewalk
+usually follows a street made of several edges, not one, so [`link`](#link)'s `along_link_id` (the road along the longest stretch) is only the first
+of them. A road is in the route when the footpath runs along it for 4 m or more (its edge within 8 m of the footpath's and parallel to it, same level). Not in the
+standard, so never in the CSVs.
+
+| Column | Type | Holds |
+|---|---|---|
+| `link_id` | BIGINT | the footpath's [`link`](#link) |
+| `along_link_id` | BIGINT | the road's link: of `gmns_walking` or, `along_mode` `driving`, of `gmns_driving` (the same hash in every schema) |
+| `along_mode` | VARCHAR | the network the road is in: `walking` or `driving` |
+| `covered_m` | DOUBLE | about how many metres of the footpath run along this road (sampled every 2 m) |
+| `gap_m` | DOUBLE | the metres between the two lines at their nearest |
 
 ## curb_seg
 
@@ -409,7 +468,7 @@ does not. Its network is also coarser (Monaco: 1,280 links against our 3,092, si
 
 ## What is not written, and why
 
-The standard has 25 tables. duckOSM writes 12 of them (everything above except `lane_connector`, which is
+The standard has 25 tables. duckOSM writes 12 of them (everything above except `lane_connector`, `crossing`, `lane_crossing` and `link_along`, which are
 its own) and leaves out the other 13:
 
 | Tables | Why |

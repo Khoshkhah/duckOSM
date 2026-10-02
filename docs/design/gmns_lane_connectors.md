@@ -53,6 +53,12 @@ After the movements and their lane ranges (`gmns_lane_movements.md`), in the loc
   lane lines. When a lane is clicked, it colours the connectors to the next lanes too.
 - The micro network's connectors start from the new lane ends automatically.
 
+## Driving only (Kaveh, 2026-10-01)
+
+Lane ends and connectors are built for the driving mode only. For a footway OSM has no turning path, only shared nodes: its lane runs to its node
+and meets the next one there (the walking `movement` table stays, for routing). Before, Monaco's walking schema had 11,310 connectors,
+six times the driving ones, every one of them invented by the same code that trims a lane where it overlaps another.
+
 ## Result on Monaco
 
 2,789 connectors. The gap from a lane's end through its connector to the next lane's start is now
@@ -71,3 +77,27 @@ gaps; they bulged past lane ends and showed as discs in translucent tunnels).
   - a junction's lanes are shortened.
 - Monaco: re-measure the gaps above (lane end → connector → next lane: 0), and screenshot the three
   reported places on the previews page.
+
+
+## Widths and tight turns (Kaveh, 2026-10-01: "a service road is too wide", the U-turn and the dead-end blob)
+
+- **Default lane width by class** (only where OSM has no `width:lanes`): `service` 2.5 m, `residential` / `living_street` / `unclassified`
+  3.0 m, the rest 3.25 m (`_LANE_W_BY_CLASS`). It is now written into `lane.width` (not NULL), so lane placement, connectors, crossings
+  and lanestyle all use one number. A bike or walk lane without a width stays NULL (lanestyle defaults it by use).
+- **A connector no wider than its curve** (`_fit_width`): at most 1.8 × the tightest radius of its Bézier, never under 60 % of the lane width.
+  A 90° turn in 3-5 m (a right turn off a service road, a U-turn) cannot carry a full lane; before, they folded over each other into a blob.
+- Open: a dead end where three connectors leave one point still draws as a bulge (Monaco, `156780348#1f`); a half-circle curve for U-turns
+  is not built.
+
+## A lane no movement leaves, and a road without a lane count (Kaveh, 2026-10-02: `167625718#2f` lanes 2 and 3 "don't have any way out", the tunnel `80378487#1f` "has 3 lanes, not 2")
+
+- **Continuation movements** (`_continuation_movements`, the root fix; first built as connectors only, moved to the movement table when Kaveh asked "I thought you fixed it in duckOSM's root"). Where a link has exactly
+  one way on (U-turns aside) and OSM does not mark its lanes (`turn:lanes`), a car lane its movement does not cover merges into the last car lane of the next link (type `merge`), and a bike lane goes on into the
+  next link's bike lane (type `thru`, `allowed_uses` bike): one movement row each (`<mvmt_id>-<lane>`, `<mvmt_id>-b<lane>`), same node and link pair. The lane connectors, the lane graph and every reader follow from the rows.
+  Monaco: 18 rows (3,975 movements). Lanes that already meet (under 0.3 m apart) need no connector.
+- **Lanes from the road it continues** (`_inherit_lanes`): a one-way edge whose way has no `lanes` / `turn:lanes` / `width:lanes` tag takes the lane count of the road it plainly
+  continues (the node between them joins only the two, both one-way, one class; a road changes its name at a tunnel) when that has more, else of the one it leads into;
+  repeated, so a way cut into pieces inherits piece by piece. Monaco: 1 edge (the tunnel). It is an inference, not OSM; `driving` only; log line `... take the lane count of the road they continue`.
+
+A bike lane's connector (Kaveh, 2026-10-02: `919814602536534482_3>3913596625020233819_3`): its width was the car lane default (3.25 m) while the bike lane is drawn 1.5 m, and it had no bike colour. A connector now takes
+`_DEFAULT_BIKE_W` (1.5 m) for a bike lane without a width (lanestyle draws the same), and lanestyle colours a connector of a bike lane as a bike lane.

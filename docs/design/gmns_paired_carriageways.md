@@ -69,6 +69,47 @@ Opposite-direction lane pairs on the same level overlapping by more than 20 m²:
 Boulevard du Larvotto 2.94 m and 3.01 m (were 0.31 m). The pairs left are partial ones, alongside each
 other for less than half their length where carriageways merge or split (the single-`d` ceiling).
 
+## Step 2 (proposal): the gap varies along the road
+
+**Problem (Kaveh, 2026-10-01, Avenue Princesse Grace).** Where the two ways of a pair converge or split, one `d` per
+edge leaves a wedge of base map between the directions (or lets them overlap): the median gap is right
+in the middle of the stretch and wrong at both ends. Monaco: 17 paired roads, the worst with a median gap of 0.40 m
+and 4.9 m at the widest (7.4352, 43.7482).
+
+**Idea: one frame, pointwise.** Place each direction's lanes from the *local* midline, not from one median
+number: the gap `g(s)` is measured at every sample of the edge (the 2 m samples `_paired_gaps` already takes), and
+the lane offset becomes a function of the position along the edge,
+
+```
+off(s) = side · (run + w/2 − g(s)/2)
+```
+
+so the two directions' lane 1s meet at every point, however the ways diverge.
+
+- `g(s)` is the measured gap where a partner is alongside; where none is (the ways have moved further apart than their
+  lanes need, `g ≥ 2 · half`), it is capped at `2 · half` — the plain one-way placement — so the rule stays
+  continuous. Between samples it is interpolated.
+- Built as a correction to the lane line already made with the median gap: the lane is cut into 2 m pieces and each
+  vertex is moved along its left normal by `−side · (g(s) − g0) / 2`, `s` being its position along the run's merged line.
+  Runs, chains, ids, lane counts and movements are unchanged; only `lane.geom` of paired edges.
+- Edges without a partner, two-way roads and `--no-pair-carriageways` are untouched.
+
+**Check:** the 17 paired roads of Monaco: the largest gap between the two lane 1s along each pair, before and
+after (target: under 0.3 m wherever the ways are within `2 · half` of each other); the overlapping pairs count
+(14 now) must not rise; tests: two antiparallel edges that converge from 6 m to 2 m apart, lane 1s meet along their
+whole length; the same on `drive_side='left'`.
+
+**Built 2026-10-01**, with two changes found on Avenue Princesse Grace (Kaveh's wedge and "no line between 249464878962401958_1 and 1718751657089712239_1"):
+
+- **No tolerance (tried, removed).** Closing a gap of up to 3 m beyond what the lanes need hid real medians: ways 5.6-7.7 m apart
+  on Avenue Princesse Grace have trees between them (Kaveh), and a wedge there is that strip, not a mapping error. Ways closer than
+  their lanes need are paired as before; a wider gap stays a gap.
+- **Alongside for 3 samples (6 m), not half the run.** Pieces of one way are one run (120 m here) and the partner lay alongside only part of it, so the whole run stayed centred. The profile takes the gap back to the plain placement where no partner is alongside.
+
+Monaco (with the 3-sample rule alone; the tolerance is gone): 36 -> about 370 one-way edges placed with their opposite carriageway; opposite-direction lane overlaps on one level 46 -> 32 pairs, 337 -> 222 m²; lanestyle now finds the two lanes above as a pair (lane 1 edges 0.00 m apart) and draws their one centre line.
+
+**Not in this step:** a real median wider than 3 m stays a gap; two-way ↔ one-way transitions; forks.
+
 ## lanestyle side (separate, after this)
 
 GMNS has no field for "this one-way link is paired with that one". So lanestyle finds paired edges

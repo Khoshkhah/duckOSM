@@ -288,25 +288,26 @@ def test_to_csv_is_spec_clean(tmp_path):
     assert cols[:3] == ["lane_id", "link_id", "lane_num"]
 
 
-def _pair_source(path, gap_m, b_north=True):
+def _pair_source(path, gap_m, b_north=True, gap_west=None):
     """Two one-way 2-lane edges of one road, mapped as two ways: P (1->2) east, Q (3->4) west,
-    ``gap_m`` metres north (or south) of P."""
+    ``gap_m`` metres north (or south) of P (``gap_west``: at Q's end, the west one, if the ways converge)."""
     con = duckdb.connect(str(path))
     con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
     con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
     con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
     con.execute("INSERT INTO raw.ways VALUES (200, MAP{}, [1,2]), (201, MAP{}, [3,4])")
     y = 59.32 + (1 if b_north else -1) * gap_m / 111320
+    yw = 59.32 + (1 if b_north else -1) * (gap_west if gap_west is not None else gap_m) / 111320
     p = lambda w: f"ST_GeomFromText('{w}')"
     con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
     con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),"
-                f"(3,{p(f'POINT(18.07 {y})')}),(4,{p(f'POINT(18.06 {y})')})")
+                f"(3,{p(f'POINT(18.07 {y})')}),(4,{p(f'POINT(18.06 {yw})')})")
     con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, "
                 "highway VARCHAR, name VARCHAR, lanes INTEGER, is_reverse BOOLEAN, oneway BOOLEAN, "
                 "length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY)")
     con.execute(f"""INSERT INTO driving.edges VALUES
         (11,1,2,200,'primary','Road',2,false,true,560,50,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
-        (12,3,4,201,'primary','Road',2,false,true,560,50,{p(f'LINESTRING(18.07 {y},18.06 {y})')})""")
+        (12,3,4,201,'primary','Road',2,false,true,560,50,{p(f'LINESTRING(18.07 {y},18.06 {yw})')})""")
     con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
     con.close()
 
@@ -330,6 +331,19 @@ def test_one_way_carriageways_of_one_road_are_placed_as_one_road(tmp_path):
     assert y["11_1"] == pytest.approx(0.375, abs=0.05) and y["11_2"] == pytest.approx(-2.875, abs=0.05)
     assert y["12_1"] == pytest.approx(3.625, abs=0.05) and y["12_2"] == pytest.approx(6.875, abs=0.05)
     assert y["12_1"] - y["11_1"] == pytest.approx(3.25, abs=0.05)
+
+
+def test_a_gap_that_varies_along_the_road_leaves_no_wedge(tmp_path):
+    """Step 2: the two ways converge from 6 m (west) to 2 m (east); the lane 1s of the two directions meet, 3.25 m apart,
+    at both ends (with the one median gap they were 3.25 m apart only in the middle)."""
+    src, out = tmp_path / "conv.duckdb", tmp_path / "conv_gmns.duckdb"
+    _pair_source(src, 2.0, gap_west=6.0)
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    y = lambda lane, pt: (con.execute(f"SELECT ST_Y(ST_{pt}Point(geom)) FROM gmns_driving.lane WHERE lane_id = '{lane}'").fetchone()[0] - 59.32) * 111320   # noqa: E731
+    assert y("12_1", "End") - y("11_1", "Start") == pytest.approx(3.25, abs=0.15)      # west end (Q ends there)
+    assert y("12_1", "Start") - y("11_1", "End") == pytest.approx(3.25, abs=0.15)      # east end
 
 
 def test_far_apart_or_off_keeps_one_way_lanes_centred(tmp_path):

@@ -27,6 +27,7 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name, and (DuckDB only) `bridge` / `tunnel` / `layer` |
 | `lane` | 3,182 | one row per lane, with its turns, allowed uses and width where OSM tags them |
 | `movement` | 3,500 | legal turns (from `edge_graph`; turning back along the same road only at a dead end, or where it's the only way into the road's other direction): type (left, thru, right, uturn, merge, diverge), code (`NBL`, `EBT`, …), the lanes it starts from and ends in (equal-length ranges read in order: from `turn:lanes` where tagged, else osm2gmns's rule, [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_movements.md)), a curved turn path |
+| `crossing`, `lane_crossing` | duckOSM extension | the pedestrian crossings painted on the driving lanes, and which stretch of each lane they cover (in `gmns_driving` only): from the OSM crossing ways and the crossing nodes that have no way ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_crossings.md)) |
 | `lane_connector` | duckOSM extension | one path per lane pair of a movement: a curve from the end of one lane to the start of the next (`from_lane_id`, `to_lane_id`, `mvmt_id`, `width`, `geom`); lanes stop where a junction starts or where they'd jump sideways, and the connector joins them ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md)) A road's pieces are placed as one run, so a lane going on through a junction or a bend is one continuous line ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_runs.md)). |
 | `geometry` | 2,765 | link shapes |
 | `signal_controller` | 1 | where the traffic lights are (OSM has no timings) |
@@ -57,6 +58,13 @@ left-hand traffic). A road mapped as two one-way ways, one per direction, drawn 
 than its lanes need, is placed as one road: each direction's lanes start from the line midway
 between the two ways, so the directions never overlap (`--no-pair-carriageways` turns this off;
 [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_paired_carriageways.md)).
+
+In the walking network a footpath (`footway`, `path`, `steps`, …) is one 2 m strip for both of its directions, centred on
+its line (people walk both ways on it). A **sidewalk** (`footway=sidewalk`) is placed from the cross-section of the road it runs
+along, not from its own OSM line: its lane lies just outside the road's kerb-side lane (the road's lanes from
+`gmns_driving` where it is there), so it never lies on the carriageway (`--no-walk-frame` turns this off,
+`--walk-clearance M` leaves a gap to the kerb; only a mapped sidewalk moves, no footpath is put where OSM has none; a sidewalk that still lies on a road (its road on its far side, too far, or none found) is pushed out across the road to the nearer kerb, half its width beyond it, so a street does not lose a side;
+[design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_walking_frame.md)).
 
 ## Meso and micro networks
 
@@ -110,6 +118,8 @@ get their own colour.
 | `--combined` | also write `gmns_all` | off |
 | `--drive-side` | `right` or `left` traffic | `right` |
 | `--no-pair-carriageways` | centre each one-way way's lanes on it, even beside its opposite direction | paired |
+| `--walk-frame` | move a mapped sidewalk off the carriageway (placed from its road's kerb, or pushed to the nearer kerb) and join the footways that meet it | off: footways stay as OSM maps them |
+| `--walk-clearance` | gap in metres between the kerb and a footpath placed from its road | 0 |
 | `--no-lane-geometry` | skip the lane centre lines | computed |
 | `--gtfs FEED` | a GTFS feed (`.zip` or folder, repeatable): its stops become `location` rows with their `gtfs_stop_id` ([how](gmns_tables.md#transit-stops-from-a-gtfs-feed)) | none |
 | `--gtfs-max-m` | how far from a link a GTFS stop may be and still be put on it | 30 |

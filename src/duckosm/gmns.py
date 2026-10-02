@@ -24,6 +24,7 @@ degrades to the lane count and skips signal/curb.
 """
 import logging
 import math
+from collections import Counter, defaultdict
 import os
 import re
 
@@ -33,7 +34,14 @@ logger = logging.getLogger("duckosm")
 _MODE_USES = {"driving": "auto", "walking": "walk", "cycling": "bike"}
 _USE_DEF = {"auto": (1.0, 1.0), "walk": (1.0, 0.0), "bike": (1.0, 0.2), "bus": (25.0, 2.0)}
 _DEFAULT_BIKE_LANE_W = 1.5       # metres, an on-road bike lane without a width tag
+_DEFAULT_BIKE_W = 1.5           # metres, an on-road bike lane without a width (lanestyle draws the same)
+_DEFAULT_WALK_W = 2.0           # metres, a footpath lane without a width (lanestyle draws the same)
 _DEFAULT_LANE_W = 3.25          # metres, when width:lanes is absent (used for lane offset spacing)
+_LANE_W_BY_CLASS = {"service": 2.5, "residential": 3.0, "living_street": 3.0, "unclassified": 3.0}   # narrower roads, same default
+
+
+def _default_lane_w(highway):
+    return _LANE_W_BY_CLASS.get((highway or "").split(";")[0].removesuffix("_link"), _DEFAULT_LANE_W)
 # saturation capacity default (pce/hr/lane) by facility_type (normalized highway; _link → parent)
 _CAPACITY = {"motorway": 2000, "trunk": 1800, "primary": 1600, "secondary": 1400, "tertiary": 1200,
              "unclassified": 1000, "residential": 800, "living_street": 300, "service": 300,
@@ -79,10 +87,13 @@ _PED_FACILITY = ("CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN 'both' THEN
 
 # Roads cars cannot use: in the walking / cycling schemas their `lanes` and `capacity` stay empty, since the
 # standard defines both for motor vehicles ("uncapacitated" bike and foot links; link.lanes excludes bike lanes)
+_CROSSING_ALONG = 0.6            # a footway=crossing link that runs along a road for this share of its length, and is at least _CROSSING_MIN_M long, is a footpath OSM tagged by mistake
+_CROSSING_MIN_M = 10.0           # (a crossing of a side street also runs along the main road, but is short: Monaco's crossings are 5 m at the median)
+_ALONG_NEAR_M = 8.0              # a footpath point counts as along a road when its edge is within this many metres of the road's edge
 _NON_MOTOR = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform")
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
-_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
+_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
     "location": ["osm_id", "name", "geom"], "zone": ["geom"],
     "signal_controller": ["node_id", "control_type"]}
 
@@ -274,13 +285,17 @@ def _run_lane_wkts(piece_wkts, offs, closed=False):
     return out
 
 
-def _paired_gaps(edges, side_sign, step_m=2.0):
+def _paired_gaps(edges, side_sign, step_m=2.0, profiles=None):
     """One-way edges placed as one side of a two-way road (docs/design/gmns_paired_carriageways.md).
 
     ``edges``: ``(edge_id, wkt, half_width_m)`` of the one-way edges. Returns ``{edge_id: d}``, the
     median gap in metres between an edge's centre line and its partner(s): one-way edges running the
     opposite way on its inner side (left for right-hand traffic) closer than ``half_A + half_B``,
-    alongside it for at least half its length. Sampled every ``step_m`` metres."""
+    alongside it for at least three samples (the profile, below, takes the gap back to the plain placement where it is not). Sampled every ``step_m`` metres.
+
+    ``profiles`` (a dict, filled in): ``{edge_id: [(s, g), ...]}``, the gap ``g`` at the distance ``s`` along the
+    edge at every sample (docs/design/gmns_paired_carriageways.md, step 2): where no partner is alongside it is
+    ``2 * half``, the plain one-way placement, and it never exceeds that; smoothed over three samples."""
     import statistics
 
     from shapely import STRtree
@@ -310,7 +325,7 @@ def _paired_gaps(edges, side_sign, step_m=2.0):
         cand = [j for j in tree.query(A.buffer(half[i] + reach)) if j != i]
         if not cand:
             continue
-        found, samples = [], 0
+        found, samples, prof = [], 0, []
         for k in range(int(A.length // step_m) + 1):
             s = min(k * step_m, A.length)
             p, (tx, ty) = A.interpolate(s), tangent(A, s)
@@ -329,13 +344,50 @@ def _paired_gaps(edges, side_sign, step_m=2.0):
                     best = d
             if best is not None:
                 found.append(best)
-        if found and len(found) >= samples / 2:
+            prof.append((s, best if best is not None else 2 * half[i]))
+        if len(found) >= 3:                              # alongside for 6 m or more; the profile fades it where it is not
             gaps[edges[i][0]] = statistics.median(found)
+            if profiles is not None:
+                g = [x for _, x in prof]
+                profiles[edges[i][0]] = [(prof[k][0], sum(g[max(k - 1, 0):k + 2]) / len(g[max(k - 1, 0):k + 2]))
+                                         for k in range(len(prof))]
     return gaps
 
 
+def _vary_wkt(lane_wkt, run_wkt, profile, g0, side_sign, step_m=2.0):
+    """A paired edge's lane line, moved so its direction's lanes start from the *local* midline: each vertex goes along the
+    lane's left normal by ``-side * (g(s) - g0) / 2``, ``g(s)`` the gap at its position along the run (``profile``), ``g0`` the
+    median gap the line was placed with. The line is cut into ``step_m`` pieces first. Returns lon/lat WKT, the input unchanged
+    on any failure."""
+    import numpy as np
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    try:
+        lane, run = _w.loads(lane_wkt), _w.loads(run_wkt)
+        x0, y0 = run.coords[0]
+        kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+        loc = lambda g: LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in g.coords])    # noqa: E731
+        ln, rn = shapely.segmentize(loc(lane), step_m), loc(run)
+        pts = np.array(ln.coords)
+        if len(pts) < 2 or len(profile) < 2:
+            return lane_wkt
+        S, G = zip(*profile)
+        tang = np.gradient(pts, axis=0)
+        norm = np.hypot(tang[:, 0], tang[:, 1])
+        norm[norm == 0] = 1.0
+        left = np.stack([-tang[:, 1] / norm, tang[:, 0] / norm], axis=1)
+        g = np.interp([rn.project(shapely.Point(p)) for p in pts], S, G)
+        pts = pts + left * (-side_sign * (g - g0) / 2.0)[:, None]
+        return LineString([(x / (kx * M) + x0, y / M + y0) for x, y in pts]).wkt
+    except Exception:
+        return lane_wkt
+
+
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False,
-            drive_side="right", pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0):
+            drive_side="right", pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0,
+            walk_frame=False, walk_clearance_m=0.0):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -346,6 +398,10 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     to_csv : if set, also dump spec-standard GMNS CSVs into this directory (per-mode subfolders when
         more than one mode).
     lane_geometry : compute a per-lane offset ``geom`` for lane-level rendering (needs shapely).
+    walk_frame : a sidewalk (``footway=sidewalk``, its ``parent_link_id`` the road it runs along) takes its place
+        from that road's cross-section: just outside the road's kerb-side lane, not from its own OSM line
+        (docs/design/gmns_walking_frame.md); ``walk_clearance_m`` leaves a gap to the kerb. Only mapped sidewalks move:
+        no footpath is put where OSM has none.
     pair_carriageways : place a one-way edge with an opposite one-way partner close on its inner side
         as one side of a two-way road, from the line midway between them (default; False = centred
         on its own way, as before). docs/design/gmns_paired_carriageways.md
@@ -400,15 +456,26 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         con.execute(f"CREATE SCHEMA {sch}")
         _build_fixed(con, sch, name, mode, uses)
         _build_node(con, sch, mode)
+        _infer_lanes(con, mode, has_raw)
         _build_link(con, sch, mode, uses, has_raw)
         _build_geometry(con, sch, mode)
-        if mode != "driving":
-            _sidewalk_parents(con, sch, has_raw, drive_side)
+        for col, typ in (("along_link_id", "BIGINT"), ("along_mode", "VARCHAR"), ("along_gap_m", "DOUBLE"), ("along_kind", "VARCHAR")):
+            con.execute(f"ALTER TABLE {sch}.link ADD COLUMN {col} {typ}")      # filled for a sidewalk: _sidewalk_parents
+        con.execute(f"CREATE TABLE {sch}.link_along(link_id BIGINT, along_link_id BIGINT, along_mode VARCHAR, "
+                    f"covered_m DOUBLE, gap_m DOUBLE)")        # every road a footpath runs along (docs/exports/gmns_tables.md); empty where no footpaths
+        along = _sidewalk_parents(con, sch, has_raw, drive_side) if mode != "driving" else {}
         _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side,
                          pair_carriageways)  # before movement
+        if walk_frame and mode != "driving" and lane_geometry:
+            _walk_frame(con, sch, drive_side, along, walk_clearance_m)  # before the lane connectors
+            _walk_kerb(con, sch, walk_clearance_m)
+            _walk_join(con, sch)
         _build_movement(con, sch, mode, uses, drive_side)
-        if lane_geometry:
-            _build_lane_connectors(con, sch)            # lane ends + connectors, after the lane ranges
+        if lane_geometry and mode == "driving":         # lane ends + connectors, after the lane ranges. Driving only: a footway has no turning
+            _build_lane_connectors(con, sch)            # path through a junction (OSM has none), its lane runs to its node and meets the next there
+        if mode == "driving":
+            from duckosm.crossings import build_crossings
+            build_crossings(con, sch, has_raw)          # zebra crossings on the driving lanes (docs/design/gmns_crossings.md)
         _build_signal_controller(con, sch)
         _build_location(con, sch, mode, has_raw, create_empty=stops is not None)
         if stops is not None:
@@ -475,7 +542,7 @@ def _build_combined(con, modes, name):
              any_value(parking) AS parking,
              string_agg(DISTINCT allowed_uses, ',' ORDER BY allowed_uses) AS allowed_uses,
              any_value(toll) AS toll, any_value(jurisdiction) AS jurisdiction,
-             any_value(row_width) AS row_width, any_value(osm_id) AS osm_id, any_value(bridge) AS bridge,
+             any_value(row_width) AS row_width, any_value(osm_id) AS osm_id, any_value(edge_ref) AS edge_ref, any_value(footway) AS footway, any_value(crossing) AS crossing, any_value(crossing_markings) AS crossing_markings, any_value(bridge) AS bridge,
              any_value(tunnel) AS tunnel, any_value(layer) AS layer, any_value(geom) AS geom
       FROM u GROUP BY link_id""")
     return {t: con.execute(f"SELECT count(*) FROM gmns_all.{t}").fetchone()[0]
@@ -512,13 +579,18 @@ def _build_node(con, sch, mode):
 
 
 def _build_link(con, sch, mode, uses, has_raw):
-    raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
+    raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = abs(e.osm_id)" if has_raw else ""   # a virtual (negative) id is its OSM way with a minus: its tags are the way's
     bike = _BIKE_FACILITY.format(v="w.tags['cycleway']") if has_raw else "NULL::VARCHAR"
     ped = _PED_FACILITY.format(v="w.tags['sidewalk']") if has_raw else "NULL::VARCHAR"
     cols = {c for (c,) in con.execute(
         "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges'", [mode]).fetchall()}
     lvl = ", ".join(f"e.{c}" if c in cols else f"NULL::VARCHAR AS {c}" for c in ("bridge", "tunnel", "layer"))
+    edge_ref = "e.edge_ref AS edge_ref" if "edge_ref" in cols else "NULL::VARCHAR AS edge_ref"     # older builds have none
+    footway = "w.tags['footway'] AS footway" if has_raw else "NULL::VARCHAR AS footway"
+    crossing = ("CASE WHEN w.tags['footway'] = 'crossing' THEN w.tags['crossing'] END AS crossing, "
+                "CASE WHEN w.tags['footway'] = 'crossing' THEN w.tags['crossing:markings'] END AS crossing_markings") if has_raw \
+        else "NULL::VARCHAR AS crossing, NULL::VARCHAR AS crossing_markings"
     # grade (%) from `duckosm elevation`'s end heights. Not on a bridge or in a tunnel: there the height is the
     # ground below or above, not the road; and the spec's limit is 100 %
     glen = _len_m("e.geometry")                         # the same length as `length`: rise over run
@@ -536,39 +608,70 @@ def _build_link(con, sch, mode, uses, has_raw):
       {grade}::DOUBLE AS grade,
       e.highway AS facility_type,
       CASE WHEN {motor} THEN {_capacity_case(hw)}::DOUBLE END AS capacity,
-      e.maxspeed_kmh AS free_speed, CASE WHEN {motor} THEN e.lanes END AS lanes,
+      e.maxspeed_kmh AS free_speed, CASE WHEN {motor} THEN COALESCE(li.lanes, e.lanes) END AS lanes,
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
       '{uses}' AS allowed_uses, NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction,
-      NULL::DOUBLE AS row_width, e.osm_id AS osm_id, {lvl}, e.geometry AS geom
-    FROM s.{mode}.edges e {raw_join}""")
+      NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, e.geometry AS geom
+    FROM s.{mode}.edges e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""")
 
 
-def _sidewalk_parents(con, sch, has_raw, drive_side, max_gap_m=30.0, max_turn_deg=30.0):
+def _sidewalk_parents(con, sch, has_raw, drive_side, max_gap_m=30.0, max_turn_deg=30.0, adjacent_m=5.0):
     """``link.parent_link_id`` of a sidewalk (an OSM way with ``footway=sidewalk``): the road link it runs
     along, as the standard's own example says ("for a sidewalk, this is the adjacent road"). The nearest
     road link within ``max_gap_m`` metres that is roughly parallel (``max_turn_deg``). A two-way road is two
     links with the same shape; the sidewalk's parent is the one it is on the kerb side of (its right-hand
-    side with right-hand traffic). A sidewalk with no such road keeps no parent."""
+    side with right-hand traffic). A sidewalk with no such road keeps no parent.
+
+    Roads of ``gmns_driving`` are looked at too (a road without a sidewalk is not in the walking network at all):
+    returns every footpath link -> the road it runs along, for ``_walk_frame``; ``parent_link_id`` is written only
+    where the road is a link of this schema."""
     if not has_raw:
-        return
+        return {}
     import numpy as np
     import shapely
     from shapely import wkt as _w
     from shapely.strtree import STRtree
 
-    sw = con.execute(f"""SELECT k.link_id, ST_AsText(k.geom) FROM {sch}.link k
-                         JOIN s.raw.ways w ON w.osm_id = k.osm_id WHERE w.tags['footway'] = 'sidewalk'""").fetchall()
+    from duckosm.crossings import _level
+
+    # a mapped sidewalk, and any other footpath (footway, path, pedestrian, cycleway: not a crossing, a link or steps) that lies right beside a road
+    near_classes = ", ".join(repr(h) for h in _NON_MOTOR if h not in ("steps", "platform", "corridor"))
+    sw = con.execute(f"""SELECT k.link_id, ST_AsText(k.geom), k.layer, k.bridge, k.tunnel,
+                           CASE WHEN w.tags['footway'] = 'sidewalk' THEN 'sidewalk' ELSE 'adjacent' END, w.tags['footway'] = 'crossing', k.from_node_id, k.to_node_id
+                         FROM {sch}.link k JOIN s.raw.ways w ON w.osm_id = abs(k.osm_id)
+                         WHERE w.tags['footway'] = 'sidewalk' OR (COALESCE(w.tags['footway'], '') NOT IN ('link', 'sidewalk')
+                           AND regexp_replace(split_part(k.facility_type, ';', 1), '_link$', '') IN ({near_classes}))
+                         """).fetchall()
     if not sw:
-        return
+        return {}
     nonroad = ", ".join(repr(h) for h in _NON_MOTOR)
-    roads = con.execute(f"""SELECT link_id, ST_AsText(geom) FROM {sch}.link WHERE
-        regexp_replace(split_part(facility_type, ';', 1), '_link$', '') NOT IN ({nonroad})""").fetchall()
+    have_drive = sch != "gmns_driving" and con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'gmns_driving' "
+                                                       "AND table_name = 'link'").fetchone()[0] > 0
+    own = set()
+    roads = []
+    if not have_drive:               # a walking-only build: its own road classes are the roads
+        roads = con.execute(f"""SELECT link_id, ST_AsText(geom), layer, bridge, tunnel FROM {sch}.link WHERE
+            regexp_replace(split_part(facility_type, ';', 1), '_link$', '') NOT IN ({nonroad})""").fetchall()
+        own = {r[0] for r in roads}
+    else:                            # a road is where cars drive: a road only people walk on (a service road closed to cars) is no road to run along
+        roads = con.execute(f"""SELECT link_id, ST_AsText(geom), layer, bridge, tunnel FROM gmns_driving.link WHERE
+            regexp_replace(split_part(facility_type, ';', 1), '_link$', '') NOT IN ({nonroad})""").fetchall()
+        own = {r[0] for r in con.execute(f"SELECT link_id FROM {sch}.link").fetchall()} & {r[0] for r in roads}
     if not roads:
-        return
+        return {}
     first = _w.loads(sw[0][1]).coords[0]
     scale = np.array([math.cos(math.radians(first[1])) * 111320.0, 111320.0])        # lon/lat -> metres, locally
     to_m = lambda w: shapely.transform(_w.loads(w), lambda c: c * scale)             # noqa: E731
     road_ids, road_geoms = [r[0] for r in roads], [to_m(r[1]) for r in roads]
+    road_level = [_level(*r[2:]) for r in roads]            # a sidewalk runs along a road of its own level (not the one under or over it)
+    half = {}                                           # a road's edge is far from its centre line: the nearest road is the nearest edge
+    for g_ in (sch, "gmns_driving"):
+        if not con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? AND table_name = 'link'", [g_]).fetchone()[0]:
+            continue
+        links = con.execute(f"SELECT link_id, COALESCE(lanes, 1), facility_type, edge_ref FROM {g_}.link").fetchall()
+        pair = Counter(e[:-1] for *_, e in links if e)  # a twin pair is one two-way road: its kerb is a whole direction's lanes away
+        for k, n, ft, e in links:
+            half.setdefault(k, n * _default_lane_w(ft) * (1.0 if e and pair[e[:-1]] > 1 else 0.5))
     tree = STRtree(road_geoms)
 
     def heading(g, t):                                  # the line's direction at distance t along it, radians
@@ -576,29 +679,280 @@ def _sidewalk_parents(con, sch, has_raw, drive_side, max_gap_m=30.0, max_turn_de
         return math.atan2(b.y - a.y, b.x - a.x)
 
     kerb = -1.0 if drive_side == "right" else 1.0       # the sidewalk's side of its road link: right = negative
-    parents = []
-    for link_id, w in sw:
-        g = to_m(w)
-        if g.length < 1.0:
-            continue
+    parents, along_rows = [], []
+
+    def match_one(link_id, g, lv, kind, crossing, allowed=None):
+        """Match one footpath to the road it runs along (and the route: every road along it for 4 m or more); ``allowed``: only these roads. Returns the road ids of its route."""
+        level = _level(*lv)
         mid = g.interpolate(0.5, normalized=True)
-        best = None
+        samples = [g.interpolate(d) for d in [*range(0, int(g.length), 2), g.length]]
+        best, route = None, []
         for i in tree.query(g, predicate="dwithin", distance=max_gap_m):
-            r = road_geoms[i]
-            t = r.project(mid)
-            turn = abs(((heading(r, t) - heading(g, g.project(mid)) + math.pi / 2) % math.pi) - math.pi / 2)
-            if math.degrees(turn) > max_turn_deg:
+            if road_level[i] != level or (allowed is not None and road_ids[i] not in allowed):
                 continue
+            r = road_geoms[i]
+            hw = half.get(road_ids[i], 0.0)
+            cov = 0                                      # how long the road runs along the footpath: samples near its edge and parallel to it
+            for sp in samples:
+                t = r.project(sp)
+                if sp.distance(r.interpolate(t)) - hw > _ALONG_NEAR_M:
+                    continue
+                turn = abs(((heading(r, t) - heading(g, g.project(sp)) + math.pi / 2) % math.pi) - math.pi / 2)
+                cov += math.degrees(turn) <= max_turn_deg
+            if not cov or (crossing and cov < _CROSSING_ALONG * len(samples)):       # a crossing is square to the road: only one that runs along it is matched
+                continue
+            t = r.project(mid)
             p = r.interpolate(t)
             a, b = r.interpolate(max(t - 1.0, 0.0)), r.interpolate(min(t + 1.0, r.length))
             side = (b.x - a.x) * (mid.y - p.y) - (b.y - a.y) * (mid.x - p.x)         # > 0: left of the road link
-            key = (round(g.distance(r) * 2) / 2, 0 if side * kerb > 0 else 1)         # nearest, then kerb side
+            # the road along the longest stretch of it (a 5 m side road touching its end does not count), then the nearest edge, then the kerb side
+            key = (-cov, round(max(g.distance(r) - hw, 0.0) * 2) / 2, 0 if side * kerb > 0 else 1)
+            if cov >= 2 and (kind == "sidewalk" or g.distance(r) - hw - _DEFAULT_WALK_W / 2 <= adjacent_m):
+                route.append((road_ids[i], cov * 2.0, g.distance(r)))        # a road it runs along for 4 m or more: one of the route
             if best is None or key < best[0]:
-                best = (key, road_ids[i])
-        if best is not None:
-            parents.append((best[1], link_id))
+                best = (key, road_ids[i], g.distance(r), g.distance(r) - hw - _DEFAULT_WALK_W / 2)
+        if best is None or not (kind == "sidewalk" or best[3] <= adjacent_m):    # an unmarked footpath only where it is right beside the road
+            return set()
+        parents.append((best[1], link_id, best[2], kind))
+        for rid, cov_m, dist in route:
+            along_rows.append((link_id, rid, sch.removeprefix("gmns_") if rid in own else "driving", cov_m, round(dist, 2)))
+        return {rid for rid, _, _ in route} | {best[1]}
+
+    at_node = defaultdict(set)                       # node -> the roads the matched footpaths that end there run along
+    deferred = []                                    # short crossings: a crossing of a side street also runs along the main road, so one is matched only where it continues a matched footpath
+    for link_id, w, *lv, kind, crossing, n0, n1 in sw:
+        g = to_m(w)
+        if g.length < 1.0:
+            continue
+        if crossing and g.length < _CROSSING_MIN_M:
+            deferred.append((link_id, g, lv, kind, n0, n1))
+            continue
+        got = match_one(link_id, g, lv, kind, crossing)
+        at_node[n0] |= got
+        at_node[n1] |= got
+    for link_id, g, lv, kind, n0, n1 in deferred:
+        allowed = at_node.get(n0, set()) | at_node.get(n1, set())
+        if allowed:
+            match_one(link_id, g, lv, kind, True, allowed)
+    if any(r in own for r, _, _, kd in parents if kd == "sidewalk"):
+        con.executemany(f"UPDATE {sch}.link SET parent_link_id = ? WHERE link_id = ?", [(r, k) for r, k, _, kd in parents if r in own and kd == "sidewalk"])
+    # duckOSM extension: the road it runs along, also where that road is only in gmns_driving (link_id is the same hash in
+    # every schema), which of the two networks it is in, and how far the sidewalk's line is from the road's line
+    if along_rows:
+        con.executemany(f"INSERT INTO {sch}.link_along VALUES (?, ?, ?, ?, ?)", along_rows)
     if parents:
-        con.executemany(f"UPDATE {sch}.link SET parent_link_id = ? WHERE link_id = ?", parents)
+        con.executemany(f"UPDATE {sch}.link SET along_link_id = ?, along_mode = ?, along_gap_m = ?, along_kind = ? WHERE link_id = ?",
+                        [(r, sch.removeprefix("gmns_") if r in own else "driving", round(d, 2), kd, k) for r, k, d, kd in parents])
+    return {k: r for r, k, _, kd in parents if kd == "sidewalk"}      # only a mapped sidewalk may take its place from the road
+
+
+def _walk_frame(con, sch, drive_side, along, clearance_m=0.0):
+    """A footpath with a parent road takes its place from the road's cross-section (docs/design/gmns_walking_frame.md):
+    its lane becomes an offset curve of the road's kerb-side lane, ``clearance_m`` outside its edge, cut to the stretch
+    the footpath covers. A road in ``gmns_driving`` (its real lanes) is the frame where there is one. Only a footpath on
+    its parent's kerb side moves.
+    Lane geometry only: ids, lengths, lane numbers and movements stay."""
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+    from shapely.ops import substring
+
+    kids = [(r[0], r[1], along[r[1]], *r[2:]) for r in con.execute(f"""SELECT l.lane_id, l.link_id, ST_AsText(l.geom), l.width,
+                           ST_AsText(k.geom) FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
+                           WHERE l.geom IS NOT NULL AND l.allowed_uses = 'walk'""").fetchall() if r[1] in along]
+    if not kids:
+        return
+    have_drive = con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'gmns_driving' "
+                             "AND table_name = 'lane'").fetchone()[0] > 0
+    kerb = -1.0 if drive_side == "right" else 1.0
+    pick = max if drive_side == "right" else min                 # lane 1 is the leftmost: the kerb is the last lane on the right
+
+    def roads(g):                                                # link -> (its lanes (num, wkt, width), its own line)
+        lanes, line = {}, {r[0]: r[1] for r in con.execute(f"SELECT link_id, ST_AsText(geom) FROM {g}.link").fetchall()}
+        for lk, num, w, wd in con.execute(f"SELECT link_id, lane_num, ST_AsText(geom), width FROM {g}.lane WHERE geom IS NOT NULL").fetchall():
+            lanes.setdefault(lk, []).append((num, w, wd))
+        return {lk: (v, line[lk]) for lk, v in lanes.items() if lk in line}
+    frame = roads(sch)
+    if have_drive:
+        frame.update(roads("gmns_driving"))
+    out, why = [], Counter()
+    for lane_id, link_id, parent, cw, ws, lw in kids:
+        if parent not in frame:
+            why['no_road_lane'] += 1
+            continue
+        planes, pline = frame[parent]
+        _, pw, wp = pick(plane for plane in planes)             # the kerb-side lane: its line and width
+        wp, ws = wp or _DEFAULT_LANE_W, ws or _DEFAULT_WALK_W
+        c, p, ln0, rl = _w.loads(cw), _w.loads(pw), _w.loads(lw), _w.loads(pline)
+        if c.is_empty or p.is_empty or ln0.is_empty or rl.is_empty:
+            why['degenerate'] += 1
+            continue
+        x0, y0 = p.coords[0]
+        kx, M = math.cos(math.radians(y0)) or 1.0, 111320.0
+        loc = lambda g: LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in g.coords])    # noqa: E731
+        cl, pl, ln, rn = loc(c), loc(p), loc(ln0), loc(rl)    # lane, road's lane, footpath's own line, road's line
+        if cl.length < 1.0 or pl.length < 1.0 or ln.length < 1.0:
+            why['short'] += 1
+            continue
+        mid = ln.interpolate(0.5, normalized=True)
+        t = rn.project(mid)                                      # which side of the road link's own line it is on
+        a, b, q = rn.interpolate(max(t - 1.0, 0.0)), rn.interpolate(min(t + 1.0, rn.length)), rn.interpolate(t)
+        side = (b.x - a.x) * (mid.y - q.y) - (b.y - a.y) * (mid.x - q.x)
+        if side * kerb <= 0:                                     # the far side of the road link: left as it is
+            why['far_side'] += 1
+            continue
+        try:
+            new = pl.offset_curve(kerb * (wp / 2 + clearance_m + ws / 2))
+        except Exception:
+            why['offset_failed'] += 1
+            continue
+        if new.is_empty or new.geom_type != "LineString" or new.distance(mid) > 12.0:
+            why['offset_far'] += 1
+            continue
+        # move the footpath's own lane onto the frame where it runs alongside the road, vertex by vertex (it keeps its length,
+        # its ends and its way on past the road): beyond the stretch the road covers the move fades out over 10 m
+        import numpy as np
+        pts = np.array(shapely.segmentize(cl, 2.0).coords)
+        a0, a1, b0, b1 = (np.array(new.coords[k]) for k in (0, 1, -2, -1))
+        t0, t1 = (a1 - a0) / (np.linalg.norm(a1 - a0) or 1.0), (b1 - b0) / (np.linalg.norm(b1 - b0) or 1.0)
+        moved = []
+        for v in pts:
+            t = new.interpolate(new.project(shapely.Point(v)))
+            over = max(0.0, -float(np.dot(v - a0, t0)), float(np.dot(v - b1, t1)))      # metres past either end of the stretch
+            w = max(0.0, 1.0 - over / 10.0)
+            moved.append((v[0] + w * (t.x - v[0]), v[1] + w * (t.y - v[1])))
+        seg = LineString(moved)
+        if seg.length < 0.5:
+            why["cut_short"] += 1
+            continue
+        out.append((LineString([(x / (kx * M) + x0, y / M + y0) for x, y in seg.coords]).wkt, lane_id))
+    if out:
+        con.executemany(f"UPDATE {sch}.lane SET geom = ST_GeomFromText(?::VARCHAR) WHERE lane_id = ?::VARCHAR", out)
+    logger.info(f"GMNS[{sch[5:]}]: {len(out):,} footpath lanes placed from their road's frame; left as they were: "
+                + (", ".join(f"{n:,} {k.replace('_', ' ')}" for k, n in why.most_common()) or "none"))
+
+
+def _walk_kerb(con, sch, clearance_m=0.0):
+    """A mapped sidewalk (``footway=sidewalk``) that still lies on a road after ``_walk_frame`` (its road was on its far side, too far, or none
+    was found) is pushed out to the kerb: every vertex that lies within a driving lane running ALONG the sidewalk moves to that road's edge plus
+    half the sidewalk's width (+ ``clearance_m``), so one side of a street is not lost. A vertex on a lane that crosses the sidewalk (a side
+    road's mouth) is left alone: that is a crossing, not a sidewalk. Only mapped sidewalks move; none is added. Lane geometry only."""
+    import numpy as np
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import LineString, Point
+    from shapely.ops import nearest_points
+
+    if not con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'gmns_driving' AND table_name = 'lane'").fetchone()[0]:
+        return
+    kids = con.execute(f"""SELECT l.lane_id, ST_AsText(l.geom), l.width FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
+                           WHERE k.footway = 'sidewalk' AND l.geom IS NOT NULL AND l.allowed_uses = 'walk'""").fetchall()
+    roads = con.execute(f"""SELECT ST_AsText(geom), COALESCE(width, {_DEFAULT_LANE_W}) FROM gmns_driving.lane
+                            WHERE geom IS NOT NULL AND allowed_uses IN ('auto', 'bus')""").fetchall()
+    if not kids or not roads:
+        return
+    x0, y0 = _w.loads(roads[0][0]).coords[0]
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    to_m = lambda g: LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in g.coords])        # noqa: E731
+    lanes = [to_m(_w.loads(w)) for w, _ in roads]
+    polys = [ln.buffer(wd / 2, cap_style="flat") for ln, (_, wd) in zip(lanes, roads)]
+    tree = shapely.STRtree(polys)
+    out = []
+    for lane_id, wkt, wd in kids:
+        half = (wd or _DEFAULT_WALK_W) / 2 + clearance_m
+        ln = shapely.segmentize(to_m(_w.loads(wkt)), 2.0)
+        pts = np.array(ln.coords)
+        if len(pts) < 2:
+            continue
+        tang = np.gradient(pts, axis=0)
+        tang /= np.maximum(np.hypot(tang[:, 0], tang[:, 1]), 1e-9)[:, None]
+        moved, changed = pts.copy(), False
+        for i, v in enumerate(pts):
+            p = Point(v)
+            near = []
+            for j in tree.query(p.buffer(25.0)):
+                lane = lanes[j]
+                s0 = lane.project(p)
+                a, b = lane.interpolate(max(s0 - 0.5, 0)), lane.interpolate(min(s0 + 0.5, lane.length))
+                n = math.hypot(b.x - a.x, b.y - a.y) or 1.0
+                if abs(((b.x - a.x) * tang[i][0] + (b.y - a.y) * tang[i][1]) / n) >= 0.7:   # a lane that runs along the sidewalk
+                    near.append(polys[j])
+            if not near:
+                continue
+            nx, ny = -tang[i][1], tang[i][0]                              # across the sidewalk: across the road
+            cut = LineString([(v[0] - nx * 25.0, v[1] - ny * 25.0), (v[0] + nx * 25.0, v[1] + ny * 25.0)]).intersection(
+                shapely.union_all(near).buffer(0.05))                     # the road along that line (lanes that touch are one road)
+            ts = []                                                       # the road's stretches along the line, as (from, to) distances from v
+            for g in getattr(cut, "geoms", [cut]):
+                if g.geom_type == "LineString" and not g.is_empty:
+                    u = [(x - v[0]) * nx + (y - v[1]) * ny for x, y in g.coords]
+                    ts.append((min(u) + 0.05, max(u) - 0.05))                   # the 0.05 m the road was grown by, taken back
+            here = [t for t in ts if t[0] - half <= 0 <= t[1] + half]     # the stretch the vertex is on, or within the clearance of
+            if not here:
+                continue
+            t0, t1 = min(here, key=lambda t: min(abs(t[0]), abs(t[1])) if not t[0] <= 0 <= t[1] else 0)
+            if t0 <= 0 <= t1:                                             # inside the road: out through the nearer kerb
+                shift = t1 + half if t1 <= -t0 else t0 - half
+            elif t0 > 0:                                                  # outside, the road ahead on the + side, closer than the clearance
+                shift = t0 - half
+            else:                                                         # outside, the road behind
+                shift = t1 + half
+            if abs(shift) > 1e-6:
+                moved[i] = v + np.array([nx, ny]) * shift
+                changed = True
+        if changed:
+            for _ in range(2):                                             # a light smoothing: no ragged edge where the push changes
+                moved[1:-1] = (moved[:-2] + 2 * moved[1:-1] + moved[2:]) / 4
+            out.append((LineString([(x / (kx * M) + x0, y / M + y0) for x, y in moved]).wkt, lane_id))
+    if out:
+        con.executemany(f"UPDATE {sch}.lane SET geom = ST_GeomFromText(?::VARCHAR) WHERE lane_id = ?::VARCHAR", out)
+    logger.info(f"GMNS[{sch[5:]}]: {len(out):,} sidewalk lanes pushed out of a road, to its kerb")
+
+
+def _walk_join(con, sch):
+    """Footways that meet at a node end at that one point in OSM, and must after ``_walk_frame`` and ``_walk_kerb`` moved a sidewalk's end: the
+    sidewalk was moved, the crosswalk or steps at the same node were not, and the joint opened up (Monaco: over half of the pairs of lane ends
+    at a node more than 0.5 m apart). Every moved sidewalk end at a node gives the node a new place (their mean); every footway, path, steps
+    or crosswalk lane that ends at the node then ends there. Only lane geometry, and only footway classes: a road walked on is untouched."""
+    import numpy as np
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    nonroad = ", ".join(repr(h) for h in _NON_MOTOR)
+    rows = con.execute(f"""SELECT l.lane_id, k.from_node_id, k.to_node_id, k.footway, ST_AsText(l.geom)
+                           FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
+                           WHERE l.geom IS NOT NULL AND l.allowed_uses = 'walk'
+                             AND regexp_replace(split_part(k.facility_type, ';', 1), '_link$', '') IN ({nonroad})""").fetchall()
+    nodes = {r[0]: (r[1], r[2]) for r in con.execute(f"SELECT node_id, x_coord, y_coord FROM {sch}.node").fetchall()}
+    if not rows or not nodes:
+        return
+    x0, y0 = next(iter(nodes.values()))
+    kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+    lanes, ends = {}, {}
+    for lane_id, fn, tn, fw, wkt in rows:
+        pts = np.array([((x - x0) * kx * M, (y - y0) * M) for x, y in _w.loads(wkt).coords])
+        if len(pts) < 2 or fn not in nodes or tn not in nodes:
+            continue
+        lanes[lane_id] = pts
+        ends.setdefault(fn, []).append((lane_id, 0, fw))
+        ends.setdefault(tn, []).append((lane_id, -1, fw))
+    changed = set()
+    for nd, lst in ends.items():
+        if len(lst) < 2:
+            continue
+        home = np.array([(nodes[nd][0] - x0) * kx * M, (nodes[nd][1] - y0) * M])
+        moved = [lanes[ln][i] for ln, i, fw in lst if fw == "sidewalk" and np.hypot(*(lanes[ln][i] - home)) > 0.05]
+        if not moved:
+            continue
+        target = np.mean(moved, axis=0)
+        for ln, i, fw in lst:
+            if np.hypot(*(lanes[ln][i] - target)) > 0.02:
+                lanes[ln][i] = target
+                changed.add(ln)
+    out = [(LineString([(x / (kx * M) + x0, y / M + y0) for x, y in lanes[ln]]).wkt, ln) for ln in changed]
+    if out:
+        con.executemany(f"UPDATE {sch}.lane SET geom = ST_GeomFromText(?::VARCHAR) WHERE lane_id = ?::VARCHAR", out)
+    logger.info(f"GMNS[{sch[5:]}]: {len(out):,} footway lanes joined at the nodes their sidewalks were moved from")
 
 
 def _build_geometry(con, sch, mode):
@@ -684,6 +1038,7 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
       FROM cp t
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
     _assign_lanes(con, sch, mode, drive_side)
+    _continuation_movements(con, sch)
 
 
 # turn:lanes part -> the movement types a lane feeds (docs/design/gmns_lane_movements.md, step 1); a
@@ -913,6 +1268,44 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
     con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN _ang")
 
 
+def _continuation_movements(con, sch):
+    """Movement rows for the lanes no movement leaves (Kaveh, 2026-10-02: ``167625718#2f`` lanes 2 and 3 had "no way out"). Where a link has exactly one way on
+    (U-turns aside), a car lane its movement does not cover (the road has fewer lanes ahead) merges into the last car lane of the next link (``merge``), and a bike
+    lane goes on into the next link's bike lane (``thru``, ``allowed_uses`` bike): one row each, ``<mvmt_id>-<lane>``, in the same node and link pair. The lane connectors
+    and every reader follow from the rows."""
+    lanes = con.execute(f"SELECT link_id, lane_num, allowed_uses, turn FROM {sch}.lane").fetchall()
+    car, bike, marked = defaultdict(list), defaultdict(list), set()
+    for lk, n, use, turn in lanes:
+        (bike if use == "bike" else car)[lk].append(n)
+        if turn:
+            marked.add(lk)                           # OSM says what each lane is for (turn:lanes): a lane no exit takes is meant to end there
+    outs = defaultdict(list)
+    for mid, ib, ob, si, ei in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, start_ib_lane, end_ib_lane FROM {sch}.movement "
+                                           f"WHERE type <> 'uturn'").fetchall():
+        outs[ib].append((mid, ob, si, ei))
+    new = []
+    for ib, ms in outs.items():
+        if len(ms) != 1 or ib not in car or ib in marked:
+            continue
+        mid, ob, si, ei = ms[0]
+        if not car.get(ob):
+            continue
+        covered = set(range(si or 1, (ei or si or 1) + 1))
+        for n in sorted(car[ib]):
+            if n not in covered:
+                new.append((mid, f"{mid}-{n}", n, n, max(car[ob]), max(car[ob]), "merge", None))
+        if bike.get(ib) and bike.get(ob):
+            new.append((mid, f"{mid}-b{bike[ib][0]}", bike[ib][0], bike[ib][0], bike[ob][0], bike[ob][0], "thru", "bike"))
+    if not new:
+        return
+    import pandas as pd
+    _cont = pd.DataFrame(new, columns=["base", "new_id", "si", "ei", "so", "eo", "typ", "uses"])   # noqa: F841 (read by SQL)
+    con.execute(f"""INSERT INTO {sch}.movement SELECT m.* REPLACE (c.new_id AS mvmt_id, c.si AS start_ib_lane, c.ei AS end_ib_lane,
+                      c.so AS start_ob_lane, c.eo AS end_ob_lane, c.typ AS type, COALESCE(c.uses, m.allowed_uses) AS allowed_uses)
+                    FROM {sch}.movement m JOIN _cont c ON c.base = m.mvmt_id""")
+    logger.info(f"GMNS[{sch[5:]}]: {len(new):,} movements for lanes that go on where the road has fewer lanes or a bike lane continues")
+
+
 def _fork_types(con, sch, max_ang=45.0):
     """The GMNS movement types ``diverge`` and ``merge`` (docs/design/gmns_lane_movements.md):
     ``diverge`` at a fork, a node one link arrives at, its 2+ ways on (U-turns aside) all within
@@ -929,6 +1322,70 @@ def _fork_types(con, sch, max_ang=45.0):
         GROUP BY f.ob_link_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
 
 
+def _fit_width(pts, w, floor=0.6):
+    """``w`` narrowed where the curve ``pts`` is tighter than the lane: at most twice the tightest radius (a turn
+    of 5 m through 90 degrees can't carry a 3.25 m lane), never under ``floor`` of ``w`` (a neck between two lanes)."""
+    rmin = float("inf")
+    for p, q, r in zip(pts, pts[1:], pts[2:]):
+        a, b, c = math.dist(p, q), math.dist(q, r), math.dist(p, r)
+        area2 = abs((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]))
+        if area2 > 1e-9:
+            rmin = min(rmin, a * b * c / (2 * area2))      # circumradius = abc / 4 area
+    return max(floor * w, min(w, 1.8 * rmin))
+
+
+def _inherit_lanes(edges, passes=6):
+    """Lane counts for one-way roads OSM gives none for (Kaveh, 2026-10-02: the tunnel ``80378487`` after the 2-lane ``167625718``).
+    ``edges``: dicts ``edge_id``, ``source``, ``target``, ``cls`` (the road class), ``lanes`` (as the edges table has it: tagged, else a
+    default of 1), ``tagged`` (the way has a ``lanes`` / ``turn:lanes`` / ``width:lanes`` tag), ``oneway``. An untagged one-way edge takes the
+    lanes of the road it plainly continues (the node between them joins only the two, both one-way, of one class: a road changes its name
+    at a tunnel) when that has more; else of the one it plainly leads into. Passes repeat, so a way cut into pieces inherits piece by piece.
+    Returns ``{edge_id: lanes}`` for the edges that change."""
+    by = {e["edge_id"]: dict(e) for e in edges}
+    at = defaultdict(set)                                # node -> the edges that touch it
+    for e in by.values():
+        at[e["source"]].add(e["edge_id"])
+        at[e["target"]].add(e["edge_id"])
+    changed = {}
+    for _ in range(passes):
+        step = False
+        for e in by.values():
+            if e["tagged"] or not e["oneway"]:
+                continue
+            for node, end in ((e["source"], "target"), (e["target"], "source")):      # what leads in, else what it leads into
+                others = at[node] - {e["edge_id"]}
+                if len(others) != 1:
+                    continue
+                o = by[next(iter(others))]
+                if o["oneway"] and o["cls"] == e["cls"] and o[end] == node and (o["lanes"] or 1) > (e["lanes"] or 1):
+                    e["lanes"] = changed[e["edge_id"]] = o["lanes"]
+                    step = True
+                    break
+        if not step:
+            break
+    return changed
+
+
+def _infer_lanes(con, mode, has_raw):
+    """``_lanes_inf(edge_id, lanes)`` (a temp table): :func:`_inherit_lanes` over the mode's edges. Empty without the raw OSM tags (no way to
+    tell a tagged ``lanes`` from the default)."""
+    con.execute("CREATE OR REPLACE TEMP TABLE _lanes_inf(edge_id BIGINT, lanes INTEGER)")
+    if not has_raw or mode != "driving":
+        return
+    cols = {c for (c,) in con.execute("SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+                                      "AND table_name = 'edges'", [mode]).fetchall()}
+    if "oneway" not in cols:
+        return
+    rows = con.execute(f"""SELECT e.edge_id, e.source, e.target, e.name, regexp_replace(split_part(e.highway, ';', 1), '_link$', ''), e.lanes,
+        (w.tags['lanes'] IS NOT NULL OR w.tags['turn:lanes'] IS NOT NULL OR w.tags['width:lanes'] IS NOT NULL OR w.tags['lanes:forward'] IS NOT NULL),
+        e.oneway FROM s.{mode}.edges e LEFT JOIN s.raw.ways w ON w.osm_id = abs(e.osm_id)""").fetchall()
+    edges = [dict(edge_id=a, source=b, target=c, cls=f, lanes=g, tagged=bool(h), oneway=bool(i)) for a, b, c, d, f, g, h, i in rows]
+    got = _inherit_lanes(edges)
+    if got:
+        con.executemany("INSERT INTO _lanes_inf VALUES (?, ?)", list(got.items()))
+        logger.info(f"GMNS[{mode}]: {len(got):,} one-way edges without a lanes tag take the lane count of the road they continue")
+
+
 def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5, min_keep_m=2.0):
     """Lanes that connect (docs/design/gmns_lane_connectors.md): shorten each lane where it ends
     inside a junction (the other links' lanes, but its own link's reverse) or doesn't meet the lane
@@ -939,7 +1396,7 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
     from shapely.geometry import LineString, Point
     from shapely.ops import substring
 
-    lanes = con.execute(f"SELECT lane_id, link_id, lane_num, COALESCE(width, {_DEFAULT_LANE_W}), ST_AsText(geom) "
+    lanes = con.execute(f"SELECT lane_id, link_id, lane_num, COALESCE(width, CASE WHEN allowed_uses = 'walk' THEN {_DEFAULT_WALK_W} WHEN allowed_uses = 'bike' THEN {_DEFAULT_BIKE_W} ELSE {_DEFAULT_LANE_W} END), ST_AsText(geom) "
                         f"FROM {sch}.lane WHERE geom IS NOT NULL").fetchall()
     con.execute(f"""CREATE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR,
                       to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY)""")
@@ -1060,7 +1517,7 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
         p1, p2 = (p0[0] + ax * 0.4 * chord, p0[1] + ay * 0.4 * chord), (p3[0] - bx * 0.4 * chord, p3[1] - by * 0.4 * chord)
         pts = [tuple((1 - t) ** 3 * u + 3 * (1 - t) ** 2 * t * v + 3 * (1 - t) * t ** 2 * w + t ** 3 * z
                      for u, v, w, z in zip(p0, p1, p2, p3)) for t in (i / 12 for i in range(13))]
-        rows.append((f"{a}>{b}", mid, a, b, min(width[a], width[b]), to_ll(pts)))
+        rows.append((f"{a}>{b}", mid, a, b, _fit_width(pts, min(width[a], width[b])), to_ll(pts)))
     import pandas as pd
     _cut = pd.DataFrame([(lid, to_ll(line.coords)) for lid, line in cut.items() if line is not geom[lid]],  # noqa: F841
                         columns=["lane_id", "wkt"])
@@ -1260,15 +1717,15 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     is placed like a two-way road's side, from the line midway between the two."""
     import pandas as pd
 
-    raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = e.osm_id" if has_raw else ""
+    raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = abs(e.osm_id)" if has_raw else ""   # a virtual (negative) id is its OSM way with a minus: its tags are the way's
     tagcol = "w.tags" if has_raw else "NULL::MAP(VARCHAR, VARCHAR)"
     has_oneway = con.execute(
         "SELECT count(*) FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges' AND column_name = 'oneway'", [mode]).fetchone()[0] > 0
     oneway_sel = "e.oneway" if has_oneway else "false"      # older/synthetic edges: treat as two-way
-    rows = con.execute(f"""SELECT e.edge_id, e.is_reverse, e.lanes, e.length_m, e.source,
+    rows = con.execute(f"""SELECT e.edge_id, e.is_reverse, COALESCE(li.lanes, e.lanes), e.length_m, e.source,
       {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name
-      FROM s.{mode}.edges e {raw_join}""").fetchall()
+      FROM s.{mode}.edges e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""").fetchall()
     side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
 
     def pick(tags, base, is_rev):
@@ -1290,6 +1747,11 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                 return (w or _DEFAULT_BIKE_LANE_W, w)
         return None
 
+    def is_foot(tags):
+        """A footpath of the walking network: 2 m wide and one strip for both directions (people walk both ways on it, so
+        its two links are not two sides of a road): centred on its line like a one-way road, never paired."""
+        return mode == "walking" and tags.get("highway") in _NON_MOTOR
+
     def lane_widths(tags, lanes, is_rev):
         turns = _split(pick(tags, "turn:lanes", is_rev))
         widths = _split(pick(tags, "width:lanes", is_rev))
@@ -1297,7 +1759,8 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         # turn entries has a third lane that the arrows say nothing about (a pocket can add lanes, never remove)
         n = max(len(turns), int(lanes or 1), 1)
         extra = bike_extra(tags, is_rev)
-        return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or _DEFAULT_LANE_W
+        dw = _DEFAULT_WALK_W if is_foot(tags) else _default_lane_w(tags.get("highway"))
+        return turns, widths, [(_num(widths[i]) if i < len(widths) else None) or dw
                                for i in range(n)] + ([extra[0]] if extra else [])
 
     # runs of pieces (docs/design/gmns_lane_runs.md): one road is a chain of edges of one OSM way;
@@ -1319,10 +1782,11 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         tags = tags or {}
         w_each = lane_widths(tags, lanes, is_rev)[2]
         w_of[edge_id] = w_each
-        place_of[edge_id] = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or side_sign < 0) else None
+        place_of[edge_id] = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or is_foot(tags) or side_sign < 0) else None
         h0, h1 = headings(wkt) if wkt else (0.0, 0.0)
-        info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway), tuple(w_each), name,
+        info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway) or is_foot(tags), tuple(w_each), name,
                          tags.get("junction") == "roundabout", h0, h1)
+    rows_tags = {r[0]: r[7] or {} for r in rows}
     runs, where, closed = _chain_runs(info)
     wkt_of = {r[0]: r[6] for r in rows}
     merged = {}                                  # run index -> the run's line, lon/lat wkt
@@ -1336,10 +1800,11 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             cs += c[1:] if cs and c[0] == cs[-1] else c
         else:
             merged[i] = "LINESTRING (" + ", ".join(cs) + ")"
-    gaps = {}
+    gaps, run_profiles = {}, {}
     if lane_geometry and pair_carriageways:
         run_gaps = _paired_gaps([(i, merged[i], sum(w_of[run[0]]) / 2.0) for i, run in enumerate(runs)
-                                 if i in merged and info[run[0]][4]], side_sign)
+                                 if i in merged and info[run[0]][4] and not is_foot(rows_tags[run[0]])],
+                                side_sign, profiles=run_profiles)
         gaps = {e: run_gaps[i] for i, run in enumerate(runs) if i in run_gaps for e in run}
         if gaps:
             logger.info(f"GMNS[{mode}]: {len(gaps):,} one-way edges placed with their opposite carriageway")
@@ -1403,6 +1868,8 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                     (i < len(buses) and buses[i] in ("designated", "yes")):
                 u = "bus"
             width = extra[1] if extra and i == n - 1 else (_num(widths[i]) if i < len(widths) else None)
+            if width is None and u not in ("bike", "walk"):
+                width = w_each[i]                            # the class default, so every reader draws the same width
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
             run += w_each[i]
             if not lane_geometry:
@@ -1411,6 +1878,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                 geom = run_geoms[edge_id][i]
             else:
                 geom = _offset_wkt(wkt, offs[i])
+            ri = where[edge_id][0]
+            if geom and edge_id in gaps and ri in run_profiles and run_place[ri] is None:   # the gap varies along the road
+                geom = _vary_wkt(geom, merged[ri], run_profiles[ri], gaps[edge_id], side_sign)
             lane_rows.append((f"{edge_id}_{i + 1}", edge_id, i + 1, u, None, None, width, turn, geom))
         for side in ("left", "right", "both"):
             val = tags.get(f"parking:{side}") or tags.get(f"parking:lane:{side}")
