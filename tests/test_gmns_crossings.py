@@ -130,3 +130,20 @@ def test_a_crossing_paints_only_on_the_lanes_of_its_own_level(tmp_path):
     assert under.execute("SELECT count(*) FROM gmns_driving.crossing").fetchone()[0] == 1
     flat = _build(tmp_path, way=("MAP{'footway':'crossing'}", ACROSS), name="lvl2")                     # no level columns: all ground
     assert flat.execute("SELECT count(*) FROM gmns_driving.crossing").fetchone()[0] == 1
+
+
+def test_a_crossing_over_a_junction_corner_is_one_square_zebra_per_road(tmp_path):
+    """docs/design/gmns_crossings.md, "One rectangle per road": a way running 45 degrees across the corner of A (east-west) and B (north-south) is two zebras,
+    each square to its own road, and no lane of one road under the other's rectangle (before: one rectangle at 45 degrees to both, on 12 lanes of the two roads)."""
+    kx = M * 0.5106                                                                # metres per degree of longitude at 59.32
+    node = (18.07, 59.32)
+    way = [(node[0] + dx / kx, node[1] + dy / M) for dx, dy in ((-16, 6), (6, -16))]       # 45 degrees, through (-5, -5)... across both roads
+    c = _build(tmp_path, way=("MAP{'highway':'footway','footway':'crossing','crossing':'marked'}", way), name="corner")
+    ids = [r[0] for r in c.execute("SELECT crossing_id FROM gmns_driving.crossing ORDER BY crossing_id").fetchall()]
+    assert len(ids) == 2 and ids[0] == "w900" and ids[1] == "w900#2"
+    links = {cid: {r[0] for r in c.execute("SELECT DISTINCT link_id FROM gmns_driving.lane_crossing WHERE crossing_id = ?", [cid]).fetchall()} for cid in ids}
+    from tests.test_gmns import A, AR, B
+    assert sorted(map(sorted, links.values())) == sorted([sorted({A, AR}), sorted({B})])    # one road each: the east-west pair, the north-south link
+    for cid in ids:                                                                # each rectangle is axis-aligned: square to its (axis-aligned) road
+        area, box = c.execute("SELECT ST_Area(geom), ST_Area(ST_Envelope(geom)) FROM gmns_driving.crossing WHERE crossing_id = ?", [cid]).fetchone()
+        assert area == pytest.approx(box, rel=1e-3)

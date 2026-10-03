@@ -12,6 +12,9 @@ _ZEBRA_W_PER_ROAD_W = 0.4                           # the zebra's width, from th
 _ZEBRA_W_MIN, _ZEBRA_W_MAX = 2.5, 4.0               # ... between these, metres (an OSM `width` tag wins)
 _MIN_ANGLE_SIN = 0.5                                # a crossing lies across the road: 30 degrees or more from the lane
 _MAX_WIND = 1.3                                     # length / chord of a piece
+_ROAD_ANGLE = 30.0                                  # degrees: covered lanes this close in direction are one road (one rectangle)
+_MIN_ALONG = math.cos(math.radians(_ROAD_ANGLE))     # |cos| of a lane's direction to the rectangle's axis: a lane of another road is not under it ...
+_MIN_ALONG_CONNECTOR = 0.5                          # ... a connector curves through the junction: 60 degrees
 _MAX_OVERLAP = 0.10                                 # of a crossing's footprint on one already placed: the same crossing
 _NODE_REACH_M = 25.0                                # a node crossing's line, to each side of the node
 
@@ -75,14 +78,14 @@ def build_crossings(con, sch, has_raw):
     from shapely.geometry import LineString, Point, Polygon
 
     lanes = con.execute(f"""SELECT l.lane_id, l.link_id, COALESCE(l.width, {_DEFAULT_LANE_W}), ST_AsText(l.geom), k.osm_id,
-                                   k.layer, k.bridge, k.tunnel
+                                   k.layer, k.bridge, k.tunnel, false
                             FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
                             WHERE l.geom IS NOT NULL AND l.allowed_uses IN {_ROAD_USES}""").fetchall()
     if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? AND table_name = 'lane_connector'", [sch]).fetchone()[0]:
         # the lane connectors are road surface too: duckOSM trims a lane where a junction starts and joins it to the next by a connector, so
         # a zebra over a joint is on the lanes and on the connector between them
         lanes += con.execute(f"""SELECT c.connector_id, l.link_id, COALESCE(c.width, {_DEFAULT_LANE_W}), ST_AsText(c.geom), k.osm_id,
-                                        k.layer, k.bridge, k.tunnel
+                                        k.layer, k.bridge, k.tunnel, true
                                  FROM {sch}.lane_connector c JOIN {sch}.lane l ON l.lane_id = c.from_lane_id
                                  JOIN {sch}.link k ON k.link_id = l.link_id
                                  WHERE c.geom IS NOT NULL AND l.allowed_uses IN {_ROAD_USES}""").fetchall()
@@ -98,9 +101,9 @@ def build_crossings(con, sch, has_raw):
     to_m = lambda lon, lat: ((lon - x0) * kx * M, (lat - y0) * M)                    # noqa: E731
     to_ll = lambda x, y: (x / (kx * M) + x0, y / M + y0)                             # noqa: E731
 
-    lane_id, link_id, lane_way, lane_w, lane_level = [], [], [], [], []
+    lane_id, link_id, lane_way, lane_w, lane_level, lane_conn = [], [], [], [], [], []
     geom, poly = [], []
-    for lid, lk, w, wkt, osm, ly, br, tu in lanes:
+    for lid, lk, w, wkt, osm, ly, br, tu, is_conn in lanes:
         g = LineString([to_m(*p) for p in _w.loads(wkt).coords])
         if g.length < 0.5:
             continue
@@ -108,6 +111,7 @@ def build_crossings(con, sch, has_raw):
         link_id.append(lk)
         lane_way.append(osm)
         lane_level.append(_level(ly, br, tu))
+        lane_conn.append(is_conn)
         lane_w.append(w)
         geom.append(g)
         poly.append(g.buffer(w / 2, cap_style="flat"))
@@ -213,67 +217,85 @@ def build_crossings(con, sch, has_raw):
             return abs(((b.x - a.x) * ty - (b.y - a.y) * tx) / n)
         sins = [_sin(it) for it in cov]
         cov = [it for it, sn in zip(cov, sins) if sn >= max(sins) - 0.15]
-        # 2. the best rectangle for all the links it crosses: ONE rectangle for the whole crossing, every piece of it. Its axis the road's
-        #    (the covered lanes' directions, opposite ones are one axis), ``width`` metres along it, centred on the middle of the crossing,
-        #    and across it from the first covered lane's outer edge to the last one's, over the median too
-        axes, ends = [], []
+        # 2. the roads it crosses: the covered lanes grouped by direction (axes within _ROAD_ANGLE degrees, opposite ones are one axis: a dual
+        #    carriageway is one road). A crossing over a junction corner is two roads, each with its own rectangle: an average of two roads'
+        #    directions points at neither (docs/design/gmns_crossings.md, "One rectangle per road")
+        roads = []                              # [anchor angle, [(lane index, piece, s0, s1, tangent)]]
         for j, part, s0, s1 in cov:
-            axes.append(tangent(geom[j], part.interpolate((s0 + s1) / 2)))
-        for part in parts:
-            ss = [(s0, s1) for _, p2, s0, s1 in cov if p2 is part]
-            if not ss:                                          # a piece with only the other road's lanes
+            t = tangent(geom[j], part.interpolate((s0 + s1) / 2))
+            ang = math.degrees(math.atan2(t[1], t[0])) % 180
+            for road in roads:
+                if abs((ang - road[0] + 90) % 180 - 90) < _ROAD_ANGLE:
+                    road[1].append((j, part, s0, s1, t))
+                    break
+            else:
+                roads.append([ang, [(j, part, s0, s1, t)]])
+        if c[0] == "n":                         # a crossing node is on ITS road: another road's lanes the node's line also touches are no zebra of it
+            roads = [r for r in roads if any(j in c[6] for j, *_ in r[1])] or roads
+        fresh = []                              # the rectangles of this crossing: they may overlap each other at a corner, not an earlier crossing's
+        for _, road in roads:
+            # the best rectangle for the links of one road: ONE rectangle for every piece of it. Its axis the road's (the covered lanes' directions),
+            # ``width`` metres along it, centred on the middle of the crossing, and across it from the first covered lane's outer edge to the last
+            # one's, over the median too
+            axes = [t for *_, t in road]
+            ends = []
+            for part in parts:
+                ss = [(s0, s1) for _, p2, s0, s1, _t in road if p2 is part]
+                if not ss:                                      # a piece with only the other road's lanes
+                    continue
+                ends += [part.interpolate(min(a for a, _ in ss)), part.interpolate(max(b for _, b in ss))]
+            ux0, uy0 = axes[0]
+            sx = sum(ax if ax * ux0 + ay * uy0 >= 0 else -ax for ax, ay in axes)
+            sy = sum(ay if ax * ux0 + ay * uy0 >= 0 else -ay for ax, ay in axes)
+            nrm = math.hypot(sx, sy) or 1.0
+            ux, uy = sx / nrm, sy / nrm
+            vx, vy = -uy, ux
+            vs = [p.x * vx + p.y * vy for p in ends]
+            v_lo, v_hi = min(vs), max(vs)
+            u_c = sum(p.x * ux + p.y * uy for p in ends) / len(ends)
+            if v_hi - v_lo < 1.0:
                 continue
-            ends += [part.interpolate(min(a for a, _ in ss)), part.interpolate(max(b for _, b in ss))]
-        ux0, uy0 = axes[0]
-        sx = sum(ax if ax * ux0 + ay * uy0 >= 0 else -ax for ax, ay in axes)
-        sy = sum(ay if ax * ux0 + ay * uy0 >= 0 else -ay for ax, ay in axes)
-        nrm = math.hypot(sx, sy) or 1.0
-        ux, uy = sx / nrm, sy / nrm
-        vx, vy = -uy, ux
-        vs = [p.x * vx + p.y * vy for p in ends]
-        v_lo, v_hi = min(vs), max(vs)
-        u_c = sum(p.x * ux + p.y * uy for p in ends) / len(ends)
-        if v_hi - v_lo < 1.0:
-            continue
-        width = _zebra_width(c[4], v_hi - v_lo)
-        rect = Polygon([(ux * (u_c + su * width / 2) + vx * vv, uy * (u_c + su * width / 2) + vy * vv)
-                        for su, vv in ((1, v_lo), (1, v_hi), (-1, v_hi), (-1, v_lo))])
-        if placed is not None and rect.intersection(placed).area > _MAX_OVERLAP * rect.area:
-            continue
-        # 3. the rectangle projected on each lane, as it really overlaps it: the lane's stretch is where the rectangle meets the lane's own
-        #    shape (so a lane that is short, or ends inside the zebra, still has its part), and the part across the lane is the overlap's extent
-        #    across the rectangle (in its own frame, so the stripes stay in step from lane to lane)
-        rows = []
-        on_rect = [j for j in tree.query(rect) if (c[7] is None or lane_level[j] == c[7])]    # every lane the RECTANGLE overlaps, not only those the line touches:
-        for j in on_rect:                                                          # a lane that goes on past the line's lane is part of the zebra
-            lane = geom[j]
-            ip = rect.intersection(poly[j])
-            if ip.is_empty or ip.area < 0.2:
+            width = _zebra_width(c[4], v_hi - v_lo)
+            rect = Polygon([(ux * (u_c + su * width / 2) + vx * vv, uy * (u_c + su * width / 2) + vy * vv)
+                            for su, vv in ((1, v_lo), (1, v_hi), (-1, v_hi), (-1, v_lo))])
+            if placed is not None and rect.intersection(placed).area > _MAX_OVERLAP * rect.area:
                 continue
-            pts = [pt for g in getattr(ip, "geoms", [ip]) if g.geom_type == "Polygon" for pt in g.exterior.coords]
-            if not pts:
+            # 3. the rectangle projected on each lane, as it really overlaps it: the lane's stretch is where the rectangle meets the lane's own
+            #    shape (so a lane that is short, or ends inside the zebra, still has its part), and the part across the lane is the overlap's extent
+            #    across the rectangle (in its own frame, so the stripes stay in step from lane to lane)
+            rows = []
+            on_rect = [j for j in tree.query(rect) if (c[7] is None or lane_level[j] == c[7])]    # every lane the RECTANGLE overlaps, not only those the line touches:
+            for j in on_rect:                                                      # a lane that goes on past the line's lane is part of the zebra
+                lane = geom[j]
+                ip = rect.intersection(poly[j])
+                if ip.is_empty or ip.area < 0.2:
+                    continue
+                pts = [pt for g in getattr(ip, "geoms", [ip]) if g.geom_type == "Polygon" for pt in g.exterior.coords]
+                if not pts:
+                    continue
+                lrs = [lane.project(Point(pt)) for pt in pts]
+                a, b = min(lrs), max(lrs)
+                vv = [x * vx + y * vy for x, y in pts]
+                ov_lo, ov_hi = max(min(vv), v_lo), min(max(vv), v_hi)
+                if b - a < 0.3 or ov_hi - ov_lo < 0.1:
+                    continue
+                mid = ip.centroid
+                tx, ty = tangent(lane, mid)
+                if abs(tx * ux + ty * uy) < (_MIN_ALONG_CONNECTOR if lane_conn[j] else _MIN_ALONG):                          # a lane that does not run along the road (a side road): not under it
+                    continue
+                nv = -ty * vx + tx * vy                                        # > 0: going on across the zebra goes to the lane's left
+                rows.append((lane_id[j], link_id[j], a, b, ov_lo - v_lo, ov_hi - v_lo, nv > 0))
+            if not rows:
                 continue
-            lrs = [lane.project(Point(pt)) for pt in pts]
-            a, b = min(lrs), max(lrs)
-            vv = [x * vx + y * vy for x, y in pts]
-            ov_lo, ov_hi = max(min(vv), v_lo), min(max(vv), v_hi)
-            if b - a < 0.3 or ov_hi - ov_lo < 0.1:
-                continue
-            mid = ip.centroid
-            tx, ty = tangent(lane, mid)
-            if abs(tx * ux + ty * uy) < 0.7:                                 # a lane that does not run along the road (a side road): not under it
-                continue
-            nv = -ty * vx + tx * vy                                        # > 0: going on across the zebra goes to the lane's left
-            rows.append((lane_id[j], link_id[j], a, b, ov_lo - v_lo, ov_hi - v_lo, nv > 0))
-        if not rows:
-            continue
-        n = seen.get((src, osm), 0)
-        seen[(src, osm)] = n + 1
-        cid = f"{src}{osm}" + (f"#{n + 1}" if n else "")
-        placed = rect if placed is None else placed.union(rect)
-        crossing_rows.append((cid, "way" if src == "w" else "node", ct, mk, _painted(ct, mk), width, v_hi - v_lo, osm,
-                              Polygon([to_ll(x, y) for x, y in rect.exterior.coords]).wkt))
-        lane_rows += [(cid, *r) for r in rows]
+            n = seen.get((src, osm), 0)
+            seen[(src, osm)] = n + 1
+            cid = f"{src}{osm}" + (f"#{n + 1}" if n else "")
+            fresh.append(rect)
+            crossing_rows.append((cid, "way" if src == "w" else "node", ct, mk, _painted(ct, mk), width, v_hi - v_lo, osm,
+                                  Polygon([to_ll(x, y) for x, y in rect.exterior.coords]).wkt))
+            lane_rows += [(cid, *r) for r in rows]
+        for rect in fresh:
+            placed = rect if placed is None else placed.union(rect)
     if crossing_rows:
         con.executemany(f"INSERT INTO {sch}.crossing SELECT ?::VARCHAR, ?::VARCHAR, ?::VARCHAR, ?::VARCHAR, ?::BOOLEAN, ?::DOUBLE, ?::DOUBLE, "
                         f"?::BIGINT, ST_GeomFromText(?::VARCHAR)", crossing_rows)

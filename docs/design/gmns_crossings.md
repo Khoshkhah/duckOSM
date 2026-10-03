@@ -95,3 +95,24 @@ lines stop at the zebra's footprint as now. The popup: the crossing's `crossing_
 - Names: `crossing` and `lane_crossing`? (`crosswalk` instead of `crossing`?)
 - A bus lane covered (my choice), or only `auto`?
 - A signalised crossing with no markings gets a row but no stripes (`markings = no` or `crossing_type = traffic_signals` alone): my choice.
+
+## One rectangle per road (Kaveh, 2026-10-03: "the interval is per road")
+
+**Problem.** A crossing over a junction corner (Monaco `w1202361402`, lon 7.42457 lat 43.73882: one OSM way running across the corner of two roads, 28 degrees off
+the one and 50 off the other) got ONE rectangle whose axis is the *average* of the covered lanes' directions: "an average of two roads points at neither". Both roads'
+lanes are within 0.15 in sine of the crossing line, so both stay in the cover (rule 1 above only drops lanes far off the crossing line), the axis lies between them, and
+the rectangle is skewed about 39 degrees to every lane it was given a row for (all 12 lanes of the two roads; the reader's 45 degree test (`abs(t . u) < 0.7`) lets them through).
+lanestyle then lays the stripes in that tilted frame and they spill from the road the zebra is on into the neighbouring arm. In Monaco 27 of about 330 painted crossings have a
+lane more than 20 degrees off their rectangle's axis.
+
+**Rule.** The interval is per road. The covered lanes are grouped into roads by direction (axes within 30 degrees of each other, opposite directions are one axis: a dual
+carriageway is one road, as before); **each road gets its own rectangle**, its axis the road's direction, its length across that road's lanes only, its width along it, centred on
+that road's part of the crossing; and its own lane rows (`start_lr` / `end_lr` / `across_from` / `across_to`, which now all lie in that rectangle's frame). A crossing over a corner
+is two zebras, each square to its road; a crossing over one road is one, as before.
+
+**Table.** No new column or table: the first road keeps `crossing_id` (`w1202361402`), the others get `#2`, `#3` (the same scheme as two crossings of one OSM way). Each is a
+`crossing` row with its own `geom` and `length` and its own `lane_crossing` rows. The overlap test between crossings (one already placed) is not applied between the roads of the same
+crossing.
+
+**Check.** A test with a skewed way across the corner of A (east-west) and B (north-south): two crossings, each rectangle axis-aligned with its road, no lane of B under A's.
+Monaco: the number of painted crossings with a lane more than 20 degrees off the axis, before and after; pictures of `w1202361402` and two other of the 27.
