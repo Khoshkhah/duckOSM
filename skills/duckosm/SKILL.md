@@ -17,7 +17,7 @@ pip install "duckosm @ git+https://github.com/Khoshkhah/duckOSM"   # not on PyPI
 pip install "duckosm[routing,viz] @ git+https://github.com/Khoshkhah/duckOSM"   # + route(), maps
 ```
 
-Extras: `routing` (networkx: `route()`, `Router`, `export-graph`), `viz` (roadstyle maps), `sumo`
+Extras: `routing` (networkx: `route()`, `Router`, `export-graph`), `viz` (roadstyle maps), `levels` (`duckosm levels`: the drawing order of the roads, stored in the `visualization` schema), `sumo`
 (netconvert), `elevation` (rasterio). Optional system tools: `osmium` (cuts a PBF to a boundary;
 without it the whole PBF is read) and GDAL `ogr2ogr`. `duckdb` must stay `<2`.
 

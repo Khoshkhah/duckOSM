@@ -80,6 +80,7 @@ plugins:
           - guides/fix-osm-errors.md
           - guides/query.md
           - guides/draw-map.md
+          - guides/drawing-order.md
           - guides/route.md
           - guides/elevation.md
           - guides/admin-boundaries.md
@@ -127,6 +128,7 @@ nav:
       - Fix OSM errors: guides/fix-osm-errors.md
       - Query the database: guides/query.md
       - Draw a map: guides/draw-map.md
+      - Store the drawing order: guides/drawing-order.md
       - Route: guides/route.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md

@@ -97,6 +97,8 @@ Next: [Your first network](first_network.md) walks through it step by step, and 
   cycle, walk + drive) where you drag a start and an end and get turn-by-turn directions
   ([try it](guides/route.md#on-a-map)). The pages are drawn by
   [mapstyle](https://khoshkhah.github.io/mapstyle/).
+- **The drawing order of the roads:** `duckosm levels` stores which road is painted over which
+  (casing and fill numbers) in the file ([Store the drawing order](guides/drawing-order.md)).
 - **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
   area's border by name, and `duckosm extract` cuts a city out of a country build in seconds
   ([Prepare an area](guides/prepare-area.md)).

@@ -122,5 +122,6 @@ def db_info(con):
             "multimodal": "mm" in schemas,
             "boundary": ("main", "boundary") in tables,
             "admin_boundaries": count("main", "admin_boundaries") or 0,
-            "elevation": ("main", "elevation_metadata") in tables}
+            "elevation": ("main", "elevation_metadata") in tables,
+            "visualization": ("visualization", "edge_levels") in tables}
 

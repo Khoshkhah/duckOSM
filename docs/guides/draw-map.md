@@ -38,3 +38,5 @@ page are in its [docs](https://khoshkhah.github.io/mapstyle/)).
 python scripts/roadstyle_map.py --db monaco.duckdb --palette mono           # highsat | carto | mono
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
+
+The order in which crossing and meeting roads are painted can be stored in the file: [Store the drawing order](drawing-order.md).

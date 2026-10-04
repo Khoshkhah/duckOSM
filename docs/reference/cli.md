@@ -110,7 +110,7 @@ duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --bound
 
 Prints what a built database holds: per mode its edges, nodes, private edges, km, legal turns
 (`edge_graph`) and turn restrictions; when and by which duckOSM version it was built; its time zone;
-and the other schemas (raw OSM data, base-map layers, `mm`, boundary, elevation). Reads only.
+and the other schemas (raw OSM data, base-map layers, `mm`, boundary, elevation, drawing order). Reads only.
 
 ```text
 duckosm info [OPTIONS] DB
@@ -168,6 +168,26 @@ duckosm viz [OPTIONS] DB
 | `--out-dir TEXT` | output folder; files are `<name>_map.html` and `<name>_<mode>_network.html` | `reports` |
 | `--arrows` / `--no-arrows` | one-way arrows, shown when zoomed in | on |
 | `--boundary` / `--no-boundary` | draw `main.boundary`, if there is one | on |
+
+### `levels`
+
+Computes the drawing order of the roads and stores it in the database (schema [`visualization`](database.md#visualization-schema)): every road gets a casing number
+(start, main, end) and a fill number, which say which road is painted over which. roadstyle computes them from the roads of all modes together. It takes long on a large network,
+so it is not part of the build. The database is changed in place. Needs `duckosm[levels]`.
+
+```text
+duckosm levels [OPTIONS] DB
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--order [class\|none]` | `class`: where roads meet, the higher road class is painted later (a road with no class takes no part); `none`: no such wish | `class` |
+| `--band-dist FLOAT` | metres: two roads closer than this, with different bands, are a stack pair | 10 |
+| `--head-m FLOAT` | metres: the length of each casing head | 5.0 |
+| `--max-level INTEGER` | the range of the numbers before the shift to the ground | 20 |
+| `--margin FLOAT` | how much later a road is painted where one must be painted after another | 1.0 |
+| `--time-limit FLOAT` | seconds for each solve of the slack stages | 60 |
+| `--min-positions` / `--no-min-positions` | also minimise the span of the numbers: fewer positions (layers) in a page, a little less compaction | on |
 
 ### `route-map`
 
