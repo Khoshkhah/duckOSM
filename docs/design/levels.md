@@ -34,6 +34,16 @@ The order depends on all the roads near each other, so the numbers are computed 
 - The rows are in `edge_id` order, so that the result does not depend on the order of the modes.
 - A road with no `highway` (a ferry) takes no part in the class order: no wish is made for it, with any road. It still gets its casing and fill numbers.
 
+### A road and its reverse row
+
+The optimization is for **roads**. A two-way street is two rows in the file, a road (`is_reverse` false) and its reverse row (`is_reverse` true): the same line the other way round, the same OSM way, `source` and `target` swapped.
+Giving roadstyle both would put every street twice, one on top of the other. The mode networks do not all flag an edge the same way (an edge can be a road in `walking` and a reverse row in `cycling`): a row is a reverse row when it is `is_reverse` in **every** table it is in. So:
+
+- the numbers are computed on the roads, **without** the reverse rows;
+- a reverse row takes the **numbers of its road** (the row of the same `osm_id` with `source` and `target` swapped; the smallest `edge_id` if there are several), with the **two heads swapped**: a casing number belongs to the end of the line it is given for, and the reverse row's line runs the other way, so its start head is its road's end head and its end head is its road's start head; the main part and the fill are the same;
+- the stored table still has **one row for every `edge_id`** (the readers look the edges up by `edge_id`, and `edge_levels_meta.n_edges` / `edge_hash` are those of all the rows, as before);
+- a reverse row with no road in the file is an error that gives the number of such rows and the first ids. Nothing is guessed.
+
 ## The band
 
 The **band** of a road says whether it is under, on, or over the ground. It is the input of the optimization:

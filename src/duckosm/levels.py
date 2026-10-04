@@ -69,6 +69,30 @@ def load_roads(db):
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
 
 
+def reverse_rows(db):
+    """``{edge_id of a reverse row: edge_id of its road}`` for every edge of ``db`` that is ``is_reverse`` in every table it is in (the mode networks do not all flag it the same way): the road is the row of the same ``osm_id`` with ``source`` and ``target`` swapped
+    (the smallest ``edge_id`` if there are several). A reverse row with no road is a ``ValueError`` that says how many and the first ids."""
+    import duckdb
+
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        have = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.tables WHERE table_name = 'edges'").fetchall()}
+        parts = [f"SELECT edge_id, osm_id, source, target, is_reverse FROM {m}.edges" for m in MODES if m in have]
+        parts += [f"SELECT edge_id, osm_id, source, target, is_reverse FROM {m}.private_edges" for m in MODES if m in have and con.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = 'private_edges'", [m]).fetchone()[0]]
+        rows = con.execute(f"""WITH e AS (SELECT edge_id, any_value(osm_id) AS osm_id, any_value(source) AS source, any_value(target) AS target, bool_and(is_reverse) AS is_reverse
+                                         FROM ({' UNION ALL '.join(parts)}) GROUP BY edge_id)
+                               SELECT r.edge_id, min(f.edge_id) FROM e r LEFT JOIN e f
+                               ON NOT f.is_reverse AND f.osm_id = r.osm_id AND f.source = r.target AND f.target = r.source
+                               WHERE r.is_reverse GROUP BY r.edge_id ORDER BY r.edge_id""").fetchall()
+    finally:
+        con.close()
+    lost = [e for e, f in rows if f is None]
+    if lost:
+        raise ValueError(f"{len(lost)} reverse edge(s) have no road in {db} (same osm_id, source and target swapped; first: {lost[:5]})")
+    return {int(e): int(f) for e, f in rows}
+
+
 def compute_and_store(db, order="class", **options):
     """Compute the numbers of the roads of ``db`` and write them to ``visualization.edge_levels`` / ``edge_levels_meta``. ``order``: ``"class"`` or ``None``;
     ``options``: ``band_dist``, ``head_m``, ``max_level``, ``margin``, ``time_limit`` of ``roadstyle.compute_levels``.
@@ -76,8 +100,17 @@ def compute_and_store(db, order="class", **options):
     import duckdb
 
     rs = roadstyle_module()
-    roads = load_roads(db)
-    levels = rs.compute_levels(roads, method="solve", band_col="band", order=order, **options)
+    edges = load_roads(db)                                               # one row for every edge_id, reverse rows too
+    twin = reverse_rows(db)                                              # a reverse row has the numbers of its road, its two heads swapped (docs/design/levels.md)
+    roads = edges[~edges["edge_id"].isin(twin)].reset_index(drop=True)
+    computed = rs.compute_levels(roads, method="solve", band_col="band", order=order, **options)
+    cols = ("casing_start", "casing_level", "casing_end", "fill_level")
+    by_id = {int(e): k for k, e in enumerate(computed["edge_id"])}
+    levels = edges.copy()
+    heads = {"casing_start": "casing_end", "casing_end": "casing_start"}      # a reverse row runs the other way: its start head is its road's end head
+    for c in cols:
+        levels[c] = [computed[heads.get(c, c) if int(e) in twin else c].iloc[by_id[twin.get(int(e), int(e))]] for e in edges["edge_id"]]
+    levels.attrs.update(computed.attrs)
     con = duckdb.connect(str(db))                                        # read-write: this writes the visualization schema
     try:
         con.execute("INSTALL spatial; LOAD spatial;")                    # the file has spatial indexes: the checkpoint needs the extension
@@ -85,6 +118,5 @@ def compute_and_store(db, order="class", **options):
         con.execute("CHECKPOINT")
     finally:
         con.close()
-    cols = ("casing_start", "casing_level", "casing_end", "fill_level")
     positions = len({int(v) for c in cols for v in levels[c]})
     return {"roads": len(roads), "positions": positions, "given_up": len(levels.attrs["levels_given_up"]), "info": levels.attrs["levels_info"]}

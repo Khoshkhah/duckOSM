@@ -98,3 +98,20 @@ def test_min_positions_option(monaco, tmp_path):
     short, n_short = run([])
     plain, n_plain = run(["--no-min-positions"])
     assert short["min_positions"] == True and pd.isna(plain["min_positions"]) and n_short <= n_plain          # noqa: E712
+
+
+def test_a_reverse_row_has_the_numbers_of_its_road_with_its_heads_swapped(monaco, tmp_path):
+    """docs/design/levels.md, "A road and its reverse row": the optimization is for the roads, a reverse row takes its road's numbers with the two heads swapped (its line runs the other way), and the table keeps one row for every edge_id."""
+    from duckosm.levels import load_roads, reverse_rows
+    db = tmp_path / "copy.duckdb"
+    db.write_bytes(monaco.read_bytes())
+    assert CliRunner().invoke(main, ["levels", str(db)]).exit_code == 0
+    twin = reverse_rows(db)
+    assert twin and not set(twin) & set(twin.values())                      # a road is never a reverse row
+    con = duckdb.connect(str(db), read_only=True)
+    t = con.execute("SELECT * FROM visualization.edge_levels").df().set_index("edge_id")
+    assert len(t) == len(load_roads(db)) and t.index.is_unique
+    cols = ["casing_start", "casing_level", "casing_end", "fill_level"]
+    for rev, road in twin.items():
+        s, m, e, f = t.loc[road, cols]
+        assert list(t.loc[rev, cols]) == [e, m, s, f]
