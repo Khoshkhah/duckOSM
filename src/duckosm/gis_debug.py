@@ -213,7 +213,7 @@ def build_payload(path, source_db=None, name=None):
                 if col.dtype.kind == "f":               # float dtype == DBF rounded the 64-bit hash
                     notes.append(("crit", "edge_id is float — precision lost (ids corrupted)"))
                     bump("fail")
-                elif col.dtype == object:
+                elif col.dtype == object or eid_dtype in ("str", "string"):      # text: object, or pandas 3's str
                     notes.append(("ok", "edge_id exact (text — shapefile-safe)"))
                 else:
                     notes.append(("ok", f"edge_id exact ({eid_dtype})"))
