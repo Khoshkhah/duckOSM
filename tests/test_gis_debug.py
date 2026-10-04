@@ -43,7 +43,7 @@ def test_payload_audits_a_clean_shapefile_export(tmp_path):
 
     edges = next(L for L in payload["layers"] if L["kind"] == "edges")
     assert edges["features"] == 2
-    assert edges["eid_dtype"] == "object"                        # shp keeps int64 ids as text
+    assert edges["eid_dtype"] in ("object", "str")               # shp keeps int64 ids as text (pandas 3 names that dtype "str")
     assert any("text" in n["text"] for n in edges["notes"])      # and says so
 
     # geometry made it into the drawable grid, classed by highway (primary vs footway differ)
