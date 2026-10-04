@@ -4,7 +4,7 @@ duckOSM needs Python 3.10 or newer.
 
 ```bash
 pip install duckosm
-duckosm --version          # duckosm, version 0.1.0
+duckosm --version          # duckosm, version 0.2.0
 ```
 
 ## Extras
