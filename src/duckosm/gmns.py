@@ -213,6 +213,43 @@ def _chain_runs(info):
     return runs, {e: (i, k) for i, run in enumerate(runs) for k, e in enumerate(run)}, closed
 
 
+def _smooth_ring(coords, step_deg=3.0, min_radius=3.0, free_first=False):
+    """The closed ring ``coords`` (local metres, first point = last point) as points on its circle when it is one (docs/design/gmns_roundabout_arc.md): the original vertices are kept
+    and points are inserted on the circle between them, at most ``step_deg`` degrees apart. The circle is the least-squares fit; it is good when its radius is at least
+    ``min_radius``, no vertex is farther than max(0.25 m, 4 % of the radius) from it, and the ring goes once round it in steps of at most 60 degrees (fewer vertices could be a polygon on purpose). Otherwise ``coords`` as they are."""
+    import numpy as np
+
+    pts = np.asarray(coords, dtype=float)
+    if len(pts) < 5 or np.hypot(*(pts[0] - pts[-1])) > 0.01:
+        return list(map(tuple, pts))
+    xy = pts[:-1].copy()
+    fit = xy[1:] if free_first else xy             # free_first: the first point is a seam in the middle of a piece, not a vertex of the way: it is put on the circle, not fitted
+    a = np.c_[2 * fit, np.ones(len(fit))]
+    cx, cy, k = np.linalg.lstsq(a, (fit ** 2).sum(1), rcond=None)[0]
+    r2 = k + cx * cx + cy * cy
+    if r2 <= min_radius ** 2:
+        return list(map(tuple, pts))
+    r = math.sqrt(r2)
+    if np.abs(np.hypot(fit[:, 0] - cx, fit[:, 1] - cy) - r).max() > max(0.25, 0.04 * r):
+        return list(map(tuple, pts))
+    if free_first:
+        v = xy[0] - (cx, cy)
+        xy[0] = (cx, cy) + r * v / np.hypot(*v)
+        pts = pts.copy(); pts[0] = pts[-1] = xy[0]
+    ang = np.arctan2(xy[:, 1] - cy, xy[:, 0] - cx)
+    d = np.diff(np.r_[ang, ang[0]])
+    d = (d + np.pi) % (2 * np.pi) - np.pi                        # each step the short way round
+    if abs(abs(d.sum()) - 2 * np.pi) > 1e-6 or (np.sign(d) != np.sign(d.sum())).any() or np.abs(d).max() > np.pi / 3:
+        return list(map(tuple, pts))                             # the ring does not go once round its circle
+    out = []
+    for p, a0, da in zip(xy, ang, d):
+        out.append(tuple(p))
+        n = int(math.ceil(abs(math.degrees(da)) / step_deg))
+        out += [(cx + r * math.cos(a0 + da * j / n), cy + r * math.sin(a0 + da * j / n)) for j in range(1, n)]
+    out.append(tuple(pts[-1]))
+    return out
+
+
 def _run_lane_wkts(piece_wkts, offs, closed=False):
     """The lanes of a run: each lane offset once from the run's merged line (so a bend is one curve
     and the pieces' lanes meet exactly), then cut back into the pieces at the joints (the lane point
@@ -247,6 +284,8 @@ def _run_lane_wkts(piece_wkts, offs, closed=False):
         if Point(c[0]).distance(Point(coords[-1])) < 0.01:
             c = c[1:]
         coords += c
+    if ring:
+        coords = _smooth_ring(coords, free_first=True)           # a roundabout's circle, not its chords (the seam is no vertex)
     merged = LineString(coords)
     out = [[] for _ in range(n)]
     for off in offs:

@@ -830,3 +830,44 @@ def test_a_uturn_at_a_road_end_is_a_half_circle_as_wide_as_its_lanes(tmp_path):
     chord, mid = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5, ((x0 + x1) / 2, (y0 + y1) / 2)
     assert chord == pytest.approx(3.25, abs=0.05) and w == pytest.approx(chord, abs=0.02)      # one lane apart, as wide as the lanes
     assert all(abs(((m(p)[0] - mid[0]) ** 2 + (m(p)[1] - mid[1]) ** 2) ** 0.5 - chord / 2) < 0.1 for p in pts)
+
+
+def test_smooth_ring_puts_a_circle_through_a_coarse_roundabout_and_leaves_other_rings_alone():
+    """docs/design/gmns_roundabout_arc.md: the vertices of a ring that lies on a circle are kept and points on the circle are added (3 degrees at most); a square, an oval or an open line is not changed."""
+    import math
+
+    from duckosm.gmns import _smooth_ring
+
+    n, r = 8, 10.0
+    ring = [(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n)) for k in range(n)]
+    ring.append(ring[0])
+    out = _smooth_ring(ring)
+    assert set(ring) <= set(out) and len(out) >= 120 and out[0] == out[-1]                   # the original vertices stay, the arcs are dense
+    assert max(abs(math.hypot(x, y) - r) for x, y in out) < 1e-9
+    assert max(math.degrees(abs(math.atan2(b[1], b[0]) - math.atan2(a[1], a[0]) + math.pi) % (2 * math.pi) - math.pi) for a, b in zip(out, out[1:])) < 3.0001
+    square = [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)]
+    oval = [(15 * math.cos(2 * math.pi * k / 12), 8 * math.sin(2 * math.pi * k / 12)) for k in range(12)]
+    oval.append(oval[0])
+    open_line = [(0, 0), (5, 1), (10, 3), (15, 6), (20, 10)]
+    assert _smooth_ring(square) == square and _smooth_ring(oval) == oval and _smooth_ring(open_line) == open_line
+
+
+def test_a_roundabout_of_a_few_ways_has_round_lanes(tmp_path):
+    """The lanes of a roundabout drawn as 8 ways around a 10 m circle are on circles (the radius of a lane varies by less than 5 cm), not on an octagon."""
+    import math
+
+    src, out = tmp_path / "round.duckdb", tmp_path / "round_gmns.duckdb"
+    kx = 111320 * math.cos(math.radians(59.32))
+    nodes = {k + 1: (18.06 + 10 * math.cos(2 * math.pi * k / 8) / kx, 59.32 + 10 * math.sin(2 * math.pi * k / 8) / 111320) for k in range(8)}
+    _way_source(src, nodes, [(11 + k, k + 1, (k + 1) % 8 + 1, 2, 501 + k, True) for k in range(8)])
+    c = duckdb.connect(str(src))
+    c.execute("UPDATE raw.ways SET tags = MAP{'junction':'roundabout'}")
+    c.close()
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    for lane in ("11_1", "11_2", "14_1"):
+        wkt = con.execute(f"SELECT ST_AsText(geom) FROM gmns_driving.lane WHERE lane_id='{lane}'").fetchone()[0]
+        pts = [tuple(float(v) for v in p.split()) for p in wkt[wkt.index("(") + 1:-1].split(", ")]
+        rad = [math.hypot((x - 18.06) * kx, (y - 59.32) * 111320) for x, y in pts]
+        assert len(pts) > 6 and max(rad) - min(rad) < 0.05, (lane, len(pts), max(rad) - min(rad))
