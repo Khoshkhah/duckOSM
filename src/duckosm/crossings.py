@@ -12,6 +12,7 @@ _ZEBRA_W_PER_ROAD_W = 0.4                           # the zebra's width, from th
 _ZEBRA_W_MIN, _ZEBRA_W_MAX = 2.5, 4.0               # ... between these, metres (an OSM `width` tag wins)
 _MIN_ANGLE_SIN = 0.5                                # a crossing lies across the road: 30 degrees or more from the lane
 _MAX_WIND = 1.3                                     # length / chord of a piece
+_ROAD_REACH_M = 3.5                                 # metres: a lane of a crossed link farther than this from the stretch of the crossing line inside the road is not under the zebra (a long link that bends away)
 _ROAD_ANGLE = 30.0                                  # degrees: covered lanes this close in direction are one road (one rectangle)
 _MIN_ALONG = math.cos(math.radians(_ROAD_ANGLE))     # |cos| of a lane's direction to the rectangle's axis: a lane of another road is not under it ...
 _MIN_ALONG_CONNECTOR = 0.5                          # ... a connector curves through the junction: 60 degrees
@@ -216,7 +217,10 @@ def build_crossings(con, sch, has_raw):
             tx, ty = tangent(geom[j], part.interpolate((s0 + s1) / 2))
             return abs(((b.x - a.x) * ty - (b.y - a.y) * tx) / n)
         sins = [_sin(it) for it in cov]
-        cov = [it for it, sn in zip(cov, sins) if sn >= max(sins) - 0.15]
+        best = {}                                # the best lanes are chosen within each piece of the line: a piece is a stretch of the line inside the road, so a second piece (the other branch of a fork,
+        for it, sn in zip(cov, sins):            # the other carriageway) is a road it really crosses, not one it touches at a corner (docs/design/gmns_crossings.md, "One rectangle per road")
+            best[id(it[1])] = max(best.get(id(it[1]), 0.0), sn)
+        cov = [it for it, sn in zip(cov, sins) if sn >= best[id(it[1])] - 0.15]
         # 2. the roads it crosses: the covered lanes grouped by direction (axes within _ROAD_ANGLE degrees, opposite ones are one axis: a dual
         #    carriageway is one road). A crossing over a junction corner is two roads, each with its own rectangle: an average of two roads'
         #    directions points at neither (docs/design/gmns_crossings.md, "One rectangle per road")
@@ -253,6 +257,14 @@ def build_crossings(con, sch, has_raw):
             vs = [p.x * vx + p.y * vy for p in ends]
             v_lo, v_hi = min(vs), max(vs)
             u_c = sum(p.x * ux + p.y * uy for p in ends) / len(ends)
+            # a zebra crosses a road, not a lane: the rectangle spans every lane of the links the line goes across, also those the line does not reach (an OSM crossing way can end inside the first lane)
+            mid = Point(sum(p.x for p in ends) / len(ends), sum(p.y for p in ends) / len(ends))
+            crossed = {link_id[j] for j, *_ in road}
+            for j2 in range(len(geom)):
+                if link_id[j2] in crossed and not lane_conn[j2] and (c[7] is None or lane_level[j2] == c[7]) and min(poly[j2].distance(q) for q in parts) < _ROAD_REACH_M:
+                    pt = geom[j2].interpolate(geom[j2].project(mid))
+                    vc = pt.x * vx + pt.y * vy
+                    v_lo, v_hi = min(v_lo, vc - lane_w[j2] / 2), max(v_hi, vc + lane_w[j2] / 2)
             if v_hi - v_lo < 1.0:
                 continue
             width = _zebra_width(c[4], v_hi - v_lo)

@@ -116,3 +116,10 @@ crossing.
 
 **Check.** A test with a skewed way across the corner of A (east-west) and B (north-south): two crossings, each rectangle axis-aligned with its road, no lane of B under A's.
 Monaco: the number of painted crossings with a lane more than 20 degrees off the axis, before and after; pictures of `w1202361402` and two other of the 27.
+
+## A zebra crosses a road, not a lane; a crossing way may cross two roads (2026-10-04, Kaveh)
+
+Two changes in `build_crossings`, found at Avenue Prince Pierre in Monaco (the OSM crossing way `503475649`, lon 7.4181, lat 43.7327), where it crosses the two branches of a fork, `503475647` and `503475651`:
+
+1. **The best lanes are chosen per piece of the line.** Where the line goes across several roads (the pieces of the line inside the lane surfaces), the lanes "most nearly perpendicular to the line" were chosen over all the pieces together. That rule is for a junction corner, where the line only touches the other road's lanes, and it threw away the whole second road (no zebra on `503475651#2f`). Now the choice is made inside each piece; a junction corner is still one piece. The crossing way gives two crossings, `w503475649` and `w503475649#2`, one rectangle per road.
+2. **The rectangle spans every lane of the links it crosses**, also the lanes the line does not reach (an OSM crossing way can end inside the first lane): the lanes of a crossed link that lie within 3.5 m of the stretch of the line inside the road widen the rectangle across the road. Monaco: 497 crossings (2 more), 1,497 lane rows (16 more).

@@ -147,3 +147,12 @@ def test_a_crossing_over_a_junction_corner_is_one_square_zebra_per_road(tmp_path
     for cid in ids:                                                                # each rectangle is axis-aligned: square to its (axis-aligned) road
         area, box = c.execute("SELECT ST_Area(geom), ST_Area(ST_Envelope(geom)) FROM gmns_driving.crossing WHERE crossing_id = ?", [cid]).fetchone()
         assert area == pytest.approx(box, rel=1e-3)
+
+
+def test_a_zebra_spans_every_lane_of_the_roads_it_crosses_even_when_the_crossing_way_ends_inside_the_first_lane(tmp_path):
+    """docs/design/gmns_crossings.md, "A zebra crosses a road": the crossing way crosses the near carriageway and ends 1 m into the first lane of the far one; the zebra is across all the lanes of
+    both carriageways here (3 car lanes, 9.75 m), not 4.25 m over the two lanes the line reaches."""
+    c = _build(tmp_path, way=("MAP{'footway':'crossing'}", [(18.065, 59.32 - 12 / M), (18.065, 59.32 + 1 / M)]))
+    length = c.execute("SELECT length FROM gmns_driving.crossing").fetchone()[0]
+    lanes = c.execute("SELECT DISTINCT lane_id FROM gmns_driving.lane_crossing").fetchall()
+    assert len(lanes) == 3 and length == pytest.approx(3 * 3.25, abs=0.4), (len(lanes), length)
