@@ -12,6 +12,7 @@ _ZEBRA_W_PER_ROAD_W = 0.4                           # the zebra's width, from th
 _ZEBRA_W_MIN, _ZEBRA_W_MAX = 2.5, 4.0               # ... between these, metres (an OSM `width` tag wins)
 _MIN_ANGLE_SIN = 0.5                                # a crossing lies across the road: 30 degrees or more from the lane
 _MAX_WIND = 1.3                                     # length / chord of a piece
+_MAX_SAME_OVERLAP = 0.5                             # a rectangle of a crossing that lies for more than this fraction of the smaller of the two on another rectangle of the same crossing is dropped
 _ROAD_REACH_M = 3.5                                 # metres: a lane of a crossed link farther than this from the stretch of the crossing line inside the road is not under the zebra (a long link that bends away)
 _ROAD_ANGLE = 30.0                                  # degrees: covered lanes this close in direction are one road (one rectangle)
 _MIN_ALONG = math.cos(math.radians(_ROAD_ANGLE))     # |cos| of a lane's direction to the rectangle's axis: a lane of another road is not under it ...
@@ -272,6 +273,8 @@ def build_crossings(con, sch, has_raw):
                             for su, vv in ((1, v_lo), (1, v_hi), (-1, v_hi), (-1, v_lo))])
             if placed is not None and rect.intersection(placed).area > _MAX_OVERLAP * rect.area:
                 continue
+            if any(rect.intersection(f).area > _MAX_SAME_OVERLAP * min(rect.area, f.area) for f in fresh):
+                continue                                        # the same ground as another rectangle of this crossing (a bend, a corner): one zebra, its rows already name every lane it overlaps
             # 3. the rectangle projected on each lane, as it really overlaps it: the lane's stretch is where the rectangle meets the lane's own
             #    shape (so a lane that is short, or ends inside the zebra, still has its part), and the part across the lane is the overlap's extent
             #    across the rectangle (in its own frame, so the stripes stay in step from lane to lane)
