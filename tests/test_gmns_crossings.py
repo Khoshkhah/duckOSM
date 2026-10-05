@@ -156,3 +156,14 @@ def test_a_zebra_spans_every_lane_of_the_roads_it_crosses_even_when_the_crossing
     length = c.execute("SELECT length FROM gmns_driving.crossing").fetchone()[0]
     lanes = c.execute("SELECT DISTINCT lane_id FROM gmns_driving.lane_crossing").fetchall()
     assert len(lanes) == 3 and length == pytest.approx(3 * 3.25, abs=0.4), (len(lanes), length)
+
+
+def test_a_crossing_way_with_several_zebra_nodes_on_roads_is_no_line_its_nodes_are_the_crossings(tmp_path):
+    """docs/design/gmns_crossings.md, "A crossing way that is a loop": way 901 runs through three zebra nodes (801-803) that lie on road way 100; it is no crossing line. Each node is a zebra square across its road."""
+    node = "MAP{'highway':'crossing','crossing':'marked','crossing:markings':'yes'}"
+    pre = (f"INSERT INTO raw.nodes VALUES (801, 59.32, 18.062, {node}); INSERT INTO raw.nodes VALUES (802, 59.32, 18.065, {node}); INSERT INTO raw.nodes VALUES (803, 59.32, 18.068, {node}); "
+           "UPDATE raw.ways SET refs = [1, 801, 802, 803, 2] WHERE osm_id = 100; "
+           "INSERT INTO raw.ways VALUES (901, MAP{'highway':'footway','footway':'crossing','crossing':'marked'}, [801, 802, 803])")
+    c = _build(tmp_path, pre_sql=pre)
+    rows = c.execute("SELECT source, osm_id, painted FROM gmns_driving.crossing ORDER BY osm_id").fetchall()
+    assert rows == [("node", 801, True), ("node", 802, True), ("node", 803, True)], rows

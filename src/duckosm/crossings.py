@@ -12,6 +12,7 @@ _ZEBRA_W_PER_ROAD_W = 0.4                           # the zebra's width, from th
 _ZEBRA_W_MIN, _ZEBRA_W_MAX = 2.5, 4.0               # ... between these, metres (an OSM `width` tag wins)
 _MIN_ANGLE_SIN = 0.5                                # a crossing lies across the road: 30 degrees or more from the lane
 _MAX_WIND = 1.3                                     # length / chord of a piece
+_LOOP_NODES = 3                                     # a crossing way with this many zebra nodes on roads is a loop round a junction, not a crossing line
 _MAX_SAME_OVERLAP = 0.5                             # a rectangle of a crossing that lies for more than this fraction of the smaller of the two on another rectangle of the same crossing is dropped
 _ROAD_REACH_M = 3.5                                 # metres: a lane of a crossed link farther than this from the stretch of the crossing line inside the road is not under the zebra (a long link that bends away)
 _ROAD_ANGLE = 30.0                                  # degrees: covered lanes this close in direction are one road (one rectangle)
@@ -96,6 +97,14 @@ def build_crossings(con, sch, has_raw):
                           WHERE tags['footway'] = 'crossing'""").fetchall()
     nodes = con.execute("""SELECT osm_id, lon, lat, tags['crossing'], tags['crossing:markings'] FROM s.raw.nodes
                            WHERE tags['highway'] = 'crossing'""").fetchall()
+    road_ways = {}                              # node -> the OSM road ways it lies on
+    for osm, refs in con.execute(f"SELECT osm_id, refs FROM s.raw.ways WHERE osm_id IN (SELECT DISTINCT osm_id FROM {sch}.link)").fetchall():
+        for r in refs:
+            road_ways.setdefault(r, set()).add(osm)
+    # a crossing way with several zebra nodes on roads is a loop round a junction (Monaco, way 1203849331: one zebra node on each arm), not one crossing line: its segments cut across the middle of
+    # the junction. It is no crossing line; its nodes are crossings of their own, square across their road (docs/design/gmns_crossings.md)
+    zebra_nodes = {n[0] for n in nodes}
+    ways = [w for w in ways if sum(1 for r in w[4] if r in zebra_nodes and r in road_ways) < _LOOP_NODES]
     if not lanes or not (ways or nodes):
         return
     x0, y0 = _w.loads(lanes[0][3]).coords[0]
@@ -166,10 +175,6 @@ def build_crossings(con, sch, has_raw):
             done.append(c)
     cands = done
     on_crossing_way = {r for w in ways for r in w[4]}
-    road_ways = {}
-    for osm, refs in con.execute(f"SELECT osm_id, refs FROM s.raw.ways WHERE osm_id IN (SELECT DISTINCT osm_id FROM {sch}.link)").fetchall():
-        for r in refs:
-            road_ways.setdefault(r, set()).add(osm)
     for osm, lon, lat, ct, mk in nodes:
         if osm in on_crossing_way or len(road_ways.get(osm, ())) != 1:        # a crossing way has it, or a junction (not a mid-road crossing)
             continue

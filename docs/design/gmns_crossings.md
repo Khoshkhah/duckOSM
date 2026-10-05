@@ -126,3 +126,10 @@ Two changes in `build_crossings`, found at Avenue Prince Pierre in Monaco (the O
 
 3. **A rectangle that lies mostly on another rectangle of the same crossing is dropped** (`_MAX_SAME_OVERLAP`, half of the smaller). A crossing line that touches a bend or a corner of a road gave two rectangles on the same ground (Rue Louis Notari, Monaco: 72 % of the smaller on the other); the old lane clip hid the double stripes, a reader that draws the rectangle shows them. The first rectangle already has a row for every lane it overlaps, so nothing is lost. Monaco: 8 overlapping pairs of rectangles
    (over 15 % of the smaller) become 2 (47 % and 25 %, true corners); 442 painted crossings, 1,481 lane rows.
+
+## A crossing way that is a loop (2026-10-04, Kaveh: "why has 159170522#3f a zebra crossing in the middle of the intersection?")
+
+OSM way `1203849331` (Monaco, Rue Suffren Reymond / Rue Princesse Florestine) is one `footway=crossing` way of 9 nodes that runs **round** a junction, with a `highway=crossing` (zebra) node on each of the four arms. Taken as one crossing line, its segments between the arm nodes cut across the middle of the junction, and the zebra was drawn there.
+
+A crossing way with **three or more** zebra nodes that lie on roads (`_LOOP_NODES`) is no crossing line. It is dropped, and its nodes are no longer excluded as "nodes of a crossing way": each is a crossing of its own (`source` `node`, square across its road, as for any `highway=crossing` node with no way). The four arms of the junction above get four zebras and the middle none.
+A way with one or two zebra nodes on roads (a crossing of one road, or of a dual carriageway) is unchanged. Monaco: five ways are loops (`157719697`, `503475661`, `1086377392`, `1203849331`, `1365041524`); 450 painted crossings (8 more), 1,488 lane rows.
