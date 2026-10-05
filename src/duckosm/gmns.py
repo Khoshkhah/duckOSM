@@ -1128,6 +1128,7 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
       FROM cp t
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
     _assign_lanes(con, sch, mode, drive_side)
+    _fork_branch_lanes(con, sch)
     _continuation_movements(con, sch)
 
 
@@ -1272,6 +1273,18 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
     by_ib = defaultdict(list)
     for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
         by_ib[ib].append((mid, ob, typ, ang or 0.0))
+    # where two or more exits go ahead (a fork, or a junction with a road that goes on), which exit is straight and which is left of it is told by the headings over 15 m, not by the first segment
+    # alone (docs/design/gmns_fork_letters.md): the angle of those movements is replaced for the lane assignment; their `type` stays
+    geom = None
+    for ib, ms in by_ib.items():
+        ahead = [k for k, m in enumerate(ms) if m[2] != "uturn" and abs(m[3]) < 45]
+        if len(ahead) < 2:
+            continue
+        geom = geom or dict(con.execute(f"SELECT link_id, geometry FROM {sch}.link").fetchall())
+        for k in ahead:
+            a = _window_angle(geom[ib], geom[ms[k][1]]) if ib in geom and ms[k][1] in geom else None
+            if a is not None:
+                ms[k] = (ms[k][0], ms[k][1], ms[k][2], a)
     along = lambda ib, ob: ib in way and way.get(ob) == way[ib]      # the next piece of the same way
     # merges as osm2gmns sees them: a node with one outbound link; its inbound links (bar the outbound
     # link's own reverse), sorted left to right by the turn into it
@@ -1358,6 +1371,55 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
     con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN _ang")
 
 
+def _fork_branch_lanes(con, sch):
+    """The lanes of a fork's branches (docs/design/gmns_fork_lanes.md): a branch of a fork (the outbound link of a ``diverge`` movement) whose OSM lane count is higher than the inbound lanes the fork gives it
+    keeps only the lanes some movement leads into; the rest begin at the next link. Only when the branch goes on into exactly one link with at least as many lanes as the branch has drawn, and
+    the lanes without a movement are at its edges. The unfed lanes are deleted from ``lane`` (the lane numbers of the rest stay: lane 2 of 2 is the right lane), ``link.lanes`` is the number left, and the movements
+    out of the branch are cut to the kept lanes, the outbound lanes shifting with them. Returns ``{link_id: [lane numbers deleted]}``."""
+    from collections import defaultdict
+
+    extra = {(lk, n) for lk, n in con.execute("SELECT link_id, lane_num FROM _extra_lane").fetchall()}       # the bike lanes beside the motor lanes
+    lanes = defaultdict(list)
+    for lk, n in con.execute(f"SELECT link_id, lane_num FROM {sch}.lane ORDER BY 1, 2").fetchall():
+        if (lk, n) not in extra:
+            lanes[lk].append(n)
+    into, out = defaultdict(list), defaultdict(list)
+    for mid, ib, ob, si, ei, so, eo, typ in con.execute(
+            f"SELECT mvmt_id, ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane, type FROM {sch}.movement").fetchall():
+        into[ob].append((mid, so, eo))
+        out[ib].append((mid, ob, si, ei, so, eo, typ))
+    branches = {ob for (ob,) in con.execute(f"SELECT DISTINCT ob_link_id FROM {sch}.movement WHERE type = 'diverge'").fetchall()}
+    deleted, cut = {}, []
+    for b in sorted(branches):
+        mine = lanes.get(b, [])
+        if len(mine) < 2 or any(so is None or eo is None for _, so, eo in into[b]):
+            continue
+        fed = sorted({n for _, so, eo in into[b] for n in range(so, eo + 1)} & set(mine))
+        unfed = [n for n in mine if n not in fed]
+        ahead = [m for m in out.get(b, []) if m[6] != "uturn"]
+        if not fed or not unfed or len({m[1] for m in ahead}) != 1 or len(lanes.get(ahead[0][1], [])) < len(mine):
+            continue
+        if any(fed[0] < n < fed[-1] for n in unfed) or any(m[2] is None or m[4] is None for m in ahead):
+            continue                                              # lanes without a movement inside the fed ones: not at the edge
+        deleted[b] = unfed
+        for mid, ob, si, ei, so, eo, typ in out.get(b, []):
+            if typ == "uturn" or si is None:
+                continue
+            lo, hi = max(si, fed[0]), min(ei, fed[-1])
+            cut.append((mid, lo, hi, so + (lo - si), so + (lo - si) + (hi - lo)) if lo <= hi else (mid, None, None, None, None))
+    for b, ns in deleted.items():
+        con.execute(f"DELETE FROM {sch}.lane WHERE link_id = ? AND lane_num IN ({','.join(str(n) for n in ns)})", [b])
+        con.execute(f"UPDATE {sch}.link SET lanes = lanes - ? WHERE link_id = ?", [len(ns), b])
+    for mid, lo, hi, so, eo in cut:
+        if lo is None:
+            con.execute(f"DELETE FROM {sch}.movement WHERE mvmt_id = ?", [mid])
+        else:
+            con.execute(f"UPDATE {sch}.movement SET start_ib_lane = ?, end_ib_lane = ?, start_ob_lane = ?, end_ob_lane = ? WHERE mvmt_id = ?", [lo, hi, so, eo, mid])
+    if deleted:
+        logger.info(f"GMNS[{sch[5:]}]: {sum(len(v) for v in deleted.values())} lanes of {len(deleted)} fork branches begin at the next link (no movement leads into them)")
+    return deleted
+
+
 def _continuation_movements(con, sch):
     """Movement rows for the lanes no movement leaves (Kaveh, 2026-10-02: ``167625718#2f`` lanes 2 and 3 had "no way out"). Where a link has exactly one way on
     (U-turns aside), a car lane its movement does not cover (the road has fewer lanes ahead) merges into the last car lane of the next link (``merge``), and a bike
@@ -1396,16 +1458,65 @@ def _continuation_movements(con, sch):
     logger.info(f"GMNS[{sch[5:]}]: {len(new):,} movements for lanes that go on where the road has fewer lanes or a bike lane continues")
 
 
-def _fork_types(con, sch, max_ang=45.0):
+def _window_angle(inbound_wkt, outbound_wkt, window_m=15.0):
+    """The turn from a link into the next one in degrees (positive to the left): the heading of the outbound link over its first ``window_m`` metres against the heading of the inbound link over its last
+    ``window_m`` metres. The angle of the last / first segment alone can bend away from the road (docs/design/gmns_fork_letters.md). None when a link is shorter than half a metre."""
+    import math
+
+    from shapely import wkt
+    from shapely.geometry import LineString
+
+    def local(line):
+        x0, y0 = line.coords[0]
+        kx = math.cos(math.radians(y0)) * 111320.0
+        return LineString([((x - x0) * kx, (y - y0) * 111320.0) for x, y in line.coords])
+
+    def heading(line, at, to):
+        p, q = line.interpolate(at), line.interpolate(to)
+        return math.degrees(math.atan2(q.y - p.y, q.x - p.x))
+
+    li, lo = local(wkt.loads(inbound_wkt)), local(wkt.loads(outbound_wkt))
+    if li.length < 0.5 or lo.length < 0.5:
+        return None
+    return (heading(lo, 0, min(window_m, lo.length)) - heading(li, max(li.length - window_m, 0), li.length) + 180) % 360 - 180
+
+
+def _fork_letters(con, sch, fork_ang=8.0):
+    """The turn letter of the ``mvmt_code`` of every ``diverge`` movement (docs/design/gmns_fork_letters.md): at a fork the straightest branch keeps T; a branch that leaves it by ``fork_ang``
+    degrees or more to the left is L, to the right R, else T. The angle of a branch is :func:`_window_angle`."""
+    from collections import defaultdict
+
+    rows = con.execute(f"""SELECT m.mvmt_id, m.node_id, m.mvmt_code, il.geometry, ol.geometry FROM {sch}.movement m
+        JOIN {sch}.link il ON il.link_id = m.ib_link_id JOIN {sch}.link ol ON ol.link_id = m.ob_link_id
+        WHERE m.type = 'diverge' AND m.mvmt_code IS NOT NULL""").fetchall()
+    by_node, ang = defaultdict(list), {}
+    for mid, node, code, gi, go in rows:
+        a = _window_angle(gi, go)
+        if a is not None:
+            ang[mid] = a
+            by_node[node].append((mid, code))
+    updates = []
+    for node, ms in by_node.items():
+        straight = min((ang[mid] for mid, _ in ms), key=abs)
+        for mid, code in ms:
+            letter = "T" if abs(ang[mid] - straight) < fork_ang else "L" if ang[mid] > straight else "R"
+            updates.append((code[:2] + letter, mid))
+    if updates:
+        con.executemany(f"UPDATE {sch}.movement SET mvmt_code = ? WHERE mvmt_id = ?", updates)
+
+
+def _fork_types(con, sch, max_ang=45.0, fork_ang=8.0):
     """The GMNS movement types ``diverge`` and ``merge`` (docs/design/gmns_lane_movements.md):
     ``diverge`` at a fork, a node one link arrives at, its 2+ ways on (U-turns aside) all within
     ``max_ang`` degrees of straight on; ``merge`` into a node one link leaves, its 2+ inbound links
     all joining within ``max_ang``. The angle bound keeps an ordinary junction (a one-way street
-    meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T; none for a U-turn)."""
+    meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T; none for a U-turn); at a fork the straightest branch keeps T and a branch ``fork_ang`` degrees or more
+    to its left or right gets L or R (the turn is told by the code, ``type`` stays ``diverge``)."""
     con.execute(f"""UPDATE {sch}.movement m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
         SELECT f.node_id FROM {sch}.movement f
         WHERE (SELECT count(*) FROM {sch}.link k WHERE k.to_node_id = f.node_id) = 1 AND f.type <> 'uturn'
         GROUP BY f.node_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
+    _fork_letters(con, sch, fork_ang)
     con.execute(f"""UPDATE {sch}.movement m SET type = 'merge' WHERE type <> 'uturn' AND m.ob_link_id IN (
         SELECT f.ob_link_id FROM {sch}.movement f
         WHERE (SELECT count(*) FROM {sch}.link k WHERE k.from_node_id = f.node_id) = 1 AND f.type <> 'uturn'

@@ -871,3 +871,48 @@ def test_a_roundabout_of_a_few_ways_has_round_lanes(tmp_path):
         pts = [tuple(float(v) for v in p.split()) for p in wkt[wkt.index("(") + 1:-1].split(", ")]
         rad = [math.hypot((x - 18.06) * kx, (y - 59.32) * 111320) for x, y in pts]
         assert len(pts) > 6 and max(rad) - min(rad) < 0.05, (lane, len(pts), max(rad) - min(rad))
+
+
+def test_the_branches_of_a_fork_carry_their_own_turn_letter(tmp_path):
+    """docs/design/gmns_fork_letters.md: a road (11) splits into a straight branch (12) and a branch 16 degrees to the right (13): both are `diverge`, and the codes say T and R. Two branches within 8 degrees of each other are both T."""
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3185), 6: (18.08, 59.3197)}
+    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 1), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    codes = dict(con.execute("SELECT ob_link_id, mvmt_code FROM gmns_driving.movement WHERE ib_link_id = 11").fetchall())
+    assert codes == {12: "EBT", 13: "EBR"}
+    left = tmp_path / "left"
+    left.mkdir()
+    con = _gmns_of(left, {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}, [(11, 1, 2, 2), (12, 2, 4, 1), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    assert dict(con.execute("SELECT ob_link_id, mvmt_code FROM gmns_driving.movement WHERE ib_link_id = 11").fetchall()) == {12: "EBT", 13: "EBL"}
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    con = _gmns_of(flat, {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.08, 59.3197)}, [(11, 1, 2, 2), (12, 2, 4, 1), (13, 2, 6, 1)], [(11, 12), (11, 13)])
+    assert set(dict(con.execute("SELECT ob_link_id, mvmt_code FROM gmns_driving.movement WHERE ib_link_id = 11").fetchall()).values()) == {"EBT"}      # 3 degrees apart: both straight
+
+
+def test_a_fork_branch_keeps_only_the_lanes_the_fork_feeds():
+    """docs/design/gmns_fork_lanes.md: branch 12 has 2 lanes but only lane 2 is fed (by movement 11-12), and it goes on into link 14 (2 lanes): lane 1 of 12 goes, link 12 has 1 lane, and the movement 12-14 is cut to lane 2 -> lane 2.
+    A branch fed on both lanes, or one that goes on into a link with fewer lanes, is left alone."""
+    from duckosm.gmns import _fork_branch_lanes
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE SCHEMA gmns_driving")
+    con.execute("CREATE TEMP TABLE _extra_lane(link_id BIGINT, lane_num INTEGER)")
+    con.execute("CREATE TABLE gmns_driving.lane(lane_id VARCHAR, link_id BIGINT, lane_num INTEGER)")
+    con.execute("CREATE TABLE gmns_driving.link(link_id BIGINT, lanes INTEGER)")
+    con.execute("""CREATE TABLE gmns_driving.movement(mvmt_id VARCHAR, ib_link_id BIGINT, ob_link_id BIGINT, start_ib_lane INTEGER, end_ib_lane INTEGER,
+                                                    start_ob_lane INTEGER, end_ob_lane INTEGER, type VARCHAR)""")
+    for lk in (11, 12, 13, 14, 15, 16, 17, 18):
+        con.execute("INSERT INTO gmns_driving.link VALUES (?, 2)", [lk])
+        for n in (1, 2):
+            con.execute("INSERT INTO gmns_driving.lane VALUES (?, ?, ?)", [f"{lk}_{n}", lk, n])
+    mv = [("11-12", 11, 12, 2, 2, 2, 2, "diverge"), ("11-13", 11, 13, 1, 1, 1, 1, "diverge"),      # 12 fed on lane 2 only, 13 on lane 1 only
+          ("12-14", 12, 14, 1, 2, 1, 2, "thru"), ("13-15", 13, 15, 1, 2, 1, 2, "thru"),
+          ("21-16", 21, 16, 1, 2, 1, 2, "diverge"), ("21-17", 21, 17, 1, 2, 1, 2, "diverge"), ("16-18", 16, 18, 1, 2, 1, 2, "thru")]   # 16 is fed on both lanes
+    con.executemany("INSERT INTO gmns_driving.movement VALUES (?, ?, ?, ?, ?, ?, ?, ?)", mv)
+    gone = _fork_branch_lanes(con, "gmns_driving")
+    assert gone == {12: [1], 13: [2]}, gone
+    assert con.execute("SELECT lane_num FROM gmns_driving.lane WHERE link_id = 12").fetchall() == [(2,)]
+    assert con.execute("SELECT lanes FROM gmns_driving.link WHERE link_id IN (12, 13) ORDER BY link_id").fetchall() == [(1,), (1,)]
+    assert con.execute("SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE mvmt_id = '12-14'").fetchone() == (2, 2, 2, 2)
+    assert con.execute("SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE mvmt_id = '13-15'").fetchone() == (1, 1, 1, 1)
+    assert con.execute("SELECT count(*) FROM gmns_driving.lane WHERE link_id = 16").fetchone()[0] == 2         # fed on both lanes: left alone
