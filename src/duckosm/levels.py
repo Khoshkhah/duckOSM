@@ -10,9 +10,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+BAND_RULE = "tags"             # how the band is made, stored in edge_levels_meta.band_rule: "tags" = the layer, bridge, tunnel only (docs/design/levels.md). A table with none is the older rule
 MODES = ("driving", "walking", "cycling")
-PATH_CLASSES = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor")
-_BAND_OF_WALK_TYPE = {"sidewalk": -1, "crossing": 1}                    # a sidewalk under its street, a crossing over it
 
 
 def roadstyle_module():
@@ -63,8 +62,6 @@ def load_roads(db):
     finally:
         con.close()
     band = np.array([_level(ly, br, tn) for ly, br, tn in zip(df["layer"], df["bridge"], df["tunnel"], strict=True)], dtype=int)
-    path = df["highway"].isin(PATH_CLASSES) & df["walk_type"].isin(_BAND_OF_WALK_TYPE)
-    band = np.where(path, df["walk_type"].map(_BAND_OF_WALK_TYPE).fillna(0).astype(int), band)
     geometry = gpd.GeoSeries([wkb.loads(bytes(b)) for b in df.pop("wkb")], crs="EPSG:4326")
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
 
@@ -115,6 +112,8 @@ def compute_and_store(db, order="class", **options):
     try:
         con.execute("INSTALL spatial; LOAD spatial;")                    # the file has spatial indexes: the checkpoint needs the extension
         rs.save_levels(con, levels)
+        con.execute("ALTER TABLE visualization.edge_levels_meta ADD COLUMN IF NOT EXISTS band_rule VARCHAR")           # roadstyle's table has none: the rule of the band the numbers were solved from
+        con.execute("UPDATE visualization.edge_levels_meta SET band_rule = ?", [BAND_RULE])
         con.execute("CHECKPOINT")
     finally:
         con.close()

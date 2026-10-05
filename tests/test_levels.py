@@ -45,9 +45,9 @@ def test_the_roads_of_all_modes_with_their_bands(monaco):
     con = duckdb.connect(str(monaco), read_only=True)
     assert len(roads) == roads["edge_id"].nunique() == _all_edge_ids(con)             # one row per edge_id, every mode
     assert roads["edge_id"].is_monotonic_increasing
-    sidewalk = roads[(roads["walk_type"] == "sidewalk") & roads["highway"].isin(["footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor"])]
-    crossing = roads[(roads["walk_type"] == "crossing") & roads["highway"].isin(["footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor"])]
-    assert len(sidewalk) and (sidewalk["band"] == -1).all() and len(crossing) and (crossing["band"] == 1).all()
+    from duckosm.crossings import _level
+    assert (roads["band"].to_numpy() == [_level(ly, br, tn) for ly, br, tn in zip(roads["layer"], roads["bridge"], roads["tunnel"], strict=True)]).all()   # the tags only: a sidewalk or a crossing is on its street's floor
+    assert (roads["walk_type"] == "sidewalk").any() and (roads["walk_type"] == "crossing").any()
     assert roads["highway"].isna().any()                                               # a ferry with no highway is a road too
 
 
@@ -65,6 +65,8 @@ def test_levels_command_writes_the_visualization_schema(monaco, tmp_path):
     assert types == {"edge_id": "BIGINT", "casing_start": "INTEGER", "casing_level": "INTEGER", "casing_end": "INTEGER", "fill_level": "INTEGER"}
     meta = con.execute("SELECT * FROM visualization.edge_levels_meta").df().iloc[0]
     assert (meta["band_source"], meta["order_source"], int(meta["n_edges"])) == ("band", "class", n[0])
+    from duckosm.levels import BAND_RULE
+    assert meta["band_rule"] == BAND_RULE == "tags"                                   # the rule of the band the numbers were solved from: mapstyle refuses another
     # the reader accepts the parameters it was computed with and refuses others
     from duckosm.levels import load_roads
     roads = load_roads(db)

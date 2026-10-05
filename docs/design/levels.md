@@ -49,8 +49,10 @@ Giving roadstyle both would put every street twice, one on top of the other. The
 The **band** of a road says whether it is under, on, or over the ground. It is the input of the optimization:
 
 - Its level from the tags: the OSM `layer` if that is a number, else 1 for a bridge, −1 for a tunnel, else 0 (`duckosm.crossings._level`).
-- Except for a path (`footway`, `path`, `cycleway`, `steps`, `pedestrian`, `bridleway`, `corridor`) with a `walk_type`: a `sidewalk` has band −1 (under its street) and a `crossing` has band 1 (over it).
-  The column `walk_type` exists only when the walking network was built with it; where it does not, the tags decide.
+- Nothing else: a sidewalk and a crossing are on the ground like the street they belong to, so they have the band of their tags (0 on a plain street). They were band −1 and 1 until 2026-10-04
+  ("a sidewalk under its street, a crossing over it"): a crossing was then painted over its street, and a footway must not be drawn over a driving road (Kaveh). With the same band the solver
+  uses the class order (`--order class`): a street is painted over the footway at the node they share. On Monaco, 1,254 of 1,266 crossing edges are then under their street, 10 at the same number
+  and 2 over it (before: 556, 540 and 170). **A table made before that date has the old numbers: run `duckosm levels` again.** The table records the rule in `edge_levels_meta.band_rule` (`tags`; empty = the old rule), and mapstyle refuses a table whose rule is not `tags`. The zebra marking is not a road: a map draws it over the street.
 
 ## What the command does
 
@@ -68,7 +70,7 @@ A new schema **`visualization`**, next to `driving`, `walking`, `cycling`, `feat
 | Table | Content |
 |---|---|
 | `visualization.edge_levels` | `edge_id` BIGINT, `casing_start`, `casing_level`, `casing_end`, `fill_level` (INTEGER): one row for every edge of the roads above |
-| `visualization.edge_levels_meta` | one row: the parameters (`method`, `head_m`, `band_dist`, `margin`, `max_level`, `band_source`, `order_source`, `min_positions`), `n_edges`, `edge_hash`, `roadstyle_version`, `created` |
+| `visualization.edge_levels_meta` | one row: the parameters (`method`, `head_m`, `band_dist`, `margin`, `max_level`, `band_source`, `order_source`, `min_positions`), `band_rule`, `n_edges`, `edge_hash`, `roadstyle_version`, `created` |
 
 `band_source` is `"band"`: the band above, which is a column the command builds. The two tables are the ones roadstyle writes; their columns and rules are in its design, section 11.
 
