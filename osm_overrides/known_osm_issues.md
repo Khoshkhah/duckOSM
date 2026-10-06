@@ -273,3 +273,20 @@ Explorer, where the down ramp had no turning movement at all. If it is confirmed
 `OsmOverrides(mode=...)`) - the two rules are written, commented out, in `osm_overrides.yaml` - and
 upstream an `access=no` (or `motor_vehicle=no`) tag in OpenStreetMap.
 
+## 9. Monaco roundabout entry - `lanes=2` on a one-lane roundabout
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco (`data/sample/monaco.osm.pbf`) |
+| **OSM way** | `1435532404` (`highway=primary`, `oneway=yes`, `name=Boulevard du Larvotto`, 10 m) |
+| **Edge** | `1435532404#1f` |
+| **Status** | **CONFIRMED by Street View** (Kaveh, 2026-10-05); override enabled |
+
+**Symptom.** In roadstyle the roundabout bulges where this edge sits: it is drawn twice as wide as
+the edges next to it.
+
+**Root cause (verified).** The way carries `lanes=2` in OpenStreetMap itself (version 3, 2026-06-09);
+duckOSM copied it unchanged. The adjacent roundabout ways `1435532402` and `1435532403` have
+`lanes=1`, and Street View shows a single lane.
+
+**Fix.** `lanes: 1` in `osm_overrides.yaml`; upstream, set `lanes=1` on the way in OpenStreetMap.

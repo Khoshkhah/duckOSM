@@ -61,6 +61,11 @@ overrides:
     layer: 0                 # (known_osm_issues #4, CONFIRMED) — sits at grade where it meets the
     note: "service=driveway ramp tagged layer=-1 end-to-end though its junction end is at grade (joins the level-0 driveway 1429337400 at a shared node); no tunnel/bridge structure. Set to 0."
 
+  # --- Monaco ---
+  - osm_id: 1435532404       # Boulevard du Larvotto, roundabout entry - lanes=2 on a 1-lane roundabout (known_osm_issues #9)
+    lanes: 1
+    note: "OSM lanes=2 (v3, 2026-06-09); Street View shows one lane and the neighbouring roundabout ways 1435532402/3 have lanes=1"
+
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
