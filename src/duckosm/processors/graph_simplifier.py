@@ -279,9 +279,11 @@ class GraphSimplifier(BaseProcessor):
         # another mode drops still marks the junction here — cross-mode edge_id alignment), and
         # paths/footways are cut there too: a crossing over a road this mode doesn't have (a
         # secondary without sidewalks, in walking) is cut where cycling cuts it, so it keeps the same
-        # edge_ids. Otherwise fall back to this mode's local `junctions.is_road_junction`.
+        # edge_ids. The global path junctions (is_road_junction FALSE: paths of any mode meet there)
+        # cut only paths, so a path is cut at the same points in every mode that has it.
+        # Otherwise fall back to this mode's local `junctions.is_road_junction`.
         if self._use_global_junctions():
-            split_here = (f"CASE WHEN {_IS_ROAD} THEN (gj.node_id IS NOT NULL) "
+            split_here = (f"CASE WHEN {_IS_ROAD} THEN COALESCE(gj.is_road_junction, FALSE) "
                           f"ELSE (j.node_id IS NOT NULL OR gj.node_id IS NOT NULL) END")
             gj_join = "LEFT JOIN main.global_junctions gj ON wn.node_id = gj.node_id"
         else:
@@ -721,8 +723,11 @@ class GraphSimplifier(BaseProcessor):
         # sum(fwd)=1 there wrongly skipped such chains; gate it on bool_or(oneway).
         # A global road junction is a HARD split that must survive contraction: even when a mode drops
         # the crossing road (so the node is locally degree-2), re-merging here would undo cross-mode
-        # edge_id alignment. Exclude those nodes from contraction when the global set is present.
-        gj_protect = ("AND node NOT IN (SELECT node_id FROM main.global_junctions)"
+        # edge_id alignment. Exclude those nodes from contraction when the global set is present; a
+        # global path junction protects only the paths there (a path is never merged across it).
+        gj_protect = (f"""AND node NOT IN (SELECT node_id FROM main.global_junctions WHERE is_road_junction)
+            AND NOT (highway IN {_NON_ROAD_HIGHWAYS}
+                     AND node IN (SELECT node_id FROM main.global_junctions))"""
                       if self._use_global_junctions() else "")
         self.execute(f"""
             CREATE OR REPLACE TEMP TABLE _node2 AS

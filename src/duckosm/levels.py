@@ -1,26 +1,27 @@
-"""The drawing order of a built network, computed by roadstyle and stored in the file (docs/design/levels.md).
+"""The drawing order of a built network: its level area, made and solved by roadstyle, the result stored in the file (docs/design/levels.md).
 
-``duckosm levels`` reads the roads of every mode, asks roadstyle for the casing and fill numbers of every road
-(``roadstyle.compute_levels``) and writes them to ``visualization.edge_levels`` (``roadstyle.save_levels``). Needs the
-``levels`` extra (roadstyle with its solver); roadstyle is imported inside the functions.
+``duckosm levels DB`` puts the roads of every mode in one level area folder (``DB.levels``: roadstyle's roads.parquet, pairs.csv and
+your edits.csv, heads.csv, caps.csv), solves it and writes the result to ``visualization.edge_levels``. ``roadstyle-levels edit DB.levels``
+is the editor; each of its solves writes into the file too. Needs the ``levels`` extra; roadstyle is imported inside the functions.
 """
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-BAND_RULE = "tags"             # how the band is made, stored in edge_levels_meta.band_rule: "tags" = the layer, bridge, tunnel only (docs/design/levels.md). A table with none is the older rule
 MODES = ("driving", "walking", "cycling")
+OPTIONAL = ("walk_type", "junction", "name", "edge_ref", "lanes")   # roadstyle reads junction (a roundabout is on top where roads meet); the editor shows name, edge_ref, lanes
 
 
 def roadstyle_module():
-    """roadstyle with the levels solver, or an ImportError that says how to install it."""
+    """roadstyle with its level areas, or an ImportError that says how to install it."""
     try:
         import roadstyle
-        roadstyle.compute_levels, roadstyle.save_levels                  # noqa: B018  (roadstyle before 0.13 has neither)
-    except (ImportError, AttributeError) as e:
-        raise ImportError('the levels need roadstyle 0.13 or later: pip install "duckosm[levels]"') from e
+        import roadstyle.level_area  # noqa: F401  (roadstyle before 0.17 has none)
+    except ImportError as e:
+        raise ImportError('the levels need roadstyle 0.17 or later: pip install "duckosm[levels]"') from e
     return roadstyle
 
 
@@ -30,18 +31,21 @@ def _union(con):
     modes = [m for m in MODES if m in have]
     if not modes:
         raise ValueError(f"no <mode>.edges table in this file (modes: {', '.join(MODES)})")
-    with_wt = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.columns "
-                                         "WHERE table_name = 'edges' AND column_name = 'walk_type'").fetchall()}
+    has = {(s, t, c) for s, t, c in con.execute("SELECT table_schema, table_name, column_name FROM information_schema.columns").fetchall()}
     private = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.tables WHERE table_name = 'private_edges'").fetchall()} & set(modes)
     cols = "edge_id, highway, layer, bridge, tunnel, geometry"
-    parts = [f"SELECT {cols}, {'walk_type' if m in with_wt else 'NULL'} AS walk_type, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
-    parts += [f"SELECT {cols}, NULL AS walk_type, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
+
+    def optional(m, t):                                  # a column an older file may not have: NULL there
+        return ", ".join(f"{c if (m, t, c) in has else 'NULL'} AS {c}" for c in OPTIONAL)
+    parts = [f"SELECT {cols}, {optional(m, 'edges')}, '{m}' AS mode, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
+    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, NULL AS mode, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
     return " UNION ALL ".join(parts)
 
 
 def load_roads(db):
     """The roads of all modes in ``db``: one row per ``edge_id`` (in ``edge_id`` order) with ``highway``, ``layer``, ``bridge``, ``tunnel``,
-    ``walk_type``, the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
+    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), ``modes`` (the modes whose
+    network has it, e.g. ``driving + walking``; None for a private road only), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
     cycling and ``edges`` before ``private_edges``."""
     import duckdb
     import geopandas as gpd
@@ -57,65 +61,26 @@ def load_roads(db):
         df = con.execute(f"""
             SELECT edge_id, first(highway ORDER BY rank) AS highway, first(layer ORDER BY rank) AS layer,
                    first(bridge ORDER BY rank) AS bridge, first(tunnel ORDER BY rank) AS tunnel,
-                   first(walk_type ORDER BY rank) AS walk_type, ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
+                   {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, list(DISTINCT mode) FILTER (WHERE mode IS NOT NULL) AS mode_list,
+                   ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
             FROM ({_union(con)}) GROUP BY edge_id ORDER BY edge_id""").df()
     finally:
         con.close()
     band = np.array([_level(ly, br, tn) for ly, br, tn in zip(df["layer"], df["bridge"], df["tunnel"], strict=True)], dtype=int)
+    df["modes"] = [" + ".join(m for m in MODES if m in set(ms if isinstance(ms, (list, np.ndarray)) else [])) or None for ms in df.pop("mode_list")]   # who may use it: the editor shows it; a private road only: None
     geometry = gpd.GeoSeries([wkb.loads(bytes(b)) for b in df.pop("wkb")], crs="EPSG:4326")
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
 
 
-def reverse_rows(db):
-    """``{edge_id of a reverse row: edge_id of its road}`` for every edge of ``db`` that is ``is_reverse`` in every table it is in (the mode networks do not all flag it the same way): the road is the row of the same ``osm_id`` with ``source`` and ``target`` swapped
-    (the smallest ``edge_id`` if there are several). A reverse row with no road is a ``ValueError`` that says how many and the first ids."""
-    import duckdb
+def make_and_solve(db, area=None):
+    """The level area of ``db`` (docs/design/levels.md): the roads of every mode in one area folder (``area``, default ``<db>.levels`` next to
+    it), solved with your edits.csv / heads.csv / caps.csv there, the result written into ``db`` (``visualization.edge_levels`` with each
+    edge's ends). roadstyle does all of it (``roadstyle.level_area``); the area belongs to ``db``, so ``roadstyle-levels edit AREA``
+    writes into it too. Returns ``{"area", "roads", "given_up", "info"}``."""
+    roadstyle_module()
+    from roadstyle.level_area import make_area, solve_area
 
-    con = duckdb.connect(str(db), read_only=True)
-    try:
-        have = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.tables WHERE table_name = 'edges'").fetchall()}
-        parts = [f"SELECT edge_id, osm_id, source, target, is_reverse FROM {m}.edges" for m in MODES if m in have]
-        parts += [f"SELECT edge_id, osm_id, source, target, is_reverse FROM {m}.private_edges" for m in MODES if m in have and con.execute(
-            "SELECT count(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = 'private_edges'", [m]).fetchone()[0]]
-        rows = con.execute(f"""WITH e AS (SELECT edge_id, any_value(osm_id) AS osm_id, any_value(source) AS source, any_value(target) AS target, bool_and(is_reverse) AS is_reverse
-                                         FROM ({' UNION ALL '.join(parts)}) GROUP BY edge_id)
-                               SELECT r.edge_id, min(f.edge_id) FROM e r LEFT JOIN e f
-                               ON NOT f.is_reverse AND f.osm_id = r.osm_id AND f.source = r.target AND f.target = r.source
-                               WHERE r.is_reverse GROUP BY r.edge_id ORDER BY r.edge_id""").fetchall()
-    finally:
-        con.close()
-    lost = [e for e, f in rows if f is None]
-    if lost:
-        raise ValueError(f"{len(lost)} reverse edge(s) have no road in {db} (same osm_id, source and target swapped; first: {lost[:5]})")
-    return {int(e): int(f) for e, f in rows}
-
-
-def compute_and_store(db, order="class", **options):
-    """Compute the numbers of the roads of ``db`` and write them to ``visualization.edge_levels`` / ``edge_levels_meta``. ``order``: ``"class"`` or ``None``;
-    ``options``: ``band_dist``, ``head_m``, ``max_level``, ``margin``, ``time_limit`` of ``roadstyle.compute_levels``.
-    Returns ``{"roads", "positions", "given_up", "info"}``."""
-    import duckdb
-
-    rs = roadstyle_module()
-    edges = load_roads(db)                                               # one row for every edge_id, reverse rows too
-    twin = reverse_rows(db)                                              # a reverse row has the numbers of its road, its two heads swapped (docs/design/levels.md)
-    roads = edges[~edges["edge_id"].isin(twin)].reset_index(drop=True)
-    computed = rs.compute_levels(roads, method="solve", band_col="band", order=order, **options)
-    cols = ("casing_start", "casing_level", "casing_end", "fill_level")
-    by_id = {int(e): k for k, e in enumerate(computed["edge_id"])}
-    levels = edges.copy()
-    heads = {"casing_start": "casing_end", "casing_end": "casing_start"}      # a reverse row runs the other way: its start head is its road's end head
-    for c in cols:
-        levels[c] = [computed[heads.get(c, c) if int(e) in twin else c].iloc[by_id[twin.get(int(e), int(e))]] for e in edges["edge_id"]]
-    levels.attrs.update(computed.attrs)
-    con = duckdb.connect(str(db))                                        # read-write: this writes the visualization schema
-    try:
-        con.execute("INSTALL spatial; LOAD spatial;")                    # the file has spatial indexes: the checkpoint needs the extension
-        rs.save_levels(con, levels)
-        con.execute("ALTER TABLE visualization.edge_levels_meta ADD COLUMN IF NOT EXISTS band_rule VARCHAR")           # roadstyle's table has none: the rule of the band the numbers were solved from
-        con.execute("UPDATE visualization.edge_levels_meta SET band_rule = ?", [BAND_RULE])
-        con.execute("CHECKPOINT")
-    finally:
-        con.close()
-    positions = len({int(v) for c in cols for v in levels[c]})
-    return {"roads": len(roads), "positions": positions, "given_up": len(levels.attrs["levels_given_up"]), "info": levels.attrs["levels_info"]}
+    area = Path(area) if area else Path(db).with_suffix(".levels")
+    make_area(load_roads(db), area, db=db, id_col="edge_id")
+    solved = solve_area(area)
+    return {"area": area, "roads": len(solved), "given_up": len(solved.attrs["levels_given_up"]), "info": solved.attrs["levels_info"]}

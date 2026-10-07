@@ -171,9 +171,10 @@ duckosm viz [OPTIONS] DB
 
 ### `levels`
 
-Computes the drawing order of the roads and stores it in the database (schema [`visualization`](database.md#visualization-schema)): every road gets a casing number
-(start, main, end) and a fill number, which say which road is painted over which. roadstyle computes them from the roads of all modes together. It takes long on a large network,
-so it is not part of the build. The database is changed in place. Needs `duckosm[levels]`.
+Makes and solves the level area of the database and stores the drawing order in it (schema [`visualization`](database.md#visualization-schema)): every road gets a casing number
+(start, main, end), a fill number and its ends as drawn. The roads of all modes go into one level area folder next to the database (`DB.levels`), where your `edits.csv`,
+`heads.csv` and `caps.csv` are kept between runs; roadstyle solves it with its defaults. It takes long on a large network, so it is not part of the build. The database is
+changed in place. To fix places by hand: `roadstyle-levels edit DB.levels`. Needs `duckosm[levels]`. Guide: [Store the drawing order](../guides/drawing-order.md).
 
 ```text
 duckosm levels [OPTIONS] DB
@@ -181,13 +182,7 @@ duckosm levels [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--order [class\|none]` | `class`: where roads meet, the higher road class is painted later (a road with no class takes no part); `none`: no such wish | `class` |
-| `--band-dist FLOAT` | metres: two roads closer than this, with different bands, are a stack pair | 10 |
-| `--head-m FLOAT` | metres: the length of each casing head | 5.0 |
-| `--max-level INTEGER` | the range of the numbers before the shift to the ground | 20 |
-| `--margin FLOAT` | how much later a road is painted where one must be painted after another | 1.0 |
-| `--time-limit FLOAT` | seconds for each solve of the slack stages | 60 |
-| `--min-positions` / `--no-min-positions` | also minimise the span of the numbers: fewer positions (layers) in a page, a little less compaction | on |
+| `--area DIR` | the level area folder | `DB.levels` next to the database |
 
 ### `route-map`
 

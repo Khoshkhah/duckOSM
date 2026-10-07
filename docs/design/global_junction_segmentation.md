@@ -95,6 +95,26 @@ degree-2. Net effect: cycling/walking gain a few extra degree-2 nodes at driving
 benign cost that buys stable cross-mode `edge_id`s. (Routing is unaffected; an extra through-node on a
 straight run changes nothing but the segmentation.)
 
+## Paths (2026-10-07)
+
+Roads were aligned, but a path (`_NON_ROAD_HIGHWAYS`) was still cut where another way *of the same
+mode* met it. Monaco, way 61121485 (Avenue Saint-Charles, `highway=pedestrian`): walking cut it at
+node 764646132, where a footway joins, into `#1f` (34 m), `#2f`, `#3f`; cycling doesn't have that
+footway and kept it whole (`#1f`, 133 m). Same street, different `edge_id`s.
+
+`main.global_junctions` now also holds **path junctions**: a node of a path where ≥2 highway way
+references meet and no road does (`is_road_junction = FALSE`). Every highway way of the raw network
+counts, so this is the union over all modes. `GraphSimplifier` cuts paths at every row of the table
+(plus the mode's own junctions, as before) and never merges paths across them; roads use only the
+`is_road_junction` rows, so **roads are cut exactly as before** (Monaco: driving `edges`,
+`private_edges`, `nodes`, `edge_graph` identical, and the road edges of walking and cycling too).
+
+Monaco: path edges with the same `edge_id` in walking and cycling 6,126 → 7,102; OSM path ways in
+both modes cut differently 110 → 0; way 61121485 has the same three pieces in both. Not covered: the
+synthetic connectors (`osm_id < 0`) that `PathConnector` adds per mode, and a `pedestrian` way that
+driving admits as `living_street` (a road in driving, a path in walking / cycling, so it can be cut
+differently there; none in Monaco).
+
 ## Interaction with the walking hole (separate bug)
 
 Global junctions align *segmentation where a road exists in a mode*. They do **not** resurrect a road a

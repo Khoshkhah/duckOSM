@@ -1,5 +1,7 @@
 # The drawing order in the duckOSM file (`duckosm levels`)
 
+**Since 2026-10-07:** `duckosm levels` makes and solves a roadstyle **level area** (`DB.levels`, your edits kept there) and stores its result with each edge's ends; the options below are gone (roadstyle's defaults). See [Store the drawing order](../guides/drawing-order.md). The rest of this note is the history.
+
 **Status:** implemented. The algorithm is in roadstyle: `roadstyle/docs/design/levels_split_casing.md`.
 
 Every road gets a **casing number** (in three parts: start, main, end) and a **fill number**. They say which road is painted over which: the casings and fills are painted

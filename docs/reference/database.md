@@ -338,20 +338,18 @@ One row for every `edge_id` of the roads of all modes (`edges` and `private_edge
 | `casing_level` | INTEGER | the casing number of the main part |
 | `casing_end` | INTEGER | the casing number of the head at the end of the edge |
 | `fill_level` | INTEGER | the fill number |
+| `head_start_m`, `head_end_m` | DOUBLE | the length of each head as drawn, metres |
+| `cap_start`, `cap_end` | VARCHAR | the end shape as drawn: `round`, `square` or `flat` |
 
 The casings and fills are painted number by number, lowest first; at each number all casings before all fills. 0 is the ground.
 
 ### `edge_levels_meta`
 
-One row: what the numbers were computed with.
+One row: where the numbers came from.
 
 | Column | Description |
 |---|---|
-| `method`, `head_m`, `band_dist`, `margin`, `max_level` | the options of the computation |
-| `band_source` | `band`: the band of each road (its level from the tags; a sidewalk -1 and a crossing 1) |
-| `order_source` | `class`, or empty for no class order |
-| `min_positions` | true, or empty when `--no-min-positions` was given |
-| `cell_buffer_m` | empty: the whole network was solved at once |
+| `source`, `area` | `area`, and the level area folder they were solved in |
 | `n_edges`, `edge_hash` | the number of edges and a hash of their ids: the numbers belong to these edges only |
 | `roadstyle_version`, `created` | the roadstyle version and when |
 
