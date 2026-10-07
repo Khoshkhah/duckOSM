@@ -12,6 +12,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MODES = ("driving", "walking", "cycling")
+OPTIONAL = ("walk_type", "junction", "name", "edge_ref", "lanes")   # roadstyle reads junction (a roundabout is on top where roads meet); the editor shows name, edge_ref, lanes
 
 
 def roadstyle_module():
@@ -30,18 +31,20 @@ def _union(con):
     modes = [m for m in MODES if m in have]
     if not modes:
         raise ValueError(f"no <mode>.edges table in this file (modes: {', '.join(MODES)})")
-    with_wt = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.columns "
-                                         "WHERE table_name = 'edges' AND column_name = 'walk_type'").fetchall()}
+    has = {(s, t, c) for s, t, c in con.execute("SELECT table_schema, table_name, column_name FROM information_schema.columns").fetchall()}
     private = {r[0] for r in con.execute("SELECT table_schema FROM information_schema.tables WHERE table_name = 'private_edges'").fetchall()} & set(modes)
     cols = "edge_id, highway, layer, bridge, tunnel, geometry"
-    parts = [f"SELECT {cols}, {'walk_type' if m in with_wt else 'NULL'} AS walk_type, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
-    parts += [f"SELECT {cols}, NULL AS walk_type, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
+
+    def optional(m, t):                                  # a column an older file may not have: NULL there
+        return ", ".join(f"{c if (m, t, c) in has else 'NULL'} AS {c}" for c in OPTIONAL)
+    parts = [f"SELECT {cols}, {optional(m, 'edges')}, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
+    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
     return " UNION ALL ".join(parts)
 
 
 def load_roads(db):
     """The roads of all modes in ``db``: one row per ``edge_id`` (in ``edge_id`` order) with ``highway``, ``layer``, ``bridge``, ``tunnel``,
-    ``walk_type``, the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
+    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
     cycling and ``edges`` before ``private_edges``."""
     import duckdb
     import geopandas as gpd
@@ -57,7 +60,7 @@ def load_roads(db):
         df = con.execute(f"""
             SELECT edge_id, first(highway ORDER BY rank) AS highway, first(layer ORDER BY rank) AS layer,
                    first(bridge ORDER BY rank) AS bridge, first(tunnel ORDER BY rank) AS tunnel,
-                   first(walk_type ORDER BY rank) AS walk_type, ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
+                   {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
             FROM ({_union(con)}) GROUP BY edge_id ORDER BY edge_id""").df()
     finally:
         con.close()

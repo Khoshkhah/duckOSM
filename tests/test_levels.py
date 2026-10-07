@@ -49,6 +49,7 @@ def test_the_roads_of_all_modes_with_their_bands(monaco):
     assert (roads["band"].to_numpy() == [_level(ly, br, tn) for ly, br, tn in zip(roads["layer"], roads["bridge"], roads["tunnel"], strict=True)]).all()   # the tags only: a sidewalk or a crossing is on its street's floor
     assert (roads["walk_type"] == "sidewalk").any() and (roads["walk_type"] == "crossing").any()
     assert roads["highway"].isna().any()                                               # a ferry with no highway is a road too
+    assert (roads["junction"] == "roundabout").any() and roads["edge_ref"].notna().all()   # roadstyle puts a roundabout on top where roads meet
 
 
 def test_levels_command_makes_the_area_and_writes_the_db(monaco, tmp_path):
