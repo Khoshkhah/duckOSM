@@ -19,6 +19,8 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     cfg = Config.from_yaml(str(ROOT / "config" / "sample_monaco.yaml"))
     cfg.source.pbf_path = str(ROOT / cfg.source.pbf_path)       # the sample is relative to the repo root
     cfg.boundary.path = str(ROOT / cfg.boundary.path)
+    if cfg.osm_overrides:
+        cfg.osm_overrides = str(ROOT / cfg.osm_overrides)     # the sample's fixes file is relative to the repo too
     cfg.output_path = str(tmp_path)
     monkeypatch.chdir(tmp_path)                                   # keep reports etc. out of the repo
     DuckOSM(cfg).run()
