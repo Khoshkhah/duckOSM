@@ -80,13 +80,29 @@ class RoadFilter(BaseProcessor):
                 OR ({ped_ok})
             """
         elif self.mode == "walking":
-            where_clause = """
-                map_extract(tags, 'highway')[1] IN (
-                    'footway', 'path', 'pedestrian', 'steps', 'living_street', 
-                    'residential', 'service', 'platform', 'corridor'
+            # Every class OSM lets people walk on, except where the sidewalk is a separate way (you
+            # walk there) or the road is a motorroad. An explicit foot permission or sidewalk tag
+            # keeps any way but a motorway. foot=no / private and access are _access_expression's.
+            walk_classes = [
+                'footway', 'path', 'pedestrian', 'steps', 'living_street', 'residential', 'service',
+                'platform', 'corridor', 'track', 'bridleway', 'road', 'unclassified',
+                'tertiary', 'tertiary_link', 'secondary', 'secondary_link',
+                'primary', 'primary_link', 'trunk', 'trunk_link',
+            ]
+            walk_list = ", ".join(f"'{h}'" for h in walk_classes)
+            where_clause = f"""
+                COALESCE({_tag('highway')}, '') NOT IN ('motorway', 'motorway_link')
+                AND (
+                    {_tag('foot')} IN ('yes', 'designated', 'permissive')
+                    OR {_tag('sidewalk')} IN ('yes', 'both', 'left', 'right')
+                    OR ({_tag('highway')} IN ({walk_list})
+                        AND COALESCE({_tag('motorroad')}, '') <> 'yes'
+                        AND COALESCE({_tag('foot')}, '') <> 'use_sidepath'
+                        AND COALESCE({_tag('sidewalk')}, '') <> 'separate'
+                        AND COALESCE({_tag('sidewalk:both')}, '') <> 'separate'
+                        AND NOT COALESCE({_tag('sidewalk:left')} = 'separate'
+                                         AND {_tag('sidewalk:right')} = 'separate', FALSE))
                 )
-                OR map_extract(tags, 'sidewalk')[1] IN ('yes', 'both', 'left', 'right')
-                OR map_extract(tags, 'foot')[1] IN ('yes', 'designated')
             """
 
         elif self.mode == "cycling":

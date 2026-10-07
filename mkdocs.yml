@@ -130,6 +130,7 @@ nav:
       - Draw a map: guides/draw-map.md
       - Store the drawing order: guides/drawing-order.md
       - Route: guides/route.md
+      - Walking: guides/walking.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md

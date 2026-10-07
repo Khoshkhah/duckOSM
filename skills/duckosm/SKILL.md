@@ -105,7 +105,7 @@ Join your own data the stable way: carry `(osm_id, source, target)` and join on 
 - **`cost_s` uses the speed limit**: no traffic, no junction delay.
 - **`oneway` is per edge.** A one-way road has no reverse edge; walking ignores `oneway` (only
   `oneway:foot`), so the same road can be two-way in walking.
-- **Not every road is in every mode**: a main road without a sidewalk tag isn't walkable; forbidden
+- **Not every road is in every mode**: motorways, motorroads and roads whose sidewalk is mapped as a separate way aren't walkable; forbidden
   roads leave that mode; private ones are in `private_edges`. Check `raw.ways` tags before
   assuming a bug.
 - **Open the database `read_only=True`** when reading, so a build or another reader isn't blocked.
