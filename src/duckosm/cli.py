@@ -337,37 +337,26 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
 
 @main.command()
 @click.argument('db', type=DB_PATH)
-@click.option('--order', type=click.Choice(['class', 'none']), default='class', show_default=True,
-              help="class: where roads meet, the higher road class is painted later; none: no such wish")
-@click.option('--band-dist', type=float, default=10.0, show_default=True,
-              help='Metres: two roads closer than this, with different bands, are a stack pair')
-@click.option('--head-m', type=float, default=5.0, show_default=True, help='Metres: the length of each casing head')
-@click.option('--max-level', type=int, default=20, show_default=True, help='The range of the numbers before the shift to the ground')
-@click.option('--margin', type=float, default=1.0, show_default=True,
-              help='How much later a road is painted where one must be painted after another')
-@click.option('--time-limit', type=float, default=60.0, show_default=True, help='Seconds for each solve of the slack stages')
-@click.option('--min-positions/--no-min-positions', default=True, show_default=True,
-              help='Also minimise the span of the numbers: fewer positions (layers) in a page, a little less compaction')
-def levels(db, order, band_dist, head_m, max_level, margin, time_limit, min_positions):
-    """Compute the drawing order of the roads and store it in the db (schema visualization).
+@click.option('--area', type=click.Path(file_okay=False), default=None,
+              help='The level area folder (default: DB.levels next to the db); your edits.csv, heads.csv and caps.csv live there')
+def levels(db, area):
+    """Make and solve the level area of the db and store the drawing order in it (schema visualization).
 
-    Every road gets a casing number (start, main, end) and a fill number, which say which road is
-    painted over which; roadstyle computes them from the roads of all modes together and they are
-    written to visualization.edge_levels (and edge_levels_meta). Takes long on a large network, so it
-    is not part of the build. The db is modified in place. Needs duckosm[levels].
+    The roads of all modes go into one level area folder (roadstyle's: roads.parquet, pairs.csv and your
+    edits.csv, heads.csv, caps.csv, kept between runs). roadstyle solves it with its defaults, and every
+    road's casing numbers, fill number and ends are written to visualization.edge_levels. To fix places
+    by hand: roadstyle-levels edit DB.levels (each of its solves writes into the db too). Needs duckosm[levels].
     """
-    from duckosm.levels import compute_and_store
+    from duckosm.levels import make_and_solve
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     try:
-        r = compute_and_store(db, order=None if order == 'none' else order, band_dist=band_dist, head_m=head_m,
-                              max_level=max_level, margin=margin, time_limit=time_limit, min_positions=min_positions)
+        r = make_and_solve(db, area)
     except (ImportError, ValueError) as e:
         raise click.ClickException(str(e))
     i = r["info"]
-    click.echo(f"wrote visualization.edge_levels: {r['roads']:,} roads, {r['positions']} positions, "
-               f"{r['given_up']} stack pairs given up, {i.get('order_violations', 0)} order wishes not kept, "
-               f"solver {i.get('solver')}, {i.get('seconds')} s")
+    click.echo(f"level area {r['area']}: {r['roads']:,} roads, {r['given_up']} stack pairs given up, "
+               f"{i.get('order_violations', 0)} order wishes not kept, {i.get('seconds')} s; wrote visualization.edge_levels")
 
 
 @main.command()
