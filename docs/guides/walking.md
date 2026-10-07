@@ -46,7 +46,7 @@ Every walking edge has a `walk_type`, from OSM sub-tags. The first rule that mat
 | `plaza` | a pedestrian square, drawn as its outline | `highway=pedestrian` + `area=yes` |
 | `pedestrian_street` | a street for people only | `highway=pedestrian` |
 | `shared_street` | a street people share with slow cars | `living_street` |
-| `shared_road` | a minor street walked on the carriageway | `residential`, `service`, `unclassified` |
+| `shared_road` | a street or road without a sidewalk tag, walked on the carriageway | `residential`, `service`, `unclassified`, `road`, `tertiary`, `secondary`, `primary`, `trunk` and their `_link`s |
 | `corridor` | indoors | `highway=corridor`, or `indoor=yes` |
 | `platform` | a public-transport platform | `highway=platform` |
 | `path` | an unpaved or shared way | `path`, `track`, `bridleway` |
@@ -86,7 +86,7 @@ between Avenue d'Alsace and Pont Sainte-Dévote, tagged `oneway=yes` and no `sid
 | | Before 2026-10-07 | Now |
 |---|---|---|
 | driving | 2 edges, one-way | 2 edges, one-way |
-| walking | not there (a `tertiary` needed a `sidewalk` or `foot` tag) | 4 edges, both ways, 97 m, `cost_s` 70 s |
+| walking | not there (a `tertiary` needed a `sidewalk` or `foot` tag) | 4 edges, both ways, `shared_road`, 97 m, `cost_s` 70 s |
 
 Its two walking edges in the drawing direction have the same `edge_id`s as the driving ones. Avenue de
 la Porte Neuve (way 159170452, `residential`, `sidewalk=separate`) went the other way: it was walkable

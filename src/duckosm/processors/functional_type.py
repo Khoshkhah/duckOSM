@@ -18,6 +18,10 @@ import logging
 
 from duckosm.processors.base import BaseProcessor
 
+# Road classes people walk on the carriageway of, when no sidewalk is tagged (walk_type 'shared_road').
+_SHARED_ROAD = ("('residential', 'service', 'unclassified', 'road', 'tertiary', 'tertiary_link', "
+                "'secondary', 'secondary_link', 'primary', 'primary_link', 'trunk', 'trunk_link')")
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +41,7 @@ class FunctionalType(BaseProcessor):
     def _walk_type(self) -> None:
         self.execute("ALTER TABLE edges ADD COLUMN IF NOT EXISTS walk_type VARCHAR")
         # From highway + footway/conveying/area/indoor on the raw way.
-        self.execute("""
+        self.execute(f"""
             UPDATE edges SET walk_type = CASE
                 WHEN edges.highway = 'steps' AND map_extract(w.tags, 'conveying')[1] IS NOT NULL THEN 'escalator'
                 WHEN edges.highway = 'steps'                                          THEN 'steps'
@@ -50,7 +54,8 @@ class FunctionalType(BaseProcessor):
                 -- a road kept for walking because it has a sidewalk: you walk its sidewalk
                 WHEN COALESCE(map_extract(w.tags, 'sidewalk')[1], 'no') NOT IN ('no', 'none', 'separate')
                      AND edges.highway NOT IN ('path', 'track', 'bridleway', 'corridor', 'platform') THEN 'sidewalk'
-                WHEN edges.highway IN ('residential', 'service', 'unclassified')      THEN 'shared_road'
+                -- a street or road without a sidewalk tag: walked on the carriageway
+                WHEN edges.highway IN {_SHARED_ROAD}                                 THEN 'shared_road'
                 WHEN edges.highway = 'corridor' OR map_extract(w.tags, 'indoor')[1] = 'yes' THEN 'corridor'
                 WHEN edges.highway = 'platform'                                       THEN 'platform'
                 WHEN edges.highway IN ('path', 'track', 'bridleway')                  THEN 'path'
@@ -59,12 +64,12 @@ class FunctionalType(BaseProcessor):
             FROM raw.ways w WHERE w.osm_id = edges.osm_id
         """)
         # Connector / tagless edges (no matching raw way): highway-only fallback.
-        self.execute("""
+        self.execute(f"""
             UPDATE edges SET walk_type = CASE
                 WHEN highway = 'steps'                                    THEN 'steps'
                 WHEN highway = 'pedestrian'                               THEN 'pedestrian_street'
                 WHEN highway = 'living_street'                            THEN 'shared_street'
-                WHEN highway IN ('residential', 'service', 'unclassified') THEN 'shared_road'
+                WHEN highway IN {_SHARED_ROAD}                            THEN 'shared_road'
                 WHEN highway = 'corridor'                                 THEN 'corridor'
                 WHEN highway = 'platform'                                 THEN 'platform'
                 WHEN highway IN ('path', 'track', 'bridleway')            THEN 'path'

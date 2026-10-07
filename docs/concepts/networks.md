@@ -139,7 +139,7 @@ Walking and cycling edges get a type from OSM sub-tags. The first rule that matc
 | `plaza` / `pedestrian_street` | `highway=pedestrian`, with / without `area=yes` |
 | `shared_street` | `living_street` |
 | `sidewalk` | any other road with a `sidewalk` tag (not `no` / `none` / `separate`): you walk its sidewalk |
-| `shared_road` | `residential`, `service`, `unclassified` |
+| `shared_road` | `residential`, `service`, `unclassified`, `road`, `tertiary`, `secondary`, `primary`, `trunk` (and their `_link`s): walked on the carriageway |
 | `corridor` | `highway=corridor`, or `indoor=yes` |
 | `platform` | `highway=platform` |
 | `path` | `path`, `track`, `bridleway` |
