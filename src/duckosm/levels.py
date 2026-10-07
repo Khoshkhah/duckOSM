@@ -37,14 +37,15 @@ def _union(con):
 
     def optional(m, t):                                  # a column an older file may not have: NULL there
         return ", ".join(f"{c if (m, t, c) in has else 'NULL'} AS {c}" for c in OPTIONAL)
-    parts = [f"SELECT {cols}, {optional(m, 'edges')}, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
-    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
+    parts = [f"SELECT {cols}, {optional(m, 'edges')}, '{m}' AS mode, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
+    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, NULL AS mode, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
     return " UNION ALL ".join(parts)
 
 
 def load_roads(db):
     """The roads of all modes in ``db``: one row per ``edge_id`` (in ``edge_id`` order) with ``highway``, ``layer``, ``bridge``, ``tunnel``,
-    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
+    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), ``modes`` (the modes whose
+    network has it, e.g. ``driving + walking``; None for a private road only), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
     cycling and ``edges`` before ``private_edges``."""
     import duckdb
     import geopandas as gpd
@@ -60,11 +61,13 @@ def load_roads(db):
         df = con.execute(f"""
             SELECT edge_id, first(highway ORDER BY rank) AS highway, first(layer ORDER BY rank) AS layer,
                    first(bridge ORDER BY rank) AS bridge, first(tunnel ORDER BY rank) AS tunnel,
-                   {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
+                   {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, list(DISTINCT mode) FILTER (WHERE mode IS NOT NULL) AS mode_list,
+                   ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
             FROM ({_union(con)}) GROUP BY edge_id ORDER BY edge_id""").df()
     finally:
         con.close()
     band = np.array([_level(ly, br, tn) for ly, br, tn in zip(df["layer"], df["bridge"], df["tunnel"], strict=True)], dtype=int)
+    df["modes"] = [" + ".join(m for m in MODES if m in set(ms if isinstance(ms, (list, np.ndarray)) else [])) or None for ms in df.pop("mode_list")]   # who may use it: the editor shows it; a private road only: None
     geometry = gpd.GeoSeries([wkb.loads(bytes(b)) for b in df.pop("wkb")], crs="EPSG:4326")
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
 
