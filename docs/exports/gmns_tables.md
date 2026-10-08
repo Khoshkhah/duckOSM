@@ -207,7 +207,7 @@ its use, width and turns.
 |---|---|---|---|
 | `lane_id` | VARCHAR | ✅ key | `<link_id>_<lane_num>`, e.g. `8511077704723192952_2` |
 | `link_id` | BIGINT | ✅ | the [`link`](#link) |
-| `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes. An on-road bike lane is the last |
+| `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes. An on-road bike lane on the right (`cycleway:right=lane`) is the last; one on the LEFT of a one-way road (`cycleway:left=lane`) is -1, left of lane 1 (the spec numbers lanes left of the left-most through lane negative), so the motor lanes keep 1..n |
 | `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does, or for an on-road bike lane (see below); the one lane of a bus-only link as its link's, `bus` or `bus,bike` (driving). `walk` / `bike` in the walking / cycling schemas |
 | `width` | DOUBLE | ✅ | metres, from `width:lanes`; else the class default (service 2.5, residential / living street / unclassified 3.0, others 3.25); a bus-only link's lane 3.25; a bike lane 1.5; **empty on a walk lane without a width** |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |

@@ -84,6 +84,27 @@ def test_cycleway_lane_is_an_explicit_bike_lane_beside_the_motor_lanes(tmp_path)
         assert c.execute(f"SELECT count(*) FROM gmns_driving.lane WHERE link_id = {B}").fetchone()[0] == 1, (tags, side)
 
 
+def test_a_left_bike_lane_on_a_one_way_road_is_lane_minus_one(tmp_path):
+    """cycleway:left=lane on a one-way road (2026-10-10, Avenue Princesse Grace): a bike lane LEFT of the motor lanes, GMNS lane -1 (left of the
+    left-most through lane, the spec's negative numbers), so the motor lanes keep 1..n and the movements their numbers."""
+    src = tmp_path / "left.duckdb"
+    _source(src)
+    con = duckdb.connect(str(src))
+    con.execute("UPDATE raw.ways SET tags = MAP{'highway':'residential','oneway':'yes','cycleway:left':'lane'} WHERE osm_id = 101")
+    con.execute("ALTER TABLE driving.edges ADD COLUMN oneway BOOLEAN DEFAULT false")
+    con.execute("UPDATE driving.edges SET oneway = true WHERE osm_id = 101")
+    con.close()
+    to_gmns(str(src), str(tmp_path / "left_gmns.duckdb"))
+    c = duckdb.connect(str(tmp_path / "left_gmns.duckdb"), read_only=True)
+    c.execute("LOAD spatial")
+    lanes = c.execute(f"SELECT lane_num, allowed_uses, width FROM gmns_driving.lane WHERE link_id = {B} ORDER BY lane_num").fetchall()
+    assert [(n, u) for n, u, _ in lanes] == [(-1, "bike"), (1, "auto")] and lanes[0][2] < lanes[1][2]
+    assert c.execute(f"SELECT start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE ob_link_id = {B}").fetchone() == (1, 1)
+    # B heads south: its left is east (x larger)
+    x = dict(c.execute(f"SELECT lane_num, ST_X(ST_StartPoint(geom)) FROM gmns_driving.lane WHERE link_id = {B}").fetchall())
+    assert x[-1] > x[1]
+
+
 def test_path4gmns_loads_the_csv_and_routes_on_it(tmp_path):
     """The README names Path4GMNS: it refused a node.csv without any zone."""
     pg = pytest.importorskip("path4gmns")
