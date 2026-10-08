@@ -297,7 +297,7 @@ duckOSM copied it unchanged. The adjacent roundabout ways `1435532402` and `1435
 | field | value |
 | --- | --- |
 | **Area** | Monaco (`data/sample/monaco.osm.pbf`) |
-| **OSM ways** | `93137596`, `93137569`, `93137578`, `93137560` (Boulevard du Larvotto), `25103774`, `35092477` (Boulevard Louis II), `51691775` (a link), `503462464`, `1238339144` (Avenue Princesse Grace: its `lanes=2` counts the left bike lane), `39838824`, `788120420` (Boulevard Princesse Charlotte) (`highway=primary`, `oneway=yes`, `lanes=2`, `name=Boulevard du Larvotto`) |
+| **OSM ways** | `93137596`, `93137569`, `93137578`, `93137560` (Boulevard du Larvotto), `25103774`, `35092477` (Boulevard Louis II), `51691775` (a link), all 11 ways of Avenue Princesse Grace (its `lanes=2` counts the left bike lane: two lanes in all on Street View), `39838824`, `788120420` (Boulevard Princesse Charlotte) (`highway=primary`, `oneway=yes`, `lanes=2`, `name=Boulevard du Larvotto`) |
 | **Edges** | `93137596#1f`, `93137569#2f` (and the other pieces of the two ways) |
 | **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
 

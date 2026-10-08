@@ -92,6 +92,33 @@ overrides:
   - osm_id: 1238339144       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes, cycleway:left=lane; Street View: one car lane + the bike lane on the left (OSM lanes counts motor lanes only)"
+  - osm_id: 50501897         # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 93137621         # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 182700002        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 182700008        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462466        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462468        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503633031        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 1131276184       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 1238339145       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
   - osm_id: 39838824         # Boulevard Princesse Charlotte, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
