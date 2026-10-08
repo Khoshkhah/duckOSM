@@ -167,3 +167,33 @@ other turn from the `from` edge. Monaco: 38 of the 43 restriction relations map 
 Not used: restrictions through a via way, the `except` tag, and tags like `restriction:hgv` or
 `restriction:conditional`. Any turn not removed is allowed, including a U-turn onto the reverse
 twin of a two-way road.
+
+## Bus routes
+
+Buses have no network of their own: the OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) are matched to the driving edges they travel,
+and stored in schema [`bus`](../reference/database.md#bus-schema) (`bus.routes`, `bus.route_edges`). A build from a PBF with driving does it
+(`options.bus_routes`, on); [`duckosm bus DB`](../reference/cli.md#bus) adds it to a file built before.
+
+A route relation lists its ways in travel order; its stops and platforms are left out. Each way is travelled from the node it shares with the way before
+to the node it shares with the way after, so its direction comes from its neighbours, and on a two-way street that picks the `#nf` or the `#nr` edge.
+The first or last way of a stretch, where only one neighbour is known, is travelled from or to its far end; when it is joined in its middle (or is a
+stretch alone), the role `forward` / `backward` decides, else the way's one-way. A roundabout is followed from where the route enters to where it leaves. The edges come from `driving.edges` and, for bus lanes and
+bus-only roads, `driving.private_edges` with `access = 'bus'`: a bus against a one-way street runs on its contraflow bus lane.
+
+Nothing is left out silently. `bus.routes.outside` counts the member ways outside the area; `bus.routes.gaps` lists every other way the route could not be
+followed on, as `'<way_id> <kind>'`:
+
+| Kind | The way |
+|---|---|
+| `no_connection` | shares no node with the next member way: the route breaks there |
+| `no_edge` | has no driving edge (nor bus lane) in the direction travelled |
+| `private` | is a private road (in `driving.private_edges`, not for buses) |
+| `role_conflict` | has a role (`forward` / `backward`) its neighbours contradict; the neighbours are followed |
+| `ambiguous` | the first or last way of a stretch, two-way, joined in its middle, no role: its direction can't be told |
+| `role` | has a role other than `''`, `forward`, `backward` |
+
+Monaco: 56 bus routes, none with gaps (38 run partly outside the area), 5,609 route edges on 1,034 driving edges, 14 of them bus lanes. The contraflow bus
+lane of Boulevard Charles III (`1449981121#1r`) carries lines 3, 607 and X1.
+
+The [level area](../guides/drawing-order.md) marks these edges: `bus` is in their `modes` and `bus_lines` lists the lines, e.g. `1, 2, 5`.
+

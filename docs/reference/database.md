@@ -11,6 +11,7 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | [`mm`](#mm-schema) | routing across modes | `multimodal`, or `multimodal.enabled` |
 | [`features`](#features-schema) | base-map layers | `options.build_features` |
 | [`visualization`](#visualization-schema) | the drawing order of the roads | `levels` |
+| [`bus`](#bus-schema) | the bus routes on the driving edges | `options.bus_routes`, or `bus` |
 
 ## `<mode>` schema {#mode-schema}
 
@@ -353,3 +354,33 @@ One row: where the numbers came from.
 | `n_edges`, `edge_hash` | the number of edges and a hash of their ids: the numbers belong to these edges only |
 | `roadstyle_version`, `created` | the roadstyle version and when |
 
+## `bus` schema
+
+The OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) as the driving edges they travel, in order and in their direction. No geometry: the
+edges are in `driving.edges` and, for bus lanes and bus-only roads, `driving.private_edges`. Written by a build from a PBF with driving (`options.bus_routes`, on)
+or by [`duckosm bus`](cli.md#bus). How: [Bus routes](../concepts/networks.md#bus-routes).
+
+### `routes`
+
+One row per route relation.
+
+| Column | Type | Description |
+|---|---|---|
+| `osm_id` | BIGINT | the relation |
+| `route` | VARCHAR | `bus`, `trolleybus` or `share_taxi` |
+| `ref`, `name`, `operator`, `from`, `to`, `network` | VARCHAR | the relation's tags |
+| `edges` | INTEGER | rows in `route_edges` |
+| `outside` | INTEGER | member ways not in the file (outside the area) |
+| `gaps` | VARCHAR[] | `'<way_id> <kind>'` for every other way the route could not be followed on; empty: matched fully |
+
+### `route_edges`
+
+One row per route and edge it travels.
+
+| Column | Type | Description |
+|---|---|---|
+| `route_id` | BIGINT | the relation (`routes.osm_id`) |
+| `ref` | VARCHAR | the route's `ref` (its line) |
+| `seq` | INTEGER | 1, 2, … along the route |
+| `edge_id`, `edge_ref` | BIGINT, VARCHAR | the driving edge |
+| `bus_lane` | BOOLEAN | the edge is in `driving.private_edges` (`access = 'bus'`) |

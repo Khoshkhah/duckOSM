@@ -252,6 +252,14 @@ class DuckOSM:
                     progress.update(main_task, description="Building feature layers...")
                     self._build_features()
 
+                # Bus routes (bus.routes, bus.route_edges): each OSM bus route relation as the driving edges it travels.
+                # Needs raw.* and the driving network; options.bus_routes (on).
+                if self.config.options.bus_routes and "driving" in self.config.modes and self.config.source.type == "pbf":
+                    progress.update(main_task, description="Matching bus routes...")
+                    from duckosm.bus import write_bus_routes
+                    routes = write_bus_routes(self.con)
+                    logger.info(f"  Bus routes: {len(routes)}, {int((routes['gaps'].str.len() > 0).sum())} with gaps (bus.routes)")
+
                 # Persist the canonical stable-edge_id macro (callable anywhere as
                 # `edge_id_hash(osm_id, source, target)`, plus the legacy `edge_id_hash_v1`), so
                 # the formula travels with the db and other projects reuse one implementation.
