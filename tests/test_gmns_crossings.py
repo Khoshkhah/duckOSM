@@ -110,7 +110,7 @@ def test_the_nodes_of_a_crossing_way_are_not_crossings_of_their_own(tmp_path):
 def test_a_crossing_over_a_bike_lane_only_is_not_a_zebra(tmp_path):
     c = _build(tmp_path, way=("MAP{'footway':'crossing'}", ACROSS), name="bike")
     assert c.execute("SELECT count(*) FROM gmns_driving.lane_crossing lc JOIN gmns_driving.lane l USING (lane_id) "
-                     "WHERE l.allowed_uses NOT IN ('auto', 'bus')").fetchone()[0] == 0
+                     "WHERE l.allowed_uses NOT IN ('auto', 'bus', 'bus,bike')").fetchone()[0] == 0
 
 
 def test_the_zebra_is_wider_on_a_wider_road_and_a_tagged_width_wins(tmp_path):

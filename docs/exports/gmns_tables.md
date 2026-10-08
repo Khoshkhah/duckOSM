@@ -124,7 +124,8 @@ A name for the uses of a mode, to keep `allowed_uses` lists short.
 A point where links start or end: a junction, a dead end, or a point where a road was cut. This is one of
 the two required tables, with `link`.
 
-A node is made wherever two OSM ways meet or a way ends (as in the source network's `nodes`). A road that
+A node is made wherever two OSM ways meet or a way ends (as in the source network's `nodes`; a bus-only road's own nodes,
+which `nodes` lacks, are its links' end points, with no height). A road that
 loops back on itself is cut in two at its midpoint; that point is a node with a **negative** id, because
 it is not an OSM node.
 
@@ -142,7 +143,11 @@ it is not an OSM node.
 ## link
 
 The routable network: **one row per direction of a road**. A footpath is one link too (two, if it can be
-walked both ways).
+walked both ways). In driving, a direction only buses may use is a link too, of one lane (`allowed_uses` `bus`): a bus lane
+against a one-way street and a bus-only road, the source's `driving.private_edges` with `access = 'bus'`
+([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/bus_only_edges.md)). They are no part of the graph of
+legal turns, so no [`movement`](#movement) leads into or out of them. Monaco: 18 (Boulevard Charles III's bus lane back,
+`1449981121#1r`, is one).
 
 | Column | Type | Spec | Holds |
 |---|---|---|---|
@@ -157,10 +162,10 @@ walked both ways).
 | `facility_type` | VARCHAR | ✅ | the OSM `highway` value as it is: `residential`, `primary_link`, `footway`, … |
 | `capacity` | DOUBLE | ✅ | saturation capacity, passenger cars per hour **per lane**: a default per road class (motorway 2000, trunk 1800, primary 1600, secondary 1400, tertiary 1200, unclassified 1000, residential 800, living_street 300, service 300, anything else 800). Empty on links that cars cannot use, see below |
 | `free_speed` | FLOAT | ✅ | km/h: the `maxspeed` tag, else a default per road class; walking 5, cycling 15 |
-| `lanes` | INTEGER | ✅ | the number of permanent **motor-vehicle** lanes in this direction, from the `lanes` / `lanes:forward` / `lanes:backward` tags, **1 where untagged**. Not the number of rows in `lane`: the standard excludes turn pockets, bike lanes, shoulders and parking lanes. Empty on links that cars cannot use |
+| `lanes` | INTEGER | ✅ | the number of permanent **motor-vehicle** lanes in this direction, from the `lanes` / `lanes:forward` / `lanes:backward` tags, **1 where untagged**; 1 on a bus-only link (a one-way street's `lanes` are its own direction's). Not the number of rows in `lane`: the standard excludes turn pockets, bike lanes, shoulders and parking lanes. Empty on links that cars cannot use |
 | `bike_facility` | VARCHAR | ✅ | from OSM `cycleway`, in the standard's words: `unseparated bike lane`, `separated bike lane`, `shared lane`, `counter-flow bike lane`, `paved shoulder`, `none`, `other` |
 | `ped_facility` | VARCHAR | ✅ | from OSM `sidewalk`: `sidewalk` (either side or both: which side is lost), `offstreet_path` (`separate`), `none`, `unknown` |
-| `allowed_uses` | VARCHAR | ✅ | the mode's use: `auto`, `walk` or `bike` |
+| `allowed_uses` | VARCHAR | ✅ | the mode's use: `auto`, `walk` or `bike`; on a bus-only link `bus`, or `bus,bike` where bikes may use it too (the way has `oneway:bicycle=no`, or `cycleway` / `cycleway:left` / `cycleway:right` = `share_busway`, or the edge is in cycling) |
 | `grade` | DOUBLE | ✅ | percent, negative downhill: `100 × (height at the end − height at the start) / length`, when the source has heights (`duckosm elevation`). Empty on a bridge or in a tunnel (there the height is the ground below or above, not the road) and where the slope would pass 100 %, the spec's limit. A coarse elevation model makes short links noisy: see the [elevation guide](../guides/elevation.md#what-the-heights-mean) |
 | `parent_link_id` | BIGINT | ✅ | for a sidewalk (an OSM way with `footway=sidewalk`) in the walking and cycling schemas, the road link it runs along: the nearest, roughly parallel one within 30 m, and of a two-way road the link the sidewalk is on the kerb side of (its right with right-hand traffic). Empty on roads and on a sidewalk with no road beside it |
 | `parking`, `toll`, `jurisdiction`, `row_width` | | ∅ | empty (parking is in [`curb_seg`](#curb_seg)) |
@@ -203,8 +208,8 @@ its use, width and turns.
 | `lane_id` | VARCHAR | ✅ key | `<link_id>_<lane_num>`, e.g. `8511077704723192952_2` |
 | `link_id` | BIGINT | ✅ | the [`link`](#link) |
 | `lane_num` | BIGINT | ✅ | 1 = the leftmost lane in the direction of travel, up to the number of lanes. An on-road bike lane is the last |
-| `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does, or for an on-road bike lane (see below) (driving). `walk` / `bike` in the walking / cycling schemas |
-| `width` | DOUBLE | ✅ | metres, from `width:lanes`; else the class default (service 2.5, residential / living street / unclassified 3.0, others 3.25); **empty on a bike or walk lane without a width** |
+| `allowed_uses` | VARCHAR | ✅ | `auto`; `bus` where `psv:lanes` / `bus:lanes` says `designated`; `bike` where `bicycle:lanes` does, or for an on-road bike lane (see below); the one lane of a bus-only link as its link's, `bus` or `bus,bike` (driving). `walk` / `bike` in the walking / cycling schemas |
+| `width` | DOUBLE | ✅ | metres, from `width:lanes`; else the class default (service 2.5, residential / living street / unclassified 3.0, others 3.25); a bus-only link's lane 3.25; a bike lane 1.5; **empty on a walk lane without a width** |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
 | `turn` | VARCHAR | ➕ | the lane's `turn:lanes` value (`left`, `through;right`, …), empty where untagged |
 | `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap) |
@@ -215,7 +220,7 @@ on-road bike lane. That is why a link can have `lanes = 2` and three `lane` rows
 **On-road bike lanes.** Where OSM tags `cycleway=lane` (or `cycleway:right=lane` / `:both`) on the right of
 the direction of travel (for the way's reverse direction: `cycleway:left` / `:both`), the link gets one more lane
 row, `allowed_uses = 'bike'`, the *last* lane, to the right of the motor lanes; its `width` is the
-`cycleway:right:width` tag, drawn 1.5 m if untagged. The GMNS FAQ says on-road bike lanes belong in the lane
+`cycleway:right:width` tag, 1.5 m if untagged. The GMNS FAQ says on-road bike lanes belong in the lane
 table. It is not a place to turn into: movements, forks and merges use the motor lanes only, and `link.lanes`
 stays the motor lane count. Not done for left-hand traffic (`--drive-side left`: the lane would be on the left
 and renumber the motor lanes), for separated tracks (they are their own links in the cycling schema) or where
@@ -310,7 +315,7 @@ on one place are one (the longer wins).
 ## lane_crossing
 
 duckOSM's own table (only in `gmns_driving`): **one row per crossing for each driving lane it covers**, so a zebra is painted lane
-by lane and follows a curved lane. Only `auto` and `bus` lanes: a bike lane is no part of a zebra.
+by lane and follows a curved lane. Only `auto` and `bus` (and `bus,bike`) lanes: a bike lane is no part of a zebra.
 
 | Column | Type | Holds |
 |---|---|---|

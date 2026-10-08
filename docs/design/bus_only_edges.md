@@ -5,6 +5,11 @@
 mode the same as private roads"). Monaco: driving `edges` unchanged (2,765, same ids);
 `private_edges` 196 -> 214 (18 bus edges: 8 bus-lane directions, 10 on bus-only service roads).
 
+**GMNS (2026-10-08, approved):** `duckosm gmns` exports them after all: each bus-only edge is a driving
+link of one `bus` lane (`bus,bike` where bikes may use it), 3.25 m wide unless tagged, with no movements
+(they are not in `edge_graph`). A one-way street with a bus lane back is placed like a two-way road: each
+direction's lanes on its own side of the way's line. Monaco: 18 links (docs/exports/gmns_tables.md, `link`).
+
 ## Today
 
 Driving is the car network, and a road or direction only buses may use is left out of it:

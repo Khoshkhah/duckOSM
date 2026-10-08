@@ -68,8 +68,8 @@ def test_all_tables_and_link_id_is_edge_id(tmp_path):
 def test_every_lane_use_is_defined_and_config_has_the_spec_columns(tmp_path):
     con = _gmns(tmp_path)
     q = lambda s: con.execute(s).fetchall()
-    assert not q("SELECT DISTINCT allowed_uses FROM gmns_driving.lane WHERE allowed_uses NOT IN "
-                 "(SELECT use FROM gmns_driving.use_definition)")
+    assert not q("SELECT DISTINCT u FROM (SELECT unnest(string_split(allowed_uses, ',')) AS u FROM gmns_driving.lane) "
+                 "WHERE u NOT IN (SELECT use FROM gmns_driving.use_definition)")     # the spec: a comma-separated set
     assert {"auto", "bus", "bike"} <= {r[0] for r in q("SELECT use FROM gmns_driving.use_definition")}
     cols = [r[0] for r in q("DESCRIBE gmns_driving.config")]
     assert "currency" in cols and q("SELECT version_number FROM gmns_driving.config") == [(0.97,)]
@@ -86,11 +86,12 @@ def test_referential_integrity(tmp_path):
 def test_lane_detail_from_osm_tags(tmp_path):
     con = _gmns(tmp_path)
     lanes = con.execute(
-        f"SELECT lane_num, turn, allowed_uses, geom IS NOT NULL FROM gmns_driving.lane "
+        f"SELECT lane_num, turn, allowed_uses, geom IS NOT NULL, width FROM gmns_driving.lane "
         f"WHERE link_id={A} ORDER BY lane_num").fetchall()
     assert len(lanes) == 2                                       # two-lane link
     assert lanes[0][1] == "through" and lanes[1][1] == "right"   # turn:lanes = through|right
     assert lanes[1][2] == "bike"                                 # bicycle:lanes = no|designated -> lane 2 bike
+    assert lanes[1][4] == 1.5                                    # an untagged bike lane's width is stored: one number for every reader
     assert all(l[3] for l in lanes)                              # offset geometry present
 
 
@@ -916,3 +917,46 @@ def test_a_fork_branch_keeps_only_the_lanes_the_fork_feeds():
     assert con.execute("SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE mvmt_id = '12-14'").fetchone() == (2, 2, 2, 2)
     assert con.execute("SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE mvmt_id = '13-15'").fetchone() == (1, 1, 1, 1)
     assert con.execute("SELECT count(*) FROM gmns_driving.lane WHERE link_id = 16").fetchone()[0] == 2         # fed on both lanes: left alone
+
+
+def test_bus_only_edges_are_one_lane_links(tmp_path):
+    """docs/design/bus_only_edges.md: the bus-only edges of driving.private_edges are GMNS links of one lane. Boulevard Charles III
+    (Monaco, way 1449981121): a one-way secondary, lanes=2, with a bus lane back (oneway:bus=no) shared with bikes
+    (cycleway:left=share_busway): its forward link keeps 2 auto lanes, the reverse is one 'bus,bike' lane of 3.25 m on its own side.
+    A bus-only road (no bikes) is one 'bus' lane, its node added though driving.nodes lacks it; neither gets a movement."""
+    F, R, S = 778772381524539079, 458517452137650958, 77
+    src, out = tmp_path / "src.duckdb", tmp_path / "out_gmns.duckdb"
+    con = duckdb.connect(str(src))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("""INSERT INTO raw.ways VALUES (200, MAP{'highway':'secondary','oneway':'yes','lanes':'2','oneway:bus':'no',
+        'oneway:bicycle':'no','cycleway:left':'share_busway','sidewalk':'left'}, [1,2]),
+        (201, MAP{'highway':'service','access':'no','bus':'designated'}, [2,3])""")
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')})")   # 3 is on the bus road only
+    cols = ("edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR, name VARCHAR, lanes INTEGER, oneway BOOLEAN, "
+            "access VARCHAR, is_reverse BOOLEAN, length_m FLOAT, maxspeed_kmh FLOAT, geometry GEOMETRY")
+    con.execute(f"CREATE TABLE driving.edges({cols})")
+    con.execute(f"CREATE TABLE driving.private_edges({cols})")
+    con.execute(f"INSERT INTO driving.edges VALUES ({F},1,2,200,'secondary','Charles III',2,true,NULL,false,570,50,"
+                f"{p('LINESTRING(18.06 59.32,18.07 59.32)')})")
+    con.execute(f"""INSERT INTO driving.private_edges VALUES
+        ({R},2,1,200,'secondary','Charles III',2,true,'bus',true,570,50,{p('LINESTRING(18.07 59.32,18.06 59.32)')}),
+        ({S},2,3,201,'service',NULL,1,false,'bus',false,1110,30,{p('LINESTRING(18.07 59.32,18.07 59.31)')}),
+        (78,1,2,202,'service',NULL,1,false,'private',false,570,30,{p('LINESTRING(18.06 59.32,18.07 59.32)')})""")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    con.close()
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial;")
+    q = lambda s: con.execute(s).fetchall()
+    assert q("SELECT link_id, lanes, allowed_uses FROM gmns_driving.link ORDER BY link_id") == [
+        (S, 1, "bus"), (R, 1, "bus,bike"), (F, 2, "auto")]                     # the way's lanes=2 is the forward's; no private road
+    assert q("SELECT link_id, lane_num, allowed_uses, width, geom IS NOT NULL FROM gmns_driving.lane ORDER BY link_id, lane_num") == [
+        (S, 1, "bus", 3.25, True), (R, 1, "bus,bike", 3.25, True), (F, 1, "auto", 3.25, True), (F, 2, "auto", 3.25, True)]
+    north = dict(q("SELECT lane_id, ST_Y(ST_Centroid(geom)) > 59.32 FROM gmns_driving.lane WHERE link_id IN (" + f"{F}, {R})"))
+    assert north == {f"{R}_1": True, f"{F}_1": False, f"{F}_2": False}      # the bus lane on its own side: left of the eastbound lanes
+    assert q("SELECT node_id FROM gmns_driving.node ORDER BY node_id") == [(1,), (2,), (3,)]
+    assert q("SELECT count(*) FROM gmns_driving.movement") == [(0,)]          # not in edge_graph: no turns made up

@@ -112,6 +112,31 @@ def _exists(con, src, schema, table):
         "AND table_name = ?", [src, schema, table]).fetchone()[0] > 0
 
 
+def _edge_view(con, mode, has_raw):
+    """``_edges`` (a temp view): the links of the mode's GMNS network, ``_edges_car`` (the mode's edges) then ``_edges_bus`` (in
+    driving, the bus-only edges of ``private_edges``; else none). Where the row order matters (the lane runs) the two are read one
+    after the other: a union reads them in another order. Bus-only edges: ``private_edges``
+    (``access = 'bus'``: a bus lane against a one-way street, a bus-only road), never routed in duckOSM but lanes on the road
+    (docs/design/bus_only_edges.md). ``_bus`` marks them, ``_bike`` says bikes may use one too: the way has ``oneway:bicycle=no``
+    or a ``cycleway`` / ``cycleway:left`` / ``cycleway:right`` of ``share_busway``, or the edge is in ``cycling.edges``."""
+    con.execute(f"CREATE OR REPLACE TEMP VIEW _edges_car AS SELECT *, false AS _bus, NULL::BOOLEAN AS _bike FROM s.{mode}.edges")
+    con.execute("CREATE OR REPLACE TEMP VIEW _edges AS SELECT * FROM _edges_car")
+    con.execute("CREATE OR REPLACE TEMP VIEW _edges_bus AS SELECT * FROM _edges_car WHERE false")
+    if mode != "driving" or not _exists(con, "s", "driving", "private_edges"):
+        return
+    bike = []
+    if has_raw:
+        bike.append("w.tags['oneway:bicycle'] = 'no' OR 'share_busway' IN "
+                    "(w.tags['cycleway'], w.tags['cycleway:left'], w.tags['cycleway:right'])")
+    if _exists(con, "s", "cycling", "edges"):
+        bike.append("p.edge_id IN (SELECT edge_id FROM s.cycling.edges)")
+    raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = abs(p.osm_id)" if has_raw else ""
+    con.execute(f"""CREATE OR REPLACE TEMP VIEW _edges_bus AS
+      SELECT p.*, true AS _bus, COALESCE({' OR '.join(bike) or 'false'}, false) AS _bike
+      FROM s.driving.private_edges p {raw_join} WHERE p.access = 'bus'""")
+    con.execute("CREATE OR REPLACE TEMP VIEW _edges AS SELECT * FROM _edges_car UNION ALL BY NAME SELECT * FROM _edges_bus")
+
+
 def _split(s):
     return s.split("|") if s else []
 
@@ -494,6 +519,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         uses = _MODE_USES.get(mode, mode)
         con.execute(f"CREATE SCHEMA {sch}")
         _build_fixed(con, sch, name, mode, uses)
+        _edge_view(con, mode, has_raw)
         _build_node(con, sch, mode)
         _infer_lanes(con, mode, has_raw)
         _build_link(con, sch, mode, uses, has_raw)
@@ -666,6 +692,14 @@ def _build_node(con, sch, mode):
       1::BIGINT AS zone_id, NULL::BIGINT AS parent_node_id, n.geom      -- every node is in the one zone
     FROM s.{mode}.nodes n LEFT JOIN _sig sig ON sig.osm_id = n.node_id
     WHERE n.geom IS NOT NULL""")
+    # a bus-only road's own nodes are not in the mode's nodes (only the routable roads' are): its edges' ends, no height
+    con.execute(f"""INSERT INTO {sch}.node BY NAME
+      SELECT node_id, any_value(ST_X(p)) AS x_coord, any_value(ST_Y(p)) AS y_coord, 1::BIGINT AS zone_id, any_value(p) AS geom,
+             CASE WHEN bool_or(sig.osm_id IS NOT NULL) THEN 'signal' END AS ctrl_type
+      FROM (SELECT source AS node_id, ST_StartPoint(geometry) AS p FROM _edges_bus
+            UNION ALL SELECT target, ST_EndPoint(geometry) FROM _edges_bus) e
+      LEFT JOIN _sig sig ON sig.osm_id = e.node_id
+      WHERE node_id NOT IN (SELECT node_id FROM {sch}.node) GROUP BY node_id""")
 
 
 def _build_link(con, sch, mode, uses, has_raw):
@@ -690,7 +724,7 @@ def _build_link(con, sch, mode, uses, has_raw):
              f"THEN 100.0 * (e.z_to - e.z_from) / {glen} END")
     hw = "regexp_replace(split_part(e.highway, ';', 1), '_link$', '')"
     motor = "true" if mode == "driving" else f"{hw} NOT IN ({', '.join(repr(h) for h in _NON_MOTOR)})"
-    con.execute(f"""CREATE TABLE {sch}.link AS SELECT
+    sel = f"""SELECT
       e.edge_id AS link_id, e.name AS name, e.source AS from_node_id, e.target AS to_node_id,
       true AS directed, e.edge_id AS geometry_id, ST_AsText(e.geometry) AS geometry,
       NULL::BIGINT AS parent_link_id, 1 AS dir_flag,
@@ -698,11 +732,13 @@ def _build_link(con, sch, mode, uses, has_raw):
       {grade}::DOUBLE AS grade,
       e.highway AS facility_type,
       CASE WHEN {motor} THEN {_capacity_case(hw)}::DOUBLE END AS capacity,
-      e.maxspeed_kmh AS free_speed, CASE WHEN {motor} THEN COALESCE(li.lanes, e.lanes) END AS lanes,
+      e.maxspeed_kmh AS free_speed, CASE WHEN e._bus THEN 1 WHEN {motor} THEN COALESCE(li.lanes, e.lanes) END AS lanes,   -- a bus-only edge is one lane
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
-      '{uses}' AS allowed_uses, NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction,
-      NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, e.geometry AS geom
-    FROM s.{mode}.edges e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""")
+      CASE WHEN e._bike THEN 'bus,bike' WHEN e._bus THEN 'bus' ELSE '{uses}' END AS allowed_uses,
+      NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction, NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, e.geometry AS geom
+    FROM {{}} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id"""
+    con.execute(f"CREATE TABLE {sch}.link AS {sel.format('_edges_car')}")
+    con.execute(f"INSERT INTO {sch}.link BY NAME {sel.format('_edges_bus')}")
 
 
 def _sidewalk_parents(con, sch, has_raw, drive_side, max_gap_m=30.0, max_turn_deg=30.0, adjacent_m=5.0):
@@ -938,7 +974,7 @@ def _walk_kerb(con, sch, clearance_m=0.0):
     kids = con.execute(f"""SELECT l.lane_id, ST_AsText(l.geom), l.width FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
                            WHERE k.footway = 'sidewalk' AND l.geom IS NOT NULL AND l.allowed_uses = 'walk'""").fetchall()
     roads = con.execute(f"""SELECT ST_AsText(geom), COALESCE(width, {_DEFAULT_LANE_W}) FROM gmns_driving.lane
-                            WHERE geom IS NOT NULL AND allowed_uses IN ('auto', 'bus')""").fetchall()
+                            WHERE geom IS NOT NULL AND allowed_uses IN ('auto', 'bus', 'bus,bike')""").fetchall()
     if not kids or not roads:
         return
     x0, y0 = _w.loads(roads[0][0]).coords[0]
@@ -1048,7 +1084,8 @@ def _walk_join(con, sch):
 def _build_geometry(con, sch, mode):
     con.execute(f"""CREATE TABLE {sch}.geometry AS SELECT
       edge_id AS geometry_id, ST_AsText(geometry) AS geometry, geometry AS geom
-    FROM s.{mode}.edges""")
+    FROM _edges_car""")
+    con.execute(f"INSERT INTO {sch}.geometry SELECT edge_id, ST_AsText(geometry), geometry FROM _edges_bus")
 
 
 def _build_movement(con, sch, mode, uses, drive_side="right"):
@@ -1763,7 +1800,7 @@ def _build_location(con, sch, mode, has_raw, create_empty=False):
     struct = [f"COALESCE(e.{c}, 'no') NOT IN ('no', '')" for c in ("tunnel", "bridge") if c in ecols]
     zskip = " OR ".join(struct) if elev and struct else "false"
     need = ", ".join(["edge_id"] + [c for c in ("z_from", "z_to", "tunnel", "bridge") if c in ecols])
-    ej = f"LEFT JOIN (SELECT {need} FROM s.{mode}.edges) e ON e.edge_id = pos.link_id" if elev else ""
+    ej = f"LEFT JOIN (SELECT {need} FROM _edges) e ON e.edge_id = pos.link_id" if elev else ""
     con.execute(f"""CREATE TABLE {sch}.location AS
       WITH pts AS (
         SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p, n.tags['name'] AS name,
@@ -1862,7 +1899,7 @@ def _apply_signs(con, sch, mode, has_raw, max_before_m=50.0):
     con.execute(f"""CREATE OR REPLACE TEMP TABLE _sign AS
       SELECT x.link_id AS ib, bool_or(x.loc_type = 'stop') AS stop
       FROM {sch}.location x JOIN {sch}.link k ON k.link_id = x.link_id
-        JOIN s.raw.nodes n ON n.osm_id = x.osm_id JOIN s.{mode}.edges e ON e.edge_id = x.link_id
+        JOIN s.raw.nodes n ON n.osm_id = x.osm_id JOIN _edges e ON e.edge_id = x.link_id
       WHERE x.loc_type IN ('stop', 'give_way') AND x.lr >= k.length - {max_before_m} AND x.lr < k.length - 0.5
         AND ((n.tags['direction'] IN ('forward', 'both') AND NOT e.is_reverse)
           OR (n.tags['direction'] IN ('backward', 'both') AND e.is_reverse))
@@ -1934,10 +1971,13 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         "SELECT count(*) FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges' AND column_name = 'oneway'", [mode]).fetchone()[0] > 0
     oneway_sel = "e.oneway" if has_oneway else "false"      # older/synthetic edges: treat as two-way
-    rows = con.execute(f"""SELECT e.edge_id, e.is_reverse, COALESCE(li.lanes, e.lanes), e.length_m, e.source,
-      {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name
-      FROM s.{mode}.edges e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""").fetchall()
+    rows = [r for src in ("_edges_car", "_edges_bus") for r in con.execute(f"""SELECT e.edge_id, e.is_reverse, COALESCE(li.lanes, e.lanes),
+      e.length_m, e.source, {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name, e._bus, e._bike
+      FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""").fetchall()]
     side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
+    bus_of = {r[0]: ("bus,bike" if r[12] else "bus") for r in rows if r[11]}   # a bus-only edge: one bus lane, 3.25 m unless tagged
+    # a one-way street with a bus lane the other way is two-way on the road: each direction's lanes on its own side of the line
+    contra = {r[9] for r in rows if r[11] and r[5]} & {r[9] for r in rows if not r[11]}
 
     def pick(tags, base, is_rev):
         # OSM: unsuffixed *:lanes is the way's forward direction; :backward is the reverse edge
@@ -1963,9 +2003,11 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         its two links are not two sides of a road): centred on its line like a one-way road, never paired."""
         return mode == "walking" and tags.get("highway") in _NON_MOTOR
 
-    def lane_widths(tags, lanes, is_rev):
+    def lane_widths(tags, lanes, is_rev, bus=False):
         turns = _split(pick(tags, "turn:lanes", is_rev))
         widths = _split(pick(tags, "width:lanes", is_rev))
+        if bus:
+            return turns[:1], widths, [(_num(widths[0]) if widths else None) or _DEFAULT_LANE_W]
         # one lane per `turn:lanes` entry, and never fewer than `lanes`: an OSM way tagged lanes=3 with only two
         # turn entries has a third lane that the arrows say nothing about (a pocket can add lanes, never remove)
         n = max(len(turns), int(lanes or 1), 1)
@@ -1989,9 +2031,10 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         return h(pts[0], pts[1]), h(pts[-2], pts[-1])
 
     info, w_of, place_of = {}, {}, {}
-    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, name in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, name, *_ in rows:
         tags = tags or {}
-        w_each = lane_widths(tags, lanes, is_rev)[2]
+        oneway = oneway and osm_id not in contra
+        w_each = lane_widths(tags, lanes, is_rev, edge_id in bus_of)[2]
         w_of[edge_id] = w_each
         place_of[edge_id] = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or is_foot(tags) or side_sign < 0) else None
         h0, h1 = headings(wkt) if wkt else (0.0, 0.0)
@@ -2058,19 +2101,21 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         con.unregister("_runs_df")
 
     lane_rows, curb_rows, extra_lanes = [], [], []
-    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name, *_ in rows:
         tags = tags or {}
-        turns, widths, w_each = lane_widths(tags, lanes, is_rev)
+        turns, widths, w_each = lane_widths(tags, lanes, is_rev, edge_id in bus_of)
         bikes = _split(pick(tags, "bicycle:lanes", is_rev))
         psvs = _split(pick(tags, "psv:lanes", is_rev))
         buses = _split(pick(tags, "bus:lanes", is_rev))     # bus lanes are tagged either way
         n = len(w_each)
-        extra = bike_extra(tags, is_rev)                     # the last lane, beside the motor lanes
+        extra = None if edge_id in bus_of else bike_extra(tags, is_rev)   # the last lane, beside the motor lanes
         offs = offsets(edge_id)
         run = 0.0
         for i in range(n):
             u = uses
-            if extra and i == n - 1:
+            if edge_id in bus_of:
+                u = bus_of[edge_id]
+            elif extra and i == n - 1:
                 u = "bike"
                 extra_lanes.append((edge_id, i + 1))
             elif i < len(bikes) and bikes[i] in ("designated", "yes"):
@@ -2079,7 +2124,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                     (i < len(buses) and buses[i] in ("designated", "yes")):
                 u = "bus"
             width = extra[1] if extra and i == n - 1 else (_num(widths[i]) if i < len(widths) else None)
-            if width is None and u not in ("bike", "walk"):
+            if width is None and u == "bike":
+                width = _DEFAULT_BIKE_W                      # stored, so every reader draws the same width
+            elif width is None and u != "walk":
                 width = w_each[i]                            # the class default, so every reader draws the same width
             turn = turns[i] if i < len(turns) and turns[i] not in ("", "none") else None
             run += w_each[i]

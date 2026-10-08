@@ -6,7 +6,7 @@ zebra, so a reader paints the stripes lane by lane and they stay continuous from
 """
 import math
 
-_ROAD_USES = ("auto", "bus")                       # a zebra is painted on driving lanes; a bike lane is no part of it
+_ROAD_USES = ("auto", "bus", "bus,bike")                     # a zebra is painted on driving lanes; a bike lane is no part of it
 _DEFAULT_LANE_W = 3.25
 _ZEBRA_W_PER_ROAD_W = 0.4                           # the zebra's width, from the width of the road it crosses ...
 _ZEBRA_W_MIN, _ZEBRA_W_MAX = 2.5, 4.0               # ... between these, metres (an OSM `width` tag wins)
