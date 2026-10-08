@@ -617,6 +617,15 @@ def test_lane_connector_joins_lane_ends(tmp_path):
     assert gap < 1e-6
 
 
+def test_a_lane_keeps_its_full_line_before_the_cut(tmp_path):
+    """geom_full: each lane's line to its nodes, before it is cut back for the connectors (a reader drawing the lanes without connectors
+    takes it, 2026-10-10): never shorter than geom, and longer where the lane ends inside a junction (A's lane 2, cut for its right turn)."""
+    con = _gmns(tmp_path)
+    shorter = con.execute("SELECT count(*) FROM gmns_driving.lane WHERE ST_Length(geom_full) < ST_Length(geom) - 1e-9").fetchone()[0]
+    full, cut = con.execute(f"SELECT ST_Length(geom_full), ST_Length(geom) FROM gmns_driving.lane WHERE lane_id = '{A}_2'").fetchone()
+    assert shorter == 0 and full > cut
+
+
 def test_one_way_into_two_way_gets_an_s_curve(tmp_path):
     """A one-way lane (centred) going on into a two-way road (lanes 1.625 m to the side): no jump at
     the node; both lanes stop short and a connector shifts across (Avenue de la Costa)."""

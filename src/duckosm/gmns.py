@@ -1670,6 +1670,10 @@ def _build_lane_connectors(con, sch, gap_ok=0.25, max_trim=0.4, junction_pad=0.5
                         f"FROM {sch}.lane WHERE geom IS NOT NULL").fetchall()
     con.execute(f"""CREATE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR,
                       to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY)""")
+    # each lane's full line, to its nodes, before it is cut back for the connectors below: a reader drawing the lanes without
+    # connectors (lanestyle, connectors off) takes it, so a junction shows no gap where a connector would be (2026-10-10)
+    con.execute(f"ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_full GEOMETRY")
+    con.execute(f"UPDATE {sch}.lane SET geom_full = geom")
     if not lanes:
         return
     x0, y0 = _w.loads(lanes[0][4]).coords[0]

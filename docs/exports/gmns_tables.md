@@ -212,7 +212,8 @@ its use, width and turns.
 | `width` | DOUBLE | ✅ | metres, from `width:lanes`; else the class default (service 2.5, residential / living street / unclassified 3.0, others 3.25); a bus-only link's lane 3.25; a bike lane 1.5; **empty on a walk lane without a width** |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
 | `turn` | VARCHAR | ➕ | the lane's `turn:lanes` value (`left`, `through;right`, …), empty where untagged |
-| `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap) |
+| `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap). Cut back where it ends inside a junction, for the `lane_connector`s |
+| `geom_full` | GEOMETRY | ➕ | the same line to its nodes, before that cut (for drawing the lanes without connectors) |
 
 How many rows: the lane count, plus a lane for each extra entry of `turn:lanes` (a turn pocket), plus one for an
 on-road bike lane. That is why a link can have `lanes = 2` and three `lane` rows.
