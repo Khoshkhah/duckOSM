@@ -37,14 +37,18 @@ def _union(con):
 
     def optional(m, t):                                  # a column an older file may not have: NULL there
         return ", ".join(f"{c if (m, t, c) in has else 'NULL'} AS {c}" for c in OPTIONAL)
-    parts = [f"SELECT {cols}, {optional(m, 'edges')}, '{m}' AS mode, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
-    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, NULL AS mode, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
+    def ow(m, t):                                        # one-way as the mode's own network says (the driving one decides the arrows)
+        return "oneway" if (m, t, "oneway") in has else "NULL"
+    parts = [f"SELECT {cols}, {optional(m, 'edges')}, {ow(m, 'edges')} AS oneway, '{m}' AS mode, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
+    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, {ow(m, 'private_edges')} AS oneway, NULL AS mode, {len(MODES) + i} AS rank FROM {m}.private_edges"
+              for i, m in enumerate(modes) if m in private]
     return " UNION ALL ".join(parts)
 
 
 def load_roads(db):
     """The roads of all modes in ``db``: one row per ``edge_id`` (in ``edge_id`` order) with ``highway``, ``layer``, ``bridge``, ``tunnel``,
-    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), ``modes`` (the modes whose
+    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), ``driving`` / ``cycling`` (in that mode's network, private edges not), ``oneway``
+    (the DRIVING network's: roadstyle's arrows are cars' one-ways only; NULL off it), ``modes`` (the modes whose
     network has it, e.g. ``driving + walking``; None for a private road only), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
     cycling and ``edges`` before ``private_edges``."""
     import duckdb
@@ -62,6 +66,8 @@ def load_roads(db):
             SELECT edge_id, first(highway ORDER BY rank) AS highway, first(layer ORDER BY rank) AS layer,
                    first(bridge ORDER BY rank) AS bridge, first(tunnel ORDER BY rank) AS tunnel,
                    {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, list(DISTINCT mode) FILTER (WHERE mode IS NOT NULL) AS mode_list,
+                   coalesce(bool_or(mode = 'driving'), false) AS driving, coalesce(bool_or(mode = 'cycling'), false) AS cycling,
+                   bool_or(oneway) FILTER (WHERE mode = 'driving') AS oneway,
                    ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
             FROM ({_union(con)}) GROUP BY edge_id ORDER BY edge_id""").df()
     finally:
