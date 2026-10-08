@@ -50,6 +50,8 @@ holds every option.
   bus-only roads (`access = 'bus'`). The columns of `edges` without
   the H3 ones; drawn
   on maps, never routed. They are not in `edges` or `edge_graph`.
+- `bus.routes` (one row per OSM bus route relation, with its `gaps`) and `bus.route_edges(route_id, ref, seq, edge_id, edge_ref, bus_lane)`:
+  the driving edges each bus route travels, in order and direction (`duckosm bus DB` adds them to an older file).
 - `raw.nodes` / `raw.ways` / `raw.relations`: every OSM element with all its `tags` (a MAP), for
   anything that isn't a road.
 - `features.*`: base-map layers (buildings, water, land, pois, …). `mm.*`: across modes, after

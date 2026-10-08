@@ -97,3 +97,18 @@ def test_levels_command_errors_say_what_is_wrong(tmp_path):
     duckdb.connect(str(db)).close()
     r = CliRunner().invoke(main, ["levels", str(db)])
     assert r.exit_code != 0 and "no <mode>.edges table" in r.output
+
+
+def test_bus_routes_in_the_build_and_the_level_roads(monaco):
+    """The build matches the bus route relations (bus.routes, bus.route_edges); the level roads get "bus" in modes and the lines in bus_lines.
+    Boulevard Charles III (way 1449981121): #1f is the cars' one-way, #1r its contraflow bus lane."""
+    con = duckdb.connect(str(monaco), read_only=True)
+    assert con.execute("SELECT count(*) FROM bus.routes").fetchone()[0] > 0
+    assert con.execute("SELECT count(*) FROM bus.route_edges WHERE bus_lane").fetchone()[0] > 0
+    from duckosm.levels import load_roads
+    roads = load_roads(monaco).set_index("edge_ref")
+    lane = roads.loc["1449981121#1r"]
+    assert "bus" in lane["modes"].split(" + ") and "driving" not in lane["modes"].split(" + ")
+    assert lane["bus_lines"] == ", ".join(sorted(set(lane["bus_lines"].split(", ")), key=lambda r: (not r.isdigit(), int(r) if r.isdigit() else 0, r)))
+    assert roads.loc["1449981121#1f", "modes"].startswith("driving") and "bus" in roads.loc["1449981121#1f", "modes"]
+    assert roads["bus_lines"].isna().sum() > 0                                   # most roads have no bus
