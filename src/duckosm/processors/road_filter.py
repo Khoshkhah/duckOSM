@@ -208,12 +208,17 @@ class RoadFilter(BaseProcessor):
                 -- direction at its peak, so it's added to both directions' capacity — e.g.
                 -- Lions Gate Bridge (lanes=3, forward=1, backward=1, reversible=1) -> 2 each way.
                 -- COALESCE(n_rev, 0) is a no-op for the vast majority of roads (no reversible tag).
+                -- A one-way way with a bus lane the other way (bus_contra): OSM's `lanes` counts every motor lane, that bus
+                -- lane too, so the one-way direction has `lanes` minus the other way's (lanes:backward, else 1) (2026-10-10:
+                -- Boulevard des Moulins, lanes=2 = one car lane + the contraflow bus lane, was drawn 2 car lanes + the bus lane).
                 CASE
                     -- one-way against the drawing: its lanes are the backward ones (refs reversed below)
-                    WHEN dir = -1 THEN COALESCE(n_bwd, n_total, CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
+                    WHEN dir = -1 THEN COALESCE(n_bwd, GREATEST(n_total - CASE WHEN bus_contra THEN COALESCE(n_fwd, 1) ELSE 0 END, 1),
+                                                CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
                     WHEN n_fwd IS NOT NULL THEN n_fwd
                     WHEN dir <> 0
-                        THEN COALESCE(n_total, CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
+                        THEN COALESCE(GREATEST(n_total - CASE WHEN bus_contra THEN COALESCE(n_bwd, 1) ELSE 0 END, 1),
+                                      CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
                     WHEN n_total IS NOT NULL AND n_bwd IS NOT NULL THEN GREATEST(n_total - n_bwd, 1)
                     WHEN n_total IS NOT NULL THEN GREATEST(CAST(CEIL(n_total / 2.0) AS INTEGER), 1)
                     ELSE CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END

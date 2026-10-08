@@ -133,3 +133,23 @@ def test_bus_lane_against_a_one_way_street():
     assert bus_back("driving", {"highway": "tertiary", "oneway:bus": "no"}) is False    # two-way anyway
     assert bus_back("cycling", {**one, "oneway:bus": "no"}) is False
 
+
+
+def test_a_contraflow_bus_lane_counts_in_lanes():
+    """OSM's lanes counts the bus lane too: a one-way way with lanes=2 and a bus lane the other way has ONE lane its way (2026-10-10,
+    Boulevard des Moulins); lanes:forward / lanes:backward, when tagged, say it themselves."""
+    def fwd(tags):
+        con = duckdb.connect()
+        con.execute("CREATE SCHEMA raw")
+        con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+        kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
+        con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2])")
+        RoadFilter(con, mode="driving")._create_ways_table()
+        return con.execute("SELECT lanes_fwd FROM ways").fetchone()[0]
+    one = {"highway": "tertiary", "oneway": "yes", "lanes": "2"}
+    assert fwd({**one, "oneway:bus": "no"}) == 1
+    assert fwd(one) == 2                                                  # no bus lane: as before
+    assert fwd({**one, "lanes": "3", "oneway:bus": "no", "lanes:backward": "1"}) == 2
+    assert fwd({**one, "oneway:bus": "no", "lanes:forward": "2"}) == 2   # tagged: as tagged
+    assert fwd({**one, "lanes": "1", "oneway:bus": "no"}) == 1           # never below one
+
