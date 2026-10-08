@@ -3,7 +3,6 @@ site_description: OpenStreetMap to a routable road network in one DuckDB file, w
 site_url: https://khoshkhah.github.io/duckOSM/
 repo_url: https://github.com/Khoshkhah/duckOSM
 repo_name: Khoshkhah/duckOSM
-edit_uri: edit/main/docs/
 
 theme:
   name: material
@@ -30,7 +29,6 @@ theme:
     - navigation.footer
     - search.suggest
     - content.code.copy
-    - content.action.edit
 
 extra_css:
   - assets/extra.css
