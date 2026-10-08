@@ -290,3 +290,22 @@ duckOSM copied it unchanged. The adjacent roundabout ways `1435532402` and `1435
 `lanes=1`, and Street View shows a single lane.
 
 **Fix.** `lanes: 1` in `osm_overrides.yaml`; upstream, set `lanes=1` on the way in OpenStreetMap.
+
+
+## 10. Monaco, Boulevard du Larvotto - `lanes=2` on two one-lane one-way ways
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco (`data/sample/monaco.osm.pbf`) |
+| **OSM ways** | `93137596`, `93137569` (`highway=primary`, `oneway=yes`, `lanes=2`, `name=Boulevard du Larvotto`) |
+| **Edges** | `93137596#1f`, `93137569#2f` (and the other pieces of the two ways) |
+| **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
+
+**Symptom.** The lane map draws two lanes where the street has one.
+
+**Root cause (verified).** Both ways carry `lanes=2` in OpenStreetMap; duckOSM copied it unchanged. Street View shows one
+lane. The sidewalks are separate `footway=sidewalk` lines (e.g. `1342546102`, about 3.3 m from the road line), so they
+are not counted in `lanes`.
+
+**Fix.** `lanes: 1` for both in `osm_overrides.yaml`; upstream, set `lanes=1` on the two ways in OpenStreetMap.
+
