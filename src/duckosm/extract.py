@@ -34,7 +34,7 @@ from duckosm.edge_id import create_edge_id_macro
 # Per-mode tables and how each is filtered to the kept edges.
 MODE_TABLES = {
     "nodes":             "node_id IN (SELECT source FROM {sch}.edges UNION SELECT target FROM {sch}.edges)",
-    "edge_graph":        "from_edge IN (SELECT edge_id FROM {sch}.edges) AND to_edge IN (SELECT edge_id FROM {sch}.edges)",
+    "edge_graph":        "from_edge IN ({live}) AND to_edge IN ({live})",      # + the bus rows' bus-only edges
     "turn_restrictions": "from_edge_id IN (SELECT edge_id FROM {sch}.edges) AND to_edge_id IN (SELECT edge_id FROM {sch}.edges)",
     "ways":              "osm_id IN (SELECT DISTINCT osm_id FROM {sch}.edges)",
     "way_nodes":         "way_id IN (SELECT DISTINCT osm_id FROM {sch}.edges)",
@@ -132,11 +132,13 @@ def main(argv=None) -> int:
                 f"CREATE OR REPLACE TABLE {sch}.private_edges AS "
                 f"SELECT * FROM src.{sch}.private_edges "
                 f"WHERE {bbox} AND ST_Intersects(geometry, (SELECT geom FROM _clip))")
+        live = f"SELECT edge_id FROM {sch}.edges" + (
+            f" UNION ALL SELECT edge_id FROM {sch}.private_edges" if "private_edges" in present[sch] else "")
         for tbl, pred in MODE_TABLES.items():
             if tbl in present[sch]:
                 out.execute(
                     f"CREATE OR REPLACE TABLE {sch}.{tbl} AS "
-                    f"SELECT * FROM src.{sch}.{tbl} WHERE {pred.format(sch=sch)}")
+                    f"SELECT * FROM src.{sch}.{tbl} WHERE {pred.format(sch=sch, live=live)}")
         summary.append((sch, n_edges))
 
     # main schema: boundary, intersecting admin_boundaries, fresh viz metadata

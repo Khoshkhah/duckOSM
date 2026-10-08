@@ -223,6 +223,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         logger.warning(f"{graph_tbl} absent — letting netconvert INFER connections "
                        f"(turn restrictions NOT enforced)")
     if use_conns:
+        from duckosm.processors.edge_graph import routed_graph
+        graph_tbl = routed_graph(con, mode)              # the cars' turns, not the bus rows
         cs = con.execute(f"SELECT from_edge, to_edge FROM {graph_tbl}").fetchall()
         # an edge with no legal successor gets a from-only connection ("no connections"), or
         # netconvert would invent its own there (it once brought back a banned left turn)

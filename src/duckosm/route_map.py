@@ -66,6 +66,8 @@ def _planner_data(db, roads):
     Node ids become small integers (some pass 2**53). Copied from mapstyle's demo planner."""
     import duckdb
 
+    from duckosm.processors.edge_graph import routed_graph
+
     con = duckdb.connect(str(db), read_only=True)
     try:
         con.execute("INSTALL spatial; LOAD spatial;")
@@ -98,7 +100,7 @@ def _planner_data(db, roads):
         for m in modes:                                        # edge-based graph of legal turns
             es = con.execute(f"SELECT edge_id, cost_s, length_m FROM {m}.edges ORDER BY edge_id").fetchall()
             nxt = {}
-            for f, t in con.execute(f"SELECT from_edge, to_edge FROM {m}.edge_graph").fetchall():
+            for f, t in con.execute(f"SELECT from_edge, to_edge FROM {routed_graph(con, m)}").fetchall():
                 if f in k_of and t in k_of:
                     nxt.setdefault(k_of[f], []).append(k_of[t])
             data["graphs"][m] = {"k": [k_of[e] for e, _, _ in es],

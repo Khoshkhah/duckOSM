@@ -184,7 +184,7 @@ class DuckOSM:
                     steps.append(("extract_restrictions", f"[{mode}] Extracting turn restrictions", self._extract_restrictions))
 
             if self.config.options.build_graph:
-                steps.append(("build_edge_graph", f"[{mode}] Building edge graph", self._build_edge_graph))
+                steps.append(("build_edge_graph", f"[{mode}] Building edge graph", lambda: self._build_edge_graph(mode)))
                 # Drop boundary-crossing stubs / fragments right after the graph is built (A3).
                 if do_components:
                     steps.append(("component_filter", f"[{mode}] Component clean-up",
@@ -696,12 +696,12 @@ class DuckOSM:
         logger.info(f"  Found {self.stats['restriction_count']:,} restrictions in "
                    f"{self.stats['restriction_time']:.2f}s")
     
-    def _build_edge_graph(self) -> None:
+    def _build_edge_graph(self, mode: str) -> None:
         """Build edge adjacency graph."""
         logger.info("Building edge graph...")
         start = time.time()
         
-        EdgeGraphBuilder(self.con).run()
+        EdgeGraphBuilder(self.con, mode).run()
         
         self.stats['edge_graph_time'] = time.time() - start
         self.stats['edge_graph_count'] = self.con.execute(

@@ -145,8 +145,8 @@ it is not an OSM node.
 The routable network: **one row per direction of a road**. A footpath is one link too (two, if it can be
 walked both ways). In driving, a direction only buses may use is a link too, of one lane (`allowed_uses` `bus`): a bus lane
 against a one-way street and a bus-only road, the source's `driving.private_edges` with `access = 'bus'`
-([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/bus_only_edges.md)). They are no part of the graph of
-legal turns, so no [`movement`](#movement) leads into or out of them. Monaco: 18 (Boulevard Charles III's bus lane back,
+([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/bus_only_edges.md)). Their turns are the source
+`edge_graph`'s rows with `uses = 'bus'`, so [movements](#movement) lead into and out of them, for buses only. Monaco: 18 (Boulevard Charles III's bus lane back,
 `1449981121#1r`, is one).
 
 | Column | Type | Spec | Holds |
@@ -251,10 +251,14 @@ direction.
 | `mvmt_code` | VARCHAR | ✅ | direction of travel and turn, e.g. `NBL` = northbound, left (`NB`/`EB`/`SB`/`WB` + `L`/`T`/`R`). **Empty for a U-turn**: the standard's code has no U; `type` says it |
 | `start_ib_lane`, `end_ib_lane` | INTEGER | ✅ | the inbound lanes the turn starts from, `lane_num` from..to |
 | `start_ob_lane`, `end_ob_lane` | INTEGER | ✅ | the outbound lanes it ends in. The two ranges are the same length and match in order: the first inbound lane goes to the first outbound lane |
-| `allowed_uses` | VARCHAR | ✅ | the mode's use |
+| `allowed_uses` | VARCHAR | ✅ | the mode's use; into or out of a bus-only link (driving), `bus`, or `bus,bike` where every bus-only link of the turn takes bikes |
 | `ctrl_type` | VARCHAR | ✅ | `signal` at a signalised junction; otherwise `stop` or `yield` where an OSM `highway=stop` / `give_way` sign applies to the inbound link (cars and bikes, not walking). A sign lies on a way node on the approach, so it counts when it is within 50 m of the end of the inbound link, before the junction, and its `direction` (`forward`, `backward` or `both`, along the way) matches the link's. Signs with no `direction`, or exactly on the junction node, say nothing about which approach and are left out |
 | `geometry` | VARCHAR | ✅ | a short curve from the end of the inbound link to the start of the outbound link, WKT |
 | `name`, `penalty`, `capacity` | | ∅ | empty |
+
+A bus's turn into or out of a bus-only link (the source `edge_graph`'s rows with `uses = 'bus'`, the same U-turn
+rule) gets its lanes by the same rules, worked out together with the cars' turns at its junction; the cars' turns keep
+the lanes they have without it. Monaco: 27 such turns.
 
 Where the lane ranges come from: the OSM `turn:lanes` tag where there is one, otherwise osm2gmns' rule
 (the leftmost link takes the leftmost lanes, the rightmost link the rightmost; a road that goes on keeps

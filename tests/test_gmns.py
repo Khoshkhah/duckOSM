@@ -960,3 +960,65 @@ def test_bus_only_edges_are_one_lane_links(tmp_path):
     assert north == {f"{R}_1": True, f"{F}_1": False, f"{F}_2": False}      # the bus lane on its own side: left of the eastbound lanes
     assert q("SELECT node_id FROM gmns_driving.node ORDER BY node_id") == [(1,), (2,), (3,)]
     assert q("SELECT count(*) FROM gmns_driving.movement") == [(0,)]          # not in edge_graph: no turns made up
+
+
+def test_bus_turns_come_from_edge_graph_and_leave_the_cars_alone(tmp_path):
+    """docs/design/bus_only_edges.md, bus turns: the edge_graph builder adds the turns into and out of a bus-only edge
+    (uses 'bus'), routing reads only the cars' rows, GMNS makes them bus movements with lanes; the cars' movements are
+    those of the same graph without the bus rows. Way 200 (1->2) is one-way with a bus lane back (2->1, bikes too);
+    way 203 (2<->4) is two-way; 201 (2->3) is a bus-only road."""
+    from duckosm.processors.edge_graph import EdgeGraphBuilder, routed_graph
+    from duckosm.gmns import to_gmns
+    F, R, S, G, Gr = 11, 12, 13, 14, 15
+    src = tmp_path / "src.duckdb"
+    con = duckdb.connect(str(src))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA raw; CREATE SCHEMA driving")
+    con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR,VARCHAR))")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR,VARCHAR), refs BIGINT[])")
+    con.execute("""INSERT INTO raw.ways VALUES (200, MAP{'highway':'secondary','oneway':'yes','oneway:bus':'no','oneway:bicycle':'no'}, [1,2]),
+        (201, MAP{'highway':'service','access':'no','bus':'designated'}, [2,3]), (203, MAP{'highway':'secondary'}, [2,4])""")
+    p = lambda w: f"ST_GeomFromText('{w}')"
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute(f"INSERT INTO driving.nodes VALUES (1,{p('POINT(18.06 59.32)')}),(2,{p('POINT(18.07 59.32)')}),(4,{p('POINT(18.08 59.32)')})")
+    cols = ("edge_id BIGINT, source BIGINT, target BIGINT, osm_id BIGINT, highway VARCHAR, name VARCHAR, lanes INTEGER, oneway BOOLEAN, "
+            "access VARCHAR, is_reverse BOOLEAN, length_m FLOAT, maxspeed_kmh FLOAT, cost_s FLOAT, geometry GEOMETRY")
+    con.execute(f"CREATE TABLE driving.edges({cols})")
+    con.execute(f"CREATE TABLE driving.private_edges({cols})")
+    con.execute(f"""INSERT INTO driving.edges VALUES
+        ({F},1,2,200,'secondary','A',1,true,NULL,false,570,50,41,{p('LINESTRING(18.06 59.32,18.07 59.32)')}),
+        ({G},2,4,203,'secondary','B',1,false,NULL,false,570,50,41,{p('LINESTRING(18.07 59.32,18.08 59.32)')}),
+        ({Gr},4,2,203,'secondary','B',1,false,NULL,true,570,50,41,{p('LINESTRING(18.08 59.32,18.07 59.32)')})""")
+    con.execute(f"""INSERT INTO driving.private_edges VALUES
+        ({R},2,1,200,'secondary','A',1,true,'bus',true,570,50,41,{p('LINESTRING(18.07 59.32,18.06 59.32)')}),
+        ({S},2,3,201,'service',NULL,1,false,'bus',false,1110,30,133,{p('LINESTRING(18.07 59.32,18.07 59.31)')})""")
+    con.execute("USE driving")
+    EdgeGraphBuilder(con, "driving").run()
+    q = lambda s: con.execute(s).fetchall()
+    assert set(q("SELECT from_edge, to_edge FROM edge_graph WHERE uses = 'car'")) == {(F, G), (G, Gr), (Gr, G)}
+    assert set(q("SELECT from_edge, to_edge FROM edge_graph WHERE uses = 'bus'")) == {(F, R), (F, S), (Gr, R), (Gr, S), (R, F)}
+    assert set(q(f"SELECT from_edge, to_edge FROM {routed_graph(con, 'driving')}")) == {(F, G), (G, Gr), (Gr, G)}
+    con.close()
+    nobus = tmp_path / "nobus.duckdb"
+    import shutil
+    shutil.copy(src, nobus)
+    c2 = duckdb.connect(str(nobus))
+    c2.execute("DELETE FROM driving.edge_graph WHERE uses <> 'car'")
+    c2.close()
+    to_gmns(str(src), str(tmp_path / "bus_gmns.duckdb"), modes=["driving"])
+    to_gmns(str(nobus), str(tmp_path / "nobus_gmns.duckdb"), modes=["driving"])
+    g = duckdb.connect(str(tmp_path / "bus_gmns.duckdb"))
+    g.execute(f"ATTACH '{tmp_path / 'nobus_gmns.duckdb'}' AS n")
+    mv = lambda where: g.execute(f"SELECT mvmt_id, type, allowed_uses, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+                                 f"FROM gmns_driving.movement WHERE {where} ORDER BY 1").fetchall()
+    assert mv("allowed_uses LIKE 'bus%'") == [               # F->R, a U-turn onto the way's other direction, has another way on: none
+        (f"{F}-{S}", "right", "bus", 1, 1, 1, 1), (f"{R}-{F}", "uturn", "bus,bike", 1, 1, 1, 1),
+        (f"{Gr}-{R}", "thru", "bus,bike", 1, 1, 1, 1), (f"{Gr}-{S}", "left", "bus", 1, 1, 1, 1)]
+    assert mv("allowed_uses NOT LIKE 'bus%'") == g.execute(
+        "SELECT mvmt_id, type, allowed_uses, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM n.gmns_driving.movement ORDER BY 1").fetchall()
+    assert g.execute(f"SELECT count(*) FROM gmns_driving.lane_connector WHERE mvmt_id = '{Gr}-{S}'").fetchone()[0] == 1
+    g.close()
+    from duckosm.lane_routing import build_lane_graph
+    build_lane_graph(str(tmp_path / "bus_gmns.duckdb"))         # the cars' lane graph: no bus turns
+    g = duckdb.connect(str(tmp_path / "bus_gmns.duckdb"))
+    assert not g.execute(f"SELECT * FROM lane_driving.lane_edges WHERE from_lane LIKE '{R}_%' OR to_lane LIKE '{S}_%'").fetchall()
+    assert g.execute(f"SELECT count(*) FROM lane_driving.lane_edges WHERE from_lane = '{F}_1' AND to_lane = '{G}_1'").fetchone()[0] == 1

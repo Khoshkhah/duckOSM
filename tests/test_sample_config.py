@@ -58,7 +58,8 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     lane = 1964280132851416298                                   # that reverse; the same id in cycling
     assert con.execute(f"SELECT access FROM driving.private_edges WHERE edge_id = {lane}").fetchone() == ("bus",)
     assert con.execute(f"SELECT count(*) FROM driving.edges WHERE edge_id = {lane}").fetchone()[0] == 0
-    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge)").fetchone()[0] == 0
+    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge) AND uses = 'car'").fetchone()[0] == 0
+    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge) AND uses = 'bus'").fetchone()[0] > 0   # the buses' turns
     assert con.execute(f"SELECT count(*) FROM cycling.edges WHERE edge_id = {lane}").fetchone()[0] == 1
     # `duckosm info` and `way --json`, the commands an agent reads first
     import json

@@ -41,12 +41,14 @@ class DuckdbClipper(BaseProcessor):
             WHERE EXISTS (SELECT 1 FROM main.boundary b WHERE {pred})
         """)
         # private roads inside the boundary (visible on maps, not routable), when the parent has them
+        live = "SELECT edge_id FROM edges"                 # the edges a graph row may join: + the bus-only ones
         try:
             self.execute(f"""
                 CREATE OR REPLACE TABLE private_edges AS
                 SELECT e.* FROM {p}.{m}.private_edges e
                 WHERE EXISTS (SELECT 1 FROM main.boundary b WHERE {pred})
             """)
+            live += " UNION ALL SELECT edge_id FROM private_edges"
         except Exception:
             pass                                              # parent built before private_edges existed
         # nodes touched by surviving edges
@@ -60,8 +62,8 @@ class DuckdbClipper(BaseProcessor):
             self.execute(f"""
                 CREATE OR REPLACE TABLE edge_graph AS
                 SELECT g.* FROM {p}.{m}.edge_graph g
-                WHERE g.from_edge IN (SELECT edge_id FROM edges)
-                  AND g.to_edge   IN (SELECT edge_id FROM edges)
+                WHERE g.from_edge IN ({live})
+                  AND g.to_edge   IN ({live})
             """)
         except Exception as e:
             logger.warning(f"  [{m}] parent has no edge_graph to clip ({e})")

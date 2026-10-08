@@ -1089,7 +1089,12 @@ def _build_geometry(con, sch, mode):
 
 
 def _build_movement(con, sch, mode, uses, drive_side="right"):
-    """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction."""
+    """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction.
+    The mode's own rows (``uses`` 'car' in driving) are the movements of its links; the rows into or out of
+    a bus-only link (``uses`` 'bus') are movements too, ``allowed_uses`` 'bus', or 'bus,bike' where each
+    bus-only link of it takes bikes. Their lanes are assigned as if they were cars' (``_assign_lanes`` over
+    the movements of their nodes, cars' included) and kept for them alone: the cars' movements stay as
+    without them (docs/design/bus_only_edges.md)."""
     if not _exists(con, "s", mode, "edge_graph"):
         con.execute(f"""CREATE TABLE {sch}.movement(
           mvmt_id VARCHAR, node_id BIGINT, name VARCHAR, ib_link_id BIGINT, start_ib_lane INT,
@@ -1097,33 +1102,43 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
           penalty DOUBLE, capacity DOUBLE, ctrl_type VARCHAR, mvmt_code VARCHAR,
           allowed_uses VARCHAR, geometry VARCHAR)""")
         return
-    con.execute(f"""CREATE TABLE {sch}.movement AS
+    from duckosm.processors.edge_graph import ROUTED_USES
+    has_uses = con.execute("SELECT count(*) FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
+                           "AND table_name = 'edge_graph' AND column_name = 'uses'", [mode]).fetchone()[0] > 0
+    own = f"'{ROUTED_USES[mode]}'"
+    eg_uses, o_uses, i_uses = ("eg.uses", "o.uses", "i.uses") if has_uses else (own, own, own)  # no `uses`: the mode's rows only
+    con.execute(f"""CREATE TEMP TABLE _mv_all AS
       WITH mv AS (
-        SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id,
+        SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id, {eg_uses} = {own} AS _own,
+               CASE WHEN {eg_uses} = {own} THEN '{uses}' WHEN (NOT fe._bus OR fe._bike) AND (NOT te._bus OR te._bike)
+                    THEN 'bus,bike' ELSE {eg_uses} END AS allowed_uses,
                fe.geometry AS ibg, te.geometry AS obg,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER)       AS pe,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER - 1)   AS pp,
                ST_PointN(te.geometry, 1) AS qs, ST_PointN(te.geometry, 2) AS qn
         FROM s.{mode}.edge_graph eg
-        JOIN s.{mode}.edges fe ON fe.edge_id = eg.from_edge
-        JOIN s.{mode}.edges te ON te.edge_id = eg.to_edge
+        JOIN _edges fe ON fe.edge_id = eg.from_edge
+        JOIN _edges te ON te.edge_id = eg.to_edge
         -- drop the immediate reversal (U-turn back onto the same physical segment): an edge_graph
         -- artifact for routing completeness, not a modelled movement -- except where turning round
         -- is the only way on (a dead end) or the only way into the reverse edge (every other road
         -- at the node leaves it, Monaco Avenue de l'Annonciade): lane routing would be stuck, the
         -- lane unreachable. Real intersection U-turns (a different osm_id) are kept too; all 'uturn'.
+        -- The other ways on / in are those its users may take: a car's the cars' rows, a bus's all.
         WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source
                    AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph o
-                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge)
+                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge
+                                 AND ({eg_uses} <> {own} OR {o_uses} = {own}))
                    AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph i
-                               WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge))
+                               WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge
+                                 AND ({eg_uses} <> {own} OR {i_uses} = {own})))
       ), b AS (
-        SELECT ib, ob, node_id, ibg, obg,
+        SELECT ib, ob, node_id, _own, allowed_uses, ibg, obg,
           atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,
           atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) AS out_b
         FROM mv
       ), t AS (
-        SELECT ib, ob, node_id, ibg, obg, ang,
+        SELECT ib, ob, node_id, _own, allowed_uses, ibg, obg, ang,
           CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
                WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
           -- inbound compass heading (0=N, clockwise) = (90 - math-bearing) mod 360
@@ -1158,15 +1173,27 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
                              WHEN t.hdg < 225 THEN 'SB' ELSE 'WB' END)
                        || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' ELSE 'T' END)
              END AS mvmt_code,
-             '{uses}' AS allowed_uses,
+             t.allowed_uses,
              ST_AsText({_bezier_line_sql('t.x0', 't.y0', 't.cx0', 't.cy0',
                                          't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry,
-             t.ang AS _ang
+             t.ang AS _ang, t._own
       FROM cp t
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id""")
+    con.execute(f"CREATE TABLE {sch}.movement AS SELECT * EXCLUDE (_own) FROM _mv_all WHERE _own")
+    # the bus movements with the cars' movements at their nodes: lanes assigned together, the bus rows kept
+    con.execute("""CREATE TEMP TABLE _mv_bus AS SELECT * EXCLUDE (_own) FROM _mv_all
+                   WHERE node_id IN (SELECT node_id FROM _mv_all WHERE NOT _own)""")
+    con.execute("CREATE TEMP TABLE _bus_mv_ids AS SELECT mvmt_id FROM _mv_all WHERE NOT _own")
+    con.execute("DROP TABLE _mv_all")
     _assign_lanes(con, sch, mode, drive_side)
     _fork_branch_lanes(con, sch)
     _continuation_movements(con, sch)
+    n_bus = con.execute("SELECT count(*) FROM _bus_mv_ids").fetchone()[0]
+    if n_bus:
+        _assign_lanes(con, sch, mode, drive_side, mv="_mv_bus")
+        con.execute(f"INSERT INTO {sch}.movement SELECT * FROM _mv_bus WHERE mvmt_id IN (SELECT mvmt_id FROM _bus_mv_ids)")
+        logger.info(f"GMNS[{mode}]: {n_bus:,} movements into or out of bus-only links")
+    con.execute("DROP TABLE _mv_bus; DROP TABLE _bus_mv_ids")
 
 
 # turn:lanes part -> the movement types a lane feeds (docs/design/gmns_lane_movements.md, step 1); a
@@ -1275,7 +1302,7 @@ def _fork_lanes(n, obs, main, angs=None):
     return out
 
 
-def _assign_lanes(con, sch, mode, drive_side="right"):
+def _assign_lanes(con, sch, mode, drive_side="right", mv=None):
     """Fill each movement's inbound / outbound lane ranges (docs/design/gmns_lane_movements.md):
 
     - ``turn:lanes`` only on the last piece of its OSM way, at the junction where the way ends (the
@@ -1288,10 +1315,13 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
     - else osm2gmns's junction rule (``_default_lanes``).
 
     Ranges have equal length and pair in order: the k-th inbound lane into the k-th outbound lane.
-    Then the GMNS types ``diverge`` / ``merge`` (``_fork_types``). Drops the helper column ``_ang``."""
+    Then the GMNS types ``diverge`` / ``merge`` (``_fork_types``). Drops the helper column ``_ang``.
+    ``mv``: the movement table (default ``<sch>.movement``)."""
     from collections import defaultdict
 
     import pandas as pd
+
+    mv = mv or f"{sch}.movement"
 
     nl = dict(con.execute(f"""SELECT l.link_id, max(l.lane_num) FROM {sch}.lane l      -- the motor lanes: not the
         LEFT JOIN _extra_lane x ON x.link_id = l.link_id AND x.lane_num = l.lane_num   -- bike lane beside them
@@ -1308,7 +1338,7 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
             "AND table_name = 'edges'", [mode]).fetchall()} else "false"
         way = {e: (o, r) for e, o, r in con.execute(f"SELECT edge_id, osm_id, {rev} FROM s.{mode}.edges").fetchall()}
     by_ib = defaultdict(list)
-    for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {sch}.movement").fetchall():
+    for mid, ib, ob, typ, ang in con.execute(f"SELECT mvmt_id, ib_link_id, ob_link_id, type, _ang FROM {mv}").fetchall():
         by_ib[ib].append((mid, ob, typ, ang or 0.0))
     # where two or more exits go ahead (a fork, or a junction with a road that goes on), which exit is straight and which is left of it is told by the headings over 15 m, not by the first segment
     # alone (docs/design/gmns_fork_letters.md): the angle of those movements is replaced for the lane assignment; their `type` stays
@@ -1402,10 +1432,10 @@ def _assign_lanes(con, sch, mode, drive_side="right"):
             rows.append((mid, i0 + 1, i1 + 1, o0 + 1, o1 + 1))
     if rows:
         _lanes = pd.DataFrame(rows, columns=["mvmt_id", "si", "ei", "so", "eo"])  # noqa: F841 (read by SQL)
-        con.execute(f"""UPDATE {sch}.movement m SET start_ib_lane = l.si, end_ib_lane = l.ei,
+        con.execute(f"""UPDATE {mv} m SET start_ib_lane = l.si, end_ib_lane = l.ei,
                           start_ob_lane = l.so, end_ob_lane = l.eo FROM _lanes l WHERE l.mvmt_id = m.mvmt_id""")
-    _fork_types(con, sch)
-    con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN _ang")
+    _fork_types(con, sch, mv=mv)
+    con.execute(f"ALTER TABLE {mv} DROP COLUMN _ang")
 
 
 def _fork_branch_lanes(con, sch):
@@ -1518,12 +1548,13 @@ def _window_angle(inbound_wkt, outbound_wkt, window_m=15.0):
     return (heading(lo, 0, min(window_m, lo.length)) - heading(li, max(li.length - window_m, 0), li.length) + 180) % 360 - 180
 
 
-def _fork_letters(con, sch, fork_ang=8.0):
+def _fork_letters(con, sch, fork_ang=8.0, mv=None):
     """The turn letter of the ``mvmt_code`` of every ``diverge`` movement (docs/design/gmns_fork_letters.md): at a fork the straightest branch keeps T; a branch that leaves it by ``fork_ang``
     degrees or more to the left is L, to the right R, else T. The angle of a branch is :func:`_window_angle`."""
     from collections import defaultdict
 
-    rows = con.execute(f"""SELECT m.mvmt_id, m.node_id, m.mvmt_code, il.geometry, ol.geometry FROM {sch}.movement m
+    mv = mv or f"{sch}.movement"
+    rows = con.execute(f"""SELECT m.mvmt_id, m.node_id, m.mvmt_code, il.geometry, ol.geometry FROM {mv} m
         JOIN {sch}.link il ON il.link_id = m.ib_link_id JOIN {sch}.link ol ON ol.link_id = m.ob_link_id
         WHERE m.type = 'diverge' AND m.mvmt_code IS NOT NULL""").fetchall()
     by_node, ang = defaultdict(list), {}
@@ -1539,23 +1570,24 @@ def _fork_letters(con, sch, fork_ang=8.0):
             letter = "T" if abs(ang[mid] - straight) < fork_ang else "L" if ang[mid] > straight else "R"
             updates.append((code[:2] + letter, mid))
     if updates:
-        con.executemany(f"UPDATE {sch}.movement SET mvmt_code = ? WHERE mvmt_id = ?", updates)
+        con.executemany(f"UPDATE {mv} SET mvmt_code = ? WHERE mvmt_id = ?", updates)
 
 
-def _fork_types(con, sch, max_ang=45.0, fork_ang=8.0):
+def _fork_types(con, sch, max_ang=45.0, fork_ang=8.0, mv=None):
     """The GMNS movement types ``diverge`` and ``merge`` (docs/design/gmns_lane_movements.md):
     ``diverge`` at a fork, a node one link arrives at, its 2+ ways on (U-turns aside) all within
     ``max_ang`` degrees of straight on; ``merge`` into a node one link leaves, its 2+ inbound links
     all joining within ``max_ang``. The angle bound keeps an ordinary junction (a one-way street
     meeting a cross street) a junction. ``mvmt_code`` keeps the angle's letter (GMNS allows R/L/T; none for a U-turn); at a fork the straightest branch keeps T and a branch ``fork_ang`` degrees or more
     to its left or right gets L or R (the turn is told by the code, ``type`` stays ``diverge``)."""
-    con.execute(f"""UPDATE {sch}.movement m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
-        SELECT f.node_id FROM {sch}.movement f
+    mv = mv or f"{sch}.movement"
+    con.execute(f"""UPDATE {mv} m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
+        SELECT f.node_id FROM {mv} f
         WHERE (SELECT count(*) FROM {sch}.link k WHERE k.to_node_id = f.node_id) = 1 AND f.type <> 'uturn'
         GROUP BY f.node_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
-    _fork_letters(con, sch, fork_ang)
-    con.execute(f"""UPDATE {sch}.movement m SET type = 'merge' WHERE type <> 'uturn' AND m.ob_link_id IN (
-        SELECT f.ob_link_id FROM {sch}.movement f
+    _fork_letters(con, sch, fork_ang, mv=mv)
+    con.execute(f"""UPDATE {mv} m SET type = 'merge' WHERE type <> 'uturn' AND m.ob_link_id IN (
+        SELECT f.ob_link_id FROM {mv} f
         WHERE (SELECT count(*) FROM {sch}.link k WHERE k.from_node_id = f.node_id) = 1 AND f.type <> 'uturn'
         GROUP BY f.ob_link_id HAVING count(*) >= 2 AND max(abs(f._ang)) < {max_ang})""")
 
