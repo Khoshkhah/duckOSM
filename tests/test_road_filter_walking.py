@@ -76,3 +76,14 @@ def test_no_highway_tag_is_no_road(mode, tags):
 @pytest.mark.parametrize("mode", ["driving", "walking", "cycling"])
 def test_residential_in_every_network(mode):
     assert _in_network(mode, {"highway": "residential"})
+
+
+@pytest.mark.parametrize("mode", ["walking", "cycling"])
+def test_ferry_line_has_class_ferry(mode):
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA raw")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+    con.execute("INSERT INTO raw.ways VALUES (1, MAP {'route': 'ferry', 'foot': 'yes', 'bicycle': 'yes'}, [1, 2]), "
+                "(2, MAP {'highway': 'footway'}, [2, 3])")
+    RoadFilter(con, mode=mode)._create_ways_table()
+    assert dict(con.execute("SELECT osm_id, highway FROM ways").fetchall()) == {1: "ferry", 2: "footway"}

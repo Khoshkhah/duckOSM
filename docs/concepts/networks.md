@@ -21,7 +21,7 @@ Then the [access tags](#access-private-and-forbidden-roads) decide, per mode.
 Every mode needs a `highway` tag: a way with only `foot`, `bicycle` or `sidewalk` tags, or with only
 `area:highway` (the outline of a pedestrian area), is not a road and is in no network. The one exception is the
 ferry line (`route=ferry`, with `foot=yes` for walking or `bicycle=yes` for cycling): in Monaco it comes into
-walking, where it is walked at 5 km/h like a footpath, and its `highway` is empty.
+walking, where it is walked at 5 km/h like a footpath, and its `highway` is `ferry` (its `walk_type` is `footpath`, its `cycle_type` `mixed_traffic`).
 
 `highway=service` (driveways, parking aisles, alleys) is part of the network like any other road.
 

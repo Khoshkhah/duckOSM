@@ -137,6 +137,8 @@ class RoadFilter(BaseProcessor):
         else:
             raise ValueError(f"Unknown mode: {self.mode}")
 
+        # a ferry line has no highway tag: give it its own class, so it has one downstream
+        highway_expr = f"COALESCE({highway_expr}, CASE WHEN {_tag('route')} = 'ferry' THEN 'ferry' END)"
         direction_expr = self._direction_expression()
         access_expr = self._access_expression()
         bus_back_expr = (f"COALESCE({_tag('oneway:bus')} = 'no' OR {_tag('oneway:psv')} = 'no', FALSE)"
