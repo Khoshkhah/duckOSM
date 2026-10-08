@@ -77,6 +77,12 @@ overrides:
   - osm_id: 93137560         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 25103774         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 35092477         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
 
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that

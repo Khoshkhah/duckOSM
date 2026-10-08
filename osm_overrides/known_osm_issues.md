@@ -297,13 +297,16 @@ duckOSM copied it unchanged. The adjacent roundabout ways `1435532402` and `1435
 | field | value |
 | --- | --- |
 | **Area** | Monaco (`data/sample/monaco.osm.pbf`) |
-| **OSM ways** | `93137596`, `93137569`, `93137578`, `93137560` (`highway=primary`, `oneway=yes`, `lanes=2`, `name=Boulevard du Larvotto`) |
+| **OSM ways** | `93137596`, `93137569`, `93137578`, `93137560` (Boulevard du Larvotto), `25103774`, `35092477` (Boulevard Louis II) (`highway=primary`, `oneway=yes`, `lanes=2`, `name=Boulevard du Larvotto`) |
 | **Edges** | `93137596#1f`, `93137569#2f` (and the other pieces of the two ways) |
 | **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
 
 **Symptom.** The lane map draws two lanes where the street has one.
 
-**Root cause (verified).** Both ways carry `lanes=2` in OpenStreetMap; duckOSM copied it unchanged. Street View shows one
+**Root cause (verified).** The ways carry `lanes=2` in OpenStreetMap; duckOSM reads it as OSM defines it (on a one-way way, every lane runs
+its way). Each got `lanes=2` in ONE mass edit, changeset 32866762 (2015-07-25), which set `lanes=2` on 3,956 ways across Monaco and
+north-west Italy, one-way and two-way alike; later edits kept it. 67 one-way Monaco ways still carry `lanes=2` from it: each is a
+candidate for the same error, but some one-way roads really have two lanes, so each is fixed only once checked. Street View shows one
 lane. The sidewalks are separate `footway=sidewalk` lines (e.g. `1342546102`, about 3.3 m from the road line), so they
 are not counted in `lanes`.
 
