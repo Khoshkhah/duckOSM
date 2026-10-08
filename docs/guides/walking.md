@@ -18,7 +18,7 @@ The first row that matches decides:
 | Way | Walkable | Why |
 |---|---|---|
 | `highway` = `motorway`, `motorway_link` | no | OSM forbids walking there, whatever the other tags say |
-| `foot` = `yes` / `designated` / `permissive`, or `sidewalk` = `yes` / `both` / `left` / `right` | yes | an explicit permission or a sidewalk on the road wins over the rows below; also on a way without a `highway` tag (the ferry) |
+| `foot` = `yes` / `designated` / `permissive`, or `sidewalk` = `yes` / `both` / `left` / `right` | yes | an explicit permission or a sidewalk on the road wins over the rows below; a way without a `highway` tag is kept only if it is a ferry (`route=ferry`) |
 | `motorroad=yes` | no | a motorroad (expressway) is closed to people on foot |
 | `foot=use_sidepath` | no | people must use the path beside it |
 | `sidewalk=separate`, `sidewalk:both=separate`, or `sidewalk:left` and `sidewalk:right` both `separate` | no | the sidewalk is its own `highway=footway` way, which carries the walking: keeping the road too would draw and route each street twice |

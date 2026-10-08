@@ -141,7 +141,9 @@ class RoadFilter(BaseProcessor):
         access_expr = self._access_expression()
         bus_back_expr = (f"COALESCE({_tag('oneway:bus')} = 'no' OR {_tag('oneway:psv')} = 'no', FALSE)"
                          if self.mode == "driving" else "FALSE")
-        where_clause = f"({where_clause}) AND COALESCE({access_expr}, '') NOT IN ({FORBIDDEN[self.mode]})"
+        # every mode needs a real highway tag: an area:highway outline, or a way with only
+        # bicycle/foot/sidewalk tags, is not a road. The one exception is the ferry line (route=ferry).
+        where_clause = f"({where_clause}) AND ({_tag('highway')} IS NOT NULL OR {_tag('route')} = 'ferry') AND COALESCE({access_expr}, '') NOT IN ({FORBIDDEN[self.mode]})"
             
         self.execute(f"""
             CREATE OR REPLACE TABLE ways AS

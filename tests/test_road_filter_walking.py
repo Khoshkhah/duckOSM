@@ -51,3 +51,28 @@ def test_not_walkable(tags):
 ])
 def test_explicit_permission_wins(tags):
     assert _walkable(tags)
+
+
+def _in_network(mode, tags):
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA raw")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+    kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
+    con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2])")
+    RoadFilter(con, mode=mode)._create_ways_table()
+    return con.execute("SELECT count(*) FROM ways").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("mode", ["driving", "walking", "cycling"])
+@pytest.mark.parametrize("tags", [
+    {"area:highway": "pedestrian", "bicycle": "yes", "bridge": "yes", "layer": "2"},
+    {"area:highway": "pedestrian", "foot": "yes"},
+    {"sidewalk": "both", "bicycle": "designated"},
+])
+def test_no_highway_tag_is_no_road(mode, tags):
+    assert not _in_network(mode, tags)
+
+
+@pytest.mark.parametrize("mode", ["driving", "walking", "cycling"])
+def test_residential_in_every_network(mode):
+    assert _in_network(mode, {"highway": "residential"})

@@ -18,9 +18,10 @@ Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. Mona
 
 Then the [access tags](#access-private-and-forbidden-roads) decide, per mode.
 
-A way tagged `foot` or `bicycle` is kept even without a `highway` tag. In Monaco this brings the
-ferry (`route=ferry`, `foot=yes`) into walking, where it is walked at 5 km/h like a footpath, and the
-outline of a pedestrian area tagged `bicycle=yes` into cycling, as a ring of edges.
+Every mode needs a `highway` tag: a way with only `foot`, `bicycle` or `sidewalk` tags, or with only
+`area:highway` (the outline of a pedestrian area), is not a road and is in no network. The one exception is the
+ferry line (`route=ferry`, with `foot=yes` for walking or `bicycle=yes` for cycling): in Monaco it comes into
+walking, where it is walked at 5 km/h like a footpath, and its `highway` is empty.
 
 `highway=service` (driveways, parking aisles, alleys) is part of the network like any other road.
 
