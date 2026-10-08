@@ -113,3 +113,4 @@ def test_bus_routes_in_the_build_and_the_level_roads(monaco):
     assert lane["bus_lines"] == ", ".join(sorted(set(lane["bus_lines"].split(", ")), key=lambda r: (not r.isdigit(), int(r) if r.isdigit() else 0, r)))
     assert roads.loc["1449981121#1f", "modes"].startswith("driving") and "bus" in roads.loc["1449981121#1f", "modes"]
     assert roads["bus_lines"].isna().sum() > 0                                   # most roads have no bus
+    assert not any("bus" in str(m).split(" + ") for m in roads.loc[roads["bus_lines"].isna(), "modes"])   # no line, no bus (2026-10-10: a walking-only reverse said "walking + bus")

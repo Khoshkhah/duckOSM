@@ -82,7 +82,7 @@ def load_roads(db):
         con.close()
     band = np.array([_level(ly, br, tn) for ly, br, tn in zip(df["layer"], df["bridge"], df["tunnel"], strict=True)], dtype=int)
     df["bus_lines"] = [", ".join(sorted(lines[e], key=_line_key)) if e in lines else None for e in df["edge_id"]]   # the bus lines on it (bus.route_edges), e.g. "1, 2, 5"
-    df["modes"] = [" + ".join([m for m in MODES if m in set(ms if isinstance(ms, (list, np.ndarray)) else [])] + (["bus"] if bl else [])) or None
+    df["modes"] = [" + ".join([m for m in MODES if m in set(ms if isinstance(ms, (list, np.ndarray)) else [])] + (["bus"] if isinstance(bl, str) else [])) or None
                    for ms, bl in zip(df.pop("mode_list"), df["bus_lines"], strict=True)]   # who may use it: the editor shows it; a private road only: None
     geometry = gpd.GeoSeries([wkb.loads(bytes(b)) for b in df.pop("wkb")], crs="EPSG:4326")
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
