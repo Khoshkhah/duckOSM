@@ -64,6 +64,7 @@ options:
   threads: null                        # cap worker threads; null = DuckDB default
   simplify_batches: 0                  # 0 = auto-size by node count; 1 = single pass
   global_junctions: true               # every mode splits roads at the same points -> same edge_id in every mode
+  infer_separate_sidewalks: true       # a road with sidewalk lines (or the other carriageway) on both sides and no sidewalk tag: sidewalk=separate, walked on its sidewalks
   functional_types: true               # walk_type (walking) / cycle_type (cycling)
   build_features: true                 # the features.* base-map layers (water, land, buildings, POIs…)
   bus_routes: true                     # bus.routes / bus.route_edges: the driving edges each bus route travels (needs driving)

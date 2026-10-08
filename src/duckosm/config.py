@@ -42,6 +42,7 @@ class Options:
     h3_resolution: int = 8
     merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
     global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/design/global_junction_segmentation.md
+    infer_separate_sidewalks: bool = True  # a road with footway=sidewalk lines beside it on both sides and no sidewalk tag gets sidewalk=separate (walked on its sidewalks, not its carriageway). See processors/separate_sidewalks.py
     functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/design/walk_cycle_type.md
     cycling_dismount: bool = True          # cycling also gets footway/pedestrian as dismount=TRUE edges (push-the-bike: walking speed, bidirectional) so cycleways connected only via them survive the component clean-up. See docs/design/cycling_dismount_edges.md
     process_speeds: bool = True

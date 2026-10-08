@@ -88,6 +88,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` |
 | `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
 | `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
+| `options.infer_separate_sidewalks` | `true` | | a road with no sidewalk tag whose both sides are covered (a `footway=sidewalk` line beside it, or the other half of a dual carriageway) gets `sidewalk=separate` (and `duckosm:sidewalk=inferred`) in `raw.ways`, so walking uses its sidewalks, not its carriageway. Needs the walking mode |
 | `options.functional_types` | `true` | | add `walk_type` (walking) and `cycle_type` (cycling). [`walk_type` and `cycle_type`](../concepts/networks.md#walk_type-and-cycle_type) |
 | `options.cycling_dismount` | `true` | | add footways and pedestrian streets to cycling as [dismount edges](../concepts/networks.md#dismount-edges) |
 | `options.process_speeds` | `true` | | add `maxspeed_kmh` to edges. [Speeds and travel time](../concepts/networks.md#speeds-and-travel-time) |

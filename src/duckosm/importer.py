@@ -17,6 +17,7 @@ from duckosm.utils import check_db_name
 from duckosm.processors import (
     RoadFilter,
     OsmOverrides,
+    SeparateSidewalks,
     GraphBuilder,
     SpeedProcessor,
     CostCalculator,
@@ -120,6 +121,10 @@ class DuckOSM:
                 global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
                 if self.config.options.boundary_cells:
                     global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
+            # Roads whose sidewalks are their own lines but carry no sidewalk tag: sidewalk=separate, before RoadFilter reads it
+            if self.config.options.infer_separate_sidewalks and "walking" in self.config.modes:
+                global_steps.append(("separate_sidewalks", "Finding roads with separate sidewalks",
+                                     lambda: SeparateSidewalks(self.con).run()))
             # Mode-agnostic road-junction set, built once from raw.* before the per-mode loop, so every
             # mode segments roads at the same junctions and shares edge_ids. See _build_global_junctions.
             if self.config.options.global_junctions:

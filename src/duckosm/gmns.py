@@ -93,7 +93,7 @@ _ALONG_NEAR_M = 8.0              # a footpath point counts as along a road when 
 _NON_MOTOR = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform")
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
-_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "turn"],
+_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "geom_full", "turn"],
     "location": ["osm_id", "name", "geom"], "zone": ["geom"],
     "signal_controller": ["node_id", "control_type"]}
 
