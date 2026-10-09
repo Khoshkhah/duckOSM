@@ -86,8 +86,11 @@ class OsmOverrides(BaseProcessor):
         sets: list[str] = []
         if "oneway" in rule and rule["oneway"] is not None:
             sets.append(f"oneway = {_BOOL[bool(rule['oneway'])]}")
-        if rule.get("lanes") is not None:                      # per-direction, both ways
-            n = int(rule["lanes"]); sets += [f"lanes_fwd = {n}", f"lanes_bwd = {n}"]
+        if rule.get("lanes") is not None:                      # per-direction, both ways where cars drive both ways
+            n = int(rule["lanes"])
+            # a one-way way keeps no lanes against it (RoadFilter: lanes are cars'; 2026-10-09), unless this rule makes it two-way
+            bwd = str(n) if rule.get("oneway") is False else f"CASE WHEN lanes_bwd IS NULL THEN NULL ELSE {n} END"
+            sets += [f"lanes_fwd = {n}", f"lanes_bwd = {bwd}"]
         if rule.get("lanes_forward") is not None:
             sets.append(f"lanes_fwd = {int(rule['lanes_forward'])}")
         if rule.get("lanes_backward") is not None:

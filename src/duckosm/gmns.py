@@ -1623,9 +1623,11 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         widths = _split(pick(tags, "width:lanes", is_rev))
         if bus:
             return turns[:1], widths, [(_num(widths[0]) if widths else None) or _DEFAULT_LANE_W]
+        if mode == "walking":       # one walking strip, the sidewalk, however many car lanes the street has (2026-10-09: no lanes for walking)
+            turns = []
         # one lane per `turn:lanes` entry, and never fewer than `lanes`: an OSM way tagged lanes=3 with only two
         # turn entries has a third lane that the arrows say nothing about (a pocket can add lanes, never remove)
-        n = max(len(turns), int(lanes or 1), 1)
+        n = 1 if mode == "walking" else max(len(turns), int(lanes or 1), 1)
         extra, left = bike_extra(tags, is_rev), bike_left(tags, is_rev, oneway)
         dw = _DEFAULT_WALK_W if is_foot(tags) else _default_lane_w(tags.get("highway"))
         return turns, widths, ([left[0]] if left else []) + [(_num(widths[i]) if i < len(widths) else None) or dw

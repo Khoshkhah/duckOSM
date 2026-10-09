@@ -77,6 +77,9 @@ overrides:
   - osm_id: 93137560         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 50501898         # tertiary_link, one-way - lanes=2 from the 2015 mass edit (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, changeset 32866762 (2015-07-25); drawn wider than the road in the level editor (2026-10-09)"
   - osm_id: 25103774         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
