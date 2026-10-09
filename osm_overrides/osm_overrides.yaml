@@ -167,6 +167,12 @@ overrides:
   - osm_id: 254596873        # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137568         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137585         # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
   - osm_id: 353889170        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
