@@ -1,6 +1,6 @@
 # GMNS lanes: one lane profile, connections from SUMO (design, 2026-10-10)
 
-Status: step 1 built (`driving.lane_profile`, processors/lane_profile.py, 2026-10-10); steps 2-3 to do. Replaces the lane rules spread over the build and `gmns.py`.
+Status: steps 1-2 built (2026-10-10): `driving.lane_profile` (processors/lane_profile.py); `to_sumo` writes its lanes and `sumo_compare.lane_diff` compares with SUMO's own import (Monaco: 1,144 of 1,182 the same, every difference named). Step 3 to do. Replaces the lane rules spread over the build and `gmns.py`.
 
 ## Why
 

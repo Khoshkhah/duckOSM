@@ -39,6 +39,9 @@ logger = logging.getLogger("duckosm")
 # which SUMO vehicle classes may use an edge of a non-driving mode (driving: SUMO's default, all)
 _MODE_ALLOW = {"walking": "pedestrian", "cycling": "bicycle"}
 
+# the SUMO vehicle classes of a lane of driving.lane_profile, by its use (an `auto` lane: SUMO's default, every road vehicle)
+_LANE_ALLOW = {"bus": "bus", "bike": "bicycle", "bus,bike": "bus bicycle"}
+
 # right-of-way hint for netconvert's junction building (explicit connections still gate movements).
 _HIGHWAY_PRIORITY = {
     "motorway": 6, "motorway_link": 6, "trunk": 5, "trunk_link": 5,
@@ -185,6 +188,12 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     rows = con.execute(
         f"SELECT edge_id, source, target, highway, name, lanes, maxspeed_kmh, length_m, "
         f"ST_AsText(geometry) FROM {mode}.edges").fetchall()
+    # each edge's lanes from driving.lane_profile (docs/design/gmns_lane_profile.md), left to right: one <lane> each with its vehicle
+    # classes and width, so netconvert gets the lanes duckOSM decided (as its own OSM import would get them from the tags), not a count
+    profile = {}
+    if mode == "driving" and _table_exists(con, "driving.lane_profile"):
+        for eid, use, width in con.execute("SELECT edge_id, use, width_m FROM driving.lane_profile ORDER BY edge_id, lane_num").fetchall():
+            profile.setdefault(eid, []).append((use, width))
     n_edges = self_loops = 0
     with open(edg_path, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<edges>\n')
@@ -194,7 +203,10 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 continue
             attrs = [f'id="{eid}"', f'from="{source}"', f'to="{target}"',
                      f'priority="{_HIGHWAY_PRIORITY.get(highway, 1)}"']
-            if lanes_ and int(lanes_) > 0:
+            lanes_here = profile.get(eid)
+            if lanes_here:
+                attrs.append(f'numLanes="{len(lanes_here)}"')
+            elif lanes_ and int(lanes_) > 0:
                 attrs.append(f'numLanes="{int(lanes_)}"')
             if spd and float(spd) > 0:
                 attrs.append(f'speed="{float(spd) / 3.6:.3f}"')       # km/h -> m/s
@@ -209,7 +221,14 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs.append(f'shape="{shape}"')
             if name:
                 attrs.append(f'name={quoteattr(str(name))}')
-            f.write("  <edge " + " ".join(attrs) + "/>\n")
+            if lanes_here:                              # SUMO numbers lanes from the right: index 0 is the right-most
+                f.write("  <edge " + " ".join(attrs) + ">\n")
+                for i, (use, width) in enumerate(reversed(lanes_here)):
+                    allow = f' allow="{_LANE_ALLOW[use]}"' if use in _LANE_ALLOW else ""
+                    f.write(f'    <lane index="{i}"{allow} width="{float(width):.2f}"/>\n')
+                f.write("  </edge>\n")
+            else:
+                f.write("  <edge " + " ".join(attrs) + "/>\n")
             n_edges += 1
         f.write('</edges>\n')
     logger.info(f"SUMO plain-XML[{mode}]: {len(nodes):,} nodes, {n_edges:,} edges "

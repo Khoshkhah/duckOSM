@@ -132,3 +132,21 @@ def test_the_build_writes_every_driving_edges_lane_profile(monaco):
     ref = dict(con.execute("SELECT edge_ref, edge_id FROM driving.edges UNION ALL SELECT edge_ref, edge_id FROM driving.private_edges").fetchall())
     assert [u for _, u, _ in got[ref["1449981121#1r"]]] == ["bus,bike"]
     assert [(n, u) for n, u, _ in got[ref["503462464#2f"]]] == [(-1, "bike"), (1, "auto")]
+
+
+def test_sumo_from_the_lane_profile_differs_from_sumos_own_import_only_by_named_causes(monaco, tmp_path):
+    """sumo_compare.lane_diff (docs/design/gmns_lane_profile.md, decision 2): SUMO built from duckOSM's lane profile and SUMO's own OSM
+    import of the same Monaco agree on most roads; every difference has a known cause (an override, the contraflow bus lane counted in
+    lanes, a default where no lanes tag is ...), none is 'other'."""
+    import shutil
+    from duckosm.sumo import _find_netconvert
+    try:
+        _find_netconvert(None)
+    except Exception:
+        pytest.skip("netconvert is needed")
+    if not shutil.which("osmium"):
+        pytest.skip("osmium is needed")
+    from duckosm.sumo_compare import lane_diff
+    rows, n = lane_diff(monaco, ROOT / "data" / "sample" / "monaco.osm.pbf", tmp_path)
+    assert n > 500 and len(rows) < 0.1 * n
+    assert not [r for r in rows if r["cause"] == "other"], [r for r in rows if r["cause"] == "other"][:5]
