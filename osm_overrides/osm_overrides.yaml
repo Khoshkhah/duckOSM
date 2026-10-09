@@ -164,6 +164,9 @@ overrides:
   - osm_id: 120062663        # Tunnel Aureglia, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 93137600         # primary_link by the Larvotto roundabout: gone - the roundabout was rebuilt smaller (known_osm_issues #12)
+    exclude_modes: [driving, cycling, walking]
+    note: "Street View 2026: the roundabout is smaller and this link is not there (OSM last changed it 2023-12); fix the geometry in OSM"
   - osm_id: 254596873        # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
@@ -193,12 +196,6 @@ overrides:
 #   no_straight_on|only_*, default no_u_turn) · note
 # Takes effect on the next driving rebuild (RestrictionProcessor runs it, then the edge graph drops it).
 turn_restrictions:
-  # --- Monaco ---
-  - from_way: 503783382      # Boulevard du Larvotto -> the link 93137600 by the roundabout: no left turn (known_osm_issues #12)
-    via_node: 273244126
-    to_way: 93137600
-    restriction: no_left_turn
-    note: "Street View (2026-10-10): the left turn into the primary_link 93137600 is not allowed; OSM has no restriction"
   # --- Tartu ---
   - from_way: 1307524008     # no U-turn onto the opposing Tähe carriageway (known_osm_issues #6)
     via_node: 330045016

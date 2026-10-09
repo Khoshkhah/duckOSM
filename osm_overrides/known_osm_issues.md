@@ -327,16 +327,16 @@ are not counted in `lanes`.
 **Fix.** `lanes: 2` for the five ways in `osm_overrides.yaml`; upstream, tag `lanes=2` on them in OpenStreetMap.
 
 
-## 12. Monaco, Boulevard du Larvotto - a left turn Street View forbids
+## 12. Monaco, Larvotto roundabout - rebuilt smaller, OSM still has the old shape
 
 | field | value |
 | --- | --- |
 | **Area** | Monaco |
-| **Turn** | from way `503783382` (Boulevard du Larvotto) via node `273244126` into way `93137600` (`highway=primary_link`, by the roundabout) |
-| **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
+| **OSM way** | `93137600` (`highway=primary_link`, last changed 2023-12-14), entered by a left turn from `503783382` (Boulevard du Larvotto) at node `273244126` |
+| **Status** | **CONFIRMED by Street View** (photos 2026); override enabled |
 
-**Symptom.** GMNS (and routing) allowed a left turn from Boulevard du Larvotto into the short link road; Street View shows it is not
-allowed. OSM has no `type=restriction` relation there.
+**Symptom.** GMNS allowed a left turn from Boulevard du Larvotto into this link; on Street View (2026) the roundabout is smaller
+and the link is not there. The roundabout is a loop of one-way ways without `junction=roundabout`.
 
-**Fix.** A synthetic `no_left_turn` in `osm_overrides.yaml` (`turn_restrictions`); upstream, map the restriction in OpenStreetMap.
-
+**Fix.** `exclude_modes: [driving, cycling, walking]` for way `93137600` in `osm_overrides.yaml` (an override cannot change a road's
+shape); upstream, redraw the roundabout in OpenStreetMap from current imagery and tag its ring `junction=roundabout`.
