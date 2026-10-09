@@ -141,7 +141,7 @@ def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
             run_netconvert: bool = True, netconvert_bin: str = None,
-            connections: bool = True, config=None):
+            connections: bool = True, config=None, bus_edges: bool = False):
     """Export the duckOSM network to SUMO, preserving ``edge_id`` and the turn restrictions.
 
     Parameters
@@ -161,6 +161,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         ``{netconvert-option: value}`` is merged onto the default; a ``str`` path to a ``.netccfg``
         is used as-is (inputs/output are still set by this function). The effective config is written
         in SUMO's standard ``.netccfg`` format and run with ``netconvert -c``.
+    bus_edges : driving only: also the bus-only edges (``private_edges`` with ``access = 'bus'``: a contraflow bus lane, a bus-only
+        road) and the buses' turns of ``edge_graph`` (its ``bus`` rows), so their lanes get connections too (GMNS, docs/design/gmns_lane_profile.md).
 
     Returns ``{"nod","edg","con"(if written),"netccfg"(if built),"net"(if built),"n_nodes",
     "n_edges","n_connections"}``. Every (non-internal) SUMO edge id equals the duckOSM ``edge_id``.
@@ -178,6 +180,14 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     # ---- nodes: geographic position; netconvert projects them ----
     nodes = con.execute(
         f"SELECT node_id, ST_X(geom), ST_Y(geom) FROM {mode}.nodes WHERE geom IS NOT NULL").fetchall()
+    if bus_edges and mode == "driving" and _table_exists(con, "driving.private_edges"):
+        # a bus-only edge's end that no driving edge reaches (a bus-only road's far end): its own line's end point
+        have = {n for n, _, _ in nodes}
+        for n, x, y in con.execute("""SELECT source, ST_X(ST_StartPoint(geometry)), ST_Y(ST_StartPoint(geometry)) FROM driving.private_edges WHERE access = 'bus'
+                                      UNION ALL SELECT target, ST_X(ST_EndPoint(geometry)), ST_Y(ST_EndPoint(geometry)) FROM driving.private_edges WHERE access = 'bus'""").fetchall():
+            if n not in have:
+                nodes.append((n, x, y))
+                have.add(n)
     with open(nod_path, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<nodes>\n')
         for nid, lon, lat in nodes:
@@ -185,9 +195,12 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         f.write('</nodes>\n')
 
     # ---- edges: id = edge_id (1:1); real shape; true graph length (meso uses it directly) ----
-    rows = con.execute(
-        f"SELECT edge_id, source, target, highway, name, lanes, maxspeed_kmh, length_m, "
-        f"ST_AsText(geometry) FROM {mode}.edges").fetchall()
+    cols = "edge_id, source, target, highway, name, lanes, maxspeed_kmh, length_m, ST_AsText(geometry)"
+    bus = bus_edges and mode == "driving" and _table_exists(con, "driving.private_edges")
+    rows = con.execute(f"SELECT {cols} FROM {mode}.edges" + (f" UNION ALL SELECT {cols} FROM driving.private_edges WHERE access = 'bus'" if bus else "")).fetchall()
+    # a one-way edge (no edge the other way between its two nodes) has its lanes centred on its line, as SUMO's own OSM import
+    # (and duckOSM's lane lines) do; a direction of a two-way road has them right of the line (netconvert's default)
+    pairs = {(r[1], r[2]) for r in rows}
     # each edge's lanes from driving.lane_profile (docs/design/gmns_lane_profile.md), left to right: one <lane> each with its vehicle
     # classes and width, so netconvert gets the lanes duckOSM decided (as its own OSM import would get them from the tags), not a count
     profile = {}
@@ -214,6 +227,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs.append(f'length="{float(length_m):.2f}"')       # true graph length
             if highway:
                 attrs.append(f'type={quoteattr(str(highway))}')
+            if (target, source) not in pairs:
+                attrs.append('spreadType="center"')
             if mode in _MODE_ALLOW:
                 attrs.append(f'allow="{_MODE_ALLOW[mode]}"')
             shape = _linestring_points(wkt)
@@ -244,11 +259,17 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     if use_conns:
         from duckosm.processors.edge_graph import routed_graph
         graph_tbl = routed_graph(con, mode)              # the cars' turns, not the bus rows
+        if bus:                                          # and the buses', where a bus-only edge is in it
+            graph_tbl = (f"(SELECT * FROM {mode}.edge_graph WHERE from_edge IN (SELECT edge_id FROM {mode}.edges UNION ALL SELECT edge_id FROM "
+                         f"driving.private_edges WHERE access = 'bus') AND to_edge IN (SELECT edge_id FROM {mode}.edges UNION ALL SELECT edge_id "
+                         f"FROM driving.private_edges WHERE access = 'bus'))")
         cs = con.execute(f"SELECT from_edge, to_edge FROM {graph_tbl}").fetchall()
         # an edge with no legal successor gets a from-only connection ("no connections"), or
         # netconvert would invent its own there (it once brought back a banned left turn)
         stuck = con.execute(f"SELECT edge_id FROM {mode}.edges WHERE source <> target "
-                            f"AND edge_id NOT IN (SELECT from_edge FROM {graph_tbl})").fetchall()
+                            f"AND edge_id NOT IN (SELECT from_edge FROM {graph_tbl})" + (
+                                f" UNION ALL SELECT edge_id FROM driving.private_edges WHERE access = 'bus' AND source <> target "
+                                f"AND edge_id NOT IN (SELECT from_edge FROM {graph_tbl})" if bus else "")).fetchall()
         with open(con_path, "w", encoding="utf-8") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n<connections>\n')
             for fe, te in cs:

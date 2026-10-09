@@ -1,6 +1,6 @@
 # GMNS lanes: one lane profile, connections from SUMO (design, 2026-10-10)
 
-Status: steps 1-2 built (2026-10-10): `driving.lane_profile` (processors/lane_profile.py); `to_sumo` writes its lanes and `sumo_compare.lane_diff` compares with SUMO's own import (Monaco: 1,144 of 1,182 the same, every difference named). Step 3 to do. Replaces the lane rules spread over the build and `gmns.py`.
+Status: steps 1-2 built (2026-10-10): `driving.lane_profile` (processors/lane_profile.py); `to_sumo` writes its lanes and `sumo_compare.lane_diff` compares with SUMO's own import (Monaco: 1,144 of 1,182 the same, every difference named). Step 3 built behind `to_gmns(lanes_from="sumo")` (gmns_sumo.py): Monaco, every movement has its lanes from SUMO (0 unmapped), 4,269 of 4,370 turns use the same car lanes as the old rules; the old rules stay the default until the 101 differences are checked. Replaces the lane rules spread over the build and `gmns.py`.
 
 ## Why
 

@@ -1051,3 +1051,38 @@ def test_bus_turns_come_from_edge_graph_and_leave_the_cars_alone(tmp_path):
     g = duckdb.connect(str(tmp_path / "bus_gmns.duckdb"))
     assert not g.execute(f"SELECT * FROM lane_driving.lane_edges WHERE from_lane LIKE '{R}_%' OR to_lane LIKE '{S}_%'").fetchall()
     assert g.execute(f"SELECT count(*) FROM lane_driving.lane_edges WHERE from_lane = '{F}_1' AND to_lane = '{G}_1'").fetchone()[0] == 1
+
+
+def test_lanes_from_sumo(tmp_path):
+    """to_gmns(lanes_from="sumo") (docs/design/gmns_lane_profile.md, step 3): each movement's lanes from netconvert's connections, one
+    connector per lane pair (the path through the junction), each lane's line cut where the junction begins (geom) and kept to its
+    node (geom_full); nothing left unmapped (lane_check empty). Here a 2-lane road forks into a 2-lane and a 1-lane road."""
+    from duckosm.sumo import _find_netconvert
+    try:
+        _find_netconvert(None)
+    except Exception:
+        pytest.skip("netconvert is needed")
+    src, out = tmp_path / "s.duckdb", tmp_path / "s_gmns.duckdb"
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}
+    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    to_gmns(str(src), str(out), lanes_from="sumo")
+    con = duckdb.connect(str(out))
+    con.execute("LOAD spatial")
+    mv = con.execute("SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
+                     "WHERE mvmt_id NOT LIKE '%-%-%'").fetchall()
+    assert {(a, b) for a, b, *_ in mv} == {(11, 12), (11, 13)} and all(r[2] is not None for r in mv)
+    assert con.execute("SELECT count(*) FROM gmns_driving.lane_check").fetchone()[0] == 0
+    n = con.execute("SELECT count(*) FROM gmns_driving.lane_connector WHERE geom IS NOT NULL").fetchone()[0]
+    assert n >= 3                                                                    # 2 lanes on, 1 into the branch at least
+    # SUMO's lane lines follow duckOSM's (a one-way's lanes centred on its line, as ours): within 5 cm sideways at their middles; the lanes
+    # leaving the fork start later, where the junction ends (an incoming lane may end a little past the node: the junction lies on the branch's side)
+    assert con.execute("SELECT max(ST_Distance(ST_LineInterpolatePoint(geom, 0.5), geom_full)) * 111320 FROM gmns_driving.lane").fetchone()[0] < 0.05
+    assert con.execute("SELECT bool_and(ST_Length(geom) < ST_Length(geom_full)) FROM gmns_driving.lane WHERE link_id IN (12, 13)").fetchone()[0]
+
+
+def test_sumo_lane_pairs_become_runs_side_by_side():
+    """gmns_sumo._runs: lane pairs that go on side by side are one movement row; a lane feeding two lanes ahead is two rows."""
+    from duckosm.gmns_sumo import _runs
+    assert _runs([(1, 1), (2, 2)]) == [[(1, 1), (2, 2)]]
+    assert _runs([(2, 1), (2, 2)]) == [[(2, 1)], [(2, 2)]]
+    assert _runs([(1, 1), (1, 2), (2, 3)]) == [[(1, 1)], [(1, 2), (2, 3)]]

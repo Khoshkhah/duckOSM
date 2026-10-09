@@ -451,7 +451,7 @@ def _vary_wkt(lane_wkt, run_wkt, profile, g0, side_sign, step_m=2.0):
 
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False,
             drive_side="right", pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0,
-            walk_frame=False, walk_clearance_m=0.0):
+            walk_frame=False, walk_clearance_m=0.0, lanes_from="rules"):
     """Extract a built duckOSM db to a standalone GMNS DuckDB.
 
     Parameters
@@ -466,6 +466,9 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         from that road's cross-section: just outside the road's kerb-side lane, not from its own OSM line
         (docs/design/gmns_walking_frame.md); ``walk_clearance_m`` leaves a gap to the kerb. Only mapped sidewalks move:
         no footpath is put where OSM has none.
+    lanes_from : ``"rules"`` (default, today's lane assignment and connectors) or ``"sumo"``: in the driving network, which lane goes to
+        which and the paths through the junctions from SUMO netconvert, the lanes from ``driving.lane_profile``
+        (docs/design/gmns_lane_profile.md, step 3; :func:`duckosm.gmns_sumo.lanes_from_sumo`). Needs netconvert (``duckosm[sumo]``).
     pair_carriageways : place a one-way edge with an opposite one-way partner close on its inner side
         as one side of a two-way road, from the line midway between them (default; False = centred
         on its own way, as before). docs/design/gmns_paired_carriageways.md
@@ -535,8 +538,14 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
             _walk_frame(con, sch, drive_side, along, walk_clearance_m)  # before the lane connectors
             _walk_kerb(con, sch, walk_clearance_m)
             _walk_join(con, sch)
-        _build_movement(con, sch, mode, uses, drive_side)
-        if lane_geometry and mode == "driving":         # lane ends + connectors, after the lane ranges. Driving only: a footway has no turning
+        sumo = lanes_from == "sumo" and mode == "driving"
+        if lanes_from not in ("rules", "sumo"):
+            raise ValueError(f'lanes_from must be "rules" or "sumo", got {lanes_from!r}')
+        _build_movement(con, sch, mode, uses, drive_side, assign=not sumo)
+        if sumo:
+            from duckosm.gmns_sumo import lanes_from_sumo
+            result.setdefault("sumo", {})[mode] = lanes_from_sumo(con, sch)
+        elif lane_geometry and mode == "driving":       # lane ends + connectors, after the lane ranges. Driving only: a footway has no turning
             _build_lane_connectors(con, sch)            # path through a junction (OSM has none), its lane runs to its node and meets the next there
         if mode == "driving":
             from duckosm.crossings import build_crossings
@@ -1088,7 +1097,7 @@ def _build_geometry(con, sch, mode):
     con.execute(f"INSERT INTO {sch}.geometry SELECT edge_id, ST_AsText(geometry), geometry FROM _edges_bus")
 
 
-def _build_movement(con, sch, mode, uses, drive_side="right"):
+def _build_movement(con, sch, mode, uses, drive_side="right", assign=True):
     """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction.
     The mode's own rows (``uses`` 'car' in driving) are the movements of its links; the rows into or out of
     a bus-only link (``uses`` 'bus') are movements too, ``allowed_uses`` 'bus', or 'bus,bike' where each
@@ -1185,10 +1194,15 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
                    WHERE node_id IN (SELECT node_id FROM _mv_all WHERE NOT _own)""")
     con.execute("CREATE TEMP TABLE _bus_mv_ids AS SELECT mvmt_id FROM _mv_all WHERE NOT _own")
     con.execute("DROP TABLE _mv_all")
+    n_bus = con.execute("SELECT count(*) FROM _bus_mv_ids").fetchone()[0]
+    if not assign:                       # the lanes come from elsewhere (lanes_from="sumo"): the rows alone, the bus rows with them
+        con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN IF EXISTS _ang")
+        con.execute(f"INSERT INTO {sch}.movement SELECT * EXCLUDE (_ang) FROM _mv_bus WHERE mvmt_id IN (SELECT mvmt_id FROM _bus_mv_ids)")
+        con.execute("DROP TABLE _mv_bus; DROP TABLE _bus_mv_ids")
+        return
     _assign_lanes(con, sch, mode, drive_side)
     _fork_branch_lanes(con, sch)
     _continuation_movements(con, sch)
-    n_bus = con.execute("SELECT count(*) FROM _bus_mv_ids").fetchone()[0]
     if n_bus:
         _assign_lanes(con, sch, mode, drive_side, mv="_mv_bus")
         con.execute(f"INSERT INTO {sch}.movement SELECT * FROM _mv_bus WHERE mvmt_id IN (SELECT mvmt_id FROM _bus_mv_ids)")
