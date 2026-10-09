@@ -312,3 +312,17 @@ are not counted in `lanes`.
 
 **Fix.** `lanes: 1` for each in `osm_overrides.yaml`; upstream, set `lanes=1` on these ways in OpenStreetMap.
 
+
+## 11. Monaco, Avenue Albert II roundabout - no `lanes` tag on a two-lane ring
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco |
+| **OSM ways** | `503462476`, `503462459`, `503462460`, `804900035`, `4229900` (`highway=secondary`, `junction=roundabout`, no `lanes`) |
+| **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
+
+**Symptom.** The ring was drawn with one lane (the lane profile's default, `source = default`); the 2-lane road entering it
+(`92627408`) had a lane with no way in (SUMO let it end before the ring).
+
+**Fix.** `lanes: 2` for the five ways in `osm_overrides.yaml`; upstream, tag `lanes=2` on them in OpenStreetMap.
+
