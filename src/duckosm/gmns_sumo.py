@@ -10,7 +10,8 @@ build it, and reads back
 - ``lane.geom``: SUMO's lane line, which stops where the junction begins; ``lane.geom_full`` keeps duckOSM's line to the node.
 
 What it cannot map is written to ``<sch>.lane_check`` (``kind``, ``id``, ``detail``), never filled in: a link whose lane count SUMO
-built differently, a movement netconvert gave no lane connection (it leaves out some U-turns).
+built differently, a movement netconvert gave no lane connection (it leaves out some U-turns), a car lane no movement leaves or
+enters.
 """
 import logging
 import tempfile
@@ -174,8 +175,23 @@ def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
         con.register("_con_sumo", pd.DataFrame(connectors, columns=["connector_id", "mvmt_id", "from_lane_id", "to_lane_id", "width", "wkt"]))
         con.execute(f"INSERT INTO {sch}.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, ST_GeomFromText(wkt) FROM _con_sumo")
         con.unregister("_con_sumo")
+    # every car lane of a link with movements has a way out, and a way in (else listed: SUMO lets a lane end before a narrowing)
+    outs, ins = defaultdict(set), defaultdict(set)
+    for r in rows:
+        if r["start_ib_lane"] is not None:
+            outs[r["ib_link_id"]].update(range(r["start_ib_lane"], r["end_ib_lane"] + 1))
+            ins[r["ob_link_id"]].update(range(r["start_ob_lane"], r["end_ob_lane"] + 1))
+    has_out, has_in = {r["ib_link_id"] for r in rows}, {r["ob_link_id"] for r in rows}
+    for (lk, n), use in sorted(use_of.items()):
+        if use == "bike" or lk in bad:
+            continue
+        if lk in has_out and n not in outs[lk]:
+            check.append(("no way out", lid_of[(lk, n)], "no movement leaves this lane"))
+        if lk in has_in and n not in ins[lk]:
+            check.append(("no way in", lid_of[(lk, n)], "no movement enters this lane"))
     if check:
         con.executemany(f"INSERT INTO {sch}.lane_check VALUES (?, ?, ?)", check)
-    summary = {"movements": len(mv), "rows": len(out), "connectors": len(connectors), "no_connection": missing, "lane_count_mismatch": len(bad)}
+    summary = {"movements": len(mv), "rows": len(out), "connectors": len(connectors), "no_connection": missing, "lane_count_mismatch": len(bad),
+               **{k: sum(1 for c in check if c[0] == k) for k in ("no way out", "no way in")}}
     logger.info(f"GMNS[driving] lanes from SUMO: {summary}; anything not mapped is in {sch}.lane_check")
     return summary
