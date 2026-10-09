@@ -326,3 +326,17 @@ are not counted in `lanes`.
 
 **Fix.** `lanes: 2` for the five ways in `osm_overrides.yaml`; upstream, tag `lanes=2` on them in OpenStreetMap.
 
+
+## 12. Monaco, Boulevard du Larvotto - a left turn Street View forbids
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco |
+| **Turn** | from way `503783382` (Boulevard du Larvotto) via node `273244126` into way `93137600` (`highway=primary_link`, by the roundabout) |
+| **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
+
+**Symptom.** GMNS (and routing) allowed a left turn from Boulevard du Larvotto into the short link road; Street View shows it is not
+allowed. OSM has no `type=restriction` relation there.
+
+**Fix.** A synthetic `no_left_turn` in `osm_overrides.yaml` (`turn_restrictions`); upstream, map the restriction in OpenStreetMap.
+
