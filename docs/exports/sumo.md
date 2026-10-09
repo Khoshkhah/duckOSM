@@ -11,7 +11,8 @@ each junction allows only the turns in `edge_graph`, so turn restrictions are ke
 leaves out a few U-turns it can't build (Monaco: 37 of 1,628); it never adds a turn.
 
 A walking network is for pedestrians only (`allow="pedestrian"`, with SUMO walking areas at the
-junctions), a cycling network for bicycles only. A driving network allows every vehicle class.
+junctions), a cycling network for bicycles only. A driving network allows every vehicle class. A
+walking or cycling edge is one path lane, 2 m or 1.5 m wide (not the road's lane count at 3.2 m).
 
 | Option | Does |
 |---|---|
@@ -27,4 +28,5 @@ from duckosm import to_sumo
 con = duckdb.connect("monaco.duckdb", read_only=True)
 out = to_sumo(con, "sumo/")                                  # out["net"] = "sumo/network.net.xml"
 to_sumo(con, "sumo/", config={"junctions.join": "true"})     # change one netconvert option
+to_sumo(con, "sumo/", edge_attrs={eid: {"numLanes": 2, "width": 3.1}})   # your own lanes and widths per edge
 ```

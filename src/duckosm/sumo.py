@@ -47,6 +47,9 @@ _HIGHWAY_PRIORITY = {
     "living_street": 1, "service": 0,
 }
 
+# a walking / cycling edge is one path, not a road: its width (netconvert's default lane width is 3.2 m)
+_MODE_LANEWIDTH = {"walking": 2.0, "cycling": 1.5}
+
 # Default netconvert options, written into the generated `.netccfg` (standard SUMO config format).
 # Tuned to keep the duckOSM topology verbatim: 1:1 edge ids (no merge), explicit turns honoured.
 DEFAULT_NETCFG = {
@@ -138,7 +141,7 @@ def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
             run_netconvert: bool = True, netconvert_bin: str = None,
-            connections: bool = True, config=None):
+            connections: bool = True, config=None, edge_attrs: dict = None):
     """Export the duckOSM network to SUMO, preserving ``edge_id`` and the turn restrictions.
 
     Parameters
@@ -158,6 +161,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         ``{netconvert-option: value}`` is merged onto the default; a ``str`` path to a ``.netccfg``
         is used as-is (inputs/output are still set by this function). The effective config is written
         in SUMO's standard ``.netccfg`` format and run with ``netconvert -c``.
+    edge_attrs : ``{edge_id: {sumo-edge-attribute: value}}`` set on those edges, over what duckOSM
+        writes: e.g. measured lane counts and widths, ``{eid: {"numLanes": 2, "width": 3.1}}``.
 
     Returns ``{"nod","edg","con"(if written),"netccfg"(if built),"net"(if built),"n_nodes",
     "n_edges","n_connections"}``. Every (non-internal) SUMO edge id equals the duckOSM ``edge_id``.
@@ -194,7 +199,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 continue
             attrs = [f'id="{eid}"', f'from="{source}"', f'to="{target}"',
                      f'priority="{_HIGHWAY_PRIORITY.get(highway, 1)}"']
-            if lanes_ and int(lanes_) > 0:
+            if lanes_ and int(lanes_) > 0 and mode not in _MODE_LANEWIDTH:     # a road's lanes, not a path's
                 attrs.append(f'numLanes="{int(lanes_)}"')
             if spd and float(spd) > 0:
                 attrs.append(f'speed="{float(spd) / 3.6:.3f}"')       # km/h -> m/s
@@ -209,6 +214,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs.append(f'shape="{shape}"')
             if name:
                 attrs.append(f'name={quoteattr(str(name))}')
+            for k, v in (edge_attrs or {}).get(eid, {}).items():
+                attrs = [a for a in attrs if not a.startswith(f"{k}=")] + [f"{k}={quoteattr(str(v))}"]
             f.write("  <edge " + " ".join(attrs) + "/>\n")
             n_edges += 1
         f.write('</edges>\n')
@@ -254,6 +261,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         opts = dict(DEFAULT_NETCFG)
         if mode == "walking":                            # SUMO pedestrians cross junctions on these
             opts["walkingareas"] = "true"
+        if mode in _MODE_LANEWIDTH:
+            opts["default.lanewidth"] = str(_MODE_LANEWIDTH[mode])
         if isinstance(config, dict):
             opts.update(config)
         cfg_path = os.path.join(out_dir, f"{net_name}.netccfg")

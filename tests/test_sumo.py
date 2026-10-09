@@ -117,3 +117,18 @@ def test_netccfg_default_and_override(tmp_path):
 def test_walking_edges_are_for_pedestrians(tmp_path):
     to_sumo(_db("walking"), str(tmp_path), mode="walking", run_netconvert=False)
     assert 'allow="pedestrian"' in (tmp_path / "network.edg.xml").read_text()
+
+
+def test_a_path_is_one_lane_of_path_width(tmp_path):
+    """A walking edge on a road with lanes=2 was two 3.2 m lanes (a 6.4 m footpath)."""
+    out = to_sumo(_db("walking"), str(tmp_path), mode="walking", run_netconvert=False)
+    assert "numLanes=" not in (tmp_path / "network.edg.xml").read_text()
+    if HAVE_NETCONVERT:
+        to_sumo(_db("walking"), str(tmp_path), mode="walking")
+        assert '<default.lanewidth value="2.0"/>' in (tmp_path / "network.netccfg").read_text()
+
+
+def test_edge_attrs_override(tmp_path):
+    to_sumo(_db(), str(tmp_path), run_netconvert=False, edge_attrs={E1: {"numLanes": 2, "width": 3.1}})
+    e1 = [ln for ln in (tmp_path / "network.edg.xml").read_text().splitlines() if f'id="{E1}"' in ln][0]
+    assert 'numLanes="2"' in e1 and 'numLanes="1"' not in e1 and 'width="3.1"' in e1
