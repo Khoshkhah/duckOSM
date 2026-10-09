@@ -1086,3 +1086,23 @@ def test_sumo_lane_pairs_become_runs_side_by_side():
     assert _runs([(1, 1), (2, 2)]) == [[(1, 1), (2, 2)]]
     assert _runs([(2, 1), (2, 2)]) == [[(2, 1)], [(2, 2)]]
     assert _runs([(1, 1), (1, 2), (2, 3)]) == [[(1, 1)], [(1, 2), (2, 3)]]
+
+
+def test_gmns_lanes_come_from_the_lane_profile(tmp_path):
+    """docs/design/gmns_lane_profile.md step 1c: in driving, GMNS takes each edge's lanes from driving.lane_profile (number, use, width,
+    turn) and only places them; an edge the profile lacks is an error, not a guess."""
+    src, out = tmp_path / "p.duckdb", tmp_path / "p_gmns.duckdb"
+    _mini_source(src, {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32)}, [(11, 1, 2, 2), (12, 2, 4, 1)], [(11, 12)])
+    con = duckdb.connect(str(src))
+    con.execute("CREATE TABLE driving.lane_profile(edge_id BIGINT, lane_num INTEGER, use VARCHAR, width_m DOUBLE, turn VARCHAR, source VARCHAR, width_source VARCHAR)")
+    con.execute("""INSERT INTO driving.lane_profile VALUES (11, -1, 'bike', 1.6, NULL, 'cycleway:left', 'default'), (11, 1, 'auto', 3.1, 'left', 'lanes', 'default'),
+                   (11, 2, 'bus', 3.4, NULL, 'bus:lanes', 'width:lanes'), (12, 1, 'auto', 3.0, NULL, 'lanes', 'default')""")
+    con.close()
+    to_gmns(str(src), str(out))
+    got = duckdb.connect(str(out)).execute("SELECT link_id, lane_num, allowed_uses, width, turn FROM gmns_driving.lane ORDER BY 1, 2").fetchall()
+    assert got == [(11, -1, "bike", 1.6, None), (11, 1, "auto", 3.1, "left"), (11, 2, "bus", 3.4, None), (12, 1, "auto", 3.0, None)]
+    con = duckdb.connect(str(src))
+    con.execute("DELETE FROM driving.lane_profile WHERE edge_id = 12")
+    con.close()
+    with pytest.raises(ValueError, match="lane_profile has no lanes"):
+        to_gmns(str(src), str(tmp_path / "p2_gmns.duckdb"))

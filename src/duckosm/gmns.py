@@ -2012,6 +2012,39 @@ def _build_signal_controller(con, sch):
     FROM {sch}.node WHERE ctrl_type = 'signal'""")
 
 
+def _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bike_extra, bike_left, pick, extra_lanes):
+    """The lanes of one edge from its tags, for a db without ``driving.lane_profile`` (built before 2026-10-10) and the walking and
+    cycling networks: ``[(lane_num, use, width, turn, width to place it)]`` left to right; a bike lane beside the motor lanes is added
+    to ``extra_lanes``. The driving rules live in processors/lane_profile.py now (docs/design/gmns_lane_profile.md)."""
+    turns, widths, w_each = lane_widths(tags, lanes, is_rev, edge_id in bus_of, one)
+    bikes, psvs, buses = (_split(pick(tags, k, is_rev)) for k in ("bicycle:lanes", "psv:lanes", "bus:lanes"))
+    n = len(w_each)
+    extra = None if edge_id in bus_of else bike_extra(tags, is_rev)      # the last lane, beside the motor lanes
+    left = None if edge_id in bus_of else bike_left(tags, is_rev, one)   # the first lane, GMNS lane -1
+    k0 = 1 if left else 0                                                # the position of motor lane 1 among w_each
+    out = []
+    for i in range(n):
+        u, m = uses, i - k0                                              # m: the motor lane's index (turn:lanes, width:lanes, *:lanes)
+        num = -1 if left and i == 0 else m + 1
+        if edge_id in bus_of:
+            u = bus_of[edge_id]
+        elif (extra and i == n - 1) or (left and i == 0):
+            u = "bike"
+            extra_lanes.append((edge_id, num))
+        elif m < len(bikes) and bikes[m] in ("designated", "yes"):
+            u = "bike"
+        elif (m < len(psvs) and psvs[m] in ("designated", "yes")) or (m < len(buses) and buses[m] in ("designated", "yes")):
+            u = "bus"
+        width = extra[1] if extra and i == n - 1 else left[1] if left and i == 0 else (_num(widths[m]) if m < len(widths) else None)
+        if width is None and u == "bike":
+            width = _DEFAULT_BIKE_W                                      # stored, so every reader draws the same width
+        elif width is None and u != "walk":
+            width = w_each[i]                                            # the class default, so every reader draws the same width
+        turn = turns[m] if 0 <= m < len(turns) and turns[m] not in ("", "none") else None
+        out.append((num, u, width, turn, w_each[i]))
+    return out
+
+
 def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="right",
                      pair_carriageways=True):
     """Per-lane rows from OSM lane tags (+ optional offset geometry) and curb_seg from parking tags.
@@ -2033,6 +2066,16 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
       e.length_m, e.source, {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name, e._bus, e._bike
       FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""").fetchall()]
     side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
+    # driving: every edge's lanes from driving.lane_profile, decided once in the build (docs/design/gmns_lane_profile.md); this function
+    # only places them. A build without the table (older) keeps the rules below
+    prof = {}
+    if mode == "driving" and _exists(con, "s", "driving", "lane_profile"):
+        for eid, num, use, width, turn, src in con.execute("SELECT edge_id, lane_num, use, width_m, turn, source FROM s.driving.lane_profile "
+                                                           "ORDER BY edge_id, lane_num").fetchall():
+            prof.setdefault(eid, []).append((num, use, width, turn, src))
+        missing_ = [r[0] for r in rows if r[0] not in prof]
+        if missing_:
+            raise ValueError(f"driving.lane_profile has no lanes for {len(missing_)} edge(s), e.g. {missing_[:5]}: build the db again")
     bus_of = {r[0]: ("bus,bike" if r[12] else "bus") for r in rows if r[11]}   # a bus-only edge: one bus lane, 3.25 m unless tagged
     # a one-way street with a bus lane the other way is two-way on the road: each direction's lanes on its own side of the line
     contra = {r[9] for r in rows if r[11] and r[5]} & {r[9] for r in rows if not r[11]}
@@ -2105,7 +2148,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, name, *_ in rows:
         tags = tags or {}
         oneway = oneway and osm_id not in contra
-        w_each = lane_widths(tags, lanes, is_rev, edge_id in bus_of, oneway)[2]
+        w_each = [x[2] for x in prof[edge_id]] if prof else lane_widths(tags, lanes, is_rev, edge_id in bus_of, oneway)[2]
         w_of[edge_id] = w_each
         place_of[edge_id] = _placement(pick(tags, "placement", is_rev), w_each) if (oneway or is_foot(tags) or side_sign < 0) else None
         h0, h1 = headings(wkt) if wkt else (0.0, 0.0)
@@ -2175,35 +2218,15 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name, *_ in rows:
         tags = tags or {}
         one = bool(oneway) and osm_id not in contra
-        turns, widths, w_each = lane_widths(tags, lanes, is_rev, edge_id in bus_of, one)
-        bikes = _split(pick(tags, "bicycle:lanes", is_rev))
-        psvs = _split(pick(tags, "psv:lanes", is_rev))
-        buses = _split(pick(tags, "bus:lanes", is_rev))     # bus lanes are tagged either way
-        n = len(w_each)
-        extra = None if edge_id in bus_of else bike_extra(tags, is_rev)   # the last lane, beside the motor lanes
-        left = None if edge_id in bus_of else bike_left(tags, is_rev, one)   # the first lane, GMNS lane -1
-        k0 = 1 if left else 0                                # the position of motor lane 1 among w_each
+        if prof:                                             # (lane_num, use, width, turn) left to right, as the profile has them
+            these = [(num, use, width, turn) for num, use, width, turn, _ in prof[edge_id]]
+            extra_lanes += [(edge_id, num) for num, use, _, _, src in prof[edge_id] if use == "bike" and src.startswith("cycleway")]
+        else:
+            these = _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bike_extra, bike_left, pick, extra_lanes)
+        w_each = [x[2] for x in these] if prof else [x[4] for x in these]
         offs = offsets(edge_id)
         run = 0.0
-        for i in range(n):
-            u, m = uses, i - k0                              # m: the motor lane's index (turn:lanes, width:lanes, *:lanes)
-            num = -1 if left and i == 0 else m + 1
-            if edge_id in bus_of:
-                u = bus_of[edge_id]
-            elif (extra and i == n - 1) or (left and i == 0):
-                u = "bike"
-                extra_lanes.append((edge_id, num))
-            elif m < len(bikes) and bikes[m] in ("designated", "yes"):
-                u = "bike"
-            elif (m < len(psvs) and psvs[m] in ("designated", "yes")) or \
-                    (m < len(buses) and buses[m] in ("designated", "yes")):
-                u = "bus"
-            width = extra[1] if extra and i == n - 1 else left[1] if left and i == 0 else (_num(widths[m]) if m < len(widths) else None)
-            if width is None and u == "bike":
-                width = _DEFAULT_BIKE_W                      # stored, so every reader draws the same width
-            elif width is None and u != "walk":
-                width = w_each[i]                            # the class default, so every reader draws the same width
-            turn = turns[m] if 0 <= m < len(turns) and turns[m] not in ("", "none") else None
+        for i, (num, u, width, turn, *_) in enumerate(these):
             run += w_each[i]
             if not lane_geometry:
                 geom = None
