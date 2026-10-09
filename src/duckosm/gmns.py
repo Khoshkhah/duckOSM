@@ -1052,7 +1052,8 @@ def _build_geometry(con, sch, mode):
 
 
 def _build_movement(con, sch, mode, uses, drive_side="right"):
-    """One row per legal turn from edge_graph; turn `type` from the bearing change at the junction."""
+    """One row per legal turn from edge_graph, plus the turns open only to some uses (turn_permission: a bus-only left turn has
+    allowed_uses = bus; docs/design/turn_permissions.md); turn `type` from the bearing change at the junction."""
     if not _exists(con, "s", mode, "edge_graph"):
         con.execute(f"""CREATE TABLE {sch}.movement(
           mvmt_id VARCHAR, node_id BIGINT, name VARCHAR, ib_link_id BIGINT, start_ib_lane INT,
@@ -1060,14 +1061,19 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
           penalty DOUBLE, capacity DOUBLE, ctrl_type VARCHAR, mvmt_code VARCHAR,
           allowed_uses VARCHAR, geometry VARCHAR)""")
         return
+    perm = (f"""UNION ALL SELECT from_edge, to_edge, string_agg(DISTINCT u, ',' ORDER BY u) FROM (
+                  SELECT from_edge, to_edge, CASE WHEN v IN ('psv', 'bus') THEN 'bus' WHEN v = 'bicycle' THEN 'bike' END AS u
+                  FROM (SELECT from_edge, to_edge, trim(unnest(string_split(vehicles, ';'))) AS v FROM s.{mode}.turn_permission WHERE allowed))
+                WHERE u IS NOT NULL GROUP BY ALL"""
+            if _exists(con, "s", mode, "turn_permission") else "")
     con.execute(f"""CREATE TABLE {sch}.movement AS
       WITH mv AS (
-        SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id,
+        SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id, eg.uses,
                fe.geometry AS ibg, te.geometry AS obg,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER)       AS pe,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER - 1)   AS pp,
                ST_PointN(te.geometry, 1) AS qs, ST_PointN(te.geometry, 2) AS qn
-        FROM s.{mode}.edge_graph eg
+        FROM (SELECT from_edge, to_edge, NULL::VARCHAR AS uses FROM s.{mode}.edge_graph {perm}) eg
         JOIN s.{mode}.edges fe ON fe.edge_id = eg.from_edge
         JOIN s.{mode}.edges te ON te.edge_id = eg.to_edge
         -- drop the immediate reversal (U-turn back onto the same physical segment): an edge_graph
@@ -1081,12 +1087,12 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
                    AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph i
                                WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge))
       ), b AS (
-        SELECT ib, ob, node_id, ibg, obg,
+        SELECT ib, ob, node_id, uses, ibg, obg,
           atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,
           atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) AS out_b
         FROM mv
       ), t AS (
-        SELECT ib, ob, node_id, ibg, obg, ang,
+        SELECT ib, ob, node_id, uses, ibg, obg, ang,
           CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
                WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
           -- inbound compass heading (0=N, clockwise) = (90 - math-bearing) mod 360
@@ -1121,7 +1127,7 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
                              WHEN t.hdg < 225 THEN 'SB' ELSE 'WB' END)
                        || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' ELSE 'T' END)
              END AS mvmt_code,
-             '{uses}' AS allowed_uses,
+             coalesce(t.uses, '{uses}') AS allowed_uses,
              ST_AsText({_bezier_line_sql('t.x0', 't.y0', 't.cx0', 't.cy0',
                                          't.cx1', 't.cy1', 't.x1', 't.y1')}) AS geometry,
              t.ang AS _ang

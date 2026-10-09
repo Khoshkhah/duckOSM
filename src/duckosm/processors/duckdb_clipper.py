@@ -75,6 +75,24 @@ class DuckdbClipper(BaseProcessor):
             """)
         except Exception:
             pass                                              # no restrictions for this mode/build
+        try:                                                  # what edge_graph does not say (docs/design/turn_permissions.md)
+            self.execute(f"""
+                CREATE OR REPLACE TABLE turn_permission AS
+                SELECT t.* FROM {p}.{m}.turn_permission t
+                WHERE t.from_edge IN (SELECT edge_id FROM edges)
+                  AND t.to_edge   IN (SELECT edge_id FROM edges)
+            """)
+        except Exception:
+            pass                                              # a parent built before turn_permission
+        try:                                                  # via-way restrictions: paths of edges
+            self.execute(f"""
+                CREATE OR REPLACE TABLE turn_path_restrictions AS
+                SELECT t.* FROM {p}.{m}.turn_path_restrictions t
+                WHERE t.from_edge IN (SELECT edge_id FROM edges) AND t.to_edge IN (SELECT edge_id FROM edges)
+                  AND list_bool_and([v IN (SELECT edge_id FROM edges) FOR v IN t.via_edges])
+            """)
+        except Exception:
+            pass                                              # a parent built before turn_path_restrictions
 
         n_e = self.fetchone("SELECT COUNT(*) FROM edges")[0]
         n_n = self.fetchone("SELECT COUNT(*) FROM nodes")[0]

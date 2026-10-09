@@ -32,3 +32,10 @@ out = to_sumo(con, "sumo/")                                  # out["net"] = "sum
 to_sumo(con, "sumo/", config={"junctions.join": "true"})     # change one netconvert option
 to_sumo(con, "sumo/", edge_attrs={eid: {"numLanes": 2, "width": 3.1}})   # your own lanes and widths per edge (id as number or text)
 ```
+
+**Joining close junctions** (`junctions.join`, off by default). A crossroads mapped as two or three close nodes becomes one
+junction. netconvert reads the turns (`.con.xml`) before it joins, and silently drops every turn onto an edge the join swallows (the
+short edge between two joined nodes): a road whose straight or left turn ran over that edge lost it. So when joining is on, duckOSM
+asks netconvert which nodes it joins (a first run with `--junctions.join-output`), merges those nodes itself (`cluster_<ids>`, as
+netconvert names them), writes every legal path through the swallowed edges as one turn (never back through a node it passed) and
+runs netconvert again without joining. Turn restrictions still hold: a path is legal only if each of its steps is in `edge_graph`.

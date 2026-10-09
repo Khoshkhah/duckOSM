@@ -36,6 +36,8 @@ MODE_TABLES = {
     "nodes":             "node_id IN (SELECT source FROM {sch}.edges UNION SELECT target FROM {sch}.edges)",
     "edge_graph":        "from_edge IN (SELECT edge_id FROM {sch}.edges) AND to_edge IN (SELECT edge_id FROM {sch}.edges)",
     "turn_restrictions": "from_edge_id IN (SELECT edge_id FROM {sch}.edges) AND to_edge_id IN (SELECT edge_id FROM {sch}.edges)",
+    "turn_permission":   "from_edge IN (SELECT edge_id FROM {sch}.edges) AND to_edge IN (SELECT edge_id FROM {sch}.edges)",
+    "turn_path_restrictions": "from_edge IN (SELECT edge_id FROM {sch}.edges) AND to_edge IN (SELECT edge_id FROM {sch}.edges)",
     "ways":              "osm_id IN (SELECT DISTINCT osm_id FROM {sch}.edges)",
     "way_nodes":         "way_id IN (SELECT DISTINCT osm_id FROM {sch}.edges)",
 }

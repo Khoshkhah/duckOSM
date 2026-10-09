@@ -67,7 +67,9 @@ class ComponentFilter(BaseProcessor):
         self.con.executemany("INSERT INTO _drop_edges VALUES (?)", [(e,) for e in drop_edges])
         self.execute("DELETE FROM edges WHERE edge_id IN (SELECT edge_id FROM _drop_edges)")
         for tbl, cols in (("edge_graph", ("from_edge", "to_edge")),
-                          ("turn_restrictions", ("from_edge_id", "to_edge_id"))):
+                          ("turn_restrictions", ("from_edge_id", "to_edge_id")),
+                          ("turn_permission", ("from_edge", "to_edge")),
+                          ("turn_path_restrictions", ("from_edge", "to_edge"))):
             try:
                 cond = " OR ".join(f"{c} IN (SELECT edge_id FROM _drop_edges)" for c in cols)
                 self.execute(f"DELETE FROM {tbl} WHERE {cond}")

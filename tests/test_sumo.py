@@ -143,3 +143,32 @@ def test_a_one_way_road_is_centred_on_its_line(tmp_path):
     edg = {ln.split('"')[1]: ln for ln in (tmp_path / "network.edg.xml").read_text().splitlines() if "<edge " in ln}
     assert 'spreadType="center"' in edg[str(E2)]                    # one-way
     assert "spreadType" not in edg[str(E1)] and "spreadType" not in edg["7"]
+
+
+@pytest.mark.skipif(not HAVE_NETCONVERT,
+                    reason="netconvert not installed (pip install duckosm[sumo])")
+def test_joined_junction_keeps_the_turns_through_it(tmp_path):
+    """A crossroads mapped as two nodes 6 m apart (A south, B north) with a short link A -> B: joining them (junctions.join) swallows
+    the link. The road from the south must still go straight on and turn left (both run over the link), not lose them."""
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA driving; USE driving")
+    con.execute("CREATE TABLE nodes(node_id BIGINT, geom GEOMETRY)")
+    pts = {1: (18.0700, 59.3190), 2: (18.0700, 59.3200), 3: (18.0700, 59.320054), 4: (18.0700, 59.3210),   # S, A, B, N
+           5: (18.0680, 59.320054), 6: (18.0720, 59.3200)}                                                 # W (from B), E (from A)
+    con.executemany("INSERT INTO nodes VALUES (?, ST_Point(?, ?))", [(n, x, y) for n, (x, y) in pts.items()])
+    con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT, highway VARCHAR, name VARCHAR, lanes INTEGER, "
+                "maxspeed_kmh FLOAT, length_m FLOAT, geometry GEOMETRY)")
+    legs = {11: (1, 2), 12: (2, 3), 13: (3, 4), 14: (3, 5), 15: (2, 6)}     # S->A, link A->B, B->N, B->W (left), A->E (right)
+    legs.update({20 + k: (b, a) for k, (a, b) in legs.items()})             # two-way roads, as at a real crossroads
+    for eid, (a, b) in legs.items():
+        (x1, y1), (x2, y2) = pts[a], pts[b]
+        length = 6 if {a, b} == {2, 3} else 110                              # the link is 6 m, the arms about 110 m
+        con.execute(f"INSERT INTO edges VALUES ({eid}, {a}, {b}, 'primary', NULL, 1, 50, {length}, "
+                    f"ST_GeomFromText('LINESTRING({x1} {y1}, {x2} {y2})'))")
+    con.execute("CREATE TABLE edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
+    con.execute("INSERT INTO edge_graph VALUES (11, 12, 1), (11, 15, 1), (12, 13, 1), (12, 14, 1)")
+    out = to_sumo(con, str(tmp_path), net_name="j", config={"junctions.join": "true"})
+    net = (tmp_path / "j.net.xml").read_text()
+    assert "cluster_2_3" in net              # A and B are one junction
+    to = set(re.findall(r'<connection from="11" to="(\d+)"', net))
+    assert to == {"13", "14", "15"}          # straight on, left (both through the swallowed link) and right
