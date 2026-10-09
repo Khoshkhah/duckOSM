@@ -273,3 +273,15 @@ Explorer, where the down ramp had no turning movement at all. If it is confirmed
 `OsmOverrides(mode=...)`) - the two rules are written, commented out, in `osm_overrides.yaml` - and
 upstream an `access=no` (or `motor_vehicle=no`) tag in OpenStreetMap.
 
+## 9. Boulevard du Larvotto — `lanes=2` counts the parking strip
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco |
+| **OSM way** | `93137560` (103 m, one-way primary) |
+| **Status** | **CONFIRMED** — the aerial photo shows one travel lane and a strip of parked cars (Kaveh, 2026-10-09) |
+
+The way is tagged `lanes=2`, but only one lane carries traffic; the outer strip is used for parking, and OSM
+counts it as a lane. Found from urbanstyle's street spaces, where the stretch was drawn with two lanes. Fix: the
+override `lanes: 1` in `osm_overrides.yaml`; upstream, `lanes=1` with `parking:right=lane` (or the side it is on).
+

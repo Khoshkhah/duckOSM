@@ -62,6 +62,11 @@ overrides:
     note: "service=driveway ramp tagged layer=-1 end-to-end though its junction end is at grade (joins the level-0 driveway 1429337400 at a shared node); no tunnel/bridge structure. Set to 0."
 
 
+  # --- Monaco ---
+  - osm_id: 93137560         # Boulevard du Larvotto — lanes=2 counts the parking strip (known_osm_issues #9, CONFIRMED)
+    lanes: 1
+    note: "one-way, one travel lane; the outer strip is parked cars (aerial photo), which lanes=2 counts as a lane"
+
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
 # (RestrictionProcessor) so the edge graph, routing, GMNS movements, exports and the lane viz all drop
