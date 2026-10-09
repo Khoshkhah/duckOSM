@@ -134,6 +134,9 @@ overrides:
   - osm_id: 4229900          # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
     lanes: 2
     note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 93137576         # Avenue Princesse Grace, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
   - osm_id: 39838824         # Boulevard Princesse Charlotte, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
