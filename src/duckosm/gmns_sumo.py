@@ -7,7 +7,8 @@ build it, and reads back
 - each movement's lane ranges from netconvert's connections: one row per run of lanes that go on side by side (the first keeps the
   movement's id, a further run ``<mvmt_id>-2`` ...; a bike lane's ``<mvmt_id>-b<lane>``, ``allowed_uses`` bike);
 - ``lane_connector``: one row per lane pair, the path through the junction (SUMO's internal lanes);
-- ``lane.geom``: SUMO's lane line, which stops where the junction begins; ``lane.geom_full`` keeps duckOSM's line to the node.
+- ``lane.geom_cut``: SUMO's lane line, which stops where the junction begins (the connectors meet it); ``lane.geom`` stays duckOSM's
+  line to the node, for every other reader (drawing without connectors, crossings, Lanelet2, routing, the walking frame).
 
 What it cannot map is written to ``<sch>.lane_check`` (``kind``, ``id``, ``detail``), never filled in: a link whose lane count SUMO
 built differently, a movement netconvert gave no lane connection (it leaves out some U-turns), a car lane no movement leaves or
@@ -64,6 +65,11 @@ def _path(via, lanes, nxt):
     return pts
 
 
+# a turn:lanes part -> the movement types it allows (a slight turn is typed thru by its angle under 30 degrees, so slight_* allows thru too)
+_ARROW = {"through": {"thru"}, "left": {"left"}, "sharp_left": {"left"}, "slight_left": {"left", "thru"}, "right": {"right"}, "sharp_right": {"right"},
+          "slight_right": {"right", "thru"}, "reverse": {"uturn"}, "merge_to_left": {"thru"}, "merge_to_right": {"thru"}, "none": {"thru"}, "": {"thru"}}
+
+
 def _runs(pairs):
     """Lane pairs ``[(a, b)]`` -> runs that go on side by side (a and b both one more each step), each ``[(a, b), ...]``."""
     out = []
@@ -75,14 +81,22 @@ def _runs(pairs):
     return out
 
 
-def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
-    """See the module docstring. ``con``: the GMNS connection, the duckOSM db attached as ``source``; ``sch``: ``gmns_driving``, its
-    ``lane`` and ``movement`` tables built. Returns a summary dict."""
+def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconvert_bin=None, work_dir=None, drive_side="right"):
+    """See the module docstring. ``con``: the GMNS connection, the duckOSM db attached as ``source``; ``sch``: ``gmns_<mode>``, its
+    ``lane`` and ``movement`` tables built; ``mode``: ``driving`` (with the bus-only edges and the buses' turns) or ``cycling`` (every
+    lane a bike's: no bike rows of their own); ``geometry``: also ``lane.geom_cut`` and ``lane_connector`` (driving; cycling has no
+    connectors, as before). ``drive_side`` ``left``: netconvert builds left-hand traffic. Returns a summary dict."""
     from duckosm.sumo import to_sumo
+    # SUMO gets GMNS's own lanes, use and width each, left to right: one to one with ours in every mode (in driving they are the lane
+    # profile's; cycling and a db built before the profile have only GMNS's)
+    ours_lanes = defaultdict(list)
+    for lk, use, w in con.execute(f"SELECT link_id, allowed_uses, COALESCE(width, 3.25) FROM {sch}.lane ORDER BY link_id, lane_num").fetchall():
+        ours_lanes[lk].append(("bike" if mode == "cycling" else use, w))
     cur = con.cursor()
     cur.execute(f"USE {source}")
     with tempfile.TemporaryDirectory() as tmp:
-        net = to_sumo(cur, work_dir or tmp, mode="driving", net_name="gmns", netconvert_bin=netconvert_bin, bus_edges=True)["net"]
+        net = to_sumo(cur, work_dir or tmp, mode=mode, net_name="gmns", netconvert_bin=netconvert_bin, bus_edges=mode == "driving",
+                      lanes=ours_lanes, config={"lefthand": "true"} if drive_side == "left" else None)["net"]
         to_ll, lanes, conns, nxt = _read_net(net)
     cur.close()
     check = []
@@ -126,7 +140,7 @@ def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
             missing += 1
             check.append(("no lane connection", r["mvmt_id"], f"{r['type']} {r['ib_link_id']} -> {r['ob_link_id']}: netconvert built none"))
             continue
-        bike = [(a, b) for a, b, _ in got if use_of.get((r["ib_link_id"], a)) == "bike" or use_of.get((r["ob_link_id"], b)) == "bike"]
+        bike = [(a, b) for a, b, _ in got if mode == "driving" and (use_of.get((r["ib_link_id"], a)) == "bike" or use_of.get((r["ob_link_id"], b)) == "bike")]
         motor = [(a, b) for a, b, _ in got if (a, b) not in bike]
         mid_of = {}                                    # lane pair -> the movement row it belongs to
         for k, run in enumerate(_runs(motor)):
@@ -139,12 +153,14 @@ def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
             m = f"{r['mvmt_id']}-b{a}"
             rows.append({**r, "mvmt_id": m, "start_ib_lane": a, "end_ib_lane": a, "start_ob_lane": b, "end_ob_lane": b, "allowed_uses": "bike"})
             mid_of[(a, b)] = m
-        for a, b, via in got:
+        for a, b, via in got if geometry else ():
             la, lb = lid_of[(r["ib_link_id"], a)], lid_of[(r["ob_link_id"], b)]
             shape = _path(via, lanes, nxt)
+            ea, eb = lanes.get(sumo_lane(r["ib_link_id"], a), ([], 0))[0], lanes.get(sumo_lane(r["ob_link_id"], b), ([], 0))[0]
             if len(shape) < 2:                         # no internal lane (a straight join): from the lane's end to the next one's start
-                ea, eb = lanes.get(sumo_lane(r["ib_link_id"], a), ([], 0))[0], lanes.get(sumo_lane(r["ob_link_id"], b), ([], 0))[0]
                 shape = [ea[-1], eb[0]] if ea and eb else []
+            elif ea and eb:                            # from the lane's very end to the next one's very start (a narrow bike lane's path
+                shape = [ea[-1], *shape[1:-1], eb[0]]  # into a wide lane ends off its middle): SUMO's points between stay
             if len(shape) >= 2:
                 connectors.append((f"{la}>{lb}", mid_of[(a, b)], la, lb, min(width_of.get(la) or 3.25, width_of.get(lb) or 3.25),
                                    "LINESTRING (" + ", ".join(f"{x:.8f} {y:.8f}" for x, y in to_ll(shape)) + ")"))
@@ -155,9 +171,36 @@ def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
     con.execute(f"INSERT INTO {sch}.movement SELECT * FROM _mv_sumo")
     con.unregister("_mv_sumo")
 
-    # the lanes: SUMO's line (to the junction) as geom, duckOSM's line to the node as geom_full
-    con.execute(f"ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_full GEOMETRY")
-    con.execute(f"UPDATE {sch}.lane SET geom_full = geom")
+    # every lane (driving: car lane) of a link with movements has a way out, and a way in (else listed: SUMO lets a lane end before a narrowing)
+    outs, ins = defaultdict(set), defaultdict(set)
+    for r in rows:
+        if r["start_ib_lane"] is not None:
+            outs[r["ib_link_id"]].update(range(r["start_ib_lane"], r["end_ib_lane"] + 1))
+            ins[r["ob_link_id"]].update(range(r["start_ob_lane"], r["end_ob_lane"] + 1))
+    has_out, has_in = {r["ib_link_id"] for r in rows}, {r["ob_link_id"] for r in rows}
+    # a lane's turn against its painted arrow (turn:lanes): SUMO does not read the arrows (its edge format has none), so each one is listed
+    turn_of = dict(((lk, n), t) for lk, n, t in con.execute(f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE turn IS NOT NULL").fetchall())
+    for r in rows:
+        if r["start_ib_lane"] is None or r["allowed_uses"] == "bike":
+            continue
+        t = r["type"] if r["type"] != "diverge" else {"L": "left", "R": "right"}.get((r["mvmt_code"] or "T")[-1:], "thru")
+        for n in range(r["start_ib_lane"], r["end_ib_lane"] + 1):
+            arrow = turn_of.get((r["ib_link_id"], n))
+            if arrow and t not in set().union(*(_ARROW.get(p.strip(), set()) for p in arrow.split(";"))):
+                check.append(("against its arrow", lid_of[(r["ib_link_id"], n)], f"{r['mvmt_id']}: a {t} turn from a lane marked {arrow!r}"))
+    for (lk, n), use in sorted(use_of.items()):
+        if (mode == "driving" and use == "bike") or lk in bad:
+            continue
+        if lk in has_out and n not in outs[lk]:
+            check.append(("no way out", lid_of[(lk, n)], "no movement leaves this lane"))
+        if lk in has_in and n not in ins[lk]:
+            check.append(("no way in", lid_of[(lk, n)], "no movement enters this lane"))
+    if not geometry:
+        if check:
+            con.executemany(f"INSERT INTO {sch}.lane_check VALUES (?, ?, ?)", check)
+        return _summary(mv, out, connectors, missing, bad, check, sch)
+    # the lanes: SUMO's line (to the junction) as geom_cut; geom stays duckOSM's line to the node
+    con.execute(f"ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_cut GEOMETRY")
     cut = []
     for lk, nums in ours.items():
         if lk in bad:
@@ -167,7 +210,7 @@ def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
             if len(shape) >= 2:
                 cut.append((lid_of[(lk, n)], "LINESTRING (" + ", ".join(f"{x:.8f} {y:.8f}" for x, y in to_ll(shape)) + ")"))
     con.register("_cut_sumo", pd.DataFrame(cut, columns=["lane_id", "wkt"]))
-    con.execute(f"UPDATE {sch}.lane l SET geom = ST_GeomFromText(c.wkt) FROM _cut_sumo c WHERE c.lane_id = l.lane_id")
+    con.execute(f"UPDATE {sch}.lane l SET geom_cut = ST_GeomFromText(c.wkt) FROM _cut_sumo c WHERE c.lane_id = l.lane_id")
     con.unregister("_cut_sumo")
     con.execute(f"""CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR,
                     to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY)""")
@@ -175,23 +218,13 @@ def lanes_from_sumo(con, sch, source="s", netconvert_bin=None, work_dir=None):
         con.register("_con_sumo", pd.DataFrame(connectors, columns=["connector_id", "mvmt_id", "from_lane_id", "to_lane_id", "width", "wkt"]))
         con.execute(f"INSERT INTO {sch}.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, ST_GeomFromText(wkt) FROM _con_sumo")
         con.unregister("_con_sumo")
-    # every car lane of a link with movements has a way out, and a way in (else listed: SUMO lets a lane end before a narrowing)
-    outs, ins = defaultdict(set), defaultdict(set)
-    for r in rows:
-        if r["start_ib_lane"] is not None:
-            outs[r["ib_link_id"]].update(range(r["start_ib_lane"], r["end_ib_lane"] + 1))
-            ins[r["ob_link_id"]].update(range(r["start_ob_lane"], r["end_ob_lane"] + 1))
-    has_out, has_in = {r["ib_link_id"] for r in rows}, {r["ob_link_id"] for r in rows}
-    for (lk, n), use in sorted(use_of.items()):
-        if use == "bike" or lk in bad:
-            continue
-        if lk in has_out and n not in outs[lk]:
-            check.append(("no way out", lid_of[(lk, n)], "no movement leaves this lane"))
-        if lk in has_in and n not in ins[lk]:
-            check.append(("no way in", lid_of[(lk, n)], "no movement enters this lane"))
     if check:
         con.executemany(f"INSERT INTO {sch}.lane_check VALUES (?, ?, ?)", check)
+    return _summary(mv, out, connectors, missing, bad, check, sch)
+
+
+def _summary(mv, out, connectors, missing, bad, check, sch):
     summary = {"movements": len(mv), "rows": len(out), "connectors": len(connectors), "no_connection": missing, "lane_count_mismatch": len(bad),
-               **{k: sum(1 for c in check if c[0] == k) for k in ("no way out", "no way in")}}
-    logger.info(f"GMNS[driving] lanes from SUMO: {summary}; anything not mapped is in {sch}.lane_check")
+               **{k: sum(1 for c in check if c[0] == k) for k in ("no way out", "no way in", "against its arrow")}}
+    logger.info(f"GMNS[{sch.removeprefix('gmns_')}] lanes from SUMO: {summary}; anything not mapped is in {sch}.lane_check")
     return summary

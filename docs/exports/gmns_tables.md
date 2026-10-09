@@ -52,6 +52,7 @@ SELECT count(*) FROM gmns_driving.link;      -- ATTACH the file, or open it dire
 | [`lane`](#lane) | yes | one lane of a link | 3,520 | lane use, width, turns |
 | [`movement`](#movement) | yes | one legal turn at a junction | 3,957 | which link may follow which, from which lanes |
 | [`lane_connector`](#lane_connector) | ➕ extension | one lane-to-lane path across a junction (driving), and a footway's [join](#footway-joins) to a road lane (walking) | 1,813 + 542 | drawing lanes through junctions |
+| [`lane_check`](#lane_check) | ➕ extension | something the lanes could not be given: a lane with no way in or out, a turn with no lane connection | — | what to check (in Street View) |
 | [`crossing`](#crossing) | ➕ extension | one pedestrian crossing painted on the driving lanes | 741 | drawing zebra crossings |
 | [`lane_crossing`](#lane_crossing) | ➕ extension | one lane a crossing covers, and which stretch of it | 909 | painting the stripes lane by lane |
 | [`link_along`](#link_along) | ➕ extension | one road a footpath runs along (a footpath often runs along several) | — | matching a sidewalk to its whole street |
@@ -212,8 +213,8 @@ its use, width and turns.
 | `width` | DOUBLE | ✅ | metres, from `width:lanes`; else the class default (service 2.5, residential / living street / unclassified 3.0, others 3.25); a bus-only link's lane 3.25; a bike lane 1.5; **empty on a walk lane without a width** |
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
 | `turn` | VARCHAR | ➕ | the lane's `turn:lanes` value (`left`, `through;right`, …), empty where untagged |
-| `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap). Cut back where it ends inside a junction, for the `lane_connector`s |
-| `geom_full` | GEOMETRY | ➕ | the same line to its nodes, before that cut (for drawing the lanes without connectors) |
+| `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap). It runs to the link's nodes |
+| `geom_cut` | GEOMETRY | ➕ | driving: the lane's line where SUMO netconvert ends it, at the edge of the junction; the `lane_connector` paths meet it ([design](../design/gmns_lane_profile.md)). `geom` is the line to the node |
 
 How many rows: the lane count, plus a lane for each extra entry of `turn:lanes` (a turn pocket), plus one for an
 on-road bike lane. That is why a link can have `lanes = 2` and three `lane` rows.
@@ -251,19 +252,19 @@ direction.
 | `type` | VARCHAR | ✅ | `left`, `right`, `thru`, `uturn` (from the change of heading at the junction), `merge`, `diverge` (the road joins or splits within 45°) |
 | `mvmt_code` | VARCHAR | ✅ | direction of travel and turn, e.g. `NBL` = northbound, left (`NB`/`EB`/`SB`/`WB` + `L`/`T`/`R`). **Empty for a U-turn**: the standard's code has no U; `type` says it |
 | `start_ib_lane`, `end_ib_lane` | INTEGER | ✅ | the inbound lanes the turn starts from, `lane_num` from..to |
-| `start_ob_lane`, `end_ob_lane` | INTEGER | ✅ | the outbound lanes it ends in. The two ranges are the same length and match in order: the first inbound lane goes to the first outbound lane |
+| `start_ob_lane`, `end_ob_lane` | INTEGER | ✅ | the outbound lanes it ends in. The two ranges are the same length and match in order: the first inbound lane goes to the first outbound lane. Where the lanes of one turn do not go on side by side (one lane into two), the turn has more rows: `<mvmt_id>-2`, ...; a bike lane's own, `<mvmt_id>-b<lane>` (`allowed_uses` bike) |
 | `allowed_uses` | VARCHAR | ✅ | the mode's use; into or out of a bus-only link (driving), `bus`, or `bus,bike` where every bus-only link of the turn takes bikes |
 | `ctrl_type` | VARCHAR | ✅ | `signal` at a signalised junction; otherwise `stop` or `yield` where an OSM `highway=stop` / `give_way` sign applies to the inbound link (cars and bikes, not walking). A sign lies on a way node on the approach, so it counts when it is within 50 m of the end of the inbound link, before the junction, and its `direction` (`forward`, `backward` or `both`, along the way) matches the link's. Signs with no `direction`, or exactly on the junction node, say nothing about which approach and are left out |
 | `geometry` | VARCHAR | ✅ | a short curve from the end of the inbound link to the start of the outbound link, WKT |
 | `name`, `penalty`, `capacity` | | ∅ | empty |
 
 A bus's turn into or out of a bus-only link (the source `edge_graph`'s rows with `uses = 'bus'`, the same U-turn
-rule) gets its lanes by the same rules, worked out together with the cars' turns at its junction; the cars' turns keep
-the lanes they have without it. Monaco: 27 such turns.
+rule) is a movement too. Monaco: 27 such turns.
 
-Where the lane ranges come from: the OSM `turn:lanes` tag where there is one, otherwise osm2gmns' rule
-(the leftmost link takes the leftmost lanes, the rightmost link the rightmost; a road that goes on keeps
-its lanes). A range is never half empty: both ends are set, or none.
+Where the lane ranges come from ([design](../design/gmns_lane_profile.md)): driving and cycling, SUMO netconvert's lane
+connections, given duckOSM's lanes and legal turns; walking (a footpath is one strip), the lanes in order, lane 1 into lane 1.
+A turn netconvert gives no lanes keeps its row without lanes and is listed in [`lane_check`](#lane_check). A range is never half
+empty: both ends are set, or none.
 
 ```sql
 -- from which lanes can a vehicle turn left?
@@ -286,10 +287,23 @@ a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 | `mvmt_id` | VARCHAR | the [`movement`](#movement) it belongs to |
 | `from_lane_id`, `to_lane_id` | VARCHAR | the two [`lane`](#lane)s |
 | `width` | DOUBLE | metres (the lane width, 3.25 m by default; a U-turn is as wide as its lanes, never more than the gap between them) |
-| `geom` | GEOMETRY | a curve from the end of the first lane to the start of the second; for a U-turn between lanes that face opposite ways, a half-circle through the two ends ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_uturn_arc.md)) |
+| `geom` | GEOMETRY | the path through the junction: SUMO netconvert's internal lane, from the lane's `geom_cut` end to the next lane's `geom_cut` start |
 
-Lanes stop where a junction starts, or where they would jump sideways; the connector joins them. Not in
-the standard, so never in the CSVs. See the [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_connectors.md).
+Which lane goes to which lane, and the path between them, come from SUMO netconvert, given duckOSM's lanes (`driving.lane_profile`)
+and legal turns ([design](../design/gmns_lane_profile.md)). Not in the standard, so never in the CSVs.
+
+## lane_check
+
+duckOSM's own table, in `gmns_driving`, `gmns_cycling` and `gmns_walking`: what the lanes could not be given, listed instead of filled
+in by a guess. Empty when everything maps.
+
+| Column | Type | Holds |
+|---|---|---|
+| `kind` | VARCHAR | `no way out` (no movement leaves the lane: it ends before a narrowing), `no way in`, `no lane connection` (netconvert built none for a legal turn), `lane count` (SUMO built a link with other lanes than duckOSM's), `against its arrow` (a turn from a lane whose `turn:lanes` arrow says otherwise: netconvert does not read the arrows) |
+| `id` | VARCHAR | the `lane_id`, `mvmt_id` or `link_id` |
+| `detail` | VARCHAR | what was found |
+
+Most rows are OSM data to check (a `lanes=2` on a one-lane road leaves a lane with no way out); fix them with `osm_overrides.yaml`.
 
 ### Footway joins
 

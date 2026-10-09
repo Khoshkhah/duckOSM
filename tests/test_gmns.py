@@ -184,10 +184,12 @@ def test_capacity_and_movement_enrichment(tmp_path):
     con.execute("LOAD spatial;")
     # capacity default by facility_type: A is 'primary' -> 1600 pce/hr/lane
     assert con.execute(f"SELECT capacity FROM gmns_driving.link WHERE link_id={A}").fetchone()[0] == 1600
-    # movement A->B: A heads east and turns south (right) -> mvmt_code EBR; the right lane (2) feeds it
+    # movement A->B: A heads east and turns south (right) -> mvmt_code EBR; A's lane 2 is a bike lane (bicycle:lanes), so the cars turn
+    # from lane 1 and the bike lane has its own row (lanes from SUMO, 2026-10-10: the old rules turned the cars out of the bike lane)
     r = con.execute(f"SELECT mvmt_code, start_ib_lane, end_ib_lane, geometry "
-                    f"FROM gmns_driving.movement WHERE ib_link_id={A} AND ob_link_id={B}").fetchone()
-    assert r[0] == "EBR" and (r[1], r[2]) == (2, 2) and r[3] is not None
+                    f"FROM gmns_driving.movement WHERE mvmt_id = '{A}-{B}'").fetchone()
+    assert r[0] == "EBR" and (r[1], r[2]) == (1, 1) and r[3] is not None
+    assert con.execute(f"SELECT start_ib_lane, allowed_uses FROM gmns_driving.movement WHERE mvmt_id = '{A}-{B}-b2'").fetchone() == (2, "bike")
     # every movement gets a connector geometry and a code, except a U-turn (the spec's code has no U)
     n, coded, uturns = con.execute("SELECT count(*), count(mvmt_code), count(*) FILTER (type = 'uturn') "
                                    "FROM gmns_driving.movement").fetchone()
@@ -365,45 +367,9 @@ def test_partner_must_be_on_the_inner_side(tmp_path):
     assert y["11_2"] - y["12_2"] == pytest.approx(3.25, abs=0.05)
 
 
-def test_turn_lanes_values_feed_every_turn_they_name():
-    """docs/design/gmns_lane_movements.md step 1: 'through;slight_right' feeds thru and right (it was
-    read as thru only); a slight turn also feeds thru (typed so under 30 degrees)."""
-    from duckosm.gmns import _turn_kinds
-    assert _turn_kinds("through;slight_right") == {"thru", "right"}
-    assert _turn_kinds("through;right") == {"thru", "right"}
-    assert _turn_kinds("left") == {"left"} and _turn_kinds("reverse") == {"uturn"}
-    assert _turn_kinds("") == {"thru"} and _turn_kinds("none") == {"thru"}
-
-
-def test_default_lanes_follow_osm2gmns():
-    """Steps 2-3, osm2gmns 0.7.6 (autoconintd.py): separate lanes per turn, equal-length ranges
-    read in order. Outbound links sorted left to right, 0-based lanes."""
-    from duckosm.gmns import _default_lanes
-    # 3 lanes, a 4-way junction (left, thru, right; 2 lanes each): left 1, thru 2, right 3
-    assert _default_lanes(3, [2, 2, 2]) == [((0, 0), (0, 0)), ((1, 1), (1, 1)), ((2, 2), (1, 1))]
-    # 2 lanes, two ways on: the right one gets the right lane, the left one the rest
-    assert _default_lanes(2, [2, 2]) == [((0, 0), (0, 0)), ((1, 1), (1, 1))]
-    # one way on: as many lanes as both have, from the left, lane k into lane k
-    assert _default_lanes(3, [2]) == [((0, 1), (0, 1))]
-    # 1 lane: every turn from it; the leftmost link entered at its lane 1, the others at the right
-    assert _default_lanes(1, [2, 3, 2]) == [((0, 0), (0, 0)), ((0, 0), (2, 2)), ((0, 0), (1, 1))]
-    # 4 lanes, 4 ways on: two middle links share the 2 middle lanes, one each
-    assert _default_lanes(4, [1, 1, 1, 1]) == [((0, 0), (0, 0)), ((1, 1), (0, 0)), ((2, 2), (0, 0)), ((3, 3), (0, 0))]
-
-
-def test_movement_lanes_from_turn_lanes(tmp_path):
-    """Way 100 (A) has turn:lanes 'through|right': its right turn into B starts from lane 2 only,
-    into B's single lane. Every movement has both ranges, equal length."""
-    con = _gmns(tmp_path)
-    assert con.execute(f"SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
-                       f"WHERE ib_link_id={A} AND ob_link_id={B}").fetchone() == (2, 2, 1, 1)
-    assert con.execute("SELECT count(*) FROM gmns_driving.movement WHERE start_ib_lane IS NULL OR start_ob_lane IS NULL "
-                       "OR end_ib_lane - start_ib_lane <> end_ob_lane - start_ob_lane").fetchone()[0] == 0
-
-
 def test_lane_graph_pairs_movement_lanes_in_order(tmp_path):
-    """Step 4: lane routing follows the movement's ranges: A's right turn into B (turn:lanes
-    'through|right') leaves from lane 2 only, so the lane graph has A_2 -> B_1 and not A_1 -> B_1."""
+    """Step 4: lane routing follows the movement's ranges: A's right turn into B: the cars from lane 1 (A's lane 2 is a bike lane,
+    bicycle:lanes), the bike lane's own row from lane 2 (lanes from SUMO, 2026-10-10)."""
     from duckosm.lane_routing import build_lane_graph
     _gmns(tmp_path).close()
     out = tmp_path / "out_gmns.duckdb"
@@ -411,7 +377,7 @@ def test_lane_graph_pairs_movement_lanes_in_order(tmp_path):
     con = duckdb.connect(str(out))
     got = con.execute(f"SELECT from_lane, to_lane FROM lane_driving.lane_edges WHERE kind <> 'lane_change' "
                       f"AND from_lane LIKE '{A}_%' AND to_lane LIKE '{B}_%'").fetchall()
-    assert got == [(f"{A}_2", f"{B}_1")]
+    assert sorted(got) == [(f"{A}_1", f"{B}_1"), (f"{A}_2", f"{B}_1")]
 
 
 def test_bus_lane_from_bus_lanes(tmp_path):
@@ -506,16 +472,6 @@ def test_turn_lanes_apply_where_the_way_ends(tmp_path):
     assert _ranges(tmp_path, A, 88) == (1, 2, 1, 2)
 
 
-def test_arrows_match_exits_by_their_place(tmp_path):
-    """At the way's end, a slight right fork (16 degrees, typed thru by its angle) takes the 'right'
-    lane and the straight exit the 'through' lane."""
-    _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
-                 [(88, 2, 4, 103, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)"),
-                  (89, 2, 5, 104, 2, "false", "LINESTRING(18.07 59.32,18.08 59.3185)")], [(A, 88), (A, 89)])
-    assert _ranges(tmp_path, A, 88)[:2] == (1, 1)                 # straight on from the 'through' lane
-    assert _ranges(tmp_path, A, 89)[:2] == (2, 2)                 # the fork from the 'right' lane
-
-
 def test_slight_fork_is_typed_thru(tmp_path):
     """Guard for the test above: the fork really is typed thru by its angle."""
     _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
@@ -561,13 +517,6 @@ def _mini_movements(tmp_path, nodes, edges, graph):
         "FROM gmns_driving.movement").fetchall()}
 
 
-def test_merge_lanes_follow_osm2gmns():
-    from duckosm.gmns import _merge_lanes
-    assert _merge_lanes([2, 1], 3) == [((0, 1), (0, 1)), ((0, 0), (2, 2))]   # main left, ramp into lane 3
-    assert _merge_lanes([1, 1], 2) == [((0, 0), (0, 0)), ((0, 0), (1, 1))]
-    assert _merge_lanes([2, 2], 2) == [((0, 1), (0, 1)), ((0, 1), (0, 1))]   # 2 into 2: both all lanes
-
-
 def test_merge_stacks_the_joining_roads_and_is_typed_merge(tmp_path):
     """A 2-lane road (11) and a 1-lane ramp from the right (12, joining at 16 degrees) merge into a
     3-lane road (13): the road takes lanes 1-2, the ramp lane 3 (both had gone into lane 1), and
@@ -604,28 +553,6 @@ def _pt(con, sql):
     return x * 111320 * 0.5101, y * 111320                    # metres near 59.32 N (cos = 0.51)
 
 
-def test_lane_connector_joins_lane_ends(tmp_path):
-    """docs/design/gmns_lane_connectors.md: a turn's connector starts exactly at the inbound lane's
-    end and ends at the outbound lane's start (base network: A's right turn into B)."""
-    con = _gmns(tmp_path)
-    c = con.execute(f"SELECT from_lane_id, to_lane_id FROM gmns_driving.lane_connector "
-                    f"WHERE from_lane_id = '{A}_2' AND to_lane_id = '{B}_1'").fetchone()
-    assert c is not None
-    gap = con.execute(f"""SELECT ST_Distance(ST_StartPoint(c.geom), ST_EndPoint(a.geom)) + ST_Distance(ST_EndPoint(c.geom), ST_StartPoint(b.geom))
-        FROM gmns_driving.lane_connector c, gmns_driving.lane a, gmns_driving.lane b
-        WHERE c.from_lane_id = '{A}_2' AND c.to_lane_id = '{B}_1' AND a.lane_id = '{A}_2' AND b.lane_id = '{B}_1'""").fetchone()[0]
-    assert gap < 1e-6
-
-
-def test_a_lane_keeps_its_full_line_before_the_cut(tmp_path):
-    """geom_full: each lane's line to its nodes, before it is cut back for the connectors (a reader drawing the lanes without connectors
-    takes it, 2026-10-10): never shorter than geom, and longer where the lane ends inside a junction (A's lane 2, cut for its right turn)."""
-    con = _gmns(tmp_path)
-    shorter = con.execute("SELECT count(*) FROM gmns_driving.lane WHERE ST_Length(geom_full) < ST_Length(geom) - 1e-9").fetchone()[0]
-    full, cut = con.execute(f"SELECT ST_Length(geom_full), ST_Length(geom) FROM gmns_driving.lane WHERE lane_id = '{A}_2'").fetchone()
-    assert shorter == 0 and full > cut
-
-
 def test_one_way_into_two_way_gets_an_s_curve(tmp_path):
     """A one-way lane (centred) going on into a two-way road (lanes 1.625 m to the side): no jump at
     the node; both lanes stop short and a connector shifts across (Avenue de la Costa)."""
@@ -637,70 +564,6 @@ def test_one_way_into_two_way_gets_an_s_curve(tmp_path):
     y0 = _pt(con, "SELECT ST_X(ST_StartPoint(geom)), ST_Y(ST_StartPoint(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1'")[1]
     y1 = _pt(con, "SELECT ST_X(ST_EndPoint(geom)), ST_Y(ST_EndPoint(geom)) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1'")[1]
     assert abs((y0 - y1) - 1.625) < 0.1                         # it shifts the lane 1.625 m to the right
-
-
-def test_straight_road_needs_no_connector(tmp_path):
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32)}
-    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1), (12, 2, 3, 1)], [(11, 12)])
-    assert con.execute("SELECT count(*) FROM gmns_driving.lane_connector").fetchone()[0] == 0
-    end = con.execute("SELECT ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE lane_id = '11_1'").fetchone()[0]
-    assert abs(end - 18.07) < 1e-7                              # not shortened
-
-
-def test_lanes_stop_at_a_junction(tmp_path):
-    """At a junction (3 neighbours) a lane stops where it leaves the other roads' lanes, not at the node:
-    lane 2 of 11 (the south side) runs into the road leaving south (14, 6.5 m wide); lane 1 doesn't."""
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.07, 59.31)}
-    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 2)], [(11, 12), (11, 14)])
-    end = dict(con.execute("SELECT lane_id, ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE link_id = 11").fetchall())
-    assert (18.07 - end["11_2"]) * 111320 * 0.5101 > 2.0        # stops before the crossing road
-
-
-def test_fork_lanes_unit():
-    """Option B: the main exit keeps all its lanes, a branch shares the lanes on its side."""
-    from duckosm.gmns import _fork_lanes
-    # 2 lanes; a 1-lane branch on the left (index 0), the road going on (index 1, 2 lanes)
-    assert _fork_lanes(2, [1, 2], 1) == [((0, 0), (0, 0)), ((0, 1), (0, 1))]
-    # a branch on the right: it shares the right lane
-    assert _fork_lanes(2, [2, 1], 0) == [((0, 1), (0, 1)), ((1, 1), (0, 0))]
-
-
-def test_main_road_keeps_its_lanes_at_a_fork(tmp_path):
-    """Boulevard du Larvotto (Kaveh): a 2-lane road going on under its own name and a 1-lane unnamed
-    road branching off to the left at a shallow angle. Both lanes go on; lane 1 may also branch off
-    (osm2gmns had sent lane 1 into the branch only)."""
-    src, out = tmp_path / "fk.duckdb", tmp_path / "fk_gmns.duckdb"
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}
-    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
-    c = duckdb.connect(str(src))
-    c.execute("UPDATE driving.edges SET name = 'Main' WHERE edge_id IN (11, 12)")
-    c.close()
-    to_gmns(str(src), str(out))
-    mv = {(a, b): r for a, b, *r in duckdb.connect(str(out)).execute(
-        "SELECT ib_link_id, ob_link_id, type, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
-        "FROM gmns_driving.movement").fetchall()}
-    assert mv[(11, 12)] == ["diverge", 1, 2, 1, 2]
-    assert mv[(11, 13)] == ["diverge", 1, 1, 1, 1]
-
-
-def test_on_a_roundabout_the_ring_goes_on_at_a_fork(tmp_path):
-    """A 2-lane roundabout piece forks into the ring's next piece (2 lanes, curving 50 degrees away) and a straighter 1-lane named exit (2026-10-10,
-    Monaco 1174006399: the exit had been the road that goes on and the ring got lane 1 only, its lane 2 then deleted as unfed). The ring keeps both
-    lanes; the exit (right of it) shares the outer lane."""
-    src, out = tmp_path / "rb.duckdb", tmp_path / "rb_gmns.duckdb"
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.0764, 59.3264), 5: (18.08, 59.3195)}
-    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
-    c = duckdb.connect(str(src))
-    c.execute("ALTER TABLE driving.edges ADD COLUMN IF NOT EXISTS junction VARCHAR")
-    c.execute("UPDATE driving.edges SET junction = 'roundabout' WHERE edge_id IN (11, 12)")
-    c.execute("UPDATE driving.edges SET name = 'Exit' WHERE edge_id = 13")
-    c.close()
-    to_gmns(str(src), str(out))
-    con = duckdb.connect(str(out))
-    mv = {(a, b): r for a, b, *r in con.execute("SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
-                                                "FROM gmns_driving.movement").fetchall()}
-    assert mv[(11, 12)] == [1, 2, 1, 2] and mv[(11, 13)] == [2, 2, 1, 1]
-    assert con.execute("SELECT count(*) FROM gmns_driving.lane WHERE link_id = 12").fetchone()[0] == 2
 
 
 def _mv_of(tmp_path, nodes, edges, graph, names=None, tags=None):
@@ -715,19 +578,6 @@ def _mv_of(tmp_path, nodes, edges, graph, names=None, tags=None):
     to_gmns(str(src), str(out))
     return {(a, b): tuple(r) for a, b, *r in duckdb.connect(str(out)).execute(
         "SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement").fetchall()}
-
-
-def test_road_going_on_keeps_its_lanes_at_a_junction(tmp_path):
-    """3358160335623944038 (Kaveh): a 2-lane road X goes on straight past a side road. Straight on
-    keeps both lanes (osm2gmns gave the right lane to the right turn only), the right turn shares
-    lane 2, and a single right turn from the side road enters the rightmost lane (osm2gmns: lane 1),
-    so lane 2 of the road ahead has a way in."""
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.0702, 59.31), 7: (18.0698, 59.31)}
-    mv = _mv_of(tmp_path, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (14, 2, 6, 1), (15, 7, 2, 1)],
-                [(11, 12), (11, 14), (15, 12)], names={11: "X", 12: "X"})
-    assert mv[(11, 12)] == (1, 2, 1, 2)          # straight on from both lanes
-    assert mv[(11, 14)] == (2, 2, 1, 1)          # the right turn shares the right lane
-    assert mv[(15, 12)] == (1, 1, 2, 2)          # a lone right turn enters the right lane
 
 
 def test_arrows_without_their_exit_go_ahead(tmp_path):
@@ -791,7 +641,6 @@ def test_lane_is_one_curve_across_a_bend(tmp_path):
         gap = _m(con, f"SELECT ST_Distance_Sphere(ST_EndPoint(a.geom), ST_StartPoint(b.geom)) FROM gmns_driving.lane a, "
                       f"gmns_driving.lane b WHERE a.lane_id='11_{k}' AND b.lane_id='12_{k}'")
         assert gap < 0.05, gap
-    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector") == 0
 
 
 def test_short_piece_inherits_the_runs_pairing(tmp_path):
@@ -803,29 +652,6 @@ def test_short_piece_inherits_the_runs_pairing(tmp_path):
     con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 2, 500, True), (12, 2, 3, 2, 500, True), (21, 5, 6, 2, 600, True)])
     off = lambda lid: _m(con, f"SELECT (ST_Y(ST_LineInterpolatePoint(l.geom, 0.5)) - {y}) * 111320 FROM gmns_driving.lane l WHERE lane_id='{lid}'")
     assert abs(off("11_1") - off("12_1")) < 0.05 and abs(off("11_2") - off("12_2")) < 0.05
-    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector WHERE from_lane_id LIKE '11_%' AND to_lane_id LIKE '12_%'") == 0
-
-
-def test_lane_going_on_through_a_junction_is_not_cut(tmp_path):
-    """Way 500 goes straight through node 2, where a 2-lane side road leaves south. Its lanes used to
-    be cut inside the side road's lanes and joined back by a connector; now they run through intact."""
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.08, 59.32), 6: (18.07, 59.31)}
-    con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 2, 500, True), (12, 2, 3, 2, 500, True), (14, 2, 6, 2, 700, True)])
-    end_x = _m(con, "SELECT ST_X(ST_EndPoint(geom)) FROM gmns_driving.lane WHERE lane_id = '11_2'")
-    assert abs(end_x - 18.07) < 1e-7                              # not trimmed at the junction
-    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector WHERE from_lane_id LIKE '11_%' AND to_lane_id LIKE '12_%'") == 0
-    assert _m(con, "SELECT count(*) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_2' AND to_lane_id = '14_2'") == 1
-
-
-def test_trimming_keeps_at_least_two_metres(tmp_path):
-    """A 4 m piece of its own way between two junctions (a 1-lane road into a 2-lane piece into a
-    1-lane road, side roads at both nodes) used to be cut to a stub; it keeps at least 2 m."""
-    d4 = 4.0 / 111320 / 0.5101
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 3: (18.07 + d4, 59.32), 4: (18.08, 59.32), 6: (18.07, 59.31), 7: (18.07 + d4, 59.31)}
-    con = _runs_gmns(tmp_path, nodes, [(11, 1, 2, 1, 500, True), (12, 2, 3, 2, 600, True), (13, 3, 4, 1, 700, True),
-                                        (16, 2, 6, 2, 800, True), (17, 3, 7, 2, 900, True)])
-    for k in (1, 2):
-        assert _m(con, f"SELECT ST_Length_Spheroid(ST_FlipCoordinates(geom)) FROM gmns_driving.lane WHERE lane_id='12_{k}'") >= 1.95
 
 
 def test_a_roundabout_ring_closes(tmp_path):
@@ -845,21 +671,6 @@ def test_a_roundabout_ring_closes(tmp_path):
         gap = con.execute(f"SELECT max(ST_Distance_Sphere(ST_EndPoint(x.geom), ST_StartPoint(y.geom))) FROM gmns_driving.lane x, "
                           f"gmns_driving.lane y WHERE x.link_id={a} AND y.link_id={b} AND x.lane_num = y.lane_num").fetchone()[0]
         assert gap < 0.05, (a, b, gap)
-    assert con.execute("SELECT count(*) FROM gmns_driving.lane_connector").fetchone()[0] == 0
-
-
-def test_a_uturn_at_a_road_end_is_a_half_circle_as_wide_as_its_lanes(tmp_path):
-    """docs/design/gmns_uturn_arc.md: a dead-end road's two lane ends are one lane width apart; the U-turn joins them with a half-circle (every point
-    of its centre line chord/2 from the middle of the two ends) and is as wide as the chord, not narrowed to 1.8 x the tightest radius."""
-    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32)}
-    con = _gmns_of(tmp_path, nodes, [(11, 1, 2, 1, 500), (12, 2, 1, 1, 500)], [(11, 12)])
-    w, wkt = con.execute("SELECT width, ST_AsText(geom) FROM gmns_driving.lane_connector WHERE from_lane_id = '11_1' AND to_lane_id = '12_1'").fetchone()
-    pts = [tuple(float(v) for v in p.split()) for p in wkt[wkt.index("(") + 1:-1].split(", ")]
-    m = lambda p: (p[0] * 111320 * 0.5101, p[1] * 111320)                # noqa: E731  metres near 59.32 N
-    (x0, y0), (x1, y1) = m(pts[0]), m(pts[-1])
-    chord, mid = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5, ((x0 + x1) / 2, (y0 + y1) / 2)
-    assert chord == pytest.approx(3.25, abs=0.05) and w == pytest.approx(chord, abs=0.02)      # one lane apart, as wide as the lanes
-    assert all(abs(((m(p)[0] - mid[0]) ** 2 + (m(p)[1] - mid[1]) ** 2) ** 0.5 - chord / 2) < 0.1 for p in pts)
 
 
 def test_smooth_ring_puts_a_circle_through_a_coarse_roundabout_and_leaves_other_rings_alone():
@@ -917,35 +728,6 @@ def test_the_branches_of_a_fork_carry_their_own_turn_letter(tmp_path):
     flat.mkdir()
     con = _gmns_of(flat, {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 6: (18.08, 59.3197)}, [(11, 1, 2, 2), (12, 2, 4, 1), (13, 2, 6, 1)], [(11, 12), (11, 13)])
     assert set(dict(con.execute("SELECT ob_link_id, mvmt_code FROM gmns_driving.movement WHERE ib_link_id = 11").fetchall()).values()) == {"EBT"}      # 3 degrees apart: both straight
-
-
-def test_a_fork_branch_keeps_only_the_lanes_the_fork_feeds():
-    """docs/design/gmns_fork_lanes.md: branch 12 has 2 lanes but only lane 2 is fed (by movement 11-12), and it goes on into link 14 (2 lanes): lane 1 of 12 goes, link 12 has 1 lane, and the movement 12-14 is cut to lane 2 -> lane 2.
-    A branch fed on both lanes, or one that goes on into a link with fewer lanes, is left alone."""
-    from duckosm.gmns import _fork_branch_lanes
-
-    con = duckdb.connect(":memory:")
-    con.execute("CREATE SCHEMA gmns_driving")
-    con.execute("CREATE TEMP TABLE _extra_lane(link_id BIGINT, lane_num INTEGER)")
-    con.execute("CREATE TABLE gmns_driving.lane(lane_id VARCHAR, link_id BIGINT, lane_num INTEGER)")
-    con.execute("CREATE TABLE gmns_driving.link(link_id BIGINT, lanes INTEGER)")
-    con.execute("""CREATE TABLE gmns_driving.movement(mvmt_id VARCHAR, ib_link_id BIGINT, ob_link_id BIGINT, start_ib_lane INTEGER, end_ib_lane INTEGER,
-                                                    start_ob_lane INTEGER, end_ob_lane INTEGER, type VARCHAR)""")
-    for lk in (11, 12, 13, 14, 15, 16, 17, 18):
-        con.execute("INSERT INTO gmns_driving.link VALUES (?, 2)", [lk])
-        for n in (1, 2):
-            con.execute("INSERT INTO gmns_driving.lane VALUES (?, ?, ?)", [f"{lk}_{n}", lk, n])
-    mv = [("11-12", 11, 12, 2, 2, 2, 2, "diverge"), ("11-13", 11, 13, 1, 1, 1, 1, "diverge"),      # 12 fed on lane 2 only, 13 on lane 1 only
-          ("12-14", 12, 14, 1, 2, 1, 2, "thru"), ("13-15", 13, 15, 1, 2, 1, 2, "thru"),
-          ("21-16", 21, 16, 1, 2, 1, 2, "diverge"), ("21-17", 21, 17, 1, 2, 1, 2, "diverge"), ("16-18", 16, 18, 1, 2, 1, 2, "thru")]   # 16 is fed on both lanes
-    con.executemany("INSERT INTO gmns_driving.movement VALUES (?, ?, ?, ?, ?, ?, ?, ?)", mv)
-    gone = _fork_branch_lanes(con, "gmns_driving")
-    assert gone == {12: [1], 13: [2]}, gone
-    assert con.execute("SELECT lane_num FROM gmns_driving.lane WHERE link_id = 12").fetchall() == [(2,)]
-    assert con.execute("SELECT lanes FROM gmns_driving.link WHERE link_id IN (12, 13) ORDER BY link_id").fetchall() == [(1,), (1,)]
-    assert con.execute("SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE mvmt_id = '12-14'").fetchone() == (2, 2, 2, 2)
-    assert con.execute("SELECT start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE mvmt_id = '13-15'").fetchone() == (1, 1, 1, 1)
-    assert con.execute("SELECT count(*) FROM gmns_driving.lane WHERE link_id = 16").fetchone()[0] == 2         # fed on both lanes: left alone
 
 
 def test_bus_only_edges_are_one_lane_links(tmp_path):
@@ -1054,9 +836,9 @@ def test_bus_turns_come_from_edge_graph_and_leave_the_cars_alone(tmp_path):
 
 
 def test_lanes_from_sumo(tmp_path):
-    """to_gmns(lanes_from="sumo") (docs/design/gmns_lane_profile.md, step 3): each movement's lanes from netconvert's connections, one
-    connector per lane pair (the path through the junction), each lane's line cut where the junction begins (geom) and kept to its
-    node (geom_full); nothing left unmapped (lane_check empty). Here a 2-lane road forks into a 2-lane and a 1-lane road."""
+    """GMNS lanes from SUMO (docs/design/gmns_lane_profile.md, step 3): each movement's lanes from netconvert's connections, one
+    connector per lane pair (the path through the junction), each lane's line cut where the junction begins (geom_cut), geom kept to
+    its node; nothing left unmapped (lane_check empty). Here a 2-lane road forks into a 2-lane and a 1-lane road."""
     from duckosm.sumo import _find_netconvert
     try:
         _find_netconvert(None)
@@ -1065,7 +847,7 @@ def test_lanes_from_sumo(tmp_path):
     src, out = tmp_path / "s.duckdb", tmp_path / "s_gmns.duckdb"
     nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}
     _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
-    to_gmns(str(src), str(out), lanes_from="sumo")
+    to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
     con.execute("LOAD spatial")
     mv = con.execute("SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM gmns_driving.movement "
@@ -1074,10 +856,10 @@ def test_lanes_from_sumo(tmp_path):
     assert con.execute("SELECT count(*) FROM gmns_driving.lane_check").fetchone()[0] == 0
     n = con.execute("SELECT count(*) FROM gmns_driving.lane_connector WHERE geom IS NOT NULL").fetchone()[0]
     assert n >= 3                                                                    # 2 lanes on, 1 into the branch at least
-    # SUMO's lane lines follow duckOSM's (a one-way's lanes centred on its line, as ours): within 5 cm sideways at their middles; the lanes
-    # leaving the fork start later, where the junction ends (an incoming lane may end a little past the node: the junction lies on the branch's side)
-    assert con.execute("SELECT max(ST_Distance(ST_LineInterpolatePoint(geom, 0.5), geom_full)) * 111320 FROM gmns_driving.lane").fetchone()[0] < 0.05
-    assert con.execute("SELECT bool_and(ST_Length(geom) < ST_Length(geom_full)) FROM gmns_driving.lane WHERE link_id IN (12, 13)").fetchone()[0]
+    # SUMO's lane lines (geom_cut) follow duckOSM's (geom; a one-way's lanes centred on its line, as ours): within 5 cm sideways at their
+    # middles; the lanes leaving the fork start later, where the junction ends (an incoming lane may end a little past the node)
+    assert con.execute("SELECT max(ST_Distance(ST_LineInterpolatePoint(geom_cut, 0.5), geom)) * 111320 FROM gmns_driving.lane").fetchone()[0] < 0.05
+    assert con.execute("SELECT bool_and(ST_Length(geom_cut) < ST_Length(geom)) FROM gmns_driving.lane WHERE link_id IN (12, 13)").fetchone()[0]
 
 
 def test_sumo_lane_pairs_become_runs_side_by_side():

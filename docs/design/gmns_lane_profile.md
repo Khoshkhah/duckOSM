@@ -1,6 +1,6 @@
 # GMNS lanes: one lane profile, connections from SUMO (design, 2026-10-10)
 
-Status: steps 1-2 built (2026-10-10): `driving.lane_profile` (processors/lane_profile.py); `to_sumo` writes its lanes and `sumo_compare.lane_diff` compares with SUMO's own import (Monaco: 1,144 of 1,182 the same, every difference named). Step 3 built behind `to_gmns(lanes_from="sumo")` (gmns_sumo.py): Monaco, every movement has its lanes from SUMO (0 unmapped), 4,269 of 4,370 turns use the same car lanes as the old rules; the old rules stay the default until the 101 differences are checked. Step 1c built: GMNS (driving) takes each edge's lanes from the profile and only places them (Monaco: every lane, movement and connector identical to before). Replaces the lane rules spread over the build and `gmns.py`.
+Status: built (2026-10-10). Steps 1-3 done; the old lane rules are deleted: GMNS driving and cycling lanes connect by SUMO netconvert, walking lanes in order; `lane.geom` is duckOSM's line to the node, `lane.geom_cut` SUMO's (the connectors meet it); `lane_check` lists what could not be given.
 
 ## Why
 

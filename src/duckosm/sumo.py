@@ -141,7 +141,7 @@ def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
             run_netconvert: bool = True, netconvert_bin: str = None,
-            connections: bool = True, config=None, bus_edges: bool = False):
+            connections: bool = True, config=None, bus_edges: bool = False, edge_attrs: dict = None, lanes: dict = None):
     """Export the duckOSM network to SUMO, preserving ``edge_id`` and the turn restrictions.
 
     Parameters
@@ -161,6 +161,10 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         ``{netconvert-option: value}`` is merged onto the default; a ``str`` path to a ``.netccfg``
         is used as-is (inputs/output are still set by this function). The effective config is written
         in SUMO's standard ``.netccfg`` format and run with ``netconvert -c``.
+    edge_attrs : ``{edge_id: {sumo-edge-attribute: value}}`` set on those edges, over what duckOSM writes: e.g. lane counts,
+        ``{eid: {"numLanes": 2}}`` (as on duckOSM's level-area branch: urbanstyle's measured widths; GMNS's lane counts).
+    lanes : ``{edge_id: [(use, width), ...]}`` left to right, each edge's lanes instead of ``driving.lane_profile``'s (GMNS gives its own,
+        in every mode, so SUMO's lanes are GMNS's one to one); ``use`` as the profile's (``auto`` / ``bus`` / ``bike`` / ``bus,bike``).
     bus_edges : driving only: also the bus-only edges (``private_edges`` with ``access = 'bus'``: a contraflow bus lane, a bus-only
         road) and the buses' turns of ``edge_graph`` (its ``bus`` rows), so their lanes get connections too (GMNS, docs/design/gmns_lane_profile.md).
 
@@ -204,7 +208,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     # each edge's lanes from driving.lane_profile (docs/design/gmns_lane_profile.md), left to right: one <lane> each with its vehicle
     # classes and width, so netconvert gets the lanes duckOSM decided (as its own OSM import would get them from the tags), not a count
     profile = {}
-    if mode == "driving" and _table_exists(con, "driving.lane_profile"):
+    if lanes is not None:
+        profile = {int(k): list(v) for k, v in lanes.items()}
+    elif mode == "driving" and _table_exists(con, "driving.lane_profile"):
         for eid, use, width in con.execute("SELECT edge_id, use, width_m FROM driving.lane_profile ORDER BY edge_id, lane_num").fetchall():
             profile.setdefault(eid, []).append((use, width))
     n_edges = self_loops = 0
@@ -236,6 +242,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs.append(f'shape="{shape}"')
             if name:
                 attrs.append(f'name={quoteattr(str(name))}')
+            for k, v in (edge_attrs or {}).get(eid, {}).items():
+                attrs = [a for a in attrs if not a.startswith(f"{k}=")] + [f"{k}={quoteattr(str(v))}"]
             if lanes_here:                              # SUMO numbers lanes from the right: index 0 is the right-most
                 f.write("  <edge " + " ".join(attrs) + ">\n")
                 for i, (use, width) in enumerate(reversed(lanes_here)):

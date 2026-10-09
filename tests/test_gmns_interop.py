@@ -184,13 +184,9 @@ def test_csv_extensions_are_kept_as_u_columns_only_when_asked(tmp_path):
     assert "u_geom" not in head("ext", "link")                    # native geometry does not go to a CSV
 
 
-def test_default_lane_width_by_class_and_connector_fit():
-    from duckosm.gmns import _default_lane_w, _fit_width
+def test_default_lane_width_by_class():
+    from duckosm.gmns import _default_lane_w
     assert (_default_lane_w("service"), _default_lane_w("residential_link"), _default_lane_w("primary")) == (2.5, 3.0, 3.25)
-    import math
-    arc = lambda r: [(r * math.cos(t / 12 * math.pi), r * math.sin(t / 12 * math.pi)) for t in range(13)]   # a half circle
-    assert _fit_width(arc(5), 3.25) == 3.25 and abs(_fit_width(arc(1), 3.25) - 1.95) < 1e-9     # roomy / tight: floor 60 %
-    assert abs(_fit_width(arc(1.5), 3.25) - 2.7) < 0.01 and _fit_width([(0, 0), (1, 0), (2, 0)], 3.0) == 3.0
 
 
 def test_an_untagged_one_way_road_takes_the_lanes_of_the_road_it_continues():

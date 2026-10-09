@@ -55,7 +55,7 @@ def test_meso_has_a_connector_per_movement_and_a_section_per_link(con):
 
 
 def test_a_lane_has_as_many_cells_as_its_length_in_7_m_pieces(con):
-    for lane_id, length, cells in con.execute(f"""SELECT l.lane_id, ST_Length_Spheroid(ST_FlipCoordinates(l.geom)),
+    for lane_id, length, cells in con.execute(f"""SELECT l.lane_id, ST_Length_Spheroid(ST_FlipCoordinates(COALESCE(l.geom_cut, l.geom))),   -- the cells follow SUMO's line
         (SELECT count(*) FROM micro_driving.micro_link c WHERE c.cell_type = 'normal' AND c.link_id LIKE 'C' || l.lane_id || '#%')
         FROM gmns_driving.lane l""").fetchall():
         assert cells == max(1, math.ceil(length / 7.0)), lane_id
