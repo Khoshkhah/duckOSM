@@ -17,6 +17,7 @@ from duckosm.utils import check_db_name
 from duckosm.processors import (
     RoadFilter,
     OsmOverrides,
+    LaneProfile,
     SeparateSidewalks,
     GraphBuilder,
     SpeedProcessor,
@@ -264,6 +265,12 @@ class DuckOSM:
                     from duckosm.bus import write_bus_routes
                     routes = write_bus_routes(self.con)
                     logger.info(f"  Bus routes: {len(routes)}, {int((routes['gaps'].str.len() > 0).sum())} with gaps (bus.routes)")
+
+                # Every driving edge's lanes, decided once (docs/design/gmns_lane_profile.md): after all modes (a bus-only edge in the
+                # cycling network is shared by bikes) and while raw.* is still here
+                if "driving" in self.config.modes and self.config.source.type == "pbf":
+                    progress.update(main_task, description="Lane profile...")
+                    self._lane_profile()
 
                 # Persist the canonical stable-edge_id macro (callable anywhere as
                 # `edge_id_hash(osm_id, source, target)`, plus the legacy `edge_id_hash_v1`), so
@@ -599,6 +606,15 @@ class DuckOSM:
         logger.info(f"  Filtered to {self.stats['node_count']:,} nodes, "
                    f"{self.stats['way_count']:,} ways in {self.stats['road_filter_time']:.2f}s")
     
+    def _lane_profile(self) -> None:
+        """``driving.lane_profile`` (processors/lane_profile.py); the ways an overrides rule gives a lane count are its ``override`` source."""
+        import yaml
+        ways = ()
+        if self.config.osm_overrides:
+            rules = (yaml.safe_load(open(self.config.osm_overrides)) or {}).get("overrides") or []
+            ways = {int(r["osm_id"]) for r in rules if any(k in r for k in ("lanes", "lanes_forward", "lanes_backward"))}
+        self.stats["lane_profile_lanes"] = LaneProfile(self.con, ways).run()
+
     def _apply_osm_overrides(self, mode: str | None = None) -> None:
         """Patch `ways` with local corrections for known OSM errors (before edges are built)."""
         n = OsmOverrides(self.con, self.config.osm_overrides, mode=mode).run()

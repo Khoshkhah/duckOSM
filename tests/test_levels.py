@@ -114,3 +114,21 @@ def test_bus_routes_in_the_build_and_the_level_roads(monaco):
     assert roads.loc["1449981121#1f", "modes"].startswith("driving") and "bus" in roads.loc["1449981121#1f", "modes"]
     assert roads["bus_lines"].isna().sum() > 0                                   # most roads have no bus
     assert not any("bus" in str(m).split(" + ") for m in roads.loc[roads["bus_lines"].isna(), "modes"])   # no line, no bus (2026-10-10: a walking-only reverse said "walking + bus")
+
+
+def test_the_build_writes_every_driving_edges_lane_profile(monaco):
+    """driving.lane_profile (docs/design/gmns_lane_profile.md): every driving edge and every bus-only edge has its lanes, motor lanes
+    numbered 1..n with no gap, a lane left of them -1, each with the source that put it there; Boulevard Charles III's contraflow bus lane
+    shared by bikes, and the overridden Avenue Princesse Grace: its left bike lane and one car lane."""
+    con = duckdb.connect(str(monaco), read_only=True)
+    edges = {e for (e,) in con.execute("SELECT edge_id FROM driving.edges UNION ALL SELECT edge_id FROM driving.private_edges WHERE access = 'bus'").fetchall()}
+    got = {}
+    for e, n, u, s in con.execute("SELECT edge_id, lane_num, use, source FROM driving.lane_profile ORDER BY 1, 2").fetchall():
+        got.setdefault(e, []).append((n, u, s))
+    assert set(got) == edges and all(s for ls in got.values() for _, _, s in ls)
+    for ls in got.values():
+        motor = [n for n, _, s in ls if not s.startswith("cycleway")]          # the bike lanes beside them come from a cycleway tag
+        assert motor == list(range(1, len(motor) + 1))
+    ref = dict(con.execute("SELECT edge_ref, edge_id FROM driving.edges UNION ALL SELECT edge_ref, edge_id FROM driving.private_edges").fetchall())
+    assert [u for _, u, _ in got[ref["1449981121#1r"]]] == ["bus,bike"]
+    assert [(n, u) for n, u, _ in got[ref["503462464#2f"]]] == [(-1, "bike"), (1, "auto")]

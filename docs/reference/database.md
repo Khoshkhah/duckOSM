@@ -25,6 +25,7 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | [`ways`](#ways), [`way_nodes`](#way_nodes) | a build from a PBF, and `duckosm extract` |
 | [`edge_id_map`](#edge_id_map) | a build from a PBF with `options.merge_segments` (on) |
 | [`virtual_nodes`](#virtual_nodes) | a build from a PBF; always empty |
+| [`lane_profile`](#lane_profile) | driving, a build from a PBF |
 
 A build cut from a parent database (`source.type: duckdb`) has only `edges`, `private_edges`,
 `nodes`, `edge_graph` and `turn_restrictions`, and each of the last three only if the parent has it.
@@ -173,6 +174,24 @@ For each merged edge, the edges it was made from. It may be empty (driving in Mo
 | `seq` | INTEGER |
 | `is_reverse` | BOOLEAN |
 | `osm_id` | BIGINT |
+
+### `lane_profile` {#lane_profile}
+
+Every driving edge's lanes, and every bus-only edge's (`private_edges` with `access = 'bus'`), decided once
+([design](../design/gmns_lane_profile.md)): one row per lane, left to right.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `edge_id` | BIGINT | the edge |
+| `lane_num` | INTEGER | 1 = the left-most through lane, 1..n the motor lanes; -1 a bike lane left of them (on a one-way, `cycleway:left=lane`); n+1 a bike lane right of them |
+| `use` | VARCHAR | `auto`, `bus`, `bike`, `bus,bike` |
+| `width_m` | DOUBLE | the lane's width |
+| `turn` | VARCHAR | its `turn:lanes` entry, or NULL |
+| `source` | VARCHAR | what put the lane there with its use: `lanes`, `lanes:forward`, `lanes:backward`, `turn:lanes`, `override` (osm_overrides.yaml), `inherited` (the road it continues), `default` (no tag), `bus:lanes`, `psv:lanes`, `lanes:bus`, `busway:*`, `cycleway:*`, `access=bus` |
+| `width_source` | VARCHAR | `width:lanes`, `cycleway:*:width`, or `default` |
+
+Bike lanes are not counted in `lanes` (OSM, and SUMO's own OSM import). A count or width no tag gives is `default`: count them
+(`WHERE source = 'default'`) to see how much of the network is guessed.
 
 ### `virtual_nodes`
 
