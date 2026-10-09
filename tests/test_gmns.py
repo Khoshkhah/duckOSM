@@ -683,6 +683,26 @@ def test_main_road_keeps_its_lanes_at_a_fork(tmp_path):
     assert mv[(11, 13)] == ["diverge", 1, 1, 1, 1]
 
 
+def test_on_a_roundabout_the_ring_goes_on_at_a_fork(tmp_path):
+    """A 2-lane roundabout piece forks into the ring's next piece (2 lanes, curving 50 degrees away) and a straighter 1-lane named exit (2026-10-10,
+    Monaco 1174006399: the exit had been the road that goes on and the ring got lane 1 only, its lane 2 then deleted as unfed). The ring keeps both
+    lanes; the exit (right of it) shares the outer lane."""
+    src, out = tmp_path / "rb.duckdb", tmp_path / "rb_gmns.duckdb"
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.0764, 59.3264), 5: (18.08, 59.3195)}
+    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    c = duckdb.connect(str(src))
+    c.execute("ALTER TABLE driving.edges ADD COLUMN IF NOT EXISTS junction VARCHAR")
+    c.execute("UPDATE driving.edges SET junction = 'roundabout' WHERE edge_id IN (11, 12)")
+    c.execute("UPDATE driving.edges SET name = 'Exit' WHERE edge_id = 13")
+    c.close()
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    mv = {(a, b): r for a, b, *r in con.execute("SELECT ib_link_id, ob_link_id, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane "
+                                                "FROM gmns_driving.movement").fetchall()}
+    assert mv[(11, 12)] == [1, 2, 1, 2] and mv[(11, 13)] == [2, 2, 1, 1]
+    assert con.execute("SELECT count(*) FROM gmns_driving.lane WHERE link_id = 12").fetchone()[0] == 2
+
+
 def _mv_of(tmp_path, nodes, edges, graph, names=None, tags=None):
     src, out = tmp_path / "jn.duckdb", tmp_path / "jn_gmns.duckdb"
     _mini_source(src, nodes, edges, graph)

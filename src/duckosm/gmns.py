@@ -1376,6 +1376,10 @@ def _assign_lanes(con, sch, mode, drive_side="right", mv=None):
     name_of, cls_of = {}, {}
     for lk, nm, ft in con.execute(f"SELECT link_id, name, facility_type FROM {sch}.link").fetchall():
         name_of[lk], cls_of[lk] = nm, ft
+    ring = set()                                 # the links of roundabouts (OSM junction=roundabout / circular)
+    if _exists(con, "s", mode, "edges") and "junction" in {c for (c,) in con.execute(
+            "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? AND table_name = 'edges'", [mode]).fetchall()}:
+        ring = {e for (e,) in con.execute(f"SELECT edge_id FROM s.{mode}.edges WHERE junction IN ('roundabout', 'circular')").fetchall()}
     n_in = defaultdict(int)
     for nd in ends.values():
         n_in[nd] += 1
@@ -1390,6 +1394,10 @@ def _assign_lanes(con, sch, mode, drive_side="right", mv=None):
         default = _default_lanes(n, obs)
         real = [k for k, m in enumerate(ms) if m[2] != "uturn"]
         ahead = [k for k in real if abs(ms[k][3]) < 45]
+        if ib in ring and any(ms[k][1] in ring for k in real):
+            # on a roundabout the ring goes on, whatever its curve: it keeps its lanes and an exit shares its side (2026-10-10, Monaco:
+            # the straighter exit had been the road that goes on, the ring's next piece got one of its two lanes)
+            ahead = [k for k in real if ms[k][1] in ring]
         if len(real) >= 2 and ahead:
             # a road that goes on (fork or junction): the exit ahead that continues it (its name, its OSM
             # way, the higher class, the straightest) keeps its lanes, the others share their side;
