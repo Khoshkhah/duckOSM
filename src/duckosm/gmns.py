@@ -1195,7 +1195,10 @@ def _build_movement(con, sch, mode, uses, drive_side="right", assign=True):
     con.execute("CREATE TEMP TABLE _bus_mv_ids AS SELECT mvmt_id FROM _mv_all WHERE NOT _own")
     con.execute("DROP TABLE _mv_all")
     n_bus = con.execute("SELECT count(*) FROM _bus_mv_ids").fetchone()[0]
-    if not assign:                       # the lanes come from elsewhere (lanes_from="sumo"): the rows alone, the bus rows with them
+    if not assign:                       # the lanes come from elsewhere (lanes_from="sumo"): the rows alone, typed (diverge / merge), the bus rows with them
+        _fork_types(con, sch)
+        if n_bus:
+            _fork_types(con, sch, mv="_mv_bus")
         con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN IF EXISTS _ang")
         con.execute(f"INSERT INTO {sch}.movement SELECT * EXCLUDE (_ang) FROM _mv_bus WHERE mvmt_id IN (SELECT mvmt_id FROM _bus_mv_ids)")
         con.execute("DROP TABLE _mv_bus; DROP TABLE _bus_mv_ids")
