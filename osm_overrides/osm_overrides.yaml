@@ -164,6 +164,9 @@ overrides:
   - osm_id: 120062663        # Tunnel Aureglia, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 353889170        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
   - osm_id: 39838824         # Boulevard Princesse Charlotte, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
