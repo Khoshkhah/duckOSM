@@ -12,6 +12,10 @@ from duckosm.processors.base import BaseProcessor
 FORBIDDEN = {"driving": "'no', 'agricultural', 'forestry', 'emergency'",
              "walking": "'no'", "cycling": "'no'"}
 
+# Roads cars cannot use: no `lanes` (lanes are motor lanes, OSM's `lanes` and GMNS's link.lanes; 2026-10-09: the level editor showed
+# "lanes 1" on footways and on a one-way street's walking-only reverse, a sidewalk). GMNS reads the same list.
+NON_MOTOR = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform")
+
 
 def _tag(k):
     return f"map_extract(tags, '{k}')[1]"
@@ -141,11 +145,32 @@ class RoadFilter(BaseProcessor):
         highway_expr = f"COALESCE({highway_expr}, CASE WHEN {_tag('route')} = 'ferry' THEN 'ferry' END)"
         direction_expr = self._direction_expression()
         access_expr = self._access_expression()
-        bus_back_expr = (f"COALESCE({_tag('oneway:bus')} = 'no' OR {_tag('oneway:psv')} = 'no', FALSE)"
-                         if self.mode == "driving" else "FALSE")
+        bus_lane_expr = f"COALESCE({_tag('oneway:bus')} = 'no' OR {_tag('oneway:psv')} = 'no', FALSE)"
+        bus_back_expr = bus_lane_expr if self.mode == "driving" else "FALSE"
+        car_dir_expr = self._direction_expression("driving")
         # every mode needs a real highway tag: an area:highway outline, or a way with only
         # bicycle/foot/sidewalk tags, is not a road. The one exception is the ferry line (route=ferry).
         where_clause = f"({where_clause}) AND ({_tag('highway')} IS NOT NULL OR {_tag('route')} = 'ferry') AND COALESCE({access_expr}, '') NOT IN ({FORBIDDEN[self.mode]})"
+        non_motor = ", ".join(f"'{h}'" for h in NON_MOTOR)
+        default = "CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END"
+        # the cars' lanes along their own direction (car_dir; the reverse of a -1 way runs as drawn) and against it
+        car_fwd = f"""(CASE
+                    WHEN split_part(highway, ';', 1) IN ({non_motor}) THEN NULL
+                    -- one-way against the drawing: its lanes are the backward ones (refs reversed below)
+                    WHEN car_dir = -1 THEN COALESCE(n_bwd, GREATEST(n_total - CASE WHEN car_contra THEN COALESCE(n_fwd, 1) ELSE 0 END, 1), {default})
+                    WHEN n_fwd IS NOT NULL THEN n_fwd
+                    WHEN car_dir <> 0 THEN COALESCE(GREATEST(n_total - CASE WHEN car_contra THEN COALESCE(n_bwd, 1) ELSE 0 END, 1), {default})
+                    WHEN n_total IS NOT NULL AND n_bwd IS NOT NULL THEN GREATEST(n_total - n_bwd, 1)
+                    WHEN n_total IS NOT NULL THEN GREATEST(CAST(CEIL(n_total / 2.0) AS INTEGER), 1)
+                    ELSE {default}
+                END + COALESCE(n_rev, 0))"""
+        car_bwd = f"""(CASE
+                    WHEN split_part(highway, ';', 1) IN ({non_motor}) OR (car_dir <> 0 AND NOT car_contra) THEN NULL
+                    WHEN n_bwd IS NOT NULL THEN n_bwd
+                    WHEN n_total IS NOT NULL AND n_fwd IS NOT NULL THEN GREATEST(n_total - n_fwd, 1)
+                    WHEN n_total IS NOT NULL THEN GREATEST(CAST(FLOOR(n_total / 2.0) AS INTEGER), 1)
+                    ELSE {default}
+                END + COALESCE(n_rev, 0))"""
             
         self.execute(f"""
             CREATE OR REPLACE TABLE ways AS
@@ -160,6 +185,9 @@ class RoadFilter(BaseProcessor):
                     {direction_expr} AS dir,
                     -- driving: buses may also go against this one-way way (a contraflow bus lane)
                     {bus_back_expr} AS bus_contra,
+                    -- the cars' direction and contraflow bus lane, in every mode: the lanes are theirs (below)
+                    {car_dir_expr} AS car_dir,
+                    {bus_lane_expr} AS car_contra,
                     map_extract(tags, 'surface')[1] AS surface,
                     -- service subtag (driveway/parking_aisle/alley/...) — drives the
                     -- narrow-vs-wide service-road rendering, like openstreetmap-carto.
@@ -211,27 +239,12 @@ class RoadFilter(BaseProcessor):
                 -- A one-way way with a bus lane the other way (bus_contra): OSM's `lanes` counts every motor lane, that bus
                 -- lane too, so the one-way direction has `lanes` minus the other way's (lanes:backward, else 1) (2026-10-10:
                 -- Boulevard des Moulins, lanes=2 = one car lane + the contraflow bus lane, was drawn 2 car lanes + the bus lane).
-                CASE
-                    -- one-way against the drawing: its lanes are the backward ones (refs reversed below)
-                    WHEN dir = -1 THEN COALESCE(n_bwd, GREATEST(n_total - CASE WHEN bus_contra THEN COALESCE(n_fwd, 1) ELSE 0 END, 1),
-                                                CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
-                    WHEN n_fwd IS NOT NULL THEN n_fwd
-                    WHEN dir <> 0
-                        THEN COALESCE(GREATEST(n_total - CASE WHEN bus_contra THEN COALESCE(n_bwd, 1) ELSE 0 END, 1),
-                                      CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END)
-                    WHEN n_total IS NOT NULL AND n_bwd IS NOT NULL THEN GREATEST(n_total - n_bwd, 1)
-                    WHEN n_total IS NOT NULL THEN GREATEST(CAST(CEIL(n_total / 2.0) AS INTEGER), 1)
-                    ELSE CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END
-                END + COALESCE(n_rev, 0) AS lanes_fwd,
-                -- Lane count in the backward direction (used by the reverse edge of two-way
-                -- roads). Prefer lanes:backward, else the remaining/half of the total, else
-                -- the class default. A shared reversible lane is added here too (see above).
-                CASE
-                    WHEN n_bwd IS NOT NULL THEN n_bwd
-                    WHEN n_total IS NOT NULL AND n_fwd IS NOT NULL THEN GREATEST(n_total - n_fwd, 1)
-                    WHEN n_total IS NOT NULL THEN GREATEST(CAST(FLOOR(n_total / 2.0) AS INTEGER), 1)
-                    ELSE CASE WHEN highway IN ('motorway', 'trunk') THEN 2 ELSE 1 END
-                END + COALESCE(n_rev, 0) AS lanes_bwd,
+                -- None on a road cars cannot use (NON_MOTOR), and none against a one-way way: no car drives there (its reverse
+                -- edge is walking or cycling only, a sidewalk), except its contraflow bus lane. The lanes are cars' (2026-10-09):
+                -- counted by the DRIVING direction (car_dir, car_contra) in every mode, then put on this mode's two edges (a
+                -- walking edge runs as drawn on a one-way street, so the cars' lanes are its forward or its backward ones).
+                CASE WHEN (dir = -1) <> (car_dir = -1) THEN {car_bwd} ELSE {car_fwd} END AS lanes_fwd,
+                CASE WHEN (dir = -1) <> (car_dir = -1) THEN {car_fwd} ELSE {car_bwd} END AS lanes_bwd,
                 tags,
                 -- A way that is one-way against its drawing (OSM -1) is turned round here, so every
                 -- later step sees its legal direction as the forward one: edges, merging, restrictions
@@ -261,7 +274,7 @@ class RoadFilter(BaseProcessor):
                          AND COALESCE({_tag('bicycle')}, '') NOT IN ('yes', 'designated', 'permissive')
                         THEN {_most_specific('foot', 'access')} ELSE {ride} END"""
 
-    def _direction_expression(self) -> str:
+    def _direction_expression(self, mode: str = None) -> str:
         """SQL integer expression for the travel direction, tailored to the mode: 1 = one-way in
         the way's drawing direction, -1 = one-way against it (OSM ``-1``), 0 = two-way.
 
@@ -274,7 +287,8 @@ class RoadFilter(BaseProcessor):
         makes a walking edge one-way.
         """
         yes = "IN ('yes', '1', 'true')"
-        if self.mode == "walking":
+        mode = mode or self.mode          # ``mode``: another mode's direction (the cars' one for the lanes, in every mode)
+        if mode == "walking":
             return f"""
                 CASE
                     WHEN map_extract(tags, 'oneway:foot')[1] {yes} THEN 1
@@ -282,7 +296,7 @@ class RoadFilter(BaseProcessor):
                     ELSE 0
                 END
             """
-        if self.mode == "cycling":
+        if mode == "cycling":
             # A dismount way is walked, not ridden — bidirectional regardless of any
             # oneway/oneway:bicycle tag (which governs riding). Rideable footways
             # (bicycle=yes/designated/permissive) keep the normal rules below.

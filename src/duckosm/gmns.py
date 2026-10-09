@@ -90,7 +90,7 @@ _PED_FACILITY = ("CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN 'both' THEN
 _CROSSING_ALONG = 0.6            # a footway=crossing link that runs along a road for this share of its length, and is at least _CROSSING_MIN_M long, is a footpath OSM tagged by mistake
 _CROSSING_MIN_M = 10.0           # (a crossing of a side street also runs along the main road, but is short: Monaco's crossings are 5 m at the median)
 _ALONG_NEAR_M = 8.0              # a footpath point counts as along a road when its edge is within this many metres of the road's edge
-_NON_MOTOR = ("footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform")
+from duckosm.processors.road_filter import NON_MOTOR as _NON_MOTOR   # noqa: E402  one list for the edges' lanes and GMNS
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
 _CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "geom_cut", "turn"],
