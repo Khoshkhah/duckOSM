@@ -73,12 +73,23 @@ overrode them is named); every default used is counted per kind. Printed and sto
 Build Monaco both ways and compare per link (lane count, uses, widths) and per movement (lane ranges). Every difference is
 listed with its OSM way, checked (Street View where needed), and only then does the new code replace the old.
 
-## Open questions
+## Decisions (2026-10-10)
 
-1. **Bike lanes in `lanes`**: OSM says a bike lane is not counted. Avenue Princesse Grace's mappers counted it (fixed by
-   overrides). Keep OSM's rule plus overrides (proposed), or count bike lanes inside `lanes`?
-2. **Lane lines on a dual carriageway**: duckOSM moves a one-way carriageway's lanes away from its partner (`_paired_gaps`);
-   netconvert does not. Use SUMO's lane shapes everywhere (simpler; dual carriageways change) or keep ours for `geom_full`
-   and SUMO's only at junctions (proposed)?
-3. **Joining close nodes**: urbanstyle lets netconvert join close nodes into one junction; GMNS nodes are duckOSM nodes.
-   Proposed: no joining for GMNS (`junctions.join false`).
+1. **Bike lanes are not counted in `lanes`**, as OSM says, plus overrides where mappers counted them (Avenue Princesse Grace).
+   Checked on SUMO's own OSM import of Monaco (netconvert `--osm-files`): it adds the bike lane on top too (one-way `lanes=2` +
+   `cycleway:right=lane`: 2 car lanes + a bike lane; two-way `lanes=2` + `cycleway:left=lane`: 1 car lane each way + a bike lane).
+   One difference: on a one-way way, SUMO reads `cycleway:left=lane` as a bike lane AGAINST the traffic (a separate edge); OSM
+   (and Street View on Avenue Princesse Grace) has it with the traffic unless `oneway:bicycle=no` / `cycleway:left:oneway=-1`.
+   The profile follows OSM; SUMO gets the profile's lanes, so its own reading never applies.
+2. **Lane lines**: ours for `geom_full` (with the dual-carriageway shift), SUMO's at junctions. **SUMO's algorithm is fed only what
+   its own OSM import would give it** (each edge's line, its lanes with their use and width, the legal turns): no lane shapes, no
+   junction shapes, no lane-to-lane connections of ours. What it builds is read back as it is. A check compares, per edge, the
+   lanes of this run with SUMO's own OSM import and lists every difference (each one a tag the profile reads differently, named).
+3. **No joining of close nodes** (`junctions.join false`): GMNS nodes stay duckOSM nodes.
+
+## Steps
+
+1. The lane profile table and its rule tests (duckOSM build); Monaco: list every edge whose lanes differ from today's GMNS.
+2. `to_sumo` writes the profile's lanes per lane; the comparison with SUMO's own OSM import.
+3. GMNS reads movements' lane ranges, connectors and junction lane shapes from the `.net.xml`; Monaco old vs new, per link and
+   per movement; the old rules removed after the check.
