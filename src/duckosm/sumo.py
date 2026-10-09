@@ -191,6 +191,8 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         f"SELECT edge_id, source, target, highway, name, lanes, maxspeed_kmh, length_m, "
         f"ST_AsText(geometry) FROM {mode}.edges").fetchall()
     n_edges = self_loops = 0
+    both_ways = {(r[1], r[2]) for r in rows}
+    extra = {str(k): v for k, v in (edge_attrs or {}).items()}      # keyed by edge_id, as a number or as text
     with open(edg_path, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<edges>\n')
         for eid, source, target, highway, name, lanes_, spd, length_m, wkt in rows:
@@ -209,12 +211,14 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs.append(f'type={quoteattr(str(highway))}')
             if mode in _MODE_ALLOW:
                 attrs.append(f'allow="{_MODE_ALLOW[mode]}"')
+            if (target, source) not in both_ways:          # one-way: its line is the road's middle (SUMO puts lanes right of it)
+                attrs.append('spreadType="center"')
             shape = _linestring_points(wkt)
             if shape:
                 attrs.append(f'shape="{shape}"')
             if name:
                 attrs.append(f'name={quoteattr(str(name))}')
-            for k, v in (edge_attrs or {}).get(eid, {}).items():
+            for k, v in extra.get(str(eid), {}).items():
                 attrs = [a for a in attrs if not a.startswith(f"{k}=")] + [f"{k}={quoteattr(str(v))}"]
             f.write("  <edge " + " ".join(attrs) + "/>\n")
             n_edges += 1
