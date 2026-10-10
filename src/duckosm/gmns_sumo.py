@@ -131,7 +131,8 @@ def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconv
     from duckosm.sumo import to_sumo
     # SUMO gets GMNS's own lanes, use, width and arrow each, left to right (the arrows through its OSM import, sumo._arrow_connections): one to one with ours in every mode (in driving they are the lane
     # profile's; cycling and a db built before the profile have only GMNS's)
-    to_dir, marked, unmatched = _arrow_fit(con, sch, drive_side)
+    # the painted arrows are the cars' (a bike's extra ways out, its paths, are on none of them): driving only
+    to_dir, marked, unmatched = _arrow_fit(con, sch, drive_side) if mode == "driving" else ({}, {}, [])
     fits = {lk for lk, _ in to_dir}
     ours_lanes = defaultdict(list)
     for lk, use, w, turn in con.execute(f"SELECT link_id, allowed_uses, COALESCE(width, 3.25), turn FROM {sch}.lane ORDER BY link_id, lane_num").fetchall():

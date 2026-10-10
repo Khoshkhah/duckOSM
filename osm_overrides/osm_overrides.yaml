@@ -200,6 +200,15 @@ overrides:
   - osm_id: 176086162        # Avenue Prince Pierre, west-bound before the fork with Rue de la Colle: its arrows are the fork's
     turn_lanes_forward: "none|none"
     note: "2026-10-10: OSM left|through describes the fork ~40 m on, at the end of way 503813539, which carries the same arrows (left lane into Rue de la Colle, right lane straight on, confirmed); this way's own end has one way out"
+  - osm_id: 503753416        # primary link (destination Nice): its arrows are the fork's, at the end of way 1212029943
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM left|through describes the fork at the end of way 1212029943, which carries the same arrows; this way's own end has one way out"
+  - osm_id: 507581437        # Boulevard Princesse Charlotte (5 m): its arrows are the fork's, at the end of way 792870577
+    turn_lanes_forward: "none|none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 792870577, which carries the same arrows; this way's own end has one way out"
+  - osm_id: 788120422        # Boulevard Princesse Charlotte: its arrows describe the fork after way 39838824
+    turn_lanes_forward: "none|none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 39838824 (2 lanes, no arrows); this way's own end has one way out"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
