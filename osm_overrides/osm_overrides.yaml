@@ -209,6 +209,9 @@ overrides:
   - osm_id: 788120422        # Boulevard Princesse Charlotte: its arrows describe the fork after way 39838824
     turn_lanes_forward: "none|none|none"
     note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 39838824 (2 lanes, no arrows); this way's own end has one way out"
+  - osm_id: 507581429        # Boulevard Princesse Charlotte before Boulevard du General Leclerc: the bus lane turns right
+    turn_lanes_forward: "through|through;right|right"
+    note: "2026-10-10, from the data (not checked in Street View; the aerial image is in shadow): three lanes (two car lanes, the bus lane) meet two roads of two lanes each, straight on and Leclerc; only a bus lane turning right fits both with OSM's through|through;right| (SUMO could not apply three straight lanes into two); 6 bus routes turn right here"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
