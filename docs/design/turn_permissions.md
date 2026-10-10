@@ -55,7 +55,8 @@ Södermalm 41, 6 with `except`; Monaco 43, none.
 7. **Restrictions with a via way** ban (or mandate) a path: from way, along the via way(s), onto the to way. Single turns in
    `edge_graph` cannot say that without banning legal moves too (the via way is used by other paths), so `edge_graph` keeps them
    out and `<mode>.turn_path_restrictions` holds one row per edge path (`from_edge`, `via_edges`, `to_edge`) with the same
-   `except_vehicles`, `applies_to`, `condition`. The SUMO export applies a path rule where the via edges vanish into a joined
+   `except_vehicles`, `applies_to`, `condition`. A rule may name several `to` ways (a `no_u_turn` naming both carriageways): a path onto
+   any of them counts. The SUMO export applies a path rule where the via edges vanish into a joined
    junction, the path being one connection there (`out["n_path_restrictions"]`, logged as "n of m applied"); elsewhere SUMO cannot
    say it. GMNS cannot either (a movement is one turn at one node).
 
@@ -70,7 +71,8 @@ Södermalm 41, 6 with `except`; Monaco 43, none.
 
 Vancouver: `edge_graph` identical before and after (225,239 pairs, none different); `turn_restrictions` 2,104 plain, 125 with
 `except`, 165 conditional, 1 for one class; `turn_permission` 142 turns open only to some vehicles, 168 closed only to some or at some
-times; 44 of 51 via-way restrictions matched edge paths (`edge_graph` still identical). Granville St x W Broadway: the left turn
+times; 45 of 53 via-way restrictions matched edge paths, the other 8 name a way outside the city extract (`edge_graph` still
+identical). Granville St x W Broadway: the left turn
 from northbound Granville onto West Broadway is open to buses and taxis only (relation 6965100); from southbound Granville onto
 West Broadway east, buses only (relation 6956554, via the link way, 07:00-19:00, written in force in SUMO).
 

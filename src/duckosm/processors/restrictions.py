@@ -168,12 +168,13 @@ class RestrictionProcessor(BaseProcessor):
                    refs[list_position(ref_roles, 'from')] AS from_way,
                    list_transform(list_filter(range(1, len(refs) + 1), i -> ref_roles[i] = 'via' AND ref_types[i]::VARCHAR = 'way'),
                                   i -> refs[i]) AS via_ways,
-                   refs[list_position(ref_roles, 'to')] AS to_way
+                   list_transform(list_filter(range(1, len(refs) + 1), i -> ref_roles[i] = 'to' AND ref_types[i]::VARCHAR = 'way'),
+                                  i -> refs[i]) AS to_ways      -- usually one; a no_u_turn may name both carriageways it may not turn onto
             FROM restrictions_raw
             WHERE len(list_filter(range(1, len(refs) + 1), i -> ref_roles[i] = 'via' AND ref_types[i]::VARCHAR = 'way')) > 0""")
         if not rules:
             return
-        ways = {w for r in rules for w in (r[5], r[7], *r[6])}
+        ways = {w for r in rules for w in (r[5], *r[6], *r[7])}
         ends = {}            # edge -> (source, target, way at the source end, way at the target end)
         for eid, src, tgt, sw, tw in self.fetchall(f"""
                 SELECT e.edge_id, e.source, e.target, s.way_id, t.way_id FROM edges e
@@ -184,8 +185,8 @@ class RestrictionProcessor(BaseProcessor):
         for eid, (src, *_ ) in ends.items():
             out_of.setdefault(src, []).append(eid)
         rows = []
-        for rid, rtype, exc, veh, cond, fw, vws, tw in rules:
-            vset = set(vws)
+        for rid, rtype, exc, veh, cond, fw, vws, tws in rules:
+            vset, tset = set(vws), set(tws)
             for fe, (_, ftgt, _, ftw) in ends.items():
                 if ftw != fw:
                     continue
@@ -194,7 +195,7 @@ class RestrictionProcessor(BaseProcessor):
                     node, path, seen = todo.pop()
                     for e in out_of.get(node, []):
                         esrc, etgt, esw, etw = ends[e]
-                        if path and esw == tw:                   # onto the to way, having passed along the via way(s)
+                        if path and esw in tset:                 # onto a to way, having passed along the via way(s)
                             rows.append((rid, rtype, exc, veh, cond, fe, list(path), e))
                         if (esw in vset or etw in vset) and etgt not in seen and len(path) < 6:
                             todo.append((etgt, path + [e], seen | {etgt}))
