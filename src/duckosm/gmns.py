@@ -540,6 +540,8 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
             from duckosm.gmns_sumo import lanes_from_sumo   # the paths through the junctions (lane_connector) and each lane cut where its junction begins
             result.setdefault("sumo", {})[mode] = lanes_from_sumo(con, sch, mode=mode, geometry=lane_geometry and mode == "driving",
                                                                   drive_side=drive_side)
+            if lane_geometry:
+                _meet_lanes(con, sch)                   # lanes that continue one another meet (a split's branches start at their lanes)
         else:
             _walk_lanes(con, sch)
         if mode == "driving":
@@ -1199,6 +1201,77 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
     con.execute(f"ALTER TABLE {sch}.movement DROP COLUMN IF EXISTS _ang")
     con.execute(f"INSERT INTO {sch}.movement SELECT * EXCLUDE (_ang) FROM _mv_bus WHERE mvmt_id IN (SELECT mvmt_id FROM _bus_mv_ids)")
     con.execute("DROP TABLE _mv_bus; DROP TABLE _bus_mv_ids")
+
+
+_MEET_TAPER_M = 15.0     # a lane bent to meet the lane it continues comes back to its own line over this many metres (half its length at most)
+_MEET_MAX_M = 8.0         # two lane ends further apart than this are left as they are (no continuation drawn across a junction)
+
+
+def _meet_lanes(con, sch):
+    """Lane lines that continue one another meet (2026-10-09: at the split of Tunnel Rocher Palais both one-lane tunnels started at the
+    node, the middle of the two-lane road, not at their own lane). A lane continues one other lane when the movements (SUMO's) going
+    straight on (thru, diverge, merge: a turn's lanes keep their corner) send it to exactly that lane and nothing else of its use feeds that lane. Of the two, the link with fewer lanes bends: at a split its
+    branches start at their lanes of the wider road, at a merge they end there; the bend fades out over _MEET_TAPER_M. Straight
+    continuations already meet and are left as they are. Returns the number of lane ends moved."""
+    import math
+
+    from shapely import wkt as _wkt
+    from shapely.geometry import LineString
+
+    lanes = {r[0]: r[1:] for r in con.execute(f"SELECT lane_id, link_id, lane_num, allowed_uses, ST_AsText(geom) FROM {sch}.lane "
+                                               "WHERE geom IS NOT NULL").fetchall()}
+    by_num = {(lk, n): lid for lid, (lk, n, _, _) in lanes.items()}
+    count = Counter(lk for lk, *_ in lanes.values())
+    nxt, prv = defaultdict(set), defaultdict(set)
+    for ib, s0, s1, ob, o0, o1 in con.execute(f"SELECT ib_link_id, start_ib_lane, end_ib_lane, ob_link_id, start_ob_lane, end_ob_lane "
+                                              f"FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge')").fetchall():   # straight on, not a turn
+        if None in (s0, s1, o0, o1) or s1 - s0 != o1 - o0:
+            continue
+        for k in range(s1 - s0 + 1):
+            a, b = by_num.get((ib, s0 + k)), by_num.get((ob, o0 + k))
+            if a and b and lanes[a][2] == lanes[b][2]:          # lanes of one use (a bike lane feeding a car lane bikes ride on is no continuation)
+                nxt[a].add(b)
+                prv[b].add(a)
+    line = {lid: _wkt.loads(v[3]) for lid, v in lanes.items()}
+    def metres(lat):
+        return 111320 * math.cos(math.radians(lat)), 111320
+    def bend(ln, at_start, to):                             # ln's first (or last) point moved to ``to``, fading over the taper
+        pts = list(ln.coords) if at_start else list(ln.coords)[::-1]
+        kx, ky = metres(pts[0][1])
+        dx, dy = to[0] - pts[0][0], to[1] - pts[0][1]
+        n = sum(math.hypot((b[0] - a[0]) * kx, (b[1] - a[1]) * ky) for a, b in zip(pts, pts[1:]))
+        taper, run, out = min(_MEET_TAPER_M, n / 2), 0.0, [(pts[0][0] + dx, pts[0][1] + dy)]
+        for a, b in zip(pts, pts[1:]):
+            seg = math.hypot((b[0] - a[0]) * kx, (b[1] - a[1]) * ky)
+            if run < taper < run + seg:                     # the point where the bend has faded out
+                f = (taper - run) / seg
+                out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+            run += seg
+            w = max(0.0, 1 - run / taper) if taper > 0 else 0.0
+            out.append((b[0] + dx * w, b[1] + dy * w))
+        return LineString(out if at_start else out[::-1])
+    moved = {}
+    for a, bs in nxt.items():
+        if len(bs) != 1:
+            continue
+        b = next(iter(bs))
+        if prv[b] != {a}:
+            continue
+        la, lb = moved.get(a, line[a]), moved.get(b, line[b])
+        end, start = la.coords[-1], lb.coords[0]
+        kx, ky = metres(end[1])
+        gap = math.hypot((end[0] - start[0]) * kx, (end[1] - start[1]) * ky)
+        if gap < 0.01 or gap > _MEET_MAX_M:
+            continue
+        if count[lanes[a][0]] >= count[lanes[b][0]]:        # the wider road keeps its lanes; the other bends to meet them
+            moved[b] = bend(lb, True, end)
+        else:
+            moved[a] = bend(la, False, start)
+    if moved:
+        con.executemany(f"UPDATE {sch}.lane SET geom = ST_GeomFromText(?::VARCHAR) WHERE lane_id = ?::VARCHAR",
+                        [(g.wkt, lid) for lid, g in moved.items()])
+    logger.info(f"GMNS[{sch[5:]}]: {len(moved):,} lane ends moved to meet the lane they continue")
+    return len(moved)
 
 
 def _walk_lanes(con, sch):

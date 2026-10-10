@@ -888,3 +888,25 @@ def test_gmns_lanes_come_from_the_lane_profile(tmp_path):
     con.close()
     with pytest.raises(ValueError, match="lane_profile has no lanes"):
         to_gmns(str(src), str(tmp_path / "p2_gmns.duckdb"))
+
+
+def test_a_lane_that_goes_on_straight_meets_the_lane_it_continues():
+    """2026-10-09 (Tunnel Rocher Palais): a two-lane road splits into two one-lane roads that start at the node, its middle; each
+    branch's lane is bent to start at its lane of the wider road (the movements say which), fading back over the taper. A turn is left."""
+    import duckdb
+    from duckosm.gmns import _meet_lanes
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA g")
+    con.execute("CREATE TABLE g.lane(lane_id VARCHAR, link_id BIGINT, lane_num INT, allowed_uses VARCHAR, geom GEOMETRY)")
+    d = 1.6 / 111320                                   # the two lanes 1.6 m either side of the road's line (y = 0)
+    con.execute(f"""INSERT INTO g.lane VALUES
+        ('1_1', 1, 1, 'auto', ST_GeomFromText('LINESTRING(0 {d}, 0.001 {d})')), ('1_2', 1, 2, 'auto', ST_GeomFromText('LINESTRING(0 -{d}, 0.001 -{d})')),
+        ('2_1', 2, 1, 'auto', ST_GeomFromText('LINESTRING(0.001 0, 0.002 0.0003)')), ('3_1', 3, 1, 'auto', ST_GeomFromText('LINESTRING(0.001 0, 0.002 -0.0003)')),
+        ('4_1', 4, 1, 'auto', ST_GeomFromText('LINESTRING(0.001 0, 0.001 0.001)'))""")
+    con.execute("CREATE TABLE g.movement(ib_link_id BIGINT, start_ib_lane INT, end_ib_lane INT, ob_link_id BIGINT, start_ob_lane INT, end_ob_lane INT, type VARCHAR)")
+    con.execute("INSERT INTO g.movement VALUES (1, 1, 1, 2, 1, 1, 'diverge'), (1, 2, 2, 3, 1, 1, 'diverge'), (1, 1, 1, 4, 1, 1, 'left')")
+    assert _meet_lanes(con, "g") == 2
+    start = dict(con.execute("SELECT lane_id, [ST_X(ST_StartPoint(geom)), ST_Y(ST_StartPoint(geom))] FROM g.lane").fetchall())
+    assert start["2_1"] == [0.001, d] and start["3_1"] == [0.001, -d] and start["4_1"] == [0.001, 0.0]   # the turn keeps its start
+    ends = dict(con.execute("SELECT lane_id, [ST_X(ST_EndPoint(geom)), ST_Y(ST_EndPoint(geom))] FROM g.lane").fetchall())
+    assert ends["2_1"] == [0.002, 0.0003] and ends["1_1"] == [0.001, d]                                    # its far end and the wide road stay
