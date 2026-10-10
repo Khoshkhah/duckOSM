@@ -17,6 +17,11 @@ assemble the `.net.xml`. Because netconvert keeps the ids and the explicit conne
   * the only movements allowed at each junction are the legal successors in ``edge_graph`` — i.e.
     **turn restrictions are respected** (netconvert is not left to guess connections from geometry).
 
+Painted turn arrows (``turn:lanes``): SUMO's plain XML has no field for them; only its OSM import reads them (``osm.turn-lanes``).
+GMNS passes the arrows that fit their link's exits in ``lanes=`` (``gmns_sumo._arrow_fit``); for an edge whose lanes have one, netconvert first reads the same network as an OSM file (our lanes as
+tags, our road types: every vehicle class, the plain XML's priorities) and its lane connections from those edges go into the
+``.con.xml`` as explicit lane-to-lane connections; every other edge keeps the edge-level successors (``_arrow_connections``).
+
     import duckdb
     from duckosm.sumo import to_sumo
     con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
@@ -139,6 +144,109 @@ def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
         f.write("\n".join(lines))
 
 
+def _arrow_connections(con, mode, bus, rows, profile, arrowed, cs, nodes, out_dir, net_name, binary, config):
+    """The lane connections netconvert's OSM import builds from the edges in ``arrowed`` (their lanes have turn arrows), as
+    ``{edge_id: [(fromLane, to_edge, toLane)]}`` in SUMO's lane indices (from the right). The network is written as an OSM file
+    ``<net_name>.osm``: a forward edge is a way with its id (its reverse edge on the same line, the way's backward direction: SUMO's
+    ``-<id>``), its lanes as tags (``lanes``, ``turn:lanes``, ``width:lanes``, ``access:lanes`` / ``bus:lanes`` / ``bicycle:lanes``);
+    the road types ``<net_name>.osm.typ.xml``: every vehicle class, the plain XML's priorities; the legal successors as there."""
+    import xml.etree.ElementTree as ET
+    from xml.sax.saxutils import quoteattr as q
+    where = f"SELECT edge_id, osm_id, is_reverse FROM {mode}.edges" + (" UNION ALL SELECT edge_id, osm_id, is_reverse FROM driving.private_edges "
+                                                                         "WHERE access = 'bus'" if bus else "")
+    way_of = {e: (osm, bool(rev)) for e, osm, rev in con.execute(where).fetchall()}
+    by_ends = {(r[1], r[2], way_of[r[0]][0]): r for r in rows if r[1] != r[2]}
+    back = {}                                            # a forward edge -> the reverse edge on its line (the way's backward lanes)
+    for r in by_ends.values():
+        p = by_ends.get((r[2], r[1], way_of[r[0]][0]))
+        if way_of[r[0]][1] and p and not way_of[p[0]][1]:
+            back[p[0]] = r[0]
+    reverse = set(back.values())
+    sumo_id = {}                                         # SUMO's edge id -> our edge_id
+
+    def lane_tags(ls, sfx):
+        t = {f"lanes{sfx}": str(len(ls)), f"width:lanes{sfx}": "|".join(f"{float(w):.2f}" for _, w, _ in ls)}
+        if any(x[2] for x in ls):
+            t[f"turn:lanes{sfx}"] = "|".join(x[2] or "" for x in ls)
+        if any(u != "auto" for u, _, _ in ls):           # a bus or bike lane: no one else, as in the plain XML's lane allow
+            t[f"access:lanes{sfx}"] = "|".join("yes" if u == "auto" else "no" for u, _, _ in ls)
+            for k, v in (("bus", "bus"), ("bicycle", "bike")):
+                t[f"{k}:lanes{sfx}"] = "|".join("designated" if v in u else "yes" if u == "auto" else "no" for u, _, _ in ls)
+        return t
+
+    osm_path = os.path.join(out_dir, f"{net_name}.osm")
+    shape_id = 10**15
+    with open(osm_path, "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6">\n')
+        for n, (x, y) in nodes.items():
+            f.write(f'  <node id="{n}" lat="{y:.7f}" lon="{x:.7f}"/>\n')
+        ways = []
+        for eid, a, b, highway, name, _, spd, _, wkt in by_ends.values():
+            if eid in reverse:
+                continue
+            refs = [a]
+            for pt in (_linestring_points(wkt) or "").split()[1:-1]:
+                shape_id += 1
+                while shape_id in nodes:
+                    shape_id += 1
+                x, y = pt.split(",")
+                f.write(f'  <node id="{shape_id}" lat="{y}" lon="{x}"/>\n')
+                refs.append(shape_id)
+            refs.append(b)
+            tags = {"highway": (highway or "road").split(";")[0]}
+            if name:
+                tags["name"] = name
+            if spd and float(spd) > 0:
+                tags["maxspeed"] = str(round(float(spd)))
+            sumo_id[str(eid)] = eid
+            if eid in back:
+                tags.update({**lane_tags(profile[eid], ":forward"), **lane_tags(profile[back[eid]], ":backward"), "oneway": "no",
+                             "lanes": str(len(profile[eid]) + len(profile[back[eid]]))})
+                sumo_id[f"-{eid}"] = back[eid]
+            else:
+                tags.update({**lane_tags(profile[eid], ""), "oneway": "yes"})
+            ways.append(f'  <way id="{eid}">' + "".join(f'<nd ref="{n}"/>' for n in refs)
+                        + "".join(f"<tag k={q(k)} v={q(v)}/>" for k, v in tags.items()) + "</way>\n")
+        f.write("".join(ways) + "</osm>\n")
+    ours = {v: k for k, v in sumo_id.items()}
+    typ_path = os.path.join(out_dir, f"{net_name}.osm.typ.xml")
+    with open(typ_path, "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<types>\n')
+        for hw in sorted({(r[3] or "road").split(";")[0] for r in rows}):
+            f.write(f'  <type id="highway.{hw}" priority="{_HIGHWAY_PRIORITY.get(hw, 1)}" numLanes="1" speed="13.89" oneway="false"/>\n')
+        f.write("</types>\n")
+    con_path = os.path.join(out_dir, f"{net_name}.osm.con.xml")
+    has = {a for a, _ in cs}
+    with open(con_path, "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<connections>\n')
+        for a, b in cs:
+            if a in ours and b in ours:
+                f.write(f'  <connection from="{ours[a]}" to="{ours[b]}"/>\n')
+        for e in ours:
+            if e not in has:
+                f.write(f'  <connection from="{ours[e]}"/>\n')
+        f.write("</connections>\n")
+    net_path = os.path.join(out_dir, f"{net_name}.osm.net.xml")
+    osm_opts = ["--osm-files", osm_path, "--type-files", typ_path, "--connection-files", con_path, "--output-file", net_path,
+                "--osm.turn-lanes", "true", "--osm.lane-access", "true"]
+    if isinstance(config, str):
+        cmd = [binary, "-c", config, *osm_opts]
+    else:
+        opts = {**DEFAULT_NETCFG, **(config or {})}
+        cmd = [binary, *osm_opts, *[x for k, v in opts.items() for x in (f"--{k}", str(v))]]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"netconvert (OSM input, for the turn arrows) failed (exit {res.returncode}):\n{res.stderr[-2000:]}")
+    got = {e: [] for e in arrowed if e in ours}
+    for _, el in ET.iterparse(net_path):
+        if el.tag == "edge" and el.get("function") != "internal" and el.get("id") not in sumo_id:
+            raise RuntimeError(f"netconvert's OSM import built edge {el.get('id')!r}, not one of ours (a way it split): cannot map it back")
+        if el.tag == "connection" and not el.get("from").startswith(":") and sumo_id[el.get("from")] in got:
+            got[sumo_id[el.get("from")]].append((int(el.get("fromLane")), sumo_id[el.get("to")], int(el.get("toLane"))))
+    logger.info(f"SUMO connections[{mode}]: {len(got)} edges with turn arrows connected lane by lane by netconvert's OSM import ({net_path})")
+    return got
+
+
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
             run_netconvert: bool = True, netconvert_bin: str = None,
             connections: bool = True, config=None, bus_edges: bool = False, edge_attrs: dict = None, lanes: dict = None):
@@ -163,8 +271,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         in SUMO's standard ``.netccfg`` format and run with ``netconvert -c``.
     edge_attrs : ``{edge_id: {sumo-edge-attribute: value}}`` set on those edges, over what duckOSM writes: e.g. lane counts,
         ``{eid: {"numLanes": 2}}`` (as on duckOSM's level-area branch: urbanstyle's measured widths; GMNS's lane counts).
-    lanes : ``{edge_id: [(use, width), ...]}`` left to right, each edge's lanes instead of ``driving.lane_profile``'s (GMNS gives its own,
-        in every mode, so SUMO's lanes are GMNS's one to one); ``use`` as the profile's (``auto`` / ``bus`` / ``bike`` / ``bus,bike``).
+    lanes : ``{edge_id: [(use, width[, turn]), ...]}`` left to right, each edge's lanes instead of ``driving.lane_profile``'s (GMNS gives
+        its own, in every mode, so SUMO's lanes are GMNS's one to one); ``use`` as the profile's (``auto`` / ``bus`` / ``bike`` /
+        ``bus,bike``); ``turn`` its arrow (``turn:lanes`` entry), applied by netconvert's OSM import (see the module docstring).
     bus_edges : driving only: also the bus-only edges (``private_edges`` with ``access = 'bus'``: a contraflow bus lane, a bus-only
         road) and the buses' turns of ``edge_graph`` (its ``bus`` rows), so their lanes get connections too (GMNS, docs/design/gmns_lane_profile.md).
 
@@ -209,10 +318,10 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     # classes and width, so netconvert gets the lanes duckOSM decided (as its own OSM import would get them from the tags), not a count
     profile = {}
     if lanes is not None:
-        profile = {int(k): list(v) for k, v in lanes.items()}
+        profile = {int(k): [(*x, None)[:3] for x in v] for k, v in lanes.items()}
     elif mode == "driving" and _table_exists(con, "driving.lane_profile"):
         for eid, use, width in con.execute("SELECT edge_id, use, width_m FROM driving.lane_profile ORDER BY edge_id, lane_num").fetchall():
-            profile.setdefault(eid, []).append((use, width))
+            profile.setdefault(eid, []).append((use, width, None))   # no arrows: only GMNS knows which fit their exits (gmns_sumo._arrow_fit)
     n_edges = self_loops = 0
     with open(edg_path, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<edges>\n')
@@ -246,7 +355,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 attrs = [a for a in attrs if not a.startswith(f"{k}=")] + [f"{k}={quoteattr(str(v))}"]
             if lanes_here:                              # SUMO numbers lanes from the right: index 0 is the right-most
                 f.write("  <edge " + " ".join(attrs) + ">\n")
-                for i, (use, width) in enumerate(reversed(lanes_here)):
+                for i, (use, width, _) in enumerate(reversed(lanes_here)):
                     allow = f' allow="{_LANE_ALLOW[use]}"' if use in _LANE_ALLOW else ""
                     f.write(f'    <lane index="{i}"{allow} width="{float(width):.2f}"/>\n')
                 f.write("  </edge>\n")
@@ -278,14 +387,28 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                             f"AND edge_id NOT IN (SELECT from_edge FROM {graph_tbl})" + (
                                 f" UNION ALL SELECT edge_id FROM driving.private_edges WHERE access = 'bus' AND source <> target "
                                 f"AND edge_id NOT IN (SELECT from_edge FROM {graph_tbl})" if bus else "")).fetchall()
+        arrowed = {e for e, ls in profile.items() if any(x[2] for x in ls)}
+        lane_cs = {}                                     # an arrowed edge -> its lane connections (SUMO's OSM import)
+        if arrowed and run_netconvert:
+            lane_cs = _arrow_connections(con, mode, bus, rows, profile, arrowed, cs, dict((n, (x, y)) for n, x, y in nodes),
+                                         out_dir, net_name, _find_netconvert(netconvert_bin), config)
+        elif arrowed:
+            logger.warning(f"SUMO connections[{mode}]: {len(arrowed)} edges have turn arrows, but run_netconvert=False: their "
+                           f"connections are edge-level, netconvert will not apply the arrows")
         with open(con_path, "w", encoding="utf-8") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n<connections>\n')
             for fe, te in cs:
-                f.write(f'  <connection from="{fe}" to="{te}"/>\n')
+                if fe not in lane_cs:
+                    f.write(f'  <connection from="{fe}" to="{te}"/>\n')
+            for fe, ls in lane_cs.items():
+                for fl, te, tl in ls:
+                    f.write(f'  <connection from="{fe}" to="{te}" fromLane="{fl}" toLane="{tl}"/>\n')
+                if not ls:                               # the arrows leave this edge no way on: no connections (lane_check lists it)
+                    f.write(f'  <connection from="{fe}"/>\n')
             for (fe,) in stuck:
                 f.write(f'  <connection from="{fe}"/>\n')
             f.write('</connections>\n')
-        out["con"], out["n_connections"] = con_path, len(cs)
+        out["con"], out["n_connections"], out["n_arrowed"] = con_path, len(cs), len(lane_cs)
         logger.info(f"SUMO connections[{mode}]: {len(cs):,} legal successors -> {con_path}")
 
     if not run_netconvert:

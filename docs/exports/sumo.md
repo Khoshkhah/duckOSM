@@ -16,6 +16,10 @@ road vehicle) and its width, numbered from the right as SUMO does. `duckosm.sumo
 builds the same area with SUMO's own OSM import too and lists, per OSM way and direction, every lane difference with its cause
 (an override, the contraflow bus lane, a default where no `lanes` tag is ...).
 
+Painted turn arrows (`turn:lanes`) are not in this network: SUMO's plain XML has no field for them. The GMNS export applies them
+([GMNS tables](gmns_tables.md), `lane_check`): where a link's arrows fit its exits, read left to right by order, netconvert's OSM
+import connects that link's lanes by them, and those lane connections go into the plain XML.
+
 A walking network is for pedestrians only (`allow="pedestrian"`, with SUMO walking areas at the
 junctions), a cycling network for bicycles only. A driving network allows every vehicle class.
 

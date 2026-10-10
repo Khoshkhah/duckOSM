@@ -469,6 +469,7 @@ def test_turn_lanes_apply_where_the_way_ends(tmp_path):
     into lane 2 and the right lane had no way on: Monaco, Boulevard Charles III)."""
     _source_with(tmp_path / "src.duckdb", {"turn:lanes": "through|right"},
                  [(88, 2, 4, 100, 2, "false", "LINESTRING(18.07 59.32,18.08 59.32)")], [(A, 88)])
+    duckdb.connect(str(tmp_path / "src.duckdb")).execute("UPDATE raw.ways SET refs = [1, 2, 4] WHERE osm_id = 100")   # the way goes on to 4
     assert _ranges(tmp_path, A, 88) == (1, 2, 1, 2)
 
 
@@ -880,19 +881,20 @@ def _fork_check(tmp_path, arrows):
     return into, con.execute("SELECT kind, id FROM gmns_driving.lane_check WHERE kind LIKE '%arrow%'").fetchall()
 
 
-def test_arrows_are_read_by_order_as_sumo_reads_them(tmp_path):
-    """A link's arrows name its exits left to right (13 the left one, 12 the right one, whatever their angles): with 'through|left' the
-    left lane belongs to 12 and the right lane to 13, so each lane SUMO sends elsewhere is listed; arrows naming more directions than
-    the link has exits are listed as not matched, never fitted."""
+def test_arrows_are_read_by_order_and_applied_by_sumo(tmp_path):
+    """A link's arrows name its exits left to right (13 the left one, 12 the right one, whatever their angles), and netconvert's OSM
+    import connects the lanes by them (sumo._arrow_connections): 'through|left' sends the left lane to 12 and the right one to 13,
+    crossing, as painted; nothing is listed. Arrows naming more directions than the link has exits are listed as not matched, and
+    SUMO does not get them."""
     from duckosm.sumo import _find_netconvert
     try:
         _find_netconvert(None)
     except Exception:
         pytest.skip("netconvert is needed")
-    into, check = _fork_check(tmp_path, "through|left")
-    wrong = {f"11_{n}" for n in into[13] if n == 1} | {f"11_{n}" for n in into[12] if n == 2}
-    assert wrong and sorted(check) == sorted(("against its arrow", w) for w in wrong)
+    assert _fork_check(tmp_path, "through|left") == ({12: {1}, 13: {2}}, [])
+    assert _fork_check(tmp_path, "left|through") == ({12: {2}, 13: {1}}, [])
     assert _fork_check(tmp_path, "left|through;right")[1] == [("arrows not matched", "11")]
+
 
 def test_sumo_lane_pairs_become_runs_side_by_side():
     """gmns_sumo._runs: lane pairs that go on side by side are one movement row; a lane feeding two lanes ahead is two rows."""

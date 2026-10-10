@@ -1587,10 +1587,11 @@ def _build_signal_controller(con, sch):
     FROM {sch}.node WHERE ctrl_type = 'signal'""")
 
 
-def _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bike_extra, bike_left, pick):
+def _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bike_extra, bike_left, pick, way_end=True):
     """The lanes of one edge from its tags, for a db without ``driving.lane_profile`` (built before 2026-10-10) and the walking and
     cycling networks: ``[(lane_num, use, width, turn, width to place it)]`` left to right. The driving rules live in
-    processors/lane_profile.py now (docs/design/gmns_lane_profile.md)."""
+    processors/lane_profile.py now (docs/design/gmns_lane_profile.md). ``way_end``: the edge ends where its way ends, the only edge
+    whose lanes carry the way's arrows (as lanes_of)."""
     turns, widths, w_each = lane_widths(tags, lanes, is_rev, edge_id in bus_of, one)
     bikes, psvs, buses = (_split(pick(tags, k, is_rev)) for k in ("bicycle:lanes", "psv:lanes", "bus:lanes"))
     n = len(w_each)
@@ -1614,7 +1615,7 @@ def _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bi
             width = _DEFAULT_BIKE_W                                      # stored, so every reader draws the same width
         elif width is None and u != "walk":
             width = w_each[i]                                            # the class default, so every reader draws the same width
-        turn = turns[m] if 0 <= m < len(turns) and turns[m] not in ("", "none") else None
+        turn = turns[m] if way_end and 0 <= m < len(turns) and turns[m] not in ("", "none") else None
         out.append((num, u, width, turn, w_each[i]))
     return out
 
@@ -1632,13 +1633,15 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
 
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = abs(e.osm_id)" if has_raw else ""   # a virtual (negative) id is its OSM way with a minus: its tags are the way's
     tagcol = "w.tags" if has_raw else "NULL::MAP(VARCHAR, VARCHAR)"
+    # the edge ends where its way ends (in its direction): the only edge whose lanes carry the way's arrows (as lane_profile)
+    endcol = "e.target IS NOT DISTINCT FROM (CASE WHEN e.is_reverse THEN w.refs[1] ELSE w.refs[-1] END)" if has_raw else "true"
     has_oneway = con.execute(
         "SELECT count(*) FROM duckdb_columns() WHERE database_name = 's' AND schema_name = ? "
         "AND table_name = 'edges' AND column_name = 'oneway'", [mode]).fetchone()[0] > 0
     oneway_sel = "e.oneway" if has_oneway else "false"      # older/synthetic edges: treat as two-way
     rows = [r for src in ("_edges_car", "_edges_bus") for r in con.execute(f"""SELECT e.edge_id, e.is_reverse, COALESCE(li.lanes, e.lanes),
-      e.length_m, e.source, {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name, e._bus, e._bike
-      FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""").fetchall()]
+      e.length_m, e.source, {oneway_sel} AS oneway, ST_AsText(e.geometry) AS wkt, {tagcol} AS tags, e.target, e.osm_id, e.name, e._bus, e._bike,
+      {endcol} AS way_end FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id""").fetchall()]
     side_sign = -1.0 if drive_side == "right" else 1.0  # offset_curve(+) is left; right-hand → negative
     # driving: every edge's lanes from driving.lane_profile, decided once in the build (docs/design/gmns_lane_profile.md); this function
     # only places them. A build without the table (older) keeps the rules below
@@ -1791,13 +1794,13 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         con.unregister("_runs_df")
 
     lane_rows, curb_rows = [], []
-    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name, *_ in rows:
+    for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name, _bus, _bike, way_end in rows:
         tags = tags or {}
         one = bool(oneway) and osm_id not in contra
         if prof:                                             # (lane_num, use, width, turn) left to right, as the profile has them
             these = [(num, use, width, turn) for num, use, width, turn, _ in prof[edge_id]]
         else:
-            these = _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bike_extra, bike_left, pick)
+            these = _rule_lanes(tags, lanes, is_rev, one, edge_id, bus_of, uses, lane_widths, bike_extra, bike_left, pick, way_end)
         w_each = [x[2] for x in these] if prof else [x[4] for x in these]
         offs = offsets(edge_id)
         run = 0.0
