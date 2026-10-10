@@ -13,6 +13,7 @@
 #   lanes_backward  int
 #   layer           int   — vertical stacking level (fixes a wrong OSM `layer` tag)
 #   exclude_modes   list  — remove the way from these modes' networks (driving/cycling/walking)
+#   turn_lanes_forward / turn_lanes_backward  str — the painted arrows, OSM turn:lanes syntax ("through;left|right")
 #   note            free text (provenance)
 #
 # Only enable a rule once the correction is verified — an unverified `oneway` flip silently drops
@@ -189,6 +190,10 @@ overrides:
     lanes: 1
     note: "OSM lanes=2, oneway=yes; Street View shows one lane"
 
+
+  - osm_id: 423632264        # Boulevard Charles III, east-bound before the car park ramp and Tunnel de Serravalle
+    turn_lanes_forward: "through;left|right"
+    note: "2026-10-10 Street View: the left lane goes straight on or left into the car park's entry ramp (way 172533153; its left+straight arrow is painted where the road forks into two lanes); OSM through|right leaves the left out"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline

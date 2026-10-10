@@ -24,7 +24,9 @@ Fields: `oneway` (bool) · `lanes` (int, per-direction — sets both directions)
 `lanes_forward` / `lanes_backward` (int, for asymmetric roads) · `layer` (signed int — vertical
 stacking level; overrides a wrong OSM `layer` tag, e.g. an at-grade way mis-tagged `layer=-1`) ·
 `exclude_modes` (list of `driving` / `cycling` / `walking` — the way is REMOVED from those modes'
-networks, for a way OSM tags as usable that is not, e.g. a tunnel ramp seen closed on Street View).
+networks, for a way OSM tags as usable that is not, e.g. a tunnel ramp seen closed on Street View) ·
+`turn_lanes_forward` / `turn_lanes_backward` (the painted arrows, OSM `turn:lanes` syntax, e.g. `through;left|right`: set as the
+way's `turn:lanes:forward` / `:backward` tag in `raw.ways`, where every lane reader takes its arrows from).
 """
 import logging
 from pathlib import Path
@@ -65,13 +67,19 @@ class OsmOverrides(BaseProcessor):
                     logger.info(f"  override osm_id={int(osm_id)}: removed from {self.mode}{note}")
                 continue
             sets = self._assignments(r)
-            if not sets:
+            arrows = {f"turn:lanes:{d}": str(r[f"turn_lanes_{d}"]) for d in ("forward", "backward") if r.get(f"turn_lanes_{d}") is not None}
+            if not sets and not arrows:
                 continue
             # Only counts as "applied" when the way is actually in this area/mode's ways table —
             # a global rule legitimately matches nothing in most areas.
             if not self.fetchone(f"SELECT count(*) FROM ways WHERE osm_id = {int(osm_id)}")[0]:
                 continue
-            self.execute(f"UPDATE ways SET {', '.join(sets)} WHERE osm_id = {int(osm_id)}")
+            if sets:
+                self.execute(f"UPDATE ways SET {', '.join(sets)} WHERE osm_id = {int(osm_id)}")
+            if arrows:                                         # the lanes' arrows are read from the raw tags (lane_profile, GMNS)
+                self.con.execute("UPDATE raw.ways SET tags = map_concat(tags, MAP(?::VARCHAR[], ?::VARCHAR[])) WHERE osm_id = ?",
+                                 [list(arrows), list(arrows.values()), int(osm_id)])
+                sets = sets + [f"{k} = {v!r}" for k, v in arrows.items()]
             applied += 1
             note = f"  ({r['note']})" if r.get("note") else ""
             logger.info(f"  override osm_id={int(osm_id)}: {', '.join(sets)}{note}")

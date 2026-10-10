@@ -95,3 +95,14 @@ def test_a_named_fixes_file_must_exist(tmp_path):
                            osm_overrides=str(tmp_path / "missing.yaml"))
     with pytest.raises(FileNotFoundError, match="OSM fixes file not found"):
         cfg.validate()
+
+
+def test_turn_lanes_override_sets_the_raw_tag(tmp_path):
+    """The painted arrows: turn_lanes_forward becomes the way's turn:lanes:forward tag in raw.ways (every lane reader's source)."""
+    con = _ways()
+    con.execute("CREATE SCHEMA raw; CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+    con.execute("INSERT INTO raw.ways VALUES (999, MAP {'turn:lanes:forward': 'through|right', 'lanes': '3'}, [1, 2])")
+    path = _rules(tmp_path, "overrides:\n  - osm_id: 999\n    turn_lanes_forward: \"through;left|right\"\n")
+    assert OsmOverrides(con, path).run() == 1
+    tags = con.execute("SELECT tags FROM raw.ways WHERE osm_id = 999").fetchone()[0]
+    assert tags["turn:lanes:forward"] == "through;left|right" and tags["lanes"] == "3"
