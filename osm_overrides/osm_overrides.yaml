@@ -194,6 +194,9 @@ overrides:
   - osm_id: 423632264        # Boulevard Charles III, east-bound before the car park ramp and Tunnel de Serravalle
     turn_lanes_forward: "left|through;right"
     note: "2026-10-10 checked on the lane map and Street View: the left lane only turns left into the car park's entry ramp (way 172533153; its left+straight arrow is painted before, where the road forks into two lanes), the right lane goes straight on or right into Tunnel de Serravalle; OSM through|right"
+  - osm_id: 4227277          # Rue de la Colle, south-bound from Rue du Rocher: no arrows painted
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10 Street View: an ordinary two-lane road, no arrows before Rue du Rocher or after; OSM turn:lanes left|through"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
