@@ -3,7 +3,8 @@
 ``driving.lane_profile``: one row per lane of each edge of ``driving.edges`` and of each bus-only edge of
 ``driving.private_edges`` (``access = 'bus'``), left to right as GMNS numbers them: a lane left of the left-most through lane
 -1, the motor lanes 1..n, a lane right of them n+1. ``use`` (``auto`` / ``bus`` / ``bike`` / ``bus,bike``), ``width_m``,
-``turn`` (its ``turn:lanes`` entry), ``source`` (the tag or rule that put the lane there with its use) and ``width_source``.
+``turn`` (its ``turn:lanes`` entry, only on the edge where its way ends in its direction: OSM's arrows describe the lanes there,
+not at a side street part way along), ``source`` (the tag or rule that put the lane there with its use) and ``width_source``.
 
 The motor lane count is the edge's ``lanes`` (RoadFilter's reading of ``lanes`` / ``lanes:forward`` / ``lanes:backward``, the
 contraflow bus lane taken off, ``osm_overrides`` applied), or ``turn:lanes``' count when it has more entries, or, for an
@@ -40,12 +41,13 @@ def _pick(tags, base, reverse):
     return tags.get(base + ":backward") if reverse else (tags.get(base + ":forward") or tags.get(base))
 
 
-def lanes_of(tags, *, reverse=False, oneway=False, highway=None, n_motor=1, n_source="default", bus_only=False, shared_bike=False):
+def lanes_of(tags, *, reverse=False, oneway=False, highway=None, n_motor=1, n_source="default", bus_only=False, shared_bike=False, way_end=True):
     """The lanes of one directed edge, left to right: ``[{lane_num, use, width_m, turn, source, width_source}]``.
 
     ``tags``: its OSM way's tags; ``reverse``: the edge runs against the way's drawing; ``oneway``: the driving network's one-way;
     ``n_motor`` / ``n_source``: its motor lane count and where that came from; ``bus_only``: a bus-only edge (a contraflow bus
-    lane, a bus-only road: one lane), ``shared_bike``: bikes share it."""
+    lane, a bus-only road: one lane), ``shared_bike``: bikes share it; ``way_end``: the edge ends where its way ends (in its direction),
+    the only edge whose lanes carry the arrows (the lane count from ``turn:lanes`` holds on every edge of the way)."""
     tags = tags or {}
     cls = (highway or "").split(";")[0].removesuffix("_link")
     if bus_only:
@@ -65,7 +67,7 @@ def lanes_of(tags, *, reverse=False, oneway=False, highway=None, n_motor=1, n_so
             use, why = "bus", "psv:lanes" if i < len(psvs) and psvs[i] in YES else "bus:lanes"
         w = _num(widths[i]) if i < len(widths) else None
         out.append({"lane_num": i + 1, "use": use, "width_m": w or LANE_W_BY_CLASS.get(cls, LANE_W),
-                    "turn": turns[i] if i < len(turns) and turns[i] not in ("", "none") else None,
+                    "turn": turns[i] if way_end and i < len(turns) and turns[i] not in ("", "none") else None,
                     "source": why, "width_source": "width:lanes" if w else "default"})
     # bus lanes counted (lanes:bus) or by side (busway:<side>=lane) when no per-lane tag says which: the right-most motor lanes
     if not any(x["use"] == "bus" for x in out):
@@ -116,7 +118,8 @@ class LaneProfile(BaseProcessor):
         cols = {c for (c,) in self.fetchall("SELECT column_name FROM duckdb_columns() WHERE schema_name = 'driving' AND table_name = 'edges'")}
         rev = "e.is_reverse" if "is_reverse" in cols else "false"
         one = "e.oneway" if "oneway" in cols else "false"
-        rows = self.fetchall(f"""SELECT e.edge_id, e.osm_id, {rev}, {one}, e.highway, e.lanes, e.source, e.target, w.tags
+        rows = self.fetchall(f"""SELECT e.edge_id, e.osm_id, {rev}, {one}, e.highway, e.lanes, e.source, e.target, w.tags,
+                                        w.refs[1], w.refs[-1]
                                  FROM driving.edges e LEFT JOIN raw.ways w ON w.osm_id = abs(e.osm_id)""")
         lane_tags = ("lanes", "lanes:forward", "lanes:backward", "turn:lanes", "width:lanes")
         info = [dict(edge_id=r[0], source=r[6], target=r[7], cls=(r[4] or "").split(";")[0].removesuffix("_link"), lanes=r[5],
@@ -124,7 +127,7 @@ class LaneProfile(BaseProcessor):
                 for r in rows]
         inherited = _inherit_lanes(info)
         out = []
-        for (eid, osm, reverse, oneway, hw, lanes, _s, _t, tags), e in zip(rows, info, strict=True):
+        for (eid, osm, reverse, oneway, hw, lanes, _s, target, tags, first, last), e in zip(rows, info, strict=True):
             tags = tags or {}
             if abs(osm or 0) in self.overrides:
                 src = "override"
@@ -136,7 +139,8 @@ class LaneProfile(BaseProcessor):
                 src = "lanes"
             else:
                 src = "default"
-            for x in lanes_of(tags, reverse=bool(reverse), oneway=bool(oneway), highway=hw, n_motor=inherited.get(eid, lanes), n_source=src):
+            for x in lanes_of(tags, reverse=bool(reverse), oneway=bool(oneway), highway=hw, n_motor=inherited.get(eid, lanes), n_source=src,
+                              way_end=target == (first if reverse else last)):
                 out.append((eid, x["lane_num"], x["use"], x["width_m"], x["turn"], x["source"], x["width_source"]))
         if "private_edges" in {t for (t,) in self.fetchall("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'driving'")}:
             cycling = {e for (e,) in self.fetchall("SELECT edge_id FROM cycling.edges")} if self.fetchone(

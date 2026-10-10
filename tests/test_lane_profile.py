@@ -45,3 +45,11 @@ def test_widths_say_where_they_come_from():
                    oneway=True, n_motor=2, n_source="lanes")
     assert [(x["width_m"], x["width_source"]) for x in got] == [(3.5, "width:lanes"), (3.0, "default"), (1.8, "cycleway:right:width")]
     assert lanes_of({}, highway="service")[0]["width_m"] == 2.5 and lanes_of({}, highway="service")[0]["width_source"] == "default"
+
+
+def test_arrows_only_where_the_way_ends():
+    tags = {"lanes": "2", "turn:lanes": "left|right"}
+    assert [x["turn"] for x in lanes_of(tags, n_motor=2)] == ["left", "right"]
+    mid = lanes_of(tags, n_motor=2, way_end=False)                 # a side street part way along: same lanes, no arrows
+    assert [(x["lane_num"], x["turn"]) for x in mid] == [(1, None), (2, None)]
+    assert len(lanes_of({"lanes": "1", "turn:lanes": "left|right"}, n_motor=1, way_end=False)) == 2
