@@ -38,8 +38,17 @@ def test_link_carries_levels(tmp_path):
 
 
 def test_write_map(tmp_path):
-    pytest.importorskip("lanestyle")
+    """The lane page of the GMNS file on the roads of the source db's level area (lanestyle.lane_page); no area: an error saying how to make one."""
+    ls = pytest.importorskip("lanestyle")
+    if not hasattr(ls, "lane_page"):
+        pytest.skip("lanestyle before 0.3 has no lane_page")
+    pytest.importorskip("scipy")
     from duckosm.gmns_map import write_map
-    out = write_map(_gmns_db(tmp_path), tmp_path / "lanes.html")
-    html = out.read_text()
-    assert "maplibre" in html.lower() and str(A) in html
+    from duckosm.levels import make_and_solve
+    gmns = _gmns_db(tmp_path)
+    src = tmp_path / "src.duckdb"
+    with pytest.raises(FileNotFoundError, match="duckosm levels"):
+        write_map(gmns, tmp_path / "lanes.html", src)
+    make_and_solve(src)
+    html = write_map(gmns, tmp_path / "lanes.html", src).read_text()
+    assert "maplibre" in html.lower() and "roads-simple" in html

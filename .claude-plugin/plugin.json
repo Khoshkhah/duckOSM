@@ -1,6 +1,6 @@
 {
   "name": "duckosm",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Routable road networks from OpenStreetMap in one DuckDB file: a skill for building, querying, routing and exporting duckOSM networks.",
   "author": {
     "name": "Kaveh",

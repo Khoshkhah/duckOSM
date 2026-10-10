@@ -22,7 +22,7 @@ from duckosm.lanelet2 import to_lanelet2
 from duckosm.lane_routing import build_lane_graph, route_lanes
 from duckosm.elevation import to_elevation
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["DuckOSM", "Config", "edge_id_hash", "edge_id_expr", "edge_id_hash_v1",
            "edge_id_expr_v1", "create_edge_id_macro",
            "to_networkx", "to_networkx_nodes", "write_graph", "route", "Router",
