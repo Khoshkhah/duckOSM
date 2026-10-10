@@ -205,10 +205,3 @@ turn_restrictions:
     to_way: 997402723
     restriction: no_u_turn
     note: "OSM lacks the restriction; the -166° turn from one-way link onto opposing/westbound Tähe is forbidden"
-
-  # --- Monaco ---
-  - from_way: 423632264      # Boulevard Charles III (east-bound) -> the service ramp 172533153: no entry
-    via_node: 1079045383
-    to_way: 172533153
-    restriction: no_left_turn
-    note: "2026-10-10 Street View: a no-entry sign facing this direction at the ramp's mouth; the lanes' arrows (through|right) name no left turn"
