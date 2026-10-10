@@ -862,6 +862,38 @@ def test_lanes_from_sumo(tmp_path):
     assert con.execute("SELECT bool_and(ST_Length(geom_cut) < ST_Length(geom)) FROM gmns_driving.lane WHERE link_id IN (12, 13)").fetchone()[0]
 
 
+
+def _fork_check(tmp_path, arrows):
+    """The 2-lane fork of test_lanes_from_sumo (12 straight on, 13 to the left), road 11 tagged ``turn:lanes`` ``arrows``: the lanes into
+    each branch {branch: {lane}}, the arrow check's rows."""
+    d = tmp_path / str(abs(hash(arrows)))
+    d.mkdir()
+    src, out = d / "f.duckdb", d / "f_gmns.duckdb"
+    nodes = {1: (18.06, 59.32), 2: (18.07, 59.32), 4: (18.08, 59.32), 5: (18.08, 59.3215)}
+    _mini_source(src, nodes, [(11, 1, 2, 2), (12, 2, 4, 2), (13, 2, 5, 1)], [(11, 12), (11, 13)])
+    duckdb.connect(str(src)).execute(f"UPDATE raw.ways SET tags = MAP {{'turn:lanes': '{arrows}'}} WHERE osm_id = 11")
+    to_gmns(str(src), str(out))
+    con = duckdb.connect(str(out))
+    into = {12: set(), 13: set()}
+    for ob, a, b in con.execute("SELECT ob_link_id, start_ib_lane, end_ib_lane FROM gmns_driving.movement WHERE ib_link_id = 11").fetchall():
+        into[ob].update(range(a, b + 1))
+    return into, con.execute("SELECT kind, id FROM gmns_driving.lane_check WHERE kind LIKE '%arrow%'").fetchall()
+
+
+def test_arrows_are_read_by_order_as_sumo_reads_them(tmp_path):
+    """A link's arrows name its exits left to right (13 the left one, 12 the right one, whatever their angles): with 'through|left' the
+    left lane belongs to 12 and the right lane to 13, so each lane SUMO sends elsewhere is listed; arrows naming more directions than
+    the link has exits are listed as not matched, never fitted."""
+    from duckosm.sumo import _find_netconvert
+    try:
+        _find_netconvert(None)
+    except Exception:
+        pytest.skip("netconvert is needed")
+    into, check = _fork_check(tmp_path, "through|left")
+    wrong = {f"11_{n}" for n in into[13] if n == 1} | {f"11_{n}" for n in into[12] if n == 2}
+    assert wrong and sorted(check) == sorted(("against its arrow", w) for w in wrong)
+    assert _fork_check(tmp_path, "left|through;right")[1] == [("arrows not matched", "11")]
+
 def test_sumo_lane_pairs_become_runs_side_by_side():
     """gmns_sumo._runs: lane pairs that go on side by side are one movement row; a lane feeding two lanes ahead is two rows."""
     from duckosm.gmns_sumo import _runs

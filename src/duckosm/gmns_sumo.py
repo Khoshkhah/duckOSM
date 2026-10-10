@@ -65,9 +65,9 @@ def _path(via, lanes, nxt):
     return pts
 
 
-# a turn:lanes part -> the movement types it allows (a slight turn is typed thru by its angle under 30 degrees, so slight_* allows thru too)
-_ARROW = {"through": {"thru"}, "left": {"left"}, "sharp_left": {"left"}, "slight_left": {"left", "thru"}, "right": {"right"}, "sharp_right": {"right"},
-          "slight_right": {"right", "thru"}, "reverse": {"uturn"}, "merge_to_left": {"thru"}, "merge_to_right": {"thru"}, "none": {"thru"}, "": {"thru"}}
+# a turn:lanes part -> its place left to right among a link's directions (a U-turn: leftmost in right-hand traffic, rightmost in left-hand)
+_RANK = {"sharp_left": 1, "left": 2, "slight_left": 3, "through": 4, "merge_to_left": 4, "merge_to_right": 4, "slight_right": 5, "right": 6,
+         "sharp_right": 7}
 
 
 def _runs(pairs):
@@ -178,16 +178,53 @@ def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconv
             outs[r["ib_link_id"]].update(range(r["start_ib_lane"], r["end_ib_lane"] + 1))
             ins[r["ob_link_id"]].update(range(r["start_ob_lane"], r["end_ob_lane"] + 1))
     has_out, has_in = {r["ib_link_id"] for r in rows}, {r["ob_link_id"] for r in rows}
-    # a lane's turn against its painted arrow (turn:lanes): SUMO does not read the arrows (its edge format has none), so each one is listed
-    turn_of = dict(((lk, n), t) for lk, n, t in con.execute(f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE turn IS NOT NULL").fetchall())
+    # a lane's turn against its painted arrow (turn:lanes), read as SUMO's OSM import reads them: by order, not by angle. A link's arrows
+    # name its directions left to right (a lane without one, on a link with arrows, counts as through there, but is not checked); its exits (a U-turn only when an arrow
+    # says reverse) sorted left to right by their angle; the i-th direction is the i-th exit (at a fork a 'left' lane goes to the left
+    # branch, even when that branch runs straight on). Arrows that name more or fewer directions than the link has exits are listed as
+    # such (an OSM question: a turn the arrows leave out, or arrows meant for a junction further on); SUMO does not read the arrows
+    from duckosm.gmns import _window_angle
+    rank = {**_RANK, "reverse": 0 if drive_side == "right" else 8}
+    marked = defaultdict(dict)
+    for lk, n, t in con.execute(f"SELECT link_id, lane_num, turn FROM {sch}.lane WHERE allowed_uses <> 'bike'").fetchall():
+        marked[lk][n] = t
+    marked = {lk: ls for lk, ls in marked.items() if any(ls.values())}
+    exits = defaultdict(set)
     for r in rows:
-        if r["start_ib_lane"] is None or r["allowed_uses"] == "bike":
+        if r["ib_link_id"] in marked and r["start_ib_lane"] is not None and r["allowed_uses"] != "bike":
+            exits[r["ib_link_id"]].add((r["ob_link_id"], r["type"]))
+    geom = dict(con.execute(f"SELECT link_id, geometry FROM {sch}.link").fetchall()) if marked else {}
+    to_dir = {}                                        # (link, exit) -> the arrow's rank that names it
+    arrow_of = {(lk, n): t for lk, ls in marked.items() for n, t in ls.items()}
+    name_of = {v: k for k, v in reversed(rank.items())}  # a rank -> its first name (4: through)
+    for lk, ls in marked.items():
+        parts = {n: [p.strip() for p in (t or "through").split(";")] for n, t in ls.items()}
+        unknown = sorted({p for ps in parts.values() for p in ps if p not in rank})
+        dirs = sorted({rank[p] for ps in parts.values() for p in ps if p in rank})
+        ex = [(ob, typ) for ob, typ in exits.get(lk, ()) if typ != "uturn" or rank["reverse"] in dirs]
+        angle = {ob: _window_angle(geom[lk], geom[ob]) for ob, typ in ex if typ != "uturn"}
+        tags = "|".join(t or "" for _, t in sorted(ls.items()))
+        if unknown:
+            check.append(("arrows not matched", str(lk), f"arrows {tags!r}: unknown {', '.join(map(repr, unknown))}"))
+        elif None in angle.values():
+            check.append(("arrows not matched", str(lk), f"arrows {tags!r}: an exit shorter than half a metre has no angle"))
+        elif not ex:                                   # no exit, no turn to check (a dead end: 'no way out' lists it)
             continue
-        t = r["type"] if r["type"] != "diverge" else {"L": "left", "R": "right"}.get((r["mvmt_code"] or "T")[-1:], "thru")
+        elif len(dirs) != len(ex):
+            check.append(("arrows not matched", str(lk), f"arrows {tags!r} name {len(dirs)} directions, the link has {len(ex)} exits"))
+        else:
+            u = float("inf") if drive_side == "right" else float("-inf")
+            order = sorted(ex, key=lambda o: -(u if o[1] == "uturn" else angle[o[0]]))
+            to_dir.update({(lk, ob): d for (ob, _), d in zip(order, dirs, strict=True)})
+            marked[lk] = {n: {rank[p] for p in ps} for n, ps in parts.items()}
+    for r in rows:
+        d = to_dir.get((r["ib_link_id"], r["ob_link_id"]))
+        if d is None or r["start_ib_lane"] is None or r["allowed_uses"] == "bike":
+            continue
         for n in range(r["start_ib_lane"], r["end_ib_lane"] + 1):
-            arrow = turn_of.get((r["ib_link_id"], n))
-            if arrow and t not in set().union(*(_ARROW.get(p.strip(), set()) for p in arrow.split(";"))):
-                check.append(("against its arrow", lid_of[(r["ib_link_id"], n)], f"{r['mvmt_id']}: a {t} turn from a lane marked {arrow!r}"))
+            if arrow_of.get((r["ib_link_id"], n)) and d not in marked[r["ib_link_id"]][n]:
+                check.append(("against its arrow", lid_of[(r["ib_link_id"], n)],
+                              f"{r['mvmt_id']}: lane {n} marked {arrow_of[(r['ib_link_id'], n)] or 'none'!r} goes to the exit of {name_of[d]!r}"))
     for (lk, n), use in sorted(use_of.items()):
         if (mode == "driving" and use == "bike") or lk in bad:
             continue
@@ -225,6 +262,6 @@ def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconv
 
 def _summary(mv, out, connectors, missing, bad, check, sch):
     summary = {"movements": len(mv), "rows": len(out), "connectors": len(connectors), "no_connection": missing, "lane_count_mismatch": len(bad),
-               **{k: sum(1 for c in check if c[0] == k) for k in ("no way out", "no way in", "against its arrow")}}
+               **{k: sum(1 for c in check if c[0] == k) for k in ("no way out", "no way in", "against its arrow", "arrows not matched")}}
     logger.info(f"GMNS[{sch.removeprefix('gmns_')}] lanes from SUMO: {summary}; anything not mapped is in {sch}.lane_check")
     return summary

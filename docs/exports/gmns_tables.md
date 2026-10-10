@@ -299,7 +299,7 @@ in by a guess. Empty when everything maps.
 
 | Column | Type | Holds |
 |---|---|---|
-| `kind` | VARCHAR | `no way out` (no movement leaves the lane: it ends before a narrowing), `no way in`, `no lane connection` (netconvert built none for a legal turn), `lane count` (SUMO built a link with other lanes than duckOSM's), `against its arrow` (a turn from a lane whose `turn:lanes` arrow says otherwise: netconvert does not read the arrows) |
+| `kind` | VARCHAR | `no way out` (no movement leaves the lane: it ends before a narrowing), `no way in`, `no lane connection` (netconvert built none for a legal turn), `lane count` (SUMO built a link with other lanes than duckOSM's), `against its arrow` (a lane that goes to an exit its `turn:lanes` arrow does not name: netconvert does not read the arrows; a link's arrows name its exits left to right, by order as SUMO's OSM import reads them, not by angle), `arrows not matched` (a link whose arrows name more or fewer directions than it has exits: a turn the arrows leave out, or arrows meant for a junction further on) |
 | `id` | VARCHAR | the `lane_id`, `mvmt_id` or `link_id` |
 | `detail` | VARCHAR | what was found |
 
