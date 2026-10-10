@@ -197,6 +197,9 @@ overrides:
   - osm_id: 4227277          # Rue de la Colle, south-bound from Rue du Rocher: no arrows painted
     turn_lanes_forward: "none|none"
     note: "2026-10-10 Street View: an ordinary two-lane road, no arrows before Rue du Rocher or after; OSM turn:lanes left|through"
+  - osm_id: 176086162        # Avenue Prince Pierre, west-bound before the fork with Rue de la Colle: its arrows are the fork's
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10: OSM left|through describes the fork ~40 m on, at the end of way 503813539, which carries the same arrows (left lane into Rue de la Colle, right lane straight on, confirmed); this way's own end has one way out"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
