@@ -11,6 +11,7 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | [`mm`](#mm-schema) | routing across modes | `multimodal`, or `multimodal.enabled` |
 | [`features`](#features-schema) | base-map layers | `options.build_features` |
 | [`visualization`](#visualization-schema) | the drawing order of the roads | `levels` |
+| [`bus`](#bus-schema) | the bus routes on the driving edges | `options.bus_routes`, or `bus` |
 
 ## `<mode>` schema {#mode-schema}
 
@@ -24,6 +25,7 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | [`ways`](#ways), [`way_nodes`](#way_nodes) | a build from a PBF, and `duckosm extract` |
 | [`edge_id_map`](#edge_id_map) | a build from a PBF with `options.merge_segments` (on) |
 | [`virtual_nodes`](#virtual_nodes) | a build from a PBF; always empty |
+| [`lane_profile`](#lane_profile) | driving, a build from a PBF |
 
 A build cut from a parent database (`source.type: duckdb`) has only `edges`, `private_edges`,
 `nodes`, `edge_graph` and `turn_restrictions`, and each of the last three only if the parent has it.
@@ -75,7 +77,8 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 The roads the mode may not use, built like `edges` and then moved out of it: private roads
 (`access` is `private`) and, in driving, bus-only roads and bus lanes (`access` is `bus`; [bus
 lanes](../concepts/networks.md#access-private-and-forbidden-roads)). They
-are never routable: not in `edge_graph`, `turn_restrictions` or any export, and `nodes` holds only
+are never routable: not in `turn_restrictions` or any export, nor in the routed rows of `edge_graph`
+(the bus-only edges have rows of their own there, `uses = 'bus'`, which only the GMNS export reads), and `nodes` holds only
 the ends of routable edges. The maps draw them, marked. [Access: private and forbidden roads](../concepts/networks.md#access-private-and-forbidden-roads).
 
 Columns: those of `edges` from `edge_id` to `cycle_type`. The H3 columns and the elevation columns
@@ -109,6 +112,11 @@ the other. Edge-based routing runs on it.
 | `to_edge` | BIGINT | the edge you go on to; its `source` is `from_edge`'s `target` |
 | `via_edge` | BIGINT | the same as `to_edge` |
 | `cost` | FLOAT | `cost_s` of `from_edge` |
+| `uses` | VARCHAR | who may make the turn: the mode's own (`car` in driving, `walk`, `bike`) between two of its `edges`; `bus` in driving where one of the two is a bus-only edge of `private_edges` (`access = 'bus'`) |
+
+Routing (`route()`, `to_networkx`, point routing, the route map, the SUMO connections) reads only the
+mode's own rows; the `bus` rows are for the GMNS export's bus turns ([bus lanes](../design/bus_only_edges.md)).
+A database built before `uses` holds only the mode's own rows.
 
 A U-turn onto the reverse twin is included. Turns forbidden by `turn_restrictions` are removed: for a
 `no_*` restriction that one turn, for an `only_*` restriction every other turn out of `from_edge`.
@@ -166,6 +174,24 @@ For each merged edge, the edges it was made from. It may be empty (driving in Mo
 | `seq` | INTEGER |
 | `is_reverse` | BOOLEAN |
 | `osm_id` | BIGINT |
+
+### `lane_profile` {#lane_profile}
+
+Every driving edge's lanes, and every bus-only edge's (`private_edges` with `access = 'bus'`), decided once
+([design](../design/gmns_lane_profile.md)): one row per lane, left to right.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `edge_id` | BIGINT | the edge |
+| `lane_num` | INTEGER | 1 = the left-most through lane, 1..n the motor lanes; -1 a bike lane left of them (on a one-way, `cycleway:left=lane`); n+1 a bike lane right of them |
+| `use` | VARCHAR | `auto`, `bus`, `bike`, `bus,bike` |
+| `width_m` | DOUBLE | the lane's width |
+| `turn` | VARCHAR | its `turn:lanes` entry, or NULL |
+| `source` | VARCHAR | what put the lane there with its use: `lanes`, `lanes:forward`, `lanes:backward`, `turn:lanes`, `override` (osm_overrides.yaml), `inherited` (the road it continues), `default` (no tag), `bus:lanes`, `psv:lanes`, `lanes:bus`, `busway:*`, `cycleway:*`, `access=bus` |
+| `width_source` | VARCHAR | `width:lanes`, `cycleway:*:width`, or `default` |
+
+Bike lanes are not counted in `lanes` (OSM, and SUMO's own OSM import). A count or width no tag gives is `default`: count them
+(`WHERE source = 'default'`) to see how much of the network is guessed.
 
 ### `virtual_nodes`
 
@@ -353,3 +379,33 @@ One row: where the numbers came from.
 | `n_edges`, `edge_hash` | the number of edges and a hash of their ids: the numbers belong to these edges only |
 | `roadstyle_version`, `created` | the roadstyle version and when |
 
+## `bus` schema
+
+The OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) as the driving edges they travel, in order and in their direction. No geometry: the
+edges are in `driving.edges` and, for bus lanes and bus-only roads, `driving.private_edges`. Written by a build from a PBF with driving (`options.bus_routes`, on)
+or by [`duckosm bus`](cli.md#bus). How: [Bus routes](../concepts/networks.md#bus-routes).
+
+### `routes`
+
+One row per route relation.
+
+| Column | Type | Description |
+|---|---|---|
+| `osm_id` | BIGINT | the relation |
+| `route` | VARCHAR | `bus`, `trolleybus` or `share_taxi` |
+| `ref`, `name`, `operator`, `from`, `to`, `network` | VARCHAR | the relation's tags |
+| `edges` | INTEGER | rows in `route_edges` |
+| `outside` | INTEGER | member ways not in the file (outside the area) |
+| `gaps` | VARCHAR[] | `'<way_id> <kind>'` for every other way the route could not be followed on; empty: matched fully |
+
+### `route_edges`
+
+One row per route and edge it travels.
+
+| Column | Type | Description |
+|---|---|---|
+| `route_id` | BIGINT | the relation (`routes.osm_id`) |
+| `ref` | VARCHAR | the route's `ref` (its line) |
+| `seq` | INTEGER | 1, 2, … along the route |
+| `edge_id`, `edge_ref` | BIGINT, VARCHAR | the driving edge |
+| `bus_lane` | BOOLEAN | the edge is in `driving.private_edges` (`access = 'bus'`) |

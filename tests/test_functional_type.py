@@ -28,3 +28,14 @@ def test_road_kept_for_its_sidewalk_is_a_sidewalk():
         {"highway": "footway", "footway": "crossing"},
         {"highway": "path", "sidewalk": "yes"},
     ]) == ["sidewalk", "sidewalk", "shared_road", "shared_road", "crossing", "path"]
+
+
+def test_road_without_sidewalk_tag_is_a_shared_road():
+    """A main road walkable by its class alone is walked on the carriageway, not a footpath."""
+    assert _walk_types([
+        {"highway": "tertiary", "oneway": "yes"},
+        {"highway": "primary_link"},
+        {"highway": "trunk", "sidewalk": "no"},
+        {"highway": "road"},
+        {"highway": "footway"},
+    ]) == ["shared_road", "shared_road", "shared_road", "shared_road", "footpath"]

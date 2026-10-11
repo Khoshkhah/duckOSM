@@ -24,7 +24,7 @@ One schema per mode, `gmns_driving`, `gmns_walking`, `gmns_cycling`. Monaco, dri
 | Table | Rows | What |
 |---|---|---|
 | `node` | 1,719 | junctions; `ctrl_type = 'signal'` at traffic lights |
-| `link` | 2,765 | directed roads: **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name, and (DuckDB only) `bridge` / `tunnel` / `layer` |
+| `link` | 2,765 | directed roads (in driving also the 18 bus-only directions, one `bus` lane each: [link](gmns_tables.md#link)): **`link_id` = `edge_id`**, length, speed, lanes, capacity (a per-lane default by road class), `facility_type` (the OSM `highway`), name, and (DuckDB only) `bridge` / `tunnel` / `layer` |
 | `lane` | 3,182 | one row per lane, with its turns, allowed uses and width where OSM tags them |
 | `movement` | 3,500 | legal turns (from `edge_graph`; turning back along the same road only at a dead end, or where it's the only way into the road's other direction): type (left, thru, right, uturn, merge, diverge), code (`NBL`, `EBT`, …), the lanes it starts from and ends in (equal-length ranges read in order: from `turn:lanes` where tagged, else osm2gmns's rule, [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_movements.md)), a curved turn path |
 | `crossing`, `lane_crossing` | duckOSM extension | the pedestrian crossings painted on the driving lanes, and which stretch of each lane they cover (in `gmns_driving` only): from the OSM crossing ways and the crossing nodes that have no way ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_crossings.md)) |

@@ -10,6 +10,16 @@ duckOSM writes the network in SUMO's plain-XML format and runs SUMO's own `netco
 each junction allows only the turns in `edge_graph`, so turn restrictions are kept. netconvert
 leaves out a few U-turns it can't build (Monaco: 37 of 1,628); it never adds a turn.
 
+In a driving network each edge's lanes come from `driving.lane_profile` ([design](../design/gmns_lane_profile.md)): one SUMO
+lane per lane, with its vehicle classes (a bus lane `bus`, a bike lane `bicycle`, a shared one `bus bicycle`, a car lane every
+road vehicle) and its width, numbered from the right as SUMO does. `duckosm.sumo_compare.lane_diff(db, osm_file, work_dir)`
+builds the same area with SUMO's own OSM import too and lists, per OSM way and direction, every lane difference with its cause
+(an override, the contraflow bus lane, a default where no `lanes` tag is ...).
+
+Painted turn arrows (`turn:lanes`) are not in this network: SUMO's plain XML has no field for them. The GMNS export applies them
+([GMNS tables](gmns_tables.md), `lane_check`): where a link's arrows fit its exits, read left to right by order, netconvert's OSM
+import connects that link's lanes by them, and those lane connections go into the plain XML.
+
 A walking network is for pedestrians only (`allow="pedestrian"`, with SUMO walking areas at the
 junctions), a cycling network for bicycles only. A driving network allows every vehicle class. A
 walking or cycling edge is one path lane, 2 m or 1.5 m wide (not the road's lane count at 3.2 m).

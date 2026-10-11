@@ -39,7 +39,7 @@ def _db():
                     f"ST_GeomFromText('LINESTRING({x1} {y1}, {x2} {y2})'))")
         con.executemany("INSERT INTO way_nodes VALUES (?, ?, ?)", [(way, a, 0), (way, b, 1)])
     RestrictionProcessor(con).run()
-    EdgeGraphBuilder(con).run()
+    EdgeGraphBuilder(con, "driving").run()
     return con
 
 
@@ -101,7 +101,7 @@ def _split_junction():
         if eid < 20:
             con.executemany("INSERT INTO way_nodes VALUES (?, ?, ?)", [(way, a, 0), (way, b, 1)])
     RestrictionProcessor(con).run()
-    EdgeGraphBuilder(con).run()
+    EdgeGraphBuilder(con, "driving").run()
     return con
 
 

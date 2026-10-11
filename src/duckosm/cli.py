@@ -361,6 +361,30 @@ def levels(db, area):
 
 @main.command()
 @click.argument('db', type=DB_PATH)
+def bus(db):
+    """Match the bus routes of the db's OSM relations to its driving edges (schema bus).
+
+    Writes bus.routes (one row per route relation, with its gaps) and bus.route_edges (the driving edges
+    each route travels, in order and in its direction; bus lanes included). The build does it too
+    (options.bus_routes); this command adds it to a file built before. Needs raw.* and the driving network.
+    """
+    import duckdb
+
+    from duckosm.bus import write_bus_routes
+
+    con = duckdb.connect(db)
+    try:
+        r = write_bus_routes(con)
+    except duckdb.CatalogException as e:
+        raise click.ClickException(f"needs raw.relations, raw.ways and the driving network: {e}")
+    finally:
+        con.close()
+    gaps = int((r["gaps"].str.len() > 0).sum())
+    click.echo(f"{len(r)} bus routes, {int(r['edges'].sum()):,} route edges, {gaps} with gaps; wrote bus.routes and bus.route_edges")
+
+
+@main.command()
+@click.argument('db', type=DB_PATH)
 @click.option('--json', 'as_json', is_flag=True, help='Print one JSON object instead of a table')
 def info(db, as_json):
     """What a built database holds: per mode its edges, nodes, private edges, km, legal turns and
@@ -394,7 +418,7 @@ def info(db, as_json):
         (f"features ({len(d['features'])} layers)", d["features"]),
         ("mm (across modes)", d["multimodal"]), ("boundary", d["boundary"]),
         (f"admin_boundaries ({d['admin_boundaries']})", d["admin_boundaries"]),
-        ("elevation", d["elevation"]), ("visualization (drawing order)", d["visualization"])) if on]
+        ("elevation", d["elevation"]), ("visualization (drawing order)", d["visualization"]), ("bus (bus routes)", d["bus"])) if on]
     click.echo("also: " + (", ".join(also) if also else "nothing else"))
 
 
@@ -1048,22 +1072,21 @@ def matsim_lanes(gmns_db, mode, signals, cycle, out_dir):
 
 @main.command(name="gmns-map")
 @click.argument('gmns_db', type=click.Path(exists=True))
-@click.option('--mode', '-m', default='driving', show_default=True, help='Mode schema to map')
-@click.option('--palette', default='mono', show_default=True, help="roadstyle palette: 'mono', 'carto' or 'highsat'")
-@click.option('--source-db', type=click.Path(exists=True), default=None,
-              help='Core db for bridge / tunnel / layer, for a GMNS file written before links carried them')
+@click.option('--source-db', type=click.Path(exists=True), required=True, help='The core db the GMNS file was made from')
+@click.option('--area', type=click.Path(exists=True, file_okay=False), default=None,
+              help='The level area (default: SOURCE_DB.levels, made by `duckosm levels SOURCE_DB`)')
 @click.option('--out', '-o', default=None, help='Output HTML (default: <name>_lanes.html)')
-def gmns_map(gmns_db, mode, palette, source_db, out):
-    """Write a lane-level HTML map of a GMNS DuckDB with lanestyle: every lane at its real width over
-    a base map, bridges over tunnels; click a lane to see the lanes it can turn into.
-    Needs `pip install "duckosm[viz]"`.
+def gmns_map(gmns_db, source_db, area, out):
+    """Write a lane-level HTML map of a GMNS DuckDB with lanestyle: the roads of the level area as roadstyle draws them,
+    each as wide as its lanes, with the lanes, lane lines, arrows, zebras and sidewalks on them.
+    Needs `pip install "duckosm[viz]"` and `duckosm levels SOURCE_DB` first.
     """
     from duckosm.gmns_map import write_map
 
     if out is None:
         out = f"{Path(gmns_db).stem}_lanes.html"
     try:
-        path = write_map(gmns_db, out, mode=mode, palette=palette, source_db=source_db)
+        path = write_map(gmns_db, out, source_db, area=area)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {path} — open in a browser")

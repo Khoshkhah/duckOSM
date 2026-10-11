@@ -285,7 +285,7 @@ def test_edge_graph_enforces_no_and_only_restrictions():
     con.execute("INSERT INTO turn_restrictions VALUES "
                 "(1,'only_straight_on',10,1,2), "   # from 1 you MUST go to 2  -> drop 1->3, 1->4
                 "(2,'no_right_turn',10,5,3)")        # from 5 you may NOT go to 3 -> drop only 5->3
-    EdgeGraphBuilder(con).run()
+    EdgeGraphBuilder(con, "driving").run()
     only_succ = sorted(r[0] for r in con.execute("SELECT to_edge FROM edge_graph WHERE from_edge=1").fetchall())
     no_succ = sorted(r[0] for r in con.execute("SELECT to_edge FROM edge_graph WHERE from_edge=5").fetchall())
     assert only_succ == [2]          # only_* keeps just the mandated turn

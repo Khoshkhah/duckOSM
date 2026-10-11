@@ -19,7 +19,7 @@ from pathlib import Path
 logger = logging.getLogger("duckosm")
 
 _Q = 8192
-_USE = {"auto": 0, "bus": 1, "bike": 2}
+_USE = {"auto": 0, "bus": 1, "bus,bike": 1, "bike": 2}
 
 
 def _table(con, schema, table):

@@ -19,6 +19,8 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     cfg = Config.from_yaml(str(ROOT / "config" / "sample_monaco.yaml"))
     cfg.source.pbf_path = str(ROOT / cfg.source.pbf_path)       # the sample is relative to the repo root
     cfg.boundary.path = str(ROOT / cfg.boundary.path)
+    if cfg.osm_overrides:
+        cfg.osm_overrides = str(ROOT / cfg.osm_overrides)     # the sample's fixes file is relative to the repo too
     cfg.output_path = str(tmp_path)
     monkeypatch.chdir(tmp_path)                                   # keep reports etc. out of the repo
     DuckOSM(cfg).run()
@@ -56,7 +58,8 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     lane = 1964280132851416298                                   # that reverse; the same id in cycling
     assert con.execute(f"SELECT access FROM driving.private_edges WHERE edge_id = {lane}").fetchone() == ("bus",)
     assert con.execute(f"SELECT count(*) FROM driving.edges WHERE edge_id = {lane}").fetchone()[0] == 0
-    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge)").fetchone()[0] == 0
+    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge) AND uses = 'car'").fetchone()[0] == 0
+    assert con.execute(f"SELECT count(*) FROM driving.edge_graph WHERE {lane} IN (from_edge, to_edge) AND uses = 'bus'").fetchone()[0] > 0   # the buses' turns
     assert con.execute(f"SELECT count(*) FROM cycling.edges WHERE edge_id = {lane}").fetchone()[0] == 1
     # `duckosm info` and `way --json`, the commands an agent reads first
     import json

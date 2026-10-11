@@ -17,5 +17,7 @@ modes:
   - walking
   - cycling
 
+osm_overrides: osm_overrides/osm_overrides.yaml   # local fixes for known OSM errors
+
 validation:
   enabled: true

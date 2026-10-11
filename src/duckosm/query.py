@@ -123,5 +123,6 @@ def db_info(con):
             "boundary": ("main", "boundary") in tables,
             "admin_boundaries": count("main", "admin_boundaries") or 0,
             "elevation": ("main", "elevation_metadata") in tables,
-            "visualization": ("visualization", "edge_levels") in tables}
+            "visualization": ("visualization", "edge_levels") in tables,
+            "bus": ("bus", "routes") in tables}
 

@@ -20,7 +20,7 @@ from duckosm.gmns import _offset_wkt
 
 logger = logging.getLogger("duckosm")
 
-_SUBTYPE = {"auto": "road", "bus": "bus_lane", "bike": "bicycle_lane", "walk": "walkway"}
+_SUBTYPE = {"auto": "road", "bus": "bus_lane", "bus,bike": "bus_lane", "bike": "bicycle_lane", "walk": "walkway"}
 
 
 def _coords(wkt):

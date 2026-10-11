@@ -34,10 +34,10 @@ crosswalk), and each node where a road ends. It is made once from all highway wa
 before any mode filters them. A road is cut at these points, and so is a footway or path that
 passes through one, even in a mode that doesn't have the road. So a way that is in two modes is cut
 into the same pieces and has the same `edge_id` in both. Monaco: 2,754 of the 2,765 driving edges
-have the same `edge_id` in cycling, 1,882 in walking. The others are roads that mode doesn't keep.
+have the same `edge_id` in cycling, 2,275 in walking. The others are roads that mode doesn't keep.
 
 So a crosswalk cuts the road it crosses in driving too, and the road cuts the crosswalk in walking
-too (where a road without sidewalks isn't in the walking network): walkers and cyclists connect to
+too (where a road whose sidewalk is a separate way isn't in the walking network): walkers and cyclists connect to
 the road there, and the pieces are the same in every mode. Ways that don't exist on the ground
 (`highway=proposed`, `construction`, …) cut nothing. `options.global_junctions: false` makes each mode
 split at its own junctions, and the ids of a road can then differ between modes.

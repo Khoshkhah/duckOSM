@@ -172,3 +172,21 @@ def test_joined_junction_keeps_the_turns_through_it(tmp_path):
     assert "cluster_2_3" in net              # A and B are one junction
     to = set(re.findall(r'<connection from="11" to="(\d+)"', net))
     assert to == {"13", "14", "15"}          # straight on, left (both through the swallowed link) and right
+
+
+def test_lanes_come_from_the_lane_profile(tmp_path):
+    """driving.lane_profile (docs/design/gmns_lane_profile.md): each edge gets its lanes as the profile has them, one <lane> each with its
+    vehicle classes and width, SUMO's index from the right: E2 = a bike lane left (-1), a car lane, a bus lane, a bike lane right."""
+    con = _db()
+    con.execute("CREATE TABLE driving.lane_profile(edge_id BIGINT, lane_num INTEGER, use VARCHAR, width_m DOUBLE, turn VARCHAR, source VARCHAR, width_source VARCHAR)")
+    con.execute(f"""INSERT INTO driving.lane_profile VALUES ({E2}, -1, 'bike', 1.5, NULL, 'cycleway:left', 'default'),
+        ({E2}, 1, 'auto', 3.25, NULL, 'lanes', 'default'), ({E2}, 2, 'bus', 3.5, NULL, 'bus:lanes', 'width:lanes'),
+        ({E2}, 3, 'bike', 1.8, NULL, 'cycleway:right', 'cycleway:right:width')""")
+    to_sumo(con, str(tmp_path), run_netconvert=False)
+    edg = (tmp_path / "network.edg.xml").read_text()
+    e2 = edg[edg.index(f'id="{E2}"'):]
+    e2 = e2[:e2.index("</edge>")]
+    assert 'numLanes="4"' in e2
+    lanes = [dict(kv.split("=") for kv in l.split("/>")[0].replace('"', "").split()) for l in e2.split("<lane ")[1:]]
+    assert [(x["index"], x.get("allow"), x["width"]) for x in lanes] == [("0", "bicycle", "1.80"), ("1", "bus", "3.50"), ("2", None, "3.25"), ("3", "bicycle", "1.50")]
+    assert 'numLanes="1"' in edg[edg.index(f'id="{E1}"'):].split("\n")[0]       # an edge the profile does not have: its lanes count, as before

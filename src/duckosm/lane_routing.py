@@ -40,7 +40,9 @@ def _turn_sql(g):
             # docs/design/gmns_lane_movements.md); a GMNS file without outbound ranges: every lane
             f"  AND (m.start_ob_lane IS NULL OR m.start_ib_lane IS NULL "
             f"       OR ol.lane_num = m.start_ob_lane + il.lane_num - m.start_ib_lane) "
-            f"WHERE m.ib_link_id IS NOT NULL AND m.ob_link_id IS NOT NULL")
+            f"WHERE m.ib_link_id IS NOT NULL AND m.ob_link_id IS NOT NULL "
+            # not the buses' turns into or out of a bus-only link (docs/design/bus_only_edges.md)
+            f"AND COALESCE(m.allowed_uses, '') NOT IN ('bus', 'bus,bike')")
 
 
 def _require_lane(con, g, gmns_db):

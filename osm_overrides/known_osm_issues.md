@@ -273,15 +273,71 @@ Explorer, where the down ramp had no turning movement at all. If it is confirmed
 `OsmOverrides(mode=...)`) - the two rules are written, commented out, in `osm_overrides.yaml` - and
 upstream an `access=no` (or `motor_vehicle=no`) tag in OpenStreetMap.
 
-## 9. Boulevard du Larvotto — `lanes=2` counts the parking strip
+## 9. Monaco roundabout entry - `lanes=2` on a one-lane roundabout
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco (`data/sample/monaco.osm.pbf`) |
+| **OSM way** | `1435532404` (`highway=primary`, `oneway=yes`, `name=Boulevard du Larvotto`, 10 m) |
+| **Edge** | `1435532404#1f` |
+| **Status** | **CONFIRMED by Street View** (Kaveh, 2026-10-05); override enabled |
+
+**Symptom.** In roadstyle the roundabout bulges where this edge sits: it is drawn twice as wide as
+the edges next to it.
+
+**Root cause (verified).** The way carries `lanes=2` in OpenStreetMap itself (version 3, 2026-06-09);
+duckOSM copied it unchanged. The adjacent roundabout ways `1435532402` and `1435532403` have
+`lanes=1`, and Street View shows a single lane.
+
+**Fix.** `lanes: 1` in `osm_overrides.yaml`; upstream, set `lanes=1` on the way in OpenStreetMap.
+
+
+## 10. Monaco, Boulevard du Larvotto - `lanes=2` on one-lane one-way ways
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco (`data/sample/monaco.osm.pbf`) |
+| **OSM ways** | `93137596`, `93137569`, `93137578`, `93137560` (Boulevard du Larvotto), `25103774`, `35092477` (Boulevard Louis II), `51691775` (a link), all 11 ways of Avenue Princesse Grace (its `lanes=2` counts the left bike lane: two lanes in all on Street View), `788120420` (Boulevard Princesse Charlotte; `39838824` checked again: two lanes and a parking space, as OSM says), the one-way loop Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia (`120062272`, `120062660`, `1024393368`, `120062661`, `120062658`, `120062662`, `177425460`, `1024393367`, `120062663`) (`highway=primary`, `oneway=yes`, `lanes=2`, `name=Boulevard du Larvotto`) |
+| **Edges** | `93137596#1f`, `93137569#2f` (and the other pieces of the two ways) |
+| **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
+
+**Symptom.** The lane map draws two lanes where the street has one.
+
+**Root cause (verified).** The ways carry `lanes=2` in OpenStreetMap; duckOSM reads it as OSM defines it (on a one-way way, every lane runs
+its way). Each got `lanes=2` in ONE mass edit, changeset 32866762 (2015-07-25), which set `lanes=2` on 3,956 ways across Monaco and
+north-west Italy, one-way and two-way alike; later edits kept it. 67 one-way Monaco ways still carry `lanes=2` from it: each is a
+candidate for the same error, but some one-way roads really have two lanes, so each is fixed only once checked. Street View shows one
+lane. The sidewalks are separate `footway=sidewalk` lines (e.g. `1342546102`, about 3.3 m from the road line), so they
+are not counted in `lanes`. On `93137560` the aerial photo shows one travel lane and a strip of parked cars, which OSM counts
+as a lane; upstream, there `lanes=1` with `parking:right=lane` (or the side it is on).
+
+**Fix.** `lanes: 1` for each in `osm_overrides.yaml`; upstream, set `lanes=1` on these ways in OpenStreetMap.
+
+
+## 11. Monaco, Avenue Albert II roundabout - no `lanes` tag on a two-lane ring
 
 | field | value |
 | --- | --- |
 | **Area** | Monaco |
-| **OSM way** | `93137560` (103 m, one-way primary) |
-| **Status** | **CONFIRMED** — the aerial photo shows one travel lane and a strip of parked cars (Kaveh, 2026-10-09) |
+| **OSM ways** | `503462476`, `503462459`, `503462460`, `804900035`, `4229900` (`highway=secondary`, `junction=roundabout`, no `lanes`) |
+| **Status** | **CONFIRMED by Street View** (2026-10-10); override enabled |
 
-The way is tagged `lanes=2`, but only one lane carries traffic; the outer strip is used for parking, and OSM
-counts it as a lane. Found from urbanstyle's street spaces, where the stretch was drawn with two lanes. Fix: the
-override `lanes: 1` in `osm_overrides.yaml`; upstream, `lanes=1` with `parking:right=lane` (or the side it is on).
+**Symptom.** The ring was drawn with one lane (the lane profile's default, `source = default`); the 2-lane road entering it
+(`92627408`) had a lane with no way in (SUMO let it end before the ring).
 
+**Fix.** `lanes: 2` for the five ways in `osm_overrides.yaml`; upstream, tag `lanes=2` on them in OpenStreetMap.
+
+
+## 12. Monaco, Larvotto roundabout - rebuilt smaller, OSM still has the old shape
+
+| field | value |
+| --- | --- |
+| **Area** | Monaco |
+| **OSM way** | `93137600` (`highway=primary_link`, last changed 2023-12-14), entered by a left turn from `503783382` (Boulevard du Larvotto) at node `273244126` |
+| **Status** | **CONFIRMED by Street View** (photos 2026); override enabled |
+
+**Symptom.** GMNS allowed a left turn from Boulevard du Larvotto into this link; on Street View (2026) the roundabout is smaller
+and the link is not there. The roundabout is a loop of one-way ways without `junction=roundabout`.
+
+**Fix.** `exclude_modes: [driving, cycling, walking]` for way `93137600` in `osm_overrides.yaml` (an override cannot change a road's
+shape); upstream, redraw the roundabout in OpenStreetMap from current imagery and tag its ring `junction=roundabout`.

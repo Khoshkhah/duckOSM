@@ -184,6 +184,16 @@ duckosm levels [OPTIONS] DB
 |---|---|---|
 | `--area DIR` | the level area folder | `DB.levels` next to the database |
 
+### `bus`
+
+Matches the database's OSM bus route relations to its driving edges and writes schema [`bus`](database.md#bus-schema): `bus.routes` (one row per route, with
+its gaps) and `bus.route_edges` (the edges each route travels, in order). A build from a PBF does it too (`options.bus_routes`); this adds it to a file built
+before. The database is changed in place. Needs `raw.*` and the driving network. How: [Bus routes](../concepts/networks.md#bus-routes).
+
+```text
+duckosm bus DB
+```
+
 ### `route-map`
 
 Writes duckOSM's route planner over a map drawn by mapstyle: drag a start and an end, pick Drive,

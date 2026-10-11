@@ -115,7 +115,7 @@ duckosm build -c config/sample_monaco.yaml && duckosm multimodal monaco.duckdb
 duckosm viz monaco.duckdb --out-dir docs/maps -m driving && mv docs/maps/monaco_driving_network.html docs/maps/monaco_driving.html
 duckosm viz monaco.duckdb --out-dir docs/maps && rm docs/maps/monaco_*_network.html   # keeps monaco_map.html
 duckosm route-map monaco.duckdb -m walk+drive -o docs/maps/monaco_route_map.html
-duckosm gmns monaco.duckdb -m driving && duckosm gmns-map monaco_gmns.duckdb -o docs/maps/monaco_gmns_lanes.html
+duckosm gmns monaco.duckdb && duckosm levels monaco.duckdb && duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb -o docs/maps/monaco_gmns_lanes.html
 ```
 
 The Monaco numbers quoted in the docs come from the same build: rebuild them after a change to what

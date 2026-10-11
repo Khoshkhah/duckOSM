@@ -111,7 +111,8 @@ def route_points(con, a, b, mode="driving", weight="time", radius_m=50.0, access
     # ponytail: reads the whole edge graph per call; a Router-like prebuilt graph when routing many
     W = dict(con.execute(f"SELECT edge_id, {key} FROM {mode}.edges").fetchall())
     nxt: dict = {}
-    for f, t in con.execute(f"SELECT from_edge, to_edge FROM {mode}.edge_graph").fetchall():
+    from duckosm.processors.edge_graph import routed_graph
+    for f, t in con.execute(f"SELECT from_edge, to_edge FROM {routed_graph(con, mode)}").fetchall():
         nxt.setdefault(f, []).append(t)
 
     # edge-based Dijkstra; a label is the cost at the END of an edge (the start edges: their part)

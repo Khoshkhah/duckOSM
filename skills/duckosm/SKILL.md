@@ -50,6 +50,8 @@ holds every option.
   bus-only roads (`access = 'bus'`). The columns of `edges` without
   the H3 ones; drawn
   on maps, never routed. They are not in `edges` or `edge_graph`.
+- `bus.routes` (one row per OSM bus route relation, with its `gaps`) and `bus.route_edges(route_id, ref, seq, edge_id, edge_ref, bus_lane)`:
+  the driving edges each bus route travels, in order and direction (`duckosm bus DB` adds them to an older file).
 - `raw.nodes` / `raw.ways` / `raw.relations`: every OSM element with all its `tags` (a MAP), for
   anything that isn't a road.
 - `features.*`: base-map layers (buildings, water, land, pois, …). `mm.*`: across modes, after
@@ -105,7 +107,7 @@ Join your own data the stable way: carry `(osm_id, source, target)` and join on 
 - **`cost_s` uses the speed limit**: no traffic, no junction delay.
 - **`oneway` is per edge.** A one-way road has no reverse edge; walking ignores `oneway` (only
   `oneway:foot`), so the same road can be two-way in walking.
-- **Not every road is in every mode**: a main road without a sidewalk tag isn't walkable; forbidden
+- **Not every road is in every mode**: motorways, motorroads and roads whose sidewalk is mapped as a separate way aren't walkable; forbidden
   roads leave that mode; private ones are in `private_edges`. Check `raw.ways` tags before
   assuming a bug.
 - **Open the database `read_only=True`** when reading, so a build or another reader isn't blocked.

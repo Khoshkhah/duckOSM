@@ -17,6 +17,8 @@ from duckosm.utils import check_db_name
 from duckosm.processors import (
     RoadFilter,
     OsmOverrides,
+    LaneProfile,
+    SeparateSidewalks,
     GraphBuilder,
     SpeedProcessor,
     CostCalculator,
@@ -120,6 +122,10 @@ class DuckOSM:
                 global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
                 if self.config.options.boundary_cells:
                     global_steps.append(("boundary_cells", "Generating boundary cells", self._build_boundary_cells))
+            # Roads whose sidewalks are their own lines but carry no sidewalk tag: sidewalk=separate, before RoadFilter reads it
+            if self.config.options.infer_separate_sidewalks and "walking" in self.config.modes:
+                global_steps.append(("separate_sidewalks", "Finding roads with separate sidewalks",
+                                     lambda: SeparateSidewalks(self.con).run()))
             # Mode-agnostic road-junction set, built once from raw.* before the per-mode loop, so every
             # mode segments roads at the same junctions and shares edge_ids. See _build_global_junctions.
             if self.config.options.global_junctions:
@@ -184,7 +190,7 @@ class DuckOSM:
                     steps.append(("extract_restrictions", f"[{mode}] Extracting turn restrictions", self._extract_restrictions))
 
             if self.config.options.build_graph:
-                steps.append(("build_edge_graph", f"[{mode}] Building edge graph", self._build_edge_graph))
+                steps.append(("build_edge_graph", f"[{mode}] Building edge graph", lambda: self._build_edge_graph(mode)))
                 # Drop boundary-crossing stubs / fragments right after the graph is built (A3).
                 if do_components:
                     steps.append(("component_filter", f"[{mode}] Component clean-up",
@@ -251,6 +257,20 @@ class DuckOSM:
                 if self.config.options.build_features and self.config.source.type == "pbf":
                     progress.update(main_task, description="Building feature layers...")
                     self._build_features()
+
+                # Bus routes (bus.routes, bus.route_edges): each OSM bus route relation as the driving edges it travels.
+                # Needs raw.* and the driving network; options.bus_routes (on).
+                if self.config.options.bus_routes and "driving" in self.config.modes and self.config.source.type == "pbf":
+                    progress.update(main_task, description="Matching bus routes...")
+                    from duckosm.bus import write_bus_routes
+                    routes = write_bus_routes(self.con)
+                    logger.info(f"  Bus routes: {len(routes)}, {int((routes['gaps'].str.len() > 0).sum())} with gaps (bus.routes)")
+
+                # Every driving edge's lanes, decided once (docs/design/gmns_lane_profile.md): after all modes (a bus-only edge in the
+                # cycling network is shared by bikes) and while raw.* is still here
+                if "driving" in self.config.modes and self.config.source.type == "pbf":
+                    progress.update(main_task, description="Lane profile...")
+                    self._lane_profile()
 
                 # Persist the canonical stable-edge_id macro (callable anywhere as
                 # `edge_id_hash(osm_id, source, target)`, plus the legacy `edge_id_hash_v1`), so
@@ -586,6 +606,15 @@ class DuckOSM:
         logger.info(f"  Filtered to {self.stats['node_count']:,} nodes, "
                    f"{self.stats['way_count']:,} ways in {self.stats['road_filter_time']:.2f}s")
     
+    def _lane_profile(self) -> None:
+        """``driving.lane_profile`` (processors/lane_profile.py); the ways an overrides rule gives a lane count are its ``override`` source."""
+        import yaml
+        ways = ()
+        if self.config.osm_overrides:
+            rules = (yaml.safe_load(open(self.config.osm_overrides)) or {}).get("overrides") or []
+            ways = {int(r["osm_id"]) for r in rules if any(k in r for k in ("lanes", "lanes_forward", "lanes_backward"))}
+        self.stats["lane_profile_lanes"] = LaneProfile(self.con, ways).run()
+
     def _apply_osm_overrides(self, mode: str | None = None) -> None:
         """Patch `ways` with local corrections for known OSM errors (before edges are built)."""
         n = OsmOverrides(self.con, self.config.osm_overrides, mode=mode).run()
@@ -696,12 +725,12 @@ class DuckOSM:
         logger.info(f"  Found {self.stats['restriction_count']:,} restrictions in "
                    f"{self.stats['restriction_time']:.2f}s")
     
-    def _build_edge_graph(self) -> None:
+    def _build_edge_graph(self, mode: str) -> None:
         """Build edge adjacency graph."""
         logger.info("Building edge graph...")
         start = time.time()
         
-        EdgeGraphBuilder(self.con).run()
+        EdgeGraphBuilder(self.con, mode).run()
         
         self.stats['edge_graph_time'] = time.time() - start
         self.stats['edge_graph_count'] = self.con.execute(

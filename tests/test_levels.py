@@ -24,6 +24,8 @@ def monaco(tmp_path_factory):
     cfg = Config.from_yaml(str(ROOT / "config" / "sample_monaco.yaml"))
     cfg.source.pbf_path = str(ROOT / cfg.source.pbf_path)
     cfg.boundary.path = str(ROOT / cfg.boundary.path)
+    if cfg.osm_overrides:
+        cfg.osm_overrides = str(ROOT / cfg.osm_overrides)     # the sample's fixes file is relative to the repo too
     cfg.output_path = str(d)
     cwd = os.getcwd()
     os.chdir(d)
@@ -48,9 +50,10 @@ def test_the_roads_of_all_modes_with_their_bands(monaco):
     from duckosm.crossings import _level
     assert (roads["band"].to_numpy() == [_level(ly, br, tn) for ly, br, tn in zip(roads["layer"], roads["bridge"], roads["tunnel"], strict=True)]).all()   # the tags only: a sidewalk or a crossing is on its street's floor
     assert (roads["walk_type"] == "sidewalk").any() and (roads["walk_type"] == "crossing").any()
-    assert roads["highway"].isna().any()                                               # a ferry with no highway is a road too
+    assert roads["highway"].notna().all() and (roads["highway"] == "ferry").any()      # a ferry is a road too, with its own class
     assert (roads["junction"] == "roundabout").any() and roads["edge_ref"].notna().all()   # roadstyle puts a roundabout on top where roads meet
-    assert {"driving + walking + cycling", "walking"} <= set(roads["modes"].dropna())       # who may use it: the level editor shows it
+    modes = set(roads["modes"].dropna())                                               # who may use it: the level editor shows it
+    assert "walking" in modes and any(m.startswith("driving + walking + cycling") for m in modes)   # (+ bus where a bus line runs)
 
 
 def test_levels_command_makes_the_area_and_writes_the_db(monaco, tmp_path):
@@ -95,3 +98,55 @@ def test_levels_command_errors_say_what_is_wrong(tmp_path):
     duckdb.connect(str(db)).close()
     r = CliRunner().invoke(main, ["levels", str(db)])
     assert r.exit_code != 0 and "no <mode>.edges table" in r.output
+
+
+def test_bus_routes_in_the_build_and_the_level_roads(monaco):
+    """The build matches the bus route relations (bus.routes, bus.route_edges); the level roads get "bus" in modes and the lines in bus_lines.
+    Boulevard Charles III (way 1449981121): #1f is the cars' one-way, #1r its contraflow bus lane."""
+    con = duckdb.connect(str(monaco), read_only=True)
+    assert con.execute("SELECT count(*) FROM bus.routes").fetchone()[0] > 0
+    assert con.execute("SELECT count(*) FROM bus.route_edges WHERE bus_lane").fetchone()[0] > 0
+    from duckosm.levels import load_roads
+    roads = load_roads(monaco).set_index("edge_ref")
+    lane = roads.loc["1449981121#1r"]
+    assert "bus" in lane["modes"].split(" + ") and "driving" not in lane["modes"].split(" + ")
+    assert lane["bus_lines"] == ", ".join(sorted(set(lane["bus_lines"].split(", ")), key=lambda r: (not r.isdigit(), int(r) if r.isdigit() else 0, r)))
+    assert roads.loc["1449981121#1f", "modes"].startswith("driving") and "bus" in roads.loc["1449981121#1f", "modes"]
+    assert roads["bus_lines"].isna().sum() > 0                                   # most roads have no bus
+    assert not any("bus" in str(m).split(" + ") for m in roads.loc[roads["bus_lines"].isna(), "modes"])   # no line, no bus (2026-10-10: a walking-only reverse said "walking + bus")
+
+
+def test_the_build_writes_every_driving_edges_lane_profile(monaco):
+    """driving.lane_profile (docs/design/gmns_lane_profile.md): every driving edge and every bus-only edge has its lanes, motor lanes
+    numbered 1..n with no gap, a lane left of them -1, each with the source that put it there; Boulevard Charles III's contraflow bus lane
+    shared by bikes, and the overridden Avenue Princesse Grace: its left bike lane and one car lane."""
+    con = duckdb.connect(str(monaco), read_only=True)
+    edges = {e for (e,) in con.execute("SELECT edge_id FROM driving.edges UNION ALL SELECT edge_id FROM driving.private_edges WHERE access = 'bus'").fetchall()}
+    got = {}
+    for e, n, u, s in con.execute("SELECT edge_id, lane_num, use, source FROM driving.lane_profile ORDER BY 1, 2").fetchall():
+        got.setdefault(e, []).append((n, u, s))
+    assert set(got) == edges and all(s for ls in got.values() for _, _, s in ls)
+    for ls in got.values():
+        motor = [n for n, _, s in ls if not s.startswith("cycleway")]          # the bike lanes beside them come from a cycleway tag
+        assert motor == list(range(1, len(motor) + 1))
+    ref = dict(con.execute("SELECT edge_ref, edge_id FROM driving.edges UNION ALL SELECT edge_ref, edge_id FROM driving.private_edges").fetchall())
+    assert [u for _, u, _ in got[ref["1449981121#1r"]]] == ["bus,bike"]
+    assert [(n, u) for n, u, _ in got[ref["503462464#2f"]]] == [(-1, "bike"), (1, "auto")]
+
+
+def test_sumo_from_the_lane_profile_differs_from_sumos_own_import_only_by_named_causes(monaco, tmp_path):
+    """sumo_compare.lane_diff (docs/design/gmns_lane_profile.md, decision 2): SUMO built from duckOSM's lane profile and SUMO's own OSM
+    import of the same Monaco agree on most roads; every difference has a known cause (an override, the contraflow bus lane counted in
+    lanes, a default where no lanes tag is ...), none is 'other'."""
+    import shutil
+    from duckosm.sumo import _find_netconvert
+    try:
+        _find_netconvert(None)
+    except Exception:
+        pytest.skip("netconvert is needed")
+    if not shutil.which("osmium"):
+        pytest.skip("osmium is needed")
+    from duckosm.sumo_compare import lane_diff
+    rows, n = lane_diff(monaco, ROOT / "data" / "sample" / "monaco.osm.pbf", tmp_path)
+    assert n > 500 and len(rows) < 0.1 * n
+    assert not [r for r in rows if r["cause"] == "other"], [r for r in rows if r["cause"] == "other"][:5]

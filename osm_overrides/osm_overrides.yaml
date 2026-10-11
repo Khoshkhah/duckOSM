@@ -13,6 +13,7 @@
 #   lanes_backward  int
 #   layer           int   — vertical stacking level (fixes a wrong OSM `layer` tag)
 #   exclude_modes   list  — remove the way from these modes' networks (driving/cycling/walking)
+#   turn_lanes_forward / turn_lanes_backward  str — the painted arrows, OSM turn:lanes syntax ("through;left|right")
 #   note            free text (provenance)
 #
 # Only enable a rule once the correction is verified — an unverified `oneway` flip silently drops
@@ -61,11 +62,156 @@ overrides:
     layer: 0                 # (known_osm_issues #4, CONFIRMED) — sits at grade where it meets the
     note: "service=driveway ramp tagged layer=-1 end-to-end though its junction end is at grade (joins the level-0 driveway 1429337400 at a shared node); no tunnel/bridge structure. Set to 0."
 
-
   # --- Monaco ---
-  - osm_id: 93137560         # Boulevard du Larvotto — lanes=2 counts the parking strip (known_osm_issues #9, CONFIRMED)
+  - osm_id: 1435532404       # Boulevard du Larvotto, roundabout entry - lanes=2 on a 1-lane roundabout (known_osm_issues #9)
     lanes: 1
-    note: "one-way, one travel lane; the outer strip is parked cars (aerial photo), which lanes=2 counts as a lane"
+    note: "OSM lanes=2 (v3, 2026-06-09); Street View shows one lane and the neighbouring roundabout ways 1435532402/3 have lanes=1"
+  - osm_id: 93137596         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane; the separate sidewalk 1342546102 runs ~3.3 m from the road line"
+  - osm_id: 93137569         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137578         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137560         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 50501898         # tertiary_link, one-way - lanes=2 from the 2015 mass edit (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, changeset 32866762 (2015-07-25); drawn wider than the road in the level editor (2026-10-09)"
+  - osm_id: 25103774         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 35092477         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 51691775         # secondary_link (no name), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 503462464        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane; Street View: one car lane + the bike lane on the left (OSM lanes counts motor lanes only)"
+  - osm_id: 1238339144       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane; Street View: one car lane + the bike lane on the left (OSM lanes counts motor lanes only)"
+  - osm_id: 50501897         # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 93137621         # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 182700002        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 182700008        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462466        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462468        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503633031        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 1131276184       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 1238339145       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462476        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 503462459        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 503462460        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 804900035        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 4229900          # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 93137576         # Avenue Princesse Grace, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 120062272        # Tunnel Aureglia, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062660        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 1024393368       # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062661        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062658        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062662        # Boulevard du Larvotto (tunnel), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 177425460        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 1024393367       # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062663        # Tunnel Aureglia, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 93137600         # primary_link by the Larvotto roundabout: gone - the roundabout was rebuilt smaller (known_osm_issues #12)
+    exclude_modes: [driving, cycling, walking]
+    note: "Street View 2026: the roundabout is smaller and this link is not there (OSM last changed it 2023-12); fix the geometry in OSM"
+  - osm_id: 254596873        # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137568         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137585         # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 353889170        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 1470365900       # Boulevard Louis II - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2; Street View shows one lane"
+  - osm_id: 788120420        # Boulevard Princesse Charlotte, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+
+
+  - osm_id: 423632264        # Boulevard Charles III, east-bound before the car park ramp and Tunnel de Serravalle
+    turn_lanes_forward: "left|through;right"
+    note: "2026-10-10 checked on the lane map and Street View: the left lane only turns left into the car park's entry ramp (way 172533153; its left+straight arrow is painted before, where the road forks into two lanes), the right lane goes straight on or right into Tunnel de Serravalle; OSM through|right"
+  - osm_id: 4227277          # Rue de la Colle, south-bound from Rue du Rocher: no arrows painted
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10 Street View: an ordinary two-lane road, no arrows before Rue du Rocher or after; OSM turn:lanes left|through"
+  - osm_id: 176086162        # Avenue Prince Pierre, west-bound before the fork with Rue de la Colle: its arrows are the fork's
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10: OSM left|through describes the fork ~40 m on, at the end of way 503813539, which carries the same arrows (left lane into Rue de la Colle, right lane straight on, confirmed); this way's own end has one way out"
+  - osm_id: 503753416        # primary link (destination Nice): its arrows are the fork's, at the end of way 1212029943
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM left|through describes the fork at the end of way 1212029943, which carries the same arrows; this way's own end has one way out"
+  - osm_id: 507581437        # Boulevard Princesse Charlotte (5 m): its arrows are the fork's, at the end of way 792870577
+    turn_lanes_forward: "none|none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 792870577, which carries the same arrows; this way's own end has one way out"
+  - osm_id: 788120422        # Boulevard Princesse Charlotte: its arrows describe the fork after way 39838824
+    turn_lanes_forward: "none|none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 39838824 (2 lanes, no arrows); this way's own end has one way out"
+  - osm_id: 507581429        # Boulevard Princesse Charlotte before Boulevard du General Leclerc: the bus lane turns right
+    turn_lanes_forward: "through|through;right|right"
+    note: "2026-10-10, from the data (not checked in Street View; the aerial image is in shadow): three lanes (two car lanes, the bus lane) meet two roads of two lanes each, straight on and Leclerc; only a bus lane turning right fits both with OSM's through|through;right| (SUMO could not apply three straight lanes into two); 6 bus routes turn right here"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline

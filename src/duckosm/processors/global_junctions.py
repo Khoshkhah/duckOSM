@@ -14,6 +14,11 @@ Without it, a road-class way that one mode drops (e.g. a ``service`` driveway re
 is segmented differently per mode and its ``edge_id`` diverges. See
 ``docs/design/global_junction_segmentation.md`` (Kalevi example).
 
+Paths (footway / path / cycleway / steps / pedestrian / bridleway / corridor) get the same treatment
+for their OWN cuts: a node of a path where any other highway way meets it is a global *path* junction
+(``is_road_junction`` FALSE), so a path shared by walking and cycling is cut at the same points (the
+union over the modes) and keeps one ``edge_id``. Roads ignore these rows, so their cuts don't change.
+
 Runs **once** (a global pre-pass, before the per-mode loop), writing to the ``main`` schema so every
 mode reads the same table.
 """
@@ -37,7 +42,9 @@ class GlobalJunctions(BaseProcessor):
         # A node is a global road junction when >=2 highway way references meet there (a road, or a
         # footway / path / cycleway), or a road-class way ends there. Counting references (not
         # distinct ways) matches the per-mode _find_junctions semantics and also flags self-crossing
-        # nodes (a way revisiting a node).
+        # nodes (a way revisiting a node). A node of a path where >=2 references meet, but no road, is
+        # a path junction (is_road_junction FALSE): only paths are cut there
+        # (docs/design/global_junction_segmentation.md, "Paths").
         self.execute(f"""
             CREATE OR REPLACE TABLE main.global_junctions AS
             WITH hw_ways AS (
@@ -61,9 +68,12 @@ class GlobalJunctions(BaseProcessor):
                 FROM node_use
                 GROUP BY node_id
             )
-            SELECT node_id, TRUE AS is_road_junction
+            SELECT node_id, road_way_count > 0 AS is_road_junction
             FROM agg
-            WHERE road_way_count > 0 AND (way_count > 1 OR road_endpoint_count > 0)
+            WHERE (road_way_count > 0 AND (way_count > 1 OR road_endpoint_count > 0))
+               OR (road_way_count = 0 AND way_count > 1)
         """)
-        n = self.fetchone("SELECT COUNT(*) FROM main.global_junctions")[0]
-        logger.info(f"  Global junctions: {n:,} mode-agnostic road junctions")
+        n, n_road = self.fetchone(
+            "SELECT COUNT(*), COUNT(*) FILTER (WHERE is_road_junction) FROM main.global_junctions")
+        logger.info(f"  Global junctions: {n_road:,} mode-agnostic road junctions, "
+                    f"{n - n_road:,} path junctions")

@@ -47,7 +47,8 @@ def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bo
     except ImportError as e:
         raise ImportError("to_networkx needs networkx — `pip install networkx`") from e
 
-    graph = f"{mode}.edge_graph"
+    from duckosm.processors.edge_graph import routed_graph
+    graph = routed_graph(con, mode)                      # the mode's own turns, not the bus rows
     if weight == "time":
         # edge_graph.cost is already the from_edge's travel time (cost_s).
         sql = f"SELECT from_edge, to_edge, cost FROM {graph}"

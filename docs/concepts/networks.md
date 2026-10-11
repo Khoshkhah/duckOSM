@@ -13,14 +13,15 @@ Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. Mona
 | Mode | Keeps |
 |---|---|
 | `driving` | `highway` = `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`s), `unclassified`, `residential`, `service`, `living_street`, `road`. Also `highway=pedestrian` when `motorcar` or `motor_vehicle` is `yes` / `designated` / `permissive`, or `access` is `delivery` / `destination`: these become `living_street` |
-| `walking` | `highway` = `footway`, `path`, `pedestrian`, `steps`, `living_street`, `residential`, `service`, `platform`, `corridor`; and any way tagged `sidewalk` = `yes` / `both` / `left` / `right`, or `foot` = `yes` / `designated`. A main road (`primary`, `secondary`, `tertiary`, `unclassified`) without such a tag is not walkable |
+| `walking` | every way people may walk on: `highway` = `footway`, `path`, `pedestrian`, `steps`, `living_street`, `residential`, `service`, `platform`, `corridor`, `track`, `bridleway`, `road`, `unclassified`, `tertiary`, `secondary`, `primary`, `trunk` (and their `_link`s). Not a road tagged `motorroad=yes`, `foot=use_sidepath`, or `sidewalk` (or `sidewalk:both`, or both `sidewalk:left` and `sidewalk:right`) = `separate`: people walk on its separately mapped sidewalk. Any way tagged `foot` = `yes` / `designated` / `permissive` or `sidewalk` = `yes` / `both` / `left` / `right` is kept. Never `motorway` or `motorway_link`. [Walking](../guides/walking.md) |
 | `cycling` | `highway` = `cycleway`, `path`, `track`, `bridleway`, `living_street`, `residential`, `service`, `unclassified`, `tertiary`, `secondary`, `primary` (and their `_link`s); any way tagged `bicycle` = `yes` / `designated` / `permissive`, or with a `cycleway` tag other than `no` / `none` / `separate`. Plus [dismount edges](#dismount-edges) |
 
 Then the [access tags](#access-private-and-forbidden-roads) decide, per mode.
 
-A way tagged `foot` or `bicycle` is kept even without a `highway` tag. In Monaco this brings the
-ferry (`route=ferry`, `foot=yes`) into walking, where it is walked at 5 km/h like a footpath, and the
-outline of a pedestrian area tagged `bicycle=yes` into cycling, as a ring of edges.
+Every mode needs a `highway` tag: a way with only `foot`, `bicycle` or `sidewalk` tags, or with only
+`area:highway` (the outline of a pedestrian area), is not a road and is in no network. The one exception is the
+ferry line (`route=ferry`, with `foot=yes` for walking or `bicycle=yes` for cycling): in Monaco it comes into
+walking, where it is walked at 5 km/h like a footpath, and its `highway` is `ferry` (its `walk_type` is `footpath`, its `cycle_type` `mixed_traffic`).
 
 `highway=service` (driveways, parking aisles, alleys) is part of the network like any other road.
 
@@ -139,7 +140,7 @@ Walking and cycling edges get a type from OSM sub-tags. The first rule that matc
 | `plaza` / `pedestrian_street` | `highway=pedestrian`, with / without `area=yes` |
 | `shared_street` | `living_street` |
 | `sidewalk` | any other road with a `sidewalk` tag (not `no` / `none` / `separate`): you walk its sidewalk |
-| `shared_road` | `residential`, `service`, `unclassified` |
+| `shared_road` | `residential`, `service`, `unclassified`, `road`, `tertiary`, `secondary`, `primary`, `trunk` (and their `_link`s): walked on the carriageway |
 | `corridor` | `highway=corridor`, or `indoor=yes` |
 | `platform` | `highway=platform` |
 | `path` | `path`, `track`, `bridleway` |
@@ -166,3 +167,33 @@ other turn from the `from` edge. Monaco: 38 of the 43 restriction relations map 
 Not used: restrictions through a via way, the `except` tag, and tags like `restriction:hgv` or
 `restriction:conditional`. Any turn not removed is allowed, including a U-turn onto the reverse
 twin of a two-way road.
+
+## Bus routes
+
+Buses have no network of their own: the OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) are matched to the driving edges they travel,
+and stored in schema [`bus`](../reference/database.md#bus-schema) (`bus.routes`, `bus.route_edges`). A build from a PBF with driving does it
+(`options.bus_routes`, on); [`duckosm bus DB`](../reference/cli.md#bus) adds it to a file built before.
+
+A route relation lists its ways in travel order; its stops and platforms are left out. Each way is travelled from the node it shares with the way before
+to the node it shares with the way after, so its direction comes from its neighbours, and on a two-way street that picks the `#nf` or the `#nr` edge.
+The first or last way of a stretch, where only one neighbour is known, is travelled from or to its far end; when it is joined in its middle (or is a
+stretch alone), the role `forward` / `backward` decides, else the way's one-way. A roundabout is followed from where the route enters to where it leaves. The edges come from `driving.edges` and, for bus lanes and
+bus-only roads, `driving.private_edges` with `access = 'bus'`: a bus against a one-way street runs on its contraflow bus lane.
+
+Nothing is left out silently. `bus.routes.outside` counts the member ways outside the area; `bus.routes.gaps` lists every other way the route could not be
+followed on, as `'<way_id> <kind>'`:
+
+| Kind | The way |
+|---|---|
+| `no_connection` | shares no node with the next member way: the route breaks there |
+| `no_edge` | has no driving edge (nor bus lane) in the direction travelled |
+| `private` | is a private road (in `driving.private_edges`, not for buses) |
+| `role_conflict` | has a role (`forward` / `backward`) its neighbours contradict; the neighbours are followed |
+| `ambiguous` | the first or last way of a stretch, two-way, joined in its middle, no role: its direction can't be told |
+| `role` | has a role other than `''`, `forward`, `backward` |
+
+Monaco: 56 bus routes, none with gaps (38 run partly outside the area), 5,609 route edges on 1,034 driving edges, 14 of them bus lanes. The contraflow bus
+lane of Boulevard Charles III (`1449981121#1r`) carries lines 3, 607 and X1.
+
+The [level area](../guides/drawing-order.md) marks these edges: `bus` is in their `modes` and `bus_lines` lists the lines, e.g. `1, 2, 5`.
+

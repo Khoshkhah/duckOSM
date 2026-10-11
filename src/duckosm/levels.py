@@ -37,15 +37,29 @@ def _union(con):
 
     def optional(m, t):                                  # a column an older file may not have: NULL there
         return ", ".join(f"{c if (m, t, c) in has else 'NULL'} AS {c}" for c in OPTIONAL)
-    parts = [f"SELECT {cols}, {optional(m, 'edges')}, '{m}' AS mode, {i} AS rank FROM {m}.edges" for i, m in enumerate(modes)]
-    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, NULL AS mode, {len(MODES) + i} AS rank FROM {m}.private_edges" for i, m in enumerate(modes) if m in private]
+    def ow(m, t):                                        # one-way as the mode's own network says (the driving one decides the arrows)
+        return "oneway" if (m, t, "oneway") in has else "NULL"
+    def walked(m, t):                                    # a cycling edge where bikes are pushed (dismount): walked, not ridden
+        return "dismount" if (m, t, "dismount") in has else "NULL"
+    parts = [f"SELECT {cols}, {optional(m, 'edges')}, {ow(m, 'edges')} AS oneway, {walked(m, 'edges')} AS dismount, '{m}' AS mode, NULL AS pmode, {i} AS rank FROM {m}.edges"
+             for i, m in enumerate(modes)]
+    parts += [f"SELECT {cols}, {optional(m, 'private_edges')}, {ow(m, 'private_edges')} AS oneway, {walked(m, 'private_edges')} AS dismount, NULL AS mode, '{m}' AS pmode, "
+              f"{len(MODES) + i} AS rank FROM {m}.private_edges"
+              for i, m in enumerate(modes) if m in private]
     return " UNION ALL ".join(parts)
+
+
+def _line_key(ref):
+    """Bus line refs in natural order: 2 before 11, numbers before letters."""
+    return (not ref.isdigit(), int(ref) if ref.isdigit() else 0, ref)
 
 
 def load_roads(db):
     """The roads of all modes in ``db``: one row per ``edge_id`` (in ``edge_id`` order) with ``highway``, ``layer``, ``bridge``, ``tunnel``,
-    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), ``modes`` (the modes whose
-    network has it, e.g. ``driving + walking``; None for a private road only), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
+    ``walk_type``, ``junction``, ``name``, ``edge_ref``, ``lanes`` (NULL where a table of an older file has none), ``driving`` / ``cycling`` (in that mode's network, private edges not), ``oneway``
+    (the DRIVING network's: roadstyle's arrows are cars' one-ways only; NULL off it), ``modes`` (the modes whose
+    network has it, e.g. ``driving + walking``; cycling only where bikes are ridden: where they are pushed (``dismount``) it is walking (2026-10-09), and ``bus`` where a bus route runs on it; a private road only: its modes with "(private)", e.g. ``walking (private)``), ``bus_lines`` (the refs of the bus
+    routes on it, e.g. ``1, 2, 5``, from ``bus.route_edges``; None off them or without that table), the band ``band`` and the line. The attributes are those of the first row, the modes taken in the order driving, walking,
     cycling and ``edges`` before ``private_edges``."""
     import duckdb
     import geopandas as gpd
@@ -55,19 +69,32 @@ def load_roads(db):
 
     from duckosm.crossings import _level
 
+    def walk(c):        # a cycling edge where bikes are pushed (dismount) is walked: walking, not cycling (2026-10-09)
+        return f"CASE WHEN {c} = 'cycling' AND coalesce(dismount, false) THEN 'walking' ELSE {c} END"
+
     con = duckdb.connect(str(db), read_only=True)
     try:
         con.execute("INSTALL spatial; LOAD spatial;")
         df = con.execute(f"""
             SELECT edge_id, first(highway ORDER BY rank) AS highway, first(layer ORDER BY rank) AS layer,
                    first(bridge ORDER BY rank) AS bridge, first(tunnel ORDER BY rank) AS tunnel,
-                   {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, list(DISTINCT mode) FILTER (WHERE mode IS NOT NULL) AS mode_list,
+                   {", ".join(f"first({c} ORDER BY rank) AS {c}" for c in OPTIONAL)}, list(DISTINCT {walk('mode')}) FILTER (WHERE mode IS NOT NULL) AS mode_list,
+                   list(DISTINCT {walk('pmode')}) FILTER (WHERE pmode IS NOT NULL) AS private_list,
+                   coalesce(bool_or(mode = 'driving'), false) AS driving, coalesce(bool_or(mode = 'cycling'), false) AS cycling,
+                   bool_or(oneway) FILTER (WHERE mode = 'driving') AS oneway,
                    ST_AsWKB(first(geometry ORDER BY rank)) AS wkb
             FROM ({_union(con)}) GROUP BY edge_id ORDER BY edge_id""").df()
+        has_bus = con.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'bus' AND table_name = 'route_edges'").fetchone()[0]
+        lines = dict(con.execute("SELECT edge_id, list(DISTINCT coalesce(ref, route_id::VARCHAR)) FROM bus.route_edges GROUP BY edge_id").fetchall()) if has_bus else {}
     finally:
         con.close()
     band = np.array([_level(ly, br, tn) for ly, br, tn in zip(df["layer"], df["bridge"], df["tunnel"], strict=True)], dtype=int)
-    df["modes"] = [" + ".join(m for m in MODES if m in set(ms if isinstance(ms, (list, np.ndarray)) else [])) or None for ms in df.pop("mode_list")]   # who may use it: the editor shows it; a private road only: None
+    df["bus_lines"] = [", ".join(sorted(lines[e], key=_line_key)) if e in lines else None for e in df["edge_id"]]   # the bus lines on it (bus.route_edges), e.g. "1, 2, 5"
+    have = lambda ms: set(ms if isinstance(ms, (list, np.ndarray)) else [])      # noqa: E731
+    # who may use it: the editor shows it, lanestyle colours a road cars do not use by it; a private road only: its modes "(private)" (2026-10-09:
+    # a private footway was None, so nothing said it is walked)
+    df["modes"] = [" + ".join(([m for m in MODES if m in have(ms)] or [f"{m} (private)" for m in MODES if m in have(ps)]) + (["bus"] if isinstance(bl, str) else [])) or None
+                   for ms, ps, bl in zip(df.pop("mode_list"), df.pop("private_list"), df["bus_lines"], strict=True)]
     geometry = gpd.GeoSeries([wkb.loads(bytes(b)) for b in df.pop("wkb")], crs="EPSG:4326")
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
 

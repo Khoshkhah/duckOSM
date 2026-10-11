@@ -42,6 +42,7 @@ class Options:
     h3_resolution: int = 8
     merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
     global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/design/global_junction_segmentation.md
+    infer_separate_sidewalks: bool = True  # a road with footway=sidewalk lines beside it on both sides and no sidewalk tag gets sidewalk=separate (walked on its sidewalks, not its carriageway). See processors/separate_sidewalks.py
     functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/design/walk_cycle_type.md
     cycling_dismount: bool = True          # cycling also gets footway/pedestrian as dismount=TRUE edges (push-the-bike: walking speed, bidirectional) so cycleways connected only via them survive the component clean-up. See docs/design/cycling_dismount_edges.md
     process_speeds: bool = True
@@ -54,6 +55,7 @@ class Options:
     boundary_cell_resolutions: Optional[list[int]] = None
 
     build_features: bool = True            # build the features.* base-map layers (water, land, buildings, POIs…) for base maps (mapstyle); PBF builds only
+    bus_routes: bool = True                # bus.routes / bus.route_edges: the driving edges each OSM bus route relation travels (needs driving; PBF builds only). See docs/concepts/networks.md#bus-routes
     sea: Optional[str] = "overture"        # features.ocean, the sea (OSM only has coastline lines): 'overture' = Overture Maps' ocean polygons, read for the area from S3 (needs the network; offline it is skipped), or false. See docs/design/sea.md
     clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
 

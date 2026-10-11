@@ -18,9 +18,13 @@ from duckosm.processors.path_connector import PathConnector
 from duckosm.processors.component_filter import ComponentFilter
 from duckosm.processors.duckdb_clipper import DuckdbClipper
 from duckosm.processors.osm_overrides import OsmOverrides
+from duckosm.processors.separate_sidewalks import SeparateSidewalks
+from duckosm.processors.lane_profile import LaneProfile
 from duckosm.processors.multimodal import MultimodalBuilder, TransferPointExtractor
 
 __all__ = [
+    "SeparateSidewalks",
+    "LaneProfile",
     "BaseProcessor",
     "RoadFilter",
     "OsmOverrides",

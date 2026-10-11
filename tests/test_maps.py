@@ -19,6 +19,8 @@ def monaco(tmp_path_factory):
     cfg = Config.from_yaml(str(ROOT / "config" / "sample_monaco.yaml"))
     cfg.source.pbf_path = str(ROOT / cfg.source.pbf_path)
     cfg.boundary.path = str(ROOT / cfg.boundary.path)
+    if cfg.osm_overrides:
+        cfg.osm_overrides = str(ROOT / cfg.osm_overrides)     # the sample's fixes file is relative to the repo too
     cfg.output_path = str(d)
     import os
     cwd = os.getcwd(); os.chdir(d)
