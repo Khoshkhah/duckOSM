@@ -341,3 +341,11 @@ and the link is not there. The roundabout is a loop of one-way ways without `jun
 
 **Fix.** `exclude_modes: [driving, cycling, walking]` for way `93137600` in `osm_overrides.yaml` (an override cannot change a road's
 shape); upstream, redraw the roundabout in OpenStreetMap from current imagery and tag its ring `junction=roundabout`.
+
+## Beausoleil: building under the Avenue de France interchange (way 138590891)
+
+**What.** A `building=yes` outline from the 2011 French cadastre (717 m²) lies 41 % under the bridge deck of Avenue de France /
+Avenue Princesse Grace (ways 4230085, 39838822). In 3D the deck ran through it.
+
+**Fix.** `remove: true` for way `138590891` in `osm_overrides.yaml` (the way is dropped from `raw.ways`, so no building is made from
+it). Upstream: check the outline against current imagery and correct or delete it in OpenStreetMap.

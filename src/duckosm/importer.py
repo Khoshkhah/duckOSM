@@ -118,6 +118,8 @@ class DuckOSM:
             if self.config.effective_boundary_path:
                 global_steps.append(("clip_pbf", "Clipping PBF to boundary", self._clip_pbf))
             global_steps.append(("load_pbf", "Loading PBF file", self._load_pbf))
+            if self.config.osm_overrides:      # (a way an OSM fix removes: gone before any step reads raw.ways)
+                global_steps.append(("remove_ways", "Removing ways the OSM fixes remove", self._remove_ways))
             if self.config.effective_boundary_path:
                 global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
                 if self.config.options.boundary_cells:
@@ -359,6 +361,14 @@ class DuckOSM:
             logger.warning("H3 extension not available, using Python fallback")
             self._h3_available = False
     
+    def _remove_ways(self) -> None:
+        """Drop from raw.ways every way an osm_overrides rule marks `remove: true` (a wrong building outline, a way that is not there)."""
+        import yaml
+        rules = (yaml.safe_load(Path(self.config.osm_overrides).read_text()) or {}).get("overrides") or []
+        ids = [int(r["osm_id"]) for r in rules if r.get("remove")]
+        if ids:
+            self.con.execute("DELETE FROM raw.ways WHERE osm_id IN (SELECT unnest(?::BIGINT[]))", [ids])
+
     def _load_pbf(self) -> None:
         """Load PBF file using ST_READOSM and save raw data."""
         logger.info("Loading PBF file...")

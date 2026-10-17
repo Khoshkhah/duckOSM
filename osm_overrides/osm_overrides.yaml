@@ -13,6 +13,7 @@
 #   lanes_backward  int
 #   layer           int   — vertical stacking level (fixes a wrong OSM `layer` tag)
 #   exclude_modes   list  — remove the way from these modes' networks (driving/cycling/walking)
+#   remove          bool  — drop the way from the build entirely (raw.ways, so no road, building or feature): any way, not only roads
 #   turn_lanes_forward / turn_lanes_backward  str — the painted arrows, OSM turn:lanes syntax ("through;left|right")
 #   note            free text (provenance)
 #
@@ -212,6 +213,10 @@ overrides:
   - osm_id: 507581429        # Boulevard Princesse Charlotte before Boulevard du General Leclerc: the bus lane turns right
     turn_lanes_forward: "through|through;right|right"
     note: "2026-10-10, from the data (not checked in Street View; the aerial image is in shadow): three lanes (two car lanes, the bus lane) meet two roads of two lanes each, straight on and Leclerc; only a bus lane turning right fits both with OSM's through|through;right| (SUMO could not apply three straight lanes into two); 6 bus routes turn right here"
+  # --- Monaco / Beausoleil ---
+  - osm_id: 138590891        # building=yes from the 2011 French cadastre under the Avenue de France interchange (known_osm_issues)
+    remove: true
+    note: "cadastre outline under the bridge deck a1 (41 % of it under the deck); Kaveh, 2026-10-17: remove it"
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
