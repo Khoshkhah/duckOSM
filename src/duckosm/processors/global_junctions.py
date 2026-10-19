@@ -25,6 +25,7 @@ mode reads the same table.
 import logging
 
 from duckosm.processors.base import BaseProcessor
+from duckosm.processors.road_filter import _ped_ok
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,8 @@ class GlobalJunctions(BaseProcessor):
         self.execute(f"""
             CREATE OR REPLACE TABLE main.global_junctions AS
             WITH hw_ways AS (
-                SELECT refs, map_extract(tags, 'highway')[1] NOT IN {_NON_ROAD_HIGHWAYS} AS is_road
+                -- a pedestrian street that cars may use is a road in driving (road_filter._ped_ok)
+                SELECT refs, (map_extract(tags, 'highway')[1] NOT IN {_NON_ROAD_HIGHWAYS} OR {_ped_ok()}) AS is_road
                 FROM raw.ways
                 WHERE map_extract(tags, 'highway')[1] IS NOT NULL
                   AND map_extract(tags, 'highway')[1] NOT IN {_NOT_BUILT}

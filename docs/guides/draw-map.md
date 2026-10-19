@@ -35,7 +35,7 @@ page are in its [docs](https://khoshkhah.github.io/mapstyle/)).
 **Other palettes, or colour by a column** (needs a clone of the repo):
 
 ```bash
-python scripts/roadstyle_map.py --db monaco.duckdb --palette mono           # highsat | carto | mono
+python scripts/roadstyle_map.py --db monaco.duckdb --palette mono
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
 

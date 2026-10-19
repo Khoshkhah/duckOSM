@@ -25,6 +25,14 @@ def _most_specific(*keys):
     return f"COALESCE({', '.join(_tag(k) for k in keys)})"
 
 
+def _ped_ok():
+    """A highway=pedestrian way that explicitly admits cars: rescued into driving as living_street."""
+    mv = f"COALESCE({_tag('motorcar')}, {_tag('motor_vehicle')})"
+    # COALESCE: no car tag is NULL, and NOT (NULL) is NULL (the pedestrian label would be skipped)
+    return (f"COALESCE({_tag('highway')} = 'pedestrian' AND ({mv} IN ('yes', 'designated', 'permissive') "
+            f"OR {_tag('access')} IN ('delivery', 'destination', 'agricultural')), FALSE)")
+
+
 class RoadFilter(BaseProcessor):
     """
     Filter OSM data to highway features only.
@@ -68,20 +76,16 @@ class RoadFilter(BaseProcessor):
                 'service', 'living_street', 'road', 'busway',      # busway: bus-only, see _access_expression
             ]
             road_list = ", ".join(f"'{h}'" for h in road_classes)
-            mv = ("COALESCE(map_extract(tags, 'motorcar')[1], "
-                  "map_extract(tags, 'motor_vehicle')[1])")
-            ped_ok = (
-                "map_extract(tags, 'highway')[1] = 'pedestrian' AND ("
-                f"{mv} IN ('yes', 'designated', 'permissive') "
-                "OR map_extract(tags, 'access')[1] IN ('delivery', 'destination', 'agricultural'))"
-            )
+            ped_ok = _ped_ok()
             highway_expr = f"""
                 CASE WHEN {ped_ok} THEN 'living_street'
                      ELSE map_extract(tags, 'highway')[1] END
             """
+            # every other highway=pedestrian way is kept too: it moves to private_edges (access
+            # 'pedestrian' / 'private' / 'delivery', see _access_expression), never routed
             where_clause = f"""
                 map_extract(tags, 'highway')[1] IN ({road_list})
-                OR ({ped_ok})
+                OR map_extract(tags, 'highway')[1] = 'pedestrian'
             """
         elif self.mode == "walking":
             # Every class OSM lets people walk on, except where the sidewalk is a separate way (you
@@ -261,7 +265,11 @@ class RoadFilter(BaseProcessor):
             bus_ok = (f"({_tag('bus')} IN ('yes', 'designated') "
                       f"OR {_tag('psv')} IN ('yes', 'designated'))")
             # a road only buses (or taxis, psv) may use: 'bus', kept like a private road
-            return f"""CASE WHEN {_tag('highway')} = 'busway' OR {car} = 'psv'
+            # a pedestrian street cars may not use is moved to private_edges (docs/design/pedestrian_private_edges.md):
+            # its label is the car tag when that says delivery or private, else 'pedestrian'
+            return f"""CASE WHEN {_tag('highway')} = 'pedestrian' AND NOT ({_ped_ok()})
+                                  THEN CASE WHEN {car} IN ('delivery', 'private') THEN {car} ELSE 'pedestrian' END
+                             WHEN {_tag('highway')} = 'busway' OR {car} = 'psv'
                                   OR ({car} IN ('no', 'private') AND {bus_ok}) THEN 'bus'
                              ELSE {car} END"""
         if self.mode == "walking":

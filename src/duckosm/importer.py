@@ -184,7 +184,7 @@ class DuckOSM:
 
             # Private roads (the mode's effective access is 'private') leave `edges` for
             # `private_edges` before the graph: visible on maps, never routable.
-            steps.append(("split_private", f"[{mode}] Moving private roads", self._split_private))
+            steps.append(("split_private", f"[{mode}] Moving private roads", lambda m=mode: self._split_private(m)))
 
             if self.config.options.extract_restrictions:
                 # Turn restrictions only for driving for now
@@ -655,20 +655,23 @@ class DuckOSM:
         """Add walk_type / cycle_type to the mode's edges from OSM sub-tags (walking/cycling only)."""
         FunctionalType(self.con, mode=mode).run()
 
-    def _split_private(self) -> None:
+    def _split_private(self, mode: str = "driving") -> None:
         """Move the roads you may not use out of `edges` into `private_edges` (same columns):
-        private roads, and in driving the bus-only roads and bus lanes (access 'bus'). Routing, the
-        graph of legal turns and every export then only see roads you may use; the maps still draw
-        them. See docs/design/access_private.md and docs/design/bus_only_edges.md."""
-        self.con.execute("CREATE OR REPLACE TABLE private_edges AS SELECT * FROM edges "
-                         "WHERE access IN ('private', 'bus')")
-        n, n_bus = self.con.execute("SELECT count(*), count(*) FILTER (WHERE access = 'bus') "
-                                    "FROM private_edges").fetchone()
+        private roads, and in driving the bus-only roads and bus lanes (access 'bus') and the
+        pedestrian streets (highway 'pedestrian': access 'pedestrian', 'private' or 'delivery'; the
+        ones cars may use were reclassed to living_street). Routing, the graph of legal turns and
+        every export then only see roads you may use; the maps still draw them. See
+        docs/design/access_private.md, bus_only_edges.md and pedestrian_private_edges.md."""
+        moved = "access IN ('private', 'bus')" + (" OR highway = 'pedestrian'" if mode == "driving" else "")
+        self.con.execute(f"CREATE OR REPLACE TABLE private_edges AS SELECT * FROM edges WHERE {moved}")
+        n, n_bus, n_ped = self.con.execute(
+            "SELECT count(*), count(*) FILTER (WHERE access = 'bus'), count(*) FILTER (WHERE highway = 'pedestrian') "
+            "FROM private_edges").fetchone()
         if n:
-            self.con.execute("DELETE FROM edges WHERE access IN ('private', 'bus')")
+            self.con.execute(f"DELETE FROM edges WHERE {moved}")
             self.con.execute("DELETE FROM nodes WHERE node_id NOT IN "
                              "(SELECT source FROM edges UNION SELECT target FROM edges)")
-        logger.info(f"  {n:,} edges moved to private_edges ({n_bus:,} for buses only)")
+        logger.info(f"  {n:,} edges moved to private_edges ({n_bus:,} for buses only, {n_ped:,} pedestrian)")
 
     def _mark_dismount(self) -> None:
         """Flag cycling edges that are walked, not ridden (dismount column)."""

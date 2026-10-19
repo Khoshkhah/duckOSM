@@ -1,8 +1,8 @@
 """Maps of a built network, drawn by mapstyle (docs/design/viz_on_mapstyle.md).
 
 `duckosm viz` writes one page with every mode (``<name>_map.html``) and one page per mode
-(``<name>_<mode>_network.html``), over the database's own base map (water, land, buildings, the
-sea); private roads and bus lanes are drawn but never routed. The route planner is in
+(``<name>_<mode>_network.html``, only that mode's edges and its private roads), over the database's own base map (water, land, buildings, the
+sea); private roads, bus lanes and pedestrian streets are drawn but never routed. The route planner is in
 :mod:`duckosm.route_map`. Needs the ``viz`` extra (mapstyle).
 """
 import logging
@@ -51,7 +51,8 @@ def render_maps(db, modes=None, name=None, out_dir="reports", basemap=None, arro
     pages = ([("all", out / f"{name}_map.html")] if all_modes else []) + \
             [(m, out / f"{name}_{m}_network.html") for m in modes]
     for mode, path in pages:
-        ms.render_map(str(db), mode=mode, **kw).save(str(path))
+        # a mode's page has only that mode's edges and private_edges (mapstyle only=, docs/design/pedestrian_private_edges.md)
+        ms.render_map(str(db), mode=mode, only=(mode != "all"), **kw).save(str(path))
         logger.info(f"  Map: {path}")
     return [p for _, p in pages]
 

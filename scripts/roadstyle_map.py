@@ -14,6 +14,7 @@ legend) via the `roadstyle` package.
 Needs: geopandas + roadstyle (pip install geopandas roadstyle).
 """
 import argparse
+import os
 from pathlib import Path
 
 import duckdb
@@ -28,19 +29,21 @@ def main():
     ap.add_argument("--db", required=True, help="duckOSM .duckdb file")
     ap.add_argument("--mode", default="driving", help="schema: driving | walking | cycling")
     ap.add_argument("--out", default=None, help="output .html (default: <db>_<mode>.html)")
-    ap.add_argument("--basemap", default="voyager", help="default base map (selected on load)")
-    ap.add_argument("--basemaps", default="voyager,positron,esri_gray,osm,satellite",
-                    help="comma list of base maps offered as a toggleable layer switcher; "
-                         "'' for none. Any of: voyager positron esri_gray osm dark_matter satellite")
-    ap.add_argument("--theme", default="light", help="light | dark")
-    ap.add_argument("--palette", default="highsat",
-                    help="road colour palette: highsat (high-saturation, default) | carto "
-                         "(OSM-standard look) | mono (grayscale) | any registered palette name")
+    # None = roadstyle's own default (settings, roadstyle.json), so the script follows the library
+    ap.add_argument("--basemap", default=None, help="default base map (selected on load)")
+    ap.add_argument("--basemaps", default=None,
+                    help="comma list of base maps offered as a layer switcher; '' for none")
+    ap.add_argument("--theme", default=None, help="light | dark")
+    ap.add_argument("--palette", default=None, help="road colour palette: any registered name")
     ap.add_argument("--color-by", default=None, help="numeric/categorical column to colour by")
     ap.add_argument("--cmap", default=None, help="matplotlib cmap for --color-by")
     ap.add_argument("--copy-field", default="edge_id",
                     help="column copied to the clipboard on edge click ('' to disable)")
     ap.add_argument("--title", default=None)
+    ap.add_argument("--google-3d", action=argparse.BooleanOptionalAction,
+                    default=bool(os.environ.get("GOOGLE_MAPS_KEY")),
+                    help="a Google 3D window linked to the map (default: on when GOOGLE_MAPS_KEY is set); "
+                         "serve the page over http, the key does not work from file://")
     a = ap.parse_args()
 
     db = Path(a.db).resolve()
@@ -84,12 +87,15 @@ def main():
 
     tooltip = [c for c in (id_col, "highway", "name", "bridge", "tunnel", a.color_by)
                if c and c in g.columns]
-    kw = dict(theme=a.theme, basemap=a.basemap, palette=a.palette, tooltip=tooltip,
-              name=a.title or db.stem, legend=True,
+    kw = dict(tooltip=tooltip, name=a.title or db.stem, legend=True,
               copy_field=id_col)                    # click an edge -> copy this column
-    layers = [b.strip() for b in a.basemaps.split(",") if b.strip()]
-    if layers:                                        # toggleable base-map layer switcher
-        kw["basemaps"] = [a.basemap] + [b for b in layers if b != a.basemap]
+    kw.update({k: v for k, v in (("theme", a.theme), ("basemap", a.basemap),
+                                 ("palette", a.palette)) if v})
+    if a.basemaps:                                    # toggleable base-map layer switcher
+        layers = [b.strip() for b in a.basemaps.split(",") if b.strip()]
+        kw["basemaps"] = ([a.basemap] if a.basemap else []) + [b for b in layers if b != a.basemap]
+    if a.google_3d:
+        kw["google_3d"] = True                        # the key comes from GOOGLE_MAPS_KEY
     if a.color_by:                                    # data-driven colour overrides class styling
         kw["color_by"] = a.color_by
         if a.cmap:

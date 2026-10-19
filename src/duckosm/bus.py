@@ -148,8 +148,9 @@ def match_bus_routes(con):
     if len(matched) != len(step_df):
         raise RuntimeError("a node pair of a way lies on two driving edges in the same direction: the route cannot pick one")
 
-    private = matched["bus_lane"].fillna(False).astype(bool) & (matched["access"] != "bus")
-    bad = matched["edge_id"].isna() | private
+    unusable = matched["bus_lane"].fillna(False).astype(bool) & (matched["access"] != "bus")
+    private = unusable & (matched["access"] == "private")      # a pedestrian street or a delivery-only one is "no_edge", as before
+    bad = matched["edge_id"].isna() | unusable
     kind = pd.Series("no_edge", index=matched.index).where(~private, "private")
     miss = matched[bad].assign(kind=kind[bad])
     miss = miss[(miss[["relation_id", "member", "kind"]] != miss[["relation_id", "member", "kind"]].shift()).any(axis=1)]   # one row per run

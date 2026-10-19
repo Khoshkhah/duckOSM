@@ -36,3 +36,27 @@ def test_paths_are_cut_where_any_way_meets_them():
     ways = [("pedestrian", [1, 2, 3, 4]), ("footway", [2, 9]), ("cycleway", [3, 8]), ("cycleway", [8, 9])]
     assert _junctions(ways, road=False) == {2, 3, 8, 9}
     assert _junctions(ways) == set()
+
+
+def _junctions_tags(ways, road=True):
+    """Like _junctions, with full tag maps: ways = [({tags}, refs)]."""
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA raw")
+    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
+    for i, (tags, refs) in enumerate(ways, 1):
+        kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
+        con.execute(f"INSERT INTO raw.ways VALUES ({i}, MAP {{{kv}}}, {refs})")
+    GlobalJunctions(con).run()
+    return {r[0] for r in con.execute(
+        "SELECT node_id FROM main.global_junctions WHERE is_road_junction = ?", [road]).fetchall()}
+
+
+def test_a_pedestrian_street_cars_may_use_is_a_road():
+    # two pedestrian ways 1-2 and 2-3 with motor_vehicle=yes (driving makes them living_street): 2 is a road cut, else
+    # the driving segmenter finds no end for either way and drops both (Olof Palmes Gata, Norrmalm)
+    open_ = {"highway": "pedestrian", "motor_vehicle": "yes"}
+    assert _junctions_tags([(open_, [1, 2]), (open_, [2, 3])]) == {1, 2, 3}
+    # no car tag: a plain pedestrian street, only a path cut at 2
+    plain = {"highway": "pedestrian"}
+    assert _junctions_tags([(plain, [1, 2]), (plain, [2, 3])]) == set()
+    assert _junctions_tags([(plain, [1, 2]), (plain, [2, 3])], road=False) == {2}

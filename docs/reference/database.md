@@ -76,7 +76,9 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 
 The roads the mode may not use, built like `edges` and then moved out of it: private roads
 (`access` is `private`) and, in driving, bus-only roads and bus lanes (`access` is `bus`; [bus
-lanes](../concepts/networks.md#access-private-and-forbidden-roads)). They
+lanes](../concepts/networks.md#access-private-and-forbidden-roads)) and the pedestrian streets that
+cars may not use (`highway` is `pedestrian`; `access` is `pedestrian`, `private` or `delivery`; [pedestrian
+streets](../concepts/networks.md#pedestrian-streets-in-driving)). They
 are never routable: not in `turn_restrictions` or any export, nor in the routed rows of `edge_graph`
 (the bus-only edges have rows of their own there, `uses = 'bus'`, which only the GMNS export reads), and `nodes` holds only
 the ends of routable edges. The maps draw them, marked. [Access: private and forbidden roads](../concepts/networks.md#access-private-and-forbidden-roads).

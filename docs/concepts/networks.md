@@ -60,11 +60,29 @@ and taxis; both count as `bus`). A **bus lane against a one-way street** (`onewa
 that direction in cycling and walking. Monaco: 18 bus edges, among them the contraflow bus lane of
 Boulevard des Moulins.
 
+### Pedestrian streets in driving
+
+A `highway=pedestrian` way that cars may use (`motorcar` or `motor_vehicle` is `yes`, `designated` or
+`permissive`, or `access` is `delivery`, `destination` or `agricultural`) is a `living_street` in
+`driving.edges`. Every other pedestrian way is built in driving too (cut at the same points, with the
+same `edge_id` as in walking), then moved to `driving.private_edges` with `highway = 'pedestrian'`.
+`access` tells why cars cannot use it:
+
+| The most specific car tag (`motorcar`, `motor_vehicle`, `vehicle`, `access`) | `access` |
+|---|---|
+| `delivery` (from `motorcar` or `motor_vehicle`) | `delivery` |
+| `private` | `private` |
+| none, `no`, or any other value | `pedestrian` |
+
+These ways are never routed or exported. The maps draw them. Other path classes (`footway`, `path`,
+`steps`, `cycleway`) are not in driving. Norrmalm: 831 edges (783 `pedestrian`, 32 `delivery`, 16
+`private`); `driving.edges` is unchanged. Design: `docs/design/pedestrian_private_edges.md`.
+
 Monaco:
 
 | Mode | Routable edges | In `private_edges` |
 |---|---|---|
-| `driving` | 2,765 | 214 (196 private, 18 for buses) |
+| `driving` | 2,765 | 689 (473 pedestrian, 198 private, 18 for buses) |
 | `walking` | 10,952 | 154 |
 | `cycling` | 10,274 | 133 |
 
