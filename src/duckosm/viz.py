@@ -5,7 +5,6 @@
 sea); private roads, bus lanes and pedestrian streets are drawn but never routed. The route planner is in
 :mod:`duckosm.route_map`. Needs the ``viz`` extra (mapstyle).
 """
-import inspect
 import logging
 import os
 from pathlib import Path
@@ -57,13 +56,8 @@ def render_maps(db, modes=None, name=None, out_dir="reports", basemap=None, arro
     pages = ([("all", out / f"{name}_map.html")] if all_modes else []) + \
             [(m, out / f"{name}_{m}_network.html") for m in modes]
     for mode, path in pages:
-        # a mode's page has only that mode's edges and private_edges (mapstyle only=, docs/design/pedestrian_private_edges.md);
-        # an older mapstyle has no only=: its page has every mode's roads
-        if mode != "all" and "only" in inspect.signature(ms.render_map).parameters:
-            kw_page = {**kw, "only": True}
-        else:
-            kw_page = kw
-        ms.render_map(str(db), mode=mode, **kw_page).save(str(path))
+        # a mode's page has only that mode's edges and private_edges (mapstyle 0.5 only=, docs/design/pedestrian_private_edges.md)
+        ms.render_map(str(db), mode=mode, only=(mode != "all"), **kw).save(str(path))
         logger.info(f"  Map: {path}")
     return [p for _, p in pages]
 
