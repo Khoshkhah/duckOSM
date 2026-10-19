@@ -5,7 +5,9 @@
 sea); private roads, bus lanes and pedestrian streets are drawn but never routed. The route planner is in
 :mod:`duckosm.route_map`. Needs the ``viz`` extra (mapstyle).
 """
+import inspect
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger("duckosm")
@@ -21,7 +23,7 @@ def mapstyle_module():
 
 
 def render_maps(db, modes=None, name=None, out_dir="reports", basemap=None, arrows=True,
-                boundary=True, all_modes=True):
+                boundary=True, all_modes=True, google_3d=None):
     """Write the maps of the built database ``db`` (a path) into ``out_dir``: with ``all_modes``,
     ``<name>_map.html`` with every mode, then ``<name>_<mode>_network.html`` for each of ``modes``
     (default: every mode in the db). ``basemap``: the first background (default: the database's own
@@ -42,6 +44,10 @@ def render_maps(db, modes=None, name=None, out_dir="reports", basemap=None, arro
         raise ValueError(f"mode(s) {unknown} not in {db} (present: {present or 'none'})")
     name = name or Path(db).stem
     kw = {"arrows": arrows}
+    if google_3d is None:
+        google_3d = bool(os.environ.get("GOOGLE_MAPS_KEY"))
+    if google_3d:
+        kw["google_3d"] = True                        # the key is roadstyle's: GOOGLE_MAPS_KEY
     if basemap:
         kw["basemap"] = basemap
     if outline:
@@ -51,8 +57,13 @@ def render_maps(db, modes=None, name=None, out_dir="reports", basemap=None, arro
     pages = ([("all", out / f"{name}_map.html")] if all_modes else []) + \
             [(m, out / f"{name}_{m}_network.html") for m in modes]
     for mode, path in pages:
-        # a mode's page has only that mode's edges and private_edges (mapstyle only=, docs/design/pedestrian_private_edges.md)
-        ms.render_map(str(db), mode=mode, only=(mode != "all"), **kw).save(str(path))
+        # a mode's page has only that mode's edges and private_edges (mapstyle only=, docs/design/pedestrian_private_edges.md);
+        # an older mapstyle has no only=: its page has every mode's roads
+        if mode != "all" and "only" in inspect.signature(ms.render_map).parameters:
+            kw_page = {**kw, "only": True}
+        else:
+            kw_page = kw
+        ms.render_map(str(db), mode=mode, **kw_page).save(str(path))
         logger.info(f"  Map: {path}")
     return [p for _, p in pages]
 

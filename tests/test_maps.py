@@ -116,3 +116,17 @@ def test_route_map_opens_on_walk_drive(monaco, tmp_path):
         assert "change" in pg.evaluate("() => document.getElementById('rm-result').innerText")   # changes of mode
         b.close()
 
+
+
+def test_viz_google_3d_follows_the_key(monaco, tmp_path, monkeypatch):
+    pytest.importorskip("mapstyle")
+    from duckosm.viz import render_maps
+    monkeypatch.delenv("GOOGLE_MAPS_KEY", raising=False)
+    off = render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False)[0].read_text()
+    assert "_g3d = false" in off
+    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test-key")
+    on = render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False)[0].read_text()
+    assert "_g3d = true" in on
+    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test-key")
+    assert "_g3d = false" in render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False,
+                                         google_3d=False)[0].read_text()

@@ -30,7 +30,7 @@ def main():
     ap.add_argument("--mode", default="driving", help="schema: driving | walking | cycling")
     ap.add_argument("--out", default=None, help="output .html (default: <db>_<mode>.html)")
     # None = roadstyle's own default (settings, roadstyle.json), so the script follows the library
-    ap.add_argument("--basemap", default=None, help="default base map (selected on load)")
+    ap.add_argument("--basemap", default="blank", help="default base map (selected on load; blank: no tiles)")
     ap.add_argument("--basemaps", default=None,
                     help="comma list of base maps offered as a layer switcher; '' for none")
     ap.add_argument("--theme", default=None, help="light | dark")

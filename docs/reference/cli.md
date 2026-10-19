@@ -168,6 +168,7 @@ duckosm viz [OPTIONS] DB
 | `--out-dir TEXT` | output folder; files are `<name>_map.html` and `<name>_<mode>_network.html` | `reports` |
 | `--arrows` / `--no-arrows` | one-way arrows, shown when zoomed in | on |
 | `--boundary` / `--no-boundary` | draw `main.boundary`, if there is one | on |
+| `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map. It needs a Google Maps key in `GOOGLE_MAPS_KEY`, and the page must be served over http at an address on the key's website list | on when `GOOGLE_MAPS_KEY` is set |
 
 ### `levels`
 

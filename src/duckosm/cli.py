@@ -318,7 +318,10 @@ def admin(args):
               help='Direction arrows on one-way roads (shown when zoomed in)')
 @click.option('--boundary/--no-boundary', default=True, show_default=True,
               help="Draw the area's boundary (main.boundary), if present")
-def viz(db, modes, basemap, out_dir, arrows, boundary):
+@click.option('--google-3d/--no-google-3d', default=None,
+              help='A Google 3D window linked to the map (default: on when GOOGLE_MAPS_KEY is set; '
+                   'serve the page over http, the key does not work from file://)')
+def viz(db, modes, basemap, out_dir, arrows, boundary, google_3d):
     """Draw the maps of a built network with mapstyle: one page with every mode
     (<name>_map.html) and one per mode (<name>_<mode>_network.html), over the database's own base
     map. With -m, only those modes' pages. Needs duckosm[viz].
@@ -328,7 +331,7 @@ def viz(db, modes, basemap, out_dir, arrows, boundary):
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     try:
         paths = render_maps(db, modes=list(modes) or None, out_dir=out_dir, basemap=basemap,
-                            arrows=arrows, boundary=boundary, all_modes=not modes)
+                            arrows=arrows, boundary=boundary, all_modes=not modes, google_3d=google_3d)
     except (ImportError, ValueError) as e:
         raise click.ClickException(str(e))
     for p in paths:
