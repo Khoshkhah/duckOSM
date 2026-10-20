@@ -88,6 +88,7 @@ duckosm sumo monaco.duckdb                    # -> sumo/monaco.net.xml (edge ids
 duckosm matsim monaco.duckdb                  # -> monaco_network.xml.gz
 duckosm gmns monaco.duckdb                    # -> monaco_gmns.duckdb (lanes, movements)
 duckosm export-gis monaco.duckdb              # -> monaco.gpkg
+duckosm export-gis monaco.duckdb -f geoparquet # -> monaco_geoparquet/edges_driving.parquet, … (+ visualization.edge_levels columns)
 duckosm viz monaco.duckdb                     # -> reports/monaco_map.html + one page per mode
 duckosm route-map monaco.duckdb               # -> reports/monaco_route_map.html (Drive/Walk/Cycle/Walk + drive)
 ```
