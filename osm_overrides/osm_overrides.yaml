@@ -217,6 +217,72 @@ overrides:
   - osm_id: 138590891        # building=yes from the 2011 French cadastre under the Avenue de France interchange (known_osm_issues)
     remove: true
     note: "cadastre outline under the bridge deck a1 (41 % of it under the deck); Kaveh, 2026-10-17: remove it"
+  # --- Vancouver, Granville Bridge and Fir Street (known_osm_issues #13): moved here from urbanstyle's corrections/lanes.json on
+  # 2026-10-19, so that SUMO (duckosm gmns) builds these lanes itself and gives their geometry ---
+  - osm_id: 473319095
+    lanes: 2
+    note: "Fir Street ramp of the Granville Bridge on the ground: 2 lanes on the 2018 aerial photo; OSM has no lanes tag"
+
+  - osm_id: 1316244492
+    lanes_forward: 2
+    lanes_backward: 2
+    note: "Granville Street, Granville Bridge arm a8: 2 lanes each way; OSM lanes=2 in all"
+
+  - osm_id: 37226820
+    lanes: 2
+    note: "Granville Bridge ramp a3, last part: 2 lanes, checked by Kaveh; OSM lanes=1"
+
+  - osm_id: 1419040137
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a9: 2 lanes backward, checked by Kaveh; OSM lanes:backward=1"
+
+  - osm_id: 1419040132
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a10: 3 forward, 2 backward, checked by Kaveh; OSM 2 and 1"
+
+  - osm_id: 1285848467
+    lanes: 3
+    note: "Granville Bridge a12: 3 lanes, checked by Kaveh; OSM lanes=2"
+
+  - osm_id: 1419040133
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a10: 3 forward, 2 backward, checked by Kaveh; OSM lanes=4 in all"
+
+  - osm_id: 1419040138
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a10, the 19 m between ways 1419040133 and 1419040132: 3 forward as both neighbours, so no lane drops for 19 m"
+
+  - osm_id: 35354210
+    lanes: 2
+    note: "Granville Bridge ramp a2 (4th Avenue): two lanes past the gore with a7 on the 2018 aerial photo (Kaveh, 2026-10-12); OSM lanes=1"
+
+  - osm_id: 299511148
+    lanes: 3
+    note: "Fir Street south of the Granville Bridge ramp: the ramp's 2 lanes and Fir Street's lane run on as 3 (Kaveh, 2026-10-15); OSM lanes=2"
+
+  - osm_id: 1210125710
+    lanes_forward: 2
+    lanes_backward: 3
+    note: "Fir Street south of the left-turn pocket: 2 southbound, 3 northbound on the 2018 aerial photo (Kaveh, 2026-10-15); OSM 1 + 3"
+
+  - osm_id: 1210125711
+    lanes_forward: 2
+    lanes_backward: 2
+    note: "Fir Street: 2 lanes each way on the 2018 aerial photo (Kaveh, 2026-10-15); OSM 1 + 2"
+
+  - osm_id: 37127118
+    lanes_forward: 2
+    lanes_backward: 2
+    note: "West 5th Avenue east of Fir Street: 2 lanes each way in Street View, also through the junction (Kaveh, 2026-10-16); OSM lanes=2"
+  - osm_id: 1419040127       # Granville Bridge northbound into the north fork (n266729860), where Seymour leaves
+    turn_lanes_forward: "through|through;right|right"
+    note: "the middle lane is the shared lane (Granville St or Seymour), the right lane goes to Seymour (Kaveh, 2026-10-19); OSM has no turn:lanes, and SUMO then fed both Seymour lanes from the right lane, across the middle lane's path"
+
+
 
 # Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
 # physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
