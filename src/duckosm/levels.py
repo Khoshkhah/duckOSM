@@ -155,37 +155,62 @@ def split_inputs(inputs, ids):
     return kept, pd.DataFrame(unmatched, columns=["kind", "row"])
 
 
+def sync_inputs(db, area, roads, inputs=None, keep_unmatched=True):
+    """Write the folder's edits.csv / heads.csv / caps.csv from the tables of ``db`` (or ``inputs``, see :func:`read_inputs`): the tables are the
+    master (docs/design/levels_in_build.md). The rows of roads that are not in ``roads`` are left out; returns them as a DataFrame (``kind``, ``row``),
+    or ``None`` when roadstyle has no ``level_*`` tables (the folder's files are then the master, as before). A folder file that differs is kept
+    as ``*.csv.before``. ``keep_unmatched=False``: a clip's rows from its parent for the roads outside the clip are not kept."""
+    rs = roadstyle_module()
+    area = Path(area)
+    if not hasattr(rs, "restore_area_inputs"):
+        logger.warning("levels: this roadstyle does not keep your edits in the database (no level_* tables): the folder's files are used")
+        return None
+    inputs = read_inputs(db) if inputs is None else inputs
+    kept, unmatched = split_inputs(inputs, set(roads["edge_id"].astype(str)))
+    if not keep_unmatched:
+        unmatched = unmatched.iloc[0:0]
+    area.mkdir(parents=True, exist_ok=True)
+    for f, df in kept.items():
+        path = area / f
+        if path.exists() and path.read_text() != df.to_csv(index=False):
+            path.with_name(path.name + ".before").write_text(path.read_text())          # the folder's own, if it differs: not lost
+        df.to_csv(path, index=False)
+    if len(unmatched):
+        logger.warning(f"levels: {len(unmatched)} edit row(s) name a road that is not in this file: ignored, kept in visualization.level_unmatched")
+    return unmatched
+
+
+def is_current(db, area, roads=None):
+    """True when ``area`` holds a solved level area of exactly the roads in ``db`` (the stored numbers belong to them): no new solve is needed."""
+    import duckdb
+
+    rs = roadstyle_module()
+    area = Path(area)
+    if not ((area / "levels.csv").exists() and (area / "area.json").exists()):
+        return False
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        rs.load_area_levels(con, load_roads(db) if roads is None else roads)
+        return True
+    except ValueError:
+        return False
+    finally:
+        con.close()
+
+
 def make_and_solve(db, area=None, inputs=None, keep_unmatched=True):
     """The level area of ``db`` (docs/design/levels.md): the roads of every mode in one area folder (``area``, default ``<db>.levels`` next to
     it), solved with your edits, heads and caps, the result written into ``db`` (``visualization.edge_levels`` with each
     edge's ends). roadstyle does all of it (``roadstyle.level_area``); the area belongs to ``db``, so ``roadstyle-levels edit AREA``
     writes into it too. Returns ``{"area", "roads", "given_up", "info", "unmatched"}``.
 
-    The tables are the master (docs/design/levels_in_build.md): ``inputs`` (default: the ones in ``db``, see :func:`read_inputs`) are written to the
-    folder's edits.csv / heads.csv / caps.csv, the rows of roads that are not in ``db`` left out and kept in ``visualization.level_unmatched``.
-    ``keep_unmatched=False`` (a clip's rows from its parent: the roads outside the clip) does not keep them.
-    A roadstyle without ``level_*`` tables has no master: the folder's files are used, as before."""
-    rs = roadstyle_module()
+    The tables are the master (:func:`sync_inputs`): ``inputs`` (default: the ones in ``db``) are written to the folder's files first."""
+    roadstyle_module()
     from roadstyle.level_area import make_area, solve_area
 
     area = Path(area) if area else Path(db).with_suffix(".levels")
     roads = load_roads(db)
-    unmatched = None
-    if hasattr(rs, "restore_area_inputs"):
-        inputs = read_inputs(db) if inputs is None else inputs
-        kept, unmatched = split_inputs(inputs, set(roads["edge_id"].astype(str)))
-        if not keep_unmatched:
-            unmatched = unmatched.iloc[0:0]
-        area.mkdir(parents=True, exist_ok=True)
-        for f, df in kept.items():
-            path = area / f
-            if path.exists() and path.read_text() != df.to_csv(index=False):
-                path.with_name(path.name + ".before").write_text(path.read_text())          # the folder's own, if it differs: not lost
-            df.to_csv(path, index=False)
-        if len(unmatched):
-            logger.warning(f"levels: {len(unmatched)} edit row(s) name a road that is not in this file: ignored, kept in visualization.level_unmatched")
-    else:
-        logger.warning("levels: this roadstyle does not keep your edits in the database (no level_* tables): the folder's files are used")
+    unmatched = sync_inputs(db, area, roads, inputs, keep_unmatched)
     make_area(roads, area, db=db, id_col="edge_id")
     solved = solve_area(area)
     if unmatched is not None:

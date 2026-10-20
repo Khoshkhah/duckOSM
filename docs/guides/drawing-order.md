@@ -3,7 +3,7 @@
 ```bash
 pip install "duckosm[levels]"
 duckosm levels monaco.duckdb                 # the level area monaco.levels/, solved, written into the file
-roadstyle-levels edit monaco.levels          # optional: fix places by hand; each solve writes into the file too
+duckosm levels-edit monaco.duckdb            # optional: fix places by hand, with mapstyle's base map and every road; each Apply writes into the file
 ```
 
 When roads cross or meet, a map must decide which is painted over which: a bridge over the road under it, a street over its sidewalk, a junction without a ring between the roads that meet.

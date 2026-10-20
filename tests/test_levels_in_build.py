@@ -120,3 +120,49 @@ def test_a_clip_takes_the_edits_of_its_parent(first, tmp_path):
     assert _q(clip, "SELECT road, start_m FROM visualization.level_heads") == [(a_road, "12")]     # the road it has: kept
     tables = {r[0] for r in _q(clip, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'visualization'")}
     assert "level_unmatched" not in tables                                                          # the parent's other rows: not kept
+
+
+# ---- duckosm levels-edit -------------------------------------------------------------------------
+
+def test_levels_edit_prepares_the_area_from_the_tables(first, tmp_path):
+    from duckosm.levels import is_current
+    from duckosm.levels_edit import prepare
+    a_road, = _q(first, "SELECT edge_id FROM driving.edges ORDER BY edge_id LIMIT 1")[0]
+    con = duckdb.connect(str(first))
+    con.execute(f"CREATE OR REPLACE TABLE visualization.level_heads AS SELECT * FROM (VALUES ({a_road}::BIGINT, '11', '5')) t(road, start_m, end_m)")
+    con.close()
+    area = prepare(first, tmp_path / "work.levels")                  # a new folder: its files come from the tables, and it is solved
+    assert (area / "heads.csv").read_text().splitlines() == ["road,start_m,end_m", f"{a_road},11,5"]
+    assert is_current(first, area)
+    (area / "heads.csv").write_text("road,start_m,end_m\n")           # a file that differs from the table: the table wins, the file is kept
+    prepare(first, area)
+    assert (area / "heads.csv").read_text().splitlines()[1] == f"{a_road},11,5"
+    assert (area / "heads.csv.before").read_text() == "road,start_m,end_m\n"
+
+
+def test_levels_edit_serves_the_editor_with_mapstyle_layers(first, tmp_path):
+    pytest.importorskip("mapstyle")
+    import socket
+    import threading
+    import time
+    import urllib.request
+
+    from duckosm.levels_edit import items_for, prepare
+    from roadstyle.level_editor import serve
+    items = items_for(first)
+    overlays, kw = items(None)
+    assert overlays and all(o.visible for o in overlays) and kw == {"basemap": "blank"}      # water, land, buildings, …
+    area = prepare(first, tmp_path / "work2.levels")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    threading.Thread(target=serve, args=(area, port), kwargs={"items": items}, daemon=True).start()
+    for _ in range(60):
+        try:
+            page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=60).read().decode()
+            break
+        except OSError:
+            time.sleep(1)
+    else:
+        pytest.fail("the editor did not answer")
+    assert "Level editor" in page and "buildings" in page

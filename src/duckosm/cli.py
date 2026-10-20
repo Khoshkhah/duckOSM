@@ -352,7 +352,8 @@ def levels(db, area):
     The roads of all modes go into one level area folder (roadstyle's: roads.parquet, pairs.csv and your
     edits.csv, heads.csv, caps.csv, kept between runs). roadstyle solves it with its defaults, and every
     road's casing numbers, fill number and ends are written to visualization.edge_levels. To fix places
-    by hand: roadstyle-levels edit DB.levels (each of its solves writes into the db too). Needs duckosm[levels].
+    by hand: duckosm levels-edit DB (each of its solves writes into the db too). `duckosm build` does
+    this as its last step. Your edits are the tables visualization.level_*: they are the master. Needs duckosm[levels].
     """
     from duckosm.levels import make_and_solve
 
@@ -364,6 +365,31 @@ def levels(db, area):
     i = r["info"]
     click.echo(f"level area {r['area']}: {r['roads']:,} roads, {r['given_up']} stack pairs given up, "
                f"{i.get('order_violations', 0)} order wishes not kept, {i.get('seconds')} s; wrote visualization.edge_levels")
+
+
+@main.command(name="levels-edit")
+@click.argument('db', type=DB_PATH)
+@click.option('--area', type=click.Path(file_okay=False), default=None,
+              help='The level area folder (default: DB.levels next to the db): a work area, rewritten from the tables of the db')
+@click.option('--port', type=int, default=8780, show_default=True, help='The editor is at http://localhost:PORT/')
+@click.option('--plain', is_flag=True, help="No base-map layers (mapstyle's water, land, buildings): the editor as roadstyle draws it")
+def levels_edit(db, area, port, plain):
+    """The level editor of the db: fix which road is on top, and the head and the cap of a road end.
+
+    It is roadstyle's editor, started on the area of the file, with mapstyle's base map and every road of the
+    file: the roads of its modes and their private_edges. A file with one mode gives an editor of that mode; with
+    several, its boxes show only some. Your edits are saved in the tables visualization.level_* of the db at each
+    Apply, with the drawing order (visualization.edge_levels). Needs duckosm[levels]; the layers need duckosm[viz].
+    """
+    from duckosm.levels_edit import edit
+
+    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
+    try:
+        edit(db, area, port=port, plain=plain)
+    except (ImportError, ValueError) as e:
+        raise click.ClickException(str(e))
+    except KeyboardInterrupt:
+        click.echo("editor stopped")
 
 
 @main.command()
