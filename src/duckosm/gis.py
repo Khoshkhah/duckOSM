@@ -22,12 +22,14 @@ into the one target with ``ogr2ogr -update -append -nln <layer>`` (the same GDAL
 Shapefiles need no assembly (one layer per file by nature).
 
 GeoParquet (``fmt="geoparquet"``) writes one ``.parquet`` file per layer into a directory
-(``edges_<mode>.parquet``, ``nodes_<mode>.parquet``, ``boundary.parquet``). DuckDB writes the
+(``edges_<mode>.parquet``, ``nodes_<mode>.parquet``, ``boundary.parquet``) and ``layers.json``, the list of these
+files (file, kind, mode, count). DuckDB writes the
 GeoParquet ``geo`` metadata itself. It needs no GDAL. Column names stay as they are, and ``edge_id``
 stays BIGINT. When the db has ``visualization.edge_levels``, every edges file also gets its columns
 (except ``edge_id``) by LEFT JOIN on ``edge_id``. duckOSM only reads that table. GeoLibre
 (``?data=<url>``) and RustGIS open GeoParquet.
 """
+import json
 import logging
 import os
 import shutil
@@ -196,6 +198,11 @@ def _export_geoparquet(con, out_dir, layers):
         counts[lyr] = _count(con, schema, table)
         written.append(path)
         logger.info(f"GIS[geoparquet]: {lyr} — {counts[lyr]:,} features -> {path}")
+    # layers.json: the list of the files, so a viewer (the roadstyle GeoLibre plugin) opens the folder in one step
+    index = [{"file": f"{lyr}.parquet", "kind": lyr.split("_")[0], "mode": lyr.split("_", 1)[1] if "_" in lyr else None,
+              "count": counts[lyr]} for lyr, _, _ in layers]
+    with open(os.path.join(out_dir, "layers.json"), "w") as f:
+        json.dump({"layers": index}, f, indent=1)
     return {"fmt": "geoparquet", "dir": out_dir, "layers": counts, "files": written}
 
 

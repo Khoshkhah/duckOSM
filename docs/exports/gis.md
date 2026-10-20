@@ -25,6 +25,9 @@ opens a file from a URL (`?data=<url>`). RustGIS also opens it. DuckDB, GeoPanda
   if the table has them, `head_start_m`, `head_end_m`, `cap_start` and `cap_end`. The `nodes` and
   `boundary` files do not get them. duckOSM only reads that table. Without it, the command writes
   the edges as they are and logs one line.
+- The folder also gets `layers.json`, the list of the files: `file`, `kind` (`edges`, `nodes` or
+  `boundary`), `mode` and `count` for each. The roadstyle GeoLibre plugin reads it to open the
+  whole folder in one step (roadstyle › Open a duckOSM folder).
 
 ## Layers
 

@@ -128,9 +128,9 @@ def test_geoparquet_without_visualization_table(tmp_path):
     con = _db()
     res = to_gis(con, str(tmp_path), fmt="geoparquet")
     assert res["fmt"] == "geoparquet" and res["dir"] == str(tmp_path)
-    assert _pq_files(tmp_path) == ["boundary.parquet", "edges_driving.parquet", "nodes_driving.parquet"]
+    assert _pq_files(tmp_path) == ["boundary.parquet", "edges_driving.parquet", "layers.json", "nodes_driving.parquet"]
     assert res["layers"] == {"edges_driving": 2, "nodes_driving": 3, "boundary": 1}
-    for f in tmp_path.iterdir():                              # DuckDB writes the GeoParquet 'geo' key
+    for f in tmp_path.glob("*.parquet"):                            # DuckDB writes the GeoParquet 'geo' key
         keys = [r[0] for r in con.execute(
             f"SELECT key::VARCHAR FROM parquet_kv_metadata('{f}')").fetchall()]
         assert "geo" in keys
@@ -161,3 +161,12 @@ def test_geoparquet_adds_edge_levels_columns(tmp_path):
     assert rows[E1] == (0, 3, 7) and rows[E2] == (None, None, None)
     nodes = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM '{tmp_path}/nodes_driving.parquet'").fetchall()]
     assert "casing_start" not in nodes                         # only the edges files get them
+
+
+def test_geoparquet_writes_the_list_of_files(tmp_path):
+    import json
+    to_gis(_db(), str(tmp_path), fmt="geoparquet", boundary=False)
+    index = json.loads((tmp_path / "layers.json").read_text())["layers"]
+    assert index == [{"file": "edges_driving.parquet", "kind": "edges", "mode": "driving", "count": 2},
+                     {"file": "nodes_driving.parquet", "kind": "nodes", "mode": "driving", "count": 3}]
+    assert all((tmp_path / x["file"]).exists() for x in index)
