@@ -23,7 +23,8 @@ Shapefiles need no assembly (one layer per file by nature).
 
 GeoParquet (``fmt="geoparquet"``) writes one ``.parquet`` file per layer into a directory
 (``edges_<mode>.parquet``, ``nodes_<mode>.parquet``, ``boundary.parquet``) and ``layers.json``, the list of these
-files (file, kind, mode, count). DuckDB writes the
+files (file, kind, mode or table, count). Each ``features.*`` table (the base map) also gets a file,
+``features_<table>.parquet``. DuckDB writes the
 GeoParquet ``geo`` metadata itself. It needs no GDAL. Column names stay as they are, and ``edge_id``
 stays BIGINT. When the db has ``visualization.edge_levels``, every edges file also gets its columns
 (except ``edge_id``) by LEFT JOIN on ``edge_id``. duckOSM only reads that table. GeoLibre
@@ -183,9 +184,12 @@ def _export_shp(con, out_dir, base, layers, srs):
 
 
 def _export_geoparquet(con, out_dir, layers):
-    """One GeoParquet file per layer. DuckDB writes the 'geo' metadata for a GEOMETRY column."""
+    """One GeoParquet file per layer, plus one per ``features.*`` table (the base map: ``features_<table>``).
+    DuckDB writes the 'geo' metadata for a GEOMETRY column."""
     os.makedirs(out_dir, exist_ok=True)
     written, counts = [], {}
+    layers = layers + [(f"features_{t}", "features", t) for (t,) in con.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'features' ORDER BY 1").fetchall()]
     for lyr, schema, table in layers:
         path = os.path.join(out_dir, f"{lyr}.parquet")
         sql, joined = _select_sql(con, schema, table, for_shp=False), False
@@ -199,8 +203,9 @@ def _export_geoparquet(con, out_dir, layers):
         written.append(path)
         logger.info(f"GIS[geoparquet]: {lyr} — {counts[lyr]:,} features -> {path}")
     # layers.json: the list of the files, so a viewer (the roadstyle GeoLibre plugin) opens the folder in one step
-    index = [{"file": f"{lyr}.parquet", "kind": lyr.split("_")[0], "mode": lyr.split("_", 1)[1] if "_" in lyr else None,
-              "count": counts[lyr]} for lyr, _, _ in layers]
+    index = [{"file": f"{lyr}.parquet", "kind": "features" if schema == "features" else table,
+              **({"mode": schema} if table in ("edges", "nodes") and schema != "features" else {}),
+              **({"table": table} if schema == "features" else {}), "count": counts[lyr]} for lyr, schema, table in layers]
     with open(os.path.join(out_dir, "layers.json"), "w") as f:
         json.dump({"layers": index}, f, indent=1)
     return {"fmt": "geoparquet", "dir": out_dir, "layers": counts, "files": written}

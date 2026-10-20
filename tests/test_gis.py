@@ -170,3 +170,16 @@ def test_geoparquet_writes_the_list_of_files(tmp_path):
     assert index == [{"file": "edges_driving.parquet", "kind": "edges", "mode": "driving", "count": 2},
                      {"file": "nodes_driving.parquet", "kind": "nodes", "mode": "driving", "count": 3}]
     assert all((tmp_path / x["file"]).exists() for x in index)
+
+
+def test_geoparquet_writes_each_features_table(tmp_path):
+    import json
+    con = _db()
+    con.execute("CREATE SCHEMA features")
+    con.execute("CREATE TABLE features.buildings(osm_id BIGINT, kind VARCHAR, name VARCHAR, geom GEOMETRY)")
+    con.execute("INSERT INTO features.buildings VALUES (7, 'building', NULL, "
+                "ST_GeomFromText('POLYGON((18.06 59.32,18.061 59.32,18.061 59.321,18.06 59.32))'))")
+    to_gis(con, str(tmp_path), fmt="geoparquet", boundary=False)
+    index = json.loads((tmp_path / "layers.json").read_text())["layers"]
+    assert index[-1] == {"file": "features_buildings.parquet", "kind": "features", "table": "buildings", "count": 1}
+    assert con.execute(f"SELECT kind FROM '{tmp_path}/features_buildings.parquet'").fetchall() == [("building",)]
