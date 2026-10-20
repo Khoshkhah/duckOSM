@@ -140,6 +140,16 @@ def test_levels_edit_prepares_the_area_from_the_tables(first, tmp_path):
     assert (area / "heads.csv.before").read_text() == "road,start_m,end_m\n"
 
 
+def test_levels_edit_asks_for_google_3d_with_a_key(first, monkeypatch):
+    pytest.importorskip("mapstyle")
+    from duckosm.levels_edit import items_for
+    import pandas as pd
+    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test")
+    assert items_for(first)(pd.DataFrame({"edge": [1]}))[1]["google_3d"] is True
+    monkeypatch.delenv("GOOGLE_MAPS_KEY")
+    assert "google_3d" not in items_for(first)(pd.DataFrame({"edge": [1]}))[1]
+
+
 def test_levels_edit_serves_the_editor_with_mapstyle_layers(first, tmp_path):
     pytest.importorskip("mapstyle")
     import socket
@@ -155,6 +165,9 @@ def test_levels_edit_serves_the_editor_with_mapstyle_layers(first, tmp_path):
     overlays, kw = items(draw)
     assert overlays and all(o.visible and o.popup == [] for o in overlays)                    # water, land, buildings, …: decoration
     assert kw["basemap"] == "blank" and list(draw["access"]) == [None, None]                  # every road has an access column
+    assert "google_3d" not in kw or os.environ.get("GOOGLE_MAPS_KEY")                         # Google 3D only with a key
+    labels = {o.label for o in overlays}
+    assert {"buildings", "water"} <= labels and not labels & {"traffic_signals", "crossings", "bus_stations", "parking_p"}   # no point layers: no dots
     area = prepare(first, tmp_path / "work2.levels")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

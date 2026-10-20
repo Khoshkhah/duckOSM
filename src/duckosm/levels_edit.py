@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 from pathlib import Path
 
 from duckosm.levels import is_current, load_roads, make_and_solve, roadstyle_module, sync_inputs
@@ -33,20 +34,26 @@ def items_for(db):
     as mapstyle's all-modes map says it). ``None`` if mapstyle is not installed (the editor is then plain)."""
     try:
         from mapstyle.map import _access, feature_overlays, load_layers, load_roads
+        from mapstyle.style import load_style
     except ImportError:
         logger.warning('the editor has no base map layers: pip install "duckosm[viz]" for mapstyle')
         return None
     roads = load_roads(db)
     access = {str(e): a for e, a in zip(roads["edge_id"], _access(roads, "all"), strict=True) if isinstance(a, str)}
+    # the layers a mapstyle page opens ticked, as areas and lines: a point layer (signals, crossings, stops) is a plain dot here, without mapstyle's icons
+    names = [sp["name"] for sp in load_style("layers")["layers"] if sp.get("ticked", True) and sp["kind"] != "point"]
 
     def items(draw):
         if draw is not None:
             draw["access"] = [access.get(str(e)) for e in draw["edge"]]
-        overlays, _config = feature_overlays(load_layers(db))
+        overlays, _config = feature_overlays(load_layers(db, names))
         for o in overlays:
             o.visible = True                    # mapstyle's layers.js shows them once styled; in the editor they start visible
             o.popup, o.tooltip = [], None       # decoration: a hover would highlight every feature that has the same number
-        return overlays, {"basemap": "blank", "tooltip": ["access"]}
+        kw = {"basemap": "blank", "tooltip": ["access"]}
+        if os.environ.get("GOOGLE_MAPS_KEY"):
+            kw["google_3d"] = True              # the Google 3D window, linked to the map (it needs this key and a page address on the key's website list)
+        return overlays, kw
     return items
 
 
