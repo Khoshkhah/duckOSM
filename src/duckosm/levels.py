@@ -2,7 +2,8 @@
 
 ``duckosm levels DB`` puts the roads of every mode in one level area folder (``DB.levels``: roadstyle's roads.parquet, pairs.csv and
 your edits.csv, heads.csv, caps.csv), solves it and writes the result to ``visualization.edge_levels``. ``roadstyle-levels edit DB.levels``
-is the editor; each of its solves writes into the file too. Needs the ``levels`` extra; roadstyle is imported inside the functions.
+is the editor; each of its solves writes into the file too, with your edits.csv, heads.csv and caps.csv (``visualization.level_*``), so a
+new area folder of the file gets them back. Needs the ``levels`` extra; roadstyle is imported inside the functions.
 """
 from __future__ import annotations
 

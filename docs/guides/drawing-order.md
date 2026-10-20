@@ -33,6 +33,7 @@ Keep the three files of yours (in git, for example): with them a rebuilt file ge
 |---|---|
 | `visualization.edge_levels` | one row for every `edge_id`: `casing_start`, `casing_level`, `casing_end`, `fill_level`, and its ends as drawn: `head_start_m`, `head_end_m`, `cap_start`, `cap_end` |
 | `visualization.edge_levels_meta` | one row: where it came from (the area), the number of edges and a hash of their ids, the roadstyle version, the time |
+| `visualization.level_edits`, `level_heads`, `level_caps` | your `edits.csv`, `heads.csv` and `caps.csv`, copied at each solve, so the database holds everything. A new area folder gets them back from here (needs a roadstyle that has `restore_area_inputs`) |
 
 Both tables are replaced at each solve, by `duckosm levels` and by the editor. A stack of roads that cannot all be kept is counted in the message, never hidden.
 
