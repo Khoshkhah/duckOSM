@@ -72,6 +72,7 @@ class DuckOSM:
             self.pbf_path = Path(config.effective_pbf_path).resolve()
             self.source_db = None
         self.output_path = config.get_db_path()
+        self._level_inputs = None                 # (the level edits of the file this build replaces, keep the rows of gone roads): see _carry_level_inputs
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.con: Optional[duckdb.DuckDBPyConnection] = None
@@ -312,6 +313,8 @@ class DuckOSM:
         finally:
             if self.con:
                 self.con.close()
+        # the drawing order (roadstyle) once the database is closed: it opens the file itself, and the maps below use it
+        self._levels_step()
         # maps (mapstyle) once the database is closed: mapstyle opens it again, read-only
         if self.config.viz.enabled:
             try:
@@ -328,6 +331,38 @@ class DuckOSM:
         
         return self.output_path
     
+    def _carry_level_inputs(self):
+        """The level edits to keep (docs/design/levels_in_build.md): the ``visualization.level_*`` tables of the file this build replaces; for a
+        clip with no file of its own, those of its parent (only the rows of the roads it has are used). ``None`` if there are none or the
+        step is off."""
+        if not self.config.options.levels:
+            return None
+        from duckosm.levels import read_inputs
+        got = read_inputs(self.output_path)
+        if got:
+            return got, True
+        if self.config.source.type == "duckdb" and self.config.source.source_db:
+            got = read_inputs(self.config.source.source_db)
+            if got:
+                return got, False                    # the parent's rows for roads outside this clip are not kept
+        return None
+
+    def _levels_step(self) -> None:
+        """The last step (options.levels): the drawing order of the roads, ``visualization.edge_levels``, solved with the edits carried over.
+        Needs the ``levels`` extra (roadstyle); without it the build only warns."""
+        if not self.config.options.levels:
+            return
+        inputs, keep = self._level_inputs or (None, True)
+        try:
+            from duckosm.levels import make_and_solve
+            res = make_and_solve(self.output_path, inputs=inputs, keep_unmatched=keep)
+            logger.info(f"  Drawing order: {res['roads']:,} roads, {res['given_up']} given up, {res['unmatched']} edit row(s) not used "
+                        "(visualization.edge_levels)")
+        except ImportError as e:
+            logger.warning(f"Drawing order skipped: {e}")
+        except Exception as e:
+            logger.warning(f"Drawing order failed: {e}")
+
     def _connect(self) -> None:
         """Connect to DuckDB and load extensions."""
         logger.info("Connecting to DuckDB...")
@@ -335,6 +370,7 @@ class DuckOSM:
         # Start every build from a clean database file so a rebuild can never inherit stale
         # tables from a previous run (e.g. tables a since-removed pipeline step used to write).
         # Only the OUTPUT file is removed here — a clip's source/parent db is a different file.
+        self._level_inputs = self._carry_level_inputs()      # before the old file goes: its level_* tables are your edits
         wal = self.output_path.with_name(self.output_path.name + ".wal")
         for stale in (self.output_path, wal):
             if stale.exists():

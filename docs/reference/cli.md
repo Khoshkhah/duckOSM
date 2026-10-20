@@ -38,6 +38,7 @@ duckosm build [OPTIONS]
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
+| `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
 | `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); overrides the config's `osm_overrides` key | none |
 | `--log-file FILE` | also write the log to this file | console only |
 
@@ -174,7 +175,7 @@ duckosm viz [OPTIONS] DB
 
 Makes and solves the level area of the database and stores the drawing order in it (schema [`visualization`](database.md#visualization-schema)): every road gets a casing number
 (start, main, end), a fill number and its ends as drawn. The roads of all modes go into one level area folder next to the database (`DB.levels`), where your `edits.csv`,
-`heads.csv` and `caps.csv` are kept between runs; roadstyle solves it with its defaults. It takes long on a large network, so it is not part of the build. The database is
+`heads.csv` and `caps.csv` are written from the tables `visualization.level_*` of the database (they are the master); roadstyle solves it with them. `duckosm build` does this as its last step; this command makes it again, or later for a build with `--no-levels`. The database is
 changed in place. To fix places by hand: `roadstyle-levels edit DB.levels`. Needs `duckosm[levels]`. Guide: [Store the drawing order](../guides/drawing-order.md).
 
 ```text

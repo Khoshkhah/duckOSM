@@ -100,15 +100,107 @@ def load_roads(db):
     return gpd.GeoDataFrame(pd.concat([df, pd.Series(band, name="band")], axis=1), geometry=geometry)
 
 
-def make_and_solve(db, area=None):
+# the level area's own input, kept in the database (roadstyle: visualization.level_*): {csv file: (table, the columns that name roads)}
+INPUTS = {"edits.csv": ("level_edits", ("a", "b")), "heads.csv": ("level_heads", ("road",)), "caps.csv": ("level_caps", ("road",))}
+
+
+def read_inputs(db):
+    """The level inputs kept in the database file ``db``: ``{table: DataFrame of text}`` for ``level_edits``, ``level_heads``, ``level_caps`` and
+    ``level_unmatched`` (docs/design/levels_in_build.md); ``{}`` when the file or the tables are not there. Every value is text, so a 64-bit
+    ``edge_id`` is not rounded."""
+    import duckdb
+
+    if not Path(db).exists():
+        return {}
+    try:
+        con = duckdb.connect(str(db), read_only=True)
+    except duckdb.Error:
+        return {}
+    out = {}
+    try:
+        have = {r[0] for r in con.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'visualization'").fetchall()}
+        for table in [t for t, _ in INPUTS.values()] + ["level_unmatched"]:
+            if table in have:
+                cols = [r[0] for r in con.execute(f"DESCRIBE visualization.{table}").fetchall()]
+                out[table] = con.execute("SELECT " + ", ".join(f'CAST("{c}" AS VARCHAR) AS "{c}"' for c in cols) + f" FROM visualization.{table}").df()
+    finally:
+        con.close()
+    return out
+
+
+def split_inputs(inputs, ids):
+    """``(kept, unmatched)``: ``kept`` is ``{csv file: DataFrame}`` of the rows whose roads are all in ``ids`` (a set of ``edge_id`` text);
+    ``unmatched`` is a DataFrame (``kind`` = the table, ``row`` = the row as JSON) of the others, with the earlier unmatched rows tried again.
+    A table the inputs do not have is not in ``kept``."""
+    import json
+
+    import pandas as pd
+
+    tables = {t: df.copy() for t, df in inputs.items() if t != "level_unmatched"}
+    for _, r in inputs.get("level_unmatched", pd.DataFrame(columns=["kind", "row"])).iterrows():
+        row = json.loads(r["row"])
+        if r["kind"] in tables:
+            tables[r["kind"]] = pd.concat([tables[r["kind"]], pd.DataFrame([row])], ignore_index=True)
+    kept, unmatched = {}, []
+    for f, (table, id_cols) in INPUTS.items():
+        if table not in tables:
+            continue
+        df = tables[table]
+        ok = pd.Series(True, index=df.index)
+        for c in id_cols:
+            if c in df.columns:
+                ok &= df[c].isna() | df[c].isin(ids)
+        kept[f] = df[ok]
+        unmatched += [{"kind": table, "row": json.dumps({k: (None if pd.isna(v) else v) for k, v in r.items()})} for _, r in df[~ok].iterrows()]
+    return kept, pd.DataFrame(unmatched, columns=["kind", "row"])
+
+
+def make_and_solve(db, area=None, inputs=None, keep_unmatched=True):
     """The level area of ``db`` (docs/design/levels.md): the roads of every mode in one area folder (``area``, default ``<db>.levels`` next to
-    it), solved with your edits.csv / heads.csv / caps.csv there, the result written into ``db`` (``visualization.edge_levels`` with each
+    it), solved with your edits, heads and caps, the result written into ``db`` (``visualization.edge_levels`` with each
     edge's ends). roadstyle does all of it (``roadstyle.level_area``); the area belongs to ``db``, so ``roadstyle-levels edit AREA``
-    writes into it too. Returns ``{"area", "roads", "given_up", "info"}``."""
-    roadstyle_module()
+    writes into it too. Returns ``{"area", "roads", "given_up", "info", "unmatched"}``.
+
+    The tables are the master (docs/design/levels_in_build.md): ``inputs`` (default: the ones in ``db``, see :func:`read_inputs`) are written to the
+    folder's edits.csv / heads.csv / caps.csv, the rows of roads that are not in ``db`` left out and kept in ``visualization.level_unmatched``.
+    ``keep_unmatched=False`` (a clip's rows from its parent: the roads outside the clip) does not keep them.
+    A roadstyle without ``level_*`` tables has no master: the folder's files are used, as before."""
+    rs = roadstyle_module()
     from roadstyle.level_area import make_area, solve_area
 
     area = Path(area) if area else Path(db).with_suffix(".levels")
-    make_area(load_roads(db), area, db=db, id_col="edge_id")
+    roads = load_roads(db)
+    unmatched = None
+    if hasattr(rs, "restore_area_inputs"):
+        inputs = read_inputs(db) if inputs is None else inputs
+        kept, unmatched = split_inputs(inputs, set(roads["edge_id"].astype(str)))
+        if not keep_unmatched:
+            unmatched = unmatched.iloc[0:0]
+        area.mkdir(parents=True, exist_ok=True)
+        for f, df in kept.items():
+            path = area / f
+            if path.exists() and path.read_text() != df.to_csv(index=False):
+                path.with_name(path.name + ".before").write_text(path.read_text())          # the folder's own, if it differs: not lost
+            df.to_csv(path, index=False)
+        if len(unmatched):
+            logger.warning(f"levels: {len(unmatched)} edit row(s) name a road that is not in this file: ignored, kept in visualization.level_unmatched")
+    else:
+        logger.warning("levels: this roadstyle does not keep your edits in the database (no level_* tables): the folder's files are used")
+    make_area(roads, area, db=db, id_col="edge_id")
     solved = solve_area(area)
-    return {"area": area, "roads": len(solved), "given_up": len(solved.attrs["levels_given_up"]), "info": solved.attrs["levels_info"]}
+    if unmatched is not None:
+        import duckdb
+
+        con = duckdb.connect(str(db))
+        try:
+            con.execute("CREATE SCHEMA IF NOT EXISTS visualization")
+            if len(unmatched):
+                con.register("_unmatched", unmatched)
+                con.execute("CREATE OR REPLACE TABLE visualization.level_unmatched AS SELECT * FROM _unmatched")
+                con.unregister("_unmatched")
+            else:
+                con.execute("DROP TABLE IF EXISTS visualization.level_unmatched")
+        finally:
+            con.close()
+    return {"area": area, "roads": len(solved), "given_up": len(solved.attrs["levels_given_up"]), "info": solved.attrs["levels_info"],
+            "unmatched": 0 if unmatched is None else len(unmatched)}

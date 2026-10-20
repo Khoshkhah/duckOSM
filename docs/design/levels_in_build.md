@@ -1,6 +1,6 @@
 # The drawing order is always in the database
 
-**Status:** proposal (2026-10-20). Not approved. No code is written.
+**Status:** approved by Kaveh and implemented 2026-10-20 (`options.levels` default `true`; a clip takes its parent's edits).
 
 ## Goal
 
@@ -66,11 +66,11 @@ there until it is.
 - Later, in roadstyle (Kaveh's decision): `roadstyle-levels edit --db FILE` reads and writes the
   tables with no folder. Not needed for this note.
 
-## Questions for you
+## Decisions (Kaveh, 2026-10-20)
 
-1. **Default of `options.levels`:** `true` (proposed) or `false`?
-2. **A clip build** (`source.type: duckdb`): it could take the parent's `level_*` rows for the
-   roads it has. Not in this note. Say if you want it.
+1. `options.levels` is `true` by default (`build --no-levels` turns it off).
+2. A **clip build** (`source.type: duckdb`) with no file of its own takes the `level_*` rows of its parent for the roads it has; the parent's
+   other rows are not kept in the clip (no `level_unmatched`).
 
 ## Test
 

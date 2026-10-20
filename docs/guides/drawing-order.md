@@ -10,8 +10,9 @@ When roads cross or meet, a map must decide which is painted over which: a bridg
 The map does it with two numbers for every road: a **casing number** (for the outline, in three parts: start, main, end) and a **fill number** (for the colour). The casings and fills are painted number by
 number, lowest first, and at each number all casings before all fills. 0 is the ground.
 
-`duckosm levels` hands the roads to [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/), which works them out exactly as for any roadstyle map, and stores the result in the schema
-`visualization` of the file, so that a map or another tool reads it instead of computing it again. Computing takes long on a large network, so it is not part of `duckosm build`.
+`duckosm build` hands the roads to [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/) as its last step, which works them out exactly as for any roadstyle map, and stores the result in the schema
+`visualization` of the file, so that a map or another tool reads it instead of computing it again. The file is always current: **a rebuild keeps your edits** (they are tables in the file) and solves again with them.
+For a big area the step takes long: `options.levels: false` (`build --no-levels`) skips it, and `duckosm levels` makes it later.
 
 ## The level area
 
@@ -20,11 +21,11 @@ The roads of **all the modes together** (`edges` and `private_edges` of `driving
 | File | Whose | Holds |
 |---|---|---|
 | `roads.parquet`, `pairs.csv` | made by each run | the solver's input: one row per road, the pairs of roads that cross or meet |
-| `edits.csv`, `heads.csv`, `caps.csv` | **yours**, kept between runs | your changes: pairs added or switched off, head lengths and end shapes per road end |
+| `edits.csv`, `heads.csv`, `caps.csv` | **yours**; a copy of the tables in the file | your changes: pairs added or switched off, head lengths and end shapes per road end. The tables are the master: each run writes these files from them |
 | `levels.csv`, `levels_info.json` | made by each solve | the result, and what the solver says about it |
 | `area.json` | made once | the file the area belongs to |
 
-Keep the three files of yours (in git, for example): with them a rebuilt file gets the same drawing order back. How the solver decides, and the editor:
+Your edits are in the file itself (`visualization.level_*`, below): a rebuild carries them over, and the folder is only a work area. A file of the folder that differs from the table is kept as `*.csv.before` when it is written again. A row that names a road that is not in the file any more is ignored with a warning and kept in `visualization.level_unmatched`; the next build tries it again. How the solver decides, and the editor:
 [Which road is on top](https://khoshkhah.github.io/roadstyle/guides/levels/).
 
 ## What it writes

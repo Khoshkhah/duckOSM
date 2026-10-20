@@ -357,7 +357,7 @@ The base-map layers: one table per layer, all with the columns `osm_id`, `osm_ty
 
 ## `visualization` schema
 
-Layers computed for drawing. Written by [`duckosm levels`](cli.md#levels); not part of a build. Design: `docs/design/levels.md`.
+Layers computed for drawing. Written by the last step of `duckosm build` (`options.levels`) and by [`duckosm levels`](cli.md#levels). A rebuild carries your edits over: `level_edits`, `level_heads`, `level_caps` (the master of your changes) and `level_unmatched`. Design: `docs/design/levels.md`, `docs/design/levels_in_build.md`.
 
 ### `edge_levels`
 
@@ -384,6 +384,22 @@ One row: where the numbers came from.
 | `source`, `area` | `area`, and the level area folder they were solved in |
 | `n_edges`, `edge_hash` | the number of edges and a hash of their ids: the numbers belong to these edges only |
 | `roadstyle_version`, `created` | the roadstyle version and when |
+
+### `level_edits`, `level_heads`, `level_caps`
+
+Your changes to the drawing order, the **master** copy: the level area's `edits.csv`, `heads.csv` and `caps.csv`, as text (the ids are BIGINT). The level
+editor writes them at each Apply, a rebuild carries them over, and each solve writes the area's files from them.
+
+| Table | Columns |
+|---|---|
+| `level_edits` | `relation` (`order`, `stack`, `meet`), `a`, `b` (edges), `a_end`, `b_end`, `enabled` |
+| `level_heads` | `road`, `start_m`, `end_m`: the head length at each end, in metres |
+| `level_caps` | `road`, `start`, `end`: `round`, `square` or `flat` |
+
+### `level_unmatched`
+
+The rows of those tables that name a road that is not in this file (a rebuild changed it): `kind` (the table) and `row` (the row as JSON). They are not used and not
+lost: the next build tries them again. The table is not there when there are none.
 
 ## `bus` schema
 

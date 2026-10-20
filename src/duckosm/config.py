@@ -55,6 +55,7 @@ class Options:
     boundary_cell_resolutions: Optional[list[int]] = None
 
     build_features: bool = True            # build the features.* base-map layers (water, land, buildings, POIs…) for base maps (mapstyle); PBF builds only
+    levels: bool = True                    # the last step: visualization.edge_levels, the drawing order of the roads, solved with your edits kept in visualization.level_* (a rebuild keeps them). Set false for a big area; `duckosm levels` makes it later. See docs/design/levels_in_build.md
     bus_routes: bool = True                # bus.routes / bus.route_edges: the driving edges each OSM bus route relation travels (needs driving; PBF builds only). See docs/concepts/networks.md#bus-routes
     sea: Optional[str] = "overture"        # features.ocean, the sea (OSM only has coastline lines): 'overture' = Overture Maps' ocean polygons, read for the area from S3 (needs the network; offline it is skipped), or false. See docs/design/sea.md
     clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
