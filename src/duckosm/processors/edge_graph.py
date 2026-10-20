@@ -2,11 +2,16 @@
 Edge graph builder processor - builds edge adjacency graph.
 """
 
+import logging
+
 from duckosm.processors.base import BaseProcessor
+
+logger = logging.getLogger("duckosm.edge_graph")
 
 # who uses the mode's own rows of edge_graph (its `uses` column); rows into or out of a bus-only edge
 # (driving's private_edges, access 'bus') are 'bus' (docs/design/bus_only_edges.md)
 ROUTED_USES = {"driving": "car", "walking": "walk", "cycling": "bike"}
+BRIDGE_MAX_TURN_DEG = 90.0   # on a bridge no move turns more than this: no U-turn, no turn back (only merges and forks)
 
 
 def routed_graph(con, mode):
@@ -41,6 +46,7 @@ class EdgeGraphBuilder(BaseProcessor):
     def run(self) -> None:
         """Build edge graph."""
         self._create_edge_graph()
+        self._remove_bridge_turnbacks()
         self._remove_restricted_turns()
     
     def _create_edge_graph(self) -> None:
@@ -77,6 +83,46 @@ class EdgeGraphBuilder(BaseProcessor):
                 WHERE e1.edge_id != e2.edge_id AND (e1.bus OR e2.bus)
             """)
     
+    def _remove_bridge_turnbacks(self) -> None:
+        """On a bridge there is no U-turn and no turn back: from one bridge edge to the next at their shared node, a move that turns more
+        than BRIDGE_MAX_TURN_DEG is removed (a bridge has only merges and forks: a median or a barrier stands between its two directions).
+        Without it a two-way bridge road mapped as one way got a U-turn at every node where a ramp leaves, and SUMO gave that U-turn the
+        left lane, so the lanes after the fork were matched one place to the side (Granville Bridge, 9 such moves; urbanstyle 2026-10-19)."""
+        has = self.fetchone("""SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema()
+                               AND table_name = 'edges' AND column_name = 'bridge'""")[0]
+        if not has:
+            return
+        n = self.fetchone(f"""
+            WITH h AS (
+                SELECT edge_id, coalesce(bridge, 'no') NOT IN ('no', '') AS on_bridge,
+                       -- the heading at the edge's end and at its start (degrees, x east y north, true metres at its latitude)
+                       degrees(atan2(ST_Y(ST_EndPoint(geometry)) - ST_Y(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)),
+                                     (ST_X(ST_EndPoint(geometry)) - ST_X(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)))
+                                     * cos(radians(ST_Y(ST_EndPoint(geometry)))))) AS h_end,
+                       degrees(atan2(ST_Y(ST_PointN(geometry, 2)) - ST_Y(ST_StartPoint(geometry)),
+                                     (ST_X(ST_PointN(geometry, 2)) - ST_X(ST_StartPoint(geometry)))
+                                     * cos(radians(ST_Y(ST_StartPoint(geometry)))))) AS h_start
+                FROM edges WHERE ST_NPoints(geometry) >= 2)
+            SELECT count(*) FROM edge_graph g JOIN h a ON a.edge_id = g.from_edge JOIN h b ON b.edge_id = g.to_edge
+            WHERE a.on_bridge AND b.on_bridge
+              AND abs(((b.h_start - a.h_end + 540) % 360) - 180) > {BRIDGE_MAX_TURN_DEG}""")[0]
+        self.execute(f"""
+            DELETE FROM edge_graph WHERE (from_edge, to_edge) IN (
+            WITH h AS (
+                SELECT edge_id, coalesce(bridge, 'no') NOT IN ('no', '') AS on_bridge,
+                       degrees(atan2(ST_Y(ST_EndPoint(geometry)) - ST_Y(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)),
+                                     (ST_X(ST_EndPoint(geometry)) - ST_X(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)))
+                                     * cos(radians(ST_Y(ST_EndPoint(geometry)))))) AS h_end,
+                       degrees(atan2(ST_Y(ST_PointN(geometry, 2)) - ST_Y(ST_StartPoint(geometry)),
+                                     (ST_X(ST_PointN(geometry, 2)) - ST_X(ST_StartPoint(geometry)))
+                                     * cos(radians(ST_Y(ST_StartPoint(geometry)))))) AS h_start
+                FROM edges WHERE ST_NPoints(geometry) >= 2)
+            SELECT g.from_edge, g.to_edge FROM edge_graph g JOIN h a ON a.edge_id = g.from_edge JOIN h b ON b.edge_id = g.to_edge
+            WHERE a.on_bridge AND b.on_bridge
+              AND abs(((b.h_start - a.h_end + 540) % 360) - 180) > {BRIDGE_MAX_TURN_DEG})""")
+        if n:
+            logger.info(f"[{self.mode}] {n:,} turn-backs on bridges removed from the edge graph (no U-turn on a bridge)")
+
     def _remove_restricted_turns(self) -> None:
         """Remove edge-graph transitions forbidden by turn restrictions.
 

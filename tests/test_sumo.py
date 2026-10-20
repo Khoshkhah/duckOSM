@@ -135,14 +135,15 @@ def test_edge_attrs_override(tmp_path):
 
 
 def test_a_one_way_road_is_centred_on_its_line(tmp_path):
-    """SUMO puts an edge's lanes right of its line: right for one direction of a two-way road, but a one-way road's line is its middle."""
+    """SUMO puts an edge's lanes right of its line: a one-way road's line is its middle (center), and a two-way road's line is the middle
+    of the whole road, both directions (roadCenter: OSM draws a way along the road's middle)."""
     con = _db()
     con.execute(f"""INSERT INTO edges VALUES (7, 2, 1, 'residential', NULL, 1, 30, 123.4,
                     ST_GeomFromText('LINESTRING(18.07 59.32,18.06 59.32)'))""")      # E1 now has its reverse twin
     to_sumo(con, str(tmp_path), run_netconvert=False)
     edg = {ln.split('"')[1]: ln for ln in (tmp_path / "network.edg.xml").read_text().splitlines() if "<edge " in ln}
     assert 'spreadType="center"' in edg[str(E2)]                    # one-way
-    assert "spreadType" not in edg[str(E1)] and "spreadType" not in edg["7"]
+    assert 'spreadType="roadCenter"' in edg[str(E1)] and 'spreadType="roadCenter"' in edg["7"]     # two-way: the line is the road's middle
 
 
 @pytest.mark.skipif(not HAVE_NETCONVERT,

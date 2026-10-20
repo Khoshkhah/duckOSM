@@ -123,6 +123,30 @@ def _arrow_fit(con, sch, drive_side):
     return to_dir, marked, unmatched
 
 
+def _lane_middles(con, sch):
+    """{link_id: {"shape": ..., "spreadType": "center"}}: the middle line between each link's leftmost and rightmost lane, as duckOSM placed
+    them (``lane.geom``, lon/lat), in SUMO's shape syntax (``x,y`` pairs)."""
+    import numpy as np
+    import shapely
+    from shapely import wkt as _wkt
+    from shapely.geometry import LineString
+    by_link = defaultdict(list)
+    for lk, wkt in con.execute(f"SELECT link_id, ST_AsText(geom) FROM {sch}.lane WHERE geom IS NOT NULL ORDER BY link_id, lane_num").fetchall():
+        by_link[lk].append(_wkt.loads(wkt))
+    out = {}
+    for lk, ls in by_link.items():
+        a, b = ls[0], ls[-1]
+        if a.length == 0 or b.length == 0:
+            continue
+        n = min(max(len(a.coords), len(b.coords), 2) * 2, 400)           # (vectorised, and at most 400 points: SUMO is slow on long shapes)
+        fs = np.linspace(0.0, 1.0, n)
+        pa = shapely.get_coordinates(shapely.line_interpolate_point(a, fs, normalized=True))
+        pb = shapely.get_coordinates(shapely.line_interpolate_point(b, fs, normalized=True))
+        mid = LineString((pa + pb) / 2.0).simplify(1e-7)
+        out[lk] = {"shape": " ".join(f"{x:.8f},{y:.8f}" for x, y in mid.coords), "spreadType": "center"}
+    return out
+
+
 def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconvert_bin=None, work_dir=None, drive_side="right"):
     """See the module docstring. ``con``: the GMNS connection, the duckOSM db attached as ``source``; ``sch``: ``gmns_<mode>``, its
     ``lane`` and ``movement`` tables built; ``mode``: ``driving`` (with the bus-only edges and the buses' turns) or ``cycling`` (every
@@ -137,11 +161,17 @@ def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconv
     ours_lanes = defaultdict(list)
     for lk, use, w, turn in con.execute(f"SELECT link_id, allowed_uses, COALESCE(width, 3.25), turn FROM {sch}.lane ORDER BY link_id, lane_num").fetchall():
         ours_lanes[lk].append(("bike" if mode == "cycling" else use, w, turn if lk in fits else None))
+    # one placement for duckOSM and SUMO: each link's shape for SUMO is the middle line of the lanes duckOSM placed (from its leftmost to
+    # its rightmost lane), centred: SUMO places nothing again by its own rule. Else the two disagreed by up to 1.7 m where one-way
+    # carriageways of one road meet at a node (Granville Bridge, Hemlock: duckOSM places them as the two sides of one road, SUMO
+    # centred each on its own OSM line), and on two-way roads with more lanes one way (urbanstyle 2026-10-19)
+    edge_attrs = _lane_middles(con, sch) if geometry else {}
     cur = con.cursor()
     cur.execute(f"USE {source}")
     with tempfile.TemporaryDirectory() as tmp:
         net = to_sumo(cur, work_dir or tmp, mode=mode, net_name="gmns", netconvert_bin=netconvert_bin, bus_edges=mode == "driving",
-                      lanes=ours_lanes, config={"lefthand": "true"} if drive_side == "left" else None)["net"]
+                      lanes=ours_lanes, edge_attrs=edge_attrs,
+                      config={"lefthand": "true"} if drive_side == "left" else None)["net"]
         to_ll, lanes, conns, nxt = _read_net(net)
     cur.close()
     check = []

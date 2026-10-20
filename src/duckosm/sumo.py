@@ -494,6 +494,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
                 src0, tgt0 = orig or (source, target)           # one-way or not: decided on the network as built
                 if (tgt0, src0) not in both_ways:          # one-way: its line is the road's middle (SUMO puts lanes right of it)
                     attrs.append('spreadType="center"')
+                else:                                       # two-way: the line is the middle of the WHOLE road, both directions (OSM
+                    attrs.append('spreadType="roadCenter"') # draws a way along the road's middle): with 3 lanes one way and 1 the other,
+                                                            # SUMO's default put the line between the directions, the road 3.25 m to one side
                 shape = _linestring_points(wkt)
                 if shape:
                     attrs.append(f'shape="{shape}"')
