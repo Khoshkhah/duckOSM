@@ -243,11 +243,16 @@ def build_crossings(con, sch, has_raw):
         if c[0] == "n":                         # a crossing node is on ITS road: another road's lanes the node's line also touches are no zebra of it
             roads = [r for r in roads if any(j in c[6] for j, *_ in r[1])] or roads
         fresh = []                              # the rectangles of this crossing: they may overlap each other at a corner, not an earlier crossing's
-        for _, road in roads:
+        links_of = [{link_id[j] for j, *_ in r[1] if not lane_conn[j]} for r in roads]     # (a road's own lanes: a lane through the junction
+                                                                                         # is listed under the link it leaves, the other road)
+        for k_road, (_, road) in enumerate(roads):
+            # a lane of a road this crossing crosses as ANOTHER road is that road's zebra, not this one's (at a junction corner the two
+            # rectangles meet; a road whose lanes moved to lie on both sides of its line reached under the other road's rectangle)
+            others = set().union(*[l_ for k2, l_ in enumerate(links_of) if k2 != k_road]) - links_of[k_road]
             # the best rectangle for the links of one road: ONE rectangle for every piece of it. Its axis the road's (the covered lanes' directions),
             # ``width`` metres along it, centred on the middle of the crossing, and across it from the first covered lane's outer edge to the last
             # one's, over the median too
-            axes = [t for *_, t in road]
+            axes = [t for j, *_, t in road if not lane_conn[j]] or [t for *_, t in road]     # (the road's own lanes: a lane through the junction curves)
             ends = []
             for part in parts:
                 ss = [(s0, s1) for _, p2, s0, s1, _t in road if p2 is part]
@@ -286,6 +291,8 @@ def build_crossings(con, sch, has_raw):
             rows = []
             on_rect = [j for j in tree.query(rect) if (c[7] is None or lane_level[j] == c[7])]    # every lane the RECTANGLE overlaps, not only those the line touches:
             for j in on_rect:                                                      # a lane that goes on past the line's lane is part of the zebra
+                if link_id[j] in others:
+                    continue
                 lane = geom[j]
                 ip = rect.intersection(poly[j])
                 if ip.is_empty or ip.area < 0.2:

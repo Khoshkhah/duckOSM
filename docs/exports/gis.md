@@ -1,12 +1,35 @@
-# GeoPackage and shapefile
+# GeoPackage, GeoParquet and shapefile
 
 ```bash
 duckosm export-gis monaco.duckdb                 # -> monaco.gpkg
 duckosm export-gis monaco.duckdb -f shp          # -> monaco_gis/monaco_edges_driving.shp, … (one per layer)
+duckosm export-gis monaco.duckdb -f geoparquet   # -> monaco_geoparquet/edges_driving.parquet, … (one per layer)
 ```
 
 For QGIS, ArcGIS, FME, or any tool that imports GIS files (Visum, Aimsun, …). GeoPackage uses
 GDAL's `ogr2ogr` to put every layer in one file; without it you get one `.gpkg` per layer.
+
+## GeoParquet
+
+GeoParquet is a column file format for geodata. Use it for web and cloud tools. GeoLibre
+opens a file from a URL (`?data=<url>`). RustGIS also opens it. DuckDB, GeoPandas and GDAL read it too.
+
+- `out` is a folder. The command writes one file per layer: `edges_<mode>.parquet`,
+  `nodes_<mode>.parquet` and `boundary.parquet`. The layers are the same as in the GeoPackage.
+- DuckDB writes the GeoParquet `geo` metadata. Coordinates are longitude / latitude (EPSG:4326).
+- Column names stay as they are (no shapefile renames). `edge_id` stays a 64-bit integer. As in
+  the GeoPackage, list columns such as `refs` are not written.
+- If the database has the table `visualization.edge_levels`, each `edges_<mode>.parquet` file also
+  gets all its columns except `edge_id`. The join uses `edge_id`. An edge with no row there gets
+  NULL values. The columns are `casing_start`, `casing_level`, `casing_end` and `fill_level`, and,
+  if the table has them, `head_start_m`, `head_end_m`, `cap_start` and `cap_end`. The `nodes` and
+  `boundary` files do not get them. duckOSM only reads that table. Without it, the command writes
+  the edges as they are and logs one line.
+- Each `features.*` table (the base map) gets its own file, `features_<table>.parquet`, with all its
+  columns. mapstyle's look splits a file into its layers by `kind`.
+- The folder also gets `layers.json`, the list of the files: `file`, `kind` (`edges`, `nodes`,
+  `boundary` or `features`), `mode` (edges and nodes) or `table` (features), and `count` for each. The roadstyle GeoLibre plugin reads it to open the
+  whole folder in one step (roadstyle › Open a duckOSM folder).
 
 ## Layers
 
@@ -44,8 +67,8 @@ Use a shapefile only for a tool that needs one:
 | Option | Does | Default |
 |---|---|---|
 | `-m`, `--mode` | modes to export; repeat for several | every mode in the db |
-| `-f`, `--format` | `gpkg` or `shp` | `gpkg` |
-| `-o`, `--out` | `.gpkg` file, or folder for shapefiles | `<name>.gpkg` / `<name>_gis/` |
+| `-f`, `--format` | `gpkg`, `geoparquet` or `shp` | `gpkg` |
+| `-o`, `--out` | `.gpkg` file, or folder for shapefiles and GeoParquet | `<name>.gpkg` / `<name>_gis/` / `<name>_geoparquet/` |
 | `--name` | the file name | the db's name |
 | `--no-boundary` | leave out the boundary layer | included |
 
@@ -54,6 +77,7 @@ import duckdb
 from duckosm import to_gis
 con = duckdb.connect("monaco.duckdb", read_only=True)
 to_gis(con, "monaco.gpkg")             # -> {"layers": {name: count}, ...}
+to_gis(con, "monaco_geoparquet", fmt="geoparquet")   # a folder of .parquet files
 ```
 
 ## Check an export

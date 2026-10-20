@@ -349,3 +349,18 @@ Avenue Princesse Grace (ways 4230085, 39838822). In 3D the deck ran through it.
 
 **Fix.** `remove: true` for way `138590891` in `osm_overrides.yaml` (the way is dropped from `raw.ways`, so no building is made from
 it). Upstream: check the outline against current imagery and correct or delete it in OpenStreetMap.
+
+## 13. Vancouver, Granville Bridge and Fir Street - lane counts
+
+| field | value |
+| --- | --- |
+| **Area** | Vancouver (Granville Bridge, its ramps, Fir Street, West 5th Avenue) |
+| **OSM ways** | `473319095`, `1316244492`, `37226820`, `1419040137`, `1419040132`, `1285848467`, `1419040133`, `1419040138`, `35354210`, `299511148`, `1210125710`, `1210125711`, `37127118` |
+| **Status** | **CONFIRMED** by Kaveh from the 2018 aerial photo and Street View (2026-10-11 to 2026-10-16); overrides enabled |
+
+**Symptom.** OSM's lane counts on these ways are lower or split differently than the road: for example the bridge's a10 has 3
+lanes forward and 2 backward, OSM says 2 and 1. urbanstyle corrected them in its own `corrections/lanes.json`, so SUMO (`duckosm
+gmns`) did not know the lanes and gave no geometry for 9 of the bridge's lanes.
+
+**Fix.** The lane counts in `osm_overrides.yaml` (each rule's note gives the count and its evidence). Upstream: correct `lanes`,
+`lanes:forward` and `lanes:backward` on these ways in OpenStreetMap.

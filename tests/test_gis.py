@@ -118,3 +118,68 @@ def test_gpkg_is_single_multi_layer_file(tmp_path):
     ids = [r[0] for r in con.execute(
         f"SELECT edge_id FROM ST_Read('{out}', layer='edges_driving')").fetchall()]
     assert set(ids) == {E1, E2}
+
+
+def _pq_files(tmp_path):
+    return sorted(p.name for p in tmp_path.iterdir())
+
+
+def test_geoparquet_without_visualization_table(tmp_path):
+    con = _db()
+    res = to_gis(con, str(tmp_path), fmt="geoparquet")
+    assert res["fmt"] == "geoparquet" and res["dir"] == str(tmp_path)
+    assert _pq_files(tmp_path) == ["boundary.parquet", "edges_driving.parquet", "layers.json", "nodes_driving.parquet"]
+    assert res["layers"] == {"edges_driving": 2, "nodes_driving": 3, "boundary": 1}
+    for f in tmp_path.glob("*.parquet"):                            # DuckDB writes the GeoParquet 'geo' key
+        keys = [r[0] for r in con.execute(
+            f"SELECT key::VARCHAR FROM parquet_kv_metadata('{f}')").fetchall()]
+        assert "geo" in keys
+    edges = tmp_path / "edges_driving.parquet"
+    types = dict(con.execute(f"SELECT name, type FROM parquet_schema('{edges}')").fetchall())
+    assert types["edge_id"] == "INT64" and "maxspeed_kmh" in types   # BIGINT kept, names not renamed
+    assert not {"casing_start", "fill_level"} & set(types)
+    assert con.execute(f"SELECT count(*) FROM '{edges}'").fetchone()[0] == 2
+    assert {r[0] for r in con.execute(f"SELECT edge_id FROM '{edges}'").fetchall()} == {E1, E2}
+    assert con.execute(f"DESCRIBE SELECT edge_id FROM '{edges}'").fetchone()[1] == "BIGINT"
+
+
+def test_geoparquet_adds_edge_levels_columns(tmp_path):
+    con = _db()
+    con.execute("CREATE SCHEMA visualization")
+    con.execute("CREATE TABLE visualization.edge_levels(edge_id BIGINT, casing_start INTEGER, "
+                "casing_level INTEGER, casing_end INTEGER, fill_level INTEGER, head_start_m INTEGER)")
+    con.execute(f"INSERT INTO visualization.edge_levels VALUES ({E1},0,1,2,3,7)")   # E2 has no row
+    res = to_gis(con, str(tmp_path), fmt="geoparquet", boundary=False)
+    assert res["layers"] == {"edges_driving": 2, "nodes_driving": 3}
+    edges = tmp_path / "edges_driving.parquet"
+    cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM '{edges}'").fetchall()]
+    assert cols.count("edge_id") == 1                         # joined on edge_id, not repeated
+    assert {"casing_start", "casing_level", "casing_end", "fill_level", "head_start_m"} <= set(cols)
+    assert con.execute(f"SELECT count(*) FROM '{edges}'").fetchone()[0] == 2
+    rows = dict((r[0], r[1:]) for r in con.execute(
+        f"SELECT edge_id, casing_start, fill_level, head_start_m FROM '{edges}'").fetchall())
+    assert rows[E1] == (0, 3, 7) and rows[E2] == (None, None, None)
+    nodes = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM '{tmp_path}/nodes_driving.parquet'").fetchall()]
+    assert "casing_start" not in nodes                         # only the edges files get them
+
+
+def test_geoparquet_writes_the_list_of_files(tmp_path):
+    import json
+    to_gis(_db(), str(tmp_path), fmt="geoparquet", boundary=False)
+    index = json.loads((tmp_path / "layers.json").read_text())["layers"]
+    assert index == [{"file": "edges_driving.parquet", "kind": "edges", "mode": "driving", "count": 2},
+                     {"file": "nodes_driving.parquet", "kind": "nodes", "mode": "driving", "count": 3}]
+    assert all((tmp_path / x["file"]).exists() for x in index)
+
+
+def test_geoparquet_writes_each_features_table(tmp_path):
+    import json
+    con = _db()
+    con.execute("CREATE SCHEMA features")
+    con.execute("CREATE TABLE features.buildings(osm_id BIGINT, kind VARCHAR, name VARCHAR, geom GEOMETRY)")
+    con.execute("INSERT INTO features.buildings VALUES (7, 'building', NULL, "
+                "ST_GeomFromText('POLYGON((18.06 59.32,18.061 59.32,18.061 59.321,18.06 59.32))'))")
+    to_gis(con, str(tmp_path), fmt="geoparquet", boundary=False)
+    index = json.loads((tmp_path / "layers.json").read_text())["layers"]
+    assert index[-1] == {"file": "features_buildings.parquet", "kind": "features", "table": "buildings", "count": 1}
+    assert con.execute(f"SELECT kind FROM '{tmp_path}/features_buildings.parquet'").fetchall() == [("building",)]

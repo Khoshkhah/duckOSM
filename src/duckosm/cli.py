@@ -11,7 +11,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm route-map  an interactive route planner page (click start and end; routes in the browser)
   duckosm sumo     export a built network to a SUMO net (edge_id preserved)
   duckosm export-graph  export a built network as a networkx graph file (GraphML / gpickle)
-  duckosm export-gis    export a built network to GeoPackage / shapefile (edge_id preserved)
+  duckosm export-gis    export a built network to GeoPackage / GeoParquet / shapefile (edge_id preserved)
   duckosm gis-debug     read a GIS export back through GDAL and write an HTML debug/QA page
   duckosm gmns          extract a built network to a standalone GMNS DuckDB (lanes, movements, …)
   duckosm gmns-viz      write an interactive HTML viewer for a GMNS DuckDB (lanes / meso, tooltips)
@@ -621,20 +621,22 @@ def export_graph(db, mode, out, graph_kind, fmt, weight, geometry, uses):
 @click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode schema(s) to export (default: every mode present in the db)')
-@click.option('--format', '-f', 'fmt', type=click.Choice(['gpkg', 'shp']), default='gpkg',
-              show_default=True, help='GeoPackage (multi-layer, primary) or ESRI shapefile')
+@click.option('--format', '-f', 'fmt', type=click.Choice(['gpkg', 'shp', 'geoparquet']), default='gpkg',
+              show_default=True, help='GeoPackage (multi-layer, primary), GeoParquet (one file per layer) or ESRI shapefile')
 @click.option('--out', '-o', default=None,
-              help='gpkg: output .gpkg file; shp: output directory (default: <name>.gpkg / <name>_gis/)')
+              help='gpkg: output .gpkg file; shp, geoparquet: output directory '
+                   '(default: <name>.gpkg / <name>_gis/ / <name>_geoparquet/)')
 @click.option('--boundary/--no-boundary', default=True, show_default=True,
               help='Also export main.boundary as a boundary layer, if present')
 @click.option('--name', default=None, help='Layer/file basename (default: the db filename stem)')
 def export_gis(db, modes, fmt, out, boundary, name):
-    """Export a built network to GeoPackage / shapefile, keeping duckOSM edge_id as an attribute.
+    """Export a built network to GeoPackage / GeoParquet / shapefile, keeping duckOSM edge_id as an attribute.
 
     Writes the geographic layers only — edges_<mode>, nodes_<mode> and boundary — in EPSG:4326.
     GeoPackage is one multi-layer file (assembled with ogr2ogr; needs GDAL); shapefile is one
-    fileset per layer. Routing adjacency (edge_graph/turn_restrictions) is not GIS data — use
-    `export-graph` or `sumo` for that. Needs the DuckDB spatial extension.
+    fileset per layer. GeoParquet is one .parquet file per layer; the edges files also get the
+    columns of visualization.edge_levels when the db has that table. Routing adjacency
+    (edge_graph/turn_restrictions) is not GIS data — use `export-graph` or `sumo` for that. Needs the DuckDB spatial extension.
     """
     import duckdb
 
@@ -644,7 +646,8 @@ def export_gis(db, modes, fmt, out, boundary, name):
     con = duckdb.connect(db, read_only=True)
     base = name or Path(db).stem
     if out is None:
-        out = f"{base}.gpkg" if fmt == "gpkg" else f"{base}_gis"
+        out = {"gpkg": f"{base}.gpkg", "shp": f"{base}_gis",
+               "geoparquet": f"{base}_geoparquet"}[fmt]
     try:
         res = to_gis(con, out, modes=list(modes) or None, fmt=fmt, boundary=boundary, name=base)
     except Exception as e:

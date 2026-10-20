@@ -199,7 +199,7 @@ def _chain_runs(info):
     same ``oneway`` and lane widths, that are one road: pieces of one OSM way and direction, pieces of
     a roundabout (OSM draws one as several ways), or a way going on into another way of the same
     name straight ahead (within 30 degrees). Each joint one-to-one. ``info``: ``edge_id -> (osm_id,
-    is_reverse, source, target, oneway, lane widths, name, roundabout, heading in, heading out)``.
+    is_reverse, source, target, oneway, lane widths, name, roundabout, heading in, heading out[, the other direction's width])``.
     Returns ``(runs, where, closed)``: the runs as edge lists in order, ``edge_id -> (run index,
     position)``, and the set of run indexes that are rings (the last piece goes on into the first)."""
     from collections import Counter, defaultdict
@@ -210,7 +210,7 @@ def _chain_runs(info):
 
     def one_road(a, b):
         ea, eb = info[a], info[b]
-        if ea[4] != eb[4] or ea[5] != eb[5]:
+        if ea[4] != eb[4] or ea[5] != eb[5] or ea[10:11] != eb[10:11]:     # (index 10: the other direction's width, if given)
             return False
         if (ea[0], ea[1]) == (eb[0], eb[1]) or (ea[7] and eb[7]):
             return True
@@ -1743,6 +1743,17 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         info[edge_id] = (osm_id, bool(is_rev), source, target, bool(oneway) or is_foot(tags), tuple(w_each), name,
                          tags.get("junction") == "roundabout", h0, h1)
     rows_tags = {r[0]: r[7] or {} for r in rows}
+    # a two-way road's line is the middle of the WHOLE road, both directions (OSM draws a way along the road's middle; SUMO's
+    # spreadType="roadCenter", sumo.py): each direction is moved by half the difference of the two directions' widths, else a road with
+    # 3 lanes one way and 1 the other lay 3.25 m to one side of its line, and its lanes here and SUMO's (geom_cut) disagreed. The other
+    # direction's width is part of a piece's cross-section: a run joins only pieces with the same (a9 3 + 1 lanes went on into a1 3 + 3)
+    opp_total = {}
+    by_ends = {(v[0], v[2], v[3]): k for k, v in info.items()}
+    for k, v in info.items():
+        o = by_ends.get((v[0], v[3], v[2]))
+        if o is not None:
+            opp_total[k] = sum(w_of[o])
+    info = {k: v + (round(opp_total.get(k, -1.0), 2),) for k, v in info.items()}
     runs, where, closed = _chain_runs(info)
     wkt_of = {r[0]: r[6] for r in rows}
     merged = {}                                  # run index -> the run's line, lon/lat wkt
@@ -1771,6 +1782,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         w_each, oneway = w_of[edge_id], info[edge_id][4]
         total = sum(w_each)
         half, gap, place, out, run = total / 2.0, gaps.get(edge_id), run_place[where[edge_id][0]], [], 0.0
+        centre = -side_sign * (total - opp_total.get(edge_id, total)) / 2.0     # (two-way: the road's middle on the line)
         for w in w_each:
             # distance of this lane's centre from the line its direction's lanes start at (the centre line):
             # lane 1 is always the LEFTMOST lane (OSM's turn:lanes, the movements and the GMNS convention
@@ -1784,7 +1796,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             elif oneway:                                     # one-way: lanes centered on the carriageway
                 out.append(half - (run + w / 2.0))
             else:                                            # two-way: this direction's lanes on its travel side
-                out.append(side_sign * d)
+                out.append(side_sign * d + centre)
             run += w
         return out
 

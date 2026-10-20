@@ -316,8 +316,8 @@ duckosm gmns-viz [OPTIONS] GMNS_DB
 
 ### `export-gis`
 
-Writes a GeoPackage or shapefiles: edges, nodes and the boundary, `edge_id` kept. Page:
-[GeoPackage and shapefile](../exports/gis.md).
+Writes a GeoPackage, GeoParquet files or shapefiles: edges, nodes and the boundary, `edge_id` kept. Page:
+[GeoPackage, GeoParquet and shapefile](../exports/gis.md).
 
 ```text
 duckosm export-gis [OPTIONS] DB
@@ -326,8 +326,8 @@ duckosm export-gis [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
-| `-f`, `--format` | `gpkg` (GeoPackage) or `shp` (shapefile) | `gpkg` |
-| `-o`, `--out TEXT` | `.gpkg` file, or folder for shapefiles | `<name>.gpkg` / `<name>_gis/` |
+| `-f`, `--format` | `gpkg` (GeoPackage), `geoparquet` or `shp` (shapefile) | `gpkg` |
+| `-o`, `--out TEXT` | `.gpkg` file, or folder for shapefiles and GeoParquet | `<name>.gpkg` / `<name>_gis/` / `<name>_geoparquet/` |
 | `--boundary` / `--no-boundary` | include `main.boundary` as a layer | on |
 | `--name TEXT` | layer and file name base | the db file name |
 

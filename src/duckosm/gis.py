@@ -1,6 +1,6 @@
 """
 GIS exporter — write a built duckOSM network to the universal GIS interchange formats,
-**GeoPackage** (primary) or **ESRI shapefile** (fallback), preserving the stable ``edge_id``.
+**GeoPackage** (primary), **GeoParquet** or **ESRI shapefile** (fallback), preserving the stable ``edge_id``.
 
 This is the widest-reach export: it hands the network to the whole GIS world (QGIS / ArcGIS / FME
 and any tool with a GIS importer — Aimsun, PTV Visum, …) with no DuckDB knowledge required. Only the
@@ -20,7 +20,17 @@ and overwrites on re-copy — so each layer is written to a temp single-layer ``
 into the one target with ``ogr2ogr -update -append -nln <layer>`` (the same GDAL dependency the
 ``duckosm admin --gpkg`` export uses). Without ``ogr2ogr`` it falls back to one file per layer.
 Shapefiles need no assembly (one layer per file by nature).
+
+GeoParquet (``fmt="geoparquet"``) writes one ``.parquet`` file per layer into a directory
+(``edges_<mode>.parquet``, ``nodes_<mode>.parquet``, ``boundary.parquet``) and ``layers.json``, the list of these
+files (file, kind, mode or table, count). Each ``features.*`` table (the base map) also gets a file,
+``features_<table>.parquet``. DuckDB writes the
+GeoParquet ``geo`` metadata itself. It needs no GDAL. Column names stay as they are, and ``edge_id``
+stays BIGINT. When the db has ``visualization.edge_levels``, every edges file also gets its columns
+(except ``edge_id``) by LEFT JOIN on ``edge_id``. duckOSM only reads that table. GeoLibre
+(``?data=<url>``) and RustGIS open GeoParquet.
 """
+import json
 import logging
 import os
 import shutil
@@ -86,6 +96,15 @@ def _select_sql(con, schema, table, for_shp):
     return f'SELECT {", ".join(parts)} FROM "{schema}"."{table}"'
 
 
+def _levels_sql(con, select_sql):
+    """Add the columns of ``visualization.edge_levels`` (all but ``edge_id``) to an edges SELECT.
+    An edge with no row there gets NULLs. Returns ``(sql, joined)``; no table = no join."""
+    if not _table_exists(con, "visualization", "edge_levels"):
+        return select_sql, False
+    return (f'SELECT s.*, v.* EXCLUDE (edge_id) FROM ({select_sql}) s '
+            f'LEFT JOIN "visualization"."edge_levels" v ON s.edge_id = v.edge_id'), True
+
+
 def _copy(con, select_sql, out_file, driver, srs):
     """One DuckDB spatial ``COPY`` → a single-layer GDAL dataset (SRS written so a .prj/CRS lands)."""
     con.execute(f"COPY ({select_sql}) TO '{out_file}' "
@@ -98,20 +117,22 @@ def _count(con, schema, table):
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
            srs: str = "EPSG:4326", ogr2ogr_bin: str = None):
-    """Export the geographic network (edges + nodes [+ boundary]) to GeoPackage or shapefile.
+    """Export the geographic network (edges + nodes [+ boundary]) to GeoPackage, GeoParquet or shapefile.
 
     Parameters
     ----------
     con : DuckDB connection to a built duckOSM db (spatial extension loaded here).
-    out : GeoPackage → the target ``.gpkg`` file. Shapefile → the target **directory**.
+    out : GeoPackage → the target ``.gpkg`` file. Shapefile or GeoParquet → the target **directory**.
     modes : mode schemas to export (default: every mode present in the db).
-    fmt : ``"gpkg"`` (default) or ``"shp"``.
+    fmt : ``"gpkg"`` (default), ``"geoparquet"`` or ``"shp"``. GeoParquet files are named
+        ``edges_<mode>.parquet`` etc. (``name`` is not used). Edges files get the columns of
+        ``visualization.edge_levels`` when that table exists.
     boundary : also export ``main.boundary`` as a ``boundary`` layer, if it exists (default True).
     name : basename for layers / shapefiles (default: the ``out`` file stem, else ``"network"``).
     srs : CRS written into every layer (default ``"EPSG:4326"`` — duckOSM geometries are lon/lat).
     ogr2ogr_bin : explicit ``ogr2ogr`` path (else auto-located; used only to assemble the GeoPackage).
 
-    Returns ``{"fmt", "path"(gpkg)|"dir"(shp), "layers": {name: n_features}, "files": [...]}``.
+    Returns ``{"fmt", "path"(gpkg)|"dir"(shp, geoparquet), "layers": {name: n_features}, "files": [...]}``.
     Every layer keeps ``edge_id`` as a plain attribute — the cross-format stable join key.
     """
     try:
@@ -120,8 +141,8 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
         pass
 
     fmt = fmt.lower()
-    if fmt not in ("gpkg", "shp"):
-        raise ValueError(f"fmt must be 'gpkg' or 'shp', got {fmt!r}")
+    if fmt not in ("gpkg", "shp", "geoparquet"):
+        raise ValueError(f"fmt must be 'gpkg', 'shp' or 'geoparquet', got {fmt!r}")
 
     present = _mode_schemas(con)
     chosen = list(modes) if modes else present
@@ -142,6 +163,8 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
 
     base = name or (os.path.splitext(os.path.basename(out))[0] if fmt == "gpkg" else None) or "network"
 
+    if fmt == "geoparquet":
+        return _export_geoparquet(con, out, layers)
     if fmt == "shp":
         return _export_shp(con, out, base, layers, srs)
     return _export_gpkg(con, out, base, layers, srs, ogr2ogr_bin)
@@ -158,6 +181,34 @@ def _export_shp(con, out_dir, base, layers, srs):
         written.append(path)
         logger.info(f"GIS[shp]: {lyr} — {counts[lyr]:,} features -> {path}")
     return {"fmt": "shp", "dir": out_dir, "layers": counts, "files": written}
+
+
+def _export_geoparquet(con, out_dir, layers):
+    """One GeoParquet file per layer, plus one per ``features.*`` table (the base map: ``features_<table>``).
+    DuckDB writes the 'geo' metadata for a GEOMETRY column."""
+    os.makedirs(out_dir, exist_ok=True)
+    written, counts = [], {}
+    layers = layers + [(f"features_{t}", "features", t) for (t,) in con.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'features' ORDER BY 1").fetchall()]
+    for lyr, schema, table in layers:
+        path = os.path.join(out_dir, f"{lyr}.parquet")
+        sql, joined = _select_sql(con, schema, table, for_shp=False), False
+        if table == "edges":
+            sql, joined = _levels_sql(con, sql)
+            if not joined:
+                logger.info(f"GIS[geoparquet]: {lyr} has no visualization columns "
+                            "(no visualization.edge_levels table)")
+        con.execute(f"COPY ({sql}) TO '{path}' (FORMAT parquet)")
+        counts[lyr] = _count(con, schema, table)
+        written.append(path)
+        logger.info(f"GIS[geoparquet]: {lyr} — {counts[lyr]:,} features -> {path}")
+    # layers.json: the list of the files, so a viewer (the roadstyle GeoLibre plugin) opens the folder in one step
+    index = [{"file": f"{lyr}.parquet", "kind": "features" if schema == "features" else table,
+              **({"mode": schema} if table in ("edges", "nodes") and schema != "features" else {}),
+              **({"table": table} if schema == "features" else {}), "count": counts[lyr]} for lyr, schema, table in layers]
+    with open(os.path.join(out_dir, "layers.json"), "w") as f:
+        json.dump({"layers": index}, f, indent=1)
+    return {"fmt": "geoparquet", "dir": out_dir, "layers": counts, "files": written}
 
 
 def _export_gpkg(con, out, base, layers, srs, ogr2ogr_bin):
