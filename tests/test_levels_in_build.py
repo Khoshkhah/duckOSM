@@ -150,39 +150,30 @@ def test_levels_edit_asks_for_google_3d_with_a_key(first, monkeypatch):
     assert "google_3d" not in items_for(first)(pd.DataFrame({"edge": [1]}))[1]
 
 
-def test_levels_edit_serves_the_editor_with_mapstyle_layers(first, tmp_path):
+def test_levels_edit_serves_the_editor_and_the_maps_on_one_port(first, tmp_path):
+    """One port for the editor and the maps: a Google key's website list needs one address, for ever."""
     pytest.importorskip("mapstyle")
     import socket
     import threading
-    import time
+    import urllib.error
     import urllib.request
 
-    from duckosm.levels_edit import _access_colours, items_for, prepare
-    from roadstyle.level_editor import serve
-    items = items_for(first)
-    import pandas as pd
-    draw = pd.DataFrame({"edge": [1, 2]})
-    overlays, kw = items(draw)
-    assert overlays and all(o.visible and o.popup == [] for o in overlays)                    # water, land, buildings, …: decoration
-    assert kw["basemap"] == "blank" and list(draw["access"]) == [None, None]                  # every road has an access column
-    assert "google_3d" not in kw or os.environ.get("GOOGLE_MAPS_KEY")                         # Google 3D only with a key
-    labels = {o.label for o in overlays}
-    assert {"buildings", "water"} <= labels and not labels & {"traffic_signals", "crossings", "bus_stations", "parking_p"}   # no point layers: no dots
-    area = prepare(first, tmp_path / "work2.levels")
+    from duckosm.levels_edit import start
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "map.html").write_text("<html>a map</html>")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    def run():
-        with _access_colours(True):
-            serve(area, port, items=items)
-    threading.Thread(target=run, daemon=True).start()
-    for _ in range(60):
-        try:
-            page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=60).read().decode()
-            break
-        except OSError:
-            time.sleep(1)
-    else:
-        pytest.fail("the editor did not answer")
+    front, _ = start(first, tmp_path / "work2.levels", port=port, reports=reports)
+    threading.Thread(target=front.serve_forever, daemon=True).start()
+    get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=120)
+    r = get("/map.html")                                                     # a file of the reports folder: as it is, never cached
+    assert r.read() == b"<html>a map</html>" and r.headers["Cache-Control"] == "no-store"
+    page = get("/").read().decode()                                          # everything else: the editor
     assert "Level editor" in page and "buildings" in page
-    assert "#9db8d9" in page and "window.rsColor=function" in page                           # the restricted roads are painted
+    assert "#9db8d9" in page and "window.rsColor=function" in page           # the restricted roads are painted
+    assert get("/api/given_up").status == 200                                # an API call goes through to the editor
+    with pytest.raises(urllib.error.HTTPError):                              # a file that is not in the folder, outside it: not served
+        get("/../../etc/passwd")
+    front.shutdown()

@@ -371,9 +371,13 @@ def levels(db, area):
 @click.argument('db', type=DB_PATH)
 @click.option('--area', type=click.Path(file_okay=False), default=None,
               help='The level area folder (default: DB.levels next to the db): a work area, rewritten from the tables of the db')
-@click.option('--port', type=int, default=8780, show_default=True, help='The editor is at http://localhost:PORT/')
+@click.option('--port', type=int, default=8000, show_default=True,
+              help='The editor is at http://localhost:PORT/, with the maps of --reports on the same port: one port, so a Google key '
+                   'needs one address in its website list')
+@click.option('--reports', type=click.Path(file_okay=False), default='reports', show_default=True,
+              help='A folder of maps (duckosm viz) served at the same port as the editor')
 @click.option('--plain', is_flag=True, help="No base-map layers (mapstyle's water, land, buildings): the editor as roadstyle draws it")
-def levels_edit(db, area, port, plain):
+def levels_edit(db, area, port, reports, plain):
     """The level editor of the db: fix which road is on top, and the head and the cap of a road end.
 
     It is roadstyle's editor, started on the area of the file, with mapstyle's base map and every road of the
@@ -385,7 +389,7 @@ def levels_edit(db, area, port, plain):
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     try:
-        edit(db, area, port=port, plain=plain)
+        edit(db, area, port=port, plain=plain, reports=reports)
     except (ImportError, ValueError) as e:
         raise click.ClickException(str(e))
     except KeyboardInterrupt:

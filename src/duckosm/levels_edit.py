@@ -87,11 +87,101 @@ def prepare(db, area=None):
     return area
 
 
-def edit(db, area=None, port=8780, plain=False):
-    """Prepare the area of ``db`` and serve the editor at http://localhost:``port``/ until Ctrl+C. ``plain``: no mapstyle layers and colours."""
+def _front(port, editor_port, reports):
+    """The one server on ``port`` (default 8000: the port of the maps, so the Google key's website list has one line for ever): a file of the
+    ``reports`` folder is served as it is (the maps ``duckosm viz`` made, never cached), and every other address goes to the editor, which listens
+    on ``editor_port`` (only on this machine)."""
+    import http.client
+    import mimetypes
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import unquote, urlparse
+
+    reports = Path(reports).resolve() if reports else None
+
+    class Front(BaseHTTPRequestHandler):
+        def _file(self):
+            path = unquote(urlparse(self.path).path)
+            if reports is None or path == "/" or path.startswith("/api/"):
+                return None
+            f = (reports / path.lstrip("/")).resolve()
+            return f if f.is_file() and reports in f.parents else None
+
+        def _send_file(self, f, body=True):
+            data = f.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", mimetypes.guess_type(str(f))[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")             # a map changes after every edit: never reuse a copy
+            self.end_headers()
+            if body:
+                self.wfile.write(data)
+
+        def _forward(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            conn = http.client.HTTPConnection("127.0.0.1", editor_port, timeout=600)
+            try:
+                conn.request(self.command, self.path, self.rfile.read(n) if n else None,
+                             {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection")})
+                r = conn.getresponse()
+                data = r.read()
+                self.send_response(r.status)
+                for k, v in r.getheaders():
+                    if k.lower() not in ("transfer-encoding", "connection", "content-length"):
+                        self.send_header(k, v)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(data)
+            finally:
+                conn.close()
+
+        def do_GET(self):
+            f = self._file()
+            self._send_file(f) if f else self._forward()
+
+        def do_HEAD(self):
+            f = self._file()
+            self._send_file(f, body=False) if f else self._forward()
+
+        def do_POST(self):
+            self._forward()
+
+        def log_message(self, *args):
+            pass
+
+    return ThreadingHTTPServer(("127.0.0.1", port), Front)
+
+
+def start(db, area=None, port=8000, plain=False, reports="reports"):
+    """Prepare the area of ``db`` and start the editor behind one server at http://localhost:``port``/ (see :func:`_front`). Returns
+    ``(front, area)``: ``front.serve_forever()`` runs it. ``plain``: no mapstyle layers and colours."""
+    import socket
+    import threading
+    import time
+
     from roadstyle.level_editor import serve
 
     area = prepare(db, area)
     items = None if plain else items_for(db)
-    with _access_colours(items is not None):
-        serve(area, port, items=items)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        editor_port = s.getsockname()[1]                       # the editor's own port: free, and no one but the front server uses it
+
+    def run():
+        with _access_colours(items is not None):
+            serve(area, editor_port, items=items)
+    threading.Thread(target=run, daemon=True).start()
+    for _ in range(600):                                       # the editor builds its map first: wait until it listens
+        try:
+            socket.create_connection(("127.0.0.1", editor_port), timeout=1).close()
+            break
+        except OSError:
+            time.sleep(0.5)
+    return _front(port, editor_port, reports), area
+
+
+def edit(db, area=None, port=8000, plain=False, reports="reports"):
+    """Start the editor of ``db`` at http://localhost:``port``/ until Ctrl+C. The files of ``reports`` (the maps) are on the same port."""
+    front, area = start(db, area, port, plain, reports)
+    print(f"level editor: http://localhost:{port}/  (maps of {reports}/ at the same port; Ctrl+C to stop)", flush=True)
+    front.serve_forever()
