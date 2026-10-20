@@ -364,3 +364,17 @@ gmns`) did not know the lanes and gave no geometry for 9 of the bridge's lanes.
 
 **Fix.** The lane counts in `osm_overrides.yaml` (each rule's note gives the count and its evidence). Upstream: correct `lanes`,
 `lanes:forward` and `lanes:backward` on these ways in OpenStreetMap.
+
+## 14. Stockholm, Centralbron at Tegelbacken - lane counts
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm (Centralbron northwest-bound, at Tegelbacken) |
+| **OSM ways** | `4830965`, `1126757835` (`highway=trunk`, `oneway=yes`) |
+| **Status** | **CONFIRMED** by Kaveh in Street View (2026-10-20); overrides enabled |
+
+**Symptom.** OSM has `lanes=1` on these ways. The road has 2 lanes. The Trafikverket sensor point at Tegelbacken has 4 lanes:
+lanes 1 and 2 are the Herkuleskopplet ramp, lanes 3 and 4 are Centralbron. Lanes 3 and 4 together count 1195 veh/h, near the 1146 veh/h
+on the next 2-lane edge. With 1 lane, the cross-section step of sensor-matching drops a real lane.
+
+**Fix.** `lanes: 2` for the two ways in `osm_overrides.yaml`. Upstream: tag `lanes=2` on them in OpenStreetMap.

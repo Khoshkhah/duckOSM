@@ -281,6 +281,13 @@ overrides:
   - osm_id: 1419040127       # Granville Bridge northbound into the north fork (n266729860), where Seymour leaves
     turn_lanes_forward: "through|through;right|right"
     note: "the middle lane is the shared lane (Granville St or Seymour), the right lane goes to Seymour (Kaveh, 2026-10-19); OSM has no turn:lanes, and SUMO then fed both Seymour lanes from the right lane, across the middle lane's path"
+  # --- Stockholm, Norrmalm: Centralbron northwest-bound at Tegelbacken (known_osm_issues #14) ---
+  - osm_id: 4830965          # Centralbron, one-way northwest-bound - lanes=1 where the road has 2
+    lanes: 2
+    note: "Street View (Kaveh, 2026-10-20): 2 lanes; OSM lanes=1. Trafikverket lane 3 + lane 4 = 1195 veh/h, near the 1146 veh/h on the next 2-lane edge 6452632749422867394"
+  - osm_id: 1126757835       # Centralbron, one-way northwest-bound - the 9 m continuation of way 4830965
+    lanes: 2
+    note: "Street View (Kaveh, 2026-10-20): 2 lanes, as way 4830965 before it; OSM lanes=1"
 
 
 
