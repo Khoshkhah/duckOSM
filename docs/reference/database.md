@@ -80,7 +80,7 @@ lanes](../concepts/networks.md#access-private-and-forbidden-roads)) and the pede
 cars may not use (`highway` is `pedestrian`; `access` is `pedestrian`, `private` or `delivery`; [pedestrian
 streets](../concepts/networks.md#pedestrian-streets-in-driving)). They
 are never routable: not in `turn_restrictions` or any export, nor in the routed rows of `edge_graph`
-(the bus-only edges have rows of their own there, `uses = 'bus'`, which only the GMNS export reads), and `nodes` holds only
+(each has rows of its own there, with its `access` label in `uses`; see the table below), and `nodes` holds only
 the ends of routable edges. The maps draw them, marked. [Access: private and forbidden roads](../concepts/networks.md#access-private-and-forbidden-roads).
 
 Columns: those of `edges` from `edge_id` to `cycle_type`. The H3 columns and the elevation columns
@@ -114,10 +114,14 @@ the other. Edge-based routing runs on it.
 | `to_edge` | BIGINT | the edge you go on to; its `source` is `from_edge`'s `target` |
 | `via_edge` | BIGINT | the same as `to_edge` |
 | `cost` | FLOAT | `cost_s` of `from_edge` |
-| `uses` | VARCHAR | who may make the turn: the mode's own (`car` in driving, `walk`, `bike`) between two of its `edges`; `bus` in driving where one of the two is a bus-only edge of `private_edges` (`access = 'bus'`) |
+| `uses` | VARCHAR | who may make the turn: the mode's own (`car` in driving, `walk`, `bike`) between two of its `edges`; where one of the two edges is in `private_edges`, its `access` label: `bus`, `private`, `pedestrian` or `delivery`. Two restricted edges with different labels have no row |
 
-Routing (`route()`, `to_networkx`, point routing, the route map, the SUMO connections) reads only the
-mode's own rows; the `bus` rows are for the GMNS export's bus turns ([bus lanes](../design/bus_only_edges.md)).
+Every reader takes the mode's own rows by default (`routed_graph(con, mode)`), and has an option for the others:
+`routed_graph(con, mode, uses="pedestrian,private")`, `to_networkx(con, uses=...)` (the restricted edges get an
+`access` attribute) and `duckosm export-graph --graph edge --uses ...`. `route()`, `Router`, point routing, the route map and
+the SUMO connections stay on the mode's own rows. The GMNS export reads the own rows and the `bus` rows (the bus turns of
+[bus lanes](../design/bus_only_edges.md)); the other labels are not links there.
+Design: `docs/design/restricted_edge_graph_rows.md`.
 A database built before `uses` holds only the mode's own rows.
 
 A U-turn onto the reverse twin is included. Turns forbidden by `turn_restrictions` are removed: for a

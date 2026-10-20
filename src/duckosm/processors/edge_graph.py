@@ -9,13 +9,33 @@ from duckosm.processors.base import BaseProcessor
 ROUTED_USES = {"driving": "car", "walking": "walk", "cycling": "bike"}
 
 
-def routed_graph(con, mode):
+RESTRICTED_USES = ("bus", "private", "pedestrian", "delivery")   # the `access` labels of private_edges that edge_graph has rows for
+
+
+def check_uses(uses):
+    """``uses`` (None, a comma string or a list of labels) as a tuple of labels of :data:`RESTRICTED_USES`; a ``ValueError`` names the others."""
+    if not uses:
+        return ()
+    items = [u.strip() for u in (uses.split(",") if isinstance(uses, str) else uses) if u and u.strip()]
+    bad = [u for u in items if u not in RESTRICTED_USES]
+    if bad:
+        raise ValueError(f"unknown uses {bad}: choose from {', '.join(RESTRICTED_USES)}")
+    return tuple(dict.fromkeys(items))
+
+
+def routed_graph(con, mode, uses=None):
     """The rows of ``<mode>.edge_graph`` the mode routes on, as a FROM-able SQL relation: the rows of its
-    own edges (``uses`` = :data:`ROUTED_USES`), not the bus rows. A graph built before the ``uses`` column
-    holds only those rows."""
+    own edges (``uses`` = :data:`ROUTED_USES`), and no others. ``uses``: more labels to take (``bus``, ``private``,
+    ``pedestrian``, ``delivery``): the turns into and out of those restricted edges, to look at the graph, not to route
+    the mode on (docs/design/restricted_edge_graph_rows.md). A graph built before the ``uses`` column holds only the
+    mode's own rows."""
+    extra = check_uses(uses)
     has = con.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema = ? "
                       "AND table_name = 'edge_graph' AND column_name = 'uses'", [mode]).fetchone()[0]
-    return f"(SELECT * FROM {mode}.edge_graph WHERE uses = '{ROUTED_USES[mode]}')" if has else f"{mode}.edge_graph"
+    if not has:
+        return f"{mode}.edge_graph"
+    wanted = ", ".join(f"'{u}'" for u in (ROUTED_USES[mode], *extra))
+    return f"(SELECT * FROM {mode}.edge_graph WHERE uses IN ({wanted}))"
 
 
 class EdgeGraphBuilder(BaseProcessor):
@@ -29,9 +49,10 @@ class EdgeGraphBuilder(BaseProcessor):
     
     Two edges are connected if the target of one is the source of another.
     Turn restrictions are excluded. Each row says who may use it (``uses``): the mode's own
-    (``ROUTED_USES``, e.g. 'car') between two of its edges; 'bus' into or out of a bus-only edge
-    (``private_edges`` with access 'bus', driving), by the same rules. Routing reads only the
-    mode's own rows (:func:`routed_graph`); the GMNS export reads all.
+    (``ROUTED_USES``, e.g. 'car') between two of its edges; the ``access`` label of a restricted edge
+    (``private_edges``: 'bus', 'private', 'pedestrian', 'delivery') into or out of it, by the same rules; a
+    turn between two restricted edges of different labels has no row. Every reader takes the mode's own rows
+    by default and has a ``uses`` option for the others (:func:`routed_graph`, docs/design/restricted_edge_graph_rows.md).
     """
     
     def __init__(self, con, mode):
@@ -67,14 +88,16 @@ class EdgeGraphBuilder(BaseProcessor):
         """)
         has_bus = self.fetchone("""SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema()
                                    AND table_name = 'private_edges' AND column_name = 'access'""")[0]
-        if has_bus:          # the same join over the edges and the bus-only edges, the rows with a bus edge
-            self.execute("""
+        if has_bus:          # the same join over the edges and the restricted edges, the rows with a restricted edge, labelled by its access
+            labels = ", ".join(f"'{u}'" for u in RESTRICTED_USES)
+            self.execute(f"""
                 INSERT INTO edge_graph
-                WITH e AS (SELECT edge_id, source, target, cost_s, false AS bus FROM edges
-                           UNION ALL SELECT edge_id, source, target, cost_s, true FROM private_edges WHERE access = 'bus')
-                SELECT e1.edge_id, e2.edge_id, e2.edge_id, e1.cost_s, 'bus'
+                WITH e AS (SELECT edge_id, source, target, cost_s, NULL AS lab FROM edges
+                           UNION ALL SELECT edge_id, source, target, cost_s, access FROM private_edges WHERE access IN ({labels}))
+                SELECT e1.edge_id, e2.edge_id, e2.edge_id, e1.cost_s, coalesce(e1.lab, e2.lab)
                 FROM e e1 INNER JOIN e e2 ON e1.target = e2.source
-                WHERE e1.edge_id != e2.edge_id AND (e1.bus OR e2.bus)
+                WHERE e1.edge_id != e2.edge_id AND (e1.lab IS NOT NULL OR e2.lab IS NOT NULL)
+                  AND (e1.lab IS NULL OR e2.lab IS NULL OR e1.lab = e2.lab)     -- no user takes two different restricted edges
             """)
     
     def _remove_restricted_turns(self) -> None:

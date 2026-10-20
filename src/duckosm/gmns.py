@@ -1114,6 +1114,9 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
                            "AND table_name = 'edge_graph' AND column_name = 'uses'", [mode]).fetchone()[0] > 0
     own = f"'{ROUTED_USES[mode]}'"
     o_uses, i_uses = ("o.uses", "i.uses") if has_uses else (own, own)  # no `uses`: the mode's rows only
+    # the mode's own rows and the bus rows: the other labels of edge_graph (private, pedestrian, delivery) are not links here
+    # (docs/design/restricted_edge_graph_rows.md)
+    gate = f"WHERE uses IN ({own}, 'bus')" if has_uses else ""
     perm = (f"""UNION ALL SELECT from_edge, to_edge, string_agg(DISTINCT u, ',' ORDER BY u), true FROM (
                   SELECT from_edge, to_edge, CASE WHEN v IN ('psv', 'bus') THEN 'bus' WHEN v = 'bicycle' THEN 'bike' END AS u
                   FROM (SELECT from_edge, to_edge, trim(unnest(string_split(vehicles, ';'))) AS v FROM s.{mode}.turn_permission WHERE allowed))
@@ -1128,7 +1131,7 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER)       AS pe,
                ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER - 1)   AS pp,
                ST_PointN(te.geometry, 1) AS qs, ST_PointN(te.geometry, 2) AS qn
-        FROM (SELECT from_edge, to_edge, {"uses" if has_uses else own} AS uses, false AS _perm FROM s.{mode}.edge_graph {perm}) eg
+        FROM (SELECT from_edge, to_edge, {"uses" if has_uses else own} AS uses, false AS _perm FROM s.{mode}.edge_graph {gate} {perm}) eg
         JOIN _edges fe ON fe.edge_id = eg.from_edge
         JOIN _edges te ON te.edge_id = eg.to_edge
         -- drop the immediate reversal (U-turn back onto the same physical segment): an edge_graph
@@ -1138,10 +1141,10 @@ def _build_movement(con, sch, mode, uses, drive_side="right"):
         -- lane unreachable. Real intersection U-turns (a different osm_id) are kept too; all 'uturn'.
         -- The other ways on / in are those its users may take: a car's the cars' rows, a bus's all.
         WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source
-                   AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph o
+                   AND EXISTS (SELECT 1 FROM (SELECT * FROM s.{mode}.edge_graph {gate}) o
                                WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge
                                  AND (eg.uses <> {own} OR {o_uses} = {own}))
-                   AND EXISTS (SELECT 1 FROM s.{mode}.edge_graph i
+                   AND EXISTS (SELECT 1 FROM (SELECT * FROM s.{mode}.edge_graph {gate}) i
                                WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge
                                  AND (eg.uses <> {own} OR {i_uses} = {own})))
       ), b AS (

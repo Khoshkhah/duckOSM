@@ -17,6 +17,8 @@ makes them movements of `allowed_uses` `bus` / `bus,bike`, with lanes and lane c
 Monaco: 51 bus rows (24 of them U-turns onto the way's other direction, dropped by GMNS's U-turn rule),
 27 bus movements, car rows and car movements unchanged.
 
+**Other labels (2026-10-20):** the turns of the other restricted edges (`private`, `pedestrian`, `delivery`) are in `edge_graph` too, by the same rule: [restricted_edge_graph_rows.md](restricted_edge_graph_rows.md).
+
 ## Today
 
 Driving is the car network, and a road or direction only buses may use is left out of it:

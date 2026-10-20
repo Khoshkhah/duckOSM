@@ -587,7 +587,10 @@ def multimodal(db, transfer_cost, schema):
 @click.option('--geometry', type=click.Choice(['wkt', 'shapely', 'none']), default='wkt',
               show_default=True,
               help="Edge geometry for --graph node (shapely falls back to WKT for graphml)")
-def export_graph(db, mode, out, graph_kind, fmt, weight, geometry):
+@click.option('--uses', default=None,
+              help="More turns for --graph edge, a comma list of bus, private, pedestrian, delivery: "
+                   "the turns into and out of those restricted edges (default: the mode's own turns only)")
+def export_graph(db, mode, out, graph_kind, fmt, weight, geometry, uses):
     """Export a built network as a networkx graph file (GraphML or gpickle).
 
     By default writes the geographic node-based MultiDiGraph (OSM junctions as nodes, road
@@ -607,7 +610,7 @@ def export_graph(db, mode, out, graph_kind, fmt, weight, geometry):
         out = f"{Path(db).stem}_{mode}{ext}"
     try:
         res = write_graph(con, out, mode=mode, graph=graph_kind, fmt=fmt, weight=weight,
-                          geometry=geometry)
+                          geometry=geometry, uses=uses)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {res['path']} ({res['fmt']}: {res['n_nodes']} nodes, "
