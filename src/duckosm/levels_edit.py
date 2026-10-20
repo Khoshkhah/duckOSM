@@ -4,6 +4,8 @@ base map (water, land, buildings, railways, signals) and every road of the file:
 Each Apply writes into the file (docs/design/levels_in_build.md)."""
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 from pathlib import Path
 
@@ -12,21 +14,56 @@ from duckosm.levels import is_current, load_roads, make_and_solve, roadstyle_mod
 logger = logging.getLogger(__name__)
 
 
+# the colours of the restricted roads, as in mapstyle's Roads box (a road that no mode can use)
+ACCESS_COLORS = {"private": "#c8c8c8", "bus": "#9db8d9", "pedestrian": "#dddde8", "delivery": "#e8d2b0"}
+
+# added to the editor's page: paints those roads (by their `access`) as the base of rsColor. The editor paints the picked roads with rsColor too,
+# which replaces the roads painted before: so rsColor is wrapped, and every call keeps these groups after its own (its own win).
+_SCRIPT = """<script>(function(){const C=__COLORS__;let base=[];const orig=window.rsColor;
+window.rsColor=function(a,b,c){if(c!=null)return orig(a,b,c);let g;
+if(a==null)g=[];else if(Array.isArray(a)&&a.length&&Array.isArray(a[0])&&a[0].length===2&&typeof a[0][1]==="string")g=a;else g=[[a,b]];
+return orig(g.concat(base));};
+let n=0;const tick=()=>{const g=Object.entries(C).map(([k,c])=>[rsQuery(p=>p.access===k),c]).filter(([ids])=>ids.length);
+if(g.length){base=g;window.rsColor(null);}else if(++n<80)setTimeout(tick,300);};tick();})();</script>"""
+
+
 def items_for(db):
-    """``f(roads)`` for roadstyle's editor (``serve(items=f)``): the overlays of mapstyle's feature layers (water, land, buildings, …)
-    of ``db`` and the blank base map. ``None`` if mapstyle is not installed or the file has no ``features.*`` (the editor is then plain)."""
+    """``f(roads)`` for roadstyle's editor (``serve(items=f)``): the overlays of mapstyle's feature layers (water, land, buildings, …) of ``db``,
+    not clickable (decoration), on the blank base map; and each road's ``access`` (private, bus, pedestrian, delivery: a road that no mode can use,
+    as mapstyle's all-modes map says it). ``None`` if mapstyle is not installed (the editor is then plain)."""
     try:
-        from mapstyle.map import feature_overlays, load_layers
+        from mapstyle.map import _access, feature_overlays, load_layers, load_roads
     except ImportError:
         logger.warning('the editor has no base map layers: pip install "duckosm[viz]" for mapstyle')
         return None
+    roads = load_roads(db)
+    access = {str(e): a for e, a in zip(roads["edge_id"], _access(roads, "all"), strict=True) if isinstance(a, str)}
 
-    def items(roads):
+    def items(draw):
+        if draw is not None:
+            draw["access"] = [access.get(str(e)) for e in draw["edge"]]
         overlays, _config = feature_overlays(load_layers(db))
         for o in overlays:
             o.visible = True                    # mapstyle's layers.js shows them once styled; in the editor they start visible
-        return overlays, {"basemap": "blank"}
+            o.popup, o.tooltip = [], None       # decoration: a hover would highlight every feature that has the same number
+        return overlays, {"basemap": "blank", "tooltip": ["access"]}
     return items
+
+
+@contextlib.contextmanager
+def _access_colours(on):
+    """While the editor is served, its page has the script that paints the restricted roads (roadstyle's ``Area.page``, wrapped; restored after)."""
+    if not on:
+        yield
+        return
+    from roadstyle import level_editor as le
+    original = le.Area.page
+    script = _SCRIPT.replace("__COLORS__", json.dumps(ACCESS_COLORS))
+    le.Area.page = property(lambda self: original.fget(self).replace("</body>", script + "</body>", 1))
+    try:
+        yield
+    finally:
+        le.Area.page = original
 
 
 def prepare(db, area=None):
@@ -44,8 +81,10 @@ def prepare(db, area=None):
 
 
 def edit(db, area=None, port=8780, plain=False):
-    """Prepare the area of ``db`` and serve the editor at http://localhost:``port``/ until Ctrl+C. ``plain``: no mapstyle layers."""
+    """Prepare the area of ``db`` and serve the editor at http://localhost:``port``/ until Ctrl+C. ``plain``: no mapstyle layers and colours."""
     from roadstyle.level_editor import serve
 
     area = prepare(db, area)
-    serve(area, port, items=None if plain else items_for(db))
+    items = None if plain else items_for(db)
+    with _access_colours(items is not None):
+        serve(area, port, items=items)

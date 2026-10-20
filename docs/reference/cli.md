@@ -190,7 +190,7 @@ duckosm levels [OPTIONS] DB
 
 The level editor of the database: fix which road is drawn over which (bridges, crossings) and the head and the cap of a road end. It is
 [roadstyle's editor](https://khoshkhah.github.io/roadstyle/guides/levels/), started on the area of the file, with mapstyle's base map (water, land, buildings,
-railways, signals) and **every road of the file**: the roads of its modes and their `private_edges` (bus, private, pedestrian, delivery). A file with one mode gives
+railways, signals) and **every road of the file**: the roads of its modes and their `private_edges` (bus, private, pedestrian, delivery). The roads that no mode can use are coloured as on the maps: private grey, bus lanes blue, pedestrian streets lavender, delivery streets tan. A file with one mode gives
 an editor of that mode; with several modes, the editor's boxes show only some. The work folder is written from the tables `visualization.level_*` (they are the
 master), and solved first if the stored numbers are not those of the roads in the file. At each Apply the editor writes your edits and the new drawing order into the
 file. Needs `duckosm[levels]`; the layers need `duckosm[viz]`. Guide: [Store the drawing order](../guides/drawing-order.md).

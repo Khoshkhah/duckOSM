@@ -147,16 +147,22 @@ def test_levels_edit_serves_the_editor_with_mapstyle_layers(first, tmp_path):
     import time
     import urllib.request
 
-    from duckosm.levels_edit import items_for, prepare
+    from duckosm.levels_edit import _access_colours, items_for, prepare
     from roadstyle.level_editor import serve
     items = items_for(first)
-    overlays, kw = items(None)
-    assert overlays and all(o.visible for o in overlays) and kw == {"basemap": "blank"}      # water, land, buildings, …
+    import pandas as pd
+    draw = pd.DataFrame({"edge": [1, 2]})
+    overlays, kw = items(draw)
+    assert overlays and all(o.visible and o.popup == [] for o in overlays)                    # water, land, buildings, …: decoration
+    assert kw["basemap"] == "blank" and list(draw["access"]) == [None, None]                  # every road has an access column
     area = prepare(first, tmp_path / "work2.levels")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    threading.Thread(target=serve, args=(area, port), kwargs={"items": items}, daemon=True).start()
+    def run():
+        with _access_colours(True):
+            serve(area, port, items=items)
+    threading.Thread(target=run, daemon=True).start()
     for _ in range(60):
         try:
             page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=60).read().decode()
@@ -166,3 +172,4 @@ def test_levels_edit_serves_the_editor_with_mapstyle_layers(first, tmp_path):
     else:
         pytest.fail("the editor did not answer")
     assert "Level editor" in page and "buildings" in page
+    assert "#9db8d9" in page and "window.rsColor=function" in page                           # the restricted roads are painted
