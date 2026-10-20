@@ -24,7 +24,7 @@ import logging
 logger = logging.getLogger("duckosm")
 
 
-def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bool = True):
+def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bool = True, uses=None):
     """Return a `networkx.DiGraph` of the routing graph, with a `weight` attribute per arc.
 
     Parameters
@@ -40,6 +40,10 @@ def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bo
         ``G.nodes[edge_id]`` carries the road data, not just the routing ``weight`` on arcs. Pass
         False for a bare graph (e.g. inside :func:`route`, which doesn't need it).
 
+    uses : more turns to take, by their label (a comma string or a list of ``bus``, ``private``, ``pedestrian``,
+        ``delivery``): the turns into and out of those restricted edges (``private_edges``), which get an ``access``
+        attribute. Default none: the mode's own turns only (docs/design/restricted_edge_graph_rows.md).
+
     Returns a DiGraph whose nodes are ``edge_id``s (with the attributes above when ``node_attrs``).
     """
     try:
@@ -48,28 +52,39 @@ def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bo
         raise ImportError("to_networkx needs networkx — `pip install networkx`") from e
 
     from duckosm.processors.edge_graph import routed_graph
-    graph = routed_graph(con, mode)                      # the mode's own turns, not the bus rows
+    graph = routed_graph(con, mode, uses)                # the mode's own turns, and the labels asked for in uses
+    roads = _roads_relation(con, mode, uses)             # edges, and private_edges when uses asks for their turns
     if weight == "time":
         # edge_graph.cost is already the from_edge's travel time (cost_s).
         sql = f"SELECT from_edge, to_edge, cost FROM {graph}"
     elif weight == "length":
         # length of the from_edge.
         sql = (f"SELECT g.from_edge, g.to_edge, e.length_m "
-               f"FROM {graph} g JOIN {mode}.edges e ON e.edge_id = g.from_edge")
+               f"FROM {graph} g JOIN {roads} e ON e.edge_id = g.from_edge")
     else:
         raise ValueError("weight must be 'time' or 'length'")
 
     g = nx.DiGraph()
     g.add_weighted_edges_from(con.execute(sql).fetchall(), weight="weight")
     if node_attrs:
-        _attach_edge_attrs(con, g, mode)
+        _attach_edge_attrs(con, g, mode, roads)
     logger.info(f"routing graph[{mode}]: {g.number_of_nodes():,} edges, "
                 f"{g.number_of_edges():,} arcs, weight={weight}"
                 f"{', +node attrs' if node_attrs else ''}")
     return g
 
 
-def _attach_edge_attrs(con, g, mode):
+def _roads_relation(con, mode, uses=None):
+    """``<mode>.edges`` as a FROM-able relation with an ``access`` column (NULL); with ``uses``, the rows of ``private_edges`` too."""
+    from duckosm.processors.edge_graph import check_uses
+    cols = "edge_id, name, highway, length_m, maxspeed_kmh, cost_s, geometry"
+    if not check_uses(uses):
+        return f"{mode}.edges"
+    return (f"(SELECT {cols}, NULL AS access FROM {mode}.edges UNION ALL "
+            f"SELECT {cols}, access FROM {mode}.private_edges)")
+
+
+def _attach_edge_attrs(con, g, mode, roads=None):
     """Attach each edge's metadata onto its node (edge_id) in an edge-based graph.
 
     Sets name/highway/length_m/maxspeed_kmh/cost_s and geometry (WKT) on every node already in
@@ -79,13 +94,16 @@ def _attach_edge_attrs(con, g, mode):
         con.execute("INSTALL spatial; LOAD spatial;")
     except Exception:
         pass
+    with_access = roads is not None and roads != f"{mode}.edges"      # the restricted edges are in: say which ones
     rows = con.execute(
-        f"SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry) "
-        f"FROM {mode}.edges").fetchall()
-    for eid, name, hw, length, spd, cost, geom in rows:
+        f"SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry)"
+        f"{', access' if with_access else ''} FROM {roads or f'{mode}.edges'}").fetchall()
+    for eid, name, hw, length, spd, cost, geom, *acc in rows:
         if eid in g:
             g.nodes[eid].update(name=name, highway=hw, length_m=length,
                                 maxspeed_kmh=spd, cost_s=cost, geometry=geom)
+            if with_access and acc[0]:
+                g.nodes[eid]["access"] = acc[0]
     return g
 
 
@@ -210,7 +228,7 @@ def _graphml_safe(g):
 
 
 def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
-                weight: str = "time", geometry: str = "wkt"):
+                weight: str = "time", geometry: str = "wkt", uses=None):
     """Build a networkx graph for ``mode`` and write it to ``path``. Returns a small summary dict.
 
     Parameters
@@ -232,6 +250,8 @@ def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
         raise ValueError("fmt must be 'graphml' or 'gpickle'")
     if graph not in ("node", "edge"):
         raise ValueError("graph must be 'node' or 'edge'")
+    if uses and graph != "edge":
+        raise ValueError("uses is for the edge graph (graph='edge'): its turns carry the labels")
     try:
         import networkx as nx
     except ImportError as e:
@@ -242,7 +262,7 @@ def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
         geom = "wkt" if (fmt == "graphml" and geometry == "shapely") else geometry
         g = to_networkx_nodes(con, mode=mode, geometry=geom)
     else:
-        g = to_networkx(con, mode=mode, weight=weight)
+        g = to_networkx(con, mode=mode, weight=weight, uses=uses)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "graphml":

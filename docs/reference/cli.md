@@ -364,6 +364,7 @@ duckosm export-graph [OPTIONS] DB
 | `-f`, `--format` | `graphml` or `gpickle` | from `--out`, else `graphml` |
 | `--weight` | arc weight, `time` or `length`; `--graph edge` only | `time` |
 | `--geometry` | edge geometry, `wkt`, `shapely` or `none`; `--graph node` only; GraphML writes shapely as WKT | `wkt` |
+| `--uses TEXT` | more turns for `--graph edge`: a comma list of `bus`, `private`, `pedestrian`, `delivery`, the turns into and out of those restricted edges (`private_edges`); they get an `access` attribute | the mode's own turns only |
 
 ## Experimental and lane-level
 

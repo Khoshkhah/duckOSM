@@ -19,3 +19,17 @@ duckosm export-graph monaco.duckdb -g edge -o routing.gpickle # the routing grap
 
 GraphML opens in any tool but stores lists and geometry as text; gpickle keeps lists and types but
 only loads in Python (add `--geometry shapely` for shapely geometries on the junction graph). From Python: `write_graph(con, "monaco.graphml")`.
+
+
+## Turns of the restricted edges
+
+The edge graph has only the mode's own turns. To add the turns into and out of the restricted edges
+(`private_edges`: `bus`, `private`, `pedestrian`, `delivery`), give `uses`:
+
+```python
+G = to_networkx(con, "driving", uses="pedestrian,private")   # CLI: duckosm export-graph --graph edge --uses pedestrian,private
+G.nodes[edge_id]["access"]                                    # 'pedestrian' on a restricted edge; absent on a usable edge
+```
+
+A restricted edge is a node with its `cost_s` as the weight of its arcs. Do not route cars over them: use this to look at what
+meets at a junction. [Database reference](../reference/database.md#edge_graph).
