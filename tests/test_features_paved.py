@@ -52,14 +52,16 @@ def test_paved_and_the_other_new_rules(con):
     box(con, 11, 0.020, 0.000, {"natural": "shrubbery"})
     box(con, 12, 0.022, 0.000, {"tourism": "zoo"})
     # a pedestrian area mapped as a multipolygon relation, with no area=yes: its ring has no tags
+    box(con, 14, 0.026, 0.000, {"amenity": "grave_yard"})
+    box(con, 15, 0.028, 0.000, {"railway": "platform"})
     box(con, 13, 0.024, 0.000, {})
     con.execute("INSERT INTO raw.relations VALUES (100, MAP {'type': 'multipolygon', 'highway': 'pedestrian'}, [13], ['outer'], ['way']::member[])")
     FeaturesBuilder(con).run()
     assert kinds(con, "paved") == sorted(["square", "pier", "pedestrian", "pedestrian", "helipad", "marketplace", "traffic_island", "quay"])
     assert con.execute("SELECT count(*) FROM features.paved WHERE osm_type = 'relation'").fetchone()[0] == 1
     assert kinds(con, "water_polygons") == ["swimming_pool"]
-    assert kinds(con, "land") == ["beach_resort", "shrubbery"]
-    assert kinds(con, "sites") == ["zoo"]
+    assert kinds(con, "land") == ["beach_resort", "grave_yard", "shrubbery"]
+    assert kinds(con, "sites") == ["platform", "zoo"]
     # the closed pedestrian road with no area=yes is still a line in `streets`, and not a polygon in `paved`
     assert con.execute("SELECT count(*) FROM features.streets WHERE osm_id = 4").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM features.paved WHERE osm_id = 4").fetchone()[0] == 0

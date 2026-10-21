@@ -62,6 +62,13 @@ Tests: the Monaco build has a `features.paved` with at least the 6 + 3 squares a
 pools; `duckosm features-check` runs and its groups are the expected ones. Docs: `docs/reference/features.md` (the table of layers),
 `docs/reference/cli.md`, `CHANGELOG.md`. This is duckOSM 0.6.0 (a new table).
 
+## What the check found on Norrmalm (2026-10-21)
+
+The first run of `features-check` on a rebuilt Norrmalm copy found two more kinds of ground (now in the layers): `amenity=grave_yard` (4 areas,
+29,145 m²: `land`) and `railway=platform` (4 areas, 9,043 m²: `sites`). It also found that **shops, restaurants, cafés, a cinema and memorials
+that are mapped as areas are in no table**: the points layers take only nodes (Norrmalm: 9 restaurants, 17 delis, 4 fast-food places, and more).
+This is a different change (a point for the centre of an area, in `pois`), and it needs its own decision. It is not in this note.
+
 ## Change in mapstyle
 
 mapstyle reads the tables that `layers.yaml` names, so every new table is a row there. No change in roadstyle.

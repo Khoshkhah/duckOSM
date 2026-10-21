@@ -8,7 +8,7 @@
   multipolygon relation), piers, breakwaters and quays, helipads, marketplaces. They were in no table, so the map had empty places
   where OSM has areas (Monaco: Place du Casino and 82 more). Design: `docs/design/missing_polygons.md`.
 - `leisure=swimming_pool` is in `water_polygons` (`kind` = `swimming_pool`), `leisure=beach_resort` and `natural=shrubbery` are in
-  `land`, and `tourism=zoo` is in `sites`.
+  `land`, and `tourism=zoo` is in `sites`. `amenity=grave_yard` is in `land` and `railway=platform` in `sites` (found by `features-check` on Norrmalm).
 - **`duckosm features-check DB`**: lists the polygons of `raw.*` that no feature table holds, grouped by tag, with the reason when the
   build leaves a group out on purpose. A group with no reason is a possible miss.
 

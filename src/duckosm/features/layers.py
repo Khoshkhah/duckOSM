@@ -83,11 +83,11 @@ class Land(Layer):
         f"OR {_t('leisure')} IN ('park','garden','golf_course','playground','miniature_golf',"
         f"'nature_reserve','stadium','pitch','track','dog_park','marina','ice_rink',"
         f"'swimming_area','beach_resort') "               # sport/leisure AREAS render as fills in OSM-Carto (not POIs)
-        f"OR {_t('landuse')} = 'greenhouse_horticulture'")
+        f"OR {_t('landuse')} = 'greenhouse_horticulture' OR {_t('amenity')} = 'grave_yard'")
     # natural=wood -> Shortbread 'forest'; everything else passes through (values match Shortbread).
     kind_sql = (
         f"CASE WHEN {_t('natural')} = 'wood' THEN 'forest' "
-        f"ELSE COALESCE({_t('landuse')}, {_t('natural')}, {_t('leisure')}) END")
+        f"ELSE COALESCE({_t('landuse')}, {_t('natural')}, {_t('leisure')}, {_t('amenity')}) END")
 
 
 class Sites(Layer):
@@ -101,13 +101,15 @@ class Sites(Layer):
         f"'school','kindergarten','hospital','prison') "
         f"OR {_t('public_transport')} IN ('platform','station') "
         f"OR {_t('leisure')} = 'sports_centre' OR {_t('landuse')} = 'construction' "
-        f"OR {_t('military')} = 'danger_area' OR {_t('man_made')} = 'bridge' OR {_t('tourism')} = 'zoo'")
+        f"OR {_t('military')} = 'danger_area' OR {_t('man_made')} = 'bridge' OR {_t('tourism')} = 'zoo' "
+        f"OR {_t('railway')} = 'platform'")
     kind_sql = (
         f"CASE WHEN {_t('landuse')} = 'construction' THEN 'construction' "
         f"WHEN {_t('military')} = 'danger_area' THEN 'danger_area' "
         f"WHEN {_t('man_made')} = 'bridge' THEN 'bridge' "
         f"WHEN {_t('leisure')} = 'sports_centre' THEN 'sports_centre' "
         f"WHEN {_t('tourism')} = 'zoo' THEN 'zoo' "
+        f"WHEN {_t('railway')} = 'platform' THEN 'platform' "
         f"WHEN {_t('amenity')} IS NOT NULL THEN {_t('amenity')} "
         f"ELSE {_t('public_transport')} END")
 
