@@ -155,7 +155,7 @@
   const CELL = 0.002;                                  // grid cell, degrees (~200 m)
   let GEO = null, GRID = null, KX = 1;
   function buildIndex() {
-    const fs = map.getSource("roads")._data.features;  // roadstyle's inline source (the planner never tiles)
+    const d = map.getSource("roads")._data, fs = (d.geojson || d).features;  // roadstyle's inline source (the planner never tiles); MapLibre 5 keeps it in `_data.geojson`
     GEO = new Array(D.n); GRID = new Map();
     KX = Math.cos(fs[0].geometry.coordinates[0][1] * Math.PI / 180);
     for (const f of fs) {

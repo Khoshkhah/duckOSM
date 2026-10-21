@@ -34,10 +34,10 @@ pip install -e ".[dev,routing]"
 ## Tests
 
 ```bash
-pytest tests/ -q                          # everything
-pytest tests/test_gmns.py -q              # one file
-pytest tests/test_gmns.py -k lane -q      # tests whose name matches
-pytest tests/ -q -rs                      # also list why tests were skipped
+python -m pytest tests/ -q                          # everything
+python -m pytest tests/test_gmns.py -q              # one file
+python -m pytest tests/test_gmns.py -k lane -q      # tests whose name matches
+python -m pytest tests/ -q -rs                      # also list why tests were skipped
 ```
 
 `tests/conftest.py` installs DuckDB's `spatial` extension once, so a fresh machine needs nothing

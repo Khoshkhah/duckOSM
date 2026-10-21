@@ -10,9 +10,9 @@ Use the project venv — `duckosm` and `pytest` are only on `PATH` when it's act
 ```bash
 pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim schema tests), networkx
 
-.venv/bin/pytest tests/ -q                          # full suite
-.venv/bin/pytest tests/test_merge_segments.py -q    # one file
-.venv/bin/pytest tests/test_gmns.py -k lane -q      # one test by name
+.venv/bin/python -m pytest tests/ -q                          # full suite
+.venv/bin/python -m pytest tests/test_merge_segments.py -q    # one file
+.venv/bin/python -m pytest tests/test_gmns.py -k lane -q      # one test by name
 
 .venv/bin/duckosm build --config config/sample_monaco.yaml # the published sample (seconds)
 .venv/bin/duckosm build --config config/<area>.yaml        # Kaveh's area configs: local, git-ignored
