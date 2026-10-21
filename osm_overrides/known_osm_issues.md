@@ -451,3 +451,67 @@ west end to Tegelbacken, in two branches. OSM has no way. Kaveh saw the road as 
 `180929` (12.8 m from the NVDB start) through the NVDB vertices to OSM node `180933` (1.9 m from the NVDB end).
 Branch A (NVDB `3678311`, `3929353`, `3678312`) is left out. It would end at Tegelbacken node `12957251840`, 22.8 m from the NVDB end,
 and cut Tegelbacken edge `4271686175640876552`. Upstream: add Rödbodtorget in OpenStreetMap.
+
+## 19. Stockholm, Malmtorgsgatan (north part) - one-way with 2 lanes, not two-way
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm |
+| **OSM way** | `382749409` (`highway=unclassified`, no `oneway` tag, no `lanes` tag, drawn north to south: `498348022` → `180927`) |
+| **Status** | **CONFIRMED** by Kaveh in Street View (2026-10-20), by NVDB and by a city tube; override enabled |
+
+**Symptom.** OSM has no `oneway` tag, so duckOSM makes the street two-way with 1 lane in each direction. Street View shows one-way
+with 2 lanes. NVDB has the street one-way south. City tube `01182290` on the next way (`1126945063`, one-way in OSM) counts only the
+direction toward Gustav Adolfs torg. With the reverse edges, SonoFlow gets a north direction that does not exist.
+
+**Fix.** `tags: {oneway: "yes", lanes: "2", "oneway:bicycle": "no"}` in `osm_overrides.yaml`. The way is drawn north to south, so
+`oneway=yes` is south. `oneway:bicycle=no` keeps the OSM state for cyclists (two-way), as on Fredsgatan (#16), until Kaveh decides.
+The edge ids do not change: `lanes` is not in the hash. Upstream: tag `oneway=yes`, `lanes=2` in OpenStreetMap.
+
+## 20. Stockholm, Olofsgatan at Olof Palmes Gata - one-way north-west, not two-way
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm (the 33 m of Olofsgatan at Olof Palmes Gata) |
+| **OSM way** | `38048758` (`highway=residential`, no `oneway` tag, drawn north-west to south-east: `21665015` → `447281012`) |
+| **Status** | **CONFIRMED** by Kaveh in Street View (2026-10-20) and by NVDB; override enabled |
+
+**Symptom.** OSM has no `oneway` tag, so duckOSM makes the piece two-way. Street View shows it is not two-way. NVDB has it one-way
+north-west. In OSM, the only other edge at its south-east end (`4594558177974992702`, way `38048759`) is one-way north-west into this
+piece, so the south-east direction is a dead end.
+
+**Fix.** `tags: {oneway: "-1", "oneway:bicycle": "no"}` in `osm_overrides.yaml`. The way is drawn south-east, so the cars go against
+the drawing direction: `oneway=-1`. The `oneway:` field of a rule takes only true or false, so the rule sets the tag.
+`oneway:bicycle=no` keeps the OSM state for cyclists, as in #19. Upstream: tag `oneway=-1` in OpenStreetMap.
+
+## 21. Stockholm, Jakobsbergsgatan (Biblioteksgatan to Birger Jarlsgatan) - one-way east, not two-way
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm |
+| **OSM way** | `17404226` (`highway=unclassified`, no `oneway` tag, drawn west to east: `11418032300` → `180202270`) |
+| **Status** | **CONFIRMED** by Kaveh in Street View (2026-10-20) and by NVDB; override enabled |
+
+**Symptom.** OSM has no `oneway` tag, so duckOSM makes the street two-way. Street View shows one-way. NVDB has it one-way east, from
+Norrlandsgatan to Birger Jarlsgatan.
+
+**Fix.** `tags: {oneway: "yes", "oneway:bicycle": "no"}` in `osm_overrides.yaml`. The way is drawn west to east, so `oneway=yes` is east.
+`oneway:bicycle=no` keeps the OSM state for cyclists, as in #19. Upstream: tag `oneway=yes` in OpenStreetMap.
+
+**Known side effect (accepted).** In OSM, the west end of this car part connects to no car road. After the fix, no car can drive
+into it. NVDB has a car link of about 55 m from Norrlandsgatan, which OSM has as the pedestrian way `39691465`. This link is not added
+(not checked). Upstream: check way `39691465` in OpenStreetMap.
+
+## 22. Stockholm, Mellangatan (tunnel) - one-way north, not two-way
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm |
+| **OSM way** | `569074663` (`highway=living_street`, tunnel, `layer=-1`, 58 m, no `oneway` tag, drawn south to north: `5473717483` → `5473717482`) |
+| **Status** | **CONFIRMED** by Kaveh in Street View (2026-10-20) and by NVDB; override enabled |
+
+**Symptom.** OSM has no `oneway` tag, so duckOSM makes the tunnel two-way. Street View shows one-way. NVDB has it one-way north.
+In OSM it connects to no other car road.
+
+**Fix.** `tags: {oneway: "yes", "oneway:bicycle": "no"}` in `osm_overrides.yaml`. The way is drawn south to north, so `oneway=yes` is
+north. `oneway:bicycle=no` keeps the OSM state for cyclists, as in #19. Upstream: tag `oneway=yes` in OpenStreetMap.

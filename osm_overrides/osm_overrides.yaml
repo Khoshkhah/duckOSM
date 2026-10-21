@@ -303,6 +303,20 @@ overrides:
   - osm_id: 40274443         # cycleway 266272124 -> 180929: keeps its west part, a cycle path only; the east part is new way 9000003678314
     keep_nodes: [266272124, 1740740220]
     note: "the east part, 1740740220 -> 180929, is a car road (NVDB segment 3678314), so it is the new way 9000003678314; the west part (15.5 m, across the southbound Vasabron carriageway) is not in NVDB"
+  # --- Stockholm, Norrmalm: one-way streets that OSM has as two-way (known_osm_issues #19-#22) ---
+  # `tags`, not `oneway: true`: the tag changes only the cars (walking ignores it); oneway:bicycle=no keeps the OSM state for cyclists, as on Fredsgatan
+  - osm_id: 382749409        # Malmtorgsgatan, north part - no oneway tag, lanes 1 each way
+    tags: {oneway: "yes", lanes: "2", "oneway:bicycle": "no"}
+    note: "one-way south with 2 lanes (the way is drawn north to south, 498348022 -> 180927): Street View (Kaveh, 2026-10-20); NVDB one-way south; city tube 01182290 on the next way 1126945063 (already one-way) counts only the direction toward Gustav Adolfs torg"
+  - osm_id: 38048758         # Olofsgatan, 33 m at Olof Palmes Gata - no oneway tag
+    tags: {oneway: "-1", "oneway:bicycle": "no"}
+    note: "one-way north-west, toward Olof Palmes Gata; the way is drawn south-east (21665015 -> 447281012), so oneway=-1: Street View (Kaveh, 2026-10-20); NVDB one-way north-west; the only other edge at the south-east end (way 38048759) is one-way north-west into this piece"
+  - osm_id: 17404226         # Jakobsbergsgatan, Biblioteksgatan to Birger Jarlsgatan - no oneway tag
+    tags: {oneway: "yes", "oneway:bicycle": "no"}
+    note: "one-way east (the way is drawn west to east, 11418032300 -> 180202270): Street View (Kaveh, 2026-10-20); NVDB one-way east from Norrlandsgatan. The west end connects to no car road in OSM, so no car can enter it (accepted; the NVDB link from Norrlandsgatan is OSM pedestrian way 39691465, not added)"
+  - osm_id: 569074663        # Mellangatan, 58 m tunnel (layer -1) - no oneway tag
+    tags: {oneway: "yes", "oneway:bicycle": "no"}
+    note: "one-way north (the way is drawn south to north, 5473717483 -> 5473717482): Street View (Kaveh, 2026-10-20); NVDB one-way north. It connects to no other car road in OSM"
 
 
 
