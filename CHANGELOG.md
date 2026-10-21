@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The `viz` extra needs mapstyle 0.7.0: the maps (`duckosm viz`, `route-map`, `levels-edit`) have the button and the row for buildings in 3D. The docs maps are drawn again with it.
 - `duckosm route-map` has `--google-3d` / `--no-google-3d`, as `viz` has: the Google 3D window is on when
   `GOOGLE_MAPS_KEY` is set.
 - `duckosm route-map`: a new side panel. The mode and the weight are segmented buttons. The start and the
