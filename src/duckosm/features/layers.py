@@ -11,6 +11,8 @@ Shortbread specifics that differ from a naive per-OSM-tag split:
 - POIs split into ``pois`` (amenity/shop/...) and ``public_transport`` (stops/stations).
 - ``amenity=parking`` and other amenity *areas* go to ``sites`` (Shortbread), not ``pois``.
 - Shortbread has no barriers/power layers — out of scope (they were disabled stubs in duckmap).
+- **paved** (squares, pedestrian areas, piers, helipads) is a duckOSM extension beyond Shortbread: the open ground that
+  people stand on, which OSM maps as areas of its own (docs/design/missing_polygons.md).
 - **traffic** (``highway=traffic_signals`` / ``crossing``) is a duckOSM extension beyond Shortbread:
   the base map renders these road-furniture nodes, and crossings carry a ``bearing`` (the direction
   of the road they sit on) so the marking can be rotated to lie across the road.
@@ -48,12 +50,14 @@ class WaterPolygons(Layer):
     name = "water_polygons"
     geom_kind = "area"
     where_sql = (f"{_t('natural')} IN ('water','glacier') OR {_t('waterway')} = 'riverbank' "
-                 f"OR {_t('landuse')} IN ('reservoir','basin') OR {_t('water')} IS NOT NULL")
+                 f"OR {_t('landuse')} IN ('reservoir','basin') OR {_t('water')} IS NOT NULL "
+                 f"OR {_t('leisure')} = 'swimming_pool'")
     kind_sql = (
         f"CASE WHEN {_t('natural')} = 'glacier' THEN 'glacier' "
         f"WHEN {_t('landuse')} = 'reservoir' THEN 'reservoir' "
         f"WHEN {_t('landuse')} = 'basin' THEN 'basin' "
         f"WHEN {_t('waterway')} = 'riverbank' THEN 'river' "
+        f"WHEN {_t('leisure')} = 'swimming_pool' THEN 'swimming_pool' "
         f"WHEN {_t('water')} IN ('river','canal','reservoir','basin','dock') THEN {_t('water')} "
         f"ELSE 'water' END")
 
@@ -75,10 +79,10 @@ class Land(Layer):
         f"'vineyard','quarry','recreation_ground','village_green','greenfield','brownfield',"
         f"'landfill','railway','plant_nursery','flowerbed','military','religious') "
         f"OR {_t('natural')} IN ('wood','scrub','heath','grassland','fell','sand','beach','scree',"
-        f"'shingle','bare_rock','wetland') "
+        f"'shingle','bare_rock','wetland','shrubbery') "
         f"OR {_t('leisure')} IN ('park','garden','golf_course','playground','miniature_golf',"
         f"'nature_reserve','stadium','pitch','track','dog_park','marina','ice_rink',"
-        f"'swimming_area') "                              # sport/leisure AREAS render as fills in OSM-Carto (not POIs)
+        f"'swimming_area','beach_resort') "               # sport/leisure AREAS render as fills in OSM-Carto (not POIs)
         f"OR {_t('landuse')} = 'greenhouse_horticulture'")
     # natural=wood -> Shortbread 'forest'; everything else passes through (values match Shortbread).
     kind_sql = (
@@ -97,14 +101,36 @@ class Sites(Layer):
         f"'school','kindergarten','hospital','prison') "
         f"OR {_t('public_transport')} IN ('platform','station') "
         f"OR {_t('leisure')} = 'sports_centre' OR {_t('landuse')} = 'construction' "
-        f"OR {_t('military')} = 'danger_area' OR {_t('man_made')} = 'bridge'")
+        f"OR {_t('military')} = 'danger_area' OR {_t('man_made')} = 'bridge' OR {_t('tourism')} = 'zoo'")
     kind_sql = (
         f"CASE WHEN {_t('landuse')} = 'construction' THEN 'construction' "
         f"WHEN {_t('military')} = 'danger_area' THEN 'danger_area' "
         f"WHEN {_t('man_made')} = 'bridge' THEN 'bridge' "
         f"WHEN {_t('leisure')} = 'sports_centre' THEN 'sports_centre' "
+        f"WHEN {_t('tourism')} = 'zoo' THEN 'zoo' "
         f"WHEN {_t('amenity')} IS NOT NULL THEN {_t('amenity')} "
         f"ELSE {_t('public_transport')} END")
+
+
+class Paved(Layer):
+    """Open ground that people stand on and the sea does not cover: squares, pedestrian areas, piers and quays, helipads, marketplaces. OSM maps them as
+    areas of their own (``place=square``, ``area:highway=*``, a pedestrian way with ``area=yes``, ``man_made=pier``, ``aeroway=helipad``).
+    A closed way and a multipolygon relation are both built. The same ways stay lines in ``streets``."""
+    name = "paved"
+    geom_kind = "area"
+    where_sql = (
+        f"{_t('place')} = 'square' OR {_t('area:highway')} IS NOT NULL "
+        f"OR ({_t('highway')} IN ('pedestrian','footway','service','living_street','steps','path','cycleway') "
+        f"AND ({_t('area')} = 'yes' OR {_t('type')} = 'multipolygon')) "      # a way with area=yes, or a pedestrian area mapped as a relation
+        f"OR {_t('man_made')} IN ('pier','breakwater','groyne','quay') OR {_t('aeroway')} IN ('helipad','heliport') "
+        f"OR {_t('amenity')} = 'marketplace'")
+    kind_sql = (
+        f"CASE WHEN {_t('place')} = 'square' THEN 'square' "
+        f"WHEN {_t('area:highway')} IS NOT NULL THEN {_t('area:highway')} "
+        f"WHEN {_t('man_made')} IN ('pier','breakwater','groyne','quay') THEN {_t('man_made')} "
+        f"WHEN {_t('amenity')} = 'marketplace' THEN 'marketplace' "
+        f"WHEN {_t('aeroway')} IN ('helipad','heliport') THEN {_t('aeroway')} "
+        f"ELSE {_t('highway')} END")
 
 
 class Buildings(Layer):
@@ -229,6 +255,7 @@ LAYERS = [
     Land,
     WaterPolygons,
     WaterLines,
+    Paved,
     Sites,
     Buildings,
     Streets,

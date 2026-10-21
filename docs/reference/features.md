@@ -7,7 +7,7 @@ library built on roadstyle, draws them.
 
 ## Build them
 
-Every build from a PBF makes them (Monaco: 11 layers, under a second). To leave them out:
+Every build from a PBF makes them (Monaco: 12 layers, under a second). To leave them out:
 `duckosm build --no-features`, or in a config file:
 
 ```yaml
@@ -56,10 +56,11 @@ In drawing order, bottom first. Monaco counts are from the sample build.
 | Layer | Shape | From OSM | `kind` | Monaco |
 |---|---|---|---|---|
 | `ocean` | area | the sea: not from the extract (OSM has only `natural=coastline` lines) but Overture Maps' ocean polygons, built from OSM's coastline, read for the area's box (the boundary's, else the extract's; +10 %, at least 500 m) | `ocean` | 1 |
-| `land` | area | `landuse` = `forest`, `grass`, `residential`, `industrial`, `cemetery`, …; `natural` = `wood`, `scrub`, `heath`, `sand`, `beach`, `wetland`, …; `leisure` = `park`, `garden`, `pitch`, `stadium`, `playground`, … | the `landuse` value, else `natural`, else `leisure`; `natural=wood` becomes `forest` | 237 |
-| `water_polygons` | area | `natural` = `water` / `glacier`, `waterway=riverbank`, `landuse` = `reservoir` / `basin`, any `water` tag | `water`, `river`, `canal`, `reservoir`, `basin`, `dock`, `glacier` | 27 |
+| `land` | area | `landuse` = `forest`, `grass`, `residential`, `industrial`, `cemetery`, …; `natural` = `wood`, `scrub`, `heath`, `sand`, `beach`, `wetland`, `shrubbery`, …; `leisure` = `park`, `garden`, `pitch`, `stadium`, `playground`, `beach_resort`, … | the `landuse` value, else `natural`, else `leisure`; `natural=wood` becomes `forest` | 241 |
+| `water_polygons` | area | `natural` = `water` / `glacier`, `waterway=riverbank`, `landuse` = `reservoir` / `basin`, any `water` tag, `leisure=swimming_pool` | `water`, `river`, `canal`, `reservoir`, `basin`, `dock`, `glacier`, `swimming_pool` | 88 |
 | `water_lines` | line | `waterway` = `river`, `stream`, `canal`, `ditch`, `drain` | the value; `drain` becomes `ditch` | 4 |
-| `sites` | area | `amenity` = `parking`, `bicycle_parking`, `bus_station`, `university`, `college`, `school`, `kindergarten`, `hospital`, `prison`; `public_transport` = `platform` / `station`; `leisure=sports_centre`, `landuse=construction`, `military=danger_area`, `man_made=bridge` | the value | 79 |
+| `sites` | area | `amenity` = `parking`, `bicycle_parking`, `bus_station`, `university`, `college`, `school`, `kindergarten`, `hospital`, `prison`; `public_transport` = `platform` / `station`; `leisure=sports_centre`, `landuse=construction`, `military=danger_area`, `man_made=bridge`, `tourism=zoo` | the value | 80 |
+| `paved` | area | open ground that people stand on: `place=square`; `area:highway=*`; a pedestrian, footway, service, living-street, steps, path or cycleway `highway` with `area=yes` (or a multipolygon relation); `man_made` = `pier`, `breakwater`, `groyne`, `quay`; `aeroway` = `helipad` / `heliport`; `amenity=marketplace` | `square`, the `area:highway` value, the `highway` value, `pier`, `quay`, `helipad`, `marketplace`, … | 83 |
 | `buildings` | area | `building`, except `building=no` | the raw `building` value (`yes` is common); not a Shortbread class | 1,262 |
 | `streets` | line | every way with `highway`, and `railway` = `rail`, `narrow_gauge`, `tram`, `light_rail`, `funicular`, `subway`, `monorail` | the `highway` value, else the `railway` value | 3,496 |
 | `public_transport` | point | `highway=bus_stop`, `railway` = `station`, `halt`, `tram_stop`; `amenity` = `bus_station`, `ferry_terminal`; `aeroway` = `aerodrome`, `helipad`; `aerialway=station` | `bus_stop`, `station`, `halt`, `tram_stop`, `ferry_terminal`, `aerialway_station`, … | 107 |
@@ -72,6 +73,8 @@ build reads it from Overture's public files on S3, so it needs the network: offl
 empty and the build goes on. Its `source` column names the Overture release; `osm_id` and `name`
 are NULL. Design: `docs/design/sea.md`.
 
+`paved` is not a Shortbread layer. Squares, piers and the like were in no table before; the same ways (a pedestrian area, a pier line) stay lines in `streets`. Design: `docs/design/missing_polygons.md`.
+
 `traffic` is not a Shortbread layer. On a crossing, `bearing` is the direction of the road it lies
 on, in degrees from north, so a map can draw the zebra marking across the road. `bearing` is NULL on traffic
 signals, and on a crossing that lies on no road.
@@ -82,3 +85,16 @@ routing. Routable roads are in the [mode schemas](database.md#mode-schema).
 Not built: a `boundaries` layer (administrative borders); use
 [`duckosm admin`](../guides/admin-boundaries.md) instead. The full lists of tag values are in
 `src/duckosm/features/layers.py`.
+
+## Check what the build leaves out
+
+OSM has polygons that no layer asks for. `duckosm features-check DB` lists the closed ways with tags and the area relations of `raw.*` that
+are in no `features.*` table, grouped by their main tag, with the number of ways and relations and the area of the ways. A way that is a ring of a
+relation that a table holds is not listed. A group that the build leaves out on purpose (zones such as `place=neighbourhood`, boundaries, the
+coastline, parts of buildings, gone buildings, street furniture) has its reason in the last column. **A group with no reason is a possible miss**:
+add a rule to a layer in `src/duckosm/features/layers.py`, or the group to `LEFT_OUT` in `src/duckosm/features/check.py` with its reason.
+The Monaco sample has no group without a reason. The report needs `raw.*`, so a clipped database cannot be checked.
+
+```bash
+duckosm features-check monaco.duckdb
+```

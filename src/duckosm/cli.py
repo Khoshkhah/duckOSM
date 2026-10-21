@@ -1045,6 +1045,31 @@ def route_map_cmd(db, mode, basemap, google_3d, out):
     click.echo(f"wrote {path} — open it in a browser")
 
 
+@main.command(name="features-check")
+@click.argument('db', type=DB_PATH)
+@click.option('--limit', default=40, show_default=True, help='How many groups to list')
+def features_check(db, limit):
+    """List the OSM polygons that no features.* table holds, grouped by tag.
+
+    A closed way with tags, or an area relation, that is in no feature table, is a group of the report.
+    A group that the build leaves out on purpose (zones, boundaries, street furniture, building parts)
+    has its reason; a group with no reason is a possible miss. Needs raw.* and features.* in the db.
+    """
+    import duckdb
+
+    from duckosm.features.check import missing_polygons, print_report
+
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        try:
+            groups = missing_polygons(con)
+        except (ValueError, duckdb.Error) as e:
+            raise click.ClickException(f"{e} (the database needs raw.* and features.*: a clipped database has no raw.*)")
+    finally:
+        con.close()
+    print_report(groups, limit=limit)
+
+
 @main.command(name="elevation")
 @click.argument('db', type=DB_PATH)
 @click.option('--dem', default=None,

@@ -6,7 +6,7 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 | Group | Commands |
 |---|---|
 | [Build and areas](#build-and-areas) | `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
-| [Query and inspect](#query-and-inspect) | `way` |
+| [Query and inspect](#query-and-inspect) | `way`, `features-check` |
 | [Maps and routing](#maps-and-routing) | `viz`, `route-map` |
 | [Exports](#exports) | `sumo`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
 | [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
@@ -128,7 +128,7 @@ mode      edges  nodes  private_edges     km  edge_graph  turn_restrictions
 driving   2,765  1,719            214   92.6       4,953                 38
 walking  10,952  4,116            154  244.1      32,476                  -
 cycling  10,274  4,151            133  245.5      28,851                  -
-also: raw (OSM data), features (11 layers), mm (across modes), boundary
+also: raw (OSM data), features (12 layers), mm (across modes), boundary
 ```
 
 A database built before this command existed has no build date; the rest is the same.
@@ -233,6 +233,20 @@ duckosm route-map [OPTIONS] DB
 | `--basemap TEXT` | a background from the web: `voyager`, `positron`, `osm`, `satellite`, … | none: the database's own layers |
 | `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map. It needs a Google Maps key in `GOOGLE_MAPS_KEY`, and the page must be served over http | on when `GOOGLE_MAPS_KEY` is set |
 | `-o`, `--out TEXT` | output HTML | `reports/<name>_route_map.html` |
+
+### `features-check`
+
+Lists the OSM polygons that no `features.*` table holds, grouped by tag, with the reason when the build leaves a group out on purpose.
+A group with no reason is a possible miss. Needs `raw.*` and `features.*`, so a clipped database cannot be checked. Reference:
+[Check what the build leaves out](features.md#check-what-the-build-leaves-out).
+
+```text
+duckosm features-check [OPTIONS] DB
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--limit INTEGER` | how many groups to list | 40 |
 
 ## Exports
 
