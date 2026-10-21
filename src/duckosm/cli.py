@@ -1023,8 +1023,11 @@ def opendrive(db, mode, crs, junctions, out):
                    '`duckosm multimodal`); the page offers every mode')
 @click.option('--basemap', default=None,
               help="First background: the database's own layers (default), or voyager, positron, osm, …")
+@click.option('--google-3d/--no-google-3d', default=None,
+              help='A Google 3D window linked to the map (default: on when GOOGLE_MAPS_KEY is set; '
+                   'serve the page over http, the key does not work from file://)')
 @click.option('--out', '-o', default=None, help='Output HTML (default: reports/<name>_route_map.html)')
-def route_map_cmd(db, mode, basemap, out):
+def route_map_cmd(db, mode, basemap, google_3d, out):
     """Write a route planner page for a built db, drawn by mapstyle: drag a start and an end, pick
     Drive, Walk, Cycle or Walk + drive (needs `duckosm multimodal` first), get the route and
     turn-by-turn directions. It routes in the browser with the same answers as route_points() /
@@ -1035,7 +1038,8 @@ def route_map_cmd(db, mode, basemap, out):
 
     name = Path(db).stem
     try:
-        path = write_route_map(db, out or f"reports/{name}_route_map.html", mode=mode, basemap=basemap)
+        path = write_route_map(db, out or f"reports/{name}_route_map.html", mode=mode, basemap=basemap,
+                                google_3d=google_3d)
     except (ImportError, ValueError) as e:
         raise click.ClickException(str(e))
     click.echo(f"wrote {path} — open it in a browser")

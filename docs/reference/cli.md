@@ -231,6 +231,7 @@ duckosm route-map [OPTIONS] DB
 |---|---|---|
 | `-m`, `--mode [driving\|walking\|cycling\|walk+drive]` | the first choice and the mode in front (`walk+drive`: every mode; needs `multimodal`); the page offers every mode | the first mode, walking in front |
 | `--basemap TEXT` | a background from the web: `voyager`, `positron`, `osm`, `satellite`, … | none: the database's own layers |
+| `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map. It needs a Google Maps key in `GOOGLE_MAPS_KEY`, and the page must be served over http | on when `GOOGLE_MAPS_KEY` is set |
 | `-o`, `--out TEXT` | output HTML | `reports/<name>_route_map.html` |
 
 ## Exports

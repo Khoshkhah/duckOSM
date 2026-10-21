@@ -536,7 +536,7 @@ window.rsSetStreetView = rsSetStreetView;
 // to its center: the map's own camera distance at that zoom). A clicked road is drawn in the 3D view
 // and the camera flies along it (the map follows). Google's 3D map exists only while the window is
 // open: closing it drops it, as nothing is loaded from Google while it is closed.
-const _g3d = false;
+const _g3d = true;
 function rsSetGoogle3D(){}
 if(_g3d){
   const w=document.createElement("div"); w.className="rs-svw rs-g3d"; w.hidden=true;

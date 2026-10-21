@@ -4,6 +4,8 @@
 
 ### Changed
 
+- `duckosm route-map` has `--google-3d` / `--no-google-3d`, as `viz` has: the Google 3D window is on when
+  `GOOGLE_MAPS_KEY` is set.
 - `duckosm route-map`: a new side panel. The mode and the weight are segmented buttons. The start and the
   end are pins with the letters A (violet) and B (amber), and the panel shows the name of their road, with a swap button. The summary has a bar of the legs, and the
   steps are a timeline with icons. The settings and the `edge_id` list are in a closed block. The panel

@@ -8,6 +8,7 @@ itself is duckOSM's: :func:`duckosm.route_points`, :func:`duckosm.route_multimod
 """
 import json
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger("duckosm")
@@ -16,7 +17,7 @@ MODES = ("driving", "walking", "cycling")
 WARN_EDGES = 100_000
 
 
-def write_route_map(db, out, mode=None, basemap=None):
+def write_route_map(db, out, mode=None, basemap=None, google_3d=None):
     """Write the route planner for the built database ``db`` (a path) to ``out``; return its path.
     ``mode``: the first choice, and the network in front: ``driving``, ``walking``, ``cycling``, or
     ``walk+drive`` (every mode in front; needs ``mm.*`` from ``duckosm multimodal``). Default: the
@@ -48,6 +49,10 @@ def write_route_map(db, out, mode=None, basemap=None):
     data = _planner_data(db, load_roads(str(db)))
     data["first"] = ["walking", "driving"] if mode == "walk+drive" else [mode] if mode else None
     kw = {"basemap": basemap} if basemap else {}
+    if google_3d is None:
+        google_3d = bool(os.environ.get("GOOGLE_MAPS_KEY"))
+    if google_3d:
+        kw["google_3d"] = True                        # the key is roadstyle's: GOOGLE_MAPS_KEY
     front = "all" if mode == "walk+drive" else mode or "walking"
     m = ms.render_map(str(db), mode=front, name=f"{Path(db).stem}: route planner", **kw)
     page = (Path(__file__).parent / "templates" / "planner.html").read_text(encoding="utf-8")
