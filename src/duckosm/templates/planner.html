@@ -5,45 +5,93 @@
      travelled. The directions follow duckosm.directions(); tests/test_maps.py keeps them equal.
      Copied from mapstyle's demo planner (which began as this page). Roads are matched by edge_id. -->
 <style>
-#map{right:300px!important} body{--rs-side:300px}
-#rm-panel{position:fixed;top:0;right:0;bottom:0;width:300px;box-sizing:border-box;padding:14px 16px;
-  overflow-y:auto;background:#fff;border-left:1px solid #ddd;font:14px/1.45 system-ui,sans-serif;color:#222;z-index:5}
-#rm-panel h3{margin:0 0 6px;font-size:16px}
-#rm-panel .rm-hint{margin:0 0 10px;color:#555;font-size:13px}
-#rm-panel fieldset{border:0;padding:0;margin:0 0 8px}
-#rm-panel label{margin-right:10px;cursor:pointer}
-#rm-panel select{font:inherit;padding:3px 6px}
-#rm-result{margin:10px 0;padding:10px 0;border-top:1px solid #eee;border-bottom:1px solid #eee;min-height:20px}
-#rm-result .rm-total{font-size:18px;font-weight:600}
-#rm-result .rm-leg{display:flex;gap:6px;align-items:center;margin-top:4px}
-#rm-result .rm-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
-#rm-result ol{margin:6px 0 0;padding-left:20px;color:#444;font-size:13px}
-#rm-result .rm-steps li{cursor:pointer;margin:2px 0} #rm-result .rm-steps li:hover{color:#111}
-#rm-result .rm-dist{color:#888;font-size:12px;white-space:nowrap}
-#rm-result .rm-edges{margin-top:8px;font-size:12px} #rm-result .rm-edges summary{cursor:pointer;color:#555}
-#rm-result .rm-edges code{font-size:11px;user-select:all}
-#rm-panel .rm-clicked{margin:8px 0 0;font-size:12px;color:#555} #rm-panel .rm-clicked code{user-select:all}
-#rm-panel .rm-note{margin-top:10px;color:#777;font-size:12px}
-#rm-off{font-size:13px;color:#444} #rm-off input{width:56px;font:inherit;padding:1px 4px}
-#rm-result .rm-break{margin-top:6px;font-size:13px;color:#444} #rm-result .rm-break div{display:flex;justify-content:space-between;gap:8px}
-#rm-result .rm-break b{font-weight:600;color:#222}
+#rm-panel{--bg:#fff;--card:#f4f5f7;--line:#e4e7ec;--text:#14181f;--mute:#667085;--accent:#2563eb;--w:380px;
+  --walk:#16a34a;--drive:#dc2626;--cycle:#2563eb;--rest:#98a2b3}
+@media (prefers-color-scheme:dark){#rm-panel{--bg:#161a21;--card:#1f242d;--line:#2b313c;--text:#eef1f5;--mute:#98a1b0;--accent:#6ea0ff}}
+#map{right:380px!important} body{--rs-side:380px}
+#rm-panel{position:fixed;top:0;right:0;bottom:0;width:var(--w);box-sizing:border-box;padding:18px 18px 28px;overflow-y:auto;
+  background:var(--bg);border-left:1px solid var(--line);font:14px/1.45 system-ui,"Segoe UI",sans-serif;color:var(--text);
+  z-index:5;display:flex;flex-direction:column;gap:14px}
+#rm-panel *{box-sizing:border-box} #rm-panel>*{flex:none}
+#rm-panel h3{margin:0;font-size:18px;font-weight:700;letter-spacing:-.01em}
+#rm-panel .rm-hint{margin:2px 0 0;color:var(--mute);font-size:12.5px}
+#rm-panel code{font-size:12px}
+#rm-mode,#rm-weight input{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
+.rm-seg{display:flex;gap:2px;padding:3px;background:var(--card);border-radius:10px;transition:opacity .15s}
+.rm-seg.off{opacity:.45}
+.rm-seg button{flex:1;border:0;background:none;padding:7px 6px;border-radius:8px;font:inherit;font-size:13px;color:var(--mute);
+  cursor:pointer;white-space:nowrap}
+.rm-seg button.rm-wide{flex:1.7}
+.rm-seg button:hover{color:var(--text)}
+.rm-seg button.on{background:var(--bg);color:var(--text);font-weight:600;box-shadow:0 1px 3px #0003}
+.rm-seg button:focus-visible,.rm-swap:focus-visible,#rm-panel summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rm-pts{position:relative;background:var(--card);border-radius:12px;padding:4px 14px}
+.rm-pt{display:flex;align-items:center;gap:12px;padding:9px 38px 9px 0;min-height:52px}
+.rm-pt+.rm-pt{border-top:1px solid var(--line)}
+.rm-pin{width:14px;height:14px;border-radius:50%;flex:none;border:3px solid var(--bg);box-shadow:0 0 0 1px var(--mute)}
+.rm-pt small{display:block;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.rm-pt b{display:block;font-weight:600;overflow-wrap:anywhere}
+.rm-swap{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;
+  border:1px solid var(--line);background:var(--bg);color:var(--mute);cursor:pointer;font-size:15px;line-height:1}
+.rm-swap:hover{color:var(--text)}
+#rm-result{display:flex;flex-direction:column;gap:14px;min-height:20px}
+.rm-sum{border-radius:12px;padding:14px 16px;background:var(--card)}
+.rm-big{font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.rm-big span{font-size:15px;font-weight:500;color:var(--mute);margin-left:8px;letter-spacing:0}
+.rm-bar{display:flex;height:8px;gap:2px;margin:12px 0 9px;border-radius:99px;overflow:hidden}
+.rm-bar i{display:block;min-width:3px}
+.rm-legend{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--mute);font-size:12.5px}
+.rm-legend span:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--c)}
+.rm-chip{display:inline-block;margin-top:10px;padding:2px 10px;border-radius:99px;font-size:12px;
+  background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.rm-steps{list-style:none;margin:0;padding:0;position:relative}
+.rm-steps:before{content:"";position:absolute;left:13px;top:14px;bottom:14px;width:2px;background:var(--line)}
+.rm-steps li{display:flex;gap:12px;padding:7px 8px 7px 0;border-radius:8px;cursor:pointer;position:relative}
+.rm-steps li:hover{background:var(--card)}
+.rm-ic{width:28px;height:28px;flex:none;border-radius:50%;display:grid;place-items:center;z-index:1;font-size:14px;
+  background:var(--bg);border:2px solid var(--c);color:var(--c)}
+.rm-steps li div{flex:1;min-width:0}
+.rm-dist{display:block;color:var(--mute);font-size:12px}
+#rm-panel details{border-top:1px solid var(--line);padding-top:12px;color:var(--mute);font-size:13px}
+#rm-panel summary{cursor:pointer;font-weight:600;color:var(--text)}
+.rm-opts{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+.rm-opts label{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.rm-opts input{width:96px;font:inherit;font-size:13px;padding:5px 8px;border-radius:8px;border:1px solid var(--line);
+  background:var(--bg);color:var(--text)}
+.rm-edges{margin-top:8px} .rm-edges summary{font-weight:500;color:var(--mute)} .rm-edges code{user-select:all}
+.rm-edges ol{padding-left:22px;margin:6px 0 0}
+#rm-panel .rm-clicked,#rm-panel .rm-note{margin:6px 0 0;font-size:12px;color:var(--mute)} .rm-clicked code{user-select:all}
+.rm-msg{padding:12px 14px;border-radius:12px;background:var(--card);color:var(--mute)}
+@media (max-width:700px){
+  #map{right:0!important;bottom:48vh!important} body{--rs-side:0px}
+  #rm-panel{top:auto;left:0;width:auto;height:48vh;border-left:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;
+    padding:14px 14px 22px;box-shadow:0 -4px 16px #0002}
+}
 </style>
 <div id="rm-panel">
-  <h3>Route planner</h3>
-  <p class="rm-hint">Drag the two markers to set the start and the end. Click a road to copy its
-  <code>edge_id</code>.</p>
-  <fieldset><select id="rm-mode"></select></fieldset>
-  <fieldset id="rm-weight">
-    <label><input type="radio" name="rm-w" value="time" checked> fastest</label>
-    <label><input type="radio" name="rm-w" value="length"> shortest</label>
-  </fieldset>
-  <fieldset id="rm-off" title="A marker may be off the road up to this distance; that walk costs walking time">
-    Off-road up to <input id="rm-radius" type="number" min="0" max="2000" step="5" value="50"> m,
-    walking <input id="rm-speed" type="number" min="0.5" max="10" step="0.5" value="4.5"> km/h
-  </fieldset>
+  <div><h3>Route planner</h3>
+  <p class="rm-hint">Drag the two pins to set the start and the end. Click a road to copy its <code>edge_id</code>.</p></div>
+  <select id="rm-mode" aria-label="Mode"></select>
+  <div class="rm-seg" id="rm-modes" role="group" aria-label="Mode"></div>
+  <div class="rm-seg" id="rm-weight" role="group" aria-label="Weight">
+    <input type="radio" name="rm-w" value="time" checked><input type="radio" name="rm-w" value="length">
+    <button type="button" data-w="time" class="on">Fastest</button><button type="button" data-w="length">Shortest</button>
+  </div>
+  <div class="rm-pts">
+    <div class="rm-pt"><span class="rm-pin" style="background:var(--text)"></span><div><small>Start</small><b id="rm-from">…</b></div></div>
+    <div class="rm-pt"><span class="rm-pin" style="background:#6b7280"></span><div><small>End</small><b id="rm-to">…</b></div></div>
+    <button type="button" class="rm-swap" id="rm-swap" title="Swap start and end" aria-label="Swap start and end">&#8645;</button>
+  </div>
   <div id="rm-result"></div>
-  <p class="rm-clicked" id="rm-clicked"></p>
   <p class="rm-note" id="rm-note"></p>
+  <details id="rm-more"><summary>Settings and details</summary>
+    <div class="rm-opts" id="rm-off" title="A marker may be off the road up to this distance; that walk costs walking time">
+      <label>Off-road up to (m)<input id="rm-radius" type="number" min="0" max="2000" step="5" value="50"></label>
+      <label>Walking speed (km/h)<input id="rm-speed" type="number" min="0.5" max="10" step="0.5" value="4.5"></label>
+    </div>
+    <div id="rm-edges"></div>
+    <p class="rm-clicked" id="rm-clicked"></p>
+  </details>
 </div>
 <script>const RM = __RM__;</script>
 <script>
@@ -141,7 +189,7 @@
   // ---- the page ------------------------------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
   // One mode, or walk + drive (with the mm tables): what route() / route_multimodal() support today.
-  const CHOICES = D.modes.map((m) => ({label: LABEL[m], modes: [m]}));
+  const CHOICES = ["walking", "cycling", "driving"].filter((m) => D.modes.includes(m)).map((m) => ({label: LABEL[m], modes: [m]}));
   if (MM && D.modes.includes("driving")) CHOICES.push({label: "Walk + drive", modes: ["walking", "driving"]});
   const NO_MM = !MM && D.modes.includes("walking") && D.modes.includes("driving")
     ? "Walk + drive needs the db's multimodal tables: run `duckosm multimodal` on it." : "";
@@ -419,28 +467,44 @@
     return s.type;
   }
 
+  const ICON = {"slight left": "\u2196", "slight right": "\u2197", left: "\u21B0", "sharp left": "\u21B0", right: "\u21B1",
+    "sharp right": "\u21B1", uturn: "\u21B6", straight: "\u2191"};
+  const ARROW = {north: "\u2191", northeast: "\u2197", east: "\u2192", southeast: "\u2198", south: "\u2193",
+    southwest: "\u2199", west: "\u2190", northwest: "\u2196"};
+  function icon(s) {
+    switch (s.type) {
+      case "depart": return ARROW[s.mod] || "\u2191";
+      case "roundabout": return "\u27F3";
+      case "mode": return "\u21C4";
+      case "arrive": return "\u2691";
+      case "fork": return s.mod === "left" ? "\u2196" : "\u2197";
+    }
+    return ICON[s.mod] || "\u2191";
+  }
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  const roadName = (c) => c ? esc(D.name[c.k] || D.hw[c.k] || "a road") : "\u2026";
+  function ends(res) { $("rm-from").innerHTML = roadName(res && res.start); $("rm-to").innerHTML = roadName(res && res.end); }
+
   function show(res, multi) {
     const out = $("rm-result");
-    if (!res) { out.textContent = "No route between these points with these modes."; paint(null); return; }
-    const v = speed(), road = res.legs.reduce((a, l) => a + l.len, 0);
-    const roadT = res.time - (res.start.d + res.end.d) / v;
-    let h = `<div class="rm-total">${fmtTime(res.time)} · ${fmtLen(res.len)}</div>` +
-      `<div class="rm-break"><div><span>Total time</span><b>${fmtTime(res.time)}</b></div>` +
-      `<div><span>Total distance</span><b>${fmtLen(res.len)}</b></div>` +
-      `<div><span>Walk to the road</span><span>${fmtLen(res.start.d)} · ${fmtTime(res.start.d / v)}</span></div>` +
-      `<div><span>${multi ? "Trip" : "On the roads"}</span><span>${fmtLen(road)} · ${fmtTime(roadT)}</span></div>` +
-      `<div><span>Walk from the road</span><span>${fmtLen(res.end.d)} · ${fmtTime(res.end.d / v)}</span></div></div>`;
-    if (multi) {
-      for (const l of res.legs) if (l.len >= 0.5) h += `<div class="rm-leg"><span class="rm-dot" style="background:${COLORS[l.mode]}"></span>${LABEL[l.mode]}: ${fmtTime(l.time)}, ${fmtLen(l.len)}</div>`;
-      if (res.transfers) h += `<div class="rm-leg">${res.transfers} change${res.transfers > 1 ? "s" : ""} of mode</div>`;
-    }
-    const steps = directions(res.legs);
-    h += '<ol class="rm-steps">' + steps.map((st, i) => `<li data-i="${i}">${say(st)}` +
-         (st.len ? ` <span class="rm-dist">${fmtLen(st.len)}</span>` : "") + "</li>").join("") + "</ol>";
-    const ks = res.legs.flatMap((l) => l.edges), ps = rsGetProps(ks.map((k) => fid[k]));
-    h += `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
-         ps.map((p) => `<li><code>${p.edge_id}</code></li>`).join("") + "</ol></details>";
+    ends(res); $("rm-edges").innerHTML = "";
+    if (!res) { out.innerHTML = '<div class="rm-msg">No route between these points with these modes.</div>'; paint(null); return; }
+    const v = speed(), off = res.start.d + res.end.d;
+    const legs = res.legs.filter((l) => l.len >= 0.5), tot = legs.reduce((a, l) => a + l.time, 0) || 1;
+    const col = (m) => `var(--${{walking: "walk", driving: "drive", cycling: "cycle"}[m]})`;
+    const bar = legs.map((l) => `<i style="flex:${Math.max(l.time, tot * 0.012)};background:${col(l.mode)}"></i>`).join("");
+    let key = legs.map((l) => `<span style="--c:${col(l.mode)}">${LABEL[l.mode]} ${fmtLen(l.len)} \u00B7 ${fmtTime(l.time)}</span>`).join("");
+    if (off >= 1) key += `<span style="--c:var(--rest)">Off-road walk ${fmtLen(off)} \u00B7 ${fmtTime(off / v)}</span>`;
+    let h = `<div class="rm-sum"><div class="rm-big">${fmtTime(res.time)}<span>${fmtLen(res.len)}</span></div>` +
+      `<div class="rm-bar">${bar}</div><div class="rm-legend">${key}</div>` +
+      (multi && res.transfers ? `<span class="rm-chip">${res.transfers} change${res.transfers > 1 ? "s" : ""} of mode</span>` : "") + "</div>";
+    const steps = directions(res.legs), lastMode = res.legs[res.legs.length - 1].mode;
+    h += '<ol class="rm-steps">' + steps.map((st, i) => `<li data-i="${i}"><span class="rm-ic" style="--c:${col(st.mode || lastMode)}">${icon(st)}</span>` +
+         `<div>${say(st)}` + (st.len ? `<span class="rm-dist">${fmtLen(st.len)}</span>` : "") + "</div></li>").join("") + "</ol>";
     out.innerHTML = h;
+    const ks = res.legs.flatMap((l) => l.edges), ps = rsGetProps(ks.map((k) => fid[k]));
+    $("rm-edges").innerHTML = `<details class="rm-edges"><summary>${ks.length} edges (edge_id)</summary><ol>` +
+         ps.map((p) => `<li><code>${p.edge_id}</code></li>`).join("") + "</ol></details>";
     for (const li of out.querySelectorAll(".rm-steps li"))       // a step -> the map at that maneuver
       li.addEventListener("click", () => map.flyTo({center: steps[+li.dataset.i].at, zoom: Math.max(map.getZoom(), 17)}));
     window.rmSteps = steps.map(say);                              // for tests and scripts
@@ -449,7 +513,7 @@
 
   function update() {
     const modes = ticked(), multi = modes.length > 1;
-    $("rm-weight").style.opacity = multi ? 0.4 : 1;
+    $("rm-weight").classList.toggle("off", multi);
     $("rm-note").textContent = multi ? "Walk + drive: the car can be taken at any junction (60 s per change). " +
       "Turn restrictions don't apply across modes (as route_multimodal_points)." : NO_MM;
     if (!markers.A || !markers.B) return;
@@ -458,8 +522,9 @@
     drawRadius(!S.length, !T.length);
     if (!S.length || !T.length) {
       const which = !S.length && !T.length ? "the start and the end" : !S.length ? "the start" : "the end";
-      $("rm-result").textContent = `No ${multi ? "walkable road" : "road of this mode"} within ${radius()} m of ${which}: ` +
-        "move the marker or raise the off-road distance.";
+      ends(null);
+      $("rm-result").innerHTML = `<div class="rm-msg">No ${multi ? "walkable road" : "road of this mode"} within ${radius()} m of ${which}: ` +
+        "move the pin or raise the off-road distance.</div>";
       window.rmLast = {modes, error: "no road"}; paint(null); return;
     }
     const v = speed();
@@ -486,15 +551,26 @@
     $("rm-mode").innerHTML = CHOICES.map((c, i) => `<option value="${i}">${c.label}</option>`).join("");
     const first = CHOICES.findIndex((c) => c.modes.join() === (D.first || []).join());    // route-map -m
     if (first >= 0) $("rm-mode").value = String(first);
-    $("rm-mode").addEventListener("change", update);
-    for (const r of document.querySelectorAll('input[name="rm-w"]')) r.addEventListener("change", update);
+    const modes = $("rm-modes"), sync = () => { for (const b of modes.children) b.classList.toggle("on", b.value === $("rm-mode").value); };
+    modes.innerHTML = CHOICES.map((c, i) => `<button type="button" value="${i}"${c.modes.length > 1 ? ' class="rm-wide"' : ""}>${c.label}</button>`).join("");
+    modes.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { $("rm-mode").value = b.value; sync(); update(); } });
+    $("rm-mode").addEventListener("change", () => { sync(); update(); });
+    sync();
+    $("rm-weight").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      for (const x of $("rm-weight").querySelectorAll("button")) x.classList.toggle("on", x === b);
+      document.querySelector(`input[name="rm-w"][value="${b.dataset.w}"]`).checked = true; update();
+    });
+    $("rm-swap").addEventListener("click", () => {
+      const a = markers.A.getLngLat(), b = markers.B.getLngLat(); markers.A.setLngLat(b); markers.B.setLngLat(a); update();
+    });
     for (const id of ["rm-radius", "rm-speed"]) $(id).addEventListener("input", update);
     drawLayers();
     // A click on a road (roadstyle's popup): its edge_id is copied and kept in the panel.
     document.addEventListener("rs:select", (e) => {
       const id = !e.detail.overlay && e.detail.properties && e.detail.properties.edge_id;
       if (!id) return;
-      $("rm-clicked").innerHTML = `Clicked road: <code>${id}</code> <span id="rm-copied"></span>`;
+      $("rm-clicked").innerHTML = `Clicked road: <code>${id}</code> <span id="rm-copied"></span>`; $("rm-more").open = true;
       if (navigator.clipboard) navigator.clipboard.writeText(String(id)).then(() => { $("rm-copied").textContent = "(copied)"; }, () => {});
     });
     window.rmRoute = function (a, b) { setMarker("A", a); setMarker("B", b); update(); };  // for scripted use
