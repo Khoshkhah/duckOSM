@@ -35,6 +35,9 @@ from duckosm.processors import (
 
 logger = logging.getLogger("duckosm")
 
+# osm_overrides new_ways ids start here: far above every OSM way id, and positive (negative osm_ids are PathConnector's)
+NEW_WAY_ID_MIN = 9_000_000_000_000
+
 
 def pbf_cut_path(cache_dir, name, strategy, pbf, boundary) -> Path:
     """Where the osmium cut of ``pbf`` to ``boundary`` is cached: ``<name>.<strategy>.<key>.osm.pbf``,
@@ -119,8 +122,8 @@ class DuckOSM:
             if self.config.effective_boundary_path:
                 global_steps.append(("clip_pbf", "Clipping PBF to boundary", self._clip_pbf))
             global_steps.append(("load_pbf", "Loading PBF file", self._load_pbf))
-            if self.config.osm_overrides:      # (a way an OSM fix removes: gone before any step reads raw.ways)
-                global_steps.append(("remove_ways", "Removing ways the OSM fixes remove", self._remove_ways))
+            if self.config.osm_overrides:      # (a way an OSM fix removes or retags: done before any step reads raw.ways)
+                global_steps.append(("raw_way_fixes", "Applying the OSM fixes to raw.ways", self._raw_way_fixes))
             if self.config.effective_boundary_path:
                 global_steps.append(("load_boundary", "Loading boundary", self._load_boundary))
                 if self.config.options.boundary_cells:
@@ -397,13 +400,55 @@ class DuckOSM:
             logger.warning("H3 extension not available, using Python fallback")
             self._h3_available = False
     
-    def _remove_ways(self) -> None:
-        """Drop from raw.ways every way an osm_overrides rule marks `remove: true` (a wrong building outline, a way that is not there)."""
+    def _raw_way_fixes(self) -> None:
+        """The osm_overrides fixes that act on raw.ways, before any step reads it (docs/design/osm_override_new_ways.md):
+        `remove: true` drops a way (a wrong building outline, a way that is not there); `keep_nodes: [from, to]` keeps only
+        that part of a way; `tags:` sets OSM tags on a way (e.g. `highway: unclassified` for a car road OSM tags pedestrian);
+        `new_ways:` adds the ways OSM does not have (id >= NEW_WAY_ID_MIN, nodes as OSM node ids or [lon, lat])."""
         import yaml
-        rules = (yaml.safe_load(Path(self.config.osm_overrides).read_text()) or {}).get("overrides") or []
+        doc = yaml.safe_load(Path(self.config.osm_overrides).read_text()) or {}
+        rules, new_ways = doc.get("overrides") or [], doc.get("new_ways") or []
+        # tags_from copies a way's OSM tags before any fix changes them
+        osm_tags = {w: dict(t) for w, t in self.con.execute(
+            "SELECT osm_id, tags FROM raw.ways WHERE osm_id IN (SELECT unnest(?::BIGINT[]))",
+            [[int(n["tags_from"]) for n in new_ways if n.get("tags_from") is not None]]).fetchall()}
         ids = [int(r["osm_id"]) for r in rules if r.get("remove")]
         if ids:
             self.con.execute("DELETE FROM raw.ways WHERE osm_id IN (SELECT unnest(?::BIGINT[]))", [ids])
+        for r in rules:
+            if r.get("remove"):
+                continue
+            if r.get("keep_nodes"):
+                a, b = (int(n) for n in r["keep_nodes"])
+                self.con.execute("UPDATE raw.ways SET refs = refs[list_position(refs, ?):list_position(refs, ?)] "
+                                 "WHERE osm_id = ? AND list_position(refs, ?) < list_position(refs, ?)",
+                                 [a, b, int(r["osm_id"]), a, b])
+            if r.get("tags"):
+                tags = {str(k): str(v) for k, v in r["tags"].items()}
+                self.con.execute("UPDATE raw.ways SET tags = map_concat(tags, MAP(?::VARCHAR[], ?::VARCHAR[])) WHERE osm_id = ?",
+                                 [list(tags), list(tags.values()), int(r["osm_id"])])
+        seen = set()
+        for n in new_ways:
+            wid = int(n["id"])
+            if wid < NEW_WAY_ID_MIN or wid in seen:
+                raise ValueError(f"osm_overrides new_ways: id {wid} is below {NEW_WAY_ID_MIN:,} or used two times")
+            seen.add(wid)
+            osm_nodes = [int(x) for x in n["nodes"] if not isinstance(x, (list, tuple))]
+            if self.con.execute("SELECT count(DISTINCT osm_id) FROM raw.nodes WHERE osm_id IN (SELECT unnest(?::BIGINT[]))",
+                                [osm_nodes]).fetchone()[0] < len(set(osm_nodes)):
+                continue                                     # not in this area (one global file): nothing to add
+            refs = []
+            for pos, node in enumerate(n["nodes"], start=1):
+                if isinstance(node, (list, tuple)):          # a new node: [lon, lat], its id from the way id and the position
+                    nid = wid * 1000 + pos
+                    self.con.execute("INSERT INTO raw.nodes (osm_id, lat, lon) VALUES (?, ?, ?)", [nid, float(node[1]), float(node[0])])
+                    if pos in (1, len(n["nodes"])):
+                        logger.warning(f"  new way {wid}: an end is a new node, so the way is a dead end there")
+                    refs.append(nid)
+                else:
+                    refs.append(int(node))
+            tags = {**osm_tags.get(int(n.get("tags_from") or 0), {}), **{str(k): str(v) for k, v in (n.get("tags") or {}).items()}}
+            self.con.execute("INSERT INTO raw.ways VALUES (?, MAP(?::VARCHAR[], ?::VARCHAR[]), ?)", [wid, list(tags), list(tags.values()), refs])
 
     def _load_pbf(self) -> None:
         """Load PBF file using ST_READOSM and save raw data."""

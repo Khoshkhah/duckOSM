@@ -378,3 +378,76 @@ lanes 1 and 2 are the Herkuleskopplet ramp, lanes 3 and 4 are Centralbron. Lanes
 on the next 2-lane edge. With 1 lane, the cross-section step of sensor-matching drops a real lane.
 
 **Fix.** `lanes: 2` for the two ways in `osm_overrides.yaml`. Upstream: tag `lanes=2` on them in OpenStreetMap.
+
+## 15. Stockholm, Rödbodgatan - two-way, not one-way
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm |
+| **OSM way** | `23089329` (`highway=unclassified`, `oneway=yes` northwest, `lanes=2`) |
+| **Status** | **CONFIRMED** by a city tube count and by Kaveh in Street View (2026-10-20); override enabled |
+
+**Symptom.** OSM has the street one-way northwest with 2 lanes. The city pneumatic tube at site `01181215` (December 2020) counted
+about 180 veh/h in each direction. A tube detects the direction, not the lane, so the street has traffic both ways. Street View
+shows a van that goes southeast. With `oneway=yes` there is no southeast edge, and sensor-matching cannot put that direction on the network.
+
+**Fix.** `oneway: false` and `lanes: 1` (1 lane each way) in `osm_overrides.yaml`. Upstream: tag `oneway=no`, `lanes=2` in OpenStreetMap.
+
+## 16. Stockholm, Fredsgatan - a car road, not a pedestrian street
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm |
+| **OSM way** | `755033491` (`highway=pedestrian`, 478 m) |
+| **Status** | **CONFIRMED** by Kaveh in Street View and Google 3D (2026-10-20) and by city tube counts; override enabled |
+
+**Symptom.** OSM tags the street `highway=pedestrian`, so duckOSM puts its 8 edges in `driving.private_edges` (`access=pedestrian`).
+Street View shows "Fredsgatan" painted on the road and turn arrows for cars. The Google 3D view shows all of the street as drivable.
+City tubes counted 200-400 veh/h on it: `01182324` (406 veh/h, 2019), `01182425`, `01182526`, `01182691` (2017-2018).
+sensor-matching cannot match these four counters, because its network has no car edge there.
+
+**Fix.** `tags: {highway: unclassified, oneway: "yes"}` in `osm_overrides.yaml`. The class is the class of its car neighbours
+Rödbodgatan, Malmtorgsgatan and Gustav Adolfs Torg. The way has no `access` tag in OSM, so the new class is sufficient.
+`oneway=yes`: NVDB (2026-10-20) has `prohibited_direction_fwd=-1` on all the Fredsgatan segments, which are drawn east to west, so
+the cars go east. The OSM way is drawn west to east (`180929` → `527259467`). Upstream: retag the way in OpenStreetMap.
+
+## 17. Stockholm, car link from Vasabron to Fredsgatan - tagged as a cycleway
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm (south of the building at the north end of Vasabron, along the water) |
+| **OSM way** | `40274443` (`highway=cycleway`, 132 m, nodes `266272124` → `119663` → `1740740220` → `1740740223` → `180929`, drawn west to east) |
+| **Status** | **CONFIRMED** by NVDB (2026-10-20); override enabled. Kaveh said to use NVDB for the Fredsgatan area |
+
+**Symptom.** Fredsgatan (#16) has no car link at its west end. NVDB has a car road on this line: segment `3678314`, named
+Fredsgatan, tertiary, 46 m, drawn east to west with `prohibited_direction_fwd=-1`, so the cars go east, from the northbound Vasabron
+carriageway (OSM node `1740740220`) to the Fredsgatan west end. The Fredsgatan tube `01182324`/2 "Mot Rödbodtorget" agrees.
+OSM has only a two-way cycleway on it.
+
+An earlier version of this fix (commit 6ba15f2) made the link one-way west, from a wrong reading of the Google 3D top view.
+
+**Fix.** In `osm_overrides.yaml`, the way is cut at `1740740220`:
+
+- The OSM way keeps only its west part, `266272124` → `119663` → `1740740220` (`keep_nodes`), as a cycleway. NVDB has no car road there.
+- The east part, `1740740220` → `1740740223` → `180929`, is the new way `9000003678314` (9,000,000,000,000 + NVDB segment `3678314`),
+  with the OSM tags of the cycleway plus `highway=unclassified`, `oneway=yes`, `lanes=2`, `oneway:bicycle=no`. The cars go east.
+  `lanes=2` is from the Google 3D top view; NVDB has no lane count here. `oneway:bicycle=no` keeps the two directions of the cycle path.
+
+Before the cut (commit 907862f), a rule on the whole way also gave 2 car edges on the west part. They are gone now.
+See `docs/design/osm_override_new_ways.md`. Upstream: split the way in OpenStreetMap and tag the east part as a road.
+
+## 18. Stockholm, Rödbodtorget - no OSM way
+
+| field | value |
+| --- | --- |
+| **Area** | Stockholm, Norrmalm (east of the building at the north end of Vasabron, west of Konstakademiens hus) |
+| **OSM way** | none. New way `9000001049107` in `osm_overrides.yaml` (`new_ways`) |
+| **Status** | **CONFIRMED** by NVDB (2026-10-20); Kaveh approved the new way and branch B only |
+
+**Symptom.** NVDB has a car road here: Rödbodtorget, tertiary, one-way north (`prohibited_direction_bwd=-1`), from the Fredsgatan
+west end to Tegelbacken, in two branches. OSM has no way. Kaveh saw the road as drivable in Google 3D.
+
+**Fix.** Branch B only (NVDB segments `1049107`, `1049108`, `1049109`, `1049110`, 69 m): the new way `9000001049107`, from OSM node
+`180929` (12.8 m from the NVDB start) through the NVDB vertices to OSM node `180933` (1.9 m from the NVDB end).
+Branch A (NVDB `3678311`, `3929353`, `3678312`) is left out. It would end at Tegelbacken node `12957251840`, 22.8 m from the NVDB end,
+and cut Tegelbacken edge `4271686175640876552`. Upstream: add Rödbodtorget in OpenStreetMap.

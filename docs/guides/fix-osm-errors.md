@@ -60,7 +60,33 @@ every area you build. Fixes are only applied when you name the file.
 | `lanes_forward`, `lanes_backward` | lanes per direction, each separately |
 | `layer` | vertical level (fixes a wrong `layer` tag, e.g. a ramp at ground level tagged `layer=-1`) |
 | `exclude_modes` | remove the way from these networks: `driving`, `walking`, `cycling` |
+| `remove` | `true`: remove the way from the build (no road, building or feature) |
+| `tags` | set these OSM tags on the way before the build reads it, e.g. `{highway: unclassified}` for a car road that OSM tags `pedestrian` |
+| `keep_nodes` | `[from, to]`: keep only this part of the way (OSM node ids). To keep the other part, add it under `new_ways` with `tags_from` |
+| `turn_lanes_forward`, `turn_lanes_backward` | the painted arrows, in OSM `turn:lanes` syntax (`through;left\|right`) |
 | `note` | free text, for your own record |
+
+## New ways (`new_ways`)
+
+A road that OSM does not have:
+
+```yaml
+new_ways:
+  - id: 9000001049107
+    source: nvdb:1049107
+    nodes: [180929, [18.063835, 59.328511], 180933]
+    tags: {highway: tertiary, oneway: "yes", name: "Rödbodtorget"}
+```
+
+| Field | Does |
+|---|---|
+| `id` | the way's id (required): 9,000,000,000,000 or more, used one time only. Do not change it: the edge ids come from it |
+| `nodes` | the nodes in the way's direction: an OSM node id, or `[lon, lat]` for a new node. Make both ends OSM nodes, so that the way connects |
+| `tags` | the OSM tags of the way |
+| `tags_from` | an OSM way whose tags (before any fix) the new way starts with; `tags` goes on top |
+| `source`, `note` | free text, for your own record |
+
+A new way that ends on a node inside another way cuts that way there, so that way gets new edge ids.
 
 ## Turn fixes (`turn_restrictions`)
 

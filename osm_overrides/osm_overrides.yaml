@@ -14,6 +14,8 @@
 #   layer           int   — vertical stacking level (fixes a wrong OSM `layer` tag)
 #   exclude_modes   list  — remove the way from these modes' networks (driving/cycling/walking)
 #   remove          bool  — drop the way from the build entirely (raw.ways, so no road, building or feature): any way, not only roads
+#   tags            map   — set these OSM tags on the way in raw.ways, before any step reads it (e.g. highway: unclassified)
+#   keep_nodes      [from, to] — keep only this part of the way (OSM node ids); add a dropped part back with new_ways + tags_from
 #   turn_lanes_forward / turn_lanes_backward  str — the painted arrows, OSM turn:lanes syntax ("through;left|right")
 #   note            free text (provenance)
 #
@@ -288,6 +290,19 @@ overrides:
   - osm_id: 1126757835       # Centralbron, one-way northwest-bound - the 9 m continuation of way 4830965
     lanes: 2
     note: "Street View (Kaveh, 2026-10-20): 2 lanes, as way 4830965 before it; OSM lanes=1"
+  # --- Stockholm, Norrmalm: Rödbodgatan is two-way (known_osm_issues #15) ---
+  - osm_id: 23089329         # Rödbodgatan - OSM oneway=yes (northwest), lanes=2
+    oneway: false
+    lanes: 1
+    note: "two-way, 1 lane each way: city tube 01181215 (Dec 2020) counted about 180 veh/h in each direction; Street View (Kaveh, 2026-10-20) shows a van going southeast"
+  # --- Stockholm, Norrmalm: Fredsgatan is a car road (known_osm_issues #16) ---
+  - osm_id: 755033491        # Fredsgatan - OSM highway=pedestrian, so it was in driving.private_edges
+    tags: {highway: unclassified, oneway: "yes", "oneway:bicycle": "no"}
+    note: "one-way east (the way is drawn west to east, 180929 -> 527259467): NVDB prohibited_direction_fwd=-1 on all its segments, drawn east to west (fetching-sweden-data norrmalm_traffic.duckdb, 2026-10-20). oneway:bicycle=no keeps the OSM state for cyclists (bicycle=yes, both ways) until Kaveh decides. A car road: Street View (Kaveh, 2026-10-20) shows Fredsgatan painted on the road with turn arrows for cars, Google 3D shows the whole street drivable; city tubes counted 200-400 veh/h (01182324: 406 veh/h, 2019; 01182425, 01182526, 01182691, 2017-2018). Class as its car neighbours Rödbodgatan, Malmtorgsgatan and Gustav Adolfs Torg"
+  # --- Stockholm, Norrmalm: car link Vasabron -> Fredsgatan, south of the building at the bridge (known_osm_issues #17) ---
+  - osm_id: 40274443         # cycleway 266272124 -> 180929: keeps its west part, a cycle path only; the east part is new way 9000003678314
+    keep_nodes: [266272124, 1740740220]
+    note: "the east part, 1740740220 -> 180929, is a car road (NVDB segment 3678314), so it is the new way 9000003678314; the west part (15.5 m, across the southbound Vasabron carriageway) is not in NVDB"
 
 
 
@@ -306,3 +321,27 @@ turn_restrictions:
     to_way: 997402723
     restriction: no_u_turn
     note: "OSM lacks the restriction; the -166° turn from one-way link onto opposing/westbound Tähe is forbidden"
+
+
+# New ways - the roads OSM does not have (docs/design/osm_override_new_ways.md). Added to raw.ways before any step reads it.
+#   id         (required) 9,000,000,000,000 or more, used one time only; never change it (edge_ids hash it).
+#              Convention here: 9,000,000,000,000 + the NVDB element id the way comes from
+#   source     free text: where the way comes from (nvdb:<id>, ...)
+#   nodes      in the way's direction: OSM node ids, or [lon, lat] for a new node (id: way id * 1000 + position).
+#              Both ends must be OSM nodes, or the way is a dead end there
+#   tags       OSM tags · tags_from: an OSM way whose tags (before any fix) the new way starts with · note
+new_ways:
+  # --- Stockholm, Norrmalm: Vasabron -> Fredsgatan (known_osm_issues #17) ---
+  - id: 9000003678314
+    source: nvdb:3678314
+    nodes: [1740740220, 1740740223, 180929]
+    tags_from: 40274443
+    tags: {highway: unclassified, oneway: "yes", lanes: "2", "oneway:bicycle": "no"}
+    note: "the east part of OSM cycleway 40274443, cut off by keep_nodes. NVDB segment 3678314 (Fredsgatan, tertiary, prohibited_direction_fwd=-1, drawn east to west): one-way east, from the northbound Vasabron carriageway (node 1740740220) to the Fredsgatan west end; agrees with Fredsgatan tube 01182324/2 'Mot Rödbodtorget'. Lanes 2 from the Google 3D top view (Kaveh, 2026-10-20). Class as Fredsgatan. oneway:bicycle=no keeps the cycle path's two directions (OSM: two-way cycleway)"
+  # --- Stockholm, Norrmalm: Rödbodtorget, east of the building at the north end of Vasabron (known_osm_issues #18) ---
+  - id: 9000001049107
+    source: nvdb:1049107,1049108,1049109,1049110
+    nodes: [180929, [18.063835, 59.328511], [18.063846, 59.328529], [18.063853, 59.328556], [18.063849, 59.328571],
+            [18.063839, 59.328613], [18.063710, 59.328759], [18.063580, 59.328889], [18.063567, 59.328902], 180933]
+    tags: {highway: tertiary, oneway: "yes", name: "Rödbodtorget"}
+    note: "NVDB branch B of Rödbodtorget (tertiary, prohibited_direction_bwd=-1: one-way north), 69 m. Starts at OSM node 180929 (12.8 m from the NVDB start), ends at OSM node 180933 (1.9 m from the NVDB end); the inner points are the NVDB vertices. Branch A (NVDB 3678311, 3929353, 3678312) is left out: it would cut Tegelbacken edge 4271686175640876552 (Kaveh, 2026-10-20)"

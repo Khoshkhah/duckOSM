@@ -27,6 +27,7 @@ stacking level; overrides a wrong OSM `layer` tag, e.g. an at-grade way mis-tagg
 networks, for a way OSM tags as usable that is not, e.g. a tunnel ramp seen closed on Street View) ·
 `turn_lanes_forward` / `turn_lanes_backward` (the painted arrows, OSM `turn:lanes` syntax, e.g. `through;left|right`: set as the
 way's `turn:lanes:forward` / `:backward` tag in `raw.ways`, where every lane reader takes its arrows from).
+`remove` and `tags` (OSM tags to set) act on `raw.ways` before any step reads it: `DuckOSM._raw_way_fixes`, not here.
 """
 import logging
 from pathlib import Path
