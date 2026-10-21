@@ -425,7 +425,7 @@ function _rsFloat(w, bar, name, left){
 const _svWindow = true;
 // with a Maps JavaScript API key (street_view_key=) the window offers Linked - a real panorama that
 // reports every step and turn, so the map marker walks with the viewer - beside Classic, the embed
-const _svKey = "";
+const _svKey = "AIzaSyDaKDLkjxZlWD_yX7k90E-gvacangCAq2g";
 function rsSetStreetView(){}
 if(_svWindow){
   const fromDisk=location.protocol==="file:";
@@ -536,7 +536,7 @@ window.rsSetStreetView = rsSetStreetView;
 // to its center: the map's own camera distance at that zoom). A clicked road is drawn in the 3D view
 // and the camera flies along it (the map follows). Google's 3D map exists only while the window is
 // open: closing it drops it, as nothing is loaded from Google while it is closed.
-const _g3d = false;
+const _g3d = true;
 function rsSetGoogle3D(){}
 if(_g3d){
   const w=document.createElement("div"); w.className="rs-svw rs-g3d"; w.hidden=true;
