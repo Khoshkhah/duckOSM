@@ -2098,7 +2098,11 @@ function placeBoxes() {
 .rm-pts{position:relative;background:var(--card);border-radius:12px;padding:4px 14px}
 .rm-pt{display:flex;align-items:center;gap:12px;padding:9px 38px 9px 0;min-height:52px}
 .rm-pt+.rm-pt{border-top:1px solid var(--line)}
-.rm-pin{width:14px;height:14px;border-radius:50%;flex:none;border:3px solid var(--bg);box-shadow:0 0 0 1px var(--mute)}
+.rm-pin{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:var(--c);box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--c)}
+#rm-panel{--start:#7c3aed;--end:#d97706}
+.rm-mk{width:30px;height:38px;position:relative;cursor:grab}
+.rm-mkb{position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--c);border:2px solid #fff;box-shadow:0 2px 5px #0006;display:grid;place-items:center}
+.rm-mkb span{transform:rotate(45deg);color:#fff;font:700 14px/1 system-ui,sans-serif}
 .rm-pt small{display:block;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
 .rm-pt b{display:block;font-weight:600;overflow-wrap:anywhere}
 .rm-swap{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;
@@ -2149,8 +2153,8 @@ function placeBoxes() {
     <button type="button" data-w="time" class="on">Fastest</button><button type="button" data-w="length">Shortest</button>
   </div>
   <div class="rm-pts">
-    <div class="rm-pt"><span class="rm-pin" style="background:var(--text)"></span><div><small>Start</small><b id="rm-from">…</b></div></div>
-    <div class="rm-pt"><span class="rm-pin" style="background:#6b7280"></span><div><small>End</small><b id="rm-to">…</b></div></div>
+    <div class="rm-pt"><span class="rm-pin" style="--c:var(--start)">A</span><div><small>Start</small><b id="rm-from">…</b></div></div>
+    <div class="rm-pt"><span class="rm-pin" style="--c:var(--end)">B</span><div><small>End</small><b id="rm-to">…</b></div></div>
     <button type="button" class="rm-swap" id="rm-swap" title="Swap start and end" aria-label="Swap start and end">&#8645;</button>
   </div>
   <div id="rm-result"></div>
@@ -2607,7 +2611,10 @@ function placeBoxes() {
 
   function setMarker(which, lngLat) {
     if (!markers[which]) {
-      markers[which] = new maplibregl.Marker({color: which === "A" ? "#111827" : "#6b7280", draggable: true})
+      const el = document.createElement("div"); el.className = "rm-mk"; el.title = which === "A" ? "Start" : "End";
+      el.style.setProperty("--c", which === "A" ? "#7c3aed" : "#d97706");       // not the walk / drive colours of the route
+      el.innerHTML = `<div class="rm-mkb"><span>${which}</span></div>`;
+      markers[which] = new maplibregl.Marker({element: el, anchor: "bottom", draggable: true})
         .setLngLat(lngLat).addTo(map);
       markers[which].on("dragend", update);
       markers[which].on("drag", () => drawRadius());           // the radius follows the marker

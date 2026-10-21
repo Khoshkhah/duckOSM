@@ -1,6 +1,6 @@
 # Design: a new side panel for the route planner
 
-Status: built (2026-10-20). Mockup: `reports/planner_panel_mockup.png`. The dots of the start and the end follow the colours of the two pins on the map, not green and red, because green and red are the colours of the walk and drive legs.
+Status: built (2026-10-20). Mockup: `reports/planner_panel_mockup.png`. The pins on the map and the dots in the card are violet with an A (start) and amber with a B (end). Green and red are the colours of the walk and drive legs, so the pins do not use them.
 
 ## Problem
 
