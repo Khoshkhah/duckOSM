@@ -7,7 +7,11 @@
 <style>
 #rm-panel{--bg:#fff;--card:#f4f5f7;--line:#e4e7ec;--text:#14181f;--mute:#667085;--accent:#2563eb;--w:380px;
   --walk:#16a34a;--drive:#dc2626;--cycle:#2563eb;--rest:#98a2b3}
-@media (prefers-color-scheme:dark){#rm-panel{--bg:#161a21;--card:#1f242d;--line:#2b313c;--text:#eef1f5;--mute:#98a1b0;--accent:#6ea0ff}}
+#rm-panel[data-theme=dark]{--bg:#161a21;--card:#1f242d;--line:#2b313c;--text:#eef1f5;--mute:#98a1b0;--accent:#6ea0ff}
+.rm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.rm-theme{flex:none;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--mute);
+  cursor:pointer;font-size:15px;line-height:1}
+.rm-theme:hover{color:var(--text)} .rm-theme:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #map{right:380px!important} body{--rs-side:380px}
 #rm-panel{position:fixed;top:0;right:0;bottom:0;width:var(--w);box-sizing:border-box;padding:18px 18px 28px;overflow-y:auto;
   background:var(--bg);border-left:1px solid var(--line);font:14px/1.45 system-ui,"Segoe UI",sans-serif;color:var(--text);
@@ -69,8 +73,9 @@
 }
 </style>
 <div id="rm-panel">
-  <div><h3>Route planner</h3>
+  <div class="rm-head"><div><h3>Route planner</h3>
   <p class="rm-hint">Drag the two pins to set the start and the end. Click a road to copy its <code>edge_id</code>.</p></div>
+  <button type="button" class="rm-theme" id="rm-theme" aria-label="Switch between light and dark" title="Light / dark">&#9790;</button></div>
   <select id="rm-mode" aria-label="Mode"></select>
   <div class="rm-seg" id="rm-modes" role="group" aria-label="Mode"></div>
   <div class="rm-seg" id="rm-weight" role="group" aria-label="Weight">
@@ -544,6 +549,12 @@
   }
 
   function init() {
+    const panel = $("rm-panel"), themeBtn = $("rm-theme");        // light is the default; the choice is kept in this browser
+    const setTheme = (t) => { panel.dataset.theme = t; themeBtn.textContent = t === "dark" ? "\u2600" : "\u263E";
+      try { localStorage.setItem("rm-theme", t); } catch (e) {} };
+    let saved = "light"; try { saved = localStorage.getItem("rm-theme") === "dark" ? "dark" : "light"; } catch (e) {}
+    setTheme(saved);
+    themeBtn.addEventListener("click", () => setTheme(panel.dataset.theme === "dark" ? "light" : "dark"));
     const ids = rsQuery(() => true), props = rsGetProps(ids);
     fid = new Array(D.n);
     for (let i = 0; i < ids.length; i++) { const k = AT.get(String(props[i].edge_id)); if (k !== undefined) fid[k] = ids[i]; }

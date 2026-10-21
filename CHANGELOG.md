@@ -7,7 +7,7 @@
 - `duckosm route-map`: a new side panel. The mode and the weight are segmented buttons. The start and the
   end show the name of their road, with a swap button. The summary has a bar of the legs, and the
   steps are a timeline with icons. The settings and the `edge_id` list are in a closed block. The panel
-  has a dark theme, and on a phone it is a sheet under the map. Design: `docs/design/route_planner_panel.md`.
+  is light, with a button for a dark theme, and on a phone it is a sheet under the map. Design: `docs/design/route_planner_panel.md`.
 
 ## 0.5.0 (2026-10-20)
 

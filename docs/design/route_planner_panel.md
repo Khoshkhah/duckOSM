@@ -28,7 +28,7 @@ Only the markup and the CSS of the panel change. The routing code does not chang
    `duckosm.directions()`.
 7. **Details.** The radius, the walking speed, the list of `edge_id` and the clicked road go into a
    closed `<details>` block at the end.
-8. **Themes and size.** CSS variables for colour. A dark theme follows `prefers-color-scheme`. Under
+8. **Themes and size.** CSS variables for colour. The panel is light by default. A button in the header switches to a dark theme, and the page keeps the choice in `localStorage`. Under
    700 px the panel becomes a sheet at the bottom of the page, and the map keeps the full width.
 
 ## Not in scope
