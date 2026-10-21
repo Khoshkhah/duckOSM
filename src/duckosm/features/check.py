@@ -32,7 +32,9 @@ LEFT_OUT = [
     ("a mark of an event (a race: pit lane, animals) or a sport tag without a pitch",
      "tags['line'] IS NOT NULL OR tags['attraction'] IS NOT NULL OR tags['animal'] IS NOT NULL OR tags['sport'] IS NOT NULL"),
     ("a club or an organisation drawn as an area: not ground", "tags['club'] IS NOT NULL"),
-    ("indoor mapping (rooms, walls, levels): not ground", "tags['indoor'] IS NOT NULL"),
+    ("indoor mapping (rooms, walls, levels): not ground",           # a shop or a restaurant with an indoor tag is a place of interest: not here
+     "tags['indoor'] IS NOT NULL AND tags['shop'] IS NULL AND tags['amenity'] IS NULL AND tags['office'] IS NULL "
+     "AND tags['tourism'] IS NULL AND tags['historic'] IS NULL"),
     ("street furniture and small areas (power, barriers, parking spaces, shelters, seating, fountains, bins, …)",
      "tags['power'] IS NOT NULL OR tags['barrier'] IS NOT NULL OR tags['amenity'] IN ('motorcycle_parking','parking_space',"
      "'shelter','fountain','bench','waste_basket','bicycle_parking','toilets','drinking_water','taxi','parking_entrance',"
