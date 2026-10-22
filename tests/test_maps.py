@@ -114,6 +114,10 @@ def test_route_map_opens_on_walk_drive(monaco, tmp_path):
         pg.wait_for_function("() => window.rmSteps && window.rmSteps.length > 1", timeout=30000)
         assert pg.evaluate("() => document.getElementById('rm-mode').selectedOptions[0].textContent") == "Walk + drive"
         assert "change" in pg.evaluate("() => document.getElementById('rm-result').innerText")   # changes of mode
+        fast = pg.evaluate("() => window.rmLast.res")          # Fastest and Shortest: each wins on its own measure
+        pg.click("#rm-weight button[data-w=length]")
+        short = pg.evaluate("() => window.rmLast.res")
+        assert short["len"] < fast["len"] and fast["time"] <= short["time"], (fast["len"], short["len"], fast["time"], short["time"])
         b.close()
 
 

@@ -17,7 +17,10 @@ Only the markup and the CSS of the panel change. The routing code does not chang
 2. **Mode.** A segmented control (Walk, Cycle, Drive, and the combined modes) in place of the
    drop-down list. The `<select id="rm-mode">` stays in the page, hidden, so tests and scripts keep
    working.
-3. **Weight.** A second segmented control: Fastest, Shortest.
+3. **Weight.** A second segmented control: Fastest, Shortest. It also applies to Walk + drive: for
+   Shortest, the search adds metres (the roads and the walks off the road), and a change of mode
+   counts 0.1 m, so the route has no change of mode that does not make it shorter. Only the page
+   has this; `route_multimodal` routes by time.
 4. **Start and end.** A card with two rows, each with a coloured dot, the label and the name of the
    nearest road. A swap button exchanges the two points.
 5. **Summary.** One card: the total time in large type and the distance next to it. Under it, a bar

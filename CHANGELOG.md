@@ -8,6 +8,9 @@
   over junctions, so a driving leg could take a turn that OSM forbids (Monaco: 29 of 16,149 turns in 300 trips). Every leg now follows the
   `edge_graph` of its mode, as `route()` does. No route gets shorter. Design: `docs/design/multimodal_edge_graph.md`.
 - `scripts/route_map_compare.py` compares the page with `route_multimodal_points` on random trips.
+- **Shortest works in Walk + drive** (`route-map`). The page routed Walk + drive by time only, so Fastest and Shortest gave the same route.
+  For Shortest the search now adds metres, and a change of mode counts 0.1 m (Monaco: 1,880 m in place of 1,901 m). The time and the
+  length that the panel shows do not change. `route_multimodal` still routes by time.
 
 ## 0.6.1 (2026-10-22)
 
