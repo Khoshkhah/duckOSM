@@ -22,3 +22,11 @@ def test_a_carriageway_goes_straight_on_through_the_v():
     dy = lambda y: (y - 59.0) * M                                                              # noqa: E731
     assert abs(dy(g.coords[0][1])) < 0.01                 # it starts on the straight line
     assert abs(dy(g.interpolate(30.0 / 57.2, normalized=True).y) - 2.0) < 0.05     # past the V it is its own line
+
+
+def test_a_lone_lane_into_a_wider_road_feeds_all_its_lanes():
+    from duckosm.sumo import _split_lone_lanes
+    prof = {"a4": [1, 2], "a2": [1, 2], "a7": [1]}
+    got = {"a4": [(1, "a7", 0), (0, "a2", 1)]}                 # SUMO's indices: 0 is the right-most lane
+    out = sorted(_split_lone_lanes(got, prof)["a4"])
+    assert out == [(0, "a2", 0), (0, "a2", 1), (1, "a7", 0)]   # lane 0 splits into both of a2's lanes; a7 is as it was

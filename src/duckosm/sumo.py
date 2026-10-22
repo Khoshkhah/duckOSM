@@ -35,6 +35,7 @@ the data (``--proj.utm``).
 """
 import logging
 import os
+from collections import defaultdict
 import shutil
 import subprocess
 from xml.sax.saxutils import quoteattr
@@ -357,7 +358,26 @@ def _arrow_connections(con, mode, bus, rows, profile, arrowed, cs, nodes, out_di
         if el.tag == "connection" and not el.get("from").startswith(":") and sumo_id[el.get("from")] in got:
             got[sumo_id[el.get("from")]].append((int(el.get("fromLane")), sumo_id[el.get("to")], int(el.get("toLane"))))
     logger.info(f"SUMO connections[{mode}]: {len(got)} edges with turn arrows connected lane by lane by netconvert's OSM import ({net_path})")
-    return got
+    return _split_lone_lanes(got, profile)
+
+
+def _split_lone_lanes(got, profile):
+    """A lane that is the only lane of its edge going into a road with more lanes feeds all of them: it splits (Granville Bridge, a4
+    into a2: lane 1 goes to a2 and becomes its two lanes; netconvert fed only one, and the other started with no traffic; Kaveh
+    2026-10-22). ``got``: ``{edge: [(fromLane, to_edge, toLane)]}`` in SUMO's lane indices; ``profile``: each edge's lanes."""
+    out = {}
+    for e, ls in got.items():
+        by_to = defaultdict(set)
+        for fl, te, tl in ls:
+            by_to[te].add((fl, tl))
+        keep = list(ls)
+        for te, pairs in by_to.items():
+            froms, n_to = {fl for fl, _ in pairs}, len(profile.get(te) or [])
+            if len(froms) == 1 and n_to > len(pairs):
+                fl = next(iter(froms))
+                keep = [x for x in keep if x[1] != te] + [(fl, te, j) for j in range(n_to)]
+        out[e] = keep
+    return out
 
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",

@@ -268,6 +268,9 @@ overrides:
   - osm_id: 1419040131         # Granville Bridge ramp a3: its right lane does not end (known_osm_issues #23)
     turn_lanes_forward: "none|none"
     note: "OSM turn:lanes |merge_to_left, but the next way 37226820 has 2 lanes (checked by Kaveh, above); SUMO ended the lane and moved lane 1 into lane 2 (Kaveh, 2026-10-22)"
+  - osm_id: 992936499          # Granville Bridge a4 before the west ramps fork: lane 1 to a2, lane 2 to a7 (known_osm_issues #24)
+    turn_lanes_forward: "slight_left|slight_right"
+    note: "OSM has no turn:lanes here, and SUMO split lane 2 into a7 and a2; only lane 1 goes to a2 and then splits into a2's two lanes, lane 2 goes to a7 (Kaveh, 2026-10-22)"
 
   - osm_id: 299511148
     lanes: 3

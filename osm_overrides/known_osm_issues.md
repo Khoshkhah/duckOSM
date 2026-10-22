@@ -530,3 +530,18 @@ the next way's left lane got no traffic.
 
 **Fix.** `turn_lanes_forward: "none|none|none"` and `"none|none"` in `osm_overrides.yaml`: no lane ends at the joint. Upstream:
 remove `merge_to_left` from `turn:lanes` on these ways in OpenStreetMap, or move it to where the lane really ends.
+
+## 24. Vancouver, Granville Bridge - no lane arrows before the west ramps fork
+
+| field | value |
+| --- | --- |
+| **Area** | Vancouver (Granville Bridge: a4 into the ramps a2 and a7) |
+| **OSM way** | `992936499` (2 lanes, one-way, no `turn:lanes`) → `35354210` (a2, 2 lanes) and `35354235` (a7, 1 lane) |
+| **Status** | **CONFIRMED** by Kaveh (2026-10-22); override enabled |
+
+**Symptom.** With no arrows, SUMO split lane 2 into a7 and a2, and lane 1 went to a2's lane 1 only. On the road, only lane 1 goes to
+a2 and splits into its two lanes; lane 2 goes to a7.
+
+**Fix.** `turn_lanes_forward: "slight_left|slight_right"` in `osm_overrides.yaml` (lane 1 is the left lane). duckOSM's lane-split
+rule (`sumo._split_lone_lanes`) then feeds both of a2's lanes from lane 1. Upstream: tag `turn:lanes=slight_left|slight_right` on
+this way in OpenStreetMap.
