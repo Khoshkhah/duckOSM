@@ -515,3 +515,18 @@ In OSM it connects to no other car road.
 
 **Fix.** `tags: {oneway: "yes", "oneway:bicycle": "no"}` in `osm_overrides.yaml`. The way is drawn south to north, so `oneway=yes` is
 north. `oneway:bicycle=no` keeps the OSM state for cyclists, as in #19. Upstream: tag `oneway=yes` in OpenStreetMap.
+
+## 23. Vancouver, Granville Bridge - merge lanes that do not end
+
+| field | value |
+| --- | --- |
+| **Area** | Vancouver (Granville Bridge: north-bound before Hemlock, and ramp a3) |
+| **OSM ways** | `256879265` (`turn:lanes=\|\|merge_to_left`, 3 lanes) → `1285848467` (3 lanes); `1419040131` (`turn:lanes=\|merge_to_left`, 2 lanes) → `37226820` (2 lanes) |
+| **Status** | **CONFIRMED** by Kaveh from the 2018 aerial photo (2026-10-22); overrides enabled |
+
+**Symptom.** OSM tags the right lane `merge_to_left`, but the next way has the same number of lanes (#13 gives those counts). SUMO
+ends the merging lane at the joint and moves every other lane one to the right, so each lane stepped a full lane width (3.2 m) and
+the next way's left lane got no traffic.
+
+**Fix.** `turn_lanes_forward: "none|none|none"` and `"none|none"` in `osm_overrides.yaml`: no lane ends at the joint. Upstream:
+remove `merge_to_left` from `turn:lanes` on these ways in OpenStreetMap, or move it to where the lane really ends.

@@ -262,6 +262,13 @@ overrides:
     lanes: 2
     note: "Granville Bridge ramp a2 (4th Avenue): two lanes past the gore with a7 on the 2018 aerial photo (Kaveh, 2026-10-12); OSM lanes=1"
 
+  - osm_id: 256879265          # Granville Bridge north-bound, before Hemlock: its right lane does not end (known_osm_issues #23)
+    turn_lanes_forward: "none|none|none"
+    note: "OSM turn:lanes ||merge_to_left, but the next way 1285848467 has 3 lanes (checked by Kaveh, above) and the 2018 aerial photo shows the right lane going on; SUMO ended it and moved every lane one to the right (Kaveh, 2026-10-22)"
+  - osm_id: 1419040131         # Granville Bridge ramp a3: its right lane does not end (known_osm_issues #23)
+    turn_lanes_forward: "none|none"
+    note: "OSM turn:lanes |merge_to_left, but the next way 37226820 has 2 lanes (checked by Kaveh, above); SUMO ended the lane and moved lane 1 into lane 2 (Kaveh, 2026-10-22)"
+
   - osm_id: 299511148
     lanes: 3
     note: "Fir Street south of the Granville Bridge ramp: the ramp's 2 lanes and Fir Street's lane run on as 3 (Kaveh, 2026-10-15); OSM lanes=2"
