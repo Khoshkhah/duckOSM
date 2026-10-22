@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 (2026-10-22)
+
+### Changed
+- **The `levels` extra needs roadstyle 0.24.2.** Its pages cut no tiles of the roads source in simple mode, so a zoom no longer freezes the page at each tile (the page took 40 to 70 ms to read the reply of each tile). A road is picked on the pieces of the road layer.
+
 ## 0.6.0 (2026-10-21)
 
 ### Added
