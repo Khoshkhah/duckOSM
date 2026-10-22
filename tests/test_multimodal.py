@@ -340,6 +340,81 @@ def test_multimodal_integration_build(tmp_path):
                               + sum(tr["cost_s"] for tr in r["transfers"]))) < 1e-6
 
 
+# ---- turn restrictions: every part of a trip follows the edge_graph of its mode ----------------
+# (docs/design/multimodal_edge_graph.md)
+
+def _turn_db(forbid_direct_turn=True):
+    """walk 10->20 (101), drive 20->21->22 (201, 202; 20 s) or 20->24->22 (205, 206; 60 s), walk 22->50 (401).
+    Junctions 20 and 22 are shared. The turn 201 -> 202 is the one a restriction may forbid."""
+    con = _new_db()
+    for nid, x in [(20, 1), (22, 3)]:
+        for m in ("walking", "driving"):
+            _add_node(con, m, nid, x, 0)
+    for nid, x in [(21, 2), (24, 2)]:
+        _add_node(con, "driving", nid, x, 1)
+    _add_node(con, "walking", 10, 0, 0)
+    _add_node(con, "walking", 50, 4, 0)
+    _add_edge(con, "walking", 101, 10, 20, 50, hw="footway")
+    _add_edge(con, "walking", 401, 22, 50, 50, hw="footway")
+    for eid, s_, t, cost in [(201, 20, 21, 10), (202, 21, 22, 10), (205, 20, 24, 30), (206, 24, 22, 30)]:
+        _add_edge(con, "driving", eid, s_, t, cost)
+    pairs = [(205, 206)] + ([] if forbid_direct_turn else [(201, 202)])
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    for f, t in pairs:
+        con.execute(f"INSERT INTO driving.edge_graph VALUES ({f}, {t}, {t}, 10)")
+    con.execute("CREATE TABLE walking.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
+    MultimodalBuilder(con, transfer_s=60).run()
+    return con
+
+
+def test_the_driving_part_does_not_take_a_forbidden_turn():
+    con = _turn_db(forbid_direct_turn=True)             # no row for 201 -> 202
+    r = route_multimodal(con, 10, 50)
+    assert [e for m, e in r["edges"] if m == "driving"] == [205, 206]
+    assert r["time_s"] == 50 + 60 + 60 + 60 + 50
+
+
+def test_the_same_trip_takes_the_short_way_where_the_turn_is_allowed():
+    con = _turn_db(forbid_direct_turn=False)
+    r = route_multimodal(con, 10, 50)
+    assert [e for m, e in r["edges"] if m == "driving"] == [201, 202]
+    assert r["time_s"] == 50 + 60 + 20 + 60 + 50
+
+
+def test_a_database_without_edge_graph_keeps_the_junction_rule():
+    con = _turn_db(forbid_direct_turn=True)
+    con.execute("DROP TABLE driving.edge_graph")
+    r = route_multimodal(con, 10, 50)
+    assert [e for m, e in r["edges"] if m == "driving"] == [201, 202]
+
+
+_MONACO = _REPO / "monaco.duckdb"
+
+
+@pytest.mark.skipif(not _MONACO.exists(), reason="needs a built monaco.duckdb with the mm tables")
+def test_monaco_walk_drive_trips_use_only_legal_turns():
+    import random
+
+    con = duckdb.connect(str(_MONACO), read_only=True)
+    legal = {m: set(con.execute(f"SELECT from_edge, to_edge FROM {m}.edge_graph").fetchall())
+             for m in ("walking", "driving", "cycling")}
+    nodes = [r[0] for r in con.execute(
+        "SELECT source FROM mm.edges WHERE mode = 'driving' INTERSECT SELECT source FROM mm.edges "
+        "WHERE mode = 'walking'").fetchall()]
+    rng = random.Random(1)
+    n = 0
+    for _ in range(40):
+        a, b = rng.choice(nodes), rng.choice(nodes)
+        r = route_multimodal(con, a, b) if a != b else None
+        if r is None:
+            continue
+        n += 1
+        for leg in r["legs"]:
+            for p, q in zip(leg["edges"], leg["edges"][1:], strict=False):
+                assert (p, q) in legal[leg["mode"]], (leg["mode"], p, q)
+    assert n > 20
+
+
 # ---- gated visual test: render a Sodermalm multimodal route by mode via mapstyle -------------
 
 _SODER = _REPO / "data" / "db" / "sodermalm_pbf.duckdb"

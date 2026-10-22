@@ -1,6 +1,6 @@
 # Design: Walk + drive on the edge graph
 
-Status: proposal. No code is written. It waits for Kaveh's sign-off.
+Status: built (2026-10-22). Kaveh approved the note.
 
 ## Problem
 
@@ -97,4 +97,4 @@ The panel note "Turn restrictions don't apply across modes" goes away, and so do
 - **Speed on a big area.** `route_multimodal` reads all tables at each call, as before.
   A prebuilt graph (like `Router`) is a separate task.
 - **Cycling.** The cycling part follows the cycling `edge_graph`. I think this is right, and it needs no extra work.
-- **Old databases.** A database without `mm` or without `edge_graph` keeps the same error as today.
+- **Old databases.** A mode without an `edge_graph` table keeps the junction rule: any road that leaves the junction may follow. A database without `mm` gives the same error as before.

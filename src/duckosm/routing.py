@@ -414,16 +414,19 @@ _HUB_MODE = "walking"
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
                      end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None,
-                     _virtual=None):
+                     _points=None):
     """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
 
     Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
-    by :class:`duckosm.processors.multimodal.MultimodalBuilder` — vertices are ``(node_id, mode)``,
-    intra-mode arcs are ``mm.edges`` (weight ``cost_s``) and inter-mode arcs are ``mm.transfers``
-    (a transfer penalty in seconds). So a single trip can **switch mode** (walk → drive → walk).
+    by :class:`duckosm.processors.multimodal.MultimodalBuilder`: the roads are ``mm.edges`` (weight
+    ``cost_s``) and the changes of mode are ``mm.transfers`` (a transfer penalty in seconds). So a
+    single trip can **switch mode** (walk → drive → walk).
 
     Everything is weighted in **seconds**, so ``time_s`` is exactly ``Σ edge cost_s + Σ transfer
-    cost_s``. A node-based Dijkstra (``heapq``); needs no networkx.
+    cost_s``. An edge-based Dijkstra (``heapq``; needs no networkx): a road is followed by the roads
+    of its mode's ``edge_graph``, so every part of the trip obeys the turn restrictions, as
+    :func:`route` does. Where a mode has no ``edge_graph`` (an old database), any road that leaves
+    the junction may follow (docs/design/multimodal_edge_graph.md).
 
     Parameters
     ----------
@@ -450,10 +453,11 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     ``None`` if the two nodes aren't connected (e.g. no transfers → the layers are disconnected).
     Raises ``ValueError`` if an endpoint isn't present in its mode's layer.
 
-    ``_virtual`` (private, :func:`duckosm.point_routing.route_multimodal_points`): extra arcs
-    ``(mode, from_node, to_node, edge_id, cost_s, fraction, access_s)`` from / to temporary nodes
-    (a point beside a road): ``cost_s`` is the part ``fraction`` of the edge, ``access_s`` the walk
-    off the road; the result then also has ``access_s``.
+    ``_points`` (private, :func:`duckosm.point_routing.route_multimodal_points`): ``(starts, ends)``
+    in place of the two nodes. ``starts`` is a list of ``(edge_id, fraction, access_s)`` and ``ends``
+    a dict ``edge_id -> (fraction, access_s)``, all walking roads: the trip starts on a road at
+    ``fraction`` of it and ends at ``fraction`` of another; ``access_s`` is the walk to and from the
+    road. The result then also has ``access_s``.
     """
     import heapq
 
@@ -464,14 +468,16 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
 
     allow = set(allowed_modes) if allowed_modes else None   # None = all modes
 
-    # --- load adjacency (two SQL reads), skipping any mode not in `allow` -----------------------
-    adj: dict = {}                       # (mode, node) -> [(nbr_node, edge_id, cost_s)]
+    # --- the roads and the changes of mode (two SQL reads), skipping any mode not in `allow` ------
+    info: dict = {}                      # (mode, edge_id) -> (source, target, cost_s)
+    out_of: dict = {}                    # (mode, node) -> [edge_id, …] that leave the node
     nodes_by_mode: dict = {}             # mode -> {node_id}
     for mode, s, t, eid, cost in con.execute(
             f"SELECT mode, source, target, edge_id, cost_s FROM {schema}.edges").fetchall():
         if allow is not None and mode not in allow:
             continue
-        adj.setdefault((mode, s), []).append((t, eid, float(cost) if cost is not None else 0.0, 1.0, 0.0))
+        info[(mode, eid)] = (s, t, float(cost) if cost is not None else 0.0)
+        out_of.setdefault((mode, s), []).append(eid)
         nm = nodes_by_mode.setdefault(mode, set())
         nm.add(s)
         nm.add(t)
@@ -482,42 +488,94 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
             continue
         tadj.setdefault((fm, nid), []).append((tm, float(cost) if cost is not None else 0.0, kind))
 
-    extra = set()
-    for mode, s, t, eid, cost, frac, acc in _virtual or ():   # a point beside a road (point_routing)
-        if allow is None or mode in allow:
-            adj.setdefault((mode, s), []).append((t, eid, cost, frac, acc))
-            extra.update((s, t))
-    if src_node not in nodes_by_mode.get(start_mode, set()) and src_node not in extra:
-        raise ValueError(f"src node {src_node} not in the '{start_mode}' layer of {schema}.edges")
-    if dst_node not in nodes_by_mode.get(end_mode, set()) and dst_node not in extra:
-        raise ValueError(f"dst node {dst_node} not in the '{end_mode}' layer of {schema}.edges")
+    # --- the legal turns of each mode: its edge_graph, as route() reads it ---------------------------
+    from duckosm.processors.edge_graph import routed_graph
+    turns: dict = {}                     # mode -> {from_edge: [to_edge, …]}
+    for mode in nodes_by_mode:
+        if not con.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = ? "
+                           "AND table_name = 'edge_graph'", [mode]).fetchone()[0]:
+            continue                     # an old database: no turn data for this mode
+        nxt = turns.setdefault(mode, {})
+        for f, t in con.execute(f"SELECT from_edge, to_edge FROM {routed_graph(con, mode)}").fetchall():
+            if (mode, t) in info:
+                nxt.setdefault(f, []).append(t)
 
-    # --- Dijkstra over states (node_id, mode, phase) --------------------------------------------
+    def following(mode, eid):            # the roads that may come after a road
+        if mode in turns:
+            return turns[mode].get(eid, ())
+        return out_of.get((mode, info[(mode, eid)][1]), ())
+
+    starts, ends = _points if _points else (None, None)
+    if starts is None:
+        if src_node not in nodes_by_mode.get(start_mode, set()):
+            raise ValueError(f"src node {src_node} not in the '{start_mode}' layer of {schema}.edges")
+        if dst_node not in nodes_by_mode.get(end_mode, set()):
+            raise ValueError(f"dst node {dst_node} not in the '{end_mode}' layer of {schema}.edges")
+
+    # --- Dijkstra over states: ("E", mode, edge_id, phase) = at the end of a road, with its cost paid;
+    #     ("N", mode, node_id, phase) = at a junction, just after a change of mode (or at the start).
+    #     A label is the time spent so far. ("END",) is the end of a trip that stops part-way along a road.
     INF = float("inf")
     init_phase = (0 if start_mode == _HUB_MODE else 1) if enforce_sequence else 0
-    start = (src_node, start_mode, init_phase)
-    dist = {start: 0.0}
-    prev: dict = {}                      # state -> (prev_state, step)
-    pq = [(0.0, src_node, start_mode, init_phase)]
+    dist: dict = {}
+    prev: dict = {}                      # state -> (previous state or None, step)
+    pq: list = []
+    END = ("END",)
+    n_push = [0]
+
+    def push(d, state, before, step):
+        if d < dist.get(state, INF):
+            dist[state] = d
+            prev[state] = (before, step)
+            n_push[0] += 1
+            heapq.heappush(pq, (d, n_push[0], state))
+
+    best_direct = None                   # a trip that starts and ends on one road, forwards
+    if starts is None:
+        push(0.0, ("N", start_mode, src_node, init_phase), None, None)
+    else:
+        for eid, frac, acc in starts:
+            c = info[(_HUB_MODE, eid)][2]
+            push(acc + (1.0 - frac) * c, ("E", _HUB_MODE, eid, init_phase), None,
+                 ("edge", eid, _HUB_MODE, (1.0 - frac) * c, 1.0 - frac, acc))
+            if eid in ends and frac <= ends[eid][0]:
+                g, acc_t = ends[eid]
+                total = acc + (g - frac) * c + acc_t
+                if best_direct is None or total < best_direct[0]:
+                    best_direct = (total, [("edge", eid, _HUB_MODE, (g - frac) * c, g - frac, acc + acc_t)])
+
+    def onto(d, state, mode, eid, phase):    # take the road `eid`; maybe stop part-way along it
+        c = info[(mode, eid)][2]
+        push(d + c, ("E", mode, eid, phase), state, ("edge", eid, mode, c, 1.0, 0.0))
+        if ends and mode == _HUB_MODE and eid in ends:
+            g, acc_t = ends[eid]
+            push(d + g * c + acc_t, END, state, ("edge", eid, mode, g * c, g, acc_t))
+
     goal = None
     while pq:
-        d, node, mode, phase = heapq.heappop(pq)
-        state = (node, mode, phase)
+        d, _, state = heapq.heappop(pq)
         if d > dist.get(state, INF):
             continue
-        if node == dst_node and mode == end_mode:
+        if state == END:
             goal = state
             break
-        # intra-mode edges — never change mode/phase
-        for nbr, eid, cost, frac, acc in adj.get((mode, node), ()):
-            ns = (nbr, mode, phase)
-            nd = d + cost + acc
-            if nd < dist.get(ns, INF):
-                dist[ns] = nd
-                prev[ns] = (state, ("edge", eid, mode, cost, frac, acc))
-                heapq.heappush(pq, (nd, nbr, mode, phase))
-        # inter-mode transfers — same node, change mode (+ enforce the walk* veh* walk* phase)
-        for tm, cost, kind in tadj.get((mode, node), ()):
+        kind, mode, key, phase = state
+        if kind == "E":
+            node = info[(mode, key)][1]
+            if ends is None and node == dst_node and mode == end_mode:
+                goal = state
+                break
+            for nxt_e in following(mode, key):
+                onto(d, state, mode, nxt_e, phase)
+        else:
+            node = key
+            if ends is None and node == dst_node and mode == end_mode:
+                goal = state
+                break
+            for nxt_e in out_of.get((mode, node), ()):
+                onto(d, state, mode, nxt_e, phase)
+        # changes of mode at this junction (+ enforce the walk* veh* walk* phase)
+        for tm, cost, tkind in tadj.get((mode, node), ()):
             nphase = phase
             if enforce_sequence:
                 entering = mode == _HUB_MODE and tm != _HUB_MODE
@@ -530,33 +588,30 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
                     if phase != 1:
                         continue
                     nphase = 2
-            ns = (node, tm, nphase)
-            nd = d + cost
-            if nd < dist.get(ns, INF):
-                dist[ns] = nd
-                prev[ns] = (state, ("transfer", mode, tm, cost, kind))
-                heapq.heappush(pq, (nd, node, tm, nphase))
+            push(d + cost, ("N", tm, node, nphase), state, ("transfer", node, mode, tm, cost, tkind))
 
-    if goal is None:
+    if best_direct is not None and (goal is None or best_direct[0] <= dist[goal]):
+        steps = best_direct[1]
+    elif goal is None:
         return None
+    else:
+        steps, s = [], goal
+        while True:
+            before, step = prev[s]
+            if step is not None:
+                steps.append(step)
+            if before is None:
+                break
+            s = before
+        steps.reverse()
 
-    # --- reconstruct the ordered state path, then walk the steps between states ------------------
-    state_path = [goal]
-    s = goal
-    while s in prev:
-        s = prev[s][0]
-        state_path.append(s)
-    state_path.reverse()
-
+    # --- the ordered steps: roads, legs, changes of mode ---------------------------------------------
     edges_seq: list = []                 # (mode, edge_id) in order
     legs: list = []
     transfers: list = []
     access_s = 0.0
-    nodes: list = [state_path[0][0]]
-    for b in state_path[1:]:
-        a, step = prev[b]
-        if a[0] != nodes[-1]:
-            nodes.append(a[0])
+    nodes: list = [] if starts is not None else [src_node]
+    for step in steps:
         if step[0] == "edge":
             _, eid, mode, cost, frac, acc = step
             edges_seq.append((mode, eid))
@@ -566,12 +621,12 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
             legs[-1]["_fr"].append(frac)
             legs[-1]["time_s"] += cost
             access_s += acc
+            if not nodes or nodes[-1] != info[(mode, eid)][1]:
+                nodes.append(info[(mode, eid)][1])
         else:
-            _, fm, tm, cost, kind = step
-            transfers.append({"node_id": a[0], "from_mode": fm, "to_mode": tm,
-                              "cost_s": cost, "kind": kind})
-        if b[0] != nodes[-1]:
-            nodes.append(b[0])
+            _, node, fm, tm, cost, tkind = step
+            transfers.append({"node_id": node, "from_mode": fm, "to_mode": tm,
+                              "cost_s": cost, "kind": tkind})
 
     # --- per-edge detail (name/highway/length/cost/geometry) for each leg ------------------------
     detail: dict = {}
@@ -603,6 +658,6 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
                 f"{len(transfers)} transfer(s), {time_s:.1f}s")
     out = {"time_s": time_s, "length_m": length_m, "edges": edges_seq, "legs": legs,
            "transfers": transfers, "nodes": nodes}
-    if _virtual:
+    if _points:
         out["access_s"] = access_s
     return out

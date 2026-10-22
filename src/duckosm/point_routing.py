@@ -176,33 +176,22 @@ def route_points(con, a, b, mode="driving", weight="time", radius_m=50.0, access
 def route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm",
                             allowed_modes=None, enforce_sequence=True):
     """:func:`duckosm.route_multimodal` between two points ``(lon, lat)``: the trip starts and ends
-    walking, so each point joins its walking edges (both ends of each: walking goes both ways, a
-    part of the edge each way), plus a direct walk when both points are on one edge. Returns the
+    walking, so each point joins its walking edges (each direction of a two-way road is an edge of its
+    own), plus a direct walk when both points are on one edge. Every part follows the ``edge_graph`` of
+    its mode (docs/design/multimodal_edge_graph.md). Returns the
     same dict as ``route_multimodal`` (``time_s`` includes the access legs, ``length_m`` their
     metres) plus ``start`` / ``end`` as in :func:`route_points`; ``None`` if not connected."""
     from duckosm.routing import route_multimodal
 
+    if allowed_modes and "walking" not in allowed_modes:
+        raise ValueError("a trip between two points starts and ends walking: allowed_modes needs 'walking'")
     S, T = _ends(con, "walking", a, b, radius_m)
     v = access_kmh / 3.6
-    A, B = "__start__", "__end__"                        # temporary nodes
-    arcs = []
-    for c in S:
-        f, x = c["fraction"], c["access_m"] / v
-        arcs += [("walking", A, c["source"], c["edge_id"], f * c["cost_s"], f, x),
-                 ("walking", A, c["target"], c["edge_id"], (1 - f) * c["cost_s"], 1 - f, x)]
-    for c in T:
-        g, x = c["fraction"], c["access_m"] / v
-        arcs += [("walking", c["source"], B, c["edge_id"], g * c["cost_s"], g, x),
-                 ("walking", c["target"], B, c["edge_id"], (1 - g) * c["cost_s"], 1 - g, x)]
+    starts = [(c["edge_id"], c["fraction"], c["access_m"] / v) for c in S]
+    ends = {c["edge_id"]: (c["fraction"], c["access_m"] / v) for c in T}
     Tby = {c["edge_id"]: c for c in T}
-    for c in S:                                          # both points on one walking edge
-        t = Tby.get(c["edge_id"])
-        if t is not None:
-            share = abs(t["fraction"] - c["fraction"])
-            arcs.append(("walking", A, B, c["edge_id"], share * c["cost_s"], share,
-                         (c["access_m"] + t["access_m"]) / v))
-    r = route_multimodal(con, A, B, schema=schema, allowed_modes=allowed_modes,
-                         enforce_sequence=enforce_sequence, _virtual=arcs)
+    r = route_multimodal(con, None, None, schema=schema, allowed_modes=allowed_modes,
+                         enforce_sequence=enforce_sequence, _points=(starts, ends))
     if r is None:
         return None
     # which candidates the route used: its first and last walking edges
@@ -211,5 +200,4 @@ def route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm
     t = Tby.get(last) or next(c for c in T if c["edge_id"] == last)
     r["start"], r["end"] = _end_info(a, s, v), _end_info(b, t, v)
     r["length_m"] += r["start"]["access_m"] + r["end"]["access_m"]
-    r["nodes"] = [n for n in r["nodes"] if n not in (A, B)]
     return r

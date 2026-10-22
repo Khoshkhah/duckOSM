@@ -72,8 +72,8 @@ runs Dijkstra in JavaScript:
 - **Several modes ticked** (Walk must be one of them): over `(node, mode, phase)` states from
   `mm.edges` and `mm.transfers`, `walk* vehicle* walk*`, start and end on foot: exactly
   `route_multimodal(..., allowed_modes=...)`. This needs the `mm` tables (`duckosm multimodal`);
-  without them the page offers one mode at a time. Like `route_multimodal`, it goes junction to
-  junction and does not see turn restrictions; the page says so.
+  without them the page offers one mode at a time. Like `route_multimodal`, it
+  follows the `edge_graph` of each mode, so every leg obeys turn restrictions (`docs/design/multimodal_edge_graph.md`).
 
 Tests check the embedded graphs against the db; a browser check (playwright, run by hand) compares
 routes in the page with `route()` / `route_multimodal()`.

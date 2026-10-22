@@ -68,7 +68,8 @@ config above.
 
 - **A vehicle is waiting at every shared junction.** Transfers aren't limited to car parks or bike
   stands, so a trip can "pick up a car" anywhere. Good for comparing modes, not a real trip planner.
-- **No turn restrictions.** `route_multimodal` routes over nodes, not over the graph of legal
-  turns, so a driving leg can take a banned turn. For one mode, use `route()`, which obeys them.
+- **Turn restrictions** hold on every leg: each part of the trip follows the `edge_graph` of its mode, as `route()` does.
+  A database without an `edge_graph` for a mode (an old build) lets any road that leaves the junction follow.
+  Design: `docs/design/multimodal_edge_graph.md`.
 - **No public transport.** OSM has stops and lines but no timetables.
 - The graph is held in memory: fine for a city.

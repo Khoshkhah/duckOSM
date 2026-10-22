@@ -10,7 +10,7 @@ import os
 import sys
 from playwright.async_api import async_playwright
 JS = """async ([zoom, n, offscreen]) => {
-  const ids = rsQuery(() => true), fs = map.getSource('roads')._data.features;
+  const ids = rsQuery(() => true), d = map.getSource('roads')._data, fs = (d.features || d.geojson.features);
   const pt = () => { const c = fs[ids[Math.floor(Math.random() * ids.length)]].geometry.coordinates; return c[Math.floor(c.length / 2)]; };
   const out = {};
   for (let i = 0; i < n; i++) {

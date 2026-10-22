@@ -34,7 +34,8 @@ route_multimodal(con, SRC, DST, start_mode="walking", end_mode="driving")   # e.
 route_multimodal(con, SRC, DST, enforce_sequence=False)   # allow any mode alternation (default enforces walk* veh* walk*)
 ```
 
-`route_multimodal` is a node-based Dijkstra over vertices `(node_id, mode)` (hand-rolled `heapq`, no
+`route_multimodal` is an edge-based Dijkstra over roads and mode changes, and each leg follows the `edge_graph` of its mode, so turn
+restrictions hold (`docs/design/multimodal_edge_graph.md`; the first version was node-based) (hand-rolled `heapq`, no
 networkx needed). `enforce_sequence=True` (default) restricts a trip to `walk* (drive|cycle)* walk*`
 — at most one contiguous vehicular segment, entered and left via walking.
 
@@ -270,7 +271,7 @@ router open to a transit layer; don't build it now.
   otherwise the router will "teleport" between cars.
 - **Simplification helps you:** junctions survive in every mode, so shared `node_id`s for transfers
   are reliably present.
-- **Turn restrictions:** only preserved end-to-end if you go edge-based (step 5 variant).
+- **Turn restrictions:** preserved end-to-end since the edge-based search (`docs/design/multimodal_edge_graph.md`).
 
 ## Testing (mirror `tests/test_road_filter_oneway.py` style)
 
