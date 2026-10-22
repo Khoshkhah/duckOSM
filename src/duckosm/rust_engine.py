@@ -7,9 +7,13 @@ all modes, then :func:`load_mode` for each mode. The other steps of the build ru
 See docs/design/rust_engine.md.
 """
 import logging
+from importlib.metadata import version
 from pathlib import Path
 
 logger = logging.getLogger("duckosm.rust_engine")
+
+MIN_VERSION = (0, 2, 0)        # the edge graph and the turn restrictions came in duckosm-rust 0.2.0
+GRAPH_TABLES = ("edge_graph", "turn_permission", "turn_restrictions", "turn_path_restrictions")
 
 
 def module():
@@ -20,6 +24,10 @@ def module():
         raise RuntimeError("options.engine: rust needs the Python module duckosm_rust (the wheel of "
                            "duckosm-rust; see docs/design/rust_engine.md). Install it, or set "
                            "options.engine: python") from e
+    have = version("duckosm-rust")
+    if tuple(int(x) for x in have.split(".")[:3]) < MIN_VERSION:
+        raise RuntimeError(f"options.engine: rust needs duckosm-rust {'.'.join(map(str, MIN_VERSION))} or "
+                           f"newer, installed: {have} (see docs/design/rust_engine.md)")
     return duckosm_rust
 
 
@@ -34,15 +42,16 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
         cycling_dismount=o.cycling_dismount, infer_separate_sidewalks=o.infer_separate_sidewalks,
         connectivity_rescue=c.connectivity_rescue, connect_snap_m=c.connect_snap_m,
         process_speeds=o.process_speeds, calculate_costs=o.calculate_costs,
-        functional_types=o.functional_types, osm_overrides=config.osm_overrides)
+        functional_types=o.functional_types, osm_overrides=config.osm_overrides,
+        build_graph=o.build_graph, extract_restrictions=o.extract_restrictions)
     for what, secs in res.get("seconds", {}).items():
         logger.info(f"  duckosm-rust {what}: {secs:.2f}s")
     return res
 
 
 def load_mode(con, mode: str, out_dir, merge_segments: bool) -> tuple[int, int]:
-    """Create ``edges``, ``private_edges``, ``nodes`` and (with merge_segments) ``edge_id_map`` in the
-    current schema from the files of ``mode``. Returns (edges, nodes). GeoParquet reads as
+    """Create ``edges``, ``private_edges``, ``nodes``, (with merge_segments) ``edge_id_map``, and the tables of
+    the edge graph and the turn restrictions that exist, in the current schema from the files of ``mode``. Returns (edges, nodes). GeoParquet reads as
     ``GEOMETRY('OGC:CRS84')``; the tables have ``GEOMETRY``, so the geometry is cast."""
     def p(table):
         return str(Path(out_dir) / f"{table}_{mode}.parquet").replace("'", "''")
@@ -54,6 +63,9 @@ def load_mode(con, mode: str, out_dir, merge_segments: bool) -> tuple[int, int]:
                 f"FROM read_parquet('{p('nodes')}')")
     if merge_segments:
         con.execute(f"CREATE OR REPLACE TABLE edge_id_map AS SELECT * FROM read_parquet('{p('edge_id_map')}')")
+    for t in GRAPH_TABLES:              # the files that the options made (build_graph, extract_restrictions)
+        if Path(p(t)).exists():
+            con.execute(f"CREATE OR REPLACE TABLE {t} AS SELECT * FROM read_parquet('{p(t)}')")
     n_edges = con.execute("SELECT count(*) FROM edges").fetchone()[0]
     n_nodes = con.execute("SELECT count(*) FROM nodes").fetchone()[0]
     return n_edges, n_nodes

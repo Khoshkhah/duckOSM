@@ -49,8 +49,9 @@ def test_rust_engine_equals_python(tmp_path, monkeypatch):
     con.execute("LOAD spatial")
     con.execute(f"ATTACH '{py}' AS py (READ_ONLY)")
     con.execute(f"ATTACH '{rs}' AS rs (READ_ONLY)")
-    tables = [f"{m}.{t}" for m in MODES for t in ("edges", "private_edges", "nodes", "edge_id_map", "edge_graph")]
-    tables.append("driving.turn_restrictions")
+    tables = [f"{m}.{t}" for m in MODES
+              for t in ("edges", "private_edges", "nodes", "edge_id_map", "edge_graph", "turn_permission")]
+    tables += ["driving.turn_restrictions", "driving.turn_path_restrictions"]
     for t in tables:
         pc, pr = _rows(con, "py", t)
         rc, rr = _rows(con, "rs", t)
