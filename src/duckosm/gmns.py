@@ -227,11 +227,14 @@ def _taper_wkt(lane_wkt, d0, l0, d1, l1, step_m=1.0):
 
 
 def _straight_wkt(lane_wkt, p0, t, length_m, at_start=True):
-    """A lane line whose first (or last) ``length_m`` metres go straight on from ``p0`` (lon/lat) along ``t`` (a unit vector
-    in local metres, pointing into the lane) and blend smoothly into the lane's own line by ``length_m``. Lon/lat WKT; the input on
-    any failure."""
+    """A lane line that starts (or ends) at ``p0`` (lon/lat) heading along ``t`` (a unit vector in local metres, pointing into the
+    lane) and comes to its own line in one smooth curve (cubic Hermite: the heading at both ends is kept). The curve is ``length_m``
+    long at least (OSM's V), and longer where the lane must move far sideways (_LANE_TAPER_PER_M); past it the lane is its own line.
+    Inside the curve the lane's own line is not used: in OSM's V it first went outwards and back (an S of 1 m at Hemlock). Lon/lat
+    WKT; the input on any failure."""
     import numpy as np
     import shapely
+    import shapely.ops
     from shapely import wkt as _w
     from shapely.geometry import LineString
 
@@ -240,17 +243,23 @@ def _straight_wkt(lane_wkt, p0, t, length_m, at_start=True):
         cs = list(lane.coords) if at_start else list(lane.coords)[::-1]
         x0, y0 = p0
         kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
-        pts = np.array(shapely.segmentize(LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in cs]), 1.0).coords)
-        s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
-        u = np.clip(s / max(length_m, 1e-6), 0, 1)
-        w = (u * u * (3 - 2 * u))[:, None]                     # 0 at the node, 1 at the end of the V, smooth at both
-        target = np.asarray(t)[None, :] * s[:, None]
-        pts = (1 - w) * target + w * pts
+        own = LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in cs])
+        t0 = np.asarray(t, dtype=float)
+        e_v = own.interpolate(min(length_m, own.length))
+        shift = abs(-t0[1] * e_v.x + t0[0] * e_v.y)                     # how far sideways of the straight line, at the V's end
+        L = min(max(length_m, shift * _LANE_TAPER_PER_M), 0.8 * own.length)
+        e = own.interpolate(L)
+        a, b = own.interpolate(max(L - 1.0, 0.0)), own.interpolate(min(L + 1.0, own.length))
+        te = np.array([b.x - a.x, b.y - a.y]) / (np.hypot(b.x - a.x, b.y - a.y) or 1.0)
+        u = np.linspace(0.0, 1.0, max(int(L) + 1, 3))[:, None]
+        h00, h10, h01, h11 = 2 * u**3 - 3 * u**2 + 1, u**3 - 2 * u**2 + u, -2 * u**3 + 3 * u**2, u**3 - u**2
+        curve = h10 * L * t0 + h01 * np.array([e.x, e.y]) + h11 * L * te + h00 * 0.0
+        rest = shapely.ops.substring(own, L, own.length)
+        pts = list(map(tuple, curve)) + list(rest.coords)[1:]
         out = [(x / (kx * M) + x0, y / M + y0) for x, y in pts]
         return LineString(out if at_start else out[::-1]).wkt
     except Exception:
         return lane_wkt
-
 
 def _chain_runs(info):
     """Runs of pieces (docs/design/gmns_lane_runs.md): consecutive edges joined end to start, with the
