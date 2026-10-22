@@ -194,6 +194,37 @@ def _placement(value, w_each):
     return {"left_of": left, "middle_of": left + w_each[n - 1] / 2, "right_of": left + w_each[n - 1]}.get(kind)
 
 
+_LANE_TAPER_PER_M = 30.0 / 3.25   # a two-way road's lanes move sideways at a joint over this many metres per metre of move (30 m a lane width)
+
+
+def _taper_wkt(lane_wkt, d0, l0, d1, l1, step_m=1.0):
+    """A lane line moved sideways near its ends (left +, metres): by ``d0`` at its start, fading to 0 over ``l0`` metres, and by ``d1``
+    at its end, fading to 0 over the last ``l1`` metres. Returns lon/lat WKT, the input unchanged on any failure."""
+    import numpy as np
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    try:
+        lane = _w.loads(lane_wkt)
+        x0, y0 = lane.coords[0]
+        kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+        ln = shapely.segmentize(LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in lane.coords]), step_m)
+        pts = np.array(ln.coords)
+        if len(pts) < 2:
+            return lane_wkt
+        s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
+        d = (d0 * np.clip(1 - s / l0, 0, 1) if l0 > 0 else 0.0) + (d1 * np.clip(1 - (s[-1] - s) / l1, 0, 1) if l1 > 0 else 0.0)
+        tang = np.gradient(pts, axis=0)
+        norm = np.hypot(tang[:, 0], tang[:, 1])
+        norm[norm == 0] = 1.0
+        left = np.stack([-tang[:, 1] / norm, tang[:, 0] / norm], axis=1)
+        pts = pts + left * np.asarray(d)[:, None] if np.ndim(d) else pts
+        return LineString([(x / (kx * M) + x0, y / M + y0) for x, y in pts]).wkt
+    except Exception:
+        return lane_wkt
+
+
 def _chain_runs(info):
     """Runs of pieces (docs/design/gmns_lane_runs.md): consecutive edges joined end to start, with the
     same ``oneway`` and lane widths, that are one road: pieces of one OSM way and direction, pieces of
@@ -1800,6 +1831,41 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             run += w
         return out
 
+    # a two-way road's lanes do not jump at a joint where the other direction's lane count changes (2026-10-22, Granville a9: 3 + 2 lanes
+    # going on into 3 + 1 moved every lane 1.6 m in one step): the road's centring changes over a taper (_LANE_TAPER_PER_M), half on
+    # each piece, the same for both directions, so the line between the directions stays continuous
+    taper = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])           # edge -> [d at start, metres, d at end, metres]
+    len_of = {r[0]: float(r[3] or 0.0) for r in rows}
+
+    def centring(e):
+        if info[e][4] or gaps.get(e) is not None or run_place[where[e][0]] is not None:
+            return None
+        total = sum(w_of[e])
+        return -side_sign * (total - opp_total.get(e, total)) / 2.0
+
+    at_src, roads_at = defaultdict(list), defaultdict(set)
+    for e, v in info.items():
+        at_src[v[2]].append(e)
+        roads_at[v[2]].add(v[0])
+        roads_at[v[3]].add(v[0])
+    for e, v in info.items():
+        ce = centring(e)
+        if ce is None:
+            continue
+        on = [f for f in at_src.get(v[3], []) if f != e and info[f][3] != v[2] and centring(f) is not None
+              and abs((info[f][8] - v[9] + 180) % 360 - 180) < 30]
+        # only at a plain joint (the two pieces meet and no other road): at a junction SUMO shapes the junction, and a taper into it moved
+        # a1's lanes at Granville's south fork by 6 m
+        if len(on) != 1 or roads_at[v[3]] != {v[0], info[on[0]][0]}:
+            continue
+        f = on[0]
+        ds = centring(f) - ce
+        if abs(ds) < 0.05:
+            continue
+        half_l = abs(ds) * _LANE_TAPER_PER_M / 2.0
+        taper[e][2:] = [ds / 2.0, min(half_l, len_of[e] / 2.0)]
+        taper[f][:2] = [-ds / 2.0, min(half_l, len_of[f] / 2.0)]
+
     run_geoms = {}                               # edge -> [lane wkt per lane], from the run's one curve
     if lane_geometry:
         for i, run in enumerate(runs):
@@ -1836,6 +1902,8 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             ri = where[edge_id][0]
             if geom and edge_id in gaps and ri in run_profiles and run_place[ri] is None:   # the gap varies along the road
                 geom = _vary_wkt(geom, merged[ri], run_profiles[ri], gaps[edge_id], side_sign)
+            if geom and edge_id in taper:                    # the road's centring changes at a joint: over a taper, not in one step
+                geom = _taper_wkt(geom, *taper[edge_id])
             lane_rows.append((f"{edge_id}_{num}", edge_id, num, u, None, None, width, turn, geom))
         for side in ("left", "right", "both"):
             val = tags.get(f"parking:{side}") or tags.get(f"parking:lane:{side}")
