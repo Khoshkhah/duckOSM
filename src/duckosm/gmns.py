@@ -225,6 +225,33 @@ def _taper_wkt(lane_wkt, d0, l0, d1, l1, step_m=1.0):
         return lane_wkt
 
 
+
+def _straight_wkt(lane_wkt, p0, t, length_m, at_start=True):
+    """A lane line whose first (or last) ``length_m`` metres go straight on from ``p0`` (lon/lat) along ``t`` (a unit vector
+    in local metres, pointing into the lane) and blend smoothly into the lane's own line by ``length_m``. Lon/lat WKT; the input on
+    any failure."""
+    import numpy as np
+    import shapely
+    from shapely import wkt as _w
+    from shapely.geometry import LineString
+
+    try:
+        lane = _w.loads(lane_wkt)
+        cs = list(lane.coords) if at_start else list(lane.coords)[::-1]
+        x0, y0 = p0
+        kx, M = (math.cos(math.radians(y0)) or 1.0), 111320.0
+        pts = np.array(shapely.segmentize(LineString([((x - x0) * kx * M, (y - y0) * M) for x, y in cs]), 1.0).coords)
+        s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
+        u = np.clip(s / max(length_m, 1e-6), 0, 1)
+        w = (u * u * (3 - 2 * u))[:, None]                     # 0 at the node, 1 at the end of the V, smooth at both
+        target = np.asarray(t)[None, :] * s[:, None]
+        pts = (1 - w) * target + w * pts
+        out = [(x / (kx * M) + x0, y / M + y0) for x, y in pts]
+        return LineString(out if at_start else out[::-1]).wkt
+    except Exception:
+        return lane_wkt
+
+
 def _chain_runs(info):
     """Runs of pieces (docs/design/gmns_lane_runs.md): consecutive edges joined end to start, with the
     same ``oneway`` and lane widths, that are one road: pieces of one OSM way and direction, pieces of
@@ -1865,6 +1892,33 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
         half_l = abs(ds) * _LANE_TAPER_PER_M / 2.0
         taper[e][2:] = [ds / 2.0, min(half_l, len_of[e] / 2.0)]
         taper[f][:2] = [-ds / 2.0, min(half_l, len_of[f] / 2.0)]
+    # where a two-way road goes on into its two one-way carriageways (or they join into it), OSM draws the carriageways' lines leaving
+    # its node in a V, and their lanes, centred on those lines, stepped sideways at the node (Granville a10 into a11 and a12: 1.3 and
+    # 1.7 m inside SUMO's 0.4 m junction; the deck goes straight on, a median barrier between the directions, Kaveh 2026-10-22): each
+    # carriageway's lane goes straight on from the two-way road's lane through the V, and comes to its own line at the V's end (OSM's
+    # first point after the node); the two-way road keeps its lanes
+    at_tgt = defaultdict(list)
+    vfix = {}                                                    # carriageway edge -> (two-way edge, the carriageway leaves the node)
+    for e, v in info.items():
+        at_tgt[v[3]].append(e)
+    for e, v in info.items():
+        if centring(e) is None:
+            continue
+        for at_end, node in ((True, v[3]), (False, v[2])):
+            if len(roads_at[node]) != 3:
+                continue
+            cands = at_src.get(node, []) if at_end else at_tgt.get(node, [])
+            on = [f for f in cands if info[f][4] and info[f][0] != v[0] and len(w_of[f]) == len(w_of[e])
+                  and abs(((info[f][8] - v[9]) if at_end else (v[8] - info[f][9])) + 180) % 360 - 180 < 30]
+            if len(on) != 1:
+                continue
+            # (the third road is the other carriageway: one-way, the other way round; at a fork of three roads nothing is moved)
+            third = roads_at[node] - {v[0], info[on[0]][0]}
+            back = [g_ for g_ in (at_tgt.get(node, []) if at_end else at_src.get(node, [])) if info[g_][0] in third]
+            ahead = [g_ for g_ in (at_src.get(node, []) if at_end else at_tgt.get(node, [])) if info[g_][0] in third]
+            if len(back) != 1 or ahead or not info[back[0]][4]:
+                continue
+            vfix[on[0]] = (e, at_end)
 
     run_geoms = {}                               # edge -> [lane wkt per lane], from the run's one curve
     if lane_geometry:
@@ -1879,6 +1933,21 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                                               columns=["link_id", "run_id", "seq", "n", "closed"]))
         con.execute("CREATE OR REPLACE TEMP TABLE _lane_runs AS SELECT * FROM _runs_df")
         con.unregister("_runs_df")
+
+    def _v_lane(f, i, geom):
+        """Lane i of carriageway f, straight on from lane i of the two-way road through OSM's V."""
+        from shapely import wkt as _w
+        e, leaves = vfix[f]
+        le = _w.loads(_offset_wkt(wkt_of[e], offsets(e)[i]))
+        lf = _w.loads(wkt_of[f])
+        cs = list(le.coords)
+        a, b = (cs[-2], cs[-1]) if leaves else (cs[1], cs[0])      # the two-way lane's end at the node, and its heading there
+        kx = math.cos(math.radians(b[1])) or 1.0
+        tx, ty = (b[0] - a[0]) * kx, b[1] - a[1]
+        n = math.hypot(tx, ty) or 1.0
+        fc = list(lf.coords) if leaves else list(lf.coords)[::-1]
+        seg = math.hypot((fc[1][0] - fc[0][0]) * kx * 111320.0, (fc[1][1] - fc[0][1]) * 111320.0)   # OSM's V: to its first point
+        return _straight_wkt(geom, b, (tx / n, ty / n), min(max(seg, 5.0), 40.0), at_start=leaves)
 
     lane_rows, curb_rows = [], []
     for edge_id, is_rev, lanes, length_m, source, oneway, wkt, tags, target, osm_id, _name, _bus, _bike, way_end in rows:
@@ -1904,6 +1973,8 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                 geom = _vary_wkt(geom, merged[ri], run_profiles[ri], gaps[edge_id], side_sign)
             if geom and edge_id in taper:                    # the road's centring changes at a joint: over a taper, not in one step
                 geom = _taper_wkt(geom, *taper[edge_id])
+            if geom and edge_id in vfix:                     # a carriageway: straight on from the two-way road through OSM's V
+                geom = _v_lane(edge_id, i, geom)
             lane_rows.append((f"{edge_id}_{num}", edge_id, num, u, None, None, width, turn, geom))
         for side in ("left", "right", "both"):
             val = tags.get(f"parking:{side}") or tags.get(f"parking:lane:{side}")
