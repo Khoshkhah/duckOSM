@@ -155,7 +155,10 @@ class LaneProfile(BaseProcessor):
         self.execute("""CREATE OR REPLACE TABLE driving.lane_profile (edge_id BIGINT, lane_num INTEGER, use VARCHAR, width_m DOUBLE,
                         turn VARCHAR, source VARCHAR, width_source VARCHAR)""")
         if out:
-            self.con.executemany("INSERT INTO driving.lane_profile VALUES (?, ?, ?, ?, ?, ?, ?)", out)
+            # one INSERT from a DataFrame: executemany commits each row (10 ms a row on a disk, hours on a country)
+            import pandas as pd
+            lanes = pd.DataFrame(out, columns=["edge_id", "lane_num", "use", "width_m", "turn", "source", "width_source"])
+            self.con.execute("INSERT INTO driving.lane_profile SELECT * FROM lanes")
         counts = dict(self.fetchall("SELECT source, count(*) FROM driving.lane_profile GROUP BY 1"))
         logger.info(f"lane profile: {len(out):,} lanes; by source: " + ", ".join(f"{k} {v:,}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])))
         return len(out)
