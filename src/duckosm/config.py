@@ -48,6 +48,7 @@ class Options:
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True
+    engine: str = "python"                 # 'python' (SQL in DuckDB) or 'rust': duckosm-rust builds the network step (edges, private_edges, nodes, edge_id_map) and Python runs the other steps. Needs the module duckosm_rust. See docs/design/rust_engine.md
     memory_limit: Optional[str] = None
     threads: Optional[int] = None
     simplify_batches: int = 0
@@ -267,6 +268,7 @@ class Config:
                 ("modes", self.modes, {"driving", "walking", "cycling"}),
                 ("options.clip_strategy", [self.options.clip_strategy or "smart"], {"smart", "complete_ways", "simple"}),
                 ("clip.predicate", [self.clip.predicate], {"intersects", "within", "centroid"}),
+                ("options.engine", [self.options.engine], {"python", "rust"}),
                 ("options.sea", [self.options.sea or "false"], {"overture", "false"})):
             bad = [v for v in val if v not in allowed]
             if bad:

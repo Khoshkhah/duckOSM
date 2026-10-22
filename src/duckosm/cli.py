@@ -106,7 +106,8 @@ def _override(cfg, ctx, **values):
     if "modes" in typed:
         cfg.modes = list(typed["modes"])
     for flag, option in (("graph", "build_graph"), ("h3_index", "h3_indexing"),
-                         ("h3_resolution", "h3_resolution"), ("features", "build_features"), ("levels", "levels")):
+                         ("h3_resolution", "h3_resolution"), ("features", "build_features"), ("levels", "levels"),
+                         ("engine", "engine")):
         if flag in typed:
             setattr(cfg.options, option, typed[flag])
 
@@ -129,11 +130,13 @@ def _override(cfg, ctx, **values):
 @click.option('--levels/--no-levels', default=True, show_default=True,
               help='The last step: the drawing order of the roads (visualization.edge_levels), with your edits kept; '
                    'turn it off for a big area and run `duckosm levels` later')
+@click.option('--engine', type=click.Choice(['python', 'rust']), default=None,
+              help='Who builds the network step: python (SQL in DuckDB) or rust (duckosm-rust; needs the module duckosm_rust). Config key: options.engine')
 @click.option('--fixes', type=click.Path(exists=True, dir_okay=False),
               help='Rules file of fixes for OSM errors (config key: osm_overrides)')
 @click.option('--log-file', type=click.Path(dir_okay=False), help='Also write the log to this file')
 def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3_resolution, modes,
-          features, levels, fixes, log_file):
+          features, levels, engine, fixes, log_file):
     """Build a routing network from a PBF, or clip one from a parent db.
 
     \b
@@ -168,6 +171,7 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
                 build_features=features,
                 modes=list(modes) if modes else ["driving"],
                 osm_overrides=fixes,
+                engine=engine,
             )
             cfg.options.levels = levels
         else:
@@ -182,7 +186,8 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
     if config:
         _override(cfg, click.get_current_context(), pbf=pbf, output=output, boundary=boundary,
                   source_db=source_db, h3_cell=h3_cell, graph=graph, h3_index=h3_index,
-                  h3_resolution=h3_resolution, modes=modes, features=features, levels=levels)
+                  h3_resolution=h3_resolution, modes=modes, features=features, levels=levels,
+                  engine=engine)
     if fixes:
         cfg.osm_overrides = fixes                  # --fixes also overrides a config file's setting
     setup_logging(log_file)

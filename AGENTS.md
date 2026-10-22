@@ -42,6 +42,11 @@ list from the config and executes it; read it first — step order carries real 
 - **Clip mode** (`source.type: duckdb`): no PBF — `DuckdbClipper` copies rows out of an attached
   parent build (e.g. `sodermalm ← sweden`), then ComponentFilter/validate. Edge ids are preserved
   verbatim; `duckosm extract` does the same ad hoc.
+- **Rust engine** (`options.engine: rust`, `--engine rust`): `duckosm_rust.build()` (the wheel of the
+  `duckosm-rust` repository) builds the network step for all modes at once and writes GeoParquet;
+  `rust_engine.py` loads `edges`, `private_edges`, `nodes` and `edge_id_map` into each mode's schema.
+  RoadFilter still runs (`ways`, `way_nodes` for the restrictions), and the steps after the network
+  (restrictions, EdgeGraph, ComponentFilter, H3, …) run in Python as before. `docs/design/rust_engine.md`.
 
 Each stage is a `BaseProcessor` subclass in `src/duckosm/processors/` that runs SQL on the shared
 connection — logic lives in SQL, not Python loops. `config.py` holds the YAML schema

@@ -11,8 +11,10 @@ from typing import Optional
 import duckdb
 
 import shutil
+import tempfile
 
 from duckosm.config import Config
+from duckosm import rust_engine
 from duckosm.utils import check_db_name
 from duckosm.processors import (
     RoadFilter,
@@ -97,6 +99,12 @@ class DuckOSM:
         total_start = time.time()
         
         is_clip = self.config.source_type == "duckdb"
+        # options.engine: rust: duckosm-rust builds the network step (docs/design/rust_engine.md)
+        rust = self.config.options.engine == "rust" and not is_clip
+        if rust:
+            rust_engine.module()          # fail now, not after the PBF is read
+        elif self.config.options.engine == "rust":
+            logger.warning("options.engine: rust has no effect on a clip build (no PBF)")
         # Component clean-up only makes sense when clipping to an AREA. A whole-region /
         # whole-country build (no boundary) legitimately has separate components (islands)
         # and 2.35M-edge union-find would be slow — so require a boundary.
@@ -137,6 +145,8 @@ class DuckOSM:
             if self.config.options.global_junctions:
                 global_steps.append(("global_junctions", "Building global junctions",
                                      self._build_global_junctions))
+            if rust:
+                global_steps.append(("rust_build", "Building the networks with duckosm-rust", self._rust_build))
 
         # 2. Mode-specific steps (run for each mode)
         def get_mode_steps(mode):
@@ -158,37 +168,42 @@ class DuckOSM:
             if self.config.osm_overrides:
                 steps.append(("apply_osm_overrides", f"[{mode}] Applying OSM overrides",
                               lambda m=mode: self._apply_osm_overrides(m)))
-            steps.append(("build_edges", f"[{mode}] Building edges", self._build_edges))
+            if rust:
+                # the network step of duckosm-rust, in place of the SQL steps below (one load per mode)
+                steps.append(("rust_network", f"[{mode}] Loading the network of duckosm-rust",
+                              lambda m=mode: self._rust_network(m)))
+            else:
+                steps.append(("build_edges", f"[{mode}] Building edges", self._build_edges))
 
-            # Cut ways into edges where they meet (the network itself: always runs).
-            steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
+                # Cut ways into edges where they meet (the network itself: always runs).
+                steps.append(("simplify_graph", f"[{mode}] Simplifying graph", self._simplify_graph))
 
-            # Reconnect dangling cycleway/footway ends to the network BEFORE the component filter, so
-            # disconnected paths aren't pruned. Cycling/walking only (driving networks are connected).
-            if self.config.clip.connectivity_rescue and mode in ("cycling", "walking"):
-                steps.append(("connect_paths", f"[{mode}] Connecting dangling paths",
-                              lambda: self._connect_paths(mode)))
+                # Reconnect dangling cycleway/footway ends to the network BEFORE the component filter, so
+                # disconnected paths aren't pruned. Cycling/walking only (driving networks are connected).
+                if self.config.clip.connectivity_rescue and mode in ("cycling", "walking"):
+                    steps.append(("connect_paths", f"[{mode}] Connecting dangling paths",
+                                  lambda: self._connect_paths(mode)))
 
-            # Flag push-the-bike edges BEFORE speeds — SpeedProcessor keys the walking-speed
-            # CASE off the dismount column.
-            if mode == "cycling" and self.config.options.cycling_dismount:
-                steps.append(("mark_dismount", f"[{mode}] Marking dismount edges",
-                              self._mark_dismount))
+                # Flag push-the-bike edges BEFORE speeds — SpeedProcessor keys the walking-speed
+                # CASE off the dismount column.
+                if mode == "cycling" and self.config.options.cycling_dismount:
+                    steps.append(("mark_dismount", f"[{mode}] Marking dismount edges",
+                                  self._mark_dismount))
 
-            if self.config.options.process_speeds:
-                steps.append(("process_speeds", f"[{mode}] Processing speeds", lambda: self._process_speeds(mode)))
+                if self.config.options.process_speeds:
+                    steps.append(("process_speeds", f"[{mode}] Processing speeds", lambda: self._process_speeds(mode)))
 
-            if self.config.options.calculate_costs:
-                steps.append(("calculate_costs", f"[{mode}] Calculating costs", lambda: self._calculate_costs(mode)))
+                if self.config.options.calculate_costs:
+                    steps.append(("calculate_costs", f"[{mode}] Calculating costs", lambda: self._calculate_costs(mode)))
 
-            # Pedestrian/cyclist functional class (walk_type / cycle_type) from OSM sub-tags.
-            if self.config.options.functional_types and mode in ("walking", "cycling"):
-                steps.append(("functional_type", f"[{mode}] Deriving functional type",
-                              lambda m=mode: self._add_functional_type(m)))
+                # Pedestrian/cyclist functional class (walk_type / cycle_type) from OSM sub-tags.
+                if self.config.options.functional_types and mode in ("walking", "cycling"):
+                    steps.append(("functional_type", f"[{mode}] Deriving functional type",
+                                  lambda m=mode: self._add_functional_type(m)))
 
-            # Private roads (the mode's effective access is 'private') leave `edges` for
-            # `private_edges` before the graph: visible on maps, never routable.
-            steps.append(("split_private", f"[{mode}] Moving private roads", lambda m=mode: self._split_private(m)))
+                # Private roads (the mode's effective access is 'private') leave `edges` for
+                # `private_edges` before the graph: visible on maps, never routable.
+                steps.append(("split_private", f"[{mode}] Moving private roads", lambda m=mode: self._split_private(m)))
 
             if self.config.options.extract_restrictions:
                 # Turn restrictions only for driving for now
@@ -902,8 +917,31 @@ class DuckOSM:
         self.stats['index_time'] = time.time() - start
         logger.info(f"  Indexes created in {self.stats['index_time']:.2f}s")
     
+    def _rust_build(self) -> None:
+        """options.engine: rust: duckosm-rust builds the network step of every mode on the cut PBF; the
+        GeoParquet files wait in a temporary folder next to the output file (_rust_network loads them,
+        _cleanup removes the folder). See docs/design/rust_engine.md."""
+        self._rust_dir = Path(tempfile.mkdtemp(prefix=f".{self.config.name}.rust-", dir=self.output_path.parent))
+        start = time.time()
+        res = rust_engine.build_parquet(self.config, self.pbf_path, self._rust_dir)
+        self.stats['rust_build_time'] = time.time() - start
+        self._rust_modes = res["modes"]
+        if res.get("sidewalk_roads"):
+            self.stats['sidewalk_roads_rust'] = res["sidewalk_roads"]
+        logger.info(f"  duckosm-rust built {len(res['modes'])} network(s) in {self.stats['rust_build_time']:.2f}s")
+
+    def _rust_network(self, mode: str) -> None:
+        """Load edges, private_edges, nodes and edge_id_map of `mode` from the files of _rust_build."""
+        n_edges, n_nodes = rust_engine.load_mode(self.con, mode, self._rust_dir,
+                                                 self.config.options.merge_segments)
+        self.stats['edge_count'], self.stats['node_count'] = n_edges, n_nodes
+        m = self._rust_modes.get(mode, {})
+        logger.info(f"  [{mode}] duckosm-rust: {n_edges:,} edges, {n_nodes:,} nodes, "
+                    f"{m.get('private_edges', 0):,} private edges, {m.get('connectors', 0):,} connectors, "
+                    f"{m.get('osm_fixes', 0):,} OSM fixes")
+
     def _cleanup(self) -> None:
-        """Clean up temporary views (keep tables)."""
+        """Clean up temporary views (keep tables), and the Parquet folder of the Rust engine."""
         logger.info("Cleaning up...")
         
         try:
@@ -911,6 +949,8 @@ class DuckOSM:
             self.con.execute("DROP VIEW IF EXISTS osm_raw")
         except Exception:
             pass
+        if getattr(self, "_rust_dir", None):
+            shutil.rmtree(self._rust_dir, ignore_errors=True)
     
     def _checkpoint(self) -> None:
         """Checkpoint database to disk."""
