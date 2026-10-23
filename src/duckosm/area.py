@@ -66,7 +66,7 @@ def _from_pbf(pbf, name, osm_id):
         extract_boundaries(pbf, gpkg)
         load_boundaries(gpkg, db)
         con = duckdb.connect(str(db))
-        con.execute("LOAD spatial")
+        con.execute("LOAD spatial; SET geometry_always_xy = false")
         pick = "SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, " \
                "ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM "
         if osm_id is not None:
@@ -104,7 +104,7 @@ def _from_nominatim(name, osm_id):
     for f in features:
         if f.get("geometry", {}).get("type") in ("Polygon", "MultiPolygon"):
             p, geom = f["properties"], json.dumps(f["geometry"])
-            area = duckdb.execute("INSTALL spatial; LOAD spatial; SELECT ST_Area_Spheroid("
+            area = duckdb.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; SELECT ST_Area_Spheroid("
                                   "ST_FlipCoordinates(ST_GeomFromGeoJSON(?))) / 1e6", [geom]).fetchone()[0]
             found.append((geom, {"name": p.get("display_name") or p.get("name"), "osm_id": p.get("osm_id"),
                                  "admin_level": None, "area_km2": round(area, 2)}))

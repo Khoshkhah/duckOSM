@@ -414,7 +414,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     "n_edges","n_connections"}``. Every (non-internal) SUMO edge id equals the duckOSM ``edge_id``.
     """
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
     os.makedirs(out_dir, exist_ok=True)

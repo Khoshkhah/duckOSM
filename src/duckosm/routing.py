@@ -91,7 +91,7 @@ def _attach_edge_attrs(con, g, mode, roads=None):
     ``g``; isolated edges absent from the graph are skipped.
     """
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
     with_access = roads is not None and roads != f"{mode}.edges"      # the restricted edges are in: say which ones
@@ -141,7 +141,7 @@ def to_networkx_nodes(con, mode: str = "driving", geometry: str = "wkt"):
     if geometry not in ("wkt", "shapely", "none"):
         raise ValueError("geometry must be 'wkt', 'shapely' or 'none'")
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
 
@@ -363,7 +363,7 @@ def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", 
 
     # per-edge detail in path order
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
     ids = ", ".join(str(e) for e in path)
@@ -462,7 +462,7 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     import heapq
 
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
 

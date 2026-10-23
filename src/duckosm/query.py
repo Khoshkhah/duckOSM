@@ -15,6 +15,8 @@ Used by ``duckosm way <db> <osm_id>`` (see cli.py); importable for notebooks:
     con = duckdb.connect("data/db/tartu.duckdb", read_only=True)
     way_table(con, 4934235).show()
 """
+from duckosm.utils import finish
+
 MODES = ("driving", "walking", "cycling")
 
 # never useful in a tabular report unless asked for (rendered as WKT via --geom)
@@ -72,7 +74,9 @@ def way_table_sql(con, osm_id, modes=None, geometry=False):
 
 def way_table(con, osm_id, modes=None, geometry=False):
     """All edges extracted from one ``osm_id``, across all modes, as ONE relation."""
-    return con.sql(way_table_sql(con, osm_id, modes=modes, geometry=geometry))
+    sql = way_table_sql(con, osm_id, modes=modes, geometry=geometry)
+    finish(con)
+    return con.sql(sql)
 
 
 def way_raw(con, osm_id):

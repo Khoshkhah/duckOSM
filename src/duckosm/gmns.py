@@ -28,6 +28,8 @@ from collections import Counter, defaultdict
 import os
 import re
 
+from duckosm.utils import finish
+
 logger = logging.getLogger("duckosm")
 
 # duckOSM mode schema -> GMNS use token, and use -> (persons_per_vehicle, pce)
@@ -60,7 +62,7 @@ def _bezier_line_sql(x0, y0, cx0, cy0, cx1, cy1, x1, y1, n=10):
     ts = ", ".join(f"{i / n:.4f}" for i in range(n + 1))
     bx = f"pow(1-u,3)*{x0} + 3*pow(1-u,2)*u*{cx0} + 3*(1-u)*pow(u,2)*{cx1} + pow(u,3)*{x1}"
     by = f"pow(1-u,3)*{y0} + 3*pow(1-u,2)*u*{cy0} + 3*(1-u)*pow(u,2)*{cy1} + pow(u,3)*{y1}"
-    return f"ST_MakeLine(list_transform([{ts}], u -> ST_Point({bx}, {by})))"
+    return f"ST_MakeLine(list_transform([{ts}], lambda u: ST_Point({bx}, {by})))"
 
 def _len_m(g):
     """SQL: the length in metres of a lon/lat geometry, on the ellipsoid. (A degree of longitude is shorter
@@ -552,7 +554,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     con = duckdb.connect(out_path)                           # NEW writable target
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     con.execute(f"ATTACH '{source_db.replace(chr(39), chr(39) * 2)}' AS s (READ_ONLY)")
 
     present = _mode_schemas(con, "s")
@@ -1581,6 +1583,7 @@ def _add_transit_stops(con, sch, mode, stops, drive_side, max_m=30.0):
         import pandas as pd
         df = pd.DataFrame(rows, columns=["loc_id", "link_id", "ref_node_id", "lr", "x_coord", "y_coord", "loc_type",
                                          "gtfs_stop_id", "name"])
+        finish(con)
         con.register("_gtfs_loc", df)
         con.execute(f"""INSERT INTO {sch}.location SELECT loc_id, link_id, ref_node_id, lr, x_coord, y_coord,
             NULL::DOUBLE, loc_type, 1::BIGINT, gtfs_stop_id, NULL::BIGINT, name, ST_Point(x_coord, y_coord)
@@ -1938,6 +1941,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
                     for e, lane_wkts in zip(run, per_piece, strict=True):
                         run_geoms[e] = lane_wkts
         import pandas as pd
+        finish(con)
         con.register("_runs_df", pd.DataFrame([(e, i, k, len(runs[i]), i in closed) for e, (i, k) in where.items()],
                                               columns=["link_id", "run_id", "seq", "n", "closed"]))
         con.execute("CREATE OR REPLACE TEMP TABLE _lane_runs AS SELECT * FROM _runs_df")
@@ -1993,6 +1997,7 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     lane_df = pd.DataFrame(lane_rows, columns=[
         "lane_id", "link_id", "lane_num", "allowed_uses", "r_barrier", "l_barrier",
         "width", "turn", "geom_wkt"])
+    finish(con)
     con.register("_lane_df", lane_df)
     geom_sel = "ST_GeomFromText(geom_wkt)" if lane_geometry else "NULL::GEOMETRY"
     con.execute(f"""CREATE TABLE {sch}.lane AS SELECT
@@ -2004,7 +2009,9 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
     curb_df = pd.DataFrame(curb_rows, columns=[
         "curb_seg_id", "link_id", "ref_node_id", "start_lr", "end_lr", "regulation", "width"])
     con.register("_curb_df", curb_df)
-    con.execute(f"CREATE TABLE {sch}.curb_seg AS SELECT * FROM _curb_df")
+    con.execute(f"""CREATE TABLE {sch}.curb_seg AS SELECT curb_seg_id::VARCHAR AS curb_seg_id, link_id::BIGINT AS link_id,
+      ref_node_id::BIGINT AS ref_node_id, start_lr::DOUBLE AS start_lr, end_lr::DOUBLE AS end_lr,
+      regulation::VARCHAR AS regulation, width::INTEGER AS width FROM _curb_df""")   # typed: an empty frame has no types
     con.unregister("_curb_df")
 
 
@@ -2030,7 +2037,7 @@ def to_micro(gmns_db, modes=None, cell_length_m=7.0):
     import duckdb
 
     con = duckdb.connect(gmns_db)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     have = _meso_modes_present(con)
     chosen = list(modes) if modes else ["driving"]
     unknown = [m for m in chosen if m not in have]
@@ -2140,7 +2147,7 @@ def to_meso(gmns_db, modes=None, trim_m=6.0):
     import duckdb
 
     con = duckdb.connect(gmns_db)                            # writable — adds meso_<mode> schemas
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     have = _meso_modes_present(con)
     chosen = list(modes) if modes else ["driving"]
     unknown = [m for m in chosen if m not in have]

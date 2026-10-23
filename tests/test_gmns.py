@@ -51,7 +51,7 @@ def _gmns(tmp_path, **kw):
     out = tmp_path / "out_gmns.duckdb"
     to_gmns(str(src), str(out), **kw)
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     return con
 
 
@@ -155,7 +155,7 @@ def test_meso_network(tmp_path):
     to_meso(str(out), modes=["driving"])
 
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     q = lambda s: con.execute(s).fetchone()[0]
     assert q("SELECT count(*) FROM meso_driving.meso_node") == 3 * 2          # 2 meso nodes per macro link
     assert q("SELECT count(*) FROM meso_driving.meso_link WHERE meso_type='normal'") == 3
@@ -169,10 +169,10 @@ def test_meso_network(tmp_path):
     assert q("SELECT count(*) FROM meso_driving.meso_link "
              "WHERE meso_type='normal' AND 'M'||macro_link_id::VARCHAR = link_id") == 3
     # turn:lanes drives the connector's lane range: A->B is a right turn, and A's lane 2 is the 'right' lane
-    lanes, s_ib, e_ib = con.execute(
+    # (one connector per inbound lane: the two have the same link_id, so look for the row, not the first one)
+    assert (1, 2, 2) in con.execute(
         f"SELECT lanes, start_ib_lane, end_ib_lane FROM meso_driving.meso_link "
-        f"WHERE link_id = 'X{A}-{B}'").fetchone()
-    assert (lanes, s_ib, e_ib) == (1, 2, 2)
+        f"WHERE link_id = 'X{A}-{B}'").fetchall()
 
 
 def test_capacity_and_movement_enrichment(tmp_path):
@@ -181,7 +181,7 @@ def test_capacity_and_movement_enrichment(tmp_path):
     out = tmp_path / "out_gmns.duckdb"
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     # capacity default by facility_type: A is 'primary' -> 1600 pce/hr/lane
     assert con.execute(f"SELECT capacity FROM gmns_driving.link WHERE link_id={A}").fetchone()[0] == 1600
     # movement A->B: A heads east and turns south (right) -> mvmt_code EBR; A's lane 2 is a bike lane (bicycle:lanes), so the cars turn
@@ -216,7 +216,7 @@ def test_micro_network(tmp_path):
     to_gmns(str(src), str(out))
     to_micro(str(out), modes=["driving"], cell_length_m=7.0)
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     q = lambda s: con.execute(s).fetchone()[0]
     assert q("SELECT count(*) FROM micro_driving.micro_link WHERE cell_type='normal'") > 0   # cells
     assert q(f"SELECT count(*) FROM micro_driving.micro_link "                                # lane change on A (2 lanes)
@@ -237,7 +237,7 @@ def test_two_way_lanes_offset_to_sides(tmp_path):
     out = tmp_path / "out_gmns.duckdb"
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     # A (1->2) and AR (2->1) are the two directions of the same road
     d = con.execute(f"""SELECT ST_Distance(
         (SELECT geom FROM gmns_driving.lane WHERE link_id={A} AND lane_num=1),
@@ -322,7 +322,7 @@ def _lane_y(tmp_path, gap_m, **kw):
     _pair_source(src, gap_m, b_north=kw.pop("b_north", True))
     to_gmns(str(src), str(out), **kw)
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     rows = con.execute("SELECT lane_id, ST_Y(ST_StartPoint(geom)) FROM gmns_driving.lane").fetchall()
     return {k: round((y - 59.32) * 111320, 2) for k, y in rows}
 
@@ -343,7 +343,7 @@ def test_a_gap_that_varies_along_the_road_leaves_no_wedge(tmp_path):
     _pair_source(src, 2.0, gap_west=6.0)
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     y = lambda lane, pt: (con.execute(f"SELECT ST_Y(ST_{pt}Point(geom)) FROM gmns_driving.lane WHERE lane_id = '{lane}'").fetchone()[0] - 59.32) * 111320   # noqa: E731
     assert y("12_1", "End") - y("11_1", "Start") == pytest.approx(3.25, abs=0.15)      # west end (Q ends there)
     assert y("12_1", "Start") - y("11_1", "End") == pytest.approx(3.25, abs=0.15)      # east end
@@ -424,7 +424,7 @@ def test_placement_says_where_the_line_lies(tmp_path):
     c.close()
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     y = dict(con.execute("SELECT lane_id, round((ST_Y(ST_StartPoint(geom)) - 59.32) * 111320, 2) "
                          "FROM gmns_driving.lane WHERE link_id = 11").fetchall())
     assert y["11_1"] == pytest.approx(4.875, abs=0.05) and y["11_2"] == pytest.approx(1.625, abs=0.05)
@@ -545,7 +545,7 @@ def _gmns_of(tmp_path, nodes, edges, graph):
     _mini_source(src, nodes, edges, graph)
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     return con
 
 
@@ -623,7 +623,7 @@ def _runs_gmns(tmp_path, nodes, edges):
     _way_source(src, nodes, edges)
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     return con
 
 
@@ -667,7 +667,7 @@ def test_a_roundabout_ring_closes(tmp_path):
     c.close()
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     for a, b in ((11, 12), (12, 13), (13, 14), (14, 11)):
         gap = con.execute(f"SELECT max(ST_Distance_Sphere(ST_EndPoint(x.geom), ST_StartPoint(y.geom))) FROM gmns_driving.lane x, "
                           f"gmns_driving.lane y WHERE x.link_id={a} AND y.link_id={b} AND x.lane_num = y.lane_num").fetchone()[0]
@@ -707,7 +707,7 @@ def test_a_roundabout_of_a_few_ways_has_round_lanes(tmp_path):
     c.close()
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     for lane in ("11_1", "11_2", "14_1"):
         wkt = con.execute(f"SELECT ST_AsText(geom) FROM gmns_driving.lane WHERE lane_id='{lane}'").fetchone()[0]
         pts = [tuple(float(v) for v in p.split()) for p in wkt[wkt.index("(") + 1:-1].split(", ")]
@@ -762,7 +762,7 @@ def test_bus_only_edges_are_one_lane_links(tmp_path):
     con.close()
     to_gmns(str(src), str(out))
     con = duckdb.connect(str(out))
-    con.execute("LOAD spatial;")
+    con.execute("LOAD spatial; SET geometry_always_xy = false;")
     q = lambda s: con.execute(s).fetchall()
     assert q("SELECT link_id, lanes, allowed_uses FROM gmns_driving.link ORDER BY link_id") == [
         (S, 1, "bus"), (R, 1, "bus,bike"), (F, 2, "auto")]                     # the way's lanes=2 is the forward's; no private road

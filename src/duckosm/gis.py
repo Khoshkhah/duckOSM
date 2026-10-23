@@ -136,7 +136,7 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
     Every layer keeps ``edge_id`` as a plain attribute — the cross-format stable join key.
     """
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
 

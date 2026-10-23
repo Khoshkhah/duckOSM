@@ -85,7 +85,7 @@ class MultimodalBuilder(BaseProcessor):
         A no-op (empty ``mm.*``) when there is nothing to bridge (<2 modes, or no ``walking``);
         it logs a warning and still creates the (empty) tables so downstream reads don't error.
         """
-        self.con.execute("INSTALL spatial; LOAD spatial;")
+        self.con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         modes = self._discover_modes()
         logger.info(f"[multimodal] modes present: {', '.join(modes) or 'none'}")
 

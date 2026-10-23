@@ -166,12 +166,12 @@ class RestrictionProcessor(BaseProcessor):
         rules = self.fetchall("""
             SELECT restriction_id, restriction_type, except_vehicles, applies_to, condition,
                    refs[list_position(ref_roles, 'from')] AS from_way,
-                   list_transform(list_filter(range(1, len(refs) + 1), i -> ref_roles[i] = 'via' AND ref_types[i]::VARCHAR = 'way'),
-                                  i -> refs[i]) AS via_ways,
-                   list_transform(list_filter(range(1, len(refs) + 1), i -> ref_roles[i] = 'to' AND ref_types[i]::VARCHAR = 'way'),
-                                  i -> refs[i]) AS to_ways      -- usually one; a no_u_turn may name both carriageways it may not turn onto
+                   list_transform(list_filter(range(1, len(refs) + 1), lambda i: ref_roles[i] = 'via' AND ref_types[i]::VARCHAR = 'way'),
+                                  lambda i: refs[i]) AS via_ways,
+                   list_transform(list_filter(range(1, len(refs) + 1), lambda i: ref_roles[i] = 'to' AND ref_types[i]::VARCHAR = 'way'),
+                                  lambda i: refs[i]) AS to_ways      -- usually one; a no_u_turn may name both carriageways it may not turn onto
             FROM restrictions_raw
-            WHERE len(list_filter(range(1, len(refs) + 1), i -> ref_roles[i] = 'via' AND ref_types[i]::VARCHAR = 'way')) > 0""")
+            WHERE len(list_filter(range(1, len(refs) + 1), lambda i: ref_roles[i] = 'via' AND ref_types[i]::VARCHAR = 'way')) > 0""")
         if not rules:
             return
         ways = {w for r in rules for w in (r[5], *r[6], *r[7])}

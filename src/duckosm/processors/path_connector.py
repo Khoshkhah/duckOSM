@@ -33,7 +33,7 @@ class PathConnector(BaseProcessor):
         self.execute("""
             CREATE OR REPLACE TEMP TABLE _und AS
             SELECT least(source, target) AS a, greatest(source, target) AS b,
-                   min(osm_id) AS osm_id, any_value(highway) AS hw
+                   min(osm_id) AS osm_id, min(highway) AS hw   -- min, not any_value: the same on each DuckDB version
             FROM edges GROUP BY least(source, target), greatest(source, target)
         """)
         # 2. Dangles: a node touching exactly ONE segment, and that segment is a path.
@@ -49,6 +49,7 @@ class PathConnector(BaseProcessor):
             SELECT deg.node, deg.other, deg.osm_id, deg.hw, ST_X(n.geom), ST_Y(n.geom)
             FROM deg JOIN nodes n ON n.node_id = deg.node
             WHERE deg.d = 1 AND deg.hw IN {_PATH}
+            ORDER BY deg.node   -- a fixed order: the first dangle of a node pair is the connector's source
         """)
         if not dangles:
             logger.info("  PathConnector: no dangling path ends")

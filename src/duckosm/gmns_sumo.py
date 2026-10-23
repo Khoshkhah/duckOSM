@@ -18,6 +18,8 @@ import logging
 import tempfile
 from collections import defaultdict
 
+from duckosm.utils import finish
+
 logger = logging.getLogger("duckosm")
 
 
@@ -288,6 +290,7 @@ def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconv
             shape = lanes.get(sumo_lane(lk, n), ([], 0))[0]
             if len(shape) >= 2:
                 cut.append((lid_of[(lk, n)], "LINESTRING (" + ", ".join(f"{x:.8f} {y:.8f}" for x, y in to_ll(shape)) + ")"))
+    finish(con)
     con.register("_cut_sumo", pd.DataFrame(cut, columns=["lane_id", "wkt"]))
     con.execute(f"UPDATE {sch}.lane l SET geom_cut = ST_GeomFromText(c.wkt) FROM _cut_sumo c WHERE c.lane_id = l.lane_id")
     con.unregister("_cut_sumo")

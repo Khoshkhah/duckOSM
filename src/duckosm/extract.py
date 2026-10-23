@@ -48,8 +48,8 @@ def build_clip(out, name, osm_id, boundary):
     if boundary:
         out.execute(
             "CREATE TEMP TABLE _clip AS "
-            "SELECT ST_Union_Agg(geom) AS geom, NULL::BIGINT AS osm_id, "
-            "       NULL AS name, NULL::INTEGER AS admin_level "
+            "SELECT ST_Union_Agg(geom)::GEOMETRY AS geom, NULL::BIGINT AS osm_id, "
+            "       NULL::VARCHAR AS name, NULL::INTEGER AS admin_level "
             f"FROM ST_Read('{Path(boundary).resolve()}')"
         )
         label = Path(boundary).name
@@ -99,7 +99,7 @@ def main(argv=None) -> int:
     args.db.parent.mkdir(parents=True, exist_ok=True)
 
     out = duckdb.connect(str(args.db))
-    out.execute("INSTALL spatial; LOAD spatial;")
+    out.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     out.execute(f"ATTACH '{args.source.resolve()}' AS src (READ_ONLY)")
 
     label = build_clip(out, args.name, args.osm_id, args.boundary)

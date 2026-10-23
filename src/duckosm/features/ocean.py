@@ -42,12 +42,12 @@ def build_ocean(con, release=None) -> int:
     """Create ``features.ocean`` on ``con`` (a built db with ``main.boundary``); the row count."""
     import duckdb
 
-    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA IF NOT EXISTS features")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; CREATE SCHEMA IF NOT EXISTS features")
     con.execute(f"CREATE OR REPLACE TABLE features.ocean ({COLUMNS})")
     try:
         x0, y0, x1, y1 = area_box(con)
         remote = duckdb.connect()                 # its own connection: S3 settings stay out of the db
-        remote.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; "
+        remote.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; "
                        "SET s3_region = 'us-west-2'")
         release = release or latest_release(remote)
         env = f"ST_MakeEnvelope({x0}, {y0}, {x1}, {y1})"

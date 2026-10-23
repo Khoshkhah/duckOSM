@@ -37,7 +37,7 @@ def to_railml(source, out_path, rail_types=_RAIL):
     import duckdb
 
     con = duckdb.connect(str(source), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name='raw' AND table_name='ways'").fetchone()[0] == 0:
         con.close()
         raise ValueError(f"no 'raw.ways' in {source} — need a built duckOSM db (with the raw OSM schema)")

@@ -31,7 +31,7 @@ def render_maps(db, modes=None, name=None, out_dir="reports", basemap=None, arro
 
     ms = mapstyle_module()
     con = duckdb.connect(str(db), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     present = [r[0] for r in con.execute(
         "SELECT DISTINCT schema_name FROM duckdb_tables() WHERE table_name = 'edges' "
         "AND schema_name IN ('driving', 'walking', 'cycling') ORDER BY schema_name").fetchall()]

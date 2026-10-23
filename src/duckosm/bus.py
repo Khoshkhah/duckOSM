@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from duckosm.utils import finish
+
 ROUTES = ("bus", "trolleybus", "share_taxi")
 ROLES = {"": None, "forward": 1, "backward": -1}      # the route's direction on the way: along its drawing, against it
 GAP_KINDS = {
@@ -133,6 +135,7 @@ def match_bus_routes(con):
         gaps += [(rid, *x) for x in g]
 
     step_df = pd.DataFrame(steps, columns=["relation_id", "step", "member", "way_id", "u", "v"])
+    finish(con)
     con.register("_bus_steps", step_df)
     try:
         matched = con.execute("""
