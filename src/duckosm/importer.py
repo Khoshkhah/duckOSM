@@ -205,13 +205,14 @@ class DuckOSM:
                 # `private_edges` before the graph: visible on maps, never routable.
                 steps.append(("split_private", f"[{mode}] Moving private roads", lambda m=mode: self._split_private(m)))
 
-            if self.config.options.extract_restrictions:
+            if self.config.options.extract_restrictions and not rust:   # rust: duckosm-rust made them
                 # Turn restrictions only for driving for now
                 if mode == "driving":
                     steps.append(("extract_restrictions", f"[{mode}] Extracting turn restrictions", self._extract_restrictions))
 
             if self.config.options.build_graph:
-                steps.append(("build_edge_graph", f"[{mode}] Building edge graph", lambda: self._build_edge_graph(mode)))
+                if not rust:          # rust: duckosm-rust made edge_graph and turn_permission (_rust_network loads them)
+                    steps.append(("build_edge_graph", f"[{mode}] Building edge graph", lambda: self._build_edge_graph(mode)))
                 # Drop boundary-crossing stubs / fragments right after the graph is built (A3).
                 if do_components:
                     steps.append(("component_filter", f"[{mode}] Component clean-up",
