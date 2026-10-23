@@ -23,6 +23,7 @@ pip install -e ".[dev,routing]"
 
 - **`edge_id`**: `(hash(osm_id, source, target) >> 1)::BIGINT` ([Stable edge ids](concepts/edge-ids.md)).
   Other projects join on it. Don't change the formula, the order of its inputs, or the `duckdb<2` pin.
+  The code also runs on DuckDB 2.0; `docs/design/duckdb2_upgrade.md` lists what the upgrade still needs.
 - **Heavy dependencies are imported inside functions** (geopandas, networkx, rasterio, roadstyle,
   sumolib), so the core install stays small: duckdb, shapely, h3, click, rich, pyyaml, pandas,
   timezonefinder (`[project.dependencies]` in `pyproject.toml`).

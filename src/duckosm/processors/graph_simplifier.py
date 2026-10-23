@@ -195,7 +195,7 @@ class GraphSimplifier(BaseProcessor):
             UPDATE edges SET length_m = c.m FROM (
                 SELECT edge_id AS id,
                        CAST(list_sum(list_transform(range(1, ST_NPoints(geometry)::INTEGER),
-                                                    i -> {hav})) AS FLOAT) AS m
+                                                    lambda i: {hav})) AS FLOAT) AS m
                 FROM edges) c
             WHERE edges.edge_id = c.id AND c.m > 0 AND abs(edges.length_m / c.m - 1) > 0.001""")
 
@@ -384,7 +384,7 @@ class GraphSimplifier(BaseProcessor):
                 w.service,
                 sg.node_list as refs,
                 ST_GeomFromText('LINESTRING(' || list_aggregate(
-                    list_transform(range(1, len(sg.lons) + 1), i -> sg.lons[i] || ' ' || sg.lats[i]),
+                    list_transform(range(1, len(sg.lons) + 1), lambda i: sg.lons[i] || ' ' || sg.lats[i]),
                     'string_agg', ', '
                 ) || ')') AS geometry,
                 FALSE AS is_reverse,
@@ -394,7 +394,7 @@ class GraphSimplifier(BaseProcessor):
                 -- vertex, which OOMs on dense country-scale networks).
                 CAST(list_sum(list_transform(
                     range(1, len(sg.lons)),
-                    i -> 12742000 * ASIN(SQRT(
+                    lambda i: 12742000 * ASIN(SQRT(
                         POWER(SIN(RADIANS(sg.lats[i + 1] - sg.lats[i]) / 2), 2) +
                         COS(RADIANS(sg.lats[i])) * COS(RADIANS(sg.lats[i + 1])) *
                         POWER(SIN(RADIANS(sg.lons[i + 1] - sg.lons[i]) / 2), 2)
@@ -830,11 +830,11 @@ class GraphSimplifier(BaseProcessor):
                 a.source, a.target, a.osm_id, a.highway, a.name, a.maxspeed, a.oneway,
                 a.lanes, a.surface, a.access, a.junction, a.layer, a.bridge, a.tunnel, a.service, a.refs_acc AS refs,
                 ST_GeomFromText('LINESTRING(' || list_aggregate(
-                    list_transform(range(1, len(c.lons) + 1), i -> c.lons[i] || ' ' || c.lats[i]),
+                    list_transform(range(1, len(c.lons) + 1), lambda i: c.lons[i] || ' ' || c.lats[i]),
                     'string_agg', ', ') || ')') AS geometry,
                 FALSE AS is_reverse,
                 CAST(list_sum(list_transform(range(1, len(c.lons)),
-                    i -> 12742000 * ASIN(SQRT(
+                    lambda i: 12742000 * ASIN(SQRT(
                         POWER(SIN(RADIANS(c.lats[i + 1] - c.lats[i]) / 2), 2) +
                         COS(RADIANS(c.lats[i])) * COS(RADIANS(c.lats[i + 1])) *
                         POWER(SIN(RADIANS(c.lons[i + 1] - c.lons[i]) / 2), 2)

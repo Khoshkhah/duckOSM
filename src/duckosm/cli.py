@@ -36,7 +36,7 @@ import click
 
 from duckosm.config import Config
 from duckosm.importer import DuckOSM
-from duckosm.utils import check_db_name
+from duckosm.utils import check_db_name, finish
 
 
 class _DbPath(click.Path):
@@ -490,7 +490,7 @@ def way(db, osm_id, modes, geom, out, as_json):
     from duckosm.query import way_raw, way_table_sql
 
     con = duckdb.connect(db, read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
 
     raw = way_raw(con, osm_id)
     if as_json:
@@ -532,6 +532,7 @@ def way(db, osm_id, modes, geom, out, as_json):
     else:
         # very large max_width so NO column is ever hidden behind "…" — the table wraps in a
         # narrow terminal instead of silently dropping columns (use -o file.csv for a clean copy)
+        finish(con)
         con.sql(sql).show(max_rows=1000, max_width=1_000_000)
 
 

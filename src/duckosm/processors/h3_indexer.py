@@ -39,8 +39,9 @@ class H3Indexer(BaseProcessor):
             
     def _register_udfs(self) -> None:
         """Register H3 UDFs."""
-        from duckosm.utils import h3_calc
-        
+        from duckosm.utils import finish, h3_calc
+
+        finish(self.con)
         # Helper for lat/lon (only needed for python fallback, but harmless)
         def h3_index(lat: float, lon: float) -> int:
             import h3

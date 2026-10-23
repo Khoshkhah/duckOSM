@@ -34,7 +34,7 @@ class FeaturesBuilder:
         self.stats = {}
 
     def run(self) -> dict:
-        self.con.execute("INSTALL spatial; LOAD spatial;")
+        self.con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         logger.info("[features] building geometry foundation ...")
         ensure_foundation(self.con)
 

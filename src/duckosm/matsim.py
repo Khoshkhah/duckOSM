@@ -147,7 +147,7 @@ def to_matsim(source, out_path, mode="driving", crs=None, gzip=True):
     import duckdb
 
     con = duckdb.connect(str(source), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     modes = _resolve_modes(con, mode)
     if crs is None:
         from duckosm.utils import data_utm_crs

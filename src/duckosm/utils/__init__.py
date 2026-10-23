@@ -13,6 +13,12 @@ def check_db_name(path):
                          f"({', '.join(RESERVED_DB_NAMES)}). Rename it, e.g. {stem}_network.duckdb")
 
 
+def finish(con):
+    """Close the open result of ``con.execute()`` (a ``fetchone()`` leaves it open). DuckDB 2.0 refuses
+    ``register()``, ``create_function()`` and ``sql()`` while there is one; DuckDB 1.x has no ``complete()`` and needs none."""
+    getattr(con, "complete", lambda: None)()
+
+
 def utm_epsg(lon, lat):
     """EPSG code of the WGS84 UTM zone containing (lon, lat), e.g. 'EPSG:32632' for Monaco."""
     return f"EPSG:{(32600 if lat >= 0 else 32700) + int((lon + 180) // 6) % 60 + 1}"

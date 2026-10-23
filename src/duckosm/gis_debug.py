@@ -163,7 +163,7 @@ def build_payload(path, source_db=None, name=None):
     if source_db:
         import duckdb
         con = duckdb.connect(str(source_db), read_only=True)
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         modes = [r[0] for r in con.execute(
             "SELECT DISTINCT schema_name FROM duckdb_tables() WHERE table_name='edges' "
             "AND schema_name NOT IN ('information_schema','pg_catalog','main','raw')").fetchall()]

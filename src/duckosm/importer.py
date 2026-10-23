@@ -394,7 +394,8 @@ class DuckOSM:
             if stale.exists():
                 stale.unlink()
         self.con = duckdb.connect(str(self.output_path))
-        self.con.execute("INSTALL spatial; LOAD spatial;")
+        # geometry_always_xy = false: the *_Spheroid functions take (lat, lon), as before DuckDB 2.0; 2.0 refuses them until it is set
+        self.con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
 
         # Large-build tuning: spill big intermediates to disk instead of OOM, and
         # avoid buffering rows just to preserve insertion order (edge_id only needs
@@ -571,7 +572,7 @@ class DuckOSM:
         
         self.con.execute(f"""
             CREATE TABLE IF NOT EXISTS boundary AS
-            SELECT * FROM ST_READ('{boundary_path}')
+            SELECT * REPLACE (geom::GEOMETRY AS geom) FROM ST_READ('{boundary_path}')   -- no CRS in the type: DuckDB 1.5 does not store it, 2.0 does
         """)
         
         count = self.con.execute("SELECT COUNT(*) FROM boundary").fetchone()[0]

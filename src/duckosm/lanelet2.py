@@ -36,7 +36,7 @@ def to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01):
     import duckdb
 
     con = duckdb.connect(str(gmns_db), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     g = f"gmns_{mode}"
     if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='lane'",
                    [g]).fetchone()[0] == 0:

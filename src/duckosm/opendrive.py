@@ -222,7 +222,7 @@ def to_opendrive(source, out_path, mode="driving", crs=None, junctions=False):
     from duckosm.utils import data_utm_crs
 
     con = duckdb.connect(str(source), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     if junctions:
         g = f"gmns_{mode}"
         if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='movement'",

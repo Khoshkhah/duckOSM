@@ -39,7 +39,7 @@ def build_viewer_payload(con, mode="driving"):
     if not _table(con, g, "lane"):
         raise ValueError(f"no {g}.lane table — is this a GMNS db with mode '{mode}'?")
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     except Exception:
         pass
 
@@ -131,7 +131,7 @@ def write_viewer(gmns_db, out, mode="driving", standalone=True):
     import duckdb
 
     con = duckdb.connect(str(gmns_db), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     payload = build_viewer_payload(con, mode=mode)
     con.close()
     Path(out).parent.mkdir(parents=True, exist_ok=True)

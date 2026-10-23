@@ -101,7 +101,7 @@ def compute_parents(con) -> None:
 def load_boundaries(gpkg: Path, db: Path) -> dict:
     """Load the GeoPackage into ``admin_boundaries`` and return per-level counts."""
     con = duckdb.connect(str(db))
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     con.execute(
         f"""
         CREATE OR REPLACE TABLE admin_boundaries AS
@@ -113,7 +113,7 @@ def load_boundaries(gpkg: Path, db: Path) -> dict:
             -- big cities); NULL otherwise.
             NULLIF(regexp_extract(other_tags, '"name:en"=>"([^"]*)"', 1), '') AS name_en,
             TRY_CAST(admin_level AS INTEGER) AS admin_level,
-            geom AS geometry
+            geom::GEOMETRY AS geometry
         FROM ST_Read('{gpkg}')
         """
     )

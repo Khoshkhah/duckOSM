@@ -57,7 +57,7 @@ def build_lane_graph(gmns_db, mode="driving"):
     import duckdb
 
     con = duckdb.connect(str(gmns_db))
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     g, ls = f"gmns_{mode}", f"lane_{mode}"
     _require_lane(con, g, gmns_db)
     con.execute(f"DROP SCHEMA IF EXISTS {ls} CASCADE")
@@ -87,7 +87,7 @@ def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
     import networkx as nx
 
     con = duckdb.connect(str(gmns_db), read_only=True)
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     g, ls = f"gmns_{mode}", f"lane_{mode}"
     _require_lane(con, g, gmns_db)
     if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name=? AND table_name='lane_edges'",

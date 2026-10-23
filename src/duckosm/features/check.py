@@ -26,9 +26,9 @@ LEFT_OUT = [
     ("the coastline: the sea comes from the layer ocean", "tags['natural'] = 'coastline'"),
     ("a part of a building: planned for a layer building_parts (phase 2)", "tags['building:part'] IS NOT NULL"),
     ("gone: a building, a place or a boundary that is demolished, disused or abandoned",
-     "tags['building'] = 'no' OR len(list_filter(map_keys(tags), x -> x LIKE 'demolished:%' OR x LIKE 'disused:%' OR x LIKE 'abandoned:%')) > 0"),
+     "tags['building'] = 'no' OR len(list_filter(map_keys(tags), lambda x: x LIKE 'demolished:%' OR x LIKE 'disused:%' OR x LIKE 'abandoned:%')) > 0"),
     ("only an address, a name or a source: no kind of ground",
-     "len(list_filter(map_keys(tags), x -> NOT (x LIKE 'addr:%' OR x IN ('type', 'name', 'source', 'note', 'fixme', 'wikidata', 'wikipedia')))) = 0"),
+     "len(list_filter(map_keys(tags), lambda x: NOT (x LIKE 'addr:%' OR x IN ('type', 'name', 'source', 'note', 'fixme', 'wikidata', 'wikipedia')))) = 0"),
     ("a mark of an event (a race: pit lane, animals) or a sport tag without a pitch",
      "tags['line'] IS NOT NULL OR tags['attraction'] IS NOT NULL OR tags['animal'] IS NOT NULL OR tags['sport'] IS NOT NULL"),
     ("a club or an organisation drawn as an area: not ground", "tags['club'] IS NOT NULL"),
@@ -58,7 +58,7 @@ def _reason_sql(prefix: str = "") -> str:
 def missing_polygons(con) -> list[dict]:
     """The groups of polygons in ``raw.*`` that no ``features.*`` table holds: ``{group, ways, relations, area_m2, reason}``.
     ``area_m2`` is the area of the closed ways (the relations are not assembled); ``reason`` is None for a possible miss."""
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     tables = [r[0] for r in con.execute("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'features'").fetchall()]
     if not tables:
         raise ValueError("this database has no features.* tables: run the features build first")

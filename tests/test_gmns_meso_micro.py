@@ -23,7 +23,7 @@ def con(tmp_path_factory):
     to_meso(str(d / "out.duckdb"))
     to_micro(str(d / "out.duckdb"))
     c = duckdb.connect(str(d / "out.duckdb"), read_only=True)
-    c.execute("LOAD spatial")
+    c.execute("LOAD spatial; SET geometry_always_xy = false")
     return c
 
 

@@ -24,7 +24,7 @@ def _build(ways, nodes):
     nodes: {node_id: (lon, lat)}
     """
     con = duckdb.connect()
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     con.execute("CREATE SCHEMA raw")
     con.execute("CREATE TABLE raw.nodes(osm_id BIGINT, lon DOUBLE, lat DOUBLE)")
     con.executemany("INSERT INTO raw.nodes VALUES (?, ?, ?)",

@@ -66,7 +66,7 @@ def candidates(con, schema, point, radius_m):
 
 
 def _ends(con, schema, a, b, radius_m):
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     S, T = candidates(con, schema, a, radius_m), candidates(con, schema, b, radius_m)
     if not S:
         raise ValueError(f"no road within {radius_m:g} m of the start")

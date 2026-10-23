@@ -75,7 +75,7 @@ def _planner_data(db, roads):
 
     con = duckdb.connect(str(db), read_only=True)
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         have = {tuple(r) for r in con.execute(
             "SELECT table_schema, table_name FROM information_schema.tables").fetchall()}
         modes = [m for m in MODES if (m, "edges") in have and (m, "edge_graph") in have]

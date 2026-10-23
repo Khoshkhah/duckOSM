@@ -345,7 +345,7 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
     ele_col, zf_col, zt_col = f"ele{sfx}", f"z_from{sfx}", f"z_to{sfx}"
 
     con = duckdb.connect(str(db))                           # read-write: enriches in place
-    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
     try:
         chosen = _mode_schemas(con, modes)
         bbox = _db_bbox(con, chosen)

@@ -75,7 +75,7 @@ def load_roads(db):
 
     con = duckdb.connect(str(db), read_only=True)
     try:
-        con.execute("INSTALL spatial; LOAD spatial;")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         df = con.execute(f"""
             SELECT edge_id, first(highway ORDER BY rank) AS highway, first(layer ORDER BY rank) AS layer,
                    first(bridge ORDER BY rank) AS bridge, first(tunnel ORDER BY rank) AS tunnel,

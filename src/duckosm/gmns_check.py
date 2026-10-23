@@ -67,9 +67,9 @@ def check_gmns(path, modes=None):
     Returns ``[(schema, check, bad, total), ...]``."""
     con = duckdb.connect(str(path), read_only=True)
     try:
-        con.execute("LOAD spatial")
+        con.execute("LOAD spatial; SET geometry_always_xy = false")
     except duckdb.Error:
-        con.execute("INSTALL spatial; LOAD spatial")
+        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false")
     try:
         schemas = [r[0] for r in con.execute(
             "SELECT DISTINCT table_schema FROM information_schema.tables WHERE table_name = 'lane' "
