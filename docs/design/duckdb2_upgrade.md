@@ -33,8 +33,11 @@ does `//` or `%` with a divisor that can be zero.
    `ORDER BY`, and `any_value(highway)` picks one of two parallel edges. On Monaco, 2.0 gives other
    values than 1.5.3 for 148 connector edges (`edge_ref` and `is_reverse`, and `highway` on 4 edges).
    The `edge_id` values do not change. A 1.5.3 build with more than one thread can also change them.
-   An `ORDER BY` and `min(highway)` make the two versions equal on all 53 tables, but they also change
-   the 1.5.3 output. Kaveh must decide this change.
+   **Fixed (Kaveh's decision, 2026-10-23):** the dangling ends are taken in the order of the node id
+   (`ORDER BY deg.node`), and the highway is `min(highway)`. The 1.5.3 output changes only in connector
+   rows (Monaco with the connector on: 68 walking and 32 cycling rows, in `edge_ref`, `is_reverse` and
+   `highway`; all other tables are equal). duckosm-rust takes the ends in the same order, so the two
+   programs are now equal on every edge row (their design item 3c is closed).
 4. **The GMNS export.** On the same input database, the 2.0 export is not equal to the 1.5.3 export.
    Most differences are in lane geometry at about 1e-12 degrees. Some are larger: `any_value()` ties
    (for example `free_speed` in `gmns_all.link`, `gmns.py:731`) and the choice of `to_lane` in walking
