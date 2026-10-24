@@ -1839,9 +1839,15 @@ def _build_lane_curb(con, sch, mode, uses, has_raw, lane_geometry, drive_side="r
             merged[i] = "LINESTRING (" + ", ".join(cs) + ")"
     gaps, run_profiles = {}, {}
     if lane_geometry and pair_carriageways:
-        run_gaps = _paired_gaps([(i, merged[i], sum(w_of[run[0]]) / 2.0) for i, run in enumerate(runs)
-                                 if i in merged and info[run[0]][4] and not is_foot(rows_tags[run[0]])],
-                                side_sign, profiles=run_profiles)
+        # (a road's two carriageways are on one level: a bridge's way beside a ground road under its edge is no partner; Granville a2's
+        # lanes swung 2.8 m sideways where the ground road w48524379 ran 2.9 m from it, 2026-10-23)
+        from duckosm.crossings import _level
+        cand = [(i, merged[i], sum(w_of[run[0]]) / 2.0) for i, run in enumerate(runs)
+                if i in merged and info[run[0]][4] and not is_foot(rows_tags[run[0]])]
+        lv_of = {i: _level(*(rows_tags[runs[i][0]].get(k) for k in ("layer", "bridge", "tunnel"))) for i, _, _ in cand}
+        run_gaps = {}
+        for lv in sorted(set(lv_of.values())):
+            run_gaps.update(_paired_gaps([c for c in cand if lv_of[c[0]] == lv], side_sign, profiles=run_profiles))
         gaps = {e: run_gaps[i] for i, run in enumerate(runs) if i in run_gaps for e in run}
         if gaps:
             logger.info(f"GMNS[{mode}]: {len(gaps):,} one-way edges placed with their opposite carriageway")
