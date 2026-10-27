@@ -188,3 +188,19 @@ def test_dem_uri_keeps_urls():
     assert _dem_uri("/vsicurl/https://example.org/dem.tif") == "/vsicurl/https://example.org/dem.tif"
     assert _dem_uri("dem.tif") == str(Path("dem.tif").resolve())
 
+
+
+def test_z_vertices_interior(tmp_path):
+    """Every vertex of an edge gets a height, in the order of the geometry; the ends equal z_from and z_to."""
+    dem = _dem(tmp_path / "ramp.tif")
+    src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.08, 59.32)], [(A, 1, 2)])
+    con = duckdb.connect(src)
+    con.execute("LOAD spatial; UPDATE driving.edges SET geometry = "
+                "ST_GeomFromText('LINESTRING(18.06 59.32,18.07 59.33,18.08 59.32)')")
+    con.close()
+    to_elevation(src, dem=dem)
+    con = duckdb.connect(src, read_only=True)
+    zf, zt, zv = con.execute("SELECT z_from, z_to, z_vertices FROM driving.edges").fetchone()
+    assert len(zv) == 3 and zv[0] == zf and zv[-1] == zt
+    assert zv[1] == pytest.approx(_ramp(18.07, 59.33), abs=2.0)
+    con.close()

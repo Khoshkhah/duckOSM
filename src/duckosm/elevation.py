@@ -5,9 +5,12 @@ read-write and adds, in place,
 
   - ``<mode>.nodes.ele``            ground elevation (m) at each node
   - ``<mode>.edges.z_from/z_to``    endpoint ground elevation (m)
+  - ``<mode>.edges.z_vertices``     ground elevation (m) at every vertex of the edge geometry, in its order
+                                    (the first and the last are z_from and z_to); a reader that needs the
+                                    heights along a way reads them here and never opens the raster
   - ``main.elevation_metadata``     provenance, one row per elevation column
 
-``suffix="dsm"`` writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` instead of overwriting, so a
+``suffix="dsm"`` writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` / ``z_vertices_dsm`` instead of overwriting, so a
 bare-earth DTM and a surface model (buildings + canopy) live side by side and ``ele_dsm - ele`` is
 height above ground. Only meaningful when both come from one acquisition at a resolution that
 resolves the objects — see docs/reference/elevation-sources.md.
@@ -342,7 +345,7 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
     if suffix and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", suffix):
         raise ValueError(f"--suffix must be a bare identifier (letters/digits/_), got {suffix!r}")
     sfx = f"_{suffix}" if suffix else ""
-    ele_col, zf_col, zt_col = f"ele{sfx}", f"z_from{sfx}", f"z_to{sfx}"
+    ele_col, zf_col, zt_col, zv_col = f"ele{sfx}", f"z_from{sfx}", f"z_to{sfx}", f"z_vertices{sfx}"
 
     con = duckdb.connect(str(db))                           # read-write: enriches in place
     con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
@@ -387,6 +390,28 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
             con.execute(f"UPDATE {m}.edges e SET "
                         f"{zf_col} = (SELECT {ele_col} FROM {m}.nodes n WHERE n.node_id = e.source), "
                         f"{zt_col} = (SELECT {ele_col} FROM {m}.nodes n WHERE n.node_id = e.target)")
+
+            # the interior vertices too, so that a reader gets the heights along a way without the raster
+            geo = "geometry" if con.execute(
+                f"SELECT count(*) FROM duckdb_columns() WHERE schema_name = '{m}' AND table_name = 'edges' "
+                "AND column_name = 'geometry'").fetchone()[0] else "geom"
+            erows = con.execute(f"SELECT edge_id, ST_AsText({geo}) FROM {m}.edges WHERE {geo} IS NOT NULL").fetchall()
+            eids, starts, vx, vy = [], [], [], []
+            for eid, wkt in erows:
+                eids.append(eid)
+                starts.append(len(vx))
+                for pair in wkt[wkt.index("(") + 1:wkt.rindex(")")].split(","):
+                    x, y = pair.split()
+                    vx.append(float(x))
+                    vy.append(float(y))
+            if vx:
+                vz, _ = sample(vx, vy)
+                starts.append(len(vx))
+                con.execute(f"ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS {zv_col} DOUBLE[]")
+                con.execute("CREATE OR REPLACE TEMP TABLE _zv(edge_id BIGINT, z DOUBLE[])")
+                con.executemany("INSERT INTO _zv VALUES (?, ?)", [
+                    (e, [round(float(z), 2) for z in vz[starts[i]:starts[i + 1]]]) for i, e in enumerate(eids)])
+                con.execute(f"UPDATE {m}.edges e SET {zv_col} = (SELECT z FROM _zv t WHERE t.edge_id = e.edge_id)")
 
             per_mode[m] = {"nodes": len(ids), "nodata": n_nd}
             total_nodes += len(ids)

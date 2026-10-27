@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- **`edges.z_vertices`.** `duckosm elevation` also samples the DEM at every vertex of each edge and writes the heights, in the
+  order of the geometry, as `<mode>.edges.z_vertices` (DOUBLE[], 2 dp; `z_vertices_<suffix>` for a second surface). A reader gets the
+  heights along a way without the raster. SimReady's `import-elevation` reads them (its open item `P7.dem-interior`).
+
 ### Fixed
 
 - **Walk + drive obeys turn restrictions.** `route_multimodal`, `route_multimodal_points` and the Walk + drive route of `route-map` searched

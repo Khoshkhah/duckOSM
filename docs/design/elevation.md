@@ -162,6 +162,7 @@ provider's raster."** Not source × format.
 |---------|-------------------|--------------------------------------------------------------|
 | `nodes` | `ele DOUBLE`      | ground elevation, m (2 dp)                                   |
 | `edges` | `z_from` / `z_to` | DOUBLE — endpoint ground elevation, m (2 dp; bare terrain — no structure offset in v1) |
+| `edges` | `z_vertices` | DOUBLE[]: the ground elevation at every vertex of the edge geometry, in its order, m (2 dp). The first and the last value are `z_from` and `z_to`. A reader that needs the heights along a way (SimReady's `import-elevation`) reads them here and does not open the raster |
 | `nodes` | `ele_<name>`      | DOUBLE — a second surface from `--suffix <name>` (e.g. `ele_dsm`) |
 | `edges` | `z_from_<name>` / `z_to_<name>` | DOUBLE — the same surface at the edge endpoints |
 
