@@ -115,7 +115,7 @@ The Rust tests (`cargo test`) keep the golden files from duckosm-rust: the Monac
 
 The note in `tests/test_engine_rust.py` says that connector rows (`osm_id < 0`) can have another direction label in the two engines. The commit `123910c` ("PathConnector: a fixed order of the dangling ends, and min(highway)") says that duckosm-rust uses the same order, "so the two programs are equal on every edge row". The mask `LABELS` is possibly not necessary any more.
 
-- **Step M1 check.** Remove the mask on a copy of the test and run it on Monaco. If it passes, the difference is gone, and the mask is deleted. If it fails, the mask stays and the changelog of the default switch lists the difference.
+- **Result of the M1 check (2026-11-04).** The test with `LABELS = ()` (no mask) passes on Monaco: the module of duckosm-rust 0.3.0 (built from the copy in `rust/`, without DuckDB) and the Python engine give equal rows for all 20 tables. The known difference is gone. The mask is deleted in M4, with the rewrite of the test.
 - **The edge rows of connectors are the only rows that changed after 0.6.0.** The commit `123910c` changed 68 walking and 32 cycling connector rows (`edge_ref`, `is_reverse`, `highway`). No other row changed.
 
 ### What must not change
@@ -189,13 +189,13 @@ Each repository is changed by a pull request of its own, after Kaveh says yes. T
 
 ## 9. The baseline (to fill in at M0)
 
-| Check | Value at `S` |
+| Check | Value at `S` = `53b3196` |
 |---|---|
-| `cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build` | tests passed: |
-| Monaco sample, CLI counts | driving 3092 edges / 1904 nodes / 724 private; walking 12238 / 4818 / 166; cycling 10670 / 4867 / 141 |
-| `tests/test_wheel.py` | |
-| `tests/test_engine_rust.py` (Python 3.10, 3.12) | |
-| Wheel size | |
+| `cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build` | 65 passed, 0 failed, 1 ignored (21 test groups). The copy in `rust/` (commit `caadf1d`) gives the same numbers. |
+| Monaco sample, CLI counts | driving 3092 edges / 1904 nodes / 724 private; walking 12238 / 4818 / 166; cycling 10670 / 4867 / 141 (the lines that `ci.yml` of duckosm-rust checks) |
+| `tests/test_engine_rust.py` without the mask | 1 passed (56 s) |
+| Wheel size, no DuckDB | 5.9 MB (`duckosm_rust-0.3.0-cp39-abi3-manylinux_2_35_x86_64.whl`) |
+| `tests/test_wheel.py` | runs in M2 (it needs the renamed module) |
 
 The Monaco counts are the lines that `ci.yml` of duckosm-rust checks today.
 
