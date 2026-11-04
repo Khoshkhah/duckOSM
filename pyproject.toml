@@ -56,3 +56,7 @@ manifest-path = "rust/duckosm-py/Cargo.toml"
 # no DuckDB inside the module: the Python package brings its own duckdb, and the importer asks for GeoParquet files only
 no-default-features = true
 profile = "release"    # a debug build of the engine is slow, also in pip install -e .
+# the sdist has all of rust/: the workspace lists duckosm-duckdb and duckosm-cli, which the module does not need,
+# and cargo reads their manifests
+include = [{ path = "rust/**/*", format = "sdist" }]
+exclude = [{ path = "rust/target/**", format = "sdist" }]

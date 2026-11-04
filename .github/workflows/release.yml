@@ -1,14 +1,132 @@
 name: Release to PyPI
 
-# Publish on a version tag (v0.1.0, ...) via PyPI trusted publishing: no API token stored.
+# A version tag (v0.7.0, ...) builds the wheels, the sdist and the CLI archives, publishes to PyPI via trusted
+# publishing (no API token stored), and makes a GitHub Release with the CLI archives.
+# A run by hand (workflow_dispatch), and a pull request that changes this file, build and test everything but
+# publish nothing: the jobs "publish" and "release" run for a tag only.
 # One-time setup on pypi.org: add a "trusted publisher" for this repo and workflow
 # (project: duckosm, owner: Khoshkhah, repository: duckOSM, workflow: release.yml, environment: pypi).
+# docs/design/rust_engine_move.md, step M3.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
 
 jobs:
-  build:
+  # The tag must be the version of the package and of the Rust crates (the module duckosm._rust has the version of
+  # rust/Cargo.toml; tests/test_wheel.py checks that it is the version of the package).
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pyproject.toml and rust/Cargo.toml have one version, and a tag is that version
+        run: |
+          python - <<'EOF'
+          import os, tomllib
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          crates = tomllib.load(open("rust/Cargo.toml", "rb"))["workspace"]["package"]["version"]
+          assert crates == version, f"rust/Cargo.toml has {crates}, pyproject.toml has {version}"
+          if os.environ["GITHUB_REF_TYPE"] == "tag":
+              tag = os.environ["GITHUB_REF_NAME"]
+              assert tag == f"v{version}", f"tag {tag} is not v{version} (pyproject.toml)"
+          EOF
+
+  # One wheel for each system (abi3: one wheel for every Python from 3.9), tested in a clean virtual environment.
+  # The wheel has the module duckosm._rust, built from rust/ (no DuckDB inside). Python 3.9 is the abi3 floor; the
+  # package itself needs 3.10 (requires-python).
+  wheels:
+    name: wheel ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-x86_64, runner: ubuntu-22.04, target: x86_64, manylinux: "2_28"}
+          - {name: linux-aarch64, runner: ubuntu-24.04-arm, target: aarch64, manylinux: "2_28"}
+          - {name: macos-x86_64, runner: macos-15-intel, target: x86_64}
+          - {name: macos-aarch64, runner: macos-latest, target: aarch64}
+          - {name: windows-x64, runner: windows-latest, target: x64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: dist
+      # The wheel is installed by its file name: PyPI has the same version, and --find-links would not choose
+      # the file. The test runs in tests/, so "import duckosm" finds the installed package and not src/.
+      - name: Test the wheel in a new virtual environment (the Rust module on Monaco)
+        shell: bash
+        run: |
+          set -e
+          python -m venv test-env
+          if [ -f test-env/Scripts/activate ]; then source test-env/Scripts/activate; else source test-env/bin/activate; fi
+          pip install dist/*.whl
+          python tests/test_wheel.py
+
+  # The Rust program (rust/duckosm-cli) as one archive for each system. The Linux program needs glibc 2.35 or newer
+  # (the runner's glibc). The file name and the program name are `duckosm-rust` until the name is decided (D4 of
+  # docs/design/rust_engine_move.md).
+  cli:
+    name: CLI ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-x86_64, runner: ubuntu-22.04}
+          - {name: linux-aarch64, runner: ubuntu-22.04-arm}
+          - {name: macos-x86_64, runner: macos-15-intel}
+          - {name: macos-aarch64, runner: macos-latest}
+          - {name: windows-x64, runner: windows-latest}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the CLI
+        run: cargo build --release -p duckosm-cli
+        working-directory: rust
+      - name: Test the CLI on the Monaco sample (the counts of tests/test_wheel.py), and make the archive
+        shell: bash
+        run: |
+          set -e
+          bin=rust/target/release/duckosm-rust; [ -f $bin.exe ] && bin=$bin.exe
+          $bin tests/data/monaco_sample.osm.pbf -o cli-test --modes driving,walking,cycling --no-merge-segments \
+            --no-component-filter --no-speeds --no-costs --no-connect-paths --no-sidewalk-inference 2> cli-test.log
+          cat cli-test.log
+          grep -q "^driving: 3092 edges, 1904 nodes, 724 private edges" cli-test.log
+          grep -q "^walking: 12238 edges, 4818 nodes, 166 private edges" cli-test.log
+          grep -q "^cycling: 10670 edges, 4867 nodes, 141 private edges" cli-test.log
+          mkdir dist
+          v=${GITHUB_REF_NAME#v}; [ "$GITHUB_REF_TYPE" = tag ] || v=dev
+          if [ -f rust/target/release/duckosm-rust.exe ]; then
+            7z a dist/duckosm-rust-$v-${{ matrix.name }}.zip ./rust/target/release/duckosm-rust.exe README.md LICENSE
+          else
+            tar czf dist/duckosm-rust-$v-${{ matrix.name }}.tar.gz -C rust/target/release duckosm-rust -C ../../.. README.md LICENSE
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.name }}
+          path: dist
+
+  # The sdist has the Python files and the whole of rust/ (maturin finds the workspace), so a source install
+  # builds the module with a Rust toolchain.
+  sdist:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -16,26 +134,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: The tag must be the version in pyproject.toml
-        run: |
-          python - <<'EOF'
-          import os, tomllib
-          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
-          tag = os.environ["GITHUB_REF_NAME"]
-          assert tag == f"v{version}", f"tag {tag} is not v{version} (pyproject.toml)"
-          EOF
-      - name: Build sdist + wheel
-        run: |
-          pip install build twine
-          python -m build
-          twine check --strict dist/*
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - run: pip install twine && twine check --strict dist/*
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: sdist
+          path: dist
 
   publish:
-    needs: build
+    if: github.ref_type == 'tag'
+    needs: [version, wheels, cli, sdist]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: pypi
@@ -44,6 +155,26 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          pattern: "{wheel-*,sdist}"
+          merge-multiple: true
           path: dist/
+      - run: ls -l dist
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{cli-*,wheel-*,sdist}"
+          merge-multiple: true
+          path: dist/
+      - name: Make the GitHub Release (the CLI archives, the wheels, the sdist)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
