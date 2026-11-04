@@ -1,0 +1,371 @@
+# Local corrections for known OSM source-data errors — see known_osm_issues.md (same folder).
+#
+# Applied to the `ways` table after RoadFilter and before GraphBuilder (once per mode), so both
+# `oneway` (topological — decides whether a reverse-twin edge is created) and `lanes` take effect
+# on a rebuild. Each rule is keyed by OSM `osm_id` and is a silent no-op in any area that doesn't
+# contain that way, so this one global file is safe to apply to every build.
+#
+# Fields per rule:
+#   osm_id          (required) the OSM way id
+#   oneway          bool  — force one-way (true) / two-way (false)
+#   lanes           int   — per-direction lane count; sets BOTH directions
+#   lanes_forward   int   — per-direction (asymmetric roads)
+#   lanes_backward  int
+#   layer           int   — vertical stacking level (fixes a wrong OSM `layer` tag)
+#   exclude_modes   list  — remove the way from these modes' networks (driving/cycling/walking)
+#   remove          bool  — drop the way from the build entirely (raw.ways, so no road, building or feature): any way, not only roads
+#   tags            map   — set these OSM tags on the way in raw.ways, before any step reads it (e.g. highway: unclassified)
+#   keep_nodes      [from, to] — keep only this part of the way (OSM node ids); add a dropped part back with new_ways + tags_from
+#   turn_lanes_forward / turn_lanes_backward  str — the painted arrows, OSM turn:lanes syntax ("through;left|right")
+#   note            free text (provenance)
+#
+# Only enable a rule once the correction is verified — an unverified `oneway` flip silently drops
+# the reverse edge. Keep unverified issues commented out.
+
+overrides:
+  # --- Södermalm ---
+  - osm_id: 4392632          # Hökens Gata — missing oneway (known_osm_issues #1, CONFIRMED)
+    oneway: true
+    note: "Hökens Gata missing oneway; adjacent segment 676781760 is oneway=yes"
+
+  - osm_id: 120860763        # Katarina Västra Kyrkogata — missing oneway (known_osm_issues #7, CONFIRMED)
+    oneway: true
+    note: "continues the oneway=yes way 1280759567 at node 1354121015; untagged, so it got a reverse twin that dead-ends in a U-turn"
+
+  - osm_id: 1280522019       # Kapellgränd — missing oneway (known_osm_issues #7, CONFIRMED by pattern)
+    oneway: true
+    note: "continues the same-name oneway=yes way 323129897 in its own direction; its reverse twin dead-ended in a U-turn"
+
+  - osm_id: 140726414        # Bohusgatan — missing oneway (known_osm_issues #4 and #7, CONFIRMED by pattern)
+    oneway: true
+    note: "continues the same-name oneway=yes way 151083837 in its own direction; its reverse twin dead-ended in a U-turn"
+
+  # NOT ENABLED - UNVERIFIED (known_osm_issues #8): the Noe Arksfaret tunnel ramps may not be drivable,
+  # an impression from Street View, not a confirmed fact. Enable only once it is confirmed.
+  # - osm_id: 1422725593       # Noe Arksfaret exit ramp (tunnel)
+  #   exclude_modes: [driving]
+  # - osm_id: 1422725594       # Noe Arksfaret entry ramp (tunnel)
+  #   exclude_modes: [driving]
+
+  # REMOVED 2026-09-10: way 233761079 (Katarina Bangata) was forced oneway: true on the note that
+  # "56 sibling segments are oneway=yes; this one just omits the tag". That evidence does not hold.
+  # OSM carries no oneway tag on it, and Overture (record w233761079@6) has no access restriction
+  # either - both say TWO-WAY. Overture's 22 Katarina Bangata segments are 11 two-way and 11
+  # one-way, so the street is not uniformly one-way and there was no omission to repair. Kaveh
+  # confirmed on the ground that this stretch is two-way. Dropping the rule restores the reverse
+  # edge; without it the junction at node 1392932069 had 8 veh/h arriving and 360 leaving.
+
+  # --- Vancouver ---
+  - osm_id: 507979055        # Trans-Canada WB @ Second Narrows — lanes undercount (known_osm_issues #3)
+    lanes: 3
+    note: "OSM lanes=2 but BC MoTI measured 3 WB lanes (P-15-21/22/23)"
+
+  # --- Tartu ---
+  - osm_id: 1429337399       # underground-parking ramp mis-tagged layer=-1 for its WHOLE length
+    layer: 0                 # (known_osm_issues #4, CONFIRMED) — sits at grade where it meets the
+    note: "service=driveway ramp tagged layer=-1 end-to-end though its junction end is at grade (joins the level-0 driveway 1429337400 at a shared node); no tunnel/bridge structure. Set to 0."
+
+  # --- Monaco ---
+  - osm_id: 1435532404       # Boulevard du Larvotto, roundabout entry - lanes=2 on a 1-lane roundabout (known_osm_issues #9)
+    lanes: 1
+    note: "OSM lanes=2 (v3, 2026-06-09); Street View shows one lane and the neighbouring roundabout ways 1435532402/3 have lanes=1"
+  - osm_id: 93137596         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane; the separate sidewalk 1342546102 runs ~3.3 m from the road line"
+  - osm_id: 93137569         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137578         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137560         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 50501898         # tertiary_link, one-way - lanes=2 from the 2015 mass edit (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, changeset 32866762 (2015-07-25); drawn wider than the road in the level editor (2026-10-09)"
+  - osm_id: 25103774         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 35092477         # Boulevard Louis II, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 51691775         # secondary_link (no name), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes (from the 2015 changeset 32866762); one lane"
+  - osm_id: 503462464        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane; Street View: one car lane + the bike lane on the left (OSM lanes counts motor lanes only)"
+  - osm_id: 1238339144       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane; Street View: one car lane + the bike lane on the left (OSM lanes counts motor lanes only)"
+  - osm_id: 50501897         # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 93137621         # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 182700002        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 182700008        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462466        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462468        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503633031        # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 1131276184       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 1238339145       # Avenue Princesse Grace, one-way - lanes=2 counts its left bike lane (cycleway:left=lane) as a car lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes, cycleway:left=lane: the avenue's mappers count the bike lane in lanes (Street View: two lanes in all); one car lane + the bike lane"
+  - osm_id: 503462476        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 503462459        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 503462460        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 804900035        # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 4229900          # Avenue Albert II roundabout - no lanes tag (default 1); Street View: two lanes (known_osm_issues #11)
+    lanes: 2
+    note: "junction=roundabout without lanes; Street View shows a two-lane ring; the road entering it (92627408) has lanes=2"
+  - osm_id: 93137576         # Avenue Princesse Grace, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 120062272        # Tunnel Aureglia, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062660        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 1024393368       # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062661        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062658        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062662        # Boulevard du Larvotto (tunnel), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 177425460        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 1024393367       # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 120062663        # Tunnel Aureglia, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View: one lane all along Tunnel Aureglia - Boulevard du Larvotto - Tunnel Aureglia"
+  - osm_id: 93137600         # primary_link by the Larvotto roundabout: gone - the roundabout was rebuilt smaller (known_osm_issues #12)
+    exclude_modes: [driving, cycling, walking]
+    note: "Street View 2026: the roundabout is smaller and this link is not there (OSM last changed it 2023-12); fix the geometry in OSM"
+  - osm_id: 254596873        # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137568         # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 93137585         # primary (no name, by Boulevard du Larvotto), one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 353889170        # Boulevard du Larvotto, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+  - osm_id: 1470365900       # Boulevard Louis II - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2; Street View shows one lane"
+  - osm_id: 788120420        # Boulevard Princesse Charlotte, one-way - lanes=2 where Street View shows one lane (known_osm_issues #10)
+    lanes: 1
+    note: "OSM lanes=2, oneway=yes; Street View shows one lane"
+
+
+  - osm_id: 423632264        # Boulevard Charles III, east-bound before the car park ramp and Tunnel de Serravalle
+    turn_lanes_forward: "left|through;right"
+    note: "2026-10-10 checked on the lane map and Street View: the left lane only turns left into the car park's entry ramp (way 172533153; its left+straight arrow is painted before, where the road forks into two lanes), the right lane goes straight on or right into Tunnel de Serravalle; OSM through|right"
+  - osm_id: 4227277          # Rue de la Colle, south-bound from Rue du Rocher: no arrows painted
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10 Street View: an ordinary two-lane road, no arrows before Rue du Rocher or after; OSM turn:lanes left|through"
+  - osm_id: 176086162        # Avenue Prince Pierre, west-bound before the fork with Rue de la Colle: its arrows are the fork's
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10: OSM left|through describes the fork ~40 m on, at the end of way 503813539, which carries the same arrows (left lane into Rue de la Colle, right lane straight on, confirmed); this way's own end has one way out"
+  - osm_id: 503753416        # primary link (destination Nice): its arrows are the fork's, at the end of way 1212029943
+    turn_lanes_forward: "none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM left|through describes the fork at the end of way 1212029943, which carries the same arrows; this way's own end has one way out"
+  - osm_id: 507581437        # Boulevard Princesse Charlotte (5 m): its arrows are the fork's, at the end of way 792870577
+    turn_lanes_forward: "none|none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 792870577, which carries the same arrows; this way's own end has one way out"
+  - osm_id: 788120422        # Boulevard Princesse Charlotte: its arrows describe the fork after way 39838824
+    turn_lanes_forward: "none|none|none"
+    note: "2026-10-10, from the data (not checked in Street View): OSM |through;slight_right| describes the fork at the end of way 39838824 (2 lanes, no arrows); this way's own end has one way out"
+  - osm_id: 507581429        # Boulevard Princesse Charlotte before Boulevard du General Leclerc: the bus lane turns right
+    turn_lanes_forward: "through|through;right|right"
+    note: "2026-10-10, from the data (not checked in Street View; the aerial image is in shadow): three lanes (two car lanes, the bus lane) meet two roads of two lanes each, straight on and Leclerc; only a bus lane turning right fits both with OSM's through|through;right| (SUMO could not apply three straight lanes into two); 6 bus routes turn right here"
+  # --- Monaco / Beausoleil ---
+  - osm_id: 138590891        # building=yes from the 2011 French cadastre under the Avenue de France interchange (known_osm_issues)
+    remove: true
+    note: "cadastre outline under the bridge deck a1 (41 % of it under the deck); Kaveh, 2026-10-17: remove it"
+  # --- Vancouver, Granville Bridge and Fir Street (known_osm_issues #13): moved here from urbanstyle's corrections/lanes.json on
+  # 2026-10-19, so that SUMO (duckosm gmns) builds these lanes itself and gives their geometry ---
+  - osm_id: 473319095
+    lanes: 2
+    note: "Fir Street ramp of the Granville Bridge on the ground: 2 lanes on the 2018 aerial photo; OSM has no lanes tag"
+
+  - osm_id: 1316244492
+    lanes_forward: 2
+    lanes_backward: 2
+    note: "Granville Street, Granville Bridge arm a8: 2 lanes each way; OSM lanes=2 in all"
+
+  - osm_id: 37226820
+    lanes: 2
+    note: "Granville Bridge ramp a3, last part: 2 lanes, checked by Kaveh; OSM lanes=1"
+
+  - osm_id: 1419040137
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a9: 2 lanes backward, checked by Kaveh; OSM lanes:backward=1"
+
+  - osm_id: 1419040132
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a10: 3 forward, 2 backward, checked by Kaveh; OSM 2 and 1"
+
+  - osm_id: 1285848467
+    lanes: 3
+    note: "Granville Bridge a12: 3 lanes, checked by Kaveh; OSM lanes=2"
+
+  - osm_id: 1419040133
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a10: 3 forward, 2 backward, checked by Kaveh; OSM lanes=4 in all"
+
+  - osm_id: 1419040138
+    lanes_forward: 3
+    lanes_backward: 2
+    note: "Granville Bridge a10, the 19 m between ways 1419040133 and 1419040132: 3 forward as both neighbours, so no lane drops for 19 m"
+
+  - osm_id: 35354210
+    lanes: 2
+    note: "Granville Bridge ramp a2 (4th Avenue): two lanes past the gore with a7 on the 2018 aerial photo (Kaveh, 2026-10-12); OSM lanes=1"
+
+  - osm_id: 256879265          # Granville Bridge north-bound, before Hemlock: its right lane does not end (known_osm_issues #23)
+    turn_lanes_forward: "none|none|none"
+    note: "OSM turn:lanes ||merge_to_left, but the next way 1285848467 has 3 lanes (checked by Kaveh, above) and the 2018 aerial photo shows the right lane going on; SUMO ended it and moved every lane one to the right (Kaveh, 2026-10-22)"
+  - osm_id: 1419040131         # Granville Bridge ramp a3: its right lane does not end (known_osm_issues #23)
+    turn_lanes_forward: "none|none"
+    note: "OSM turn:lanes |merge_to_left, but the next way 37226820 has 2 lanes (checked by Kaveh, above); SUMO ended the lane and moved lane 1 into lane 2 (Kaveh, 2026-10-22)"
+  - osm_id: 992936499          # Granville Bridge a4 before the west ramps fork: lane 1 to a2, lane 2 to a7 (known_osm_issues #24)
+    turn_lanes_forward: "slight_left|slight_right"
+    note: "OSM has no turn:lanes here, and SUMO split lane 2 into a7 and a2; only lane 1 goes to a2 and then splits into a2's two lanes, lane 2 goes to a7 (Kaveh, 2026-10-22)"
+
+  - osm_id: 299511148
+    lanes: 3
+    note: "Fir Street south of the Granville Bridge ramp: the ramp's 2 lanes and Fir Street's lane run on as 3 (Kaveh, 2026-10-15); OSM lanes=2"
+
+  - osm_id: 1210125710
+    lanes_forward: 2
+    lanes_backward: 3
+    note: "Fir Street south of the left-turn pocket: 2 southbound, 3 northbound on the 2018 aerial photo (Kaveh, 2026-10-15); OSM 1 + 3"
+
+  - osm_id: 1210125711
+    lanes_forward: 2
+    lanes_backward: 2
+    note: "Fir Street: 2 lanes each way on the 2018 aerial photo (Kaveh, 2026-10-15); OSM 1 + 2"
+
+  - osm_id: 37127118
+    lanes_forward: 2
+    lanes_backward: 2
+    note: "West 5th Avenue east of Fir Street: 2 lanes each way in Street View, also through the junction (Kaveh, 2026-10-16); OSM lanes=2"
+  - osm_id: 1419040127       # Granville Bridge northbound into the north fork (n266729860), where Seymour leaves
+    turn_lanes_forward: "through|through;right|right"
+    note: "the middle lane is the shared lane (Granville St or Seymour), the right lane goes to Seymour (Kaveh, 2026-10-19); OSM has no turn:lanes, and SUMO then fed both Seymour lanes from the right lane, across the middle lane's path"
+  # --- Stockholm, Norrmalm: Centralbron northwest-bound at Tegelbacken (known_osm_issues #14) ---
+  - osm_id: 4830965          # Centralbron, one-way northwest-bound - lanes=1 where the road has 2
+    lanes: 2
+    note: "Street View (Kaveh, 2026-10-20): 2 lanes; OSM lanes=1. Trafikverket lane 3 + lane 4 = 1195 veh/h, near the 1146 veh/h on the next 2-lane edge 6452632749422867394"
+  - osm_id: 1126757835       # Centralbron, one-way northwest-bound - the 9 m continuation of way 4830965
+    lanes: 2
+    note: "Street View (Kaveh, 2026-10-20): 2 lanes, as way 4830965 before it; OSM lanes=1"
+  # --- Stockholm, Norrmalm: Rödbodgatan is two-way (known_osm_issues #15) ---
+  - osm_id: 23089329         # Rödbodgatan - OSM oneway=yes (northwest), lanes=2
+    oneway: false
+    lanes: 1
+    note: "two-way, 1 lane each way: city tube 01181215 (Dec 2020) counted about 180 veh/h in each direction; Street View (Kaveh, 2026-10-20) shows a van going southeast"
+  # --- Stockholm, Norrmalm: Fredsgatan is a car road (known_osm_issues #16) ---
+  - osm_id: 755033491        # Fredsgatan - OSM highway=pedestrian, so it was in driving.private_edges
+    tags: {highway: unclassified, oneway: "yes", "oneway:bicycle": "no"}
+    note: "one-way east (the way is drawn west to east, 180929 -> 527259467): NVDB prohibited_direction_fwd=-1 on all its segments, drawn east to west (fetching-sweden-data norrmalm_traffic.duckdb, 2026-10-20). oneway:bicycle=no keeps the OSM state for cyclists (bicycle=yes, both ways) until Kaveh decides. A car road: Street View (Kaveh, 2026-10-20) shows Fredsgatan painted on the road with turn arrows for cars, Google 3D shows the whole street drivable; city tubes counted 200-400 veh/h (01182324: 406 veh/h, 2019; 01182425, 01182526, 01182691, 2017-2018). Class as its car neighbours Rödbodgatan, Malmtorgsgatan and Gustav Adolfs Torg"
+  # --- Stockholm, Norrmalm: car link Vasabron -> Fredsgatan, south of the building at the bridge (known_osm_issues #17) ---
+  - osm_id: 40274443         # cycleway 266272124 -> 180929: keeps its west part, a cycle path only; the east part is new way 9000003678314
+    keep_nodes: [266272124, 1740740220]
+    note: "the east part, 1740740220 -> 180929, is a car road (NVDB segment 3678314), so it is the new way 9000003678314; the west part (15.5 m, across the southbound Vasabron carriageway) is not in NVDB"
+  # --- Stockholm, Norrmalm: one-way streets that OSM has as two-way (known_osm_issues #19-#22) ---
+  # `tags`, not `oneway: true`: the tag changes only the cars (walking ignores it); oneway:bicycle=no keeps the OSM state for cyclists, as on Fredsgatan
+  - osm_id: 382749409        # Malmtorgsgatan, north part - no oneway tag, lanes 1 each way
+    tags: {oneway: "yes", lanes: "2", "oneway:bicycle": "no"}
+    note: "one-way south with 2 lanes (the way is drawn north to south, 498348022 -> 180927): Street View (Kaveh, 2026-10-20); NVDB one-way south; city tube 01182290 on the next way 1126945063 (already one-way) counts only the direction toward Gustav Adolfs torg"
+  - osm_id: 38048758         # Olofsgatan, 33 m at Olof Palmes Gata - no oneway tag
+    tags: {oneway: "-1", "oneway:bicycle": "no"}
+    note: "one-way north-west, toward Olof Palmes Gata; the way is drawn south-east (21665015 -> 447281012), so oneway=-1: Street View (Kaveh, 2026-10-20); NVDB one-way north-west; the only other edge at the south-east end (way 38048759) is one-way north-west into this piece"
+  - osm_id: 17404226         # Jakobsbergsgatan, Biblioteksgatan to Birger Jarlsgatan - no oneway tag
+    tags: {oneway: "yes", "oneway:bicycle": "no"}
+    note: "one-way east (the way is drawn west to east, 11418032300 -> 180202270): Street View (Kaveh, 2026-10-20); NVDB one-way east from Norrlandsgatan. The west end connects to no car road in OSM, so no car can enter it (accepted; the NVDB link from Norrlandsgatan is OSM pedestrian way 39691465, not added)"
+  - osm_id: 569074663        # Mellangatan, 58 m tunnel (layer -1) - no oneway tag
+    tags: {oneway: "yes", "oneway:bicycle": "no"}
+    note: "one-way north (the way is drawn south to north, 5473717483 -> 5473717482): Street View (Kaveh, 2026-10-20); NVDB one-way north. It connects to no other car road in OSM"
+
+
+
+# Synthetic turn restrictions — for junctions where OSM is missing a `type=restriction` relation that
+# physically exists, so duckOSM generates a forbidden movement. Injected into the restriction pipeline
+# (RestrictionProcessor) so the edge graph, routing, GMNS movements, exports and the lane viz all drop
+# the turn. Each rule maps from_way -> via_node -> to_way to edge ids (handles merged/reverse edges),
+# and is a global no-op in areas that don't contain the ways. See docs/design/turn-restriction-overrides.md.
+#   from_way, via_node, to_way  (required, OSM ids) · restriction (no_u_turn|no_left_turn|no_right_turn|
+#   no_straight_on|only_*, default no_u_turn) · note
+# Takes effect on the next driving rebuild (RestrictionProcessor runs it, then the edge graph drops it).
+turn_restrictions:
+  # --- Tartu ---
+  - from_way: 1307524008     # no U-turn onto the opposing Tähe carriageway (known_osm_issues #6)
+    via_node: 330045016
+    to_way: 997402723
+    restriction: no_u_turn
+    note: "OSM lacks the restriction; the -166° turn from one-way link onto opposing/westbound Tähe is forbidden"
+
+
+# New ways - the roads OSM does not have (docs/design/osm_override_new_ways.md). Added to raw.ways before any step reads it.
+#   id         (required) 9,000,000,000,000 or more, used one time only; never change it (edge_ids hash it).
+#              Convention here: 9,000,000,000,000 + the NVDB element id the way comes from
+#   source     free text: where the way comes from (nvdb:<id>, ...)
+#   nodes      in the way's direction: OSM node ids, or [lon, lat] for a new node (id: way id * 1000 + position).
+#              Both ends must be OSM nodes, or the way is a dead end there
+#   tags       OSM tags · tags_from: an OSM way whose tags (before any fix) the new way starts with · note
+new_ways:
+  # --- Stockholm, Norrmalm: Vasabron -> Fredsgatan (known_osm_issues #17) ---
+  - id: 9000003678314
+    source: nvdb:3678314
+    nodes: [1740740220, 1740740223, 180929]
+    tags_from: 40274443
+    tags: {highway: unclassified, oneway: "yes", lanes: "2", "oneway:bicycle": "no"}
+    note: "the east part of OSM cycleway 40274443, cut off by keep_nodes. NVDB segment 3678314 (Fredsgatan, tertiary, prohibited_direction_fwd=-1, drawn east to west): one-way east, from the northbound Vasabron carriageway (node 1740740220) to the Fredsgatan west end; agrees with Fredsgatan tube 01182324/2 'Mot Rödbodtorget'. Lanes 2 from the Google 3D top view (Kaveh, 2026-10-20). Class as Fredsgatan. oneway:bicycle=no keeps the cycle path's two directions (OSM: two-way cycleway)"
+  # --- Stockholm, Norrmalm: Rödbodtorget, east of the building at the north end of Vasabron (known_osm_issues #18) ---
+  - id: 9000001049107
+    source: nvdb:1049107,1049108,1049109,1049110
+    nodes: [180929, [18.063835, 59.328511], [18.063846, 59.328529], [18.063853, 59.328556], [18.063849, 59.328571],
+            [18.063839, 59.328613], [18.063710, 59.328759], [18.063580, 59.328889], [18.063567, 59.328902], 180933]
+    tags: {highway: tertiary, oneway: "yes", name: "Rödbodtorget"}
+    note: "NVDB branch B of Rödbodtorget (tertiary, prohibited_direction_bwd=-1: one-way north), 69 m. Starts at OSM node 180929 (12.8 m from the NVDB start), ends at OSM node 180933 (1.9 m from the NVDB end); the inner points are the NVDB vertices. Branch A (NVDB 3678311, 3929353, 3678312) is left out: it would cut Tegelbacken edge 4271686175640876552 (Kaveh, 2026-10-20)"

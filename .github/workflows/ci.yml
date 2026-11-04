@@ -27,6 +27,19 @@ jobs:
       # python -m pytest puts the repo root on the path: tests import each other as `tests.test_gmns`
       - run: python -m pytest tests/ -q -rs
 
+  # The Rust engine (rust/, docs/design/rust_engine_move.md): the golden tests of the crates. One invocation compiles DuckDB one time.
+  rust:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build
+        working-directory: rust
+
   package:
     runs-on: ubuntu-latest
     steps:

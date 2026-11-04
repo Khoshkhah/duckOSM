@@ -1,0 +1,35 @@
+[package]
+name = "duckosm-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["duckdb", "zstd", "tzf"]
+# the time zone of an area from the world map of tzf-rs (2.7 MB with gzip): natively; the browser build uses the
+# page's time zone table (www/timezones.json) instead
+tzf = ["dep:tzf-rs"]
+duckdb = ["dep:duckosm-duckdb"]
+# Pure-Rust compression for the GeoParquet files (WebAssembly); the default is zstd.
+snap = ["duckosm-parquet/snap"]
+# zstd is a C library: the browser build (duckosm-wasm) leaves it out and uses snap.
+zstd = ["duckosm-parquet/zstd"]
+
+[dependencies]
+duckosm-core = { path = "../duckosm-core" }
+duckosm-parquet = { path = "../duckosm-parquet", default-features = false }
+duckosm-duckdb = { path = "../duckosm-duckdb", optional = true }
+yaml-rust2 = "0.13"
+# the area's time zone in main.visualization_metadata, from the coordinates (duckOSM uses timezonefinder);
+# without the command-line program of the crate
+tzf-rs = { version = "2.1", default-features = false, features = ["bundled"], optional = true }
+# main.boundary keeps the order of the properties of the file, as GDAL does
+# the DEM of the elevation step (a GeoTIFF, uncompressed or deflate)
+tiff = { version = "=0.11.3", default-features = false, features = ["deflate"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place
+roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f0a161b9abd2d993c7963b909de0a9a4322f38bf" }
+
+[dev-dependencies]
+# the tests read the .duckdb file that the build writes (the version of duckosm-duckdb)
+duckdb = { version = "=1.10506.1", features = ["bundled"] }

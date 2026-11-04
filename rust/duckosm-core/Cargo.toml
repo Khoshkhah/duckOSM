@@ -1,0 +1,21 @@
+[package]
+name = "duckosm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["pbf"]
+# Reading a .osm.pbf file. Off for builds that get their data from somewhere else (WebAssembly).
+pbf = ["dep:osmpbf", "dep:rayon"]
+
+[dependencies]
+rstar = "0.12"
+osmpbf = { version = "0.3.8", optional = true }
+# the passes of the cut to a boundary decode the blocks in parallel (the same rayon as osmpbf)
+rayon = { version = "1.12", optional = true }
+# OSM JSON (the output format of the Overpass API): the input of the browser page from a place name
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# the zlib blobs of the .osm.pbf that cutfile.rs writes: pure Rust, so every target writes the same bytes
+miniz_oxide = "0.8"

@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+# The Rust engine of duckOSM (docs/design/rust_engine_move.md). Imported from the repository duckosm-rust, commit 53b3196.
+# The browser page (crates/duckosm-wasm) stays in duckosm-rust and takes these crates as a Git dependency.
+members = ["duckosm-core", "duckosm-parquet", "duckosm-duckdb", "duckosm-build", "duckosm-cli", "duckosm-py"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+authors = ["Kaveh Khoshkhah"]
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = "thin"
+codegen-units = 16

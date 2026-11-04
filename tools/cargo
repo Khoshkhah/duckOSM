@@ -1,0 +1,56 @@
+#!/bin/sh
+# cargo with one shared build folder per repository (docs/development.md, "One shared build folder").
+# Install: install -m 755 tools/cargo ~/.local/bin/cargo (~/.local/bin must be before ~/.cargo/bin in PATH).
+#
+# In the main checkout or a worktree of a repository in REPOS, the workspace's target/ is a link to
+# <main checkout>/.shared-target, so the dependencies compile one time for all worktrees. A workspace that has a
+# target/ folder of its own keeps it. Cargo finds a crate "fresh" from the file times, and it identifies a workspace
+# crate by its relative path: a worktree with older files then gets the binary of the worktree that built last.
+# Thus, when the workspace that builds changes, this script touches the tracked files of the new workspace (its
+# crates compile again, the dependencies do not). A lock lets the cargo commands of only one workspace use the
+# folder at a time. Off: delete this file.
+REPOS="$HOME/projects/duckosm-rust $HOME/projects/roadstyle $HOME/projects/duckOSM"
+real=$HOME/.cargo/bin/cargo
+[ -n "$CARGO_SHARED_TARGET_HELD" ] && exec "$real" "$@"
+
+cmd= manifest= td=$CARGO_TARGET_DIR skip= prev=
+for a in "$@"; do
+  [ "$a" = -- ] && break
+  case $prev in --manifest-path) manifest=$a ;; --target-dir) td=$a ;; esac
+  case $a in --manifest-path=*) manifest=${a#*=} ;; --target-dir=*) td=${a#*=} ;; esac
+  prev=$a
+  # the subcommand: the first word that is not an option and not the value of a global option
+  if [ -n "$skip" ]; then skip=
+  elif [ -z "$cmd" ]; then
+    case $a in --config|-Z|-C|--color|--explain) skip=1 ;; [-+]*) ;; *) cmd=$a ;; esac
+  fi
+done
+case $cmd in b|build|c|check|clippy|d|doc|fix|r|run|rustc|rustdoc|t|test|bench) ;; *) exec "$real" "$@" ;; esac
+
+dir=.
+[ -n "$manifest" ] && dir=$(dirname -- "$manifest")
+common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exec "$real" "$@"
+repo=$(dirname -- "$common")
+case " $REPOS " in *" $repo "*) ;; *) exec "$real" "$@" ;; esac
+shared=$repo/.shared-target
+if [ -n "$manifest" ]; then ws=$("$real" locate-project --workspace --message-format plain --manifest-path "$manifest")
+else ws=$("$real" locate-project --workspace --message-format plain); fi 2>/dev/null || exec "$real" "$@"
+ws=$(dirname -- "$ws")
+[ -e "$ws/target" ] || [ -L "$ws/target" ] || { mkdir -p "$shared" && ln -s "$shared" "$ws/target"; }
+td=$(realpath -m -- "${td:-$ws/target}")
+case $td in "$shared"|"$shared"/*) ;; *) exec "$real" "$@" ;; esac
+
+# one marker and one lock for all of .shared-target (also for a --target-dir in it, for example target/threads)
+mkdir -p "$shared"
+exec 8>"$shared/.gate" 9>>"$shared/.lock"
+flock 8
+last=$(cat "$shared/.last-tree" 2>/dev/null)
+if [ "$last" != "$ws" ]; then
+  flock -n 9 || { echo "cargo: waits for the cargo commands of $last to end" >&2; flock 9; }
+  (cd "$ws" && git ls-files -z -- . | xargs -0 -r touch -c --)
+  printf '%s\n' "$ws" >"$shared/.last-tree"
+fi
+flock -s 9
+exec 8>&-
+export CARGO_SHARED_TARGET_HELD=1
+exec "$real" "$@"

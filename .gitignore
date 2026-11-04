@@ -44,3 +44,7 @@ config/*.yaml
 !config/template.yaml
 !config/sample_monaco.yaml
 /*.duckdb
+
+# Rust engine (rust/): the build folder and the shared build folder of tools/cargo
+rust/target
+.shared-target/
