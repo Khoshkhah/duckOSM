@@ -1,0 +1,29 @@
+# duckOSM 0.6.0: only the network step of the driving mode, to compare with duckosm-rust.
+# The runner (run_bench.py) writes a copy of this file with `pbf_path`, `name` and `output_path` set.
+# No boundary: no osmium cut and no component filter. The rest of the pipeline is off, except the
+# steps that duckOSM cannot switch off (the lane profile, the time zone, the metadata, the macros).
+name: bench
+output_path: .
+source:
+  type: pbf
+  pbf_path: PBF
+modes:
+  - driving
+options:
+  merge_segments: false        # duckosm-rust has no merge_segments yet
+  global_junctions: true
+  build_graph: false           # the edge graph of legal turns
+  h3_indexing: false
+  process_speeds: false
+  calculate_costs: false
+  extract_restrictions: false
+  functional_types: false
+  infer_separate_sidewalks: false
+  build_features: false
+  bus_routes: false
+  levels: false
+  sea: false
+clip:
+  connectivity_rescue: false
+validation:
+  enabled: false

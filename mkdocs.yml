@@ -114,6 +114,7 @@ plugins:
 exclude_docs: |
   design/
   lane_map.md
+  rust/
 
 nav:
   - Home: index.md

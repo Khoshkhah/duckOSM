@@ -1,0 +1,11 @@
+[package]
+name = "duckosm-duckdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+duckdb = { version = "=1.10506.1", features = ["bundled", "parquet"] }
+
+[dev-dependencies]
+duckosm-core = { path = "../duckosm-core", default-features = false }

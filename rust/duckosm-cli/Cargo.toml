@@ -1,0 +1,17 @@
+[package]
+name = "duckosm-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "duckosm-rust"
+path = "src/main.rs"
+
+[features]
+default = ["duckdb"]
+duckdb = ["duckosm-build/duckdb"]
+
+[dependencies]
+duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
+clap = { version = "4", features = ["derive"] }

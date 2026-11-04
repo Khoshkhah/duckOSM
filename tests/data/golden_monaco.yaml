@@ -1,0 +1,16 @@
+# Golden build for duckosm-rust: Monaco, driving only, no OSM fixes. Run from this folder.
+name: monaco_golden
+output_path: .
+source:
+  type: pbf
+  pbf_path: /home/kaveh/projects/duckOSM/data/sample/monaco.osm.pbf
+boundary:
+  path: /home/kaveh/projects/duckOSM/data/sample/monaco.geojson
+modes:
+  - driving
+options:
+  build_features: false
+  bus_routes: false
+  levels: false
+clip:
+  connectivity_rescue: false

@@ -1,0 +1,19 @@
+[package]
+name = "duckosm-parquet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["zstd"]
+# zstd is a C library: it does not build for WebAssembly. Use "snap" (pure Rust) there.
+zstd = ["parquet/zstd"]
+snap = ["parquet/snap"]
+
+[dependencies]
+duckosm-core = { path = "../duckosm-core", default-features = false }
+arrow-array = "=60.0.0"
+arrow-schema = "=60.0.0"
+parquet = { version = "=60.0.0", default-features = false, features = ["arrow"] }
+# the rows of visualization.edge_levels (the same commit as duckosm-build)
+roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f0a161b9abd2d993c7963b909de0a9a4322f38bf" }

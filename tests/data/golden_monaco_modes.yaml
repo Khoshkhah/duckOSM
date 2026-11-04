@@ -1,0 +1,31 @@
+# Golden build for duckosm-rust, three modes. Monaco, the sample file of duckOSM, no boundary (no cut,
+# no component filter), no OSM fixes. Change `merge_segments` to true for the merge golden.
+# Run: python bench/python_steps.py <this file> --no-lane-profile    (in an empty folder; set name)
+name: GOLDEN
+output_path: .
+source:
+  type: pbf
+  pbf_path: /home/kaveh/projects/duckOSM/data/sample/monaco.osm.pbf
+modes:
+  - driving
+  - walking
+  - cycling
+options:
+  merge_segments: false
+  global_junctions: true
+  infer_separate_sidewalks: false   # a spatial rule that duckosm-rust does not have yet
+  functional_types: false
+  cycling_dismount: true
+  build_graph: false
+  h3_indexing: false
+  process_speeds: false
+  calculate_costs: false
+  extract_restrictions: false
+  build_features: false
+  bus_routes: false
+  levels: false
+  sea: false
+clip:
+  connectivity_rescue: false        # the dangling-path connector is not in duckosm-rust yet
+validation:
+  enabled: false

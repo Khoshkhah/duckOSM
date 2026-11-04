@@ -1,0 +1,17 @@
+variant	mode	table	rows	checksum
+sample	driving	edge_graph	7348	f5333786129af741
+sample	driving	turn_permission	0	0
+sample	driving	turn_restrictions	43	fef32fd449fb171d
+sample	driving	turn_path_restrictions	0	0
+sample	walking	edge_graph	36850	66ef0acffedf8e05
+sample	walking	turn_permission	0	0
+sample	cycling	edge_graph	32750	550f4d6c9571ece
+sample	cycling	turn_permission	0	0
+cut	driving	edge_graph	6567	da6f447106ae3895
+cut	driving	turn_permission	0	0
+cut	driving	turn_restrictions	38	234919293260c7f0
+cut	driving	turn_path_restrictions	0	0
+cut	walking	edge_graph	34764	fb5412a0ea8b8e7c
+cut	walking	turn_permission	0	0
+cut	cycling	edge_graph	31013	1eb0e4b33a7e9767
+cut	cycling	turn_permission	0	0
