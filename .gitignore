@@ -48,3 +48,5 @@ config/*.yaml
 # Rust engine (rust/): the build folder and the shared build folder of tools/cargo
 rust/target
 .shared-target/
+src/duckosm/_rust*.so
+src/duckosm/_rust*.pyd

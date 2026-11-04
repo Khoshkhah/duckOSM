@@ -48,7 +48,7 @@ class Options:
     process_speeds: bool = True
     extract_restrictions: bool = True
     calculate_costs: bool = True
-    engine: str = "python"                 # 'python' (SQL in DuckDB) or 'rust': duckosm-rust builds the network step (edges, private_edges, nodes, edge_id_map) and Python runs the other steps. Needs the module duckosm_rust. See docs/design/rust_engine.md
+    engine: str = "python"                 # 'python' (SQL in DuckDB) or 'rust': the Rust engine (duckosm._rust) builds the network step (edges, private_edges, nodes, edge_id_map) and Python runs the other steps. See docs/design/rust_engine.md
     memory_limit: Optional[str] = None
     threads: Optional[int] = None
     simplify_batches: int = 0

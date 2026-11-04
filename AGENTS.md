@@ -8,7 +8,7 @@ To *use* duckOSM rather than change it, read the agent skill [`skills/duckosm/SK
 Use the project venv — `duckosm` and `pytest` are only on `PATH` when it's active.
 
 ```bash
-pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim schema tests), networkx
+pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim schema tests), networkx. It builds rust/ with maturin (needs a Rust toolchain): run it again after a change in rust/
 
 .venv/bin/python -m pytest tests/ -q                          # full suite
 .venv/bin/python -m pytest tests/test_merge_segments.py -q    # one file
@@ -42,8 +42,8 @@ list from the config and executes it; read it first — step order carries real 
 - **Clip mode** (`source.type: duckdb`): no PBF — `DuckdbClipper` copies rows out of an attached
   parent build (e.g. `sodermalm ← sweden`), then ComponentFilter/validate. Edge ids are preserved
   verbatim; `duckosm extract` does the same ad hoc.
-- **Rust engine** (`options.engine: rust`, `--engine rust`): `duckosm_rust.build()` (the wheel of the
-  `duckosm-rust` repository) builds the network step for all modes at once and writes GeoParquet;
+- **Rust engine** (`options.engine: rust`, `--engine rust`): `duckosm._rust.build()` (the Rust code in
+  `rust/`, built into the wheel by maturin) builds the network step for all modes at once and writes GeoParquet;
   `rust_engine.py` loads `edges`, `private_edges`, `nodes` and `edge_id_map` into each mode's schema.
   RoadFilter still runs (`ways`, `way_nodes` for the restrictions), and the steps after the network
   (restrictions, EdgeGraph, ComponentFilter, H3, …) run in Python as before. `docs/design/rust_engine.md`.

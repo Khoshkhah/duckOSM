@@ -1,6 +1,7 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
+# one wheel with the Rust engine in it: the module duckosm._rust (rust/duckosm-py, abi3). docs/design/rust_engine_move.md
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
 
 [project]
 name = "duckosm"
@@ -48,8 +49,10 @@ Homepage = "https://github.com/khoshkhah/duckOSM"
 Repository = "https://github.com/khoshkhah/duckOSM"
 Issues = "https://github.com/khoshkhah/duckOSM/issues"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-duckosm = ["templates/*.yaml", "templates/*.html"]    # init-config template; the route planner page
+[tool.maturin]
+python-source = "src"
+module-name = "duckosm._rust"
+manifest-path = "rust/duckosm-py/Cargo.toml"
+# no DuckDB inside the module: the Python package brings its own duckdb, and the importer asks for GeoParquet files only
+no-default-features = true
+profile = "release"    # a debug build of the engine is slow, also in pip install -e .

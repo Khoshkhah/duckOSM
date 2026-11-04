@@ -1,14 +1,12 @@
-"""options.engine: rust builds the network step with duckosm-rust (the module duckosm_rust). The
+"""options.engine: rust builds the network step with the Rust engine (the module duckosm._rust). The
 output file must have the same tables as the Python build: the network tables that Rust writes, and
 the tables that the later Python steps make from them. See docs/design/rust_engine.md."""
 from pathlib import Path
 
 import duckdb
-import pytest
 
 from duckosm import Config, DuckOSM
-
-pytest.importorskip("duckosm_rust")
+from duckosm import _rust  # noqa: F401  # no skip: every wheel has the module, and a missing one is a failure
 
 ROOT = Path(__file__).resolve().parents[1]
 MODES = ("driving", "walking", "cycling")

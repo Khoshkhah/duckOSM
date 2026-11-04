@@ -1,7 +1,7 @@
-//! Python module `duckosm_rust`: the network step of duckOSM.
+//! Python module `duckosm._rust`: the Rust engine of duckOSM (the network step).
 //!
 //! ```python
-//! import duckosm_rust as dr
+//! from duckosm import _rust as dr
 //! res = dr.build("monaco.osm.pbf", "out/", modes=["driving", "walking"])
 //! res["modes"]["driving"]["edges"]      # 3092
 //! dr.edge_id_hash(osm_id, source, target)
@@ -159,7 +159,7 @@ fn edge_id_hash(osm_id: i64, source: i64, target: i64) -> i64 {
 }
 
 #[pymodule]
-fn duckosm_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(build_from_config, m)?)?;
     m.add_function(wrap_pyfunction!(edge_id_hash, m)?)?;
