@@ -90,6 +90,17 @@ This move changes one thing: the network step and its tables (section "The test"
 
 The Rust engine replaces GraphBuilder, GraphSimplifier, PathConnector, DismountMarker, SpeedProcessor, CostCalculator, FunctionalType and the private split, as `docs/design/rust_engine.md` says. It also replaces RestrictionProcessor and EdgeGraphBuilder.
 
+### Decision: all parts go to Rust, one by one
+
+Kaveh wants every part on the Rust engine by default. The plan does this in stages, after the network step (M4). Each stage is one pull request with its own golden test on Monaco and Tartu. The default of a stage changes only when the test passes. The Python code stays as the reference for one release.
+
+| Stage | Part | Why this order |
+|---|---|---|
+| R1 | Bus routes | Small. `bus.rs` is done and was checked in duckosm-rust. |
+| R2 | Levels | `levels.rs` is done and was checked. It uses `roadstyle-levels`, so Python no longer calls roadstyle for the build. |
+| R3 | Features (`features.*`) | Large output. It needs `raw.*` or the Rust raw tables. |
+| R4 | `raw.*` and the cut (osmium) | Last. The Rust cut equals osmium on Monaco and Tartu for `complete_ways`. The strategy `smart` needs a check. Then osmium and `ST_READOSM` are not necessary. |
+
 ### The test that proves equal output
 
 `tests/test_engine_rust.py` builds `config/sample_monaco.yaml` with both engines and compares every row of 20 tables (6 tables for each of the three modes, plus 2 turn tables of driving). After the move it changes in three ways:
