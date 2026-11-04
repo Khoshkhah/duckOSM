@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-build"
-version = "0.3.0"
+version = "0.6.1"
 dependencies = [
  "duckdb",
  "duckosm-core",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-cli"
-version = "0.3.0"
+version = "0.6.1"
 dependencies = [
  "clap",
  "duckosm-build",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-core"
-version = "0.3.0"
+version = "0.6.1"
 dependencies = [
  "miniz_oxide 0.8.9",
  "osmpbf",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-duckdb"
-version = "0.3.0"
+version = "0.6.1"
 dependencies = [
  "duckdb",
  "duckosm-core",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-parquet"
-version = "0.3.0"
+version = "0.6.1"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-py"
-version = "0.3.0"
+version = "0.6.1"
 dependencies = [
  "duckosm-build",
  "duckosm-core",

@@ -131,7 +131,7 @@ def _override(cfg, ctx, **values):
               help='The last step: the drawing order of the roads (visualization.edge_levels), with your edits kept; '
                    'turn it off for a big area and run `duckosm levels` later')
 @click.option('--engine', type=click.Choice(['python', 'rust']), default=None,
-              help='Who builds the network step: python (SQL in DuckDB) or rust (duckosm-rust; needs the module duckosm_rust). Config key: options.engine')
+              help='Who builds the network step: python (SQL in DuckDB) or rust (the Rust engine, duckosm._rust). Config key: options.engine')
 @click.option('--fixes', type=click.Path(exists=True, dir_okay=False),
               help='Rules file of fixes for OSM errors (config key: osm_overrides)')
 @click.option('--log-file', type=click.Path(dir_okay=False), help='Also write the log to this file')

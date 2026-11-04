@@ -9,7 +9,7 @@ step. Part 2 (2026-10-22, duckosm-rust 0.2.0): the turn restrictions and the edg
 [duckosm-rust](https://github.com/Khoshkhah/duckosm-rust) is the network step of duckOSM in Rust: a cut
 PBF in, the tables `edges`, `private_edges`, `nodes`, `edge_id_map`, `edge_graph`, `turn_permission`,
 `turn_restrictions` and `turn_path_restrictions` out, with the same `edge_id` values. On Estonia (121 MB PBF, three modes) it takes 19 s and 1.5 GB, and the SQL steps take 1,545 s
-and 10 GB. Its Python module is `duckosm_rust` (the wheel of that repository).
+and 10 GB. Its Python module is `duckosm._rust` (in the `duckosm` wheel; it was `duckosm_rust` before 2026-11-04).
 
 With `options.engine: rust` (CLI `--engine rust`), the build runs the network step in Rust and every other
 step in Python, as before. The output file has the same tables.
@@ -20,7 +20,7 @@ The global steps do not change: connect, the osmium cut, `ST_READOSM` into `raw.
 boundary, the sidewalk rule and `global_junctions`. The later steps need `raw.*` (features, bus routes,
 restrictions), and these steps are cheap.
 
-One new global step, `rust_build`, runs after `global_junctions`. It calls `duckosm_rust.build()` one time
+One new global step, `rust_build`, runs after `global_junctions`. It calls `duckosm._rust.build()` one time
 for all modes, on the cut PBF, with the options of the config (`merge_segments`, `global_junctions`,
 `cycling_dismount`, `infer_separate_sidewalks`, `connectivity_rescue`, `connect_snap_m`,
 `process_speeds`, `calculate_costs`, `functional_types`, `osm_overrides`, `build_graph`,
@@ -53,25 +53,25 @@ ends can have the other direction label (`edge_ref`, `is_reverse`, and the colum
 them). duckOSM does not fix this order; see section 6 of the duckosm-rust design.
 
 `tests/test_engine_rust.py` builds the Monaco sample with both engines and compares the tables, with the
-edge graph and the turn restrictions. It skips when `duckosm_rust` is not installed. The duckosm-rust
-repository also compares the edge graph and the restrictions on Tartu (81 restrictions, 19
+edge graph and the turn restrictions. The test has no mask: the connector labels are equal since commit
+`123910c` (a fixed order of the dangling ends), checked again in step M1 of
+[rust_engine_move.md](rust_engine_move.md). The test does not skip: every wheel has the module. The
+duckosm-rust repository also compared the edge graph and the restrictions on Tartu (81 restrictions, 19
 `turn_permission` rows, 5 via-way paths): every row is equal.
 
 ## Install
 
-The engine needs duckosm-rust 0.2.0 or newer; `rust_engine.module()` checks the version. The wheel is not
-on PyPI yet (the name waits for the DuckDB trademark answer). A tag of duckosm-rust makes a GitHub Release
-with a wheel for Linux, macOS and Windows (the repository is private for now): `pip install` the wheel of
-your system. Or build it from the duckosm-rust repository:
+The Rust code is in `rust/` of this repository, and `maturin` builds it into the module `duckosm._rust` of
+the `duckosm` wheel (no DuckDB inside: the package has its own `duckdb`, and the engine writes GeoParquet
+only). A source install needs a Rust toolchain:
 
 ```bash
-pip install maturin
-maturin build --release --no-default-features -m crates/duckosm-py/Cargo.toml -o wheels   # no DuckDB inside: 2 MB
-pip install wheels/duckosm_rust-*.whl
+pip install -e ".[dev]"      # builds the module in the release profile; run it again after a change in rust/
+maturin build --out wheels   # or: one abi3 wheel, about 6 MB
+python tests/test_wheel.py   # checks the installed module on the Monaco sample
 ```
 
-`--no-default-features` is correct here: duckOSM has its own DuckDB, and the engine needs only the
-GeoParquet output.
+The wheel of the repository `duckosm-rust` (module `duckosm_rust`, last version 0.3.0) is not used any more.
 
 ## Limits
 

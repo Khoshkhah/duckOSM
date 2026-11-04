@@ -1,39 +1,33 @@
-"""The Rust engine (``options.engine: rust``): duckosm-rust builds the network step.
+"""The Rust engine (``options.engine: rust``): the Rust code of this repository (``rust/``) builds the network step.
 
-``duckosm_rust`` (the wheel of the duckosm-rust repository) reads the cut PBF and writes the tables of
+``duckosm._rust`` (the module of the wheel, crate ``rust/duckosm-py``) reads the cut PBF and writes the tables of
 the network step as GeoParquet: ``edges``, ``private_edges``, ``nodes`` and ``edge_id_map`` of each mode,
 with the same ``edge_id`` values as the SQL steps. The importer calls :func:`build_parquet` one time for
 all modes, then :func:`load_mode` for each mode. The other steps of the build run in Python as before.
-See docs/design/rust_engine.md.
+See docs/design/rust_engine.md and docs/design/rust_engine_move.md.
 """
 import logging
-from importlib.metadata import version
 from pathlib import Path
 
 logger = logging.getLogger("duckosm.rust_engine")
 
-MIN_VERSION = (0, 2, 0)        # the edge graph and the turn restrictions came in duckosm-rust 0.2.0
 GRAPH_TABLES = ("edge_graph", "turn_permission", "turn_restrictions", "turn_path_restrictions")
 
 
 def module():
-    """The ``duckosm_rust`` module, or a clear error when it is not installed."""
+    """The ``duckosm._rust`` module, or a clear error when this install has no Rust module."""
     try:
-        import duckosm_rust
+        from duckosm import _rust
     except ImportError as e:
-        raise RuntimeError("options.engine: rust needs the Python module duckosm_rust (the wheel of "
-                           "duckosm-rust; see docs/design/rust_engine.md). Install it, or set "
-                           "options.engine: python") from e
-    have = version("duckosm-rust")
-    if tuple(int(x) for x in have.split(".")[:3]) < MIN_VERSION:
-        raise RuntimeError(f"options.engine: rust needs duckosm-rust {'.'.join(map(str, MIN_VERSION))} or "
-                           f"newer, installed: {have} (see docs/design/rust_engine.md)")
-    return duckosm_rust
+        raise RuntimeError("options.engine: rust needs the module duckosm._rust. It is in every wheel of duckosm; "
+                           "a source install must build it (pip install -e . needs a Rust toolchain). "
+                           "Or set options.engine: python") from e
+    return _rust
 
 
 def build_parquet(config, pbf_path, out_dir) -> dict:
-    """Run the network step of duckosm-rust for every mode of ``config`` on the cut PBF; the GeoParquet
-    files go to ``out_dir``. Returns the summary dict of ``duckosm_rust.build`` (counts and seconds)."""
+    """Run the network step of the Rust engine for every mode of ``config`` on the cut PBF; the GeoParquet
+    files go to ``out_dir``. Returns the summary dict of ``duckosm._rust.build`` (counts and seconds)."""
     o, c = config.options, config.clip
     res = module().build(
         str(pbf_path), str(out_dir), modes=list(config.modes), formats=["geoparquet"], name=config.name,
@@ -45,7 +39,7 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
         functional_types=o.functional_types, osm_overrides=config.osm_overrides,
         build_graph=o.build_graph, extract_restrictions=o.extract_restrictions)
     for what, secs in res.get("seconds", {}).items():
-        logger.info(f"  duckosm-rust {what}: {secs:.2f}s")
+        logger.info(f"  rust {what}: {secs:.2f}s")
     return res
 
 
