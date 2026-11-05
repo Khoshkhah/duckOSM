@@ -92,7 +92,7 @@ const MARKUP = (note) => String.raw`
       <p class="why">Click the road that the turn starts on, or type its way ID.</p>
       <div class="row"><input id="fix-from" type="text" inputmode="numeric" placeholder="From way ID" aria-label="From way ID" style="flex:1"><button id="fix-turn-find" class="btn" type="button">Find turns</button><button id="fix-turn-clear" class="btn" type="button" hidden>Unselect</button></div>
       <p id="fix-turn-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#2563eb"></i>The road the turn starts on</span><span class="legend"><i style="background:#16a34a"></i>Roads that leave the junction</span><span class="legend"><i style="border:3px solid #2563eb;border-radius:50%;background:rgba(37,99,235,.25)"></i>The junction</span><br><span class="muted">Point at a road in the list to outline it on the map.</span></p>
-      <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junctions at the end of the road.</b> Click one to see the roads that leave it.</p><input id="fix-via" type="hidden"><div id="fix-via-list" class="walls" role="listbox" aria-label="Junction"></div></div>
+      <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junction at the end of the road.</b> Pick one to see the roads that leave it. The map shows the junction that you pick.</p><select id="fix-via" aria-label="Junction" style="width:100%"></select></div>
     </section>
     <section class="fsec" id="fix-turnsec" hidden><h3>Rule for each road that leaves the junction</h3><div id="fix-out"></div></section>
     <div class="fix-bar" id="fix-turn-bar" hidden>
@@ -722,16 +722,13 @@ export async function initFixesPanel(root, ctx) {
     const nodes = js.map((r) => String(r.n));
     $("fix-via-row").hidden = $("fix-turnsec").hidden = $("fix-turn-bar").hidden = !nodes.length;
     $("fix-turn-clear").hidden = false; $("fix-turn-legend").hidden = !nodes.length;
+    // a dropdown list: one option for each junction
+    $("fix-via").innerHTML = js.map((r) => `<option value="${r.n}">Junction ${r.n}: ${r.c ? `${plural(r.c, "road")} ${r.c === 1 ? "leaves" : "leave"} it` : "no road leaves it"}</option>`).join("");
     $("fix-via").value = nodes.includes(String(via)) ? String(via) : nodes[0] ?? "";       // the junction that the tab picks first: the one at the end of the road with the most roads that leave it
-    $("fix-via-list").innerHTML = js.map((r, i) => `<div class="junrow" role="option" tabindex="0" data-n="${r.n}"><span class="k">${i + 1}</span><span><b>Junction ${r.n}</b><br><span class="small muted">${r.c ? `${plural(r.c, "road")} ${r.c === 1 ? "leaves" : "leave"} it` : "no road leaves it"}</span></span></div>`).join("");
-    paintJunctions();
     $("fix-out").innerHTML = nodes.length ? "" : `<p class="why">Way ${from} is not in the driving network.</p>`;
     if (nodes.length) await outgoing();
     drawSelected(zoom, { turn: nodes.length ? { via: $("fix-via").value } : null });
     if (!nodes.length) { turnOut = []; drawTurnRoads(); }
-  }
-  function paintJunctions({ scroll = false } = {}) {
-    for (const row of $("fix-via-list").querySelectorAll(".junrow")) { const on = row.dataset.n === $("fix-via").value; row.classList.toggle("sel", on); row.setAttribute("aria-selected", on); if (on && scroll) reveal(row); }
   }
   function paintTurnSel() {
     for (const row of $("fix-out").querySelectorAll(".turn")) row.classList.toggle("sel", Number(row.dataset.to) === turnSel);
@@ -778,14 +775,14 @@ export async function initFixesPanel(root, ctx) {
     status(`Added to the changes: ${plural(d.length, "turn rule")}.`);
   };
   function clearTurns() {
-    $("fix-from").value = ""; $("fix-via").value = ""; $("fix-via-list").innerHTML = ""; turnSel = null; $("fix-out").innerHTML = "";
+    $("fix-from").value = ""; $("fix-via").innerHTML = ""; turnSel = null; $("fix-out").innerHTML = "";
     $("fix-via-row").hidden = $("fix-turnsec").hidden = $("fix-turn-bar").hidden = $("fix-turn-clear").hidden = $("fix-turn-legend").hidden = true;
     turnOut = []; drawTurnRoads(); paintTurnBar(); drawSelected(false);
   }
   $("fix-turn-clear").onclick = clearTurns;
   $("fix-out").addEventListener("click", (e) => { const b = e.target.closest("[data-from]"); if (b) findTurns(Number(b.dataset.from), Number($("fix-via").value), { zoom: true }); });
   $("fix-turn-find").onclick = () => { const id = whole($("fix-from").value); id ? findTurns(id, null, { zoom: true }) : status("Type a way ID (a whole number)."); };
-  $("fix-via").onchange = () => { turnSel = null; paintJunctions({ scroll: true }); outgoing(); drawSelected(false, { turn: { via: $("fix-via").value } }); };
+  $("fix-via").onchange = () => { turnSel = null; outgoing(); drawSelected(false, { turn: { via: $("fix-via").value } }); };
 
   // ---- the map: edited objects are amber, the selected object is blue
   const EMPTY = { type: "FeatureCollection", features: [] };
@@ -1047,9 +1044,6 @@ export async function initFixesPanel(root, ctx) {
     drawnCount.turn = feats.length;
   }
   // a click (or Enter) on a junction row picks the junction; on a row of a turn road it picks the road (the same as a wall of a building)
-  const pickJunction = (row) => { if (!row || row.dataset.n === $("fix-via").value) return; $("fix-via").value = row.dataset.n; $("fix-via").onchange(); };
-  $("fix-via-list").addEventListener("click", (e) => pickJunction(e.target.closest(".junrow")));
-  $("fix-via-list").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickJunction(e.target.closest(".junrow")); } });
   const pickTurn = (row) => { if (!row) return; turnSel = turnSel === Number(row.dataset.to) ? null : Number(row.dataset.to); paintTurnSel(); if (turnSel != null) reveal(row); };
   $("fix-out").addEventListener("click", (e) => { if (!e.target.closest("select, button")) pickTurn(e.target.closest(".turn")); });
   $("fix-out").addEventListener("keydown", (e) => { if (e.target.classList?.contains("turn") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pickTurn(e.target); } });

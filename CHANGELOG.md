@@ -7,6 +7,9 @@
 - **The fixes editor: the bar of a tab hid no list row any more.** The bar ("Add to changes") sticks to the bottom of the
   panel, but a sticky box stops at the padding of its scroll box, so 12 px of the list showed under the bar (Kaveh's
   screenshot of the Turn tab). `.fix-bar` now has `bottom: -12px`, the padding of `.fix-body`.
+- **The fixes editor: the junctions of the Turn tab are a dropdown list** (Kaveh). Before, each junction at the end of the
+  road was a row of two lines, and a road with many junctions filled the tab. The `<select id="fix-via">` has one option for
+  each junction, with the number of roads that leave it. The map shows the junction that you pick.
 
 ### Changed
 

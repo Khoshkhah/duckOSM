@@ -80,11 +80,10 @@
 #fix-panel .wallrow { cursor: pointer; border-radius: 6px; }
 #fix-panel .wallrow.edited { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
 /* the rows that are a pick on the map (walls, doors, junctions, turn roads): the row under the pointer has a tint, the picked row a stronger one and an outline (the panel's accent: it shows in the dark theme too) */
-#fix-panel .junrow { display: grid; grid-template-columns: 1.6em 1fr; gap: 6px; align-items: center; padding: 6px 8px; border-left: 3px solid transparent; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
 #fix-panel .turn { padding: 4px 6px; border-radius: 6px; border-left: 3px solid transparent; cursor: pointer; }
-#fix-panel :is(.wallrow, .doorrow, .junrow, .turn):hover, #fix-panel .wallrow.hover { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); }
-#fix-panel :is(.wallrow, .doorrow, .junrow, .turn).sel { background: color-mix(in srgb, var(--accent) 26%, var(--bg)); outline: 2px solid var(--accent); outline-offset: -1px; }
-#fix-panel :is(.wallrow, .doorrow, .junrow, .turn):focus-visible { outline: 2px solid var(--accent); }
+#fix-panel :is(.wallrow, .doorrow, .turn):hover, #fix-panel .wallrow.hover { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); }
+#fix-panel :is(.wallrow, .doorrow, .turn).sel { background: color-mix(in srgb, var(--accent) 26%, var(--bg)); outline: 2px solid var(--accent); outline-offset: -1px; }
+#fix-panel :is(.wallrow, .doorrow, .turn):focus-visible { outline: 2px solid var(--accent); }
 #fix-panel .wallrow select { width: 100%; max-width: none; }
 #fix-panel .wallrow .dlabel { grid-column: 2; color: var(--mut); }
 #fix-panel .gwhy { grid-column: 1 / -1; margin: -2px 0 4px; }
