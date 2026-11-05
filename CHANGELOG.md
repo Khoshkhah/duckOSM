@@ -20,7 +20,9 @@
 
 - **The fixes editor is in duckOSM** (`web/fixes_editor/`): the panel "Edit OSM data" of the duckOSM page, with its unit tests
   (`node web/fixes_editor/fixes_units.mjs`, in CI). The page loads it at the same duckOSM rev as its build engine. Guide:
-  `docs/guides/edit-osm-data.md`. Design: `docs/design/fixes_editor.md`.
+  `docs/guides/edit-osm-data.md`. Design: `docs/design/fixes_editor.md`. A change from the page's panel: the map shows no wall
+  numbers. The wall under the pointer (on the map, or its row in the list of walls) is lit and shows its number; with no pointer (a
+  phone), the selected wall shows its number.
 - **`extra.tag_edits` in `raw.*`.** The tag edits of a fixes file now change `raw.ways`, `raw.nodes` and `raw.relations`, so the layers
   (`features.*`), the bus routes and the lane profile see them, and the Python engine supports them too. Before, only the networks of the
   Rust engine saw them (Monaco: 6 tables were different from the page).

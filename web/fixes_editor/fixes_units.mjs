@@ -1,7 +1,7 @@
 // Checks of the fixes rules (fixes.js) and of the readers for the 3D preview (fixes_panel.js), with no browser:
 //   node web/fixes_editor/fixes_units.mjs
 import * as F from "./fixes.js";
-import { cssColor, heightOf } from "./fixes_panel.js";
+import { cssColor, heightOf, wallShown, wallFilter } from "./fixes_panel.js";
 
 const sorted = (k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);   // the order of the keys of a map does not matter
 const eq = (a, b, m) => { const x = JSON.stringify(a, sorted), y = JSON.stringify(b, sorted); if (x !== y) throw new Error(`${m}: ${x} != ${y}`); };
@@ -74,4 +74,8 @@ F.deleteNewWay(doc, n1);
 eq(F.addNewWay(doc, { nodes: [1, 2], tags: {} }), F.NEW_WAY_MIN + 2, "an id is not used again while a higher one is there");
 F.deleteNewWay(doc, n2); F.deleteNewWay(doc, F.NEW_WAY_MIN + 2);
 eq([F.newWays(doc), F.dump({ dump: (x) => JSON.stringify(x) }, doc)], [[], ""], "no new road, no file");
+// the number of a wall: no wall by default; the wall under the pointer, else the selected wall (a phone has no pointer)
+eq([wallShown(null, null), wallShown("1|2", null), wallShown("1|2", "3|4"), wallShown(null, "3|4")], ["", "1|2", "1|2", "3|4"], "the wall with a number");
+eq(wallFilter(""), ["==", ["coalesce", ["get", "k"], ""], "-"], "no wall: the filter matches no feature (a wall of another building has no key)");
+eq(wallFilter("1|2"), ["==", ["coalesce", ["get", "k"], ""], "1|2"], "one wall");
 console.log("fixes_units.mjs: ok");

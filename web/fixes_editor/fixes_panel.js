@@ -131,6 +131,11 @@ const MARKUP = (note) => String.raw`
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
+// the walls of the picked building have no number on the map, only the wall under the pointer (on the map or in the list of walls) and, with no
+// pointer on a wall (a phone), the selected wall. The map filter of the number (fix-faces-label) and of the lit wall (fix-faces-hover, -glow).
+export function wallShown(hover, selected) { return hover ?? selected ?? ""; }
+export const wallFilter = (key) => ["==", ["coalesce", ["get", "k"], ""], key || "-"];
+
 export async function initFixesPanel(root, ctx) {
   const { duck, map, status, yaml } = ctx;
   root.insertAdjacentHTML("beforeend", MARKUP(ctx.changesNote ? " " + ctx.changesNote : ""));
@@ -141,6 +146,7 @@ export async function initFixesPanel(root, ctx) {
   const stash = {};                            // the state of the other two edit tabs: { sel, data, draft, touched, walls }
   let walls = [];                              // the walls of the selected building (main.building_faces), with their lines
   let wallSel = null;                          // the selected wall of that building: "from_node|to_node"
+  let wallHover = null;                        // the wall under the pointer, on the map or in the list of walls (the same key)
   let doors = [];                              // the doors of the selected building (main.building_entrances)
   const kinds = new Map();                     // "way123" -> "road" | "building": what an edited way is (the list of changes)
   const names = new Map();
@@ -363,7 +369,7 @@ export async function initFixesPanel(root, ctx) {
   function unselect() {
     if (!sel) return;
     const dropped = touched.size;
-    ++token; sel = null; data = null; draft = {}; touched = new Set(); walls = []; wallSel = null; doors = [];
+    ++token; sel = null; data = null; draft = {}; touched = new Set(); walls = []; wallSel = null; wallHover = null; doors = [];
     $("fix-id").value = "";
     renderObject(); drawSelected(false); drawFaces(); clearMapSelection();
     status(dropped ? `Unselected. ${plural(dropped, "field")} that you did not add ${dropped === 1 ? "was" : "were"} dropped.` : "Unselected.");
@@ -386,7 +392,7 @@ export async function initFixesPanel(root, ctx) {
     if (go) setTab(k);                                // saves the state of the tab that shows, and shows the tab of the object
     kind = k;
     const my = ++token;
-    sel = { kind: k, type: type ?? KIND_OF[k], id }; data = null; draft = {}; touched = new Set(); wallSel = null; doors = [];
+    sel = { kind: k, type: type ?? KIND_OF[k], id }; data = null; draft = {}; touched = new Set(); wallSel = null; wallHover = null; doors = [];
     $("fix-id").value = id;
     renderObject();
     const d = await loadData(sel.type, id, k);
@@ -449,6 +455,16 @@ export async function initFixesPanel(root, ctx) {
     if (r.top < b.top + 8) body.scrollTop += r.top - b.top - 8;
     else if (r.bottom > bottom) body.scrollTop += r.bottom - bottom;
   }
+  // the wall under the pointer: the map lights it and shows its number, and its row in the list has the class "hover"
+  function paintHover() {
+    const k = wallShown(wallHover, wallSel);
+    if (map.getLayer("fix-faces-label")) {
+      for (const id of ["fix-faces-glow", "fix-faces-hover"]) map.setFilter(id, wallFilter(k));
+      map.setFilter("fix-faces-label", ["all", ["has", "n"], wallFilter(k)]);
+    }
+    for (const row of $("fix-form").querySelectorAll(".wallrow")) row.classList.toggle("hover", row.dataset.key === wallHover);
+  }
+  function hoverWall(key) { if (key !== wallHover) { wallHover = key; paintHover(); } }
   function selectWall(key, { zoom = false } = {}) {
     wallSel = key; paintWalls(); drawFaces();
     reveal($("fix-form").querySelector(".wallrow.sel"));
@@ -813,12 +829,17 @@ export async function initFixesPanel(root, ctx) {
       map.addSource("fix-faces", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "fix-faces-edit", type: "line", source: "fix-faces", filter: ["==", ["get", "e"], 1], paint: { "line-color": AMBER, "line-width": 10, "line-opacity": 0.55 } });
       map.addLayer({ id: "fix-faces-sel", type: "line", source: "fix-faces", filter: ["==", ["get", "s"], 1], layout: { "line-cap": "round" }, paint: { "line-color": "#111827", "line-width": 14, "line-opacity": 0.9 } });
+      const faceColor = ["match", ["get", "t"], "front", FACE_COLORS.front, "back", FACE_COLORS.back, "party", FACE_COLORS.party, FACE_COLORS.side];
+      map.addLayer({ id: "fix-faces-glow", type: "line", source: "fix-faces", filter: wallFilter(""), layout: { "line-cap": "round" }, paint: { "line-color": faceColor, "line-width": 22, "line-opacity": 0.35, "line-blur": 4 } });
       map.addLayer({ id: "fix-faces-line", type: "line", source: "fix-faces", layout: { "line-cap": "round" },
-        paint: { "line-color": ["match", ["get", "t"], "front", FACE_COLORS.front, "back", FACE_COLORS.back, "party", FACE_COLORS.party, FACE_COLORS.side], "line-width": 4.5 } });
+        paint: { "line-color": faceColor, "line-width": 4.5 } });
+      map.addLayer({ id: "fix-faces-hover", type: "line", source: "fix-faces", filter: wallFilter(""), layout: { "line-cap": "round" }, paint: { "line-color": faceColor, "line-width": 9 } });
       map.addLayer({ id: "fix-faces-door", type: "circle", source: "fix-faces", filter: ["==", ["get", "door"], 1], paint: { "circle-radius": 6.5, "circle-color": "#0ea5e9", "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });   // a wall with a door: a dot in the middle of it
-      map.addLayer({ id: "fix-faces-label", type: "symbol", source: "fix-faces", filter: ["has", "n"],      // the number of a wall of the picked building, as in the list
+      map.addLayer({ id: "fix-faces-label", type: "symbol", source: "fix-faces", filter: ["all", ["has", "n"], wallFilter("")],      // the number of one wall (wallShown), as in the list
         layout: { "text-field": ["concat", "#", ["get", "n"]], "text-font": ["Noto Sans Bold"], "text-size": 13, "text-allow-overlap": true, "text-ignore-placement": true },
         paint: { "text-color": "#111827", "text-halo-color": "#ffffff", "text-halo-width": 2.5 } });
+      map.on("mousemove", "fix-faces-line", (e) => { const k = e.features[0]?.properties.k; if (k) { map.getCanvas().style.cursor = "pointer"; hoverWall(k); } });
+      map.on("mouseleave", "fix-faces-line", () => { map.getCanvas().style.cursor = ""; hoverWall(null); });
     }
     if (!map.getSource("fix-3d")) {                  // the edited buildings, as extrusions with their height and facade color (tilt the map to see them)
       map.addSource("fix-3d", { type: "geojson", data: EMPTY });
@@ -965,26 +986,29 @@ export async function initFixesPanel(root, ctx) {
     if (!open()) { map.getSource("fix-faces")?.setData({ type: "FeatureCollection", features: [] }); drawnCount.faces = 0; return; }       // closed: no walls on the map
     ensureLayers();
     let feats = [];
-    const asFeature = (g, t, e, s = 0) => { try { return { type: "Feature", properties: { t, e: e ? 1 : 0, s: s ? 1 : 0 }, geometry: JSON.parse(g) }; } catch { return null; } };
+    const asFeature = (g, t, e, s = 0, k = null) => { try { return { type: "Feature", properties: { t, e: e ? 1 : 0, s: s ? 1 : 0, ...(k ? { k } : {}) }, geometry: JSON.parse(g) }; } catch { return null; } };
     const mid = (g) => { const c = JSON.parse(g).coordinates; return [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2]; };
-    const numberDot = (g, n) => { try { return { type: "Feature", properties: { n }, geometry: { type: "Point", coordinates: mid(g) } }; } catch { return null; } };
+    const numberDot = (g, n, k) => { try { return { type: "Feature", properties: { n, k }, geometry: { type: "Point", coordinates: mid(g) } }; } catch { return null; } };
     const doorDot = (g) => { try { const c = JSON.parse(g).coordinates; return { type: "Feature", properties: { door: 1 }, geometry: { type: "Point", coordinates: [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2] } }; } catch { return null; } };
     if (hasFaces()) {
       if (current === "building" && $("fix-walls-all").checked && map.getZoom() >= 16) {
         const b = map.getBounds();
         const all = (await safe(`SELECT * EXCLUDE (geometry), ST_AsGeoJSON(geometry) AS g FROM main.building_faces WHERE ST_Intersects(geometry, ST_MakeEnvelope(${b.getWest()}, ${b.getSouth()}, ${b.getEast()}, ${b.getNorth()})) LIMIT 30000`))
         ;
-        feats = all.map((r) => asFeature(r.g, r.face_type, r.edited, sel?.kind === "building" && Number(r.building_id) === sel.id && `${Number(r.from_node)}|${Number(r.to_node)}` === wallSel));
+        const mine = (r) => sel?.kind === "building" && Number(r.building_id) === sel.id, key = (r) => `${Number(r.from_node)}|${Number(r.to_node)}`;
+        feats = all.map((r) => asFeature(r.g, r.face_type, r.edited, mine(r) && key(r) === wallSel, mine(r) ? key(r) : null));
+        feats.push(...all.filter(mine).map((r) => numberDot(r.g, r.face_index + 1, key(r))));
         feats.push(...all.filter((r) => r.door).map((r) => doorDot(r.g)));
       } else if (current === "building" && sel?.kind === "building" && walls.length) {
-        feats = walls.map((w) => asFeature(w.g, wallType(w), !!F.findFace(doc, sel.id, w.from_node, w.to_node) || w.edited, wallKey(w) === wallSel));
-        feats.push(...walls.filter((w) => wallDoorNow(w)).map((w) => doorDot(w.g)), ...walls.map((w) => numberDot(w.g, w.face_index + 1)));
+        feats = walls.map((w) => asFeature(w.g, wallType(w), !!F.findFace(doc, sel.id, w.from_node, w.to_node) || w.edited, wallKey(w) === wallSel, wallKey(w)));
+        feats.push(...walls.filter((w) => wallDoorNow(w)).map((w) => doorDot(w.g)), ...walls.map((w) => numberDot(w.g, w.face_index + 1, wallKey(w))));
       }
     }
     if (my !== faceToken) return;
     feats = feats.filter(Boolean);
     map.getSource("fix-faces")?.setData({ type: "FeatureCollection", features: feats });
     drawnCount.faces = feats.length;
+    paintHover();
   }
   $("fix-walls-all").onchange = drawFaces;
   map.on("moveend", () => { if (open() && current === "building" && $("fix-walls-all").checked) drawFaces(); if (open() && current === "node") drawNodes(); if (open() && current === "building") drawDoors(); });
@@ -1233,6 +1257,8 @@ export async function initFixesPanel(root, ctx) {
 
   // ---- wiring
   $("fix-form").addEventListener("keydown", (e) => { const row = e.target.closest?.(".wallrow"); if (row && e.target === row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); selectWall(row.dataset.key, { zoom: true }); } });
+  $("fix-form").addEventListener("mouseover", (e) => { const row = e.target.closest?.(".wallrow"); if (row) hoverWall(row.dataset.key); });
+  $("fix-form").addEventListener("mouseout", (e) => { const row = e.target.closest?.(".wallrow"); if (row && !row.contains(e.relatedTarget)) hoverWall(null); });
   $("fix-form").addEventListener("input", onInput);
   $("fix-form").addEventListener("change", onInput);
   $("fix-form").addEventListener("click", (e) => {
