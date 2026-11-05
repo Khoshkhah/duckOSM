@@ -408,12 +408,15 @@ pub fn run<W: Write + Send>(
     let driving = p.modes.contains(&Mode::Driving);
     let need_relations = opts.extract_restrictions && driving;
     // the bus routes need the route relations and the member ways of the raw cut (docs/bus.md)
-    let bus = p.bus_routes && driving;
+    let bus = p.bus_routes && driving && matches!(input, Input::Area(..)); // OSM JSON has no route relations
     let cut_file = p.cut_pbf || p.cut_osm;
-    if (p.raw || cut_file || p.building_faces) && !matches!(input, Input::Area(..)) {
+    if (p.raw || p.building_faces) && !matches!(input, Input::Area(..) | Input::OsmJson(..)) {
         return Err(
-            "raw.* (the base-map layers), the building faces and the cut file need a boundary and a region file".into(),
+            "raw.* (the base-map layers) and the building faces need a boundary and a region file, or OSM JSON".into(),
         );
+    }
+    if cut_file && !matches!(input, Input::Area(..)) {
+        return Err("the cut file needs a boundary and a region file".into());
     }
     let mut raw = None;
     let (mut ways, mut coords, relations) = match input {
@@ -459,10 +462,14 @@ pub fn run<W: Write + Send>(
             (ways, coords, relations)
         }
         Input::OsmJson(bytes, boundary) => {
-            let mut data = OsmJson::read(bytes)?;
+            let mut data = OsmJson::read(bytes, p.raw || p.building_faces)?;
             if let Some(b) = boundary {
                 data.cut(b);
             }
+            raw = data.raw.take().map(|mut r| {
+                r.apply_fixes(fixes);
+                r
+            });
             let mut ways = std::mem::take(&mut data.ways);
             fixes.apply_to_ways(&mut ways)?;
             let coords = data.coords(&ways);
