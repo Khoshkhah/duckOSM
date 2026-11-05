@@ -1,6 +1,6 @@
 # The Rust engine: `options.engine: rust`
 
-Status: implemented on 2026-10-22. Decision by Kaveh (duckosm-rust design, section 12): Python duckOSM
+Status: implemented on 2026-10-22. Since 2026-11-04 the engine is the default (`options.engine: rust`) and its code is in `rust/` ([rust_engine_move.md](rust_engine_move.md)); `python` is the reference. Decision by Kaveh (duckosm-rust design, section 12): Python duckOSM
 calls the Rust wheel part by part, with a config option as the switch. Part 1 (2026-10-22): the network
 step. Part 2 (2026-10-22, duckosm-rust 0.2.0): the turn restrictions and the edge graph.
 

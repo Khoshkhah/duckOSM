@@ -44,7 +44,7 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
 
 
 def load_mode(con, mode: str, out_dir, merge_segments: bool) -> tuple[int, int]:
-    """Create ``edges``, ``private_edges``, ``nodes``, (with merge_segments) ``edge_id_map``, and the tables of
+    """Create ``edges``, ``private_edges``, ``nodes``, ``virtual_nodes``, (with merge_segments) ``edge_id_map``, and the tables of
     the edge graph and the turn restrictions that exist, in the current schema from the files of ``mode``. Returns (edges, nodes). GeoParquet reads as
     ``GEOMETRY('OGC:CRS84')``; the tables have ``GEOMETRY``, so the geometry is cast."""
     def p(table):
@@ -55,6 +55,8 @@ def load_mode(con, mode: str, out_dir, merge_segments: bool) -> tuple[int, int]:
                 f"FROM read_parquet('{p('private_edges')}')")
     con.execute(f"CREATE OR REPLACE TABLE nodes AS SELECT node_id, geometry::GEOMETRY AS geom "
                 f"FROM read_parquet('{p('nodes')}')")
+    con.execute(f"CREATE OR REPLACE TABLE virtual_nodes AS SELECT node_id, geometry::GEOMETRY AS geom "
+                f"FROM read_parquet('{p('virtual_nodes')}')")     # always empty, but the Python build has the table
     if merge_segments:
         con.execute(f"CREATE OR REPLACE TABLE edge_id_map AS SELECT * FROM read_parquet('{p('edge_id_map')}')")
     for t in GRAPH_TABLES:              # the files that the options made (build_graph, extract_restrictions)

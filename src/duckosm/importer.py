@@ -99,12 +99,10 @@ class DuckOSM:
         total_start = time.time()
         
         is_clip = self.config.source_type == "duckdb"
-        # options.engine: rust: duckosm-rust builds the network step (docs/design/rust_engine.md)
+        # options.engine: rust (the default): the Rust engine builds the network step; a clip build has no PBF, so it never uses it (docs/design/rust_engine.md)
         rust = self.config.options.engine == "rust" and not is_clip
         if rust:
             rust_engine.module()          # fail now, not after the PBF is read
-        elif self.config.options.engine == "rust":
-            logger.warning("options.engine: rust has no effect on a clip build (no PBF)")
         # Component clean-up only makes sense when clipping to an AREA. A whole-region /
         # whole-country build (no boundary) legitimately has separate components (islands)
         # and 2.35M-edge union-find would be slow — so require a boundary.

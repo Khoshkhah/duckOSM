@@ -7,6 +7,10 @@ pip install duckosm
 duckosm --version          # duckosm, version 0.2.0
 ```
 
+The wheel has the Rust engine in it (the module `duckosm._rust`, no other install). There is a wheel for Linux (x86_64 and
+aarch64), macOS (x86_64 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that
+needs a [Rust toolchain](https://rustup.rs).
+
 ## Extras
 
 Some features need more packages. Add the extras you want in brackets, for example

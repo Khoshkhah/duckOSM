@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Changed
+
+- **The Rust engine is the default** (`options.engine: rust`; `--engine python` runs the SQL steps). The Rust code of the
+  repository `duckosm-rust` is in `rust/` now, and `duckosm._rust` is its Python module, inside the `duckosm` wheel. The wheel is
+  not pure Python any more: it has one build for each of 5 systems (Linux x86_64 and aarch64, macOS x86_64 and arm64, Windows
+  x64; abi3, Python 3.9 and newer), and a source install needs a Rust toolchain. The module has no DuckDB; the package uses its own
+  `duckdb`. The network step (edges, private edges, nodes, `edge_id_map`, edge graph, turn restrictions) runs in Rust: Estonia
+  takes 19 s and 1.5 GB, against 1,545 s and 10 GB. The osmium cut, `raw.*`, the features, the bus routes and the levels
+  stay Python for now. They move to Rust one by one, each with its own equality test. `edge_id` and all tables are
+  the same as in 0.6.1 (Monaco: every row of 20 tables; the connector rows are equal in both engines since the fixed order of
+  `PathConnector`). The Python engine stays as the reference for one release; the tag `python-default-final` is the last commit
+  with the Python default. The old wheel `duckosm_rust` (the repository `duckosm-rust`, last version 0.3.0) is not used any more.
+  Plan: `docs/design/rust_engine_move.md`.
+
 ### Added
 
 - **`edges.z_vertices`.** `duckosm elevation` also samples the DEM at every vertex of each edge and writes the heights, in the

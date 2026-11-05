@@ -187,7 +187,7 @@ State at `origin/main` = `53b3196` (2026-11-03):
 
 Each repository is changed by a pull request of its own, after Kaveh says yes. This plan does not change another repository.
 
-## 9. The baseline (to fill in at M0)
+## 9. The baseline (M0) and the results of M4
 
 | Check | Value at `S` = `53b3196` |
 |---|---|
@@ -198,6 +198,17 @@ Each repository is changed by a pull request of its own, after Kaveh says yes. T
 | `tests/test_wheel.py` | runs in M2 (it needs the renamed module) |
 
 The Monaco counts are the lines that `ci.yml` of duckosm-rust checks today.
+
+Results of M4 (2026-11-04), with the default `engine: rust`:
+
+| Check | Result |
+|---|---|
+| Python suite | 456 passed, 6 skipped (the skips need local PBFs or S3) |
+| `tests/test_engine_rust.py` | Monaco: 22 tables (20 + `virtual_nodes` of 3 modes) equal in names, types and rows; the lists of tables of both files equal |
+| Tartu (`config/tartu.yaml`, no features, no levels; the cut from the Estonia file) | 17 tables equal in names, types and rows; the lists of tables equal. Python 19 s, Rust 7 s |
+| A finding | The Rust build did not load the empty table `virtual_nodes`, so the file had 3 tables less. `rust_engine.load_mode` loads it now, and the test compares the lists of tables |
+| Old file `data/db/tartu.duckdb` (2026-09-30) | driving: the same 28,340 `edge_id` values. Walking and cycling differ from that file, as the Python engine of today does (60,412 and 59,176 edges in both engines), so the cause is not the engine |
+| Estonia | not run (it needs the OK of Kaveh) |
 
 ## 10. Risks
 
