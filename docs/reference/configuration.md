@@ -100,6 +100,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it |
 | `options.sea` | `overture` | | the sea, [`features.ocean`](features.md), from Overture Maps (needs the network; skipped offline); `false` = none |
 | `options.levels` | `true` | | the last step: the drawing order of the roads, [`visualization.edge_levels`](database.md#visualization-schema), solved with your edits kept in `visualization.level_*` (`build --no-levels` turns it off). Needs the `levels` extra. A clip takes the edits of its parent for the roads it has. [Guide](../guides/drawing-order.md) |
+| `options.building_faces` | `false` | | write [`main.building_faces`](database.md#building_faces), the walls of the buildings with a type each, and apply the wall rules (`extra.building_faces`) of the [fixes file](../guides/edit-osm-data.md). Needs the Rust engine, a PBF and a boundary: other builds stop with an error |
 | `options.bus_routes` | `true` | | match the OSM bus routes to the driving edges: schema [`bus`](database.md#bus-schema). Needs driving and `raw.*`, so a `duckdb` build skips it |
 | `options.clip_strategy` | none | | how `osmium` cuts the PBF: `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
 | `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default |

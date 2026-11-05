@@ -1,0 +1,973 @@
+{
+  "_doc": "The preset fields of the fixes editor (fixes_panel.js, docs/guides/edit-osm-data.md). One list for each kind of object (road, building, node, and new_road for a road that the person draws). key: an OSM tag, or, with rule: true, a key of an overrides rule that acts for each mode (oneway, lanes, layer, turn lanes). type: choice (options: [value, label]; a value that is not in the list is kept), text, int or color. group: the section of a field in the form (the panel shows the fields in the order of this file, one section for each group).",
+  "road": [
+    {
+      "key": "name",
+      "label": "Name",
+      "type": "text",
+      "group": "Basics"
+    },
+    {
+      "key": "oneway",
+      "label": "One-way",
+      "type": "choice",
+      "rule": true,
+      "options": [
+        [
+          "true",
+          "Yes"
+        ],
+        [
+          "false",
+          "No"
+        ]
+      ],
+      "group": "Basics"
+    },
+    {
+      "key": "lanes",
+      "label": "Lanes, all",
+      "type": "int",
+      "rule": true,
+      "group": "Lanes and speed"
+    },
+    {
+      "key": "lanes_forward",
+      "label": "Lanes, forward",
+      "type": "int",
+      "rule": true,
+      "group": "Lanes and speed"
+    },
+    {
+      "key": "lanes_backward",
+      "label": "Lanes, back",
+      "type": "int",
+      "rule": true,
+      "group": "Lanes and speed"
+    },
+    {
+      "key": "maxspeed",
+      "label": "Max speed",
+      "type": "text",
+      "placeholder": "30, 50, walk",
+      "group": "Lanes and speed"
+    },
+    {
+      "key": "turn_lanes_forward",
+      "label": "Turn lanes, forward",
+      "type": "text",
+      "rule": true,
+      "placeholder": "left|through|right",
+      "group": "Lanes and speed"
+    },
+    {
+      "key": "turn_lanes_backward",
+      "label": "Turn lanes, back",
+      "type": "text",
+      "rule": true,
+      "placeholder": "left|through",
+      "group": "Lanes and speed"
+    },
+    {
+      "key": "sidewalk",
+      "label": "Sidewalk",
+      "type": "choice",
+      "options": [
+        [
+          "both",
+          "Both sides"
+        ],
+        [
+          "left",
+          "Left"
+        ],
+        [
+          "right",
+          "Right"
+        ],
+        [
+          "no",
+          "None"
+        ],
+        [
+          "separate",
+          "Separate (own way)"
+        ]
+      ],
+      "group": "Sidewalk, cycleway, crossing"
+    },
+    {
+      "key": "cycleway",
+      "label": "Cycleway",
+      "type": "choice",
+      "options": [
+        [
+          "lane",
+          "Lane"
+        ],
+        [
+          "track",
+          "Track"
+        ],
+        [
+          "shared_lane",
+          "Shared lane"
+        ],
+        [
+          "share_busway",
+          "Shared with bus"
+        ],
+        [
+          "opposite",
+          "Opposite"
+        ],
+        [
+          "no",
+          "None"
+        ]
+      ],
+      "group": "Sidewalk, cycleway, crossing"
+    },
+    {
+      "key": "crossing",
+      "label": "Crossing",
+      "type": "choice",
+      "options": [
+        [
+          "marked",
+          "Marked"
+        ],
+        [
+          "unmarked",
+          "Unmarked"
+        ],
+        [
+          "uncontrolled",
+          "Uncontrolled"
+        ],
+        [
+          "traffic_signals",
+          "Traffic signals"
+        ]
+      ],
+      "group": "Sidewalk, cycleway, crossing"
+    },
+    {
+      "key": "surface",
+      "label": "Surface",
+      "type": "choice",
+      "options": [
+        [
+          "asphalt",
+          "Asphalt"
+        ],
+        [
+          "paved",
+          "Paved"
+        ],
+        [
+          "concrete",
+          "Concrete"
+        ],
+        [
+          "paving_stones",
+          "Paving stones"
+        ],
+        [
+          "cobblestone",
+          "Cobblestone"
+        ],
+        [
+          "compacted",
+          "Compacted"
+        ],
+        [
+          "gravel",
+          "Gravel"
+        ],
+        [
+          "unpaved",
+          "Unpaved"
+        ],
+        [
+          "dirt",
+          "Dirt"
+        ]
+      ],
+      "group": "Surface and access"
+    },
+    {
+      "key": "access",
+      "label": "Access",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "permissive",
+          "Permissive"
+        ],
+        [
+          "destination",
+          "Destination"
+        ],
+        [
+          "customers",
+          "Customers"
+        ],
+        [
+          "private",
+          "Private"
+        ],
+        [
+          "no",
+          "No"
+        ]
+      ],
+      "group": "Surface and access"
+    },
+    {
+      "key": "layer",
+      "label": "Layer",
+      "type": "int",
+      "rule": true,
+      "group": "Level"
+    },
+    {
+      "key": "bridge",
+      "label": "Bridge",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "viaduct",
+          "Viaduct"
+        ]
+      ],
+      "group": "Level"
+    },
+    {
+      "key": "tunnel",
+      "label": "Tunnel",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "building_passage",
+          "Building passage"
+        ]
+      ],
+      "group": "Level"
+    }
+  ],
+  "building": [
+    {
+      "key": "name",
+      "label": "Name",
+      "type": "text",
+      "group": "Basics"
+    },
+    {
+      "key": "building",
+      "label": "Kind",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "house",
+          "House"
+        ],
+        [
+          "apartments",
+          "Apartments"
+        ],
+        [
+          "residential",
+          "Residential"
+        ],
+        [
+          "commercial",
+          "Commercial"
+        ],
+        [
+          "retail",
+          "Retail"
+        ],
+        [
+          "industrial",
+          "Industrial"
+        ],
+        [
+          "office",
+          "Office"
+        ],
+        [
+          "public",
+          "Public"
+        ],
+        [
+          "church",
+          "Church"
+        ],
+        [
+          "garage",
+          "Garage"
+        ],
+        [
+          "roof",
+          "Roof only"
+        ]
+      ],
+      "group": "Basics"
+    },
+    {
+      "key": "building:levels",
+      "label": "Floors",
+      "type": "int",
+      "group": "Size"
+    },
+    {
+      "key": "height",
+      "label": "Height (m)",
+      "type": "text",
+      "placeholder": "15 or 15.5",
+      "group": "Size"
+    },
+    {
+      "key": "roof:shape",
+      "label": "Roof shape",
+      "type": "choice",
+      "options": [
+        [
+          "flat",
+          "Flat"
+        ],
+        [
+          "gabled",
+          "Gabled"
+        ],
+        [
+          "hipped",
+          "Hipped"
+        ],
+        [
+          "pyramidal",
+          "Pyramidal"
+        ],
+        [
+          "skillion",
+          "Skillion"
+        ],
+        [
+          "gambrel",
+          "Gambrel"
+        ],
+        [
+          "mansard",
+          "Mansard"
+        ],
+        [
+          "dome",
+          "Dome"
+        ],
+        [
+          "round",
+          "Round"
+        ]
+      ],
+      "group": "Roof"
+    },
+    {
+      "key": "roof:levels",
+      "label": "Roof floors",
+      "type": "int",
+      "group": "Roof"
+    },
+    {
+      "key": "roof:colour",
+      "label": "Roof color",
+      "type": "color",
+      "group": "Roof"
+    },
+    {
+      "key": "roof:material",
+      "label": "Roof material",
+      "type": "choice",
+      "options": [
+        [
+          "roof_tiles",
+          "Tiles"
+        ],
+        [
+          "metal",
+          "Metal"
+        ],
+        [
+          "concrete",
+          "Concrete"
+        ],
+        [
+          "slate",
+          "Slate"
+        ],
+        [
+          "tar_paper",
+          "Tar paper"
+        ],
+        [
+          "glass",
+          "Glass"
+        ],
+        [
+          "grass",
+          "Grass"
+        ]
+      ],
+      "group": "Roof"
+    },
+    {
+      "key": "building:colour",
+      "label": "Facade color",
+      "type": "color",
+      "group": "Facade"
+    },
+    {
+      "key": "building:material",
+      "label": "Facade material",
+      "type": "choice",
+      "options": [
+        [
+          "brick",
+          "Brick"
+        ],
+        [
+          "concrete",
+          "Concrete"
+        ],
+        [
+          "stone",
+          "Stone"
+        ],
+        [
+          "wood",
+          "Wood"
+        ],
+        [
+          "glass",
+          "Glass"
+        ],
+        [
+          "metal",
+          "Metal"
+        ],
+        [
+          "plaster",
+          "Plaster"
+        ]
+      ],
+      "group": "Facade"
+    }
+  ],
+  "node": [
+    {
+      "key": "name",
+      "label": "Name",
+      "type": "text",
+      "group": "Basics"
+    },
+    {
+      "key": "highway",
+      "label": "Kind",
+      "type": "choice",
+      "options": [
+        [
+          "traffic_signals",
+          "Traffic signals"
+        ],
+        [
+          "crossing",
+          "Crossing"
+        ],
+        [
+          "stop",
+          "Stop"
+        ],
+        [
+          "give_way",
+          "Give way"
+        ],
+        [
+          "bus_stop",
+          "Bus stop"
+        ]
+      ],
+      "group": "Basics"
+    },
+    {
+      "key": "crossing",
+      "label": "Crossing",
+      "type": "choice",
+      "options": [
+        [
+          "marked",
+          "Marked"
+        ],
+        [
+          "unmarked",
+          "Unmarked"
+        ],
+        [
+          "uncontrolled",
+          "Uncontrolled"
+        ],
+        [
+          "traffic_signals",
+          "Traffic signals"
+        ]
+      ],
+      "group": "Crossing"
+    },
+    {
+      "key": "kerb",
+      "label": "Kerb",
+      "type": "choice",
+      "options": [
+        [
+          "lowered",
+          "Lowered"
+        ],
+        [
+          "raised",
+          "Raised"
+        ],
+        [
+          "flush",
+          "Flush"
+        ]
+      ],
+      "group": "Crossing"
+    },
+    {
+      "key": "tactile_paving",
+      "label": "Tactile paving",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "no",
+          "No"
+        ]
+      ],
+      "group": "Crossing"
+    },
+    {
+      "key": "traffic_signals:direction",
+      "label": "Signal direction",
+      "type": "choice",
+      "options": [
+        [
+          "forward",
+          "Forward"
+        ],
+        [
+          "backward",
+          "Backward"
+        ]
+      ],
+      "group": "Traffic signals"
+    }
+  ],
+  "new_road": [
+    {
+      "key": "highway",
+      "label": "Kind",
+      "type": "choice",
+      "options": [
+        [
+          "residential",
+          "Residential street"
+        ],
+        [
+          "service",
+          "Service road"
+        ],
+        [
+          "tertiary",
+          "Tertiary road"
+        ],
+        [
+          "secondary",
+          "Secondary road"
+        ],
+        [
+          "primary",
+          "Primary road"
+        ],
+        [
+          "unclassified",
+          "Unclassified road"
+        ],
+        [
+          "living_street",
+          "Living street"
+        ],
+        [
+          "pedestrian",
+          "Pedestrian street"
+        ],
+        [
+          "footway",
+          "Footway"
+        ],
+        [
+          "cycleway",
+          "Cycleway"
+        ],
+        [
+          "path",
+          "Path"
+        ],
+        [
+          "track",
+          "Track"
+        ]
+      ]
+    },
+    {
+      "key": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "key": "oneway",
+      "label": "One-way",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "no",
+          "No"
+        ],
+        [
+          "-1",
+          "Yes, against the line"
+        ]
+      ]
+    },
+    {
+      "key": "lanes",
+      "label": "Lanes",
+      "type": "int"
+    },
+    {
+      "key": "maxspeed",
+      "label": "Max speed",
+      "type": "text",
+      "placeholder": "30, 50, walk"
+    },
+    {
+      "key": "surface",
+      "label": "Surface",
+      "type": "choice",
+      "options": [
+        [
+          "asphalt",
+          "Asphalt"
+        ],
+        [
+          "paved",
+          "Paved"
+        ],
+        [
+          "concrete",
+          "Concrete"
+        ],
+        [
+          "paving_stones",
+          "Paving stones"
+        ],
+        [
+          "gravel",
+          "Gravel"
+        ],
+        [
+          "unpaved",
+          "Unpaved"
+        ]
+      ]
+    }
+  ],
+  "_guards": {
+    "_doc": "Guards: one choice closes or narrows a field for another (fixes_panel.js, guardsOf). A rule has `if` (a key and the values that make it true; a key that ends with ! means: none of these values; the keys are the tags of the object, and `highway` of a road is its class), then `disable` (the fields that go off) and `allow` (a field and the only values that stay in its list), and a `reason` that shows under the field.",
+    "road": [
+      {
+        "if": {
+          "oneway": [
+            "true"
+          ]
+        },
+        "disable": [
+          "lanes_forward",
+          "lanes_backward",
+          "turn_lanes_backward"
+        ],
+        "reason": "A one-way road has its lanes in one direction: use Lanes, all and the turn lanes forward."
+      },
+      {
+        "if": {
+          "highway": [
+            "motorway",
+            "motorway_link",
+            "trunk",
+            "trunk_link"
+          ]
+        },
+        "disable": [
+          "sidewalk",
+          "cycleway",
+          "crossing"
+        ],
+        "allow": {
+          "surface": [
+            "asphalt",
+            "paved",
+            "concrete"
+          ],
+          "access": [
+            "yes",
+            "no"
+          ]
+        },
+        "reason": "A motorway or a trunk road has no sidewalk, no cycleway and no crossing, and its surface is paved."
+      },
+      {
+        "if": {
+          "highway": [
+            "primary",
+            "primary_link",
+            "secondary",
+            "secondary_link"
+          ]
+        },
+        "allow": {
+          "surface": [
+            "asphalt",
+            "paved",
+            "concrete",
+            "paving_stones",
+            "cobblestone"
+          ]
+        },
+        "reason": "A primary or a secondary road has a paved surface."
+      },
+      {
+        "if": {
+          "highway": [
+            "footway",
+            "path",
+            "steps",
+            "pedestrian",
+            "cycleway",
+            "bridleway",
+            "corridor"
+          ]
+        },
+        "disable": [
+          "sidewalk",
+          "cycleway",
+          "lanes",
+          "lanes_forward",
+          "lanes_backward",
+          "maxspeed",
+          "turn_lanes_forward",
+          "turn_lanes_backward"
+        ],
+        "reason": "A path for people has no sidewalk, no lanes and no speed limit of its own."
+      },
+      {
+        "if": {
+          "highway!": [
+            "footway",
+            "path",
+            "cycleway",
+            "pedestrian",
+            "steps"
+          ]
+        },
+        "disable": [
+          "crossing"
+        ],
+        "reason": "A crossing is a tag of a footway or a cycleway that crosses a road."
+      },
+      {
+        "if": {
+          "bridge": [
+            "yes",
+            "viaduct"
+          ]
+        },
+        "disable": [
+          "tunnel"
+        ],
+        "reason": "A road is a bridge or a tunnel, not both."
+      },
+      {
+        "if": {
+          "tunnel": [
+            "yes",
+            "building_passage"
+          ]
+        },
+        "disable": [
+          "bridge"
+        ],
+        "reason": "A road is a bridge or a tunnel, not both."
+      }
+    ],
+    "building": [
+      {
+        "if": {
+          "roof:shape": [
+            "flat"
+          ]
+        },
+        "disable": [
+          "roof:levels"
+        ],
+        "reason": "A flat roof has no roof levels."
+      },
+      {
+        "if": {
+          "roof:shape": [
+            ""
+          ]
+        },
+        "disable": [
+          "roof:levels"
+        ],
+        "reason": "Set the roof shape first."
+      },
+      {
+        "if": {
+          "building": [
+            "roof"
+          ]
+        },
+        "disable": [
+          "building:levels",
+          "building:material",
+          "building:colour",
+          "roof:levels"
+        ],
+        "reason": "A roof (a shelter) has no walls: no levels, no facade material and no facade color."
+      },
+      {
+        "if": {
+          "roof:material": [
+            "grass"
+          ]
+        },
+        "allow": {
+          "roof:shape": [
+            "flat",
+            "skillion",
+            "gabled",
+            "hipped"
+          ]
+        },
+        "reason": "A grass roof is flat or has a low slope."
+      }
+    ],
+    "node": [
+      {
+        "if": {
+          "highway!": [
+            "crossing",
+            "traffic_signals"
+          ]
+        },
+        "disable": [
+          "crossing",
+          "kerb",
+          "tactile_paving"
+        ],
+        "reason": "Crossing, kerb and tactile paving are for a crossing, or for a traffic signal with a crossing."
+      },
+      {
+        "if": {
+          "highway": [
+            "traffic_signals"
+          ]
+        },
+        "allow": {
+          "crossing": [
+            "traffic_signals"
+          ]
+        },
+        "reason": "A traffic signal with a crossing has crossing=traffic_signals."
+      },
+      {
+        "if": {
+          "highway!": [
+            "traffic_signals"
+          ]
+        },
+        "disable": [
+          "traffic_signals:direction"
+        ],
+        "reason": "The direction is for a traffic signal."
+      }
+    ],
+    "new_road": [
+      {
+        "if": {
+          "highway": [
+            "footway",
+            "cycleway",
+            "pedestrian"
+          ]
+        },
+        "disable": [
+          "lanes",
+          "maxspeed",
+          "oneway"
+        ],
+        "reason": "A path for people has no lanes, no speed limit and no one-way rule here."
+      },
+      {
+        "if": {
+          "highway": [
+            "primary",
+            "secondary",
+            "tertiary"
+          ]
+        },
+        "allow": {
+          "surface": [
+            "asphalt",
+            "paved",
+            "concrete"
+          ]
+        },
+        "reason": "A primary, secondary or tertiary road has a paved surface."
+      }
+    ]
+  }
+}

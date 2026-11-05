@@ -218,6 +218,7 @@ Left over from the build and always empty: the virtual nodes are in `nodes`, wit
 | [`boundary_cells`](#boundary_cells) | a build from a PBF, with `options.boundary_cells` (off) and a boundary |
 | [`elevation_metadata`](#elevation_metadata) | after `duckosm elevation` |
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
+| [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 
 `main` also holds two macros: `edge_id_hash(osm_id, source, target)` gives the `edge_id` formula,
 and `edge_id_hash_v1(osm_id, source, target, is_reverse)` the old one.
@@ -301,6 +302,29 @@ Every OSM administrative boundary in the PBF. [Add administrative boundaries](..
 | `admin_level` | INTEGER | the OSM `admin_level` |
 | `geometry` | GEOMETRY | the (multi)polygon |
 | `parent_osm_id` | BIGINT | the boundary it lies in, one level up; NULL at the top |
+
+### `building_faces`
+
+One row for each wall of a building of the area: a segment of the outer ring of a building way, or of a ring of a multipolygon building
+relation. The Rust engine finds the type of each wall from the street edges of the driving and walking networks, then applies the wall
+rules of the [fixes file](../guides/edit-osm-data.md#extrabuilding_faces). A wall shorter than 0.1 m has no row.
+
+| Column | Type | Description |
+|---|---|---|
+| `building_id` | BIGINT | the OSM id of the building way or relation |
+| `building_type` | VARCHAR | `way` or `relation` |
+| `face_index` | INTEGER | the place of the wall in the ring (it changes when the ring gets a node) |
+| `from_node`, `to_node` | BIGINT | the OSM nodes at the ends of the wall: with `building_id`, the key of the wall |
+| `face_type` | VARCHAR | `front`, `back`, `side`, `party` (two buildings share the wall) or `court` (a wall of a courtyard) |
+| `computed_type` | VARCHAR | the type that the build found; `face_type` has the type of a wall rule |
+| `edited` | BOOLEAN | a wall rule gives `face_type` |
+| `type_reason` | VARCHAR | why the wall has its type: `street`, `corner`, `entrance`, `address`, `inferred`, `opposite`, `shared`, `other`, `inner` or `none` |
+| `door` | VARCHAR | the kind of door from a wall rule, for example `main`; NULL for no door |
+| `length_m` | FLOAT | the length of the wall |
+| `azimuth_deg` | FLOAT | the direction of the wall |
+| `street_osm_id`, `street_edge_id`, `street_name` | BIGINT, BIGINT, VARCHAR | the street that the wall faces; NULL for none |
+| `distance_m` | FLOAT | the distance to that street |
+| `geometry` | GEOMETRY | the wall as a LineString |
 
 ## `raw` schema
 

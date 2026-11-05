@@ -47,6 +47,9 @@ On Monaco, the file above gives:
 | cycling edges of Avenue Saint-Romain | 18 | 0 |
 | turns from Avenue Delphine onto Avenue Saint-Romain | 1 | 0 |
 
+To make the file on a map, use the panel **Edit OSM data** of the duckOSM page: [Edit OSM data and use the fixes file](edit-osm-data.md).
+The page also writes two more keys, `extra.tag_edits` and `extra.building_faces`.
+
 A rule for a way or junction that isn't in the area does nothing, so one file can hold fixes for
 every area you build. Fixes are only applied when you name the file.
 

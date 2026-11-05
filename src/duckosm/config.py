@@ -59,6 +59,7 @@ class Options:
     levels: bool = True                    # the last step: visualization.edge_levels, the drawing order of the roads, solved with your edits kept in visualization.level_* (a rebuild keeps them). Set false for a big area; `duckosm levels` makes it later. See docs/design/levels_in_build.md
     bus_routes: bool = True                # bus.routes / bus.route_edges: the driving edges each OSM bus route relation travels (needs driving; PBF builds only). See docs/concepts/networks.md#bus-routes
     sea: Optional[str] = "overture"        # features.ocean, the sea (OSM only has coastline lines): 'overture' = Overture Maps' ocean polygons, read for the area from S3 (needs the network; offline it is skipped), or false. See docs/design/sea.md
+    building_faces: bool = False           # main.building_faces: the walls of the buildings, each with a type (front, back, side, party, court), with the wall rules (extra.building_faces) of the fixes file. Rust engine, a PBF and a boundary only. See docs/design/fixes_editor.md
     clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
 
 
@@ -286,6 +287,9 @@ class Config:
                 raise ValueError("pbf_path (or source.pbf_path) is required")
             if not Path(self.effective_pbf_path).exists():
                 raise FileNotFoundError(f"PBF file not found: {self.effective_pbf_path}")
+        if self.options.building_faces and (self.options.engine != "rust" or self.source_type != "pbf" or not self.effective_boundary_path):
+            raise ValueError("options.building_faces needs options.engine: rust, a PBF source and a boundary "
+                             "(the Python engine has no step for the walls of the buildings)")
         if self.osm_overrides and not Path(self.osm_overrides).exists():
             raise FileNotFoundError(f"OSM fixes file not found: {self.osm_overrides}")
         if self.effective_boundary_path and not Path(self.effective_boundary_path).exists():

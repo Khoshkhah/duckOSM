@@ -1,0 +1,104 @@
+# Edit OSM data and use the fixes file
+
+The panel **Edit OSM data** of the [duckOSM page](https://khoshkhah.github.io/duckosm-rust/) changes the OSM data of an area on a map:
+the tags of roads, buildings and nodes, turn rules, new roads and the type of each wall of a building. The panel writes the changes
+as a fixes file. `duckosm build` reads the same file and gives the same tables as the page. The panel is part of duckOSM
+(`web/fixes_editor/`), and the page loads it at the same duckOSM version as its build engine.
+
+The fixes file has the keys of [Fix OSM errors](fix-osm-errors.md) (`overrides`, `new_ways`, `turn_restrictions`) and two more keys
+under `extra`. A file from the page is a normal duckOSM fixes file.
+
+## Make the changes on the page
+
+1. On the page, build your area with **Layers** on (the layers need a region file).
+2. Open **Edit OSM data**.
+3. Pick the tab of what you want to change:
+
+    | Tab | What you change | Key in the file |
+    |---|---|---|
+    | **Road** | the tags of a road: lanes, speed, one-way, sidewalk, surface; the networks that have the road; delete the road | `overrides` (one-way, lanes, layer, modes, delete), `extra.tag_edits` (the other tags) |
+    | **Building** | the tags of a building: floors, height, roof, facade; the type of each wall and its door; delete the building | `extra.tag_edits`, `extra.building_faces`, `overrides` (delete) |
+    | **Node** | a traffic signal, a crossing or another node | `extra.tag_edits` |
+    | **Turn** | a turn that a driver cannot make, or must make, at a junction | `turn_restrictions` |
+    | **New road** | a road that OSM does not have: click its points on the map | `new_ways` |
+
+4. Click the object on the map, or type its OSM id and click **Load**.
+5. Change the fields of the form, then click **Add to changes**. Nothing goes into the file before this step.
+6. In the **Changes** tab, click **Build again** to see the changes in the tables and on the map.
+7. Click **Download** to save the file (`osm_fixes.yaml`).
+
+The page keeps the changes in your browser for each area name, so a reload of the page does not lose them.
+
+## Build with the file
+
+Give the file to `duckosm build`:
+
+```bash
+duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson --fixes osm_fixes.yaml
+```
+
+A wall rule (`extra.building_faces`) needs the table `main.building_faces`. Set `options.building_faces` in the
+[config file](build.md#with-a-config-file):
+
+```yaml
+osm_overrides: osm_fixes.yaml   # or --fixes on the command line
+options:
+  building_faces: true
+```
+
+| Key | Rust engine (the default) | `--engine python` |
+|---|---|---|
+| `overrides`, `new_ways`, `turn_restrictions` | yes | yes |
+| `extra.tag_edits` | yes | yes |
+| `extra.building_faces` | with `options.building_faces: true` | no: the build stops with an error |
+
+On the Monaco sample, a file with every key gives the same rows as the page in all tables that the two have. The test
+`tests/test_page_fixes.py` makes sure of this on each change of duckOSM.
+
+## The keys under `extra`
+
+### `extra.tag_edits`
+
+Each rule sets and deletes tags of one OSM way, node or relation. The build sets the tags first, then deletes the keys.
+
+```yaml
+extra:
+  tag_edits:
+    - {type: way, id: 503462470, set: {sidewalk: both, surface: paved}}
+    - {type: node, id: 21912089, set: {highway: traffic_signals}}
+    - {type: relation, id: 393226, delete: [building]}
+```
+
+| Field | Does |
+|---|---|
+| `type` | `way`, `node` or `relation` (required) |
+| `id` | the OSM id (required) |
+| `set` | these tags get these values |
+| `delete` | these tags go |
+| `was` | the values before the change (the page writes them for its list of changes; the build does not read them) |
+| `note` | free text |
+
+The build changes the tags in `raw.*` before all other steps. So the networks, the layers (`features.*`), the bus routes and the
+lane profile see the new tags. A rule on a relation changes its tags only, not its geometry. A rule for an object that is not in the area
+does nothing.
+
+### `extra.building_faces`
+
+Each rule gives one wall of a building another type, or a door.
+
+```yaml
+extra:
+  building_faces:
+    - {building: 23715051, from_node: 256791670, to_node: 256791677, type: back}
+```
+
+| Field | Does |
+|---|---|
+| `building` | the OSM id of the building way or relation (required) |
+| `from_node`, `to_node` | the two OSM nodes at the ends of the wall, in either order (required) |
+| `type` | `front`, `back`, `side`, `party` or `court` |
+| `door` | the kind of door of the wall, for example `main` or `service` (optional) |
+| `note` | free text |
+
+In [`main.building_faces`](../reference/database.md#building_faces), `face_type` has the type of the rule, `computed_type` has the type
+that the build found, and `edited` is true.
