@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The fixes editor: the bar of a tab hid no list row any more.** The bar ("Add to changes") sticks to the bottom of the
+  panel, but a sticky box stops at the padding of its scroll box, so 12 px of the list showed under the bar (Kaveh's
+  screenshot of the Turn tab). `.fix-bar` now has `bottom: -12px`, the padding of `.fix-body`.
+
 ### Changed
 
 - **The Rust engine is the default** (`options.engine: rust`; `--engine python` runs the SQL steps). The Rust code of the

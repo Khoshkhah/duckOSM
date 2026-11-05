@@ -17,7 +17,8 @@
 #fix-panel .chg.del { border-left-color: #dc2626; }
 #fix-panel .fsec .fixgrid { margin-top: 0; grid-template-columns: 8.5em 1fr; }
 #fix-panel .fsec > .row:first-of-type, #fix-panel .fsec > p.why + .row { margin-top: 0; }
-#fix-panel .fix-bar { position: sticky; bottom: 0; margin: 0 -15px -12px; padding: 10px 15px 12px; background: var(--bg); border-top: 1px solid var(--line); }
+/* bottom = minus the padding of .fix-body: a sticky box stops at the padding of its scroll box, and with bottom 0 the list showed in a 12 px gap under the bar */
+#fix-panel .fix-bar { position: sticky; bottom: -12px; margin: 0 -15px -12px; padding: 10px 15px 12px; background: var(--bg); border-top: 1px solid var(--line); }
 #fix-panel .fix-bar .row { margin-top: 0; }
 #fix-panel .fix-bar p { margin: 6px 0 0; }
 #fix-panel #fix-apply { width: 100%; }
