@@ -120,7 +120,7 @@ Every reader takes the mode's own rows by default (`routed_graph(con, mode)`), a
 `routed_graph(con, mode, uses="pedestrian,private")`, `to_networkx(con, uses=...)` (the restricted edges get an
 `access` attribute) and `duckosm export-graph --graph edge --uses ...`. `route()`, `Router`, point routing, the route map and
 the SUMO connections stay on the mode's own rows. The GMNS export reads the own rows and the `bus` rows (the bus turns of
-[bus lanes](../design/bus_only_edges.md)); the other labels are not links there.
+[bus lanes](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/bus_only_edges.md)); the other labels are not links there.
 Design: `docs/design/restricted_edge_graph_rows.md`.
 A database built before `uses` holds only the mode's own rows.
 
@@ -184,7 +184,7 @@ For each merged edge, the edges it was made from. It may be empty (driving in Mo
 ### `lane_profile` {#lane_profile}
 
 Every driving edge's lanes, and every bus-only edge's (`private_edges` with `access = 'bus'`), decided once
-([design](../design/gmns_lane_profile.md)): one row per lane, left to right.
+([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)): one row per lane, left to right.
 
 | Column | Type | Meaning |
 |---|---|---|
