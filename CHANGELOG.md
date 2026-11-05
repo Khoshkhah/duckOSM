@@ -18,6 +18,16 @@
 
 ### Added
 
+- **The fixes editor is in duckOSM** (`web/fixes_editor/`): the panel "Edit OSM data" of the duckOSM page, with its unit tests
+  (`node web/fixes_editor/fixes_units.mjs`, in CI). The page loads it at the same duckOSM rev as its build engine. Guide:
+  `docs/guides/edit-osm-data.md`. Design: `docs/design/fixes_editor.md`.
+- **`extra.tag_edits` in `raw.*`.** The tag edits of a fixes file now change `raw.ways`, `raw.nodes` and `raw.relations`, so the layers
+  (`features.*`), the bus routes and the lane profile see them, and the Python engine supports them too. Before, only the networks of the
+  Rust engine saw them (Monaco: 6 tables were different from the page).
+- **`options.building_faces`** (off): `main.building_faces`, the walls of the buildings with a type each, and the wall rules
+  (`extra.building_faces`) of a fixes file. Rust engine only. `tests/test_page_fixes.py`: a fixes file from the page with every fix kind
+  gives the same rows as the page in all 44 tables that the two builds have (Monaco).
+
 - **`edges.z_vertices`.** `duckosm elevation` also samples the DEM at every vertex of each edge and writes the heights, in the
   order of the geometry, as `<mode>.edges.z_vertices` (DOUBLE[], 2 dp; `z_vertices_<suffix>` for a second surface). A reader gets the
   heights along a way without the raster. SimReady's `import-elevation` reads them (its open item `P7.dem-interior`).

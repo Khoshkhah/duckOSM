@@ -1,0 +1,50 @@
+# A fixes file of the duckosm-rust page ("Edit OSM data") with every fix kind, for the Monaco sample (data/sample/monaco.osm.pbf).
+# tests/test_page_fixes.py builds Monaco with it and compares the tables with page_tables.json (the page's build of the same file,
+# from scripts/page_tables.py). Do not edit page_tables.json by hand: make it again with the script. docs/design/fixes_editor.md.
+overrides:
+  - osm_id: 503462470
+    lanes: 3
+    oneway: true
+    note: page test
+  - osm_id: 25722685
+    remove: true
+new_ways:
+  - id: 9000000000000
+    nodes:
+      - 21911886
+      - - 7.4235072
+        - 43.7371133
+      - 21914340
+    tags:
+      highway: service
+turn_restrictions:
+  - from_way: 4097656
+    via_node: 21912089
+    to_way: 35092475
+    restriction: no_left_turn
+extra:
+  tag_edits:
+    - type: way
+      id: 503462470
+      set:
+        sidewalk: both
+        surface: paved
+    - type: way
+      id: 23715051
+      set:
+        building:levels: '9'
+      delete:
+        - roof:shape
+    - type: node
+      id: 21912089
+      set:
+        highway: traffic_signals
+    - type: relation
+      id: 393226
+      delete:
+        - building
+  building_faces:
+    - building: 23715051
+      from_node: 256791670
+      to_node: 256791677
+      type: back

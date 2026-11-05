@@ -69,6 +69,45 @@ def test_tags_rule_retags_the_raw_way(tmp_path):
     assert tags[999] == {"highway": "pedestrian"}
 
 
+def test_tag_edits_set_then_delete_on_raw_ways_nodes_and_relations(tmp_path):
+    """`extra.tag_edits` (the fixes editor of the page) act on raw.* after the `tags` of the rules, as raw.rs of the Rust engine."""
+    from types import SimpleNamespace
+    from duckosm.importer import DuckOSM
+    d = DuckOSM.__new__(DuckOSM)
+    d.con = duckdb.connect()
+    d.con.execute("CREATE SCHEMA raw")
+    for t in ("ways", "nodes", "relations"):
+        d.con.execute(f"CREATE TABLE raw.{t}(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR))")
+    d.con.execute("INSERT INTO raw.ways VALUES (5, MAP {'highway': 'residential', 'roof:shape': 'flat'}), (6, MAP {'highway': 'service'})")
+    d.con.execute("INSERT INTO raw.nodes VALUES (7, NULL)")
+    d.con.execute("INSERT INTO raw.relations VALUES (8, MAP {'type': 'multipolygon', 'building': 'yes'})")
+    d.config = SimpleNamespace(osm_overrides=_rules(tmp_path, """
+overrides:
+  - osm_id: 5
+    tags: {surface: asphalt}
+extra:
+  tag_edits:
+    - {type: way, id: 5, set: {surface: paved, sidewalk: both}, delete: [roof:shape]}
+    - {type: node, id: 7, set: {highway: traffic_signals}}
+    - {type: relation, id: 8, delete: [building]}
+    - {type: way, id: 999, set: {a: b}}
+"""))
+    d._raw_way_fixes()
+    tags = {t: dict(d.con.execute(f"SELECT osm_id, tags FROM raw.{t}").fetchall()) for t in ("ways", "nodes", "relations")}
+    assert tags["ways"] == {5: {"highway": "residential", "surface": "paved", "sidewalk": "both"}, 6: {"highway": "service"}}
+    assert tags["nodes"] == {7: {"highway": "traffic_signals"}}
+    assert tags["relations"] == {8: {"type": "multipolygon"}}
+
+
+def test_building_faces_needs_the_rust_engine(tmp_path):
+    from duckosm import Config
+    root = __import__("pathlib").Path(__file__).resolve().parents[1]
+    cfg = Config.from_args(str(root / "data/sample/monaco.osm.pbf"), str(tmp_path), boundary_path=str(root / "data/sample/monaco.geojson"),
+                           building_faces=True, engine="python")
+    with pytest.raises(ValueError, match="building_faces needs options.engine: rust"):
+        cfg.validate()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
 

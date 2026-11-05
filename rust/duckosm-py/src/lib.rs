@@ -17,7 +17,8 @@ use std::path::PathBuf;
 
 /// Build the networks of `modes` from `pbf` and write them into the folder `out`.
 ///
-/// The keyword names are the option names of duckOSM. Returns a dict with the numbers of each mode, the
+/// The keyword names are the option names of duckOSM. `building_faces` also writes `building_faces_main.parquet` (the walls of the
+/// buildings, with the wall rules of the fixes file); it needs `boundary`. Returns a dict with the numbers of each mode, the
 /// files that were written and the time of each step.
 #[pyfunction]
 #[pyo3(signature = (
@@ -26,7 +27,7 @@ use std::path::PathBuf;
     cycling_dismount = true, infer_separate_sidewalks = true, connectivity_rescue = true,
     connect_snap_m = 10.0, process_speeds = true, calculate_costs = true, functional_types = true,
     osm_overrides = None, build_graph = true, extract_restrictions = true, boundary = None, ways_tables = true,
-    bus_routes = true, levels = "tags".to_string()
+    bus_routes = true, levels = "tags".to_string(), building_faces = false
 ))]
 #[allow(clippy::too_many_arguments)]
 fn build<'py>(
@@ -53,6 +54,7 @@ fn build<'py>(
     ways_tables: bool,
     bus_routes: bool,
     levels: String,
+    building_faces: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
     let mut p = Params {
         name,
@@ -79,6 +81,7 @@ fn build<'py>(
         ways_tables,
     };
     p.bus_routes = bus_routes;
+    p.building_faces = building_faces;
     p.levels = parse_levels(&levels).map_err(PyValueError::new_err)?;
     // the build runs without the GIL, so other Python threads go on
     let sum = py
@@ -114,6 +117,9 @@ fn summary_dict<'py>(py: Python<'py>, sum: &Summary) -> PyResult<Bound<'py, PyDi
     }
     res.set_item("seconds", steps)?;
     res.set_item("sidewalk_roads", sum.sidewalk_roads.unwrap_or(0))?;
+    if let Some((walls, buildings)) = sum.building_faces {
+        res.set_item("building_faces", (walls, buildings))?;
+    }
     Ok(res)
 }
 

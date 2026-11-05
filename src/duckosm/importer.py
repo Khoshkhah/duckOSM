@@ -442,6 +442,13 @@ class DuckOSM:
                 tags = {str(k): str(v) for k, v in r["tags"].items()}
                 self.con.execute("UPDATE raw.ways SET tags = map_concat(tags, MAP(?::VARCHAR[], ?::VARCHAR[])) WHERE osm_id = ?",
                                  [list(tags), list(tags.values()), int(r["osm_id"])])
+        # `extra.tag_edits` (the fixes editor, docs/design/fixes_editor.md): set, then delete, the tags of a way, a node or a relation
+        for e in (doc.get("extra") or {}).get("tag_edits") or []:
+            table = {"way": "ways", "node": "nodes", "relation": "relations"}[e["type"]]
+            tags = {str(k): str(v) for k, v in (e.get("set") or {}).items()}
+            self.con.execute(f"UPDATE raw.{table} SET tags = map_from_entries(list_filter(map_entries(map_concat(coalesce(tags, MAP {{}}), "
+                             "MAP(?::VARCHAR[], ?::VARCHAR[]))), x -> NOT list_contains(?::VARCHAR[], x.key))) WHERE osm_id = ?",
+                             [list(tags), list(tags.values()), [str(k) for k in e.get("delete") or []], int(e["id"])])
         seen = set()
         for n in new_ways:
             wid = int(n["id"])
@@ -929,6 +936,8 @@ class DuckOSM:
         if res.get("sidewalk_roads"):
             self.stats['sidewalk_roads_rust'] = res["sidewalk_roads"]
         logger.info(f"  duckosm-rust built {len(res['modes'])} network(s) in {self.stats['rust_build_time']:.2f}s")
+        if self.config.options.building_faces:
+            logger.info(f"  main.building_faces: {rust_engine.load_building_faces(self.con, self._rust_dir):,} walls")
 
     def _rust_network(self, mode: str) -> None:
         """Load edges, private_edges, nodes and edge_id_map of `mode` from the files of _rust_build."""

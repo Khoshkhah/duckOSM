@@ -32,15 +32,26 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
     res = module().build(
         str(pbf_path), str(out_dir), modes=list(config.modes), formats=["geoparquet"], name=config.name,
         merge_segments=o.merge_segments, global_junctions=o.global_junctions,
-        keep_largest_component=False,     # ComponentFilter runs in Python after the edge graph, as before
+        # ComponentFilter runs in Python after the edge graph, as before. With the walls, the Rust step also keeps only the largest
+        # component (as on the page), so that a wall does not face a street piece that ComponentFilter removes later
+        keep_largest_component=o.building_faces and c.keep_largest_component,
         cycling_dismount=o.cycling_dismount, infer_separate_sidewalks=o.infer_separate_sidewalks,
         connectivity_rescue=c.connectivity_rescue, connect_snap_m=c.connect_snap_m,
         process_speeds=o.process_speeds, calculate_costs=o.calculate_costs,
         functional_types=o.functional_types, osm_overrides=config.osm_overrides,
-        build_graph=o.build_graph, extract_restrictions=o.extract_restrictions)
+        build_graph=o.build_graph, extract_restrictions=o.extract_restrictions,
+        # the walls need raw.* of the area, which the module reads only with the boundary (the cut PBF is cut again, with no change)
+        building_faces=o.building_faces, boundary=config.effective_boundary_path if o.building_faces else None, bus_routes=False)
     for what, secs in res.get("seconds", {}).items():
         logger.info(f"  rust {what}: {secs:.2f}s")
     return res
+
+
+def load_building_faces(con, out_dir) -> int:
+    """Create ``main.building_faces`` from ``building_faces_main.parquet`` (``options.building_faces``). Returns the rows."""
+    p = str(Path(out_dir) / "building_faces_main.parquet").replace("'", "''")
+    con.execute(f"CREATE OR REPLACE TABLE main.building_faces AS SELECT * REPLACE (geometry::GEOMETRY AS geometry) FROM read_parquet('{p}')")
+    return con.execute("SELECT count(*) FROM main.building_faces").fetchone()[0]
 
 
 def load_mode(con, mode: str, out_dir, merge_segments: bool) -> tuple[int, int]:
