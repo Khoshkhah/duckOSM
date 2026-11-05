@@ -1,7 +1,8 @@
 //! The OSM JSON reader gives the same data as the PBF reader: the Monaco PBF is written as OSM JSON (as Overpass
 //! writes it: coordinates with 7 decimals, tags as an object, members with type, ref and role), read back, and
 //! compared with the PBF reader: the ways, their tags, the coordinate bits and the restriction relations. The cut
-//! of OSM JSON to a boundary keeps the same ways as the cut of the PBF reader.
+//! of OSM JSON to a boundary keeps the same ways as the cut of the PBF reader, and the same `raw.*` as the
+//! `smart` cut of the PBF reader (the input of the base-map layers).
 
 use duckosm_core::boundary::Boundary;
 use duckosm_core::osmjson::OsmJson;
@@ -48,17 +49,19 @@ fn to_json(path: &PathBuf) -> String {
             match el {
                 Element::Node(n) => write!(
                     s,
-                    r#"{{"type":"node","id":{},"lat":{},"lon":{}}}"#,
+                    r#"{{"type":"node","id":{},"lat":{},"lon":{},"tags":{}}}"#,
                     n.id(),
                     deg7(n.decimicro_lat()),
-                    deg7(n.decimicro_lon())
+                    deg7(n.decimicro_lon()),
+                    tags(n.tags())
                 ),
                 Element::DenseNode(n) => write!(
                     s,
-                    r#"{{"type":"node","id":{},"lat":{},"lon":{}}}"#,
+                    r#"{{"type":"node","id":{},"lat":{},"lon":{},"tags":{}}}"#,
                     n.id(),
                     deg7(n.decimicro_lat()),
-                    deg7(n.decimicro_lon())
+                    deg7(n.decimicro_lon()),
+                    tags(n.tags())
                 ),
                 Element::Way(w) => {
                     let refs: Vec<String> = w.refs().map(|r| r.to_string()).collect();
@@ -106,7 +109,7 @@ fn to_json(path: &PathBuf) -> String {
 fn osm_json_equals_pbf() {
     let path = data("monaco.osm.pbf");
     let json = to_json(&path);
-    let data = OsmJson::read(json.as_bytes()).unwrap();
+    let data = OsmJson::read(json.as_bytes(), false).unwrap();
     let ways = pbf::read_ways(&path).unwrap();
     assert_eq!(data.ways.len(), ways.len());
     for (a, b) in data.ways.iter().zip(&ways) {
@@ -147,11 +150,44 @@ fn osm_json_equals_pbf() {
 fn osm_json_cut_equals_pbf_cut() {
     let sample = data("monaco_sample.osm.pbf");
     let b = Boundary::parse(&std::fs::read_to_string(data("monaco.geojson")).unwrap()).unwrap();
-    let mut json = OsmJson::read(to_json(&sample).as_bytes()).unwrap();
+    let mut json = OsmJson::read(to_json(&sample).as_bytes(), false).unwrap();
     let all = json.ways.len();
     json.cut(&b);
     let (ways, _, _) = pbf::read_area_path(&sample, &b).unwrap();
     assert!(json.ways.len() < all);
     let ids = |w: &[duckosm_core::model::Way]| w.iter().map(|w| w.id).collect::<Vec<_>>();
     assert_eq!(ids(&json.ways), ids(&ways));
+}
+
+#[test]
+fn osm_json_raw_cut_equals_pbf_raw_cut() {
+    let sample = data("monaco_sample.osm.pbf");
+    let b = Boundary::parse(&std::fs::read_to_string(data("monaco.geojson")).unwrap()).unwrap();
+    let mut json = OsmJson::read(to_json(&sample).as_bytes(), true).unwrap();
+    json.cut(&b);
+    let got = json.raw.unwrap();
+    let open = || pbf::BlobReader::from_path(&sample).map_err(|e| e.to_string());
+    let (_, _, _, want) = pbf::read_area_raw(open, &b).unwrap();
+    let nodes = |r: &duckosm_core::raw::Raw| {
+        r.nodes
+            .iter()
+            .map(|n| (n.id, n.lon.to_bits(), n.lat.to_bits(), n.tags.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(nodes(&got), nodes(&want));
+    let ways = |r: &duckosm_core::raw::Raw| {
+        r.ways
+            .iter()
+            .map(|w| (w.id, w.tags.clone(), w.refs.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ways(&got), ways(&want));
+    let rels = |r: &duckosm_core::raw::Raw| {
+        r.relations
+            .iter()
+            .map(|r| (r.id, r.tags.clone(), r.members.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rels(&got), rels(&want));
+    assert!(!got.relations.is_empty() && got.nodes.iter().any(|n| !n.tags.is_empty()));
 }

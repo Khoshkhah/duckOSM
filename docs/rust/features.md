@@ -107,8 +107,10 @@ The writer (`duckosm-parquet`) writes the three tables with the columns and type
 `lon DOUBLE`, `tags MAP(VARCHAR, VARCHAR)`, `refs BIGINT[]`, `ref_roles VARCHAR[]`, and `ref_types` as `VARCHAR[]` (the SQL that
 loads them casts it to duckOSM's `ENUM`). The coordinates use the formula of the PBF reader, which gives the bits of duckOSM (B2).
 
-The wasm module: `build_area(region, boundary, modes, fixes, raw)`. With `raw`, the result also has the three files. The page with
-a cut file (`build`) or Overpass (`build_osm_json`) does not get the layers in this plan: the box is off there, with a note.
+The wasm module: `build_area(region, boundary, modes, fixes, raw)`. With `raw`, the result also has the three files. Overpass
+(`build_osm_json(json, boundary, modes, fixes, levels, raw)`) also gives them: the page's query then also asks for the objects
+of the layers, and `OsmJson::cut` cuts `raw.*` as the `smart` cut of a region file does (test `osm_json_raw_cut_equals_pbf_raw_cut`).
+A cut file (`build`) does not get the layers: the box has no effect there.
 
 ### 2. The SQL: one file from duckOSM
 
@@ -152,7 +154,7 @@ These are the changes, each in its own small commit, so they merge easily with t
 
 - `features.ocean`: S3 allows the page to read it, but duckOSM reads a folder of Overture files with a `glob`. The time and the
   download in the page are not known. Later, as an option.
-- The layers with a cut file or with Overpass (Overpass would need a much larger query).
+- The layers with a cut file.
 - `visualization.edge_levels` and the bus routes.
 
 ## The checks
@@ -236,5 +238,5 @@ Changes from the design:
   copies the changed tags into `raw.ways`, with the order of `map_concat`. A member without a role is NULL, as `ST_READOSM` gives it.
 - **The order in the page.** DuckDB loads spatial during the build, and the tables wait for it. The first build of a page
   downloads the extension (4.5 MB), so the time from the click to the first query includes that download.
-- The layers are made only from a region file. With a cut file or with Overpass, the box has no effect.
+- The layers are made from a region file or from Overpass. With a cut file, the box has no effect.
 
