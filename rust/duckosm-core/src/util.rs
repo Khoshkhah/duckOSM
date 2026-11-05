@@ -27,3 +27,13 @@ impl Hasher for FxHasher {
 
 pub type FxHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type FxHashSet<K> = std::collections::HashSet<K, BuildHasherDefault<FxHasher>>;
+
+/// A hook for the memory probe (`examples/mem_probe.rs`): the network step calls `step` at the start of each numbered step. Without a
+/// probe it costs one read of a static.
+pub static STEP_HOOK: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+pub fn step(name: &str) {
+    if let Some(hook) = STEP_HOOK.get() {
+        hook(name);
+    }
+}
