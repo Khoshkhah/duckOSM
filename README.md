@@ -80,6 +80,11 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 - **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
   area's border by name, and `duckosm extract` cuts a city out of a country build in seconds.
 - **Your own fixes for OSM errors**, applied on every build ([how](https://khoshkhah.github.io/duckOSM/guides/fix-osm-errors/)).
+- **A Rust engine** for the network step (`rust/`), the default since 2026-11-04 (`options.engine: rust`).
+  The Python engine stays as the reference until the next release.
+- **In the browser:** [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) builds the same tables in a web page,
+  with the same Rust engine. Its panel **Edit OSM data** (`web/fixes_editor/`) writes the fixes file that `duckosm build` reads
+  ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
 
 ## Exports
 
