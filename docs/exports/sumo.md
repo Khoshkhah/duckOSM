@@ -10,7 +10,7 @@ duckOSM writes the network in SUMO's plain-XML format and runs SUMO's own `netco
 each junction allows only the turns in `edge_graph`, so turn restrictions are kept. netconvert
 leaves out a few U-turns it can't build (Monaco: 37 of 1,628); it never adds a turn.
 
-In a driving network each edge's lanes come from `driving.lane_profile` ([design](../design/gmns_lane_profile.md)): one SUMO
+In a driving network each edge's lanes come from `driving.lane_profile` ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)): one SUMO
 lane per lane, with its vehicle classes (a bus lane `bus`, a bike lane `bicycle`, a shared one `bus bicycle`, a car lane every
 road vehicle) and its width, numbered from the right as SUMO does. `duckosm.sumo_compare.lane_diff(db, osm_file, work_dir)`
 builds the same area with SUMO's own OSM import too and lists, per OSM way and direction, every lane difference with its cause

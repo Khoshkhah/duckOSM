@@ -214,7 +214,7 @@ its use, width and turns.
 | `r_barrier`, `l_barrier` | VARCHAR | ∅ | empty |
 | `turn` | VARCHAR | ➕ | the lane's `turn:lanes` value (`left`, `through;right`, …), empty where untagged |
 | `geom` | GEOMETRY | ➕ | the lane's centre line, offset from the link line by the widths of the lanes before it. A two-way road's lanes sit on the traffic side; a road mapped as two one-way ways is placed as one road (no overlap). It runs to the link's nodes |
-| `geom_cut` | GEOMETRY | ➕ | driving: the lane's line where SUMO netconvert ends it, at the edge of the junction; the `lane_connector` paths meet it ([design](../design/gmns_lane_profile.md)). `geom` is the line to the node |
+| `geom_cut` | GEOMETRY | ➕ | driving: the lane's line where SUMO netconvert ends it, at the edge of the junction; the `lane_connector` paths meet it ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)). `geom` is the line to the node |
 
 How many rows: the lane count, plus a lane for each extra entry of `turn:lanes` (a turn pocket), plus one for an
 on-road bike lane. That is why a link can have `lanes = 2` and three `lane` rows.
@@ -261,7 +261,7 @@ direction.
 A bus's turn into or out of a bus-only link (the source `edge_graph`'s rows with `uses = 'bus'`, the same U-turn
 rule) is a movement too. Monaco: 27 such turns.
 
-Where the lane ranges come from ([design](../design/gmns_lane_profile.md)): driving and cycling, SUMO netconvert's lane
+Where the lane ranges come from ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)): driving and cycling, SUMO netconvert's lane
 connections, given duckOSM's lanes and legal turns; walking (a footpath is one strip), the lanes in order, lane 1 into lane 1.
 A turn netconvert gives no lanes keeps its row without lanes and is listed in [`lane_check`](#lane_check). A range is never half
 empty: both ends are set, or none.
@@ -290,7 +290,7 @@ a junction. A movement from lanes 1-2 into lanes 1-2 has two connectors.
 | `geom` | GEOMETRY | the path through the junction: SUMO netconvert's internal lane, from the lane's `geom_cut` end to the next lane's `geom_cut` start |
 
 Which lane goes to which lane, and the path between them, come from SUMO netconvert, given duckOSM's lanes (`driving.lane_profile`)
-and legal turns ([design](../design/gmns_lane_profile.md)). Not in the standard, so never in the CSVs.
+and legal turns ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)). Not in the standard, so never in the CSVs.
 
 ## lane_check
 

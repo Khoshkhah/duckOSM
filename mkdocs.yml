@@ -57,7 +57,7 @@ markdown_extensions:
       # GitHub-style anchors, so the docs' existing in-page links work on the site too
       slugify: !!python/object/apply:pymdownx.slugs.slugify { kwds: { case: lower } }
 
-# design notes and unbuilt specs stay in the repo but aren't published
+# design notes, unbuilt specs and the developer guide stay in the repo but aren't published
 plugins:
   - search
   # /llms.txt (an index for AI agents, llmstxt.org) and /llms-full.txt (every page as Markdown)
@@ -109,11 +109,10 @@ plugins:
           - reference/database.md
           - reference/features.md
           - reference/elevation-sources.md
-        Development:
-          - development.md
 
 exclude_docs: |
   design/
+  development.md
   lane_map.md
   rust/
 
@@ -161,5 +160,3 @@ nav:
       - Database schema: reference/database.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md
-  - Development:
-      - Development: development.md
