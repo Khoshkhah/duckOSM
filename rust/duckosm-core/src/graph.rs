@@ -166,15 +166,17 @@ fn member(rel: &Relation, role: &str, t: MemberType) -> Option<i64> {
         .max()
 }
 
-/// The ways of the mode that have the two nodes as neighbours (`way_nodes` with `abs(seq) = 1`).
+/// The ways of `keep` that have the two nodes as neighbours (`way_nodes` with `abs(seq) = 1`). `keep` is the ways that a rule
+/// names: every question asks if one of them is at the end of an edge, so the other ways would only fill memory (millions of
+/// pairs in a large area).
 struct WayEnds {
     pairs: FxHashMap<(i64, i64), Vec<i64>>,
 }
 
 impl WayEnds {
-    fn new(mw: &[ModeWay]) -> WayEnds {
+    fn new(mw: &[ModeWay], keep: &FxHashSet<i64>) -> WayEnds {
         let mut pairs: FxHashMap<(i64, i64), Vec<i64>> = FxHashMap::default();
-        for w in mw {
+        for w in mw.iter().filter(|w| keep.contains(&w.id)) {
             for p in w.refs.windows(2) {
                 let k = (p[0].min(p[1]), p[0].max(p[1]));
                 let v = pairs.entry(k).or_default();
@@ -217,13 +219,20 @@ pub fn restrictions(
     mw: &[ModeWay],
     edges: &[Edge],
 ) -> (Vec<TurnRestriction>, Vec<TurnPath>) {
-    let ends = WayEnds::new(mw);
-    let mut by_target: FxHashMap<i64, Vec<usize>> = FxHashMap::default();
-    let mut by_source: FxHashMap<i64, Vec<usize>> = FxHashMap::default();
-    for (i, e) in edges.iter().enumerate() {
-        by_target.entry(e.target).or_default().push(i);
-        by_source.entry(e.source).or_default().push(i);
+    let mut rule_ways: FxHashSet<i64> = relations
+        .iter()
+        .flat_map(|r| {
+            r.members
+                .iter()
+                .filter(|m| m.1 == MemberType::Way)
+                .map(|m| m.0)
+        })
+        .collect();
+    for s in synthetic {
+        rule_ways.extend([s.from_way, s.to_way]);
     }
+    let ends = WayEnds::new(mw, &rule_ways);
+    drop(rule_ways);
     // the rules with a via node: (rule, from way, via node, to way)
     let mut node_rules: Vec<NodeRule> = Vec::new();
     for rel in relations {
@@ -245,6 +254,18 @@ pub fn restrictions(
             condition: None,
         };
         node_rules.push((rule, Some(s.from_way), Some(s.via_node), Some(s.to_way)));
+    }
+    // the edges at the via nodes of the rules, and only those
+    let via_nodes: FxHashSet<i64> = node_rules.iter().filter_map(|n| n.2).collect();
+    let mut by_target: FxHashMap<i64, Vec<usize>> = FxHashMap::default();
+    let mut by_source: FxHashMap<i64, Vec<usize>> = FxHashMap::default();
+    for (i, e) in edges.iter().enumerate() {
+        if via_nodes.contains(&e.target) {
+            by_target.entry(e.target).or_default().push(i);
+        }
+        if via_nodes.contains(&e.source) {
+            by_source.entry(e.source).or_default().push(i);
+        }
     }
     let mut out = Vec::new();
     for (r, fw, vn, tw) in &node_rules {
@@ -420,14 +441,26 @@ pub fn edge_graph(
                 .filter_map(|e| label(e).map(|l| (e, Some(l)))),
         )
         .collect();
-    let mut by_source: FxHashMap<i64, Vec<usize>> = FxHashMap::default();
-    for (i, (e, _)) in all.iter().enumerate() {
-        by_source.entry(e.source).or_default().push(i);
-    }
+    // (source, index), sorted: 16 bytes for each edge, where a hash map with one vector for each source needs about 100
+    let mut by_source: Vec<(i64, usize)> = all
+        .iter()
+        .enumerate()
+        .map(|(i, (e, _))| (e.source, i))
+        .collect();
+    by_source.sort_unstable();
+    let starting_at = |node: i64| {
+        let lo = by_source.partition_point(|k| k.0 < node);
+        let n = by_source[lo..].partition_point(|k| k.0 == node);
+        &by_source[lo..lo + n]
+    };
     let heads: Vec<(f64, f64)> = all.iter().map(|(e, _)| headings(e)).collect();
-    let mut rows = Vec::new();
+    // The number of moves is known before the rows are made (a move that a bridge rule or two access labels remove only makes the
+    // vector a little too large). Without this, the vector doubles its capacity by pushes: it holds the old and the new block at the
+    // same time, and it keeps up to half of the capacity unused.
+    let moves: usize = all.iter().map(|(e, _)| starting_at(e.target).len()).sum();
+    let mut rows = Vec::with_capacity(moves);
     for (i, &(e1, l1)) in all.iter().enumerate() {
-        for &j in by_source.get(&e1.target).map_or(&[][..], |v| v.as_slice()) {
+        for &(_, j) in starting_at(e1.target) {
             let (e2, l2) = all[j];
             if e1.edge_id == e2.edge_id {
                 continue;
@@ -503,7 +536,10 @@ pub fn edge_graph(
             })
         });
     }
-    rows.sort_by_key(|g| (g.from_edge, g.to_edge));
+    // Each (from, to) pair has one row (a pair of edge indexes makes one move, and the edge ids are unique), so the sort needs no
+    // tie rule. An unstable sort works in place; the stable one allocates half of the rows again.
+    rows.sort_unstable_by_key(|g| (g.from_edge, g.to_edge));
+    rows.shrink_to_fit();
     permission.sort();
     (rows, permission)
 }
