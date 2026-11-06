@@ -423,6 +423,10 @@ class DuckOSM:
         import yaml
         doc = yaml.safe_load(Path(self.config.osm_overrides).read_text()) or {}
         rules, new_ways = doc.get("overrides") or [], doc.get("new_ways") or []
+        walls = len((doc.get("extra") or {}).get("building_faces") or [])
+        if walls and not self.config.options.building_faces:     # the wall rules act only where the build makes the walls
+            logger.warning(f"  The fixes file has {walls} wall rule(s) (extra.building_faces). They do nothing: set options.building_faces: true "
+                           "(Rust engine) to make main.building_faces and apply them.")
         # tags_from copies a way's OSM tags before any fix changes them
         osm_tags = {w: dict(t) for w, t in self.con.execute(
             "SELECT osm_id, tags FROM raw.ways WHERE osm_id IN (SELECT unnest(?::BIGINT[]))",

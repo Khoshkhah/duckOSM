@@ -1,10 +1,110 @@
 {
-  "_doc": "The preset fields of the fixes editor (fixes_panel.js, docs/guides/edit-osm-data.md). One list for each kind of object (road, building, node, and new_road for a road that the person draws). key: an OSM tag, or, with rule: true, a key of an overrides rule that acts for each mode (oneway, lanes, layer, turn lanes). type: choice (options: [value, label]; a value that is not in the list is kept), text, int or color. group: the section of a field in the form (the panel shows the fields in the order of this file, one section for each group).",
+  "_doc": "The preset fields of the fixes editor (fixes_panel.js, docs/guides/edit-osm-data.md). One list for each kind of object (road, building, node, and new_road for a road that the person draws). key: an OSM tag, or, with rule: true, a key of an overrides rule that acts for each mode (oneway, lanes, layer, turn lanes). type: choice (options: [value, label]; a value that is not in the list is kept), text, int or color. group: the section of a field in the form (the panel shows the fields in the order of this file, one section for each group). check: optional, the check of a value while the person types (fixes_panel.js, checkValue): min and max for an int, or format (maxspeed, turn_lanes, height, color).",
   "road": [
     {
       "key": "name",
       "label": "Name",
       "type": "text",
+      "group": "Basics"
+    },
+    {
+      "key": "highway",
+      "label": "Road class",
+      "type": "choice",
+      "options": [
+        [
+          "motorway",
+          "Motorway"
+        ],
+        [
+          "motorway_link",
+          "Motorway link"
+        ],
+        [
+          "trunk",
+          "Trunk"
+        ],
+        [
+          "trunk_link",
+          "Trunk link"
+        ],
+        [
+          "primary",
+          "Primary"
+        ],
+        [
+          "primary_link",
+          "Primary link"
+        ],
+        [
+          "secondary",
+          "Secondary"
+        ],
+        [
+          "secondary_link",
+          "Secondary link"
+        ],
+        [
+          "tertiary",
+          "Tertiary"
+        ],
+        [
+          "tertiary_link",
+          "Tertiary link"
+        ],
+        [
+          "unclassified",
+          "Unclassified"
+        ],
+        [
+          "residential",
+          "Residential"
+        ],
+        [
+          "living_street",
+          "Living street"
+        ],
+        [
+          "service",
+          "Service"
+        ],
+        [
+          "busway",
+          "Busway"
+        ],
+        [
+          "pedestrian",
+          "Pedestrian street"
+        ],
+        [
+          "track",
+          "Track"
+        ],
+        [
+          "footway",
+          "Footway"
+        ],
+        [
+          "path",
+          "Path"
+        ],
+        [
+          "cycleway",
+          "Cycleway"
+        ],
+        [
+          "bridleway",
+          "Bridleway"
+        ],
+        [
+          "steps",
+          "Steps"
+        ],
+        [
+          "corridor",
+          "Corridor"
+        ]
+      ],
       "group": "Basics"
     },
     {
@@ -30,31 +130,46 @@
     },
     {
       "key": "lanes",
-      "label": "Lanes, all",
+      "label": "Lanes in each direction",
       "type": "int",
       "rule": true,
-      "group": "Lanes and speed"
+      "group": "Lanes and speed",
+      "check": {
+        "min": 1,
+        "max": 20
+      }
     },
     {
       "key": "lanes_forward",
-      "label": "Lanes, forward",
+      "label": "Lanes forward",
       "type": "int",
       "rule": true,
-      "group": "Lanes and speed"
+      "group": "Lanes and speed",
+      "check": {
+        "min": 0,
+        "max": 20
+      }
     },
     {
       "key": "lanes_backward",
-      "label": "Lanes, back",
+      "label": "Lanes back",
       "type": "int",
       "rule": true,
-      "group": "Lanes and speed"
+      "group": "Lanes and speed",
+      "check": {
+        "min": 0,
+        "max": 20
+      }
     },
     {
       "key": "maxspeed",
       "label": "Max speed",
       "type": "text",
       "placeholder": "30, 50, walk",
-      "group": "Lanes and speed"
+      "group": "Lanes and speed",
+      "check": {
+        "format": "maxspeed"
+      }
     },
     {
       "key": "turn_lanes_forward",
@@ -62,7 +177,10 @@
       "type": "text",
       "rule": true,
       "placeholder": "left|through|right",
-      "group": "Lanes and speed"
+      "group": "Lanes and speed",
+      "check": {
+        "format": "turn_lanes"
+      }
     },
     {
       "key": "turn_lanes_backward",
@@ -70,7 +188,10 @@
       "type": "text",
       "rule": true,
       "placeholder": "left|through",
-      "group": "Lanes and speed"
+      "group": "Lanes and speed",
+      "check": {
+        "format": "turn_lanes"
+      }
     },
     {
       "key": "sidewalk",
@@ -198,11 +319,11 @@
           "Dirt"
         ]
       ],
-      "group": "Surface and access"
+      "group": "Surface"
     },
     {
       "key": "access",
-      "label": "Access",
+      "label": "All traffic",
       "type": "choice",
       "options": [
         [
@@ -230,14 +351,110 @@
           "No"
         ]
       ],
-      "group": "Surface and access"
+      "group": "Access"
+    },
+    {
+      "key": "motor_vehicle",
+      "label": "Cars",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "designated",
+          "Yes, a road for them"
+        ],
+        [
+          "destination",
+          "Only to get to a place here"
+        ],
+        [
+          "delivery",
+          "Only delivery"
+        ],
+        [
+          "private",
+          "Private"
+        ],
+        [
+          "no",
+          "No"
+        ]
+      ],
+      "group": "Access"
+    },
+    {
+      "key": "foot",
+      "label": "Walking",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "designated",
+          "Yes, a path for them"
+        ],
+        [
+          "permissive",
+          "Yes, with the owner's permission"
+        ],
+        [
+          "private",
+          "Private"
+        ],
+        [
+          "no",
+          "No"
+        ]
+      ],
+      "group": "Access"
+    },
+    {
+      "key": "bicycle",
+      "label": "Bikes",
+      "type": "choice",
+      "options": [
+        [
+          "yes",
+          "Yes"
+        ],
+        [
+          "designated",
+          "Yes, a path for them"
+        ],
+        [
+          "permissive",
+          "Yes, with the owner's permission"
+        ],
+        [
+          "dismount",
+          "Walk the bike"
+        ],
+        [
+          "private",
+          "Private"
+        ],
+        [
+          "no",
+          "No"
+        ]
+      ],
+      "group": "Access"
     },
     {
       "key": "layer",
       "label": "Layer",
       "type": "int",
       "rule": true,
-      "group": "Level"
+      "group": "Level",
+      "check": {
+        "min": -5,
+        "max": 5
+      }
     },
     {
       "key": "bridge",
@@ -339,14 +556,21 @@
       "key": "building:levels",
       "label": "Floors",
       "type": "int",
-      "group": "Size"
+      "group": "Size",
+      "check": {
+        "min": 0,
+        "max": 200
+      }
     },
     {
       "key": "height",
       "label": "Height (m)",
       "type": "text",
       "placeholder": "15 or 15.5",
-      "group": "Size"
+      "group": "Size",
+      "check": {
+        "format": "height"
+      }
     },
     {
       "key": "roof:shape",
@@ -396,13 +620,20 @@
       "key": "roof:levels",
       "label": "Roof floors",
       "type": "int",
-      "group": "Roof"
+      "group": "Roof",
+      "check": {
+        "min": 0,
+        "max": 20
+      }
     },
     {
       "key": "roof:colour",
       "label": "Roof color",
       "type": "color",
-      "group": "Roof"
+      "group": "Roof",
+      "check": {
+        "format": "color"
+      }
     },
     {
       "key": "roof:material",
@@ -444,7 +675,10 @@
       "key": "building:colour",
       "label": "Facade color",
       "type": "color",
-      "group": "Facade"
+      "group": "Facade",
+      "check": {
+        "format": "color"
+      }
     },
     {
       "key": "building:material",
@@ -598,7 +832,7 @@
   "new_road": [
     {
       "key": "highway",
-      "label": "Kind",
+      "label": "Road class",
       "type": "choice",
       "options": [
         [
@@ -677,14 +911,21 @@
     },
     {
       "key": "lanes",
-      "label": "Lanes",
-      "type": "int"
+      "label": "Lanes (all directions)",
+      "type": "int",
+      "check": {
+        "min": 1,
+        "max": 20
+      }
     },
     {
       "key": "maxspeed",
       "label": "Max speed",
       "type": "text",
-      "placeholder": "30, 50, walk"
+      "placeholder": "30, 50, walk",
+      "check": {
+        "format": "maxspeed"
+      }
     },
     {
       "key": "surface",

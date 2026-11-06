@@ -1,7 +1,8 @@
 // Checks of the fixes rules (fixes.js) and of the readers for the 3D preview (fixes_panel.js), with no browser:
 //   node web/fixes_editor/fixes_units.mjs
 import * as F from "./fixes.js";
-import { cssColor, heightOf, wallShown, wallFilter } from "./fixes_panel.js";
+import { cssColor, heightOf, wallShown, wallFilter, checkValue, checkKey, crossChecks, clearClosed, guardsFor, nodeRule, geoOf } from "./fixes_panel.js";
+import { readFileSync } from "node:fs";
 
 const sorted = (k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);   // the order of the keys of a map does not matter
 const eq = (a, b, m) => { const x = JSON.stringify(a, sorted), y = JSON.stringify(b, sorted); if (x !== y) throw new Error(`${m}: ${x} != ${y}`); };
@@ -116,4 +117,36 @@ F.updateNewWayTags(doc, nw, { highway: "track" });
 eq(doc.new_ways, [{ id: nw, nodes: [1, 3], tags: { highway: "track" }, note: "x" }], "a tag change writes one new road");
 F.remove(doc, { new_way: nw });
 eq(F.newWays(doc), [], "remove: the new road goes");
+// the checks of the forms (docs/design/fixes_editor_guards.md)
+const presets = JSON.parse(readFileSync(new URL("presets.json", import.meta.url), "utf8"));
+const field = (kind, key) => presets[kind].find((f) => f.key === key);
+const ok = (x, m) => { if (x !== "") throw new Error(`${m}: "${x}" is not empty`); };
+const no = (x, m) => { if (!x) throw new Error(`${m}: no message`); };
+ok(checkValue(field("road", "lanes"), "2"), "lanes 2"); no(checkValue(field("road", "lanes"), "0"), "lanes 0"); no(checkValue(field("road", "lanes"), "two"), "lanes two");
+ok(checkValue(field("road", "layer"), "-2"), "layer -2"); no(checkValue(field("road", "layer"), "9"), "layer 9");
+for (const v of ["50", "30 mph", "walk", "none", "SE:urban"]) ok(checkValue(field("road", "maxspeed"), v), `maxspeed ${v}`);
+no(checkValue(field("road", "maxspeed"), "fast"), "maxspeed fast");
+ok(checkValue(field("road", "turn_lanes_forward"), "left;through|right"), "turn lanes"); ok(checkValue(field("road", "turn_lanes_forward"), "|through"), "an empty lane");
+no(checkValue(field("road", "turn_lanes_forward"), "left|straight"), "a bad arrow");
+for (const v of ["12", "12.5 m", "40 ft", "40'"]) ok(checkValue(field("building", "height"), v), `height ${v}`);
+no(checkValue(field("building", "height"), "tall"), "height tall");
+ok(checkValue(field("building", "roof:colour"), "#a0b0c0"), "color hex"); ok(checkValue(field("building", "roof:colour"), "red"), "color name"); no(checkValue(field("building", "roof:colour"), "#12"), "a bad color");
+ok(checkValue(field("road", "lanes"), ""), "an empty value is not checked");
+ok(checkKey("cycleway:left"), "a key"); no(checkKey("my key"), "a key with a space"); no(checkKey("@wall"), "a key with @");
+eq(crossChecks("road", { lanes: "2", lanes_forward: "3" }).map((c) => c[0]), ["lanes_forward"], "lanes forward is not lanes");
+eq(crossChecks("road", { lanes: "2", turn_lanes_forward: "left|through|right" }).map((c) => c[0]), ["turn_lanes_forward"], "turn lanes count");
+eq(crossChecks("road", { lanes: "3", turn_lanes_forward: "left|through|right", bridge: "yes", layer: "1" }), [], "all agree");
+eq(crossChecks("road", { bridge: "yes", layer: "0" }).map((c) => c[0]), ["layer"], "a bridge on layer 0");
+eq(crossChecks("road", { motor_vehicle: "no", foot: "no", bicycle: "no" }).map((c) => c[0]), ["bicycle"], "in no network");
+// a choice clears a field that a guard closes now; a conflict of the data stays
+const d1 = { highway: "traffic_signals", crossing: "marked" };
+eq(clearClosed(presets._guards.node, presets.node, { highway: "crossing", crossing: "marked" }, d1), [["crossing", "marked", "A traffic signal with a crossing has crossing=traffic_signals."]], "the crossing goes");
+eq(d1.crossing, "", "the value is cleared");
+const d2 = { highway: "traffic_signals", crossing: "marked", name: "x" };
+eq(clearClosed(presets._guards.node, presets.node, { ...d2 }, d2), [], "the data had the conflict: nothing is cleared");
+eq([...guardsFor(presets._guards.road, { oneway: "true" }).off.keys()].includes("lanes_backward"), true, "a one-way road has no lanes back");
+eq(nodeRule("traffic_signals", { arms: 2, classes: ["residential"], tags: {} }), "A traffic signal needs a junction of at least 3 roads.", "a signal needs 3 roads");
+eq(nodeRule("stop", { arms: 3, classes: ["residential"], tags: {} }), "", "a stop sign at a T junction");
+// a geometry of a query row: a text (duckdb-wasm) or an object (a server that sends JSON rows)
+eq([geoOf('{"type":"Point","coordinates":[1,2]}'), geoOf({ type: "Point", coordinates: [1, 2] })], [{ type: "Point", coordinates: [1, 2] }, { type: "Point", coordinates: [1, 2] }], "geoOf");
 console.log("fixes_units.mjs: ok");

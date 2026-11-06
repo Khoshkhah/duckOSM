@@ -41,6 +41,104 @@ const REASONS = {
   none: ["no street seen", "No street is near this building. Check the type."],
 };
 const FACE_NAMES = { front: "Front", back: "Back", side: "Side", party: "Party wall", court: "Courtyard wall" };
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+// a GeoJSON geometry of a query row: duckdb-wasm (Studio) gives ST_AsGeoJSON as a text, and a server that sends the rows as JSON (duckosm edit)
+// gives it as an object. Before this, the panel parsed only a text: in duckosm edit, no shape of the panel was drawn on the map.
+export const geoOf = (g) => (typeof g === "string" ? JSON.parse(g) : g);
+const fid = (key) => `fixf-${key.replace(/[^a-z0-9]/gi, "_")}`;          // the id of the control of a field
+
+// ---- the checks of the forms (docs/design/fixes_editor_guards.md). They have no DOM: fixes_units.mjs tests them in Node.
+// why a node cannot have this kind ("" when it can): the node must be on a road of the driving network, a signal needs a junction of at least 3
+// roads, a crossing needs a crossable road class, a motorway or a trunk road has neither, and a node has one kind. `d`: the data of the node
+// (arms: the number of roads that meet, classes: their classes, tags)
+export function nodeRule(kind, d) {
+  if (!d?.arms) return "This node is not on a road of the driving network.";
+  if (d.classes.some((c) => NO_SIGNAL.has(c))) return "A motorway or a trunk road meets here: no signal and no crossing.";
+  const cur = d.tags?.highway;
+  if (kind === "stop" || kind === "give_way") return d.arms < 3 ? "A stop sign or a give-way sign needs a junction of at least 3 roads." : "";
+  if (kind === "bus_stop") return "";
+  if (kind === "traffic_signals") {
+    if (cur === "crossing") return "This node is a crossing already.";
+    if (d.arms < 3) return "A traffic signal needs a junction of at least 3 roads.";
+  } else if (kind === "crossing") {
+    if (cur === "traffic_signals") return "This node is a traffic signal already.";
+    if (!d.classes.some((c) => CROSSABLE.has(c))) return "A crossing needs a road of the class residential, service, tertiary, secondary or primary here.";
+  }
+  return "";
+}
+const ARROWS = new Set(["", "none", "left", "slight_left", "sharp_left", "through", "right", "slight_right", "sharp_right", "reverse", "merge_to_left", "merge_to_right"]);
+const FORMATS = {
+  maxspeed: [/^(\d+(\.\d+)?( ?(mph|knots|km\/h))?|none|walk|signals|variable|[A-Z]{2}:[a-z_]+)$/, "Type a number (50), a number and mph (30 mph), walk, none, signals or a zone (SE:urban)."],
+  height: [/^\d+(\.\d+)?( ?(m|ft))?$|^\d+'(\d+")?$/, "Type the meters (12, 12.5 m) or the feet (40 ft, 40')."],
+};
+// why the value of a field is not correct ("" when it is): presets.json `check` (min and max of an int, or a format)
+export function checkValue(f, v) {
+  v = String(v ?? "").trim();
+  if (v === "") return "";
+  if (v.length > 255) return "OSM keeps at most 255 characters in a value.";
+  const c = f.check ?? {};
+  if (f.type === "int") {
+    const range = c.min != null && c.max != null ? ` from ${c.min} to ${c.max}` : c.min != null ? ` of ${c.min} or more` : "";
+    if (!/^-?\d+$/.test(v) || (c.min != null && Number(v) < c.min) || (c.max != null && Number(v) > c.max)) return `Type a whole number${range}.`;
+  }
+  if (c.format === "turn_lanes") {
+    const bad = v.split("|").flatMap((lane) => lane.split(";")).find((a) => !ARROWS.has(a.trim()));
+    return bad === undefined ? "" : `"${bad}" is not a turn arrow. Use left, through, right, slight_left, slight_right, reverse or none: ";" between the arrows of a lane, "|" between the lanes.`;
+  }
+  if (c.format === "color") return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v) || cssColor(v) || (/^[a-z]+$/i.test(v) && globalThis.CSS?.supports?.("color", v)) ? "" : "Type #rrggbb or a color name (white, red, beige).";
+  const fm = FORMATS[c.format];
+  return fm && !fm[0].test(v) ? fm[1] : "";
+}
+// why a key of the Other tags is not correct ("" when it is)
+export function checkKey(k) {
+  if (!k) return "Type a key.";
+  if (/[\s="]/.test(k)) return "A key has no space, no = and no quote.";
+  if (k[0] === "@") return "A key cannot start with @.";
+  return k.length > 255 ? "OSM keeps at most 255 characters in a key." : "";
+}
+// the warnings that use two or more fields: [field, text, the fields that cause it]. The panel shows one only when the person changed one of these fields.
+export function crossChecks(kind, d) {
+  const out = [], int = (k) => (/^-?\d+$/.test(String(d[k] ?? "").trim()) ? Number(d[k]) : null);
+  const lanesOf = (k) => (String(d[k] ?? "").trim() ? String(d[k]).split("|").length : null);
+  if (kind !== "road") return out;
+  for (const [k, name] of [["lanes_forward", "forward"], ["lanes_backward", "back"]]) {
+    if (int(k) != null && int("lanes") != null && int(k) !== int("lanes")) out.push([k, `Lanes in each direction is ${int("lanes")}, and lanes ${name} is ${int(k)}: the build uses ${int(k)} ${name}.`, [k, "lanes"]]);
+  }
+  for (const [k, l] of [["turn_lanes_forward", "lanes_forward"], ["turn_lanes_backward", "lanes_backward"]]) {
+    const want = int(l) ?? int("lanes"), have = lanesOf(k);
+    if (have != null && want != null && have !== want) out.push([k, `The turn lanes have ${plural(have, "lane")}, and the road has ${plural(want, "lane")} in this direction.`, [k, l, "lanes"]]);
+  }
+  const layer = int("layer");
+  if (["yes", "viaduct"].includes(d.bridge) && layer != null && layer < 1) out.push(["layer", "A bridge has a layer of 1 or more.", ["layer", "bridge"]]);
+  if (["yes", "building_passage"].includes(d.tunnel) && layer != null && layer > -1 && d.tunnel !== "building_passage") out.push(["layer", "A tunnel has a layer of -1 or less.", ["layer", "tunnel"]]);
+  if (["motor_vehicle", "foot", "bicycle"].every((k) => d[k] === "no")) out.push(["bicycle", "Cars, walking and bikes are all No: the road is in no network. To remove the road, use Delete.", ["motor_vehicle", "foot", "bicycle"]]);
+  return out;
+}
+// the guards of presets.json (`_guards`) for some values: the fields that go off, and the fields whose list gets shorter, each with its reason
+export function guardsFor(rules, values) {
+  const off = new Map(), allow = new Map();
+  for (const r of rules ?? []) {
+    const on = Object.entries(r.if).every(([key, vals]) => { const not = key.endsWith("!"), v = String(values[not ? key.slice(0, -1) : key] ?? ""); return not ? !vals.includes(v) : vals.includes(v); });
+    if (!on) continue;
+    for (const key of r.disable ?? []) if (!off.has(key)) off.set(key, r.reason);
+    for (const [key, vals] of Object.entries(r.allow ?? {})) allow.set(key, { vals: allow.has(key) ? allow.get(key).vals.filter((x) => vals.includes(x)) : vals, reason: r.reason });
+  }
+  return { off, allow };
+}
+// why a guard closes this field for this value ("" when it is open)
+const shut = (g, f, v) => (g.off.has(f.key) ? g.off.get(f.key) : f.type === "choice" && v !== "" && g.allow.has(f.key) && !g.allow.get(f.key).vals.includes(v) ? g.allow.get(f.key).reason : "");
+// a choice changed `before` into `d`: each field that a guard closes now, and did not close before, loses its value. Returns [field, old value, reason].
+// A conflict that the data had before the change stays: the person did not make it.
+export function clearClosed(rules, fields, before, d) {
+  const g0 = guardsFor(rules, before), g1 = guardsFor(rules, d), out = [];
+  for (const f of fields) {
+    const v = String(d[f.key] ?? "");
+    if (v === "") continue;
+    const why = shut(g1, f, v);
+    if (why && !shut(g0, f, v)) { d[f.key] = ""; out.push([f.key, v, why]); }
+  }
+  return out;
+}
 
 // the height and the color of a building from its tags, for the 3D preview of the edited buildings (the same reading as main.building_info in app/duck.js of duckosm-rust)
 const NAMED = { white: "#ffffff", black: "#000000", red: "#ff0000", green: "#008000", blue: "#0000ff", yellow: "#ffff00", orange: "#ffa500", brown: "#a52a2a", grey: "#808080", gray: "#808080",
@@ -113,7 +211,8 @@ const MARKUP = (note) => String.raw`
   </div>
   <div id="fix-changes" class="fix-pane" role="tabpanel" hidden>
     <div id="fix-pending" class="fix-pending" hidden></div>
-    <div class="row" style="margin-top:0"><button id="fix-undo" type="button">Undo</button><button id="fix-redo" type="button">Redo</button><button id="fix-download" type="button">Download</button><button id="fix-clear" type="button">Clear all</button></div>
+    <div class="row" style="margin-top:0"><button id="fix-undo" type="button">Undo</button><button id="fix-redo" type="button">Redo</button><button id="fix-download" type="button">Download</button><button id="fix-clear" type="button" class="sb-danger">Delete all changes</button></div>
+    <div class="row"><span class="small">Changes on the map</span><div class="rs-seg" id="fix-show" aria-label="Changes on the map"><button type="button" class="on" data-v="show">Show</button><button type="button" data-v="hide">Hide</button></div></div>
     <div id="fix-list" class="fix-list"></div>
     <p class="why">A change shows in amber on the map. Click a change to see it and its data. Download saves the rules as a fixes file: <code>duckosm build --fixes</code> reads it. This browser keeps the changes of each area.${note}</p>
     <div class="fix-bar">
@@ -223,26 +322,8 @@ export async function initFixesPanel(ctx) {
   }
 
   // ---- the panel: what is selected
-  // why a traffic signal or a crossing cannot go on this node ("" when it can): the node must be on a road of the driving network, a signal needs a
-  // junction of at least 3 roads, a crossing needs a crossable road class, a motorway or a trunk road has neither, and a node has one kind
-  function nodeRule(kind, d) {
-    if (!d?.arms) return "This node is not on a road of the driving network.";
-    if (d.classes.some((c) => NO_SIGNAL.has(c))) return "A motorway or a trunk road meets here: no signal and no crossing.";
-    const cur = d.tags?.highway;
-    if (kind === "stop" || kind === "give_way") return d.arms < 3 ? "A stop sign or a give-way sign needs a junction of at least 3 roads." : "";
-    if (kind === "bus_stop") return "";
-    if (kind === "traffic_signals") {
-      if (cur === "crossing") return "This node is a crossing already.";
-      if (d.arms < 3) return "A traffic signal needs a junction of at least 3 roads.";
-    } else if (kind === "crossing") {
-      if (cur === "traffic_signals") return "This node is a traffic signal already.";
-      if (!d.classes.some((c) => CROSSABLE.has(c))) return "A crossing needs a road of the class residential, service, tertiary, secondary or primary here.";
-    }
-    return "";
-  }
   let turnSel = null;                                // the road of the Turn list that is picked (its row has the mark and the map outlines it)
   const presetsOf = () => presets[sel?.kind ?? kind] ?? [];
-  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
   const isRuleKey = (f) => !!f.rule;
   function initialDraft() {
     const rule = F.ruleOf(doc, sel.type, sel.id), d = {};
@@ -264,21 +345,17 @@ export async function initFixesPanel(ctx) {
   // ---- guards: one choice closes a field, or narrows the list of a field, for another (presets.json, `_guards`)
   const guardRules = presets._guards ?? {};
   const guardKeys = new Set(Object.values(guardRules).filter(Array.isArray).flat().flatMap((r) => Object.keys(r.if).map((k) => k.replace(/!$/, ""))));
-  function guardsOf(k, values) {
-    const off = new Map(), allow = new Map();
-    for (const r of guardRules[k] ?? []) {
-      const on = Object.entries(r.if).every(([key, vals]) => { const not = key.endsWith("!"), v = String(values[not ? key.slice(0, -1) : key] ?? ""); return not ? !vals.includes(v) : vals.includes(v); });
-      if (!on) continue;
-      for (const key of r.disable ?? []) if (!off.has(key)) off.set(key, r.reason);
-      for (const [key, vals] of Object.entries(r.allow ?? {})) allow.set(key, { vals: allow.has(key) ? allow.get(key).vals.filter((x) => vals.includes(x)) : vals, reason: r.reason });
-    }
-    return { off, allow };
-  }
-  // the reason under a field that a guard closed or narrowed
-  const guardNote = (f, g) => (g?.off.has(f.key) ? g.off.get(f.key) : g?.allow.has(f.key) && f.type === "choice" ? g.allow.get(f.key).reason : "");
+  const guardsOf = (k, values) => guardsFor(guardRules[k], values);
+  // the reason under a field that a guard closed or narrowed; `gone`: the fields that a guard cleared, { key: [old value, reason] }
+  const guardNote = (f, g, gone = cleared) => (gone[f.key] ? `Cleared "${gone[f.key][0]}": ${gone[f.key][1]}` : g?.off.has(f.key) ? g.off.get(f.key) : g?.allow.has(f.key) && f.type === "choice" ? g.allow.get(f.key).reason : "");
+  // the line under a field for its error or its warning (paintChecks fills it)
+  const errLine = (key) => `<p class="why gerr" data-err="${esc(key)}" role="alert" hidden></p>`;
+  let cleared = {};                            // the fields of the form that a guard cleared after a choice (guardNote)
+  let seen = {};                               // the values of the form when it was drawn: the state before a choice (clearClosed)
+  let sureMissing = false;                     // the person pushed Add once for an ID that is not in the area: the second push adds it
 
   function control(f, value, g = null) {
-    const id = `fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}`;
+    const id = fid(f.key);
     let el;
     if (f.type === "choice") {
       const allowed = g?.allow.get(f.key)?.vals;
@@ -296,23 +373,68 @@ export async function initFixesPanel(ctx) {
 
   // the number of fields that are not added to the changes yet, for each edit tab (the tab of the state in the variables, and the others in the stash)
   const dirty = (k) => (k === kind ? touched.size : stash[k]?.touched?.size ?? 0);
+  // before the panel drops edits that are not in the changes, it asks (the browser's dialog); true: drop them
+  const dropOk = (n, noun, of) => !n || confirm(`${plural(n, noun)} of ${of} ${n === 1 ? "is" : "are"} not added to the changes. Drop ${n === 1 ? "it" : "them"}?`);
+  const labelOf = (key) => presetsOf().find((f) => f.key === key)?.label ?? key;
+  // what is wrong in the form of the picked object: [{key, text, block}]. A value that the person changed blocks Add; a value of the data (or a
+  // warning of two fields) shows only
+  function problems() {
+    if (!sel || !data) return [];
+    const out = [], fields = presetsOf(), g = guardsOf(sel.kind, draft);
+    for (const f of fields) {
+      const v = String(draft[f.key] ?? "").trim(), mine = touched.has(f.key);
+      let text = checkValue(f, v);
+      if (!text && mine && v !== "") text = shut(g, f, v);
+      if (!text && sel.kind === "node" && f.key === "highway" && mine && v && v !== data.tags.highway) text = nodeRule(v, data);
+      if (text) out.push({ key: f.key, text, block: mine });
+    }
+    for (const k of touched) if (k[0] !== "@" && typeof draft[k] === "string" && !fields.some((f) => f.key === k) && draft[k].length > 255) out.push({ key: k, text: "OSM keeps at most 255 characters in a value.", block: true });
+    for (const [key, text, keys] of crossChecks(sel.kind, draft)) if (keys.some((k) => touched.has(k)) && !out.some((p) => p.key === key)) out.push({ key, text, block: false });
+    return out;
+  }
+  // the lines under the fields: an error is red and its field has a red edge, a warning is amber
+  function paintChecks() {
+    const list = problems(), by = new Map(list.map((p) => [p.key, p]));
+    for (const el of $("fix-form").querySelectorAll("[data-err]")) {
+      const p = by.get(el.dataset.err);
+      el.hidden = !p; el.textContent = p?.text ?? ""; el.classList.toggle("warn", !!p && !p.block);
+      const input = $(fid(el.dataset.err)) ?? el.previousElementSibling?.querySelector?.("input");
+      if (input) { input.classList.toggle("invalid", !!p?.block); input.setAttribute("aria-invalid", p?.block ? "true" : "false"); }
+    }
+    return list;
+  }
   function paintBar() {
     if (!sel || !data) return paintDots();
     const rule = F.ruleOf(doc, sel.type, sel.id), inChanges = !F.isEmptyRule(rule);
     // only the buttons that can act now (Kaveh, 2026-11-06: three disabled buttons made the bar heavy): an edit has Add (or Update) and Reset,
     // an object in the changes with no edit has Remove, and an object with neither has the state line only
-    const edited = touched.size > 0;
-    $("fix-save").textContent = inChanges ? "Update change" : "Add to changes";
-    $("fix-save").disabled = $("fix-revert").disabled = !edited;
+    const edited = touched.size > 0, bad = paintChecks().find((p) => p.block);
+    $("fix-save").textContent = !data.found && sureMissing ? "Add anyway" : inChanges ? "Update change" : "Add to changes";
+    $("fix-save").disabled = !edited || !!bad;
+    $("fix-revert").disabled = !edited;
     $("fix-save").hidden = $("fix-revert").hidden = !edited;
     $("fix-del").disabled = $("fix-del").hidden = !inChanges || edited;
     $("fix-btns").hidden = !edited && !inChanges;
-    $("fix-state").textContent = edited ? `${plural(touched.size, "change")} not added yet.` : inChanges ? "In your changes." : "Edit a field to make a change.";
+    $("fix-state").textContent = bad ? `${labelOf(bad.key)}: ${bad.text}` : !data.found && edited ? (sureMissing ? "This ID is not in the area. Push Add anyway to add the rule." : "This ID is not in the area.")
+      : edited ? `${plural(touched.size, "change")} not added yet.` : inChanges ? "In your changes." : "Edit a field to make a change.";
+    $("fix-state").classList.toggle("bad", !!bad);
     paintDots();
   }
 
   // the section Delete: a road or a building way is removed from the data (the rule `remove` of duckOSM: it is in no network and no layer after the next build), a building that is a
   // relation loses its `building` tag, and a signal or a crossing loses its tags. The delete is part of the draft until Add to changes.
+  // the rules of other records that use the picked object: the turn rules of a road, the wall rules of a building. They do nothing after a delete.
+  function depsOf() {
+    if (sel?.kind === "road") return [...new Map((doc.turn_restrictions ?? []).filter((t) => t.from_way === sel.id || t.to_way === sel.id).map((t) => [`${t.from_way}|${t.via_node}|${t.to_way}`, { from_way: t.from_way, via_node: t.via_node, to_way: t.to_way }])).values()];
+    return sel?.kind === "building" ? wallRecs() : [];
+  }
+  function depsNote(gone) {
+    const n = depsOf().length, noun = sel.kind === "road" ? "turn rule" : "wall rule";
+    if (!n || !gone) return "";
+    return touched.size
+      ? `<label class="rs-opt" style="margin-top:8px"><input type="checkbox" id="fix-del-deps" checked><span>Also delete the ${plural(n, noun)} of this ${sel.kind}. Without the ${sel.kind}, ${n === 1 ? "it does" : "they do"} nothing.</span></label>`
+      : `<p class="small" style="margin:8px 0 0">${plural(n, noun)} of this ${sel.kind} ${n === 1 ? "is" : "are"} still in your changes, and ${n === 1 ? "does" : "do"} nothing.</p><button type="button" id="fix-del-deps-now">Delete ${n === 1 ? "it" : "them"}</button>`;
+  }
   function deleteSection(rule) {
     if (!sel || !data) return "";
     const what = sel.kind === "road" ? "road" : sel.kind === "building" ? "building" : data.tags.highway === "traffic_signals" ? "traffic signal" : data.tags.highway === "crossing" ? "crossing" : null;
@@ -323,7 +445,7 @@ export async function initFixesPanel(ctx) {
       ? `<p class="small" style="margin:0"><b>This ${what} is deleted in the changes.</b> ${effect} To take it back, use Remove from changes.</p>`
       : gone
       ? `<p class="small"><b>This ${what} will be deleted from the data.</b> ${effect} Press Add to changes to keep this.</p><button type="button" id="fix-delete" data-undo="1">Undo the delete</button>`
-      : `<p class="why" style="margin:0 0 8px">Delete this ${what} from the data. ${sel.kind === "node" ? "The node stays on its road, without its traffic tag." : "It is a change like the others: the data has it until you build again."}</p><button type="button" id="fix-delete">Delete this ${what}</button>`) + `</section>`;
+      : `<p class="why" style="margin:0 0 8px">Delete this ${what} from the data.${depsOf().length ? ` ${plural(depsOf().length, sel.kind === "road" ? "turn rule" : "wall rule")} of your changes use${depsOf().length === 1 ? "s" : ""} it.` : ""} ${sel.kind === "node" ? "The node stays on its road, without its traffic tag." : "It is a change like the others: the data has it until you build again."}</p><button type="button" id="fix-delete">Delete this ${what}</button>`) + depsNote(gone) + `</section>`;
   }
   // whether the draft deletes the object: `remove` (a way), no `building` tag (a relation), no traffic tag (a node)
   function deletedNow() {
@@ -374,7 +496,7 @@ export async function initFixesPanel(ctx) {
     const all = [{ type: sel.type, id: sel.id }, ...wallRecs()], what = `${sel.kind} ${sel.id}`;
     if (how === "edit") { if (all.some((o) => F.count(doc, o) > 1)) commit(() => all.forEach((o) => F.join(doc, o))); }
     else { commit(() => all.forEach((o) => F.remove(doc, o))); status(`Deleted from the changes: ${what}. Undo brings it back.`); }
-    ask = false; touched = new Set(); draft = initialDraft(); renderForm(); drawFaces(); drawSelected(false);
+    ask = false; touched = new Set(); cleared = {}; sureMissing = false; draft = initialDraft(); renderForm(); drawFaces(); drawSelected(false);
   }
   $("fix-inchg").addEventListener("click", (e) => { const b = e.target.closest("[data-ask]"); if (b) answer(b.dataset.ask); });
 
@@ -382,12 +504,14 @@ export async function initFixesPanel(ctx) {
     const box = $("fix-form");
     paintAsk();
     if (!sel || !data) { box.innerHTML = ""; $("fix-actions").hidden = true; return paintDots(); }
-    const rule = F.ruleOf(doc, sel.type, sel.id), fields = presetsOf(), g = guardsOf(sel.kind, draft);
-    const row = (f) => `<label for="fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}" class="small${editedKey(rule, f) || touched.has(f.key) ? " edited" : ""}"${editedKey(rule, f) && f.key in rule.was ? ` title="Was: ${esc(rule.was[f.key] ?? "none")}"` : ""}>${esc(f.label)}${editedKey(rule, f) ? ` <a href="#" class="link" role="button" data-revert="${esc(f.key)}" title="Take this change back">↺</a>` : ""}</label>${control(f, draft[f.key] ?? "", g)}${guardNote(f, g) ? `<p class="why gwhy">${esc(guardNote(f, g))}</p>` : ""}`;
+    const rule = F.ruleOf(doc, sel.type, sel.id), fields = presetsOf(), g = guardsOf(sel.kind, draft), told = new Set();
+    const note = (f) => { const x = guardNote(f, g); if (!x || cleared[f.key]) return x; if (told.has(x)) return ""; told.add(x); return x; };   // call it once for each field
+    const row = (f) => `<label for="${fid(f.key)}" class="small${editedKey(rule, f) || touched.has(f.key) ? " edited" : ""}"${editedKey(rule, f) && f.key in rule.was ? ` title="Was: ${esc(rule.was[f.key] ?? "none")}"` : ""}>${esc(f.label)}${editedKey(rule, f) ? ` <a href="#" class="link" role="button" data-revert="${esc(f.key)}" title="Take this change back">↺</a>` : ""}</label>${control(f, draft[f.key] ?? "", g).replace(/<(select|input) /, `<$1 title="${esc(guardNote(f, g))}" `)}${((x) => (x ? `<p class="why gwhy">${esc(x)}</p>` : ""))(note(f))}${errLine(f.key)}`;
     const section = (title, inner) => `<section class="fsec"><h3>${title}</h3>${inner}</section>`;
     let html = [...new Set(fields.map((f) => f.group ?? "Fields"))].map((g) => section(esc(g), `<div class="grid2 fixgrid">${fields.filter((f) => (f.group ?? "Fields") === g).map(row).join("")}</div>`)).join("");
-    if (sel.kind === "road") {
-      html += section("Modes", `<p class="small" style="margin:0 0 6px">Not in</p><div class="rs-opts rs-opts-row" role="group" aria-label="Exclude from">${["driving", "walking", "cycling"].map((m) => `<label class="rs-opt"><input type="checkbox" name="fix-ex" value="${m}"${draft.exclude_modes.includes(m) ? " checked" : ""}><span>${m[0].toUpperCase() + m.slice(1)}</span></label>`).join("")}</div>`);
+    // the rule exclude_modes of an older fixes file: a rule of duckOSM, not OSM data. The editor writes the access tags (Cars, Walking, Bikes) instead
+    if (sel.kind === "road" && draft.exclude_modes.length) {
+      html += section("Networks (a duckOSM rule)", `<p class="why" style="margin:0 0 8px">Your changes keep this road out of ${esc(draft.exclude_modes.join(", "))}. This rule is not OSM data. To say the same in OSM, set Cars, Walking or Bikes to No under Access.</p><button type="button" id="fix-drop-ex">Remove this rule</button>`);
     }
     if (sel.kind === "building" && walls.length) {
       html += section(`Walls <span class="muted">(${walls.length})</span>`, `<div class="wallbar"><button type="button" data-wall-nav="-1">‹ Previous</button><button type="button" data-wall-nav="1">Next ›</button><button type="button" data-wall-nav="0" id="fix-wall-off">Unselect</button></div>
@@ -399,7 +523,7 @@ export async function initFixesPanel(ctx) {
           <span class="small dlabel">Door</span><select data-walldoor aria-label="Door of wall ${w.face_index + 1}">${[["", "No door"], ...DOOR_KINDS.filter(([v]) => v)].map(([v, n]) => `<option value="${esc(v)}"${v === wallDoor(w) ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></div>`; }).join("")}</div>
         <p class="why" style="margin:6px 0 0">Click a wall in the list or on the map to select it. A wall type and a door wait for Add to changes, like a field. A door belongs to the wall: it has no place on it.</p>`);
     } else if (sel.kind === "building" && !hasFaces()) {
-      html += section("Walls", '<p class="why" style="margin:0">Build with the layers on to see the walls of a building and to give them a type.</p>');
+      html += section("Walls", '<p class="why" style="margin:0">This database has no walls. To see the walls of a building and give them a type, build with <code>options.building_faces: true</code> (the Rust engine). In duckOSM Studio, build with the layers on.</p>');
     }
     if (sel.kind === "building" && sel.type === "way" && hasDoors()) {
       const addr = (d) => [d.street, d.housenumber].filter(Boolean).join(" ");
@@ -412,11 +536,12 @@ export async function initFixesPanel(ctx) {
     }
     const preset = new Set(fields.map((f) => f.key));
     const other = Object.keys(draft).filter((k) => !preset.has(k) && k[0] !== "@" && !["exclude_modes", "remove", "note"].includes(k));
-    html += section("Other tags", `<div class="other">${other.map((k) => `<div class="otherrow${k in rule.set || rule.delete.includes(k) ? " edited" : ""}"><span class="k" title="${esc(k)}">${esc(k)}</span><input type="text" data-key="${esc(k)}" value="${esc(draft[k])}" aria-label="${esc(k)}"><button type="button" data-clear="${esc(k)}" title="Delete this tag" aria-label="Delete ${esc(k)}">×</button></div>`).join("") || '<span class="small muted">None.</span>'}
+    html += section("Other tags", `<div class="other">${other.map((k) => `<div class="otherrow${k in rule.set || rule.delete.includes(k) ? " edited" : ""}"><span class="k" title="${esc(k)}">${esc(k)}</span><input type="text" data-key="${esc(k)}" value="${esc(draft[k])}" aria-label="${esc(k)}"><button type="button" data-clear="${esc(k)}" title="Delete this tag" aria-label="Delete ${esc(k)}">×</button></div>${errLine(k)}`).join("") || '<span class="small muted">None.</span>'}
       <div class="otherrow add"><input type="text" id="fix-addkey" placeholder="key" aria-label="New tag, key"><input type="text" id="fix-addval" placeholder="value" aria-label="New tag, value"><button type="button" id="fix-add">Add</button></div></div>
       <div class="grid2 fixgrid" style="margin-top:8px"><label for="fix-note" class="small">Note</label><input type="text" id="fix-note" value="${esc(draft.note)}" placeholder="Why"></div>`);
     html += deleteSection(rule);
     box.innerHTML = html;
+    seen = { ...draft };
     if (sel.kind === "node") {                       // the Kind field offers only what the node can have; the reason is under it
       const hw = $("fixf-highway"), no = [["traffic_signals", "Traffic signals"], ["crossing", "Crossing"], ["stop", "Stop"], ["give_way", "Give way"], ["bus_stop", "Bus stop"]].map(([k, n]) => [k, n, nodeRule(k, data)]).filter(([, , w]) => w);
       for (const [k] of no) { const o = hw?.querySelector(`option[value="${k}"]`); if (o && hw.value !== k) o.disabled = true; }
@@ -428,9 +553,9 @@ export async function initFixesPanel(ctx) {
 
   // take the picked object out of the tab: the form, the draft and the blue on the map go (a field that is not added is dropped)
   function unselect() {
-    if (!sel) return;
+    if (!sel || !dropOk(touched.size, "field", `${KIND_NAME[sel.kind].toLowerCase()} ${sel.id}`)) return;
     const dropped = touched.size;
-    ++token; sel = null; data = null; draft = {}; touched = new Set(); walls = []; wallSel = null; wallHover = null; doors = []; ask = false;
+    ++token; sel = null; data = null; draft = {}; touched = new Set(); cleared = {}; sureMissing = false; walls = []; wallSel = null; wallHover = null; doors = []; ask = false;
     $("fix-id").value = "";
     renderObject(); drawSelected(false); drawFaces(); clearMapSelection();
     status(dropped ? `Unselected. ${plural(dropped, "field")} that you did not add ${dropped === 1 ? "was" : "were"} dropped.` : "Unselected.");
@@ -442,22 +567,33 @@ export async function initFixesPanel(ctx) {
     if (!sel) { box.innerHTML = `<p class="why" style="margin:0">Nothing is picked in this tab.</p>`; renderForm(); return; }
     if (!data) { box.innerHTML = '<p class="why" style="margin:0">Loading…</p>'; return; }
     const name = data.tags.name ? ` “${esc(data.tags.name)}”` : "";
-    const head = `${KIND_NAME[sel.kind === "building" && sel.type === "relation" ? "relation" : sel.kind]} ${sel.type} ${sel.id}${name}`;
+    const head = `${KIND_NAME[sel.kind === "building" && sel.type === "relation" ? "relation" : sel.kind]} ${sel.kind === "node" ? "" : `${sel.type} `}${sel.id}${name}`;
     const tagCount = Object.keys(data.tags).length;
-    box.innerHTML = `<div class="objhead">${head}</div>${data.found ? "" : '<p class="why">Not found in this area. A rule for this ID still works if the ID is right.</p>'}${data.facts.map((f) => `<div class="small muted">${esc(f)}</div>`).join("")}
+    box.innerHTML = `<div class="objhead">${head}</div>${data.found ? "" : data.other ? `<p class="why bad">This ID is not a ${sel.kind} of this area. It is a ${data.other}. <a href="#" class="link" role="button" data-open-kind="${data.other}">Open ${data.other} ${sel.id} in the ${TAB_NAME[data.other]} tab →</a></p>` : '<p class="why bad">This ID is not in this area. Check the ID. A rule for an ID that is not in the area does nothing in this build.</p>'}${data.facts.map((f) => `<div class="small muted">${esc(f)}</div>`).join("")}
       <details class="alltags"><summary>All tags in the data (${tagCount})</summary><table>${Object.entries(data.tags).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("") || '<tr><td colspan="2" class="muted">No tags (build with the layers on to see them all).</td></tr>'}</table></details>`;
   }
 
+  // the other kind of object that has this OSM id, when the tab of the person does not have it (a building id in the Road tab): "road", "building", "node" or null
+  async function otherKind(id, k) {
+    const has = async (sql) => (await safe(sql)).length > 0;
+    if (k !== "building" && built("features", "buildings") && (await has(`SELECT 1 FROM features.buildings WHERE osm_id = ${id} LIMIT 1`))) return "building";
+    if (k !== "road") for (const m of modes()) if (await has(`SELECT 1 FROM ${m}.edges WHERE osm_id = ${id} LIMIT 1`)) return "road";
+    if (k !== "node" && ((built("features", "traffic") && (await has(`SELECT 1 FROM features.traffic WHERE osm_id = ${id} LIMIT 1`))) || (modes()[0] && (await has(`SELECT 1 FROM ${modes()[0]}.way_nodes WHERE node_id = ${id} LIMIT 1`))))) return "node";
+    return null;
+  }
   async function select(k, type, id, { zoom = false, go = true } = {}) {
     if (!whole(id)) return;
+    const prev = k === kind ? sel : stash[k]?.sel;              // the object of that tab: its edits that are not added go with a new pick
+    if (prev && prev.id !== id && !dropOk(dirty(k), "field", `${KIND_NAME[k].toLowerCase()} ${prev.id}`)) { window.rsDeselect?.(); return false; }
     if (go) setTab(k);                                // saves the state of the tab that shows, and shows the tab of the object
     const again = sel?.kind === k && sel.id === id;   // the same object again (a build, Load): the box keeps the person's answer
     kind = k;
     const my = ++token;
-    sel = { kind: k, type: type ?? KIND_OF[k], id }; data = null; draft = {}; touched = new Set(); wallSel = null; wallHover = null; doors = [];
+    sel = { kind: k, type: type ?? KIND_OF[k], id }; data = null; draft = {}; touched = new Set(); cleared = {}; sureMissing = false; wallSel = null; wallHover = null; doors = [];
     $("fix-id").value = id;
     renderObject();
     const d = await loadData(sel.type, id, k);
+    if (!d.found) d.other = await otherKind(id, k);
     if (my !== token) return;
     sel.type = d.type; data = d; draft = initialDraft();
     walls = k === "building" ? await loadWalls(id, d.type) : [];
@@ -497,7 +633,7 @@ export async function initFixesPanel(ctx) {
       .map((r) => ({ ...r, from_node: Number(r.from_node), to_node: Number(r.to_node), face_index: Number(r.face_index) }));
   }
   const wallKey = (w) => `${w.from_node}|${w.to_node}`;
-  const wallLine = (w) => (w._line ??= JSON.parse(w.g).coordinates);
+  const wallLine = (w) => (w._line ??= geoOf(w.g).coordinates);
   // the selected wall: its row has a mark, the bar tells which wall it is, and the map outlines it (the layer fix-faces-sel)
   function paintWalls() {
     for (const row of $("fix-form").querySelectorAll(".wallrow")) row.classList.toggle("sel", row.dataset.key === wallSel);
@@ -549,6 +685,8 @@ export async function initFixesPanel(ctx) {
   // ---- edits in the form
   function onInput(e) {
     const el = e.target;
+    if (!el.isConnected) return;                       // a field of a form that was drawn again
+
     if (el.dataset?.door !== undefined) {                                        // the kind of a door: a node edit at once
       const row = el.closest(".doorrow"), k = `@door:${row.dataset.id}`, d = doors.find((x) => x.osm_id === Number(row.dataset.id));
       if (el.value === doorKindNow(d)) { touched.delete(k); delete draft[k]; } else { touched.add(k); draft[k] = el.value; }
@@ -568,7 +706,6 @@ export async function initFixesPanel(ctx) {
       row.classList.toggle("edited", touched.has(k) || touched.has(`@wdoor:${row.dataset.key}`) || !!F.findFace(doc, sel.id, w.from_node, w.to_node));
       return paintBar();
     }
-    if (el.name === "fix-ex") { draft.exclude_modes = [...root.querySelectorAll("input[name=fix-ex]:checked")].map((c) => c.value); touched.add("exclude_modes"); return paintBar(); }
     if (el.id === "fix-note") { draft.note = el.value; touched.add("note"); return paintBar(); }
     if (el.dataset.for) { const t = $(el.dataset.for); t.value = el.value; draft[t.dataset.key] = el.value; touched.add(t.dataset.key); root.querySelector(`label[for="${t.id}"]`)?.classList.add("edited"); return paintBar(); }
     const k = el.dataset?.key;
@@ -577,23 +714,21 @@ export async function initFixesPanel(ctx) {
     el.closest(".otherrow")?.classList.add("edited");
     if (el.id) root.querySelector(`label[for="${el.id}"]`)?.classList.add("edited");
     paintBar();
-    if (e.type === "change" && guardKeys.has(k)) { const id = el.id; renderForm(); $(id)?.focus(); }      // a choice that closes or narrows another field
+    if (e.type === "change" && guardKeys.has(k)) {                       // a choice that closes or narrows another field: the field loses its value
+      const a = document.activeElement;
+      if (a !== el && $("fix-form").contains(a)) a.blur();               // the field that has the focus gives its value first
+      for (const [key, was, why] of clearClosed(guardRules[sel.kind], presetsOf(), seen, draft)) { touched.add(key); cleared[key] = [was, why]; }
+      const id = el.id; renderForm(); $(id)?.focus();
+      const n = Object.keys(cleared).length;
+      if (n) status(`${plural(n, "field")} cleared: ${Object.keys(cleared).map(labelOf).join(", ")}. Reset brings ${n === 1 ? "it" : "them"} back.`, 6000);
+    }
   }
 
   function save() {
     if (!sel || !data) return status("Pick an object first.");
-    if (sel.kind === "node" && touched.has("highway") && ["traffic_signals", "crossing"].includes(draft.highway) && draft.highway !== data.tags.highway) {
-      const why = nodeRule(draft.highway, data);
-      if (why) return status(why, 7000);
-    }
-    const gd = guardsOf(sel.kind, draft);
-    for (const k of touched) {
-      const f = presetsOf().find((x) => x.key === k), v = String(draft[k] ?? "");
-      if (!f || v === "") continue;
-      if (gd.off.has(k) && v !== (data.tags[k] ?? "")) return status(`${f.label}: ${gd.off.get(k)}`, 7000);
-      const allow = gd.allow.get(k);
-      if (allow && !allow.vals.includes(v) && v !== (data.tags[k] ?? "")) return status(`${f.label}: ${allow.reason}`, 7000);
-    }
+    const bad = problems().find((p) => p.block);
+    if (bad) { ($(fid(bad.key)) ?? $("fix-form").querySelector(`[data-err="${CSS.escape(bad.key)}"]`)?.previousElementSibling?.querySelector("input"))?.focus(); return status(`${labelOf(bad.key)}: ${bad.text}`, 7000); }
+    if (!data.found && !sureMissing) { sureMissing = true; paintBar(); return status(`${sel.type} ${sel.id} is not in this area. Check the ID and the tab. Push Add anyway to add the rule.`, 8000); }
     const rule = structuredClone(F.ruleOf(doc, sel.type, sel.id)), fields = presetsOf(), ruleFields = new Map(fields.filter(isRuleKey).map((f) => [f.key, f]));
     const dataMode = data.mode ?? {};
     const specials = [...touched].filter((k) => k[0] === "@");                        // wall types and door kinds
@@ -620,7 +755,6 @@ export async function initFixesPanel(ctx) {
       }
       if (ruleFields.has(k)) {
         const f = ruleFields.get(k);
-        if (f.type === "int" && v !== "" && !/^-?\d+$/.test(v)) return status(`${f.label} is a whole number.`);
         const conv = v === "" ? null : f.key === "oneway" ? v === "true" : f.type === "int" ? Number(v) : v;
         if (conv === null) delete rule.mode[k];
         else if (String(conv) === (dataMode[k] ?? "") && !(k in rule.mode)) continue;            // the same as the data: no change
@@ -628,15 +762,16 @@ export async function initFixesPanel(ctx) {
         continue;
       }
       const f = fields.find((x) => x.key === k);
-      if (f?.type === "int" && v !== "" && !/^-?\d+$/.test(v)) return status(`${f.label} is a whole number.`);
       if (v === "") {
         delete rule.set[k];
         if (k in data.tags && !rule.delete.includes(k)) rule.delete.push(k);
       } else if (v === data.tags[k] && !(k in rule.set)) { /* the same as the data: no change */ }
       else { rule.set[k] = v; rule.delete = rule.delete.filter((x) => x !== k); }
     }
+    const deps = deletedNow() && $("fix-del-deps")?.checked ? depsOf() : [];
     commit(() => {
       F.writeRule(doc, sel.type, sel.id, rule);
+      for (const o of deps) F.remove(doc, o);
       for (const key of new Set(specials.filter((k) => k[1] === "w").map((k) => k.slice(k.indexOf(":") + 1)))) {       // a wall: its type and its door in one rule
         const [a, b] = key.split("|").map(Number), w = walls.find((x) => wallKey(x) === key);
         F.setFace(doc, sel.id, a, b, draft[`@wall:${key}`] ?? wallTypeNow(w), w.computed_type, draft[`@wdoor:${key}`] ?? wallDoorNow(w));
@@ -646,7 +781,7 @@ export async function initFixesPanel(ctx) {
       }
     });
     status(F.isEmptyRule(rule) && !specials.length ? "No change to add." : `Added to the changes: ${sel.type} ${sel.id}.`);
-    touched = new Set();
+    touched = new Set(); cleared = {}; sureMissing = false;
     draft = initialDraft(); renderForm(); drawSelected(false);
   }
 
@@ -660,16 +795,15 @@ export async function initFixesPanel(ctx) {
 
   // ---- the tabs: Road, Building and Node share one editor, and each has its own object, form and draft (the stash holds the two that do not show)
   function switchKind(k) {
-    stash[kind] = { sel, data, draft, touched, walls, wallSel, doors, ask };
+    stash[kind] = { sel, data, draft, touched, walls, wallSel, doors, ask, cleared, seen };
     const st = stash[k] ?? { sel: null, data: null, draft: {}, touched: new Set(), walls: [], wallSel: null, doors: [], ask: false };
-    kind = k; ({ sel, data, draft, touched, walls, wallSel = null, doors = [], ask = false } = st); ++token;
+    kind = k; ({ sel, data, draft, touched, walls, wallSel = null, doors = [], ask = false, cleared = {}, seen = {} } = st); sureMissing = false; ++token;
     $("fix-id").value = sel?.id ?? "";
     if (sel && !data) select(k, sel.type, sel.id, { go: false });       // an object that waited for its data (a build came between)
   }
   // nothing stays selected on the map from the tab that was left: roadstyle's road selection (the glow and the popup) and the hover marks go
   function clearMapSelection() {
     window.rsDeselect?.();
-    document.querySelectorAll(".maplibregl-popup:not(.rs-tip)").forEach((p) => p.remove());
     leaveNode();
     turnSel = null; paintTurnSel();
   }
@@ -760,13 +894,27 @@ export async function initFixesPanel(ctx) {
       return;
     }
     if (c.dataset.newway) { setTab("new"); startEdit(Number(c.dataset.newway)); drawSelected(true); return; }
-    if (c.dataset.face) { select("building", "way", Number(c.dataset.face.split("|")[0]), { zoom: true }); return; }
+    if (c.dataset.face) {                              // a wall: its building in the Building tab, with the wall selected and in view
+      const [bd, a, b] = c.dataset.face.split("|").map(Number);
+      if ((await select("building", "way", bd, { zoom: true })) === false) return;
+      const w = walls.find((x) => (x.from_node === a && x.to_node === b) || (x.from_node === b && x.to_node === a));
+      if (w) selectWall(wallKey(w), { zoom: true });
+      return;
+    }
     if (c.dataset.turn) { const [a, b] = c.dataset.turn.split("|").map(Number); setTab("turns"); $("fix-from").value = a; findTurns(a, b, { zoom: true }); return; }
     select(c.dataset.kind, c.dataset.type, Number(c.dataset.id), { zoom: true });
   });
   $("fix-undo").onclick = () => { if (hist.length) { future.push(snap()); doc = hist.pop(); persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } } };
   $("fix-redo").onclick = () => { if (future.length) { hist.push(snap()); doc = future.pop(); persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } } };
-  $("fix-clear").onclick = () => { commit(() => { doc = {}; }); if (sel && data) { draft = initialDraft(); renderForm(); } };
+  // Delete all changes: all the rules go from the file too (duckosm edit saves each change at once). It asks first, with roadstyle's confirm dialog
+  // (rs.confirm, its OK button red: sb-danger) or, on a roadstyle rev without it, the browser's dialog. Undo brings them back while the page is open
+  $("fix-clear").onclick = async () => {
+    const n = total(), what = `Delete all ${plural(n, "change")}?`, more = "They go from the saved changes too. Undo brings them back while this page is open.";
+    if (!n || !(window.rs?.confirm ? await window.rs.confirm({ title: what, text: more, ok: "Delete", danger: true }) : confirm(`${what} ${more}`))) return;
+    commit(() => { doc = {}; });
+    if (sel && data) { draft = initialDraft(); renderForm(); }
+    status(`Deleted ${plural(n, "change")}. Undo brings them back.`, 8000);
+  };
   $("fix-download").onclick = () => {
     const a = Object.assign(document.createElement("a"), { download: "osm_fixes.yaml", href: URL.createObjectURL(new Blob([text() ?? ""], { type: "text/yaml" })) });
     a.click();
@@ -791,7 +939,9 @@ export async function initFixesPanel(ctx) {
   };
   let turnFrom = null;
   const turnOk = new Set();                          // the junctions ("from|via") of the picked road where the person answered the box
+  const keepTurnsOk = () => dropOk(turnDiffs().length, "turn rule", `way ${turnAt?.from}`);
   async function findTurns(from, via = null, { zoom = false } = {}) {
+    if (!(turnAt && from === turnAt.from && Number(via) === turnAt.via) && !keepTurnsOk()) { $("fix-from").value = turnAt.from; window.rsDeselect?.(); return; }
     if (from !== turnFrom) { turnFrom = from; turnOk.clear(); }
     $("fix-from").value = from;
     // the junctions at the ends of the edges of the road, the one with the most roads that leave it first
@@ -812,9 +962,11 @@ export async function initFixesPanel(ctx) {
     for (const row of $("fix-out").querySelectorAll(".turn")) row.classList.toggle("sel", Number(row.dataset.to) === turnSel);
     if (map.getLayer("fix-turn-hl")) map.setFilter("fix-turn-hl", ["==", ["get", "id"], turnSel ?? -1]);
   }
-  async function outgoing() {
+  // `keep`: the rules that the person chose and did not add stay, when the list is of the same road and junction (a tab change, a change of the rules)
+  async function outgoing({ keep = true } = {}) {
     const from = whole($("fix-from").value), via = Number($("fix-via").value);
     if (!from || !Number.isSafeInteger(via)) return;
+    const chosen = keep && turnAt?.from === from && turnAt?.via === via ? new Map(turnDiffs().map((x) => [x.to, x.want])) : new Map();
     const roads = await safe(`SELECT osm_id, any_value(name) AS name, any_value(highway) AS highway, any_value(ST_X(ST_PointN(geometry, 1))) AS x1, any_value(ST_Y(ST_PointN(geometry, 1))) AS y1,
       any_value(ST_X(ST_PointN(geometry, 2))) AS x2, any_value(ST_Y(ST_PointN(geometry, 2))) AS y2 FROM driving.edges WHERE source = ${via} AND osm_id != ${from} GROUP BY osm_id ORDER BY osm_id LIMIT 30`);
     const inEdge = (await safe(`SELECT ST_X(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)) AS x1, ST_Y(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)) AS y1, ST_X(ST_PointN(geometry, ST_NPoints(geometry)::INTEGER)) AS x2,
@@ -825,7 +977,12 @@ export async function initFixesPanel(ctx) {
     const none = '<p class="why">No other road leaves this junction from this road. A road leaves it only when it is in the driving network and its direction goes away from the junction.</p>';
     $("fix-out").innerHTML = (roads.length ? "" : none) + arrivals;
     if (roads.length) $("fix-out").insertAdjacentHTML("afterbegin", roads.map((r) => `<div class="turn" data-to="${r.osm_id}"><span class="small"><i class="sw" style="background:#16a34a"></i>To <b>${esc(r.name || "no name")}</b> (${esc(r.highway)}, way ${r.osm_id})${turnWay(inEdge, r) ? ` · <i>${WAY_NAMES[turnWay(inEdge, r)]}</i>` : ""}</span>${turnSelect(F.findTurn(doc, from, via, Number(r.osm_id))?.restriction, turnWay(inEdge, r))}</div>`).join(""));
-    for (const row of $("fix-out").querySelectorAll(".turn")) { row.tabIndex = 0; row.querySelector("select").onchange = paintTurnBar; }
+    for (const row of $("fix-out").querySelectorAll(".turn")) {
+      const s = row.querySelector("select"), want = chosen.get(Number(row.dataset.to));
+      if (want !== undefined && [...s.options].some((o) => o.value === want)) s.value = want;
+      row.tabIndex = 0; s.onchange = paintTurnBar;
+    }
+    turnAt = { from, via };
     if (!roads.some((r) => Number(r.osm_id) === turnSel)) turnSel = null;
     turnNames = new Map(roads.map((r) => [Number(r.osm_id), r.name]));
     paintTurnSel();
@@ -851,12 +1008,14 @@ export async function initFixesPanel(ctx) {
     if (b.dataset.ask === "edit") { if (list.some((t) => F.count(doc, t) > 1)) commit(() => list.forEach((t) => F.join(doc, t))); }
     else { commit(() => list.forEach((t) => F.remove(doc, t))); status(`Deleted from the changes: ${plural(list.length, "turn rule")} of way ${list[0].from_way}. Undo brings ${list.length === 1 ? "it" : "them"} back.`); }
     turnOk.add(`${$("fix-from").value}|${$("fix-via").value}`);
-    outgoing();
+    outgoing({ keep: false });
   });
   // the rules that the person chose in the list and did not add yet
+  let turnAt = null;                                 // the road and the junction of the list of turns: { from, via }
   function turnDiffs() {
-    const from = whole($("fix-from").value), via = Number($("fix-via").value), out = [];
-    if (!from || !Number.isSafeInteger(via)) return out;
+    const out = [];
+    if (!turnAt) return out;
+    const { from, via } = turnAt;
     for (const row of $("fix-out").querySelectorAll(".turn")) {
       const to = Number(row.dataset.to), want = row.querySelector("select").value, have = F.findTurn(doc, from, via, to)?.restriction ?? "";
       if (want !== have) out.push({ from, via, to, want });
@@ -864,9 +1023,18 @@ export async function initFixesPanel(ctx) {
     return out;
   }
   function paintTurnBar() {
-    const n = turnDiffs().length;
+    const rows = [...$("fix-out").querySelectorAll(".turn")], box = (r) => r.querySelector("select"), only = rows.find((r) => box(r).value.startsWith("only_"));
+    for (const r of rows) {
+      const s = box(r), off = !!only && r !== only;
+      if (off && s.value) s.value = "";
+      if (s.disabled !== off) s.disabled = off;
+      r.querySelector(".gwhy")?.remove();
+      if (off) r.insertAdjacentHTML("beforeend", `<p class="why gwhy">${esc(TURN_TYPES[box(only).value])} to ${esc(turnNames.get(Number(only.dataset.to)) || `way ${only.dataset.to}`)}: no other turn is possible here.</p>`);
+    }
+    const closed = rows.length > 0 && rows.every((r) => box(r).value.startsWith("no_")), n = turnDiffs().length;
     $("fix-turn-add").disabled = !n;
-    $("fix-turn-note").textContent = n ? `${plural(n, "rule")} not added yet.` : "";
+    $("fix-turn-note").textContent = (closed ? "Every turn from this road is closed here: the junction is a dead end for it. " : "") + (n ? `${plural(n, "rule")} not added yet.` : "");
+    $("fix-turn-note").classList.toggle("warn", closed);
     paintDots();
   }
   $("fix-turn-add").onclick = () => {
@@ -876,6 +1044,8 @@ export async function initFixesPanel(ctx) {
     status(`Added to the changes: ${plural(d.length, "turn rule")}.`);
   };
   function clearTurns() {
+    if (!keepTurnsOk()) return;
+    turnAt = null;
     $("fix-from").value = ""; $("fix-via").innerHTML = ""; turnSel = null; $("fix-out").innerHTML = ""; turnFrom = null; turnOk.clear(); paintTurnAsk();
     $("fix-via-row").hidden = $("fix-turnsec").hidden = $("fix-turn-bar").hidden = $("fix-turn-clear").hidden = $("fix-turn-legend").hidden = true;
     turnOut = []; drawTurnRoads(); paintTurnBar(); drawSelected(false);
@@ -883,10 +1053,18 @@ export async function initFixesPanel(ctx) {
   $("fix-turn-clear").onclick = clearTurns;
   $("fix-out").addEventListener("click", (e) => { const b = e.target.closest("[data-from]"); if (b) findTurns(Number(b.dataset.from), Number($("fix-via").value), { zoom: true }); });
   $("fix-turn-find").onclick = () => { const id = whole($("fix-from").value); id ? findTurns(id, null, { zoom: true }) : status("Type a way ID (a whole number)."); };
-  $("fix-via").onchange = () => { turnSel = null; outgoing(); drawSelected(false, { turn: { via: $("fix-via").value } }); };
+  $("fix-via").onchange = () => {
+    if (turnAt && Number($("fix-via").value) !== turnAt.via && !keepTurnsOk()) { $("fix-via").value = String(turnAt.via); return; }
+    turnSel = null; outgoing(); drawSelected(false, { turn: { via: $("fix-via").value } }); };
 
   // ---- the map: edited objects are amber, the selected object is blue
   const EMPTY = { type: "FeatureCollection", features: [] };
+  // the switch "Changes on the map" of the Changes tab (roadstyle's two-way switch, rs-seg): Hide takes the changes off the map (amber, the 3D
+  // buildings, the amber walls); the selection of a tab stays
+  const CHANGE_LAYERS = ["fix-edits-fill", "fix-edits-glow", "fix-edits-line", "fix-edits-pt", "fix-3d", "fix-faces-edit"];
+  let showChanges = true;
+  function paintShowChanges() { for (const id of CHANGE_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showChanges ? "visible" : "none"); }
+  window.rs?.tabs?.use?.($("fix-show"), (v) => { showChanges = v !== "hide"; paintShowChanges(); });
   function ensureLayers() {
     if (!map.getSource("fix-nodes")) {                // the nodes of the Node tab (the lowest of the panel's layers)
       map.addSource("fix-nodes", { type: "geojson", data: EMPTY });
@@ -943,13 +1121,14 @@ export async function initFixesPanel(ctx) {
       map.addSource("fix-3d", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "fix-3d", type: "fill-extrusion", source: "fix-3d", paint: { "fill-extrusion-height": ["get", "h"], "fill-extrusion-color": ["get", "c"], "fill-extrusion-opacity": 0.85 } }, "fix-edits-fill");
     }
+    paintShowChanges();
   }
 
   // the lines, polygons and points of some objects: [{type, id, kind}] -> Feature[]
   async function shapes(list) {
     const out = [], ways = list.filter((o) => o.type === "way" || o.type === "relation");
     const ids = (t) => list.filter((o) => o.type === t).map((o) => o.id).filter((n) => Number.isSafeInteger(n) && n > 0);
-    const geo = (r) => { try { return { type: "Feature", properties: { id: Number(r.id) }, geometry: JSON.parse(r.g) }; } catch { return null; } };   // a BigInt in a property stops the map's source: nothing is drawn
+    const geo = (r) => { try { return { type: "Feature", properties: { id: Number(r.id) }, geometry: geoOf(r.g) }; } catch { return null; } };   // a BigInt in a property stops the map's source: nothing is drawn
     const wayIds = ids("way"), relIds = ids("relation");
     if (wayIds.length) {
       for (const m of modes()) for (const r of await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geometry) AS g FROM ${m}.edges WHERE osm_id IN (${wayIds.join(",")})`)) out.push(geo(r));
@@ -978,7 +1157,7 @@ export async function initFixesPanel(ctx) {
     for (const r of await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geom) AS g, ${TAGS} FROM features.buildings WHERE osm_type = 'way' AND osm_id IN (${ids.join(",")})`)) {
       const rule = F.ruleOf(doc, "way", Number(r.id)), tags = { ...tagMap(r), ...rule.set };
       for (const k of rule.delete) delete tags[k];
-      try { out.push({ type: "Feature", properties: { h: Math.round(heightOf(tags) * 10) / 10, c: cssColor(tags["building:colour"]) ?? cssColor(tags["roof:colour"]) ?? AMBER }, geometry: JSON.parse(r.g) }); } catch { /* no geometry */ }
+      try { out.push({ type: "Feature", properties: { h: Math.round(heightOf(tags) * 10) / 10, c: cssColor(tags["building:colour"]) ?? cssColor(tags["roof:colour"]) ?? AMBER }, geometry: geoOf(r.g) }); } catch { /* no geometry */ }
     }
     return out;
   }
@@ -1084,10 +1263,10 @@ export async function initFixesPanel(ctx) {
     if (!open()) { map.getSource("fix-faces")?.setData({ type: "FeatureCollection", features: [] }); drawnCount.faces = 0; return; }       // closed: no walls on the map
     ensureLayers();
     let feats = [];
-    const asFeature = (g, t, e, s = 0, k = null) => { try { return { type: "Feature", properties: { t, e: e ? 1 : 0, s: s ? 1 : 0, ...(k ? { k } : {}) }, geometry: JSON.parse(g) }; } catch { return null; } };
-    const mid = (g) => { const c = JSON.parse(g).coordinates; return [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2]; };
+    const asFeature = (g, t, e, s = 0, k = null) => { try { return { type: "Feature", properties: { t, e: e ? 1 : 0, s: s ? 1 : 0, ...(k ? { k } : {}) }, geometry: geoOf(g) }; } catch { return null; } };
+    const mid = (g) => { const c = geoOf(g).coordinates; return [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2]; };
     const numberDot = (g, n, k) => { try { return { type: "Feature", properties: { n, k }, geometry: { type: "Point", coordinates: mid(g) } }; } catch { return null; } };
-    const doorDot = (g) => { try { const c = JSON.parse(g).coordinates; return { type: "Feature", properties: { door: 1 }, geometry: { type: "Point", coordinates: [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2] } }; } catch { return null; } };
+    const doorDot = (g) => { try { const c = geoOf(g).coordinates; return { type: "Feature", properties: { door: 1 }, geometry: { type: "Point", coordinates: [(c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2] } }; } catch { return null; } };
     if (hasFaces()) {
       if (current === "building" && $("fix-walls-all").checked && map.getZoom() >= 16) {
         const b = map.getBounds();
@@ -1122,7 +1301,7 @@ export async function initFixesPanel(ctx) {
     for (const f of feats) f.properties.d = gone.has(f.properties.id) ? 1 : 0;
     for (const w of F.newWays(doc)) { const line = await newWayLine(w); if (line.length > 1) feats.push({ type: "Feature", properties: { id: w.id, road: 1 }, geometry: { type: "LineString", coordinates: line } }); }
     const via = [...new Set((doc.turn_restrictions ?? []).map((t) => t.via_node))].filter((n) => Number.isSafeInteger(n));
-    if (via.length) for (const r of await safe(`SELECT node_id AS id, ST_AsGeoJSON(geom) AS g FROM driving.nodes WHERE node_id IN (${via.join(",")})`)) { try { feats.push({ type: "Feature", properties: { turn: 1 }, geometry: JSON.parse(r.g) }); } catch { /* no geometry */ } }
+    if (via.length) for (const r of await safe(`SELECT node_id AS id, ST_AsGeoJSON(geom) AS g FROM driving.nodes WHERE node_id IN (${via.join(",")})`)) { try { feats.push({ type: "Feature", properties: { turn: 1 }, geometry: geoOf(r.g) }); } catch { /* no geometry */ } }
     const solids = await extrusions();
     if (my === mapToken) {
       map.getSource("fix-edits")?.setData({ type: "FeatureCollection", features: feats }); drawnCount.edits = feats.length;
@@ -1138,7 +1317,7 @@ export async function initFixesPanel(ctx) {
     if (open() && current === "turns" && turnOut.length) {
       ensureLayers();
       feats = (await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geometry) AS g FROM driving.edges WHERE osm_id IN (${turnOut.join(",")})`))
-        .map((r) => { try { return { type: "Feature", properties: { id: Number(r.id) }, geometry: JSON.parse(r.g) }; } catch { return null; } }).filter(Boolean);
+        .map((r) => { try { return { type: "Feature", properties: { id: Number(r.id) }, geometry: geoOf(r.g) }; } catch { return null; } }).filter(Boolean);
     }
     if (my !== turnToken) return;
     map.getSource("fix-turn")?.setData({ type: "FeatureCollection", features: feats });
@@ -1161,7 +1340,7 @@ export async function initFixesPanel(ctx) {
       return;
     }
     if (turn) {
-      const from = whole($("fix-from").value), feat = (g, props) => { try { return { type: "Feature", properties: props, geometry: JSON.parse(g) }; } catch { return null; } };
+      const from = whole($("fix-from").value), feat = (g, props) => { try { return { type: "Feature", properties: props, geometry: geoOf(g) }; } catch { return null; } };
       const road = from ? await safe(`SELECT ST_AsGeoJSON(geometry) AS g FROM driving.edges WHERE osm_id = ${from}`) : [];
       const junction = await safe(`SELECT ST_AsGeoJSON(geom) AS g FROM driving.nodes WHERE node_id = ${Number(turn.via)}`);
       feats = [...road.map((r) => feat(r.g, {})), ...junction.map((r) => feat(r.g, { j: 1 }))].filter(Boolean);
@@ -1183,16 +1362,51 @@ export async function initFixesPanel(ctx) {
   // ---- a new road: click points on the map (a click near a junction joins it), set the kind, finish; the rule is in `new_ways`
   let draw = null, newDraft = {}, editNew = null;          // editNew: the id of a new road of the changes that is open for edit (its points stay)
   const newFields = presets.new_road ?? [];
+  let newCleared = {}, newSeen = {};                   // the fields of the new road that a guard cleared, and the values when the form was drawn
   function renderNewForm() {
     const g = guardsOf("new_road", newDraft);
-    $("fix-newform").innerHTML = `<div class="grid2 fixgrid">${newFields.map((f) => `<label for="fixn-${f.key}" class="small">${esc(f.label)}</label>${control({ ...f }, newDraft[f.key] ?? "", g).replace(`id="fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}"`, `id="fixn-${f.key}"`)}${guardNote(f, g) ? `<p class="why gwhy">${esc(guardNote(f, g))}</p>` : ""}`).join("")}</div>`;
+    $("fix-newform").innerHTML = `<div class="grid2 fixgrid">${newFields.map((f) => `<label for="fixn-${f.key}" class="small">${esc(f.label)}</label>${control({ ...f }, newDraft[f.key] ?? "", g).replace(`id="${fid(f.key)}"`, `id="fixn-${f.key}"`)}${guardNote(f, g, newCleared) ? `<p class="why gwhy">${esc(guardNote(f, g, newCleared))}</p>` : ""}${errLine(f.key)}`).join("")}</div>`;
+    newSeen = { ...newDraft };
+    paintNewChecks();
   }
-  $("fix-newform").addEventListener("change", (e) => {                 // a choice that closes or narrows another field
-    for (const f of newFields) { const el = $(`fixn-${f.key}`); if (el) newDraft[f.key] = el.value; }
+  // what is wrong in the form of the new road: [key, text]
+  const newProblems = () => { const g = guardsOf("new_road", newDraft); return newFields.map((f) => [f.key, checkValue(f, newDraft[f.key]) || shut(g, f, String(newDraft[f.key] ?? ""))]).filter(([, x]) => x); };
+  function paintNewChecks() {
+    const bad = new Map(newProblems());
+    for (const el of $("fix-newform").querySelectorAll("[data-err]")) {
+      const x = bad.get(el.dataset.err);
+      el.hidden = !x; el.textContent = x ?? "";
+      $(`fixn-${el.dataset.err}`)?.classList.toggle("invalid", !!x);
+    }
+    drawn();
+  }
+  const readNew = () => { for (const f of newFields) { const el = $(`fixn-${f.key}`); if (el) newDraft[f.key] = el.value; } };
+  $("fix-newform").addEventListener("input", () => { readNew(); paintNewChecks(); });
+  $("fix-newform").addEventListener("change", (e) => {                 // a choice that closes or narrows another field: the field loses its value
+    readNew();
+    if (!e.target.isConnected || !guardKeys.has(e.target.dataset.key)) return paintNewChecks();      // only a guard's choice draws the form again
+    const a = document.activeElement;
+    if (a !== e.target && $("fix-newform").contains(a)) a.blur();          // the field that has the focus gives its value first
+    for (const [key, was, why] of clearClosed(guardRules.new_road, newFields, newSeen, newDraft)) newCleared[key] = [was, why];
     const id = e.target.id;
     renderNewForm(); $(id)?.focus();
   });
-  const drawn = () => { paintDots(); $("fix-draw-n").textContent = draw ? `${draw.pts.length} point${draw.pts.length === 1 ? "" : "s"}${draw.pts.some((p) => p.id != null) ? ", joins a junction" : ""}` : ""; };
+  const dropDrawOk = () => !(draw?.pts.length >= 2) || confirm(`A new road with ${plural(draw.pts.length, "point")} is not added to the changes. Drop it?`);
+  // why the new road cannot be added now ("" when it can): two points or more, one of them on a junction (the build keeps only the roads that join
+  // the network), and no error in its form
+  function drawWhy() {
+    const bad = newProblems()[0];
+    if (bad) return `${newFields.find((f) => f.key === bad[0])?.label}: ${bad[1]}`;
+    if (editNew != null || !draw) return "";
+    if (draw.pts.length < 2) return "Click at least two points on the map.";
+    return draw.pts.some((p) => p.id != null) ? "" : "Join the road to a junction: start or end it with a click near a road's junction (the point turns green). The build removes a road that joins no other road.";
+  }
+  const drawn = () => {
+    paintDots();
+    const why = drawWhy();
+    $("fix-draw-done").disabled = !!why;
+    $("fix-draw-n").textContent = draw ? `${plural(draw.pts.length, "point")}${draw.pts.some((p) => p.id != null) ? ", joins a junction" : ""}.${why ? ` ${why}` : ""}` : "";
+  };
   async function drawPreview() {
     ensureLayers();
     const pts = draw?.pts ?? [], feats = pts.map((p) => ({ type: "Feature", properties: { snap: p.id != null ? 1 : 0 }, geometry: { type: "Point", coordinates: [p.lng, p.lat] } }));
@@ -1201,7 +1415,7 @@ export async function initFixesPanel(ctx) {
     drawnCount.draw = pts.length;
   }
   function startDraw() {
-    draw = { pts: [] }; newDraft = { highway: "residential" };
+    draw = { pts: [] }; newDraft = { highway: "residential" }; newCleared = {};
     $("fix-drawbox").hidden = false; $("fix-draw").hidden = true;
     renderNewForm(); paintNewMode(); drawn(); drawPreview();
     map.getCanvas().style.cursor = current === "new" ? "crosshair" : "";
@@ -1222,8 +1436,8 @@ export async function initFixesPanel(ctx) {
   function startEdit(id, { asking = true } = {}) {
     const w = F.findNewWay(doc, id);
     if (!w) return;
-    if (draw) stopDraw();
-    editNew = id; newDraft = { ...w.tags };
+    if (draw) { if (!dropDrawOk()) return; stopDraw(); }
+    editNew = id; newDraft = { ...w.tags }; newCleared = {};
     $("fix-drawbox").hidden = false; $("fix-draw").hidden = true;
     renderNewForm(); paintNewMode();
     $("fix-draw-n").textContent = `${plural(w.nodes.length, "point")}${w.nodes.some(Number.isInteger) ? ", joins a junction" : ""}`;
@@ -1246,15 +1460,17 @@ export async function initFixesPanel(ctx) {
       const dist = (r.x - lng) ** 2 + (r.y - lat) ** 2;
       if (!best || dist < best.dist) best = { id: Number(r.id), lng: r.x, lat: r.y, dist };
     }
+    if (best && draw?.pts.at(-1)?.id === best.id) return status("This junction is the point before. Click another place.");      // an edge of length 0
     draw?.pts.push(best ? { id: best.id, lng: best.lng, lat: best.lat } : { id: null, lng, lat });
     drawn(); drawPreview();
   }
   function finishDraw() {
-    if (editNew == null && (!draw || draw.pts.length < 2)) return status("Click at least two points on the map.");
+    readNew();
+    const why = drawWhy();
+    if (why) return status(why, 7000);
     const w = editNew != null ? F.findNewWay(doc, editNew) : null, tags = {};
     for (const f of newFields) {
-      const v = ($(`fixn-${f.key}`)?.value ?? "").trim();
-      if (f.type === "int" && v !== "" && !/^\d+$/.test(v)) return status(`${f.label} is a whole number.`);
+      const v = String(newDraft[f.key] ?? "").trim();
       if (v) tags[f.key] = v;
     }
     if (!tags.highway) return status("Pick the kind of road.");
@@ -1273,8 +1489,8 @@ export async function initFixesPanel(ctx) {
   $("fix-draw").onclick = startDraw;
   $("fix-draw-done").onclick = finishDraw;
   $("fix-draw-undo").onclick = () => { draw?.pts.pop(); drawn(); drawPreview(); };
-  $("fix-draw-cancel").onclick = stopDraw;
-  document.addEventListener("keydown", (e) => { if (!draw || !open() || current !== "new") return; if (e.key === "Escape") stopDraw(); else if (e.key === "Enter" && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) finishDraw(); });
+  $("fix-draw-cancel").onclick = () => { if (dropDrawOk()) stopDraw(); };
+  document.addEventListener("keydown", (e) => { if (!draw || !open() || current !== "new") return; if (e.key === "Escape") { if (dropDrawOk()) stopDraw(); } else if (e.key === "Enter" && !/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) finishDraw(); });
 
   // ---- what a click on the map picks
   const open = () => document.body.classList.contains("editing-fixes");
@@ -1300,7 +1516,7 @@ export async function initFixesPanel(ctx) {
     const r = (await safe(`SELECT building_id AS b, from_node AS f, to_node AS n FROM main.building_faces WHERE ST_Distance(geometry, ST_Point(${lng}, ${lat})) < ${dd} ORDER BY ST_Distance(geometry, ST_Point(${lng}, ${lat})) LIMIT 1`))[0];
     if (!r) return false;
     const key = `${Number(r.f)}|${Number(r.n)}`;
-    if (!(sel?.kind === "building" && sel.id === Number(r.b))) await select("building", "way", Number(r.b));
+    if (!(sel?.kind === "building" && sel.id === Number(r.b)) && (await select("building", "way", Number(r.b))) === false) return true;
     selectWall(key);
     return true;
   }
@@ -1337,7 +1553,7 @@ export async function initFixesPanel(ctx) {
         else status("No node here. Click a dot, or a junction of the roads.");
       }
     }
-    setTimeout(() => { window.rsDeselect?.(); document.querySelectorAll(".maplibregl-popup:not(.rs-tip)").forEach((p) => p.remove()); });
+    setTimeout(() => window.rsDeselect?.());
   }
   map.on("click", onMapClick);
   // roadstyle picks the nearest road for a click within a few pixels of it, also when the click is on a building. The Road and Turn tabs ignore such a click
@@ -1348,15 +1564,17 @@ export async function initFixesPanel(ctx) {
     if (!p || performance.now() - p.t > 2000 || !built("features", "buildings")) return false;       // a press that is older is not this select
     return (await safe(`SELECT 1 FROM features.buildings WHERE ST_Intersects(geom, ST_Point(${p.p.lng}, ${p.p.lat})) LIMIT 1`)).length > 0;
   }
-  document.addEventListener("rs:select", async (e) => {                       // a road: the dashboard's click on the roads (roadstyle), with no popup
+  document.addEventListener("rs:select", async (e) => {                       // a road: the dashboard's click on the roads (roadstyle)
     if (!open()) return;
-    setTimeout(() => document.querySelectorAll(".maplibregl-popup:not(.rs-tip)").forEach((p) => p.remove()));
-    if (draw && current === "new") { setTimeout(() => window.rsDeselect?.()); return; }              // a click while drawing adds a point (onMapClick)
+    // each tab draws its own selection: roadstyle's look of the pick goes at once (the popup is held, see rsInteraction). ponytail: roadstyle has
+    // no switch yet to keep the hover and not draw its selection; asked for (docs/design/fixes_editor_guards.md), then this line goes
+    setTimeout(() => window.rsDeselect?.());
+    if (draw && current === "new") return;                                // a click while drawing adds a point (onMapClick)
     const turns = current === "turns";
     if (!turns && current !== "road") return;                            // a building or a node is picked by its own click
     const id = Number(ctx.roadIdOfRow(e.detail?.id));
     if (!Number.isSafeInteger(id) || id <= 0) return;
-    if (await onBuilding(pressed)) { window.rsDeselect?.(); return; }
+    if (await onBuilding(pressed)) return;
     if (turns) { $("fix-from").value = id; findTurns(id); }
     else select("road", "way", id);
   });
@@ -1377,17 +1595,21 @@ export async function initFixesPanel(ctx) {
     const t = e.target.closest("button, a");
     if (!t) return;
     if (t.dataset.revert) return revertKey(t.dataset.revert);
+    if (t.id === "fix-del-deps-now") { const deps = depsOf(); commit(() => deps.forEach((o) => F.remove(doc, o))); status(`Deleted from the changes: ${plural(deps.length, "rule")}. Undo brings them back.`); return renderForm(); }
+    if (t.id === "fix-drop-ex") { draft.exclude_modes = []; touched.add("exclude_modes"); return renderForm(); }
     if (t.dataset.clear) { draft[t.dataset.clear] = ""; touched.add(t.dataset.clear); t.closest(".otherrow").querySelector("input").value = ""; t.closest(".otherrow").classList.add("edited"); return paintBar(); }
     if (t.id === "fix-add") {
       const k = $("fix-addkey").value.trim(), v = $("fix-addval").value.trim();
-      if (!k || !v) return status("Type a key and a value.");
+      const why = checkKey(k) || (v ? "" : "Type a value.");
+      if (why) { status(why, 6000); return $(checkKey(k) ? "fix-addkey" : "fix-addval").focus(); }
       draft[k] = v; touched.add(k); renderForm();
     }
   });
   $("fix-save").onclick = save;
   $("fix-unselect").onclick = unselect;
+  $("fix-obj").addEventListener("click", (e) => { const a = e.target.closest("[data-open-kind]"); if (a && sel) select(a.dataset.openKind, KIND_OF[a.dataset.openKind], sel.id, { zoom: true }); });
   $("fix-form").addEventListener("click", (e) => { if (e.target.closest("#fix-delete")) toggleDelete(); });
-  $("fix-revert").onclick = () => { touched = new Set(); draft = initialDraft(); renderForm(); };
+  $("fix-revert").onclick = () => { touched = new Set(); cleared = {}; sureMissing = false; draft = initialDraft(); renderForm(); };
   for (const b of root.querySelectorAll("[data-review]")) b.onclick = () => setTab("changes");
   $("fix-pending").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) setTab(b.dataset.go, { zoom: true }); });
   $("fix-del").onclick = () => {
@@ -1408,7 +1630,7 @@ export async function initFixesPanel(ctx) {
     for (const e of root.querySelectorAll("[data-n]")) e.textContent = n ? ` (${n})` : "";
     $("fix-apply-n").textContent = n ? ` (${plural(n, "change")})` : "";
     paintBar();
-    if (current === "turns" && !$("fix-turnsec").hidden) outgoing();
+    if (current === "turns" && !$("fix-turnsec").hidden) outgoing({ keep: false });
     const s = (x) => (x === 1 ? "" : "s");
     ctx.onChange(n ? `${n} change${s(n)}: ${F.objects(doc).length} object${s(F.objects(doc).length)}, ${turns} turn rule${s(turns)}, ${faces} wall${s(faces)}, ${newWays} new road${s(newWays)}.` : "No fixes.", n);
     if (!$("fix-changes").hidden) renderChanges();
@@ -1429,9 +1651,20 @@ export async function initFixesPanel(ctx) {
     try { doc = F.parse(yaml, txt); hist = []; future = []; persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } }
     catch (e) { status("The fixes file is not valid: " + e.message.split("\n")[0], 8000); }
   }
+  // roadstyle's own map interaction while the editor is open (roadstyle's public functions only): no road popup (rs.holdPopup), and the buildings of
+  // the base map are not clickable, so roadstyle draws no hover and no selection on them (rsSetInteraction). ponytail: roadstyle has no switch yet
+  // for the hover alone, or for the roads of one tab; asked for (docs/design/fixes_editor_guards.md)
+  let buildingsWere = null;
+  function rsInteraction(on) {
+    window.rs?.holdPopup?.("fixes-editor", on);
+    const now = window.rsGetInteraction?.("buildings");
+    if (!now) return;
+    if (on) { buildingsWere ??= now; window.rsSetInteraction("buildings", { clickable: false, popup: false }); }
+    else if (buildingsWere) { window.rsSetInteraction("buildings", buildingsWere); buildingsWere = null; }
+  }
   function openPanel() {
     clearMapSelection();                             // what was selected before (roadstyle's road selection and its popup) is not selected in this panel
-    document.body.classList.add("editing-fixes"); fr.open(current); ensureLayers();
+    document.body.classList.add("editing-fixes"); fr.open(current); ensureLayers(); rsInteraction(true);
     const back = restore();
     if (back) status(`${plural(back, "change")} from your last visit ${back === 1 ? "is" : "are"} back.`, 6000);
     setTab(current); drawEdits();
@@ -1447,11 +1680,12 @@ export async function initFixesPanel(ctx) {
   // leaving the panel unselects everything on the map: the blue objects, roadstyle's road selection, the node dots, the turn roads and the walls (the amber changes stay)
   function close() {
     if (draw) stopDraw();
-    document.body.classList.remove("editing-fixes"); fr.close();
+    document.body.classList.remove("editing-fixes"); fr.close(); rsInteraction(false);
     clearMapSelection(); drawSelected(false); drawFaces(); drawNodes(); drawTurnRoads(); drawDoors();
   }
 
-  $("fix-apply").onclick = () => ctx.onBuild?.();          // the host page builds again (it reads text())
+  $("fix-apply").onclick = () => ctx.onBuild?.();
+  addEventListener("beforeunload", (e) => { if (pendingList().length) e.preventDefault(); });          // the host page builds again (it reads text())
   setTab("road"); sync();
   return { text, load, restore, open: openFrom, close, isOpen: open, rebuilt, select, tab: setTab, drawn: () => ({ ...drawnCount }), count: () => F.objects(doc).length + (doc.turn_restrictions ?? []).length + F.faceEdits(doc).length + F.newWays(doc).length };
 }
