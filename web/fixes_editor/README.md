@@ -19,7 +19,8 @@ Copy the folder at one duckOSM rev, link `fixes_panel.css`, load [js-yaml](https
 ```js
 import { initFixesPanel } from "./fixes_editor/fixes_panel.js";
 
-const panel = await initFixesPanel(document.getElementById("fix-panel"), {
+const panel = await initFixesPanel({
+	frame,         // (options) gives roadstyle's editor frame in the host's panel: rs.frame({...options, panel, back})
 	duck,          // the database: query(sql) gives an Arrow table, tables is [{mode, table}], loadSpatial()
 	map,           // the MapLibre map
 	yaml,          // js-yaml
@@ -33,17 +34,23 @@ const panel = await initFixesPanel(document.getElementById("fix-panel"), {
 });
 ```
 
-The element must have the id `fix-panel`. The panel adds its tabs and its body to the element, after the header of the host page.
+The panel is roadstyle's editor frame ([An editor in the panel](https://github.com/Khoshkhah/roadstyle/blob/main/docs/guides/dashboard-parts.md#an-editor-in-the-panel)).
+The panel gives the title, the id `fix` and the six tabs to `frame(options)`. The host adds what it owns: its panel (`#sb`) and the back
+button (`back: "Steps"` in Studio, `back: null` in `duckosm edit`). The host listens to the event `back` of the frame and then calls
+`close()`. The host can add to the frame's title line (`top`) and head row (`head`) before it gives the frame back. The root of the
+frame gets the id `fix-panel`, and the ids of the tabs are `fix-tab-road` to `fix-tab-changes`.
 The panel returns `text()` (the fixes file, or `null` when there is no change), `load(text)`, `restore()`, `open()`, `close()`,
 `isOpen()`, `rebuilt()` (call it after a build), `select()`, `tab()`, `drawn()` and `count()`.
 
+The frame gives the title line, the tab row, the body that scrolls, the bar under the body and roadstyle's select boxes. The buttons,
+the links and the option rows are roadstyle's parts. `fixes_panel.css` has only the editor's own content, with roadstyle's tokens.
+
 The host page gives:
 
-- The classes `btn`, `btn primary`, `row`, `why`, `small`, `muted` and `grid2`, and the CSS variables `--bg`, `--fg`, `--muted`, `--mut`,
-  `--line`, `--surface` and `--accent`.
-- The header of the panel, and the show and hide of the panel: the panel sets the class `editing-fixes` on `<body>` while it is open.
-  The panel has no close or hide button of its own. A control of the host that hides the panel must call `close()` first, as the
-  host's "back" control does. Then nothing of the editor stays selected on the map while the panel is hidden.
+- roadstyle's dashboard panel and its stylesheet `dashboard.css`.
+- The show and hide of the panel: the panel sets the class `editing-fixes` on `<body>` while it is open. The panel has no close or
+  hide button of its own. A control of the host that hides the panel must call `close()` first, as the frame's back button does.
+  Then nothing of the editor stays selected on the map while the panel is hidden.
 - roadstyle's map: the event `rs:select` and `window.rsDeselect`.
 - The tables `driving.edges`, `driving.nodes`, `features.buildings` and `features.traffic`. With `main.building_faces` (option
   `building_faces`), the Building tab shows the walls. With `main.building_entrances`, it shows the doors. If a table is not there,

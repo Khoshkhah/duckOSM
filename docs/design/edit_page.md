@@ -109,9 +109,10 @@ the editor).
 
 `rust/duckosm-edit/page/edit.js` and `edit.css` go into roadstyle's page as `page_script` and `page_style`. The script:
 
-- puts `#fix-panel` into the dashboard's panel (`#sb .sb-card`), after the template's top line. While the editor is open
-  (`body.editing-fixes`), the panel's body is hidden, as in Studio.
-- calls `initFixesPanel` with the `ctx` of Studio: `duck`, `map` (`window.map`), `yaml` (js-yaml 4.1.0, the version of Studio),
+- gives the editor roadstyle's editor frame in the dashboard's panel (`rs.frame` with `panel: #sb` and no back button), with the name
+  of the fixes file in its title line and the line of state under the tabs. While the editor is open, the frame hides the panel's
+  body, as in Studio.
+- calls `initFixesPanel` with the `ctx` of Studio: `frame`, `duck`, `map` (`window.map`), `yaml` (js-yaml 4.1.0, the version of Studio),
   `status`, `roadIdOfRow` (the `osm_id` of the road's row, `rsGetProps`), `areaKey`, `onChange`, `onBuild`, `changesNote` and `buildOff`.
 - loads the fixes file. A file that is not valid YAML is not changed: the page says so and saves nothing.
 - saves the rules with each change (`onChange`, `PUT /api/fixes`), only when the text changes. The panel's **Download** button stays.
