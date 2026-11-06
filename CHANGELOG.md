@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- **The fixes editor: an edit could go under a later rule of the same object.** `findRule` read the first record of an object and
+  `upsertRule` replaced the first, but the build applies the records in file order. Now the editor reads the records joined as the build
+  applies them, and each write puts one record in the place of all of them.
 - **The fixes editor: the bar of a tab hid no list row any more.** The bar ("Add to changes") sticks to the bottom of the
   panel, but a sticky box stops at the padding of its scroll box, so 12 px of the list showed under the bar (Kaveh's
   screenshot of the Turn tab). `.fix-bar` now has `bottom: -12px`, the padding of `.fix-body`.
@@ -27,6 +30,11 @@
 
 ### Added
 
+- **The fixes editor: the box "This road is in your changes"** (Kaveh's design). When you pick an object that is in your changes, a box
+  shows over the form: **Edit it** opens the form with your changes, **Delete it** removes them (Undo brings them back). For a road, a
+  building with its walls, a node, the turns of a road at a junction, and a new road. A file with two or more rules for one object: the
+  box says how many, Edit joins them into one (for the same key the later rule wins, as in the build), and the Changes tab marks the
+  object ("2 rules").
 - **The fixes editor is in duckOSM** (`web/fixes_editor/`): the panel "Edit OSM data" of the duckOSM page, with its unit tests
   (`node web/fixes_editor/fixes_units.mjs`, in CI). The page loads it at the same duckOSM rev as its build engine. Guide:
   `docs/guides/edit-osm-data.md`. Design: `docs/design/fixes_editor.md`. A change from the page's panel: the map shows no wall

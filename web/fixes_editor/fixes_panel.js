@@ -80,6 +80,7 @@ const MARKUP = (note) => String.raw`
       <label id="fix-walls-row" class="small walls-all" hidden><input type="checkbox" id="fix-walls-all">Show the walls of all buildings in view (zoom 16 or more)</label>
     </section>
     <section class="fsec" id="fix-objsec"><div class="fsec-hd"><h3>Selected</h3><button id="fix-unselect" class="btn sm" type="button" hidden>Unselect</button></div><div id="fix-obj" class="fix-obj"></div></section>
+    <div id="fix-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
     <div id="fix-form"></div>
     <div class="fix-bar" id="fix-actions" hidden>
       <div class="barline"><span id="fix-state" class="small" role="status"></span><button type="button" class="link" data-review>Review changes →</button></div>
@@ -94,6 +95,7 @@ const MARKUP = (note) => String.raw`
       <p id="fix-turn-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#2563eb"></i>The road the turn starts on</span><span class="legend"><i style="background:#16a34a"></i>Roads that leave the junction</span><span class="legend"><i style="border:3px solid #2563eb;border-radius:50%;background:rgba(37,99,235,.25)"></i>The junction</span><br><span class="muted">Point at a road in the list to outline it on the map.</span></p>
       <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junction at the end of the road.</b> Pick one to see the roads that leave it. The map shows the junction that you pick.</p><select id="fix-via" aria-label="Junction" style="width:100%"></select></div>
     </section>
+    <div id="fix-turn-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
     <section class="fsec" id="fix-turnsec" hidden><h3>Rule for each road that leaves the junction</h3><div id="fix-out"></div></section>
     <div class="fix-bar" id="fix-turn-bar" hidden>
       <p id="fix-turn-note" class="small" role="status"></p>
@@ -105,6 +107,7 @@ const MARKUP = (note) => String.raw`
     <p class="why">Draw a road that OSM does not have. A click near a junction joins the road to it. The road is in the networks after you build again.</p>
     <div class="row" style="margin-top:0"><button id="fix-draw" class="btn primary" type="button">Draw a new road</button></div>
     <div id="fix-drawbox" hidden>
+      <div id="fix-new-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
       <section class="fsec"><h3>Points</h3>
         <p class="why" id="fix-draw-help">Click the points of the road on the map. <b>Enter</b> finishes, <b>Esc</b> cancels.</p><p class="small" id="fix-draw-n"></p>
         <div class="row"><button id="fix-draw-undo" class="btn" type="button">Undo point</button><button id="fix-draw-cancel" class="btn" type="button">Cancel</button></div>
@@ -142,8 +145,9 @@ export async function initFixesPanel(root, ctx) {
   const presets = await fetch(new URL("presets.json", import.meta.url)).then((r) => r.json());
   let doc = {}, hist = [], future = [];
   let sel = null, data = null, draft = {}, touched = new Set(), kind = "road", token = 0;   // the state of the tab `kind` (Road, Building or Node)
+  let ask = false;                             // the picked object has records in the changes, and the box waits for Edit it or Delete it (the form waits)
   let current = "road";                        // the tab that shows
-  const stash = {};                            // the state of the other two edit tabs: { sel, data, draft, touched, walls }
+  const stash = {};                            // the state of the other two edit tabs: { sel, data, draft, touched, walls, ask }
   let walls = [];                              // the walls of the selected building (main.building_faces), with their lines
   let wallSel = null;                          // the selected wall of that building: "from_node|to_node"
   let wallHover = null;                        // the wall under the pointer, on the map or in the list of walls (the same key)
@@ -318,8 +322,47 @@ export async function initFixesPanel(root, ctx) {
     else { draft.remove = !undo; touched.add("remove"); }
     renderForm();
   }
+  // ---- the box "This road is in your changes" (docs/design/fixes_editor.md, "The box of a picked object"). When a picked object has records in
+  // the changes, the box shows over the form, and the form waits: Edit it opens the form with the values of the records (two or more records are
+  // joined into one, in file order: for the same key the later wins, as in the build), Delete it removes all of them (Undo brings them back).
+  const said = (v) => (/^-?\d+(\.\d+)?$|^(true|false)$/.test(v) ? v : `"${v}"`);
+  const ruleText = (type, id) => F.describeBits(doc, type, id).map(({ k, now }) => (k === "object" ? "deleted" : k === "not in" ? `not in ${now}` : now === null ? `no ${k}` : `${k} ${said(now)}`));
+  function askBox(el, what, bits, n, many = false) {
+    el.hidden = false;
+    el.innerHTML = (n > 1 ? `<p><b>This ${what} has ${n} rules in your changes.</b> Edit joins them into one: for the same key, the later rule wins, as in the build.</p><p class="small">${esc(bits || "(no change in it)")}</p>`
+      : `<p><b>${many ? `These ${what}s are` : `This ${what} is`} in your changes:</b> ${esc(bits || "(no change in it)")}.</p>`)
+      + `<div class="row"><button type="button" class="btn primary" data-ask="edit">Edit it</button><button type="button" class="btn" data-ask="delete">Delete it</button></div>`;
+  }
+  // the records of the picked object: the object's own (overrides and tag edit), and for a building the rules of its walls; null when it has none
+  const wallRecs = () => (sel.kind === "building" ? F.wallsOf(doc, sel.id).map((w) => ({ building: sel.id, ...w })) : []);
+  function editRecords() {
+    const own = { type: sel.type, id: sel.id }, bits = F.count(doc, own) ? ruleText(sel.type, sel.id) : [];
+    let n = F.count(doc, own);
+    for (const w of wallRecs()) {
+      const f = F.findFace(doc, sel.id, w.from_node, w.to_node), at = walls.find((x) => (x.from_node === w.from_node && x.to_node === w.to_node) || (x.from_node === w.to_node && x.to_node === w.from_node));
+      n = Math.max(n, F.count(doc, w));
+      bits.push(`wall ${at ? `#${at.face_index + 1}` : `${w.from_node}-${w.to_node}`} ${(FACE_NAMES[f.type] ?? f.type).toLowerCase()}${f.door ? `, door ${f.door}` : ""}`);
+    }
+    return n ? { n, text: bits.join(", ") } : null;
+  }
+  function paintAsk() {
+    const r = ask && sel && data ? editRecords() : null;
+    if (!r) ask = false;
+    $("fix-edit").classList.toggle("asking", !!r);
+    if (r) askBox($("fix-inchg"), sel.kind, r.text, r.n); else $("fix-inchg").hidden = true;
+  }
+  function answer(how) {
+    if (!sel || !data) return;
+    const all = [{ type: sel.type, id: sel.id }, ...wallRecs()], what = `${sel.kind} ${sel.id}`;
+    if (how === "edit") { if (all.some((o) => F.count(doc, o) > 1)) commit(() => all.forEach((o) => F.join(doc, o))); }
+    else { commit(() => all.forEach((o) => F.remove(doc, o))); status(`Deleted from the changes: ${what}. Undo brings it back.`); }
+    ask = false; touched = new Set(); draft = initialDraft(); renderForm(); drawFaces(); drawSelected(false);
+  }
+  $("fix-inchg").addEventListener("click", (e) => { const b = e.target.closest("[data-ask]"); if (b) answer(b.dataset.ask); });
+
   function renderForm() {
     const box = $("fix-form");
+    paintAsk();
     if (!sel || !data) { box.innerHTML = ""; $("fix-actions").hidden = true; return paintDots(); }
     const rule = F.ruleOf(doc, sel.type, sel.id), fields = presetsOf(), g = guardsOf(sel.kind, draft);
     const row = (f) => `<label for="fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}" class="small${editedKey(rule, f) || touched.has(f.key) ? " edited" : ""}"${editedKey(rule, f) && f.key in rule.was ? ` title="Was: ${esc(rule.was[f.key] ?? "none")}"` : ""}>${esc(f.label)}${editedKey(rule, f) ? ` <button type="button" class="link" data-revert="${esc(f.key)}" title="Take this change back">↺</button>` : ""}</label>${control(f, draft[f.key] ?? "", g)}${guardNote(f, g) ? `<p class="why gwhy">${esc(guardNote(f, g))}</p>` : ""}`;
@@ -369,7 +412,7 @@ export async function initFixesPanel(root, ctx) {
   function unselect() {
     if (!sel) return;
     const dropped = touched.size;
-    ++token; sel = null; data = null; draft = {}; touched = new Set(); walls = []; wallSel = null; wallHover = null; doors = [];
+    ++token; sel = null; data = null; draft = {}; touched = new Set(); walls = []; wallSel = null; wallHover = null; doors = []; ask = false;
     $("fix-id").value = "";
     renderObject(); drawSelected(false); drawFaces(); clearMapSelection();
     status(dropped ? `Unselected. ${plural(dropped, "field")} that you did not add ${dropped === 1 ? "was" : "were"} dropped.` : "Unselected.");
@@ -390,6 +433,7 @@ export async function initFixesPanel(root, ctx) {
   async function select(k, type, id, { zoom = false, go = true } = {}) {
     if (!whole(id)) return;
     if (go) setTab(k);                                // saves the state of the tab that shows, and shows the tab of the object
+    const again = sel?.kind === k && sel.id === id;   // the same object again (a build, Load): the box keeps the person's answer
     kind = k;
     const my = ++token;
     sel = { kind: k, type: type ?? KIND_OF[k], id }; data = null; draft = {}; touched = new Set(); wallSel = null; wallHover = null; doors = [];
@@ -401,6 +445,7 @@ export async function initFixesPanel(root, ctx) {
     walls = k === "building" ? await loadWalls(id, d.type) : [];
     doors = k === "building" && d.type === "way" ? await loadDoors(id) : [];
     if (my !== token) return;
+    if (!again) ask = !!editRecords();
     renderObject(); renderForm(); drawFaces();
     await drawSelected(zoom);
   }
@@ -588,9 +633,9 @@ export async function initFixesPanel(root, ctx) {
 
   // ---- the tabs: Road, Building and Node share one editor, and each has its own object, form and draft (the stash holds the two that do not show)
   function switchKind(k) {
-    stash[kind] = { sel, data, draft, touched, walls, wallSel, doors };
-    const st = stash[k] ?? { sel: null, data: null, draft: {}, touched: new Set(), walls: [], wallSel: null, doors: [] };
-    kind = k; ({ sel, data, draft, touched, walls, wallSel = null, doors = [] } = st); ++token;
+    stash[kind] = { sel, data, draft, touched, walls, wallSel, doors, ask };
+    const st = stash[k] ?? { sel: null, data: null, draft: {}, touched: new Set(), walls: [], wallSel: null, doors: [], ask: false };
+    kind = k; ({ sel, data, draft, touched, walls, wallSel = null, doors = [], ask = false } = st); ++token;
     $("fix-id").value = sel?.id ?? "";
     if (sel && !data) select(k, sel.type, sel.id, { go: false });       // an object that waited for its data (a build came between)
   }
@@ -654,18 +699,20 @@ export async function initFixesPanel(root, ctx) {
   async function renderChanges() {
     await classify();
     const objs = F.objects(doc), turns = doc.turn_restrictions ?? [], faces = F.faceEdits(doc), roads = F.newWays(doc);
-    const item = (attrs, label, inner, cls = "") => `<div class="chg${cls}" ${attrs} tabindex="0" role="button"><div class="chgtop"><b>${label}</b><button type="button" class="btn sm" data-x aria-label="Delete this change">×</button></div>${inner}</div>`;
+    const item = (attrs, label, inner, cls = "", n = 1) => `<div class="chg${cls}" ${attrs} tabindex="0" role="button"><div class="chgtop"><b>${label}${n > 1 ? ` <span class="nrules" title="This object has ${n} records in the file. Pick it, then Edit it joins them.">${n} rules</span>` : ""}</b><button type="button" class="btn sm" data-x aria-label="Delete this change">×</button></div>${inner}</div>`;
+    // one item for each wall, turn and new road: the record that the build keeps (the last), and the number of records
+    const uniq = (list, key) => { const m = new Map(); for (const x of list) { const k = key(x); m.set(k, { last: x, n: (m.get(k)?.n ?? 0) + 1 }); } return [...m.values()]; };
     const bits = (list) => list.length ? `<ul class="bits">${list.map(({ k, was, now }) => `<li><span class="k">${esc(k)}</span><span>${was === null ? "" : `<span class="was">${was === "" ? "none" : esc(was)}</span> → `}${now === null ? "(deleted)" : esc(now)}</span></li>`).join("")}</ul>` : '<div class="small">(no change in it)</div>';
     const note = (t) => `<div class="small">${esc(t)}</div>`;
     const group = (title, items) => (items.length ? `<div class="fix-group">${title} (${items.length})</div>${items.join("")}` : "");
     const by = { road: [], building: [], node: [], relation: [] };
     for (const o of objs) {
       const k = o.type === "way" ? kinds.get("way" + o.id) ?? "road" : o.type, nm = names.get(o.type + o.id);
-      by[k]?.push(item(`data-type="${o.type}" data-id="${o.id}" data-kind="${k === "relation" ? "building" : k}"`, `${KIND_NAME[k] ?? k} ${o.id}${nm ? ` · ${esc(nm)}` : ""}`, bits(F.describeBits(doc, o.type, o.id)), F.ruleOf(doc, o.type, o.id).mode.remove ? " del" : ""));
+      by[k]?.push(item(`data-type="${o.type}" data-id="${o.id}" data-kind="${k === "relation" ? "building" : k}"`, `${KIND_NAME[k] ?? k} ${o.id}${nm ? ` · ${esc(nm)}` : ""}`, bits(F.describeBits(doc, o.type, o.id)), F.ruleOf(doc, o.type, o.id).mode.remove ? " del" : "", F.count(doc, o)));
     }
-    const newRoads = roads.map((w) => item(`data-newway="${w.id}"`, `New road · ${w.id}`, note(`${w.tags?.highway ?? "road"}${w.tags?.name ? ` “${w.tags.name}”` : ""}, ${w.nodes.length} points${w.nodes.some(Number.isInteger) ? ", joins a junction" : ""}`)));
-    const walls = faces.map((f) => item(`data-face="${f.building}|${f.from_node}|${f.to_node}"`, `Wall · building ${f.building}`, note(`${FACE_NAMES[f.type] ?? f.type}${f.door ? `, door: ${f.door}` : ""}, between nodes ${f.from_node} and ${f.to_node}`)));
-    const turnItems = turns.map((t) => item(`data-turn="${t.from_way}|${t.via_node}|${t.to_way}"`, `Turn · ${esc(TURN_TYPES[t.restriction] ?? t.restriction)}`, note(`way ${t.from_way}, at junction ${t.via_node}, to way ${t.to_way}`)));
+    const newRoads = uniq(roads, (w) => w.id).map(({ last, n }) => { const w = F.findNewWay(doc, last.id); return item(`data-newway="${w.id}"`, `New road · ${w.id}`, note(`${w.tags?.highway ?? "road"}${w.tags?.name ? ` “${w.tags.name}”` : ""}, ${w.nodes.length} points${w.nodes.some(Number.isInteger) ? ", joins a junction" : ""}`), "", n); });
+    const walls = uniq(faces, (f) => `${f.building}|${Math.min(f.from_node, f.to_node)}|${Math.max(f.from_node, f.to_node)}`).map(({ last: f, n }) => item(`data-face="${f.building}|${f.from_node}|${f.to_node}"`, `Wall · building ${f.building}`, note(`${FACE_NAMES[f.type] ?? f.type}${f.door ? `, door: ${f.door}` : ""}, between nodes ${f.from_node} and ${f.to_node}`), "", n));
+    const turnItems = uniq(turns, (t) => `${t.from_way}|${t.via_node}|${t.to_way}`).map(({ last: t, n }) => item(`data-turn="${t.from_way}|${t.via_node}|${t.to_way}"`, `Turn · ${esc(TURN_TYPES[t.restriction] ?? t.restriction)}`, note(`way ${t.from_way}, at junction ${t.via_node}, to way ${t.to_way}`), "", n));
     const html = [group("Roads", by.road), group("Buildings", by.building), group("Walls", walls), group("Nodes", by.node), group("Other objects", by.relation), group("Turn rules", turnItems), group("New roads", newRoads)].join("");
     $("fix-list").innerHTML = html || '<p class="why" style="margin:0">No changes yet. Pick an object on the map, change a field and press <b>Add to changes</b>.</p>';
     $("fix-undo").disabled = !hist.length; $("fix-redo").disabled = !future.length;
@@ -678,7 +725,7 @@ export async function initFixesPanel(root, ctx) {
     if (!c) return;
     if (e.target.closest("[data-x]")) {
       if (c.dataset.newway) { commit(() => F.deleteNewWay(doc, Number(c.dataset.newway))); return; }
-      if (c.dataset.face) { const [bd, a, b] = c.dataset.face.split("|").map(Number); commit(() => F.setFace(doc, bd, a, b, "side", "side")); if (sel?.id === bd) { renderForm(); drawFaces(); } return; }
+      if (c.dataset.face) { const [bd, a, b] = c.dataset.face.split("|").map(Number); commit(() => F.remove(doc, { building: bd, from_node: a, to_node: b })); if (sel?.id === bd) { renderForm(); drawFaces(); } return; }
       if (c.dataset.turn) { const [a, b, d] = c.dataset.turn.split("|").map(Number); commit(() => F.deleteTurn(doc, a, b, d)); }
       else commit(() => F.deleteObjectRule(doc, c.dataset.type, Number(c.dataset.id)));
       if (sel && !c.dataset.turn && sel.type === c.dataset.type && sel.id === Number(c.dataset.id) && data) { draft = initialDraft(); renderForm(); }
@@ -714,7 +761,10 @@ export async function initFixesPanel(root, ctx) {
     if (cur && !keys.includes(cur)) keys.push(cur);
     return `<select aria-label="Turn rule"><option value="">Allowed</option>${keys.map((k) => `<option value="${k}"${cur === k ? " selected" : ""}>${TURN_TYPES[k]}</option>`).join("")}</select>`;
   };
+  let turnFrom = null;
+  const turnOk = new Set();                          // the junctions ("from|via") of the picked road where the person answered the box
   async function findTurns(from, via = null, { zoom = false } = {}) {
+    if (from !== turnFrom) { turnFrom = from; turnOk.clear(); }
     $("fix-from").value = from;
     // the junctions at the ends of the edges of the road, the one with the most roads that leave it first
     const js = await safe(`SELECT t.n::VARCHAR AS n, count(DISTINCT o.osm_id)::INTEGER AS c FROM (SELECT DISTINCT target AS n FROM driving.edges WHERE osm_id = ${from}) t
@@ -749,9 +799,32 @@ export async function initFixesPanel(root, ctx) {
     if (roads.length) $("fix-out").insertAdjacentHTML("afterbegin", roads.map((r) => `<div class="turn" data-to="${r.osm_id}"><span class="small"><i class="sw" style="background:#16a34a"></i>To <b>${esc(r.name || "no name")}</b> (${esc(r.highway)}, way ${r.osm_id})${turnWay(inEdge, r) ? ` · <i>${WAY_NAMES[turnWay(inEdge, r)]}</i>` : ""}</span>${turnSelect(F.findTurn(doc, from, via, Number(r.osm_id))?.restriction, turnWay(inEdge, r))}</div>`).join(""));
     for (const row of $("fix-out").querySelectorAll(".turn")) { row.tabIndex = 0; row.querySelector("select").onchange = paintTurnBar; }
     if (!roads.some((r) => Number(r.osm_id) === turnSel)) turnSel = null;
+    turnNames = new Map(roads.map((r) => [Number(r.osm_id), r.name]));
     paintTurnSel();
     paintTurnBar();
+    paintTurnAsk();
   }
+  // the box over the list when the road has turn rules at this junction in the changes: the list waits for Edit it or Delete it
+  let turnNames = new Map();
+  const turnsHere = () => {
+    const from = whole($("fix-from").value), via = Number($("fix-via").value);
+    return from && Number.isSafeInteger(via) ? [...new Set((doc.turn_restrictions ?? []).filter((t) => t.from_way === from && t.via_node === via).map((t) => t.to_way))].map((to) => ({ from_way: from, via_node: via, to_way: to })) : [];
+  };
+  function paintTurnAsk() {
+    const list = turnsHere(), waits = list.length > 0 && !turnOk.has(`${$("fix-from").value}|${$("fix-via").value}`) && !$("fix-turnsec").hidden;
+    $("fix-turns").classList.toggle("asking", waits);
+    if (!waits) { $("fix-turn-inchg").hidden = true; return; }
+    const bits = list.map((t) => { const r = F.findTurn(doc, t.from_way, t.via_node, t.to_way).restriction, nm = turnNames.get(t.to_way); return `${(TURN_TYPES[r] ?? r).toLowerCase()} to ${nm ? `“${nm}” (way ${t.to_way})` : `way ${t.to_way}`}`; });
+    askBox($("fix-turn-inchg"), "turn", bits.join(", "), Math.max(...list.map((t) => F.count(doc, t))), list.length > 1);
+  }
+  $("fix-turn-inchg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ask]"), list = turnsHere();
+    if (!b) return;
+    if (b.dataset.ask === "edit") { if (list.some((t) => F.count(doc, t) > 1)) commit(() => list.forEach((t) => F.join(doc, t))); }
+    else { commit(() => list.forEach((t) => F.remove(doc, t))); status(`Deleted from the changes: ${plural(list.length, "turn rule")} of way ${list[0].from_way}. Undo brings ${list.length === 1 ? "it" : "them"} back.`); }
+    turnOk.add(`${$("fix-from").value}|${$("fix-via").value}`);
+    outgoing();
+  });
   // the rules that the person chose in the list and did not add yet
   function turnDiffs() {
     const from = whole($("fix-from").value), via = Number($("fix-via").value), out = [];
@@ -775,7 +848,7 @@ export async function initFixesPanel(root, ctx) {
     status(`Added to the changes: ${plural(d.length, "turn rule")}.`);
   };
   function clearTurns() {
-    $("fix-from").value = ""; $("fix-via").innerHTML = ""; turnSel = null; $("fix-out").innerHTML = "";
+    $("fix-from").value = ""; $("fix-via").innerHTML = ""; turnSel = null; $("fix-out").innerHTML = ""; turnFrom = null; turnOk.clear(); paintTurnAsk();
     $("fix-via-row").hidden = $("fix-turnsec").hidden = $("fix-turn-bar").hidden = $("fix-turn-clear").hidden = $("fix-turn-legend").hidden = true;
     turnOut = []; drawTurnRoads(); paintTurnBar(); drawSelected(false);
   }
@@ -1066,7 +1139,7 @@ export async function initFixesPanel(root, ctx) {
       feats = [...road.map((r) => feat(r.g, {})), ...junction.map((r) => feat(r.g, { j: 1 }))].filter(Boolean);
     } else if (sel && EDIT.includes(current)) feats = await shapes([{ type: sel.type, id: sel.id }]);
     else if (current === "new" && editNew != null) {
-      const w = F.newWays(doc).find((x) => x.id === editNew), line = w ? await newWayLine(w) : [];
+      const w = F.findNewWay(doc, editNew), line = w ? await newWayLine(w) : [];
       if (line.length > 1) feats = [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } }];
     }
     if (my !== selToken) return;
@@ -1107,6 +1180,7 @@ export async function initFixesPanel(root, ctx) {
   }
   function stopDraw() {
     draw = null; editNew = null; $("fix-drawbox").hidden = true; $("fix-draw").hidden = false;
+    $("fix-new").classList.remove("asking"); $("fix-new-inchg").hidden = true;
     paintNewMode(); map.getCanvas().style.cursor = ""; drawn(); drawPreview(); drawSelected(false);
   }
   // the New road tab has two modes: draw (points and form) and edit (the form of a road that is in the changes)
@@ -1117,15 +1191,25 @@ export async function initFixesPanel(root, ctx) {
     $("fix-draw-done").textContent = edit ? "Update change" : "Add to changes";
     $("fix-draw-help").innerHTML = edit ? "The points of this road stay. To change them, remove the road and draw it again." : "Click the points of the road on the map. <b>Enter</b> finishes, <b>Esc</b> cancels.";
   }
-  function startEdit(id) {
-    const w = F.newWays(doc).find((x) => x.id === id);
+  function startEdit(id, { asking = true } = {}) {
+    const w = F.findNewWay(doc, id);
     if (!w) return;
     if (draw) stopDraw();
     editNew = id; newDraft = { ...w.tags };
     $("fix-drawbox").hidden = false; $("fix-draw").hidden = true;
     renderNewForm(); paintNewMode();
     $("fix-draw-n").textContent = `${plural(w.nodes.length, "point")}${w.nodes.some(Number.isInteger) ? ", joins a junction" : ""}`;
+    // a new road of the changes: the box first, and the form waits
+    $("fix-new").classList.toggle("asking", asking);
+    if (asking) askBox($("fix-new-inchg"), "new road", `${w.tags?.highway ?? "road"}${w.tags?.name ? ` "${w.tags.name}"` : ""}, ${plural(w.nodes.length, "point")}`, F.count(doc, { new_way: id }));
+    else $("fix-new-inchg").hidden = true;
   }
+  $("fix-new-inchg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-ask]"), id = editNew;
+    if (!b || id == null) return;
+    if (b.dataset.ask === "edit") { if (F.count(doc, { new_way: id }) > 1) commit(() => F.join(doc, { new_way: id })); startEdit(id, { asking: false }); return; }
+    commit(() => F.remove(doc, { new_way: id })); stopDraw(); status(`Deleted from the changes: new road ${id}. Undo brings it back.`);
+  });
   $("fix-new-del").onclick = () => { const id = editNew; commit(() => F.deleteNewWay(doc, id)); stopDraw(); status(`Removed from the changes: new road ${id}.`); };
   async function addPoint(e) {
     const { lng, lat } = e.lngLat, d = px(e, 14);
@@ -1139,7 +1223,7 @@ export async function initFixesPanel(root, ctx) {
   }
   function finishDraw() {
     if (editNew == null && (!draw || draw.pts.length < 2)) return status("Click at least two points on the map.");
-    const w = editNew != null ? F.newWays(doc).find((x) => x.id === editNew) : null, tags = {};
+    const w = editNew != null ? F.findNewWay(doc, editNew) : null, tags = {};
     for (const f of newFields) {
       const v = (document.getElementById(`fixn-${f.key}`)?.value ?? "").trim();
       if (f.type === "int" && v !== "" && !/^\d+$/.test(v)) return status(`${f.label} is a whole number.`);
@@ -1327,7 +1411,7 @@ export async function initFixesPanel(root, ctx) {
   // after a build: the data is new, so each tab loads its object again (the changes and the picked objects stay)
   const rebuilt = () => {
     kinds.clear(); names.clear(); walls = []; wallSel = null;
-    for (const k of EDIT) if (k !== kind && stash[k]?.sel) stash[k] = { sel: stash[k].sel, data: null, draft: {}, touched: new Set(), walls: [], wallSel: null };
+    for (const k of EDIT) if (k !== kind && stash[k]?.sel) stash[k] = { sel: stash[k].sel, data: null, draft: {}, touched: new Set(), walls: [], wallSel: null, ask: stash[k].ask };
     if (sel) select(kind, sel.type, sel.id, { go: false }); else { renderObject(); drawSelected(false); }
     drawEdits(); drawFaces(); drawNodes(); drawDoors();
   };

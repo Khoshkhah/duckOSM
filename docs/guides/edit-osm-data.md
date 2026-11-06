@@ -1,6 +1,6 @@
 # Edit OSM data and use the fixes file
 
-The panel **Edit OSM data** of the [duckOSM page](https://khoshkhah.github.io/duckosm-rust/) changes the OSM data of an area on a map:
+The panel **Edit OSM data** of [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) changes the OSM data of an area on a map:
 the tags of roads, buildings and nodes, turn rules, new roads and the type of each wall of a building. The panel writes the changes
 as a fixes file. `duckosm build` reads the same file and gives the same tables as the page. The panel is part of duckOSM
 (`web/fixes_editor/`), and the page loads it at the same duckOSM version as its build engine.
@@ -28,6 +28,21 @@ under `extra`. A file from the page is a normal duckOSM fixes file.
 7. Click **Download** to save the file (`osm_fixes.yaml`).
 
 The page keeps the changes in your browser for each area name, so a reload of the page does not lose them.
+
+### An object that is in your changes
+
+When you pick an object that is in your changes already, a box shows over the form, and the form waits:
+
+> **This road is in your changes:** lanes 2, name "B". **Edit it** **Delete it**
+
+- **Edit it** opens the form with the values of your changes.
+- **Delete it** removes the changes of the object, and the form opens with the OSM data. **Undo** in the **Changes** tab brings them back.
+
+The box shows for a road, a building (with its walls), a node, the turn rules of a road at a junction, and a new road that you open
+from the **Changes** tab.
+
+A file that you load can have two or more rules for one object. Then the box says how many. **Edit it** joins them into one rule: for the
+same key, the later rule wins, as in the build. The build result does not change. The **Changes** tab marks such an object with "2 rules".
 
 ## Build with the file
 

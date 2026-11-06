@@ -93,3 +93,9 @@
 #fix-panel .legend { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font-size: 11.5px; color: var(--muted); }
 #fix-panel .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 #fix-panel .chgtop { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+/* the box over a form when the picked object is in the changes (fixes_panel.js, askBox): the form waits for Edit it or Delete it */
+#fix-panel .fix-inchg { border: 1px solid #f59e0b; border-radius: 12px; padding: 10px 12px; margin: 0 0 10px; background: rgba(245, 158, 11, 0.1); }
+#fix-panel .fix-inchg p { margin: 0 0 8px; }
+#fix-panel .fix-inchg .row { margin-top: 0; }
+#fix-panel #fix-edit.asking :is(#fix-form, #fix-actions), #fix-panel #fix-turns.asking :is(#fix-turnsec, #fix-turn-bar), #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
+#fix-panel .nrules { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: rgba(245, 158, 11, 0.2); color: #b45309; font-size: 11px; font-weight: 600; white-space: nowrap; }
