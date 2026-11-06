@@ -34,9 +34,6 @@ The Rust engine is the module `duckosm._rust`, inside the `duckosm` wheel. You d
 (x86_64 and aarch64), macOS (x86_64 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that
 needs a [Rust toolchain](https://rustup.rs).
 
-!!! note
-    The version on PyPI (0.6.1) does not have the Rust engine yet. It comes with the next release.
-
 ## The program duckosm-rust
 
 The folder `rust/` also has a program with no Python: `duckosm-rust`. It builds an area from a config or from a cut `.osm.pbf` file.

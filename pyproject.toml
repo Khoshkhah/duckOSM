@@ -5,7 +5,7 @@ build-backend = "maturin"
 
 [project]
 name = "duckosm"
-version = "0.6.1"
+version = "0.7.0"
 description = "High-performance OSM-to-routing-network converter built on DuckDB"
 readme = "README.md"
 requires-python = ">=3.10"
