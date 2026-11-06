@@ -166,8 +166,8 @@ If the file has wall rules and `options.building_faces` is off, the build writes
 ## What each change writes
 
 This section shows, for each change that you make in the editor, the record that the editor writes in the fixes file, and the result
-in the tables after `duckosm build`. The file `tests/data/editor_changes/osm_fixes.yaml` is the file that the editor wrote for these
-changes on the Monaco sample. The test `tests/test_editor_changes.py` builds Monaco with it in the two engines and checks each result
+in the tables after `duckosm build`. The complete file that the editor wrote for these changes on the Monaco sample is
+[`tests/data/editor_changes/osm_fixes.yaml`](https://github.com/Khoshkhah/duckOSM/blob/main/tests/data/editor_changes/osm_fixes.yaml). The test `tests/test_editor_changes.py` builds Monaco with it in the two engines and checks each result
 below.
 
 The editor writes two kinds of record for an object:

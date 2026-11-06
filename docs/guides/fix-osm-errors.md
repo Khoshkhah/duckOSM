@@ -62,7 +62,7 @@ every area you build. Fixes are only applied when you name the file.
 | `lanes` | lanes per direction, both directions |
 | `lanes_forward`, `lanes_backward` | lanes per direction, each separately |
 | `layer` | vertical level (fixes a wrong `layer` tag, e.g. a ramp at ground level tagged `layer=-1`) |
-| `exclude_modes` | remove the way from these networks: `driving`, `walking`, `cycling` |
+| `exclude_modes` | remove the way from these networks: `driving`, `walking`, `cycling`. This is a rule of duckOSM, not OSM data. The editor writes the OSM tags in its place: `motor_vehicle`, `foot` or `bicycle` with the value `no`, in `extra.tag_edits` ([What each change writes](edit-osm-data.md#road-tab)). The two give the same networks |
 | `remove` | `true`: remove the way from the build (no road, building or feature) |
 | `tags` | set these OSM tags on the way before the build reads it, e.g. `{highway: unclassified}` for a car road that OSM tags `pedestrian` |
 | `keep_nodes` | `[from, to]`: keep only this part of the way (OSM node ids). To keep the other part, add it under `new_ways` with `tags_from` |
