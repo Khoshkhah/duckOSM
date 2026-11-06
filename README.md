@@ -85,6 +85,8 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 - **In the browser:** [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) builds the same tables in a web page,
   with the same Rust engine. Its panel **Edit OSM data** (`web/fixes_editor/`) writes the fixes file that `duckosm build` reads
   ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
+- **Edit on your computer:** `duckosm edit my_area.duckdb` opens the same panel on a page on your computer, and
+  **Build again** builds the area with your fixes ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/#edit-on-your-computer-duckosm-edit)).
 
 ## Exports
 
