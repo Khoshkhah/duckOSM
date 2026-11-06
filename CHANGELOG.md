@@ -6,7 +6,7 @@
 
 - **The fixes editor is in roadstyle's editor frame, and the roads are in roadstyle's highlight sets** (Kaveh,
   `docs/design/fixes_editor.md`). `initFixesPanel(panel, ctx)` takes the dashboard's panel (`#sb`) and `ctx.dashboard` (`window.rs`,
-  roadstyle `f715e32f` or later). The frame has the title "Edit OSM data", a back button, the six tabs in its head row, the form in its
+  roadstyle `e1b0617a` or later). The frame has the title "Edit OSM data", a back button, the six tabs in its head row, the form in its
   body and the buttons of each tab in its one bar at the bottom edge. The grid of grey tabs and the bar of each tab are gone. New hooks:
   `roadRows(osmId)` (the map's rows of a way), `onBack` and `backLabel`. With `roadRows`, the picked road is blue, the changes amber,
   the deleted roads red, the roads that leave a junction green and the road under the pointer in the Turn list dark, at the road's

@@ -203,7 +203,7 @@ call `close()` first (README.md).
 Kaveh's decisions. The editor had its own shell: a 3 × 2 grid of grey tabs, a body that scrolls, and a white bar that sticks to the
 bottom of each tab. The roads had the editor's own line layers (`fix-sel-*`, `fix-turn-*`, `fix-edits-*`) with a fixed width. On the map
 they were wider or thinner than the road, and they had dark blobs at the joins. roadstyle now has both parts (roadstyle PR #49,
-`f715e32f`): the editor frame `rs.frame` and the highlight sets.
+`e1b0617a`): the editor frame `rs.frame` and the highlight sets.
 
 - **The frame.** `initFixesPanel(panel, ctx)` takes the host's dashboard panel (`#sb`) and makes `rs.frame({panel, title: "Edit OSM
   data", back, id: "fix", tabs})`. The ids of the tab buttons do not change (`fix-tab-road`, ...). The six tabs are in the frame's head

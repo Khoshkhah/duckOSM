@@ -14,7 +14,7 @@ The user guide is [Edit OSM data](../../docs/guides/edit-osm-data.md). The desig
 
 ## Use it in a page
 
-The host page is roadstyle's standard dashboard (roadstyle `f715e32f` or later): the editor uses roadstyle's editor frame `rs.frame` and the
+The host page is roadstyle's standard dashboard (roadstyle `e1b0617a` or later): the editor uses roadstyle's editor frame `rs.frame` and the
 highlight sets (`rsHighlight(rows, {set, color})`). Copy the folder at one duckOSM rev, link `fixes_panel.css`, load
 [js-yaml](https://github.com/nodeca/js-yaml) and call `initFixesPanel`:
 

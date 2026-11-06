@@ -127,9 +127,7 @@ def test_edit_save_box_and_build(monaco, page_url):
         page.click("#fix-tab-changes")
         assert _bars(page) == [["fix-build-bar"], True]
         # the back button closes the editor and shows the dashboard's own panel; its card "Edit OSM data" opens the editor again
-        # ponytail: a DOM click. On a desktop, roadstyle's Layers box (overlays.js: a page with no toolbar puts it in the top-left stack .rs-tl) is over
-        # the back button, so a click at the button's place hits the box. Use page.click when roadstyle docks that box.
-        page.locator("#fix-back").dispatch_event("click")
+        page.click("#fix-back")          # a real click: no box of roadstyle is over the back button (roadstyle #59)
         assert not page.locator("#fix-panel").is_visible() and page.locator("#sb .sb-body").is_visible()
         assert not page.evaluate("document.body.classList.contains('editing-fixes')")
         assert page.evaluate(f"({_LIT})({ROAD})")[0] == AMBER, "the changes stay on the map"
