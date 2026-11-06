@@ -102,6 +102,7 @@ Next: [Your first network](first_network.md) walks through it step by step, and 
 - **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
   area's border by name, and `duckosm extract` cuts a city out of a country build in seconds
   ([Prepare an area](guides/prepare-area.md)).
+- **A fast engine in Rust:** Estonia's network builds in 19 seconds, with the same tables and ids ([The Rust engine](concepts/rust-engine.md)).
 - **Your own fixes for OSM errors**, applied on every build ([Fix OSM errors](guides/fix-osm-errors.md)).
 
 ## Exports
