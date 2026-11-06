@@ -83,8 +83,8 @@ const MARKUP = (note) => String.raw`
     <div id="fix-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
     <div id="fix-form"></div>
     <div class="fix-bar" id="fix-actions" hidden>
-      <div class="barline"><span id="fix-state" class="small" role="status"></span><button type="button" class="link" data-review>Review changes →</button></div>
-      <div class="row"><button id="fix-save" class="btn primary" type="button">Add to changes</button><button id="fix-revert" class="btn" type="button"><span class="long">Reset form</span><span class="short">Reset</span></button><button id="fix-del" class="btn" type="button"><span class="long">Remove from changes</span><span class="short">Remove</span></button></div>
+      <div class="barline"><span id="fix-state" class="small" role="status"></span><button type="button" class="link" data-review>Changes<span data-n></span> →</button></div>
+      <div class="row" id="fix-btns"><button id="fix-save" class="btn primary" type="button">Add to changes</button><button id="fix-revert" class="btn" type="button">Reset</button><button id="fix-del" class="btn danger" type="button">Remove</button></div>
     </div>
   </div>
   <div id="fix-turns" class="fix-pane" role="tabpanel" hidden>
@@ -142,6 +142,16 @@ export const wallFilter = (key) => ["==", ["coalesce", ["get", "k"], ""], key ||
 export async function initFixesPanel(root, ctx) {
   const { duck, map, status, yaml } = ctx;
   root.insertAdjacentHTML("beforeend", MARKUP(ctx.changesNote ? " " + ctx.changesNote : ""));
+  // the bars of the panes go to one foot under the body, as the bar of roadstyle's editor frame: they stay in view and never cover the form (Kaveh,
+  // 2026-11-06: the bar that stuck to the bottom of the body was a slab of its own colour over the form). A bar shows while its place in its pane does
+  // and its pane does not ask (Edit it or Delete it). `ctx.selectBoxes(el)`: the host's look for the <select> lists (roadstyle's rsSelectBoxes).
+  const foot = document.createElement("div");
+  foot.className = "fix-foot";
+  root.querySelector(".fix-body").after(foot);
+  const homes = new Map();
+  for (const b of root.querySelectorAll(".fix-pane .fix-bar")) { homes.set(b, b.parentElement); foot.append(b); }
+  const paintFoot = () => { for (const [b, home] of homes) b.classList.toggle("off", !!home.closest("[hidden]") || !!home.closest(".fix-pane").classList.contains("asking")); };
+  new MutationObserver(() => { paintFoot(); ctx.selectBoxes?.(root); }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class"] });
   const presets = await fetch(new URL("presets.json", import.meta.url)).then((r) => r.json());
   let doc = {}, hist = [], future = [];
   let sel = null, data = null, draft = {}, touched = new Set(), kind = "road", token = 0;   // the state of the tab `kind` (Road, Building or Node)
@@ -235,7 +245,8 @@ export async function initFixesPanel(root, ctx) {
   function initialDraft() {
     const rule = F.ruleOf(doc, sel.type, sel.id), d = {};
     for (const f of presetsOf()) {
-      if (isRuleKey(f)) d[f.key] = rule.mode[f.key] != null ? String(rule.mode[f.key]) : data.mode[f.key] ?? data.tags[f.key.replace(/_/g, ":")] ?? "";
+      if (f.key === "oneway" && rule.mode.oneway == null && (rule.set.oneway ?? data.tags.oneway) === "-1") d.oneway = "-1";     // the reverse: the tag oneway=-1
+      else if (isRuleKey(f)) d[f.key] = rule.mode[f.key] != null ? String(rule.mode[f.key]) : data.mode[f.key] ?? data.tags[f.key.replace(/_/g, ":")] ?? "";
       else d[f.key] = f.key in rule.set ? String(rule.set[f.key]) : rule.delete.includes(f.key) ? "" : data.tags[f.key] ?? "";
     }
     for (const k of new Set([...Object.keys(data.tags), ...Object.keys(rule.set)])) if (!(k in d)) d[k] = k in rule.set ? String(rule.set[k]) : rule.delete.includes(k) ? "" : data.tags[k];
@@ -246,7 +257,7 @@ export async function initFixesPanel(root, ctx) {
     return d;
   }
 
-  const editedKey = (rule, f) => (isRuleKey(f) ? f.key in rule.mode : f.key in rule.set || rule.delete.includes(f.key));
+  const editedKey = (rule, f) => (isRuleKey(f) ? f.key in rule.mode || (f.key === "oneway" && "oneway" in rule.set) : f.key in rule.set || rule.delete.includes(f.key));
 
   // ---- guards: one choice closes a field, or narrows the list of a field, for another (presets.json, `_guards`)
   const guardRules = presets._guards ?? {};
@@ -286,10 +297,15 @@ export async function initFixesPanel(root, ctx) {
   function paintBar() {
     if (!sel || !data) return paintDots();
     const rule = F.ruleOf(doc, sel.type, sel.id), inChanges = !F.isEmptyRule(rule);
+    // only the buttons that can act now (Kaveh, 2026-11-06: three disabled buttons made the bar heavy): an edit has Add (or Update) and Reset,
+    // an object in the changes with no edit has Remove, and an object with neither has the state line only
+    const edited = touched.size > 0;
     $("fix-save").textContent = inChanges ? "Update change" : "Add to changes";
-    $("fix-save").disabled = $("fix-revert").disabled = touched.size === 0;
-    $("fix-del").disabled = !inChanges;
-    $("fix-state").textContent = touched.size ? `${plural(touched.size, "change")} not added yet.` : inChanges ? "This object is in the changes." : "No change yet. Edit a field.";
+    $("fix-save").disabled = $("fix-revert").disabled = !edited;
+    $("fix-save").hidden = $("fix-revert").hidden = !edited;
+    $("fix-del").disabled = $("fix-del").hidden = !inChanges || edited;
+    $("fix-btns").hidden = !edited && !inChanges;
+    $("fix-state").textContent = edited ? `${plural(touched.size, "change")} not added yet.` : inChanges ? "In your changes." : "Edit a field to make a change.";
     paintDots();
   }
 
@@ -490,13 +506,12 @@ export async function initFixesPanel(root, ctx) {
     }
     if ($("fix-wall-off")) $("fix-wall-off").disabled = i < 0;
   }
-  // scroll a row of a list into view in the panel, above the bar that sticks to its bottom (scrollIntoView does not know the bar and leaves the row under it)
+  // scroll a row of a list into view in the panel, 8 px from its edges
   function reveal(row) {
     const body = row?.closest(".fix-body");
     if (!body) return;
     const b = body.getBoundingClientRect(), r = row.getBoundingClientRect();
-    const bars = [...body.querySelectorAll(".fix-bar")].filter((x) => x.offsetParent).map((x) => x.getBoundingClientRect().top);
-    const bottom = Math.min(b.bottom, ...bars) - 8;
+    const bottom = b.bottom - 8;
     if (r.top < b.top + 8) body.scrollTop += r.top - b.top - 8;
     else if (r.bottom > bottom) body.scrollTop += r.bottom - bottom;
   }
@@ -590,6 +605,16 @@ export async function initFixesPanel(root, ctx) {
       if (!(k in rule.was) && !(k in rule.mode) && !(k in rule.set) && !rule.delete.includes(k)) {
         const before = ruleFields.has(k) ? dataMode[k] : data.tags[k];
         rule.was[k] = before === undefined || before === "" ? null : before;
+      }
+      if (k === "oneway" && (v === "-1" || (rule.set.oneway ?? data.tags.oneway) === "-1")) {
+        // a reverse is the tag oneway=-1: the rule `oneway` acts after the road filter, which gives the way its direction from the tag. Away from a
+        // reverse, the tag is yes or no, or blank: the data's own tag again. The rule `oneway` goes
+        delete rule.mode.oneway;
+        const tag = v === "-1" ? "-1" : v === "true" ? "yes" : v === "false" ? "no" : "";
+        if (tag === "" || tag === data.tags.oneway) delete rule.set.oneway;
+        else rule.set.oneway = tag;
+        rule.delete = rule.delete.filter((x) => x !== "oneway");
+        continue;
       }
       if (ruleFields.has(k)) {
         const f = ruleFields.get(k);
@@ -1378,6 +1403,7 @@ export async function initFixesPanel(root, ctx) {
   function sync() {
     const { turns, faces, newWays } = F.counts(doc), n = F.objects(doc).length + turns + faces + newWays;
     $("fix-n").textContent = n ? String(n) : "";
+    for (const e of document.querySelectorAll("#fix-panel [data-n]")) e.textContent = n ? ` (${n})` : "";
     $("fix-apply-n").textContent = n ? ` (${plural(n, "change")})` : "";
     paintBar();
     if (current === "turns" && !$("fix-turnsec").hidden) outgoing();

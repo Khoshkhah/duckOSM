@@ -17,23 +17,27 @@
 #fix-panel .chg.del { border-left-color: #dc2626; }
 #fix-panel .fsec .fixgrid { margin-top: 0; grid-template-columns: 8.5em 1fr; }
 #fix-panel .fsec > .row:first-of-type, #fix-panel .fsec > p.why + .row { margin-top: 0; }
-/* bottom = minus the padding of .fix-body: a sticky box stops at the padding of its scroll box, and with bottom 0 the list showed in a 12 px gap under the bar */
-#fix-panel .fix-bar { position: sticky; bottom: -12px; margin: 0 -15px -12px; padding: 10px 15px 12px; background: var(--bg); border-top: 1px solid var(--line); }
+/* the foot under the body: the bar of the pane that shows, in the look of roadstyle's editor frame bar (.rs-frame-bar): the panel's own colour and a line */
+#fix-panel .fix-foot { flex: none; margin: 0 15px; }
+#fix-panel .fix-bar { padding: 8px 0 10px; border-top: 1px solid var(--line); }
+#fix-panel .fix-bar.off { display: none; }
 #fix-panel .fix-bar .row { margin-top: 0; }
 #fix-panel .fix-bar p { margin: 6px 0 0; }
 #fix-panel #fix-apply { width: 100%; }
 #fix-panel .barline { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 #fix-panel .barline .link { white-space: nowrap; }
-@media (max-width: 700px) {
-  #fix-panel #fix-actions .row { flex-wrap: nowrap; }
-  #fix-panel #fix-actions .row .btn.primary { flex: 2 1 0; }
-  #fix-panel #fix-actions .row .btn { padding: 0 8px; }
-  #fix-panel .long { display: none; }
-}
+@media (max-width: 700px) { #fix-panel .long { display: none; } }
 @media (min-width: 701px) { #fix-panel .short { display: none; } }
 #fix-panel .fix-bar .row { flex-wrap: wrap; }
 #fix-panel .fix-bar .row .btn { flex: 1 1 0; white-space: nowrap; }
 #fix-panel .fix-bar .row .btn.primary { flex: 1 1 100%; }
+/* the bar of the object form: one row, the main button wide and Reset or Remove at its side; the bar is one line when no button can act */
+#fix-panel #fix-actions .barline { margin-bottom: 0; }
+#fix-panel #fix-btns { flex-wrap: nowrap; margin-top: 8px; }
+#fix-panel #fix-btns .btn { flex: none; padding: 0 14px; }
+#fix-panel #fix-btns .btn.primary { flex: 1 1 auto; }
+#fix-panel #fix-btns[hidden], #fix-panel #fix-btns .btn[hidden] { display: none; }
+#fix-panel .btn.danger { color: color-mix(in srgb, #dc2626 75%, var(--fg)); }      /* a red that is darker on a light panel and lighter on a dark one */
 #fix-panel .fix-pending { border: 1px solid #f59e0b; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: rgba(245, 158, 11, 0.1); }
 #fix-panel .fix-pending b { display: block; margin-bottom: 4px; }
 #fix-panel .fix-group { margin: 12px 0 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
@@ -97,5 +101,5 @@
 #fix-panel .fix-inchg { border: 1px solid #f59e0b; border-radius: 12px; padding: 10px 12px; margin: 0 0 10px; background: rgba(245, 158, 11, 0.1); }
 #fix-panel .fix-inchg p { margin: 0 0 8px; }
 #fix-panel .fix-inchg .row { margin-top: 0; }
-#fix-panel #fix-edit.asking :is(#fix-form, #fix-actions), #fix-panel #fix-turns.asking :is(#fix-turnsec, #fix-turn-bar), #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
+#fix-panel #fix-edit.asking #fix-form, #fix-panel #fix-turns.asking #fix-turnsec, #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
 #fix-panel .nrules { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: rgba(245, 158, 11, 0.2); color: #b45309; font-size: 11px; font-weight: 600; white-space: nowrap; }
