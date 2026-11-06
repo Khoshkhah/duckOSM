@@ -71,7 +71,7 @@ browser, and you do not download the file: the page saves each change in the fix
 
 ### The page
 
-![The page of duckosm edit: the panel Edit OSM data at the left, the roads of the database on the OpenFreeMap Positron base map](../images/edit-page.png)
+![The page of duckosm edit: the panel Edit OSM data at the left, the roads of the database on the OpenFreeMap Positron base map, tilted, with the buildings in 3D](../images/edit-page.png)
 
 | Part | What it is |
 |---|---|
