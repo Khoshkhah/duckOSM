@@ -40,7 +40,8 @@ The panel makes its own markup. The host page gives one element and the things t
 ```js
 import { initFixesPanel } from "./fixes_editor/fixes_panel.js";
 
-const panel = await initFixesPanel(document.getElementById("fix-panel"), {
+const panel = await initFixesPanel({
+	frame,         // (options) → roadstyle's editor frame in the host's panel (rs.frame)
 	duck,          // the database: query(sql) → Arrow table, tables [{mode, table}], loadSpatial()
 	map,           // the MapLibre map
 	yaml,          // js-yaml (the host page loads it)
@@ -69,8 +70,9 @@ The returned object does not change: `text`, `load`, `restore`, `open`, `close`,
 
 What the panel takes from the host page, and does not own:
 
-- **Classes:** `btn`, `btn primary`, `row`, `why`, `small`, `muted`, `grid2`.
-- **CSS variables:** `--bg`, `--fg`, `--muted`, `--mut`, `--line`, `--surface`, `--accent`.
+- **The frame.** `ctx.frame(options)` gives roadstyle's editor frame (`rs.frame`) in the host's panel, with the host's back button.
+  The frame has the title line, the tab row, the body, the bar and roadstyle's select boxes. The buttons, the links and the option
+  rows are roadstyle's parts, and the colours are roadstyle's tokens. The README has the details.
 - **The class `editing-fixes` on `<body>`.** The panel sets it while it is open. The host page uses it to hide its other parts.
 - **roadstyle's map:** the event `rs:select` and `window.rsDeselect`.
 - **The tables.** The panel reads `driving.edges`, `driving.nodes`, `features.buildings` and `features.traffic` (duckOSM), and

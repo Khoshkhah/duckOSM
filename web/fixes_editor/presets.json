@@ -18,6 +18,10 @@
           "Yes"
         ],
         [
+          "-1",
+          "Yes, reverse"
+        ],
+        [
           "false",
           "No"
         ]
@@ -720,7 +724,8 @@
       {
         "if": {
           "oneway": [
-            "true"
+            "true",
+            "-1"
           ]
         },
         "disable": [

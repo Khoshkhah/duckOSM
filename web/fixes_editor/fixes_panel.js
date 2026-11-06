@@ -2,8 +2,8 @@
 // `doc`); this file holds the panel: six tabs: Road, Building and Node (one tag editor for the three, with its own selected object and draft in each tab; the
 // fields are in the sections of presets.json), Turn (the turn rules), New road (draw a road) and Changes (the list, undo, and the one Build button). Each tab has
 // an "Add to changes" button: nothing is in the rules before it. The map layers: an edited object is amber, the selected one is blue.
-// initFixesPanel(root, ctx) adds the tabs and the body to `root` (the host page keeps its own header there) and returns what the host page calls: load(), text(),
-// open(), close(), restore(), rebuilt(). The host page gives what it owns in `ctx` (README.md).
+// initFixesPanel(ctx) draws the panel in roadstyle's editor frame (ctx.frame: the host's panel and back button) and returns what the host page calls: load(),
+// text(), open(), close(), restore(), rebuilt(). The host page gives what it owns in `ctx` (README.md).
 import * as F from "./fixes.js";
 
 const AMBER = "#f59e0b", BLUE = "#2563eb";
@@ -59,39 +59,31 @@ export function heightOf(tags) {
   return lv ? Number(lv[1]) * 3.2 : 6;                         // 3.2 m for a floor; 6 m when the data has neither
 }
 
-// the tabs and the body of the panel; `note`: more text of the host page for the Changes tab (ctx.changesNote)
+// the panes of the panel, in the body of roadstyle's editor frame (the frame has the title line, the tabs and the bar); `note`: more text of the host page
+// for the Changes tab (ctx.changesNote)
 const MARKUP = (note) => String.raw`
-<div class="fix-tabs" role="tablist" aria-label="What to fix">
-  <button role="tab" id="fix-tab-road" data-tab="road" aria-controls="fix-edit" aria-selected="true" type="button">Road<i class="dot" hidden title="Not added to the changes yet"></i></button>
-  <button role="tab" id="fix-tab-building" data-tab="building" aria-controls="fix-edit" aria-selected="false" type="button">Building<i class="dot" hidden title="Not added to the changes yet"></i></button>
-  <button role="tab" id="fix-tab-node" data-tab="node" aria-controls="fix-edit" aria-selected="false" type="button">Node<i class="dot" hidden title="Not added to the changes yet"></i></button>
-  <button role="tab" id="fix-tab-turns" data-tab="turns" aria-controls="fix-turns" aria-selected="false" type="button">Turn<i class="dot" hidden title="Not added to the changes yet"></i></button>
-  <button role="tab" id="fix-tab-new" data-tab="new" aria-controls="fix-new" aria-selected="false" type="button">New road<i class="dot" hidden title="Not added to the changes yet"></i></button>
-  <button role="tab" id="fix-tab-changes" data-tab="changes" aria-controls="fix-changes" aria-selected="false" type="button">Changes <span id="fix-n" class="badge"></span></button>
-</div>
-<div class="fix-body">
   <div id="fix-edit" class="fix-pane" role="tabpanel">
     <p id="fix-intro" class="why"></p>
     <section class="fsec"><h3>Pick</h3>
       <p id="fix-pickhint" class="why"></p>
       <p id="fix-doors-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#92400e;border-radius:50%"></i>Door (an entrance node)</span><br><span id="fix-doors-info" class="muted"></span></p>
       <p id="fix-nodes-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#e11d48"></i>Traffic signal</span><span class="legend"><i style="background:#0d9488"></i>Crossing</span><span class="legend"><i style="background:#6b7280"></i>Other</span><span class="legend"><i style="background:#9ca3af"></i>Junction</span><br><span id="fix-nodes-info" class="muted"></span></p>
-      <div class="row"><input id="fix-id" type="text" inputmode="numeric" placeholder="OSM ID" aria-label="OSM ID" style="flex:1"><button id="fix-load" class="btn" type="button">Load</button></div>
-      <label id="fix-walls-row" class="small walls-all" hidden><input type="checkbox" id="fix-walls-all">Show the walls of all buildings in view (zoom 16 or more)</label>
+      <div class="row"><input id="fix-id" type="text" inputmode="numeric" placeholder="OSM ID" aria-label="OSM ID" style="flex:1"><button id="fix-load" type="button">Load</button></div>
+      <label id="fix-walls-row" class="rs-opt" style="margin-top:8px" hidden><input type="checkbox" id="fix-walls-all"><span>Show the walls of all buildings in view (zoom 16 or more)</span></label>
     </section>
-    <section class="fsec" id="fix-objsec"><div class="fsec-hd"><h3>Selected</h3><button id="fix-unselect" class="btn sm" type="button" hidden>Unselect</button></div><div id="fix-obj" class="fix-obj"></div></section>
+    <section class="fsec" id="fix-objsec"><div class="fsec-hd"><h3>Selected</h3><button id="fix-unselect" type="button" hidden>Unselect</button></div><div id="fix-obj" class="fix-obj"></div></section>
     <div id="fix-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
     <div id="fix-form"></div>
     <div class="fix-bar" id="fix-actions" hidden>
-      <div class="barline"><span id="fix-state" class="small" role="status"></span><button type="button" class="link" data-review>Review changes →</button></div>
-      <div class="row"><button id="fix-save" class="btn primary" type="button">Add to changes</button><button id="fix-revert" class="btn" type="button"><span class="long">Reset form</span><span class="short">Reset</span></button><button id="fix-del" class="btn" type="button"><span class="long">Remove from changes</span><span class="short">Remove</span></button></div>
+      <div class="barline"><span id="fix-state" class="small" role="status"></span><a href="#" class="link" role="button" data-review>Changes<span data-n></span> →</a></div>
+      <div class="row" id="fix-btns"><button id="fix-save" class="sb-primary" type="button">Add to changes</button><button id="fix-revert" type="button">Reset</button><button id="fix-del" class="danger" type="button">Remove</button></div>
     </div>
   </div>
   <div id="fix-turns" class="fix-pane" role="tabpanel" hidden>
     <p class="why">A turn rule says that a driver cannot make a turn (or must make it) at a junction. The rules are for the driving network.</p>
     <section class="fsec"><h3>Pick the road</h3>
       <p class="why">Click the road that the turn starts on, or type its way ID.</p>
-      <div class="row"><input id="fix-from" type="text" inputmode="numeric" placeholder="From way ID" aria-label="From way ID" style="flex:1"><button id="fix-turn-find" class="btn" type="button">Find turns</button><button id="fix-turn-clear" class="btn" type="button" hidden>Unselect</button></div>
+      <div class="row"><input id="fix-from" type="text" inputmode="numeric" placeholder="From way ID" aria-label="From way ID" style="flex:1"><button id="fix-turn-find" type="button">Find turns</button><button id="fix-turn-clear" type="button" hidden>Unselect</button></div>
       <p id="fix-turn-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#2563eb"></i>The road the turn starts on</span><span class="legend"><i style="background:#16a34a"></i>Roads that leave the junction</span><span class="legend"><i style="border:3px solid #2563eb;border-radius:50%;background:rgba(37,99,235,.25)"></i>The junction</span><br><span class="muted">Point at a road in the list to outline it on the map.</span></p>
       <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junction at the end of the road.</b> Pick one to see the roads that leave it. The map shows the junction that you pick.</p><select id="fix-via" aria-label="Junction" style="width:100%"></select></div>
     </section>
@@ -99,39 +91,37 @@ const MARKUP = (note) => String.raw`
     <section class="fsec" id="fix-turnsec" hidden><h3>Rule for each road that leaves the junction</h3><div id="fix-out"></div></section>
     <div class="fix-bar" id="fix-turn-bar" hidden>
       <p id="fix-turn-note" class="small" role="status"></p>
-      <div class="row"><button id="fix-turn-add" class="btn primary" type="button">Add to changes</button></div>
-      <p class="small"><button type="button" class="link" data-review>Review the changes →</button></p>
+      <div class="row"><button id="fix-turn-add" class="sb-primary" type="button">Add to changes</button></div>
+      <p class="small"><a href="#" class="link" role="button" data-review>Review the changes →</a></p>
     </div>
   </div>
   <div id="fix-new" class="fix-pane" role="tabpanel" hidden>
     <p class="why">Draw a road that OSM does not have. A click near a junction joins the road to it. The road is in the networks after you build again.</p>
-    <div class="row" style="margin-top:0"><button id="fix-draw" class="btn primary" type="button">Draw a new road</button></div>
+    <div class="row" style="margin-top:0"><button id="fix-draw" class="sb-primary" type="button">Draw a new road</button></div>
     <div id="fix-drawbox" hidden>
       <div id="fix-new-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
       <section class="fsec"><h3>Points</h3>
         <p class="why" id="fix-draw-help">Click the points of the road on the map. <b>Enter</b> finishes, <b>Esc</b> cancels.</p><p class="small" id="fix-draw-n"></p>
-        <div class="row"><button id="fix-draw-undo" class="btn" type="button">Undo point</button><button id="fix-draw-cancel" class="btn" type="button">Cancel</button></div>
+        <div class="row"><button id="fix-draw-undo" type="button">Undo point</button><button id="fix-draw-cancel" type="button">Cancel</button></div>
       </section>
       <section class="fsec"><h3>The road</h3><div id="fix-newform"></div></section>
       <div class="fix-bar">
-        <div class="row"><button id="fix-draw-done" class="btn primary" type="button">Add to changes</button><button id="fix-new-del" class="btn" type="button" hidden>Remove from changes</button></div>
-        <p class="small"><button type="button" class="link" data-review>Review the changes →</button></p>
+        <div class="row"><button id="fix-draw-done" class="sb-primary" type="button">Add to changes</button><button id="fix-new-del" type="button" hidden>Remove from changes</button></div>
+        <p class="small"><a href="#" class="link" role="button" data-review>Review the changes →</a></p>
       </div>
     </div>
   </div>
   <div id="fix-changes" class="fix-pane" role="tabpanel" hidden>
     <div id="fix-pending" class="fix-pending" hidden></div>
-    <div class="row" style="margin-top:0"><button id="fix-undo" class="btn" type="button">Undo</button><button id="fix-redo" class="btn" type="button">Redo</button><button id="fix-download" class="btn" type="button">Download</button><button id="fix-clear" class="btn" type="button">Clear all</button></div>
+    <div class="row" style="margin-top:0"><button id="fix-undo" type="button">Undo</button><button id="fix-redo" type="button">Redo</button><button id="fix-download" type="button">Download</button><button id="fix-clear" type="button">Clear all</button></div>
     <div id="fix-list" class="fix-list"></div>
     <p class="why">A change shows in amber on the map. Click a change to see it and its data. Download saves the rules as a fixes file: <code>duckosm build --fixes</code> reads it. This browser keeps the changes of each area.${note}</p>
     <div class="fix-bar">
-      <button id="fix-apply" class="btn primary" type="button">Build again<span id="fix-apply-n"></span></button>
+      <button id="fix-apply" class="sb-primary" type="button">Build again<span id="fix-apply-n"></span></button>
       <p id="fix-apply-why" class="why" role="status"></p>
     </div>
-  </div>
-</div>`;
+  </div>`;
 
-const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 // the walls of the picked building have no number on the map, only the wall under the pointer (on the map or in the list of walls) and, with no
@@ -139,9 +129,31 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 export function wallShown(hover, selected) { return hover ?? selected ?? ""; }
 export const wallFilter = (key) => ["==", ["coalesce", ["get", "k"], ""], key || "-"];
 
-export async function initFixesPanel(root, ctx) {
+export async function initFixesPanel(ctx) {
   const { duck, map, status, yaml } = ctx;
-  root.insertAdjacentHTML("beforeend", MARKUP(ctx.changesNote ? " " + ctx.changesNote : ""));
+  // the panel is roadstyle's editor frame (docs/guides/dashboard-parts.md, "An editor in the panel"): the host's ctx.frame(options) makes it in the
+  // host's panel. The frame has the title line, the tab row, the body that scrolls (the panes) and the bar under the body. Its root has the id
+  // fix-panel: the rules of fixes_panel.css start with it.
+  const fr = ctx.frame({ title: "Edit OSM data", label: "Edit OSM data", id: "fix", tabs: TABS.map((t) => [t, TAB_NAME[t]]) });
+  const root = fr.root;
+  root.id = "fix-panel";
+  // an element of the panel (the frame is in the page only while it is open)
+  const $ = (id) => root.querySelector("#" + CSS.escape(id));
+  fr.body.innerHTML = MARKUP(ctx.changesNote ? " " + ctx.changesNote : "");
+  // the amber dot of a tab with edits that are not in the changes, and the number of changes on the tab Changes
+  for (const t of TABS) $(`fix-tab-${t}`).insertAdjacentHTML("beforeend", t === "changes" ? ' <span id="fix-n" class="badge"></span>' : '<i class="dot" hidden title="Not added to the changes yet"></i>');
+  fr.addEventListener("tab", (e) => setTab(e.detail.tab));
+  root.addEventListener("click", (e) => { if (e.target.closest('a[href="#"]')) e.preventDefault(); });     // the links of the panel act in the panel
+  // the bars of the panes go to the frame's bar: they stay in view and never cover the form (Kaveh, 2026-11-06). A bar shows while its place in its pane
+  // does and its pane does not ask (Edit it or Delete it); the frame's bar shows while one of them shows.
+  const homes = new Map();
+  for (const b of root.querySelectorAll(".fix-pane .fix-bar")) { homes.set(b, b.parentElement); fr.bar.append(b); }
+  const paintFoot = () => {
+    for (const [b, home] of homes) b.classList.toggle("off", !!home.closest("[hidden]") || !!home.closest(".fix-pane").classList.contains("asking"));
+    const none = [...homes.keys()].every((b) => b.hidden || b.classList.contains("off"));
+    if (fr.bar.hidden !== none) fr.bar.hidden = none;
+  };
+  new MutationObserver(paintFoot).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class"] });
   const presets = await fetch(new URL("presets.json", import.meta.url)).then((r) => r.json());
   let doc = {}, hist = [], future = [];
   let sel = null, data = null, draft = {}, touched = new Set(), kind = "road", token = 0;   // the state of the tab `kind` (Road, Building or Node)
@@ -235,7 +247,8 @@ export async function initFixesPanel(root, ctx) {
   function initialDraft() {
     const rule = F.ruleOf(doc, sel.type, sel.id), d = {};
     for (const f of presetsOf()) {
-      if (isRuleKey(f)) d[f.key] = rule.mode[f.key] != null ? String(rule.mode[f.key]) : data.mode[f.key] ?? data.tags[f.key.replace(/_/g, ":")] ?? "";
+      if (f.key === "oneway" && rule.mode.oneway == null && (rule.set.oneway ?? data.tags.oneway) === "-1") d.oneway = "-1";     // the reverse: the tag oneway=-1
+      else if (isRuleKey(f)) d[f.key] = rule.mode[f.key] != null ? String(rule.mode[f.key]) : data.mode[f.key] ?? data.tags[f.key.replace(/_/g, ":")] ?? "";
       else d[f.key] = f.key in rule.set ? String(rule.set[f.key]) : rule.delete.includes(f.key) ? "" : data.tags[f.key] ?? "";
     }
     for (const k of new Set([...Object.keys(data.tags), ...Object.keys(rule.set)])) if (!(k in d)) d[k] = k in rule.set ? String(rule.set[k]) : rule.delete.includes(k) ? "" : data.tags[k];
@@ -246,7 +259,7 @@ export async function initFixesPanel(root, ctx) {
     return d;
   }
 
-  const editedKey = (rule, f) => (isRuleKey(f) ? f.key in rule.mode : f.key in rule.set || rule.delete.includes(f.key));
+  const editedKey = (rule, f) => (isRuleKey(f) ? f.key in rule.mode || (f.key === "oneway" && "oneway" in rule.set) : f.key in rule.set || rule.delete.includes(f.key));
 
   // ---- guards: one choice closes a field, or narrows the list of a field, for another (presets.json, `_guards`)
   const guardRules = presets._guards ?? {};
@@ -286,10 +299,15 @@ export async function initFixesPanel(root, ctx) {
   function paintBar() {
     if (!sel || !data) return paintDots();
     const rule = F.ruleOf(doc, sel.type, sel.id), inChanges = !F.isEmptyRule(rule);
+    // only the buttons that can act now (Kaveh, 2026-11-06: three disabled buttons made the bar heavy): an edit has Add (or Update) and Reset,
+    // an object in the changes with no edit has Remove, and an object with neither has the state line only
+    const edited = touched.size > 0;
     $("fix-save").textContent = inChanges ? "Update change" : "Add to changes";
-    $("fix-save").disabled = $("fix-revert").disabled = touched.size === 0;
-    $("fix-del").disabled = !inChanges;
-    $("fix-state").textContent = touched.size ? `${plural(touched.size, "change")} not added yet.` : inChanges ? "This object is in the changes." : "No change yet. Edit a field.";
+    $("fix-save").disabled = $("fix-revert").disabled = !edited;
+    $("fix-save").hidden = $("fix-revert").hidden = !edited;
+    $("fix-del").disabled = $("fix-del").hidden = !inChanges || edited;
+    $("fix-btns").hidden = !edited && !inChanges;
+    $("fix-state").textContent = edited ? `${plural(touched.size, "change")} not added yet.` : inChanges ? "In your changes." : "Edit a field to make a change.";
     paintDots();
   }
 
@@ -304,8 +322,8 @@ export async function initFixesPanel(root, ctx) {
     return `<section class="fsec danger"><h3>Delete</h3>` + (gone && !touched.size
       ? `<p class="small" style="margin:0"><b>This ${what} is deleted in the changes.</b> ${effect} To take it back, use Remove from changes.</p>`
       : gone
-      ? `<p class="small"><b>This ${what} will be deleted from the data.</b> ${effect} Press Add to changes to keep this.</p><button type="button" class="btn" id="fix-delete" data-undo="1">Undo the delete</button>`
-      : `<p class="why" style="margin:0 0 8px">Delete this ${what} from the data. ${sel.kind === "node" ? "The node stays on its road, without its traffic tag." : "It is a change like the others: the data has it until you build again."}</p><button type="button" class="btn" id="fix-delete">Delete this ${what}</button>`) + `</section>`;
+      ? `<p class="small"><b>This ${what} will be deleted from the data.</b> ${effect} Press Add to changes to keep this.</p><button type="button" id="fix-delete" data-undo="1">Undo the delete</button>`
+      : `<p class="why" style="margin:0 0 8px">Delete this ${what} from the data. ${sel.kind === "node" ? "The node stays on its road, without its traffic tag." : "It is a change like the others: the data has it until you build again."}</p><button type="button" id="fix-delete">Delete this ${what}</button>`) + `</section>`;
   }
   // whether the draft deletes the object: `remove` (a way), no `building` tag (a relation), no traffic tag (a node)
   function deletedNow() {
@@ -331,7 +349,7 @@ export async function initFixesPanel(root, ctx) {
     el.hidden = false;
     el.innerHTML = (n > 1 ? `<p><b>This ${what} has ${n} rules in your changes.</b> Edit joins them into one: for the same key, the later rule wins, as in the build.</p><p class="small">${esc(bits || "(no change in it)")}</p>`
       : `<p><b>${many ? `These ${what}s are` : `This ${what} is`} in your changes:</b> ${esc(bits || "(no change in it)")}.</p>`)
-      + `<div class="row"><button type="button" class="btn primary" data-ask="edit">Edit it</button><button type="button" class="btn" data-ask="delete">Delete it</button></div>`;
+      + `<div class="row"><button type="button" class="sb-primary" data-ask="edit">Edit it</button><button type="button" data-ask="delete">Delete it</button></div>`;
   }
   // the records of the picked object: the object's own (overrides and tag edit), and for a building the rules of its walls; null when it has none
   const wallRecs = () => (sel.kind === "building" ? F.wallsOf(doc, sel.id).map((w) => ({ building: sel.id, ...w })) : []);
@@ -365,14 +383,14 @@ export async function initFixesPanel(root, ctx) {
     paintAsk();
     if (!sel || !data) { box.innerHTML = ""; $("fix-actions").hidden = true; return paintDots(); }
     const rule = F.ruleOf(doc, sel.type, sel.id), fields = presetsOf(), g = guardsOf(sel.kind, draft);
-    const row = (f) => `<label for="fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}" class="small${editedKey(rule, f) || touched.has(f.key) ? " edited" : ""}"${editedKey(rule, f) && f.key in rule.was ? ` title="Was: ${esc(rule.was[f.key] ?? "none")}"` : ""}>${esc(f.label)}${editedKey(rule, f) ? ` <button type="button" class="link" data-revert="${esc(f.key)}" title="Take this change back">↺</button>` : ""}</label>${control(f, draft[f.key] ?? "", g)}${guardNote(f, g) ? `<p class="why gwhy">${esc(guardNote(f, g))}</p>` : ""}`;
+    const row = (f) => `<label for="fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}" class="small${editedKey(rule, f) || touched.has(f.key) ? " edited" : ""}"${editedKey(rule, f) && f.key in rule.was ? ` title="Was: ${esc(rule.was[f.key] ?? "none")}"` : ""}>${esc(f.label)}${editedKey(rule, f) ? ` <a href="#" class="link" role="button" data-revert="${esc(f.key)}" title="Take this change back">↺</a>` : ""}</label>${control(f, draft[f.key] ?? "", g)}${guardNote(f, g) ? `<p class="why gwhy">${esc(guardNote(f, g))}</p>` : ""}`;
     const section = (title, inner) => `<section class="fsec"><h3>${title}</h3>${inner}</section>`;
     let html = [...new Set(fields.map((f) => f.group ?? "Fields"))].map((g) => section(esc(g), `<div class="grid2 fixgrid">${fields.filter((f) => (f.group ?? "Fields") === g).map(row).join("")}</div>`)).join("");
     if (sel.kind === "road") {
-      html += section("Modes", `<div class="checks" role="group" aria-label="Exclude from"><span class="small">Not in</span>${["driving", "walking", "cycling"].map((m) => `<label><input type="checkbox" name="fix-ex" value="${m}"${draft.exclude_modes.includes(m) ? " checked" : ""}>${m[0].toUpperCase() + m.slice(1)}</label>`).join("")}</div>`);
+      html += section("Modes", `<p class="small" style="margin:0 0 6px">Not in</p><div class="rs-opts rs-opts-row" role="group" aria-label="Exclude from">${["driving", "walking", "cycling"].map((m) => `<label class="rs-opt"><input type="checkbox" name="fix-ex" value="${m}"${draft.exclude_modes.includes(m) ? " checked" : ""}><span>${m[0].toUpperCase() + m.slice(1)}</span></label>`).join("")}</div>`);
     }
     if (sel.kind === "building" && walls.length) {
-      html += section(`Walls <span class="muted">(${walls.length})</span>`, `<div class="wallbar"><button type="button" class="btn sm" data-wall-nav="-1">‹ Previous</button><button type="button" class="btn sm" data-wall-nav="1">Next ›</button><button type="button" class="btn sm" data-wall-nav="0" id="fix-wall-off">Unselect</button></div>
+      html += section(`Walls <span class="muted">(${walls.length})</span>`, `<div class="wallbar"><button type="button" data-wall-nav="-1">‹ Previous</button><button type="button" data-wall-nav="1">Next ›</button><button type="button" data-wall-nav="0" id="fix-wall-off">Unselect</button></div>
         <p class="small" id="fix-wallpos" style="margin:6px 0"></p>
         <p class="small" style="margin:0 0 6px">${Object.entries(FACE_COLORS).map(([t, c]) => `<span class="legend" style="margin-left:0;margin-right:8px"><i style="background:${c}"></i>${FACE_NAMES[t]}</span>`).join("")}</p>
         <div class="walls">${walls.map((w) => { const t = wallType(w), ruled = !!F.findFace(doc, sel.id, w.from_node, w.to_node) || touched.has(`@wall:${wallKey(w)}`) || touched.has(`@wdoor:${wallKey(w)}`);
@@ -394,8 +412,8 @@ export async function initFixesPanel(root, ctx) {
     }
     const preset = new Set(fields.map((f) => f.key));
     const other = Object.keys(draft).filter((k) => !preset.has(k) && k[0] !== "@" && !["exclude_modes", "remove", "note"].includes(k));
-    html += section("Other tags", `<div class="other">${other.map((k) => `<div class="otherrow${k in rule.set || rule.delete.includes(k) ? " edited" : ""}"><span class="k" title="${esc(k)}">${esc(k)}</span><input type="text" data-key="${esc(k)}" value="${esc(draft[k])}" aria-label="${esc(k)}"><button type="button" class="btn sm" data-clear="${esc(k)}" title="Delete this tag" aria-label="Delete ${esc(k)}">×</button></div>`).join("") || '<span class="small muted">None.</span>'}
-      <div class="otherrow add"><input type="text" id="fix-addkey" placeholder="key" aria-label="New tag, key"><input type="text" id="fix-addval" placeholder="value" aria-label="New tag, value"><button type="button" class="btn sm" id="fix-add">Add</button></div></div>
+    html += section("Other tags", `<div class="other">${other.map((k) => `<div class="otherrow${k in rule.set || rule.delete.includes(k) ? " edited" : ""}"><span class="k" title="${esc(k)}">${esc(k)}</span><input type="text" data-key="${esc(k)}" value="${esc(draft[k])}" aria-label="${esc(k)}"><button type="button" data-clear="${esc(k)}" title="Delete this tag" aria-label="Delete ${esc(k)}">×</button></div>`).join("") || '<span class="small muted">None.</span>'}
+      <div class="otherrow add"><input type="text" id="fix-addkey" placeholder="key" aria-label="New tag, key"><input type="text" id="fix-addval" placeholder="value" aria-label="New tag, value"><button type="button" id="fix-add">Add</button></div></div>
       <div class="grid2 fixgrid" style="margin-top:8px"><label for="fix-note" class="small">Note</label><input type="text" id="fix-note" value="${esc(draft.note)}" placeholder="Why"></div>`);
     html += deleteSection(rule);
     box.innerHTML = html;
@@ -490,13 +508,12 @@ export async function initFixesPanel(root, ctx) {
     }
     if ($("fix-wall-off")) $("fix-wall-off").disabled = i < 0;
   }
-  // scroll a row of a list into view in the panel, above the bar that sticks to its bottom (scrollIntoView does not know the bar and leaves the row under it)
+  // scroll a row of a list into view in the panel, 8 px from its edges
   function reveal(row) {
-    const body = row?.closest(".fix-body");
+    const body = row?.closest(".rs-frame-body");
     if (!body) return;
     const b = body.getBoundingClientRect(), r = row.getBoundingClientRect();
-    const bars = [...body.querySelectorAll(".fix-bar")].filter((x) => x.offsetParent).map((x) => x.getBoundingClientRect().top);
-    const bottom = Math.min(b.bottom, ...bars) - 8;
+    const bottom = b.bottom - 8;
     if (r.top < b.top + 8) body.scrollTop += r.top - b.top - 8;
     else if (r.bottom > bottom) body.scrollTop += r.bottom - bottom;
   }
@@ -551,16 +568,16 @@ export async function initFixesPanel(root, ctx) {
       row.classList.toggle("edited", touched.has(k) || touched.has(`@wdoor:${row.dataset.key}`) || !!F.findFace(doc, sel.id, w.from_node, w.to_node));
       return paintBar();
     }
-    if (el.name === "fix-ex") { draft.exclude_modes = [...document.querySelectorAll("input[name=fix-ex]:checked")].map((c) => c.value); touched.add("exclude_modes"); return paintBar(); }
+    if (el.name === "fix-ex") { draft.exclude_modes = [...root.querySelectorAll("input[name=fix-ex]:checked")].map((c) => c.value); touched.add("exclude_modes"); return paintBar(); }
     if (el.id === "fix-note") { draft.note = el.value; touched.add("note"); return paintBar(); }
-    if (el.dataset.for) { const t = $(el.dataset.for); t.value = el.value; draft[t.dataset.key] = el.value; touched.add(t.dataset.key); document.querySelector(`label[for="${t.id}"]`)?.classList.add("edited"); return paintBar(); }
+    if (el.dataset.for) { const t = $(el.dataset.for); t.value = el.value; draft[t.dataset.key] = el.value; touched.add(t.dataset.key); root.querySelector(`label[for="${t.id}"]`)?.classList.add("edited"); return paintBar(); }
     const k = el.dataset?.key;
     if (!k) return;
     draft[k] = el.value; touched.add(k);
     el.closest(".otherrow")?.classList.add("edited");
-    if (el.id) document.querySelector(`label[for="${el.id}"]`)?.classList.add("edited");
+    if (el.id) root.querySelector(`label[for="${el.id}"]`)?.classList.add("edited");
     paintBar();
-    if (e.type === "change" && guardKeys.has(k)) { const id = el.id; renderForm(); document.getElementById(id)?.focus(); }      // a choice that closes or narrows another field
+    if (e.type === "change" && guardKeys.has(k)) { const id = el.id; renderForm(); $(id)?.focus(); }      // a choice that closes or narrows another field
   }
 
   function save() {
@@ -590,6 +607,16 @@ export async function initFixesPanel(root, ctx) {
       if (!(k in rule.was) && !(k in rule.mode) && !(k in rule.set) && !rule.delete.includes(k)) {
         const before = ruleFields.has(k) ? dataMode[k] : data.tags[k];
         rule.was[k] = before === undefined || before === "" ? null : before;
+      }
+      if (k === "oneway" && (v === "-1" || (rule.set.oneway ?? data.tags.oneway) === "-1")) {
+        // a reverse is the tag oneway=-1: the rule `oneway` acts after the road filter, which gives the way its direction from the tag. Away from a
+        // reverse, the tag is yes or no, or blank: the data's own tag again. The rule `oneway` goes
+        delete rule.mode.oneway;
+        const tag = v === "-1" ? "-1" : v === "true" ? "yes" : v === "false" ? "no" : "";
+        if (tag === "" || tag === data.tags.oneway) delete rule.set.oneway;
+        else rule.set.oneway = tag;
+        rule.delete = rule.delete.filter((x) => x !== "oneway");
+        continue;
       }
       if (ruleFields.has(k)) {
         const f = ruleFields.get(k);
@@ -650,7 +677,7 @@ export async function initFixesPanel(root, ctx) {
     if (name !== current) clearMapSelection();
     if (EDIT.includes(name) && name !== kind) switchKind(name);
     current = name;
-    for (const t of TABS) $(`fix-tab-${t}`).setAttribute("aria-selected", String(t === name));
+    fr.tab(name);
     for (const id of new Set(Object.values(PANE))) $(id).hidden = id !== PANE[name];
     if (EDIT.includes(name)) {
       $("fix-intro").textContent = HINTS[name][0]; $("fix-pickhint").textContent = HINTS[name][1]; $("fix-walls-row").hidden = name !== "building"; $("fix-nodes-legend").hidden = name !== "node"; $("fix-doors-legend").hidden = name !== "building";
@@ -682,7 +709,7 @@ export async function initFixesPanel(root, ctx) {
   function renderPending() {
     const list = pendingList(), n = total();
     $("fix-pending").hidden = !list.length;
-    $("fix-pending").innerHTML = list.length ? `<b>Not added to the changes yet</b>${list.map((x) => `<div class="small">${esc(x.text)} <button type="button" class="link" data-go="${x.tab}">Open ${esc(TAB_NAME[x.tab])} →</button></div>`).join("")}` : "";
+    $("fix-pending").innerHTML = list.length ? `<b>Not added to the changes yet</b>${list.map((x) => `<div class="small">${esc(x.text)} <a href="#" class="link" role="button" data-go="${x.tab}">Open ${esc(TAB_NAME[x.tab])} →</a></div>`).join("")}` : "";
     const off = ctx.buildOff?.() ?? "";                // the host cannot build (duckosm edit: the database has no record of its build)
     $("fix-apply").disabled = !n || list.length > 0 || !!off;
     $("fix-apply-why").textContent = off || (!n ? "There are no changes to build." : list.length ? "Add the edits above to the changes, or reset them, first." : "");
@@ -700,7 +727,7 @@ export async function initFixesPanel(root, ctx) {
   async function renderChanges() {
     await classify();
     const objs = F.objects(doc), turns = doc.turn_restrictions ?? [], faces = F.faceEdits(doc), roads = F.newWays(doc);
-    const item = (attrs, label, inner, cls = "", n = 1) => `<div class="chg${cls}" ${attrs} tabindex="0" role="button"><div class="chgtop"><b>${label}${n > 1 ? ` <span class="nrules" title="This object has ${n} records in the file. Pick it, then Edit it joins them.">${n} rules</span>` : ""}</b><button type="button" class="btn sm" data-x aria-label="Delete this change">×</button></div>${inner}</div>`;
+    const item = (attrs, label, inner, cls = "", n = 1) => `<div class="chg${cls}" ${attrs} tabindex="0" role="button"><div class="chgtop"><b>${label}${n > 1 ? ` <span class="nrules" title="This object has ${n} records in the file. Pick it, then Edit it joins them.">${n} rules</span>` : ""}</b><button type="button" data-x aria-label="Delete this change">×</button></div>${inner}</div>`;
     // one item for each wall, turn and new road: the record that the build keeps (the last), and the number of records
     const uniq = (list, key) => { const m = new Map(); for (const x of list) { const k = key(x); m.set(k, { last: x, n: (m.get(k)?.n ?? 0) + 1 }); } return [...m.values()]; };
     const bits = (list) => list.length ? `<ul class="bits">${list.map(({ k, was, now }) => `<li><span class="k">${esc(k)}</span><span>${was === null ? "" : `<span class="was">${was === "" ? "none" : esc(was)}</span> → `}${now === null ? "(deleted)" : esc(now)}</span></li>`).join("")}</ul>` : '<div class="small">(no change in it)</div>';
@@ -794,7 +821,7 @@ export async function initFixesPanel(root, ctx) {
       ST_Y(ST_PointN(geometry, ST_NPoints(geometry)::INTEGER)) AS y2 FROM driving.edges WHERE osm_id = ${from} AND target = ${via} LIMIT 1`))[0];
     turnOut = roads.map((r) => Number(r.osm_id)); drawTurnRoads();
     const arrive = await safe(`SELECT osm_id, any_value(name) AS name, any_value(highway) AS highway, bool_or(oneway) AS oneway FROM driving.edges WHERE target = ${via} AND osm_id != ${from} GROUP BY osm_id ORDER BY osm_id LIMIT 12`);
-    const arrivals = arrive.length ? `<p class="small" style="margin:12px 0 4px"><b>Roads that arrive at this junction.</b> Start from one of them to give a rule for the turn onto a road that leaves.</p>${arrive.map((r) => `<div class="small"><button type="button" class="link" data-from="${r.osm_id}">${esc(r.name || "no name")}</button> (${esc(r.highway)}, way ${r.osm_id}${r.oneway ? ", one-way" : ""})</div>`).join("")}` : "";
+    const arrivals = arrive.length ? `<p class="small" style="margin:12px 0 4px"><b>Roads that arrive at this junction.</b> Start from one of them to give a rule for the turn onto a road that leaves.</p>${arrive.map((r) => `<div class="small"><a href="#" class="link" role="button" data-from="${r.osm_id}">${esc(r.name || "no name")}</a> (${esc(r.highway)}, way ${r.osm_id}${r.oneway ? ", one-way" : ""})</div>`).join("")}` : "";
     const none = '<p class="why">No other road leaves this junction from this road. A road leaves it only when it is in the driving network and its direction goes away from the junction.</p>';
     $("fix-out").innerHTML = (roads.length ? "" : none) + arrivals;
     if (roads.length) $("fix-out").insertAdjacentHTML("afterbegin", roads.map((r) => `<div class="turn" data-to="${r.osm_id}"><span class="small"><i class="sw" style="background:#16a34a"></i>To <b>${esc(r.name || "no name")}</b> (${esc(r.highway)}, way ${r.osm_id})${turnWay(inEdge, r) ? ` · <i>${WAY_NAMES[turnWay(inEdge, r)]}</i>` : ""}</span>${turnSelect(F.findTurn(doc, from, via, Number(r.osm_id))?.restriction, turnWay(inEdge, r))}</div>`).join(""));
@@ -1161,9 +1188,9 @@ export async function initFixesPanel(root, ctx) {
     $("fix-newform").innerHTML = `<div class="grid2 fixgrid">${newFields.map((f) => `<label for="fixn-${f.key}" class="small">${esc(f.label)}</label>${control({ ...f }, newDraft[f.key] ?? "", g).replace(`id="fixf-${f.key.replace(/[^a-z0-9]/gi, "_")}"`, `id="fixn-${f.key}"`)}${guardNote(f, g) ? `<p class="why gwhy">${esc(guardNote(f, g))}</p>` : ""}`).join("")}</div>`;
   }
   $("fix-newform").addEventListener("change", (e) => {                 // a choice that closes or narrows another field
-    for (const f of newFields) { const el = document.getElementById(`fixn-${f.key}`); if (el) newDraft[f.key] = el.value; }
+    for (const f of newFields) { const el = $(`fixn-${f.key}`); if (el) newDraft[f.key] = el.value; }
     const id = e.target.id;
-    renderNewForm(); document.getElementById(id)?.focus();
+    renderNewForm(); $(id)?.focus();
   });
   const drawn = () => { paintDots(); $("fix-draw-n").textContent = draw ? `${draw.pts.length} point${draw.pts.length === 1 ? "" : "s"}${draw.pts.some((p) => p.id != null) ? ", joins a junction" : ""}` : ""; };
   async function drawPreview() {
@@ -1226,7 +1253,7 @@ export async function initFixesPanel(root, ctx) {
     if (editNew == null && (!draw || draw.pts.length < 2)) return status("Click at least two points on the map.");
     const w = editNew != null ? F.findNewWay(doc, editNew) : null, tags = {};
     for (const f of newFields) {
-      const v = (document.getElementById(`fixn-${f.key}`)?.value ?? "").trim();
+      const v = ($(`fixn-${f.key}`)?.value ?? "").trim();
       if (f.type === "int" && v !== "" && !/^\d+$/.test(v)) return status(`${f.label} is a whole number.`);
       if (v) tags[f.key] = v;
     }
@@ -1347,7 +1374,7 @@ export async function initFixesPanel(root, ctx) {
     if (drow && !e.target.closest("select")) { const d = doors.find((x) => x.osm_id === Number(drow.dataset.id)); if (d) zoomTo([[d.lon, d.lat]], 20); return; }
     const row = e.target.closest(".wallrow");
     if (row && !e.target.closest("select")) return selectWall(row.dataset.key, { zoom: true });
-    const t = e.target.closest("button");
+    const t = e.target.closest("button, a");
     if (!t) return;
     if (t.dataset.revert) return revertKey(t.dataset.revert);
     if (t.dataset.clear) { draft[t.dataset.clear] = ""; touched.add(t.dataset.clear); t.closest(".otherrow").querySelector("input").value = ""; t.closest(".otherrow").classList.add("edited"); return paintBar(); }
@@ -1361,7 +1388,7 @@ export async function initFixesPanel(root, ctx) {
   $("fix-unselect").onclick = unselect;
   $("fix-form").addEventListener("click", (e) => { if (e.target.closest("#fix-delete")) toggleDelete(); });
   $("fix-revert").onclick = () => { touched = new Set(); draft = initialDraft(); renderForm(); };
-  for (const b of document.querySelectorAll("#fix-panel [data-review]")) b.onclick = () => setTab("changes");
+  for (const b of root.querySelectorAll("[data-review]")) b.onclick = () => setTab("changes");
   $("fix-pending").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) setTab(b.dataset.go, { zoom: true }); });
   $("fix-del").onclick = () => {
     if (!sel) return;
@@ -1378,6 +1405,7 @@ export async function initFixesPanel(root, ctx) {
   function sync() {
     const { turns, faces, newWays } = F.counts(doc), n = F.objects(doc).length + turns + faces + newWays;
     $("fix-n").textContent = n ? String(n) : "";
+    for (const e of root.querySelectorAll("[data-n]")) e.textContent = n ? ` (${n})` : "";
     $("fix-apply-n").textContent = n ? ` (${plural(n, "change")})` : "";
     paintBar();
     if (current === "turns" && !$("fix-turnsec").hidden) outgoing();
@@ -1403,7 +1431,7 @@ export async function initFixesPanel(root, ctx) {
   }
   function openPanel() {
     clearMapSelection();                             // what was selected before (roadstyle's road selection and its popup) is not selected in this panel
-    document.body.classList.add("editing-fixes"); ensureLayers();
+    document.body.classList.add("editing-fixes"); fr.open(current); ensureLayers();
     const back = restore();
     if (back) status(`${plural(back, "change")} from your last visit ${back === 1 ? "is" : "are"} back.`, 6000);
     setTab(current); drawEdits();
@@ -1419,7 +1447,7 @@ export async function initFixesPanel(root, ctx) {
   // leaving the panel unselects everything on the map: the blue objects, roadstyle's road selection, the node dots, the turn roads and the walls (the amber changes stay)
   function close() {
     if (draw) stopDraw();
-    document.body.classList.remove("editing-fixes");
+    document.body.classList.remove("editing-fixes"); fr.close();
     clearMapSelection(); drawSelected(false); drawFaces(); drawNodes(); drawTurnRoads(); drawDoors();
   }
 

@@ -24,9 +24,14 @@
   async function start() {
     const [info] = await Promise.all([api("info").then((r) => r.json()), script("https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js")]);
     document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "fixes_editor/fixes_panel.css" }));
-    // the editor's panel in the dashboard's panel, after its top line (the name, the theme and the hide button of the template)
-    $("sb").querySelector(".sb-card").insertAdjacentHTML("beforeend", `<div id="fix-panel" aria-label="Edit OSM data"><div class="fix-hd"><h2>Edit OSM data</h2>
-      <span class="small muted" title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</span></div><p id="fix-status" class="small" role="status" hidden></p></div>`);
+    // the editor is in roadstyle's editor frame in the dashboard's panel (rs.frame): the page is the editor, so the frame has no back button. The
+    // title line has the name of the fixes file, and the head row has the line of state under the tabs.
+    const frame = (opts) => {
+      const f = window.rs.frame({ ...opts, panel: $("sb"), back: null });
+      f.top.insertAdjacentHTML("beforeend", `<span class="small muted" title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</span>`);
+      f.head.insertAdjacentHTML("beforeend", '<p id="fix-status" class="small" role="status" hidden></p>');
+      return f;
+    };
     const { initFixesPanel } = await import("./fixes_editor/fixes_panel.js");
     const duck = {
       tables: info.tables,
@@ -63,7 +68,7 @@
         b.disabled = false; b.classList.remove("busy");
       }
     }
-    const panel = await initFixesPanel($("fix-panel"), { duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, areaKey: () => "edit:" + info.db,
+    const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, areaKey: () => "edit:" + info.db,
       onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code>${esc(info.fixes)}</code> at once.` });
     if (info.exists) {
       const text = await (await api("fixes")).text();

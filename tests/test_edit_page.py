@@ -87,7 +87,7 @@ def test_edit_save_box_and_build(monaco, page_url):
         browser = p.chromium.launch()
         page, errors = _open(browser, page_url)
         # the dashboard's own panel and toolbox are there, with the editor in the panel
-        assert page.locator("#sb .sb-top").is_visible() and page.locator("#fix-panel .fix-tabs").is_visible()
+        assert page.locator("#sb .sb-top").is_visible() and page.locator("#fix-tabs").is_visible()
         _pick_road(page, ROAD)
         page.fill("#fixf-lanes", "3")
         page.click("#fix-save")
@@ -127,9 +127,10 @@ def test_phone(monaco, page_url):
         browser = p.chromium.launch()
         page, errors = _open(browser, page_url, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         assert page.evaluate("document.documentElement.classList.contains('rs-phone')")
-        page.locator("#fix-panel .fix-tabs").wait_for(state="visible")
+        page.locator("#fix-tabs").wait_for(state="visible")
         assert page.evaluate("document.documentElement.scrollWidth") <= 390
-        right = page.evaluate("Math.max(...[...document.querySelectorAll('#fix-panel .fix-tabs [role=tab]')].map((e) => e.getBoundingClientRect().right))")
+        # the tab row of roadstyle's frame is in the screen (on a phone it is one row that scrolls sideways)
+        right = page.evaluate("document.getElementById('fix-tabs').getBoundingClientRect().right")
         assert right <= 390, right
         assert not errors, errors
         browser.close()
