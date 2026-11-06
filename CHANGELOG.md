@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **`duckosm edit`: the page has roadstyle's current look.** It asked roadstyle for the old docked layout (`layout: dock`), so it did not look like roadstyle's own pages and duckOSM Studio. Now it uses roadstyle's default layout (the panel is a card over the map), at roadstyle main `0689bc25`. The docs show the page: four pictures in the guide *Edit OSM data*, and a new page *The Rust engine*.
 - **The fixes editor: an edit could go under a later rule of the same object.** `findRule` read the first record of an object and
   `upsertRule` replaced the first, but the build applies the records in file order. Now the editor reads the records joined as the build
   applies them, and each write puts one record in the place of all of them.
