@@ -313,7 +313,7 @@ class DuckOSM:
                 # so a failure here fails the build rather than leaving a db without one.
                 from duckosm.utils import add_timezone, stamp_build
                 logger.info(f"  Timezone: {add_timezone(self.con)}")
-                stamp_build(self.con)
+                stamp_build(self.con, config=self.config)
 
                 # Build report (D) + roadstyle viz (E)
                 if self.config.report.enabled:

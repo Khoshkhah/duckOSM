@@ -10,8 +10,9 @@ path = "src/main.rs"
 
 [features]
 default = ["duckdb"]
-duckdb = ["duckosm-build/duckdb"]
+duckdb = ["duckosm-build/duckdb", "dep:duckosm-edit", "duckosm-edit/duckdb"]
 
 [dependencies]
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
 clap = { version = "4", features = ["derive"] }
+duckosm-edit = { path = "../duckosm-edit", optional = true }   # duckosm-rust edit: the page that edits the fixes (needs DuckDB)

@@ -28,6 +28,7 @@ const panel = await initFixesPanel(document.getElementById("fix-panel"), {
 	areaKey,       // () gives the name of the area: the browser keeps the changes of each area
 	onChange,      // (summary, n): the number of changes is new
 	onBuild,       // (): the user clicks "Build again"; the host page builds with panel.text()
+	buildOff,      // optional: () gives why the host cannot build now ("" when it can); Build again is then off, with this reason under it
 	changesNote,   // optional: more HTML for the help text of the Changes tab
 });
 ```

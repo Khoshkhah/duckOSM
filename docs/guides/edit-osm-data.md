@@ -44,6 +44,41 @@ from the **Changes** tab.
 A file that you load can have two or more rules for one object. Then the box says how many. **Edit it** joins them into one rule: for the
 same key, the later rule wins, as in the build. The build result does not change. The **Changes** tab marks such an object with "2 rules".
 
+## Edit on your computer: duckosm edit
+
+`duckosm edit` opens the same panel on a page on your computer, for a database that you built. You do not build the area again in the
+browser, and you do not download the file: the page saves each change in the fixes file at once.
+
+1. Build the area with `duckosm build` (for example `duckosm build --config my_area.yaml`). The database keeps the record of its
+   build: the config and the folder of the build.
+2. Start the page:
+
+    ```bash
+    duckosm edit data/db/my_area.duckdb
+    ```
+
+    The command writes the address of the page, `http://127.0.0.1:8790/`. Open it in your browser. The page answers only on this computer.
+    To use another port, add `--port 8791`. When you connect to the computer with ssh, forward the port (`ssh -L 8790:127.0.0.1:8790 ...`).
+
+3. The page is roadstyle's dashboard of the database, with **Edit OSM data** in its panel. Make the changes as on the duckOSM Studio page:
+   pick an object, change the fields, and click **Add to changes**.
+4. Each change goes into `osm_fixes.yaml` beside the database at once. To use another file, start with `--fixes path/to/file.yaml`. If
+   the file does not exist, the page starts with no rules, and your first change makes the file. **Download** in the **Changes** tab
+   gives a copy.
+5. Click **Build again** in the **Changes** tab. The build of the database runs again with the fixes file, and the page loads again with
+   the new network.
+6. Press Ctrl+C in the terminal to stop the page.
+
+Before the page writes a file that was there already, it keeps the old file as `osm_fixes.yaml.bak`. The page writes the file from the
+rules of the panel, so the comments of a file that you wrote by hand do not stay. If the file is not valid YAML, the page tells you and
+does not change it.
+
+**Build again** is off when the database has no record of its build: a database from an older duckOSM, from duckOSM Studio, or from
+`duckosm-rust` without `--config`. The reason shows under the button. Build the database again with `duckosm build`, then it works.
+
+`duckosm-rust edit my_area.duckdb` opens the same page from duckOSM's Rust program. Its **Build again** runs the build of the Rust program
+(`duckosm-rust --config`). It writes the `.duckdb` file only, and it skips the steps that the Rust program does not have.
+
 ## Build with the file
 
 Give the file to `duckosm build`:

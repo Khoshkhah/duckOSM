@@ -30,6 +30,13 @@
 
 ### Added
 
+- **`duckosm edit`: edit the OSM data on your computer** (`docs/design/edit_page.md`). `duckosm edit area.duckdb` opens a page on
+  127.0.0.1: roadstyle's dashboard of the database with the panel **Edit OSM data**. Each change goes into `osm_fixes.yaml` beside the
+  database (or `--fixes`) at once, and **Build again** runs the build of the database again with the file. The server is Rust
+  (`rust/duckosm-edit`), with the safety rules of roadstyle-serve (127.0.0.1 only, `Host` and `Origin` checks, only the fixes file is
+  written). `duckosm-rust edit` is the same page in the Rust program. A build writes its record for this in
+  `main.visualization_metadata` (`build_config`, `build_dir`). The editor has a new optional hook, `ctx.buildOff`: Build again is off,
+  with the reason under it.
 - **The fixes editor: the box "This road is in your changes"** (Kaveh's design). When you pick an object that is in your changes, a box
   shows over the form: **Edit it** opens the form with your changes, **Delete it** removes them (Undo brings them back). For a road, a
   building with its walls, a node, the turns of a road at a junction, and a new road. A file with two or more rules for one object: the

@@ -31,14 +31,26 @@ def data_utm_crs(con, table, geom="geom"):
     return utm_epsg(lon, lat)
 
 
-def stamp_build(con, table="main.visualization_metadata"):
+def stamp_build(con, table="main.visualization_metadata", config=None):
     """Store when the database was made and by which duckOSM version (``built_at``,
-    ``duckosm_version``), so ``duckosm info`` can say what a database is."""
+    ``duckosm_version``), so ``duckosm info`` can say what a database is. With ``config`` (the build's
+    Config), also the build's record: ``build_config`` (the config as YAML) and ``build_dir`` (the
+    folder of the build, for its relative paths). ``duckosm edit`` builds the database again from them."""
     from duckosm import __version__
 
     con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS built_at TIMESTAMP")
     con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS duckosm_version VARCHAR")
     con.execute(f"UPDATE {table} SET built_at = now()::TIMESTAMP, duckosm_version = ?", [__version__])
+    if config is not None:
+        import dataclasses
+        import os
+
+        import yaml
+
+        con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS build_config VARCHAR")
+        con.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS build_dir VARCHAR")
+        con.execute(f"UPDATE {table} SET build_config = ?, build_dir = ?",
+                    [yaml.safe_dump(dataclasses.asdict(config), sort_keys=False), os.getcwd()])
 
 
 def add_timezone(con, table="main.visualization_metadata"):

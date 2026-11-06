@@ -1,0 +1,18 @@
+[package]
+name = "duckosm-edit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "duckosm edit: a page on 127.0.0.1 that edits the OSM fixes of a duckOSM database (docs/design/edit_page.md)"
+
+[features]
+# the native database and the native build (the CLI). The Python module gives its own database (duckosm/edit.py) and has no DuckDB inside
+duckdb = ["dep:duckdb", "dep:duckosm-build", "duckosm-build/duckdb"]
+
+[dependencies]
+httparse = "=1.10.1"           # the request line and the headers, as roadstyle-serve
+serde_json = { version = "1", features = ["preserve_order"] }
+# the map: roadstyle's standard dashboard page of a duckOSM file (roadstyle_io::duckosm reads the file, page_options::page_from writes the page)
+roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f715e32f47d97ff4b8be40ca5cc990ca4d2dd706" }
+duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"], optional = true }
+duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }

@@ -237,6 +237,8 @@ One row: where to open a map, and the area's time zone.
 | `timezone` | VARCHAR | the area's IANA time zone, e.g. `Europe/Monaco`, found at the network node nearest the middle of all nodes. Always set: the build fails without it |
 | `built_at` | TIMESTAMP | when the database was built (or extracted); NULL in a database built before duckOSM recorded it |
 | `duckosm_version` | VARCHAR | the duckOSM version that built it; NULL like `built_at` |
+| `build_config` | VARCHAR | the config of the build as YAML (all keys, with the options of the command line). [`duckosm edit`](cli.md#edit) builds the database again from it. NULL in a database from an older duckOSM, from `duckosm extract`, or from `duckosm-rust` without `--config` |
+| `build_dir` | VARCHAR | the folder in which the build ran: the relative paths of `build_config` are for this folder; NULL like `build_config` |
 
 ### `boundary`
 

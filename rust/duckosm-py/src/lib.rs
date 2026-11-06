@@ -158,6 +158,44 @@ fn set_formats(p: &mut Params, formats: Option<Vec<String>>) -> PyResult<()> {
     }
 }
 
+/// The database of `duckosm edit` in Python (src/duckosm/edit.py): the module has no DuckDB, so the server calls the methods of a Python
+/// object (open, close, execute, texts, build).
+struct PyDb(Py<PyAny>);
+
+impl duckosm_edit::Db for PyDb {
+    fn open(&mut self) -> Result<(), String> {
+        Python::attach(|py| self.0.call_method0(py, "open").map(|_| ()).map_err(|e| e.to_string()))
+    }
+    fn close(&mut self) {
+        let _ = Python::attach(|py| self.0.call_method0(py, "close"));
+    }
+    fn execute(&mut self, sql: &str) -> Result<(), String> {
+        Python::attach(|py| self.0.call_method1(py, "execute", (sql,)).map(|_| ()).map_err(|e| e.to_string()))
+    }
+    fn texts(&mut self, sql: &str) -> Result<Vec<Option<String>>, String> {
+        Python::attach(|py| self.0.call_method1(py, "texts", (sql,)).and_then(|r| r.bind(py).extract()).map_err(|e| e.to_string()))
+    }
+    fn build(&mut self, config: &str, dir: &std::path::Path, fixes: &std::path::Path, db: &std::path::Path) -> Result<String, String> {
+        Python::attach(|py| {
+            self.0.call_method1(py, "build", (config, dir.display().to_string(), fixes.display().to_string(), db.display().to_string()))
+                .and_then(|r| r.bind(py).extract()).map_err(|e| e.to_string())
+        })
+    }
+}
+
+/// `duckosm edit` (rust/duckosm-edit, docs/design/edit_page.md): serve the page of the database `db` on 127.0.0.1:`port` in a thread of its
+/// own, with the fixes file `fixes`; `backend` is the Python object of the database (duckosm/edit.py). Returns the address of the page at
+/// once; the server stops with the Python process.
+#[pyfunction]
+fn edit(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>) -> PyResult<String> {
+    let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
+    let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
+    let site = py.detach(|| duckosm_edit::Site::new(Box::new(PyDb(backend)), &db, &fixes, port)).map_err(PyRuntimeError::new_err)?;
+    let url = site.url();
+    std::thread::spawn(move || duckosm_edit::serve(std::sync::Arc::new(site), listener));
+    Ok(url)
+}
+
 /// The stable edge id of duckOSM: `(hash(osm_id, source, target) >> 1)` with the DuckDB hash.
 #[pyfunction]
 fn edge_id_hash(osm_id: i64, source: i64, target: i64) -> i64 {
@@ -169,6 +207,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(build_from_config, m)?)?;
     m.add_function(wrap_pyfunction!(edge_id_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(edit, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

@@ -15,4 +15,5 @@ duckdb = ["duckosm-build/duckdb"]
 [dependencies]
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
 duckosm-core = { path = "../duckosm-core" }
+duckosm-edit = { path = "../duckosm-edit" }    # duckosm edit: the page and its server; the database is Python's (duckosm/edit.py)
 pyo3 = { version = "0.30", features = ["abi3-py39", "extension-module"] }

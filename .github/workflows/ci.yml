@@ -39,8 +39,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build
+      # duckosm-edit too: the CLI and the wheel link it, so the golden tests run with the features that it adds (roadstyle's serde_json)
+      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit --features duckosm-edit/duckdb
         working-directory: rust
+
+  # duckosm edit in a browser (tests/test_edit_page.py, docs/design/edit_page.md): the page of a Monaco build, a change, the box, Build again
+  edit-page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
+      - run: pip install -e ".[dev]" "playwright==1.55.0"
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest tests/test_edit_page.py -q -rs
 
   package:
     runs-on: ubuntu-latest

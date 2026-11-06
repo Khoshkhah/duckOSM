@@ -683,8 +683,9 @@ export async function initFixesPanel(root, ctx) {
     const list = pendingList(), n = total();
     $("fix-pending").hidden = !list.length;
     $("fix-pending").innerHTML = list.length ? `<b>Not added to the changes yet</b>${list.map((x) => `<div class="small">${esc(x.text)} <button type="button" class="link" data-go="${x.tab}">Open ${esc(TAB_NAME[x.tab])} →</button></div>`).join("")}` : "";
-    $("fix-apply").disabled = !n || list.length > 0;
-    $("fix-apply-why").textContent = !n ? "There are no changes to build." : list.length ? "Add the edits above to the changes, or reset them, first." : "";
+    const off = ctx.buildOff?.() ?? "";                // the host cannot build (duckosm edit: the database has no record of its build)
+    $("fix-apply").disabled = !n || list.length > 0 || !!off;
+    $("fix-apply-why").textContent = off || (!n ? "There are no changes to build." : list.length ? "Add the edits above to the changes, or reset them, first." : "");
   }
 
   // ---- the list of changes
