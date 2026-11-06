@@ -78,4 +78,42 @@ eq([F.newWays(doc), F.dump({ dump: (x) => JSON.stringify(x) }, doc)], [[], ""], 
 eq([wallShown(null, null), wallShown("1|2", null), wallShown("1|2", "3|4"), wallShown(null, "3|4")], ["", "1|2", "1|2", "3|4"], "the wall with a number");
 eq(wallFilter(""), ["==", ["coalesce", ["get", "k"], ""], "-"], "no wall: the filter matches no feature (a wall of another building has no key)");
 eq(wallFilter("1|2"), ["==", ["coalesce", ["get", "k"], ""], "1|2"], "one wall");
+// two or more records of one object (a file by hand): the editor reads them joined as the build applies them, in file order (the later key wins)
+doc = { overrides: [{ osm_id: 5, lanes: 2, tags: { name: "A" }, exclude_modes: ["walking"] }, { osm_id: 6, lanes: 1 }, { osm_id: 5, lanes: 3, oneway: true, tags: { surface: "paved" }, exclude_modes: ["cycling"] }],
+  extra: { tag_edits: [{ type: "way", id: 5, set: { name: "B", maxspeed: "30" }, was: { name: "A0" } }, { type: "way", id: 5, set: { maxspeed: "50" }, delete: ["name"], was: { maxspeed: "20" } }] } };
+eq(F.count(doc, { type: "way", id: 5 }), 2, "two records of way 5");
+eq(F.findRule(doc, 5), { osm_id: 5, lanes: 3, oneway: true, tags: { name: "A", surface: "paved" }, exclude_modes: ["walking", "cycling"] }, "the overrides joined: the later key wins, the modes and the tags of both");
+eq(F.findTagEdit(doc, "way", 5), { type: "way", id: 5, set: { maxspeed: "50" }, delete: ["name"], was: { name: "A0", maxspeed: "20" } }, "the tag edits joined: a later delete wins over an earlier set");
+F.join(doc, { type: "way", id: 5 });
+eq([F.count(doc, { type: "way", id: 5 }), doc.overrides.map((r) => r.osm_id)], [1, [5, 6]], "join: one record, in the place of the first");
+eq(doc.extra.tag_edits, [{ type: "way", id: 5, set: { maxspeed: "50" }, delete: ["name"], was: { name: "A0", maxspeed: "20" } }], "join: one tag edit");
+// a save with duplicates in the file writes one record: the edit cannot go under a later record
+doc = { extra: { tag_edits: [{ type: "node", id: 9, set: { highway: "crossing" } }, { type: "node", id: 9, set: { highway: "stop" } }] } };
+F.writeRule(doc, "node", 9, { mode: {}, set: { highway: "traffic_signals" }, delete: [], note: "" });
+eq(doc.extra.tag_edits, [{ type: "node", id: 9, set: { highway: "traffic_signals" } }], "a write replaces all the records of the object");
+// remove: all the records go
+doc = { overrides: [{ osm_id: 5, lanes: 2 }, { osm_id: 5, remove: true }], extra: { tag_edits: [{ type: "way", id: 5, set: { a: "1" } }, { type: "way", id: 5, set: { b: "2" } }] } };
+eq(F.findRule(doc, 5).remove, true, "remove of any record");
+F.remove(doc, { type: "way", id: 5 });
+eq([doc.overrides, doc.extra], [[], undefined], "remove: every record of the way goes");
+// walls: the build keeps the last rule of a wall (all of it); join keeps that one, remove takes all
+doc = { extra: { building_faces: [{ building: 5, from_node: 1, to_node: 2, type: "back", door: "main" }, { building: 5, from_node: 3, to_node: 4, type: "side" }, { building: 5, from_node: 2, to_node: 1, type: "party" }] } };
+eq([F.count(doc, { building: 5, from_node: 1, to_node: 2 }), F.findFace(doc, 5, 1, 2)], [2, { building: 5, from_node: 2, to_node: 1, type: "party" }], "the later wall rule wins, with no door");
+eq(F.wallsOf(doc, 5), [{ from_node: 1, to_node: 2 }, { from_node: 3, to_node: 4 }], "the walls of a building that have a rule");
+F.join(doc, { building: 5, from_node: 1, to_node: 2 });
+eq(F.faceEdits(doc), [{ building: 5, from_node: 2, to_node: 1, type: "party" }, { building: 5, from_node: 3, to_node: 4, type: "side" }], "join: one wall rule in the place of the first");
+F.remove(doc, { building: 5, from_node: 1, to_node: 2 }); F.remove(doc, { building: 5, from_node: 3, to_node: 4 });
+eq(doc.extra, undefined, "remove: no wall rule, no extra");
+// turns and new roads
+doc = { turn_restrictions: [{ from_way: 1, via_node: 2, to_way: 3, restriction: "no_left_turn" }, { from_way: 1, via_node: 2, to_way: 3, restriction: "no_u_turn" }] };
+eq([F.count(doc, { from_way: 1, via_node: 2, to_way: 3 }), F.findTurn(doc, 1, 2, 3).restriction], [2, "no_u_turn"], "the later turn rule");
+F.join(doc, { from_way: 1, via_node: 2, to_way: 3 });
+eq(doc.turn_restrictions, [{ from_way: 1, via_node: 2, to_way: 3, restriction: "no_u_turn" }], "join: one turn rule");
+const nw = F.NEW_WAY_MIN;
+doc = { new_ways: [{ id: nw, nodes: [1, 2], tags: { highway: "path" } }, { id: nw, nodes: [1, 3], tags: { highway: "service" }, note: "x" }] };
+eq([F.count(doc, { new_way: nw }), F.findNewWay(doc, nw)], [2, { id: nw, nodes: [1, 3], tags: { highway: "service" }, note: "x" }], "the new roads joined");
+F.updateNewWayTags(doc, nw, { highway: "track" });
+eq(doc.new_ways, [{ id: nw, nodes: [1, 3], tags: { highway: "track" }, note: "x" }], "a tag change writes one new road");
+F.remove(doc, { new_way: nw });
+eq(F.newWays(doc), [], "remove: the new road goes");
 console.log("fixes_units.mjs: ok");

@@ -164,6 +164,40 @@ the page. Kaveh chose 1.
 `main.building_entrances` and `main.building_info` are not fix kinds: the page makes them from `features.buildings` and `raw.*` for the
 panel. They stay in the page.
 
+## The box of a picked object (2026-11-05)
+
+Kaveh's design. When the person picks an object that has records in the changes, the panel shows a box over the form, and the form
+waits: **This road is in your changes:** lanes 2, name "B". **Edit it** opens the form with the values of the records. **Delete it**
+removes all the records of the object, and the form opens with its OSM data. Undo brings them back.
+
+| Kind | The records |
+|---|---|
+| Road | `overrides` by `osm_id`, and the tag edit of the way |
+| Building | the tag edit of the way or relation (and `overrides` for a delete), and `extra.building_faces` of its walls |
+| Node | the tag edit of the node |
+| Turn | `turn_restrictions` of the picked road at the picked junction (by `from_way`, `via_node`, `to_way`) |
+| New road | `new_ways` by `id`, when it opens from the Changes tab |
+
+The walls are in the box of their building: a pick of a wall in the list does not stop the form a second time. The box keeps the
+person's answer while the same object stays picked (a build again, Load of the same ID).
+
+**Two or more records of one object.** Before this change, `parse()` kept every record, `findRule` took the first, and `upsertRule`
+replaced the first. An edit could then go under a later record, because the build applies the records in file order. Now `fixes.js`
+reads the records joined as the build applies them, and each write puts one record in the place of the first one:
+
+- `overrides`: each key in file order (the later wins); `remove` and `exclude_modes` of every record; `tags` key by key.
+- Tag edits: for each record, set the tags, then delete the keys. `was` keeps the value before the first change.
+- Walls: the build keeps the last record of a wall (`building_faces.rs`, a map by wall), all of it: a later record with no `door` has no door.
+- Turns: the form has one rule for each turn: the later record. The build applies every record; two different rules for one turn
+  have no meaning, so the join takes the later one.
+- New roads: the build stops when two new roads have one ID. The join takes each key in file order.
+
+The box says how many records there are ("This road has 2 rules in your changes. Edit joins them into one: for the same key, the later
+rule wins, as in the build."), and the Changes tab marks the object ("2 rules"). `fixes_units.mjs` checks the joins and the delete of all.
+
+**The hide button.** The panel has no hide or close button. The header is the host's. A host control that hides the panel must call
+`close()` first (README.md).
+
 ## What the Python engine (`--engine python`) does not support
 
 - `extra.building_faces`: the Python engine has no `building_faces` step. With `options.building_faces`, the build stops with an error.
