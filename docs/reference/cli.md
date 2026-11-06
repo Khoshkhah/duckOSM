@@ -206,6 +206,25 @@ duckosm levels-edit [OPTIONS] DB
 | `--reports DIR` | a folder of maps (`duckosm viz`), served as files at the same port; any other address is the editor | `reports` |
 | `--plain` | no base-map layers: the editor as roadstyle draws it | off |
 
+### `edit`
+
+Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
+of duckOSM Studio. Each change goes into the fixes file at once. **Build again** runs the build of the database again with the file,
+and the page then shows the new network. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
+`duckosm-rust edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
+
+```text
+duckosm edit [OPTIONS] DB
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--fixes FILE` | the fixes file; if it does not exist, the first change makes it | `osm_fixes.yaml` beside the database |
+| `--port INTEGER` | the port of the page on 127.0.0.1 | `8790` |
+
+Build again needs the record of the build in the database (`build_config` and `build_dir` of
+[`visualization_metadata`](database.md#visualization_metadata)). `duckosm build` writes it, and `duckosm-rust --config` too.
+
 ### `bus`
 
 Matches the database's OSM bus route relations to its driving edges and writes schema [`bus`](database.md#bus-schema): `bus.routes` (one row per route, with

@@ -314,6 +314,28 @@ def admin(args):
 
 
 @main.command()
+@click.argument("db", type=DB_PATH)
+@click.option("--fixes", type=click.Path(dir_okay=False), default=None,
+              help="The fixes file (default: osm_fixes.yaml beside DB). It need not exist: the first change makes it.")
+@click.option("--port", type=int, default=8790, show_default=True, help="The port of the page on 127.0.0.1")
+def edit(db, fixes, port):
+    """Edit the OSM data of DB on a page on your computer, and build again.
+
+    \b
+    The page is roadstyle's dashboard of DB with the panel Edit OSM data. Each change goes into the
+    fixes file at once. Build again runs the build of DB again with the file.
+    Example:
+        duckosm edit monaco.duckdb        # then open http://127.0.0.1:8790/
+    """
+    from duckosm.edit import serve
+
+    try:
+        serve(db, fixes, port)
+    except Exception as e:
+        raise click.ClickException(str(e))
+
+
+@main.command()
 @click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode(s) to draw a page of, repeat for several (default: every mode, plus a page '

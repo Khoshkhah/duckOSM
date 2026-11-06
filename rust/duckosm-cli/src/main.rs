@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// duckosm-rust: build the road networks of duckOSM (driving, walking, cycling) from an .osm.pbf file.
 #[derive(Parser)]
-#[command(name = "duckosm-rust", version)]
+#[command(name = "duckosm-rust", version, after_help = "To edit the OSM data of a database on a page: duckosm-rust edit <AREA>.duckdb (duckosm-rust edit --help)")]
 struct Cli {
     /// The input .osm.pbf file (already cut to the area). Not with --config.
     #[arg(required_unless_present = "config", conflicts_with = "config")]
@@ -109,8 +109,47 @@ struct Cli {
     timing: bool,
 }
 
+/// duckosm-rust edit: a page on 127.0.0.1 that edits the OSM data of a database (docs/guides/edit-osm-data.md, "Edit on your computer").
+/// Each change goes into the fixes file at once. Build again builds the database again with the file.
+#[derive(Parser)]
+#[command(name = "duckosm-rust edit", version)]
+struct EditCli {
+    /// The database (<area>.duckdb) that duckosm build or duckosm-rust wrote.
+    db: PathBuf,
+    /// The fixes file (default: osm_fixes.yaml beside the database). It need not exist: the first change makes it.
+    #[arg(long)]
+    fixes: Option<PathBuf>,
+    /// The port of the page on 127.0.0.1.
+    #[arg(long, default_value_t = 8790)]
+    port: u16,
+}
+
+#[cfg(feature = "duckdb")]
+fn edit(args: &[String]) -> Result<(), String> {
+    let cli = EditCli::parse_from(args);
+    let db = std::fs::canonicalize(&cli.db).map_err(|e| format!("{}: {e}", cli.db.display()))?;
+    let fixes = match cli.fixes {
+        Some(f) => std::path::absolute(&f).map_err(|e| format!("{}: {e}", f.display()))?,
+        None => db.with_file_name("osm_fixes.yaml"),
+    };
+    let listener = duckosm_edit::bind(cli.port)?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let site = duckosm_edit::Site::new(Box::new(duckosm_edit::native::NativeDb::new(&db)), &db, &fixes, port)?;
+    eprintln!("duckosm-rust edit: {}  (the fixes file: {}; Ctrl+C stops)", site.url(), fixes.display());
+    duckosm_edit::serve(std::sync::Arc::new(site), listener);
+    Ok(())
+}
+
+#[cfg(not(feature = "duckdb"))]
+fn edit(_: &[String]) -> Result<(), String> {
+    Err("edit needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
+}
+
 fn main() {
-    if let Err(e) = run() {
+    let args: Vec<String> = std::env::args().collect();
+    // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
+    let r = if args.get(1).map(String::as_str) == Some("edit") { edit(&args[1..]) } else { run() };
+    if let Err(e) = r {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
@@ -173,6 +212,13 @@ fn run() -> Result<(), String> {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;
     }
     let sum = build(&pbf, &out, &p)?;
+    // the build's record in the database, for duckosm-rust edit (Build again): the config file and the folder of its relative paths
+    #[cfg(feature = "duckdb")]
+    if let (Some(cfg), true) = (&cli.config, p.duckdb) {
+        let text = std::fs::read_to_string(cfg).map_err(|e| format!("{}: {e}", cfg.display()))?;
+        let dir = std::env::current_dir().map_err(|e| e.to_string())?;
+        duckosm_edit::native::record(&out.join(format!("{}.duckdb", p.name)), &text, &dir)?;
+    }
     for l in sum.lines() {
         eprintln!("{l}");
     }
