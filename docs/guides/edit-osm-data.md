@@ -29,6 +29,10 @@ under `extra`. A file from the page is a normal duckOSM fixes file.
 
 The page keeps the changes in your browser for each area name, so a reload of the page does not lose them.
 
+On the map, the picked road is blue, a road in your changes is amber and a road that your changes delete is red. In the **Turn** tab,
+the roads that leave the junction are green, and the road under the pointer in the list is dark. Each road keeps its width at every
+zoom. Buildings, nodes and junctions have their own marks.
+
 ### An object that is in your changes
 
 When you pick an object that is in your changes already, a box shows over the form, and the form waits:
@@ -61,7 +65,9 @@ browser, and you do not download the file: the page saves each change in the fix
     To use another port, add `--port 8791`. When you connect to the computer with ssh, forward the port (`ssh -L 8790:127.0.0.1:8790 ...`).
 
 3. The page is roadstyle's dashboard of the database, with **Edit OSM data** in its panel. Make the changes as on the duckOSM Studio page:
-   pick an object, change the fields, and click **Add to changes**.
+   pick an object, change the fields, and click **Add to changes**. The title line of the panel shows the name of the fixes file. The
+   buttons of the tab and the messages of the page are at the bottom edge of the panel. **← Map** shows the dashboard's own panel; its
+   card **Edit OSM data** opens the editor again.
 4. Each change goes into `osm_fixes.yaml` beside the database at once. To use another file, start with `--fixes path/to/file.yaml`. If
    the file does not exist, the page starts with no rules, and your first change makes the file. **Download** in the **Changes** tab
    gives a copy.

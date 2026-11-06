@@ -1,11 +1,10 @@
-/* The look of the fixes editor (fixes_panel.js, docs/design/fixes_editor.md). Every rule starts with #fix-panel, the element that the host page
-   gives to initFixesPanel. The host page gives the classes btn, row, why, small, muted and grid2, and the CSS variables --bg, --fg, --muted, --mut,
-   --line, --surface and --accent. The host page owns the header (.fix-hd) and the show and hide of the panel (body.editing-fixes). */
-#fix-panel .fix-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 15px; overscroll-behavior: contain; }
-#fix-panel .fix-tabs { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 10px 15px 0; padding: 3px; background: var(--surface); border-radius: 10px; }
-#fix-panel .fix-tabs [role=tab] { position: relative; height: 34px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; font-weight: 500; cursor: pointer; }
-#fix-panel .fix-tabs [role=tab][aria-selected=true] { background: var(--bg); color: var(--fg); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
-#fix-panel .fix-tabs .dot { position: absolute; top: 6px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; }
+/* The look of the fixes editor (fixes_panel.js, docs/design/fixes_editor.md). Every rule starts with #fix-panel, the root of roadstyle's editor frame
+   (the editor gives it this id). The frame gives the title line, the tab row, the body that scrolls and the bar at the bottom edge. The host page gives the
+   classes btn, row, why, small, muted and grid2, and the CSS variables --bg, --fg, --muted, --mut, --line, --surface and --accent. */
+#fix-panel .rs-tab { position: relative; }
+#fix-panel .rs-tab .dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+/* the bar has the buttons of each tab, and the host's status line; with all of them hidden, the bar does not show */
+#fix-panel > .rs-frame-bar:not(:has(> :not([hidden]))) { display: none; }
 #fix-panel .fsec { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 0 0 10px; }
 #fix-panel .walls-all:not([hidden]) { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
 #fix-panel .fsec-hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -17,8 +16,6 @@
 #fix-panel .chg.del { border-left-color: #dc2626; }
 #fix-panel .fsec .fixgrid { margin-top: 0; grid-template-columns: 8.5em 1fr; }
 #fix-panel .fsec > .row:first-of-type, #fix-panel .fsec > p.why + .row { margin-top: 0; }
-/* bottom = minus the padding of .fix-body: a sticky box stops at the padding of its scroll box, and with bottom 0 the list showed in a 12 px gap under the bar */
-#fix-panel .fix-bar { position: sticky; bottom: -12px; margin: 0 -15px -12px; padding: 10px 15px 12px; background: var(--bg); border-top: 1px solid var(--line); }
 #fix-panel .fix-bar .row { margin-top: 0; }
 #fix-panel .fix-bar p { margin: 6px 0 0; }
 #fix-panel #fix-apply { width: 100%; }
@@ -45,7 +42,7 @@
 #fix-panel .fix-pane .grid2 { grid-template-columns: 7.5em 1fr; }
 #fix-panel .fixgrid { margin-top: 10px; }
 #fix-panel .turn { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 6px; }
-#fix-panel .turn select { max-width: 11em; }
+#fix-panel .turn :is(select, .rs-sel) { max-width: 11em; }
 #fix-panel .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: #f59e0b; color: #1f1300; font-size: 11px; line-height: 18px; font-weight: 600; }
 #fix-panel .badge:empty { display: none; }
 #fix-panel .fix-obj { margin-top: 10px; }
@@ -71,11 +68,11 @@
 #fix-panel .walls { display: flex; flex-direction: column; gap: 4px; }
 #fix-panel .wallrow { display: grid; grid-template-columns: 2.4em 1fr 1fr; gap: 4px 6px; align-items: center; padding: 6px 6px; border-left: 3px solid transparent; }
 #fix-panel .wallrow > .small:not(.dlabel) { grid-column: 2 / 4; }
-#fix-panel .wallrow > select[data-wall] { grid-column: 2 / 4; }
+#fix-panel .wallrow > :is(select[data-wall], .rs-sel:has(> select[data-wall])) { grid-column: 2 / 4; }
 #fix-panel .doors { display: flex; flex-direction: column; gap: 4px; }
 #fix-panel .doorrow { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 6px; align-items: center; padding: 2px 4px; border-left: 3px solid transparent; border-radius: 6px; cursor: pointer; }
 #fix-panel .doorrow.edited { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
-#fix-panel .doorrow select { max-width: 11.5em; }
+#fix-panel .doorrow :is(select, .rs-sel) { max-width: 11.5em; }
 #fix-panel .wallbar { display: flex; gap: 6px; flex-wrap: wrap; }
 #fix-panel .wallrow { cursor: pointer; border-radius: 6px; }
 #fix-panel .wallrow.edited { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.12); }
@@ -97,5 +94,5 @@
 #fix-panel .fix-inchg { border: 1px solid #f59e0b; border-radius: 12px; padding: 10px 12px; margin: 0 0 10px; background: rgba(245, 158, 11, 0.1); }
 #fix-panel .fix-inchg p { margin: 0 0 8px; }
 #fix-panel .fix-inchg .row { margin-top: 0; }
-#fix-panel #fix-edit.asking :is(#fix-form, #fix-actions), #fix-panel #fix-turns.asking :is(#fix-turnsec, #fix-turn-bar), #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
+#fix-panel #fix-edit.asking #fix-form, #fix-panel #fix-turns.asking #fix-turnsec, #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
 #fix-panel .nrules { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: rgba(245, 158, 11, 0.2); color: #b45309; font-size: 11px; font-weight: 600; white-space: nowrap; }

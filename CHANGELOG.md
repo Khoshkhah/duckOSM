@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor
+  parses text. `duck.query` of the page now gives such a column as text. The selected object, the changes and the walls show again.
 - **The fixes editor: an edit could go under a later rule of the same object.** `findRule` read the first record of an object and
   `upsertRule` replaced the first, but the build applies the records in file order. Now the editor reads the records joined as the build
   applies them, and each write puts one record in the place of all of them.
@@ -16,6 +18,14 @@
 
 ### Changed
 
+- **The fixes editor is in roadstyle's editor frame, and the roads are in roadstyle's highlight sets** (Kaveh,
+  `docs/design/fixes_editor.md`). `initFixesPanel(panel, ctx)` takes the dashboard's panel (`#sb`) and `ctx.dashboard` (`window.rs`,
+  roadstyle `f715e32f` or later). The frame has the title "Edit OSM data", a back button, the six tabs in its head row, the form in its
+  body and the buttons of each tab in its one bar at the bottom edge. The grid of grey tabs and the bar of each tab are gone. New hooks:
+  `roadRows(osmId)` (the map's rows of a way), `onBack` and `backLabel`. With `roadRows`, the picked road is blue, the changes amber,
+  the deleted roads red, the roads that leave a junction green and the road under the pointer in the Turn list dark, at the road's
+  own width. Without it, the old line layers stay. The editor returns `frame`. `duckosm edit` gives the new hooks, shows the file name
+  in the title line and the status in the bar, and has a card "Edit OSM data" that opens the editor after **← Map**.
 - **The Rust engine is the default** (`options.engine: rust`; `--engine python` runs the SQL steps). The Rust code of the
   repository `duckosm-rust` is in `rust/` now, and `duckosm._rust` is its Python module, inside the `duckosm` wheel. The wheel is
   not pure Python any more: it has one build for each of 5 systems (Linux x86_64 and aarch64, macOS x86_64 and arm64, Windows

@@ -195,8 +195,44 @@ reads the records joined as the build applies them, and each write puts one reco
 The box says how many records there are ("This road has 2 rules in your changes. Edit joins them into one: for the same key, the later
 rule wins, as in the build."), and the Changes tab marks the object ("2 rules"). `fixes_units.mjs` checks the joins and the delete of all.
 
-**The hide button.** The panel has no hide or close button. The header is the host's. A host control that hides the panel must call
-`close()` first (README.md).
+**The hide button.** The panel has no hide button. The back button of the frame closes it. A host control that hides the panel must
+call `close()` first (README.md).
+
+## The editor frame and the highlight sets (2026-11-05)
+
+Kaveh's decisions. The editor had its own shell: a 3 × 2 grid of grey tabs, a body that scrolls, and a white bar that sticks to the
+bottom of each tab. The roads had the editor's own line layers (`fix-sel-*`, `fix-turn-*`, `fix-edits-*`) with a fixed width. On the map
+they were wider or thinner than the road, and they had dark blobs at the joins. roadstyle now has both parts (roadstyle PR #49,
+`f715e32f`): the editor frame `rs.frame` and the highlight sets.
+
+- **The frame.** `initFixesPanel(panel, ctx)` takes the host's dashboard panel (`#sb`) and makes `rs.frame({panel, title: "Edit OSM
+  data", back, id: "fix", tabs})`. The ids of the tab buttons do not change (`fix-tab-road`, ...). The six tabs are in the frame's head
+  row. The panes are in the frame's body. The bars of the four kinds of tab (`fix-actions`, `fix-turn-bar`, `fix-new-bar`,
+  `fix-build-bar`) are in the frame's one bar, and `paintBars()` shows the bar of the tab that shows. The bar also waits while the box
+  "This road is in your changes" asks. A CSS rule hides the frame's bar when all of its children are hidden. The frame's root has the
+  id `fix-panel`, so the CSS of the editor did not change its scope. The editor finds its elements in the frame (`$`), because the
+  frame is out of the page while it is closed.
+- **open, close, back.** `open()`, `close()`, `isOpen()` and `tab()` follow the frame. The back button closes the editor and calls
+  `ctx.onBack`. The class `editing-fixes` on `<body>` stays.
+- **The highlight sets.** A new host hook, `roadRows(osmId)`, gives the map's rows of an OSM way. With it, the roads go into five sets
+  (`ROAD_SETS`, in one place): `fix-edits` amber, `fix-gone` red, `fix-turn-out` green, `fix-turn-hover` dark gray, `fix-sel` blue. A
+  road in two sets has the colour of the later set in roadstyle. A change of one set sets the later sets again, so the order of
+  `ROAD_SETS` is always the order in roadstyle. `roadsLit()` takes the lines of the roads that the map has out of the features of a
+  layer. Then the layer keeps the buildings, the nodes, the junctions and a new road. Without `roadRows`, the editor uses its old line
+  layers.
+- **duckosm edit.** The page gives `dashboard`, `roadRows` (an index of `RS_SIDE.props` by `osm_id`, made one time) and
+  `backLabel: "Map"`. The name of the fixes file is in the frame's title line, and the status line is in the frame's bar. A card of the
+  dashboard's panel, "Edit OSM data", opens the editor again after the back button. Its note is the summary of the changes.
+
+Two faults that the move showed:
+
+- **The server's JSON columns.** The server of `duckosm edit` gives the rows as JSON (DuckDB's `to_json`). A JSON column, for example
+  `ST_AsGeoJSON(geometry)`, came as an object, but the editor parses text, as in DuckDB-Wasm's Arrow table. Thus no object of the editor
+  showed on the map of `duckosm edit`: the selected road, the changes, the walls. `duck.query` of the page now gives such a column as
+  text.
+- **roadstyle's Layers box on a desktop.** On a docked dashboard with no toolbar, roadstyle puts the Layers box of the base map in
+  the stack at the top left (`overlays.js`, `_tlHost`). The stack is over the panel and covers the back button. A click on the button
+  hits the box. This is a fault of roadstyle. The page does not change the template.
 
 ## What the Python engine (`--engine python`) does not support
 
