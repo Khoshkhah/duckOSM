@@ -11,9 +11,6 @@ The wheel has the Rust engine in it (the module `duckosm._rust`, no other instal
 aarch64), macOS (x86_64 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that
 needs a [Rust toolchain](https://rustup.rs).
 
-!!! note
-    The version on PyPI (0.6.1) does not have the [Rust engine](concepts/rust-engine.md) yet. It comes with the next release.
-
 ## Extras
 
 Some features need more packages. Add the extras you want in brackets, for example
