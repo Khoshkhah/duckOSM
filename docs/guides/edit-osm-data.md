@@ -75,6 +75,28 @@ browser, and you do not download the file: the page saves each change in the fix
    the new network.
 6. Press Ctrl+C in the terminal to stop the page.
 
+### The page
+
+![The page of duckosm edit: the panel Edit OSM data at the left, the roads of the database on the OpenFreeMap Positron base map, tilted, with the buildings in 3D](../images/edit-page.png)
+
+| Part | What it is |
+|---|---|
+| The panel at the left | The name of the area and **Hide panel** at the top. Under them, **Edit OSM data** with the name of the fixes file, and six tabs: **Road**, **Building**, **Node**, **Turn**, **New road** and **Changes**. |
+| The map | The roads of the database, drawn by roadstyle. Click a road, a building or a node to pick it. |
+| The bar at the right of the map | The map tools of roadstyle's dashboard: the light or dark theme, zoom, Street View, Google 3D, the base map and the layers, and the settings. |
+
+To change a road, click it on the map. The form shows its tags. Change a field, for example the lanes, and click **Add to changes**:
+
+![A road is picked: the form shows its tags, the lanes are changed to 3, and Add to changes is at the bottom](../images/edit-road.png)
+
+When you pick the road again, the box "This road is in your changes" shows over the form ([An object that is in your changes](#an-object-that-is-in-your-changes)):
+
+![The box This road is in your changes, with Edit it and Delete it](../images/edit-box.png)
+
+The **Changes** tab lists your rules. **Build again** builds the database with them, and the page loads the new network:
+
+![The Changes tab: one change of a road, the buttons Undo, Redo, Download and Clear all, and Build again](../images/edit-changes.png)
+
 Before the page writes a file that was there already, it keeps the old file as `osm_fixes.yaml.bak`. The page writes the file from the
 rules of the panel, so the comments of a file that you wrote by hand do not stay. If the file is not valid YAML, the page tells you and
 does not change it.

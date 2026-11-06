@@ -1,4 +1,4 @@
-//! The page of `duckosm edit`: roadstyle's standard dashboard of the duckOSM database (the template "dashboard", docked, with its panel,
+//! The page of `duckosm edit`: roadstyle's standard dashboard of the duckOSM database (the template "dashboard", in its default layout, with its panel,
 //! toolbox and phone sheet), as roadstyle's own `duckosm.page(db, dashboard=True)` makes it. roadstyle_io::duckosm has the SQL that reads
 //! the file (the roads of every mode with their stored levels, and the base map's `features.*`); this module runs it on the database of
 //! the server, and roadstyle's page writer writes the page. The page's own script (page/edit.js) puts the fixes editor into the panel.
@@ -67,8 +67,9 @@ pub fn make(db: &mut dyn Db, name: &str) -> Result<String, String> {
     let roads = parquet(db, &d::roads_select("all", &run).map_err(|e| e.to_string())?)?;
     let features = d::features_select(&made, &run).map(|q| parquet(db, &q)).transpose()?;
     db.execute(&run.drop_sql(&made))?;
-    // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)): the panel docked, the clicked road in the panel (no tooltip)
-    let (o, lk) = look(json!({"name": name, "template": "dashboard", "layout": "dock", "tooltip": null, "state": "live", "levels": levels,
+    // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
+    // the clicked road in the panel (no tooltip)
+    let (o, lk) = look(json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels,
                              "page_script": SCRIPT, "page_style": STYLE}))?;
     let given = roadstyle::page_options::given_of(&lk, &o.args);
     let roads = roadstyle::read::read_roads(roads, "geometry").map_err(|e| e.to_string())?;

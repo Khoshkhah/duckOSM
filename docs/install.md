@@ -4,7 +4,7 @@ duckOSM needs Python 3.10 or newer.
 
 ```bash
 pip install duckosm
-duckosm --version          # duckosm, version 0.2.0
+duckosm --version
 ```
 
 The wheel has the Rust engine in it (the module `duckosm._rust`, no other install). There is a wheel for Linux (x86_64 and
