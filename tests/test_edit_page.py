@@ -122,6 +122,37 @@ def test_edit_save_box_and_build(monaco, page_url):
     con.close()
 
 
+def test_hover_is_on_the_objects_of_the_tab(monaco, page_url):
+    """The hover of roadstyle is on the objects of the tab (rs.holdHover): a road under the mouse has the pointer in the Road and Turn tabs, and
+    not in the Node, New road and Changes tabs. A click on a road still gives its pick in the Road tab."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        _pick_road(page, ROAD)
+        page.evaluate("fixesPanel.tab('road')")
+        cursor = "() => window.map.getCanvas().style.cursor"
+        spot = None
+        for dy in range(-60, 61, 6):                           # a point of the road under the mouse: the road is drawn through the middle of the map
+            for dx in range(-60, 61, 6):
+                x, y = 760 + dx, 450 + dy
+                page.mouse.move(x, y)
+                page.wait_for_timeout(40)
+                if page.evaluate(cursor) == "pointer":
+                    spot = (x, y)
+                    break
+            if spot:
+                break
+        assert spot, "no road under the mouse in the Road tab"
+        for tab, pointer in [("node", False), ("new", False), ("changes", False), ("turns", True), ("road", True)]:
+            page.evaluate(f"fixesPanel.tab('{tab}')")
+            page.mouse.move(5, 5)
+            page.mouse.move(*spot)
+            page.wait_for_timeout(200)
+            assert (page.evaluate(cursor) == "pointer") is pointer, (tab, page.evaluate(cursor))
+        assert not errors, errors
+        browser.close()
+
+
 def test_add_a_file(monaco, page_url, tmp_path):
     """Add a file (docs/design/fixes_editor_time_merge.md): the changes of another file go into the changes. The road of the first test is
     in the two files, and its change here is newer, so it stays; a node with no time is added and gets the time of now. Undo takes it back."""

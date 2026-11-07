@@ -180,3 +180,17 @@ are the parts that `fixes_panel.css` still draws itself:
 Parts that roadstyle has, and that the editor can use in place of its own CSS: a callout (`rs-callout`) for the box "This road is in your
 changes" and the box "Not added to the changes yet", a dot (`rs-dot`) for the legends, and rows of fields (`rs-kv`) for "All tags in the
 data" and the changes of an item.
+
+### What roadstyle gave (2026-11-07)
+
+The edit page pins roadstyle `ff1cd725`, the head of roadstyle PR 69 (`claude/dash-parts`). Until PR 69 is merged, this is a commit of a branch: when it
+is on `origin/main`, the pin moves to the merge commit.
+
+- **The hover of a tab.** `rs.holdHover(key, on)`: no road lights up, there is no road tooltip, and a click still selects the road. The editor holds
+  it in every tab except Road and Turn, and the buildings have roadstyle's hover in the Building tab only (`rsSetInteraction`).
+- **The selection of a tab.** `rs.holdSelectLook(key, on)`: `rs:select` comes, but roadstyle draws no select look on a road or a building, and each tab
+  draws its own. The two workarounds are gone: the `rsDeselect` after each pick, and the feature state of a building.
+- **The red button and the confirm dialog.** **Delete all changes** has `sb-danger` and asks with `rs.confirm`, with roadstyle's red OK button.
+
+Still drawn by `fixes_panel.css`: the parts of the table above that PR 69 also has (the select box edge, the disabled look, the field message, the
+badge, the unsaved dot, the rows). They move to roadstyle's own classes in a later change.

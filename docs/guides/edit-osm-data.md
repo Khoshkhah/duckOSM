@@ -106,7 +106,7 @@ browser, and you do not download the file: the page saves each change in the fix
 | Part | What it is |
 |---|---|
 | The panel at the left | **Edit OSM data** with the name of the fixes file and **Hide panel** at the top. Under them, six tabs: **Road**, **Building**, **Node**, **Turn**, **New road** and **Changes**. A tab with edits that are not added has an amber dot, and **Changes** shows the number of changes. |
-| The map | The roads of the database, drawn by roadstyle. Click a road, a building or a node to pick it. |
+| The map | The roads of the database, drawn by roadstyle. Click a road, a building or a node to pick it. The hover is on the objects of the tab: the roads in the **Road** and **Turn** tabs, the buildings in the **Building** tab, and nothing in the other tabs. |
 | The bar at the right of the map | The map tools of roadstyle's dashboard: the light or dark theme, zoom, Street View, Google 3D, the base map and the layers, and the settings. |
 
 To change a road, click it on the map. The form shows its tags. Change a field, for example the lanes, and click **Add to changes**:
@@ -119,7 +119,7 @@ When you pick the road again, the box "This road is in your changes" shows over 
 
 The **Changes** tab lists your rules. **Build again** builds the database with them, and the page loads the new network:
 
-![The Changes tab: the buttons Undo, Redo, Download, Add a file and Delete all changes, the switch Changes on the map, one change of a road, and Build again](../images/edit-changes.png)
+![The Changes tab: the buttons Undo, Redo, Download and Add a file, the red button Delete all changes, the switch Changes on the map, one change of a road, and Build again](../images/edit-changes.png)
 
 **Changes on the map**, **Show** or **Hide**, shows or hides your changes on the map (the amber objects, the 3D buildings and the amber
 walls). The changes stay in the file. **Delete all changes** deletes every change from the list and from the fixes file. It asks first. **Undo** brings the changes back while

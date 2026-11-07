@@ -827,7 +827,7 @@ export async function initFixesPanel(ctx) {
     if (name !== current) clearMapSelection();
     if (EDIT.includes(name) && name !== kind) switchKind(name);
     current = name;
-    paintBuildingsHover();
+    paintHover();
     fr.tab(name);
     for (const id of new Set(Object.values(PANE))) $(id).hidden = id !== PANE[name];
     if (EDIT.includes(name)) {
@@ -1564,7 +1564,6 @@ export async function initFixesPanel(ctx) {
     if (!open() || (current !== "building" && current !== "node")) return;        // a road is picked by the dashboard's click (rs:select), a turn too
     const { lng, lat } = e.lngLat;
     if (current === "building") {
-      setTimeout(() => clearBuildingSelect(e.point));               // after roadstyle's own click, which selects the building
       const door = map.queryRenderedFeatures(e.point, { layers: ["fix-doors-pt"] })[0];
       if (door) {
         const bid = door.properties.b;
@@ -1593,7 +1592,6 @@ export async function initFixesPanel(ctx) {
         else status("No node here. Click a dot, or a junction of the roads.");
       }
     }
-    setTimeout(() => window.rsDeselect?.());
   }
   map.on("click", onMapClick);
   // roadstyle picks the nearest road for a click within a few pixels of it, also when the click is on a building. The Road and Turn tabs ignore such a click
@@ -1606,9 +1604,6 @@ export async function initFixesPanel(ctx) {
   }
   document.addEventListener("rs:select", async (e) => {                       // a road: the dashboard's click on the roads (roadstyle)
     if (!open()) return;
-    // each tab draws its own selection: roadstyle's look of the pick goes at once (the popup is held, see rsInteraction). ponytail: roadstyle has
-    // no switch yet to keep the hover and not draw its selection; asked for (docs/design/fixes_editor_guards.md), then this line goes
-    setTimeout(() => window.rsDeselect?.());
     if (draw && current === "new") return;                                // a click while drawing adds a point (onMapClick)
     const turns = current === "turns";
     if (!turns && current !== "road") return;                            // a building or a node is picked by its own click
@@ -1691,31 +1686,26 @@ export async function initFixesPanel(ctx) {
     try { doc = F.parse(yaml, txt); F.stampMissing(doc, F.localTime()); hist = []; future = []; persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } }
     catch (e) { status("The fixes file is not valid: " + e.message.split("\n")[0], 8000); }
   }
-  // roadstyle's own map interaction while the editor is open (roadstyle's public functions only): no road popup (rs.holdPopup), and the buildings of
-  // the base map are not clickable, so roadstyle draws no hover and no selection on them (rsSetInteraction). ponytail: roadstyle has no switch yet
-  // for the hover alone, or for the roads of one tab; asked for (docs/design/fixes_editor_guards.md)
+  // roadstyle's own map interaction while the editor is open (roadstyle's public functions only): no road popup (rs.holdPopup) and no select look
+  // (rs.holdSelectLook: rs:select still comes, and each tab draws its own selection). The hover is on the objects of the tab only (paintHover).
   let buildingsWere = null;
   function rsInteraction(on) {
     window.rs?.holdPopup?.("fixes-editor", on);
+    window.rs?.holdSelectLook?.("fixes-editor", on);
     const now = window.rsGetInteraction?.("buildings");
-    if (!now) return;
-    if (on) { buildingsWere ??= now; paintBuildingsHover(); }
-    else if (buildingsWere) { window.rsSetInteraction("buildings", buildingsWere); buildingsWere = null; }
-  }
-  // the buildings have roadstyle's hover only in the Building tab (Kaveh, 2026-11-06: the hover of a tab is on the objects of that tab). Over a
-  // building, roadstyle's building hover wins over its road hover. ponytail: the road hover stays in every tab until roadstyle has a switch for it
-  function paintBuildingsHover() {
-    if (buildingsWere) window.rsSetInteraction("buildings", { clickable: open() && current === "building", popup: false });
-  }
-  // roadstyle selects a clickable building on a click (its purple): the editor draws its own selection, so roadstyle's goes at once.
-  // ponytail: by MapLibre's feature state of the building, as roadstyle has no public function for it (its clearOvSel); asked for
-  function clearBuildingSelect(point) {
-    const ov = window.RS_OVERLAYS?.find((o) => o.label === "buildings");
-    const layers = (ov?.layers ?? []).filter((id) => map.getLayer(id));
-    if (!layers.length) return;
-    for (const f of map.queryRenderedFeatures(point, { layers })) {
-      if (f.id != null) map.setFeatureState({ source: f.source, id: f.id, ...(f.sourceLayer ? { sourceLayer: f.sourceLayer } : {}) }, { select: false });
+    if (now) {
+      if (on) buildingsWere ??= now;
+      else if (buildingsWere) { window.rsSetInteraction("buildings", buildingsWere); buildingsWere = null; }
     }
+    paintHover();
+  }
+  // the hover of a tab is on the objects of that tab (Kaveh, 2026-11-06): the roads in the Road and Turn tabs, the buildings in the Building tab, and
+  // nothing of roadstyle's in the Node, New road and Changes tabs (the editor's own layers, such as the node dots, have their own hover). A click on a
+  // road still sends rs:select in every tab (rs.holdHover); the buildings are clickable in the Building tab only (rsSetInteraction).
+  function paintHover() {
+    const on = open();
+    window.rs?.holdHover?.("fixes-editor", on && current !== "road" && current !== "turns");
+    if (buildingsWere) window.rsSetInteraction("buildings", { clickable: on && current === "building", popup: false });
   }
   function openPanel() {
     clearMapSelection();                             // what was selected before (roadstyle's road selection and its popup) is not selected in this panel
