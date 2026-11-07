@@ -95,6 +95,21 @@ def test_ask_page(monaco, page_url):
             page.wait_for_function(f"window.askPage.shapes() >= {minimum}", timeout=30_000)
             counted = page.evaluate(q, "SELECT count(*) FROM (" + sql + ")")["rows"][0][0]
             assert page.evaluate("window.askPage.shapes()") == int(counted), (sql, counted)
+        # the map switch of the data dock (On or Off): the shapes show with it, and a closed dock shows nothing on the map
+        page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")
+        page.wait_for_function("window.askPage.shapes() > 1000 && window.askPage.shapesShown()", timeout=30_000)
+        vis = "() => window.map.getLayoutProperty('ask-shapes-pt', 'visibility')"
+        assert page.evaluate(vis) == "visible"
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")
+        page.wait_for_function("!window.askPage.shapesShown()", timeout=10_000)
+        assert page.evaluate(vis) == "none" and page.evaluate("window.askPage.data.light()") is False
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")
+        page.wait_for_function("window.askPage.shapesShown()", timeout=10_000)
+        assert page.evaluate(vis) == "visible"
+        page.evaluate("window.askPage.data.close()")
+        page.wait_for_function("!window.askPage.shapesShown()", timeout=10_000)
+        page.evaluate("window.askPage.data.open()")
+        page.wait_for_function("window.askPage.shapesShown()", timeout=10_000)
         page.evaluate(run, "SELECT edge_id, name FROM driving.edges LIMIT 5")
         page.wait_for_function("window.askPage.shapes() === 0", timeout=30_000)            # a table with no geometry clears the map
         # a write is refused, and the file of the database does not change

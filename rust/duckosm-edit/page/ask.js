@@ -84,15 +84,18 @@
     // so "show all buildings" draws every building. A new table with no geometry clears the shapes (as roadstyle's light follows the table).
     // ponytail: no cap, so a result of millions of shapes (a county of buildings) is slow in the browser; add a cap or tiles if that comes.
     const SHAPES = "ask-shapes", PURPLE = "#7c4dff", EMPTY = { type: "FeatureCollection", features: [] };
-    let shapes = EMPTY, drawn = 0, ticket = 0;
+    let shapes = EMPTY, drawn = 0, ticket = 0, shapesOn = true;
     const addShapeLayers = () => {
       const map = window.map, polygon = ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]], point = ["in", ["geometry-type"], ["literal", ["Point", "MultiPoint"]]];
       if (map.getSource(SHAPES)) return;
       map.addSource(SHAPES, { type: "geojson", data: shapes });
-      map.addLayer({ id: "ask-shapes-fill", type: "fill", source: SHAPES, filter: polygon, paint: { "fill-color": PURPLE, "fill-opacity": 0.4 } });
-      map.addLayer({ id: "ask-shapes-line", type: "line", source: SHAPES, filter: ["!", point], paint: { "line-color": PURPLE, "line-width": 2 } });
-      map.addLayer({ id: "ask-shapes-pt", type: "circle", source: SHAPES, filter: point, paint: { "circle-color": PURPLE, "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
+      const layout = { visibility: shapesOn ? "visible" : "none" };
+      map.addLayer({ id: "ask-shapes-fill", type: "fill", source: SHAPES, filter: polygon, layout, paint: { "fill-color": PURPLE, "fill-opacity": 0.4 } });
+      map.addLayer({ id: "ask-shapes-line", type: "line", source: SHAPES, filter: ["!", point], layout, paint: { "line-color": PURPLE, "line-width": 2 } });
+      map.addLayer({ id: "ask-shapes-pt", type: "circle", source: SHAPES, filter: point, layout, paint: { "circle-color": PURPLE, "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
     };
+    // the map switch of the data dock (On or Off, roadstyle): the shapes show with the table's roads. Off, or a closed dock: the map has its own colours only.
+    const showShapes_ = (on) => { shapesOn = on; for (const id of ["ask-shapes-fill", "ask-shapes-line", "ask-shapes-pt"]) if (window.map.getLayer(id)) window.map.setLayoutProperty(id, "visibility", on ? "visible" : "none"); };
     const showShapes = (features) => {
       shapes = { type: "FeatureCollection", features }; drawn = features.length;
       addShapeLayers(); window.map.getSource(SHAPES).setData(shapes);
@@ -122,6 +125,7 @@
       roadsBy: (sql, column) => `SELECT DISTINCT edge_id FROM ${main} WHERE "${column}" IN (SELECT "${column}" FROM (${sql}))`,
       sql: main ? `SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS km FROM ${main} GROUP BY highway ORDER BY edges DESC` : "SELECT 1",
     });
+    data.addEventListener("light", (e) => showShapes_(e.detail.on));
     data.addEventListener("run", (e) => drawResult(e.detail).catch((err) => console.warn("duckosm ask: the shapes did not draw:", err.message)));
     const ask = askPanel({
       data, dialect: "DuckDB",
@@ -144,7 +148,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapesShown: () => shapesOn };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });

@@ -43,6 +43,8 @@ geometry of a result itself, with one GeoJSON source and three layers (fill, lin
   The limit of 1000 is for the rows that the table shows, not for the selection: the table has the first 1000 rows and the map has all of them, so
   "show all buildings" draws every building. There is no cap: a result of millions of shapes is slow in the browser.
 - A new table with no geometry clears the shapes, as the light of roadstyle follows the table.
+- The shapes follow the map switch of the data dock (On or Off, roadstyle PR 73): the event `light` {on}, and `data.light()`, are true while the switch is on and the
+  dock is open. Off, or with the dock closed, the layers are hidden, and the map has its own colours only.
 - The camera moves to the shapes after an answer of Ask, not after the person's own SQL.
 - The `about` text tells the agent that it can show nodes, buildings and walls, with which columns, and to add no `LIMIT` for "all".
 
