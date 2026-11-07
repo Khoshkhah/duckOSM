@@ -26,6 +26,10 @@ The command opens the map of the database on a page on your computer, with two p
 Roads and buildings are clickable. A road shows its card beside the table. A click on a building puts its row in the table: its OSM id, name, kind and tags,
 the number of its walls and of the walls that you edited, and its changes from `extra.edits`. The page does not change the data.
 
+A result that has a geometry column is drawn on the map, all its rows: the column `geom` of `driving.nodes` (points) and of `features.buildings`
+(shapes), and `geometry` of `main.building_faces` (lines). The limit of 1000 is for the rows that the table shows. The map shows every row that the query selects. So you can write "Show all
+buildings on the map" or "Show all nodes of the driving network on the map". A new table with no geometry column clears the shapes.
+
 The table `extra.edits` has the changes of the [fixes file](edit-osm-data.md) (`osm_fixes.yaml` beside the database, or `--fixes`), with the
 time of each change. You can ask about the changes and about the data in one question, for example "Which roads did I change, and how many lanes did
 they have?". The columns are `kind` (`object`, `wall`, `turn`, `new_road`), `type`, `osm_id`, `what`, `changed` and `note`. The page reads the file

@@ -78,19 +78,62 @@
       return { tables };
     };
 
+    // ---- the shapes of a result on the map. roadstyle's Ask lights roads only ("I can only show roads"), so the page draws the geometry of the table itself:
+    // a result with a geometry column (geom of driving.nodes, features.buildings, building_faces) is drawn as it is: nodes as points, buildings as shapes.
+    // The limit of 1000 is for the rows that the TABLE shows, not for the selection: the page runs the same SQL again, for the geometry only, with no limit,
+    // so "show all buildings" draws every building. A new table with no geometry clears the shapes (as roadstyle's light follows the table).
+    // ponytail: no cap, so a result of millions of shapes (a county of buildings) is slow in the browser; add a cap or tiles if that comes.
+    const SHAPES = "ask-shapes", PURPLE = "#7c4dff", EMPTY = { type: "FeatureCollection", features: [] };
+    let shapes = EMPTY, drawn = 0, ticket = 0;
+    const addShapeLayers = () => {
+      const map = window.map, polygon = ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]], point = ["in", ["geometry-type"], ["literal", ["Point", "MultiPoint"]]];
+      if (map.getSource(SHAPES)) return;
+      map.addSource(SHAPES, { type: "geojson", data: shapes });
+      map.addLayer({ id: "ask-shapes-fill", type: "fill", source: SHAPES, filter: polygon, paint: { "fill-color": PURPLE, "fill-opacity": 0.4 } });
+      map.addLayer({ id: "ask-shapes-line", type: "line", source: SHAPES, filter: ["!", point], paint: { "line-color": PURPLE, "line-width": 2 } });
+      map.addLayer({ id: "ask-shapes-pt", type: "circle", source: SHAPES, filter: point, paint: { "circle-color": PURPLE, "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
+    };
+    const showShapes = (features) => {
+      shapes = { type: "FeatureCollection", features }; drawn = features.length;
+      addShapeLayers(); window.map.getSource(SHAPES).setData(shapes);
+    };
+    window.map.on("styledata", () => { if (drawn && !window.map.getSource(SHAPES)) showShapes(shapes.features); });          // a new base map drops the layers
+    const bounds = (features) => {
+      let b = null;
+      const walk = (c) => { if (typeof c[0] === "number") { b = b ? [Math.min(b[0], c[0]), Math.min(b[1], c[1]), Math.max(b[2], c[0]), Math.max(b[3], c[1])] : [c[0], c[1], c[0], c[1]]; } else c.forEach(walk); };
+      features.forEach((f) => walk(f.geometry.coordinates));
+      return b;
+    };
+    const drawResult = async (d) => {
+      const col = d.columns.find((c) => /^GEOMETRY$/i.test(c.type)), mine = ++ticket;
+      if (!col) { if (drawn) showShapes([]); return; }
+      const name = '"' + col.name.replace(/"/g, '""') + '"';
+      const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
+      if (mine !== ticket) return;                                  // a newer table came while this one loaded
+      const features = rows.map(([g]) => { try { return { type: "Feature", properties: {}, geometry: JSON.parse(g) }; } catch { return null; } }).filter((f) => f?.geometry);
+      showShapes(features);
+      const b = features.length && d.source !== "person" ? bounds(features) : null;             // the camera follows an answer of Ask, not the person's own SQL
+      if (b) window.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 18, duration: 800 });
+    };
+
     const ready = loadEdits().catch((e) => console.warn("duckosm ask: the changes did not load:", e.message));
     const data = dataDock({
       query, schema, ready,
       roadsBy: (sql, column) => `SELECT DISTINCT edge_id FROM ${main} WHERE "${column}" IN (SELECT "${column}" FROM (${sql}))`,
       sql: main ? `SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS km FROM ${main} GROUP BY highway ORDER BY edges DESC` : "SELECT 1",
     });
+    data.addEventListener("run", (e) => drawResult(e.detail).catch((err) => console.warn("duckosm ask: the shapes did not draw:", err.message)));
     const ask = askPanel({
       data, dialect: "DuckDB",
       about: "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
         + "edge_id is its id and osm_id the OSM way. main.building_faces has the walls of the buildings, and the schema features has the buildings and the other base-map layers. "
-        + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change).",
-      examples: ["Which objects did I change, and when?", "Which roads have more than 3 lanes?", "How many walls of each type do the buildings have?",
-        "Which walls did I change by hand?", "Draw a bar chart of the km of road in each class."],
+        + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). "
+        + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
+        + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
+        + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
+        + "Never answer that you can only show roads.",
+      examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
+        "How many walls of each type do the buildings have?", "Show the walls that I changed by hand.", "Draw a bar chart of the km of road in each class."],
     });
     // roads and buildings are clickable: the road card shows beside the table, and a click on a building puts its row in the data dock (no popup:
     // the dock has the road card for roads only, so the building's facts go into the table). roadstyle sends rs:select with the overlay's label.
@@ -118,7 +161,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, edits: () => edits };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });

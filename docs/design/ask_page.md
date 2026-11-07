@@ -34,6 +34,18 @@ roadstyle knows no database. The host page (`rust/duckosm-edit/page/ask.js`) giv
 - `schema()`: the tables of the file, each with a line about what it holds, and the columns of the main table.
 - `roadsBy(sql, column)`: how to find the roads of a result that has `osm_id` and no `edge_id`.
 
+## Shapes on the map
+
+roadstyle's Ask lights roads only. Asked "show all nodes" or "show all buildings", it answered "I can only show roads". So the page draws the
+geometry of a result itself, with one GeoJSON source and three layers (fill, line, circle) in roadstyle's select purple:
+
+- A result with a column of the type `GEOMETRY` is drawn. The page runs the same SQL again, for that column only, with `ST_AsGeoJSON` and no limit.
+  The limit of 1000 is for the rows that the table shows, not for the selection: the table has the first 1000 rows and the map has all of them, so
+  "show all buildings" draws every building. There is no cap: a result of millions of shapes is slow in the browser.
+- A new table with no geometry clears the shapes, as the light of roadstyle follows the table.
+- The camera moves to the shapes after an answer of Ask, not after the person's own SQL.
+- The `about` text tells the agent that it can show nodes, buildings and walls, with which columns, and to add no `LIMIT` for "all".
+
 ## The edits as a table
 
 Ask must answer questions about the edits too. The page reads the fixes file, as the editor does, and gives the server its changes as

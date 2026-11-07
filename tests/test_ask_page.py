@@ -89,6 +89,14 @@ def test_ask_page(monaco, page_url):
         # the data dock runs the line and lights the roads of the result
         res = page.evaluate(run, "SELECT edge_id, name, highway FROM driving.edges WHERE osm_id = 503462470")
         assert not (res or {}).get("error"), res
+        # a result with a geometry column is drawn on the map, all of its rows (the table has the first 1000 only): every building and every node
+        for sql, minimum in [("SELECT osm_id, name, geom FROM features.buildings", 1200), ("SELECT node_id, geom FROM driving.nodes", 1700)]:
+            page.evaluate(run, sql)
+            page.wait_for_function(f"window.askPage.shapes() >= {minimum}", timeout=30_000)
+            counted = page.evaluate(q, "SELECT count(*) FROM (" + sql + ")")["rows"][0][0]
+            assert page.evaluate("window.askPage.shapes()") == int(counted), (sql, counted)
+        page.evaluate(run, "SELECT edge_id, name FROM driving.edges LIMIT 5")
+        page.wait_for_function("window.askPage.shapes() === 0", timeout=30_000)            # a table with no geometry clears the map
         # a write is refused, and the file of the database does not change
         for sql in ["CREATE TABLE main.x AS SELECT 1", "INSERT INTO extra.edits VALUES ('a', 'b', 1, 'c', NULL, NULL)", "DROP TABLE extra.edits"]:
             assert "error" in page.evaluate(q, sql), sql
