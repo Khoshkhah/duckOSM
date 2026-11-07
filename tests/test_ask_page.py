@@ -120,6 +120,10 @@ def test_ask_page(monaco, page_url):
         page.wait_for_timeout(500)
         assert page.evaluate("window.askPage.shapes()") == shown, "a click on a building keeps the shapes of the map"
         assert page.locator(".maplibregl-popup").count() == 0, "no popup for a building"
+        # the facts of the building are in the card of the data dock: the layer's name as a chip, the name of the building, its id
+        page.wait_for_function("document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden", timeout=30_000)
+        card = page.inner_text(".rs-dd-card")
+        assert "buildings" in card and "Palais princier de Monaco" in card and str(b[0]) in card, card
         # a road: its card beside the table, and no popup
         page.evaluate("() => { const rows = window.rsQuery((p) => Number(p.osm_id) === 503462470); window.rsSelect(rows[0]); }")
         page.wait_for_function("document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden", timeout=30_000)

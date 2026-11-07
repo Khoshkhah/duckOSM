@@ -135,11 +135,10 @@
       examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
         "How many walls of each type do the buildings have?", "Show the walls that I changed by hand.", "Draw a bar chart of the km of road in each class."],
     });
-    // roads and buildings are clickable: roadstyle selects the clicked item, and the facts of a road are in the card beside the table. No popup anywhere (every
-    // base-map layer has its popup off, and the road popup is held). The card does not draw a building yet (roadstyle's branch claude/dock-item-card, docs/design/ask_page.md).
+    // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer
+    // such as a building). No popup anywhere: rs.holdPopup holds the popups of roads and of items, here for the whole page (the dock holds them only while it is open).
     // A click must not run a query: a new table with no geometry would clear the shapes of the map.
     window.rsSetInteraction?.("buildings", { clickable: true, popup: false });
-    for (const o of window.RS_OVERLAYS ?? []) window.rsSetInteraction?.(o.label, { popup: false });
     window.rs.holdPopup?.("ask-page", true);
     window.rs.sections.add({ id: "ask", label: "Ask the data", note: "A question about the OSM data and your changes", open: () => ask.open(), icon: "ask", background: true });
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
