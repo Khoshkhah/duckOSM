@@ -105,13 +105,13 @@ browser, and you do not download the file: the page saves each change in the fix
 
 | Part | What it is |
 |---|---|
-| The panel at the left | The name of the area and **Hide panel** at the top. Under them, **Edit OSM data** with the name of the fixes file, and six tabs: **Road**, **Building**, **Node**, **Turn**, **New road** and **Changes**. |
+| The panel at the left | **Edit OSM data** with the name of the fixes file and **Hide panel** at the top. Under them, six tabs: **Road**, **Building**, **Node**, **Turn**, **New road** and **Changes**. A tab with edits that are not added has an amber dot, and **Changes** shows the number of changes. |
 | The map | The roads of the database, drawn by roadstyle. Click a road, a building or a node to pick it. |
 | The bar at the right of the map | The map tools of roadstyle's dashboard: the light or dark theme, zoom, Street View, Google 3D, the base map and the layers, and the settings. |
 
 To change a road, click it on the map. The form shows its tags. Change a field, for example the lanes, and click **Add to changes**:
 
-![A road is picked: the form shows its tags, the lanes are changed to 3, and Add to changes is at the bottom](../images/edit-road.png)
+![A road is picked: the form shows its tags, Lanes in each direction is changed to 3, and Add to changes and Reset are at the bottom](../images/edit-road.png)
 
 When you pick the road again, the box "This road is in your changes" shows over the form ([An object that is in your changes](#an-object-that-is-in-your-changes)):
 
@@ -119,7 +119,7 @@ When you pick the road again, the box "This road is in your changes" shows over 
 
 The **Changes** tab lists your rules. **Build again** builds the database with them, and the page loads the new network:
 
-![The Changes tab: one change of a road, the buttons Undo, Redo, Download and Clear all, and Build again](../images/edit-changes.png)
+![The Changes tab: the buttons Undo, Redo, Download and Delete all changes, the switch Changes on the map, one change of a road, and Build again](../images/edit-changes.png)
 
 **Changes on the map**, **Show** or **Hide**, shows or hides your changes on the map (the amber objects, the 3D buildings and the amber
 walls). The changes stay in the file. **Delete all changes** deletes every change from the list and from the fixes file. It asks first. **Undo** brings the changes back while
