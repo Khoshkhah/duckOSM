@@ -97,6 +97,17 @@ def test_ask_page(monaco, page_url):
         # roadstyle's modules come from the server
         assert page.evaluate("fetch('roadstyle/ask/ask_panel.js').then(r => r.status)") == 200
         assert page.evaluate("fetch('roadstyle/../Cargo.toml').then(r => r.status)") == 404
+        # a click on a building puts its row in the data dock: its OSM id, its tags and its walls
+        b = page.evaluate(q, "SELECT b.osm_id, ST_X(ST_PointOnSurface(b.geom)) AS x, ST_Y(ST_PointOnSurface(b.geom)) AS y FROM features.buildings b "
+                             "JOIN main.building_faces f ON f.building_id = b.osm_id GROUP BY ALL ORDER BY b.osm_id LIMIT 1")["rows"][0]
+        page.evaluate("([x, y]) => { window.map.jumpTo({center: [x, y], zoom: 19, pitch: 0, bearing: 0}); }", [b[1], b[2]])
+        page.wait_for_function("window.map.loaded() && !window.map.isMoving()", timeout=30_000)
+        pt = page.evaluate("([x, y]) => { const p = window.map.project([x, y]); const r = window.map.getCanvas().getBoundingClientRect(); return [r.left + p.x, r.top + p.y]; }", [b[1], b[2]])
+        page.mouse.click(*pt)
+        page.wait_for_function("window.askPage.data.result()?.sql?.includes('features.buildings')", timeout=30_000)
+        row = page.evaluate("window.askPage.data.result()")
+        assert str(b[0]) in str(row), row
+        assert "walls" in str(row), row
         # Ask is open in the panel, and buildings are clickable
         assert page.evaluate("window.askPage.ask.isOpen()")
         assert page.evaluate("window.rsGetInteraction('buildings')")["clickable"] is True

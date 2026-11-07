@@ -17,7 +17,9 @@ The page is the same roadstyle dashboard as `duckosm edit`. It has two more part
 | The data dock | One SQL line over a wide table under the map. The roads of the result light on the map. A click on a row selects its road. |
 | Ask | A question in words. The agent writes SQL, runs it in the data dock, and answers in a few sentences. It can colour roads, focus on roads and draw a chart. It uses the person's own key of a free AI service, which stays in the browser. |
 
-Roads and buildings are clickable. A road shows its card beside the table. A building shows its tags.
+Roads and buildings are clickable. A road shows its card beside the table. The card is for roads only, so a click on a building (roadstyle sends
+`rs:select` with `overlay: "buildings"`) runs a query in the data dock: the row of the building with its tags, the number of its walls and of the walls
+that were edited, and its changes from `extra.edits`. There is no popup for a building.
 
 ## What the host gives
 

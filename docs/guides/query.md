@@ -23,7 +23,8 @@ The command opens the map of the database on a page on your computer, with two p
   focus on roads, move the map and draw a chart. Ask uses your own key of a free AI service. The key stays in your browser.
 - **Query the tables:** the data dock. One SQL line over a wide table under the map. The roads of the result light on the map.
 
-Roads and buildings are clickable. A road shows its card beside the table. A building shows its tags. The page does not change the data.
+Roads and buildings are clickable. A road shows its card beside the table. A click on a building puts its row in the table: its OSM id, name, kind and tags,
+the number of its walls and of the walls that you edited, and its changes from `extra.edits`. The page does not change the data.
 
 The table `extra.edits` has the changes of the [fixes file](edit-osm-data.md) (`osm_fixes.yaml` beside the database, or `--fixes`), with the
 time of each change. You can ask about the changes and about the data in one question, for example "Which roads did I change, and how many lanes did
