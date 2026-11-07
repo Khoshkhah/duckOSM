@@ -9,7 +9,7 @@ The user guide is [Edit OSM data](../../docs/guides/edit-osm-data.md). The desig
 | `fixes.js` | The rules as data: read and write the fixes file. No DOM, no map. |
 | `fixes_panel.js` | The panel: its markup, the six tabs, the map layers, undo and redo. |
 | `fixes_panel.css` | The look of the panel. Every rule starts with `#fix-panel`. |
-| `presets.json` | The fields of each tab, and the guards between them. |
+| `presets.json` | The fields of each tab, the checks of their values (`check`) and the guards between them (`_guards`). |
 | `fixes_units.mjs` | The unit tests: `node web/fixes_editor/fixes_units.mjs` (the CI job `test` runs them). |
 
 ## Use it in a page

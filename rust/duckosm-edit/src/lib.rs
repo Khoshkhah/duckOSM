@@ -7,6 +7,10 @@
 //!
 //! The routes: `GET /` the page; `GET /fixes_editor/<file>` the editor; `GET /api/info` the area, the tables and why Build again is off;
 //! `GET` and `PUT /api/fixes` the fixes file; `POST /api/query` the rows of one SELECT as JSON; `POST /api/build` Build again.
+//!
+//! `duckosm ask` (docs/design/ask_page.md) is the same server with `Mode::Ask`: the page has roadstyle's data dock and Ask in place of the editor. It
+//! adds `GET /roadstyle/<file>` (roadstyle's dashboard modules, which the page imports), `POST /api/sql` (a SELECT with its columns and types, for the
+//! data dock) and `POST /api/table` (the changes of the fixes file as the table `extra.edits`, for Ask). Build again is off.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -64,11 +68,19 @@ struct State {
 /// What makes the page from the open database and the area's name.
 pub type Pager = fn(&mut dyn Db, &str) -> Result<String, String>;
 
+/// What the page is for: the fixes editor (`duckosm edit`), or roadstyle's data dock and Ask (`duckosm ask`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Edit,
+    Ask,
+}
+
 /// One server: the database, the fixes file, and the names that the server answers to.
 pub struct Site {
     pub db: PathBuf,
     pub fixes: PathBuf,
     pub own: [String; 2],
+    pub mode: Mode,
     state: Mutex<State>,
     /// What makes the page of the open database (`page::make`; the tests give a placeholder).
     pager: Pager,
@@ -78,10 +90,16 @@ pub struct Site {
 
 impl Site {
     /// Open `db` and make the page. `fixes`: the fixes file (it need not exist); `port`: the port of the server.
-    pub fn new(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16) -> Result<Site, String> {
-        let (page, tables, source) = load(db.as_mut(), db_path, page::make)?;
-        Ok(Site { db: db_path.to_path_buf(), fixes: fixes.to_path_buf(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")],
-                  state: Mutex::new(State { db, page, tables, source }), pager: page::make, backed_up: Mutex::new(false) })
+    pub fn new(db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16) -> Result<Site, String> {
+        Site::with_mode(db, db_path, fixes, port, Mode::Edit)
+    }
+
+    /// As `new`, for the page of `mode`.
+    pub fn with_mode(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode) -> Result<Site, String> {
+        let pager: Pager = if mode == Mode::Ask { page::make_ask } else { page::make };
+        let (page, tables, source) = load(db.as_mut(), db_path, pager)?;
+        Ok(Site { db: db_path.to_path_buf(), fixes: fixes.to_path_buf(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
+                  state: Mutex::new(State { db, page, tables, source }), pager, backed_up: Mutex::new(false) })
     }
 
     /// The address of the page.
@@ -98,6 +116,9 @@ impl Site {
 
     /// Build again: the database closes, the build writes it again, and the page is made again.
     fn rebuild(&self) -> Result<String, String> {
+        if self.mode == Mode::Ask {
+            return Err("duckosm ask does not build. Use duckosm edit to change the data.".into());
+        }
         let mut s = self.state.lock().unwrap();
         let (config, dir) = s.source.clone()?;
         if !self.fixes.exists() {
@@ -114,6 +135,66 @@ impl Site {
     fn query(&self, sql: &str) -> Result<String, String> {
         let mut s = self.state.lock().unwrap();
         Ok(Value::Array(rows(s.db.as_mut(), sql)?).to_string())
+    }
+
+    /// A SELECT for the data dock: `{"columns": [{name, type}], "rows": [[...]]}`. A 64-bit integer (an edge id) goes as a text, so that the
+    /// page keeps all its digits (JSON numbers of a browser have 53 bits): the page makes a BigInt of it from the type.
+    /// ponytail: a result with two columns of one name is refused by DuckDB (it needs a name for each).
+    fn sql(&self, sql: &str) -> Result<String, String> {
+        let sql = sql.trim().trim_end_matches(';');
+        let mut s = self.state.lock().unwrap();
+        let db = s.db.as_mut();
+        let cols = rows(db, &format!("SELECT column_name AS name, column_type AS type FROM (DESCRIBE {sql})"))?;
+        let q = |n: &str| format!("\"{}\"", n.replace('"', "\"\""));
+        let list: Vec<String> = cols.iter().map(|c| {
+            let (n, t) = (c["name"].as_str().unwrap_or_default(), c["type"].as_str().unwrap_or_default());
+            if matches!(t, "BIGINT" | "UBIGINT" | "HUGEINT" | "UHUGEINT") { format!("CAST({} AS VARCHAR) AS {}", q(n), q(n)) } else { q(n) }
+        }).collect();
+        let data = rows(db, &format!("SELECT {} FROM ({sql}) duckosm_sql", list.join(", ")))?;
+        let rows: Vec<Value> = data.into_iter().map(|r| Value::Array(r.as_object().map(|o| o.values().cloned().collect()).unwrap_or_default())).collect();
+        Ok(json!({"columns": cols, "rows": rows}).to_string())
+    }
+
+    /// The table `extra.<name>` from `{"name", "columns": [{name, type}], "rows": [[...]]}`: the page's own data, which Ask reads
+    /// (`extra` is an attached file database, `page::make_ask`). Names are words, types are from a short list, and values are written as SQL
+    /// literals here, so the body is data and never SQL.
+    fn table(&self, body: &[u8]) -> Result<(), String> {
+        let t: Value = serde_json::from_slice(body).map_err(|e| format!("the table: {e}"))?;
+        let word = |w: &str| !w.is_empty() && w.len() <= 63 && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let name = t["name"].as_str().filter(|n| word(n)).ok_or("the table needs a name of letters, digits and _")?;
+        let cols = t["columns"].as_array().filter(|c| !c.is_empty()).ok_or("the table needs columns")?;
+        let mut ddl = Vec::new();
+        let mut types = Vec::new();
+        for c in cols {
+            let (n, ty) = (c["name"].as_str().unwrap_or_default(), c["type"].as_str().unwrap_or_default());
+            if !word(n) || !matches!(ty, "VARCHAR" | "BIGINT" | "DOUBLE" | "BOOLEAN" | "TIMESTAMPTZ") {
+                return Err(format!("the column {n:?} {ty:?} is not allowed"));
+            }
+            ddl.push(format!("{n} {ty}"));
+            types.push(ty);
+        }
+        let lit = |v: &Value, ty: &str| -> Result<String, String> {
+            Ok(match v {
+                Value::Null => "NULL".into(),
+                Value::Bool(b) if ty == "BOOLEAN" => b.to_string().to_uppercase(),
+                Value::Number(n) if matches!(ty, "BIGINT" | "DOUBLE") => n.to_string(),
+                Value::String(x) if ty == "VARCHAR" => format!("'{}'", x.replace('\'', "''")),
+                Value::String(x) if ty == "BIGINT" => x.parse::<i64>().map_err(|_| format!("{x:?} is not a BIGINT"))?.to_string(),
+                Value::String(x) if ty == "TIMESTAMPTZ" => format!("TRY_CAST('{}' AS TIMESTAMPTZ)", x.replace('\'', "''")),
+                _ => return Err(format!("a value {v} does not fit {ty}")),
+            })
+        };
+        let rows = t["rows"].as_array().ok_or("the table needs rows")?;
+        let mut s = self.state.lock().unwrap();
+        s.db.execute(&format!("CREATE OR REPLACE TABLE extra.{name} ({})", ddl.join(", ")))?;
+        for chunk in rows.chunks(500) {
+            let vals = chunk.iter().map(|r| {
+                let r = r.as_array().filter(|r| r.len() == types.len()).ok_or("a row has not the number of columns")?;
+                Ok(format!("({})", r.iter().zip(&types).map(|(v, ty)| lit(v, ty)).collect::<Result<Vec<_>, String>>()?.join(", ")))
+            }).collect::<Result<Vec<_>, String>>()?;
+            s.db.execute(&format!("INSERT INTO extra.{name} VALUES {}", vals.join(", ")))?;
+        }
+        Ok(())
     }
 
     /// Write the fixes file (the first write of this server keeps the file before it as `<fixes>.bak`).
@@ -225,6 +306,14 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
     let read = matches!(method, "GET" | "HEAD");
     let body_of = |b: &[u8]| -> Vec<u8> { if method == "HEAD" { Vec::new() } else { b.to_vec() } };
     // the page and the editor's files: read only
+    // roadstyle's dashboard modules that the page of `duckosm ask` imports (the data dock and Ask): only .js files of the dashboard, read only
+    if let Some(f) = path.strip_prefix("roadstyle/") {
+        let file = read.then(|| inside(Path::new(""), f)).flatten().filter(|_| f.ends_with(".js"));
+        return match file.and_then(|_| roadstyle::assets::get(&format!("static/dashboard/{f}"))) {
+            Some(b) => say(&mut out, "200 OK", "text/javascript", &body_of(b)),
+            None => say(&mut out, "404 Not Found", "text/plain", b"not found"),
+        };
+    }
     if path.is_empty() || path == "index.html" || path.starts_with("fixes_editor/") {
         if !read {
             return say(&mut out, "405 Method Not Allowed", "text/plain", b"the page's files are read only");
@@ -245,7 +334,7 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
             Ok(b) => say(&mut out, "200 OK", "text/yaml; charset=utf-8", &body_of(&b)),
             Err(_) => say(&mut out, "404 Not Found", "text/plain", b"no fixes file yet"),
         },
-        ("PUT", "fixes") | ("POST", "query" | "build") => {
+        ("PUT", "fixes") | ("POST", "query" | "build" | "sql" | "table") => {
             // from this server's own page only (a browser sends Origin with a PUT and a POST)
             if header("origin").is_some_and(|o| !site.own.iter().any(|h| o == format!("http://{h}"))) {
                 return say(&mut out, "403 Forbidden", "text/plain", b"not this server's page");
@@ -268,6 +357,15 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
                     Ok(j) => say(&mut out, "200 OK", "application/json", j.as_bytes()),
                     Err(e) => say(&mut out, "400 Bad Request", "text/plain", e.as_bytes()),
                 },
+                "sql" => match site.sql(&String::from_utf8_lossy(&body)) {
+                    Ok(j) => say(&mut out, "200 OK", "application/json", j.as_bytes()),
+                    Err(e) => say(&mut out, "400 Bad Request", "text/plain", e.as_bytes()),
+                },
+                "table" if site.mode == Mode::Ask => match site.table(&body) {
+                    Ok(()) => say(&mut out, "200 OK", "text/plain", b"saved"),
+                    Err(e) => say(&mut out, "400 Bad Request", "text/plain", e.as_bytes()),
+                },
+                "table" => say(&mut out, "404 Not Found", "text/plain", b"not found"),
                 _ => {
                     let r = site.rebuild();
                     let j = match &r { Ok(t) => json!({"ok": true, "text": t}), Err(e) => json!({"ok": false, "error": e}) };
@@ -275,7 +373,7 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
                 }
             }
         }
-        (_, "info" | "fixes" | "query" | "build") => say(&mut out, "405 Method Not Allowed", "text/plain", b"not this method"),
+        (_, "info" | "fixes" | "query" | "build" | "sql" | "table") => say(&mut out, "405 Method Not Allowed", "text/plain", b"not this method"),
         _ => say(&mut out, "404 Not Found", "text/plain", b"not found"),
     }
 }
@@ -307,6 +405,8 @@ mod tests {
     /// A database with no tables: the queries give what `answers` has for them, and a build writes a mark.
     struct Fake {
         built: Arc<Mutex<Vec<String>>>,
+        /// The statements that `execute` got.
+        ran: Arc<Mutex<Vec<String>>>,
     }
 
     impl Db for Fake {
@@ -314,13 +414,16 @@ mod tests {
             Ok(())
         }
         fn close(&mut self) {}
-        fn execute(&mut self, _sql: &str) -> Result<(), String> {
+        fn execute(&mut self, sql: &str) -> Result<(), String> {
+            self.ran.lock().unwrap().push(sql.to_string());
             Ok(())
         }
         fn texts(&mut self, sql: &str) -> Result<Vec<Option<String>>, String> {
             Ok(if sql.contains("count(*) AS n") { vec![Some(r#"{"n": 2}"#.into())] }
                else if sql.contains("build_config") { vec![Some(r#"{"build_config": "name: a", "build_dir": "/tmp"}"#.into())] }
                else if sql.contains("FROM (SELECT 1 AS x) duckosm_row") { vec![Some(r#"{"x": 1}"#.into())] }
+               else if sql.contains("(DESCRIBE SELECT 1 AS x)") { vec![Some(r#"{"name": "x", "type": "BIGINT"}"#.into())] }
+               else if sql.contains("CAST(\"x\" AS VARCHAR) AS \"x\" FROM (SELECT 1 AS x)") { vec![Some(r#"{"x": "1"}"#.into())] }
                else { vec![] })
         }
         fn build(&mut self, config: &str, _dir: &Path, fixes: &Path, _db: &Path) -> Result<String, String> {
@@ -331,6 +434,12 @@ mod tests {
 
     /// A server on a free port with the fake database (the page is a placeholder) and a fixes file in a new folder.
     fn server(tag: &str) -> (PathBuf, impl Fn(&str) -> String, u16, Arc<Mutex<Vec<String>>>) {
+        let (fixes, ask, port, built, _) = server_with(tag, Mode::Edit);
+        (fixes, ask, port, built)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn server_with(tag: &str, mode: Mode) -> (PathBuf, impl Fn(&str) -> String, u16, Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) {
         let dir = std::env::temp_dir().join(format!("duckosm-edit-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fixes = dir.join("osm_fixes.yaml");
@@ -338,8 +447,9 @@ mod tests {
         let listener = bind(0).unwrap();
         let port = listener.local_addr().unwrap().port();
         let built = Arc::new(Mutex::new(Vec::new()));
-        let site = Site { db: dir.join("area.duckdb"), fixes: fixes.clone(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")],
-                          state: Mutex::new(State { db: Box::new(Fake { built: built.clone() }), page: "the page".into(), tables: json!([]),
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        let site = Site { db: dir.join("area.duckdb"), fixes: fixes.clone(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
+                          state: Mutex::new(State { db: Box::new(Fake { built: built.clone(), ran: ran.clone() }), page: "the page".into(), tables: json!([]),
                                                     source: Ok(("name: a".into(), dir.clone())) }),
                           pager: |_, _| Ok("the page".into()), backed_up: Mutex::new(false) };
         std::thread::spawn(move || serve(Arc::new(site), listener));
@@ -350,7 +460,7 @@ mod tests {
             s.read_to_string(&mut text).ok();
             text
         };
-        (fixes, ask, port, built)
+        (fixes, ask, port, built, ran)
     }
 
     #[test]
@@ -434,6 +544,61 @@ mod tests {
         assert!(ask(&chunked).starts_with("HTTP/1.1 411"));
         assert!(ask("NOT HTTP\r\n\r\n").starts_with("HTTP/1.1 400"));
         assert!(!fixes.exists());
+    }
+
+    #[test]
+    fn roadstyles_modules_are_read_only_js_of_the_dashboard() {
+        let (_, ask, port, _) = server("modules");
+        let get = |path: &str| ask(&format!("GET /{path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"));
+        let ok = get("roadstyle/data/data_dock.js");
+        assert!(ok.starts_with("HTTP/1.1 200") && ok.contains("text/javascript") && ok.contains("dataDock"));
+        assert!(get("roadstyle/ask/ask_panel.js").contains("askPanel"));
+        for bad in ["roadstyle/dashboard.css", "roadstyle/../Cargo.toml", "roadstyle/no/such.js", "roadstyle/"] {
+            assert!(get(bad).starts_with("HTTP/1.1 404"), "{bad}");
+        }
+        let put = ask(&format!("PUT /roadstyle/data/data_dock.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\n\r\n"));
+        assert!(put.starts_with("HTTP/1.1 404"));
+    }
+
+    #[test]
+    fn sql_gives_the_columns_and_a_big_integer_as_a_text() {
+        let (_, ask, port, _) = server("sql");
+        let body = "SELECT 1 AS x";
+        let r = ask(&format!("POST /api/sql HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://localhost:{port}\r\nContent-Length: {}\r\n\r\n{body};", body.len() + 1));
+        assert!(r.ends_with(r#"{"columns":[{"name":"x","type":"BIGINT"}],"rows":[["1"]]}"#), "{r}");
+        let other = ask(&format!("POST /api/sql HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://evil.example\r\nContent-Length: 1\r\n\r\nx"));
+        assert!(other.starts_with("HTTP/1.1 403"));
+    }
+
+    #[test]
+    fn a_table_is_made_in_ask_mode_only_from_data() {
+        let (_, ask, port, _, ran) = server_with("table", Mode::Ask);
+        let post = |path: &str, body: &str| ask(&format!("POST /api/{path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://localhost:{port}\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
+        let ok = r#"{"name":"edits","columns":[{"name":"what","type":"VARCHAR"},{"name":"osm_id","type":"BIGINT"},{"name":"changed","type":"TIMESTAMPTZ"}],"rows":[["a'b",5,null],["c","7","2026-11-06T14:32:05+01:00"]]}"#;
+        assert!(post("table", ok).starts_with("HTTP/1.1 200"));
+        let ran = ran.lock().unwrap().clone();
+        assert_eq!(ran[0], "CREATE OR REPLACE TABLE extra.edits (what VARCHAR, osm_id BIGINT, changed TIMESTAMPTZ)");
+        assert_eq!(ran[1], "INSERT INTO extra.edits VALUES ('a''b', 5, NULL), ('c', 7, TRY_CAST('2026-11-06T14:32:05+01:00' AS TIMESTAMPTZ))");
+        for bad in [r#"{"name":"edits; DROP","columns":[{"name":"a","type":"VARCHAR"}],"rows":[]}"#,
+                    r#"{"name":"t","columns":[{"name":"a b","type":"VARCHAR"}],"rows":[]}"#,
+                    r#"{"name":"t","columns":[{"name":"a","type":"VARCHAR); DROP TABLE x; --"}],"rows":[]}"#,
+                    r#"{"name":"t","columns":[{"name":"a","type":"BIGINT"}],"rows":[["1; DROP"]]}"#,
+                    r#"{"name":"t","columns":[{"name":"a","type":"VARCHAR"}],"rows":[["x","y"]]}"#, "not json"] {
+            assert!(post("table", bad).starts_with("HTTP/1.1 400"), "{bad}");
+        }
+        assert_eq!(ran.len(), 2, "a refused table runs no statement");
+        let (_, ask, port, _) = server("no-table");
+        let edit = ask(&format!("POST /api/table HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://localhost:{port}\r\nContent-Length: {}\r\n\r\n{ok}", ok.len()));
+        assert!(edit.starts_with("HTTP/1.1 404"), "the editor page has no table route");
+    }
+
+    #[test]
+    fn ask_mode_does_not_build() {
+        let (fixes, ask, port, built, _) = server_with("no-build", Mode::Ask);
+        std::fs::write(&fixes, "overrides: []\n").unwrap();
+        let r = ask(&format!("POST /api/build HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://localhost:{port}\r\nContent-Length: 0\r\n\r\n"));
+        assert!(r.contains(r#""ok":false"#) && r.contains("does not build"), "{r}");
+        assert!(built.lock().unwrap().is_empty());
     }
 
     #[test]

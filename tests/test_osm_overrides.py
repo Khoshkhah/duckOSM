@@ -99,13 +99,16 @@ extra:
     assert tags["relations"] == {8: {"type": "multipolygon"}}
 
 
-def test_building_faces_needs_the_rust_engine(tmp_path):
+def test_building_faces_needs_the_rust_engine(tmp_path, caplog):
+    """The config templates turn the walls on: a build that cannot make them (here the Python engine) goes on without them, with a warning."""
     from duckosm import Config
     root = __import__("pathlib").Path(__file__).resolve().parents[1]
     cfg = Config.from_args(str(root / "data/sample/monaco.osm.pbf"), str(tmp_path), boundary_path=str(root / "data/sample/monaco.geojson"),
                            building_faces=True, engine="python")
-    with pytest.raises(ValueError, match="building_faces needs options.engine: rust"):
+    with caplog.at_level("WARNING", logger="duckosm"):
         cfg.validate()
+    assert cfg.options.building_faces is False
+    assert any("need options.engine: rust" in r.getMessage() for r in caplog.records)
 
 
 if __name__ == "__main__":

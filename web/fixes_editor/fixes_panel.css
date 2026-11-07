@@ -10,8 +10,7 @@
 #fix-panel .why:empty { display: none; }
 #fix-panel .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 #fix-panel .grid2 { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
-#fix-panel code { font-size: 11.5px; word-break: break-all; }
-body.editing-fixes .maplibregl-popup:not(.rs-tip) { display: none !important; }      /* the panel picks on the map: no road popup */
+#fix-panel code { font-size: 11.5px; overflow-wrap: anywhere; }      /* a long path breaks; a short name goes to the next line whole */
 /* the tabs: the amber dot of edits that are not in the changes, and the number of changes */
 #fix-panel .rs-tab .dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: #f59e0b; vertical-align: 1px; }
 #fix-panel .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: #f59e0b; color: #1f1300; font-size: 11px; line-height: 18px; font-weight: 600; }
@@ -24,7 +23,7 @@ body.editing-fixes .maplibregl-popup:not(.rs-tip) { display: none !important; } 
 #fix-panel .fsec.danger { border-color: var(--fix-bad); }
 #fix-panel .fsec.danger h3, #fix-panel #fix-delete, #fix-panel button.danger { color: var(--fix-bad); }
 #fix-panel .chg.del { border-left-color: #dc2626; }
-#fix-panel .fsec .fixgrid { margin-top: 0; grid-template-columns: 8.5em 1fr; }
+#fix-panel .fsec .fixgrid { margin-top: 0; grid-template-columns: 10em 1fr; }
 #fix-panel .fsec > .row:first-of-type, #fix-panel .fsec > p.why + .row { margin-top: 0; }
 /* the bars of the panes, in the frame's bar: the one of the pane that shows */
 #fix-panel .fix-bar.off { display: none; }
@@ -54,7 +53,7 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel .bits .k { color: var(--mut); min-width: 6.5em; }
 #fix-panel .bits .was { color: var(--mut); text-decoration: line-through; }
 #fix-panel .fix-pane { margin-top: 2px; }
-#fix-panel .fix-pane .grid2 { grid-template-columns: 7.5em 1fr; }
+#fix-panel .fix-pane .grid2 { grid-template-columns: 10em 1fr; }      /* the label column of the forms (this rule wins over .fsec .fixgrid) */
 #fix-panel .fixgrid { margin-top: 10px; }
 #fix-panel .turn { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 6px; padding: 4px 6px; border-radius: 6px; border-left: 3px solid transparent; cursor: pointer; }
 #fix-panel .turn .rs-sel { max-width: 11em; }
@@ -64,8 +63,9 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel .alltags table { border-collapse: collapse; margin-top: 4px; width: 100%; }
 #fix-panel .alltags td { padding: 1px 6px 1px 0; vertical-align: top; word-break: break-word; }
 #fix-panel .alltags td:first-child { color: var(--mut); white-space: nowrap; }
-#fix-panel label.edited { color: #b45309; font-weight: 600; }
+#fix-panel label.edited { color: #b45309; }          /* not bold: a bold label with its dot and ↺ wraps */
 #fix-panel label.edited::before { content: "● "; color: #f59e0b; }
+#fix-panel label.edited:has([data-revert])::before { content: none; }      /* a change in your changes: its color and ↺ mark it; the dot is for an edit not added yet */
 #fix-panel .colorrow { display: grid; grid-template-columns: 1fr 38px; gap: 6px; }
 #fix-panel .colorrow input[type=color] { width: 38px; height: 36px; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); }
 #fix-panel .other { display: flex; flex-direction: column; gap: 6px; }
@@ -77,8 +77,9 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel .chg { border: 1px solid var(--line); border-left: 4px solid #f59e0b; border-radius: 10px; padding: 6px 10px; cursor: pointer; background: var(--bg); }
 #fix-panel .walls { display: flex; flex-direction: column; gap: 4px; }
 #fix-panel .wallrow { display: grid; grid-template-columns: 3.6em 1fr 1fr; gap: 4px 6px; align-items: center; padding: 6px; border-left: 3px solid transparent; border-radius: 6px; cursor: pointer; }
-#fix-panel .wallrow > .small:not(.dlabel) { grid-column: 2 / 4; }
-#fix-panel .wallrow > .rs-sel:has([data-wall]) { grid-column: 2 / 4; }
+#fix-panel .wallrow > .small { grid-column: 2 / 4; }
+#fix-panel .wallrow > .rs-sel:has([data-wall]) { grid-column: 2; }
+#fix-panel .wallrow > .rs-sel:has([data-walldoor]) { grid-column: 3; }       /* line 1: the number, the length and the street; line 2: the type and the door, side by side */
 #fix-panel .doors { display: flex; flex-direction: column; gap: 4px; }
 #fix-panel .doorrow { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 6px; align-items: center; padding: 2px 4px; border-left: 3px solid transparent; border-radius: 6px; cursor: pointer; }
 #fix-panel .doorrow .rs-sel { max-width: 11.5em; }
@@ -90,9 +91,18 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel :is(.wallrow, .doorrow, .turn).sel { background: color-mix(in srgb, var(--accent) 26%, var(--bg)); outline: 2px solid var(--accent); outline-offset: -1px; }
 #fix-panel :is(.wallrow, .doorrow, .turn):focus-visible { outline: 2px solid var(--accent); }
 #fix-panel .wallrow .rs-sel { width: 100%; max-width: none; }
-#fix-panel .wallrow .dlabel { grid-column: 2; color: var(--mut); }
+/* roadstyle gives a select box its border only in a card of the panel (.sb-sec[data-rs-card]); the boxes of the editor are .fsec, so the editor
+   gives the border, the same as its text fields */
+#fix-panel .rs-sel-btn { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; min-height: 33px; }
 #fix-panel .gwhy { grid-column: 1 / -1; margin: -2px 0 4px; }
+/* the checks of a form (docs/design/fixes_editor_guards.md): an error is red, with a red edge on its field; a warning is amber and does not block */
+#fix-panel .gerr { grid-column: 1 / -1; margin: -2px 0 4px; color: var(--fix-bad); }
+#fix-panel .gerr.warn, #fix-panel .warn { color: #b45309; }
+#fix-panel .why.bad, #fix-panel #fix-state.bad { color: var(--fix-bad); }
+#fix-panel :is(input, select).invalid { border-color: var(--fix-bad); box-shadow: 0 0 0 1px var(--fix-bad); }
+#fix-panel .other .gerr { margin: 0; }
 #fix-panel input:disabled { opacity: 0.55; cursor: not-allowed; }
+#fix-panel button:disabled { opacity: 0.45; cursor: not-allowed; }      /* a button that cannot act now: roadstyle's sb-primary looks the same with and without it */
 #fix-panel .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }   /* the color of the item on the map */
 #fix-panel .legend { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font-size: 11.5px; color: var(--mut); }
 #fix-panel .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
@@ -103,3 +113,5 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel .fix-inchg .row { margin-top: 0; }
 #fix-panel #fix-edit.asking #fix-form, #fix-panel #fix-turns.asking #fix-turnsec, #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
 #fix-panel .nrules { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: rgba(245, 158, 11, 0.2); color: #b45309; font-size: 11px; font-weight: 600; white-space: nowrap; }
+#fix-panel .chgtop .muted { font-weight: 400; }      /* the kind and the id after the name of a change */
+#fix-panel .chgtime { margin-top: 2px; }                /* the time of a change (docs/design/fixes_editor_time_merge.md) */

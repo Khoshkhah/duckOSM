@@ -1,7 +1,8 @@
 /* duckosm edit (page/edit.js): the host of duckOSM's fixes editor (web/fixes_editor/) on roadstyle's standard dashboard. The editor is roadstyle's
    editor frame in the dashboard's panel, with roadstyle's parts and tokens, so the page needs only these rules. */
 /* the template's rule for a label of the panel (small capitals) is for its own fields: the labels of the editor have the text as it is */
-#fix-panel label { display: block; margin: 0; font-weight: 400; text-transform: none; letter-spacing: 0; color: inherit; font-size: 12.5px; }
+#fix-panel label { font-weight: 400; text-transform: none; letter-spacing: 0; color: inherit; }
+#fix-panel label:not(.rs-opt) { display: block; margin: 0; font-size: 12.5px; }
 /* the line of state under the tabs: "Saved in ...", an error of the fixes file or of the build */
 #fix-panel #fix-status { margin: 8px 0 0; padding: 6px 9px; border-radius: 8px; background: var(--card); }
 #edit-error { position: fixed; left: 16px; bottom: 16px; z-index: 99; max-width: 480px; padding: 10px 12px; border-radius: 9px; background: #fef2f2; color: #991b1b; font: 13px system-ui, sans-serif; }

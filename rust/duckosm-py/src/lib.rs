@@ -188,9 +188,20 @@ impl duckosm_edit::Db for PyDb {
 /// once; the server stops with the Python process.
 #[pyfunction]
 fn edit(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>) -> PyResult<String> {
+    serve_page(py, db, fixes, port, backend, duckosm_edit::Mode::Edit)
+}
+
+/// `duckosm ask` (docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor. `fixes` is the file whose
+/// changes Ask can read (the table `extra.edits`).
+#[pyfunction]
+fn ask(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>) -> PyResult<String> {
+    serve_page(py, db, fixes, port, backend, duckosm_edit::Mode::Ask)
+}
+
+fn serve_page(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>, mode: duckosm_edit::Mode) -> PyResult<String> {
     let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
     let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
-    let site = py.detach(|| duckosm_edit::Site::new(Box::new(PyDb(backend)), &db, &fixes, port)).map_err(PyRuntimeError::new_err)?;
+    let site = py.detach(|| duckosm_edit::Site::with_mode(Box::new(PyDb(backend)), &db, &fixes, port, mode)).map_err(PyRuntimeError::new_err)?;
     let url = site.url();
     std::thread::spawn(move || duckosm_edit::serve(std::sync::Arc::new(site), listener));
     Ok(url)
@@ -208,6 +219,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_from_config, m)?)?;
     m.add_function(wrap_pyfunction!(edge_id_hash, m)?)?;
     m.add_function(wrap_pyfunction!(edit, m)?)?;
+    m.add_function(wrap_pyfunction!(ask, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

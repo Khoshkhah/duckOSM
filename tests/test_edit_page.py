@@ -104,6 +104,7 @@ def test_edit_save_box_and_build(monaco, page_url):
             time.sleep(0.1)
         text = fixes.read_text()
         assert f"osm_id: {ROAD}" in text and "lanes: 3" in text, text
+        assert re.search(r"changed: '\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d'", text), "each record has its time"
         # the road again: the box first, and the form waits
         page.click("#fix-unselect")
         # an edited road is amber when it is not picked (the set fix-edits)
@@ -128,6 +129,73 @@ def test_edit_save_box_and_build(monaco, page_url):
     lanes = {r[0] for r in con.execute(f"SELECT lanes FROM driving.edges WHERE osm_id = {ROAD}").fetchall()}
     assert lanes == {3}, lanes
     con.close()
+
+
+def test_hover_is_on_the_objects_of_the_tab(monaco, page_url):
+    """The hover of roadstyle is on the objects of the tab (rs.holdHover): a road under the mouse has the pointer in the Road and Turn tabs, and
+    not in the Node, New road and Changes tabs. A click on a road still gives its pick in the Road tab."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        _pick_road(page, ROAD)
+        page.evaluate("fixesPanel.tab('road')")
+        cursor = "() => window.map.getCanvas().style.cursor"
+        spot = None
+        for dy in range(-60, 61, 6):                           # a point of the road under the mouse: the road is drawn through the middle of the map
+            for dx in range(-60, 61, 6):
+                x, y = 760 + dx, 450 + dy
+                page.mouse.move(x, y)
+                page.wait_for_timeout(40)
+                if page.evaluate(cursor) == "pointer":
+                    spot = (x, y)
+                    break
+            if spot:
+                break
+        assert spot, "no road under the mouse in the Road tab"
+        for tab, pointer in [("node", False), ("new", False), ("changes", False), ("turns", True), ("road", True)]:
+            page.evaluate(f"fixesPanel.tab('{tab}')")
+            page.mouse.move(5, 5)
+            page.mouse.move(*spot)
+            page.wait_for_timeout(200)
+            assert (page.evaluate(cursor) == "pointer") is pointer, (tab, page.evaluate(cursor))
+        assert not errors, errors
+        browser.close()
+
+
+def test_add_a_file(monaco, page_url, tmp_path):
+    """Add a file (docs/design/fixes_editor_time_merge.md): the changes of another file go into the changes. The road of the first test is
+    in the two files, and its change here is newer, so it stays; a node with no time is added and gets the time of now. Undo takes it back."""
+    fixes = monaco.with_name("osm_fixes.yaml")
+    other = tmp_path / "other.yaml"
+    other.write_text(f"overrides:\n  - {{osm_id: {ROAD}, lanes: 2, changed: '2020-01-01T10:00:00+01:00'}}\n"
+                     "extra:\n  tag_edits:\n    - {type: node, id: 21912099, set: {highway: stop}}\n")
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("modes: [driving]\n")
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        page.click("#fix-tab-changes")
+        before = page.evaluate("window.fixesPanel.count()")
+        page.set_input_files("#fix-add-file", str(bad))
+        page.wait_for_function("document.getElementById('fix-status').textContent.includes('is not a fixes file')", timeout=10_000)
+        assert page.evaluate("window.fixesPanel.count()") == before, "a bad file changes nothing"
+        page.set_input_files("#fix-add-file", str(other))
+        page.wait_for_function("document.getElementById('fix-status').textContent.includes('from other.yaml')", timeout=10_000)
+        msg = page.inner_text("#fix-status")
+        assert "Added 1 change" in msg and "1 object was in both files: the newer change stays" in msg, msg
+        assert page.evaluate("window.fixesPanel.count()") == before + 1
+        assert page.locator("#fix-list .chgtime").count() == before + 1, "each change shows its time"
+        for _ in range(50):
+            if "id: 21912099" in fixes.read_text():
+                break
+            time.sleep(0.1)
+        text = fixes.read_text()
+        assert "highway: stop" in text and "lanes: 3" in text and "lanes: 2" not in text, text
+        assert text.count("changed: '") == text.count("- type:") + text.count("- osm_id:"), text
+        page.click("#fix-undo")
+        assert page.evaluate("window.fixesPanel.count()") == before
+        assert not errors, errors
+        browser.close()
 
 
 def test_phone(monaco, page_url):

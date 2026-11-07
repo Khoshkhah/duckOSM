@@ -1,5 +1,5 @@
-//! The walls of the buildings (`main.building_faces`, docs/osm-editing.md, M4): each segment of the outer ring of a building footprint is a face, and
-//! each face has a type. This is not in duckOSM: it is made on request (`Params.building_faces`), from the raw cut and the street edges of the build.
+//! The walls of the buildings (`main.building_faces`, docs/concepts/building-walls.md): each segment of the outer ring of a building footprint is a face, and
+//! each face has a type. The build makes them when `options.building_faces` is on (`Params.building_faces`), from the raw cut and the street edges.
 //!
 //! - `front`: the wall that faces a street, and any other wall that faces a street at a short distance (a corner building has two). A street counts only when
 //!   it can be seen from the wall: the line from the wall to the street crosses no wall of a building (the building itself or another one).
@@ -317,7 +317,7 @@ fn same_street(a: &Match, b: &Match) -> bool {
     }
 }
 
-/// The type and the reason of each wall of the outer ring of one building (docs/wall-types.md). `front` is the main front wall.
+/// The type and the reason of each wall of the outer ring of one building (docs/concepts/building-walls.md, "The type of each run"). `front` is the main front wall.
 fn wall_types(walls: &[Wall], front: Option<usize>, front_reason: &'static str) -> Vec<(FaceType, &'static str)> {
     let m = walls.len();
     // 1. the runs

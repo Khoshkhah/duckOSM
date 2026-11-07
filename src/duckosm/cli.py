@@ -336,6 +336,30 @@ def edit(db, fixes, port):
 
 
 @main.command()
+@click.argument("db", type=DB_PATH)
+@click.option("--fixes", type=click.Path(dir_okay=False), default=None,
+              help="The fixes file whose changes you can ask about (default: osm_fixes.yaml beside DB)")
+@click.option("--port", type=int, default=8791, show_default=True, help="The port of the page on 127.0.0.1")
+def ask(db, fixes, port):
+    """Ask questions about the OSM data of DB, and about its changes, on a page on your computer.
+
+    \b
+    The page is roadstyle's dashboard of DB with a data dock (one SQL line over a wide table) and Ask (a
+    question in words, answered with SQL). Roads and buildings are clickable. The table extra.edits has
+    the changes of the fixes file, with the time of each. Ask uses your own key of a free AI service: it
+    stays in your browser. The page does not change the data or the file.
+    Example:
+        duckosm ask monaco.duckdb        # then open http://127.0.0.1:8791/
+    """
+    from duckosm.edit import serve
+
+    try:
+        serve(db, fixes, port, ask=True)
+    except Exception as e:
+        raise click.ClickException(str(e))
+
+
+@main.command()
 @click.argument('db', type=DB_PATH)
 @click.option('--mode', '-m', 'modes', multiple=True,
               help='Mode(s) to draw a page of, repeat for several (default: every mode, plus a page '

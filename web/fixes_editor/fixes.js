@@ -234,3 +234,97 @@ export function remove(doc, o) {
     default: return deleteObjectRule(doc, o.type, o.id);
   }
 }
+// ---- the time of a change (docs/design/fixes_editor_time_merge.md): the key `changed` on each record, the local date and time with the offset
+// from UTC. The build does not read it.
+const LISTS = [["overrides"], ["new_ways"], ["turn_restrictions"], ["extra", "tag_edits"], ["extra", "building_faces"]];
+const listAt = (doc, [a, b]) => (b ? doc[a]?.[b] : doc[a]) ?? [];
+const two = (n) => String(n).padStart(2, "0");
+export function localTime(d = new Date()) {
+  const o = -d.getTimezoneOffset(), a = Math.abs(o);
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}${o < 0 ? "-" : "+"}${two(Math.floor(a / 60))}:${two(a % 60)}`;
+}
+// the time as a number (ms), NaN for no time. js-yaml makes a Date of a time that has no quotes (a file that a person wrote)
+export const timeMs = (t) => (t instanceof Date ? t.getTime() : t == null ? NaN : Date.parse(t));
+// a record with no `changed`, as a text with its keys sorted: two records with the same text are the same change
+const keySorted = (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v);
+const bare = (r) => { const { changed, ...rest } = r; return JSON.stringify(rest, keySorted); };
+// after a change: a record that is new or different from the records of `before` gets the time `now`. A record that the change wrote again with
+// the same content gets its old time back
+export function stamp(before, doc, now) {
+  for (const p of LISTS) {
+    const old = new Map(listAt(before, p).map((r) => [bare(r), r.changed]));
+    for (const r of listAt(doc, p)) {
+      const k = bare(r);
+      if (!old.has(k)) r.changed = now;
+      else if (old.get(k) != null) r.changed = old.get(k);
+    }
+  }
+}
+// a record with no time gets the time `now` (a file that has no times yet); returns the number of records that got it
+export function stampMissing(doc, now) {
+  let n = 0;
+  for (const p of LISTS) for (const r of listAt(doc, p)) if (r.changed == null) { r.changed = now; n++; }
+  return n;
+}
+// the records of one object (`o` as for count) in all the lists
+export function recordsOf(doc, o) {
+  switch (kindOf(o)) {
+    case "new": return newWays(doc).filter((w) => w.id === o.new_way);
+    case "wall": return faceEdits(doc).filter((e) => sameWall(e, o.building, o.from_node, o.to_node));
+    case "turn": return (doc.turn_restrictions ?? []).filter((t) => same(t, o.from_way, o.via_node, o.to_way));
+    default: return [...(o.type === "way" ? (doc.overrides ?? []).filter((r) => r.osm_id === o.id) : []), ...tagEdits(doc).filter((e) => e.type === o.type && e.id === o.id)];
+  }
+}
+// the latest time of the records (ms), NaN when no record has a time
+export const latest = (recs) => recs.reduce((m, r) => { const t = timeMs(r.changed); return Number.isNaN(t) ? m : Number.isNaN(m) ? t : Math.max(m, t); }, NaN);
+
+// ---- Add a file: the records of another fixes file go into `doc`
+const FILE_KEYS = ["overrides", "new_ways", "turn_restrictions", "extra"], EXTRA_KEYS = ["tag_edits", "building_faces"];
+// "" when `doc` can be a fixes file, else what is wrong
+export function checkFile(doc) {
+  const bad = Object.keys(doc).filter((k) => !FILE_KEYS.includes(k));
+  if (bad.length) return `unknown key ${bad.join(", ")}`;
+  const ex = doc.extra ?? {};
+  if (typeof ex !== "object" || Array.isArray(ex)) return "extra must be a map";
+  const badEx = Object.keys(ex).filter((k) => !EXTRA_KEYS.includes(k));
+  if (badEx.length) return `unknown key extra.${badEx.join(", extra.")}`;
+  for (const p of LISTS) { const v = p[1] ? ex[p[1]] : doc[p[0]]; if (v != null && !Array.isArray(v)) return `${p.join(".")} must be a list`; }
+  for (const p of LISTS) if (listAt(doc, p).some((r) => !r || typeof r !== "object" || Array.isArray(r))) return `each item of ${p.join(".")} must be a map`;
+  return "";
+}
+// the object of a record, as a text: the rule and the tag edit of a way are one object
+const objKey = ([a, b], r) => (a === "overrides" ? `obj way ${r.osm_id}` : b === "tag_edits" ? `obj ${r.type} ${r.id}` : b === "building_faces"
+  ? `wall ${r.building} ${Math.min(r.from_node, r.to_node)} ${Math.max(r.from_node, r.to_node)}` : a === "turn_restrictions" ? `turn ${r.from_way} ${r.via_node} ${r.to_way}` : `new ${r.id}`);
+// merge(doc, other): for each object of `other`, its records go to the end of the lists of `doc`. The same object in the two files: the records
+// with the later time stay, the others go. The same time, or no time on one side: the two stay, `other` last (the build: it wins key by key).
+// A new road of `other` with the ID of another new road of `doc` gets the next free ID, also in the records of `other` that use it. `other` changes.
+// Returns { added, replaced, older, both, renumbered }: the number of objects of each case.
+export function merge(doc, other) {
+  const out = { added: 0, replaced: 0, older: 0, both: 0, renumbered: 0 };
+  const mine = new Map(newWays(doc).map((w) => [w.id, JSON.stringify(w.nodes)])), map = new Map();
+  let next = Math.max(NEW_WAY_MIN - 1, ...newWays(doc).map((w) => w.id), ...newWays(other).map((w) => w.id));
+  for (const w of newWays(other)) if (mine.has(w.id) && mine.get(w.id) !== JSON.stringify(w.nodes) && !map.has(w.id)) map.set(w.id, ++next);
+  const to = (id) => map.get(id) ?? id;
+  if (map.size) {
+    out.renumbered = map.size;
+    for (const w of newWays(other)) w.id = to(w.id);
+    for (const t of other.turn_restrictions ?? []) { t.from_way = to(t.from_way); t.to_way = to(t.to_way); }
+    for (const r of other.overrides ?? []) r.osm_id = to(r.osm_id);
+    for (const e of tagEdits(other)) if (e.type === "way") e.id = to(e.id);
+  }
+  const group = (d) => { const g = new Map(); for (const p of LISTS) for (const r of listAt(d, p)) { const k = objKey(p, r); (g.get(k) ?? g.set(k, []).get(k)).push(r); } return g; };
+  const ours = group(doc), theirs = group(other), drop = new Set(), take = new Set();
+  for (const [k, recs] of theirs) {
+    const have = ours.get(k);
+    if (!have) { out.added++; recs.forEach((r) => take.add(r)); continue; }
+    const a = latest(have), b = latest(recs);
+    if (!Number.isNaN(a) && !Number.isNaN(b) && a !== b) {
+      if (b > a) { out.replaced++; have.forEach((r) => drop.add(r)); recs.forEach((r) => take.add(r)); } else out.older++;
+    } else { out.both++; recs.forEach((r) => take.add(r)); }
+  }
+  for (const p of LISTS) {
+    const list = [...listAt(doc, p).filter((r) => !drop.has(r)), ...listAt(other, p).filter((r) => take.has(r))];
+    if (p[1]) setExtra(doc, p[1], list); else doc[p[0]] = list;
+  }
+  return out;
+}

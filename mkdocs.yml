@@ -153,6 +153,7 @@ nav:
       - Stable edge ids: concepts/edge-ids.md
       - What each network contains: concepts/networks.md
       - Network clean-up: concepts/cleanup.md
+      - The walls of the buildings: concepts/building-walls.md
       - Routing across modes: concepts/multimodal.md
       - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:

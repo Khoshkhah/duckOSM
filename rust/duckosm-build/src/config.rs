@@ -407,10 +407,11 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 const FIX_TOP: [&str; 4] = ["overrides", "new_ways", "turn_restrictions", "extra"];
 /// The keys of `extra` (an extension of duckosm-rust: duckOSM reads only `overrides`, so it ignores the key `extra`).
 const FIX_EXTRA: [&str; 2] = ["tag_edits", "building_faces"];
-const FIX_FACE_EDIT: [&str; 6] = ["building", "from_node", "to_node", "type", "door", "note"];
-/// `was`: what the data had before the change, kept by the page to show "was to now" (the build does not read it).
-const FIX_TAG_EDIT: [&str; 6] = ["type", "id", "set", "delete", "note", "was"];
-const FIX_RULE: [&str; 13] = [
+const FIX_FACE_EDIT: [&str; 7] = ["building", "from_node", "to_node", "type", "door", "note", "changed"];
+/// `was`: what the data had before the change, kept by the page to show "was to now". `changed` (in each list): the date and the time of the
+/// change, written by the fixes editor (docs/design/fixes_editor_time_merge.md). The build reads neither.
+const FIX_TAG_EDIT: [&str; 7] = ["type", "id", "set", "delete", "note", "was", "changed"];
+const FIX_RULE: [&str; 14] = [
     "osm_id",
     "oneway",
     "lanes",
@@ -424,9 +425,10 @@ const FIX_RULE: [&str; 13] = [
     "turn_lanes_forward",
     "turn_lanes_backward",
     "note",
+    "changed",
 ];
-const FIX_NEW_WAY: [&str; 6] = ["id", "nodes", "tags", "tags_from", "source", "note"];
-const FIX_TURN: [&str; 5] = ["from_way", "via_node", "to_way", "restriction", "note"];
+const FIX_NEW_WAY: [&str; 7] = ["id", "nodes", "tags", "tags_from", "source", "note", "changed"];
+const FIX_TURN: [&str; 6] = ["from_way", "via_node", "to_way", "restriction", "note", "changed"];
 /// The restriction types that the edge graph understands (duckOSM `_ALLOWED_RESTRICTIONS`).
 const TURN_TYPES: [&str; 10] = [
     "no_u_turn",
@@ -937,6 +939,18 @@ mod tests {
             let e = parse_osm_fixes(text, "t").unwrap_err();
             assert!(e.contains(msg), "{text:?}: {e}");
         }
+    }
+
+    #[test]
+    fn the_time_of_a_change_is_read_and_not_used() {
+        let t = "'2026-11-06T14:32:05+01:00'";
+        let text = format!(
+            "overrides:\n  - {{osm_id: 1, lanes: 2, changed: {t}}}\nnew_ways:\n  - {{id: 9000000000001, nodes: [5, [7.4, 43.7]], tags: {{highway: service}}, changed: {t}}}\n\
+             turn_restrictions:\n  - {{from_way: 2, via_node: 3, to_way: 4, restriction: no_left_turn, changed: {t}}}\nextra:\n  tag_edits:\n    \
+             - {{type: node, id: 7, set: {{crossing: marked}}, changed: {t}}}\n  building_faces:\n    - {{building: 5, from_node: 1, to_node: 2, type: front, changed: {t}}}\n"
+        );
+        let f = parse_osm_fixes(&text, "t").unwrap();
+        assert_eq!((f.ways.len(), f.new_ways.len(), f.turn_restrictions.len(), f.tag_edits.len(), f.face_edits.len()), (1, 1, 1, 1, 1));
     }
 
     #[test]
