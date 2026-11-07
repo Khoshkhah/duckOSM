@@ -215,25 +215,37 @@
       data.card({ title: named >= 0 ? String(row[named]) : `${table} ${idCol >= 0 ? row[idCol] : e.detail.index + 1}`, chip: table,
         rows: columns.map((c, i) => [c.name.replace(/_/g, " "), i === g ? null : row[i]]).filter(([, v]) => v != null), id: idCol >= 0 ? String(row[idCol]) : undefined });
     });
+    // the road classes of each network with their number of edges: Ask must not guess the values of `highway` (asked to colour the roads by class, it used classes that
+    // do not exist, found no roads, and had no step left to look them up)
+    const classes = (await Promise.all(info.tables.filter((t) => t.table === "edges").map(async (t) => {
+      try {
+        const { rows } = await query(`SELECT highway, count(*) AS n FROM ${t.mode}.edges GROUP BY highway ORDER BY n DESC`);
+        return `${t.mode}.edges: ${rows.map(([h, n]) => `${h ?? "NULL"} (${n})`).join(", ")}`;
+      } catch { return ""; }
+    }))).filter(Boolean).join("; ");
+    const aboutText = "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
+      + "edge_id is its id and osm_id the OSM way. main.building_faces has the walls of the buildings, and the schema features has the buildings and the other base-map layers. "
+      + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). "
+      + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
+      + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
+      + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
+      + "H3: the nodes tables (driving.nodes and the others) have h3_cell, a BIGINT H3 index at resolution 8. extra.boundary_h3 (resolution, h3_cell, whole_boundary) has the H3 cells that cover the boundary at each resolution 0 to 11, and whole_boundary is true for the one cell that contains the whole boundary: "
+      + "the SMALLEST cell that contains the whole boundary is the row with the largest resolution where whole_boundary is true. THE PAGE DRAWS A RESULT THAT HAS A COLUMN h3_cell (and no geometry column) AS HEXAGONS, so you CAN show H3 cells: SELECT h3_cell FROM extra.boundary_h3 WHERE whole_boundary ORDER BY resolution DESC LIMIT 1, or SELECT DISTINCT h3_cell FROM driving.nodes. "
+      + (classes ? `THE VALUES OF highway (the road classes) with the number of edges, for each network: ${classes}. Use exactly these values in a WHERE, and never guess a class. ` : "")
+      + "To colour roads by class, call color_roads once, with one group for each class that you colour (for example primary red, secondary orange, tertiary yellow, the others grey), each group with its sql: SELECT edge_id FROM driving.edges WHERE highway = 'primary'. "
+      + "COLOURS: a shape is coloured by its column face_type (front green, back red, side grey, party wall purple, court cyan), so a result with face_type needs no more. "
+      + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
+      + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
+      + "Never answer that you can only show roads.";
     const ask = askPanel({
-      data, dialect: "DuckDB",
-      about: "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
-        + "edge_id is its id and osm_id the OSM way. main.building_faces has the walls of the buildings, and the schema features has the buildings and the other base-map layers. "
-        + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). "
-        + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
-        + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
-        + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
-        + "H3: the nodes tables (driving.nodes and the others) have h3_cell, a BIGINT H3 index at resolution 8. extra.boundary_h3 (resolution, h3_cell, whole_boundary) has the H3 cells that cover the boundary at each resolution 0 to 11, and whole_boundary is true for the one cell that contains the whole boundary: "
-        + "the SMALLEST cell that contains the whole boundary is the row with the largest resolution where whole_boundary is true. THE PAGE DRAWS A RESULT THAT HAS A COLUMN h3_cell (and no geometry column) AS HEXAGONS, so you CAN show H3 cells: SELECT h3_cell FROM extra.boundary_h3 WHERE whole_boundary ORDER BY resolution DESC LIMIT 1, or SELECT DISTINCT h3_cell FROM driving.nodes. "
-        + "COLOURS: a shape is coloured by its column face_type (front green, back red, side grey, party wall purple, court cyan), so a result with face_type needs no more. "
-        + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
-        + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
-        + "Never answer that you can only show roads.",
+      data, dialect: "DuckDB", maxSteps: 8,
+      about: aboutText,
       examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
         "Show the walls of all buildings, with a color for each wall type.", "Show only the front walls of the buildings.",
         "Color the walls that I changed by hand in red and the others in grey.", "Show the buildings that have more than 10 walls.",
         "How many walls of each type do the buildings have?", "Show the smallest H3 cell that contains the whole boundary.",
-        "Color the roads by their class.", "Draw a bar chart of the km of road in each class."],
+        "Color the roads by their class.", "Turn off the water and the waterways layers.", "Switch the base map to satellite.",
+        "Turn on the 3D view and tilt the map.", "Draw a bar chart of the km of road in each class."],
     });
     // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer
     // such as a building). No popup anywhere: rs.holdPopup holds the popups of roads and of items, here for the whole page (the dock holds them only while it is open).
@@ -244,7 +256,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, about: aboutText, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });

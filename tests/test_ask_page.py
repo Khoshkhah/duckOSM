@@ -186,6 +186,10 @@ def test_ask_page(monaco, page_url):
         page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
         colours = page.evaluate("[...new Set(window.askPage.shapeProps().map((p) => p.color ?? 'none'))].sort()")
         assert colours == ["#ff0000", "none"], colours                       # a colour that CSS does not know is left out
+        # Ask is told the real road classes (it guessed them, found no roads, and had no step left): the values of highway are in its instructions
+        classes = page.evaluate(q, "SELECT DISTINCT highway FROM driving.edges WHERE highway IS NOT NULL")["rows"]
+        about = page.evaluate("window.askPage.about")
+        assert classes and all(f"{c[0]} (" in about for c in classes), "every road class of the driving network is in the instructions"
         # the map switch of the data dock (On or Off): the shapes show with it, and a closed dock shows nothing on the map
         page.evaluate("window.askPage.data.open()")
         page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")
