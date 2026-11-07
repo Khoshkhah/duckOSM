@@ -70,6 +70,17 @@ functions, so a question about the H3 cells of the boundary had no data. Now:
 - A result with no geometry column and a column `h3_cell`, `h3` or `h3_id` is drawn as hexagons, one for each distinct cell (BIGINT or hex text).
 - The `about` text and an example question tell Ask about both.
 
+## The opacity of the shapes, and the H3 row
+
+Two requests of Kaveh (2026-11-07), sent by the Ask sessions:
+
+- "h3-cell selection from table must show the cell on the map". A click on a row that has an H3 column (`h3_cell`, `h3`, `h3_id`; a hex text or a BIGINT) and no geometry draws that
+  one cell in the select look (the source `ask-pick`), moves the map to it, and fills the card (the title is its name, else `H3 cell <hex>`, and all its values). A row with a
+  geometry column (the nodes) is selected by its geometry as before.
+- "increase transparency of h3 cells on map". Ask answered that it could not: its tool `set_map` changes roadstyle's layers, and the shapes of a result are the page's own layer.
+  The page gives Ask its own tool through the `tools` option of roadstyle: `set_shapes {opacity, reset}`. It sets the fill, line and point opacity of the shapes (`applyOpacity`), a new
+  result and a new base map keep it, and `reset: true` brings the default look back (the fill 0.4, the outline and the points 1). The selected item is not changed.
+
 ## The edits as a table
 
 Ask must answer questions about the edits too. The page reads the fixes file, as the editor does, and gives the server its changes as

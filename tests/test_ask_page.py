@@ -139,6 +139,49 @@ def test_a_row_of_the_table_selects_its_item(monaco, page_url):
         browser.close()
 
 
+def test_an_h3_row_is_selected_on_the_map_and_the_opacity_tool(monaco, page_url):
+    """A row with an H3 cell (a hex text, or a BIGINT) and no geometry draws that one cell in the select look and fills the card; the tool set_shapes of Ask
+    changes the opacity of the shapes of a result and brings the default back."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(page_url)
+        page.wait_for_function("window.askPage", timeout=60_000)
+        page.evaluate("window.askPage.data.open()")
+        run, rows = "(s) => window.askPage.data.run(s)", "#rs-dock tbody tr"
+        q = "async (sql) => { const r = await fetch('api/sql', {method: 'POST', body: sql}); return r.ok ? await r.json() : {error: await r.text()}; }"
+        card_text = "() => (document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden) ? document.querySelector('.rs-dd-card').textContent.replace(/\\s/g, '') : ''"
+        # a hex text
+        page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 9 ORDER BY h3_cell")
+        page.wait_for_function("window.askPage.shapes() > 20", timeout=30_000)
+        cell = page.evaluate("document.querySelectorAll('#rs-dock tbody tr')[1].cells[0].innerText.trim()")
+        page.locator(rows).nth(1).click()
+        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
+        assert cell in page.evaluate(card_text), (cell, page.evaluate(card_text))
+        # a BIGINT cell of the nodes
+        page.evaluate(run, "SELECT DISTINCT h3_cell FROM driving.nodes ORDER BY h3_cell")
+        page.wait_for_function("window.askPage.shapes() > 3", timeout=30_000)
+        page.locator(rows).nth(0).click()
+        hexed = page.evaluate(q, "SELECT lower(to_hex(h3_cell)) FROM (SELECT DISTINCT h3_cell FROM driving.nodes ORDER BY h3_cell LIMIT 1)")["rows"][0][0]
+        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
+        assert hexed in page.evaluate(card_text), (hexed, page.evaluate(card_text))
+        # the opacity of the shapes (the tool of the page)
+        paint = "(p) => [window.map.getPaintProperty('ask-shapes-fill', 'fill-opacity'), window.map.getPaintProperty('ask-shapes-line', 'line-opacity')]"
+        assert page.evaluate(paint, None) == [0.4, 1]
+        done = page.evaluate("window.askPage.shapeTools[0].run({opacity: 0.15})")
+        assert "0.15" in done["done"] and page.evaluate(paint, None) == [0.15, 0.15]
+        page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 8")            # a new result keeps the opacity
+        page.wait_for_function("window.askPage.shapes() > 3", timeout=30_000)
+        assert page.evaluate(paint, None) == [0.15, 0.15]
+        assert page.evaluate("window.askPage.shapeTools[0].run({reset: true})")["done"].startswith("The shapes have the default look")
+        assert page.evaluate(paint, None) == [0.4, 1]
+        assert "opacity must be" in page.evaluate("window.askPage.shapeTools[0].run({opacity: 3}).then(() => 'no error', (e) => e.message)")
+        assert not errors, errors
+        browser.close()
+
+
 def test_ask_page(monaco, page_url):
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
