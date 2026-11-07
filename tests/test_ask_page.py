@@ -110,6 +110,11 @@ def test_ask_page(monaco, page_url):
         page.wait_for_function("!window.askPage.shapesShown()", timeout=10_000)
         page.evaluate("window.askPage.data.open()")
         page.wait_for_function("window.askPage.shapesShown()", timeout=10_000)
+        # the roads of a result are lit by roadstyle on their own shape (edge_id): no line of the page over them, also when the table has their geometry column
+        page.evaluate(run, "SELECT edge_id, name, geometry FROM driving.edges")
+        page.wait_for_function("window.askPage.shapes() === 0", timeout=30_000)
+        page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")
+        page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
         page.evaluate(run, "SELECT edge_id, name FROM driving.edges LIMIT 5")
         page.wait_for_function("window.askPage.shapes() === 0", timeout=30_000)            # a table with no geometry clears the map
         # a write is refused, and the file of the database does not change
