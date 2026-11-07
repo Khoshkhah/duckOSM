@@ -130,7 +130,7 @@
     },
     {
       "key": "lanes",
-      "label": "Lanes in each direction",
+      "label": "Lanes each way",
       "type": "int",
       "rule": true,
       "group": "Lanes and speed",
@@ -173,7 +173,7 @@
     },
     {
       "key": "turn_lanes_forward",
-      "label": "Turn lanes, forward",
+      "label": "Turn lanes fwd",
       "type": "text",
       "rule": true,
       "placeholder": "left|through|right",
@@ -184,7 +184,7 @@
     },
     {
       "key": "turn_lanes_backward",
-      "label": "Turn lanes, back",
+      "label": "Turn lanes back",
       "type": "text",
       "rule": true,
       "placeholder": "left|through",
@@ -574,7 +574,7 @@
     },
     {
       "key": "roof:shape",
-      "label": "Roof shape",
+      "label": "Shape",
       "type": "choice",
       "options": [
         [
@@ -618,7 +618,7 @@
     },
     {
       "key": "roof:levels",
-      "label": "Roof floors",
+      "label": "Floors",
       "type": "int",
       "group": "Roof",
       "check": {
@@ -628,7 +628,7 @@
     },
     {
       "key": "roof:colour",
-      "label": "Roof color",
+      "label": "Color",
       "type": "color",
       "group": "Roof",
       "check": {
@@ -637,7 +637,7 @@
     },
     {
       "key": "roof:material",
-      "label": "Roof material",
+      "label": "Material",
       "type": "choice",
       "options": [
         [
@@ -673,7 +673,7 @@
     },
     {
       "key": "building:colour",
-      "label": "Facade color",
+      "label": "Color",
       "type": "color",
       "group": "Facade",
       "check": {
@@ -682,7 +682,7 @@
     },
     {
       "key": "building:material",
-      "label": "Facade material",
+      "label": "Material",
       "type": "choice",
       "options": [
         [
@@ -814,7 +814,7 @@
     },
     {
       "key": "traffic_signals:direction",
-      "label": "Signal direction",
+      "label": "Direction",
       "type": "choice",
       "options": [
         [
@@ -911,7 +911,7 @@
     },
     {
       "key": "lanes",
-      "label": "Lanes (all directions)",
+      "label": "Lanes (total)",
       "type": "int",
       "check": {
         "min": 1,
@@ -974,7 +974,7 @@
           "lanes_backward",
           "turn_lanes_backward"
         ],
-        "reason": "A one-way road has its lanes in one direction: use Lanes, all and the turn lanes forward."
+        "reason": "A one-way road: use Lanes each way and Turn lanes fwd."
       },
       {
         "if": {
@@ -1001,7 +1001,7 @@
             "no"
           ]
         },
-        "reason": "A motorway or a trunk road has no sidewalk, no cycleway and no crossing, and its surface is paved."
+        "reason": "Not on a motorway or a trunk road."
       },
       {
         "if": {
@@ -1021,7 +1021,7 @@
             "cobblestone"
           ]
         },
-        "reason": "A primary or a secondary road has a paved surface."
+        "reason": "A primary or a secondary road is paved."
       },
       {
         "if": {
@@ -1045,7 +1045,7 @@
           "turn_lanes_forward",
           "turn_lanes_backward"
         ],
-        "reason": "A path for people has no sidewalk, no lanes and no speed limit of its own."
+        "reason": "Not on a footway, a path or a cycleway."
       },
       {
         "if": {
@@ -1060,7 +1060,7 @@
         "disable": [
           "crossing"
         ],
-        "reason": "A crossing is a tag of a footway or a cycleway that crosses a road."
+        "reason": "Only on a footway or a cycleway that crosses a road."
       },
       {
         "if": {
@@ -1072,7 +1072,7 @@
         "disable": [
           "tunnel"
         ],
-        "reason": "A road is a bridge or a tunnel, not both."
+        "reason": "A bridge or a tunnel, not both."
       },
       {
         "if": {
@@ -1084,7 +1084,7 @@
         "disable": [
           "bridge"
         ],
-        "reason": "A road is a bridge or a tunnel, not both."
+        "reason": "A bridge or a tunnel, not both."
       }
     ],
     "building": [
@@ -1097,7 +1097,7 @@
         "disable": [
           "roof:levels"
         ],
-        "reason": "A flat roof has no roof levels."
+        "reason": "A flat roof has no roof floors."
       },
       {
         "if": {
@@ -1122,7 +1122,7 @@
           "building:colour",
           "roof:levels"
         ],
-        "reason": "A roof (a shelter) has no walls: no levels, no facade material and no facade color."
+        "reason": "A roof shelter has no floors and no facade."
       },
       {
         "if": {
@@ -1138,7 +1138,7 @@
             "hipped"
           ]
         },
-        "reason": "A grass roof is flat or has a low slope."
+        "reason": "A grass roof is flat or low."
       }
     ],
     "node": [
@@ -1154,7 +1154,7 @@
           "kerb",
           "tactile_paving"
         ],
-        "reason": "Crossing, kerb and tactile paving are for a crossing, or for a traffic signal with a crossing."
+        "reason": "Only on a crossing or a traffic signal."
       },
       {
         "if": {
@@ -1167,7 +1167,7 @@
             "traffic_signals"
           ]
         },
-        "reason": "A traffic signal with a crossing has crossing=traffic_signals."
+        "reason": "At a traffic signal: crossing=traffic_signals."
       },
       {
         "if": {
@@ -1178,7 +1178,7 @@
         "disable": [
           "traffic_signals:direction"
         ],
-        "reason": "The direction is for a traffic signal."
+        "reason": "Only on a traffic signal."
       }
     ],
     "new_road": [
@@ -1195,7 +1195,7 @@
           "maxspeed",
           "oneway"
         ],
-        "reason": "A path for people has no lanes, no speed limit and no one-way rule here."
+        "reason": "Not on a footway, a cycleway or a pedestrian street."
       },
       {
         "if": {
@@ -1212,7 +1212,7 @@
             "concrete"
           ]
         },
-        "reason": "A primary, secondary or tertiary road has a paved surface."
+        "reason": "A primary, secondary or tertiary road is paved."
       }
     ]
   }

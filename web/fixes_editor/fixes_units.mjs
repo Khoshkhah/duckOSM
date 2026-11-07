@@ -140,7 +140,7 @@ eq(crossChecks("road", { bridge: "yes", layer: "0" }).map((c) => c[0]), ["layer"
 eq(crossChecks("road", { motor_vehicle: "no", foot: "no", bicycle: "no" }).map((c) => c[0]), ["bicycle"], "in no network");
 // a choice clears a field that a guard closes now; a conflict of the data stays
 const d1 = { highway: "traffic_signals", crossing: "marked" };
-eq(clearClosed(presets._guards.node, presets.node, { highway: "crossing", crossing: "marked" }, d1), [["crossing", "marked", "A traffic signal with a crossing has crossing=traffic_signals."]], "the crossing goes");
+eq(clearClosed(presets._guards.node, presets.node, { highway: "crossing", crossing: "marked" }, d1), [["crossing", "marked", "At a traffic signal: crossing=traffic_signals."]], "the crossing goes");
 eq(d1.crossing, "", "the value is cleared");
 const d2 = { highway: "traffic_signals", crossing: "marked", name: "x" };
 eq(clearClosed(presets._guards.node, presets.node, { ...d2 }, d2), [], "the data had the conflict: nothing is cleared");

@@ -40,8 +40,8 @@ The panel checks each value while you type, and it does not let you add a change
 - **A field that is off**: another choice closes it, for example a footway has no sidewalk. The reason is under the first field that it
   closes. When your choice closes a field that has a value, the panel clears the value and says so. **Reset** brings it back.
 
-**Lanes in each direction** is the lanes of one direction (the rule `lanes` of duckOSM sets the two directions). **Lanes forward** and
-**Lanes back** replace it for one direction. In the **New road** tab, **Lanes (all directions)** is the OSM tag `lanes`.
+**Lanes each way** is the lanes of one direction (the rule `lanes` of duckOSM sets the two directions). **Lanes forward** and
+**Lanes back** replace it for one direction. In the **New road** tab, **Lanes (total)** is the OSM tag `lanes`.
 
 **Access** has the OSM tags `access`, `motor_vehicle` (Cars), `foot` (Walking) and `bicycle` (Bikes). A road with **No** for a mode is not
 in the network of that mode after the next build. An older fixes file can have the duckOSM rule `exclude_modes`. The form shows it under
@@ -111,7 +111,7 @@ browser, and you do not download the file: the page saves each change in the fix
 
 To change a road, click it on the map. The form shows its tags. Change a field, for example the lanes, and click **Add to changes**:
 
-![A road is picked: the form shows its tags, Lanes in each direction is changed to 3, and Add to changes and Reset are at the bottom](../images/edit-road.png)
+![A road is picked: the form shows its tags, Lanes each way is changed to 3, and Add to changes and Reset are at the bottom](../images/edit-road.png)
 
 When you pick the road again, the box "This road is in your changes" shows over the form ([An object that is in your changes](#an-object-that-is-in-your-changes)):
 
@@ -172,7 +172,7 @@ below.
 
 The editor writes two kinds of record for an object:
 
-- `overrides` (by `osm_id`): the keys that act on the network of each mode: Lanes in each direction (`lanes`), Lanes forward and back,
+- `overrides` (by `osm_id`): the keys that act on the network of each mode: Lanes each way (`lanes`), Lanes forward and back,
   One-way yes or no, Layer, the turn lanes, and Delete (`remove`).
 - `extra.tag_edits`: the OSM tags, with `set` and `delete`. `was` keeps the value before the first change; the build does not read it.
 
@@ -201,8 +201,8 @@ extra:
 
 | Change in the form | Record | Result after the build |
 |---|---|---|
-| Lanes in each direction 3 | `overrides`: `lanes: 3` | `driving.edges.lanes` is 3 in each direction (before: 1) |
-| Turn lanes, forward | `overrides`: `turn_lanes_forward` | `driving.lane_profile.turn` of the forward edges: left, through, through. `raw.ways` has the tag `turn:lanes:forward` |
+| Lanes each way 3 | `overrides`: `lanes: 3` | `driving.edges.lanes` is 3 in each direction (before: 1) |
+| Turn lanes fwd | `overrides`: `turn_lanes_forward` | `driving.lane_profile.turn` of the forward edges: left, through, through. `raw.ways` has the tag `turn:lanes:forward` |
 | Name | tag edit `name` | `name` of the edges of all modes |
 | Max speed 30 | tag edit `maxspeed` | `driving.edges.maxspeed_kmh` is 30 (before: 60, the default of the class), and the travel times change |
 | Sidewalk both | tag edit `sidewalk` | `walking.edges.walk_type` is `sidewalk` (before: `shared_road`) |

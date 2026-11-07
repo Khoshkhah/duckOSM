@@ -69,7 +69,7 @@
       }
     }
     const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, areaKey: () => "edit:" + info.db,
-      onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code>${esc(info.fixes)}</code> at once.` });
+      onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</code> at once.` });
     if (info.exists) {
       const text = await (await api("fixes")).text();
       try { window.jsyaml.load(text); } catch (e) { blocked = e.message.split("\n")[0]; }
