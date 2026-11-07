@@ -13,6 +13,6 @@ duckdb = ["dep:duckdb", "dep:duckosm-build", "duckosm-build/duckdb"]
 httparse = "=1.10.1"           # the request line and the headers, as roadstyle-serve
 serde_json = { version = "1", features = ["preserve_order"] }
 # the map: roadstyle's standard dashboard page of a duckOSM file (roadstyle_io::duckosm reads the file, page_options::page_from writes the page)
-roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "6deb643d791872b35b0bd6f30067f0c99f143b65" }
+roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "21effaa383aedc1ccd127b755c2d21674b01a573" }
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"], optional = true }
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }
