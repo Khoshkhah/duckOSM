@@ -58,6 +58,18 @@ geometry of a result itself, with one GeoJSON source and three layers (fill, lin
 - The camera moves to the shapes after an answer of Ask, not after the person's own SQL.
 - The `about` text tells the agent that it can show nodes, buildings and walls, with which columns, and to add no `LIMIT` for "all".
 
+## H3 cells
+
+Asked "show smaller h3 cell on map that contain whole boundary area", Ask answered that it had no information about H3 cells (Kaveh, 2026-11-07). The database has
+H3 only in the `h3_cell` column of the nodes (resolution 8), `main.boundary_cells` is an optional build step that is not in every database, and DuckDB here has no H3
+functions, so a question about the H3 cells of the boundary had no data. Now:
+
+- The page loads h3-js (jsdelivr, a pinned version) and makes the table `extra.boundary_h3` (resolution 0 to 11, `h3_cell` as a hex text, `whole_boundary`): the cells of the
+  vertices of `main.boundary`, and from resolution 5 the cells inside it. `whole_boundary` is true when all the vertices are in one cell. A cell is convex, so that cell holds the
+  whole boundary; the smallest cell that holds it is the largest resolution with the flag. Without h3-js (no network) the table is not made.
+- A result with no geometry column and a column `h3_cell`, `h3` or `h3_id` is drawn as hexagons, one for each distinct cell (BIGINT or hex text).
+- The `about` text and an example question tell Ask about both.
+
 ## The edits as a table
 
 Ask must answer questions about the edits too. The page reads the fixes file, as the editor does, and gives the server its changes as
