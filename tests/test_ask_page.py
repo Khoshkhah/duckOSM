@@ -117,6 +117,17 @@ def test_ask_page(monaco, page_url):
             page.wait_for_function(f"window.askPage.shapes() >= {minimum}", timeout=30_000)
             counted = page.evaluate(q, "SELECT count(*) FROM (" + sql + ")")["rows"][0][0]
             assert page.evaluate("window.askPage.shapes()") == int(counted), (sql, counted)
+        # the colour of a shape: the walls by their face_type (the colours of the editor), and any shape by a column `color`
+        page.evaluate("window.askPage.data.open()")
+        page.evaluate(run, "SELECT building_id, face_type, geometry FROM main.building_faces")
+        page.wait_for_function("window.askPage.shapes() > 5000", timeout=30_000)
+        types = page.evaluate("[...new Set(window.askPage.shapeProps().map((p) => p.face_type))].sort()")
+        assert types == ["back", "court", "front", "party", "side"], types
+        assert page.evaluate("window.map.getPaintProperty('ask-shapes-line', 'line-color')")[0] == "coalesce"
+        page.evaluate(run, "SELECT node_id, geom, CASE WHEN node_id % 2 = 0 THEN '#ff0000' ELSE 'not a colour' END AS color FROM driving.nodes")
+        page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
+        colours = page.evaluate("[...new Set(window.askPage.shapeProps().map((p) => p.color ?? 'none'))].sort()")
+        assert colours == ["#ff0000", "none"], colours                       # a colour that CSS does not know is left out
         # the map switch of the data dock (On or Off): the shapes show with it, and a closed dock shows nothing on the map
         page.evaluate("window.askPage.data.open()")
         page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")

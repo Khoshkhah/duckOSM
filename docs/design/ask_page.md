@@ -42,6 +42,9 @@ geometry of a result itself, with one GeoJSON source and three layers (fill, lin
 - A result with a column of the type `GEOMETRY` is drawn. The page runs the same SQL again, for that column only, with `ST_AsGeoJSON` and no limit.
   The limit of 1000 is for the rows that the table shows, not for the selection: the table has the first 1000 rows and the map has all of them, so
   "show all buildings" draws every building. There is no cap: a result of millions of shapes is slow in the browser.
+- The colour of a shape is its column `color` (a CSS colour; one that CSS does not know is left out), else its `face_type` in the colours of the editor's walls
+  (`FACE_COLORS`), else roadstyle's purple. Asked "show the walls with a colour for each face_type", Ask answered that it had no tool for the colours of shapes
+  (Kaveh, 2026-11-07); now it needs none, and the `about` text tells it about `face_type` and `color`.
 - A result with the column `edge_id` is lit by roadstyle on the road's own shape, so the page draws no shape for it. The geometry column of an edges table is the centre
   line of the road, and a thin line over the road shows the road twice (Kaveh, 2026-11-07: "it shows roads from table in sql in this shape").
 - A new table with no geometry clears the shapes, as the light of roadstyle follows the table.

@@ -84,6 +84,10 @@
     // so "show all buildings" draws every building. A new table with no geometry clears the shapes (as roadstyle's light follows the table).
     // ponytail: no cap, so a result of millions of shapes (a county of buildings) is slow in the browser; add a cap or tiles if that comes.
     const SHAPES = "ask-shapes", PURPLE = "#7c4dff", EMPTY = { type: "FeatureCollection", features: [] };
+    // the colour of a shape: the column `color` of the result (a CSS colour, so Ask can colour by any rule in SQL), else its `face_type` in the colours of the editor's
+    // walls (web/fixes_editor/fixes_panel.js, FACE_COLORS), else roadstyle's purple
+    const FACE = { front: "#16a34a", back: "#dc2626", side: "#6b7280", party: "#7c3aed", court: "#0891b2" };
+    const COLOUR = ["coalesce", ["get", "color"], ["match", ["get", "face_type"], ...Object.entries(FACE).flat(), PURPLE]];
     let shapes = EMPTY, drawn = 0, ticket = 0, shapesOn = true;
     // is the table shown on the map now (the switch of the dock is On and the dock is open)? The dock keeps the switch in this browser, so after a reload it can start Off
     // and no event `light` comes: the page asks data.light() each time that it draws, and does not wait for the event only.
@@ -93,9 +97,9 @@
       if (map.getSource(SHAPES)) return;
       map.addSource(SHAPES, { type: "geojson", data: shapes });
       const layout = { visibility: shapesOn ? "visible" : "none" };
-      map.addLayer({ id: "ask-shapes-fill", type: "fill", source: SHAPES, filter: polygon, layout, paint: { "fill-color": PURPLE, "fill-opacity": 0.4 } });
-      map.addLayer({ id: "ask-shapes-line", type: "line", source: SHAPES, filter: ["!", point], layout, paint: { "line-color": PURPLE, "line-width": 2 } });
-      map.addLayer({ id: "ask-shapes-pt", type: "circle", source: SHAPES, filter: point, layout, paint: { "circle-color": PURPLE, "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
+      map.addLayer({ id: "ask-shapes-fill", type: "fill", source: SHAPES, filter: polygon, layout, paint: { "fill-color": COLOUR, "fill-opacity": 0.4 } });
+      map.addLayer({ id: "ask-shapes-line", type: "line", source: SHAPES, filter: ["!", point], layout, paint: { "line-color": COLOUR, "line-width": 3 } });
+      map.addLayer({ id: "ask-shapes-pt", type: "circle", source: SHAPES, filter: point, layout, paint: { "circle-color": COLOUR, "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
     };
     // the map switch of the data dock (On or Off, roadstyle): the shapes show with the table's roads. Off, or a closed dock: the map has its own colours only.
     const showShapes_ = (on) => { shapesOn = on; for (const id of ["ask-shapes-fill", "ask-shapes-line", "ask-shapes-pt"]) if (window.map.getLayer(id)) window.map.setLayoutProperty(id, "visibility", on ? "visible" : "none"); };
@@ -115,10 +119,15 @@
       // is the centre line of the road, and a thin line over the road shows the road twice). The shapes are for what roadstyle cannot light.
       const col = d.columns.find((c) => /^GEOMETRY$/i.test(c.type)), mine = ++ticket;
       if (!col || d.columns.some((c) => c.name === "edge_id")) { if (drawn) showShapes([]); return; }
-      const name = '"' + col.name.replace(/"/g, '""') + '"';
-      const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
+      const q = (n) => '"' + n.replace(/"/g, '""') + '"', name = q(col.name);
+      const kept = ["face_type", "color"].filter((n) => d.columns.some((c) => c.name === n));         // the columns that colour a shape
+      const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g${kept.map((n) => `, CAST(${q(n)} AS VARCHAR) AS ${q(n)}`).join("")} FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
       if (mine !== ticket) return;                                  // a newer table came while this one loaded
-      const features = rows.map(([g]) => { try { return { type: "Feature", properties: {}, geometry: JSON.parse(g) }; } catch { return null; } }).filter((f) => f?.geometry);
+      const features = rows.map(([g, ...vals]) => {
+        const properties = {};
+        kept.forEach((n, i) => { if (vals[i] != null && !(n === "color" && !CSS.supports("color", vals[i]))) properties[n] = vals[i]; });        // a colour that CSS does not know is left out
+        try { return { type: "Feature", properties, geometry: JSON.parse(g) }; } catch { return null; }
+      }).filter((f) => f?.geometry);
       showShapes(features);
       const b = features.length && d.source !== "person" ? bounds(features) : null;             // the camera follows an answer of Ask, not the person's own SQL
       if (b) window.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 18, duration: 800 });
@@ -140,6 +149,8 @@
         + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
         + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
         + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
+        + "COLOURS: a shape is coloured by its column face_type (front green, back red, side grey, party wall purple, court cyan), so a result with face_type needs no more. "
+        + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
         + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
         + "Never answer that you can only show roads.",
       examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
@@ -154,7 +165,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), shapesShown: lit };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });
