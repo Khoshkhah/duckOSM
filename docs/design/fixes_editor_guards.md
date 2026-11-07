@@ -192,5 +192,18 @@ is on `origin/main`, the pin moves to the merge commit.
   draws its own. The two workarounds are gone: the `rsDeselect` after each pick, and the feature state of a building.
 - **The red button and the confirm dialog.** **Delete all changes** has `sb-danger` and asks with `rs.confirm`, with roadstyle's red OK button.
 
-Still drawn by `fixes_panel.css`: the parts of the table above that PR 69 also has (the select box edge, the disabled look, the field message, the
-badge, the unsaved dot, the rows). They move to roadstyle's own classes in a later change.
+**Moved to roadstyle's own classes (2026-11-07):** the editor's CSS for these parts is deleted, and the editor uses roadstyle's.
+
+| Part | Now | The editor's CSS that went |
+|---|---|---|
+| The count of changes on the tab | `rs-badge` (the class is on while there is a number) | `.badge` |
+| The "not saved" dot on a tab | `rs-unsaved` (the dot is in the tab while it is needed) | `.dot` |
+| The line under a field, error or warning | `rs-field-msg` (an empty line does not show), `warn` for a warning | `.gerr`, `.warn` of the lines |
+| The red edge of a field with an error | `aria-invalid="true"` on the field | `.invalid` |
+| The border of a select box in a frame | roadstyle's `#sb .rs-frame .rs-sel-btn` | the `.rs-sel-btn` rule |
+| A disabled button | roadstyle's `:where(#sb, .rs-frame, #rs-dock) button:disabled` | the `button:disabled` rule |
+
+What stays in `fixes_panel.css` is layout and the content of the editor: the place of a message in the grid of a form, the rows of the walls, the doors, the
+turns and the changes, the boxes of a pane (`fsec`) and the legends. The rows are not moved to `rs-rows`: each has its own columns and its own click.
+The look changed a little: the select boxes are roadstyle's height and radius (about 5 px shorter), the badge is roadstyle's soft accent, and a message has
+roadstyle's icon.
