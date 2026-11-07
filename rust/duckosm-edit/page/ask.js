@@ -229,8 +229,11 @@
         + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
         + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
         + "Never answer that you can only show roads.",
-      examples: ["Which objects did I change, and when?", "Show the smallest H3 cell that contains the whole boundary.", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
-        "How many walls of each type do the buildings have?", "Show the walls that I changed by hand.", "Draw a bar chart of the km of road in each class."],
+      examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
+        "Show the walls of all buildings, with a color for each wall type.", "Show only the front walls of the buildings.",
+        "Color the walls that I changed by hand in red and the others in grey.", "Show the buildings that have more than 10 walls.",
+        "How many walls of each type do the buildings have?", "Show the smallest H3 cell that contains the whole boundary.",
+        "Color the roads by their class.", "Draw a bar chart of the km of road in each class."],
     });
     // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer
     // such as a building). No popup anywhere: rs.holdPopup holds the popups of roads and of items, here for the whole page (the dock holds them only while it is open).
