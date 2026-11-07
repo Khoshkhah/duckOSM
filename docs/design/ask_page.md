@@ -17,13 +17,13 @@ The page is the same roadstyle dashboard as `duckosm edit`. It has two more part
 | The data dock | One SQL line over a wide table under the map. The roads of the result light on the map. A click on a row selects its road. |
 | Ask | A question in words. The agent writes SQL, runs it in the data dock, and answers in a few sentences. It can colour roads, focus on roads and draw a chart. It uses the person's own key of a free AI service, which stays in the browser. |
 
-Roads and buildings are clickable. A road shows its card beside the table. The card is for roads only, so a click on a building (roadstyle sends
-`rs:select` with `overlay: "buildings"`) runs a query in the data dock: the row of the building with its tags, the number of its walls and of the walls
-that were edited, and its changes from `extra.edits`. There is no popup for any item: the page turns every overlay popup off and holds the road popup.
+Roads and buildings are clickable: roadstyle selects the clicked item (a solid purple look). A road shows its card beside the table. The card is for
+roads only, so a click on a building shows no facts yet. A first version ran a query for the building and put its row in the table; Kaveh wanted the
+facts in the card, and the query replaced the table, so a table with no geometry cleared the shapes of the map. A click runs no query now. There is no popup for any item: the page turns every overlay popup off and holds the road popup.
 
 **Asked of roadstyle (2026-11-07, for PR 69):** the data dock's card should also draw the facts of an overlay item, as it does for a road. It skips an
 overlay click now, and a host has no way to put content in the card. Kaveh wants the facts of a clicked item in that card. When roadstyle has it, the
-page moves the pin and the building has its facts in the card too. The row in the table stays: it has the walls and the changes, which the card does not.
+page moves the pin and the building has its facts in the card too. The walls and the changes of a building are not in the card: ask for them, or write a SQL line.
 
 ## What the host gives
 

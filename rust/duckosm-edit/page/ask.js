@@ -135,28 +135,12 @@
       examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
         "How many walls of each type do the buildings have?", "Show the walls that I changed by hand.", "Draw a bar chart of the km of road in each class."],
     });
-    // roads and buildings are clickable: the road card shows beside the table, and a click on a building puts its row in the data dock (no popup:
-    // the dock has the road card for roads only, so the building's facts go into the table). roadstyle sends rs:select with the overlay's label.
+    // roads and buildings are clickable: roadstyle selects the clicked item, and the facts of a road are in the card beside the table. No popup anywhere (every
+    // base-map layer has its popup off, and the road popup is held). The card does not draw a building yet (roadstyle's branch claude/dock-item-card, docs/design/ask_page.md).
+    // A click must not run a query: a new table with no geometry would clear the shapes of the map.
     window.rsSetInteraction?.("buildings", { clickable: true, popup: false });
-    // no popup anywhere: every item (a base-map layer) shows nothing floating, and a road's popup is held while this page is open. The facts of a road are in
-    // the card beside the table; roadstyle's card does not draw an overlay item yet (asked for, docs/design/ask_page.md), so a building has its row in the table.
     for (const o of window.RS_OVERLAYS ?? []) window.rsSetInteraction?.(o.label, { popup: false });
     window.rs.holdPopup?.("ask-page", true);
-    const hasTable = async (name) => (await query(`SELECT 1 FROM duckdb_tables() WHERE schema_name || '.' || table_name = '${name}' AND database_name = current_database()`)).rows.length > 0;
-    let walls = null;
-    const buildingSql = (id) => `SELECT b.osm_id, b.osm_type, b.name, b.kind,
-      ${walls ? `(SELECT count(*) FROM main.building_faces f WHERE f.building_id = b.osm_id) AS walls, (SELECT count(*) FROM main.building_faces f WHERE f.building_id = b.osm_id AND f.edited) AS edited_walls,` : ""}
-      (SELECT string_agg(x.what, '; ') FROM extra.edits x WHERE x.osm_id = b.osm_id) AS changes, b.tags
-      FROM features.buildings b WHERE b.osm_id = ${id}`.replace(/\s+/g, " ");
-    document.addEventListener("rs:select", async (e) => {
-      const d = e.detail;
-      if (d?.overlay !== "buildings") return;
-      const id = Number(d.properties?.osm_id ?? d.id);
-      if (!Number.isSafeInteger(id)) return;
-      walls ??= await hasTable("main.building_faces");
-      data.open();
-      data.run(buildingSql(id)).catch((err) => console.warn("duckosm ask: the building did not show:", err.message));
-    });
     window.rs.sections.add({ id: "ask", label: "Ask the data", note: "A question about the OSM data and your changes", open: () => ask.open(), icon: "ask", background: true });
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;

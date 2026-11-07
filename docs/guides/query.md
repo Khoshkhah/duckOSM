@@ -23,8 +23,9 @@ The command opens the map of the database on a page on your computer, with two p
   focus on roads, move the map and draw a chart. Ask uses your own key of a free AI service. The key stays in your browser.
 - **Query the tables:** the data dock. One SQL line over a wide table under the map. The roads of the result light on the map.
 
-Roads and buildings are clickable. A road shows its card beside the table. A click on a building puts its row in the table: its OSM id, name, kind and tags,
-the number of its walls and of the walls that you edited, and its changes from `extra.edits`. The page does not change the data.
+Roads and buildings are clickable. A click selects the item. A road shows its card beside the table. There is no popup. (The card for a building
+needs a change in roadstyle that is not released yet.) A click runs no query, so the shapes of the last result stay on the map. The page does not
+change the data.
 
 A result that has a geometry column is drawn on the map, all its rows: the column `geom` of `driving.nodes` (points) and of `features.buildings`
 (shapes), and `geometry` of `main.building_faces` (lines). The limit of 1000 is for the rows that the table shows. The map shows every row that the query selects. So you can write "Show all
