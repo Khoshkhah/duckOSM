@@ -17,6 +17,7 @@ from duckosm import Config, DuckOSM
 pw = pytest.importorskip("playwright.sync_api")
 ROOT = Path(__file__).resolve().parents[1]
 ROAD = 503462470                      # a road of the Monaco sample (docs/design/fixes_editor.md)
+WALL_BUILDING = []                     # the building_id of the building with the most walls (set by the monaco fixture)
 BLUE, AMBER = "#2563eb", "#f59e0b"    # the sets fix-sel and fix-edits (ROAD_SETS of fixes_panel.js)
 # the colour of the highlight set on each map row of the road (the feature state rs_hl that roadstyle's road layer reads)
 _LIT = """(id) => window.rsQuery((p) => Number(p.osm_id) === id).map((row) => { const l = window.map.getLayer("roads-simple") ?? window.map.getLayer("roads-fill");
@@ -38,7 +39,12 @@ def monaco(tmp_path_factory):
         DuckOSM(cfg).run()
     finally:
         os.chdir(here)
-    return out / "monaco.duckdb"
+    db = out / "monaco.duckdb"
+    # the building with the most walls, for the wall hover (read now: the page's server has the database open later)
+    con = duckdb.connect(str(db), read_only=True)
+    WALL_BUILDING.append(con.execute("SELECT building_id FROM main.building_faces GROUP BY building_id ORDER BY count(*) DESC LIMIT 1").fetchone()[0])
+    con.close()
+    return db
 
 
 def _free_port():
@@ -227,4 +233,30 @@ def test_host_without_road_rows(monaco, page_url):
         page.wait_for_function("window.fixesPanel.drawn().sel > 0", timeout=10_000)
         assert page.evaluate("window.fixesPanel.drawn()")["lit"]["fix-sel"] == 0
         assert page.evaluate(f"({_LIT})({ROAD})") == [None] * 2
+        browser.close()
+
+
+def test_wall_hover(monaco, page_url):
+    """The Building tab: the pointer on a wall row lights the wall on the map and shows its number, and the row has the class "hover".
+    The roadstyle hover of the tab (paintMapHover) is another function than the wall hover (paintHover): a name used twice made the wall hover do nothing."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        page.evaluate(f"window.fixesPanel.select('building', 'way', {WALL_BUILDING[0]})")
+        page.wait_for_function("document.querySelectorAll('#fix-form .wallrow').length >= 3", timeout=30_000)
+        page.wait_for_function("window.map.querySourceFeatures('fix-faces').length >= 3", timeout=30_000)
+        page.evaluate("""() => { const c = window.map.querySourceFeatures('fix-faces').find((f) => f.geometry.type === 'LineString').geometry.coordinates[0];
+            window.map.jumpTo({center: c, zoom: 19}); }""")
+        page.wait_for_function("window.map.loaded() && !window.map.isMoving()", timeout=30_000)
+        labels = "window.map.queryRenderedFeatures({layers: ['fix-faces-label']}).map((f) => f.properties.n)"
+        page.wait_for_timeout(800)
+        assert page.evaluate(labels) == [], "no wall number by default"
+        row = page.locator("#fix-form .wallrow").nth(1)
+        row.hover()
+        page.wait_for_function(f"{labels}.length === 1", timeout=10_000)
+        assert "hover" in row.get_attribute("class"), row.get_attribute("class")
+        page.mouse.move(5, 5)
+        page.wait_for_function(f"{labels}.length === 0", timeout=10_000)
+        assert "hover" not in row.get_attribute("class")
+        assert not errors, errors
         browser.close()
