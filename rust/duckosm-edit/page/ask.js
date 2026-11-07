@@ -95,6 +95,10 @@
     // roads and buildings are clickable: the road card shows beside the table, and a click on a building puts its row in the data dock (no popup:
     // the dock has the road card for roads only, so the building's facts go into the table). roadstyle sends rs:select with the overlay's label.
     window.rsSetInteraction?.("buildings", { clickable: true, popup: false });
+    // no popup anywhere: every item (a base-map layer) shows nothing floating, and a road's popup is held while this page is open. The facts of a road are in
+    // the card beside the table; roadstyle's card does not draw an overlay item yet (asked for, docs/design/ask_page.md), so a building has its row in the table.
+    for (const o of window.RS_OVERLAYS ?? []) window.rsSetInteraction?.(o.label, { popup: false });
+    window.rs.holdPopup?.("ask-page", true);
     const hasTable = async (name) => (await query(`SELECT 1 FROM duckdb_tables() WHERE schema_name || '.' || table_name = '${name}' AND database_name = current_database()`)).rows.length > 0;
     let walls = null;
     const buildingSql = (id) => `SELECT b.osm_id, b.osm_type, b.name, b.kind,

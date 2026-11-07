@@ -108,6 +108,11 @@ def test_ask_page(monaco, page_url):
         row = page.evaluate("window.askPage.data.result()")
         assert str(b[0]) in str(row), row
         assert "walls" in str(row), row
+        assert page.locator(".maplibregl-popup").count() == 0, "no popup for a building"
+        # a road: its card beside the table, and no popup
+        page.evaluate("() => { const rows = window.rsQuery((p) => Number(p.osm_id) === 503462470); window.rsSelect(rows[0]); }")
+        page.wait_for_function("document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden", timeout=30_000)
+        assert page.locator(".maplibregl-popup").count() == 0, "no popup for a road"
         # Ask is open in the panel, and buildings are clickable
         assert page.evaluate("window.askPage.ask.isOpen()")
         assert page.evaluate("window.rsGetInteraction('buildings')")["clickable"] is True

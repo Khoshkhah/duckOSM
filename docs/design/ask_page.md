@@ -19,7 +19,11 @@ The page is the same roadstyle dashboard as `duckosm edit`. It has two more part
 
 Roads and buildings are clickable. A road shows its card beside the table. The card is for roads only, so a click on a building (roadstyle sends
 `rs:select` with `overlay: "buildings"`) runs a query in the data dock: the row of the building with its tags, the number of its walls and of the walls
-that were edited, and its changes from `extra.edits`. There is no popup for a building.
+that were edited, and its changes from `extra.edits`. There is no popup for any item: the page turns every overlay popup off and holds the road popup.
+
+**Asked of roadstyle (2026-11-07, for PR 69):** the data dock's card should also draw the facts of an overlay item, as it does for a road. It skips an
+overlay click now, and a host has no way to put content in the card. Kaveh wants the facts of a clicked item in that card. When roadstyle has it, the
+page moves the pin and the building has its facts in the card too. The row in the table stays: it has the walls and the changes, which the card does not.
 
 ## What the host gives
 
