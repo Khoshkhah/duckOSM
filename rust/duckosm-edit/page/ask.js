@@ -85,6 +85,9 @@
     // ponytail: no cap, so a result of millions of shapes (a county of buildings) is slow in the browser; add a cap or tiles if that comes.
     const SHAPES = "ask-shapes", PURPLE = "#7c4dff", EMPTY = { type: "FeatureCollection", features: [] };
     let shapes = EMPTY, drawn = 0, ticket = 0, shapesOn = true;
+    // is the table shown on the map now (the switch of the dock is On and the dock is open)? The dock keeps the switch in this browser, so after a reload it can start Off
+    // and no event `light` comes: the page asks data.light() each time that it draws, and does not wait for the event only.
+    const lit = () => { try { return data.light ? !!data.light() : true; } catch { return true; } };
     const addShapeLayers = () => {
       const map = window.map, polygon = ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]], point = ["in", ["geometry-type"], ["literal", ["Point", "MultiPoint"]]];
       if (map.getSource(SHAPES)) return;
@@ -97,8 +100,8 @@
     // the map switch of the data dock (On or Off, roadstyle): the shapes show with the table's roads. Off, or a closed dock: the map has its own colours only.
     const showShapes_ = (on) => { shapesOn = on; for (const id of ["ask-shapes-fill", "ask-shapes-line", "ask-shapes-pt"]) if (window.map.getLayer(id)) window.map.setLayoutProperty(id, "visibility", on ? "visible" : "none"); };
     const showShapes = (features) => {
-      shapes = { type: "FeatureCollection", features }; drawn = features.length;
-      addShapeLayers(); window.map.getSource(SHAPES).setData(shapes);
+      shapes = { type: "FeatureCollection", features }; drawn = features.length; shapesOn = lit();
+      addShapeLayers(); window.map.getSource(SHAPES).setData(shapes); showShapes_(shapesOn);
     };
     window.map.on("styledata", () => { if (drawn && !window.map.getSource(SHAPES)) showShapes(shapes.features); });          // a new base map drops the layers
     const bounds = (features) => {
@@ -108,8 +111,10 @@
       return b;
     };
     const drawResult = async (d) => {
+      // A result with the id of a road (edge_id) is lit by roadstyle on the road's own shape: the page draws no line over it (the geometry column of an edges table
+      // is the centre line of the road, and a thin line over the road shows the road twice). The shapes are for what roadstyle cannot light.
       const col = d.columns.find((c) => /^GEOMETRY$/i.test(c.type)), mine = ++ticket;
-      if (!col) { if (drawn) showShapes([]); return; }
+      if (!col || d.columns.some((c) => c.name === "edge_id")) { if (drawn) showShapes([]); return; }
       const name = '"' + col.name.replace(/"/g, '""') + '"';
       const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
       if (mine !== ticket) return;                                  // a newer table came while this one loaded
@@ -135,6 +140,7 @@
         + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
         + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
         + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
+        + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
         + "Never answer that you can only show roads.",
       examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
         "How many walls of each type do the buildings have?", "Show the walls that I changed by hand.", "Draw a bar chart of the km of road in each class."],
@@ -148,7 +154,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapesShown: () => shapesOn };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });

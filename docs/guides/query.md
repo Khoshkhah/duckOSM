@@ -29,7 +29,8 @@ change the data.
 
 A result that has a geometry column is drawn on the map, all its rows: the column `geom` of `driving.nodes` (points) and of `features.buildings`
 (shapes), and `geometry` of `main.building_faces` (lines). The limit of 1000 is for the rows that the table shows. The map shows every row that the query selects. So you can write "Show all
-buildings on the map" or "Show all nodes of the driving network on the map". A new table with no geometry column clears the shapes. The switch **On / Off** in the data dock shows or hides the table on the map, with its roads and
+buildings on the map" or "Show all nodes of the driving network on the map". A result with the column `edge_id` is not drawn this way: roadstyle lights its roads on their own shape, so select `edge_id` for roads. A new table with no
+geometry column clears the shapes. The switch **On / Off** in the data dock shows or hides the table on the map, with its roads and
 its shapes. A closed dock shows nothing on the map.
 
 The table `extra.edits` has the changes of the [fixes file](edit-osm-data.md) (`osm_fixes.yaml` beside the database, or `--fixes`), with the

@@ -42,6 +42,8 @@ geometry of a result itself, with one GeoJSON source and three layers (fill, lin
 - A result with a column of the type `GEOMETRY` is drawn. The page runs the same SQL again, for that column only, with `ST_AsGeoJSON` and no limit.
   The limit of 1000 is for the rows that the table shows, not for the selection: the table has the first 1000 rows and the map has all of them, so
   "show all buildings" draws every building. There is no cap: a result of millions of shapes is slow in the browser.
+- A result with the column `edge_id` is lit by roadstyle on the road's own shape, so the page draws no shape for it. The geometry column of an edges table is the centre
+  line of the road, and a thin line over the road shows the road twice (Kaveh, 2026-11-07: "it shows roads from table in sql in this shape").
 - A new table with no geometry clears the shapes, as the light of roadstyle follows the table.
 - The shapes follow the map switch of the data dock (On or Off, roadstyle PR 73): the event `light` {on}, and `data.light()`, are true while the switch is on and the
   dock is open. Off, or with the dock closed, the layers are hidden, and the map has its own colours only.
