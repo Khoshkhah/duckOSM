@@ -87,6 +87,8 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
   ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
 - **Edit on your computer:** `duckosm edit my_area.duckdb` opens the same panel on a page on your computer, and
   **Build again** builds the area with your fixes ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/#edit-on-your-computer-duckosm-edit)).
+- **Ask on your computer:** `duckosm ask my_area.duckdb` opens the map with an SQL line and Ask (a question in words, answered with SQL). Roads and
+  buildings are clickable, and the table `extra.edits` has your changes ([how](https://khoshkhah.github.io/duckOSM/guides/query/#ask-questions-on-a-page-duckosm-ask)).
 
 ## Exports
 

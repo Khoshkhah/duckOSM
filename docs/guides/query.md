@@ -11,6 +11,25 @@ con.execute("LOAD spatial")                  # for the ST_ functions below
 con.sql("SELECT count(*) FROM driving.edges").show()
 ```
 
+## Ask questions on a page: duckosm ask
+
+```bash
+duckosm ask monaco.duckdb        # then open http://127.0.0.1:8791/
+```
+
+The command opens the map of the database on a page on your computer, with two parts from [roadstyle](https://github.com/Khoshkhah/roadstyle):
+
+- **Ask the data:** write a question in words. The agent writes the SQL, runs it, and answers in a few sentences. It can also colour roads,
+  focus on roads, move the map and draw a chart. Ask uses your own key of a free AI service. The key stays in your browser.
+- **Query the tables:** the data dock. One SQL line over a wide table under the map. The roads of the result light on the map.
+
+Roads and buildings are clickable. A road shows its card beside the table. A building shows its tags. The page does not change the data.
+
+The table `extra.edits` has the changes of the [fixes file](edit-osm-data.md) (`osm_fixes.yaml` beside the database, or `--fixes`), with the
+time of each change. You can ask about the changes and about the data in one question, for example "Which roads did I change, and how many lanes did
+they have?". The columns are `kind` (`object`, `wall`, `turn`, `new_road`), `type`, `osm_id`, `what`, `changed` and `note`. The page reads the file
+again each time that you load it. A change that you have not built yet is in `extra.edits` but not in the other tables.
+
 ## Where the tables are
 
 Each mode has its own schema: `driving.edges`, `walking.edges`, `cycling.edges`, and so on. Always

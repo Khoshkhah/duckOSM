@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 /// and the classes and colours that the editor takes from its host (page/edit.css).
 const SCRIPT: &str = include_str!("../page/edit.js");
 const STYLE: &str = include_str!("../page/edit.css");
+/// The host part of the page of `duckosm ask` (page/ask.js): roadstyle's data dock and Ask, and the changes of the fixes file as a table.
+const ASK_SCRIPT: &str = include_str!("../page/ask.js");
 const MAPLIBRE_JS: &str = roadstyle::assets::text!("vendor/maplibre-gl.js");
 const MAPLIBRE_CSS: &str = roadstyle::assets::text!("vendor/maplibre-gl.css");
 
@@ -31,8 +33,25 @@ fn parquet(db: &mut dyn Db, sql: &str) -> Result<Vec<u8>, String> {
     bytes
 }
 
-/// The page of the open database `db` (the area `name`).
+/// The page of `duckosm edit`: the open database `db` (the area `name`) with the fixes editor.
 pub fn make(db: &mut dyn Db, name: &str) -> Result<String, String> {
+    make_with(db, name, SCRIPT, STYLE)
+}
+
+/// The page of `duckosm ask`: the same map, with roadstyle's data dock and Ask. `extra` is a small database file in the temp folder for the page's
+/// own tables (the changes of the fixes file): DuckDB does not attach an in-memory database next to a read-only one. The file of the area stays read
+/// only, and the lock after this step does not stop a write to `extra`.
+/// ponytail: the file stays in the temp folder after Ctrl+C (a few kB); the next run of the same process id writes it again.
+pub fn make_ask(db: &mut dyn Db, name: &str) -> Result<String, String> {
+    let file = std::env::temp_dir().join(format!("duckosm-ask-{}.duckdb", std::process::id()));
+    for f in [file.clone(), file.with_extension("duckdb.wal")] {
+        let _ = std::fs::remove_file(f);
+    }
+    db.execute(&format!("ATTACH '{}' AS extra (READ_WRITE)", file.display().to_string().replace('\'', "''")))?;
+    make_with(db, name, ASK_SCRIPT, "")
+}
+
+fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str) -> Result<String, String> {
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let catalog = db.texts("SELECT current_database()")?.into_iter().next().flatten().unwrap_or_default();
     let [tq, cq] = d::catalog_sql(&catalog);
@@ -70,7 +89,7 @@ pub fn make(db: &mut dyn Db, name: &str) -> Result<String, String> {
     // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
     // the clicked road in the panel (no tooltip)
     let (o, lk) = look(json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels,
-                             "page_script": SCRIPT, "page_style": STYLE}))?;
+                             "page_script": script, "page_style": style}))?;
     let given = roadstyle::page_options::given_of(&lk, &o.args);
     let roads = roadstyle::read::read_roads(roads, "geometry").map_err(|e| e.to_string())?;
     let features = features.map(roadstyle::read_features).transpose().map_err(|e| e.to_string())?;

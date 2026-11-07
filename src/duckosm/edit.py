@@ -51,14 +51,15 @@ class _Db:
         return f"{Path(db).name} in {time.time() - t0:.0f} s, with {Path(fixes).name}"
 
 
-def serve(db, fixes=None, port: int = 8790):
-    """Serve the page of ``db`` on 127.0.0.1:``port`` until Ctrl+C. ``fixes``: the fixes file (default: osm_fixes.yaml beside ``db``)."""
+def serve(db, fixes=None, port: int = 8790, ask: bool = False):
+    """Serve the page of ``db`` on 127.0.0.1:``port`` until Ctrl+C. ``fixes``: the fixes file (default: osm_fixes.yaml beside ``db``).
+    ``ask``: ``duckosm ask`` (roadstyle's data dock and Ask in place of the editor; docs/design/ask_page.md)."""
     from duckosm import _rust
 
     db = Path(db).resolve()
     fixes = Path(fixes).resolve() if fixes else db.with_name("osm_fixes.yaml")
-    url = _rust.edit(str(db), str(fixes), port, _Db(db))
-    print(f"duckosm edit: {url}  (the fixes file: {fixes}; Ctrl+C stops)", flush=True)
+    url = (_rust.ask if ask else _rust.edit)(str(db), str(fixes), port, _Db(db))
+    print(f"duckosm {'ask' if ask else 'edit'}: {url}  (the fixes file: {fixes}; Ctrl+C stops)", flush=True)
     try:
         while True:
             time.sleep(1)
