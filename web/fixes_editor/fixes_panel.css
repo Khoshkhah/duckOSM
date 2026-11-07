@@ -11,10 +11,6 @@
 #fix-panel .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 #fix-panel .grid2 { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
 #fix-panel code { font-size: 11.5px; overflow-wrap: anywhere; }      /* a long path breaks; a short name goes to the next line whole */
-/* the tabs: the amber dot of edits that are not in the changes, and the number of changes */
-#fix-panel .rs-tab .dot { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: #f59e0b; vertical-align: 1px; }
-#fix-panel .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: #f59e0b; color: #1f1300; font-size: 11px; line-height: 18px; font-weight: 600; }
-#fix-panel .badge:empty { display: none; }
 /* a box of a pane (roadstyle's rs-sec-box has its look only in a card of the panel, not in a frame) */
 #fix-panel .fsec { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 0 0 10px; background: var(--card); }
 #fix-panel .fsec-hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -91,18 +87,14 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel :is(.wallrow, .doorrow, .turn).sel { background: color-mix(in srgb, var(--accent) 26%, var(--bg)); outline: 2px solid var(--accent); outline-offset: -1px; }
 #fix-panel :is(.wallrow, .doorrow, .turn):focus-visible { outline: 2px solid var(--accent); }
 #fix-panel .wallrow .rs-sel { width: 100%; max-width: none; }
-/* roadstyle gives a select box its border only in a card of the panel (.sb-sec[data-rs-card]); the boxes of the editor are .fsec, so the editor
-   gives the border, the same as its text fields */
-#fix-panel .rs-sel-btn { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; min-height: 33px; }
 #fix-panel .gwhy { grid-column: 1 / -1; margin: -2px 0 4px; }
-/* the checks of a form (docs/design/fixes_editor_guards.md): an error is red, with a red edge on its field; a warning is amber and does not block */
-#fix-panel .gerr { grid-column: 1 / -1; margin: -2px 0 4px; color: var(--fix-bad); }
-#fix-panel .gerr.warn, #fix-panel .warn { color: #b45309; }
+/* the checks of a form (docs/design/fixes_editor_guards.md): the line under a field is roadstyle's rs-field-msg (red, amber with .warn, and the field has
+   a red edge with aria-invalid); here only its place in the grid of a form */
+#fix-panel .rs-field-msg { grid-column: 1 / -1; margin: -2px 0 4px; }
+#fix-panel .warn { color: #b45309; }
 #fix-panel .why.bad, #fix-panel #fix-state.bad { color: var(--fix-bad); }
-#fix-panel :is(input, select).invalid { border-color: var(--fix-bad); box-shadow: 0 0 0 1px var(--fix-bad); }
-#fix-panel .other .gerr { margin: 0; }
+#fix-panel .other .rs-field-msg { margin: 0; }
 #fix-panel input:disabled { opacity: 0.55; cursor: not-allowed; }
-#fix-panel button:disabled { opacity: 0.45; cursor: not-allowed; }      /* a button that cannot act now: roadstyle's sb-primary looks the same with and without it */
 #fix-panel .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }   /* the color of the item on the map */
 #fix-panel .legend { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font-size: 11.5px; color: var(--mut); }
 #fix-panel .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }

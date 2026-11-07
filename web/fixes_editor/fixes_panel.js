@@ -244,8 +244,8 @@ export async function initFixesPanel(ctx) {
   // an element of the panel (the frame is in the page only while it is open)
   const $ = (id) => root.querySelector("#" + CSS.escape(id));
   fr.body.innerHTML = MARKUP(ctx.changesNote ? " " + ctx.changesNote : "");
-  // the amber dot of a tab with edits that are not in the changes, and the number of changes on the tab Changes
-  for (const t of TABS) $(`fix-tab-${t}`).insertAdjacentHTML("beforeend", t === "changes" ? ' <span id="fix-n" class="badge"></span>' : '<i class="dot" hidden title="Not added to the changes yet"></i>');
+  // the number of changes on the tab Changes: roadstyle's rs-badge (the class is on while there is a number: the badge has its own display, so `hidden` does not hide it)
+  $("fix-tab-changes").insertAdjacentHTML("beforeend", '<span id="fix-n"></span>');
   fr.addEventListener("tab", (e) => setTab(e.detail.tab));
   root.addEventListener("click", (e) => { if (e.target.closest('a[href="#"]')) e.preventDefault(); });     // the links of the panel act in the panel
   // the bars of the panes go to the frame's bar: they stay in view and never cover the form (Kaveh, 2026-11-06). A bar shows while its place in its pane
@@ -367,7 +367,7 @@ export async function initFixesPanel(ctx) {
   // the reason under a field that a guard closed or narrowed; `gone`: the fields that a guard cleared, { key: [old value, reason] }
   const guardNote = (f, g, gone = cleared) => (gone[f.key] ? `Cleared "${gone[f.key][0]}": ${gone[f.key][1]}` : g?.off.has(f.key) ? g.off.get(f.key) : g?.allow.has(f.key) && f.type === "choice" ? g.allow.get(f.key).reason : "");
   // the line under a field for its error or its warning (paintChecks fills it)
-  const errLine = (key) => `<p class="why gerr" data-err="${esc(key)}" role="alert" hidden></p>`;
+  const errLine = (key) => `<p class="rs-field-msg" data-err="${esc(key)}" role="alert"></p>`;      // roadstyle's line under a field; an empty one does not show
   let cleared = {};                            // the fields of the form that a guard cleared after a choice (guardNote)
   let seen = {};                               // the values of the form when it was drawn: the state before a choice (clearClosed)
   let sureMissing = false;                     // the person pushed Add once for an ID that is not in the area: the second push adds it
@@ -415,9 +415,9 @@ export async function initFixesPanel(ctx) {
     const list = problems(), by = new Map(list.map((p) => [p.key, p]));
     for (const el of $("fix-form").querySelectorAll("[data-err]")) {
       const p = by.get(el.dataset.err);
-      el.hidden = !p; el.textContent = p?.text ?? ""; el.classList.toggle("warn", !!p && !p.block);
+      el.textContent = p?.text ?? ""; el.classList.toggle("warn", !!p && !p.block);
       const input = $(fid(el.dataset.err)) ?? el.previousElementSibling?.querySelector?.("input");
-      if (input) { input.classList.toggle("invalid", !!p?.block); input.setAttribute("aria-invalid", p?.block ? "true" : "false"); }
+      if (input) input.setAttribute("aria-invalid", p?.block ? "true" : "false");           // roadstyle draws the red edge from aria-invalid
     }
     return list;
   }
@@ -845,9 +845,13 @@ export async function initFixesPanel(ctx) {
     paintDots();
     if (open()) { drawSelected(zoom, { turn: name === "turns" && !$("fix-turnsec").hidden ? { via: $("fix-via").value } : null }); drawFaces(); drawNodes(); drawTurnRoads(); drawDoors(); }
   }
-  // an amber dot on the tab that has edits that are not in the changes yet
+  // roadstyle's "not saved" dot (rs-unsaved) on the tab that has edits that are not in the changes yet: the dot is in the tab while it is needed
   function paintDots() {
-    const on = (t, v) => { $(`fix-tab-${t}`).querySelector(".dot").hidden = !v; };
+    const on = (t, v) => {
+      const tab = $(`fix-tab-${t}`), dot = tab.querySelector(".rs-unsaved");
+      if (v && !dot) tab.insertAdjacentHTML("beforeend", '<span class="rs-unsaved" role="img" aria-label="Not saved" title="Not added to the changes yet"></span>');
+      else if (!v && dot) dot.remove();
+    };
     for (const k of EDIT) on(k, dirty(k) > 0);
     on("turns", turnDiffs().length > 0);
     on("new", !!draw && draw.pts.length > 0);
@@ -1450,8 +1454,8 @@ export async function initFixesPanel(ctx) {
     const bad = new Map(newProblems());
     for (const el of $("fix-newform").querySelectorAll("[data-err]")) {
       const x = bad.get(el.dataset.err);
-      el.hidden = !x; el.textContent = x ?? "";
-      $(`fixn-${el.dataset.err}`)?.classList.toggle("invalid", !!x);
+      el.textContent = x ?? "";
+      $(`fixn-${el.dataset.err}`)?.setAttribute("aria-invalid", x ? "true" : "false");
     }
     drawn();
   }
@@ -1697,7 +1701,7 @@ export async function initFixesPanel(ctx) {
   // ---- the numbers on the page
   function sync() {
     const { turns, faces, newWays } = F.counts(doc), n = F.objects(doc).length + turns + faces + newWays;
-    $("fix-n").textContent = n ? String(n) : "";
+    $("fix-n").textContent = n ? String(n) : ""; $("fix-n").className = n ? "rs-badge" : "";
     for (const e of root.querySelectorAll("[data-n]")) e.textContent = n ? ` (${n})` : "";
     $("fix-apply-n").textContent = n ? ` (${plural(n, "change")})` : "";
     paintBar();
