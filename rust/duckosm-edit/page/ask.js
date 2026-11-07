@@ -139,8 +139,48 @@
       roadsBy: (sql, column) => `SELECT DISTINCT edge_id FROM ${main} WHERE "${column}" IN (SELECT "${column}" FROM (${sql}))`,
       sql: main ? `SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS km FROM ${main} GROUP BY highway ORDER BY edges DESC` : "SELECT 1",
     });
-    data.addEventListener("light", (e) => showShapes_(e.detail.on));
-    data.addEventListener("run", (e) => drawResult(e.detail).catch((err) => console.warn("duckosm ask: the shapes did not draw:", err.message)));
+    // ---- a row of the table: its item on the map, and its facts in the card (roadstyle's data dock: the event `row`, data.card(...) and the event `cardclose`).
+    // A road row (the result has edge_id) is selected by roadstyle itself, with its own card. A row that has a geometry column (a node, a building, a wall) is drawn here in
+    // the select look (roadstyle's solid purple), the map zooms to it, and the card has all its values except the geometry. A new selection of roadstyle, a new result and the
+    // close button of the card send `cardclose`: the drawing goes then. The map switch (On or Off) is for the table only: the selected item stays on the map, also Off.
+    const PICK = "ask-pick";
+    let picked = 0;
+    const addPickLayers = () => {
+      const map = window.map, polygon = ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]], point = ["in", ["geometry-type"], ["literal", ["Point", "MultiPoint"]]];
+      if (map.getSource(PICK)) return;
+      map.addSource(PICK, { type: "geojson", data: EMPTY });
+      const layout = { visibility: "visible" };                      // the selected item has no switch: it is in the card, and it stays on the map
+      map.addLayer({ id: "ask-pick-fill", type: "fill", source: PICK, filter: polygon, layout, paint: { "fill-color": PURPLE, "fill-opacity": 0.85 } });
+      map.addLayer({ id: "ask-pick-line", type: "line", source: PICK, filter: ["!", point], layout, paint: { "line-color": PURPLE, "line-width": 6 } });
+      map.addLayer({ id: "ask-pick-pt", type: "circle", source: PICK, filter: point, layout, paint: { "circle-color": PURPLE, "circle-radius": 9, "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
+    };
+    const showPick = (features) => {
+      addPickLayers(); picked = features.length;
+      window.map.getSource(PICK).setData({ type: "FeatureCollection", features });
+    };
+    window.map.on("styledata", () => { if (picked && !window.map.getSource(PICK)) showPick(pickedFeatures); });          // a new base map drops the layers
+    let pickedFeatures = [], rowTicket = 0, lastSql = "";
+    const clearPick = () => { rowTicket++; pickedFeatures = []; if (picked) showPick([]); };
+    data.addEventListener("light", (e) => showShapes_(e.detail.on));                  // the switch is for the table (the shapes of the result), not for the selected item
+    data.addEventListener("cardclose", clearPick);
+    data.addEventListener("run", (e) => { lastSql = e.detail.sql; drawResult(e.detail).catch((err) => console.warn("duckosm ask: the shapes did not draw:", err.message)); });
+    data.addEventListener("row", async (e) => {
+      const { columns, row } = e.detail, mine = ++rowTicket;
+      const g = columns.findIndex((c) => /^GEOMETRY$/i.test(c.type));
+      if (columns.some((c) => c.name === "edge_id") || g < 0 || row[g] == null) { clearPick(); return; }      // a road: roadstyle selects it; no geometry: nothing to draw
+      const wkt = String(row[g]).replace(/'/g, "''");
+      const { rows } = await query(`SELECT ST_AsGeoJSON(ST_GeomFromText('${wkt}')) AS g`);
+      if (mine !== rowTicket) return;                                 // another row was clicked while this one loaded
+      let geometry; try { geometry = JSON.parse(rows[0][0]); } catch { return; }
+      pickedFeatures = [{ type: "Feature", properties: {}, geometry }];
+      showPick(pickedFeatures);
+      const b = bounds(pickedFeatures);
+      if (b) window.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 19, duration: 600 });
+      const named = columns.findIndex((c) => c.name === "name" && row[columns.indexOf(c)] != null), idCol = columns.findIndex((c) => /(^|_)id$/.test(c.name));
+      const table = (lastSql.match(/\bFROM\s+([\w."]+)/i) || [])[1]?.replace(/"/g, "") ?? "row";
+      data.card({ title: named >= 0 ? String(row[named]) : `${table} ${idCol >= 0 ? row[idCol] : e.detail.index + 1}`, chip: table,
+        rows: columns.map((c, i) => [c.name.replace(/_/g, " "), i === g ? null : row[i]]).filter(([, v]) => v != null), id: idCol >= 0 ? String(row[idCol]) : undefined });
+    });
     const ask = askPanel({
       data, dialect: "DuckDB",
       about: "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
@@ -165,7 +205,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), shapesShown: lit };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });

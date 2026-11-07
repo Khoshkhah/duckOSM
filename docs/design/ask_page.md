@@ -45,6 +45,11 @@ geometry of a result itself, with one GeoJSON source and three layers (fill, lin
 - The colour of a shape is its column `color` (a CSS colour; one that CSS does not know is left out), else its `face_type` in the colours of the editor's walls
   (`FACE_COLORS`), else roadstyle's purple. Asked "show the walls with a colour for each face_type", Ask answered that it had no tool for the colours of shapes
   (Kaveh, 2026-11-07); now it needs none, and the `about` text tells it about `face_type` and `color`.
+- A row of the table (roadstyle's data dock: the event `row`, `data.card(...)` and the event `cardclose`, PR 81): a row with a geometry column is drawn in the select look
+  (a source `ask-pick`, solid purple), the map zooms to it, and the card has the title (its `name`, else the table and its id), the table as the chip, all the values
+  except the geometry, and its id with Copy id. `cardclose` (the close button, a new selection of roadstyle, a new result) removes the drawing. The map switch (On or Off) is for the table only: Off, the shapes of the result go, and the selected item stays on the map, with its card
+  (Kaveh, 2026-11-07). A road row (the result has `edge_id`) is selected by roadstyle with its own card, and the page draws nothing. Kaveh, 2026-11-07: "each selecting from table must show that item on map also shows
+  its info in card info in sql panel".
 - A result with the column `edge_id` is lit by roadstyle on the road's own shape, so the page draws no shape for it. The geometry column of an edges table is the centre
   line of the road, and a thin line over the road shows the road twice (Kaveh, 2026-11-07: "it shows roads from table in sql in this shape").
 - A new table with no geometry clears the shapes, as the light of roadstyle follows the table.

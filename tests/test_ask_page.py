@@ -90,6 +90,55 @@ def test_off_switch_shows_no_shapes_after_a_reload(monaco, page_url):
         browser.close()
 
 
+def test_a_row_of_the_table_selects_its_item(monaco, page_url):
+    """A row of a result with a geometry column (a node, a building) is drawn on the map in the select look, the map zooms to it, and its facts are in the card of the
+    data dock; the close button of the card removes the drawing. A road row is selected by roadstyle, not by the page."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(page_url)
+        page.wait_for_function("window.askPage", timeout=60_000)
+        page.evaluate("window.askPage.data.open()")
+        run = "(s) => window.askPage.data.run(s)"
+        rows = "#rs-dock tbody tr"
+        card_text = "() => (document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden) ? document.querySelector('.rs-dd-card').innerText : ''"
+        # a node
+        page.evaluate(run, "SELECT node_id, geom FROM driving.nodes WHERE node_id > 0 ORDER BY node_id")
+        page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
+        page.locator(rows).nth(1).click()
+        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
+        node_id = page.evaluate("document.querySelectorAll('#rs-dock tbody tr')[1].cells[0].innerText.replace(/\\s/g, '')")
+        assert node_id in page.evaluate(card_text).replace(" ", "").replace("\u00a0", ""), page.evaluate(card_text)
+        assert page.locator(".maplibregl-popup").count() == 0
+        page.locator(".rs-dd-rc-x").click()                                   # the close button of the card
+        page.wait_for_function("window.askPage.picked() === 0", timeout=15_000)
+        # a building, with its name as the title of the card
+        page.evaluate(run, "SELECT osm_id, name, geom FROM features.buildings WHERE name IS NOT NULL ORDER BY name")
+        page.wait_for_function("document.querySelectorAll('#rs-dock tbody tr').length > 1", timeout=30_000)
+        name = page.evaluate("document.querySelectorAll('#rs-dock tbody tr')[0].cells[1].innerText")
+        page.locator(rows).nth(0).click()
+        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
+        assert name in page.evaluate(card_text), (name, page.evaluate(card_text))
+        # the map switch is for the table only: Off, the shapes of the result go, and the selected item stays on the map, with its card
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")
+        page.wait_for_function("window.map.getLayoutProperty('ask-shapes-fill', 'visibility') === 'none'", timeout=15_000)
+        assert page.evaluate("window.map.getLayoutProperty('ask-pick-fill', 'visibility')") == "visible" and page.evaluate("window.askPage.picked()") == 1
+        page.locator(rows).nth(2).click()
+        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
+        assert page.evaluate("window.map.getLayoutProperty('ask-pick-fill', 'visibility')") == "visible", "Off: the selected item is still on the map"
+        assert page.evaluate(card_text), "Off: the card still has its facts"
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")                  # On again
+        # a road row: roadstyle selects the road and draws its card; the page has no drawing of its own
+        page.evaluate(run, "SELECT edge_id, name FROM driving.edges ORDER BY edge_id LIMIT 5")
+        page.wait_for_function("document.querySelectorAll('#rs-dock tbody tr').length === 5", timeout=30_000)
+        page.locator(rows).nth(0).click()
+        page.wait_for_function("window.askPage.picked() === 0", timeout=15_000)
+        assert not errors, errors
+        browser.close()
+
+
 def test_ask_page(monaco, page_url):
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()

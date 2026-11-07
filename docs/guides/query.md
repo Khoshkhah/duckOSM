@@ -31,6 +31,8 @@ A result that has a geometry column is drawn on the map, all its rows: the colum
 (shapes), and `geometry` of `main.building_faces` (lines). The limit of 1000 is for the rows that the table shows. The map shows every row that the query selects. So you can write "Show all
 buildings on the map" or "Show all nodes of the driving network on the map". The shapes have colours: a result with the column `face_type` (the walls) is coloured by it, with the colours of the editor (front green, back red, side grey, party
 wall purple, court cyan). For other colours, select a column `color` with a CSS colour, for example `CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color`.
+A click on a row of the table selects the item: a row with a geometry column (a node, a building, a wall) is drawn on the map in the select look, the map zooms to it,
+and the card beside the table has all the values of the row. The ✕ of the card removes the drawing. A row of a road is selected by roadstyle, with its own card.
 A result with the column `edge_id` is not drawn this way: roadstyle lights its roads on their own shape, so select `edge_id` for roads. A new table with no
 geometry column clears the shapes. The switch **On / Off** in the data dock shows or hides the table on the map, with its roads and
 its shapes. A closed dock shows nothing on the map.
