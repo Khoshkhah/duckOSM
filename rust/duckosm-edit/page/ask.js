@@ -142,14 +142,14 @@
     // ---- a row of the table: its item on the map, and its facts in the card (roadstyle's data dock: the event `row`, data.card(...) and the event `cardclose`).
     // A road row (the result has edge_id) is selected by roadstyle itself, with its own card. A row that has a geometry column (a node, a building, a wall) is drawn here in
     // the select look (roadstyle's solid purple), the map zooms to it, and the card has all its values except the geometry. A new selection of roadstyle, a new result and the
-    // close button of the card send `cardclose`: the drawing goes then.
+    // close button of the card send `cardclose`: the drawing goes then. The map switch (On or Off) is for the table only: the selected item stays on the map, also Off.
     const PICK = "ask-pick";
     let picked = 0;
     const addPickLayers = () => {
       const map = window.map, polygon = ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]], point = ["in", ["geometry-type"], ["literal", ["Point", "MultiPoint"]]];
       if (map.getSource(PICK)) return;
       map.addSource(PICK, { type: "geojson", data: EMPTY });
-      const layout = { visibility: lit() ? "visible" : "none" };
+      const layout = { visibility: "visible" };                      // the selected item has no switch: it is in the card, and it stays on the map
       map.addLayer({ id: "ask-pick-fill", type: "fill", source: PICK, filter: polygon, layout, paint: { "fill-color": PURPLE, "fill-opacity": 0.85 } });
       map.addLayer({ id: "ask-pick-line", type: "line", source: PICK, filter: ["!", point], layout, paint: { "line-color": PURPLE, "line-width": 6 } });
       map.addLayer({ id: "ask-pick-pt", type: "circle", source: PICK, filter: point, layout, paint: { "circle-color": PURPLE, "circle-radius": 9, "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
@@ -157,12 +157,11 @@
     const showPick = (features) => {
       addPickLayers(); picked = features.length;
       window.map.getSource(PICK).setData({ type: "FeatureCollection", features });
-      for (const id of ["ask-pick-fill", "ask-pick-line", "ask-pick-pt"]) window.map.setLayoutProperty(id, "visibility", lit() ? "visible" : "none");
     };
     window.map.on("styledata", () => { if (picked && !window.map.getSource(PICK)) showPick(pickedFeatures); });          // a new base map drops the layers
     let pickedFeatures = [], rowTicket = 0, lastSql = "";
     const clearPick = () => { rowTicket++; pickedFeatures = []; if (picked) showPick([]); };
-    data.addEventListener("light", (e) => { showShapes_(e.detail.on); for (const id of ["ask-pick-fill", "ask-pick-line", "ask-pick-pt"]) if (window.map.getLayer(id)) window.map.setLayoutProperty(id, "visibility", e.detail.on ? "visible" : "none"); });
+    data.addEventListener("light", (e) => showShapes_(e.detail.on));                  // the switch is for the table (the shapes of the result), not for the selected item
     data.addEventListener("cardclose", clearPick);
     data.addEventListener("run", (e) => { lastSql = e.detail.sql; drawResult(e.detail).catch((err) => console.warn("duckosm ask: the shapes did not draw:", err.message)); });
     data.addEventListener("row", async (e) => {

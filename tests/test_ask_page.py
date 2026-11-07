@@ -121,6 +121,15 @@ def test_a_row_of_the_table_selects_its_item(monaco, page_url):
         page.locator(rows).nth(0).click()
         page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
         assert name in page.evaluate(card_text), (name, page.evaluate(card_text))
+        # the map switch is for the table only: Off, the shapes of the result go, and the selected item stays on the map, with its card
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")
+        page.wait_for_function("window.map.getLayoutProperty('ask-shapes-fill', 'visibility') === 'none'", timeout=15_000)
+        assert page.evaluate("window.map.getLayoutProperty('ask-pick-fill', 'visibility')") == "visible" and page.evaluate("window.askPage.picked()") == 1
+        page.locator(rows).nth(2).click()
+        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
+        assert page.evaluate("window.map.getLayoutProperty('ask-pick-fill', 'visibility')") == "visible", "Off: the selected item is still on the map"
+        assert page.evaluate(card_text), "Off: the card still has its facts"
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")                  # On again
         # a road row: roadstyle selects the road and draws its card; the page has no drawing of its own
         page.evaluate(run, "SELECT edge_id, name FROM driving.edges ORDER BY edge_id LIMIT 5")
         page.wait_for_function("document.querySelectorAll('#rs-dock tbody tr').length === 5", timeout=30_000)
