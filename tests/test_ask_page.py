@@ -68,6 +68,28 @@ def page_url(monaco):
     proc.wait(10)
 
 
+def test_off_switch_shows_no_shapes_after_a_reload(monaco, page_url):
+    """The map switch of the data dock is kept in the browser, so a page can start Off, and no event `light` comes. Off, the shapes of a result are not drawn."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        ctx = browser.new_context()
+        ctx.add_init_script("try { localStorage.setItem('rs-data-light:/', '0'); } catch (e) {}")
+        page = ctx.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(page_url)
+        page.wait_for_function("window.askPage", timeout=60_000)
+        page.evaluate("window.askPage.data.open()")
+        page.evaluate("(s) => window.askPage.data.run(s)", "SELECT node_id, geom FROM driving.nodes")
+        page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
+        assert page.evaluate("window.askPage.data.light()") is False
+        assert page.evaluate("window.map.getLayoutProperty('ask-shapes-pt', 'visibility')") == "none", "the switch is Off: no shapes on the map"
+        page.evaluate("document.querySelector('.rs-dd-light input').click()")
+        page.wait_for_function("window.map.getLayoutProperty('ask-shapes-pt', 'visibility') === 'visible'", timeout=10_000)
+        assert not errors, errors
+        browser.close()
+
+
 def test_ask_page(monaco, page_url):
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
@@ -96,6 +118,7 @@ def test_ask_page(monaco, page_url):
             counted = page.evaluate(q, "SELECT count(*) FROM (" + sql + ")")["rows"][0][0]
             assert page.evaluate("window.askPage.shapes()") == int(counted), (sql, counted)
         # the map switch of the data dock (On or Off): the shapes show with it, and a closed dock shows nothing on the map
+        page.evaluate("window.askPage.data.open()")
         page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")
         page.wait_for_function("window.askPage.shapes() > 1000 && window.askPage.shapesShown()", timeout=30_000)
         vis = "() => window.map.getLayoutProperty('ask-shapes-pt', 'visibility')"
