@@ -1,6 +1,6 @@
-"""``duckosm edit`` in a browser (docs/design/edit_page.md): the page of a Monaco build, a change of a road saved in osm_fixes.yaml, the box
-"This road is in your changes" when the road is picked again, and Build again with the file. Headless Chromium (Playwright); the test
-skips itself without Playwright and its browser. The map's base layers come from the internet."""
+"""``duckosm edit`` in a browser (docs/design/edit_page.md): the page of a Monaco build, the roads in roadstyle's highlight sets, a change of a
+road saved in osm_fixes.yaml, the box "This road is in your changes" when the road is picked again, and Build again with the file. Headless
+Chromium (Playwright); the test skips itself without Playwright and its browser. The map's base layers come from the internet."""
 import os
 import re
 import socket
@@ -17,6 +17,10 @@ from duckosm import Config, DuckOSM
 pw = pytest.importorskip("playwright.sync_api")
 ROOT = Path(__file__).resolve().parents[1]
 ROAD = 503462470                      # a road of the Monaco sample (docs/design/fixes_editor.md)
+BLUE, AMBER = "#2563eb", "#f59e0b"    # the sets fix-sel and fix-edits (ROAD_SETS of fixes_panel.js)
+# the colour of the highlight set on each map row of the road (the feature state rs_hl that roadstyle's road layer reads)
+_LIT = """(id) => window.rsQuery((p) => Number(p.osm_id) === id).map((row) => { const l = window.map.getLayer("roads-simple") ?? window.map.getLayer("roads-fill");
+    return window.map.getFeatureState({source: l.source, sourceLayer: l.sourceLayer, id: row}).rs_hl ?? null; })"""
 
 
 @pytest.fixture(scope="module")
@@ -89,6 +93,9 @@ def test_edit_save_box_and_build(monaco, page_url):
         # the dashboard's own panel and toolbox are there, with the editor in the panel
         assert page.locator("#sb .sb-top").is_visible() and page.locator("#fix-tabs").is_visible()
         _pick_road(page, ROAD)
+        # the picked road is blue on the map's own road rows (the set fix-sel), and the editor's own line layer has nothing of it
+        page.wait_for_function(f"({_LIT})({ROAD}).every((c) => c === '{BLUE}')", timeout=10_000)
+        assert page.evaluate("window.fixesPanel.drawn()")["sel"] == 0
         page.fill("#fixf-lanes", "3")
         page.click("#fix-save")
         for _ in range(50):
@@ -100,6 +107,8 @@ def test_edit_save_box_and_build(monaco, page_url):
         assert re.search(r"changed: '\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d'", text), "each record has its time"
         # the road again: the box first, and the form waits
         page.click("#fix-unselect")
+        # an edited road is amber when it is not picked (the set fix-edits)
+        page.wait_for_function(f"({_LIT})({ROAD}).every((c) => c === '{AMBER}')", timeout=10_000)
         _pick_road(page, ROAD)
         box = page.locator("#fix-inchg")
         box.wait_for(state="visible")
@@ -201,4 +210,21 @@ def test_phone(monaco, page_url):
         right = page.evaluate("document.getElementById('fix-tabs').getBoundingClientRect().right")
         assert right <= 390, right
         assert not errors, errors
+        browser.close()
+
+
+def test_host_without_road_rows(monaco, page_url):
+    """A host that does not give roadRows: the picked road is drawn by the editor's own line layer, not by a highlight set."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        ctx = browser.new_context()
+        # the page has its script inline (rust/duckosm-edit/src/page.rs): the page without roadRows in the editor's ctx
+        ctx.route(page_url, lambda route: route.fulfill(response=(r := route.fetch()), body=r.text().replace("roadIdOfRow, roadRows,", "roadIdOfRow,")))
+        page = ctx.new_page()
+        page.goto(page_url)
+        page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
+        _pick_road(page, ROAD)
+        page.wait_for_function("window.fixesPanel.drawn().sel > 0", timeout=10_000)
+        assert page.evaluate("window.fixesPanel.drawn()")["lit"]["fix-sel"] == 0
+        assert page.evaluate(f"({_LIT})({ROAD})") == [None] * 2
         browser.close()

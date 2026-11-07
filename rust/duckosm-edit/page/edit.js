@@ -38,6 +38,8 @@
       loadSpatial: async () => {},                                    // the server loaded it
       query: async (sql) => {
         const rows = await (await api("query", { method: "POST", body: sql })).json();
+        // a JSON column (ST_AsGeoJSON) is an object in the server's rows; DuckDB-Wasm's Arrow table gives it as text, and the editor parses the text
+        for (const o of rows) for (const k in o) if (o[k] !== null && typeof o[k] === "object" && !Array.isArray(o[k])) o[k] = JSON.stringify(o[k]);
         return { toArray: () => rows.map((o) => ({ toJSON: () => o })) };
       },
     };
@@ -58,6 +60,13 @@
       status(now ? `${now} ${msg}` : msg, now ? 10000 : 2500);
     };
     const roadIdOfRow = (row) => window.rsGetProps?.([row])?.[0]?.osm_id ?? window.RS_SIDE?.props?.[row]?.osm_id;
+    // the rows of the map's roads of an OSM way (the highlight sets of the editor): an index of the road table, made once; rsQuery when the page has no RS_SIDE
+    let byWay = null;
+    const roadRows = (id) => {
+      const props = window.RS_SIDE?.props;
+      if (!byWay && props?.length) { byWay = new Map(); props.forEach((p, i) => { const k = Number(p?.osm_id); byWay.has(k) ? byWay.get(k).push(i) : byWay.set(k, [i]); }); }
+      return byWay ? byWay.get(Number(id)) ?? [] : window.rsQuery?.((p) => Number(p.osm_id) === Number(id)) ?? [];
+    };
     async function onBuild() {
       await queue;
       const b = $("fix-apply");
@@ -73,7 +82,7 @@
         b.disabled = false; b.classList.remove("busy");
       }
     }
-    const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, areaKey: () => "edit:" + info.db,
+    const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, roadRows, areaKey: () => "edit:" + info.db,
       onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</code> at once.` });
     let fileText = "";
     if (info.exists) {

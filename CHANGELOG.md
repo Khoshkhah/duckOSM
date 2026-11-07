@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor
+  parses text. `duck.query` of the page now gives such a column as text. The selected object, the changes and the walls show again.
+
+### Changed
+
+- **The fixes editor colours the roads with roadstyle's highlight sets** (`docs/design/fixes_editor.md`). A new optional hook,
+  `roadRows(osmId)`, gives the map's rows of an OSM way. With it, the picked road is blue, the changes are amber, the deleted roads
+  are red, the roads that leave a junction are green and the road under the pointer in the Turn list is dark, on the road's own fill
+  at the road's width. Without it, the editor's own line layers stay. `duckosm edit` gives the hook. The roadstyle pin of
+  `duckosm-edit` moves to `e1b0617a` (roadstyle #58, #59, #60).
+
 ## 0.7.0 (2026-11-06)
 
 The Rust engine is the default and is in the wheel (wheels for 5 systems). `duckosm edit` opens the fixes editor on a page on your computer. The fixes editor shows a box for an object that is already in your changes.

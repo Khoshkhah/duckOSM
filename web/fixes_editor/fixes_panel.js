@@ -1,7 +1,8 @@
 // The fixes editor of duckOSM ("Edit OSM data", docs/design/fixes_editor.md, the user guide docs/guides/edit-osm-data.md). The rules are data (fixes.js:
 // `doc`); this file holds the panel: six tabs: Road, Building and Node (one tag editor for the three, with its own selected object and draft in each tab; the
 // fields are in the sections of presets.json), Turn (the turn rules), New road (draw a road) and Changes (the list, undo, and the one Build button). Each tab has
-// an "Add to changes" button: nothing is in the rules before it. The map layers: an edited object is amber, the selected one is blue.
+// an "Add to changes" button: nothing is in the rules before it. On the map an edited object is amber, the selected one is blue. A road of the map gets the
+// colour from roadstyle's highlight sets (ROAD_SETS); a building, a node, a junction and a new road from the editor's own layers.
 // initFixesPanel(ctx) draws the panel in roadstyle's editor frame (ctx.frame: the host's panel and back button) and returns what the host page calls: load(),
 // text(), open(), close(), restore(), rebuilt(). The host page gives what it owns in `ctx` (README.md).
 import * as F from "./fixes.js";
@@ -227,6 +228,10 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 // pointer on a wall (a phone), the selected wall. The map filter of the number (fix-faces-label) and of the lit wall (fix-faces-hover, -glow).
 export function wallShown(hover, selected) { return hover ?? selected ?? ""; }
 export const wallFilter = (key) => ["==", ["coalesce", ["get", "k"], ""], key || "-"];
+
+// the roads of the map that the editor lights with roadstyle's highlight sets (rsHighlight(rows, {set, color})), with the host's roadRows. The order is the
+// order of the sets: a road in two sets has the colour of the later set.
+const ROAD_SETS = [["fix-edits", AMBER], ["fix-gone", DELETED], ["fix-turn-out", TURN_OUT], ["fix-turn-hover", "#111827"], ["fix-sel", BLUE]];
 
 export async function initFixesPanel(ctx) {
   const { duck, map, status, yaml } = ctx;
@@ -999,7 +1004,12 @@ export async function initFixesPanel(ctx) {
   }
   function paintTurnSel() {
     for (const row of $("fix-out").querySelectorAll(".turn")) row.classList.toggle("sel", Number(row.dataset.to) === turnSel);
-    if (map.getLayer("fix-turn-hl")) map.setFilter("fix-turn-hl", ["==", ["get", "id"], turnSel ?? -1]);
+    turnMark(turnSel);
+  }
+  // the road of the Turn list under the pointer, else the picked one: dark on the map (null: none)
+  function turnMark(id) {
+    if (hl) light("fix-turn-hover", id == null ? [] : ctx.roadRows(id) ?? []);
+    else if (map.getLayer("fix-turn-hl")) map.setFilter("fix-turn-hl", ["==", ["get", "id"], id ?? -1]);
   }
   // `keep`: the rules that the person chose and did not add stay, when the list is of the same road and junction (a tab change, a change of the rules)
   async function outgoing({ keep = true } = {}) {
@@ -1097,6 +1107,29 @@ export async function initFixesPanel(ctx) {
     turnSel = null; outgoing(); drawSelected(false, { turn: { via: $("fix-via").value } }); };
 
   // ---- the map: edited objects are amber, the selected object is blue
+  // The roads of the map are in roadstyle's highlight sets (ROAD_SETS): the colour on the road's own fill, at the road's width at every zoom. The host's
+  // roadRows(osmId) gives the rows of a way. A host without roadRows gets the editor's line layers (fix-sel, fix-turn, fix-edits) for the roads too.
+  const hl = typeof ctx.roadRows === "function" && typeof window.rsHighlight === "function";
+  const lit = new Map(ROAD_SETS.map(([s]) => [s, []]));             // set -> its rows now
+  // a new set of rows; the sets after it are set again, so that the order of ROAD_SETS stays the order of roadstyle's sets (the later set wins)
+  function light(set, rows) {
+    lit.set(set, rows);
+    for (const [s, color] of ROAD_SETS.slice(ROAD_SETS.findIndex(([x]) => x === set))) window.rsHighlight(lit.get(s), { set: s, color });
+  }
+  // the lines among `feats` that are roads of the map (roadRows finds the rows of the way) go into the sets `sets` (setOf(f) picks the set); the rest
+  // stays for the editor's own layer: a building, a node, a junction, a new road (road: 1). No roadRows: all stay.
+  function roadsLit(feats, sets, setOf = () => sets[0]) {
+    if (!hl) return feats;
+    const rows = new Map(sets.map((s) => [s, []])), onMap = new Map();      // onMap: way id -> the map has its rows
+    const rest = feats.filter((f) => {
+      const id = f.properties.id;
+      if (f.properties.road || !/LineString/.test(f.geometry?.type ?? "") || !whole(id)) return true;
+      if (!onMap.has(id)) { const r = ctx.roadRows(id) ?? []; onMap.set(id, r.length > 0); rows.get(setOf(f)).push(...r); }
+      return !onMap.get(id);
+    });
+    for (const s of sets) light(s, rows.get(s));
+    return rest;
+  }
   const EMPTY = { type: "FeatureCollection", features: [] };
   // the switch "Changes on the map" of the Changes tab (roadstyle's two-way switch, rs-seg): Hide takes the changes off the map (amber, the 3D
   // buildings, the amber walls); the selection of a tab stays
@@ -1343,7 +1376,8 @@ export async function initFixesPanel(ctx) {
     if (via.length) for (const r of await safe(`SELECT node_id AS id, ST_AsGeoJSON(geom) AS g FROM driving.nodes WHERE node_id IN (${via.join(",")})`)) { try { feats.push({ type: "Feature", properties: { turn: 1 }, geometry: geoOf(r.g) }); } catch { /* no geometry */ } }
     const solids = await extrusions();
     if (my === mapToken) {
-      map.getSource("fix-edits")?.setData({ type: "FeatureCollection", features: feats }); drawnCount.edits = feats.length;
+      const rest = roadsLit(feats, ["fix-edits", "fix-gone"], (f) => (f.properties.d ? "fix-gone" : "fix-edits"));
+      map.getSource("fix-edits")?.setData({ type: "FeatureCollection", features: rest }); drawnCount.edits = rest.length;
       map.getSource("fix-3d")?.setData({ type: "FeatureCollection", features: solids }); drawnCount.heights = solids.map((f) => f.properties.h);
     }
   }
@@ -1359,6 +1393,7 @@ export async function initFixesPanel(ctx) {
         .map((r) => { try { return { type: "Feature", properties: { id: Number(r.id) }, geometry: geoOf(r.g) }; } catch { return null; } }).filter(Boolean);
     }
     if (my !== turnToken) return;
+    feats = roadsLit(feats, ["fix-turn-out"]);
     map.getSource("fix-turn")?.setData({ type: "FeatureCollection", features: feats });
     drawnCount.turn = feats.length;
   }
@@ -1366,8 +1401,8 @@ export async function initFixesPanel(ctx) {
   const pickTurn = (row) => { if (!row) return; turnSel = turnSel === Number(row.dataset.to) ? null : Number(row.dataset.to); paintTurnSel(); if (turnSel != null) reveal(row); };
   $("fix-out").addEventListener("click", (e) => { if (!e.target.closest("select, button")) pickTurn(e.target.closest(".turn")); });
   $("fix-out").addEventListener("keydown", (e) => { if (e.target.classList?.contains("turn") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pickTurn(e.target); } });
-  $("fix-out").addEventListener("mouseover", (e) => { const r = e.target.closest(".turn"); if (r && map.getLayer("fix-turn-hl")) map.setFilter("fix-turn-hl", ["==", ["get", "id"], Number(r.dataset.to)]); });
-  $("fix-out").addEventListener("mouseout", (e) => { if (!e.relatedTarget?.closest?.(".turn") && map.getLayer("fix-turn-hl")) map.setFilter("fix-turn-hl", ["==", ["get", "id"], turnSel ?? -1]); });
+  $("fix-out").addEventListener("mouseover", (e) => { const r = e.target.closest(".turn"); if (r) turnMark(Number(r.dataset.to)); });
+  $("fix-out").addEventListener("mouseout", (e) => { if (!e.relatedTarget?.closest?.(".turn")) turnMark(turnSel); });
 
   let selToken = 0;
   async function drawSelected(zoom, { turn = null } = {}) {
@@ -1375,21 +1410,22 @@ export async function initFixesPanel(ctx) {
     ensureLayers();
     let feats = [];
     if (!open()) {                                    // the panel is closed: nothing is selected on the map
-      map.getSource("fix-sel")?.setData({ type: "FeatureCollection", features: [] }); drawnCount.sel = 0;
+      map.getSource("fix-sel")?.setData({ type: "FeatureCollection", features: [] }); drawnCount.sel = 0; roadsLit([], ["fix-sel"]);
       return;
     }
     if (turn) {
       const from = whole($("fix-from").value), feat = (g, props) => { try { return { type: "Feature", properties: props, geometry: geoOf(g) }; } catch { return null; } };
       const road = from ? await safe(`SELECT ST_AsGeoJSON(geometry) AS g FROM driving.edges WHERE osm_id = ${from}`) : [];
       const junction = await safe(`SELECT ST_AsGeoJSON(geom) AS g FROM driving.nodes WHERE node_id = ${Number(turn.via)}`);
-      feats = [...road.map((r) => feat(r.g, {})), ...junction.map((r) => feat(r.g, { j: 1 }))].filter(Boolean);
+      feats = [...road.map((r) => feat(r.g, { id: from })), ...junction.map((r) => feat(r.g, { j: 1 }))].filter(Boolean);
     } else if (sel && EDIT.includes(current)) feats = await shapes([{ type: sel.type, id: sel.id }]);
     else if (current === "new" && editNew != null) {
       const w = F.findNewWay(doc, editNew), line = w ? await newWayLine(w) : [];
-      if (line.length > 1) feats = [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } }];
+      if (line.length > 1) feats = [{ type: "Feature", properties: { road: 1 }, geometry: { type: "LineString", coordinates: line } }];
     }
     if (my !== selToken) return;
-    map.getSource("fix-sel")?.setData({ type: "FeatureCollection", features: feats }); drawnCount.sel = feats.length;
+    const rest = roadsLit(feats, ["fix-sel"]);                // `feats` stays whole for the zoom
+    map.getSource("fix-sel")?.setData({ type: "FeatureCollection", features: rest }); drawnCount.sel = rest.length;
     if (zoom && feats.length) {
       const b = new maplibregl.LngLatBounds();
       const add = (c) => (typeof c[0] === "number" ? b.extend(c) : c.forEach(add));
@@ -1732,5 +1768,5 @@ export async function initFixesPanel(ctx) {
   $("fix-apply").onclick = () => ctx.onBuild?.();
   addEventListener("beforeunload", (e) => { if (pendingList().length) e.preventDefault(); });          // the host page builds again (it reads text())
   setTab("road"); sync();
-  return { text, load, restore, open: openFrom, close, isOpen: open, rebuilt, select, tab: setTab, drawn: () => ({ ...drawnCount }), count: () => F.objects(doc).length + (doc.turn_restrictions ?? []).length + F.faceEdits(doc).length + F.newWays(doc).length };
+  return { text, load, restore, open: openFrom, close, isOpen: open, rebuilt, select, tab: setTab, drawn: () => ({ ...drawnCount, lit: Object.fromEntries([...lit].map(([s, r]) => [s, r.length])) }), count: () => F.objects(doc).length + (doc.turn_restrictions ?? []).length + F.faceEdits(doc).length + F.newWays(doc).length };
 }
