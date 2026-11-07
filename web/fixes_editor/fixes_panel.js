@@ -832,7 +832,7 @@ export async function initFixesPanel(ctx) {
     if (name !== current) clearMapSelection();
     if (EDIT.includes(name) && name !== kind) switchKind(name);
     current = name;
-    paintHover();
+    paintMapHover();
     fr.tab(name);
     for (const id of new Set(Object.values(PANE))) $(id).hidden = id !== PANE[name];
     if (EDIT.includes(name)) {
@@ -1727,7 +1727,7 @@ export async function initFixesPanel(ctx) {
     catch (e) { status("The fixes file is not valid: " + e.message.split("\n")[0], 8000); }
   }
   // roadstyle's own map interaction while the editor is open (roadstyle's public functions only): no road popup (rs.holdPopup) and no select look
-  // (rs.holdSelectLook: rs:select still comes, and each tab draws its own selection). The hover is on the objects of the tab only (paintHover).
+  // (rs.holdSelectLook: rs:select still comes, and each tab draws its own selection). The hover is on the objects of the tab only (paintMapHover).
   let buildingsWere = null;
   function rsInteraction(on) {
     window.rs?.holdPopup?.("fixes-editor", on);
@@ -1737,12 +1737,12 @@ export async function initFixesPanel(ctx) {
       if (on) buildingsWere ??= now;
       else if (buildingsWere) { window.rsSetInteraction("buildings", buildingsWere); buildingsWere = null; }
     }
-    paintHover();
+    paintMapHover();
   }
   // the hover of a tab is on the objects of that tab (Kaveh, 2026-11-06): the roads in the Road and Turn tabs, the buildings in the Building tab, and
   // nothing of roadstyle's in the Node, New road and Changes tabs (the editor's own layers, such as the node dots, have their own hover). A click on a
   // road still sends rs:select in every tab (rs.holdHover); the buildings are clickable in the Building tab only (rsSetInteraction).
-  function paintHover() {
+  function paintMapHover() {
     const on = open();
     window.rs?.holdHover?.("fixes-editor", on && current !== "road" && current !== "turns");
     if (buildingsWere) window.rsSetInteraction("buildings", { clickable: on && current === "building", popup: false });
