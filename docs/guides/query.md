@@ -23,6 +23,8 @@ The command opens the map of the database on a page on your computer, with two p
   focus on roads, move the map and draw a chart. Ask uses your own key of a free AI service. The key stays in your browser.
 - **Query the tables:** the data dock. One SQL line over a wide table under the map. The roads of the result light on the map.
 
+[Questions to ask the AI agent](ask-questions.md) has examples for each group of tasks.
+
 Roads and buildings are clickable. A click selects the item. A road shows its card beside the table. There is no popup. (The card for a building
 needs a change in roadstyle that is not released yet.) A click runs no query, so the shapes of the last result stay on the map. The page does not
 change the data.

@@ -223,6 +223,26 @@
         return `${t.mode}.edges: ${rows.map(([h, n]) => `${h ?? "NULL"} (${n})`).join(", ")}`;
       } catch { return ""; }
     }))).filter(Boolean).join("; ");
+    // The questions to ask, in groups (docs/guides/ask-questions.md). The SQL behind each one was run on the page's database. The list of examples has the first two of each
+    // group for now (roadstyle's Ask takes a flat list); when it takes groups (asked 2026-11-07), the page passes QUESTIONS as they are.
+    const QUESTIONS = [
+      { title: "The data", items: ["Which one-way roads have no name?", "What are the 10 longest primary roads?", "Which roads have a speed limit above 50 km/h?",
+        "Which roads have more than 3 lanes?", "How many edges and how many km of road does each network have?"] },
+      { title: "Buildings and walls", items: ["How many walls of each type do the buildings have?", "Which buildings have no front wall?",
+        "Which buildings have more than 10 walls?", "What are the 100 longest walls?"] },
+      { title: "My changes", items: ["Which objects did I change, and when?", "Which walls did I change by hand?", "What did I change in the last day?"] },
+      { title: "Show on the map", items: ["Show all buildings on the map.", "Show the walls of all buildings, with a color for each wall type.",
+        "Show the dead-end nodes of the driving network.", "Show all nodes of the driving network on the map.", "Show only the front walls of the buildings.",
+        "Color the walls that I changed by hand in red and the others in grey."] },
+      { title: "Color and focus the roads", items: ["Color the roads by their class.", "Show only the primary roads and fade the others.",
+        "Color the one-way roads red and the two-way roads grey.", "Color the roads that have a speed limit above 50 km/h."] },
+      { title: "H3 cells and the boundary", items: ["Show the smallest H3 cell that contains the whole boundary.", "Show the H3 cells of the boundary at resolution 9.",
+        "How many nodes are in each H3 cell?"] },
+      { title: "The map and the layers", items: ["Turn off the water and the waterways layers.", "Switch the base map to satellite.",
+        "Turn on the 3D view and tilt the map.", "Switch to the dark base map."] },
+      { title: "Charts", items: ["Draw a bar chart of the km of road in each class.", "Draw a histogram of the road lengths.",
+        "Show a pie chart of the one-way and the two-way roads."] },
+    ];
     const aboutText = "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
       + "edge_id is its id and osm_id the OSM way. main.building_faces has the walls of the buildings, and the schema features has the buildings and the other base-map layers. "
       + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). "
@@ -240,12 +260,7 @@
     const ask = askPanel({
       data, dialect: "DuckDB", maxSteps: 8,
       about: aboutText,
-      examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
-        "Show the walls of all buildings, with a color for each wall type.", "Show only the front walls of the buildings.",
-        "Color the walls that I changed by hand in red and the others in grey.", "Show the buildings that have more than 10 walls.",
-        "How many walls of each type do the buildings have?", "Show the smallest H3 cell that contains the whole boundary.",
-        "Color the roads by their class.", "Turn off the water and the waterways layers.", "Switch the base map to satellite.",
-        "Turn on the 3D view and tilt the map.", "Draw a bar chart of the km of road in each class."],
+      examples: QUESTIONS.flatMap((g) => g.items.slice(0, 2)),      // the first two of each group, in one list; the groups themselves go to Ask when it takes groups
     });
     // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer
     // such as a building). No popup anywhere: rs.holdPopup holds the popups of roads and of items, here for the whole page (the dock holds them only while it is open).
@@ -256,7 +271,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, about: aboutText, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, about: aboutText, questions: QUESTIONS, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });
