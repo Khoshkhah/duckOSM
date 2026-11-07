@@ -156,7 +156,7 @@ options:
 |---|---|---|
 | `overrides`, `new_ways`, `turn_restrictions` | yes | yes |
 | `extra.tag_edits` | yes | yes |
-| `extra.building_faces` | with `options.building_faces: true` | no: the build stops with an error |
+| `extra.building_faces` | with `options.building_faces: true` | no: the build writes a warning and makes no walls |
 
 On the Monaco sample, a file with every key gives the same rows as the page in all tables that the two have. The test
 `tests/test_page_fixes.py` makes sure of this on each change of duckOSM.

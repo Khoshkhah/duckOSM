@@ -19,5 +19,8 @@ modes:
 
 osm_overrides: osm_overrides/osm_overrides.yaml   # local fixes for known OSM errors
 
+options:
+  building_faces: true             # main.building_faces: each wall of a building with its type (front, back, side, party, court), and the wall rules of the fixes file. docs/concepts/building-walls.md
+
 validation:
   enabled: true

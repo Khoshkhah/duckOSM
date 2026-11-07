@@ -287,9 +287,13 @@ class Config:
                 raise ValueError("pbf_path (or source.pbf_path) is required")
             if not Path(self.effective_pbf_path).exists():
                 raise FileNotFoundError(f"PBF file not found: {self.effective_pbf_path}")
+        # the walls need the Rust engine, a PBF and a boundary. The config templates turn them on, so a build that cannot make them goes on
+        # without them, with a warning (Kaveh, 2026-11-06), and does not stop
         if self.options.building_faces and (self.options.engine != "rust" or self.source_type != "pbf" or not self.effective_boundary_path):
-            raise ValueError("options.building_faces needs options.engine: rust, a PBF source and a boundary "
-                             "(the Python engine has no step for the walls of the buildings)")
+            logging.getLogger("duckosm").warning(
+                "options.building_faces is on, but the walls of the buildings need options.engine: rust, a PBF source and a boundary "
+                "(the Python engine has no step for them). This build makes no main.building_faces.")
+            self.options.building_faces = False
         if self.osm_overrides and not Path(self.osm_overrides).exists():
             raise FileNotFoundError(f"OSM fixes file not found: {self.osm_overrides}")
         if self.effective_boundary_path and not Path(self.effective_boundary_path).exists():
