@@ -223,24 +223,24 @@
         return `${t.mode}.edges: ${rows.map(([h, n]) => `${h ?? "NULL"} (${n})`).join(", ")}`;
       } catch { return ""; }
     }))).filter(Boolean).join("; ");
-    // The questions to ask, in groups (docs/guides/ask-questions.md). The SQL behind each one was run on the page's database. The list of examples has the first two of each
-    // group for now (roadstyle's Ask takes a flat list); when it takes groups (asked 2026-11-07), the page passes QUESTIONS as they are.
+    // The questions to ask, in groups (docs/guides/ask-questions.md); they are about the data of duckOSM. roadstyle's Ask has six general groups for any data and shows
+    // them first (Know the data, Find and count, ...), then these groups. The titles differ from the general ones, so no heading shows twice.
     const QUESTIONS = [
-      { title: "The data", items: ["Which one-way roads have no name?", "What are the 10 longest primary roads?", "Which roads have a speed limit above 50 km/h?",
+      { title: "Roads of the area", items: ["Which one-way roads have no name?", "What are the 10 longest primary roads?", "Which roads have a speed limit above 50 km/h?",
         "Which roads have more than 3 lanes?", "How many edges and how many km of road does each network have?"] },
       { title: "Buildings and walls", items: ["How many walls of each type do the buildings have?", "Which buildings have no front wall?",
         "Which buildings have more than 10 walls?", "What are the 100 longest walls?"] },
       { title: "My changes", items: ["Which objects did I change, and when?", "Which walls did I change by hand?", "What did I change in the last day?"] },
-      { title: "Show on the map", items: ["Show all buildings on the map.", "Show the walls of all buildings, with a color for each wall type.",
+      { title: "Shapes on the map", items: ["Show all buildings on the map.", "Show the walls of all buildings, with a color for each wall type.",
         "Show the dead-end nodes of the driving network.", "Show all nodes of the driving network on the map.", "Show only the front walls of the buildings.",
         "Color the walls that I changed by hand in red and the others in grey."] },
-      { title: "Color and focus the roads", items: ["Color the roads by their class.", "Show only the primary roads and fade the others.",
+      { title: "Roads: color and focus", items: ["Color the roads by their class.", "Show only the primary roads and fade the others.",
         "Color the one-way roads red and the two-way roads grey.", "Color the roads that have a speed limit above 50 km/h."] },
       { title: "H3 cells and the boundary", items: ["Show the smallest H3 cell that contains the whole boundary.", "Show the H3 cells of the boundary at resolution 9.",
         "How many nodes are in each H3 cell?"] },
-      { title: "The map and the layers", items: ["Turn off the water and the waterways layers.", "Switch the base map to satellite.",
+      { title: "Water, 3D and base maps", items: ["Turn off the water and the waterways layers.", "Switch the base map to satellite.",
         "Turn on the 3D view and tilt the map.", "Switch to the dark base map."] },
-      { title: "Charts", items: ["Draw a bar chart of the km of road in each class.", "Draw a histogram of the road lengths.",
+      { title: "Charts of the roads", items: ["Draw a bar chart of the km of road in each class.", "Draw a histogram of the road lengths.",
         "Show a pie chart of the one-way and the two-way roads."] },
     ];
     const aboutText = "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
@@ -260,7 +260,7 @@
     const ask = askPanel({
       data, dialect: "DuckDB", maxSteps: 8,
       about: aboutText,
-      examples: QUESTIONS.flatMap((g) => g.items.slice(0, 2)),      // the first two of each group, in one list; the groups themselves go to Ask when it takes groups
+      examples: QUESTIONS,                  // roadstyle's Ask shows its general groups first (any data), then these groups
     });
     // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer
     // such as a building). No popup anywhere: rs.holdPopup holds the popups of roads and of items, here for the whole page (the dock holds them only while it is open).

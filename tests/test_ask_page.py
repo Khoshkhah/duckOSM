@@ -186,6 +186,14 @@ def test_ask_page(monaco, page_url):
         page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
         colours = page.evaluate("[...new Set(window.askPage.shapeProps().map((p) => p.color ?? 'none'))].sort()")
         assert colours == ["#ff0000", "none"], colours                       # a colour that CSS does not know is left out
+        # the examples of Ask: roadstyle's general groups come first, then the groups of the page, each with its heading and none twice; all the questions are there
+        ex = page.evaluate("document.querySelector('.rs-ask-ex').textContent")      # textContent: the headings may be in capitals by CSS, which innerText returns
+        titles = [g["title"] for g in page.evaluate("window.askPage.questions")]
+        assert "Know the data" in ex and ex.index("Know the data") < ex.index(titles[0]), "the general groups come first"
+        assert all(ex.count(t) == 1 for t in titles), "no heading twice"
+        asked = page.evaluate("[...document.querySelectorAll('.rs-ask-ex .rs-ask-q')].map((b) => b.textContent)")
+        mine = [q for g in page.evaluate("window.askPage.questions") for q in g["items"]]
+        assert all(q in asked for q in mine) and len(asked) > len(mine), "every question of the page is a chip, after the general ones"
         # Ask is told the real road classes (it guessed them, found no roads, and had no step left): the values of highway are in its instructions
         classes = page.evaluate(q, "SELECT DISTINCT highway FROM driving.edges WHERE highway IS NOT NULL")["rows"]
         about = page.evaluate("window.askPage.about")

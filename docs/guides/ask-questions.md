@@ -2,6 +2,8 @@
 
 These are questions that you can ask in **Ask the data** on the page of [`duckosm ask`](query.md#ask-questions-on-a-page-duckosm-ask). They are in groups. For each question, the tables, the columns and the map actions that it needs exist in the Monaco sample, and the SQL of the main ones was run there.
 
+In the list of examples, **six general groups** come first: *Know the data*, *Find and count*, *Show on the map*, *Colour and focus*, *The map and the layers* and *Charts*. They come from roadstyle's Ask, and they work with any data: they name no table and no column, so Ask reads the schema and picks the names. After them come the groups of this page, which are about the data of duckOSM and are listed below.
+
 Write a question in your own words. You do not need these exact sentences. A short, plain question with one thing to do gives the best answer.
 
 ## How to ask
@@ -12,7 +14,7 @@ Write a question in your own words. You do not need these exact sentences. A sho
 - **Click New to start again.** Each step sends the whole conversation again, so a long conversation uses your free limit faster.
 - **Ask cannot change the data.** It reads the database and controls the map. To change the OSM data, use [Edit OSM data](edit-osm-data.md).
 
-## The data
+## Roads of the area
 
 Questions about the roads of each network: the tables `driving.edges`, `walking.edges` and `cycling.edges`. The answer is a table. The roads of the table light on the map.
 
@@ -39,7 +41,7 @@ Questions about the fixes file, which the page reads as the table `extra.edits` 
 - Which walls did I change by hand?
 - What did I change in the last day?
 
-## Show on the map
+## Shapes on the map
 
 The page draws a result that has a geometry column: nodes as points, buildings as shapes, walls as lines. The table shows the first 1000 rows, and the map shows every row. A wall has a color for its `face_type`, and any shape can have a column `color` with a CSS color.
 
@@ -50,7 +52,7 @@ The page draws a result that has a geometry column: nodes as points, buildings a
 - Show only the front walls of the buildings.
 - Color the walls that I changed by hand in red and the others in grey.
 
-## Color and focus the roads
+## Roads: color and focus
 
 Ask colors roads, or keeps some roads and fades the others. It uses the road classes that the page tells it (for example `primary`, `secondary`, `residential`).
 
@@ -67,7 +69,7 @@ The page computes the H3 cells of the boundary (the table `extra.boundary_h3`, r
 - Show the H3 cells of the boundary at resolution 9.
 - How many nodes are in each H3 cell?
 
-## The map and the layers
+## Water, 3D and base maps
 
 Ask can turn the layers on and off, change the base map, turn the 3D view on, and move the camera. It reads the layers and the base maps of the page first.
 
@@ -76,7 +78,7 @@ Ask can turn the layers on and off, change the base map, turn the 3D view on, an
 - Turn on the 3D view and tilt the map.
 - Switch to the dark base map.
 
-## Charts
+## Charts of the roads
 
 Ask draws a chart of the result in the data dock: bar, line, histogram, scatter or pie.
 
