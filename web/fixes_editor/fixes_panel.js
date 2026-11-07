@@ -210,7 +210,7 @@ const MARKUP = (note) => String.raw`
   </div>
   <div id="fix-changes" class="fix-pane" role="tabpanel" hidden>
     <div id="fix-pending" class="fix-pending" hidden></div>
-    <div class="row" style="margin-top:0"><button id="fix-undo" type="button">Undo</button><button id="fix-redo" type="button">Redo</button><button id="fix-download" type="button">Download</button></div>
+    <div class="row" style="margin-top:0"><button id="fix-undo" type="button">Undo</button><button id="fix-redo" type="button">Redo</button><button id="fix-download" type="button">Download</button><button id="fix-add" type="button" title="Add the changes of another fixes file">Add a file</button><input id="fix-add-file" type="file" accept=".yaml,.yml" hidden></div>
     <div class="row"><span class="small">Changes on the map</span><div class="rs-seg" id="fix-show" aria-label="Changes on the map"><button type="button" class="on" data-v="show">Show</button><button type="button" data-v="hide">Hide</button></div></div>
     <div id="fix-list" class="fix-list"></div>
     <div class="row"><button id="fix-clear" type="button" class="sb-danger">Delete all changes</button></div>
@@ -268,7 +268,17 @@ export async function initFixesPanel(ctx) {
 
   // ---- the data
   const snap = () => structuredClone(doc);
-  function commit(change) { hist.push(snap()); if (hist.length > 100) hist.shift(); future = []; change(); persist(); sync(); }
+  // each change: the records that are new or different get the time of now (`changed`, docs/design/fixes_editor_time_merge.md); Add a file keeps the
+  // times of its records (stamp: false)
+  function commit(change, { stamp = true } = {}) {
+    const before = snap();
+    hist.push(before); if (hist.length > 100) hist.shift(); future = [];
+    change();
+    if (stamp) F.stamp(before, doc, F.localTime());
+    persist(); sync();
+  }
+  // the time of a change as the list shows it, in the time zone of this browser: "6 Nov 2026, 14:32"; "" for no time
+  const when = (recs) => { const t = F.latest(recs); return Number.isNaN(t) ? "" : new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
   const rows = async (sql) => (await duck.query(sql)).toArray().map((r) => r.toJSON());
   const whole = (v) => { const n = Number(v); return Number.isSafeInteger(n) && n > 0 ? n : null; };
   const built = (mode, table) => duck.tables.some((t) => t.mode === mode && t.table === table);
@@ -470,29 +480,31 @@ export async function initFixesPanel(ctx) {
   // joined into one, in file order: for the same key the later wins, as in the build), Delete it removes all of them (Undo brings them back).
   const said = (v) => (/^-?\d+(\.\d+)?$|^(true|false)$/.test(v) ? v : `"${v}"`);
   const ruleText = (type, id) => F.describeBits(doc, type, id).map(({ k, now }) => (k === "object" ? "deleted" : k === "not in" ? `not in ${now}` : now === null ? `no ${k}` : `${k} ${said(now)}`));
-  function askBox(el, what, bits, n, many = false) {
+  function askBox(el, what, bits, n, many = false, t = "") {
     el.hidden = false;
     el.innerHTML = (n > 1 ? `<p><b>This ${what} has ${n} rules in your changes.</b> Edit joins them into one: for the same key, the later rule wins, as in the build.</p><p class="small">${esc(bits || "(no change in it)")}</p>`
       : `<p><b>${many ? `These ${what}s are` : `This ${what} is`} in your changes:</b> ${esc(bits || "(no change in it)")}.</p>`)
+      + (t ? `<p class="small muted">Changed ${esc(t)}</p>` : "")
       + `<div class="row"><button type="button" class="sb-primary" data-ask="edit">Edit it</button><button type="button" data-ask="delete">Delete it</button></div>`;
   }
   // the records of the picked object: the object's own (overrides and tag edit), and for a building the rules of its walls; null when it has none
   const wallRecs = () => (sel.kind === "building" ? F.wallsOf(doc, sel.id).map((w) => ({ building: sel.id, ...w })) : []);
   function editRecords() {
     const own = { type: sel.type, id: sel.id }, bits = F.count(doc, own) ? ruleText(sel.type, sel.id) : [];
-    let n = F.count(doc, own);
+    let n = F.count(doc, own), recs = F.recordsOf(doc, own);
     for (const w of wallRecs()) {
+      recs = recs.concat(F.recordsOf(doc, w));
       const f = F.findFace(doc, sel.id, w.from_node, w.to_node), at = walls.find((x) => (x.from_node === w.from_node && x.to_node === w.to_node) || (x.from_node === w.to_node && x.to_node === w.from_node));
       n = Math.max(n, F.count(doc, w));
       bits.push(`wall ${at ? `#${at.face_index + 1}` : `${w.from_node}-${w.to_node}`} ${(FACE_NAMES[f.type] ?? f.type).toLowerCase()}${f.door ? `, door ${f.door}` : ""}`);
     }
-    return n ? { n, text: bits.join(", ") } : null;
+    return n ? { n, text: bits.join(", "), t: when(recs) } : null;
   }
   function paintAsk() {
     const r = ask && sel && data ? editRecords() : null;
     if (!r) ask = false;
     $("fix-edit").classList.toggle("asking", !!r);
-    if (r) askBox($("fix-inchg"), sel.kind, r.text, r.n); else $("fix-inchg").hidden = true;
+    if (r) askBox($("fix-inchg"), sel.kind, r.text, r.n, false, r.t); else $("fix-inchg").hidden = true;
   }
   function answer(how) {
     if (!sel || !data) return;
@@ -866,7 +878,7 @@ export async function initFixesPanel(ctx) {
   async function renderChanges() {
     await classify();
     const objs = F.objects(doc), turns = doc.turn_restrictions ?? [], faces = F.faceEdits(doc), roads = F.newWays(doc);
-    const item = (attrs, label, inner, cls = "", n = 1) => `<div class="chg${cls}" ${attrs} tabindex="0" role="button"><div class="chgtop"><b>${label}${n > 1 ? ` <span class="nrules" title="This object has ${n} records in the file. Pick it, then Edit it joins them.">${n} rules</span>` : ""}</b><button type="button" data-x aria-label="Delete this change">×</button></div>${inner}</div>`;
+    const item = (attrs, label, inner, cls = "", n = 1, t = "") => `<div class="chg${cls}" ${attrs} tabindex="0" role="button"><div class="chgtop"><b>${label}${n > 1 ? ` <span class="nrules" title="This object has ${n} records in the file. Pick it, then Edit it joins them.">${n} rules</span>` : ""}</b><button type="button" data-x aria-label="Delete this change">×</button></div>${inner}${t ? `<div class="chgtime small muted">${esc(t)}</div>` : ""}</div>`;
     // one item for each wall, turn and new road: the record that the build keeps (the last), and the number of records
     const uniq = (list, key) => { const m = new Map(); for (const x of list) { const k = key(x); m.set(k, { last: x, n: (m.get(k)?.n ?? 0) + 1 }); } return [...m.values()]; };
     const bits = (list) => list.length ? `<ul class="bits">${list.map(({ k, was, now }) => `<li><span class="k">${esc(k)}</span><span>${was === null ? "" : `<span class="was">${was === "" ? "none" : esc(was)}</span> → `}${now === null ? "(deleted)" : esc(now)}</span></li>`).join("")}</ul>` : '<div class="small">(no change in it)</div>';
@@ -875,11 +887,11 @@ export async function initFixesPanel(ctx) {
     const by = { road: [], building: [], node: [], relation: [] };
     for (const o of objs) {
       const k = o.type === "way" ? kinds.get("way" + o.id) ?? "road" : o.type, nm = names.get(o.type + o.id);
-      by[k]?.push(item(`data-type="${o.type}" data-id="${o.id}" data-kind="${k === "relation" ? "building" : k}"`, nm ? `${esc(nm)} <span class="muted small">${(KIND_NAME[k] ?? k).toLowerCase()} ${o.id}</span>` : `${KIND_NAME[k] ?? k} ${o.id}`, bits(F.describeBits(doc, o.type, o.id)), F.ruleOf(doc, o.type, o.id).mode.remove ? " del" : "", F.count(doc, o)));
+      by[k]?.push(item(`data-type="${o.type}" data-id="${o.id}" data-kind="${k === "relation" ? "building" : k}"`, nm ? `${esc(nm)} <span class="muted small">${(KIND_NAME[k] ?? k).toLowerCase()} ${o.id}</span>` : `${KIND_NAME[k] ?? k} ${o.id}`, bits(F.describeBits(doc, o.type, o.id)), F.ruleOf(doc, o.type, o.id).mode.remove ? " del" : "", F.count(doc, o), when(F.recordsOf(doc, o))));
     }
-    const newRoads = uniq(roads, (w) => w.id).map(({ last, n }) => { const w = F.findNewWay(doc, last.id); return item(`data-newway="${w.id}"`, `New road · ${w.id}`, note(`${w.tags?.highway ?? "road"}${w.tags?.name ? ` “${w.tags.name}”` : ""}, ${w.nodes.length} points${w.nodes.some(Number.isInteger) ? ", joins a junction" : ""}`), "", n); });
-    const walls = uniq(faces, (f) => `${f.building}|${Math.min(f.from_node, f.to_node)}|${Math.max(f.from_node, f.to_node)}`).map(({ last: f, n }) => item(`data-face="${f.building}|${f.from_node}|${f.to_node}"`, `Wall · building ${f.building}`, note(`${FACE_NAMES[f.type] ?? f.type}${f.door ? ` · door ${f.door}` : ""} · nodes ${f.from_node}–${f.to_node}`), "", n));
-    const turnItems = uniq(turns, (t) => `${t.from_way}|${t.via_node}|${t.to_way}`).map(({ last: t, n }) => item(`data-turn="${t.from_way}|${t.via_node}|${t.to_way}"`, `Turn · ${esc(TURN_TYPES[t.restriction] ?? t.restriction)}`, note(`way ${t.from_way} → way ${t.to_way}, at node ${t.via_node}`), "", n));
+    const newRoads = uniq(roads, (w) => w.id).map(({ last, n }) => { const w = F.findNewWay(doc, last.id); return item(`data-newway="${w.id}"`, `New road · ${w.id}`, note(`${w.tags?.highway ?? "road"}${w.tags?.name ? ` “${w.tags.name}”` : ""}, ${w.nodes.length} points${w.nodes.some(Number.isInteger) ? ", joins a junction" : ""}`), "", n, when(F.recordsOf(doc, { new_way: w.id }))); });
+    const walls = uniq(faces, (f) => `${f.building}|${Math.min(f.from_node, f.to_node)}|${Math.max(f.from_node, f.to_node)}`).map(({ last: f, n }) => item(`data-face="${f.building}|${f.from_node}|${f.to_node}"`, `Wall · building ${f.building}`, note(`${FACE_NAMES[f.type] ?? f.type}${f.door ? ` · door ${f.door}` : ""} · nodes ${f.from_node}–${f.to_node}`), "", n, when(F.recordsOf(doc, f))));
+    const turnItems = uniq(turns, (t) => `${t.from_way}|${t.via_node}|${t.to_way}`).map(({ last: t, n }) => item(`data-turn="${t.from_way}|${t.via_node}|${t.to_way}"`, `Turn · ${esc(TURN_TYPES[t.restriction] ?? t.restriction)}`, note(`way ${t.from_way} → way ${t.to_way}, at node ${t.via_node}`), "", n, when(F.recordsOf(doc, t))));
     const html = [group("Roads", by.road), group("Buildings", by.building), group("Walls", walls), group("Nodes", by.node), group("Other objects", by.relation), group("Turn rules", turnItems), group("New roads", newRoads)].join("");
     $("fix-list").innerHTML = html || '<p class="why" style="margin:0">No changes yet. Pick an object on the map, change a field and press <b>Add to changes</b>.</p>';
     $("fix-undo").disabled = !hist.length; $("fix-redo").disabled = !future.length;
@@ -919,6 +931,28 @@ export async function initFixesPanel(ctx) {
     commit(() => { doc = {}; });
     if (sel && data) { draft = initialDraft(); renderForm(); }
     status(`Deleted ${plural(n, "change")}. Undo brings them back.`, 8000);
+  };
+  // Add a file (docs/design/fixes_editor_time_merge.md): the changes of another fixes file go into the changes. A record with no time gets the time
+  // of now; for an object in the two files, the newer change stays (F.merge). Undo takes back all of the file
+  $("fix-add").onclick = () => $("fix-add-file").click();
+  $("fix-add-file").onchange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    let other;
+    try { other = F.parse(yaml, await file.text()); const bad = F.checkFile(other); if (bad) throw new Error(bad); }
+    catch (err) { return status(`${file.name} is not a fixes file: ${err.message.split("\n")[0]}. Nothing changed.`, 10000); }
+    F.stampMissing(other, F.localTime());
+    let r;
+    commit(() => { r = F.merge(doc, other); }, { stamp: false });
+    if (sel && data) { draft = initialDraft(); renderForm(); }
+    const n = r.added + r.replaced + r.both;
+    status(!n && !r.older ? `${file.name} has no changes.` : [
+      `Added ${plural(n, "change")} from ${file.name}.`,
+      r.replaced || r.older ? `${plural(r.replaced + r.older, "object")} ${r.replaced + r.older === 1 ? "was" : "were"} in both files: the newer change stays.` : "",
+      r.both ? `${plural(r.both, "object")} with the same time ${r.both === 1 ? "has" : "have"} two rules.` : "",
+      r.renumbered ? `${plural(r.renumbered, "new road")} got a new ID.` : "",
+      "Undo takes the file back."].filter(Boolean).join(" "), 12000);
   };
   $("fix-download").onclick = () => {
     const a = Object.assign(document.createElement("a"), { download: "osm_fixes.yaml", href: URL.createObjectURL(new Blob([text() ?? ""], { type: "text/yaml" })) });
@@ -1651,10 +1685,10 @@ export async function initFixesPanel(ctx) {
   function persist() { try { const t = text(); t ? localStorage.setItem(storeKey(), t) : localStorage.removeItem(storeKey()); } catch { /* no storage */ } }
   function restore() {
     if (total()) return 0;
-    try { const t = localStorage.getItem(storeKey()); if (!t) return 0; doc = F.parse(yaml, t); hist = []; future = []; sync(); return total(); } catch { return 0; }
+    try { const t = localStorage.getItem(storeKey()); if (!t) return 0; doc = F.parse(yaml, t); F.stampMissing(doc, F.localTime()); hist = []; future = []; sync(); return total(); } catch { return 0; }
   }
   function load(txt) {
-    try { doc = F.parse(yaml, txt); hist = []; future = []; persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } }
+    try { doc = F.parse(yaml, txt); F.stampMissing(doc, F.localTime()); hist = []; future = []; persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } }
     catch (e) { status("The fixes file is not valid: " + e.message.split("\n")[0], 8000); }
   }
   // roadstyle's own map interaction while the editor is open (roadstyle's public functions only): no road popup (rs.holdPopup), and the buildings of

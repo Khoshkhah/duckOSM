@@ -1,17 +1,21 @@
 # The fixes file that the editor wrote (duckosm edit on the Monaco sample with options.building_faces, 2026-11-06): one change of each
-# kind that the forms make, each with its own Add to changes. Do not edit it by hand: it is the editor's output, with its `was` keys.
+# kind that the forms make, each with its own Add to changes, and its time (`changed`). Do not edit it by hand: it is the editor's output, with its `was` keys.
 # tests/test_editor_changes.py builds Monaco with it in the two engines and checks the result of each change. The guide
 # docs/guides/edit-osm-data.md ("What each change writes") shows the same changes.
 overrides:
   - osm_id: 503462470
     lanes: 3
     turn_lanes_forward: left|through|through
+    changed: '2026-11-06T15:00:00+01:00'
   - osm_id: 766768153
     layer: 1
+    changed: '2026-11-06T15:00:00+01:00'
   - osm_id: 4229577
     remove: true
+    changed: '2026-11-06T15:00:00+01:00'
   - osm_id: 1152567278
     remove: true
+    changed: '2026-11-06T15:00:00+01:00'
 extra:
   tag_edits:
     - type: way
@@ -28,30 +32,35 @@ extra:
         sidewalk: null
         surface: asphalt
         turn_lanes_forward: null
+      changed: '2026-11-06T15:00:00+01:00'
     - type: way
       id: 157719645
       set:
         highway: service
       was:
         highway: residential
+      changed: '2026-11-06T15:00:00+01:00'
     - type: way
       id: 4230099
       set:
         motor_vehicle: 'no'
       was:
         motor_vehicle: null
+      changed: '2026-11-06T15:00:00+01:00'
     - type: way
       id: 4230011
       set:
         foot: 'no'
       was:
         foot: null
+      changed: '2026-11-06T15:00:00+01:00'
     - type: way
       id: 165636031
       set:
         oneway: '-1'
       was:
         oneway: 'false'
+      changed: '2026-11-06T15:00:00+01:00'
     - type: way
       id: 766768153
       set:
@@ -59,6 +68,7 @@ extra:
       was:
         layer: null
         bridge: null
+      changed: '2026-11-06T15:00:00+01:00'
     - type: way
       id: 23715051
       set:
@@ -71,24 +81,28 @@ extra:
         height: null
         roof:shape: null
         building:colour: null
+      changed: '2026-11-06T15:00:00+01:00'
     - type: relation
       id: 393226
       delete:
         - building
       was:
         building: castle
+      changed: '2026-11-06T15:00:00+01:00'
     - type: node
       id: 21912089
       set:
         highway: traffic_signals
       was:
         highway: null
+      changed: '2026-11-06T15:00:00+01:00'
     - type: node
       id: 13135657937
       delete:
         - highway
       was:
         highway: traffic_signals
+      changed: '2026-11-06T15:00:00+01:00'
     - type: node
       id: 21912099
       set:
@@ -99,21 +113,25 @@ extra:
         highway: null
         crossing: null
         kerb: null
+      changed: '2026-11-06T15:00:00+01:00'
   building_faces:
     - building: 23715051
       from_node: 256791677
       to_node: 256791676
       type: front
       door: main
+      changed: '2026-11-06T15:00:00+01:00'
 turn_restrictions:
   - from_way: 4097656
     via_node: 21912099
     to_way: 157719652
     restriction: only_right_turn
+    changed: '2026-11-06T15:00:00+01:00'
   - from_way: 4097656
     via_node: 21912089
     to_way: 35092475
     restriction: no_straight_on
+    changed: '2026-11-06T15:00:00+01:00'
 new_ways:
   - id: 9000000000000
     nodes:
@@ -124,3 +142,4 @@ new_ways:
     tags:
       highway: service
       name: New lane
+    changed: '2026-11-06T15:00:00+01:00'

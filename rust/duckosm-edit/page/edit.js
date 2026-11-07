@@ -49,8 +49,13 @@
       const t = panel.text() ?? "";
       if (t === saved) return;
       saved = t;
-      queue = queue.then(() => api("fixes", { method: "PUT", body: t })).then(() => status(`Saved in ${info.fixes.split(/[\\/]/).pop()}.`, 2500))
+      queue = queue.then(() => api("fixes", { method: "PUT", body: t })).then(() => noteSaved(`Saved in ${info.fixes.split(/[\\/]/).pop()}.`))
         .catch((e) => status("The fixes file was not saved: " + e.message, 15000));
+    };
+    // the line of state says that the file is saved, after the message that shows (the result of Add a file, for example), not in its place
+    const noteSaved = (msg) => {
+      const el = $("fix-status"), now = el && !el.hidden ? el.textContent.replace(/ ?Saved in \S+$/, "") : "";
+      status(now ? `${now} ${msg}` : msg, now ? 10000 : 2500);
     };
     const roadIdOfRow = (row) => window.rsGetProps?.([row])?.[0]?.osm_id ?? window.RS_SIDE?.props?.[row]?.osm_id;
     async function onBuild() {
@@ -70,14 +75,17 @@
     }
     const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, areaKey: () => "edit:" + info.db,
       onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</code> at once.` });
+    let fileText = "";
     if (info.exists) {
-      const text = await (await api("fixes")).text();
-      try { window.jsyaml.load(text); } catch (e) { blocked = e.message.split("\n")[0]; }
+      fileText = await (await api("fixes")).text();
+      try { window.jsyaml.load(fileText); } catch (e) { blocked = e.message.split("\n")[0]; }
       if (blocked) status(`The fixes file is not valid YAML: ${blocked}. The page does not change it. Correct it, then load the page again.`, 0);
-      else panel.load(text);
+      else panel.load(fileText);
     }
-    saved = panel.text() ?? "";
+    // the load gives a record with no time the time of now (`changed`): then the text differs from the file, and save() writes it
+    saved = fileText.trim() ? fileText : "";
     ready = true;
+    save();
     await panel.open();
     // the template's hide button hides the panel: the editor closes too (nothing of it stays selected on the map); show opens it again
     $("sb-hide")?.addEventListener("click", () => panel.close());

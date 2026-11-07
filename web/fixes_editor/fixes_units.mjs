@@ -149,4 +149,49 @@ eq(nodeRule("traffic_signals", { arms: 2, classes: ["residential"], tags: {} }),
 eq(nodeRule("stop", { arms: 3, classes: ["residential"], tags: {} }), "", "a stop sign at a T junction");
 // a geometry of a query row: a text (duckdb-wasm) or an object (a server that sends JSON rows)
 eq([geoOf('{"type":"Point","coordinates":[1,2]}'), geoOf({ type: "Point", coordinates: [1, 2] })], [{ type: "Point", coordinates: [1, 2] }, { type: "Point", coordinates: [1, 2] }], "geoOf");
+// the time of a change (docs/design/fixes_editor_time_merge.md)
+eq(F.localTime(new Date(2026, 10, 6, 9, 5, 7)).slice(0, 19), "2026-11-06T09:05:07", "the local time");
+eq(/^[+-]\d\d:\d\d$/.test(F.localTime().slice(19)), true, "the offset from UTC");
+{
+  const T1 = "2026-11-01T10:00:00+01:00", T2 = "2026-11-06T14:00:00+01:00";
+  const before = { overrides: [{ osm_id: 1, lanes: 2, changed: T1 }, { osm_id: 2, lanes: 3, changed: T1 }], extra: { tag_edits: [{ type: "way", id: 1, set: { a: "b" }, delete: [], changed: T1 }] } };
+  const d = structuredClone(before);
+  d.overrides[1] = { osm_id: 2, lanes: 4 };                                       // changed
+  d.extra.tag_edits[0] = { type: "way", id: 1, delete: [], set: { a: "b" } };      // written again, the same content (another key order)
+  d.turn_restrictions = [{ from_way: 1, via_node: 2, to_way: 3, restriction: "no_u_turn" }];   // new
+  F.stamp(before, d, T2);
+  eq([d.overrides[0].changed, d.overrides[1].changed, d.extra.tag_edits[0].changed, d.turn_restrictions[0].changed], [T1, T2, T1, T2], "stamp: only a new or a different record gets the time of now");
+  const old = { overrides: [{ osm_id: 1, lanes: 2 }, { osm_id: 2, lanes: 2, changed: T1 }] };
+  eq([F.stampMissing(old, T2), old.overrides.map((r) => r.changed)], [1, [T2, T1]], "a record with no time gets the time of now");
+  eq(Number.isNaN(F.latest([{}, {}])), true, "no time: NaN");
+  eq(F.latest([{ changed: T1 }, { changed: new Date(T2) }]), Date.parse(T2), "the latest time, also of a Date of js-yaml");
+  eq(F.recordsOf(before, { type: "way", id: 1 }).length, 2, "the records of a way: its rule and its tag edit");
+}
+// Add a file: the merge
+{
+  const T1 = "2026-11-01T10:00:00+01:00", T2 = "2026-11-06T14:00:00+01:00", N = F.NEW_WAY_MIN;
+  const doc = {
+    overrides: [{ osm_id: 1, lanes: 2, changed: T1 }, { osm_id: 2, lanes: 2, changed: T2 }],
+    extra: { tag_edits: [{ type: "way", id: 1, set: { a: "b" }, delete: [], changed: T1 }] },
+    new_ways: [{ id: N, nodes: [5, 6], tags: { highway: "service" }, changed: T1 }],
+  };
+  const other = {
+    overrides: [{ osm_id: 1, lanes: 3, changed: T2 }, { osm_id: 2, lanes: 5, changed: T1 }, { osm_id: 4, lanes: 1, changed: T1 }],
+    new_ways: [{ id: N, nodes: [7, 8], tags: { highway: "footway" }, changed: T1 }],
+    turn_restrictions: [{ from_way: N, via_node: 8, to_way: 9, restriction: "no_u_turn", changed: T1 }],
+    extra: { building_faces: [{ building: 5, from_node: 1, to_node: 2, type: "front", changed: T1 }] },
+  };
+  const r = F.merge(doc, other);
+  eq(r, { added: 4, replaced: 1, older: 1, both: 0, renumbered: 1 }, "the merge: the cases");
+  eq(doc.overrides.map((x) => [x.osm_id, x.lanes]), [[2, 2], [1, 3], [4, 1]], "way 1: the newer file wins (rule and tag edit go); way 2: ours is newer; way 4 is new");
+  eq(F.tagEdits(doc), [], "the older tag edit of way 1 went with its rule");
+  eq(doc.new_ways.map((w) => w.id), [N, N + 1], "a new road with the same ID and other nodes gets the next free ID");
+  eq(doc.turn_restrictions[0].from_way, N + 1, "the turn of that road gets the new ID too");
+  eq(F.faceEdits(doc).length, 1, "a wall rule is added");
+  const same = { new_ways: [{ id: N, nodes: [5, 6], tags: { highway: "service" } }] }, d2 = { new_ways: [{ id: N, nodes: [5, 6], tags: { highway: "track" } }] };
+  eq(F.merge(d2, same), { added: 0, replaced: 0, older: 0, both: 1, renumbered: 0 }, "the same road and no time: the two stay");
+  eq(d2.new_ways.length, 2, "the two records of the road");
+  eq([F.checkFile({ overrides: [] }), F.checkFile({ modes: [] }), F.checkFile({ extra: { x: [] } }), F.checkFile({ overrides: 3 }), F.checkFile({ overrides: [3] })],
+    ["", "unknown key modes", "unknown key extra.x", "overrides must be a list", "each item of overrides must be a map"], "checkFile");
+}
 console.log("fixes_units.mjs: ok");

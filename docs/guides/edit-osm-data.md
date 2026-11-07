@@ -115,15 +115,48 @@ To change a road, click it on the map. The form shows its tags. Change a field, 
 
 When you pick the road again, the box "This road is in your changes" shows over the form ([An object that is in your changes](#an-object-that-is-in-your-changes)):
 
-![The box This road is in your changes, with Edit it and Delete it](../images/edit-box.png)
+![The box This road is in your changes, with the time of the change, Edit it and Delete it](../images/edit-box.png)
 
 The **Changes** tab lists your rules. **Build again** builds the database with them, and the page loads the new network:
 
-![The Changes tab: the buttons Undo, Redo, Download and Delete all changes, the switch Changes on the map, one change of a road, and Build again](../images/edit-changes.png)
+![The Changes tab: the buttons Undo, Redo, Download, Add a file and Delete all changes, the switch Changes on the map, one change of a road, and Build again](../images/edit-changes.png)
 
 **Changes on the map**, **Show** or **Hide**, shows or hides your changes on the map (the amber objects, the 3D buildings and the amber
 walls). The changes stay in the file. **Delete all changes** deletes every change from the list and from the fixes file. It asks first. **Undo** brings the changes back while
 the page is open. After a reload, they are gone.
+
+#### The time of each change
+
+Each record that the editor writes has the key `changed`: your local date and time, with the offset from UTC.
+
+```yaml
+overrides:
+  - osm_id: 503462470
+    lanes: 3
+    changed: '2026-11-06T14:32:05+01:00'
+```
+
+- The editor sets the time of now on each record that you add or change. A record that you do not change keeps its time.
+- When the page opens a file, each record with no `changed` (an old file, or a file that you wrote by hand) gets the time of now, and the
+  page saves the file.
+- The **Changes** tab shows the time under each change, for example "6 Nov 2026, 14:32", in the time zone of your browser. The box "This
+  road is in your changes" shows it too.
+- The build does not read `changed`.
+
+#### Add a file
+
+**Add a file** in the **Changes** tab adds the changes of another fixes file to your changes. Select the file (`.yaml` or `.yml`) in the
+dialog of your browser.
+
+- If the file is not valid, the page shows the error and changes nothing.
+- A record of the file with no `changed` gets the time of now.
+- If an object is in the two files, the change with the later time stays, and the other goes. The rule of a road and its tag edit count
+  as one object.
+- If the two changes of an object have the same time, the two stay, the added one last. The build applies them in file order, so the
+  added change wins key by key. The **Changes** tab shows "2 rules" on the object.
+- If a new road of the file has the ID of one of your new roads, and other points, it is another road. It gets the next free ID, and
+  the turn rules of the file that use it get the new ID too.
+- A status line tells the result. **Undo** takes back all of the file in one step. The page saves the result in the fixes file at once.
 
 Before the page writes a file that was there already, it keeps the old file as `osm_fixes.yaml.bak`. The page writes the file from the
 rules of the panel, so the comments of a file that you wrote by hand do not stay. If the file is not valid YAML, the page tells you and
@@ -175,6 +208,8 @@ The editor writes two kinds of record for an object:
 - `overrides` (by `osm_id`): the keys that act on the network of each mode: Lanes each way (`lanes`), Lanes forward and back,
   One-way yes or no, Layer, the turn lanes, and Delete (`remove`).
 - `extra.tag_edits`: the OSM tags, with `set` and `delete`. `was` keeps the value before the first change; the build does not read it.
+
+Each record also has `changed`, the time of the change ([The time of each change](#the-time-of-each-change)). The examples below leave it out.
 
 ### Road tab
 
@@ -303,6 +338,7 @@ extra:
 | `delete` | these tags go |
 | `was` | the values before the change (the page writes them for its list of changes; the build does not read them) |
 | `note` | free text |
+| `changed` | the date and the time of the change, which the editor writes; the build does not read it |
 
 The build changes the tags in `raw.*` before all other steps. So the networks, the layers (`features.*`), the bus routes and the
 lane profile see the new tags. A rule on a relation changes its tags only, not its geometry. A rule for an object that is not in the area
@@ -325,6 +361,7 @@ extra:
 | `type` | `front`, `back`, `side`, `party` or `court` |
 | `door` | the kind of door of the wall, for example `main` or `service` (optional) |
 | `note` | free text |
+| `changed` | the date and the time of the change, which the editor writes; the build does not read it |
 
 In [`main.building_faces`](../reference/database.md#building_faces), `face_type` has the type of the rule, `computed_type` has the type
 that the build found, and `edited` is true.

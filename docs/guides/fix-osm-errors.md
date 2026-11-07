@@ -68,6 +68,7 @@ every area you build. Fixes are only applied when you name the file.
 | `keep_nodes` | `[from, to]`: keep only this part of the way (OSM node ids). To keep the other part, add it under `new_ways` with `tags_from` |
 | `turn_lanes_forward`, `turn_lanes_backward` | the painted arrows, in OSM `turn:lanes` syntax (`through;left\|right`) |
 | `note` | free text, for your own record |
+| `changed` | the date and the time of the change, which the editor writes; the build does not read it |
 
 ## New ways (`new_ways`)
 
@@ -88,6 +89,7 @@ new_ways:
 | `tags` | the OSM tags of the way |
 | `tags_from` | an OSM way whose tags (before any fix) the new way starts with; `tags` goes on top |
 | `source`, `note` | free text, for your own record |
+| `changed` | the date and the time of the change, which the editor writes; the build does not read it |
 
 A new way that ends on a node inside another way cuts that way there, so that way gets new edge ids.
 
@@ -98,6 +100,7 @@ A new way that ends on a node inside another way cuts that way there, so that wa
 | `from_way`, `via_node`, `to_way` | the turn: from this way, through this junction node, onto that way (OSM ids, required) |
 | `restriction` | `no_u_turn` (default), `no_left_turn`, `no_right_turn`, `no_straight_on`, or `only_*` |
 | `note` | free text |
+| `changed` | the date and the time of the change, which the editor writes; the build does not read it |
 
 The turn disappears from the driving network everywhere: routing, and every export (SUMO, MATSim,
 GMNS, OpenDRIVE). To find the ids, look the road up on [openstreetmap.org](https://www.openstreetmap.org)

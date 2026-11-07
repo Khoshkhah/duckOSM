@@ -114,3 +114,4 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel #fix-edit.asking #fix-form, #fix-panel #fix-turns.asking #fix-turnsec, #fix-panel #fix-new.asking #fix-drawbox > :not(#fix-new-inchg) { display: none; }
 #fix-panel .nrules { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: rgba(245, 158, 11, 0.2); color: #b45309; font-size: 11px; font-weight: 600; white-space: nowrap; }
 #fix-panel .chgtop .muted { font-weight: 400; }      /* the kind and the id after the name of a change */
+#fix-panel .chgtime { margin-top: 2px; }                /* the time of a change (docs/design/fixes_editor_time_merge.md) */
