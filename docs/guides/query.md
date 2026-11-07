@@ -31,6 +31,9 @@ A result that has a geometry column is drawn on the map, all its rows: the colum
 (shapes), and `geometry` of `main.building_faces` (lines). The limit of 1000 is for the rows that the table shows. The map shows every row that the query selects. So you can write "Show all
 buildings on the map" or "Show all nodes of the driving network on the map". The shapes have colours: a result with the column `face_type` (the walls) is coloured by it, with the colours of the editor (front green, back red, side grey, party
 wall purple, court cyan). For other colours, select a column `color` with a CSS colour, for example `CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color`.
+H3 cells are drawn as hexagons: a result with a column `h3_cell` (and no geometry column) shows each of its cells. The nodes have `h3_cell` (H3 resolution 8). The page
+also makes the table `extra.boundary_h3` with the H3 cells that cover the boundary at each resolution 0 to 11; `whole_boundary` is true for the one cell that contains
+the whole boundary, so the smallest such cell is the row with the largest resolution where it is true. The page computes these cells with h3-js, because DuckDB has no H3 here.
 A click on a row of the table selects the item: a row with a geometry column (a node, a building, a wall) is drawn on the map in the select look, the map zooms to it,
 and the card beside the table has all the values of the row. The ✕ of the card removes the drawing. A row of a road is selected by roadstyle, with its own card.
 A result with the column `edge_id` is not drawn this way: roadstyle lights its roads on their own shape, so select `edge_id` for roads. A new table with no

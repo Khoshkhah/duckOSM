@@ -22,6 +22,7 @@
     building_faces: "One row is one wall of a building, with its type (front, back, side, party, court) and the type that the build found (computed_type).",
     building_entrances: "The entrances and doors of the buildings.",
     buildings: "The buildings of the base map, with their OSM tags.",
+    boundary_h3: "The H3 cells that cover the boundary at each resolution 0 to 11: resolution, h3_cell (a hex id), whole_boundary (true for the one cell that contains the whole boundary).",
     edits: "The changes in the fixes file: kind (object, wall, turn, new_road), type, osm_id, what, changed (the time), note.",
   };
   const BIG = /^(U?BIGINT|U?HUGEINT)$/;
@@ -46,6 +47,8 @@
   }
 
   async function start() {
+    // h3-js: the H3 cells of the boundary and their shapes. DuckDB here has no H3 functions, so the page computes them; without it (no network) the page has no H3 table.
+    const h3Loaded = script("https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js").then(() => !!window.h3, () => false);
     const [info] = await Promise.all([api("info").then((r) => r.json()), script("https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js")]);
     const [F, { dataDock }, { askPanel }] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js")]);
 
@@ -118,8 +121,21 @@
       // A result with the id of a road (edge_id) is lit by roadstyle on the road's own shape: the page draws no line over it (the geometry column of an edges table
       // is the centre line of the road, and a thin line over the road shows the road twice). The shapes are for what roadstyle cannot light.
       const col = d.columns.find((c) => /^GEOMETRY$/i.test(c.type)), mine = ++ticket;
-      if (!col || d.columns.some((c) => c.name === "edge_id")) { if (drawn) showShapes([]); return; }
-      const q = (n) => '"' + n.replace(/"/g, '""') + '"', name = q(col.name);
+      const q = (n) => '"' + n.replace(/"/g, '""') + '"';
+      // no geometry, but a column with H3 cells (h3_cell, h3, h3_id): each cell is drawn as its hexagon (h3-js), all the distinct cells of the result
+      const hexCol = !col && window.h3 ? d.columns.find((c) => /^h3(_cell|_id)?$/i.test(c.name)) : null;
+      if ((!col && !hexCol) || d.columns.some((c) => c.name === "edge_id")) { if (drawn) showShapes([]); return; }
+      if (hexCol) {
+        const { rows } = await query(`SELECT DISTINCT ${q(hexCol.name)} FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_h3 WHERE ${q(hexCol.name)} IS NOT NULL`);
+        if (mine !== ticket) return;
+        const cells = rows.map(([c]) => (typeof c === "bigint" ? c.toString(16) : String(c))).filter((c) => { try { return window.h3.isValidCell(c); } catch { return false; } });
+        const hexes = cells.map((c) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [window.h3.cellToBoundary(c, true)] } }));
+        showShapes(hexes);
+        const hb = hexes.length && d.source !== "person" ? bounds(hexes) : null;
+        if (hb) window.map.fitBounds([[hb[0], hb[1]], [hb[2], hb[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 18, duration: 800 });
+        return;
+      }
+      const name = q(col.name);
       const kept = ["face_type", "color"].filter((n) => d.columns.some((c) => c.name === n));         // the columns that colour a shape
       const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g${kept.map((n) => `, CAST(${q(n)} AS VARCHAR) AS ${q(n)}`).join("")} FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
       if (mine !== ticket) return;                                  // a newer table came while this one loaded
@@ -133,7 +149,25 @@
       if (b) window.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 18, duration: 800 });
     };
 
-    const ready = loadEdits().catch((e) => console.warn("duckosm ask: the changes did not load:", e.message));
+    // the H3 cells of the boundary, for each resolution 0 to 11: the cells of the boundary's vertices, and from resolution 5 the cells inside it. `whole_boundary` is true for
+    // the one cell that holds all the vertices (a cell is convex, so it holds the whole boundary): the smallest such cell has the largest resolution with the flag.
+    const loadH3 = async () => {
+      if (!(await h3Loaded)) return;
+      const { rows: g } = await query("SELECT ST_AsGeoJSON(geom) FROM main.boundary");
+      const polys = g.flatMap(([x]) => { const j = JSON.parse(x); return j.type === "Polygon" ? [j.coordinates] : j.type === "MultiPolygon" ? j.coordinates : []; });
+      if (!polys.length) return;
+      const out = [];
+      for (let r = 0; r <= 11; r++) {
+        const vertex = new Set(), cells = new Set();
+        for (const poly of polys) for (const ring of poly) for (const [lng, lat] of ring) vertex.add(window.h3.latLngToCell(lat, lng, r));
+        vertex.forEach((c) => cells.add(c));
+        if (r >= 5) for (const poly of polys) for (const c of window.h3.polygonToCells(poly, r, true)) cells.add(c);
+        for (const c of cells) out.push([r, c, vertex.size === 1]);
+      }
+      const columns = [["resolution", "BIGINT"], ["h3_cell", "VARCHAR"], ["whole_boundary", "BOOLEAN"]].map(([name, type]) => ({ name, type }));
+      await api("table", { method: "POST", body: JSON.stringify({ name: "boundary_h3", columns, rows: out }) });
+    };
+    const ready = Promise.all([loadEdits(), loadH3()]).catch((e) => console.warn("duckosm ask: a table of the page did not load:", e.message));
     const data = dataDock({
       query, schema, ready,
       roadsBy: (sql, column) => `SELECT DISTINCT edge_id FROM ${main} WHERE "${column}" IN (SELECT "${column}" FROM (${sql}))`,
@@ -189,11 +223,13 @@
         + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
         + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
         + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
+        + "H3: the nodes tables (driving.nodes and the others) have h3_cell, a BIGINT H3 index at resolution 8. extra.boundary_h3 (resolution, h3_cell, whole_boundary) has the H3 cells that cover the boundary at each resolution 0 to 11, and whole_boundary is true for the one cell that contains the whole boundary: "
+        + "the SMALLEST cell that contains the whole boundary is the row with the largest resolution where whole_boundary is true. THE PAGE DRAWS A RESULT THAT HAS A COLUMN h3_cell (and no geometry column) AS HEXAGONS, so you CAN show H3 cells: SELECT h3_cell FROM extra.boundary_h3 WHERE whole_boundary ORDER BY resolution DESC LIMIT 1, or SELECT DISTINCT h3_cell FROM driving.nodes. "
         + "COLOURS: a shape is coloured by its column face_type (front green, back red, side grey, party wall purple, court cyan), so a result with face_type needs no more. "
         + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
         + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
         + "Never answer that you can only show roads.",
-      examples: ["Which objects did I change, and when?", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
+      examples: ["Which objects did I change, and when?", "Show the smallest H3 cell that contains the whole boundary.", "Show all buildings on the map.", "Show all nodes of the driving network on the map.",
         "How many walls of each type do the buildings have?", "Show the walls that I changed by hand.", "Draw a bar chart of the km of road in each class."],
     });
     // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer

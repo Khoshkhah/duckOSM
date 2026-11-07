@@ -166,6 +166,15 @@ def test_ask_page(monaco, page_url):
             page.wait_for_function(f"window.askPage.shapes() >= {minimum}", timeout=30_000)
             counted = page.evaluate(q, "SELECT count(*) FROM (" + sql + ")")["rows"][0][0]
             assert page.evaluate("window.askPage.shapes()") == int(counted), (sql, counted)
+        # H3: the page makes the table extra.boundary_h3 (h3-js), and a result with a column h3_cell is drawn as hexagons
+        whole = page.evaluate(q, "SELECT max(resolution), count(*) FROM extra.boundary_h3 WHERE whole_boundary")["rows"][0]
+        # every resolution from 0 to the smallest one has one cell that holds the whole boundary (Monaco: the smallest is resolution 6)
+        assert 4 <= int(whole[0]) <= 8 and int(whole[1]) == int(whole[0]) + 1, whole
+        page.evaluate("window.askPage.data.open()")
+        page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 10")
+        page.wait_for_function("window.askPage.shapes() > 50", timeout=30_000)
+        page.evaluate(run, "SELECT DISTINCT h3_cell FROM driving.nodes")
+        page.wait_for_function("window.askPage.shapes() > 5", timeout=30_000)
         # the colour of a shape: the walls by their face_type (the colours of the editor), and any shape by a column `color`
         page.evaluate("window.askPage.data.open()")
         page.evaluate(run, "SELECT building_id, face_type, geometry FROM main.building_faces")
