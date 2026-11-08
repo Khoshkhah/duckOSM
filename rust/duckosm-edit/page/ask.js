@@ -92,6 +92,14 @@
     const FACE = { front: "#16a34a", back: "#dc2626", side: "#6b7280", party: "#7c3aed", court: "#0891b2" };
     const COLOUR = ["coalesce", ["get", "color"], ["match", ["get", "face_type"], ...Object.entries(FACE).flat(), PURPLE]];
     let shapes = EMPTY, drawn = 0, ticket = 0, shapesOn = true;
+    // the opacity of the shapes of a result (the tool set_shapes of Ask): null is the default look (the fill 0.4, the outline and the points 1)
+    let shapeOpacity = null;
+    const applyOpacity = () => {
+      const map = window.map, o = shapeOpacity;
+      if (map.getLayer("ask-shapes-fill")) map.setPaintProperty("ask-shapes-fill", "fill-opacity", o ?? 0.4);
+      if (map.getLayer("ask-shapes-line")) map.setPaintProperty("ask-shapes-line", "line-opacity", o ?? 1);
+      if (map.getLayer("ask-shapes-pt")) { map.setPaintProperty("ask-shapes-pt", "circle-opacity", o ?? 1); map.setPaintProperty("ask-shapes-pt", "circle-stroke-opacity", o ?? 1); }
+    };
     // is the table shown on the map now (the switch of the dock is On and the dock is open)? The dock keeps the switch in this browser, so after a reload it can start Off
     // and no event `light` comes: the page asks data.light() each time that it draws, and does not wait for the event only.
     const lit = () => { try { return data.light ? !!data.light() : true; } catch { return true; } };
@@ -103,6 +111,7 @@
       map.addLayer({ id: "ask-shapes-fill", type: "fill", source: SHAPES, filter: polygon, layout, paint: { "fill-color": COLOUR, "fill-opacity": 0.4 } });
       map.addLayer({ id: "ask-shapes-line", type: "line", source: SHAPES, filter: ["!", point], layout, paint: { "line-color": COLOUR, "line-width": 3 } });
       map.addLayer({ id: "ask-shapes-pt", type: "circle", source: SHAPES, filter: point, layout, paint: { "circle-color": COLOUR, "circle-radius": 4, "circle-stroke-color": "#fff", "circle-stroke-width": 1.2 } });
+      applyOpacity();                                                  // new layers (a new base map, the first result) keep the opacity that Ask set
     };
     // the map switch of the data dock (On or Off, roadstyle): the shapes show with the table's roads. Off, or a closed dock: the map has its own colours only.
     const showShapes_ = (on) => { shapesOn = on; for (const id of ["ask-shapes-fill", "ask-shapes-line", "ask-shapes-pt"]) if (window.map.getLayer(id)) window.map.setLayoutProperty(id, "visibility", on ? "visible" : "none"); };
@@ -201,6 +210,22 @@
     data.addEventListener("row", async (e) => {
       const { columns, row } = e.detail, mine = ++rowTicket;
       const g = columns.findIndex((c) => /^GEOMETRY$/i.test(c.type));
+      const hexAt = g < 0 && window.h3 ? columns.findIndex((c) => /^h3(_cell|_id)?$/i.test(c.name)) : -1;
+      const named = columns.findIndex((c, i) => c.name === "name" && row[i] != null), idCol = columns.findIndex((c) => /(^|_)id$/.test(c.name));
+      const table = (lastSql.match(/\bFROM\s+([\w."]+)/i) || [])[1]?.replace(/"/g, "") ?? "row";
+      const card = (title, skip, id) => data.card({ title, chip: table, rows: columns.map((c, i) => [c.name.replace(/_/g, " "), i === skip ? null : row[i]]).filter(([, v]) => v != null), id });
+      if (!columns.some((c) => c.name === "edge_id") && hexAt >= 0 && row[hexAt] != null) {              // a row with an H3 cell and no geometry: the hexagon is the selected item
+        const cell = typeof row[hexAt] === "bigint" ? row[hexAt].toString(16) : String(row[hexAt]);
+        let ok = false; try { ok = window.h3.isValidCell(cell); } catch { /* not a cell */ }
+        if (ok) {
+          pickedFeatures = [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [window.h3.cellToBoundary(cell, true)] } }];
+          showPick(pickedFeatures);
+          const hb = bounds(pickedFeatures);
+          if (hb) window.map.fitBounds([[hb[0], hb[1]], [hb[2], hb[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 19, duration: 600 });
+          card(named >= 0 ? String(row[named]) : `H3 cell ${cell}`, -1, cell);
+          return;
+        }
+      }
       if (columns.some((c) => c.name === "edge_id") || g < 0 || row[g] == null) { clearPick(); return; }      // a road: roadstyle selects it; no geometry: nothing to draw
       const wkt = String(row[g]).replace(/'/g, "''");
       const { rows } = await query(`SELECT ST_AsGeoJSON(ST_GeomFromText('${wkt}')) AS g`);
@@ -210,10 +235,7 @@
       showPick(pickedFeatures);
       const b = bounds(pickedFeatures);
       if (b) window.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 19, duration: 600 });
-      const named = columns.findIndex((c) => c.name === "name" && row[columns.indexOf(c)] != null), idCol = columns.findIndex((c) => /(^|_)id$/.test(c.name));
-      const table = (lastSql.match(/\bFROM\s+([\w."]+)/i) || [])[1]?.replace(/"/g, "") ?? "row";
-      data.card({ title: named >= 0 ? String(row[named]) : `${table} ${idCol >= 0 ? row[idCol] : e.detail.index + 1}`, chip: table,
-        rows: columns.map((c, i) => [c.name.replace(/_/g, " "), i === g ? null : row[i]]).filter(([, v]) => v != null), id: idCol >= 0 ? String(row[idCol]) : undefined });
+      card(named >= 0 ? String(row[named]) : `${table} ${idCol >= 0 ? row[idCol] : e.detail.index + 1}`, g, idCol >= 0 ? String(row[idCol]) : undefined);
     });
     // the road classes of each network with their number of edges: Ask must not guess the values of `highway` (asked to colour the roads by class, it used classes that
     // do not exist, found no roads, and had no step left to look them up)
@@ -237,7 +259,7 @@
       { title: "Roads: color and focus", items: ["Color the roads by their class.", "Show only the primary roads and fade the others.",
         "Color the one-way roads red and the two-way roads grey.", "Color the roads that have a speed limit above 50 km/h."] },
       { title: "H3 cells and the boundary", items: ["Show the smallest H3 cell that contains the whole boundary.", "Show the H3 cells of the boundary at resolution 9.",
-        "How many nodes are in each H3 cell?"] },
+        "How many nodes are in each H3 cell?", "Make the H3 cells more transparent."] },
       { title: "Water, 3D and base maps", items: ["Turn off the water and the waterways layers.", "Switch the base map to satellite.",
         "Turn on the 3D view and tilt the map.", "Switch to the dark base map."] },
       { title: "Charts of the roads", items: ["Draw a bar chart of the km of road in each class.", "Draw a histogram of the road lengths.",
@@ -257,8 +279,24 @@
       + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
       + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
       + "Never answer that you can only show roads.";
+    // the page's own tool for Ask (roadstyle's `tools` option): set_map changes roadstyle's layers only, and the shapes of a result (H3 cells, buildings, walls, nodes) are
+    // the page's own layer (Kaveh: "increase transparency of h3 cells on map", and Ask answered that it could not)
+    const shapeTools = [{
+      name: "set_shapes",
+      description: "Change how transparent the shapes are that the page draws for a result (H3 cells, buildings, walls, nodes). opacity: 0 is invisible, 1 is solid; by default the fill of a shape is 0.4 and its outline and points are 1. reset: true brings the default look back. It does not change the layers of the map (use set_map for those).",
+      parameters: { opacity: { type: "number", description: "0 to 1" }, reset: { type: "boolean", description: "true: the default look" } },
+      required: [],
+      step: () => "Changing the shapes",
+      run: async (a) => {
+        if (a.reset) shapeOpacity = null;
+        else if (a.opacity != null) { const o = Number(a.opacity); if (!(o >= 0 && o <= 1)) throw new Error("opacity must be a number from 0 to 1"); shapeOpacity = o; }
+        else throw new Error("give opacity (0 to 1) or reset: true");
+        applyOpacity();
+        return { done: shapeOpacity == null ? "The shapes have the default look." : `The shapes have opacity ${shapeOpacity}.`, shapes_now: drawn };
+      },
+    }];
     const ask = askPanel({
-      data, dialect: "DuckDB", maxSteps: 8,
+      data, dialect: "DuckDB", maxSteps: 8, tools: shapeTools,
       about: aboutText,
       examples: QUESTIONS,                  // roadstyle's Ask shows its general groups first (any data), then these groups
     });
@@ -271,7 +309,7 @@
     window.rs.sections.add({ id: "sql", label: "Query the tables", note: "One SQL line over a wide table", open: () => data.open(), icon: "ask", background: true });
     await ready;
     ask.open();
-    window.askPage = { data, ask, about: aboutText, questions: QUESTIONS, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
+    window.askPage = { data, ask, about: aboutText, shapeTools, opacity: () => shapeOpacity, questions: QUESTIONS, edits: () => edits, shapes: () => drawn, shapeProps: () => shapes.features.map((f) => f.properties), picked: () => picked, shapesShown: lit };            // for the tests (tests/test_ask_page.py)
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="ask-error" role="alert">duckosm ask: ${esc(e.message)}</p>`); });
   window.rsReady ? go() : document.addEventListener("rs:ready", go, { once: true });

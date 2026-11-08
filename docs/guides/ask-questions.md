@@ -68,6 +68,7 @@ The page computes the H3 cells of the boundary (the table `extra.boundary_h3`, r
 - Show the smallest H3 cell that contains the whole boundary.
 - Show the H3 cells of the boundary at resolution 9.
 - How many nodes are in each H3 cell?
+- Make the H3 cells more transparent.
 
 ## Water, 3D and base maps
 
@@ -85,6 +86,10 @@ Ask draws a chart of the result in the data dock: bar, line, histogram, scatter 
 - Draw a bar chart of the km of road in each class.
 - Draw a histogram of the road lengths.
 - Show a pie chart of the one-way and the two-way roads.
+
+## Change the look of the shapes
+
+The shapes that the page draws for a result (H3 cells, buildings, walls, nodes) have a tool of their own, `set_shapes`: ask "Make the H3 cells more transparent", or "Make the shapes solid". A new result keeps the look. "Back to the default look" brings the standard look back. The map layers (water, parking, base map) are a different tool: see *Water, 3D and base maps*.
 
 ## When an answer is wrong
 
