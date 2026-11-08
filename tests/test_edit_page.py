@@ -373,10 +373,12 @@ def test_the_turn_list_does_not_collapse_while_the_next_junction_loads(monaco, p
         page.evaluate("() => { const f = window.fetch; window.fetch = async (u, o) => { if (String(u).includes('api/query')) await new Promise((r) => setTimeout(r, 250)); return f(u, o); }; }")
         page.evaluate("""() => { window.__min = 1e9; const tick = () => { const h = document.getElementById('fix-out').getBoundingClientRect().height; if (h < window.__min) window.__min = h; requestAnimationFrame(tick); }; tick(); }""")
         full = page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
+        # each action: wait until its data has come (the class `loading` is off), whatever the speed of the machine
+        settle = lambda: (page.wait_for_timeout(300), page.wait_for_function("!document.getElementById('fix-out').classList.contains('loading')", timeout=60_000))
         page.evaluate("(()=>{const s=document.getElementById('fix-via'); s.selectedIndex=2; s.dispatchEvent(new Event('change',{bubbles:true}));})()")
-        page.wait_for_timeout(2000)
+        settle()
         page.evaluate("document.getElementById('fix-turn-find').click()")
-        page.wait_for_timeout(2000)
+        settle()
         low, final = page.evaluate("window.__min"), page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
         assert low >= min(full, final) * 0.9, f"the list fell to {low}px (it was {full}px, it is {final}px) while the data loaded"
         assert not page.evaluate("document.getElementById('fix-out').classList.contains('loading')")
