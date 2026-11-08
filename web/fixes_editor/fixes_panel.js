@@ -303,6 +303,16 @@ export async function initFixesPanel(ctx) {
   const hasTable = (schema, table) => built(schema, table);
   const tagMap = (r) => { const k = r?.k ? String(r.k).split("\x01") : [], v = r?.v ? String(r.v).split("\x01") : []; return Object.fromEntries(k.map((key, i) => [key, v[i] ?? ""])); };
   const TAGS = "array_to_string(map_keys(tags), chr(1)) AS k, array_to_string(map_values(tags), chr(1)) AS v";
+  // A table of the host can have no `tags` column (an area that the host opened from files without the tags: the export of Studio leaves them out). The tags of a table are read only when
+  // the column is there; else the columns k and v are empty and the object has a fact that says so. When the list of columns cannot be read, the column is taken as there.
+  const columns = new Map();
+  const tagsOf = async (schema, table) => {
+    const key = `${schema}.${table}`;
+    if (!columns.has(key)) columns.set(key, new Set((await safe(`SELECT column_name FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}'`)).map((r) => String(r.column_name))));
+    const cols = columns.get(key);
+    return !cols.size || cols.has("tags") ? { sql: TAGS, has: true } : { sql: "NULL AS k, NULL AS v", has: false };
+  };
+  const NO_TAGS = "The tags of this object are not in the data of this area (its table has no tags column), so the form shows no current values. A rule that you add still works.";
   // a failed query gives no rows, like a query with no match; `fails` and `lastFail` tell the difference (loadData: "the data could not be read" is not "not in this area")
   let fails = 0, lastFail = "";
   const safe = async (sql) => { try { return await rows(sql); } catch (e) { fails++; lastFail = e.message.split("\n")[0]; console.warn("fixes panel: a query failed:", lastFail, "|", sql.slice(0, 90)); return []; } };
@@ -325,8 +335,9 @@ export async function initFixesPanel(ctx) {
         const nb = (await safe(`SELECT count(DISTINCT CASE WHEN source = ${id} THEN target ELSE source END)::INTEGER AS arms, string_agg(DISTINCT highway, ',') AS cls FROM driving.edges WHERE source = ${id} OR target = ${id}`))[0];
         out.arms = nb?.arms ?? 0; out.classes = nb?.cls ? String(nb.cls).split(",") : [];
       }
-      const r = (await safe(`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat, ${TAGS} FROM features.traffic WHERE osm_id = ${id}`))[0];
-      if (r) { out.found = true; out.tags = tagMap(r); out.lonlat = [r.lon, r.lat]; if (out.arms) out.facts.push(`${plural(out.arms, "road")} meet here`); return out; }
+      const tg = await tagsOf("features", "traffic");
+      const r = (await safe(`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat, ${tg.sql} FROM features.traffic WHERE osm_id = ${id}`))[0];
+      if (r) { out.found = true; out.tags = tagMap(r); out.lonlat = [r.lon, r.lat]; if (out.arms) out.facts.push(`${plural(out.arms, "road")} meet here`); if (!tg.has) out.facts.push(NO_TAGS); return out; }
       for (const m of modes()) {                      // a node of the roads (a junction) with no traffic tag in the data
         const q = (await safe(`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat FROM ${m}.nodes WHERE node_id = ${id} AND node_id IN (SELECT node_id FROM ${m}.way_nodes)`))[0];
         if (!q) continue;
@@ -349,8 +360,9 @@ export async function initFixesPanel(ctx) {
       return out;
     }
     if (k === "building") {
-      const r = built("features", "buildings") ? (await safe(`SELECT osm_type, ${TAGS} FROM features.buildings WHERE osm_id = ${id} LIMIT 1`))[0] : null;
-      if (r) { out.found = true; out.tags = tagMap(r); out.type = r.osm_type === "relation" ? "relation" : "way"; return out; }
+      const tg = built("features", "buildings") ? await tagsOf("features", "buildings") : null;
+      const r = tg ? (await safe(`SELECT osm_type, ${tg.sql} FROM features.buildings WHERE osm_id = ${id} LIMIT 1`))[0] : null;
+      if (r) { out.found = true; out.tags = tagMap(r); out.type = r.osm_type === "relation" ? "relation" : "way"; if (!tg.has) out.facts.push(NO_TAGS); return out; }
       if (hasFaces()) {                                // a building with walls but no row in features.buildings (a build with the layers off, or other filters): its walls are in the data
         const f = (await safe(`SELECT any_value(building_type) AS t, count(*)::INTEGER AS n FROM main.building_faces WHERE building_id = ${id}`))[0];
         if (f && f.n) {
@@ -361,7 +373,7 @@ export async function initFixesPanel(ctx) {
       return out;
     }
     let raw = null;
-    for (const m of modes()) { raw = (await safe(`SELECT ${TAGS} FROM ${m}.ways WHERE osm_id = ${id}`))[0]; if (raw) break; }      // <mode>.ways has all the tags of the ways that the mode kept
+    for (const m of modes()) { raw = (await safe(`SELECT ${(await tagsOf(m, "ways")).sql} FROM ${m}.ways WHERE osm_id = ${id}`))[0]; if (raw) break; }      // <mode>.ways has all the tags of the ways that the mode kept
     if (raw) { out.found = true; out.tags = tagMap(raw); }
     const inModes = [];
     let len = null, wt = null;
@@ -624,8 +636,10 @@ export async function initFixesPanel(ctx) {
   function renderObject() {
     const box = $("fix-obj");
     $("fix-unselect").hidden = !sel;
-    if (!sel) { box.innerHTML = `<p class="why" style="margin:0">Nothing is picked in this tab.</p>`; renderForm(); return; }
-    if (!data) { box.innerHTML = '<p class="why" style="margin:0">Loading…</p>'; return; }
+    if (!sel) { box.classList.remove("loading"); box.innerHTML = `<p class="why" style="margin:0">Nothing is picked in this tab.</p>`; renderForm(); return; }
+    // while the next object loads, the box keeps the text of the last one (dimmed): a box of one line "Loading…" would move the whole form up and back at each pick
+    if (!data) { box.classList.toggle("loading", !!box.querySelector(".objhead")); if (!box.classList.contains("loading")) box.innerHTML = '<p class="why" style="margin:0">Loading…</p>'; return; }
+    box.classList.remove("loading");
     const kindName = KIND_NAME[sel.kind === "building" && sel.type === "relation" ? "relation" : sel.kind];
     const head = data.tags.name ? esc(data.tags.name) : `${kindName} ${sel.id}`;
     const sub = data.tags.name ? `${kindName} · ${sel.kind === "node" ? "node" : sel.type} ${sel.id}` : sel.kind === "node" ? "" : `${sel.type} ${sel.id}`;
@@ -1032,17 +1046,21 @@ export async function initFixesPanel(ctx) {
     if (!(turnAt && from === turnAt.from && Number(via) === turnAt.via) && !keepTurnsOk()) { $("fix-from").value = turnAt.from; window.rsDeselect?.(); return; }
     if (from !== turnFrom) { turnFrom = from; turnOk.clear(); }
     $("fix-from").value = from;
-    // the junctions at the ends of the edges of the road, the one with the most roads that leave it first
-    const js = await safe(`SELECT t.n::VARCHAR AS n, count(DISTINCT o.osm_id)::INTEGER AS c FROM (SELECT DISTINCT target AS n FROM driving.edges WHERE osm_id = ${from}) t
-      LEFT JOIN driving.edges o ON o.source = t.n AND o.osm_id != ${from} GROUP BY t.n ORDER BY c DESC, t.n`);
+    // every junction at an end of the edges of the road. Where the road arrives (e = true) a turn can start; the start of a one-way road (e = false) is a junction too, but no turn
+    // from this road is there. The ones where the road arrives come first, the one with the most roads that leave it first.
+    const js = await safe(`SELECT t.n::VARCHAR AS n, t.e AS e, count(DISTINCT o.osm_id)::INTEGER AS c FROM (SELECT n, bool_or(arrives) AS e FROM (
+        SELECT target AS n, true AS arrives FROM driving.edges WHERE osm_id = ${from} UNION ALL SELECT source AS n, false AS arrives FROM driving.edges WHERE osm_id = ${from}) GROUP BY n) t
+      LEFT JOIN driving.edges o ON o.source = t.n AND o.osm_id != ${from} GROUP BY t.n, t.e ORDER BY t.e DESC, c DESC, t.n`);
     const nodes = js.map((r) => String(r.n));
     $("fix-via-row").hidden = $("fix-turnsec").hidden = $("fix-turn-bar").hidden = !nodes.length;
     $("fix-turn-clear").hidden = false; $("fix-turn-legend").hidden = !nodes.length;
     // a dropdown list: one option for each junction
-    $("fix-via").innerHTML = js.map((r) => `<option value="${r.n}">Junction ${r.n}: ${r.c ? `${plural(r.c, "road")} ${r.c === 1 ? "leaves" : "leave"} it` : "no road leaves it"}</option>`).join("");
+    $("fix-via").innerHTML = js.map((r) => `<option value="${r.n}" data-end="${r.e ? 1 : 0}">Junction ${r.n}: ${!r.e ? "the road starts here" : r.c ? `${plural(r.c, "road")} ${r.c === 1 ? "leaves" : "leave"} it` : "no road leaves it"}</option>`).join("");
     $("fix-via").value = nodes.includes(String(via)) ? String(via) : nodes[0] ?? "";       // the junction that the tab picks first: the one at the end of the road with the most roads that leave it
-    $("fix-out").innerHTML = nodes.length ? "" : `<p class="why">Way ${from} is not in the driving network.</p>`;
-    if (nodes.length) await outgoing();
+    // the list keeps its last text (dimmed) until the new one is made: an empty list in between would move everything under it up and back
+    if (nodes.length) { $("fix-out").classList.toggle("loading", $("fix-out").children.length > 0); await outgoing(); }
+    else $("fix-out").innerHTML = `<p class="why">Way ${from} is not in the driving network.</p>`;
+    $("fix-out").classList.remove("loading");
     drawSelected(zoom, { turn: nodes.length ? { via: $("fix-via").value } : null });
     if (!nodes.length) { turnOut = []; turnIn = []; drawTurnRoads(); }
   }
@@ -1060,14 +1078,16 @@ export async function initFixesPanel(ctx) {
     const from = whole($("fix-from").value), via = Number($("fix-via").value);
     if (!from || !Number.isSafeInteger(via)) return;
     const chosen = keep && turnAt?.from === from && turnAt?.via === via ? new Map(turnDiffs().map((x) => [x.to, x.want])) : new Map();
+    $("fix-out").classList.toggle("loading", $("fix-out").children.length > 0);
     const roads = await safe(`SELECT osm_id, any_value(name) AS name, any_value(highway) AS highway, any_value(ST_X(ST_PointN(geometry, 1))) AS x1, any_value(ST_Y(ST_PointN(geometry, 1))) AS y1,
       any_value(ST_X(ST_PointN(geometry, 2))) AS x2, any_value(ST_Y(ST_PointN(geometry, 2))) AS y2 FROM driving.edges WHERE source = ${via} AND osm_id != ${from} GROUP BY osm_id ORDER BY osm_id LIMIT 30`);
     const inEdge = (await safe(`SELECT ST_X(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)) AS x1, ST_Y(ST_PointN(geometry, (ST_NPoints(geometry) - 1)::INTEGER)) AS y1, ST_X(ST_PointN(geometry, ST_NPoints(geometry)::INTEGER)) AS x2,
       ST_Y(ST_PointN(geometry, ST_NPoints(geometry)::INTEGER)) AS y2 FROM driving.edges WHERE osm_id = ${from} AND target = ${via} LIMIT 1`))[0];
-    turnOut = roads.map((r) => Number(r.osm_id)); drawTurnRoads();
+    const starts = !inEdge;                          // the road does not arrive at this junction: it starts here (a one-way road), so no turn from it is here
+    turnOut = starts ? [] : roads.map((r) => Number(r.osm_id)); drawTurnRoads();
     const arrive = await safe(`SELECT osm_id, any_value(name) AS name, any_value(highway) AS highway, bool_or(oneway) AS oneway FROM driving.edges WHERE target = ${via} AND osm_id != ${from} GROUP BY osm_id ORDER BY osm_id LIMIT 12`);
     // the roads that only arrive (a two-way road is a road that leaves it too, and is green): the third colour on the map
-    turnIn = arrive.map((r) => Number(r.osm_id)).filter((id) => !turnOut.includes(id)); drawTurnRoads();
+    turnIn = starts ? [] : arrive.map((r) => Number(r.osm_id)).filter((id) => !turnOut.includes(id)); drawTurnRoads();
     const arrivals = arrive.length ? `<p class="small" style="margin:12px 0 4px"><b>Roads into this junction</b> <span class="muted">(click one to start from it)</span></p>${arrive.map((r) => `<div class="small"><i class="sw" style="background:${turnOut.includes(Number(r.osm_id)) ? TURN_OUT : TURN_IN}"></i><a href="#" class="link" role="button" data-from="${r.osm_id}">${esc(r.name || "no name")}</a> (${esc(r.highway)}, way ${r.osm_id}${r.oneway ? ", one-way" : ""})</div>`).join("")}` : "";
     // the roads of the other networks that meet this junction and that are not in the driving network (a footway, a path, a cycleway): they are not on the map of this tab
     const others = new Map();
@@ -1076,9 +1096,10 @@ export async function initFixesPanel(ctx) {
         AND osm_id NOT IN (SELECT osm_id FROM driving.edges WHERE source = ${via} OR target = ${via}) GROUP BY osm_id ORDER BY osm_id LIMIT 12`)) if (!others.has(Number(r.osm_id))) others.set(Number(r.osm_id), { ...r, m });
     }
     const notDriving = others.size ? `<p class="small muted" style="margin:12px 0 4px">Also here, not in the driving network (not on the map of this tab): ${[...others.values()].map((r) => `${esc(r.name || "no name")} (${esc(r.highway)}, way ${r.osm_id}, ${r.m})`).join("; ")}.</p>` : "";
-    const none = '<p class="why">No driving road leaves this junction.</p>';
-    $("fix-out").innerHTML = (roads.length ? "" : none) + arrivals + notDriving;
-    if (roads.length) $("fix-out").insertAdjacentHTML("afterbegin", roads.map((r) => `<div class="turn" data-to="${r.osm_id}"><span class="small"><i class="sw" style="background:#16a34a"></i><b>${esc(r.name || "no name")}</b>${turnWay(inEdge, r) ? ` · ${WAY_NAMES[turnWay(inEdge, r)]}` : ""}<br><span class="muted">${esc(r.highway)} · way ${r.osm_id}</span></span>${turnSelect(F.findTurn(doc, from, via, Number(r.osm_id))?.restriction, turnWay(inEdge, r))}</div>`).join(""));
+    const none = starts ? `<p class="why">Way ${from} starts at this junction (it is a one-way road), so no turn from it is here. Choose a junction where it arrives to make a turn rule.</p>` : '<p class="why">No driving road leaves this junction.</p>';
+    $("fix-out").classList.remove("loading");
+    $("fix-out").innerHTML = (roads.length && !starts ? "" : none) + arrivals + notDriving;
+    if (roads.length && !starts) $("fix-out").insertAdjacentHTML("afterbegin", roads.map((r) => `<div class="turn" data-to="${r.osm_id}"><span class="small"><i class="sw" style="background:#16a34a"></i><b>${esc(r.name || "no name")}</b>${turnWay(inEdge, r) ? ` · ${WAY_NAMES[turnWay(inEdge, r)]}` : ""}<br><span class="muted">${esc(r.highway)} · way ${r.osm_id}</span></span>${turnSelect(F.findTurn(doc, from, via, Number(r.osm_id))?.restriction, turnWay(inEdge, r))}</div>`).join(""));
     for (const row of $("fix-out").querySelectorAll(".turn")) {
       const s = row.querySelector("select"), want = chosen.get(Number(row.dataset.to));
       if (want !== undefined && [...s.options].some((o) => o.value === want)) s.value = want;
@@ -1086,7 +1107,7 @@ export async function initFixesPanel(ctx) {
     }
     turnAt = { from, via };
     if (!roads.some((r) => Number(r.osm_id) === turnSel)) turnSel = null;
-    turnNames = new Map(roads.map((r) => [Number(r.osm_id), r.name]));
+    turnNames = new Map((starts ? [] : roads).map((r) => [Number(r.osm_id), r.name]));
     paintTurnSel();
     paintTurnBar();
     paintTurnAsk();
@@ -1216,10 +1237,10 @@ export async function initFixesPanel(ctx) {
     }
     if (!map.getSource("fix-turn-js")) {              // every junction of the picked road (the ends of its edges): a white dot that a click chooses; the chosen one has the blue ring of fix-sel
       map.addSource("fix-turn-js", { type: "geojson", data: EMPTY });
-      map.addLayer({ id: "fix-turn-js-pt", type: "circle", source: "fix-turn-js", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 13, 5, 19, 9], "circle-color": "#ffffff", "circle-stroke-color": BLUE, "circle-stroke-width": 3 } });
+      map.addLayer({ id: "fix-turn-js-pt", type: "circle", source: "fix-turn-js", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 13, 5, 19, 9], "circle-color": "#ffffff", "circle-stroke-color": ["case", ["==", ["get", "e"], 0], "#9ca3af", BLUE], "circle-stroke-width": 3 } });
       map.on("mouseenter", "fix-turn-js-pt", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "fix-turn-js-pt", () => { map.getCanvas().style.cursor = ""; });
-      map.on("click", "fix-turn-js-pt", (e) => chooseJunction(e.features?.[0]?.properties?.n));
+      map.on("click", "fix-turn-js-pt", (e) => { dotAt = performance.now(); chooseJunction(e.features?.[0]?.properties?.n); });
     }
     for (const [src, color0, w, fa] of [["fix-edits", AMBER, 5, 0.28], ["fix-sel", BLUE, 7, 0.2]]) {
       const color = src === "fix-edits" ? ["case", ["==", ["get", "d"], 1], DELETED, AMBER] : color0;          // a deleted object is red
@@ -1288,7 +1309,7 @@ export async function initFixesPanel(ctx) {
     const ids = F.objects(doc).filter((o) => o.type === "way" && kinds.get("way" + o.id) === "building").map((o) => o.id);
     if (!ids.length) return [];
     const out = [];
-    for (const r of await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geom) AS g, ${TAGS} FROM features.buildings WHERE osm_type = 'way' AND osm_id IN (${ids.join(",")})`)) {
+    for (const r of await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geom) AS g, ${(await tagsOf("features", "buildings")).sql} FROM features.buildings WHERE osm_type = 'way' AND osm_id IN (${ids.join(",")})`)) {
       const rule = F.ruleOf(doc, "way", Number(r.id)), tags = { ...tagMap(r), ...rule.set };
       for (const k of rule.delete) delete tags[k];
       try { out.push({ type: "Feature", properties: { h: Math.round(heightOf(tags) * 10) / 10, c: cssColor(tags["building:colour"]) ?? cssColor(tags["roof:colour"]) ?? AMBER }, geometry: geoOf(r.g) }); } catch { /* no geometry */ }
@@ -1462,12 +1483,13 @@ export async function initFixesPanel(ctx) {
     drawTurnJunctions();
   }
   // the junctions of the picked road, from the list of the Junction box (so the dots and the list are the same junctions)
-  let turnJsToken = 0;
+  let turnJsToken = 0, dotAt = -1e9;               // dotAt: the time of the last click on a junction dot (the road under the dot must not be picked then)
   async function drawTurnJunctions() {
-    const my = ++turnJsToken, ids = open() && current === "turns" && !$("fix-turnsec").hidden ? [...$("fix-via").options].map((o) => Number(o.value)).filter(Number.isSafeInteger) : [];
+    const my = ++turnJsToken, opts = open() && current === "turns" && !$("fix-turnsec").hidden ? [...$("fix-via").options] : [];
+    const ids = opts.map((o) => Number(o.value)).filter(Number.isSafeInteger), arrives = new Map(opts.map((o) => [String(o.value), o.dataset.end !== "0"]));
     const rows = ids.length ? await safe(`SELECT node_id AS n, ST_X(geom) AS x, ST_Y(geom) AS y FROM driving.nodes WHERE node_id IN (${ids.join(",")})`) : [];
     if (my !== turnJsToken) return;
-    map.getSource("fix-turn-js")?.setData({ type: "FeatureCollection", features: rows.map((r) => ({ type: "Feature", properties: { n: String(r.n) }, geometry: { type: "Point", coordinates: [r.x, r.y] } })) });
+    map.getSource("fix-turn-js")?.setData({ type: "FeatureCollection", features: rows.map((r) => ({ type: "Feature", properties: { n: String(r.n), e: arrives.get(String(r.n)) === false ? 0 : 1 }, geometry: { type: "Point", coordinates: [r.x, r.y] } })) });
     drawnCount.turnJs = rows.length;
   }
   // a click on a junction dot of the map: the same as the choice in the Junction box (its guard for rules that are not added yet is in onchange)
@@ -1725,7 +1747,10 @@ export async function initFixesPanel(ctx) {
     const id = Number(roadIdOfRow(e.detail?.id));
     if (!Number.isSafeInteger(id) || id <= 0) return;
     if (await onBuilding(pressed)) return;
-    if (turns && pressed && map.queryRenderedFeatures(map.project(pressed.p), { layers: ["fix-turn-js-pt"] }).length) return;      // a junction dot of the road: chooseJunction
+    if (turns) {                                                       // a click on a junction dot of the road chooses the junction (chooseJunction), it does not pick the road under the dot.
+      await new Promise((r) => setTimeout(r, 60));                       // The dot's click and this event come in either order: wait for the dot's click
+      if (performance.now() - dotAt < 500 || (pressed && map.queryRenderedFeatures(map.project(pressed.p), { layers: ["fix-turn-js-pt"] }).length)) return;
+    }
     if (turns) { $("fix-from").value = id; findTurns(id); }
     else select("road", "way", id);
   });

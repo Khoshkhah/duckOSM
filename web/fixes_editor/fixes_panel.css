@@ -54,6 +54,7 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel .turn { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin-top: 6px; padding: 4px 6px; border-radius: 6px; border-left: 3px solid transparent; cursor: pointer; }
 #fix-panel .turn .rs-sel { max-width: 11em; }
 #fix-panel .fix-obj { margin-top: 10px; }
+#fix-panel .fix-obj.loading, #fix-panel #fix-out.loading { opacity: .55; }      /* the last object, while the next one loads: the form below does not move */
 #fix-panel .objhead { font-weight: 600; }
 #fix-panel .alltags { margin-top: 6px; font-size: 12px; }
 #fix-panel .alltags table { border-collapse: collapse; margin-top: 4px; width: 100%; }
