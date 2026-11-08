@@ -9,6 +9,12 @@
 
 ### Changed
 
+- **`duckosm ask`: many more example questions, in 14 groups.** The list has 115 questions. It has new groups for the road tags (surface,
+  bridges, tunnels, roundabouts), the junctions and turn restrictions, the traffic signals and crossings, the levels, heights and roofs of the
+  buildings, the walls and their streets, and the look of the shapes. The groups that were already there have more questions, and *Charts of the roads*
+  is now *Charts of the data*. The SQL of each new question was run on the Monaco sample and gave rows. Ask itself needs an AI key and was not run.
+  The list is now one file, `web/ask/questions.js` (`export const QUESTIONS`). The page imports it (the server gives it at `/ask/questions.js`), and a host page
+  of its own can copy it, as it copies `web/fixes_editor/`. Guide: `docs/guides/ask-questions.md`.
 - **The fixes editor colours the roads with roadstyle's highlight sets** (`docs/design/fixes_editor.md`). A new optional hook,
   `roadRows(osmId)`, gives the map's rows of an OSM way. With it, the picked road is blue, the changes are amber, the deleted roads
   are red, the roads that leave a junction are green and the road under the pointer in the Turn list is dark, on the road's own fill

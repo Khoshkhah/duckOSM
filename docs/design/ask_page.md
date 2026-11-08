@@ -34,6 +34,12 @@ roadstyle knows no database. The host page (`rust/duckosm-edit/page/ask.js`) giv
 - `schema()`: the tables of the file, each with a line about what it holds, and the columns of the main table.
 - `roadsBy(sql, column)`: how to find the roads of a result that has `osm_id` and no `edge_id`.
 
+## The example questions
+
+The examples of Ask are in one file, `web/ask/questions.js` (`export const QUESTIONS`, groups of `{ title, items }`). The page imports it from `/ask/questions.js`,
+where the server has it in the program, and passes it as `examples`. roadstyle's six general groups show first, so no title of the file is one of them.
+Another host page can copy the file. `tests/test_ask_questions.py` checks the groups, and the guide `docs/guides/ask-questions.md` lists the same questions.
+
 ## Shapes on the map
 
 roadstyle's Ask lights roads only. Asked "show all nodes" or "show all buildings", it answered "I can only show roads". So the page draws the
