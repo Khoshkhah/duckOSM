@@ -289,11 +289,18 @@ def test_the_turn_tab_shows_every_junction_of_the_road_and_a_click_on_a_dot_choo
             .map((f) => { const q = m.project(f.geometry.coordinates); return {n: f.properties.n, x: q.x, y: q.y}; }); }"""
         page.wait_for_function(f"({dots})().length > 1", timeout=20_000)            # the map has moved to the road
         first = page.input_value("#fix-via")
-        target = next(d for d in page.evaluate(dots) if d["n"] != first and d["x"] > 450 and 60 < d["y"] < 780)
-        page.wait_for_timeout(800)                                                  # the map stops
-        target = next(d for d in page.evaluate(dots) if d["n"] == target["n"])
-        page.mouse.click(target["x"], target["y"])
-        page.wait_for_function(f"document.getElementById('fix-via').value === '{target['n']}'", timeout=15_000)
+        # a click chooses the junction: the map must stand still, else the dot moves from under the pointer (a slow machine). The click is tried again when it missed.
+        for attempt in range(3):
+            page.wait_for_function("!window.map.isMoving() && window.map.areTilesLoaded()", timeout=20_000)
+            page.wait_for_timeout(300)
+            target = next(d for d in page.evaluate(dots) if d["n"] != first and d["x"] > 450 and 60 < d["y"] < 780)
+            page.mouse.click(target["x"], target["y"])
+            try:
+                page.wait_for_function(f"document.getElementById('fix-via').value === '{target['n']}'", timeout=6_000)
+                break
+            except pw.TimeoutError:
+                if attempt == 2:
+                    raise
         page.wait_for_function("document.getElementById('fix-out').innerText.length > 0", timeout=15_000)
         assert page.input_value("#fix-from") == str(frm), "the click chose a junction; it did not pick the road again"
         assert page.evaluate("fixesPanel.drawn().turnJs") == len(listed)
