@@ -138,8 +138,8 @@ export const HINTS = [
 ];
 
 // dataDock({ schema }): the tables that Ask may see. Every table of the file, the `features.*` base-map tables too (without them the agent cannot count the traffic signals);
-// only `raw.*` (the unfiltered OSM data of a build, when it is kept) is left out. `tables` is the host's list: { mode, table, rows } or { name, rows }. The result is for describeTables.
-export const askTables = (tables) => tables.map((t) => ({ name: t.name ?? `${t.mode}.${t.table}`, rows: t.rows })).filter((t) => !t.name.startsWith("raw."));
+// only `raw.*` (the unfiltered OSM data of a build, when it is kept) is left out. `tables` is the host's list: { mode, table, rows } or { name: "schema.table", rows }. When an entry has mode and table, the name is mode.table (a host's `name` can be a file name). The result is for describeTables.
+export const askTables = (tables) => tables.map((t) => ({ name: t.mode && t.table ? `${t.mode}.${t.table}` : t.name, rows: t.rows })).filter((t) => !t.name.startsWith("raw."));
 
 // askPanel({ about }): the text that tells the agent what the data is. It names a table only when `tables` has it. `classes` is the text of roadClasses.
 // `shapes: true` is for a page that draws the geometry column of a result on the map (nodes as points, buildings as shapes, walls as lines, H3 cells as hexagons).

@@ -43,7 +43,7 @@ out.kinds = Object.fromEntries([true, false].map((t) => [t, (() => { const k = o
 out.onlyRoads = Object.keys(objectKinds({ names: ["driving.edges"] }));
 out.noNodes = (() => { try { objectKinds({ names: ["features.traffic"] }).node.geometryBy("s", "node_id"); return "no error"; } catch (e) { return e.message; } })();
 out.hasTags = [await hasTags(async () => ({ rows: [[1]] })), await hasTags(async () => ({ rows: [] }))];
-out.askTables = askTables([{ mode: "features", table: "traffic", rows: 7, bytes: 1 }, { name: "raw.ways", rows: 1 }, { mode: "driving", table: "edges", rows: 3 }]);
+out.askTables = askTables([{ name: "features_traffic.parquet", mode: "features", table: "traffic", rows: 7, bytes: 1 }, { name: "raw.ways", rows: 1 }, { name: "main.boundary", rows: 2 }, { name: "raw_ways.parquet", mode: "raw", table: "ways", rows: 4 }, { mode: "driving", table: "edges", rows: 3 }]);
 out.hints = HINTS.map((h) => [h.table, h.sql, h.tags]);
 out.aboutNoTags = aboutText({ tables: names, hasTags: false });
 process.stdout.write(JSON.stringify(out));
@@ -137,7 +137,8 @@ def test_the_object_kinds_give_the_geometry_and_the_facts_of_a_node_or_a_buildin
 
 def test_ask_sees_the_base_map_tables_and_gets_the_sql_for_the_common_questions(monaco, result):
     """The fault: Studio hid every features.* table, so Ask could not count the traffic signals. askTables keeps them, the text names them and gives SQL to copy."""
-    assert result["askTables"] == [{"name": "features.traffic", "rows": 7}, {"name": "driving.edges", "rows": 3}], "features.* stays, raw.* goes"
+    assert result["askTables"] == [{"name": "features.traffic", "rows": 7}, {"name": "main.boundary", "rows": 2}, {"name": "driving.edges", "rows": 3}], \
+        "features.* stays, raw.* goes; mode.table wins over a file name, and a plain name still works"
     full, none = result["about"], result["aboutNoTags"]
     for h in result["hints"]:
         assert h[1] in full, f"the hint {h[1]!r} is in the text"
