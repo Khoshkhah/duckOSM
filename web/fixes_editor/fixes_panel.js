@@ -236,6 +236,17 @@ const ROAD_SETS = [["fix-edits", AMBER], ["fix-gone", DELETED], ["fix-turn-out",
 
 export async function initFixesPanel(ctx) {
   const { duck, map, status, yaml } = ctx;
+  // the roads of the map: the host can give roadIdOfRow(row) (the OSM way of a row) and roadRows(osmId) (the rows of a way). Without them the editor reads the map's road table
+  // itself (window.RS_SIDE.props, rsGetProps, rsQuery). A row of the table is an object, or an array when the host gives roadKeys (the names of the columns). `roadRows: false`
+  // keeps the editor's own line layers for the roads.
+  const osmOf = (p) => (Array.isArray(p) ? p[(ctx.roadKeys ?? []).indexOf("osm_id")] : p?.osm_id);
+  const roadIdOfRow = ctx.roadIdOfRow ?? ((row) => osmOf(window.rsGetProps?.([row])?.[0] ?? window.RS_SIDE?.props?.[row]));
+  let byWay = null;                                  // an index of the road table by OSM way, made when it is first needed
+  const roadRows = ctx.roadRows === false ? null : ctx.roadRows ?? ((id) => {
+    const props = window.RS_SIDE?.props;
+    if (!byWay && props?.length) { byWay = new Map(); props.forEach((p, i) => { const k = Number(osmOf(p)); byWay.has(k) ? byWay.get(k).push(i) : byWay.set(k, [i]); }); }
+    return byWay ? byWay.get(Number(id)) ?? [] : window.rsQuery?.((p) => Number(osmOf(p)) === Number(id)) ?? [];
+  });
   // the panel is roadstyle's editor frame (docs/guides/dashboard-parts.md, "An editor in the panel"): the host's ctx.frame(options) makes it in the
   // host's panel. The frame has the title line, the tab row, the body that scrolls (the panes) and the bar under the body. Its root has the id
   // fix-panel: the rules of fixes_panel.css start with it.
@@ -1041,7 +1052,7 @@ export async function initFixesPanel(ctx) {
   }
   // the road of the Turn list under the pointer, else the picked one: dark on the map (null: none)
   function turnMark(id) {
-    if (hl) light("fix-turn-hover", id == null ? [] : ctx.roadRows(id) ?? []);
+    if (hl) light("fix-turn-hover", id == null ? [] : roadRows(id) ?? []);
     else if (map.getLayer("fix-turn-hl")) map.setFilter("fix-turn-hl", ["==", ["get", "id"], id ?? -1]);
   }
   // `keep`: the rules that the person chose and did not add stay, when the list is of the same road and junction (a tab change, a change of the rules)
@@ -1150,8 +1161,8 @@ export async function initFixesPanel(ctx) {
 
   // ---- the map: edited objects are amber, the selected object is blue
   // The roads of the map are in roadstyle's highlight sets (ROAD_SETS): the colour on the road's own fill, at the road's width at every zoom. The host's
-  // roadRows(osmId) gives the rows of a way. A host without roadRows gets the editor's line layers (fix-sel, fix-turn, fix-edits) for the roads too.
-  const hl = typeof ctx.roadRows === "function" && typeof window.rsHighlight === "function";
+  // roadRows(osmId) gives the rows of a way (the host's, or the editor's own index of the map's road table). With `roadRows: false` the editor's line layers (fix-sel, fix-turn, fix-edits) draw the roads.
+  const hl = typeof roadRows === "function" && typeof window.rsHighlight === "function";
   const lit = new Map(ROAD_SETS.map(([s]) => [s, []]));             // set -> its rows now
   // a new set of rows; the sets after it are set again, so that the order of ROAD_SETS stays the order of roadstyle's sets (the later set wins)
   function light(set, rows) {
@@ -1168,7 +1179,7 @@ export async function initFixesPanel(ctx) {
     const rest = feats.filter((f) => {
       const id = f.properties.id;
       if (f.properties.road || !/LineString/.test(f.geometry?.type ?? "") || !whole(id)) return true;
-      if (!onMap.has(id)) { const r = ctx.roadRows(id) ?? []; onMap.set(id, r.length > 0); rows.get(setOf(f)).push(...r); }
+      if (!onMap.has(id)) { const r = roadRows(id) ?? []; onMap.set(id, r.length > 0); rows.get(setOf(f)).push(...r); }
       return !onMap.get(id);
     });
     for (const s of sets) light(s, rows.get(s));
@@ -1711,7 +1722,7 @@ export async function initFixesPanel(ctx) {
     if (draw && current === "new") return;                                // a click while drawing adds a point (onMapClick)
     const turns = current === "turns";
     if (!turns && current !== "road") return;                            // a building or a node is picked by its own click
-    const id = Number(ctx.roadIdOfRow(e.detail?.id));
+    const id = Number(roadIdOfRow(e.detail?.id));
     if (!Number.isSafeInteger(id) || id <= 0) return;
     if (await onBuilding(pressed)) return;
     if (turns && pressed && map.queryRenderedFeatures(map.project(pressed.p), { layers: ["fix-turn-js-pt"] }).length) return;      // a junction dot of the road: chooseJunction

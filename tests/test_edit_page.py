@@ -224,12 +224,12 @@ def test_phone(monaco, page_url):
 
 
 def test_host_without_road_rows(monaco, page_url):
-    """A host that does not give roadRows: the picked road is drawn by the editor's own line layer, not by a highlight set."""
+    """A host that gives `roadRows: false`: the picked road is drawn by the editor's own line layer, not by a highlight set."""
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         ctx = browser.new_context()
-        # the page has its script inline (rust/duckosm-edit/src/page.rs): the page without roadRows in the editor's ctx
-        ctx.route(page_url, lambda route: route.fulfill(response=(r := route.fetch()), body=r.text().replace("roadIdOfRow, roadRows,", "roadIdOfRow,")))
+        # the page has its script inline (rust/duckosm-edit/src/page.rs): the page with `roadRows: false` in the editor's ctx
+        ctx.route(page_url, lambda route: route.fulfill(response=(r := route.fetch()), body=r.text().replace("status, areaKey:", "status, roadRows: false, areaKey:")))
         page = ctx.new_page()
         page.goto(page_url)
         page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)

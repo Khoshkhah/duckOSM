@@ -59,14 +59,6 @@
       const el = $("fix-status"), now = el && !el.hidden ? el.textContent.replace(/ ?Saved in \S+$/, "") : "";
       status(now ? `${now} ${msg}` : msg, now ? 10000 : 2500);
     };
-    const roadIdOfRow = (row) => window.rsGetProps?.([row])?.[0]?.osm_id ?? window.RS_SIDE?.props?.[row]?.osm_id;
-    // the rows of the map's roads of an OSM way (the highlight sets of the editor): an index of the road table, made once; rsQuery when the page has no RS_SIDE
-    let byWay = null;
-    const roadRows = (id) => {
-      const props = window.RS_SIDE?.props;
-      if (!byWay && props?.length) { byWay = new Map(); props.forEach((p, i) => { const k = Number(p?.osm_id); byWay.has(k) ? byWay.get(k).push(i) : byWay.set(k, [i]); }); }
-      return byWay ? byWay.get(Number(id)) ?? [] : window.rsQuery?.((p) => Number(p.osm_id) === Number(id)) ?? [];
-    };
     async function onBuild() {
       await queue;
       const b = $("fix-apply");
@@ -82,7 +74,7 @@
         b.disabled = false; b.classList.remove("busy");
       }
     }
-    const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, roadIdOfRow, roadRows, areaKey: () => "edit:" + info.db,
+    const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, areaKey: () => "edit:" + info.db,
       onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</code> at once.` });
     let fileText = "";
     if (info.exists) {
