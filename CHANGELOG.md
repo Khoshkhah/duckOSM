@@ -7,6 +7,13 @@
 - **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor
   parses text. `duck.query` of the page now gives such a column as text. The selected object, the changes and the walls show again.
 
+### Added
+
+- **`web/ask/schema.js` says which column of a result row is a node or a building** (`objectKinds`, `hasTags`; `docs/design/ask_schema.md`). A node is `node_id`, `source`, `target`
+  or `via_node` (the geometry and the H3 cell come from the nodes table) or an `osm_id` of `features.traffic`; a building is `building_id` of a wall or an `osm_id` of
+  `features.buildings`. `geometryBy(sql, column)` gives one SELECT with the geometry and the facts of the card. It leaves `tags` out for a file whose base-map tables have none.
+  No host calls it yet: roadstyle's data dock gets the hook for it.
+
 ### Changed
 
 - **What Ask knows about the duckOSM tables is one module, `web/ask/schema.js`** (`docs/design/ask_schema.md`). It has the notes of 40 tables, the text for the agent

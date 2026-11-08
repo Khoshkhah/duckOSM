@@ -67,3 +67,25 @@ The page makes `extra.edits` (always) and `extra.boundary_h3` (only when h3-js l
 - Roadstyle's Ask puts the `about` note of a table into the prompt only for the tables of `extra.`. The notes of the other tables show in the Tables list of the dock only. So the agent learns
   about the other tables through `aboutText`. A change in roadstyle (the notes of all tables in the prompt) would make `aboutText` shorter. That is for roadstyle, not here.
 - The steps 2 to 4 of Kaveh's plan (editing levels, editing design) are other tasks.
+
+## Object kinds: which column of a result row is a node or a building (built, 2026-11-08; Kaveh signed off the note)
+
+Kaveh: a node picked in the SQL table does not show on the map, and its facts are not in the card. The data dock of roadstyle maps a row to a road only (`edge_id`). The dock's part is
+roadstyle's (a design for the kinds `node` and `building`). The knowledge of the tables is duckOSM's, and it goes in `web/ask/schema.js` as data and SQL text, with no code in the hosts.
+Checked on Monaco:
+
+| Kind | Id column of a result | Geometry and facts come from | Note |
+|---|---|---|---|
+| road (exists) | `edge_id`; `osm_id` of an edge | `<mode>.edges` | `roadsBy` |
+| node | `node_id`, `source`, `target`, `via_node` | `driving.nodes` (`node_id`, `geom`, `h3_cell`), else the first `<mode>.nodes` | a negative `node_id` is a virtual node and has a `geom` |
+| node (point of the base map) | `osm_id` with `osm_type = 'node'` | `features.traffic` (`kind`, `name`, `tags`, `geom`) | 410 of 575 are also graph nodes. The rest are not in `nodes`, so this table has its own `geom` |
+| building | `building_id` (walls); `osm_id` with `osm_type` of `way` or `relation` | `features.buildings` (`osm_id`, `osm_type`, `kind`, `name`, `tags`, `geom`) | `building_faces.building_id = features.buildings.osm_id` for all 10909 walls |
+
+`osm_id` alone is not sure (a road, a building and a point have their own ids), so the SQL of a weak id column keeps `osm_type` and the dock takes the kind that gives rows. On Monaco no id is in two kinds.
+`tags` is a column of the base-map tables only in a file that was saved after roadstyle PR 112; an older saved area has none. So the SQL leaves `tags` out when the host says `hasTags: false`.
+
+Form (to fit the dock's hook when its design is written): `objectKinds({ names, hasTags })` returns `{ node: { idColumns, geometryBy }, building: { idColumns, geometryBy } }`. `geometryBy(sql, column)` returns
+one SELECT, like `roadsBy`: the columns `id`, `geom`, then the facts of the card (`h3_cell`, `kind`, `name`, `tags`), for the ids that `SELECT column FROM (sql)` gives. The hosts pass it to the dock unchanged.
+
+Host line, when the dock has the hook (the name of the option is roadstyle's): `kinds: objectKinds({ names, hasTags: await hasTags(query) })` from `web/ask/schema.js`. The hosts (`duckosm ask`, Studio)
+write nothing else. Until then `objectKinds` is not called by any host.

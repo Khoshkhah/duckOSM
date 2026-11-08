@@ -87,6 +87,44 @@ export async function roadClasses(query, names) {
   return parts.filter(Boolean).join("; ");
 }
 
+// Object kinds (docs/design/ask_schema.md): which column of a result row is a node or a building, and the SQL that gives its geometry and the facts of its card. Like `roadsBy`,
+// `geometryBy(sql, column)` returns one SELECT: the columns `id` and `geom`, then the facts, for the ids that `SELECT column FROM (sql)` gives. A weak id column (`osm_id`) can also mean a
+// road, so the dock takes the kind that gives rows. `hasTags: false` is for a file whose base-map tables have no `tags` column (an area saved before roadstyle PR 112); `hasTags(query)` reads it.
+// Only the kinds whose tables are in `names` are returned.
+export async function hasTags(query) {
+  const { rows } = await query("SELECT 1 FROM information_schema.columns WHERE table_schema = 'features' AND column_name = 'tags' LIMIT 1");
+  return rows.length > 0;
+}
+
+export function objectKinds({ names = [], hasTags = true } = {}) {
+  const inner = (sql) => sql.trim().replace(/;\s*$/, "");
+  const q = (c) => `"${String(c).replace(/"/g, '""')}"`;
+  const tags = (a) => (hasTags ? `, ${a}.tags` : "");
+  const nodes = names.find((n) => n === "driving.nodes") ?? names.find((n) => n.endsWith(".nodes"));
+  const kinds = {};
+  if (nodes || names.includes("features.traffic")) {
+    kinds.node = {
+      idColumns: [...(nodes ? ["node_id", "source", "target", "via_node"] : []), ...(names.includes("features.traffic") ? ["osm_id"] : [])],
+      geometryBy: (sql, column) => {
+        if (column === "osm_id") {      // a point of the base map (a traffic signal or a crossing is an OSM node; some are not in the graph, so this table has its own geom)
+          return `SELECT t.osm_id AS id, t.geom, t.kind, t.name${tags("t")} FROM features.traffic t WHERE t.osm_type = 'node' AND t.osm_id IN (SELECT ${q(column)} FROM (${inner(sql)}))`;
+        }
+        if (!nodes) throw new Error("this file has no nodes table");
+        const join = names.includes("features.traffic") ? " LEFT JOIN features.traffic t ON t.osm_type = 'node' AND t.osm_id = n.node_id" : "";
+        const facts = names.includes("features.traffic") ? `, t.kind, t.name${tags("t")}` : "";
+        return `SELECT n.node_id AS id, n.geom, n.h3_cell${facts} FROM ${nodes} n${join} WHERE n.node_id IN (SELECT ${q(column)} FROM (${inner(sql)}))`;
+      },
+    };
+  }
+  if (names.includes("features.buildings")) {
+    kinds.building = {
+      idColumns: ["building_id", "osm_id"],
+      geometryBy: (sql, column) => `SELECT b.osm_id AS id, b.geom, b.osm_type, b.kind, b.name${tags("b")} FROM features.buildings b WHERE b.osm_type IN ('way', 'relation') AND b.osm_id IN (SELECT ${q(column)} FROM (${inner(sql)}))`,
+    };
+  }
+  return kinds;
+}
+
 // askPanel({ about }): the text that tells the agent what the data is. It names a table only when `tables` has it. `classes` is the text of roadClasses.
 // `shapes: true` is for a page that draws the geometry column of a result on the map (nodes as points, buildings as shapes, walls as lines, H3 cells as hexagons).
 export function aboutText({ tables = [], classes = "", shapes = false } = {}) {
