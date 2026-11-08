@@ -92,3 +92,16 @@ or continuing a matched footpath); `--walk-frame` (moves footpaths to the kerb) 
   folium/matplotlib.
 - Design docs for non-trivial changes live in `docs/design/`; update the matching `docs/*.md`
   (`docs/reference/database.md` for schema changes) alongside code.
+
+## Hosts of the editor and Ask (Studio and others)
+
+A host is a page that runs duckOSM's fixes editor (`web/fixes_editor/`, `initFixesPanel`) or Ask (`web/ask/`) with its own data and map: `duckosm edit`, `duckosm ask` and duckOSM Studio.
+The aim: when the editor or Ask changes in duckOSM or roadstyle, a host only moves the version (the git revision of the crates `duckosm-core`, `duckosm-editor` and `roadstyle`).
+It does not change its code. These rules keep this true (Kaveh, 2026-11-08):
+
+1. **Keep the host contract compatible.** The options of `initFixesPanel` and the files of `web/ask/` are the contract. A new option has a default that keeps an old host working.
+   A change that breaks a host needs a `### Host changes` entry in `CHANGELOG.md` and the text of the migration, in the same PR.
+2. **Say what a host must do, in each PR.** The PR text ends with one line: `Host change: none, only move the version`, or the exact change that the host must make.
+3. **Test the contract on a host with the shape of Studio, not only on `duckosm edit`.** Studio has vector-tile overlays on a shared source (`rs-roads`, not a source with the name of the overlay),
+   array rows in `RS_SIDE.props` (`roadKeys`) and a DuckDB-wasm style data access (`ctx.duck`). The hover bug and the road index work both came from this gap.
+   The test host is planned in `docs/design/test_host.md`. Until it exists, check a change of the contract against these three by hand.

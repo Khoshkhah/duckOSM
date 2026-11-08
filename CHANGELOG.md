@@ -2,10 +2,31 @@
 
 ## Unreleased
 
+### Host changes
+
+For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each entry says what the host must do.
+
+- **The editor reads the map's road table itself** (duckOSM #43). `roadIdOfRow` and `roadRows` are now optional. Without them the editor reads `window.RS_SIDE.props`
+  (then `rsGetProps` and `rsQuery`) and builds the index of the roads by OSM way. A row of the table is an object, or an array when the host gives the new option
+  `roadKeys` (the column names). `roadRows: false` keeps the editor's own line layers. *Host: nothing is needed. Studio can drop its own `roadIdOfRow` and `roadRows` and give `roadKeys`.*
+- **The editor files are a library crate, `duckosm-editor`** (duckOSM #45). It has the four files of `web/fixes_editor/` (`FILES`, `file(name)`). *Host: nothing is needed. A Rust host can add the crate
+  at the same revision as `duckosm-core`, serve `FILES` from one folder, and remove its step that fetches and copies the folder.*
+
 ### Fixed
 
 - **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor
   parses text. `duck.query` of the page now gives such a column as text. The selected object, the changes and the walls show again.
+
+### Added
+
+- **Ask sees the base-map tables and has SQL for the common questions** (`web/ask/schema.js`, `docs/design/ask_schema.md`). Studio hid every `features.*` table, so Ask could not
+  count the traffic signals ("I can't give a count yet"). `askTables` keeps them (it drops only `raw.*`). The text for the agent has a line for each base-map table: its columns, what `kind` holds
+  (`features.traffic` has only `traffic_signals` and `crossing`, no stop signs) and example SQL for the signals, the buildings by levels and the points of interest. `aboutText({ hasTags })`
+  leaves out the hints that need `tags` for a file without a `tags` column. A Monaco test runs the SQL of each hint (22 signals, 179 buildings with more than 5 levels).
+- **`web/ask/schema.js` says which column of a result row is a node or a building** (`objectKinds`, `hasTags`; `docs/design/ask_schema.md`). A node is `node_id`, `source`, `target`
+  or `via_node` (the geometry and the H3 cell come from the nodes table) or an `osm_id` of `features.traffic`; a building is `building_id` of a wall or an `osm_id` of
+  `features.buildings`. `geometryBy(sql, column)` gives one SELECT with the geometry and the facts of the card. It leaves `tags` out for a file whose base-map tables have none.
+  No host calls it yet: roadstyle's data dock gets the hook for it.
 
 ### Changed
 
