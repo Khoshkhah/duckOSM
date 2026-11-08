@@ -125,9 +125,25 @@ export function objectKinds({ names = [], hasTags = true } = {}) {
   return kinds;
 }
 
+// What `kind` holds in each base-map table (checked on Monaco), and the SQL for the common questions. The agent copies a hint, so the test runs each one on a Monaco database.
+export const FEATURE_KINDS = {
+  buildings: "the building tag (yes, apartments, house, ...)", traffic: "traffic_signals or crossing (there are no stop signs)", pois: "the shop, amenity or tourism value (bench, restaurant, ...)",
+  sites: "parking, platform, school, hospital, ...", public_transport: "bus_stop, station, ...", streets: "the highway or railway value (footway, residential, rail, ...)",
+  land: "grass, park, forest, ...", paved: "pier, pedestrian, square, ...", place_labels: "suburb, town, ...", water_polygons: "water, swimming_pool, ...", water_lines: "stream, ditch, ...", ocean: "ocean",
+};
+export const HINTS = [
+  { table: "features.traffic", say: "the traffic signals", sql: "SELECT count(*) FROM features.traffic WHERE kind = 'traffic_signals'", tags: false },
+  { table: "features.buildings", say: "the buildings with more than 5 levels", sql: "SELECT count(*) FROM features.buildings WHERE try_cast(tags['building:levels'] AS INTEGER) > 5", tags: true },
+  { table: "features.pois", say: "the points of interest of each kind", sql: "SELECT kind, count(*) AS n FROM features.pois GROUP BY kind ORDER BY n DESC", tags: false },
+];
+
+// dataDock({ schema }): the tables that Ask may see. Every table of the file, the `features.*` base-map tables too (without them the agent cannot count the traffic signals);
+// only `raw.*` (the unfiltered OSM data of a build, when it is kept) is left out. `tables` is the host's list: { mode, table, rows } or { name, rows }. The result is for describeTables.
+export const askTables = (tables) => tables.map((t) => ({ name: t.name ?? `${t.mode}.${t.table}`, rows: t.rows })).filter((t) => !t.name.startsWith("raw."));
+
 // askPanel({ about }): the text that tells the agent what the data is. It names a table only when `tables` has it. `classes` is the text of roadClasses.
 // `shapes: true` is for a page that draws the geometry column of a result on the map (nodes as points, buildings as shapes, walls as lines, H3 cells as hexagons).
-export function aboutText({ tables = [], classes = "", shapes = false } = {}) {
+export function aboutText({ tables = [], classes = "", shapes = false, hasTags = true } = {}) {
   const has = (re) => tables.some((n) => re.test(n));
   const t = [
     "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
@@ -136,9 +152,13 @@ export function aboutText({ tables = [], classes = "", shapes = false } = {}) {
   if (has(/\.edge_graph$/)) t.push("edge_graph has the legal turns (from_edge, to_edge, via_edge). ");
   if (has(/^driving\.turn_restrictions$/)) t.push("driving.turn_restrictions has the OSM turn restrictions (restriction_type, via_node, from_edge_id, to_edge_id). ");
   if (has(/^main\.building_faces$/)) t.push("main.building_faces has the walls of the buildings (building_id, face_type, computed_type, edited, length_m, distance_m, street_name, geometry). ");
-  if (has(/^features\./)) {
-    t.push("The schema features has the base-map layers: buildings, traffic (kind is traffic_signals or crossing), sites, public_transport, pois, streets, water_polygons and others; each has osm_id, kind, name, tags and geom. "
-      + "tags is a MAP: write tags['building:levels'], and cast it (try_cast(tags['height'] AS DOUBLE)). ");
+  const features = tables.filter((n) => n.startsWith("features.")).map((n) => n.slice("features.".length));
+  if (features.length) {
+    t.push("The schema features has the base-map layers. Each table has osm_id, osm_type, kind (the main OSM value of the object), name and geom"
+      + (hasTags ? ", and tags (a MAP: write tags['building:levels'], cast it with try_cast(tags['height'] AS DOUBLE), and select tags['key'] and not the whole tags). " : "; this file has NO tags column, so use kind and name only. ")
+      + "What kind holds: " + features.filter((f) => FEATURE_KINDS[f]).map((f) => `${f}: ${FEATURE_KINDS[f]}`).join("; ") + ". "
+      + "These tables are big in a large area: count or group in SQL, and never list features.streets or features.buildings whole. ");
+    for (const h of HINTS) if (tables.includes(h.table) && (hasTags || !h.tags)) t.push(`Example SQL, ${h.say}: ${h.sql}; `);
   }
   if (has(/^extra\.edits$/)) {
     t.push("extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). ");

@@ -89,3 +89,23 @@ one SELECT, like `roadsBy`: the columns `id`, `geom`, then the facts of the card
 
 Host line, when the dock has the hook (the name of the option is roadstyle's): `kinds: objectKinds({ names, hasTags: await hasTags(query) })` from `web/ask/schema.js`. The hosts (`duckosm ask`, Studio)
 write nothing else. Until then `objectKinds` is not called by any host.
+
+## The base-map tables for Ask (built, 2026-11-08; Kaveh signed off the note)
+
+Fault (Studio, model claude-haiku-5-5): "how many is traffic signals on the map?" got "I can't give a count yet". Studio's `schema()` drops every `features.*` table (`t.mode !== "features"`), so the
+agent never sees `features.traffic`, and the text for the agent does not name it. The knowledge is duckOSM's. On Monaco: `features.traffic` has `kind` = `traffic_signals` (22) or `crossing` (553) and no
+other kind, so there are no stop signs in it. Every `features.*` table has `osm_id`, `osm_type`, `kind` (the value of the main OSM tag: a `pois` row has `kind` = `bench`, `restaurant`, ...), `name`, `geom` and,
+in a file saved after roadstyle PR 112, `tags` (a MAP). `kind` is always there, `tags` is not, so a hint uses `kind` first.
+
+1. `askTables(tables)` takes the host's list (`{ mode, table, rows }` or `{ name, rows }`) and returns `[{ name: "schema.table", rows }]` with every table, the `features.*` tables included. It drops only `raw.*`.
+   Studio calls it in `schema()` in place of its filter.
+2. `aboutText` gets one line for each `features.*` table that is in the list: its columns and what its `kind` holds, from the table notes. With `hasTags: false` it says that there is no `tags` column and gives no hint that uses it.
+3. Hints in `aboutText`, as SQL the agent can copy: the count of traffic signals (`SELECT count(*) FROM features.traffic WHERE kind = 'traffic_signals'`), the buildings by number of levels
+   (`try_cast(tags['building:levels'] AS INTEGER)`, only with tags), and the points of interest by kind (`GROUP BY kind`). The hints are in the text only when their table is.
+4. Test on a Monaco database: the SQL of every hint runs and gives the numbers that a second, independent query gives (22 signals, 179 buildings with more than 5 levels). No model is run.
+
+Size: Monaco has 575 traffic points, 1262 buildings, 3496 streets and 1645 points of interest. A county has millions. Ask sends only the names and the row counts of the tables, never the rows, so size
+costs nothing in the prompt. The text tells the agent to count or group in SQL and not to list `features.streets` or `features.buildings` whole. `tags` is a MAP, and a result with a MAP column is shown as JSON by the dock, so
+the text says to select `tags['key']` and not `tags`.
+
+Host line: Studio calls `describeTables(askTables(duck.tables), main, query)` in `schema()` in place of its `t.mode !== "features"` filter, and gives `aboutText({ tables, classes, hasTags: await hasTags(query) })`. `duckosm ask` already lists every table and now gives `hasTags`.

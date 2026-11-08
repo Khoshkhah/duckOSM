@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 
 SCRIPT = """
-import { TABLE_NOTES, mainEdges, roadsBy, startSql, describeTables, roadClasses, aboutText, objectKinds, hasTags } from %r;
+import { TABLE_NOTES, mainEdges, roadsBy, startSql, describeTables, roadClasses, aboutText, objectKinds, hasTags, askTables, HINTS } from %r;
 const names = JSON.parse(process.argv[1]);
 const bare = (n) => n.slice(n.lastIndexOf(".") + 1);
 const out = {};
@@ -43,6 +43,9 @@ out.kinds = Object.fromEntries([true, false].map((t) => [t, (() => { const k = o
 out.onlyRoads = Object.keys(objectKinds({ names: ["driving.edges"] }));
 out.noNodes = (() => { try { objectKinds({ names: ["features.traffic"] }).node.geometryBy("s", "node_id"); return "no error"; } catch (e) { return e.message; } })();
 out.hasTags = [await hasTags(async () => ({ rows: [[1]] })), await hasTags(async () => ({ rows: [] }))];
+out.askTables = askTables([{ mode: "features", table: "traffic", rows: 7, bytes: 1 }, { name: "raw.ways", rows: 1 }, { mode: "driving", table: "edges", rows: 3 }]);
+out.hints = HINTS.map((h) => [h.table, h.sql, h.tags]);
+out.aboutNoTags = aboutText({ tables: names, hasTags: false });
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -130,3 +133,21 @@ def test_the_object_kinds_give_the_geometry_and_the_facts_of_a_node_or_a_buildin
         assert wall[1] == 5 and wall[2] and building[0][:5] == ["id", "geom", "osm_type", "kind", "name"] and building[1] == 5, "a wall is a building by building_id"
         assert wrong_building[1] == 0 and wrong_node[1] == 0, "an osm_id of another kind gives no row"
         assert ("tags" in node[0]) is (with_tags == "true") and ("tags" in building[0]) is (with_tags == "true"), "the tags are left out when the file has none"
+
+
+def test_ask_sees_the_base_map_tables_and_gets_the_sql_for_the_common_questions(monaco, result):
+    """The fault: Studio hid every features.* table, so Ask could not count the traffic signals. askTables keeps them, the text names them and gives SQL to copy."""
+    assert result["askTables"] == [{"name": "features.traffic", "rows": 7}, {"name": "driving.edges", "rows": 3}], "features.* stays, raw.* goes"
+    full, none = result["about"], result["aboutNoTags"]
+    for h in result["hints"]:
+        assert h[1] in full, f"the hint {h[1]!r} is in the text"
+    assert "traffic: traffic_signals or crossing (there are no stop signs)" in full and "never list features.streets" in full
+    assert "NO tags column" in none and "tags['building:levels']" not in none and "try_cast" not in none and "features.traffic WHERE kind = 'traffic_signals'" in none, "without tags only the hints that need no tags stay"
+    con = duckdb.connect(str(monaco), read_only=True)
+    con.execute("LOAD spatial")
+    by_table = {h[0]: con.execute(h[1]).fetchall() for h in result["hints"]}       # the SQL of each hint runs on a real database
+    # the numbers, with a second query that does not use the hint: 22 signals (the tag highway=traffic_signals), 179 buildings with more than 5 levels
+    assert by_table["features.traffic"] == [(22,)] == con.execute("SELECT count(*) FROM features.traffic WHERE tags['highway'] = 'traffic_signals'").fetchall()
+    assert by_table["features.buildings"] == [(179,)] == con.execute(
+        "SELECT count(*) FROM features.buildings WHERE regexp_matches(tags['building:levels'], '^[0-9]+$') AND CAST(tags['building:levels'] AS INTEGER) > 5").fetchall()
+    assert by_table["features.pois"][0] == ("bench", 248) and len(by_table["features.pois"]) > 10
