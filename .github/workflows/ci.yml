@@ -60,7 +60,7 @@ jobs:
       - run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
       - run: pip install -e ".[dev]" "playwright==1.55.0"
       - run: python -m playwright install --with-deps chromium
-      - run: python -m pytest tests/test_edit_page.py -q -rs
+      - run: python -m pytest tests/test_edit_page.py tests/test_editor_host_shapes.py tests/test_editor_building.py tests/test_editor_road_node.py tests/test_editor_turn_changes.py -q -rs
 
   package:
     runs-on: ubuntu-latest
