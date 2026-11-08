@@ -40,6 +40,10 @@ The panel checks each value while you type, and it does not let you add a change
 - **A field that is off**: another choice closes it, for example a footway has no sidewalk. The reason is under the first field that it
   closes. When your choice closes a field that has a value, the panel clears the value and says so. **Reset** brings it back.
 
+A picked object is never called "not in this area" by mistake. A building is looked up in `features.buildings`, then among the walls
+(`main.building_faces`); a node in the traffic features, the junctions of the ways, then any node of the networks and the doors. When a query fails, the box says
+that the data could not be read, and gives the reason.
+
 **Lanes each way** is the lanes of one direction (the rule `lanes` of duckOSM sets the two directions). **Lanes forward** and
 **Lanes back** replace it for one direction. In the **New road** tab, **Lanes (total)** is the OSM tag `lanes`.
 
@@ -302,6 +306,11 @@ turn_restrictions:
 | Change in the form | Record | Result after the build |
 |---|---|---|
 | A rule for a road that leaves the junction | `turn_restrictions` | a row in `driving.turn_restrictions` (`restriction_type`, `from_edge_id`, `via_node`, `to_edge_id`); routing on `driving.edge_graph` obeys it |
+
+On the map, the roads at the junction have the colors of the legend: the **From** road is blue, the roads that **leave** the junction are green, and the
+roads that **only arrive** (a one-way road into the junction) are violet. The colors on the map are the same as in the legend and the list, in the light
+and in the dark theme. A road of another network that meets the junction and is not in the driving network (a footway, a path) is named under the list.
+It is not on the map of this tab.
 
 ### New road tab
 
