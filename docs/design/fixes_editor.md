@@ -46,8 +46,9 @@ const panel = await initFixesPanel({
 	map,           // the MapLibre map
 	yaml,          // js-yaml (the host page loads it)
 	status,        // status(text, ms): a short message for the user
-	roadIdOfRow,   // the OSM way id of a road that roadstyle's map selects (event rs:select)
-	roadRows,      // optional: (osmId) → the map's rows of an OSM way (roadstyle's highlight sets)
+	roadIdOfRow,   // optional: (row) → the OSM way id of a road that roadstyle's map selects (event rs:select); the default reads window.RS_SIDE.props
+	roadRows,      // optional: (osmId) → the map's rows of an OSM way (roadstyle's highlight sets); the default indexes window.RS_SIDE.props; false: no sets
+	roadKeys,      // optional: the column names, when a row of window.RS_SIDE.props is an array
 	areaKey,       // () → the name of the area: the browser keeps the changes of each area
 	onChange,      // (summary, n): the number of changes is new
 	onBuild,       // (): the user clicks "Build again"
@@ -76,10 +77,10 @@ What the panel takes from the host page, and does not own:
   rows are roadstyle's parts, and the colours are roadstyle's tokens. The README has the details.
 - **The class `editing-fixes` on `<body>`.** The panel sets it while it is open. The host page uses it to hide its other parts.
 - **roadstyle's map:** the event `rs:select` and `window.rsDeselect`.
-- **The highlight sets (optional).** With `ctx.roadRows(osmId)`, a road of the map is in one of roadstyle's highlight sets
+- **The highlight sets.** With `ctx.roadRows(osmId)` (the host's, or the editor's own index of `window.RS_SIDE.props`), a road of the map is in one of roadstyle's highlight sets
   (`rsHighlight(rows, {set, color})`), in this order: `fix-edits` (amber), `fix-gone` (red), `fix-turn-out` (green), `fix-turn-hover`
   (dark) and `fix-sel` (blue). A road in two sets has the colour of the later set. The colour is on the road's own fill, so it has the
-  road's width at each zoom and no dark blobs at the joins. Without `roadRows`, the editor's line layers (`fix-sel`, `fix-turn`,
+  road's width at each zoom and no dark blobs at the joins. With `roadRows: false`, the editor's line layers (`fix-sel`, `fix-turn`,
   `fix-edits`) draw the roads, as before.
 - **The tables.** The panel reads `driving.edges`, `driving.nodes`, `features.buildings` and `features.traffic` (duckOSM), and
   `main.building_faces`, `main.building_entrances` and `main.building_info` (the page makes them). If a table is not there, the panel

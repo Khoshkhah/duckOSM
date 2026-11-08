@@ -113,7 +113,7 @@ the editor).
   of the fixes file in its title line and the line of state under the tabs. While the editor is open, the frame hides the panel's
   body, as in Studio.
 - calls `initFixesPanel` with the `ctx` of Studio: `frame`, `duck`, `map` (`window.map`), `yaml` (js-yaml 4.1.0, the version of Studio),
-  `status`, `roadIdOfRow` (the `osm_id` of the road's row, `rsGetProps`), `areaKey`, `onChange`, `onBuild`, `changesNote` and `buildOff`.
+  `status`, `areaKey` (the editor reads the roads of the map itself: `window.RS_SIDE.props`), `onChange`, `onBuild`, `changesNote` and `buildOff`.
 - loads the fixes file. A file that is not valid YAML is not changed: the page says so and saves nothing.
 - saves the rules with each change (`onChange`, `PUT /api/fixes`), only when the text changes. The panel's **Download** button stays.
 - closes the editor when the template's hide button hides the panel, and opens it again with the show button.
