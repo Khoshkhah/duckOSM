@@ -9,6 +9,10 @@
 
 ### Changed
 
+- **What Ask knows about the duckOSM tables is one module, `web/ask/schema.js`** (`docs/design/ask_schema.md`). It has the notes of 40 tables, the text for the agent
+  (`aboutText`: it names a table only when the table is there, and tells the agent that `tags` is a MAP), `roadsBy`, the first SQL line of the data dock, the columns of
+  the main table and the real road classes. `duckosm ask` imports it from `/ask/schema.js`. duckOSM Studio can copy `web/ask/` and use the same file, so the two pages
+  differ only in how they reach the data. The page lost its own copies of these. The text for the agent keeps its old facts and adds the layers of `features`, the turn tables and the MAP hint.
 - **`duckosm ask`: many more example questions, in 14 groups.** The list has 115 questions. It has new groups for the road tags (surface,
   bridges, tunnels, roundabouts), the junctions and turn restrictions, the traffic signals and crossings, the levels, heights and roofs of the
   buildings, the walls and their streets, and the look of the shapes. The groups that were already there have more questions, and *Charts of the roads*

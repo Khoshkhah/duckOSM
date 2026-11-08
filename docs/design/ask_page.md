@@ -34,6 +34,11 @@ roadstyle knows no database. The host page (`rust/duckosm-edit/page/ask.js`) giv
 - `schema()`: the tables of the file, each with a line about what it holds, and the columns of the main table.
 - `roadsBy(sql, column)`: how to find the roads of a result that has `osm_id` and no `edge_id`.
 
+## What Ask knows about the tables
+
+The notes of the tables, the text for the agent (`about`), `roadsBy`, the first SQL line and the columns of the main table are in `web/ask/schema.js`, not in `ask.js`. The page and
+duckOSM Studio import the same file. The design is in [ask_schema.md](ask_schema.md).
+
 ## The example questions
 
 The examples of Ask are in one file, `web/ask/questions.js` (`export const QUESTIONS`, groups of `{ title, items }`). The page imports it from `/ask/questions.js`,
