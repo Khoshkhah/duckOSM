@@ -21,6 +21,7 @@ const HINTS = {                              // [the intro under the tabs (none:
   node: ["", "Click a dot or a junction, or type the node ID."],
 };
 const TURN_OUT = "#16a34a";                  // the roads that leave the junction of the Turn tab
+const TURN_IN = "#c026d3";                   // the roads that only arrive at the junction (a one-way road into it)
 const DOOR_COLOR = "#92400e";                  // the doors of the Building tab: brown dots
 const DOOR_KINDS = [["", "(no entrance tag)"], ["yes", "Entrance"], ["main", "Main entrance"], ["service", "Service entrance"], ["home", "Home entrance"], ["emergency", "Emergency exit"], ["exit", "Exit"], ["staircase", "Staircase"], ["garage", "Garage"]];
 const DELETED = "#dc2626";                     // an object that the changes delete: red on the map and in the list
@@ -182,7 +183,7 @@ const MARKUP = (note) => String.raw`
     <section class="fsec"><h3>Pick the road</h3>
       <p class="why">Click the road that a turn starts on, or type its way ID.</p>
       <div class="row"><input id="fix-from" type="text" inputmode="numeric" placeholder="From way ID" aria-label="From way ID" style="flex:1"><button id="fix-turn-find" type="button">Find turns</button><button id="fix-turn-clear" type="button" hidden>Unselect</button></div>
-      <p id="fix-turn-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#2563eb"></i>From</span><span class="legend"><i style="background:#16a34a"></i>To</span><span class="legend"><i style="border:3px solid #2563eb;border-radius:50%;background:rgba(37,99,235,.25)"></i>Junction</span></p>
+      <p id="fix-turn-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#2563eb"></i>From</span><span class="legend"><i style="background:#16a34a"></i>To</span><span class="legend"><i style="background:#c026d3"></i>Only into it</span><span class="legend"><i style="border:3px solid #2563eb;border-radius:50%;background:rgba(37,99,235,.25)"></i>Junction</span></p>
       <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junction</b></p><select id="fix-via" aria-label="Junction" style="width:100%"></select></div>
     </section>
     <div id="fix-turn-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
@@ -231,7 +232,7 @@ export const wallFilter = (key) => ["==", ["coalesce", ["get", "k"], ""], key ||
 
 // the roads of the map that the editor lights with roadstyle's highlight sets (rsHighlight(rows, {set, color})), with the host's roadRows. The order is the
 // order of the sets: a road in two sets has the colour of the later set.
-const ROAD_SETS = [["fix-edits", AMBER], ["fix-gone", DELETED], ["fix-turn-out", TURN_OUT], ["fix-turn-hover", "#111827"], ["fix-sel", BLUE]];
+const ROAD_SETS = [["fix-edits", AMBER], ["fix-gone", DELETED], ["fix-turn-out", TURN_OUT], ["fix-turn-in", TURN_IN], ["fix-turn-hover", "#111827"], ["fix-sel", BLUE]];
 
 export async function initFixesPanel(ctx) {
   const { duck, map, status, yaml } = ctx;
@@ -291,10 +292,20 @@ export async function initFixesPanel(ctx) {
   const hasTable = (schema, table) => built(schema, table);
   const tagMap = (r) => { const k = r?.k ? String(r.k).split("\x01") : [], v = r?.v ? String(r.v).split("\x01") : []; return Object.fromEntries(k.map((key, i) => [key, v[i] ?? ""])); };
   const TAGS = "array_to_string(map_keys(tags), chr(1)) AS k, array_to_string(map_values(tags), chr(1)) AS v";
-  const safe = async (sql) => { try { return await rows(sql); } catch (e) { console.warn("fixes panel: a query failed:", e.message.split("\n")[0], "|", sql.slice(0, 90)); return []; } };
+  // a failed query gives no rows, like a query with no match; `fails` and `lastFail` tell the difference (loadData: "the data could not be read" is not "not in this area")
+  let fails = 0, lastFail = "";
+  const safe = async (sql) => { try { return await rows(sql); } catch (e) { fails++; lastFail = e.message.split("\n")[0]; console.warn("fixes panel: a query failed:", lastFail, "|", sql.slice(0, 90)); return []; } };
 
   // the data of one object: its tags (all of them when the build has raw.*), and what the networks have of it
+  // The data of a picked object. An object that was picked from the data must never be "not in this area": it is looked up in each table that can have it (a building:
+  // features.buildings, then the walls main.building_faces; a node: the traffic features, a junction of a way, any node of the networks, a door), and when a query FAILED
+  // (a table that is not there, a database that did not answer) the box says that the data could not be read, with the reason.
   async function loadData(type, id, k) {
+    const before = fails, out = await loadData0(type, id, k);
+    if (!out.found && fails > before) out.failed = lastFail || "a query failed";
+    return out;
+  }
+  async function loadData0(type, id, k) {
     const out = { type, id, kind: k, tags: {}, mode: {}, facts: [], found: false, lonlat: null };
     if (type === "node") {
       // the roads of the driving network at the node: the number of different neighbour nodes (a plain road has 2, a T junction 3) and the classes
@@ -313,11 +324,29 @@ export async function initFixesPanel(ctx) {
         out.facts.push(`A junction${w ? ` of ${plural(w.n, "road")}` : ""}, with no traffic tag`);
         break;
       }
+      if (!out.found) for (const m of modes()) {      // any node of a network (the dots of the Node tab are these), also one that no way lists
+        const q = (await safe(`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat FROM ${m}.nodes WHERE node_id = ${id}`))[0];
+        if (!q) continue;
+        out.found = true; out.lonlat = [q.lon, q.lat];
+        out.facts.push(`A node of the ${m} network, with no tags in the data`);
+        break;
+      }
+      if (!out.found && hasDoors()) {                 // a door of a building (main.building_entrances)
+        const d = (await safe(`SELECT ST_X(geom) AS lon, ST_Y(geom) AS lat, kind, door FROM main.building_entrances WHERE osm_id = ${id} LIMIT 1`))[0];
+        if (d) { out.found = true; out.lonlat = [d.lon, d.lat]; out.facts.push(`A ${d.kind ?? d.door ?? "door"} of a building, with no other tags in the data`); }
+      }
       return out;
     }
     if (k === "building") {
-      const r = (await safe(`SELECT osm_type, ${TAGS} FROM features.buildings WHERE osm_id = ${id} LIMIT 1`))[0];
-      if (r) { out.found = true; out.tags = tagMap(r); out.type = r.osm_type === "relation" ? "relation" : "way"; }
+      const r = built("features", "buildings") ? (await safe(`SELECT osm_type, ${TAGS} FROM features.buildings WHERE osm_id = ${id} LIMIT 1`))[0] : null;
+      if (r) { out.found = true; out.tags = tagMap(r); out.type = r.osm_type === "relation" ? "relation" : "way"; return out; }
+      if (hasFaces()) {                                // a building with walls but no row in features.buildings (a build with the layers off, or other filters): its walls are in the data
+        const f = (await safe(`SELECT any_value(building_type) AS t, count(*)::INTEGER AS n FROM main.building_faces WHERE building_id = ${id}`))[0];
+        if (f && f.n) {
+          out.found = true; out.type = f.t === "relation" ? "relation" : "way";
+          out.facts.push(`Only the walls of this building are in the data (${plural(f.n, "wall")}); its tags are not. Build with the layers on to see them.`);
+        }
+      }
       return out;
     }
     let raw = null;
@@ -590,7 +619,7 @@ export async function initFixesPanel(ctx) {
     const head = data.tags.name ? esc(data.tags.name) : `${kindName} ${sel.id}`;
     const sub = data.tags.name ? `${kindName} · ${sel.kind === "node" ? "node" : sel.type} ${sel.id}` : sel.kind === "node" ? "" : `${sel.type} ${sel.id}`;
     const tagCount = Object.keys(data.tags).length;
-    box.innerHTML = `<div class="objhead">${head}</div>${sub ? `<div class="small muted">${sub}</div>` : ""}${data.found ? "" : data.other ? `<p class="why bad">This ID is not a ${sel.kind} of this area. It is a ${data.other}. <a href="#" class="link" role="button" data-open-kind="${data.other}">Open ${data.other} ${sel.id} in the ${TAB_NAME[data.other]} tab →</a></p>` : '<p class="why bad">This ID is not in this area. Check the ID. A rule for an ID that is not in the area does nothing in this build.</p>'}${data.facts.map((f) => `<div class="small muted">${esc(f)}</div>`).join("")}
+    box.innerHTML = `<div class="objhead">${head}</div>${sub ? `<div class="small muted">${sub}</div>` : ""}${data.found ? "" : data.other ? `<p class="why bad">This ID is not a ${sel.kind} of this area. It is a ${data.other}. <a href="#" class="link" role="button" data-open-kind="${data.other}">Open ${data.other} ${sel.id} in the ${TAB_NAME[data.other]} tab →</a></p>` : data.failed ? `<p class="why bad">The data of this area could not be read (${esc(data.failed)}). Try Load again. If it stays, load the page again.</p>` : '<p class="why bad">This ID is not in this area. Check the ID. A rule for an ID that is not in the area does nothing in this build.</p>'}${data.facts.map((f) => `<div class="small muted">${esc(f)}</div>`).join("")}
       <details class="alltags"><summary>All tags in the data (${tagCount})</summary><table>${Object.entries(data.tags).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("") || '<tr><td colspan="2" class="muted">No tags (build with the layers on to see them all).</td></tr>'}</table></details>`;
   }
 
@@ -749,7 +778,7 @@ export async function initFixesPanel(ctx) {
     if (!sel || !data) return status("Pick an object first.");
     const bad = problems().find((p) => p.block);
     if (bad) { ($(fid(bad.key)) ?? $("fix-form").querySelector(`[data-err="${CSS.escape(bad.key)}"]`)?.previousElementSibling?.querySelector("input"))?.focus(); return status(`${labelOf(bad.key)}: ${bad.text}`, 7000); }
-    if (!data.found && !sureMissing) { sureMissing = true; paintBar(); return status(`${sel.type} ${sel.id} is not in this area. Check the ID and the tab. Push Add anyway to add the rule.`, 8000); }
+    if (!data.found && !sureMissing) { sureMissing = true; paintBar(); return status(data.failed ? `The data of this area could not be read (${data.failed}). Try Load again.` : `${sel.type} ${sel.id} is not in this area. Check the ID and the tab. Push Add anyway to add the rule.`, 8000); }
     const rule = structuredClone(F.ruleOf(doc, sel.type, sel.id)), fields = presetsOf(), ruleFields = new Map(fields.filter(isRuleKey).map((f) => [f.key, f]));
     const dataMode = data.mode ?? {};
     const specials = [...touched].filter((k) => k[0] === "@");                        // wall types and door kinds
@@ -1004,7 +1033,7 @@ export async function initFixesPanel(ctx) {
     $("fix-out").innerHTML = nodes.length ? "" : `<p class="why">Way ${from} is not in the driving network.</p>`;
     if (nodes.length) await outgoing();
     drawSelected(zoom, { turn: nodes.length ? { via: $("fix-via").value } : null });
-    if (!nodes.length) { turnOut = []; drawTurnRoads(); }
+    if (!nodes.length) { turnOut = []; turnIn = []; drawTurnRoads(); }
   }
   function paintTurnSel() {
     for (const row of $("fix-out").querySelectorAll(".turn")) row.classList.toggle("sel", Number(row.dataset.to) === turnSel);
@@ -1026,9 +1055,18 @@ export async function initFixesPanel(ctx) {
       ST_Y(ST_PointN(geometry, ST_NPoints(geometry)::INTEGER)) AS y2 FROM driving.edges WHERE osm_id = ${from} AND target = ${via} LIMIT 1`))[0];
     turnOut = roads.map((r) => Number(r.osm_id)); drawTurnRoads();
     const arrive = await safe(`SELECT osm_id, any_value(name) AS name, any_value(highway) AS highway, bool_or(oneway) AS oneway FROM driving.edges WHERE target = ${via} AND osm_id != ${from} GROUP BY osm_id ORDER BY osm_id LIMIT 12`);
-    const arrivals = arrive.length ? `<p class="small" style="margin:12px 0 4px"><b>Roads into this junction</b> <span class="muted">(click one to start from it)</span></p>${arrive.map((r) => `<div class="small"><a href="#" class="link" role="button" data-from="${r.osm_id}">${esc(r.name || "no name")}</a> (${esc(r.highway)}, way ${r.osm_id}${r.oneway ? ", one-way" : ""})</div>`).join("")}` : "";
+    // the roads that only arrive (a two-way road is a road that leaves it too, and is green): the third colour on the map
+    turnIn = arrive.map((r) => Number(r.osm_id)).filter((id) => !turnOut.includes(id)); drawTurnRoads();
+    const arrivals = arrive.length ? `<p class="small" style="margin:12px 0 4px"><b>Roads into this junction</b> <span class="muted">(click one to start from it)</span></p>${arrive.map((r) => `<div class="small"><i class="sw" style="background:${turnOut.includes(Number(r.osm_id)) ? TURN_OUT : TURN_IN}"></i><a href="#" class="link" role="button" data-from="${r.osm_id}">${esc(r.name || "no name")}</a> (${esc(r.highway)}, way ${r.osm_id}${r.oneway ? ", one-way" : ""})</div>`).join("")}` : "";
+    // the roads of the other networks that meet this junction and that are not in the driving network (a footway, a path, a cycleway): they are not on the map of this tab
+    const others = new Map();
+    for (const m of modes().filter((x) => x !== "driving")) {
+      for (const r of await safe(`SELECT osm_id, any_value(name) AS name, any_value(highway) AS highway FROM ${m}.edges WHERE (source = ${via} OR target = ${via}) AND osm_id != ${from}
+        AND osm_id NOT IN (SELECT osm_id FROM driving.edges WHERE source = ${via} OR target = ${via}) GROUP BY osm_id ORDER BY osm_id LIMIT 12`)) if (!others.has(Number(r.osm_id))) others.set(Number(r.osm_id), { ...r, m });
+    }
+    const notDriving = others.size ? `<p class="small muted" style="margin:12px 0 4px">Also here, not in the driving network (not on the map of this tab): ${[...others.values()].map((r) => `${esc(r.name || "no name")} (${esc(r.highway)}, way ${r.osm_id}, ${r.m})`).join("; ")}.</p>` : "";
     const none = '<p class="why">No driving road leaves this junction.</p>';
-    $("fix-out").innerHTML = (roads.length ? "" : none) + arrivals;
+    $("fix-out").innerHTML = (roads.length ? "" : none) + arrivals + notDriving;
     if (roads.length) $("fix-out").insertAdjacentHTML("afterbegin", roads.map((r) => `<div class="turn" data-to="${r.osm_id}"><span class="small"><i class="sw" style="background:#16a34a"></i><b>${esc(r.name || "no name")}</b>${turnWay(inEdge, r) ? ` · ${WAY_NAMES[turnWay(inEdge, r)]}` : ""}<br><span class="muted">${esc(r.highway)} · way ${r.osm_id}</span></span>${turnSelect(F.findTurn(doc, from, via, Number(r.osm_id))?.restriction, turnWay(inEdge, r))}</div>`).join(""));
     for (const row of $("fix-out").querySelectorAll(".turn")) {
       const s = row.querySelector("select"), want = chosen.get(Number(row.dataset.to));
@@ -1101,7 +1139,7 @@ export async function initFixesPanel(ctx) {
     turnAt = null;
     $("fix-from").value = ""; $("fix-via").innerHTML = ""; turnSel = null; $("fix-out").innerHTML = ""; turnFrom = null; turnOk.clear(); paintTurnAsk();
     $("fix-via-row").hidden = $("fix-turnsec").hidden = $("fix-turn-bar").hidden = $("fix-turn-clear").hidden = $("fix-turn-legend").hidden = true;
-    turnOut = []; drawTurnRoads(); paintTurnBar(); drawSelected(false);
+    turnOut = []; turnIn = []; drawTurnRoads(); paintTurnBar(); drawSelected(false);
   }
   $("fix-turn-clear").onclick = clearTurns;
   $("fix-out").addEventListener("click", (e) => { const b = e.target.closest("[data-from]"); if (b) findTurns(Number(b.dataset.from), Number($("fix-via").value), { zoom: true }); });
@@ -1118,7 +1156,9 @@ export async function initFixesPanel(ctx) {
   // a new set of rows; the sets after it are set again, so that the order of ROAD_SETS stays the order of roadstyle's sets (the later set wins)
   function light(set, rows) {
     lit.set(set, rows);
-    for (const [s, color] of ROAD_SETS.slice(ROAD_SETS.findIndex(([x]) => x === set))) window.rsHighlight(lit.get(s), { set: s, color });
+    // opacity 1: a set without one has the opacity of the map's look (selection.opacity), so on the dark road fill the green and the blue were pale and not the colours of
+    // the legend and the list; with 1 the map has the colour that the legend has, in the light theme and in the dark one
+    for (const [s, color] of ROAD_SETS.slice(ROAD_SETS.findIndex(([x]) => x === set))) window.rsHighlight(lit.get(s), { set: s, color, opacity: 1 });
   }
   // the lines among `feats` that are roads of the map (roadRows finds the rows of the way) go into the sets `sets` (setOf(f) picks the set); the rest
   // stays for the editor's own layer: a building, a node, a junction, a new road (road: 1). No roadRows: all stay.
@@ -1161,7 +1201,7 @@ export async function initFixesPanel(ctx) {
     if (!map.getSource("fix-turn")) {                 // the roads that leave the junction of the Turn tab; the one under the pointer in the list has a dark outline
       map.addSource("fix-turn", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "fix-turn-hl", type: "line", source: "fix-turn", filter: ["==", ["get", "id"], -1], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#111827", "line-width": 12, "line-opacity": 0.85 } });
-      map.addLayer({ id: "fix-turn-line", type: "line", source: "fix-turn", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": TURN_OUT, "line-width": 6, "line-opacity": 0.95 } });
+      map.addLayer({ id: "fix-turn-line", type: "line", source: "fix-turn", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["case", ["==", ["get", "in"], 1], TURN_IN, TURN_OUT], "line-width": 6, "line-opacity": 0.95 } });
     }
     for (const [src, color0, w, fa] of [["fix-edits", AMBER, 5, 0.28], ["fix-sel", BLUE, 7, 0.2]]) {
       const color = src === "fix-edits" ? ["case", ["==", ["get", "d"], 1], DELETED, AMBER] : color0;          // a deleted object is red
@@ -1387,17 +1427,18 @@ export async function initFixesPanel(ctx) {
   }
 
   // the roads that leave the junction (the Turn tab), in green; a hover on a row of the list outlines its road
-  let turnOut = [], turnToken = 0;
+  let turnOut = [], turnIn = [], turnToken = 0;          // the roads that leave the junction, and the roads that only arrive at it
   async function drawTurnRoads() {
     const my = ++turnToken;
     let feats = [];
-    if (open() && current === "turns" && turnOut.length) {
+    if (open() && current === "turns" && (turnOut.length || turnIn.length)) {
       ensureLayers();
-      feats = (await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geometry) AS g FROM driving.edges WHERE osm_id IN (${turnOut.join(",")})`))
-        .map((r) => { try { return { type: "Feature", properties: { id: Number(r.id) }, geometry: geoOf(r.g) }; } catch { return null; } }).filter(Boolean);
+      const arrive = new Set(turnIn);
+      feats = (await safe(`SELECT osm_id AS id, ST_AsGeoJSON(geometry) AS g FROM driving.edges WHERE osm_id IN (${[...turnOut, ...turnIn].join(",")})`))
+        .map((r) => { try { return { type: "Feature", properties: { id: Number(r.id), ...(arrive.has(Number(r.id)) ? { in: 1 } : {}) }, geometry: geoOf(r.g) }; } catch { return null; } }).filter(Boolean);
     }
     if (my !== turnToken) return;
-    feats = roadsLit(feats, ["fix-turn-out"]);
+    feats = roadsLit(feats, ["fix-turn-out", "fix-turn-in"], (f) => (f.properties.in ? "fix-turn-in" : "fix-turn-out"));
     map.getSource("fix-turn")?.setData({ type: "FeatureCollection", features: feats });
     drawnCount.turn = feats.length;
   }
