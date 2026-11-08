@@ -12,19 +12,6 @@
   };
   const script = (src) => new Promise((ok, no) => document.head.append(Object.assign(document.createElement("script"), { src, crossOrigin: "anonymous", onload: ok, onerror: () => no(new Error("cannot load " + src)) })));
 
-  // what each table of a duckOSM file holds (the agent and the Tables list read it)
-  const ABOUT = {
-    edges: "One row is one direction of a road (an edge), with its length, speed, lanes, cost and OSM tags.",
-    nodes: "The junctions and the ends of the roads.",
-    edge_graph: "The legal turns: one row for each move from an edge to the next edge.",
-    private_edges: "The roads that this network keeps out: private, forbidden or bus only.",
-    turn_restrictions: "The OSM turn restrictions.",
-    building_faces: "One row is one wall of a building, with its type (front, back, side, party, court) and the type that the build found (computed_type).",
-    building_entrances: "The entrances and doors of the buildings.",
-    buildings: "The buildings of the base map, with their OSM tags.",
-    boundary_h3: "The H3 cells that cover the boundary at each resolution 0 to 11: resolution, h3_cell (a hex id), whole_boundary (true for the one cell that contains the whole boundary).",
-    edits: "The changes in the fixes file: kind (object, wall, turn, new_road), type, osm_id, what, changed (the time), note.",
-  };
   const BIG = /^(U?BIGINT|U?HUGEINT)$/;
   // a value that the data dock can show: a 64-bit integer as a BigInt (it came as a text), a list or a struct as JSON
   const cell = (v, type) => (v == null ? null : BIG.test(type) ? BigInt(v) : typeof v === "object" ? JSON.stringify(v) : v);
@@ -50,9 +37,10 @@
     // h3-js: the H3 cells of the boundary and their shapes. DuckDB here has no H3 functions, so the page computes them; without it (no network) the page has no H3 table.
     const h3Loaded = script("https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js").then(() => !!window.h3, () => false);
     const [info] = await Promise.all([api("info").then((r) => r.json()), script("https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js")]);
-    // QUESTIONS: the questions to ask, in groups (web/ask/questions.js, one file for this page and for duckOSM Studio; docs/guides/ask-questions.md). roadstyle's Ask shows its
+    // QUESTIONS and S: the questions to ask (web/ask/questions.js) and what Ask knows about the tables (web/ask/schema.js, docs/design/ask_schema.md): one file each for this page and
+    // for duckOSM Studio (docs/guides/ask-questions.md). roadstyle's Ask shows its
     // general groups first (any data), then these groups, which are about the data of duckOSM.
-    const [F, { dataDock }, { askPanel }, { QUESTIONS }] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js"), import("./ask/questions.js")]);
+    const [F, { dataDock }, { askPanel }, { QUESTIONS }, S] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js"), import("./ask/questions.js"), import("./ask/schema.js")]);
 
     const query = async (sql, { signal } = {}) => {
       const { columns, rows } = await (await api("sql", { method: "POST", body: sql, signal })).json();
@@ -68,19 +56,12 @@
       await api("table", { method: "POST", body: JSON.stringify({ name: "edits", columns, rows }) });
       edits = rows.length;
     };
-    const edgesTable = info.tables.find((t) => t.mode === "driving" && t.table === "edges") ?? info.tables.find((t) => t.table === "edges");
-    const main = edgesTable && `${edgesTable.mode}.edges`;
+    const names = info.tables.map((t) => `${t.mode}.${t.table}`);
+    const main = S.mainEdges(names);
 
     const schema = async () => {
       const { rows } = await query("SELECT schema_name, table_name, estimated_size, database_name FROM duckdb_tables() WHERE database_name IN (current_database(), 'extra') ORDER BY 1, 2");
-      const tables = rows.map(([s, t, n, d]) => ({ name: d === "extra" ? `extra.${t}` : `${s}.${t}`, rows: Number(n), about: ABOUT[t] ?? "" }));
-      const first = tables.find((t) => t.name === main);
-      if (first) {
-        const [s, t] = main.split(".");
-        const { rows: cols } = await query(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '${s}' AND table_name = '${t}' AND table_catalog = current_database()`);
-        Object.assign(first, { main: true, columns: cols.map(([name, type]) => ({ name, type })) });
-      }
-      return { tables };
+      return S.describeTables(rows.map(([s, t, n, d]) => ({ name: d === "extra" ? `extra.${t}` : `${s}.${t}`, rows: Number(n) })), main, query);
     };
 
     // ---- the shapes of a result on the map. roadstyle's Ask lights roads only ("I can only show roads"), so the page draws the geometry of the table itself:
@@ -181,8 +162,7 @@
     const ready = Promise.all([loadEdits(), loadH3()]).catch((e) => console.warn("duckosm ask: a table of the page did not load:", e.message));
     const data = dataDock({
       query, schema, ready,
-      roadsBy: (sql, column) => `SELECT DISTINCT edge_id FROM ${main} WHERE "${column}" IN (SELECT "${column}" FROM (${sql}))`,
-      sql: main ? `SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS km FROM ${main} GROUP BY highway ORDER BY edges DESC` : "SELECT 1",
+      roadsBy: S.roadsBy(main), sql: S.startSql(main),
     });
     // ---- a row of the table: its item on the map, and its facts in the card (roadstyle's data dock: the event `row`, data.card(...) and the event `cardclose`).
     // A road row (the result has edge_id) is selected by roadstyle itself, with its own card. A row that has a geometry column (a node, a building, a wall) is drawn here in
@@ -239,28 +219,8 @@
       if (b) window.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 19, duration: 600 });
       card(named >= 0 ? String(row[named]) : `${table} ${idCol >= 0 ? row[idCol] : e.detail.index + 1}`, g, idCol >= 0 ? String(row[idCol]) : undefined);
     });
-    // the road classes of each network with their number of edges: Ask must not guess the values of `highway` (asked to colour the roads by class, it used classes that
-    // do not exist, found no roads, and had no step left to look them up)
-    const classes = (await Promise.all(info.tables.filter((t) => t.table === "edges").map(async (t) => {
-      try {
-        const { rows } = await query(`SELECT highway, count(*) AS n FROM ${t.mode}.edges GROUP BY highway ORDER BY n DESC`);
-        return `${t.mode}.edges: ${rows.map(([h, n]) => `${h ?? "NULL"} (${n})`).join(", ")}`;
-      } catch { return ""; }
-    }))).filter(Boolean).join("; ");
-    const aboutText = "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
-      + "edge_id is its id and osm_id the OSM way. main.building_faces has the walls of the buildings, and the schema features has the buildings and the other base-map layers. "
-      + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). "
-      + "THE PAGE ALSO DRAWS A RESULT THAT HAS A GEOMETRY COLUMN ON THE MAP, as it is: nodes as points, buildings as shapes, walls as lines. So you CAN show nodes, buildings and walls: "
-      + "run_query with their geom column (driving.nodes: node_id, geom; features.buildings: osm_id, name, geom; main.building_faces: building_id, face_type, geometry), "
-      + "for example SELECT node_id, geom FROM driving.nodes. For \"all\" of them, add no LIMIT and no WHERE: the table shows only the first 1000 rows, and the map shows every row that you select. "
-      + "H3: the nodes tables (driving.nodes and the others) have h3_cell, a BIGINT H3 index at resolution 8. extra.boundary_h3 (resolution, h3_cell, whole_boundary) has the H3 cells that cover the boundary at each resolution 0 to 11, and whole_boundary is true for the one cell that contains the whole boundary: "
-      + "the SMALLEST cell that contains the whole boundary is the row with the largest resolution where whole_boundary is true. THE PAGE DRAWS A RESULT THAT HAS A COLUMN h3_cell (and no geometry column) AS HEXAGONS, so you CAN show H3 cells: SELECT h3_cell FROM extra.boundary_h3 WHERE whole_boundary ORDER BY resolution DESC LIMIT 1, or SELECT DISTINCT h3_cell FROM driving.nodes. "
-      + (classes ? `THE VALUES OF highway (the road classes) with the number of edges, for each network: ${classes}. Use exactly these values in a WHERE, and never guess a class. ` : "")
-      + "To colour roads by class, call color_roads once, with one group for each class that you colour (for example primary red, secondary orange, tertiary yellow, the others grey), each group with its sql: SELECT edge_id FROM driving.edges WHERE highway = 'primary'. "
-      + "COLOURS: a shape is coloured by its column face_type (front green, back red, side grey, party wall purple, court cyan), so a result with face_type needs no more. "
-      + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. "
-      + "ROADS are lit by the page itself on their own shape when the result has the column edge_id: select edge_id for roads, and not their geometry. "
-      + "Never answer that you can only show roads.";
+    // what Ask is told about the tables (web/ask/schema.js): the tables of the file, the page's own tables (extra.edits always, extra.boundary_h3 with h3-js) and the real road classes
+    const aboutText = S.aboutText({ tables: [...names, "extra.edits", ...((await h3Loaded) ? ["extra.boundary_h3"] : [])], classes: await S.roadClasses(query, names), shapes: true });
     // the page's own tool for Ask (roadstyle's `tools` option): set_map changes roadstyle's layers only, and the shapes of a result (H3 cells, buildings, walls, nodes) are
     // the page's own layer (Kaveh: "increase transparency of h3 cells on map", and Ask answered that it could not)
     const shapeTools = [{
