@@ -24,6 +24,10 @@ _LIT = """(id) => window.rsQuery((p) => Number(p.osm_id) === id).map((row) => { 
     return window.map.getFeatureState({source: l.source, sourceLayer: l.sourceLayer, id: row}).rs_hl ?? null; })"""
 
 
+TURN_OUT, TURN_IN = "#16a34a", "#c026d3"      # the sets fix-turn-out and fix-turn-in
+_QUERY = "async (sql) => { const r = await fetch('api/query', {method: 'POST', body: sql}); return await r.json(); }"
+
+
 @pytest.fixture(scope="module")
 def monaco(tmp_path_factory):
     """A Monaco build of the sample config, with no fixes file."""
@@ -233,6 +237,72 @@ def test_host_without_road_rows(monaco, page_url):
         page.wait_for_function("window.fixesPanel.drawn().sel > 0", timeout=10_000)
         assert page.evaluate("window.fixesPanel.drawn()")["lit"]["fix-sel"] == 0
         assert page.evaluate(f"({_LIT})({ROAD})") == [None] * 2
+        browser.close()
+
+
+def test_the_turn_tab_draws_all_the_roads_at_the_junction(monaco, page_url):
+    """The Turn tab: the From road is blue, the roads that leave the junction are green, the roads that only arrive are a third colour, and the legend says so. A road of
+    another network at the junction is named in the panel. Every highlight set has opacity 1, so the map has the colour of the legend in the dark theme too."""
+    via, frm = 25193390, 4227273
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        ids = lambda sql: [int(r["id"]) for r in page.evaluate(_QUERY, sql)]
+        leave = ids(f"SELECT DISTINCT osm_id AS id FROM driving.edges WHERE source = {via} AND osm_id != {frm}")
+        only_in = ids(f"SELECT DISTINCT osm_id AS id FROM driving.edges WHERE target = {via} AND osm_id != {frm} "
+                      f"AND osm_id NOT IN (SELECT osm_id FROM driving.edges WHERE source = {via})")
+        assert leave and only_in, "the junction of the test has roads that leave and roads that only arrive"
+        page.evaluate("window.__hl = []; const o = window.rsHighlight; window.rsHighlight = (ids, l) => { if (l && l.set) window.__hl.push(l); return o(ids, l); }")
+        page.evaluate("fixesPanel.tab('turns')")
+        page.fill("#fix-from", str(frm))
+        page.click("#fix-turn-find")
+        page.wait_for_function("document.querySelectorAll('#fix-via option').length > 0", timeout=30_000)
+        page.evaluate("(v) => { const s = document.getElementById('fix-via'); s.value = v; s.dispatchEvent(new Event('input', {bubbles: true})); s.dispatchEvent(new Event('change', {bubbles: true})); }", str(via))
+        page.wait_for_function(f"({_LIT})({only_in[0]}).some((c) => c === '{TURN_IN}')", timeout=20_000)
+        for i in leave:
+            assert set(page.evaluate(f"({_LIT})({i})")) == {TURN_OUT}, ("leaves", i)
+        for i in only_in:
+            assert set(page.evaluate(f"({_LIT})({i})")) == {TURN_IN}, ("only arrives", i)
+        assert set(page.evaluate(f"({_LIT})({frm})")) == {BLUE}, "the From road"
+        assert page.evaluate("window.__hl.length") > 0 and all(l.get("opacity") == 1 for l in page.evaluate("window.__hl")), "every set has opacity 1"
+        assert "Only into it" in page.inner_text("#fix-turn-legend")
+        assert "not in the driving network" in page.inner_text("#fix-out"), "a road of another network at the junction is named"
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_picked_object_is_never_called_missing_by_a_missing_row_or_a_failed_query(monaco, page_url):
+    """A building that has walls but no row in features.buildings, and a node that is in a network but in no way list, are found; a query that FAILS says that the data could
+    not be read, with the reason, and not "not in this area"."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        bid = int(page.evaluate(_QUERY, "SELECT building_id AS id FROM main.building_faces LIMIT 1")[0]["id"])
+        def answer(patterns, status=200, body="[]"):
+            page.unroute("**/api/query")
+            page.route("**/api/query", lambda route: route.fulfill(status=status, content_type="application/json" if status == 200 else "text/plain", body=body)
+                       if any(x in (route.request.post_data or "") for x in patterns) else route.continue_())
+        text = lambda: page.inner_text("#fix-obj")
+        # a building with walls and no row in features.buildings
+        answer(["FROM features.buildings WHERE osm_id"])
+        page.evaluate(f"fixesPanel.select('building', 'way', {bid})")
+        page.wait_for_function("document.querySelector('#fix-obj .objhead')", timeout=15_000)
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('Only the walls')", timeout=15_000)
+        assert "not in this area" not in text(), text()
+        # a node that is in a network but in no way list, with no traffic row
+        answer(["FROM features.traffic WHERE osm_id", "AND node_id IN (SELECT node_id FROM"])
+        page.evaluate("fixesPanel.select('node', 'node', 21912099)")
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('A node of the')", timeout=15_000)
+        assert "not in this area" not in text(), text()
+        # a failed query: the data could not be read, and the reason is there
+        answer(["FROM features.buildings WHERE osm_id"], status=400, body="Catalog Error: Table with name buildings does not exist")
+        page.evaluate("fixesPanel.select('building', 'way', 999999999)")
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('could not be read')", timeout=15_000)
+        assert "Catalog Error" in text() and "not in this area" not in text(), text()
+        # and an ID that is really not there still says so
+        page.unroute("**/api/query")
+        page.evaluate("fixesPanel.select('building', 'way', 999999998)")
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('not in this area')", timeout=15_000)
         browser.close()
 
 
