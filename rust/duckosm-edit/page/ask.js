@@ -50,7 +50,9 @@
     // h3-js: the H3 cells of the boundary and their shapes. DuckDB here has no H3 functions, so the page computes them; without it (no network) the page has no H3 table.
     const h3Loaded = script("https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js").then(() => !!window.h3, () => false);
     const [info] = await Promise.all([api("info").then((r) => r.json()), script("https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js")]);
-    const [F, { dataDock }, { askPanel }] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js")]);
+    // QUESTIONS: the questions to ask, in groups (web/ask/questions.js, one file for this page and for duckOSM Studio; docs/guides/ask-questions.md). roadstyle's Ask shows its
+    // general groups first (any data), then these groups, which are about the data of duckOSM.
+    const [F, { dataDock }, { askPanel }, { QUESTIONS }] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js"), import("./ask/questions.js")]);
 
     const query = async (sql, { signal } = {}) => {
       const { columns, rows } = await (await api("sql", { method: "POST", body: sql, signal })).json();
@@ -245,26 +247,6 @@
         return `${t.mode}.edges: ${rows.map(([h, n]) => `${h ?? "NULL"} (${n})`).join(", ")}`;
       } catch { return ""; }
     }))).filter(Boolean).join("; ");
-    // The questions to ask, in groups (docs/guides/ask-questions.md); they are about the data of duckOSM. roadstyle's Ask has six general groups for any data and shows
-    // them first (Know the data, Find and count, ...), then these groups. The titles differ from the general ones, so no heading shows twice.
-    const QUESTIONS = [
-      { title: "Roads of the area", items: ["Which one-way roads have no name?", "What are the 10 longest primary roads?", "Which roads have a speed limit above 50 km/h?",
-        "Which roads have more than 3 lanes?", "How many edges and how many km of road does each network have?"] },
-      { title: "Buildings and walls", items: ["How many walls of each type do the buildings have?", "Which buildings have no front wall?",
-        "Which buildings have more than 10 walls?", "What are the 100 longest walls?"] },
-      { title: "My changes", items: ["Which objects did I change, and when?", "Which walls did I change by hand?", "What did I change in the last day?"] },
-      { title: "Shapes on the map", items: ["Show all buildings on the map.", "Show the walls of all buildings, with a color for each wall type.",
-        "Show the dead-end nodes of the driving network.", "Show all nodes of the driving network on the map.", "Show only the front walls of the buildings.",
-        "Color the walls that I changed by hand in red and the others in grey."] },
-      { title: "Roads: color and focus", items: ["Color the roads by their class.", "Show only the primary roads and fade the others.",
-        "Color the one-way roads red and the two-way roads grey.", "Color the roads that have a speed limit above 50 km/h."] },
-      { title: "H3 cells and the boundary", items: ["Show the smallest H3 cell that contains the whole boundary.", "Show the H3 cells of the boundary at resolution 9.",
-        "How many nodes are in each H3 cell?", "Make the H3 cells more transparent."] },
-      { title: "Water, 3D and base maps", items: ["Turn off the water and the waterways layers.", "Switch the base map to satellite.",
-        "Turn on the 3D view and tilt the map.", "Switch to the dark base map."] },
-      { title: "Charts of the roads", items: ["Draw a bar chart of the km of road in each class.", "Draw a histogram of the road lengths.",
-        "Show a pie chart of the one-way and the two-way roads."] },
-    ];
     const aboutText = "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
       + "edge_id is its id and osm_id the OSM way. main.building_faces has the walls of the buildings, and the schema features has the buildings and the other base-map layers. "
       + "extra.edits has the changes that the person made in the fixes file (osm_id is the OSM id of the changed object; changed is the time of the change). "
@@ -298,7 +280,7 @@
     const ask = askPanel({
       data, dialect: "DuckDB", maxSteps: 8, tools: shapeTools,
       about: aboutText,
-      examples: QUESTIONS,                  // roadstyle's Ask shows its general groups first (any data), then these groups
+      examples: QUESTIONS,
     });
     // roads and buildings are clickable: roadstyle selects the clicked item, and the data dock's card shows its facts (a road, or an item of a base-map layer
     // such as a building). No popup anywhere: rs.holdPopup holds the popups of roads and of items, here for the whole page (the dock holds them only while it is open).
