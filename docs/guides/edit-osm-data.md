@@ -307,6 +307,9 @@ turn_restrictions:
 |---|---|---|
 | A rule for a road that leaves the junction | `turn_restrictions` | a row in `driving.turn_restrictions` (`restriction_type`, `from_edge_id`, `via_node`, `to_edge_id`); routing on `driving.edge_graph` obeys it |
 
+After you pick a road, each of its junctions is a white dot on the map. The **Junction** box lists the same junctions. Click a dot to choose that junction, or choose it in the box.
+The blue ring shows the chosen one.
+
 On the map, the roads at the junction have the colors of the legend: the **From** road is blue, the roads that **leave** the junction are green, and the
 roads that **only arrive** (a one-way road into the junction) are violet. The colors on the map are the same as in the legend and the list, in the light
 and in the dark theme. A road of another network that meets the junction and is not in the driving network (a footway, a path) is named under the list.
