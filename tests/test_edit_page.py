@@ -4,120 +4,13 @@ Chromium (Playwright); the test skips itself without Playwright and its browser.
 import os
 import re
 import shutil
-import socket
-import subprocess
-import sys
 import time
-from pathlib import Path
 
 import duckdb
 import pytest
 
-from duckosm import Config, DuckOSM
-
-pw = pytest.importorskip("playwright.sync_api")
-ROOT = Path(__file__).resolve().parents[1]
-ROAD = 503462470                      # a road of the Monaco sample (docs/design/fixes_editor.md)
-WALL_BUILDING = []                     # the building_id of the building with the most walls (set by the monaco fixture)
-BLUE, AMBER = "#2563eb", "#f59e0b"    # the sets fix-sel and fix-edits (ROAD_SETS of fixes_panel.js)
-# the colour of the highlight set on each map row of the road (the feature state rs_hl that roadstyle's road layer reads)
-_LIT = """(id) => window.rsQuery((p) => Number(p.osm_id) === id).map((row) => { const l = window.map.getLayer("roads-simple") ?? window.map.getLayer("roads-fill");
-    return window.map.getFeatureState({source: l.source, sourceLayer: l.sourceLayer, id: row}).rs_hl ?? null; })"""
-
-
-TURN_OUT, TURN_IN = "#16a34a", "#c026d3"      # the sets fix-turn-out and fix-turn-in
-_QUERY = "async (sql) => { const r = await fetch('api/query', {method: 'POST', body: sql}); return await r.json(); }"
-
-
-@pytest.fixture(scope="module")
-def monaco(tmp_path_factory):
-    """A Monaco build of the sample config, with no fixes file."""
-    out = tmp_path_factory.mktemp("edit")
-    cfg = Config.from_yaml(str(ROOT / "config" / "sample_monaco.yaml"))
-    cfg.source.pbf_path = str(ROOT / cfg.source.pbf_path)
-    cfg.boundary.path = str(ROOT / cfg.boundary.path)
-    cfg.osm_overrides = None
-    cfg.output_path = str(out)
-    here = os.getcwd()
-    os.chdir(out)                     # the reports of the build stay out of the repository
-    try:
-        DuckOSM(cfg).run()
-    finally:
-        os.chdir(here)
-    db = out / "monaco.duckdb"
-    # the building with the most walls, for the wall hover (read now: the page's server has the database open later)
-    con = duckdb.connect(str(db), read_only=True)
-    WALL_BUILDING.append(con.execute("SELECT building_id FROM main.building_faces GROUP BY building_id ORDER BY count(*) DESC LIMIT 1").fetchone()[0])
-    con.close()
-    return db
-
-
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _serve(db):
-    """Start `duckosm edit` on the database: (the process, the URL of the page)."""
-    port = _free_port()
-    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "edit", str(db), "--port", str(port)],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    line = ""
-    for _ in range(600):
-        line = proc.stdout.readline()
-        if "http://" in line or proc.poll() is not None:
-            break
-    m = re.search(r"http://\S+", line)
-    if not m:
-        proc.kill()
-        pytest.fail(f"duckosm edit did not start: {line}")
-    return proc, m.group(0)
-
-
-@pytest.fixture(scope="module")
-def page_url(monaco):
-    proc, url = _serve(monaco)
-    yield url
-    proc.terminate()
-    proc.wait(10)
-
-
-@pytest.fixture(scope="module")
-def restored_url(monaco, tmp_path_factory):
-    """The shape of an area that Studio restores from its saved files: every table of `features` WITHOUT the column `tags` (the export leaves it out)."""
-    d = tmp_path_factory.mktemp("restored")
-    db = d / "monaco.duckdb"
-    shutil.copy(monaco, db)
-    con = duckdb.connect(str(db))
-    con.execute("LOAD spatial")
-    for (t,) in con.execute("SELECT table_name FROM information_schema.columns WHERE table_schema = 'features' AND column_name = 'tags'").fetchall():
-        con.execute(f"CREATE OR REPLACE TABLE features.{t} AS SELECT * EXCLUDE (tags) FROM features.{t}")
-    assert not con.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'features' AND column_name = 'tags'").fetchone()[0]
-    con.close()
-    proc, url = _serve(db)
-    yield url
-    proc.terminate()
-    proc.wait(10)
-
-
-def _open(browser, url, **ctx):
-    page = browser.new_context(**ctx).new_page()
-    errors = []
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(url)
-    page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
-    return page, errors
-
-
-def _pick_road(page, osm_id):
-    """A click on the road on the map: roadstyle's dashboard picks it (rs:select), and the panel reads its OSM id from the road's row."""
-    page.evaluate("""(id) => { const rows = window.rsQuery((p) => Number(p.osm_id) === id); const b = window.RS_SIDE.bboxes[rows[0]];
-        window.map.jumpTo({center: [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2], zoom: 18}); }""", osm_id)
-    page.wait_for_function("window.map.loaded() && !window.map.isMoving()", timeout=30_000)
-    page.evaluate("""(id) => { const rows = window.rsQuery((p) => Number(p.osm_id) === id); window.rsSelect(rows[0]); }""", osm_id)
-    page.wait_for_function(f"document.getElementById('fix-id').value === '{osm_id}' && document.querySelector('#fix-obj .objhead')", timeout=30_000)
-
+from editor_fixtures import (AMBER, BLUE, ROAD, ROOT, TURN_IN, TURN_OUT, WALL_BUILDING, _LIT, _QUERY, _free_port, _open, _pick_road, _serve, monaco, page_url, pw,  # noqa: F401
+                             restored_url)
 
 def test_edit_save_box_and_build(monaco, page_url):
     fixes = monaco.with_name("osm_fixes.yaml")
@@ -334,9 +227,16 @@ def test_the_turn_tab_shows_every_junction_of_the_road_and_a_click_on_a_dot_choo
         browser.close()
 
 
+# A slow machine and a slow database (Studio's is in the browser): every query of the page waits `ms` milliseconds, and the page counts the queries that have not answered yet.
+_SLOW = """(ms) => { const f = window.fetch; window.__inflight = 0; window.fetch = async (u, o) => { const q = String(u).includes('api/query'); if (q) { window.__inflight++; await new Promise((r) => setTimeout(r, ms)); }
+    try { return await f(u, o); } finally { if (q) window.__inflight--; } }; }"""
+# The page is quiet: no query is on its way and the box has no `loading` class. A test waits for this and judges the HISTORY that it recorded, not one moment.
+_QUIET = "(id) => window.__inflight === 0 && !document.getElementById(id).classList.contains('loading')"
+
+
 def test_the_form_does_not_jump_while_the_next_object_loads(monaco, page_url):
     """A pick of another building: the object box keeps its text (dimmed) while the data loads, so the form below stays where it is. Before, the box was one line "Loading..." for a
-    moment, and the form moved up and back at each pick."""
+    moment, and the form moved up and back at each pick. The page records what it showed in every animation frame; the test judges the record, so the speed of the machine does not matter."""
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         page, errors = _open(browser, page_url)
@@ -344,24 +244,26 @@ def test_the_form_does_not_jump_while_the_next_object_loads(monaco, page_url):
         assert len(ids) == 2
         page.evaluate("fixesPanel.tab('building')")
         page.evaluate(f"fixesPanel.select('building', 'way', {ids[0]})")
-        page.wait_for_function(f"document.getElementById('fix-obj').innerText.includes('{ids[0]}')", timeout=15_000)
-        top = lambda: page.evaluate("document.getElementById('fix-form').getBoundingClientRect().top")
-        before = top()
-        # the data of the next building comes late
-        page.evaluate("() => { const f = window.fetch; window.fetch = async (u, o) => { if (String(o?.body).includes('features.buildings WHERE osm_id')) await new Promise((r) => setTimeout(r, 1500)); return f(u, o); }; }")
+        page.wait_for_function(f"document.getElementById('fix-obj').innerText.includes('{ids[0]}')", timeout=30_000)
+        before = page.evaluate("document.getElementById('fix-form').getBoundingClientRect().top")
+        page.evaluate(_SLOW, 700)
+        page.evaluate("""() => { window.__frames = []; const tick = () => { window.__frames.push([document.getElementById('fix-obj').innerText, document.getElementById('fix-form').getBoundingClientRect().top]);
+            requestAnimationFrame(tick); }; tick(); }""")
         page.evaluate(f"fixesPanel.select('building', 'way', {ids[1]})")
-        page.wait_for_timeout(500)
-        assert "Loading" not in page.inner_text("#fix-obj"), "the box keeps the last object while it loads"
-        assert abs(top() - before) < 1, (top(), before)
-        page.wait_for_function(f"document.getElementById('fix-obj').innerText.includes('{ids[1]}')", timeout=15_000)
-        assert not page.evaluate("document.getElementById('fix-obj').classList.contains('loading')")
+        page.wait_for_function(f"document.getElementById('fix-obj').innerText.includes('{ids[1]}')", timeout=60_000)
+        page.wait_for_function(f"({_QUIET})('fix-obj')", timeout=60_000)
+        frames = page.evaluate("window.__frames")
+        old = [f for f in frames if str(ids[0]) in f[0] and str(ids[1]) not in f[0]]
+        assert old, "the old object was shown while the next one loaded"
+        assert not [f for f in frames if "Loading" in f[0]], "the box never shows Loading... for an object that was shown before"
+        assert all(abs(f[1] - before) < 1 for f in old), f"the form moved while the old object was shown: {sorted({round(f[1]) for f in old})} (it was {round(before)})"
         assert not errors, errors
         browser.close()
 
 
 def test_the_turn_list_does_not_collapse_while_the_next_junction_loads(monaco, page_url):
     """The Turn tab: when another road or junction is picked and the data comes late (Studio's browser database is slower), the list keeps its last text (dimmed). It was empty for
-    about a second, and everything under it moved up and back."""
+    about a second, and everything under it moved up and back. The page records every change of the list and every height; the test judges the record."""
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         page, errors = _open(browser, page_url)
@@ -369,19 +271,24 @@ def test_the_turn_list_does_not_collapse_while_the_next_junction_loads(monaco, p
         page.fill("#fix-from", "8352246")
         page.click("#fix-turn-find")
         page.wait_for_function("document.querySelectorAll('#fix-via option').length > 2 && document.getElementById('fix-out').children.length > 0", timeout=30_000)
-        page.wait_for_timeout(1500)
-        page.evaluate("() => { const f = window.fetch; window.fetch = async (u, o) => { if (String(u).includes('api/query')) await new Promise((r) => setTimeout(r, 250)); return f(u, o); }; }")
-        page.evaluate("""() => { window.__min = 1e9; const tick = () => { const h = document.getElementById('fix-out').getBoundingClientRect().height; if (h < window.__min) window.__min = h; requestAnimationFrame(tick); }; tick(); }""")
+        page.evaluate(_SLOW, 700)
+        page.wait_for_function(f"({_QUIET})('fix-out')", timeout=60_000)
         full = page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
-        # each action: wait until its data has come (the class `loading` is off), whatever the speed of the machine
-        settle = lambda: (page.wait_for_timeout(300), page.wait_for_function("!document.getElementById('fix-out').classList.contains('loading')", timeout=60_000))
+        page.evaluate("""() => { window.__out = []; const el = document.getElementById('fix-out');
+            new MutationObserver(() => window.__out.push([el.children.length, Math.round(el.getBoundingClientRect().height)])).observe(el, {childList: true, subtree: true, characterData: true});
+            window.__min = 1e9; const tick = () => { const h = el.getBoundingClientRect().height; if (h < window.__min) window.__min = h; requestAnimationFrame(tick); }; tick(); }""")
+        # another junction by the box, then the same road again: each time wait until the page is quiet
         page.evaluate("(()=>{const s=document.getElementById('fix-via'); s.selectedIndex=2; s.dispatchEvent(new Event('change',{bubbles:true}));})()")
-        settle()
+        page.wait_for_function("document.getElementById('fix-out').classList.contains('loading') || window.__out.length > 0", timeout=60_000)
+        page.wait_for_function(f"({_QUIET})('fix-out')", timeout=60_000)
         page.evaluate("document.getElementById('fix-turn-find').click()")
-        settle()
-        low, final = page.evaluate("window.__min"), page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
+        page.wait_for_function(f"window.__inflight > 0 || window.__out.length > 2", timeout=60_000)
+        page.wait_for_function(f"({_QUIET})('fix-out')", timeout=60_000)
+        final = page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
+        states, low = page.evaluate("window.__out"), page.evaluate("window.__min")
+        assert states, "the list was drawn again"
+        assert all(n > 0 for n, _ in states), f"the list was empty at some moment: {states}"
         assert low >= min(full, final) * 0.9, f"the list fell to {low}px (it was {full}px, it is {final}px) while the data loaded"
-        assert not page.evaluate("document.getElementById('fix-out').classList.contains('loading')")
         assert not errors, errors
         browser.close()
 
