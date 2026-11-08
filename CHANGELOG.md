@@ -11,11 +11,13 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   `roadKeys` (the column names). `roadRows: false` keeps the editor's own line layers. *Host: nothing is needed. Studio can drop its own `roadIdOfRow` and `roadRows` and give `roadKeys`.*
 - **The editor files are a library crate, `duckosm-editor`** (duckOSM #45). It has the four files of `web/fixes_editor/` (`FILES`, `file(name)`). *Host: nothing is needed. A Rust host can add the crate
   at the same revision as `duckosm-core`, serve `FILES` from one folder, and remove its step that fetches and copies the folder.*
+- **`askTables` names an entry `mode.table` when it has both** (`web/ask/schema.js`). *Host: nothing is needed; a host that passes its entries as they are (Studio, whose `name` is a file name) moves its duckOSM pin.*
 
 ### Fixed
 
 - **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor
   parses text. `duck.query` of the page now gives such a column as text. The selected object, the changes and the walls show again.
+- **`askTables` takes `mode.table` before `name`.** A host entry can have a `name` that is a file name (Studio: `features_traffic.parquet`). Now an entry with `mode` and `table` is named `mode.table`; an entry with only `name` works as before.
 
 ### Added
 
