@@ -16,7 +16,7 @@ from tests import page_tables as P
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "tests/data/page_fixes"
-PAGE_ONLY = {"main.building_entrances", "main.building_info"}     # the page makes them for its panel, from features.buildings and raw.*
+PAGE_ONLY = {"main.building_entrances", "main.building_info"}     # the page makes them for its panel; duckosm build makes main.building_entrances only with options.building_faces (this build has it off)
 PAGE_ONLY_COLUMNS = {"main.boundary": {"geofabrik"}}               # the Geofabrik regions of the page's area: there each column is compared
 
 

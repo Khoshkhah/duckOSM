@@ -942,6 +942,7 @@ class DuckOSM:
         logger.info(f"  duckosm-rust built {len(res['modes'])} network(s) in {self.stats['rust_build_time']:.2f}s")
         if self.config.options.building_faces:
             logger.info(f"  main.building_faces: {rust_engine.load_building_faces(self.con, self._rust_dir):,} walls")
+            logger.info(f"  main.building_entrances: {rust_engine.make_building_entrances(self.con):,} doors")
 
     def _rust_network(self, mode: str) -> None:
         """Load edges, private_edges, nodes and edge_id_map of `mode` from the files of _rust_build."""

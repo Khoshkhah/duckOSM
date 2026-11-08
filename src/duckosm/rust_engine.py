@@ -47,6 +47,29 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
     return res
 
 
+# main.building_entrances: the doors of the area. A door is a node with `entrance` or `door`; its building is the building way that has the node in its outline (the smallest id when
+# two buildings share it; NULL when none). The same SQL as the page of Studio (docs/rust/tables.md), so the editor reads one table everywhere.
+BUILDING_ENTRANCES_SQL = """
+CREATE OR REPLACE TABLE main.building_entrances AS
+WITH e AS (
+  SELECT osm_id, tags, lon, lat FROM raw.nodes WHERE map_extract(tags, 'entrance')[1] IS NOT NULL OR map_extract(tags, 'door')[1] IS NOT NULL
+), j AS (
+  SELECT node_id, min(building_id) AS building_id FROM (
+    SELECT w.osm_id AS building_id, unnest(w.refs) AS node_id FROM raw.ways w WHERE map_extract(w.tags, 'building')[1] IS NOT NULL)
+  WHERE node_id IN (SELECT osm_id FROM e) GROUP BY node_id)
+SELECT e.osm_id, 'node' AS osm_type, coalesce(map_extract(e.tags, 'entrance')[1], 'door') AS kind, map_extract(e.tags, 'door')[1] AS door,
+       map_extract(e.tags, 'access')[1] AS access, map_extract(e.tags, 'addr:housenumber')[1] AS housenumber, map_extract(e.tags, 'addr:street')[1] AS street,
+       map_extract(e.tags, 'level')[1] AS level, map_extract(e.tags, 'wheelchair')[1] AS wheelchair, map_extract(e.tags, 'name')[1] AS name,
+       j.building_id, e.tags, ST_Point(e.lon, e.lat) AS geom
+FROM e LEFT JOIN j ON j.node_id = e.osm_id"""
+
+
+def make_building_entrances(con) -> int:
+    """Create ``main.building_entrances`` from ``raw.*`` (``options.building_faces``: the doors go with the walls). Returns the rows."""
+    con.execute(BUILDING_ENTRANCES_SQL)
+    return con.execute("SELECT count(*) FROM main.building_entrances").fetchone()[0]
+
+
 def load_building_faces(con, out_dir) -> int:
     """Create ``main.building_faces`` from ``building_faces_main.parquet`` (``options.building_faces``). Returns the rows."""
     p = str(Path(out_dir) / "building_faces_main.parquet").replace("'", "''")

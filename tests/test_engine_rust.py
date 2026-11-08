@@ -48,8 +48,8 @@ def test_rust_engine_equals_python(tmp_path, monkeypatch):
         rc, rr = _rows(con, "rs", t)
         assert pc == rc, f"{t}: the columns differ"
         assert pr == rr, f"{t}: {len(set(pr) ^ set(rr))} rows differ"
-    # the sample config turns the walls of the buildings on: only the Rust engine makes them (the Python engine writes a warning)
-    names = "SELECT table_schema, table_name FROM information_schema.tables WHERE table_catalog = '%s' AND table_name != 'building_faces' ORDER BY 1, 2"
+    # the sample config turns the walls of the buildings on: only the Rust engine makes them and the doors that go with them (the Python engine writes a warning)
+    names = "SELECT table_schema, table_name FROM information_schema.tables WHERE table_catalog = '%s' AND table_name NOT IN ('building_faces', 'building_entrances') ORDER BY 1, 2"
     assert con.execute(names % "py").fetchall() == con.execute(names % "rs").fetchall(), "the two files have other tables"
     assert con.execute("SELECT count(*) FROM rs.main.building_faces").fetchone()[0] > 10_000
     assert con.execute("SELECT count(*) FROM rs.driving.edges").fetchone()[0] > 2000
