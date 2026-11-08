@@ -813,10 +813,15 @@ version = "0.7.0"
 dependencies = [
  "duckdb",
  "duckosm-build",
+ "duckosm-editor",
  "httparse",
  "roadstyle",
  "serde_json",
 ]
+
+[[package]]
+name = "duckosm-editor"
+version = "0.7.0"
 
 [[package]]
 name = "duckosm-parquet"

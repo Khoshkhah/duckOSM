@@ -5,7 +5,7 @@
 //! `MAX_HEAD` bytes. The one file that the page writes is the fixes file. The editor's SQL runs on the database, read only and with no
 //! access to files (`LOCK`). Build again runs the build of the database again with the fixes file, and the page then has the new network.
 //!
-//! The routes: `GET /` the page; `GET /fixes_editor/<file>` the editor; `GET /ask/questions.js` the questions of Ask; `GET /api/info` the area, the tables and why Build again is off;
+//! The routes: `GET /` the page; `GET /fixes_editor/<file>` the editor; `GET /ask/questions.js` and `GET /ask/schema.js` what Ask knows; `GET /api/info` the area, the tables and why Build again is off;
 //! `GET` and `PUT /api/fixes` the fixes file; `POST /api/query` the rows of one SELECT as JSON; `POST /api/build` Build again.
 //!
 //! `duckosm ask` (docs/design/ask_page.md) is the same server with `Mode::Ask`: the page has roadstyle's data dock and Ask in place of the editor. It
@@ -239,13 +239,16 @@ fn source(db: &mut dyn Db) -> Result<(String, PathBuf), String> {
     Ok((config.to_string(), dir))
 }
 
-/// The files of the fixes editor, in the program (web/fixes_editor/ of this repository).
+/// The files of the fixes editor, from the library `duckosm-editor` (web/fixes_editor/ of this repository).
 fn editor_file(name: &str) -> Option<&'static str> {
+    duckosm_editor::file(name).map(|f| f.text)
+}
+
+/// The files of Ask that the page and duckOSM Studio share, in the program (web/ask/ of this repository).
+fn ask_file(name: &str) -> Option<&'static str> {
     Some(match name {
-        "fixes_panel.js" => include_str!("../../../web/fixes_editor/fixes_panel.js"),
-        "fixes.js" => include_str!("../../../web/fixes_editor/fixes.js"),
-        "fixes_panel.css" => include_str!("../../../web/fixes_editor/fixes_panel.css"),
-        "presets.json" => include_str!("../../../web/fixes_editor/presets.json"),
+        "questions.js" => include_str!("../../../web/ask/questions.js"),
+        "schema.js" => include_str!("../../../web/ask/schema.js"),
         _ => return None,
     })
 }
@@ -314,12 +317,15 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
             None => say(&mut out, "404 Not Found", "text/plain", b"not found"),
         };
     }
-    if path.is_empty() || path == "index.html" || path.starts_with("fixes_editor/") || path == "ask/questions.js" {
+    if path.is_empty() || path == "index.html" || path.starts_with("fixes_editor/") || path.starts_with("ask/") {
         if !read {
             return say(&mut out, "405 Method Not Allowed", "text/plain", b"the page's files are read only");
         }
-        if path == "ask/questions.js" {
-            return say(&mut out, "200 OK", "text/javascript", &body_of(include_str!("../../../web/ask/questions.js").as_bytes()));
+        if let Some(f) = path.strip_prefix("ask/") {
+            return match ask_file(f) {
+                Some(t) => say(&mut out, "200 OK", "text/javascript", &body_of(t.as_bytes())),
+                None => say(&mut out, "404 Not Found", "text/plain", b"not found"),
+            };
         }
         if let Some(f) = path.strip_prefix("fixes_editor/") {
             return match editor_file(f) {
@@ -526,7 +532,7 @@ mod tests {
     fn a_write_to_another_path_is_refused() {
         let (fixes, ask, port, _) = server("path");
         let put = |path: &str| ask(&format!("PUT {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 1\r\n\r\nx"));
-        for path in ["/", "/index.html", "/fixes_editor/fixes.js", "/ask/questions.js", "/api/info"] {
+        for path in ["/", "/index.html", "/fixes_editor/fixes.js", "/ask/questions.js", "/ask/schema.js", "/api/info"] {
             assert!(put(path).starts_with("HTTP/1.1 405"), "{path}");
         }
         for path in ["/api/fixes/../area.duckdb", "/api/other.yaml", "/area.duckdb", "/../osm_fixes.yaml"] {
@@ -550,10 +556,12 @@ mod tests {
     }
 
     #[test]
-    fn the_questions_of_ask_are_a_read_only_js_module() {
+    fn the_files_of_ask_are_read_only_js_modules() {
         let (_, ask, port, _) = server("questions");
         let ok = ask(&format!("GET /ask/questions.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"));
         assert!(ok.starts_with("HTTP/1.1 200") && ok.contains("text/javascript") && ok.contains("export const QUESTIONS"));
+        let schema = ask(&format!("GET /ask/schema.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"));
+        assert!(schema.starts_with("HTTP/1.1 200") && schema.contains("text/javascript") && schema.contains("export function aboutText"));
         assert!(ask(&format!("GET /ask/other.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")).starts_with("HTTP/1.1 404"));
     }
 

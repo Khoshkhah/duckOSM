@@ -2,7 +2,7 @@
 resolver = "2"
 # The Rust engine of duckOSM (docs/design/rust_engine_move.md). Imported from the repository duckosm-rust, commit 53b3196.
 # The browser page (crates/duckosm-wasm) stays in duckosm-rust and takes these crates as a Git dependency.
-members = ["duckosm-core", "duckosm-parquet", "duckosm-duckdb", "duckosm-build", "duckosm-edit", "duckosm-cli", "duckosm-py"]
+members = ["duckosm-core", "duckosm-parquet", "duckosm-duckdb", "duckosm-build", "duckosm-editor", "duckosm-edit", "duckosm-cli", "duckosm-py"]
 
 [workspace.package]
 version = "0.7.0"   # the version of the Python package duckosm (tests/test_wheel.py checks that they are equal)

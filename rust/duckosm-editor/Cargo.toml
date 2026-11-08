@@ -1,0 +1,9 @@
+[package]
+name = "duckosm-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The files of the duckOSM fixes editor (web/fixes_editor/) as a library: a host page serves them and calls initFixesPanel (docs/design/editor_crate.md)"
+
+# No dependencies: a host (duckosm edit, Studio in WebAssembly) takes the files and serves them.
+[dependencies]
