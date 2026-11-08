@@ -40,7 +40,7 @@ The panel checks each value while you type, and it does not let you add a change
 - **A field that is off**: another choice closes it, for example a footway has no sidewalk. The reason is under the first field that it
   closes. When your choice closes a field that has a value, the panel clears the value and says so. **Reset** brings it back.
 
-A picked object is never called "not in this area" by mistake. A building is looked up in `features.buildings`, then among the walls
+If a table has no `tags` column (an area that a host restored from saved files, for example in Studio), the tags of the object are empty and the box says so. The object is still found. The form shows no current values, and a rule that you add still works (the fixes file needs only the type and the ID of the object). The walls come from `main.building_faces` and do not need tags. A picked object is never called "not in this area" by mistake. A building is looked up in `features.buildings`, then among the walls
 (`main.building_faces`); a node in the traffic features, the junctions of the ways, then any node of the networks and the doors. When a query fails, the box says
 that the data could not be read, and gives the reason.
 
@@ -307,7 +307,7 @@ turn_restrictions:
 |---|---|---|
 | A rule for a road that leaves the junction | `turn_restrictions` | a row in `driving.turn_restrictions` (`restriction_type`, `from_edge_id`, `via_node`, `to_edge_id`); routing on `driving.edge_graph` obeys it |
 
-After you pick a road, each of its junctions is a white dot on the map. The **Junction** box lists the same junctions. Click a dot to choose that junction, or choose it in the box.
+After you pick a road, each of its junctions is a white dot on the map. The start of a one-way road is a junction too, with a gray ring: no turn from the road is there, and the panel says so.  The **Junction** box lists the same junctions. Click a dot to choose that junction, or choose it in the box.
 The blue ring shows the chosen one.
 
 On the map, the roads at the junction have the colors of the legend: the **From** road is blue, the roads that **leave** the junction are green, and the

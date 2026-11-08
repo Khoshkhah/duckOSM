@@ -3,6 +3,7 @@ road saved in osm_fixes.yaml, the box "This road is in your changes" when the ro
 Chromium (Playwright); the test skips itself without Playwright and its browser. The map's base layers come from the internet."""
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -57,10 +58,10 @@ def _free_port():
         return s.getsockname()[1]
 
 
-@pytest.fixture(scope="module")
-def page_url(monaco):
+def _serve(db):
+    """Start `duckosm edit` on the database: (the process, the URL of the page)."""
     port = _free_port()
-    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "edit", str(monaco), "--port", str(port)],
+    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "edit", str(db), "--port", str(port)],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     line = ""
     for _ in range(600):
@@ -71,7 +72,31 @@ def page_url(monaco):
     if not m:
         proc.kill()
         pytest.fail(f"duckosm edit did not start: {line}")
-    yield m.group(0)
+    return proc, m.group(0)
+
+
+@pytest.fixture(scope="module")
+def page_url(monaco):
+    proc, url = _serve(monaco)
+    yield url
+    proc.terminate()
+    proc.wait(10)
+
+
+@pytest.fixture(scope="module")
+def restored_url(monaco, tmp_path_factory):
+    """The shape of an area that Studio restores from its saved files: every table of `features` WITHOUT the column `tags` (the export leaves it out)."""
+    d = tmp_path_factory.mktemp("restored")
+    db = d / "monaco.duckdb"
+    shutil.copy(monaco, db)
+    con = duckdb.connect(str(db))
+    con.execute("LOAD spatial")
+    for (t,) in con.execute("SELECT table_name FROM information_schema.columns WHERE table_schema = 'features' AND column_name = 'tags'").fetchall():
+        con.execute(f"CREATE OR REPLACE TABLE features.{t} AS SELECT * EXCLUDE (tags) FROM features.{t}")
+    assert not con.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'features' AND column_name = 'tags'").fetchone()[0]
+    con.close()
+    proc, url = _serve(db)
+    yield url
     proc.terminate()
     proc.wait(10)
 
@@ -305,6 +330,129 @@ def test_the_turn_tab_shows_every_junction_of_the_road_and_a_click_on_a_dot_choo
         assert page.input_value("#fix-from") == str(frm), "the click chose a junction; it did not pick the road again"
         assert page.evaluate("fixesPanel.drawn().turnJs") == len(listed)
         assert "white dot" in page.inner_text("#fix-via-row")
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_form_does_not_jump_while_the_next_object_loads(monaco, page_url):
+    """A pick of another building: the object box keeps its text (dimmed) while the data loads, so the form below stays where it is. Before, the box was one line "Loading..." for a
+    moment, and the form moved up and back at each pick."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        ids = [int(r["id"]) for r in page.evaluate(_QUERY, "SELECT osm_id AS id FROM features.buildings WHERE osm_type = 'way' LIMIT 2")]
+        assert len(ids) == 2
+        page.evaluate("fixesPanel.tab('building')")
+        page.evaluate(f"fixesPanel.select('building', 'way', {ids[0]})")
+        page.wait_for_function(f"document.getElementById('fix-obj').innerText.includes('{ids[0]}')", timeout=15_000)
+        top = lambda: page.evaluate("document.getElementById('fix-form').getBoundingClientRect().top")
+        before = top()
+        # the data of the next building comes late
+        page.evaluate("() => { const f = window.fetch; window.fetch = async (u, o) => { if (String(o?.body).includes('features.buildings WHERE osm_id')) await new Promise((r) => setTimeout(r, 1500)); return f(u, o); }; }")
+        page.evaluate(f"fixesPanel.select('building', 'way', {ids[1]})")
+        page.wait_for_timeout(500)
+        assert "Loading" not in page.inner_text("#fix-obj"), "the box keeps the last object while it loads"
+        assert abs(top() - before) < 1, (top(), before)
+        page.wait_for_function(f"document.getElementById('fix-obj').innerText.includes('{ids[1]}')", timeout=15_000)
+        assert not page.evaluate("document.getElementById('fix-obj').classList.contains('loading')")
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_turn_list_does_not_collapse_while_the_next_junction_loads(monaco, page_url):
+    """The Turn tab: when another road or junction is picked and the data comes late (Studio's browser database is slower), the list keeps its last text (dimmed). It was empty for
+    about a second, and everything under it moved up and back."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        page.evaluate("fixesPanel.tab('turns')")
+        page.fill("#fix-from", "8352246")
+        page.click("#fix-turn-find")
+        page.wait_for_function("document.querySelectorAll('#fix-via option').length > 2 && document.getElementById('fix-out').children.length > 0", timeout=30_000)
+        page.wait_for_timeout(1500)
+        page.evaluate("() => { const f = window.fetch; window.fetch = async (u, o) => { if (String(u).includes('api/query')) await new Promise((r) => setTimeout(r, 250)); return f(u, o); }; }")
+        page.evaluate("""() => { window.__min = 1e9; const tick = () => { const h = document.getElementById('fix-out').getBoundingClientRect().height; if (h < window.__min) window.__min = h; requestAnimationFrame(tick); }; tick(); }""")
+        full = page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
+        # each action: wait until its data has come (the class `loading` is off), whatever the speed of the machine
+        settle = lambda: (page.wait_for_timeout(300), page.wait_for_function("!document.getElementById('fix-out').classList.contains('loading')", timeout=60_000))
+        page.evaluate("(()=>{const s=document.getElementById('fix-via'); s.selectedIndex=2; s.dispatchEvent(new Event('change',{bubbles:true}));})()")
+        settle()
+        page.evaluate("document.getElementById('fix-turn-find').click()")
+        settle()
+        low, final = page.evaluate("window.__min"), page.evaluate("document.getElementById('fix-out').getBoundingClientRect().height")
+        assert low >= min(full, final) * 0.9, f"the list fell to {low}px (it was {full}px, it is {final}px) while the data loaded"
+        assert not page.evaluate("document.getElementById('fix-out').classList.contains('loading')")
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_start_of_a_one_way_road_is_a_junction_of_the_turn_tab(monaco, page_url):
+    """Every end of the road is a junction of the list and a dot on the map, also the start of a one-way road. No turn from the road is there: the panel says so and has no turn rule."""
+    frm, start = 8352246, 25193390                  # the road arrives at its other ends; it only leaves 25193390
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        page.evaluate("fixesPanel.tab('turns')")
+        page.fill("#fix-from", str(frm))
+        page.click("#fix-turn-find")
+        page.wait_for_function("document.querySelectorAll('#fix-via option').length > 1", timeout=30_000)
+        opts = page.evaluate("[...document.querySelectorAll('#fix-via option')].map((o) => ({v: o.value, t: o.textContent, end: o.dataset.end}))")
+        starts = [o for o in opts if o["end"] == "0"]
+        assert [o["v"] for o in starts] == [str(start)] and "starts here" in starts[0]["t"], opts
+        assert opts[-1] == starts[0], "the junctions where the road arrives come first"
+        page.wait_for_function(f"fixesPanel.drawn().turnJs === {len(opts)}", timeout=20_000)
+        page.evaluate("(v) => { const s = document.getElementById('fix-via'); s.value = v; s.dispatchEvent(new Event('change', {bubbles: true})); }", str(start))
+        page.wait_for_function("document.getElementById('fix-out').innerText.includes('starts at this junction')", timeout=15_000)
+        assert page.locator("#fix-out .turn").count() == 0, "no turn rule at the start of the road"
+        assert not errors, errors
+        browser.close()
+
+
+def test_an_area_restored_without_tags_shows_the_picked_objects(restored_url):
+    """An area restored from files that have no tags column (Studio's saved areas): a building and a node that are picked are shown, with empty tags and a note, never as "not in this area"
+    or "could not be read". A rule that does not need the tags can be added."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, restored_url)
+        bid = int(page.evaluate(_QUERY, "SELECT osm_id AS id FROM features.buildings WHERE osm_type = 'way' LIMIT 1")[0]["id"])
+        nid = int(page.evaluate(_QUERY, "SELECT osm_id AS id FROM features.traffic LIMIT 1")[0]["id"])
+        page.evaluate("fixesPanel.tab('building')")
+        page.evaluate(f"fixesPanel.select('building', 'way', {bid})")
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('no tags column')", timeout=15_000)
+        for text in (page.inner_text("#fix-obj"),):
+            assert "not in this area" not in text and "could not be read" not in text, text
+        # a rule that sets a tag is added without the old tags
+        page.fill("#fixf-building_levels", "4")
+        page.click("#fix-save")
+        page.wait_for_function("fixesPanel.count() === 1", timeout=10_000)
+        page.evaluate("fixesPanel.tab('node')")
+        page.evaluate(f"fixesPanel.select('node', 'node', {nid})")
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('no tags column')", timeout=15_000)
+        text = page.inner_text("#fix-obj")
+        assert "not in this area" not in text and "could not be read" not in text, text
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_table_without_a_tags_column_does_not_stop_the_editor(monaco, page_url):
+    """A host can have a feature table with no tags column (Studio opens a saved area from files that leave the tags out). The editor reads the columns first: the node is found, its
+    tags are empty, and the panel says so. Before, the query failed: "Referenced column tags not found" and the panel said that the data could not be read."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        nid = int(page.evaluate(_QUERY, "SELECT osm_id AS id FROM features.traffic LIMIT 1")[0]["id"])
+        def no_tags(route):
+            body = route.request.post_data or ""
+            if "information_schema.columns" in body and "'traffic'" in body:
+                return route.fulfill(status=200, content_type="application/json", body='[{"column_name": "osm_id"}, {"column_name": "geom"}]')
+            if "map_keys(tags)" in body and "features.traffic" in body:
+                return route.fulfill(status=400, content_type="text/plain", body='Binder Error: Referenced column "tags" not found in FROM clause!')
+            return route.continue_()
+        page.route("**/api/query", no_tags)
+        page.evaluate(f"fixesPanel.select('node', 'node', {nid})")
+        page.wait_for_function("document.getElementById('fix-obj').innerText.includes('no tags column')", timeout=15_000)
+        text = page.inner_text("#fix-obj")
+        assert "could not be read" not in text and "not in this area" not in text, text
         assert not errors, errors
         browser.close()
 
