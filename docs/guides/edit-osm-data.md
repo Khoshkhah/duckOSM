@@ -277,7 +277,7 @@ extra:
 | Wall type and its door | `extra.building_faces` | `main.building_faces`: `face_type` is `front`, `edited` is true and `door` is `main` (before: `side`, no door). Needs `options.building_faces` |
 | Delete this building (a way) | `overrides`: `remove: true` | the building is not in `features.buildings` |
 | Delete this building (a relation) | tag edit: delete `building` | the relation is not in `features.buildings` |
-| Kind of a door | tag edit of the door node: `entrance` | duckOSM Studio only: `duckosm build` does not make `main.building_entrances` |
+| Kind of a door | tag edit of the door node: `entrance` | `main.building_entrances`: `duckosm build` makes it with `options.building_faces`, as Studio does |
 
 ### Node tab
 

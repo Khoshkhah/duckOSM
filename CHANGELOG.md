@@ -13,6 +13,11 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   at the same revision as `duckosm-core`, serve `FILES` from one folder, and remove its step that fetches and copies the folder.*
 - **`askTables` names an entry `mode.table` when it has both** (`web/ask/schema.js`). *Host: nothing is needed; a host that passes its entries as they are (Studio, whose `name` is a file name) moves its duckOSM pin.*
 
+### Added
+
+- **`duckosm build` makes `main.building_entrances`** with `options.building_faces` (the doors of the area: `kind`, `door`, `access`, `housenumber`, `street`, `level`, `wheelchair`, `name`, `building_id`, `geom`).
+  It is the same SQL as the page of Studio, so the editor reads one table everywhere (the Doors section of the Building tab). Before, only Studio made it. Monaco sample: 110 doors.
+
 ### Fixed
 
 - **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor

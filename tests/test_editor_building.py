@@ -14,27 +14,9 @@ BIG_BUILDING = ("SELECT osm_id, ST_X(ST_PointOnSurface(geom)) AS x, ST_Y(ST_Poin
 
 
 @pytest.fixture(scope="module")
-def doors_url(monaco, tmp_path_factory):
-    """A copy of the Monaco database with the table main.building_entrances. `duckosm build` does not make it (Studio makes it for its panel), so the test makes it here: the nodes
-    of raw.nodes that have an `entrance` or `door` tag and lie on the outline of a building, with the columns that the panel reads."""
-    d = tmp_path_factory.mktemp("doors")
-    db = d / "monaco.duckdb"
-    shutil.copy(monaco, db)
-    con = duckdb.connect(str(db))
-    con.execute("LOAD spatial")
-    con.execute("""CREATE TABLE main.building_entrances AS
-        SELECT osm_id, coalesce(tags['entrance'], 'door') AS kind, tags['door'] AS door, tags['access'] AS access, tags['addr:housenumber'] AS housenumber, tags['addr:street'] AS street,
-               tags['level'] AS level, tags['wheelchair'] AS wheelchair, tags['name'] AS name, geom, building_id
-        FROM (SELECT n.osm_id, n.tags, ST_Point(n.lon, n.lat) AS geom, b.osm_id AS building_id,
-                     row_number() OVER (PARTITION BY n.osm_id ORDER BY ST_Distance(b.geom, ST_Point(n.lon, n.lat))) AS r
-              FROM raw.nodes n JOIN features.buildings b ON b.osm_type = 'way' AND ST_DWithin(b.geom, ST_Point(n.lon, n.lat), 0.00001)
-              WHERE map_contains(n.tags, 'entrance') OR map_contains(n.tags, 'door')) WHERE r = 1""")
-    assert con.execute("SELECT count(*) FROM main.building_entrances").fetchone()[0] > 0, "Monaco has doors on buildings"
-    con.close()
-    proc, url = _serve(db)
-    yield url
-    proc.terminate()
-    proc.wait(10)
+def doors_url(page_url):
+    """`duckosm build` makes main.building_entrances with options.building_faces, so the doors test uses the Monaco page as it is."""
+    return page_url
 
 
 def _rows(page, sql):
@@ -301,11 +283,11 @@ def test_select_each_wall(monaco, page_url):
 
 def test_the_kind_of_a_door_is_a_node_edit(doors_url):
     """Studio line 615: the Building tab lists the doors of a building (main.building_entrances) and draws them as dots; another kind of door waits for Add to changes and then is a
-    node rule with `entrance`. (The table is made by the `doors_url` fixture: `duckosm build` does not make it.)"""
+    node rule with `entrance`. (The table is made by `duckosm build`.)"""
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         page, errors = _open_clean(browser, doors_url, **VIEW)
-        bid = _rows(page, "SELECT building_id FROM main.building_entrances GROUP BY building_id ORDER BY count(*) DESC, building_id LIMIT 1")[0]["building_id"]
+        bid = _rows(page, "SELECT building_id FROM main.building_entrances WHERE building_id IS NOT NULL GROUP BY building_id ORDER BY count(*) DESC, building_id LIMIT 1")[0]["building_id"]
         n_doors = _rows(page, f"SELECT count(*)::INTEGER AS n FROM main.building_entrances WHERE building_id = {bid}")[0]["n"]
         door = _rows(page, f"SELECT osm_id, kind FROM main.building_entrances WHERE building_id = {bid} ORDER BY osm_id LIMIT 1")[0]
         page.click("#fix-tab-building")
@@ -322,5 +304,17 @@ def test_the_kind_of_a_door_is_a_node_edit(doors_url):
         page.click("#fix-save")
         y = text()
         assert f"id: {door['osm_id']}" in y and "type: node" in y and f"entrance: {new_kind}" in y, y
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_build_makes_the_doors_table(monaco, page_url):
+    """`duckosm build` makes main.building_entrances (the same table as Studio's page): doors with their kind, and the building whose outline has the node."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open_clean(browser, page_url)
+        n, on = [page.evaluate(_QUERY, q)[0]["n"] for q in ("SELECT count(*)::INTEGER AS n FROM main.building_entrances",
+                                                              "SELECT count(*)::INTEGER AS n FROM main.building_entrances WHERE building_id IS NOT NULL")]
+        assert n > 0 and 0 < on <= n, (n, on)
         assert not errors, errors
         browser.close()
