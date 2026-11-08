@@ -239,15 +239,9 @@ fn source(db: &mut dyn Db) -> Result<(String, PathBuf), String> {
     Ok((config.to_string(), dir))
 }
 
-/// The files of the fixes editor, in the program (web/fixes_editor/ of this repository).
+/// The files of the fixes editor, from the library `duckosm-editor` (web/fixes_editor/ of this repository).
 fn editor_file(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "fixes_panel.js" => include_str!("../../../web/fixes_editor/fixes_panel.js"),
-        "fixes.js" => include_str!("../../../web/fixes_editor/fixes.js"),
-        "fixes_panel.css" => include_str!("../../../web/fixes_editor/fixes_panel.css"),
-        "presets.json" => include_str!("../../../web/fixes_editor/presets.json"),
-        _ => return None,
-    })
+    duckosm_editor::file(name).map(|f| f.text)
 }
 
 /// Bind 127.0.0.1:`port` (0: a free port).
