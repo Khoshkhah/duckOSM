@@ -25,8 +25,9 @@ const panel = await initFixesPanel({
 	map,           // the MapLibre map
 	yaml,          // js-yaml
 	status,        // status(text, ms): a short message for the user
-	roadIdOfRow,   // the OSM way id of a road that roadstyle's map selects (event rs:select)
-	roadRows,      // optional: (osmId) gives the map's rows of an OSM way, for roadstyle's highlight sets
+	roadIdOfRow,   // optional: (row) gives the OSM way id of a road that roadstyle's map selects (event rs:select); the default reads window.RS_SIDE.props
+	roadRows,      // optional: (osmId) gives the map's rows of an OSM way, for roadstyle's highlight sets; the default is an index of window.RS_SIDE.props; false: no highlight sets
+	roadKeys,      // optional: the names of the columns, when a row of window.RS_SIDE.props is an array (the default reads `osm_id` of an object)
 	areaKey,       // () gives the name of the area: the browser keeps the changes of each area
 	onChange,      // (summary, n): the number of changes is new
 	onBuild,       // (): the user clicks "Build again"; the host page builds with panel.text()
@@ -53,10 +54,12 @@ The host page gives:
   hide button of its own. A control of the host that hides the panel must call `close()` first, as the frame's back button does.
   Then nothing of the editor stays selected on the map while the panel is hidden.
 - roadstyle's map: the event `rs:select` and `window.rsDeselect`.
-- Optional: `roadRows(osmId)`. With it, the editor colours a road of the map with roadstyle's highlight sets (`window.rsHighlight`):
+- Optional: `roadIdOfRow(row)` and `roadRows(osmId)`. Without them the editor reads the map's road table itself (`window.RS_SIDE.props`, then `rsGetProps` and `rsQuery`), so a
+  host that is a roadstyle page gives neither. A row of the table is an object with `osm_id`; for an array row, give `roadKeys` (the names of the columns).
+  With `roadRows`, the editor colours a road of the map with roadstyle's highlight sets (`window.rsHighlight`):
   the picked road is blue, the changes are amber, the deleted roads are red, the roads that leave the junction of the Turn tab are
   green and the road under the pointer in the Turn list is dark. The colour is on the road's own fill, at the road's width at each
-  zoom. Without `roadRows`, the editor draws the roads with its own line layers. A building, a node, a junction and a new road always
+  zoom. With `roadRows: false`, the editor draws the roads with its own line layers. A building, a node, a junction and a new road always
   use the editor's own layers. `drawn().lit` gives the number of rows in each set.
 - The tables `driving.edges`, `driving.nodes`, `features.buildings` and `features.traffic`. With `main.building_faces` (option
   `building_faces`), the Building tab shows the walls. With `main.building_entrances`, it shows the doors. If a table is not there,
