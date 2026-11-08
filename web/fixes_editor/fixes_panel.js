@@ -184,7 +184,7 @@ const MARKUP = (note) => String.raw`
       <p class="why">Click the road that a turn starts on, or type its way ID.</p>
       <div class="row"><input id="fix-from" type="text" inputmode="numeric" placeholder="From way ID" aria-label="From way ID" style="flex:1"><button id="fix-turn-find" type="button">Find turns</button><button id="fix-turn-clear" type="button" hidden>Unselect</button></div>
       <p id="fix-turn-legend" class="small" hidden><span class="legend" style="margin-left:0"><i style="background:#2563eb"></i>From</span><span class="legend"><i style="background:#16a34a"></i>To</span><span class="legend"><i style="background:#c026d3"></i>Only into it</span><span class="legend"><i style="border:3px solid #2563eb;border-radius:50%;background:rgba(37,99,235,.25)"></i>Junction</span></p>
-      <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junction</b></p><select id="fix-via" aria-label="Junction" style="width:100%"></select></div>
+      <div id="fix-via-row" hidden><p class="small" style="margin:10px 0 4px"><b>Junction</b></p><select id="fix-via" aria-label="Junction" style="width:100%"></select><p class="small muted" style="margin:4px 0 0">Or click a white dot on the map.</p></div>
     </section>
     <div id="fix-turn-inchg" class="fix-inchg" role="group" aria-label="In your changes" hidden></div>
     <section class="fsec" id="fix-turnsec" hidden><h3>Turns at the junction</h3><div id="fix-out"></div></section>
@@ -1203,6 +1203,13 @@ export async function initFixesPanel(ctx) {
       map.addLayer({ id: "fix-turn-hl", type: "line", source: "fix-turn", filter: ["==", ["get", "id"], -1], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#111827", "line-width": 12, "line-opacity": 0.85 } });
       map.addLayer({ id: "fix-turn-line", type: "line", source: "fix-turn", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["case", ["==", ["get", "in"], 1], TURN_IN, TURN_OUT], "line-width": 6, "line-opacity": 0.95 } });
     }
+    if (!map.getSource("fix-turn-js")) {              // every junction of the picked road (the ends of its edges): a white dot that a click chooses; the chosen one has the blue ring of fix-sel
+      map.addSource("fix-turn-js", { type: "geojson", data: EMPTY });
+      map.addLayer({ id: "fix-turn-js-pt", type: "circle", source: "fix-turn-js", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 13, 5, 19, 9], "circle-color": "#ffffff", "circle-stroke-color": BLUE, "circle-stroke-width": 3 } });
+      map.on("mouseenter", "fix-turn-js-pt", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "fix-turn-js-pt", () => { map.getCanvas().style.cursor = ""; });
+      map.on("click", "fix-turn-js-pt", (e) => chooseJunction(e.features?.[0]?.properties?.n));
+    }
     for (const [src, color0, w, fa] of [["fix-edits", AMBER, 5, 0.28], ["fix-sel", BLUE, 7, 0.2]]) {
       const color = src === "fix-edits" ? ["case", ["==", ["get", "d"], 1], DELETED, AMBER] : color0;          // a deleted object is red
       if (map.getSource(src)) continue;
@@ -1263,7 +1270,7 @@ export async function initFixesPanel(ctx) {
     return out.filter(Boolean);
   }
 
-  const drawnCount = { edits: 0, sel: 0, heights: [], faces: 0, draw: 0, nodes: 0, turn: 0, doors: 0 };      // what the panel put in the map's sources (the tests read it)
+  const drawnCount = { edits: 0, sel: 0, heights: [], faces: 0, draw: 0, nodes: 0, turn: 0, turnJs: 0, doors: 0 };      // what the panel put in the map's sources (the tests read it)
   // the edited buildings with their height and color: the tags of the data with the rule on top, so a change shows before the next build
   async function extrusions() {
     await classify();
@@ -1441,7 +1448,23 @@ export async function initFixesPanel(ctx) {
     feats = roadsLit(feats, ["fix-turn-out", "fix-turn-in"], (f) => (f.properties.in ? "fix-turn-in" : "fix-turn-out"));
     map.getSource("fix-turn")?.setData({ type: "FeatureCollection", features: feats });
     drawnCount.turn = feats.length;
+    drawTurnJunctions();
   }
+  // the junctions of the picked road, from the list of the Junction box (so the dots and the list are the same junctions)
+  let turnJsToken = 0;
+  async function drawTurnJunctions() {
+    const my = ++turnJsToken, ids = open() && current === "turns" && !$("fix-turnsec").hidden ? [...$("fix-via").options].map((o) => Number(o.value)).filter(Number.isSafeInteger) : [];
+    const rows = ids.length ? await safe(`SELECT node_id AS n, ST_X(geom) AS x, ST_Y(geom) AS y FROM driving.nodes WHERE node_id IN (${ids.join(",")})`) : [];
+    if (my !== turnJsToken) return;
+    map.getSource("fix-turn-js")?.setData({ type: "FeatureCollection", features: rows.map((r) => ({ type: "Feature", properties: { n: String(r.n) }, geometry: { type: "Point", coordinates: [r.x, r.y] } })) });
+    drawnCount.turnJs = rows.length;
+  }
+  // a click on a junction dot of the map: the same as the choice in the Junction box (its guard for rules that are not added yet is in onchange)
+  const chooseJunction = (n) => {
+    if (!n || current !== "turns" || $("fix-turnsec").hidden || String($("fix-via").value) === String(n)) return;
+    if (![...$("fix-via").options].some((o) => o.value === String(n))) return;
+    $("fix-via").value = String(n); $("fix-via").onchange();
+  };
   // a click (or Enter) on a junction row picks the junction; on a row of a turn road it picks the road (the same as a wall of a building)
   const pickTurn = (row) => { if (!row) return; turnSel = turnSel === Number(row.dataset.to) ? null : Number(row.dataset.to); paintTurnSel(); if (turnSel != null) reveal(row); };
   $("fix-out").addEventListener("click", (e) => { if (!e.target.closest("select, button")) pickTurn(e.target.closest(".turn")); });
@@ -1691,6 +1714,7 @@ export async function initFixesPanel(ctx) {
     const id = Number(ctx.roadIdOfRow(e.detail?.id));
     if (!Number.isSafeInteger(id) || id <= 0) return;
     if (await onBuilding(pressed)) return;
+    if (turns && pressed && map.queryRenderedFeatures(map.project(pressed.p), { layers: ["fix-turn-js-pt"] }).length) return;      // a junction dot of the road: chooseJunction
     if (turns) { $("fix-from").value = id; findTurns(id); }
     else select("road", "way", id);
   });

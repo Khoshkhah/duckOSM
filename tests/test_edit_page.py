@@ -258,7 +258,8 @@ def test_the_turn_tab_draws_all_the_roads_at_the_junction(monaco, page_url):
         page.click("#fix-turn-find")
         page.wait_for_function("document.querySelectorAll('#fix-via option').length > 0", timeout=30_000)
         page.evaluate("(v) => { const s = document.getElementById('fix-via'); s.value = v; s.dispatchEvent(new Event('input', {bubbles: true})); s.dispatchEvent(new Event('change', {bubbles: true})); }", str(via))
-        page.wait_for_function(f"({_LIT})({only_in[0]}).some((c) => c === '{TURN_IN}')", timeout=20_000)
+        for i, c in ((only_in[0], TURN_IN), (leave[0], TURN_OUT), (frm, BLUE)):      # the three sets are drawn one after the other: wait for each
+            page.wait_for_function(f"({_LIT})({i}).some((c) => c === '{c}')", timeout=20_000)
         for i in leave:
             assert set(page.evaluate(f"({_LIT})({i})")) == {TURN_OUT}, ("leaves", i)
         for i in only_in:
@@ -267,6 +268,36 @@ def test_the_turn_tab_draws_all_the_roads_at_the_junction(monaco, page_url):
         assert page.evaluate("window.__hl.length") > 0 and all(l.get("opacity") == 1 for l in page.evaluate("window.__hl")), "every set has opacity 1"
         assert "Only into it" in page.inner_text("#fix-turn-legend")
         assert "not in the driving network" in page.inner_text("#fix-out"), "a road of another network at the junction is named"
+        assert not errors, errors
+        browser.close()
+
+
+def test_the_turn_tab_shows_every_junction_of_the_road_and_a_click_on_a_dot_chooses_it(monaco, page_url):
+    """After a road is picked, each of its junctions is a white dot on the map, the same junctions as the Junction box lists. A click on a dot chooses that junction (the box and the
+    list of turns follow) and does not pick the road under the dot again."""
+    frm = 8352246                                   # a long road with 7 junctions in the Monaco sample
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, page_url)
+        page.evaluate("fixesPanel.tab('turns')")
+        page.fill("#fix-from", str(frm))
+        page.click("#fix-turn-find")
+        page.wait_for_function("document.querySelectorAll('#fix-via option').length > 1", timeout=30_000)
+        listed = page.evaluate("[...document.querySelectorAll('#fix-via option')].map((o) => o.value)")
+        page.wait_for_function(f"fixesPanel.drawn().turnJs === {len(listed)}", timeout=20_000)
+        dots = """() => { const m = window.map; return m.queryRenderedFeatures({layers: ['fix-turn-js-pt']})
+            .map((f) => { const q = m.project(f.geometry.coordinates); return {n: f.properties.n, x: q.x, y: q.y}; }); }"""
+        page.wait_for_function(f"({dots})().length > 1", timeout=20_000)            # the map has moved to the road
+        first = page.input_value("#fix-via")
+        target = next(d for d in page.evaluate(dots) if d["n"] != first and d["x"] > 450 and 60 < d["y"] < 780)
+        page.wait_for_timeout(800)                                                  # the map stops
+        target = next(d for d in page.evaluate(dots) if d["n"] == target["n"])
+        page.mouse.click(target["x"], target["y"])
+        page.wait_for_function(f"document.getElementById('fix-via').value === '{target['n']}'", timeout=15_000)
+        page.wait_for_function("document.getElementById('fix-out').innerText.length > 0", timeout=15_000)
+        assert page.input_value("#fix-from") == str(frm), "the click chose a junction; it did not pick the road again"
+        assert page.evaluate("fixesPanel.drawn().turnJs") == len(listed)
+        assert "white dot" in page.inner_text("#fix-via-row")
         assert not errors, errors
         browser.close()
 
