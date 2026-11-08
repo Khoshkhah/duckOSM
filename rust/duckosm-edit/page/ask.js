@@ -220,7 +220,7 @@
       card(named >= 0 ? String(row[named]) : `${table} ${idCol >= 0 ? row[idCol] : e.detail.index + 1}`, g, idCol >= 0 ? String(row[idCol]) : undefined);
     });
     // what Ask is told about the tables (web/ask/schema.js): the tables of the file, the page's own tables (extra.edits always, extra.boundary_h3 with h3-js) and the real road classes
-    const aboutText = S.aboutText({ tables: [...names, "extra.edits", ...((await h3Loaded) ? ["extra.boundary_h3"] : [])], classes: await S.roadClasses(query, names), shapes: true });
+    const aboutText = S.aboutText({ tables: [...names, "extra.edits", ...((await h3Loaded) ? ["extra.boundary_h3"] : [])], classes: await S.roadClasses(query, names), shapes: true, hasTags: await S.hasTags(query) });
     // the page's own tool for Ask (roadstyle's `tools` option): set_map changes roadstyle's layers only, and the shapes of a result (H3 cells, buildings, walls, nodes) are
     // the page's own layer (Kaveh: "increase transparency of h3 cells on map", and Ask answered that it could not)
     const shapeTools = [{
