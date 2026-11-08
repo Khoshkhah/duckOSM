@@ -12,6 +12,17 @@ The user guide is [Edit OSM data](../../docs/guides/edit-osm-data.md). The desig
 | `presets.json` | The fields of each tab, the checks of their values (`check`) and the guards between them (`_guards`). |
 | `fixes_units.mjs` | The unit tests: `node web/fixes_editor/fixes_units.mjs` (the CI job `test` runs them). |
 
+## Get the files: the library `duckosm-editor`
+
+A Rust host depends on the crate `duckosm-editor` (`rust/duckosm-editor`, the same git revision as `duckosm-core`) and serves its files. It has no copy of the folder and no
+fetch step (`docs/design/editor_crate.md`):
+
+```rust
+for f in duckosm_editor::FILES {
+    serve(&format!("duckosm/fixes_editor/{}", f.name), f.content_type, f.text);
+}
+```
+
 ## Use it in a page
 
 Copy the folder at one duckOSM rev, link `fixes_panel.css`, load [js-yaml](https://github.com/nodeca/js-yaml) and call `initFixesPanel`:
