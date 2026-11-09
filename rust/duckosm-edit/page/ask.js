@@ -40,7 +40,7 @@
     // QUESTIONS and S: the questions to ask (web/ask/questions.js) and what Ask knows about the tables (web/ask/schema.js, docs/design/ask_schema.md): one file each for this page and
     // for duckOSM Studio (docs/guides/ask-questions.md). roadstyle's Ask shows its
     // general groups first (any data), then these groups, which are about the data of duckOSM.
-    const [F, { dataDock }, { askPanel }, { QUESTIONS }, S] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js"), import("./ask/questions.js"), import("./ask/schema.js")]);
+    const [F, { dataDock }, { askPanel }, { QUESTIONS }, S, V] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js"), import("./ask/questions.js"), import("./ask/schema.js"), import("./ask/views.js")]);
 
     const query = async (sql, { signal } = {}) => {
       const { columns, rows } = await (await api("sql", { method: "POST", body: sql, signal })).json();
@@ -130,7 +130,7 @@
       const name = q(col.name);
       const kept = ["face_type", "color"].filter((n) => d.columns.some((c) => c.name === n));         // the columns that colour a shape
       const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g${kept.map((n) => `, CAST(${q(n)} AS VARCHAR) AS ${q(n)}`).join("")} FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
-      if (mine !== ticket) return;                                  // a newer table came while this one loaded
+      if (mine !== ticket || owned) return;                         // a newer table came while this one loaded, or a kind owns the result
       const features = rows.map(([g, ...vals]) => {
         const properties = {};
         kept.forEach((n, i) => { if (vals[i] != null && !(n === "color" && !CSS.supports("color", vals[i]))) properties[n] = vals[i]; });        // a colour that CSS does not know is left out
@@ -160,10 +160,23 @@
       await api("table", { method: "POST", body: JSON.stringify({ name: "boundary_h3", columns, rows: out }) });
     };
     const ready = Promise.all([loadEdits(), loadH3()]).catch((e) => console.warn("duckosm ask: a table of the page did not load:", e.message));
+    // the kinds of object that a row can be (docs/design/table_views.md, web/ask/views.js): roadstyle draws the object of a row, selects it and fills the card.
+    // Until roadstyle can colour a kind and draw a wall (docs/design/dock_kinds_table_views.md, steps 2 to 4), a result that has a geometry column keeps the page's own
+    // drawing below (the colour column, the walls by face_type). So a kind answers only a result with ids and no geometry column (a via_node, a way_id, a route_id).
+    const hasGeom = () => (data.result?.()?.columns || []).some((c) => /^GEOMETRY$/i.test(c.type));          // the dock sets its result before it asks a kind
+    const NONE = "SELECT NULL::BIGINT AS id, NULL::VARCHAR AS geom WHERE false";
+    const kinds = V.viewKinds({ names: info.tables.map((t) => `${t.mode}.${t.table}`), hasTags: await S.hasTags(query) });
+    for (const k of Object.values(kinds)) { const by = k.geometryBy; k.geometryBy = (sql, column) => (hasGeom() ? NONE : by(sql, column)); }
     const data = dataDock({
       query, schema, ready,
       roadsBy: S.roadsBy(main), sql: S.startSql(main),
+      kinds,
     });
+    // a kind owns the result: the page draws nothing for it, and the object of a kind has its card (roadstyle's event `kind`; a new result resets it)
+    let owned = false;
+    data.addEventListener("run", () => { owned = false; });
+    data.addEventListener("kind", (e) => { owned = !!e.detail.name; if (owned) { ticket++; if (drawn) showShapes([]); clearPick(); } });
+    data.addEventListener("kinderror", (e) => console.warn(`duckosm ask: the kind ${e.detail.kind} failed:`, e.detail.message));
     // ---- a row of the table: its item on the map, and its facts in the card (roadstyle's data dock: the event `row`, data.card(...) and the event `cardclose`).
     // A road row (the result has edge_id) is selected by roadstyle itself, with its own card. A row that has a geometry column (a node, a building, a wall) is drawn here in
     // the select look (roadstyle's solid purple), the map zooms to it, and the card has all its values except the geometry. A new selection of roadstyle, a new result and the
@@ -190,6 +203,7 @@
     data.addEventListener("cardclose", clearPick);
     data.addEventListener("run", (e) => { lastSql = e.detail.sql; drawResult(e.detail).catch((err) => console.warn("duckosm ask: the shapes did not draw:", err.message)); });
     data.addEventListener("row", async (e) => {
+      if (owned) return;                                            // the object of a kind: roadstyle selects it and fills the card
       const { columns, row } = e.detail, mine = ++rowTicket;
       const g = columns.findIndex((c) => /^GEOMETRY$/i.test(c.type));
       const hexAt = g < 0 && window.h3 ? columns.findIndex((c) => /^h3(_cell|_id)?$/i.test(c.name)) : -1;

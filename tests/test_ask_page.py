@@ -300,3 +300,37 @@ def test_ask_page(monaco, page_url):
         assert page.evaluate("window.rsGetInteraction('buildings')")["clickable"] is True
         assert not errors, errors
         browser.close()
+
+
+def test_a_result_of_ids_has_its_objects_on_the_map_and_a_card(monaco, page_url):
+    """web/ask/views.js gives roadstyle's data dock the kinds of the tables (docs/design/table_views.md): a result with ids and no geometry column (the junction of a
+    turn restriction, the nodes of a way, a bus route) is drawn by the dock itself, a click on a row selects the object and fills the card. A result with a geometry
+    column keeps the page's own drawing."""
+    drawn = "(s) => (window.map.getSource(s) ? window.map.getSource(s).serialize().data.features.length : 0)"
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(page_url)
+        page.wait_for_function("window.askPage", timeout=60_000)
+        page.evaluate("window.askPage.data.open()")
+        run, rows = "(s) => window.askPage.data.run(s)", "#rs-dock tbody tr"
+        card = "() => (document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden) ? document.querySelector('.rs-dd-card').innerText : ''"
+        # the junction of a turn restriction: a node of the graph
+        page.evaluate(run, "SELECT restriction_id, via_node FROM driving.turn_restrictions")
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 0", timeout=30_000)
+        assert page.evaluate("window.askPage.shapes()") == 0, "the page draws nothing for a result that a kind owns"
+        page.locator(rows).nth(0).click()
+        page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') === 1", timeout=15_000)
+        via = page.evaluate("document.querySelectorAll('#rs-dock tbody tr')[0].cells[1].innerText.replace(/\\s/g, '')")
+        assert via in page.evaluate(card).replace(" ", "").replace(" ", ""), page.evaluate(card)
+        # the nodes of a way: most are not junctions, so the point comes from raw.nodes
+        page.evaluate(run, "SELECT way_id, node_id FROM driving.way_nodes LIMIT 300")
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 250", timeout=30_000)
+        # a result with a geometry column keeps the page's own drawing, and the kind does not draw it again
+        page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")
+        page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
+        assert page.evaluate(f"({drawn})('rs-dock-kinds')") == 0, "a result with a geometry column is not drawn twice"
+        assert not errors, errors
+        browser.close()

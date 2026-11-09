@@ -25,6 +25,10 @@ facts in the card, and the query replaced the table, so a table with no geometry
 overlay click now, and a host has no way to put content in the card. Kaveh wants the facts of a clicked item in that card. When roadstyle has it, the
 page moves the pin and the building has its facts in the card too. The walls and the changes of a building are not in the card: ask for them, or write a SQL line.
 
+## Kinds of a result of ids (2026-11-09)
+
+The page passes `viewKinds` (`web/ask/views.js`, [table_views.md](table_views.md)) to the data dock as `kinds`. A result with ids and no geometry column is drawn by the dock itself, and a click on a row fills the card. A result with a geometry column keeps the page's drawing below: the page makes the dock's kinds answer nothing for it (`hasGeom`), so no object is drawn twice. This ends when roadstyle can colour a kind and draw a wall (steps 2 to 4 of its design).
+
 ## What the host gives
 
 roadstyle knows no database. The host page (`rust/duckosm-edit/page/ask.js`) gives the data dock three things:
