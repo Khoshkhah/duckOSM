@@ -2,7 +2,9 @@
 // roadstyle's data dock draws the objects and fills the card (its option `kinds`); this file only says what the tables are. No DOM, no fetch and no DuckDB: a host gives the names of its
 // tables ("driving.nodes", ...) and passes the result to `dataDock({ kinds })`.
 //
-//   dataDock({ ..., kinds: viewKinds({ names, hasTags: await hasTags(query) }) });
+//   dataDock({ ..., kinds: viewKinds({ names, hasTags: await hasTags(query), h3: window.h3, query }) });
+//
+// `h3` is the h3-js module (a host that has it gets the H3 cells on the map and the card of a cell); `query(sql)` answers { columns, rows } (the count of nodes in a cell).
 //
 // A kind is { label, idColumns, geometryBy(sql, column) }. `geometryBy` gives ONE SELECT for the result's own `sql`: the columns `id` and `geom` (GeoJSON text), then the facts of the card.
 // Roads (a result with `edge_id`) are not here: roadstyle lights them on their own shape.
@@ -48,7 +50,7 @@ const bare = (n) => n.slice(n.lastIndexOf(".") + 1);
 // What the file needs for each table: `coverage(names)` names every table of the list (without `raw.*`) with its status, or "unknown" when this file has no entry.
 export const coverage = (names) => Object.fromEntries(names.filter((n) => !n.startsWith("raw.")).map((n) => [n, TABLES[bare(n)] ?? "unknown"]));
 
-export function viewKinds({ names = [], hasTags = true } = {}) {
+export function viewKinds({ names = [], hasTags = true, h3 = null, query = null } = {}) {
   const has = (n) => names.includes(n), end = (re) => names.find((n) => re.test(n));
   const tags = (a) => (hasTags ? `, ${a}.tags` : "");
   const kinds = {};
@@ -176,6 +178,59 @@ export function viewKinds({ names = [], hasTags = true } = {}) {
   for (const t of names.filter((n) => /^gmns_\w+\.lane$/.test(n))) {
     kinds[`lane_${t.split(".")[0]}`] = { label: "GMNS lane", idColumns: ["lane_id"], geometryBy: (sql, column) => `SELECT l.lane_id AS id, ST_AsGeoJSON(l.geom) AS geom, l.link_id, l.lane_num FROM ${t} l WHERE l.lane_id ${ids(sql, column)}` };
   }
+  // ---- H3 cells (docs/design/table_views.md). DuckDB here has no H3 functions, so the host gives h3-js and the shape of a cell is made in JavaScript (roadstyle's geometryOf).
+  // A cell comes as a hex text (extra.boundary_h3.h3_cell, boundary_cells.h3_id) or as a BIGINT (nodes.h3_cell, resolution 8), so the id is turned into a hex text first.
+  if (h3) {
+    const cellOf = (id) => {
+      const text = String(id);
+      try { if (h3.isValidCell(text)) return text; } catch { /* not a hex text */ }
+      try { const hex = BigInt(text).toString(16); if (h3.isValidCell(hex)) return hex; } catch { /* not a number */ }
+      return null;
+    };
+    const polygon = (cell) => ({ type: "Polygon", coordinates: [h3.cellToBoundary(cell, true)] });
+    // The H3 indexes of all the descendants of a cell are one range of the 64-bit number: the digits below the cell are 0 for the lowest and 6 for the highest (checked on Monaco against cell_to_parent).
+    const range = (cell, resolution) => {
+      const x = BigInt("0x" + cell), r = Number((x >> 52n) & 15n);
+      let lo = (x & ~(15n << 52n)) | (BigInt(resolution) << 52n), hi = lo;
+      for (let k = r + 1; k <= resolution; k++) { const shift = BigInt(3 * (15 - k)), mask = 7n << shift; lo &= ~mask; hi = (hi & ~mask) | (6n << shift); }
+      return [lo, hi];
+    };
+    const nodeTable = names.find((n) => n === "driving.nodes") ?? names.find((n) => /\.nodes$/.test(n) && !n.startsWith("raw."));
+    const km2 = (v) => (v >= 10 ? v.toFixed(1) : v >= 0.1 ? v.toFixed(2) : v.toFixed(4)) + " km²";
+    const info = (cell) => {
+      const resolution = h3.getResolution(cell), [lat, lng] = h3.cellToLatLng(cell);
+      return [["H3 cell", cell], ["resolution", resolution], ...(resolution > 0 ? [["parent cell", h3.cellToParent(cell, resolution - 1)]] : []),
+        ["centre", `${lat.toFixed(5)}, ${lng.toFixed(5)}`], ["area", km2(h3.cellArea(cell, "km2"))], ["edge length", `${Math.round(h3.getHexagonEdgeLengthAvg(resolution, "m"))} m`],
+        ...(h3.isPentagon(cell) ? [["shape", "pentagon"]] : [])];
+    };
+    kinds.h3cell = {
+      label: "H3 cell", idColumns: ["h3_cell", "h3_id"],
+      geometryOf: (list) => list.flatMap((id) => { const cell = cellOf(id); return cell ? [{ id, geom: polygon(cell) }] : []; }),
+      // the card of a cell: what the cell is, the other columns of the clicked row, and how many nodes it holds (the nodes keep their cell at resolution 8, so a larger cell has a count and a smaller one has none)
+      card: async (card) => {
+        const cell = cellOf(card.id);
+        if (!cell) return {};
+        const resolution = h3.getResolution(cell), rows = info(cell);
+        for (const [k, v] of Object.entries(card.row || {})) if (!/^h3_(cell|id)$/.test(k) && k !== "resolution" && v != null) rows.push([k.replace(/_/g, " "), v]);
+        const sections = [];
+        if (nodeTable && query) {
+          if (resolution > 8) sections.push({ title: "Inside this cell", rows: [["nodes", "not counted: the nodes keep their cell at resolution 8"]] });
+          else {
+            const [lo, hi] = range(cell, 8);
+            try { sections.push({ title: "Inside this cell", rows: [["nodes", Number((await query(`SELECT count(*) FROM ${nodeTable} WHERE h3_cell BETWEEN ${lo} AND ${hi}`)).rows[0][0])]] }); } catch { /* no count */ }
+          }
+        }
+        return { title: `H3 cell ${cell}`, rows, sections };
+      },
+    };
+    delete kinds.cell;      // boundary_cells has its own hexagon in SQL; the cell kind above gives it the card
+    // a node has its cell at resolution 8: its card has a button that draws the cell
+    if (kinds.node) kinds.node.card = (card) => {
+      const raw = card.facts?.h3_cell ?? card.row?.h3_cell, cell = raw == null ? null : cellOf(raw);
+      return cell ? { action: { label: "Show H3 cell", note: `H3 cell ${cell}, resolution ${h3.getResolution(cell)}`, run: () => polygon(cell) } } : {};
+    };
+  }
+
   // The dock gives a result to the kind that finds the most of its ids, and the first kind of the list wins a tie. A row of turn_restrictions has a via_node (a node) and two edges
   // (a turn): the turn is the better answer, so the kinds of two keys come first.
   const first = (k) => /^(turn|permission|restriction|path|movement)/.test(k);

@@ -82,6 +82,8 @@
       if (map.getLayer("ask-shapes-fill")) map.setPaintProperty("ask-shapes-fill", "fill-opacity", o ?? 0.4);
       if (map.getLayer("ask-shapes-line")) map.setPaintProperty("ask-shapes-line", "line-opacity", o ?? 1);
       if (map.getLayer("ask-shapes-pt")) { map.setPaintProperty("ask-shapes-pt", "circle-opacity", o ?? 1); map.setPaintProperty("ask-shapes-pt", "circle-stroke-opacity", o ?? 1); }
+      // the objects that roadstyle's data dock draws for a kind (H3 cells, nodes, turns) have the same switch
+      for (const [id, props] of [["rs-dock-kinds-fill", ["fill-opacity"]], ["rs-dock-kinds-line", ["line-opacity"]], ["rs-dock-kinds-dot", ["circle-opacity", "circle-stroke-opacity"]]]) if (map.getLayer(id)) for (const prop of props) map.setPaintProperty(id, prop, o ?? 1);
     };
     // is the table shown on the map now (the switch of the dock is On and the dock is open)? The dock keeps the switch in this browser, so after a reload it can start Off
     // and no event `light` comes: the page asks data.light() each time that it draws, and does not wait for the event only.
@@ -114,19 +116,7 @@
       // is the centre line of the road, and a thin line over the road shows the road twice). The shapes are for what roadstyle cannot light.
       const col = d.columns.find((c) => /^GEOMETRY$/i.test(c.type)), mine = ++ticket;
       const q = (n) => '"' + n.replace(/"/g, '""') + '"';
-      // no geometry, but a column with H3 cells (h3_cell, h3, h3_id): each cell is drawn as its hexagon (h3-js), all the distinct cells of the result
-      const hexCol = !col && window.h3 ? d.columns.find((c) => /^h3(_cell|_id)?$/i.test(c.name)) : null;
-      if ((!col && !hexCol) || d.columns.some((c) => c.name === "edge_id")) { if (drawn) showShapes([]); return; }
-      if (hexCol) {
-        const { rows } = await query(`SELECT DISTINCT ${q(hexCol.name)} FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_h3 WHERE ${q(hexCol.name)} IS NOT NULL`);
-        if (mine !== ticket) return;
-        const cells = rows.map(([c]) => (typeof c === "bigint" ? c.toString(16) : String(c))).filter((c) => { try { return window.h3.isValidCell(c); } catch { return false; } });
-        const hexes = cells.map((c) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [window.h3.cellToBoundary(c, true)] } }));
-        showShapes(hexes);
-        const hb = hexes.length && d.source !== "person" ? bounds(hexes) : null;
-        if (hb) window.map.fitBounds([[hb[0], hb[1]], [hb[2], hb[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 18, duration: 800 });
-        return;
-      }
+      if (!col || d.columns.some((c) => c.name === "edge_id")) { if (drawn) showShapes([]); return; }
       const name = q(col.name);
       const kept = ["face_type", "color"].filter((n) => d.columns.some((c) => c.name === n));         // the columns that colour a shape
       const { rows } = await query(`SELECT ST_AsGeoJSON(${name}) AS g${kept.map((n) => `, CAST(${q(n)} AS VARCHAR) AS ${q(n)}`).join("")} FROM (${d.sql.trim().replace(/;\s*$/, "")}) duckosm_shapes WHERE ${name} IS NOT NULL`);
@@ -165,8 +155,12 @@
     // drawing below (the colour column, the walls by face_type). So a kind answers only a result with ids and no geometry column (a via_node, a way_id, a route_id).
     const hasGeom = () => (data.result?.()?.columns || []).some((c) => /^GEOMETRY$/i.test(c.type));          // the dock sets its result before it asks a kind
     const NONE = "SELECT NULL::BIGINT AS id, NULL::VARCHAR AS geom WHERE false";
-    const kinds = V.viewKinds({ names: info.tables.map((t) => `${t.mode}.${t.table}`), hasTags: await S.hasTags(query) });
-    for (const k of Object.values(kinds)) { const by = k.geometryBy; k.geometryBy = (sql, column) => (hasGeom() ? NONE : by(sql, column)); }
+    const kinds = V.viewKinds({ names: info.tables.map((t) => `${t.mode}.${t.table}`), hasTags: await S.hasTags(query), h3: (await h3Loaded) ? window.h3 : null, query });
+    for (const k of Object.values(kinds)) {
+      const by = k.geometryBy, of = k.geometryOf;
+      if (by) k.geometryBy = (sql, column) => (hasGeom() ? NONE : by(sql, column));
+      if (of) k.geometryOf = (list, opts) => (hasGeom() ? [] : of(list, opts));
+    }
     const data = dataDock({
       query, schema, ready,
       roadsBy: S.roadsBy(main), sql: S.startSql(main),
@@ -175,7 +169,7 @@
     // a kind owns the result: the page draws nothing for it, and the object of a kind has its card (roadstyle's event `kind`; a new result resets it)
     let owned = false;
     data.addEventListener("run", () => { owned = false; });
-    data.addEventListener("kind", (e) => { owned = !!e.detail.name; if (owned) { ticket++; if (drawn) showShapes([]); clearPick(); } });
+    data.addEventListener("kind", (e) => { owned = !!e.detail.name; if (owned) { ticket++; if (drawn) showShapes([]); clearPick(); window.map.once("idle", applyOpacity); } });
     data.addEventListener("kinderror", (e) => console.warn(`duckosm ask: the kind ${e.detail.kind} failed:`, e.detail.message));
     // ---- a row of the table: its item on the map, and its facts in the card (roadstyle's data dock: the event `row`, data.card(...) and the event `cardclose`).
     // A road row (the result has edge_id) is selected by roadstyle itself, with its own card. A row that has a geometry column (a node, a building, a wall) is drawn here in
@@ -206,22 +200,9 @@
       if (owned) return;                                            // the object of a kind: roadstyle selects it and fills the card
       const { columns, row } = e.detail, mine = ++rowTicket;
       const g = columns.findIndex((c) => /^GEOMETRY$/i.test(c.type));
-      const hexAt = g < 0 && window.h3 ? columns.findIndex((c) => /^h3(_cell|_id)?$/i.test(c.name)) : -1;
       const named = columns.findIndex((c, i) => c.name === "name" && row[i] != null), idCol = columns.findIndex((c) => /(^|_)id$/.test(c.name));
       const table = (lastSql.match(/\bFROM\s+([\w."]+)/i) || [])[1]?.replace(/"/g, "") ?? "row";
       const card = (title, skip, id) => data.card({ title, chip: table, rows: columns.map((c, i) => [c.name.replace(/_/g, " "), i === skip ? null : row[i]]).filter(([, v]) => v != null), id });
-      if (!columns.some((c) => c.name === "edge_id") && hexAt >= 0 && row[hexAt] != null) {              // a row with an H3 cell and no geometry: the hexagon is the selected item
-        const cell = typeof row[hexAt] === "bigint" ? row[hexAt].toString(16) : String(row[hexAt]);
-        let ok = false; try { ok = window.h3.isValidCell(cell); } catch { /* not a cell */ }
-        if (ok) {
-          pickedFeatures = [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [window.h3.cellToBoundary(cell, true)] } }];
-          showPick(pickedFeatures);
-          const hb = bounds(pickedFeatures);
-          if (hb) window.map.fitBounds([[hb[0], hb[1]], [hb[2], hb[3]]], { padding: { left: 420, top: 60, right: 60, bottom: 320 }, maxZoom: 19, duration: 600 });
-          card(named >= 0 ? String(row[named]) : `H3 cell ${cell}`, -1, cell);
-          return;
-        }
-      }
       if (columns.some((c) => c.name === "edge_id") || g < 0 || row[g] == null) { clearPick(); return; }      // a road: roadstyle selects it; no geometry: nothing to draw
       const wkt = String(row[g]).replace(/'/g, "''");
       const { rows } = await query(`SELECT ST_AsGeoJSON(ST_GeomFromText('${wkt}')) AS g`);
