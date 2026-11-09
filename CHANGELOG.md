@@ -15,6 +15,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Added
 
+- **`web/ask/views.js`: what each table of a duckOSM file is on the map** (`viewKinds({ names, hasTags })`, `coverage(names)`; [design](docs/design/table_views.md)). It gives roadstyle's data dock the `kinds` for nodes (also the nodes of a way, from `raw.nodes`), buildings, OSM ways, bus routes, the base-map tables, the boundary, its H3 cells and GMNS links and lanes. The tables that wait for roadstyle (a turn is several parts; the card of an H3 cell) are marked `pending:<step>`. `tests/test_ask_views.py` fails for a table that has no status. No host uses it yet; `objectKinds` stays until the page moves. *Host: nothing is needed.*
 - **`duckosm build` makes `main.building_entrances`** with `options.building_faces` (the doors of the area: `kind`, `door`, `access`, `housenumber`, `street`, `level`, `wheelchair`, `name`, `building_id`, `geom`).
   It is the same SQL as the page of Studio, so the editor reads one table everywhere (the Doors section of the Building tab). Before, only Studio made it. Monaco sample: 110 doors.
 
