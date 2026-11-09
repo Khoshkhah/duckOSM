@@ -5,7 +5,7 @@
 //! `MAX_HEAD` bytes. The one file that the page writes is the fixes file. The editor's SQL runs on the database, read only and with no
 //! access to files (`LOCK`). Build again runs the build of the database again with the fixes file, and the page then has the new network.
 //!
-//! The routes: `GET /` the page; `GET /fixes_editor/<file>` the editor; `GET /ask/questions.js` and `GET /ask/schema.js` what Ask knows; `GET /api/info` the area, the tables and why Build again is off;
+//! The routes: `GET /` the page; `GET /fixes_editor/<file>` the editor; `GET /ask/questions.js`, `GET /ask/schema.js` and `GET /ask/views.js` what Ask knows; `GET /api/info` the area, the tables and why Build again is off;
 //! `GET` and `PUT /api/fixes` the fixes file; `POST /api/query` the rows of one SELECT as JSON; `POST /api/build` Build again.
 //!
 //! `duckosm ask` (docs/design/ask_page.md) is the same server with `Mode::Ask`: the page has roadstyle's data dock and Ask in place of the editor. It
@@ -249,6 +249,7 @@ fn ask_file(name: &str) -> Option<&'static str> {
     Some(match name {
         "questions.js" => include_str!("../../../web/ask/questions.js"),
         "schema.js" => include_str!("../../../web/ask/schema.js"),
+        "views.js" => include_str!("../../../web/ask/views.js"),
         _ => return None,
     })
 }
@@ -532,7 +533,7 @@ mod tests {
     fn a_write_to_another_path_is_refused() {
         let (fixes, ask, port, _) = server("path");
         let put = |path: &str| ask(&format!("PUT {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 1\r\n\r\nx"));
-        for path in ["/", "/index.html", "/fixes_editor/fixes.js", "/ask/questions.js", "/ask/schema.js", "/api/info"] {
+        for path in ["/", "/index.html", "/fixes_editor/fixes.js", "/ask/questions.js", "/ask/schema.js", "/ask/views.js", "/api/info"] {
             assert!(put(path).starts_with("HTTP/1.1 405"), "{path}");
         }
         for path in ["/api/fixes/../area.duckdb", "/api/other.yaml", "/area.duckdb", "/../osm_fixes.yaml"] {
