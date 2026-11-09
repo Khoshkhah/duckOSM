@@ -211,7 +211,6 @@ export function viewKinds({ names = [], hasTags = true, h3 = null, query = null 
         const cell = cellOf(card.id);
         if (!cell) return {};
         const resolution = h3.getResolution(cell), rows = info(cell);
-        for (const [k, v] of Object.entries(card.row || {})) if (!/^h3_(cell|id)$/.test(k) && k !== "resolution" && v != null) rows.push([k.replace(/_/g, " "), v]);
         const sections = [];
         if (nodeTable && query) {
           if (resolution > 8) sections.push({ title: "Inside this cell", rows: [["nodes", "not counted: the nodes keep their cell at resolution 8"]] });
@@ -234,5 +233,19 @@ export function viewKinds({ names = [], hasTags = true, h3 = null, query = null 
   // The dock gives a result to the kind that finds the most of its ids, and the first kind of the list wins a tie. A row of turn_restrictions has a via_node (a node) and two edges
   // (a turn): the turn is the better answer, so the kinds of two keys come first.
   const first = (k) => /^(turn|permission|restriction|path|movement)/.test(k);
+  // The card of every kind ends with the clicked row of the table, all its columns as they are in the table (Kaveh: a card shows the info of the row, for example width_m of lane_profile).
+  // The object's own facts (name, kind, tags, the cell of a node) come first, from the kind's SQL; the section "Row" is the result row itself.
+  const shown = (v) => (typeof v === "bigint" ? v.toString() : v !== null && typeof v === "object" ? JSON.stringify(v) : v);
+  for (const kind of Object.values(kinds)) {
+    const own = kind.card;
+    kind.card = (card) => {
+      const done = (out) => {
+        const rows = Object.entries(card.row || {}).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k.replace(/_/g, " "), shown(v)]);
+        return rows.length ? { ...(out || {}), sections: [...((out && out.sections) || []), { title: "Row", rows }] } : out || {};
+      };
+      const got = own ? own(card) : {};
+      return got && typeof got.then === "function" ? got.then(done) : done(got);
+    };
+  }
   return Object.fromEntries([...Object.entries(kinds).filter(([k]) => first(k)), ...Object.entries(kinds).filter(([k]) => !first(k))]);
 }

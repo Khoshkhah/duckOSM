@@ -375,5 +375,8 @@ def test_a_turn_row_draws_its_roads_and_has_a_card(monaco, page_url):
             page.locator(rows).nth(0).click()
             page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') === 3", timeout=15_000)       # from, via, to
             assert label.lower() in page.evaluate(card).lower(), (label, page.evaluate(card))
+            # the card ends with the clicked row of the table, every column of it
+            text = page.evaluate(card).lower()
+            assert "row" in text and ("from edge" in text) and ("restriction id" in text if label == "Turn restriction" else "to edge" in text), text
         assert not errors, errors
         browser.close()
