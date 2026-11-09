@@ -140,8 +140,10 @@ def test_a_row_of_the_table_selects_its_item(monaco, page_url):
 
 
 def test_an_h3_row_is_selected_on_the_map_and_the_opacity_tool(monaco, page_url):
-    """A row with an H3 cell (a hex text, or a BIGINT) and no geometry draws that one cell in the select look and fills the card; the tool set_shapes of Ask
-    changes the opacity of the shapes of a result and brings the default back."""
+    """A table of H3 cells (a hex text, or a BIGINT) is drawn as hexagons by roadstyle's data dock (the kind h3cell of web/ask/views.js, h3-js makes the shapes). A click on a
+    row selects the hexagon and the card tells what the cell is and how many nodes it holds. The card of a node has a button that draws its cell. The tool set_shapes of Ask
+    changes the opacity of the objects and brings the default back."""
+    drawn = "(s) => (window.map.getSource(s) ? window.map.getSource(s).serialize().data.features.length : 0)"
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
@@ -155,28 +157,42 @@ def test_an_h3_row_is_selected_on_the_map_and_the_opacity_tool(monaco, page_url)
         card_text = "() => (document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden) ? document.querySelector('.rs-dd-card').textContent.replace(/\\s/g, '') : ''"
         # a hex text
         page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 9 ORDER BY h3_cell")
-        page.wait_for_function("window.askPage.shapes() > 20", timeout=30_000)
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 20", timeout=30_000)
+        assert page.evaluate("window.askPage.shapes()") == 0, "the page draws nothing for a result that a kind owns"
         cell = page.evaluate("document.querySelectorAll('#rs-dock tbody tr')[1].cells[0].innerText.trim()")
         page.locator(rows).nth(1).click()
-        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
-        assert cell in page.evaluate(card_text), (cell, page.evaluate(card_text))
-        # a BIGINT cell of the nodes
+        page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') === 1", timeout=15_000)
+        page.wait_for_function("() => document.querySelector('.rs-dd-card').textContent.includes('parent cell')", timeout=15_000)
+        text = page.evaluate(card_text)
+        assert cell in text and "resolution9" in text and "area" in text and "edgelength" in text, text
+        # a BIGINT cell of the nodes: the card counts the nodes of the cell
         page.evaluate(run, "SELECT DISTINCT h3_cell FROM driving.nodes ORDER BY h3_cell")
-        page.wait_for_function("window.askPage.shapes() > 3", timeout=30_000)
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 3", timeout=30_000)
         page.locator(rows).nth(0).click()
-        hexed = page.evaluate(q, "SELECT lower(to_hex(h3_cell)) FROM (SELECT DISTINCT h3_cell FROM driving.nodes ORDER BY h3_cell LIMIT 1)")["rows"][0][0]
-        page.wait_for_function("window.askPage.picked() === 1", timeout=15_000)
-        assert hexed in page.evaluate(card_text), (hexed, page.evaluate(card_text))
-        # the opacity of the shapes (the tool of the page)
-        paint = "(p) => [window.map.getPaintProperty('ask-shapes-fill', 'fill-opacity'), window.map.getPaintProperty('ask-shapes-line', 'line-opacity')]"
-        assert page.evaluate(paint, None) == [0.4, 1]
+        hexed = page.evaluate(q, "SELECT lower(to_hex(h3_cell)), count(*) FROM driving.nodes WHERE h3_cell = (SELECT min(h3_cell) FROM driving.nodes) GROUP BY 1")["rows"][0]
+        page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') === 1", timeout=15_000)
+        page.wait_for_function("() => document.querySelector('.rs-dd-card').textContent.includes('Inside this cell')", timeout=15_000)
+        text = page.evaluate(card_text)
+        assert hexed[0] in text and ("nodes" + hexed[1]) in text, (hexed, text)
+        # the card of a node has a button for its cell; the cell is drawn with the node
+        page.evaluate(run, "SELECT node_id FROM driving.nodes WHERE node_id > 0 ORDER BY node_id LIMIT 5")
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') >= 5", timeout=30_000)
+        page.locator(rows).nth(0).click()
+        page.wait_for_function("() => !!document.querySelector('.rs-dd-rc-act button')", timeout=15_000)
+        page.locator(".rs-dd-rc-act button").click()
+        page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') >= 2", timeout=15_000)
+        # the opacity of the objects (the tool of the page)
+        paint = "() => [window.map.getPaintProperty('rs-dock-kinds-fill', 'fill-opacity'), window.map.getPaintProperty('rs-dock-kinds-line', 'line-opacity')]"
+        page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 9")
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 20", timeout=30_000)
+        assert page.evaluate(paint) == [1, 1]
         done = page.evaluate("window.askPage.shapeTools[0].run({opacity: 0.15})")
-        assert "0.15" in done["done"] and page.evaluate(paint, None) == [0.15, 0.15]
+        assert "0.15" in done["done"] and page.evaluate(paint) == [0.15, 0.15]
         page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 8")            # a new result keeps the opacity
-        page.wait_for_function("window.askPage.shapes() > 3", timeout=30_000)
-        assert page.evaluate(paint, None) == [0.15, 0.15]
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 3", timeout=30_000)
+        page.wait_for_function("() => window.map.getPaintProperty('rs-dock-kinds-fill', 'fill-opacity') === 0.15", timeout=15_000)
         assert page.evaluate("window.askPage.shapeTools[0].run({reset: true})")["done"].startswith("The shapes have the default look")
-        assert page.evaluate(paint, None) == [0.4, 1]
+        assert page.evaluate(paint) == [1, 1]
         assert "opacity must be" in page.evaluate("window.askPage.shapeTools[0].run({opacity: 3}).then(() => 'no error', (e) => e.message)")
         assert not errors, errors
         browser.close()
@@ -214,10 +230,11 @@ def test_ask_page(monaco, page_url):
         # every resolution from 0 to the smallest one has one cell that holds the whole boundary (Monaco: the smallest is resolution 6)
         assert 4 <= int(whole[0]) <= 8 and int(whole[1]) == int(whole[0]) + 1, whole
         page.evaluate("window.askPage.data.open()")
+        drawn = "(s) => (window.map.getSource(s) ? window.map.getSource(s).serialize().data.features.length : 0)"
         page.evaluate(run, "SELECT h3_cell FROM extra.boundary_h3 WHERE resolution = 10")
-        page.wait_for_function("window.askPage.shapes() > 50", timeout=30_000)
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 50", timeout=30_000)
         page.evaluate(run, "SELECT DISTINCT h3_cell FROM driving.nodes")
-        page.wait_for_function("window.askPage.shapes() > 5", timeout=30_000)
+        page.wait_for_function(f"({drawn})('rs-dock-kinds') > 5", timeout=30_000)
         # the colour of a shape: the walls by their face_type (the colours of the editor), and any shape by a column `color`
         page.evaluate("window.askPage.data.open()")
         page.evaluate(run, "SELECT building_id, face_type, geometry FROM main.building_faces")
@@ -226,7 +243,7 @@ def test_ask_page(monaco, page_url):
         assert types == ["back", "court", "front", "party", "side"], types
         assert page.evaluate("window.map.getPaintProperty('ask-shapes-line', 'line-color')")[0] == "coalesce"
         page.evaluate(run, "SELECT node_id, geom, CASE WHEN node_id % 2 = 0 THEN '#ff0000' ELSE 'not a colour' END AS color FROM driving.nodes")
-        page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
+        page.wait_for_function("window.askPage.shapes() > 1000 && window.askPage.shapeProps().some((p) => p.color)", timeout=30_000)       # the shapes of the new result, not the walls before
         colours = page.evaluate("[...new Set(window.askPage.shapeProps().map((p) => p.color ?? 'none'))].sort()")
         assert colours == ["#ff0000", "none"], colours                       # a colour that CSS does not know is left out
         # the examples of Ask: roadstyle's general groups come first, then the groups of the page, each with its heading and none twice; all the questions are there
@@ -332,5 +349,34 @@ def test_a_result_of_ids_has_its_objects_on_the_map_and_a_card(monaco, page_url)
         page.evaluate(run, "SELECT node_id, geom FROM driving.nodes")
         page.wait_for_function("window.askPage.shapes() > 1000", timeout=30_000)
         assert page.evaluate(f"({drawn})('rs-dock-kinds')") == 0, "a result with a geometry column is not drawn twice"
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_turn_row_draws_its_roads_and_has_a_card(monaco, page_url):
+    """A row of edge_graph or turn_restrictions (two roads and the junction) is one object of three parts: roadstyle draws all of them, a click selects the object, and the card
+    has its facts from the table (docs/design/table_views.md, roadstyle step 3: parts with roles and a composite key)."""
+    drawn = "(s) => (window.map.getSource(s) ? window.map.getSource(s).serialize().data.features.length : 0)"
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" and "ERR_" not in m.text and "Failed to load resource" not in m.text else None)
+        page.goto(page_url)
+        page.wait_for_function("window.askPage", timeout=60_000)
+        page.evaluate("window.askPage.data.open()")
+        run, rows = "(s) => window.askPage.data.run(s)", "#rs-dock tbody tr"
+        card = "() => (document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden) ? document.querySelector('.rs-dd-card').innerText : ''"
+        for sql, label in [("SELECT from_edge, to_edge FROM driving.edge_graph LIMIT 20", "Turn"),
+                           ("SELECT restriction_id, from_edge_id, via_node, to_edge_id FROM driving.turn_restrictions", "Turn restriction")]:
+            page.evaluate(run, sql)
+            page.wait_for_function(f"({drawn})('rs-dock-kinds') >= 3", timeout=30_000)          # at least one turn: its three parts
+            page.locator(rows).nth(0).click()
+            page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') === 3", timeout=15_000)       # from, via, to
+            assert label.lower() in page.evaluate(card).lower(), (label, page.evaluate(card))
+            # the card ends with the clicked row of the table, every column of it
+            text = page.evaluate(card).lower()
+            assert "row" in text and ("from edge" in text) and ("restriction id" in text if label == "Turn restriction" else "to edge" in text), text
         assert not errors, errors
         browser.close()
