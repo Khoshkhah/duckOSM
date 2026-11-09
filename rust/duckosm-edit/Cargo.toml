@@ -14,6 +14,6 @@ duckosm-editor = { path = "../duckosm-editor" }   # the files of the fixes edito
 httparse = "=1.10.1"           # the request line and the headers, as roadstyle-serve
 serde_json = { version = "1", features = ["preserve_order"] }
 # the map: roadstyle's standard dashboard page of a duckOSM file (roadstyle_io::duckosm reads the file, page_options::page_from writes the page)
-roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "fc6fa738f28b9c89c8813504a808e156e8ab56ee" }
+roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9c71506399cbfa0bf990e9e263434aa662478825" }
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"], optional = true }
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }
