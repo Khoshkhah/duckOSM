@@ -334,3 +334,29 @@ def test_a_result_of_ids_has_its_objects_on_the_map_and_a_card(monaco, page_url)
         assert page.evaluate(f"({drawn})('rs-dock-kinds')") == 0, "a result with a geometry column is not drawn twice"
         assert not errors, errors
         browser.close()
+
+
+def test_a_turn_row_draws_its_roads_and_has_a_card(monaco, page_url):
+    """A row of edge_graph or turn_restrictions (two roads and the junction) is one object of three parts: roadstyle draws all of them, a click selects the object, and the card
+    has its facts from the table (docs/design/table_views.md, roadstyle step 3: parts with roles and a composite key)."""
+    drawn = "(s) => (window.map.getSource(s) ? window.map.getSource(s).serialize().data.features.length : 0)"
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" and "ERR_" not in m.text and "Failed to load resource" not in m.text else None)
+        page.goto(page_url)
+        page.wait_for_function("window.askPage", timeout=60_000)
+        page.evaluate("window.askPage.data.open()")
+        run, rows = "(s) => window.askPage.data.run(s)", "#rs-dock tbody tr"
+        card = "() => (document.querySelector('.rs-dd-card') && !document.querySelector('.rs-dd-card').hidden) ? document.querySelector('.rs-dd-card').innerText : ''"
+        for sql, label in [("SELECT from_edge, to_edge FROM driving.edge_graph LIMIT 20", "Turn"),
+                           ("SELECT restriction_id, from_edge_id, via_node, to_edge_id FROM driving.turn_restrictions", "Turn restriction")]:
+            page.evaluate(run, sql)
+            page.wait_for_function(f"({drawn})('rs-dock-kinds') >= 3", timeout=30_000)          # at least one turn: its three parts
+            page.locator(rows).nth(0).click()
+            page.wait_for_function(f"({drawn})('rs-dock-kinds-sel') === 3", timeout=15_000)       # from, via, to
+            assert label.lower() in page.evaluate(card).lower(), (label, page.evaluate(card))
+        assert not errors, errors
+        browser.close()

@@ -1,6 +1,6 @@
 # Table views: every table on the map, and one card for every row
 
-Status: **signed off (2026-11-09). Step 3 is partly built: `web/ask/views.js` has the kinds that need nothing new from roadstyle (nodes, buildings, ways, bus routes, the base-map tables, the boundary and its cells, GMNS links and lanes). The turn tables and the H3 card wait for roadstyle steps 3 and 4 (PR 121 there).**
+Status: **signed off (2026-11-09). Step 3 is partly built: `web/ask/views.js` has the kinds that need nothing new from roadstyle (nodes, buildings, ways, bus routes, the base-map tables, the boundary and its cells, GMNS links and lanes). The turn tables are built too (roadstyle step 3, 2026-11-09: parts with roles and composite keys). The H3 card, the row columns in a road card and the Reset of Ask's map changes wait for roadstyle step 4 and a small PR (PR 121 there).**
 Kaveh asked: almost every table must show its rows on the map, and a click on a row must give a standard info card. A table of H3 cells must draw the cells and give a card for the selected row.
 duckOSM must not copy the Ask part of roadstyle. It is much work, so it needs a plan.
 

@@ -32,6 +32,14 @@ ASKS = [
     ("route", "route_id", "SELECT DISTINCT route_id FROM bus.route_edges LIMIT 5", False),
     ("boundary", "osm_id", "SELECT osm_id FROM main.boundary", True),
     ("cell", "h3_id", "SELECT h3_id FROM main.boundary_cells", True),
+    # a turn is one object of the parts from, via and to; the key is two columns
+    ("turn", ["from_edge", "to_edge"], "SELECT from_edge, to_edge FROM driving.edge_graph LIMIT 5", True),
+    ("turn", ["from_edge", "to_edge"], "SELECT from_edge, to_edge FROM walking.edge_graph LIMIT 5", True),
+    ("restriction", ["from_edge_id", "to_edge_id"], "SELECT from_edge_id, to_edge_id FROM driving.turn_restrictions", True),
+    # these tables are empty on Monaco, so the result is made from edge_graph: the SQL of the kind must still run and draw
+    ("path", ["from_edge", "to_edge"], "SELECT from_edge, to_edge, [from_edge] AS via_edges, 'no_u_turn' AS restriction_type, 'car' AS applies_to, NULL AS condition FROM driving.edge_graph LIMIT 3", True),
+    ("permission", ["from_edge", "to_edge"], "SELECT from_edge, to_edge, true AS allowed, 'bus' AS vehicles, 'taxi' AS except_vehicles, NULL AS condition FROM driving.edge_graph LIMIT 3", True),
+    ("merged", "new_edge_id", "SELECT edge_id AS new_edge_id FROM driving.edges LIMIT 3", None),     # driving.edge_id_map is empty on Monaco: the SQL must run, no rows are asked for
     *[(f"feature_{t}", "osm_id", f"SELECT osm_id FROM features.{t} LIMIT 5", False) for t in
       ("land", "paved", "place_labels", "pois", "public_transport", "sites", "streets", "water_lines", "water_polygons")],
 ]
@@ -105,10 +113,18 @@ def test_the_sql_of_every_kind_runs(monaco, result):
         columns = [d[0] for d in got.description]
         rows = got.fetchall()
         assert columns[:2] == ["id", "geom"], (key, columns)
+        if exact is None:
+            continue                                            # the SQL ran; the table has no rows to find
         assert rows, f"{key} by {column} gave no object for: {sql}"
         for r in rows:
-            assert json.loads(r[1])["type"], (key, r[0])        # geom is GeoJSON text
-        wanted = len({r[0] for r in monaco.execute(sql).fetchall()})
+            geom = json.loads(r[1])
+            if isinstance(geom, list):                          # the parts of a turn: a road in, the junction or the roads between, a road out
+                roles = [p["role"] for p in geom]
+                assert "from" in roles and "to" in roles and "via" in roles and all(p["geom"]["type"] for p in geom), (key, r[0], roles)
+            else:
+                assert geom["type"], (key, r[0])                # geom is GeoJSON text
+        got_ids = monaco.execute(sql).fetchall()
+        wanted = len({tuple(r[:2]) for r in got_ids if None not in r[:2]} if isinstance(column, list) else {r[0] for r in got_ids})
         assert len(rows) <= wanted, (key, column, len(rows), wanted)
         if exact:
             assert len(rows) == wanted, f"{key} by {column}: {len(rows)} objects for {wanted} ids"
@@ -120,3 +136,21 @@ def test_tags_are_left_out_when_the_file_has_none(monaco, names):
     done = subprocess.run(["node", "--input-type=module", "-e", script, json.dumps(names)], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     assert not any("tags" in sql for sql in json.loads(done.stdout))
+
+
+def test_a_gmns_movement_is_a_turn():
+    """The movements of a GMNS file: the link in, the node and the link out, one object. Skips without the local GMNS file of Södermalm."""
+    path = ROOT / "data" / "db" / "sodermalm_gmns.duckdb"
+    if not path.exists():
+        pytest.skip("data/db/sodermalm_gmns.duckdb is not built")
+    con = duckdb.connect(str(path), read_only=True)
+    con.execute("LOAD spatial")
+    names = [f"{s}.{t}" for s, t in con.execute("SELECT schema_name, table_name FROM duckdb_tables() ORDER BY 1, 2").fetchall()]
+    module = (ROOT / "web" / "ask" / "views.js").as_uri()
+    script = "import { viewKinds } from %r; const k = viewKinds({ names: JSON.parse(process.argv[1]) }).movement_gmns_driving; process.stdout.write(k.geometryBy('SELECT ib_link_id, ob_link_id FROM gmns_driving.movement LIMIT 5', ['ib_link_id', 'ob_link_id']));" % module
+    done = subprocess.run(["node", "--input-type=module", "-e", script, json.dumps(names)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    rows = con.execute(done.stdout).fetchall()
+    wanted = len({tuple(r) for r in con.execute("SELECT ib_link_id, ob_link_id FROM gmns_driving.movement LIMIT 5").fetchall()})
+    assert len(rows) == wanted and rows, (len(rows), wanted)
+    assert {p["role"] for p in json.loads(rows[0][1])} == {"from", "via", "to"}
