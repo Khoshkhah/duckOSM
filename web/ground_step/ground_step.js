@@ -38,7 +38,7 @@ export async function initGroundStep({ root, catalog, bbox, status = () => {}, o
 	const all = Array.isArray(catalog) ? catalog : (await (await fetch(catalog)).json()).sources;
 	const byId = Object.fromEntries(all.map((s) => [s.id, s]));
 	const aws = all.find((s) => s.fallback);
-	let chosen = null, file = null, info = null, listed = "";
+	let chosen = null, file = null, info = null, listed = "", shown = null;
 	root.id = root.id || "ground-step";
 	root.classList.add("gs");
 	root.innerHTML = `<p class="gs-area small muted" data-gs="area"></p>
@@ -60,7 +60,9 @@ export async function initGroundStep({ root, catalog, bbox, status = () => {}, o
 	}
 
 	function render() {
-		const b = bbox(), list = sources();
+		const b = bbox(), list = sources(), sig = JSON.stringify(b) + list.map((s) => s.id);
+		if (sig === shown) return;                                                  // the same area: nothing to draw again
+		shown = sig;
 		q("area").textContent = b ? `Area: ${fmt(b)} (west, south, east, north)` : "Choose the area in step 1 first.";
 		const key = list.map((s) => s.id).join();
 		if (key !== listed) {                                                       // the area changed: a new list, and the best source is the choice
