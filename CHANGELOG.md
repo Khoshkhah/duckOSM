@@ -13,6 +13,9 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   at the same revision as `duckosm-core`, serve `FILES` from one folder, and remove its step that fetches and copies the folder.*
 - **`askTables` names an entry `mode.table` when it has both** (`web/ask/schema.js`). *Host: nothing is needed; a host that passes its entries as they are (Studio, whose `name` is a file name) moves its duckOSM pin.*
 
+- **A host can give the data dock `kinds` as a function and read it again** (roadstyle `f3d1efc5`, PR 134 and 136; `viewKinds` needs no change). A host whose tables change after the start (Studio: a build with other layers) gives `kinds: () => viewKinds({ names, hasTags, h3, query })`
+  and calls `await data.refreshKinds()` after the change. The dock then draws the rows of the new tables. *Host: nothing is needed. `duckosm ask` adds no table while it runs, so its page still gives the object. Studio replaced its proxy of kinds with the function.*
+
 ### Added
 
 - **`aboutText({ kinds: true })` tells Ask that results of ids are drawn** (`web/ask/schema.js`). A page whose data dock has the kinds of `web/ask/views.js` passes `kinds: true`, and the agent then knows that it can show junctions, turns, ways, buildings, bus routes and H3 cells by their ids. `duckosm ask` does this. *Host: duckOSM Studio passes `kinds: true` to `aboutText`.*
