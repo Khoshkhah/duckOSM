@@ -20,7 +20,7 @@ This page tells what duckOSM stores, how the data goes to a map, and which choic
 | `nodes.ele` | the ground height at each node | the Rust build with `--dem`, or `duckosm elevation` |
 | `edges.z_from`, `edges.z_to` | the height at the two ends of each edge | the same |
 | `edges.z_vertices` | the height at each point of the edge line | the Rust build with `--dem` |
-| [`main.elevation_metadata`](../reference/database.md#elevation_metadata) | where the heights come from: source, product (`DTM` or `DSM`), resolution, vertical datum, licence | both |
+| [`main.elevation_metadata`](../reference/database.md#elevation_metadata) | where the heights come from: source, product (`DTM` or `DSM`), resolution, vertical datum, licence, and `sha256`, the SHA-256 of the DEM file (the ground id) | both |
 
 The grid is the terrain itself. The heights at the nodes and edges are samples of the same file at the road points.
 
@@ -33,8 +33,8 @@ The build reads the DEM one time and takes its pixels over the area:
 - **The pixels:** the raster's own pixels, with no resampling. A row is one pixel centre, and `z` is its height to the centimetre.
 - **No data:** a pixel with no value (for example the open sea in some models) has `z` NULL.
 
-For Monaco with the FABDEM crop, the grid has 156 × 119 pixels (18,564 rows) and takes 55 KB of Parquet, about 3 bytes for each
-pixel. The road tables of the same area are much larger.
+For Monaco (`tests/data/monaco.osm.pbf`, the modes driving, walking and cycling) with the FABDEM crop, the grid has 140 × 103
+pixels (14,420 rows, `z` from 0 to 543.77 m) and takes 45 KB of Parquet, about 3 bytes for each pixel. The road tables of the same area are much larger.
 
 ## From the database to a map
 
@@ -67,12 +67,29 @@ The DEM decides the quality of every height. Two choices matter:
 - **A known vertical datum.** Every height is in metres above one datum, for example EGM2008. Two files on different datums do not
   agree, even when each one is correct.
 
-Today you give the DEM on the command line:
+Give the DEM one time for each area, in the config file ([`elevation`](../reference/configuration.md#elevation)):
+
+```yaml
+elevation:
+  dem: fabdem-monaco.tif
+  product: DTM
+  vertical_datum: EGM2008
+  license: CC-BY-NC-SA-4.0
+```
 
 ```bash
-duckosm-rust monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco --dem fabdem-monaco.tif
-duckosm-rust --config my_area.yaml --dem fabdem-monaco.tif      # the same with a config file
+duckosm-rust --config my_area.yaml
 ```
+
+Or give it on the command line. `--dem` wins over the config:
+
+```bash
+duckosm-rust monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco \
+  --dem fabdem-monaco.tif --dem-product DTM --dem-vertical-datum EGM2008 --dem-license CC-BY-NC-SA-4.0
+```
+
+The DEM is the area's [ground reference](ground-reference.md): without its product, its vertical datum and its license the build stops,
+unless you mark it as not the reference (`reference: false`, or `--dem-not-reference`).
 
 The file is a GeoTIFF in EPSG:4326 with 32-bit floats. `duckosm elevation` can add heights to a database that is already built
 (`--dem` or `--source`), but it writes only the heights at the nodes and edges, not the grid. Where to get a DEM:

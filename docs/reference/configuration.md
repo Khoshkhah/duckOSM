@@ -133,6 +133,31 @@ Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
 | `multimodal.transfer_s` | `60.0` | seconds added at each change of mode |
 | `multimodal.transfer_costs` | none | seconds per direction, e.g. `{"walking->driving": 60, "driving->walking": 30}`; a pair not listed uses `transfer_s` |
 
+## `elevation`
+
+The area's DEM: its [ground reference](../concepts/ground-reference.md). Set it one time for each area here, not on each
+command line. Only the Rust build (`duckosm-rust --config`) reads this section: it samples the DEM and writes the heights,
+`main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
+`duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
+
+| Key | Default | Does |
+|---|---|---|
+| `elevation.dem` | none | the DEM file: a GeoTIFF in EPSG:4326 with 32-bit floats. No file: no heights |
+| `elevation.product` | none | `DTM` (bare earth) or `DSM` (surface). Necessary when `reference` is `true` |
+| `elevation.vertical_datum` | none | its vertical datum, for example `EGM2008`. Necessary when `reference` is `true` |
+| `elevation.license` | none | its license. Necessary when `reference` is `true` |
+| `elevation.reference` | `true` | the file is the area's ground reference. `false` (a test, a second surface): the product, the datum and the license can stay unknown |
+
+```yaml
+elevation:
+  dem: data/dem/fabdem-monaco.tif
+  product: DTM
+  vertical_datum: EGM2008
+  license: CC-BY-NC-SA-4.0
+```
+
+The build writes the SHA-256 of the file in `main.elevation_metadata.sha256`, the ground id.
+
 ## `report` and `viz`
 
 | Key | Default | Template | Does |

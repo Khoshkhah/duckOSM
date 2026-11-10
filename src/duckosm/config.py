@@ -30,7 +30,7 @@ def _only_known(cls, data: dict) -> dict:
 
 # every key a config file may have at the top level (sections, and the flat shorthands)
 _TOP_LEVEL_KEYS = {"name", "output_path", "osm_overrides", "modes", "options", "source", "boundary",
-                   "clip", "validation", "report", "viz", "multimodal",
+                   "clip", "validation", "report", "viz", "multimodal", "elevation",
                    "pbf_path", "boundary_path", "h3_cell"}
 
 
@@ -138,6 +138,17 @@ class Viz:
 
 
 @dataclass
+class Elevation:
+    """The area's DEM, its ground reference (docs/concepts/ground-reference.md). Only the Rust build
+    (duckosm-rust) reads it; its --dem wins. `duckosm elevation` takes its file on the command line."""
+    dem: Optional[str] = None
+    product: Optional[str] = None                  # DTM or DSM
+    vertical_datum: Optional[str] = None
+    license: Optional[str] = None
+    reference: bool = True
+
+
+@dataclass
 class Config:
     """Configuration for a duckOSM build."""
 
@@ -159,6 +170,7 @@ class Config:
     report: Report = field(default_factory=Report)
     viz: Viz = field(default_factory=Viz)
     multimodal: Multimodal = field(default_factory=Multimodal)
+    elevation: Elevation = field(default_factory=Elevation)
 
     # ---- effective accessors (unify the new blocks with the back-compat flat keys) ----
     @property
@@ -200,6 +212,7 @@ class Config:
         report = Report(**_only_known(Report, data.get("report")))
         viz = Viz(**_only_known(Viz, data.get("viz")))
         multimodal = Multimodal(**_only_known(Multimodal, data.get("multimodal")))
+        elevation = Elevation(**_only_known(Elevation, data.get("elevation")))
 
         return cls(
             name=data.get("name", "default"),
@@ -211,7 +224,7 @@ class Config:
             modes=data.get("modes") or ["driving"],
             options=options, source=source, boundary=boundary,
             clip=clip, validation=validation, report=report, viz=viz,
-            multimodal=multimodal,
+            multimodal=multimodal, elevation=elevation,
         )
 
     @classmethod

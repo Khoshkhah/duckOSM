@@ -1224,10 +1224,11 @@ pub fn write_elevation_grid_to<W: Write + Send>(
 
 /// Write duckOSM's `main.elevation_metadata` (`elevation_metadata_main.parquet`), one row for the column `ele`:
 /// the text columns in duckOSM's order (ele_column, source, source_type, uri, product, dem_crs, vertical_datum,
-/// license, sampled_at, duckosm_version), the resolution, the fill value and the two counts.
+/// license, sampled_at, duckosm_version, sha256), the resolution, the fill value and the two counts. `sha256` is the
+/// ground id: the SHA-256 of the bytes of the DEM file, in lowercase hexadecimal.
 pub fn write_elevation_metadata_to<W: Write + Send>(
     out: W,
-    text: [&str; 10],
+    text: [&str; 11],
     resolution_m: f64,
     nodata_fill: f64,
     n_nodes: i64,
@@ -1248,6 +1249,7 @@ pub fn write_elevation_metadata_to<W: Write + Send>(
         "n_nodata",
         "sampled_at",
         "duckosm_version",
+        "sha256",
     ];
     let fields = names
         .iter()
@@ -1280,6 +1282,7 @@ pub fn write_elevation_metadata_to<W: Write + Send>(
             i64s(std::iter::once(n_nodata)),
             t(8),
             t(9),
+            t(10),
         ]
     })
 }
