@@ -1185,12 +1185,14 @@ export async function initFixesPanel(ctx) {
   // roadRows(osmId) gives the rows of a way (the host's, or the editor's own index of the map's road table). With `roadRows: false` the editor's line layers (fix-sel, fix-turn, fix-edits) draw the roads.
   const hl = typeof roadRows === "function" && typeof window.rsHighlight === "function";
   const lit = new Map(ROAD_SETS.map(([s]) => [s, []]));             // set -> its rows now
+  const CHANGE_SETS = new Set(["fix-edits", "fix-gone"]);          // the road sets of the changes: "Changes on the map: Hide" takes them off the map, and lit keeps their rows
+  let showChanges = true;
   // a new set of rows; the sets after it are set again, so that the order of ROAD_SETS stays the order of roadstyle's sets (the later set wins)
   function light(set, rows) {
     lit.set(set, rows);
     // opacity 1: a set without one has the opacity of the map's look (selection.opacity), so on the dark road fill the green and the blue were pale and not the colours of
     // the legend and the list; with 1 the map has the colour that the legend has, in the light theme and in the dark one
-    for (const [s, color] of ROAD_SETS.slice(ROAD_SETS.findIndex(([x]) => x === set))) window.rsHighlight(lit.get(s), { set: s, color, opacity: 1 });
+    for (const [s, color] of ROAD_SETS.slice(ROAD_SETS.findIndex(([x]) => x === set))) window.rsHighlight(showChanges || !CHANGE_SETS.has(s) ? lit.get(s) : [], { set: s, color, opacity: 1 });
   }
   // the lines among `feats` that are roads of the map (roadRows finds the rows of the way) go into the sets `sets` (setOf(f) picks the set); the rest
   // stays for the editor's own layer: a building, a node, a junction, a new road (road: 1). No roadRows: all stay.
@@ -1210,9 +1212,9 @@ export async function initFixesPanel(ctx) {
   // the switch "Changes on the map" of the Changes tab (roadstyle's two-way switch, rs-seg): Hide takes the changes off the map (amber, the 3D
   // buildings, the amber walls); the selection of a tab stays
   const CHANGE_LAYERS = ["fix-edits-fill", "fix-edits-glow", "fix-edits-line", "fix-edits-pt", "fix-3d", "fix-faces-edit"];
-  let showChanges = true;
   function paintShowChanges() { for (const id of CHANGE_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showChanges ? "visible" : "none"); }
-  window.rs?.tabs?.use?.($("fix-show"), (v) => { showChanges = v !== "hide"; paintShowChanges(); });
+  // the roads of the map are in roadstyle's sets (CHANGE_SETS), not in these layers: light() sets them again, empty while the changes are hidden
+  window.rs?.tabs?.use?.($("fix-show"), (v) => { showChanges = v !== "hide"; paintShowChanges(); if (hl) light("fix-edits", lit.get("fix-edits")); });
   function ensureLayers() {
     if (!map.getSource("fix-nodes")) {                // the nodes of the Node tab (the lowest of the panel's layers)
       map.addSource("fix-nodes", { type: "geojson", data: EMPTY });

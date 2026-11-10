@@ -6,7 +6,7 @@ import shutil
 import duckdb
 import pytest
 
-from editor_fixtures import ROAD, _LIT, _QUERY, _open_clean, _pick_road, _serve, monaco, page_url, pw  # noqa: F401
+from editor_fixtures import AMBER, ROAD, _LIT, _QUERY, _open_clean, _pick_road, _serve, monaco, page_url, pw  # noqa: F401
 
 DELETED = "#dc2626"                       # the colour of a deleted object (the set fix-gone)
 ARMS = ("(SELECT nid FROM (SELECT source AS nid, target AS o FROM driving.edges UNION ALL SELECT target, source FROM driving.edges) GROUP BY nid "
@@ -323,3 +323,24 @@ def test_a_traffic_signal_and_the_other_changes_are_in_the_built_database(build_
                        f"WHERE osm_id = {bid} AND osm_type = 'way'").fetchall() == [("7", "gabled", "#cc3300")]
     assert con.execute(f"SELECT map_extract(tags, 'traffic_signals:direction')[1], map_extract(tags, 'note:test')[1] FROM features.traffic WHERE osm_id = {nid}").fetchall() == [("backward", "hello")]
     con.close()
+
+
+def test_hide_takes_the_changed_roads_off_the_map_and_show_brings_them_back(monaco, page_url):
+    """"Changes on the map: Hide" of the Changes tab: a changed road (the set fix-edits, amber) and a deleted road (the set fix-gone, red) go off the map, as the
+    editor's own layers do. The roads of the map are in roadstyle's highlight sets, so Hide sets them empty; Show lights them again (Studio: Hide left them amber)."""
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open_clean(browser, page_url)
+        gone = int(_rows(page, f"SELECT osm_id FROM driving.edges WHERE osm_id != {ROAD} ORDER BY osm_id LIMIT 1")[0]["osm_id"])
+        _load(page, f"overrides:\n  - {{osm_id: {ROAD}, lanes: 7}}\n  - {{osm_id: {gone}, remove: true}}\n")
+        page.click("#fix-tab-changes")
+        lit = lambda: (page.evaluate(f"({_LIT})({ROAD})"), page.evaluate(f"({_LIT})({gone})"))
+        page.wait_for_function(f"({_LIT})({ROAD}).every((c) => c === '{AMBER}') && ({_LIT})({gone}).every((c) => c === '{DELETED}')", timeout=20_000)
+        page.click("#fix-show [data-v=hide]")
+        edited, deleted = lit()
+        assert set(edited) == {None} and set(deleted) == {None}, (edited, deleted)
+        page.click("#fix-show [data-v=show]")
+        edited, deleted = lit()
+        assert set(edited) == {AMBER} and set(deleted) == {DELETED}, (edited, deleted)
+        assert not errors, errors
+        browser.close()

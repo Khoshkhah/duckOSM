@@ -26,6 +26,9 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Fixed
 
+- **"Changes on the map: Hide" takes the changed roads off the map** (`web/fixes_editor/fixes_panel.js`). Hide made only the editor's own layers invisible. A road of the
+  map is in roadstyle's highlight sets `fix-edits` (amber) and `fix-gone` (red), so it stayed lit. Now Hide sets these two sets empty and Show lights them again; the editor keeps
+  their rows. Test: `test_editor_turn_changes.py::test_hide_takes_the_changed_roads_off_the_map_and_show_brings_them_back`.
 - **`duckosm edit`: the editor showed nothing on the map.** The server gives a JSON column (`ST_AsGeoJSON`) as an object, and the editor
   parses text. `duck.query` of the page now gives such a column as text. The selected object, the changes and the walls show again.
 - **`askTables` takes `mode.table` before `name`.** A host entry can have a `name` that is a file name (Studio: `features_traffic.parquet`). Now an entry with `mode` and `table` is named `mode.table`; an entry with only `name` works as before.
