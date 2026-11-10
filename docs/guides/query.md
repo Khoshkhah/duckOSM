@@ -25,22 +25,44 @@ The command opens the map of the database on a page on your computer, with two p
 
 [Questions to ask the AI agent](ask-questions.md) has examples for each group of tasks.
 
-Roads and buildings are clickable. A click selects the item. A road shows its card beside the table. There is no popup. (The card for a building
-needs a change in roadstyle that is not released yet.) A click runs no query, so the shapes of the last result stay on the map. The page does not
-change the data.
+Roads, buildings and the other objects of the base map are clickable. A click selects the item, and its card is beside the table. There is no popup. A click runs no
+query, so the shapes of the last result stay on the map. The page does not change the data.
 
 A result that has a geometry column is drawn on the map, all its rows: the column `geom` of `driving.nodes` (points) and of `features.buildings`
 (shapes), and `geometry` of `main.building_faces` (lines). The limit of 1000 is for the rows that the table shows. The map shows every row that the query selects. So you can write "Show all
 buildings on the map" or "Show all nodes of the driving network on the map". The shapes have colours: a result with the column `face_type` (the walls) is coloured by it, with the colours of the editor (front green, back red, side grey, party
 wall purple, court cyan). For other colours, select a column `color` with a CSS colour, for example `CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color`.
-H3 cells are drawn as hexagons: a result with a column `h3_cell` (and no geometry column) shows each of its cells. The nodes have `h3_cell` (H3 resolution 8). The page
-also makes the table `extra.boundary_h3` with the H3 cells that cover the boundary at each resolution 0 to 11; `whole_boundary` is true for the one cell that contains
-the whole boundary, so the smallest such cell is the row with the largest resolution where it is true. The page computes these cells with h3-js, because DuckDB has no H3 here.
 A click on a row of the table selects the item: a row with a geometry column (a node, a building, a wall) is drawn on the map in the select look, the map zooms to it,
-and the card beside the table has all the values of the row. The ✕ of the card removes the drawing. A row of a road is selected by roadstyle, with its own card.
+and the card beside the table has all the values of the row. The ✕ of the card removes the drawing. A row of a road is selected by roadstyle. Its card has a section
+**This row** with all the columns of the row, for example `width_m` of `lane_profile`.
 A result with the column `edge_id` is not drawn this way: roadstyle lights its roads on their own shape, so select `edge_id` for roads. A new table with no
 geometry column clears the shapes. The switch **On / Off** in the data dock shows or hides the table on the map, with its roads and
 its shapes. A closed dock shows nothing on the map.
+
+### Every table on the map
+
+A result that has the id columns of a table, and no geometry column, shows its objects on the map and has a card for each row. The card has the facts of the object,
+and a section **Row** with all the columns of the clicked row. The page names the kind of the result under the table, for example "Shown as Turn".
+
+| The result has | A row is | On the map |
+|---|---|---|
+| `from_edge` and `to_edge` (`edge_graph`, `turn_permission`), `from_edge_id` and `to_edge_id` (`turn_restrictions`), `via_edges` (`turn_path_restrictions`) | a turn | the road in, the junction (or the roads between) and the road out, in three colours |
+| `node_id`, `via_node` | a node | the junction. The card of a node has a button **Show H3 cell**. |
+| `way_id`, `osm_id` | an OSM way, a building, a base-map object | its shape. A way is all its edges. |
+| `route_id` | a bus route | all its edges |
+| `h3_cell`, `h3_id` | an H3 cell | the hexagon. The card has the resolution, the parent cell, the centre, the area and the number of nodes inside. |
+| `new_edge_id` (`edge_id_map`) | a merged edge | the new edge |
+| `ib_link_id` and `ob_link_id` (GMNS `movement`) | a movement | the link in, the node, the link out |
+
+A result with the column `edge_id` lights the roads on their own shape. A result with a geometry column is drawn as it is (see above). To make the page use another kind,
+select the column under the name of that kind, for example `SELECT osm_id AS way_id`. The nodes keep their H3 cell at resolution 8, so the card of a larger cell counts
+the nodes inside, and the card of a smaller cell says that it has no count. A table that the page does not know shows its rows in the table only.
+
+The page makes the table `extra.boundary_h3` with the H3 cells that cover the boundary at each resolution 0 to 11; `whole_boundary` is true for the one cell that contains
+the whole boundary, so the smallest such cell is the row with the largest resolution where it is true. The page computes these cells with h3-js, because DuckDB has no H3 here.
+
+**Reset** (the button in the data dock) empties the table and gives the map its own colours. It also puts back what **Ask** changed on the map (layers, base map, theme, 3D view),
+and leaves the camera and the changes that you made by hand.
 
 The table `extra.edits` has the changes of the [fixes file](edit-osm-data.md) (`osm_fixes.yaml` beside the database, or `--fixes`), with the
 time of each change. You can ask about the changes and about the data in one question, for example "Which roads did I change, and how many lanes did
