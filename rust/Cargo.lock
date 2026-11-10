@@ -2091,7 +2091,7 @@ dependencies = [
 [[package]]
 name = "roadstyle"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -2109,12 +2109,12 @@ dependencies = [
 [[package]]
 name = "roadstyle-assets"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 
 [[package]]
 name = "roadstyle-engine"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "base64 0.22.1",
  "foldhash 0.2.0",
@@ -2129,7 +2129,7 @@ dependencies = [
 [[package]]
 name = "roadstyle-io"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -2159,7 +2159,7 @@ dependencies = [
 [[package]]
 name = "roadstyle-levels"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "rstar",
  "sha2",
@@ -2168,7 +2168,7 @@ dependencies = [
 [[package]]
 name = "roadstyle-look"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "base64 0.22.1",
  "crc32fast",
@@ -2185,7 +2185,7 @@ dependencies = [
 [[package]]
 name = "roadstyle-model"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -2199,7 +2199,7 @@ dependencies = [
 [[package]]
 name = "roadstyle-tiles"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=4963d27f75e10e861f9a9152ae40aa5f9d16abe4#4963d27f75e10e861f9a9152ae40aa5f9d16abe4"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=deeba949e2203a7abc3805224164550d0726b5d6#deeba949e2203a7abc3805224164550d0726b5d6"
 dependencies = [
  "flate2",
  "foldhash 0.2.0",
