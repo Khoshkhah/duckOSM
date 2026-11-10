@@ -297,7 +297,7 @@ Where the heights came from: one row per height column (`ele`, `ele_dsm`, …). 
 
 The pixels of the DEM over the network: the ground between the roads, for a reader that makes a terrain (SimReady's
 `gltf` adapter). The rows are the raster's own pixels, with no resampling, over the bounding box of the nodes of
-every mode, plus 3 pixels on each side. Only the Rust build writes it (`duckosm-rust --dem`). Monaco with the FABDEM
+every mode, plus 3 pixels on each side. Only the Rust build writes it: `duckosm-rust --dem`, or `Params.dem_bytes` (the bytes of the GeoTIFF) in a build with no file system, as the browser. Monaco with the FABDEM
 crop: 156 × 119 pixels, 55 KB of Parquet.
 
 | Column | Type | Description |

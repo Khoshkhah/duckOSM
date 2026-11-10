@@ -46,3 +46,22 @@ fn grid_is_the_pixels_of_the_box() {
     assert!(wide[0].lat > wide[wide.len() - 1].lat && wide[0].lon < wide[1].lon);
     assert!(dem.grid(8.0, 44.0, 8.1, 44.1, 3).is_empty());
 }
+
+/// The browser gives the DEM as bytes: the build writes the same heights and the same grid as from the file.
+#[test]
+fn dem_bytes_build_as_dem_file() {
+    use duckosm_build::{build, Params};
+    use std::path::PathBuf;
+    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+    let tif = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/monaco-copernicus-glo30.tif");
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let p = Params { duckdb: false, built_at: Some(0), dem: Some(tif.clone()), ..Params::default() };
+    let q = Params { dem: None, dem_bytes: Some(("glo30.tif".into(), std::fs::read(&tif).unwrap())), ..p.clone() };
+    let (a, b) = (tmp.join("dem-file"), tmp.join("dem-bytes"));
+    build(&data.join("monaco_sample.osm.pbf"), &a, &p).unwrap();
+    build(&data.join("monaco_sample.osm.pbf"), &b, &q).unwrap();
+    for f in ["elevation_grid_main.parquet", "elevation_nodes_driving.parquet", "elevation_edges_driving.parquet"] {
+        let (x, y) = (std::fs::read(a.join(f)).unwrap(), std::fs::read(b.join(f)).unwrap());
+        assert!(x.len() > 100 && x == y, "{f}");
+    }
+}

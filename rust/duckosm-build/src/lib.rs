@@ -69,6 +69,9 @@ pub struct Params {
     /// and writes `elevation_nodes_<mode>.parquet`, `elevation_edges_<mode>.parquet` (with `z_vertices`, the
     /// height at each vertex) and `elevation_metadata_main.parquet`; the .duckdb gets duckOSM's columns.
     pub dem: Option<PathBuf>,
+    /// The DEM as the bytes of a GeoTIFF and a file name, for a build with no file system (the browser). `dem` wins
+    /// when both are set. The same step and the same files as `dem`; the metadata's `uri` is the file name.
+    pub dem_bytes: Option<(String, Vec<u8>)>,
     /// Also make `main.building_faces` (`building_faces_main.parquet`, docs/osm-editing.md): the walls of the buildings of the raw cut, each with a
     /// type (front, back, side, party), from the street edges of the driving and walking modes. Needs a boundary and a region file, as `raw` does.
     pub building_faces: bool,
@@ -94,6 +97,7 @@ impl Default for Params {
             built_at: None,
             timezone_entry: None,
             dem: None,
+            dem_bytes: None,
             building_faces: false,
         }
     }
@@ -488,7 +492,11 @@ pub fn run<W: Write + Send>(
         sum.sidewalk_roads = Some(sidewalks::infer_separate_sidewalks(&mut ways, &coords));
         log.step("sidewalk rule");
     }
-    let dem = p.dem.as_deref().map(elevation::Dem::open).transpose()?;
+    let dem = match (&p.dem, &p.dem_bytes) {
+        (Some(path), _) => Some(elevation::Dem::open(path)?),
+        (None, Some((name, bytes))) => Some(elevation::Dem::from_reader(std::io::Cursor::new(bytes), name)?),
+        (None, None) => None,
+    };
     let (mut dem_nodes, mut dem_nodata) = (0i64, 0i64);
     let mut mode_nodes = Vec::new();
     let mut level_edges = LevelEdges::default();
@@ -543,11 +551,15 @@ pub fn run<W: Write + Send>(
         }
         mode_nodes.push((*mode, net.nodes));
     }
-    if let (Some(d), Some(path)) = (&dem, &p.dem) {
-        let name = path
-            .file_name()
-            .map_or(String::new(), |f| f.to_string_lossy().into_owned());
-        let uri = std::fs::canonicalize(path).unwrap_or(path.clone());
+    if let Some(d) = &dem {
+        let (name, uri) = match (&p.dem, &p.dem_bytes) {
+            (Some(path), _) => (
+                path.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned()),
+                std::fs::canonicalize(path).unwrap_or(path.clone()).to_string_lossy().into_owned(),
+            ),
+            (None, Some((n, _))) => (n.clone(), n.clone()),
+            (None, None) => unreachable!("a DEM comes from dem or dem_bytes"),
+        };
         let sampled = area::iso_time(p.built_at.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -559,7 +571,7 @@ pub fn run<W: Write + Send>(
                 "ele",
                 &name,
                 "file",
-                &uri.to_string_lossy(),
+                &uri,
                 "unknown",
                 "EPSG:4326",
                 "unknown",
