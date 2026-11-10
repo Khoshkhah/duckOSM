@@ -112,18 +112,19 @@ export function viewKinds({ names = [], hasTags = true, h3 = null, query = null 
     const cols = facts ? facts.columns : [];
     return {
       label, idColumns: [[from, to]], ...(needs ? { needs } : {}),
-      geometryBy: (sql, [fromColumn, toColumn]) => `WITH r AS (SELECT ${q(fromColumn)} AS a, ${q(toColumn)} AS b, ${via ? `any_value(${q(via)})` : "NULL::BIGINT[]"} AS v
-          FROM (${inner(sql)}) WHERE ${q(fromColumn)} IS NOT NULL AND ${q(toColumn)} IS NOT NULL GROUP BY 1, 2),
-        ${facts ? `fx AS (SELECT r.a, r.b${cols.map((c) => `, any_value(t.${q(c)}) AS ${q(c)}`).join("")} FROM r JOIN (${facts.of.map((t) => `SELECT * FROM ${t}`).join(" UNION ALL BY NAME ")}) t ON t.${q(facts.from)} = r.a AND t.${q(facts.to)} = r.b GROUP BY 1, 2),` : ""}
+      geometryBy: (sql, [fromColumn, toColumn]) => `WITH r AS (SELECT ${q(fromColumn)} AS a, ${q(toColumn)} AS b, ${via ? `any_value(${q(via)})` : "NULL::BIGINT[]"} AS v, min(rn) AS rn
+          FROM (SELECT *, row_number() OVER () AS rn FROM (${inner(sql)})) WHERE ${q(fromColumn)} IS NOT NULL AND ${q(toColumn)} IS NOT NULL GROUP BY 1, 2),
+        ${facts ? `fx AS (SELECT r.a, r.b, any_value(COLUMNS(c -> c IN (${cols.map((c) => `'${c}'`).join(", ")}))) AS "\\0" FROM r JOIN (${facts.of.map((t) => `SELECT * FROM ${t}`).join(" UNION ALL BY NAME ")}) t ON t.${q(facts.from)} = r.a AND t.${q(facts.to)} = r.b GROUP BY 1, 2),` : ""}
         parts AS (
           SELECT r.a, r.b, 'from' AS role, f.geometry AS g FROM r JOIN ${road} f ON f.edge_id = r.a
           UNION ALL SELECT r.a, r.b, 'via', ST_EndPoint(f.geometry) FROM r JOIN ${road} f ON f.edge_id = r.a WHERE r.v IS NULL
           UNION ALL SELECT r.a, r.b, 'to', t.geometry FROM r JOIN ${road} t ON t.edge_id = r.b
           UNION ALL SELECT x.a, x.b, 'via', e.geometry FROM (SELECT a, b, unnest(v) AS eid FROM r WHERE v IS NOT NULL) x JOIN ${road} e ON e.edge_id = x.eid)
         SELECT CAST(r.a AS VARCHAR) || '|' || CAST(r.b AS VARCHAR) AS id,
-          (SELECT json_group_array(json_object('role', p.role, 'geom', ST_AsGeoJSON(p.g)::JSON)) FROM parts p WHERE p.a = r.a AND p.b = r.b)::VARCHAR AS geom${cols.map((c) => `, fx.${q(c)}`).join("")}
+          (SELECT json_group_array(json_object('role', p.role, 'geom', ST_AsGeoJSON(p.g)::JSON)) FROM parts p WHERE p.a = r.a AND p.b = r.b)::VARCHAR AS geom${facts ? ", fx.* EXCLUDE (a, b)" : ""}
         FROM r${facts ? " LEFT JOIN fx ON fx.a = r.a AND fx.b = r.b" : ""}
-        WHERE EXISTS (SELECT 1 FROM parts p WHERE p.a = r.a AND p.b = r.b AND p.role = 'from') AND EXISTS (SELECT 1 FROM parts p WHERE p.a = r.a AND p.b = r.b AND p.role = 'to')`,
+        WHERE EXISTS (SELECT 1 FROM parts p WHERE p.a = r.a AND p.b = r.b AND p.role = 'from') AND EXISTS (SELECT 1 FROM parts p WHERE p.a = r.a AND p.b = r.b AND p.role = 'to')
+        ORDER BY r.rn`,
     };
   };
   const tablesOf = (suffix) => names.filter((n) => n.endsWith(suffix) && !n.startsWith("raw.") && !n.startsWith("mm."));

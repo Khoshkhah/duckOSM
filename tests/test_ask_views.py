@@ -154,3 +154,23 @@ def test_a_gmns_movement_is_a_turn():
     wanted = len({tuple(r) for r in con.execute("SELECT ib_link_id, ob_link_id FROM gmns_driving.movement LIMIT 5").fetchall()})
     assert len(rows) == wanted and rows, (len(rows), wanted)
     assert {p["role"] for p in json.loads(rows[0][1])} == {"from", "via", "to"}
+
+
+def test_a_turn_card_needs_only_the_columns_the_table_has():
+    """A file built before `uses` has an edge_graph with no `uses` column: the turn kind must still draw its turns, and its card has the columns that exist (cost). The rows keep
+    the order of the result, so the first rows of the table are the first objects (the dock cuts the objects at 20 000)."""
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.edges AS SELECT * FROM (VALUES (1, ST_GeomFromText('LINESTRING(0 0, 1 0)')), (2, ST_GeomFromText('LINESTRING(1 0, 1 1)')), (3, ST_GeomFromText('LINESTRING(1 0, 2 0)'))) t(edge_id, geometry)")
+    con.execute("CREATE TABLE driving.edge_graph AS SELECT * FROM (VALUES (3, 1, 1, 7.0), (1, 2, 2, 5.5), (1, 3, 3, 4.5)) t(from_edge, to_edge, via_edge, cost)")
+    module = (ROOT / "web" / "ask" / "views.js").as_uri()
+    script = "import { viewKinds } from %r; const k = viewKinds({ names: ['driving.edges', 'driving.edge_graph'] }).turn; process.stdout.write(k.geometryBy('SELECT * FROM driving.edge_graph', ['from_edge', 'to_edge']));" % module
+    done = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    got = con.execute(done.stdout)
+    assert [d[0] for d in got.description] == ["id", "geom", "cost"], got.description
+    rows = got.fetchall()
+    assert [r[0] for r in rows] == ["3|1", "1|2", "1|3"], rows           # the order of the table
+    assert [r[2] for r in rows] == [7.0, 5.5, 4.5]
+    assert {p["role"] for p in json.loads(rows[0][1])} == {"from", "via", "to"}
