@@ -143,7 +143,7 @@ export const askTables = (tables) => tables.map((t) => ({ name: t.mode && t.tabl
 
 // askPanel({ about }): the text that tells the agent what the data is. It names a table only when `tables` has it. `classes` is the text of roadClasses.
 // `shapes: true` is for a page that draws the geometry column of a result on the map (nodes as points, buildings as shapes, walls as lines, H3 cells as hexagons).
-export function aboutText({ tables = [], classes = "", shapes = false, hasTags = true } = {}) {
+export function aboutText({ tables = [], classes = "", shapes = false, hasTags = true, kinds = false } = {}) {
   const has = (re) => tables.some((n) => re.test(n));
   const t = [
     "The OSM data of one area, built by duckOSM. Each network is a schema: driving, walking and cycling. In a network, edges has one row for each direction of a road; "
@@ -182,6 +182,14 @@ export function aboutText({ tables = [], classes = "", shapes = false, hasTags =
     t.push("COLOURS: a shape is coloured by its column face_type (front green, back red, side grey, party wall purple, court cyan), so a result with face_type needs no more. "
       + "For any other colour select a column named color with a CSS colour, for example CASE highway WHEN 'primary' THEN '#dc2626' ELSE '#6b7280' END AS color. ");
   }
-  if (shapes) t.push("Never answer that you can only show roads.");
+  // `kinds: true` is for a page whose data dock has the kinds of web/ask/views.js: a result of ids (no geometry column) is drawn, and each row has a card.
+  if (kinds) {
+    t.push("THE PAGE ALSO DRAWS A RESULT OF IDS (A RESULT WITH NO GEOMETRY COLUMN) ON THE MAP, and each row has a card. So you CAN show: junctions and nodes (select node_id or via_node), "
+      + "turns (select from_edge and to_edge of edge_graph, or from_edge_id and to_edge_id of turn_restrictions: the road in, the junction and the road out are drawn in three colours), "
+      + "OSM ways (osm_id or way_id: all the edges of the way), buildings (building_id, or osm_id of features.buildings), bus routes (route_id), the objects of the base map (osm_id of a features table) "
+      + "and H3 cells (h3_cell or h3_id: hexagons). Select the id columns, and not a geometry, for example SELECT from_edge, to_edge FROM driving.edge_graph WHERE ... "
+      + "Do not draw them with a chart or with colours. ");
+  }
+  if (shapes || kinds) t.push("Never answer that you can only show roads.");
   return t.join("");
 }

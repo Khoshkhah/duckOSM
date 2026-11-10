@@ -34,6 +34,7 @@ out.classes = await roadClasses(query, ["driving.edges", "walking.edges", "main.
 out.about = aboutText({ tables: names, classes: out.classes });
 out.aboutNone = aboutText({ tables: ["driving.edges"] });
 out.aboutShapes = aboutText({ tables: names, shapes: true });
+out.aboutKinds = [aboutText({ tables: names, kinds: true }), aboutText({ tables: names })];
 // the object kinds: the SQL of each (kind, id column, result) pair, for the test to run on the database
 const asks = [["node", "node_id", "SELECT node_id FROM driving.nodes LIMIT 5"], ["node", "source", "SELECT source FROM driving.edges LIMIT 5;"],
   ["node", "via_node", "SELECT via_node FROM driving.turn_restrictions LIMIT 5"], ["node", "osm_id", "SELECT osm_id FROM features.traffic LIMIT 5"],
@@ -110,6 +111,9 @@ def test_the_about_text_names_a_table_only_when_it_is_there(result):
 
 def test_the_text_about_shapes_is_for_a_page_that_draws_them(result):
     assert "GEOMETRY COLUMN" in result["aboutShapes"] and "HEXAGONS" in result["aboutShapes"] and "only show roads" in result["aboutShapes"]
+    # a page with the kinds of web/ask/views.js tells the agent that results of ids are drawn (Studio has no shapes, only kinds); a page without them says nothing of it
+    with_kinds, without = result["aboutKinds"]
+    assert "RESULT OF IDS" in with_kinds and "from_edge" in with_kinds and "only show roads" in with_kinds and "RESULT OF IDS" not in without
     assert "GEOMETRY COLUMN" not in result["about"] and "HEXAGONS" not in result["about"] and "only show roads" not in result["about"]
 
 
