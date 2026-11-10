@@ -99,6 +99,7 @@ plugins:
           - exports/lane-routing.md
         Concepts:
           - concepts/build.md
+          - concepts/terrain.md
           - concepts/edge-ids.md
           - concepts/networks.md
           - concepts/cleanup.md
@@ -152,6 +153,7 @@ nav:
   - Concepts:
       - How a build works: concepts/build.md
       - The ground reference: concepts/ground-reference.md
+      - The terrain of an area: concepts/terrain.md
       - The Rust engine: concepts/rust-engine.md
       - Stable edge ids: concepts/edge-ids.md
       - What each network contains: concepts/networks.md
