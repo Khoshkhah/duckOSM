@@ -174,3 +174,26 @@ def test_a_turn_card_needs_only_the_columns_the_table_has():
     assert [r[0] for r in rows] == ["3|1", "1|2", "1|3"], rows           # the order of the table
     assert [r[2] for r in rows] == [7.0, 5.5, 4.5]
     assert {p["role"] for p in json.loads(rows[0][1])} == {"from", "via", "to"}
+
+
+def test_the_kinds_work_on_the_tables_of_the_rust_engine():
+    """duckOSM Studio's tables come from the Rust engine: `nodes` has node_id and geom and no h3_cell. The node kind must draw them (it failed with a binder error). The same pair of
+    edges can be in two networks with another cost, so a turn card has no facts of its own then (the section Row has them)."""
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving; CREATE SCHEMA walking")
+    con.execute("CREATE TABLE driving.nodes AS SELECT * FROM (VALUES (10, ST_Point(0, 0)), (11, ST_Point(1, 0))) t(node_id, geom)")
+    for mode, cost in (("driving", 5.3), ("walking", 31.9)):
+        con.execute(f"CREATE TABLE {mode}.edges AS SELECT * FROM (VALUES (1, ST_GeomFromText('LINESTRING(0 0, 1 0)')), (2, ST_GeomFromText('LINESTRING(1 0, 1 1)'))) t(edge_id, geometry)")
+        con.execute(f"CREATE TABLE {mode}.edge_graph AS SELECT 1 AS from_edge, 2 AS to_edge, 2 AS via_edge, {cost}::FLOAT AS cost")
+    module = (ROOT / "web" / "ask" / "views.js").as_uri()
+    names = ["driving.nodes", "driving.edges", "driving.edge_graph", "walking.edges", "walking.edge_graph"]
+    script = ("import { viewKinds } from %r; const k = viewKinds({ names: JSON.parse(process.argv[1]) });"
+              "process.stdout.write(JSON.stringify([k.node.geometryBy('SELECT 10 AS node_id', 'node_id'), k.turn.geometryBy('SELECT * FROM driving.edge_graph', ['from_edge', 'to_edge'])]));") % module
+    done = subprocess.run(["node", "--input-type=module", "-e", script, json.dumps(names)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    node_sql, turn_sql = json.loads(done.stdout)
+    rows = con.execute(node_sql).fetchall()
+    assert len(rows) == 1 and rows[0][0] == 10 and json.loads(rows[0][1])["type"] == "Point", rows
+    got = con.execute(turn_sql)
+    assert [d[0] for d in got.description] == ["id", "geom"], got.description        # no cost or uses: two networks have the pair

@@ -69,14 +69,15 @@ export function viewKinds({ names = [], hasTags = true, h3 = null, query = null 
         if (!nodes.length) throw new Error("this file has no nodes table");
         // A node of a way (way_nodes) is mostly not a junction, so it is in no nodes table: when the file keeps raw.nodes, the point comes from its lat and lon.
         const raw = has("raw.nodes"), traffic = has("features.traffic");
-        const join = nodes.map((t, i) => ` LEFT JOIN ${t} n${i} ON n${i}.node_id = s.nid`).join("") + (raw ? " LEFT JOIN raw.nodes r ON r.osm_id = s.nid" : "")
+        // The nodes of the networks as one table. A node can be in one network only. `h3_cell` is a column of a file of `duckosm build` and not of the nodes that the Rust engine makes
+        // (duckOSM Studio), so an empty column of that name is added by name (UNION ALL BY NAME) and the card has no cell without it.
+        const all = `(SELECT DISTINCT ON (node_id) node_id, geom, h3_cell FROM (${nodes.map((t) => `SELECT * FROM ${t}`).join(" UNION ALL BY NAME ")} UNION ALL BY NAME SELECT NULL::BIGINT AS h3_cell WHERE false) ORDER BY node_id)`;
+        const join = ` LEFT JOIN ${all} n ON n.node_id = s.nid` + (raw ? " LEFT JOIN raw.nodes r ON r.osm_id = s.nid" : "")
           + (traffic ? " LEFT JOIN features.traffic t ON t.osm_type = 'node' AND t.osm_id = s.nid" : "");
-        const of = (col) => nodes.map((_, i) => `n${i}.${col}`).join(", ");
-        const geom = `COALESCE(${of("geom")}${raw ? ", ST_Point(r.lon, r.lat)" : ""})`;
-        const present = [...nodes.map((_, i) => `n${i}.node_id IS NOT NULL`), ...(raw ? ["r.osm_id IS NOT NULL"] : [])].join(" OR ");
-        const h3 = nodes[0].endsWith(".nodes") ? `, COALESCE(${of("h3_cell")}) AS h3_cell` : "";
+        const geom = `COALESCE(n.geom${raw ? ", ST_Point(r.lon, r.lat)" : ""})`;
+        const present = `n.node_id IS NOT NULL${raw ? " OR r.osm_id IS NOT NULL" : ""}`;
         const facts = traffic ? `, t.kind, t.name${tags("t")}` : "";
-        return `SELECT s.nid AS id, ST_AsGeoJSON(${geom}) AS geom${h3}${facts} FROM (SELECT DISTINCT ${q(column)} AS nid FROM (${inner(sql)})) s${join} WHERE ${present}`;
+        return `SELECT s.nid AS id, ST_AsGeoJSON(${geom}) AS geom, n.h3_cell${facts} FROM (SELECT DISTINCT ${q(column)} AS nid FROM (${inner(sql)})) s${join} WHERE ${present}`;
       },
     };
   }
@@ -128,7 +129,9 @@ export function viewKinds({ names = [], hasTags = true, h3 = null, query = null 
     };
   };
   const tablesOf = (suffix) => names.filter((n) => n.endsWith(suffix) && !n.startsWith("raw.") && !n.startsWith("mm."));
-  const factsOf = (suffix, from, to, columns) => (tablesOf(suffix).length ? { of: tablesOf(suffix), from, to, columns } : null);
+  // The facts of a turn card come from the table of the kind. With the same table in several networks (edge_graph, turn_permission) the result does not say which one its rows come from,
+  // and the pair can have another cost or use in another network: then the card has no facts of its own and the section Row (the clicked row) has them.
+  const factsOf = (suffix, from, to, columns) => (tablesOf(suffix).length === 1 ? { of: tablesOf(suffix), from, to, columns } : null);
   if (roadsSql) {
     kinds.turn = turns({ label: "Turn", idColumns: ["from_edge", "to_edge"], facts: factsOf(".edge_graph", "from_edge", "to_edge", ["cost", "uses"]) });
     kinds.permission = turns({ label: "Turn rule", idColumns: ["from_edge", "to_edge"], needs: ["allowed"], facts: factsOf(".turn_permission", "from_edge", "to_edge", ["allowed", "vehicles", "except_vehicles", "condition"]) });
