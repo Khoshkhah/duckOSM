@@ -3,6 +3,10 @@
 Where `duckosm elevation` can get its heights, and how the sources compare. How to run it:
 [Add elevation](../guides/elevation.md).
 
+The list of sources is data: `src/duckosm/data/dem_sources.json`. The code, the page "Ground" of
+duckOSM Studio and the two tables below (`python scripts/update_elevation_sources_doc.py`) read it.
+[The sources for an area](#the-sources-for-an-area) tells the order.
+
 There are two ways to give it a model:
 
 - `--source` fetches a 30 m model for the area. `copernicus` works anywhere with nothing to set up;
@@ -31,16 +35,18 @@ bare ground ([below](#dtm-or-dsm)).
 
 To use one of these, download it and pass it with `--dem`.
 
+<!-- dem-sources:global -->
 | Model | Resolution | Covers | Type | Access | Licence |
-|---|---|---|---|---|---|
-| Copernicus GLO-90 | 90 m | world | DSM | COG (Cloud-Optimized GeoTIFF, [below](#file-formats)) on AWS `copernicus-dem-90m`, no account | free, commercial use allowed (attribution) |
-| EU-DEM v1.1 | 25 m | Europe | close to DTM | GeoTIFF in EPSG:3035, no account | Copernicus open, commercial use allowed |
+| --- | --- | --- | --- | --- | --- |
 | FABDEM v1.2 | 30 m | world (60°S to 80°N) | DTM | GeoTIFF, no account | CC-BY-NC-SA: **not for commercial use** |
+| Copernicus GLO-90 | 90 m | world | DSM | COG (Cloud-Optimized GeoTIFF, [below](#file-formats)) on AWS `copernicus-dem-90m`, no account | free, commercial use allowed (attribution) |
+| EU-DEM v1.1 | 25 m | Europe | DSM, close to a DTM | GeoTIFF in EPSG:3035, no account | Copernicus open, commercial use allowed |
 | SRTM v3 | 30 m | **60°N to 56°S only** | DSM | HGT / GeoTIFF, NASA Earthdata account | public domain |
 | NASADEM | 30 m | **60°N to 56°S only** | DSM | GeoTIFF / HGT, NASA Earthdata account | public domain |
 | ASTER GDEM v3 | 30 m | 83°N to 83°S | DSM | COG, NASA Earthdata account | free (attribution) |
 | ALOS AW3D30 | 30 m | 82°N to 82°S | DSM | GeoTIFF, JAXA account | free (attribution) |
 | GEBCO 2024 / ETOPO 2022 | about 450 m | land and sea | mixed | NetCDF / GeoTIFF | public domain |
+<!-- /dem-sources:global -->
 
 SRTM and NASADEM stop at 60°N, so they miss most of Scandinavia. GEBCO and ETOPO are too coarse for
 roads.
@@ -50,15 +56,34 @@ roads.
 Many countries publish a 1 m DTM made from LiDAR. It shows cliffs, cuttings and bridge ramps that a
 30 m model can't. Some examples:
 
+<!-- dem-sources:national -->
 | Country | Model | Resolution | CRS (coordinate system) | Access | Licence |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | Sweden | Lantmäteriet Markhöjdmodell Nedladdning, grid 1+ | 1 m DTM (also a DSM) | EPSG:3006, heights RH2000 | STAC API `STAC-hojd`, after a free GeoTorget registration | CC0 |
 | Estonia | Maa-amet Digital Terrain Model | 1, 5, 10, 25 m DTM (also a DSM) | EPSG:3301, heights EH2000 | map-sheet tiles or whole-country files, no account | open |
 | Canada | NRCan HRDEM Mosaic | 1 m DTM and DSM, COG | EPSG:3979, heights CGVD2013 | STAC API `datacube.services.geo.ca/stac/api/` | OGL-Canada (attribution) |
-| France | IGN RGE ALTI / LiDAR HD | 1 m DTM | EPSG:2154 | `geoservices.ign.fr` | Etalab 2.0 |
+| France | IGN RGE ALTI / LiDAR HD | 1 m DTM | EPSG:2154, heights IGN69 | `geoservices.ign.fr` | Etalab 2.0 |
+<!-- /dem-sources:national -->
 
 For other countries, search for the national mapping agency's open DTM. Any CRS works: node
 coordinates are converted to the model's CRS before sampling.
+
+## The sources for an area
+
+`duckosm.dem_sources.sources_for_bbox((west, south, east, north))` gives the sources that cover a box, best first:
+
+1. a national 1 m DTM, where one covers the area;
+2. EU-DTM, in Europe;
+3. FABDEM (a DTM, **not for commercial use**);
+4. Copernicus GLO-30 (a DSM);
+5. the other models, by resolution.
+
+A source covers the box when the whole box is inside its coverage. The coverage of a country is a coarse outline: check the
+download page of the source. Each entry has the product (`DTM` or `DSM`), the CRS, the vertical datum, the licence
+(`license`) and whether it allows commercial use, the access (a download, a COG, a STAC API, or tiles; an account or a key) and
+`cors` (true when a web page can read the data: the Copernicus COG files on AWS send no CORS header, so a page cannot).
+The page "Ground" of Studio uses the list to suggest a source and to fill the product, the datum and the licence of the file that
+the person gives.
 
 ## File formats
 
@@ -87,8 +112,8 @@ join in a VRT.
 - **DTM** (terrain model): the bare ground.
 
 For road gradients use a **DTM**. A DSM puts a node under trees on the tree tops and a node next to
-a building on its roof edge, which gives false slopes. Copernicus GLO-30 is a DSM; EU-DTM, EU-DEM,
-FABDEM and the national models above are DTMs.
+a building on its roof edge, which gives false slopes. Copernicus GLO-30 is a DSM; EU-DTM, FABDEM
+and the national models above are DTMs. EU-DEM is a DSM that is close to a DTM.
 
 With both a DTM and a DSM from the same survey, store the DSM as a second surface
 (`--suffix dsm`): `ele_dsm - ele` is then the height of buildings and trees. Two unrelated 30 m

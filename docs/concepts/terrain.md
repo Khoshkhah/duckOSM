@@ -67,6 +67,11 @@ The DEM decides the quality of every height. Two choices matter:
 - **A known vertical datum.** Every height is in metres above one datum, for example EGM2008. Two files on different datums do not
   agree, even when each one is correct.
 
+To see which models cover your area, best first, use `duckosm.dem_sources.sources_for_bbox` ([Add elevation](../guides/elevation.md)). In duckOSM Studio
+the step "Ground" lists them for the area on the map. You select the downloaded file, and the step fills in the product, the vertical datum and the licence.
+With no file, the step can make a DEM from the AWS Terrain Tiles. That DEM is a surface model (`DSM`) with the label "Ground: AWS Terrain Tiles", so no
+project takes it as the reference ground.
+
 Give the DEM one time for each area, in the config file ([`elevation`](../reference/configuration.md#elevation)):
 
 ```yaml
