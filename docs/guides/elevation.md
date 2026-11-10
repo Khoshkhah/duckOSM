@@ -46,6 +46,9 @@ duckosm elevation monaco.duckdb --dem my_dtm.tif          # any GDAL raster
 
 Where to get elevation data, and how the sources compare: [Elevation sources](../reference/elevation-sources.md).
 
+For an area that SimReady, urbanstyle or roadstyle also use, the heights must follow [The ground reference](../concepts/ground-reference.md):
+one bare-earth model (DTM) with a known vertical datum, recorded once and used by every project.
+
 ## What the heights mean
 
 The height is the **surface at the node's position**, not the road itself:
