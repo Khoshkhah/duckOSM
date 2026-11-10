@@ -75,7 +75,7 @@ names the two ids.
 |---|---|
 | the reference | `product = DTM`, `vertical_datum` known, `sha256` equals the file's |
 | the road on its ground | under each roadway, the road surface minus the conformed ground is at most 0.05 m |
-| the map terrain | the terrain tiles of a page minus the conformed ground grid, at the grid's points: at most 0.10 m (the PNG step) |
+| the map terrain | the terrain tiles of a page minus the conformed ground grid, at the tile pixels' points (each pixel's north-west corner, where MapLibre reads it): at most 0.10 m (the PNG step). Not at the grid's points: MapLibre interpolates the tile pixels again, so there the difference is metres on steep ground |
 | one ground in an area | every product of the area has the same ground id |
 
 ## Where each project stands (2026-11-10)
