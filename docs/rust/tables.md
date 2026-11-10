@@ -30,7 +30,7 @@ mode: `edges`, `nodes`, `private_edges`, `edge_graph`, `edge_id_map`, `turn_perm
 
 Not in this list: `visualization.level_edits`, `level_heads`, `level_caps` and `level_unmatched` (the manual
 edits of the drawing levels in duckOSM's level editor), `main.boundary_cells` and the H3 columns (duckOSM option
-H3), `main.elevation_metadata` (elevation), `main.admin_boundaries` (the boundaries for `duckosm boundary`).
+H3), `main.elevation_metadata` and `main.elevation_grid` (elevation), `main.admin_boundaries` (the boundaries for `duckosm boundary`).
 They come from separate duckOSM tools or options.
 
 ## Decisions (Kaveh, 2026-10-22)

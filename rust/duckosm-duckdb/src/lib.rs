@@ -58,7 +58,7 @@ pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(
         }
     }
     if parquet_dir.join("elevation_metadata_main.parquet").exists() {
-        write_schema(&con, parquet_dir, "main", &["elevation_metadata"])?;
+        write_schema(&con, parquet_dir, "main", &["elevation_metadata", "elevation_grid"])?;
     }
     if parquet_dir.join("transfers_mm.parquet").exists() {
         con.execute_batch(&mm_edges(modes))
