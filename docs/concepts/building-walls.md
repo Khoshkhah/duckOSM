@@ -198,3 +198,55 @@ data give the same rows.
 - At most two corner fronts: a building with four streets around it has at most three fronts from the streets. A wall with an entrance
   is a front too.
 - An entrance tag on a node of the wall gives a front, also when the entrance is at the back of the building.
+
+## Proposal: party walls of different heights
+
+Date: 2026-11-10. Status: proposal, not built. Nothing above this heading changes until Kaveh agrees.
+
+### The fault
+
+Step 3 marks a wall `party` when two rings have the same two nodes. It does not use heights. The 3D walls of
+[duckOSM Studio](https://github.com/Khoshkhah/duckosm-studio) draw each wall from the ground to the roof in one color. So a tower that
+stands on a podium shows its whole facade in the `party` color, also above the roof of the podium.
+
+Data of Burnaby (`pbf/burnaby.complete_ways.osm.pbf`, 6,066 `party` walls), heights from the `height` and `building:levels` tags at 3 m for each level:
+
+| Case | Count | Example |
+|---|---|---|
+| A tower beside a lower building: tower 40 m or more, with a party wall | 338 wall pairs. In 239 the other building is less than half as high. In 75 it has no height tag | Station Square (Willingdon Avenue): towers of 41 levels (123 m) and a podium of 3 levels (9 m, relation 16733309) share 120 m of wall |
+| Two rings with the same footprint | 8 pairs | Way 962138234 (`Station Square Tower 4`) and relation 16733312 have the same 12 nodes. Each wall of both is `party` with the other |
+| A part of a building (`building:part`) | 2 of 41,548 | Not a problem here: a way with `building:part` and no `building` tag is no ring |
+
+Of all the party wall pairs, 484 have a height difference of more than 15 m, 60 have 3 to 15 m, and 1,146 have less than 3 m. In 4,372 pairs at least one
+building has no height tag.
+
+### The change
+
+1. **Same footprint, no party wall.** Two rings whose walls are all the same two nodes are one footprint that is mapped twice. The build gives
+   neither ring a party wall. It also leaves each ring out of the line-of-sight test of the other, so that the walls keep the type that they
+   would have with one ring.
+2. **A new column `open_type`.** It tells the type of the wall if no building stood beside it. For a `party` wall, the build runs steps 2 to 6
+   a second time for the buildings that have party walls. In this run, the walls of the neighbour buildings are not shared and are not in the
+   line-of-sight test. For every other wall, `open_type` is `computed_type`.
+3. **No height in the table.** The height of a building depends on the look: `m_per_level` and the heights of the kinds are values that a
+   person changes in the design panel. The engine has no look. So the page, not the build, finds the shared part.
+
+The page finds the neighbour of a wall in `building_faces` itself: it is the other row with the same two nodes. The shared height is the lower
+of the heights of the two buildings, by the rule of the tiles. [roadstyle draws the two parts](https://github.com/Khoshkhah/roadstyle/blob/claude/party-wall-heights/docs/design/party_wall_split.md).
+
+### The effect on the table
+
+| Column | Change |
+|---|---|
+| `open_type` (new, VARCHAR) | the type with no neighbour; equal to `computed_type` for a wall that is not `party` |
+| `face_type`, `computed_type`, `type_reason` | no change, except for the twin rings of item 1 |
+
+A new column changes the result of the build. The tests that compare the columns of `building_faces` (Monaco, Tartu) need the new column, and
+Kaveh must agree to that before the code changes.
+
+### The limits
+
+- The type above the shared part comes from a 2D method. A tower wall above a podium can face a street that the podium hides in the
+  line-of-sight test. Item 2 removes the neighbour from the test, but not a third building.
+- A wall with several neighbours takes the lowest one.
+- A building with no height tag has the height of its kind, as in the tiles. The shared part is then a guess.
