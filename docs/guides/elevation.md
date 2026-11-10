@@ -20,7 +20,7 @@ It adds:
 - `nodes.ele`: the height at each node, in metres;
 - `edges.z_from`, `edges.z_to`: the height at each edge's two ends;
 - a row in `main.elevation_metadata` saying where the heights came from (source, resolution,
-  vertical datum, licence).
+  vertical datum, licence), and the SHA-256 of the elevation file, the ground id.
 
 The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md), [GIS](../exports/gis.md) and
 [GMNS](../exports/gmns_tables.md) exports then include the heights (GMNS: `node.z_coord`, `link.grade`).
@@ -33,8 +33,12 @@ when you set an [OpenTopography](https://opentopography.org) key in `OPENTOPOGRA
 better accuracy, point it at your own file, e.g. a national 1 m model:
 
 ```bash
-duckosm elevation monaco.duckdb --dem my_dtm.tif          # any GDAL raster
+duckosm elevation monaco.duckdb --dem my_dtm.tif --vertical-datum EGM2008 --license CC-BY-4.0
 ```
+
+A `--dem` file in `ele` is the area's ground reference. Its vertical datum and its license are necessary: without them
+the command stops. For a file that is not the reference (a test, a surface model), add `--not-reference`. A file with
+`--suffix` is never the reference.
 
 | Option | Does | Default |
 |---|---|---|
@@ -43,6 +47,26 @@ duckosm elevation monaco.duckdb --dem my_dtm.tif          # any GDAL raster
 | `-m MODE` | only this mode; repeat for several | every mode |
 | `--nodata-fill` | height written where the model has no value | `0` |
 | `--suffix dsm` | store as a second surface (`ele_dsm`, `z_from_dsm`, …) instead of replacing | |
+| `--vertical-datum` | the vertical datum of the `--dem` file, for example `EGM2008` | |
+| `--license` | the license of the `--dem` file | |
+| `--not-reference` | the `--dem` file is not the area's ground reference | |
+
+The Rust build (`duckosm-rust --dem FILE`) has the same rule, with the options `--dem-vertical-datum`, `--dem-license`
+and `--dem-not-reference`. The browser build gives them as `Params.dem_vertical_datum`, `dem_license` and
+`dem_not_reference`.
+
+### The ground id
+
+`main.elevation_metadata.sha256` is the SHA-256 of the elevation file's bytes. It is the same value that `sha256sum`
+gives, so you can check a database against its file:
+
+```bash
+sha256sum my_dtm.tif
+duckdb monaco.duckdb -c "SELECT sha256 FROM main.elevation_metadata WHERE ele_column = 'ele'"
+```
+
+The value is NULL when the step read no whole file: Copernicus GLO-30 is streamed in parts, and a `--dem` URL is read in
+parts. To get a ground id, give the reference as a local file.
 
 Where to get elevation data, and how the sources compare: [Elevation sources](../reference/elevation-sources.md).
 

@@ -24,7 +24,7 @@ The ground reference of an area is one elevation file. duckOSM records it, in `m
 | `dem_crs` | its CRS |
 | `vertical_datum` | known (`EGM2008`, `EGM96`, a national datum). `unknown` is not a reference |
 | `resolution_m`, `license` | known |
-| `sha256` (new) | the hash of the file's bytes, the **ground id** of every product below |
+| `sha256` | the hash of the file's bytes, the **ground id** of every product below. NULL when no whole file was read (Copernicus tiles streamed from AWS, a URL): such a source is not a reference |
 
 The other projects do not choose a ground. They read this row (or the same values in the area's settings, for SimReady:
 `areas/<area>/area.yaml` `dem:` and `sources.yaml`, which must name the same file).
@@ -78,11 +78,11 @@ names the two ids.
 | the map terrain | the terrain tiles of a page minus the conformed ground grid, at the grid's points: at most 0.10 m (the PNG step) |
 | one ground in an area | every product of the area has the same ground id |
 
-## Where each project stands (2026-11-09)
+## Where each project stands (2026-11-10)
 
 | Project | Now | To do |
 |---|---|---|
-| duckOSM | `main.elevation_metadata` with `product`, `vertical_datum`; the default source is Copernicus GLO-30 (a DSM); `main.elevation_grid` is on the branch `claude/elevation-grid` | the `sha256` column; `vertical_datum` and `license` required for a `--dem` file of a reference |
+| duckOSM | Done. `main.elevation_metadata` has `product`, `vertical_datum`, `license` and `sha256` (the ground id) in the Python command and in the Rust build (file and browser bytes); `main.elevation_grid` from the Rust build. A `--dem` file in `ele` needs its vertical datum and its license, or `--not-reference`. The default source with no `--dem` is still Copernicus GLO-30 (a DSM, no ground id) | `product` of a `--dem` file is still `unknown` (no option yet) |
 | SimReady | Monaco on FABDEM (a DTM), Vancouver on a 1 m LiDAR DTM; `terrain-conform` and the GLB on the branch `claude/gltf-adapter-design-5047c6`; the connecting roads of the `.xodr` have no elevation | the ground id in its products; the conformed ground as a grid that others read; the elevation of the connecting roads |
 | roadstyle | the map terrain is always the AWS Terrain Tiles | terrain tiles from the conformed ground for an area with a reference; the page option `ground`; the vehicles take the road heights |
 | urbanstyle | a "rough terrain" switch with the AWS Terrain Tiles; bridge heights from LiDAR feed SimReady | the same terrain tiles as roadstyle |

@@ -63,7 +63,7 @@ def test_ele_and_z_from_local_dem(tmp_path):
     dem = _dem(tmp_path / "ramp.tif")
     nodes = [(1, 18.06, 59.32), (2, 18.07, 59.32)]
     src = _src(tmp_path / "s.duckdb", nodes, [(A, 1, 2)])
-    res = to_elevation(src, dem=dem)
+    res = to_elevation(src, dem=dem, reference=False)
 
     assert res["n_nodes"] == 2 and res["n_nodata"] == 0
     con = duckdb.connect(src, read_only=True)
@@ -82,7 +82,7 @@ def test_nodata_fill_out_of_coverage(tmp_path):
     # node 3 sits far outside the DEM bbox → must get the fill value, and count as nodata
     src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.07, 59.32), (3, 100.0, 10.0)],
                [(A, 1, 2), (B, 2, 3)])
-    res = to_elevation(src, dem=dem, nodata_fill=-999.0)
+    res = to_elevation(src, dem=dem, nodata_fill=-999.0, reference=False)
 
     assert res["n_nodata"] == 1
     con = duckdb.connect(src, read_only=True)
@@ -95,15 +95,31 @@ def test_nodata_fill_out_of_coverage(tmp_path):
 def test_provenance_metadata(tmp_path):
     dem = _dem(tmp_path / "ramp.tif")
     src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.07, 59.32)], [(A, 1, 2)])
-    to_elevation(src, dem=dem)
+    to_elevation(src, dem=dem, vertical_datum="EGM2008", license="CC-BY-4.0")
 
     con = duckdb.connect(src, read_only=True)
-    row = con.execute("SELECT source_type, product, n_nodes, n_nodata, dem_crs "
-                      "FROM main.elevation_metadata").fetchone()
+    row = con.execute("SELECT source_type, product, n_nodes, n_nodata, dem_crs, vertical_datum, "
+                      "license, sha256 FROM main.elevation_metadata").fetchone()
     assert row[0] == "file" and row[1] == "unknown"       # a --dem file: type file, product unknown
     assert row[2] == 2 and row[3] == 0
     assert "4326" in row[4]                                # CRS read from the raster
+    assert row[5:7] == ("EGM2008", "CC-BY-4.0")
+    import hashlib
+    with open(dem, "rb") as f:
+        assert row[7] == hashlib.sha256(f.read()).hexdigest()   # the ground id
     assert con.execute("SELECT count(*) FROM main.elevation_metadata").fetchone()[0] == 1
+    con.close()
+
+
+def test_reference_dem_needs_datum_and_license(tmp_path):
+    dem = _dem(tmp_path / "ramp.tif")
+    src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32)], [])
+    with pytest.raises(ValueError, match="reference ground"):
+        to_elevation(src, dem=dem, vertical_datum="EGM2008")
+    to_elevation(src, dem=dem, reference=False)            # not the reference: unknown is allowed
+    con = duckdb.connect(src, read_only=True)
+    assert con.execute("SELECT vertical_datum, license FROM main.elevation_metadata").fetchone() == (
+        "unknown", "unknown")
     con.close()
 
 
@@ -125,7 +141,7 @@ def test_suffix_keeps_two_surfaces(tmp_path):
 
     nodes = [(1, 18.06, 59.32), (2, 18.07, 59.32)]
     src = _src(tmp_path / "s.duckdb", nodes, [(A, 1, 2)])
-    to_elevation(src, dem=ground)
+    to_elevation(src, dem=ground, vertical_datum="EGM2008", license="test")
     res = to_elevation(src, dem=surface, suffix="dsm")
     assert res["column"] == "ele_dsm"
 
@@ -198,7 +214,7 @@ def test_z_vertices_interior(tmp_path):
     con.execute("LOAD spatial; UPDATE driving.edges SET geometry = "
                 "ST_GeomFromText('LINESTRING(18.06 59.32,18.07 59.33,18.08 59.32)')")
     con.close()
-    to_elevation(src, dem=dem)
+    to_elevation(src, dem=dem, reference=False)
     con = duckdb.connect(src, read_only=True)
     zf, zt, zv = con.execute("SELECT z_from, z_to, z_vertices FROM driving.edges").fetchone()
     assert len(zv) == 3 and zv[0] == zf and zv[-1] == zt

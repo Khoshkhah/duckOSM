@@ -55,7 +55,14 @@ fn dem_bytes_build_as_dem_file() {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
     let tif = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/monaco-copernicus-glo30.tif");
     let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let p = Params { duckdb: false, built_at: Some(0), dem: Some(tif.clone()), ..Params::default() };
+    let p = Params {
+        duckdb: false,
+        built_at: Some(0),
+        dem: Some(tif.clone()),
+        dem_vertical_datum: Some("EGM2008".into()),
+        dem_license: Some("Copernicus".into()),
+        ..Params::default()
+    };
     let q = Params { dem: None, dem_bytes: Some(("glo30.tif".into(), std::fs::read(&tif).unwrap())), ..p.clone() };
     let (a, b) = (tmp.join("dem-file"), tmp.join("dem-bytes"));
     build(&data.join("monaco_sample.osm.pbf"), &a, &p).unwrap();
@@ -64,4 +71,38 @@ fn dem_bytes_build_as_dem_file() {
         let (x, y) = (std::fs::read(a.join(f)).unwrap(), std::fs::read(b.join(f)).unwrap());
         assert!(x.len() > 100 && x == y, "{f}");
     }
+    // the ground id of both builds is the SHA-256 of the file; the datum and the license are written
+    let sha = sha256_hex(&std::fs::read(&tif).unwrap());
+    let con = duckdb::Connection::open_in_memory().unwrap();
+    for dir in [&a, &b] {
+        let f = dir.join("elevation_metadata_main.parquet");
+        let row: (String, String, String) = con
+            .query_row(
+                &format!("SELECT sha256, vertical_datum, license FROM read_parquet('{}')", f.display()),
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (sha.clone(), "EGM2008".into(), "Copernicus".into()));
+    }
+}
+
+fn sha256_hex(b: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(b))
+}
+
+/// A DEM with no datum or license stops the build, unless it is marked as not the reference.
+#[test]
+fn reference_dem_needs_datum_and_license() {
+    use duckosm_build::{build, Params};
+    use std::path::PathBuf;
+    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+    let tif = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/monaco-copernicus-glo30.tif");
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let p = Params { duckdb: false, built_at: Some(0), dem: Some(tif), ..Params::default() };
+    let e = build(&data.join("monaco_sample.osm.pbf"), &tmp.join("dem-no-datum"), &p).unwrap_err();
+    assert!(e.contains("reference ground"), "{e}");
+    let q = Params { dem_not_reference: true, ..p };
+    build(&data.join("monaco_sample.osm.pbf"), &tmp.join("dem-not-reference"), &q).unwrap();
 }

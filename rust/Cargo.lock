@@ -773,6 +773,7 @@ dependencies = [
  "duckosm-parquet",
  "roadstyle-levels 0.25.0",
  "serde_json",
+ "sha2",
  "tiff",
  "tzf-rs",
  "yaml-rust2",

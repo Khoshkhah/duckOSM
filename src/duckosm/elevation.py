@@ -30,6 +30,7 @@ Needs the optional deps ``rasterio`` + ``pyproj`` (``pip install 'duckosm[elevat
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import os
@@ -108,6 +109,19 @@ def _dem_uri(dem) -> str:
     (resolving a URL as a path once recorded `/cwd/https:/host/dem.tif`)."""
     d = str(dem)
     return d if "://" in d or d.startswith("/vsi") else str(Path(d).resolve())
+
+
+def _sha256(path) -> str | None:
+    """The ground id: the SHA-256 of the bytes of a local DEM file. None for a URL or a GDAL virtual
+    path, because the step reads only parts of such a source and has no whole file to hash."""
+    d = str(path)
+    if "://" in d or d.startswith("/vsi") or not Path(d).is_file():
+        return None
+    h = hashlib.sha256()
+    with open(d, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _copernicus_url(lat_floor: int, lon_floor: int) -> str:
@@ -207,7 +221,7 @@ def _make_sampler(dem, provider, nodata_fill, bbox):
         meta = {"source": Path(dem).name, "source_type": "file", "uri": _dem_uri(dem),
                 "resolution_m": _dem_resolution_m(ds), "product": "unknown",
                 "dem_crs": ds.crs.to_string() if ds.crs else "unknown",
-                "vertical_datum": "unknown", "license": "unknown"}
+                "vertical_datum": "unknown", "license": "unknown", "sha256": _sha256(dem)}
         return _file_sampler(ds, nodata_fill), meta, ds.close
 
     p = PROVIDERS[provider]
@@ -226,7 +240,8 @@ def _make_sampler(dem, provider, nodata_fill, bbox):
         meta = {"source": p["source"], "source_type": "download", "uri": p["uri"],
                 "resolution_m": p["resolution_m"], "product": p["product"],
                 "dem_crs": ds.crs.to_string() if ds.crs else p["dem_crs"],
-                "vertical_datum": p["vertical_datum"], "license": p["license"]}
+                "vertical_datum": p["vertical_datum"], "license": p["license"],
+                "sha256": _sha256(path)}
 
         def closer():
             ds.close()
@@ -256,7 +271,8 @@ def _make_sampler(dem, provider, nodata_fill, bbox):
                 _clean(ds.sample([(lons[i], lats[i]) for i in idxs]), ds.nodata, out, filled, idxs)
         return out, filled
 
-    meta = {"source_type": "download", **{k: p[k] for k in
+    # streamed tiles: no whole file is read, so there is no ground id
+    meta = {"source_type": "download", "sha256": None, **{k: p[k] for k in
             ("source", "uri", "resolution_m", "product", "dem_crs", "vertical_datum", "license")}}
     return sample, meta, None
 
@@ -302,21 +318,24 @@ def _write_metadata(con, meta, nodata_fill, n_nodes, n_nodata, ele_column):
         ele_column VARCHAR, source VARCHAR, source_type VARCHAR, uri VARCHAR,
         resolution_m DOUBLE, product VARCHAR, dem_crs VARCHAR, vertical_datum VARCHAR,
         license VARCHAR, nodata_fill DOUBLE, n_nodes BIGINT, n_nodata BIGINT,
-        sampled_at VARCHAR, duckosm_version VARCHAR)""")
+        sampled_at VARCHAR, duckosm_version VARCHAR, sha256 VARCHAR)""")
     con.execute("ALTER TABLE main.elevation_metadata ADD COLUMN IF NOT EXISTS ele_column VARCHAR")
+    con.execute("ALTER TABLE main.elevation_metadata ADD COLUMN IF NOT EXISTS sha256 VARCHAR")
     con.execute("UPDATE main.elevation_metadata SET ele_column = 'ele' WHERE ele_column IS NULL")
     con.execute("DELETE FROM main.elevation_metadata WHERE ele_column = ?", [ele_column])
     con.execute("""INSERT INTO main.elevation_metadata
         (ele_column, source, source_type, uri, resolution_m, product, dem_crs, vertical_datum,
-         license, nodata_fill, n_nodes, n_nodata, sampled_at, duckosm_version)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
+         license, nodata_fill, n_nodes, n_nodata, sampled_at, duckosm_version, sha256)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
         ele_column,
         meta["source"], meta["source_type"], meta["uri"], meta["resolution_m"], meta["product"],
         meta["dem_crs"], meta["vertical_datum"], meta["license"], float(nodata_fill),
-        n_nodes, n_nodata, datetime.now(timezone.utc).isoformat(timespec="seconds"), __version__])
+        n_nodes, n_nodata, datetime.now(timezone.utc).isoformat(timespec="seconds"), __version__,
+        meta["sha256"]])
 
 
-def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix=""):
+def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix="",
+                 vertical_datum=None, license=None, reference=True):
     """Add elevation to a built duckOSM db in place. Returns a stats dict.
 
     Args:
@@ -330,7 +349,17 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
             writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` alongside the plain ``ele``.
             Object height above ground is then ``ele_dsm - ele`` (needs a DTM in ``ele`` and
             a DSM here, both at a resolution fine enough to resolve the objects).
+        vertical_datum, license: the vertical datum (for example ``EGM2008``) and the license of the
+            ``dem`` file, for ``main.elevation_metadata``. A ``dem`` in ``ele`` (no ``suffix``) is the
+            area's reference ground (docs/concepts/ground-reference.md): both are necessary, unless
+            ``reference`` is False. Ignored for a ``source`` provider, which has its own values.
+        reference: False marks the ``dem`` as not the area's reference ground (a test, a surface
+            model): its unknown datum and license are written as ``unknown``.
     """
+    if dem and not suffix and reference and not (vertical_datum and license):
+        raise ValueError("the DEM is the area's reference ground: give its vertical datum and its "
+                         "license (--vertical-datum, --license), or mark it as not the reference "
+                         "(--not-reference)")
     _fix_polluted_proj()                                    # before any rasterio/pyproj CRS op
     try:
         import numpy  # noqa: F401
@@ -359,6 +388,8 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
                 logger.info(f"  source=auto → {provider} "
                             f"(bbox {', '.join(f'{v:.2f}' for v in bbox)})")
         sample, meta, closer = _make_sampler(dem, provider, nodata_fill, bbox)
+        if dem:
+            meta.update(vertical_datum=vertical_datum or "unknown", license=license or "unknown")
     except Exception:
         con.close()
         raise

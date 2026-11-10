@@ -532,6 +532,12 @@ duckosm elevation [OPTIONS] DB
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
 | `--nodata-fill FLOAT` | height written where the model has no value | `0.0` |
 | `--suffix NAME` | store as a second surface: `--suffix dsm` writes `ele_dsm`, `z_from_dsm`, `z_to_dsm` | |
+| `--vertical-datum DATUM` | the vertical datum of the `--dem` file, for example `EGM2008` | `unknown` |
+| `--license TEXT` | the license of the `--dem` file | `unknown` |
+| `--not-reference` | the `--dem` file is not the area's [ground reference](../concepts/ground-reference.md): its datum and its license can stay `unknown` | |
+
+A `--dem` file in `ele` (no `--suffix`) is the area's ground reference. Give `--vertical-datum` and `--license`, or
+`--not-reference`. If not, the command stops. The SHA-256 of the file goes into `main.elevation_metadata.sha256`.
 
 ### `admin`
 
