@@ -6,8 +6,13 @@
 //! Copernicus GLO-30 tile, for example). A value is the pixel that holds the point, as rasterio's `sample`
 //! takes it; a point outside the raster, a nodata value or a value that is not finite gets `nodata_fill`
 //! (0.0, as duckOSM). The heights are kept to 2 decimals (cm), as duckOSM keeps them.
+//!
+//! The step also writes the pixels of the DEM over the network (`main.elevation_grid`): the ground between the
+//! roads, for a reader that makes a terrain (SimReady's `gltf` adapter). The pixels are the raster's own, with
+//! no resampling.
 
 use duckosm_core::model::{Edge, Node};
+use std::io::{Read, Seek};
 use std::path::Path;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::tags::Tag;
@@ -28,9 +33,14 @@ pub struct Dem {
 
 impl Dem {
     pub fn open(path: &Path) -> Result<Dem, String> {
-        let err = |e: tiff::TiffError| format!("{}: {e}", path.display());
         let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut d = Decoder::new(std::io::BufReader::new(f)).map_err(err)?;
+        Dem::from_reader(std::io::BufReader::new(f), &path.display().to_string())
+    }
+
+    /// The DEM from the bytes of a GeoTIFF (a file, or the bytes that a browser gives); `name` goes in the errors.
+    pub fn from_reader<R: Read + Seek>(r: R, name: &str) -> Result<Dem, String> {
+        let err = |e: tiff::TiffError| format!("{name}: {e}");
+        let mut d = Decoder::new(r).map_err(err)?;
         let (w, h) = d.dimensions().map_err(err)?;
         let scale = d.get_tag_f64_vec(Tag::ModelPixelScaleTag).map_err(err)?;
         let tie = d.get_tag_f64_vec(Tag::ModelTiepointTag).map_err(err)?;
@@ -40,7 +50,7 @@ impl Dem {
             .unwrap_or_default();
         let key = |k: u16| keys[4..].chunks(4).find(|e| e[0] == k).map(|e| e[3]);
         if keys.len() < 4 || key(2048) != Some(4326) {
-            return Err(format!("{}: the DEM must be in EPSG:4326", path.display()));
+            return Err(format!("{name}: the DEM must be in EPSG:4326"));
         }
         let nodata = match d.find_tag(Tag::GdalNodata).map_err(err)? {
             Some(_) => d
@@ -55,10 +65,7 @@ impl Dem {
         let data = match d.read_image().map_err(err)? {
             DecodingResult::F32(v) => v,
             _ => {
-                return Err(format!(
-                    "{}: the DEM must have 32-bit float values",
-                    path.display()
-                ))
+                return Err(format!("{name}: the DEM must have 32-bit float values"))
             }
         };
         let (sx, sy) = (scale[0], scale[1]);
@@ -100,6 +107,46 @@ impl Dem {
                 .get(row.min(self.height - 1) * self.width + col.min(self.width - 1))?,
         );
         (z.is_finite() && Some(z) != self.nodata).then_some(z)
+    }
+}
+
+/// One pixel of the DEM: its column and row in the grid (0 at the west and the north edge), the lon and the lat of
+/// its centre, and its height to the cm (None on nodata).
+pub struct GridCell {
+    pub col: i32,
+    pub row: i32,
+    pub lon: f64,
+    pub lat: f64,
+    pub z: Option<f64>,
+}
+
+impl Dem {
+    /// The pixels over a box (degrees) plus `margin` pixels on each side, inside the raster, row by row from the
+    /// north. Empty when the box is outside the raster.
+    pub fn grid(&self, west: f64, south: f64, east: f64, north: f64, margin: usize) -> Vec<GridCell> {
+        let col = |lon: f64| ((lon - self.x0) / self.sx).floor();
+        let row = |lat: f64| ((self.y0 - lat) / self.sy).floor();
+        let m = margin as f64;
+        let (c0, c1) = ((col(west) - m).max(0.0), (col(east) + m).min(self.width as f64 - 1.0));
+        let (r0, r1) = ((row(north) - m).max(0.0), (row(south) + m).min(self.height as f64 - 1.0));
+        if !(c0 <= c1 && r0 <= r1) {
+            return Vec::new();
+        }
+        let (c0, c1, r0, r1) = (c0 as usize, c1 as usize, r0 as usize, r1 as usize);
+        let mut cells = Vec::with_capacity((c1 - c0 + 1) * (r1 - r0 + 1));
+        for r in r0..=r1 {
+            for c in c0..=c1 {
+                let z = f64::from(self.data[r * self.width + c]);
+                cells.push(GridCell {
+                    col: (c - c0) as i32,
+                    row: (r - r0) as i32,
+                    lon: self.x0 + (c as f64 + 0.5) * self.sx,
+                    lat: self.y0 - (r as f64 + 0.5) * self.sy,
+                    z: (z.is_finite() && Some(z) != self.nodata).then(|| round_cm(z)),
+                });
+            }
+        }
+        cells
     }
 }
 

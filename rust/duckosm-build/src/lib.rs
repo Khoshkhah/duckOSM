@@ -573,6 +573,19 @@ pub fn run<W: Write + Send>(
             dem_nodata,
         )?;
         log.step("elevation metadata");
+        // the ground between the roads: the pixels over the box of the nodes of every mode, 3 pixels more on each side
+        let (mut w, mut s, mut e, mut n) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for nd in mode_nodes.iter().flat_map(|(_, ns)| ns) {
+            (w, s, e, n) = (w.min(nd.lon), s.min(nd.lat), e.max(nd.lon), n.max(nd.lat));
+        }
+        if w <= e && s <= n {
+            let cells = d.grid(w, s, e, n, 3);
+            duckosm_parquet::write_elevation_grid_to(
+                file("elevation_grid_main.parquet")?,
+                &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>(),
+            )?;
+            log.step("elevation grid");
+        }
     }
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
         let faces = building_faces::building_faces(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits);
