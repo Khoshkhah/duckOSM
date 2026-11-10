@@ -142,6 +142,7 @@ class Elevation:
     """The area's DEM, its ground reference (docs/concepts/ground-reference.md). Only the Rust build
     (duckosm-rust) reads it; its --dem wins. `duckosm elevation` takes its file on the command line."""
     dem: Optional[str] = None
+    product: Optional[str] = None                  # DTM or DSM
     vertical_datum: Optional[str] = None
     license: Optional[str] = None
     reference: bool = True

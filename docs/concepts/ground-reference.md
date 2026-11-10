@@ -82,7 +82,7 @@ names the two ids.
 
 | Project | Now | To do |
 |---|---|---|
-| duckOSM | Done. `main.elevation_metadata` has `product`, `vertical_datum`, `license` and `sha256` (the ground id) in the Python command and in the Rust build (file and browser bytes); `main.elevation_grid` from the Rust build. A `--dem` file in `ele` needs its vertical datum and its license, or `--not-reference`. The default source with no `--dem` is still Copernicus GLO-30 (a DSM, no ground id) | `product` of a `--dem` file is still `unknown` (no option yet) |
+| duckOSM | Done. `main.elevation_metadata` has `product`, `vertical_datum`, `license` and `sha256` (the ground id) in the Python command and in the Rust build (file and browser bytes); `main.elevation_grid` from the Rust build. A `--dem` file in `ele` needs its product, its vertical datum and its license (options or the config section `elevation`), or `--not-reference`. The default source with no `--dem` is still Copernicus GLO-30 (a DSM, no ground id) | nothing |
 | SimReady | Monaco on FABDEM (a DTM), Vancouver on a 1 m LiDAR DTM; `terrain-conform` and the GLB on the branch `claude/gltf-adapter-design-5047c6`; the connecting roads of the `.xodr` have no elevation | the ground id in its products; the conformed ground as a grid that others read; the elevation of the connecting roads |
 | roadstyle | the map terrain is always the AWS Terrain Tiles | terrain tiles from the conformed ground for an area with a reference; the page option `ground`; the vehicles take the road heights |
 | urbanstyle | a "rough terrain" switch with the AWS Terrain Tiles; bridge heights from LiDAR feed SimReady | the same terrain tiles as roadstyle |

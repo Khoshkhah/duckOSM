@@ -94,7 +94,7 @@ const REPORT: [&str; 1] = ["enabled"];
 const VIZ: [&str; 2] = ["enabled", "basemap"];
 const MULTIMODAL: [&str; 3] = ["enabled", "transfer_s", "transfer_costs"];
 /// The area's DEM, its ground reference (docs/concepts/ground-reference.md). The command line `--dem` wins.
-const ELEVATION: [&str; 4] = ["dem", "vertical_datum", "license", "reference"];
+const ELEVATION: [&str; 5] = ["dem", "product", "vertical_datum", "license", "reference"];
 
 struct Section<'a> {
     name: &'a str,
@@ -403,6 +403,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         // main.boundary and the metadata, also when the PBF is cut already (a missing file is an error there)
         area_boundary: boundary_path.map(PathBuf::from).filter(|b| b.exists()),
         dem,
+        dem_product: elevation.str("product")?,
         dem_vertical_datum: elevation.str("vertical_datum")?,
         dem_license: elevation.str("license")?,
         dem_not_reference: !elevation.bool("reference", true)?,
@@ -855,12 +856,15 @@ mod tests {
     fn elevation_section() {
         let tif = format!("{}/tests/data/monaco-copernicus-glo30.tif", env!("CARGO_MANIFEST_DIR"));
         let c = write(&format!(
-            "pbf_path: {}\nelevation:\n  dem: {tif}\n  vertical_datum: EGM2008\n  license: open\n",
+            "pbf_path: {}\nelevation:\n  dem: {tif}\n  product: DTM\n  vertical_datum: EGM2008\n  license: open\n",
             pbf()
         ));
         let p = read(&c, false, false).unwrap().params;
         assert_eq!(p.dem, Some(PathBuf::from(&tif)));
-        assert_eq!((p.dem_vertical_datum.as_deref(), p.dem_license.as_deref()), (Some("EGM2008"), Some("open")));
+        assert_eq!(
+            (p.dem_product.as_deref(), p.dem_vertical_datum.as_deref(), p.dem_license.as_deref()),
+            (Some("DTM"), Some("EGM2008"), Some("open"))
+        );
         assert!(!p.dem_not_reference);
         let c = write(&format!("pbf_path: {}\nelevation:\n  dem: {tif}\n  reference: false\n", pbf()));
         assert!(read(&c, false, false).unwrap().params.dem_not_reference);

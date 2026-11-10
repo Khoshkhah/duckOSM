@@ -73,9 +73,10 @@ pub struct Params {
     /// The DEM as the bytes of a GeoTIFF and a file name, for a build with no file system (the browser). `dem` wins
     /// when both are set. The same step and the same files as `dem`; the metadata's `uri` is the file name.
     pub dem_bytes: Option<(String, Vec<u8>)>,
-    /// The vertical datum (for example `EGM2008`) and the license of the DEM, for `main.elevation_metadata`. The DEM is
-    /// the area's reference ground (docs/concepts/ground-reference.md): the build stops when one of them is None,
-    /// unless `dem_not_reference` is set. Then the unknown values are written as `unknown`.
+    /// The product (`DTM` or `DSM`), the vertical datum (for example `EGM2008`) and the license of the DEM, for
+    /// `main.elevation_metadata`. The DEM is the area's reference ground (docs/concepts/ground-reference.md): the build
+    /// stops when one of them is None, unless `dem_not_reference` is set. Then the unknown values are written as `unknown`.
+    pub dem_product: Option<String>,
     pub dem_vertical_datum: Option<String>,
     pub dem_license: Option<String>,
     pub dem_not_reference: bool,
@@ -105,6 +106,7 @@ impl Default for Params {
             timezone_entry: None,
             dem: None,
             dem_bytes: None,
+            dem_product: None,
             dem_vertical_datum: None,
             dem_license: None,
             dem_not_reference: false,
@@ -502,12 +504,16 @@ pub fn run<W: Write + Send>(
         sum.sidewalk_roads = Some(sidewalks::infer_separate_sidewalks(&mut ways, &coords));
         log.step("sidewalk rule");
     }
+    if let Some(x) = p.dem_product.as_deref().filter(|x| !matches!(*x, "DTM" | "DSM")) {
+        return Err(format!("the DEM product must be DTM (bare earth) or DSM (surface), not {x}"));
+    }
     if (p.dem.is_some() || p.dem_bytes.is_some())
         && !p.dem_not_reference
-        && (p.dem_vertical_datum.is_none() || p.dem_license.is_none())
+        && (p.dem_product.is_none() || p.dem_vertical_datum.is_none() || p.dem_license.is_none())
     {
-        return Err("the DEM is the area's reference ground: give its vertical datum and its license \
-                    (--dem-vertical-datum, --dem-license), or mark it as not the reference (--dem-not-reference)"
+        return Err("the DEM is the area's reference ground: give its product, its vertical datum and its license \
+                    (--dem-product, --dem-vertical-datum, --dem-license), or mark it as not the reference \
+                    (--dem-not-reference)"
             .into());
     }
     let dem = match (&p.dem, &p.dem_bytes) {
@@ -599,7 +605,7 @@ pub fn run<W: Write + Send>(
                 &name,
                 "file",
                 &uri,
-                "unknown",
+                p.dem_product.as_deref().unwrap_or("unknown"),
                 "EPSG:4326",
                 p.dem_vertical_datum.as_deref().unwrap_or("unknown"),
                 p.dem_license.as_deref().unwrap_or("unknown"),

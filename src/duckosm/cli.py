@@ -1138,6 +1138,9 @@ def features_check(db, limit):
 @click.option('--suffix', default='', metavar='NAME',
               help="Store as a SECOND surface instead of overwriting: --suffix dsm writes "
                    "ele_dsm / z_from_dsm / z_to_dsm. Object height = ele_dsm - ele.")
+@click.option('--product', type=click.Choice(['DTM', 'DSM']), default=None,
+              help="The product of the --dem file: DTM (bare earth) or DSM (surface). Necessary when "
+                   "the --dem file is the area's reference ground (no --suffix).")
 @click.option('--vertical-datum', default=None, metavar='DATUM',
               help='The vertical datum of the --dem file (for example EGM2008). Necessary when the '
                    '--dem file is the area\'s reference ground (no --suffix).')
@@ -1147,7 +1150,8 @@ def features_check(db, limit):
 @click.option('--not-reference', is_flag=True,
               help="The --dem file is not the area's reference ground (a test or a surface model): "
                    "its vertical datum and its license can stay unknown.")
-def elevation(db, dem, source, modes, nodata_fill, suffix, vertical_datum, license_, not_reference):
+def elevation(db, dem, source, modes, nodata_fill, suffix, product, vertical_datum, license_,
+              not_reference):
     """Sample a DEM at every node and add elevation to a built db, in place.
 
     Adds <mode>.nodes.ele and <mode>.edges.z_from/z_to, and records provenance in
@@ -1161,7 +1165,7 @@ def elevation(db, dem, source, modes, nodata_fill, suffix, vertical_datum, licen
     --suffix keeps a second surface side by side, so a bare-earth DTM and a DSM can both
     live in one db and `ele_dsm - ele` gives height above ground.
 
-    A --dem file in `ele` is the area's reference ground: give --vertical-datum and --license,
+    A --dem file in `ele` is the area's reference ground: give --product, --vertical-datum and --license,
     or --not-reference. The SHA-256 of the file is the ground id (main.elevation_metadata.sha256).
     See https://khoshkhah.github.io/duckOSM/guides/elevation/.
     """
@@ -1172,7 +1176,7 @@ def elevation(db, dem, source, modes, nodata_fill, suffix, vertical_datum, licen
     try:
         res = to_elevation(db, dem=dem, source=source, modes=list(modes) or None,
                            nodata_fill=nodata_fill, suffix=suffix, vertical_datum=vertical_datum,
-                           license=license_, reference=not not_reference)
+                           license=license_, reference=not not_reference, product=product)
     except Exception as e:
         raise click.ClickException(str(e))
     click.echo(f"elevation added from {res['source']} — {res['n_nodes']} nodes "

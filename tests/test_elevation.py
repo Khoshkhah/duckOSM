@@ -95,12 +95,12 @@ def test_nodata_fill_out_of_coverage(tmp_path):
 def test_provenance_metadata(tmp_path):
     dem = _dem(tmp_path / "ramp.tif")
     src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32), (2, 18.07, 59.32)], [(A, 1, 2)])
-    to_elevation(src, dem=dem, vertical_datum="EGM2008", license="CC-BY-4.0")
+    to_elevation(src, dem=dem, product="DTM", vertical_datum="EGM2008", license="CC-BY-4.0")
 
     con = duckdb.connect(src, read_only=True)
     row = con.execute("SELECT source_type, product, n_nodes, n_nodata, dem_crs, vertical_datum, "
                       "license, sha256 FROM main.elevation_metadata").fetchone()
-    assert row[0] == "file" and row[1] == "unknown"       # a --dem file: type file, product unknown
+    assert row[0] == "file" and row[1] == "DTM"           # a --dem file: type file, the given product
     assert row[2] == 2 and row[3] == 0
     assert "4326" in row[4]                                # CRS read from the raster
     assert row[5:7] == ("EGM2008", "CC-BY-4.0")
@@ -115,7 +115,9 @@ def test_reference_dem_needs_datum_and_license(tmp_path):
     dem = _dem(tmp_path / "ramp.tif")
     src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32)], [])
     with pytest.raises(ValueError, match="reference ground"):
-        to_elevation(src, dem=dem, vertical_datum="EGM2008")
+        to_elevation(src, dem=dem, vertical_datum="EGM2008", license="x")
+    with pytest.raises(ValueError, match="DTM .bare earth. or DSM"):
+        to_elevation(src, dem=dem, product="DEM", reference=False)
     to_elevation(src, dem=dem, reference=False)            # not the reference: unknown is allowed
     con = duckdb.connect(src, read_only=True)
     assert con.execute("SELECT vertical_datum, license FROM main.elevation_metadata").fetchone() == (
@@ -141,7 +143,7 @@ def test_suffix_keeps_two_surfaces(tmp_path):
 
     nodes = [(1, 18.06, 59.32), (2, 18.07, 59.32)]
     src = _src(tmp_path / "s.duckdb", nodes, [(A, 1, 2)])
-    to_elevation(src, dem=ground, vertical_datum="EGM2008", license="test")
+    to_elevation(src, dem=ground, product="DTM", vertical_datum="EGM2008", license="test")
     res = to_elevation(src, dem=surface, suffix="dsm")
     assert res["column"] == "ele_dsm"
 

@@ -59,6 +59,7 @@ fn dem_bytes_build_as_dem_file() {
         duckdb: false,
         built_at: Some(0),
         dem: Some(tif.clone()),
+        dem_product: Some("DSM".into()),
         dem_vertical_datum: Some("EGM2008".into()),
         dem_license: Some("Copernicus".into()),
         ..Params::default()
@@ -76,14 +77,14 @@ fn dem_bytes_build_as_dem_file() {
     let con = duckdb::Connection::open_in_memory().unwrap();
     for dir in [&a, &b] {
         let f = dir.join("elevation_metadata_main.parquet");
-        let row: (String, String, String) = con
+        let row: (String, String, String, String) = con
             .query_row(
-                &format!("SELECT sha256, vertical_datum, license FROM read_parquet('{}')", f.display()),
+                &format!("SELECT sha256, vertical_datum, license, product FROM read_parquet('{}')", f.display()),
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
-        assert_eq!(row, (sha.clone(), "EGM2008".into(), "Copernicus".into()));
+        assert_eq!(row, (sha.clone(), "EGM2008".into(), "Copernicus".into(), "DSM".into()));
     }
 }
 
@@ -92,7 +93,7 @@ fn sha256_hex(b: &[u8]) -> String {
     format!("{:x}", Sha256::digest(b))
 }
 
-/// A DEM with no datum or license stops the build, unless it is marked as not the reference.
+/// A DEM with no product, datum or license stops the build, unless it is marked as not the reference.
 #[test]
 fn reference_dem_needs_datum_and_license() {
     use duckosm_build::{build, Params};
@@ -103,6 +104,9 @@ fn reference_dem_needs_datum_and_license() {
     let p = Params { duckdb: false, built_at: Some(0), dem: Some(tif), ..Params::default() };
     let e = build(&data.join("monaco_sample.osm.pbf"), &tmp.join("dem-no-datum"), &p).unwrap_err();
     assert!(e.contains("reference ground"), "{e}");
+    let bad = Params { dem_product: Some("DEM".into()), dem_not_reference: true, ..p.clone() };
+    let e = build(&data.join("monaco_sample.osm.pbf"), &tmp.join("dem-bad-product"), &bad).unwrap_err();
+    assert!(e.contains("DTM (bare earth) or DSM"), "{e}");
     let q = Params { dem_not_reference: true, ..p };
     build(&data.join("monaco_sample.osm.pbf"), &tmp.join("dem-not-reference"), &q).unwrap();
 }

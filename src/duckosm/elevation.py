@@ -335,7 +335,7 @@ def _write_metadata(con, meta, nodata_fill, n_nodes, n_nodata, ele_column):
 
 
 def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix="",
-                 vertical_datum=None, license=None, reference=True):
+                 vertical_datum=None, license=None, reference=True, product=None):
     """Add elevation to a built duckOSM db in place. Returns a stats dict.
 
     Args:
@@ -349,17 +349,20 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
             writes ``ele_dsm`` / ``z_from_dsm`` / ``z_to_dsm`` alongside the plain ``ele``.
             Object height above ground is then ``ele_dsm - ele`` (needs a DTM in ``ele`` and
             a DSM here, both at a resolution fine enough to resolve the objects).
-        vertical_datum, license: the vertical datum (for example ``EGM2008``) and the license of the
-            ``dem`` file, for ``main.elevation_metadata``. A ``dem`` in ``ele`` (no ``suffix``) is the
-            area's reference ground (docs/concepts/ground-reference.md): both are necessary, unless
-            ``reference`` is False. Ignored for a ``source`` provider, which has its own values.
+        product, vertical_datum, license: the product (``DTM`` or ``DSM``), the vertical datum (for
+            example ``EGM2008``) and the license of the ``dem`` file, for ``main.elevation_metadata``.
+            A ``dem`` in ``ele`` (no ``suffix``) is the area's reference ground
+            (docs/concepts/ground-reference.md): all three are necessary, unless ``reference`` is False.
+            Ignored for a ``source`` provider, which has its own values.
         reference: False marks the ``dem`` as not the area's reference ground (a test, a surface
             model): its unknown datum and license are written as ``unknown``.
     """
-    if dem and not suffix and reference and not (vertical_datum and license):
-        raise ValueError("the DEM is the area's reference ground: give its vertical datum and its "
-                         "license (--vertical-datum, --license), or mark it as not the reference "
-                         "(--not-reference)")
+    if product not in (None, "DTM", "DSM"):
+        raise ValueError(f"the DEM product must be DTM (bare earth) or DSM (surface), not {product}")
+    if dem and not suffix and reference and not (product and vertical_datum and license):
+        raise ValueError("the DEM is the area's reference ground: give its product, its vertical "
+                         "datum and its license (--product, --vertical-datum, --license), or mark it "
+                         "as not the reference (--not-reference)")
     _fix_polluted_proj()                                    # before any rasterio/pyproj CRS op
     try:
         import numpy  # noqa: F401
@@ -389,7 +392,8 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
                             f"(bbox {', '.join(f'{v:.2f}' for v in bbox)})")
         sample, meta, closer = _make_sampler(dem, provider, nodata_fill, bbox)
         if dem:
-            meta.update(vertical_datum=vertical_datum or "unknown", license=license or "unknown")
+            meta.update(product=product or "unknown", vertical_datum=vertical_datum or "unknown",
+                        license=license or "unknown")
     except Exception:
         con.close()
         raise

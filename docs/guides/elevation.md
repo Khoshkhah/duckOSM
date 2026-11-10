@@ -33,11 +33,11 @@ when you set an [OpenTopography](https://opentopography.org) key in `OPENTOPOGRA
 better accuracy, point it at your own file, e.g. a national 1 m model:
 
 ```bash
-duckosm elevation monaco.duckdb --dem my_dtm.tif --vertical-datum EGM2008 --license CC-BY-4.0
+duckosm elevation monaco.duckdb --dem my_dtm.tif --product DTM --vertical-datum EGM2008 --license CC-BY-4.0
 ```
 
-A `--dem` file in `ele` is the area's ground reference. Its vertical datum and its license are necessary: without them
-the command stops. For a file that is not the reference (a test, a surface model), add `--not-reference`. A file with
+A `--dem` file in `ele` is the area's ground reference. Its product (`DTM` or `DSM`), its vertical datum and its license
+are necessary: without them the command stops. For a file that is not the reference (a test, a surface model), add `--not-reference`. A file with
 `--suffix` is never the reference.
 
 | Option | Does | Default |
@@ -47,14 +47,15 @@ the command stops. For a file that is not the reference (a test, a surface model
 | `-m MODE` | only this mode; repeat for several | every mode |
 | `--nodata-fill` | height written where the model has no value | `0` |
 | `--suffix dsm` | store as a second surface (`ele_dsm`, `z_from_dsm`, …) instead of replacing | |
+| `--product` | `DTM` (bare earth) or `DSM` (surface): the product of the `--dem` file | |
 | `--vertical-datum` | the vertical datum of the `--dem` file, for example `EGM2008` | |
 | `--license` | the license of the `--dem` file | |
 | `--not-reference` | the `--dem` file is not the area's ground reference | |
 
-The Rust build (`duckosm-rust --dem FILE`) has the same rule, with the options `--dem-vertical-datum`, `--dem-license`
-and `--dem-not-reference`. To set the DEM one time for each area, put it in the config file, in the section
-[`elevation`](../reference/configuration.md#elevation) (`dem`, `vertical_datum`, `license`); `--dem` wins over it. The browser build gives them as `Params.dem_vertical_datum`, `dem_license` and
-`dem_not_reference`.
+The Rust build (`duckosm-rust --dem FILE`) has the same rule, with the options `--dem-product`, `--dem-vertical-datum`,
+`--dem-license` and `--dem-not-reference`. To set the DEM one time for each area, put it in the config file, in the section
+[`elevation`](../reference/configuration.md#elevation) (`dem`, `product`, `vertical_datum`, `license`); `--dem` wins over it. The browser build gives them as `Params.dem_product`,
+`dem_vertical_datum`, `dem_license` and `dem_not_reference`.
 
 ### The ground id
 

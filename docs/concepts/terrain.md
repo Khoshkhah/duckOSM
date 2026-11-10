@@ -33,8 +33,8 @@ The build reads the DEM one time and takes its pixels over the area:
 - **The pixels:** the raster's own pixels, with no resampling. A row is one pixel centre, and `z` is its height to the centimetre.
 - **No data:** a pixel with no value (for example the open sea in some models) has `z` NULL.
 
-For Monaco with the FABDEM crop, the grid has 156 × 119 pixels (18,564 rows) and takes 55 KB of Parquet, about 3 bytes for each
-pixel. The road tables of the same area are much larger.
+For Monaco (`tests/data/monaco.osm.pbf`, the modes driving, walking and cycling) with the FABDEM crop, the grid has 140 × 103
+pixels (14,420 rows, `z` from 0 to 543.77 m) and takes 45 KB of Parquet, about 3 bytes for each pixel. The road tables of the same area are much larger.
 
 ## From the database to a map
 
@@ -72,6 +72,7 @@ Give the DEM one time for each area, in the config file ([`elevation`](../refere
 ```yaml
 elevation:
   dem: fabdem-monaco.tif
+  product: DTM
   vertical_datum: EGM2008
   license: CC-BY-NC-SA-4.0
 ```
@@ -84,10 +85,10 @@ Or give it on the command line. `--dem` wins over the config:
 
 ```bash
 duckosm-rust monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco \
-  --dem fabdem-monaco.tif --dem-vertical-datum EGM2008 --dem-license CC-BY-NC-SA-4.0
+  --dem fabdem-monaco.tif --dem-product DTM --dem-vertical-datum EGM2008 --dem-license CC-BY-NC-SA-4.0
 ```
 
-The DEM is the area's [ground reference](ground-reference.md): without its vertical datum and its license the build stops,
+The DEM is the area's [ground reference](ground-reference.md): without its product, its vertical datum and its license the build stops,
 unless you mark it as not the reference (`reference: false`, or `--dem-not-reference`).
 
 The file is a GeoTIFF in EPSG:4326 with 32-bit floats. `duckosm elevation` can add heights to a database that is already built

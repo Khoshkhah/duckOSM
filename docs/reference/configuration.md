@@ -143,13 +143,15 @@ command line. Only the Rust build (`duckosm-rust --config`) reads this section: 
 | Key | Default | Does |
 |---|---|---|
 | `elevation.dem` | none | the DEM file: a GeoTIFF in EPSG:4326 with 32-bit floats. No file: no heights |
+| `elevation.product` | none | `DTM` (bare earth) or `DSM` (surface). Necessary when `reference` is `true` |
 | `elevation.vertical_datum` | none | its vertical datum, for example `EGM2008`. Necessary when `reference` is `true` |
 | `elevation.license` | none | its license. Necessary when `reference` is `true` |
-| `elevation.reference` | `true` | the file is the area's ground reference. `false` (a test, a surface model): the datum and the license can stay unknown |
+| `elevation.reference` | `true` | the file is the area's ground reference. `false` (a test, a second surface): the product, the datum and the license can stay unknown |
 
 ```yaml
 elevation:
   dem: data/dem/fabdem-monaco.tif
+  product: DTM
   vertical_datum: EGM2008
   license: CC-BY-NC-SA-4.0
 ```
