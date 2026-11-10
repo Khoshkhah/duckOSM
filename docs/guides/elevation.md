@@ -72,6 +72,18 @@ parts. To get a ground id, give the reference as a local file.
 
 Where to get elevation data, and how the sources compare: [Elevation sources](../reference/elevation-sources.md).
 
+To find the sources that cover an area, best first, ask the catalog:
+
+```python
+from duckosm.dem_sources import sources_for_bbox
+
+for s in sources_for_bbox((7.41, 43.73, 7.44, 43.75)):      # Monaco: west, south, east, north
+    print(s["name"], s["resolution_text"], s["product"], s["license"])
+```
+
+The order is a national 1 m DTM, EU-DTM, FABDEM, Copernicus GLO-30 and then the others. Each entry has the `product`, `vertical_datum` and `license`
+that `--product`, `--vertical-datum` and `--license` need. In duckOSM Studio the step "Ground" does the same for the area on the map.
+
 For an area that SimReady, urbanstyle or roadstyle also use, the heights must follow [The ground reference](../concepts/ground-reference.md):
 one bare-earth model (DTM) with a known vertical datum, recorded once and used by every project.
 

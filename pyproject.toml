@@ -58,5 +58,5 @@ no-default-features = true
 profile = "release"    # a debug build of the engine is slow, also in pip install -e .
 # the sdist has all of rust/: the workspace lists duckosm-duckdb and duckosm-cli, which the module does not need,
 # and cargo reads their manifests
-include = [{ path = "rust/**/*", format = "sdist" }, { path = "web/fixes_editor/*", format = "sdist" }, { path = "web/ask/*", format = "sdist" }]   # duckosm-edit embeds the fixes editor and the questions of Ask
+include = [{ path = "rust/**/*", format = "sdist" }, { path = "web/fixes_editor/*", format = "sdist" }, { path = "web/ask/*", format = "sdist" }, { path = "web/ground_step/*", format = "sdist" }]   # duckosm-edit embeds the fixes editor and the questions of Ask
 exclude = [{ path = "rust/target/**", format = "sdist" }]
