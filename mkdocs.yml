@@ -151,6 +151,7 @@ nav:
           - Lane-level routing: exports/lane-routing.md
   - Concepts:
       - How a build works: concepts/build.md
+      - The ground reference: concepts/ground-reference.md
       - The Rust engine: concepts/rust-engine.md
       - Stable edge ids: concepts/edge-ids.md
       - What each network contains: concepts/networks.md
