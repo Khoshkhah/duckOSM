@@ -52,7 +52,8 @@ the command stops. For a file that is not the reference (a test, a surface model
 | `--not-reference` | the `--dem` file is not the area's ground reference | |
 
 The Rust build (`duckosm-rust --dem FILE`) has the same rule, with the options `--dem-vertical-datum`, `--dem-license`
-and `--dem-not-reference`. The browser build gives them as `Params.dem_vertical_datum`, `dem_license` and
+and `--dem-not-reference`. To set the DEM one time for each area, put it in the config file, in the section
+[`elevation`](../reference/configuration.md#elevation) (`dem`, `vertical_datum`, `license`); `--dem` wins over it. The browser build gives them as `Params.dem_vertical_datum`, `dem_license` and
 `dem_not_reference`.
 
 ### The ground id

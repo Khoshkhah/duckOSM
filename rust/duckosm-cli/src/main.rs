@@ -208,10 +208,13 @@ fn run() -> Result<(), String> {
     if let Some(m) = &cli.levels {
         p.levels = parse_levels(m)?;
     }
-    p.dem = cli.dem.clone();
-    p.dem_vertical_datum = cli.dem_vertical_datum.clone();
-    p.dem_license = cli.dem_license.clone();
-    p.dem_not_reference = cli.dem_not_reference;
+    // --dem wins over the config's elevation section, with its own datum and license
+    if cli.dem.is_some() {
+        p.dem = cli.dem.clone();
+        p.dem_vertical_datum = cli.dem_vertical_datum.clone();
+        p.dem_license = cli.dem_license.clone();
+        p.dem_not_reference = cli.dem_not_reference;
+    }
     if let Some(f) = &cli.fixes {
         p.osm_fixes = Some(f.clone());
     }
