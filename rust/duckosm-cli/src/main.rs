@@ -174,7 +174,7 @@ fn studio(args: &[String]) -> Result<(), String> {
     let listener = duckosm_edit::bind(cli.port)?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let site = duckosm_edit::studio::Studio::new(Box::new(duckosm_edit::native::NativeHost), &out, port, cli.geofabrik_index)?;
-    eprintln!("duckosm-rust studio: {}  (the areas are in {}; Ctrl+C stops)", site.url(), site.out.display());
+    eprintln!("duckosm-rust studio: {}  (the areas are in {}; Ctrl+C stops)", site.url(), site.out().display());
     if !cli.no_open {
         // the browser of the desktop; on a computer with no desktop (an ssh session) nothing opens, and the address above is the way
         let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };

@@ -35,8 +35,10 @@
       ["Networks", "The networks to build: driving, walking and cycling."],
       ["Base map", "The layers of the base map (water, land use, buildings, ...)."],
       ["Build", "Builds the area into a .duckdb file in its folder. The steps show while it runs."]] },
-    6: { title: "The result", intro: "What the build made, and the map of the new area.", terms: [
-      ["Open the map", "Shows the roads of the area with the panel Edit OSM data, the page of `duckosm edit`."]] },
+    6: { title: "The result", intro: "What the build made: the networks, and the files with the folder where they are saved.", terms: [] },
+    7: { title: "Visualization", intro: "The roads of the new area on the map, with the panel Edit OSM data (the page of `duckosm edit`).", terms: [
+      ["Open the map when the build ends", "The page opens the map by itself, after the build. Turn it off to stay here."],
+      ["Back", "The panel Edit OSM data has a back button to these steps."]] },
   };
 
   async function start() {
@@ -49,17 +51,17 @@
       intro: "This page makes the data of an area on this computer. The server of this page builds the area: the page itself shows the steps. The files stay on this computer, in the folder of the areas.",
       terms: [["1 Choose an area", "Search for a place, draw shapes on the map, open a GeoJSON file, or click hexagons."], ["2 The area", "Check the name and the size of the area, and set a buffer."],
         ["3 The data", "Select the OpenStreetMap data: a Geofabrik extract, or a file on this computer."], ["4 Ground", "Select the DEM (the height of the ground), or none."],
-        ["5 Build", "Select the networks and the options, and press Build."], ["6 The result", "Open the map of the new area and edit the OSM data."]],
+        ["5 Build", "Select the networks and the options, and press Build."], ["6 The result", "The networks and the files that the build made."], ["7 Visualization", "The map of the new area, and the panel Edit OSM data."]],
       note: 'Documentation: <a href="https://khoshkhah.github.io/duckOSM/guides/studio/" target="_blank" rel="noopener">Make the data of an area on your computer</a>' });
-    const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
+    const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { initFolderStep }, { initVisualizationStep }, { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
       import("./parts/build_steps/area_step.js"), import("./parts/build_steps/data_step.js"), import("./parts/build_steps/settings_step.js"),
-      import("./parts/build_steps/build_step.js"), import("./parts/build_steps/result_step.js"), import("./parts/build_steps/core.js"), import("./parts/ground_step/ground_step.js")]);
+      import("./parts/build_steps/build_step.js"), import("./parts/build_steps/result_step.js"), import("./parts/build_steps/folder_step.js"), import("./parts/build_steps/visualization_step.js"), import("./parts/build_steps/core.js"), import("./parts/ground_step/ground_step.js")]);
 
     // ---- the cards: one for each step, as in Studio (a round number, the title, "?", a chevron) ----
     const cards = [];
     const body = () => Object.assign(document.createElement("div"), { className: "step-body" });
     const roots = {};
-    for (const [n, label] of [[1, "Choose an area"], [2, "The area"], [3, "The data"], [4, "Ground"], [5, "Build"], [6, "The result"]]) {
+    for (const [n, label] of [[1, "Choose an area"], [2, "The area"], [3, "The data"], [4, "Ground"], [5, "Build"], [6, "The result"], [7, "Visualization"]]) {
       const el = (roots[n] = body());
       const c = rs.sections.add({ id: `step${n}`, label, step: n, fold: true, el });
       c.classList.add("step");
@@ -73,18 +75,33 @@
     // the areas on the disk (the folder of the server): as in Studio, a card with a row for each area, with Open (the map and the editor) and Load (the area and the settings again)
     const saved = body();
     const areasCard = rs.sections.add({ id: "areas", label: "Your areas", fold: true, el: saved, before: "step1" });
-    rs.sections.hide("areas");
+    const folderBox = body(), listBox = body();
+    saved.append(folderBox, listBox);
+    initFolderStep({ root: folderBox, folder: async () => (await (await api("info")).json()).out, list: async (path) => post("folders", path),
+      choose: async (path, create) => { await post("folder", JSON.stringify({ path, create })); await paintAreas(); where(); }, onChange: () => rs.sections.note("areas", "") });
     const paintAreas = async () => {
       const list = await (await api("areas")).json();
-      list[0] ? rs.sections.show("areas") : rs.sections.hide("areas");
-      saved.innerHTML = list.map((a) => {
+      listBox.innerHTML = list.length ? "" : '<p class="small muted">No area in this folder yet.</p>';
+      listBox.insertAdjacentHTML("beforeend", list.map((a) => {
         const modes = parseSettings(a.config).modes ?? [];
         return `<div class="rs-opt saved-area" data-name="${esc(a.name)}"><span><strong>${esc(a.name)}</strong>
           <small>${new Date(a.modified * 1000).toLocaleString()} · ${bytes(a.size)}${a.dem ? " · with a DEM" : ""}</small>
           <span class="sa-nets">${modes.map((m) => `<span class="rs-chip">${esc(m)}</span>`).join("")}</span>
           <span class="sa-actions"><button type="button" class="sb-primary" data-do="open">Open</button><button type="button" data-do="load">Load</button></span></span></div>`;
-      }).join("");
+      }).join(""));
     };
+    // a saved area under the mouse (or the keyboard) shows its boundary on the map, as a place of the search list does; the boundaries are read once
+    const outlines = new Map();
+    const showArea = async (name) => {
+      if (!outlines.has(name)) outlines.set(name, api("area/" + encodeURIComponent(name)).then((r) => r.json()).then((a) => a.boundary, () => null));
+      const boundary = await outlines.get(name);
+      if (hoveredArea === name && boundary) area.showPlace(boundary, name);
+    };
+    let hoveredArea = null;
+    const overArea = (e) => { const n = e.target.closest(".saved-area")?.dataset.name; if (n && n !== hoveredArea) { hoveredArea = n; showArea(n); } };
+    saved.addEventListener("mouseover", overArea);
+    saved.addEventListener("focusin", overArea);
+    saved.addEventListener("mouseleave", () => { hoveredArea = null; area.showPlace(null); });
     saved.addEventListener("click", async (e) => {
       const b = e.target.closest("button[data-do]"), name = b?.closest(".saved-area")?.dataset.name;
       if (!name) return;
@@ -115,11 +132,12 @@
     let extracts = null;
     const data = initDataStep({ root: roots[3], rs: parts, map, padding, zoomToArea: () => area.zoom(), area: () => area.area(),
       extracts: () => (extracts ??= api("geofabrik").then((r) => r.json()).then(extractsOf).catch((e) => { extracts = null; throw e; })),
-      checkFile: async (path) => (await (await api("file", { method: "POST", body: path })).json()).size, onChange: () => { build.refresh(); refreshSteps(); } });
+      checkFile: async (path) => (await (await api("file", { method: "POST", body: path })).json()).size, onChange: () => { build.refresh(); refreshSteps(); where(); } });
     const ground = await initGroundStep({ root: roots[4], catalog: "parts/data/dem_sources.json", bbox: () => area.area()?.bbox ?? null, drop: rs.drop,
-      status: (t) => rs.sections.note("step4", t), onChange: () => { build.refresh(); refreshSteps(); } });
+      status: (t) => rs.sections.note("step4", t), onChange: () => { build.refresh(); refreshSteps(); where(); } });
     const settings = initSettingsStep({ root: $("settings-box"), onChange: () => build.refresh(), checkFile: async (path) => (await post("file", path)).size });
-    const result = initResultStep({ root: roots[6], href: "edit/" });
+    const result = initResultStep({ root: roots[6] });
+    const viz = initVisualizationStep({ root: roots[7], href: "edit/" });
     let built = false, auto = false, touched = false, current = null;
     const autoFold = (c, folded) => { auto = true; try { rs.sections.fold(c.dataset.rsSection, folded); } finally { auto = false; } };
     const build = initBuildStep({ root: $("build-box"),
@@ -130,14 +148,27 @@
         return "";
       },
       run: async () => {
-        built = false; result.clear(); refreshSteps();
+        built = false; result.clear(); viz.ready(false); refreshSteps();
         const a = area.area(), dem = await ground.dem();
         if (dem) await api(`dem/${a.name}`, { method: "PUT", body: dem.bytes });
         await api("build", { method: "POST", body: JSON.stringify({ name: a.name, boundary: a.geometry, data: data.choice(), settings: settings.yaml(),
           dem: dem && { product: dem.product, vertical_datum: dem.vertical_datum, license: dem.license, not_reference: dem.not_reference } }) });
       },
       poll: async () => (await api("job")).json(),
-      onDone: (job) => { built = true; paintAreas(); result.show(job); refreshSteps(); autoFold(cards[5], false); } });
+      onDone: (job) => { built = true; paintAreas(); result.show(job); viz.built(); refreshSteps(); autoFold(cards[5], false); autoFold(cards[6], false); } });
+
+    // ---- where the files are: the folder of the area (loading, downloading and saving), shown in the cards ----
+    const place = (card, first) => { const p = Object.assign(document.createElement("p"), { className: "where" }); first ? card.prepend(p) : card.append(p); return p; };
+    const [where2, where3, where5] = [place(roots[2]), place(roots[3]), place(roots[5], true)];
+    async function where() {
+      const out = (await (await api("info")).json()).out, sep = out.includes("\\") ? "\\" : "/", a = area.area(), c = data.choice(), code = (t) => `<code>${esc(t)}</code>`;
+      const dir = a ? `${out}${sep}${a.name}${sep}` : "";
+      where2.innerHTML = a ? `Saved in ${code(dir)}` : "";
+      where3.innerHTML = !a ? "" : c?.kind === "geofabrik" ? `Downloaded to ${code(dir + c.url.split("/").pop())}` : c?.kind === "file" ? `Read from ${code(c.path)}` : `The data is saved in ${code(dir)}`;
+      const dem = ground.choice().id ? ", dem.tif" : "";
+      where5.innerHTML = a ? `The build writes ${code(`${dir}${a.name}.duckdb`)}, config.yaml, boundary.geojson${dem} and osm_fixes.yaml (your changes) in that folder.` : "";
+    }
+    where();
 
     // ---- the flow of the steps, as in Studio (refreshSteps): what each step needs ("" when ready, else the reason), when it is done, and the one open step ----
     const STEP = {
@@ -147,6 +178,7 @@
       4: { ready: () => (area.area() ? "" : "after step 1"), done: () => !!ground.choice().id, optional: true },      // optional: the page does not open it by itself
       5: { ready: () => (area.area() && data.choice() ? "" : "after step 3"), done: () => built },
       6: { ready: () => (built ? "" : "after step 5"), done: () => built },
+      7: { ready: () => (built ? "" : "after step 5"), done: () => false, optional: true },      // optional: the page opens the map by itself, or the person does
     };
     // the person opened or folded a card: the next step does not fold the others
     document.addEventListener("rs:sectionchange", (e) => {
@@ -177,7 +209,7 @@
     }
     refreshSteps();
     paintAreas().catch(() => {});
-    window.studio = { area, data, settings, ground, build, result, map };           // for the tests
+    window.studio = { area, data, settings, ground, build, result, viz, map };           // for the tests
     window.studioReady = true;
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="edit-error" role="alert">duckosm studio: ${String(e.message).replace(/</g, "&lt;")}</p>`); });

@@ -38,7 +38,13 @@ fn parquet(db: &mut dyn Db, sql: &str) -> Result<Vec<u8>, String> {
 
 /// The page of `duckosm edit`: the open database `db` (the area `name`) with the fixes editor.
 pub fn make(db: &mut dyn Db, name: &str) -> Result<String, String> {
-    make_with(db, name, SCRIPT, STYLE)
+    make_with(db, name, SCRIPT, STYLE, None)
+}
+
+/// The page of the result of `duckosm studio`: the same page, with the base map "blank", so that the base map is the layers of the database itself (`features.*`: water, land
+/// use, buildings, ...) and the roads, with no tiles from the internet under them. The person can choose another base map in the bar.
+pub fn make_result(db: &mut dyn Db, name: &str) -> Result<String, String> {
+    make_with(db, name, SCRIPT, STYLE, Some("blank"))
 }
 
 /// The page of `duckosm ask`: the same map, with roadstyle's data dock and Ask. `extra` is a small database file in the temp folder for the page's
@@ -51,10 +57,10 @@ pub fn make_ask(db: &mut dyn Db, name: &str) -> Result<String, String> {
         let _ = std::fs::remove_file(f);
     }
     db.execute(&format!("ATTACH '{}' AS extra (READ_WRITE)", file.display().to_string().replace('\'', "''")))?;
-    make_with(db, name, ASK_SCRIPT, "")
+    make_with(db, name, ASK_SCRIPT, "", None)
 }
 
-fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str) -> Result<String, String> {
+fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<String, String> {
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let catalog = db.texts("SELECT current_database()")?.into_iter().next().flatten().unwrap_or_default();
     let [tq, cq] = d::catalog_sql(&catalog);
@@ -91,8 +97,11 @@ fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str) -> Result<S
     db.execute(&run.drop_sql(&made))?;
     // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
     // the clicked road in the panel (no tooltip)
-    let (o, lk) = look(json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels,
-                             "page_script": script, "page_style": style}))?;
+    let mut args = json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels, "page_script": script, "page_style": style});
+    if let Some(b) = basemap {
+        args["basemap"] = json!(b);
+    }
+    let (o, lk) = look(args)?;
     let given = roadstyle::page_options::given_of(&lk, &o.args);
     let roads = roadstyle::read::read_roads(roads, "geometry").map_err(|e| e.to_string())?;
     let features = features.map(roadstyle::read_features).transpose().map_err(|e| e.to_string())?;

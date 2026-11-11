@@ -82,6 +82,7 @@ export const OPTIONS = [
   { key: "infer_separate_sidewalks", at: "options", on: true, name: "Infer separate sidewalks", note: "A road with a sidewalk line on both sides gets sidewalk=separate." },
   { key: "cycling_dismount", at: "options", on: true, name: "Dismount edges", note: "Cycling uses the footways that are walked." },
   { key: "bus_routes", at: "options", on: true, name: "Bus routes", note: "Match the OSM bus routes to the driving edges." },
+  { key: "building_faces", at: "options", on: true, name: "Wall labels", note: "main.building_faces: each wall of a building with its type (front, back, side, party, court), and the wall rules of the fixes file." },
   { key: "levels", at: "options", on: true, name: "Drawing order", note: "visualization.edge_levels: which road is on top at a bridge or a tunnel." },
   { key: "sea", at: "options", on: false, name: "Sea from Overture Maps", note: "Needs the internet. Off: the build stays offline." },
   { key: "keep_largest_component", at: "clip", on: true, name: "Keep the largest connected part", note: "Roads that do not connect to the main network are removed." },
@@ -107,7 +108,7 @@ export function settingsYaml(values = {}) {
 /** The text of one line of progress, for the state of the build job (`{state, steps, bytes, total, seconds}`). */
 export function progressText(job) {
   const last = job.steps?.[job.steps.length - 1] ?? "";
-  if (job.state === "downloading") return `Downloading ${bytes(job.bytes)}${job.total ? ` of ${bytes(job.total)}` : ""}`;
+  if (job.state === "downloading") return `Downloading ${bytes(job.bytes)}${job.total ? ` of ${bytes(job.total)}` : ""}${job.seconds > 2 ? ` (${(job.bytes / 1048576 / job.seconds).toFixed(1)} MB/s)` : ""}`;
   if (job.state === "building") return `${last || "Starting"} (${Math.round(job.seconds)} s)`;
   return last;
 }

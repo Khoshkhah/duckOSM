@@ -38,3 +38,16 @@ html.rs-phone .bs button, html.rs-phone .bs summary, html.rs-phone .bs-open { mi
 .bs-h3box p { margin: 0; }
 .bs-h3box [data-as=h3-grid-note]:not(:empty) { margin-top: 4px; }
 .bs .rs-tab svg { flex: none; }
+.bs-path { display: block; overflow-wrap: anywhere; user-select: all; font: 11.5px/1.4 ui-monospace, monospace; }
+.bs-files { width: 100%; }
+.bs-folder .area-acts { align-items: center; }
+.bs-folder [data-fs=dirs] { max-height: 180px; overflow: auto; }
+.bs .where { margin: 0; font-size: 12px; color: var(--mut); overflow-wrap: anywhere; }
+.bs .where code { font: 11.5px/1.4 ui-monospace, monospace; user-select: all; }
+.bs-steplog tr.run td { color: var(--ink); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.bs-run { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+.bs-spin { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: bs-turn .8s linear infinite; }
+.bs-run { animation: bs-pulse 1.4s ease-in-out infinite; }
+@keyframes bs-turn { to { transform: rotate(360deg); } }
+@keyframes bs-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .bs-spin, .bs-run { animation: none; } }

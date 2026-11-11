@@ -100,9 +100,15 @@ export function initDataStep({ root, rs, map = null, padding = () => 40, zoomToA
 		if (map.getSource("bs-extract") || map.isStyleLoaded()) put(); else map.once("idle", put);
 	}
 	const fit = (x) => { const b = x.bbox; map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: padding(), maxZoom: 15, duration: 600 }); };
+	// under the mouse the map moves to the extract when it is not all in view (an extract is mostly bigger than the view), or too small to see (the rule of the search list)
+	const fitIfHidden = (x) => {
+		const b = x.bbox, view = map.getBounds();
+		const small = b[2] - b[0] < (view.getEast() - view.getWest()) / 4 && b[3] - b[1] < (view.getNorth() - view.getSouth()) / 4;
+		if (!(view.contains([b[0], b[1]]) && view.contains([b[2], b[3]])) || small) fit(x);
+	};
 	if (map) {
 		map.on("styledata", () => { if ((shown || hovered) && !map.getSource("bs-extract")) try { paint(); } catch { /* the next styledata tries again */ } });
-		const over = (e) => { const r = e.target.closest("label")?.querySelector('input[name="bs-extract"]'); if (r) { hovered = r.value; paint(); } };
+		const over = (e) => { const r = e.target.closest("label")?.querySelector('input[name="bs-extract"]'); if (r && hovered !== r.value) { hovered = r.value; paint(); const x = list.find((e) => e.id === hovered); if (x) fitIfHidden(x); } };
 		q("list").addEventListener("mouseover", over);
 		q("list").addEventListener("focusin", over);
 		q("list").addEventListener("mouseleave", () => { hovered = null; paint(); });

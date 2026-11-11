@@ -49,7 +49,7 @@ const TOP: [&str; 16] = [
     "h3_cell",
     "elevation",
 ];
-const OPTIONS: [&str; 21] = [
+const OPTIONS: [&str; 22] = [
     "build_graph",
     "h3_indexing",
     "h3_resolution",
@@ -69,6 +69,7 @@ const OPTIONS: [&str; 21] = [
     "build_features",
     "levels",
     "bus_routes",
+    "building_faces",
     "sea",
     "clip_strategy",
 ];
@@ -391,6 +392,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         name,
         options: opts,
         bus_routes: options.bool("bus_routes", true)?,
+        // the walls of the buildings (duckOSM options.building_faces, off by default): main.building_faces, with the wall rules of the fixes file; they need the area's boundary
+        building_faces: options.bool("building_faces", false)? && has_boundary,
         // duckOSM: options.levels (on by default) solves the drawing order; off writes no table
         levels: if options.bool("levels", true)? {
             Method::Solve

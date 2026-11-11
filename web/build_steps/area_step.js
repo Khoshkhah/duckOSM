@@ -520,5 +520,12 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		Object.assign(document.createElement("a"), { href: url, download: `${current.name}.geojson` }).click();
 		setTimeout(() => URL.revokeObjectURL(url), 1000);
 	});
-	return { area: () => current, rebuffer, set, clear, zoom, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
+	/** Show a place on the map as the search list does (purple outline, the map moves to it when it is out of view); `showPlace(null)` takes it away. For a list of places that the host has (saved areas). */
+	function showPlace(g, name = "") {
+		const polys = g ? polygonsOf(g) : [];
+		previewShape = polys.length ? { name, geometry: geometry(polys) } : null;
+		draw(shape);
+		if (previewShape) fitIfHidden(previewShape.geometry);
+	}
+	return { area: () => current, showPlace, rebuffer, set, clear, zoom, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
 }
