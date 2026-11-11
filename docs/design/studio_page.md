@@ -46,7 +46,7 @@ under `/edit/` to it. The page uses relative addresses, so it works under the pr
    `elevation`) and then the text of the Settings step. The page does not know a path on the disk. The config is written to `config.yaml` in the folder of the area, and it
    is the record of the build (`build_config` of `main.visualization_metadata`), so **Build again** of the edit page works.
 2. **One folder for each area**, `OUT_DIR/<name>/`. The fixes file is beside the database, so two areas have two fixes files.
-3. **The build is a `Host`.** The native program (`NativeHost`) runs `duckosm-build` with DuckDB. The Python module has no DuckDB, so its host (`duckosm/studio.py`)
+3. **Rust is the product, Python is the cross-check** (Kaveh, 2026-11-10: everything is written in Rust; the Python version stays for cross-validation). The build is a `Host`. The native program (`NativeHost`) runs `duckosm-build` with DuckDB. The Python module has no DuckDB, so its host (`duckosm/studio.py`)
    runs `duckosm build` (`duckosm.edit.build_area`): the Rust engine and the SQL steps, with the base-map layers. The two hosts give the server a line for each step
    (`set_progress` of `duckosm-build`, and `DuckOSM.on_step`), and the page shows them.
 4. **The DEM in the Python host.** The Python build does not read the `elevation` section, so `build_area` runs `duckosm.elevation.to_elevation` after the build and
@@ -65,6 +65,12 @@ Studio keeps the areas in the browser (OPFS), so this page keeps them where `duc
 `<name>/<name>.duckdb` (`GET /api/areas`, newest first, with the config text for the networks). **Open** (`POST /api/open`) makes the page of the result for that area at `/edit/`. **Load**
 (`GET /api/area/<name>`) gives the boundary and the config, and the page puts them into the Area and Settings steps (`parseSettings` of `core.js` reads back what `settingsYaml` wrote). There is no Delete:
 the server does not delete files.
+
+## Gap: the Rust build is smaller than the Python build
+
+The native build does not make `features.*` (the base-map layers), the H3 columns (`h3_cell`, `from_cell`, `to_cell`, `lca_res`), `features.ocean`, and the optional checks, report, maps and multimodal graph. The page of
+Studio (browser) makes `features.*` by running roadstyle's SQL (`features_sql`) on DuckDB. The native program can run the same SQL on its bundled DuckDB over `raw.*`; H3 can use a Rust H3 crate. Until this is done,
+`duckosm studio` (Python) gives the full result. This is the next task after this page.
 
 ## Limits
 

@@ -68,6 +68,7 @@ The panel is a sheet at the bottom and the map is above it. Draw the box on the 
 
 ## Limits
 
+- The Rust build makes no base-map layers (`features.*`), no H3 columns and no sea yet. The Python build (`duckosm studio`) makes them.
 - The page builds one area at a time.
 - A DEM file is at most 16 MB. A larger DEM does not go through the page: give it with `elevation:` in a config and run `duckosm build`.
 - The page does not stop a build that runs. Stop the command, then start it again.
