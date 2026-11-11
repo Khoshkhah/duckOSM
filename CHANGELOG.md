@@ -39,7 +39,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Added
 
-- **`duckosm studio`: card 8, Edit levels** ([guide](docs/guides/studio.md); roadstyle PR 170). roadstyle's level-edit part (`levelEditPart`, unchanged) over the map of the open area.
+- **`duckosm studio`: card 8, Edit levels** ([guide](docs/guides/studio.md); roadstyle `1c909e5b`, PR 170). roadstyle's level-edit part (`levelEditPart`, unchanged) over the map of the open area.
   The server gives it the roads of the level area (`GET /areas/<name>/levels/edges`), the stored levels (`levels/stored`) and the save (`POST levels/save`:
   one SQL script, `page::save_levels_sql`, that each host runs on a writing connection, `Host::write`), and way D draws each change again (`POST relevel`).
   roadstyle's page files and the editor's WebAssembly package are at `/rs/` (`roadstyle_serve::embedded`). `rust/duckosm-edit/editor_pkg.sh` builds the
