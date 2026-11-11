@@ -4,6 +4,15 @@
 area, with the panels **Edit OSM data** and **Edit levels**. The steps are the steps of [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), the
 page that runs in a browser. The two pages use the same parts of duckOSM (`web/build_steps/` and `web/ground_step/`).
 
+The two pages are duckOSM's two versions:
+
+- **Offline:** `duckosm studio` (this page). The program on your computer builds the area into a `.duckdb` file on the disk.
+  Its limit is DuckDB's `memory_limit` (`options.memory_limit`) and the disk, so it is for a large area.
+- **Online:** duckOSM Studio in the browser. The browser builds the area. Its limit is the memory of the tab (later: the
+  browser disk, OPFS).
+
+[The load step in Rust](../design/streaming_load.md) tells how each version loads the PBF file.
+
 The difference: here the build runs on your computer. It is `duckosm build`, so the area can be as large as your computer can build, and the
 result is a `.duckdb` file on your disk.
 
