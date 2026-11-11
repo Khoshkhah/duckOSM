@@ -14,7 +14,7 @@ export function initResultStep({ root, href }) {
 	return {
 		show(job) {
 			q("none").hidden = true; q("done").hidden = false;
-			q("line").innerHTML = `<b>${esc(job.name)}</b> in <code>${esc(job.db)}</code>, built in ${Math.round(job.seconds)} s.`;
+			q("line").innerHTML = `<b>${esc(job.name)}</b> in <code>${esc(job.db)}</code>${job.seconds == null ? "" : `, built in ${Math.round(job.seconds)} s`}.`;
 			// the networks of the build, from its summary (the other lines are the log of the build)
 			const rows = [...String(job.text ?? "").matchAll(/^(\w+): ([\d,]+) edges, ([\d,]+) nodes/gm)];
 			q("nets").hidden = !rows.length;

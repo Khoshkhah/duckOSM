@@ -6,7 +6,7 @@
 //! The files that it writes are in the folder of the area, `<out>/<name>/`: `boundary.geojson`, `dem.tif`, `config.yaml`, the PBF file of a
 //! download, and the `<name>.duckdb` of the build. A local PBF file is read from the path that the page gives (the page is on the same computer).
 //!
-//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/folders` (the folders inside a folder, for the folder picker) and `POST /api/folder` (use another folder for the areas); `POST /api/buffer` (an area and a distance: the area grown by it); `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/file` (the path of a local PBF file: its size);
+//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/folders` (the folders inside a folder, for the folder picker) and `POST /api/folder` (use another folder for the areas); `POST /api/buffer` (an area and a distance: the area grown by it); `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/delete` (the name of a saved area: its folder is deleted); `POST /api/file` (the path of a local PBF file: its size); `GET /api/pbf` and `POST /api/pbfget` (the OSM extracts in `<out>/osm/`: listed, downloaded); `POST /api/demfiles` and `POST /api/demget` (the DEM files of a model for a box: listed, downloaded);
 //! `PUT /api/dem/<name>` the DEM of the area; `POST /api/build` start the build; `GET /api/job` the state of the build; `GET /edit/...` the
 //! page of `duckosm edit` for the area that was built last.
 
@@ -93,6 +93,8 @@ pub struct Studio {
     /// The page: roadstyle's dashboard with the script of the steps (`page::make_studio`), made once.
     page: String,
     job: Mutex<Job>,
+    /// The download of an OSM extract (step 3), apart from the build: `name` is the file, `dir` its path when it is whole.
+    dl: Mutex<Job>,
     edit: Mutex<Option<Arc<Site>>>,
     pager: Pager,
 }
@@ -113,6 +115,60 @@ fn yymmdd(back: u64) -> String {
 /// A name of an area is a folder name: letters, digits, `_`, `-` and `.`, not starting with a dot.
 fn is_name(n: &str) -> bool {
     !n.is_empty() && n.len() <= 64 && !n.starts_with('.') && n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+/// The files of a DEM model that the server can download for a box, as (address, file name): one file for each 1° tile. Only the models with a
+/// file at a fixed address have them (Copernicus GLO-30 and GLO-90 on AWS, no account). The others have only their web page.
+pub fn dem_tiles(source: &str, bbox: [f64; 4]) -> Vec<(String, String)> {
+    let (bucket, code) = match source {
+        "copernicus-glo30" => ("copernicus-dem-30m", "10"),
+        "copernicus-glo90" => ("copernicus-dem-90m", "30"),
+        _ => return Vec::new(),
+    };
+    let span = |a: f64, b: f64| (a.floor() as i32)..=((b.ceil() as i32 - 1).max(a.floor() as i32));
+    let mut out = Vec::new();
+    for lat in span(bbox[1], bbox[3]) {
+        for lon in span(bbox[0], bbox[2]) {
+            let name = format!("Copernicus_DSM_COG_{code}_{}{:02}_00_{}{:03}_00_DEM", if lat < 0 { 'S' } else { 'N' }, lat.abs(), if lon < 0 { 'W' } else { 'E' }, lon.abs());
+            out.push((format!("https://{bucket}.s3.amazonaws.com/{name}/{name}.tif"), format!("{name}.tif")));
+        }
+    }
+    out
+}
+
+/// The files of an area's folder and of its folders (the cut PBF in `pbf/`, the drawing levels in `<name>.levels/`), with their path in the folder, sorted.
+fn folder_files(dir: &Path) -> Vec<(String, u64)> {
+    let mut files: Vec<(String, u64)> = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        match e.metadata() {
+            Ok(m) if m.is_file() => files.push((n, m.len())),
+            Ok(m) if m.is_dir() => files.extend(std::fs::read_dir(e.path()).into_iter().flatten().flatten().filter_map(|f| {
+                f.metadata().ok().filter(|m| m.is_file()).map(|m| (format!("{n}/{}", f.file_name().to_string_lossy()), m.len()))
+            })),
+            _ => {}
+        }
+    }
+    files.sort();
+    files
+}
+
+/// The box [west, south, east, north] of all the positions of a GeoJSON value, or None when it has none.
+pub fn bbox_of(v: &Value) -> Option<[f64; 4]> {
+    fn walk(v: &Value, b: &mut [f64; 4]) {
+        match v {
+            Value::Array(a) if a.len() >= 2 && a[0].is_number() && a[1].is_number() => {
+                let (x, y) = (a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0));
+                *b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, b)),
+            Value::Object(o) => o.iter().filter(|(k, _)| matches!(k.as_str(), "coordinates" | "geometry" | "features" | "geometries")).for_each(|(_, x)| walk(x, b)),
+            _ => {}
+        }
+    }
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    walk(v, &mut b);
+    b[0].is_finite().then_some(b)
 }
 
 /// A text as a YAML string (a JSON string is one).
@@ -152,7 +208,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), edit: Mutex::new(None), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), pager })
     }
 
     /// The folder of the areas now.
@@ -217,7 +273,7 @@ impl Studio {
         let (url, total, ranges) = Self::resolve(url)?;
         let url = url.as_str();
         {
-            let mut j = self.job.lock().unwrap();
+            let mut j = self.dl.lock().unwrap();
             (j.bytes, j.total) = (0, total);
         }
         let part = PathBuf::from(format!("{}.part", to.display()));
@@ -246,7 +302,7 @@ impl Studio {
                     break;
                 }
                 file.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", part.display()))?;
-                self.job.lock().unwrap().bytes += n as u64;
+                self.dl.lock().unwrap().bytes += n as u64;
             }
         }
         std::fs::rename(&part, to).map_err(|e| format!("{}: {e}", to.display()))
@@ -275,7 +331,7 @@ impl Studio {
                     }
                     file.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", part.display()))?;
                     pos += n as u64;
-                    self.job.lock().unwrap().bytes += n as u64;
+                    self.dl.lock().unwrap().bytes += n as u64;
                 }
                 Ok(())
             };
@@ -316,11 +372,24 @@ impl Studio {
             Some("geofabrik") => {
                 let url = data["url"].as_str().filter(|u| u.starts_with("http://") || u.starts_with("https://")).ok_or("the extract has no URL")?;
                 let file = url.rsplit('/').next().filter(|f| f.ends_with(".pbf") && is_name(f)).ok_or("the URL does not end with a .pbf file")?;
-                (dir.join(file), Some(url.to_string()))
+                let pbf = self.osm_dir().join(file);
+                if !pbf.is_file() {
+                    return Err(format!("{file} is not in the folder: Get it in step 3 first"));
+                }
+                (pbf, Some(url.to_string()))
             }
             _ => return Err("the request has no data: a Geofabrik extract or a file".into()),
         };
         let dem = b["dem"].is_object().then(|| b["dem"].clone());
+        // a DEM from the downloaded files of a model: the server joins them and cuts them to the area (2 pixels more on each side) into dem.tif
+        if let Some(files) = dem.as_ref().and_then(|d| d["files"].as_array()) {
+            let src = self.dem_dir(dem.as_ref().and_then(|d| d["source"].as_str()).unwrap_or_default())?;
+            let paths = files.iter().map(|f| f.as_str().filter(|f| is_name(f)).map(|f| src.join(f)).ok_or("a DEM file name is letters, digits, _, - and .".to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let bbox = bbox_of(&b["boundary"]).ok_or("the boundary has no position")?;
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            duckosm_build::elevation::write_area_dem(&paths.iter().map(PathBuf::as_path).collect::<Vec<_>>(), bbox, 2, &dir.join("dem.tif"))?;
+        }
         if dem.is_some() && !dir.join("dem.tif").is_file() {
             return Err("the request has a DEM, but the server has no dem.tif for this area: send it with PUT /api/dem/<name> first".into());
         }
@@ -346,9 +415,7 @@ impl Studio {
                 Ok(text) => {
                     (j.state, j.text) = ("done", text);
                     // the files of the area (the folder, one level): what the build made and what it downloaded
-                    let mut files: Vec<(String, u64)> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
-                        .filter_map(|e| e.metadata().ok().filter(|m| m.is_file()).map(|m| (e.file_name().to_string_lossy().into_owned(), m.len()))).collect();
-                    files.sort();
+                    let files = folder_files(&dir);
                     j.files = files;
                 }
                 Err(e) => (j.state, j.error) = ("error", e),
@@ -366,17 +433,10 @@ impl Studio {
         }
     }
 
-    /// The work of one build: the download, the config, the build, and the page of the result.
+    /// The work of one build: the config, the build, and the page of the result. The OSM file is on the disk (step 3 downloads an extract).
     fn run(&self, name: &str, dir: &Path, pbf: &Path, url: Option<&str>, dem: Option<&Value>, settings: &str) -> Result<String, String> {
         if let Some(url) = url {
-            if pbf.is_file() {
-                self.step(&format!("The folder has {} already: not downloaded again", pbf.file_name().unwrap_or_default().to_string_lossy()));
-            } else {
-                self.job.lock().unwrap().state = "downloading";
-                self.step(&format!("Download {url} to {}", pbf.display()));
-                self.download(url, pbf)?;
-                self.job.lock().unwrap().state = "building";
-            }
+            self.step(&format!("Read {} (downloaded in step 3 from {url})", pbf.display()));
         }
         // the page of the area that was built before closes its database: the build may write the same file
         if let Some(old) = self.edit.lock().unwrap().take() {
@@ -442,7 +502,25 @@ impl Studio {
     fn area_info(&self, name: &str) -> Result<String, String> {
         let dir = self.area_dir(name).filter(|d| d.join(format!("{name}.duckdb")).is_file()).ok_or("no such area")?;
         let boundary: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("boundary.geojson")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-        Ok(json!({"name": name, "boundary": boundary, "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default()}).to_string())
+        let files: Vec<Value> = folder_files(&dir).into_iter().map(|(n, b)| json!({"name": n, "size": b})).collect();
+        Ok(json!({"name": name, "boundary": boundary, "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default(),
+                  "dir": dir.display().to_string(), "db": dir.join(format!("{name}.duckdb")).display().to_string(), "files": files}).to_string())
+    }
+
+    /// Delete a saved area (`POST /api/delete`, its name): its folder and all the files in it. Only a folder with `<name>.duckdb` is an area; the
+    /// downloaded extracts (`osm/`) and DEM files (`dem/`) stay. The page asks the person first.
+    fn delete(&self, name: &str) -> Result<(), String> {
+        let dir = self.area_dir(name).filter(|d| d.join(format!("{name}.duckdb")).is_file()).ok_or("no such area")?;
+        {
+            let j = self.job.lock().unwrap();
+            if j.state == "building" && j.name == name {
+                return Err(format!("{name} is building: wait for it"));
+            }
+        }
+        if let Some(old) = self.edit.lock().unwrap().take() {      // the map page may have the database open
+            old.close();
+        }
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
     }
 
     /// Open the page of the result for a saved area (the page of `duckosm edit`, at `/edit/`).
@@ -492,6 +570,102 @@ impl Studio {
         let epsg = if n + s_ >= 0.0 { 32600 } else { 32700 } + zone;
         let g = self.host.buffer(&format!("MULTIPOLYGON({})", wkt.join(",")), epsg, metres)?;
         Ok(format!("{{\"geometry\":{g}}}"))
+    }
+
+    /// The folder of the downloaded OSM extracts: `<out>/osm/`. One extract serves each area that it covers.
+    fn osm_dir(&self) -> PathBuf {
+        self.out().join("osm")
+    }
+
+    /// The extracts in the folder and the download now (`GET /api/pbf`): `{"folder", "files": [{"file", "size"}], "dl": the state of the download}`.
+    fn pbf_list(&self) -> String {
+        let dir = self.osm_dir();
+        let mut files: Vec<(String, u64)> = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter_map(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.ends_with(".osm.pbf").then(|| e.metadata().ok().filter(|m| m.is_file()).map(|m| (n, m.len()))).flatten()
+        }).collect();
+        files.sort();
+        json!({"folder": dir.display().to_string(), "files": files.iter().map(|(f, n)| json!({"file": f, "size": n})).collect::<Vec<_>>(), "dl": self.dl.lock().unwrap().json()}).to_string()
+    }
+
+    /// Start the download of an extract into the folder (`POST /api/pbfget`, the address of the `.osm.pbf` file). The page reads the progress with `GET /api/pbf`.
+    fn pbf_get(self: &Arc<Self>, body: &[u8]) -> Result<String, String> {
+        let url = String::from_utf8_lossy(body).trim().to_string();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err("the address of the extract is not http or https".into());
+        }
+        let file = url.rsplit('/').next().filter(|f| f.ends_with(".osm.pbf") && is_name(f)).ok_or("the address does not end with a .osm.pbf file")?.to_string();
+        let to = self.osm_dir().join(&file);
+        {
+            let mut d = self.dl.lock().unwrap();
+            if d.state == "downloading" {
+                return Err(format!("{} is downloading: wait for it, or let it end", d.name));
+            }
+            *d = Job { state: "downloading", name: file.clone(), started: Some(Instant::now()), ..Job::default() };
+        }
+        std::fs::create_dir_all(self.osm_dir()).map_err(|e| e.to_string())?;
+        let me = self.clone();
+        std::thread::spawn(move || {
+            let r = if to.is_file() { Ok(()) } else { me.download(&url, &to) };
+            let mut d = me.dl.lock().unwrap();
+            d.ended = Some(Instant::now());
+            match r {
+                Ok(()) => (d.state, d.dir) = ("done", to.display().to_string()),
+                Err(e) => (d.state, d.error) = ("error", e),
+            }
+        });
+        Ok("{}".into())
+    }
+
+    /// The folder of the downloaded files of a DEM model: `<out>/dem/<source>/`.
+    fn dem_dir(&self, source: &str) -> Result<PathBuf, String> {
+        is_name(source).then(|| self.out().join("dem").join(source)).ok_or_else(|| format!("{source}: not a model name"))
+    }
+
+    /// The DEM files of a model for an area (`POST /api/demfiles`, `{"source", "bbox"}`): `{"folder", "tiles": [{"url", "file", "have", "size"}], "local": [{"file", "size"}]}`.
+    /// `tiles` are the files that the server can download for the box; `local` are all the `.tif` files in the folder of the model (a file that the person put there too).
+    fn dem_files(&self, body: &[u8]) -> Result<String, String> {
+        let b: Value = serde_json::from_slice(body).map_err(|e| format!("the request: {e}"))?;
+        let source = b["source"].as_str().unwrap_or_default();
+        let dir = self.dem_dir(source)?;
+        let bbox: [f64; 4] = serde_json::from_value(b["bbox"].clone()).map_err(|_| "the request has no bbox [west, south, east, north]".to_string())?;
+        let size = |f: &Path| std::fs::metadata(f).ok().filter(|m| m.is_file()).map(|m| m.len());
+        let tiles: Vec<Value> = dem_tiles(source, bbox).into_iter().map(|(url, file)| {
+            let have = size(&dir.join(&file));
+            json!({"url": url, "file": file, "have": have.is_some(), "size": have.unwrap_or(0)})
+        }).collect();
+        let mut local: Vec<(String, u64)> = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter_map(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            (n.ends_with(".tif") || n.ends_with(".tiff")).then(|| size(&e.path()).map(|s| (n, s))).flatten()
+        }).collect();
+        local.sort();
+        Ok(json!({"folder": dir.display().to_string(), "tiles": tiles, "local": local.iter().map(|(f, n)| json!({"file": f, "size": n})).collect::<Vec<_>>()}).to_string())
+    }
+
+    /// Download the files of `tiles` that the folder of the model does not have (`POST /api/demget`, the same request as `demfiles`). A tile that
+    /// the model does not have (all sea: 404) is left out. Gives the answer of `demfiles`.
+    fn dem_get(&self, body: &[u8]) -> Result<String, String> {
+        let b: Value = serde_json::from_slice(body).map_err(|e| format!("the request: {e}"))?;
+        let source = b["source"].as_str().unwrap_or_default();
+        let dir = self.dem_dir(source)?;
+        let bbox: [f64; 4] = serde_json::from_value(b["bbox"].clone()).map_err(|_| "the request has no bbox [west, south, east, north]".to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        for (url, file) in dem_tiles(source, bbox) {
+            let to = dir.join(&file);
+            if to.is_file() {
+                continue;
+            }
+            let mut resp = match ureq::get(&url).call() {
+                Ok(r) => r,
+                Err(ureq::Error::StatusCode(404)) => continue,
+                Err(e) => return Err(format!("{url}: {e}")),
+            };
+            let part = dir.join(format!("{file}.part"));
+            let mut out = std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+            std::io::copy(&mut resp.body_mut().with_config().limit(u64::MAX).reader(), &mut out).map_err(|e| format!("{url}: {e}"))?;
+            std::fs::rename(&part, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+        }
+        self.dem_files(body)
     }
 
     fn dem(&self, name: &str, body: &[u8]) -> Result<(), String> {
@@ -546,6 +720,7 @@ impl Studio {
                 req.say("200 OK", "application/json", j.to_string().as_bytes())
             }
             ("GET" | "HEAD", "areas") => req.say("200 OK", "application/json", self.areas().to_string().as_bytes()),
+            ("GET" | "HEAD", "pbf") => req.say("200 OK", "application/json", self.pbf_list().as_bytes()),
             ("GET" | "HEAD", a) if a.starts_with("area/") => match self.area_info(&a["area/".len()..]) {
                 Ok(t) => req.say("200 OK", "application/json", t.as_bytes()),
                 Err(e) => req.say("404 Not Found", "text/plain", e.as_bytes()),
@@ -554,7 +729,7 @@ impl Studio {
                 Ok(t) => req.say("200 OK", "application/json", t.as_bytes()),
                 Err(e) => req.say("502 Bad Gateway", "text/plain", e.as_bytes()),
             },
-            ("POST", "file" | "build" | "open" | "buffer" | "folders" | "folder") | ("PUT", _) if matches!(api.as_str(), "file" | "build" | "open" | "buffer" | "folders" | "folder") || api.starts_with("dem/") => {
+            ("POST", "file" | "build" | "open" | "buffer" | "folders" | "folder" | "demfiles" | "demget" | "pbfget" | "delete") | ("PUT", _) if matches!(api.as_str(), "file" | "build" | "open" | "buffer" | "folders" | "folder" | "demfiles" | "demget" | "pbfget" | "delete") || api.starts_with("dem/") => {
                 let own = self.own.clone();
                 let Some(body) = req.write_body(&own)? else { return Ok(()) };
                 let r: Result<String, String> = match (req.method.as_str(), api.as_str()) {
@@ -567,6 +742,10 @@ impl Studio {
                     ("POST", "buffer") => self.buffer(&body),
                     ("POST", "folders") => self.folders(&String::from_utf8_lossy(&body)),
                     ("POST", "folder") => self.set_folder(&body),
+                    ("POST", "demfiles") => self.dem_files(&body),
+                    ("POST", "demget") => self.dem_get(&body),
+                    ("POST", "pbfget") => self.pbf_get(&body),
+                    ("POST", "delete") => self.delete(String::from_utf8_lossy(&body).trim()).map(|_| "{}".to_string()),
                     ("POST", "open") => self.open(String::from_utf8_lossy(&body).trim()).map(|_| "{}".to_string()),
                     ("PUT", a) if a.starts_with("dem/") => self.dem(&a["dem/".len()..], &body).map(|_| "{}".to_string()),
                     _ => Err("not this method".into()),
@@ -576,7 +755,7 @@ impl Studio {
                     Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
                 }
             }
-            (_, "info" | "job" | "geofabrik" | "areas" | "file" | "build" | "open" | "buffer" | "folders" | "folder") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
+            (_, "info" | "job" | "geofabrik" | "areas" | "file" | "build" | "open" | "buffer" | "folders" | "folder" | "demfiles" | "demget" | "pbfget" | "pbf" | "delete") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
             _ => req.say("404 Not Found", "text/plain", b"not found"),
         }
     }
@@ -597,6 +776,26 @@ pub fn serve(studio: Arc<Studio>, listener: TcpListener) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dem_tiles_cover_the_box() {
+        let t = super::dem_tiles("copernicus-glo30", [7.40, 43.72, 7.44, 43.76]);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].1, "Copernicus_DSM_COG_10_N43_00_E007_00_DEM.tif");
+        assert!(t[0].0.starts_with("https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N43_00_E007_00_DEM/"));
+        let t = super::dem_tiles("copernicus-glo90", [-0.5, -1.2, 0.5, 0.0]);
+        let names: Vec<_> = t.iter().map(|x| x.1.as_str()).collect();
+        assert_eq!(names, ["Copernicus_DSM_COG_30_S02_00_W001_00_DEM.tif", "Copernicus_DSM_COG_30_S02_00_E000_00_DEM.tif",
+                           "Copernicus_DSM_COG_30_S01_00_W001_00_DEM.tif", "Copernicus_DSM_COG_30_S01_00_E000_00_DEM.tif"]);
+        assert!(super::dem_tiles("ca-nrcan-hrdem", [0.0, 0.0, 1.0, 1.0]).is_empty());
+    }
+
+    #[test]
+    fn bbox_of_geojson() {
+        let v = serde_json::json!({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "x"}, "geometry": {"type": "MultiPolygon", "coordinates": [[[[7.4, 43.7], [7.5, 43.7], [7.5, 43.8], [7.4, 43.7]]]]}}]});
+        assert_eq!(super::bbox_of(&v), Some([7.4, 43.7, 7.5, 43.8]));
+        assert_eq!(super::bbox_of(&serde_json::json!({"type": "Polygon", "coordinates": []})), None);
+    }
+
     use super::*;
     use std::io::Read;
     use std::net::TcpStream;
@@ -824,7 +1023,7 @@ mod tests {
         got.sort();
         assert_eq!(got.len(), 4, "20 MB are four parts of 5 MB (the part is at least 4 MB): {got:?}");
         assert!(got[0].0 == 0 && got[3].1 == data.len() - 1 && got.windows(2).all(|w| w[0].1 + 1 == w[1].0), "the ranges are one after the other: {got:?}");
-        assert_eq!(s.job.lock().unwrap().bytes, data.len() as u64, "the job counts every byte");
+        assert_eq!(s.dl.lock().unwrap().bytes, data.len() as u64, "the download counts every byte");
         assert!(!out.join("big.osm.pbf.part").exists());
     }
 

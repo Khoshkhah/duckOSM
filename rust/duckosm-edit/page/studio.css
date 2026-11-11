@@ -21,3 +21,5 @@
 @media (max-width: 700px) {
 	#sb .step-body button:not([class*="rs-"]), #sb .rs-tab, #sb :is(input[type=text], input[type=search]) { min-height: 44px; }      /* plain buttons; roadstyle's parts have their own phone sizes */
 }
+.saved-area .gs-spin { display: inline-block; width: 11px; height: 11px; margin-right: 4px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: sa-spin 0.8s linear infinite; vertical-align: -1px; }
+@keyframes sa-spin { to { transform: rotate(360deg); } }

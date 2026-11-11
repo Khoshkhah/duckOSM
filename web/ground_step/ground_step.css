@@ -15,3 +15,17 @@
 .gs .gs-facts dd { margin: 0; overflow-wrap: anywhere; }
 .gs .rs-opt small { display: block; }
 html.rs-phone .gs button, html.rs-phone .gs summary { min-height: 44px; }      /* a finger's size on a phone */
+.gs .gs-ok { color: color-mix(in srgb, #15803d 80%, var(--ink)); }
+.gs .gs-files { margin: 4px 0 8px; padding-left: 18px; overflow-wrap: anywhere; }
+.gs .gs-folder { margin: 8px 0; }
+/* the chosen row, as an extract row of Studio: Get or Use, the web page and the file at the end; the state under the name */
+.gs .rs-opt { align-items: center; }
+:is(#sb, .rs-side) .gs .rs-opt > .gs-row-do, .gs .gs-row-do { display: flex; flex-direction: row; gap: 2px; align-items: center; margin-left: auto; flex: none; }   /* roadstyle makes each span of a row a column */
+.gs .gs-row-do:empty { display: none; }
+.gs .gs-row-do > button { padding: 5px 9px; }
+.gs .gs-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; color: var(--muted, currentColor); }
+.gs .gs-ico:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: var(--ink, currentColor); }
+.gs .gs-row-state:empty { display: none; }
+.gs .gs-prog { display: inline-flex; align-items: center; gap: 6px; }
+.gs .gs-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: gs-spin 0.8s linear infinite; }
+@keyframes gs-spin { to { transform: rotate(360deg); } }

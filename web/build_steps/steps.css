@@ -51,3 +51,12 @@ html.rs-phone .bs button, html.rs-phone .bs summary, html.rs-phone .bs-open { mi
 @keyframes bs-turn { to { transform: rotate(360deg); } }
 @keyframes bs-pulse { 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .bs-spin, .bs-run { animation: none; } }
+/* the extract rows of the data step, as Studio's: Get, Use or In use, the progress under the name, the file to this computer */
+.bs-data .rs-opt { align-items: center; }
+.bs-data .rs-opt > button { padding: 5px 9px; margin-left: auto; flex: none; }
+.bs-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; flex: none; color: var(--muted, currentColor); }
+.bs-ico:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: var(--ink, currentColor); }
+.bs-prog { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.bs-bar { display: block; height: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 15%, transparent); overflow: hidden; }
+.bs-bar > span { display: block; height: 100%; background: var(--accent, #0e7490); transition: width 0.3s; }
+.bs-err { color: color-mix(in srgb, #dc2626 75%, var(--ink, currentColor)); }
