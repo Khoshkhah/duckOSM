@@ -351,8 +351,7 @@ def test_card_8_edits_the_levels_of_an_area(studio):
         page.fill("[data-ds=path]", str(PBF))
         page.wait_for_function("document.querySelector('[data-ds=msg]').textContent.startsWith('Found')")
         _options(page)
-        for k in ("bus_routes", "build_features"):                 # the levels stay: card 8 edits them
-            page.uncheck(f"[name=opt][value={k}]")
+        page.uncheck("[name=opt][value=bus_routes]")               # the levels stay (card 8 edits them), and the base-map layers and the wall labels (the walls need the buildings)
         for m in ("walking", "cycling"):
             page.uncheck(f"[name=mode][value={m}]")
         _build_and_open(page, "monaco-lv")
@@ -361,6 +360,17 @@ def test_card_8_edits_the_levels_of_an_area(studio):
         page.wait_for_function("document.body.dataset.rsEditing === 'levels' || /failed/.test(document.querySelector('[data-rs-section=step8]').innerText)", timeout=300_000)
         assert "open in" in page.inner_text(card), page.inner_text(card)
         assert page.evaluate("window.studio.levelPart.editor.answer().resolve.how") == "given", "the editor starts from the stored levels"
+        # a click on a road in the editor selects it (the part lends the editor the road table of the server, way D: the page keeps none)
+        page.evaluate("map.jumpTo({zoom: 16})")
+        page.wait_for_function("map.loaded()", timeout=60_000)
+        page.wait_for_timeout(1000)
+        spot = page.evaluate("""() => { const c = map.getCanvas(), r = c.getBoundingClientRect(), L = map.getStyle().layers.filter((l) => l.type === 'line' && l.id.startsWith('rs-')).map((l) => l.id);
+            for (let y = 0.15 * c.clientHeight; y < 0.85 * c.clientHeight; y += 7) for (let x = 0.4 * c.clientWidth; x < 0.95 * c.clientWidth; x += 7) {
+              if (document.elementFromPoint(r.left + x, r.top + y) !== c) continue; const f = map.queryRenderedFeatures([x, y])[0];
+              if (f && L.includes(f.layer.id)) return [r.left + x, r.top + y]; } return null; }""")
+        assert spot, "a road to click"
+        page.mouse.click(*spot)
+        page.wait_for_selector("#lv-cards .card, #lv-cards [data-hroad]", timeout=10_000)
         road = page.evaluate("(async () => { const e = window.studio.levelPart.editor, ids = e.roads.slice(0, 300), f = await e.facts(ids); return ids.find((i) => f[i].length_m > 30); })()")
         said = page.evaluate("r => window.lvApi('/api/apply', {ops: [{op: 'head', road: r, end: 'end', m: '7'}]})", road)
         assert said["ok"] and said["redrawn"], said
@@ -368,6 +378,9 @@ def test_card_8_edits_the_levels_of_an_area(studio):
         page.click("#lv-back")
         page.wait_for_function("/Applied|failed/.test(document.querySelector('[data-rs-section=step8]').innerText)", timeout=120_000)
         assert "Applied" in page.inner_text(card), page.inner_text(card)
+        # the 3D walls by type: the area has main.building_faces (the option "Wall labels" is on), and the server cuts them into tiles of its map
+        walls = page.evaluate("fetch(location.origin + '/areas/monaco-lv/walls').then((r) => r.json())")
+        assert walls["walls"] > 100 and walls["source"]["tiles"][0].startswith("/tiles/walls/"), walls
         browser.close()
         assert not errors, errors
     con = duckdb.connect(str(out / "monaco-lv" / "monaco-lv.duckdb"), read_only=True)

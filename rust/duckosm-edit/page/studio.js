@@ -119,6 +119,16 @@
         const adapter = window.rsHttpAdapter(`${location.origin}/areas/${encodeURIComponent(name)}`);
         const style = await adapter.style();
         rs.setAdapter(adapter);
+        // the walls of the buildings (3D walls by type): the server cuts them into tiles of the area's map when they first show; none when the area has no
+        // main.building_faces (the build's option "Wall labels")
+        window.rsSetWalls?.(async () => {
+          const r = await fetch(`${location.origin}/areas/${encodeURIComponent(name)}/walls`);
+          if (r.status === 204) return null;
+          if (!r.ok) throw new Error((await r.text()) || r.statusText);
+          const { source } = await r.json();
+          source.tiles = source.tiles.map((t) => (t.startsWith("/") ? `${location.origin}/areas/${encodeURIComponent(name)}${t}` : t));
+          return source;
+        });
         window.rsSetBasemap?.("blank");                                   // first: the base map's own tools (its 3D buildings) give way to the area's, which the style brings
         roadsOn ??= rs.roadLayers({ prefix: "rs-", before: map.getLayer("bs-area-fill") ? "bs-area-fill" : null });
         await roadsOn.show(style);
@@ -130,6 +140,7 @@
     // no open area: its map goes, and the base map of the page is back
     function closeArea() {
       if (levelPart?.isOpen()) levelPart.close();
+      window.rsSetWalls?.(null);
       roadsOn?.remove();
       rs.setAdapter(null);
       window.rsSetBasemap?.("ofm_liberty");

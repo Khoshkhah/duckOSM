@@ -49,7 +49,8 @@ jobs:
 
   # duckosm edit in a browser (tests/test_edit_page.py, docs/design/edit_page.md): the page of a Monaco build, a change, the box, Build again
   edit-page:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest: Playwright 1.55 has no Chromium for ubuntu-latest (26.04) (2026-11-11)
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +69,8 @@ jobs:
 
   # duckosm studio in a browser (tests/test_studio_page.py, docs/guides/studio.md): the six steps on Monaco, at a desktop width and at 390 x 844
   studio-page:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest: Playwright 1.55 has no Chromium for ubuntu-latest (26.04) (2026-11-11)
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
