@@ -79,12 +79,15 @@
     saved.append(folderBox, listBox);
     initFolderStep({ root: folderBox, folder: async () => (await (await api("info")).json()).out, list: async (path) => post("folders", path),
       choose: async (path, create) => { await post("folder", JSON.stringify({ path, create })); await paintAreas(); where(); }, onChange: () => rs.sections.note("areas", "") });
+    let openArea = null;
+    const markOpen = (name) => { openArea = name; for (const r of saved.querySelectorAll('input[name="saved-area"]')) r.checked = r.value === name; };
     const paintAreas = async () => {
       const list = await (await api("areas")).json();
       listBox.innerHTML = list.length ? "" : '<p class="small muted">No area in this folder yet.</p>';
       listBox.insertAdjacentHTML("beforeend", list.map((a) => {
         const modes = parseSettings(a.config).modes ?? [];
-        return `<div class="rs-opt saved-area" data-name="${esc(a.name)}"><span><strong>${esc(a.name)}</strong>
+        // the area that is open in the steps keeps its row selected (roadstyle's style of a chosen row: a hidden radio that is checked)
+        return `<div class="rs-opt saved-area" data-name="${esc(a.name)}"><input type="radio" name="saved-area" value="${esc(a.name)}" hidden tabindex="-1"${a.name === openArea ? " checked" : ""}><span><strong>${esc(a.name)}</strong>
           <small>${new Date(a.modified * 1000).toLocaleString()} · ${bytes(a.size)}${a.dem ? " · with a DEM" : ""}</small>
           <span class="sa-nets">${modes.map((m) => `<span class="rs-chip">${esc(m)}</span>`).join("")}</span>
           <span class="sa-actions"><button type="button" class="sb-primary" data-do="open" title="Open this area: its boundary and settings go into the steps, its result into step 6, and step 7 opens its map">Open</button><button type="button" class="sb-danger" data-do="delete" title="Delete the folder of this area and all its files">Delete</button></span></span></div>`;
@@ -127,6 +130,7 @@
         area.set(a.boundary, a.name, "saved");
         loadedArea = a.name;
         settings.set(parseSettings(a.config));
+        markOpen(a.name);
         built = true; builtName = a.name; result.show({ ...a, text: "", seconds: null }); viz.ready(true); refreshSteps();
         autoFold(cards[5], false); autoFold(cards[6], false);
         rs.sections.note("areas", `${a.name} is open. Open its map in step 7, or change a step and build again.`);
@@ -145,7 +149,7 @@
     };
     const parts = { search: rs.search, drop: rs.drop, tabs: rs.tabs, toggle: rs.toggle, kpi: rs.kpi, number: rs.number };
     const post = async (path, body) => (await api(path, { method: "POST", body })).json();
-    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { if (built && area.area()?.name !== builtName) { built = false; result.clear(); viz.ready(false); } ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });      // another area: the result of the old one goes
+    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { if (openArea && area.area()?.name !== openArea) markOpen(null); if (built && area.area()?.name !== builtName) { built = false; result.clear(); viz.ready(false); } ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });      // another area: the result of the old one goes
     const zoomBtn = Object.assign(rs.sections.button("step2", { icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>', title: "Zoom to the area", onClick: () => area.zoom() }), { disabled: true });
     let extracts = null;
     const data = initDataStep({ root: roots[3], rs: parts, map, padding, zoomToArea: () => area.zoom(), area: () => area.area(),
@@ -176,7 +180,7 @@
           dem: dem && { product: dem.product, vertical_datum: dem.vertical_datum, license: dem.license, not_reference: dem.not_reference, ...(dem.files ? { source: dem.source, files: dem.files } : {}) } }) });
       },
       poll: async () => (await api("job")).json(),
-      onDone: (job) => { built = true; builtName = job.name; paintAreas(); result.show(job); viz.built(); refreshSteps(); autoFold(cards[5], false); autoFold(cards[6], false); } });
+      onDone: (job) => { built = true; builtName = job.name; openArea = job.name; paintAreas(); result.show(job); viz.built(); refreshSteps(); autoFold(cards[5], false); autoFold(cards[6], false); } });
 
     // ---- where the files are: the folder of the area (loading, downloading and saving), shown in the cards ----
     const place = (card, first) => { const p = Object.assign(document.createElement("p"), { className: "where" }); first ? card.prepend(p) : card.append(p); return p; };

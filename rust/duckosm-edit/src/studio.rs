@@ -96,6 +96,8 @@ pub struct Studio {
     /// The download of an OSM extract (step 3), apart from the build: `name` is the file, `dir` its path when it is whole.
     dl: Mutex<Job>,
     edit: Mutex<Option<Arc<Site>>>,
+    /// The name of the area whose map page is made now (Open makes it in the background), or empty.
+    opening: Mutex<String>,
     pager: Pager,
 }
 
@@ -208,7 +210,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), pager })
     }
 
     /// The folder of the areas now.
@@ -448,7 +450,7 @@ impl Studio {
         self.step(&format!("Build from {} into {}", pbf.display(), db.display()));
         let text = self.host.build(&config, dir, &db, &|line| self.step(line))?;
         self.step(&format!("Visualization: make the map page of {name} (the roads and the layers of the database on a blank base map)"));
-        let site = Site::with_pager(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager)?;
+        let site = Site::with_cache(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager, Some(dir.join(format!("{name}.map.html"))))?;
         *self.edit.lock().unwrap() = Some(Arc::new(site));
         Ok(text)
     }
@@ -523,8 +525,9 @@ impl Studio {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
     }
 
-    /// Open the page of the result for a saved area (the page of `duckosm edit`, at `/edit/`).
-    fn open(&self, name: &str) -> Result<(), String> {
+    /// Open the page of the result for a saved area (the page of `duckosm edit`, at `/edit/`). It answers at once: the page is made in the background
+    /// (or read from `<name>.map.html`), and `/edit/` says "Preparing the map" until it is there.
+    fn open(self: &Arc<Self>, name: &str) -> Result<(), String> {
         let dir = self.area_dir(name).filter(|d| d.join(format!("{name}.duckdb")).is_file()).ok_or("no such area")?;
         if matches!(self.job.lock().unwrap().state, "downloading" | "building") {
             return Err("a build runs: wait for it".into());
@@ -532,9 +535,21 @@ impl Studio {
         if let Some(old) = self.edit.lock().unwrap().take() {
             old.close();
         }
-        let db = dir.join(format!("{name}.duckdb"));
-        let site = Site::with_pager(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager)?;
-        *self.edit.lock().unwrap() = Some(Arc::new(site));
+        *self.opening.lock().unwrap() = name.to_string();
+        let (me, name) = (self.clone(), name.to_string());
+        std::thread::spawn(move || {
+            let db = dir.join(format!("{name}.duckdb"));
+            let site = Site::with_cache(me.host.db(&db), &db, &dir.join("osm_fixes.yaml"), me.port, Mode::Edit, me.pager, Some(dir.join(format!("{name}.map.html"))));
+            let mut opening = me.opening.lock().unwrap();
+            if *opening != name {
+                return;      // another area was opened meanwhile
+            }
+            match site {
+                Ok(s) => *me.edit.lock().unwrap() = Some(Arc::new(s)),
+                Err(e) => eprintln!("duckosm studio: {name}: {e}"),
+            }
+            opening.clear();
+        });
         Ok(())
     }
 
@@ -692,6 +707,11 @@ impl Studio {
                     req.path = rest.to_string();
                     s.route(req)
                 }
+                None if !self.opening.lock().unwrap().is_empty() => {
+                    let name = self.opening.lock().unwrap().clone();
+                    let page = format!("<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=1><title>Preparing the map</title><body style=\"font:15px system-ui;margin:40px\">Preparing the map of {name}…</body>");
+                    req.say("200 OK", "text/html; charset=utf-8", page.as_bytes())
+                }
                 None => req.say("404 Not Found", "text/plain", b"no area is built yet"),
             };
         }
@@ -712,7 +732,7 @@ impl Studio {
         let api = path.strip_prefix("api/").unwrap_or("").to_string();
         match (req.method.as_str(), api.as_str()) {
             ("GET" | "HEAD", "info") => {
-                let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some()});
+                let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap()});
                 req.say("200 OK", "application/json", info.to_string().as_bytes())
             }
             ("GET" | "HEAD", "job") => {
@@ -960,7 +980,11 @@ mod tests {
         }
         assert!(post(port, &ask, "POST", "open", "no-db").starts_with("HTTP/1.1 400"));
         assert!(post(port, &ask, "POST", "open", "old").starts_with("HTTP/1.1 200"));
-        assert!(ask(&format!("GET /edit/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")).ends_with("the result page"));
+        // Open answers at once; the page is made in the background ("Preparing the map" until then), and kept in old/old.map.html
+        let page = (0..100).map(|_| { std::thread::sleep(std::time::Duration::from_millis(20)); ask(&format!("GET /edit/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")) })
+            .find(|r| !r.contains("Preparing the map")).unwrap();
+        assert!(page.ends_with("the result page"), "{page}");
+        assert_eq!(std::fs::read_to_string(out.join("old").join("old.map.html")).unwrap(), "the result page");
     }
 
     #[test]

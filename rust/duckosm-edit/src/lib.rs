@@ -87,6 +87,8 @@ pub struct Site {
     pager: Pager,
     /// The fixes file is copied to `<fixes>.bak` before the page writes it the first time.
     backed_up: Mutex<bool>,
+    /// A file that keeps the page of the database (`duckosm studio`: `<name>.map.html` in the folder of the area), or None.
+    cache: Option<PathBuf>,
 }
 
 impl Site {
@@ -102,10 +104,16 @@ impl Site {
     }
 
     /// As `with_mode`, with the function that makes the page (the tests of `studio` give a placeholder).
-    pub fn with_pager(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode, pager: Pager) -> Result<Site, String> {
-        let (page, tables, source) = load(db.as_mut(), db_path, pager)?;
+    pub fn with_pager(db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode, pager: Pager) -> Result<Site, String> {
+        Site::with_cache(db, db_path, fixes, port, mode, pager, None)
+    }
+
+    /// As `with_pager`, and the page is kept in the file `cache`: a later open reads the file when it is newer than the database, and does not make the page
+    /// again (Burnaby: 12 s and 45 MB to make). A database that changed (a build, Build again) makes the page and the file again.
+    pub fn with_cache(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode, pager: Pager, cache: Option<PathBuf>) -> Result<Site, String> {
+        let (page, tables, source) = load(db.as_mut(), db_path, pager, cache.as_deref())?;
         Ok(Site { db: db_path.to_path_buf(), fixes: fixes.to_path_buf(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
-                  state: Mutex::new(State { db, page, tables, source }), pager, backed_up: Mutex::new(false) })
+                  state: Mutex::new(State { db, page, tables, source }), pager, backed_up: Mutex::new(false), cache })
     }
 
     /// The address of the page.
@@ -133,7 +141,7 @@ impl Site {
         s.db.close();
         let built = s.db.build(&config, &dir, &self.fixes, &self.db);
         // the database opens again also after a failed build (the old file, or what the build left)
-        let (page, tables, source) = load(s.db.as_mut(), &self.db, self.pager)?;
+        let (page, tables, source) = load(s.db.as_mut(), &self.db, self.pager, self.cache.as_deref())?;
         (s.page, s.tables, s.source) = (page, tables, source);
         built
     }
@@ -216,10 +224,23 @@ impl Site {
 }
 
 /// Open the database, make the page, read the tables and the build's record, then lock the database (`LOCK`).
-fn load(db: &mut dyn Db, path: &Path, pager: Pager) -> Result<(String, Value, Result<(String, PathBuf), String>), String> {
+fn load(db: &mut dyn Db, path: &Path, pager: Pager, cache: Option<&Path>) -> Result<(String, Value, Result<(String, PathBuf), String>), String> {
     db.open()?;
     let name = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "area".into());
-    let page = pager(db, &name)?;
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let kept = cache.filter(|c| matches!((modified(c), modified(path)), (Some(c), Some(d)) if c >= d)).and_then(|c| std::fs::read_to_string(c).ok());
+    let page = match kept {
+        Some(page) => page,
+        None => {
+            let page = pager(db, &name)?;
+            if let Some(c) = cache {
+                if let Err(e) = std::fs::write(c, &page) {
+                    eprintln!("duckosm: the page is not kept in {}: {e}", c.display());
+                }
+            }
+            page
+        }
+    };
     let tables: Vec<Value> = rows(db, "SELECT table_schema AS mode, table_name AS \"table\" FROM information_schema.tables WHERE table_catalog = current_database()")?;
     let source = source(db);
     db.execute(LOCK)?;
@@ -516,7 +537,7 @@ mod tests {
         let site = Site { db: dir.join("area.duckdb"), fixes: fixes.clone(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
                           state: Mutex::new(State { db: Box::new(Fake { built: built.clone(), ran: ran.clone() }), page: "the page".into(), tables: json!([]),
                                                     source: Ok(("name: a".into(), dir.clone())) }),
-                          pager: |_, _| Ok("the page".into()), backed_up: Mutex::new(false) };
+                          pager: |_, _| Ok("the page".into()), backed_up: Mutex::new(false), cache: None };
         std::thread::spawn(move || serve(Arc::new(site), listener));
         let ask = move |req: &str| {
             let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();

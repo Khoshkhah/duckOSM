@@ -55,7 +55,8 @@ The areas are files on your disk, in `OUT_DIR/<name>/`. A new visit of the page 
 For each area the card shows the date, the size, the networks and whether it has a DEM, with two buttons. The outline of the area under the mouse shows on the map.
 
 - **Open** puts the area into the steps: its boundary and its settings, its result in step 6, and its map in step 7. To build it again, choose the OSM data and the ground, change what you want, and click Build.
-  A large area takes some seconds to open.
+  Open answers at once. The map page of the area is kept in `OUT_DIR/<name>/<name>.map.html`: the build writes it, and Open reads it, so the map is ready at once.
+  The server makes the page again only when the database changed (Burnaby: about 13 s, in the background; step 7 says "Preparing the map" until it is ready).
 - **Delete** deletes the folder of the area and all its files, after you confirm. The downloaded extracts (`OUT_DIR/osm/`) and DEM files (`OUT_DIR/dem/`) stay.
 
 ## On a phone
