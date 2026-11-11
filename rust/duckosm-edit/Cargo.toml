@@ -14,10 +14,10 @@ duckosm-editor = { path = "../duckosm-editor" }   # the files of the fixes edito
 httparse = "=1.10.1"           # the request line and the headers, as roadstyle-serve
 serde_json = { version = "1", features = ["preserve_order"] }
 # the map: roadstyle's standard dashboard page of a duckOSM file (roadstyle_io::duckosm reads the file, page_options::page_from writes the page)
-roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "1c909e5bd7d1e4921b2300b794e14b36cdd573c6" }
+roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa" }
 # duckosm studio: the map of an open area is way D (roadstyle local): the style, the tiles, the rows and the lines; with DuckDB (the feature duckdb), the queries
-roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "1c909e5bd7d1e4921b2300b794e14b36cdd573c6", default-features = false }
-roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "1c909e5bd7d1e4921b2300b794e14b36cdd573c6" }   # the request and the answer of way D (Api)
+roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa", default-features = false }
+roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa" }   # the request and the answer of way D (Api)
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }   # the progress hook of the build (set_progress)
 ureq = "3"                     # duckosm studio: the download of a Geofabrik extract and of its index
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }

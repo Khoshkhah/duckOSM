@@ -53,11 +53,17 @@ One step is open at a time, and the next step opens when the one before is done.
 7. **Edit OSM data.** The card opens the panel Edit OSM data of the area: the page of [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit).
    Each change goes into `OUT_DIR/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file. Its back button comes back to the steps,
    with the area open.
+The map of an open area has the **3D walls by type** (front, back, side, party, court; the toolbox's 3D buildings, then the walls
+style of card Edit design) when the area has `main.building_faces`: the build's option **Wall labels** (on by default) makes it, with
+the base-map layers. The server cuts the walls into tiles of the area's map when they first show. An area built before this option was
+on has no walls: build it again.
+
 8. **Edit levels.** The card opens roadstyle's level editor over the map of the open area: the drawing order of the roads at bridges and
    tunnels (the same editor as card 8 of duckOSM Studio). Each change draws the changed roads again at once: the server redraws them.
    **← Steps** closes the editor and writes the change into the area's `.duckdb` file (`visualization.edge_levels`, `edge_levels_meta`,
    `level_edits`, `level_heads` and `level_caps`). The area must have levels: the option **levels** of the build is on by default. The
-   editor runs in the page with roadstyle's WebAssembly package. The program has the package only when `rust/duckosm-edit/editor_pkg.sh`
+   editor needs every road of the area, so it borrows the area's road table from the server while it is open. It runs in the page with
+   roadstyle's WebAssembly package. The program has the package only when `rust/duckosm-edit/editor_pkg.sh`
    ran before its build. Without the package, the card says so.
 
 Studio has two more ways to get the OSM data (Overpass, and a cut file that you open in the browser). They are not here: the build reads a Geofabrik extract or a file on this computer.

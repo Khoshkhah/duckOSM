@@ -128,7 +128,9 @@ UPDATE visualization.edge_levels_meta SET source = 'area', area = '{}', created 
 }
 
 /// The roads, the base-map rows and the look of an area's page (the stored levels, the layers of the database), for `make_with` and `make_tiled`.
-fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look), String> {
+type Prepared = (roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look, Option<String>);
+
+fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>, walls: bool) -> Result<Prepared, String> {
     let cat = catalog(db)?;
     // the stored levels of the build (visualization.edge_levels); a file with none: the tags rule (no solve: the page opens at once)
     let tags = !cat.tables.iter().any(|(a, b)| a == "visualization" && b == "edge_levels");
@@ -159,6 +161,15 @@ fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Opti
     }
     let roads = parquet(db, &d::roads_select("all", &run).map_err(|e| e.to_string())?)?;
     let features = d::features_select(&made, &run).map(|q| parquet(db, &q)).transpose()?;
+    // the walls of the buildings (`walls`; Studio's wallsData, here on the server): the roof of each building that has walls (its height tags, from the
+    // rows of the map) and each wall of main.building_faces; the heights come below, from the look's rule of the 3D buildings
+    let wall_rows = match d::features_select(&made, &run) {
+        Some(q) if walls && cat.tables.iter().any(|(a, b)| a == "main" && b == "building_faces") => Some((
+            rows(db, &format!("SELECT CAST(osm_id AS VARCHAR) AS id, height, levels, roof_levels, kind, min_height, min_level, ST_AsGeoJSON(ST_GeomFromWKB(geometry)) AS g
+                               FROM ({q}) b WHERE b.layer = 'buildings' AND TRY_CAST(b.osm_id AS BIGINT) IN (SELECT building_id FROM main.building_faces)"))?,
+            rows(db, "SELECT CAST(building_id AS VARCHAR) AS id, face_type, azimuth_deg, ST_AsGeoJSON(geometry) AS g FROM main.building_faces")?)),
+        _ => None,
+    };
     db.execute(&run.drop_sql(&made))?;
     // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
     // the clicked road in the panel (no tooltip)
@@ -169,11 +180,37 @@ fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Opti
     let (o, lk) = look(args)?;
     let roads = roadstyle::read::read_roads(roads, "geometry").map_err(|e| e.to_string())?;
     let features = features.map(roadstyle::read_features).transpose().map_err(|e| e.to_string())?;
-    Ok((roads, features, o, lk))
+    let walls = wall_rows.map(|(roofs, faces)| walls_of(&lk, &roofs, &faces)).transpose()?;
+    Ok((roads, features, o, lk, walls))
+}
+
+/// The walls of `rsSetWalls` (a GeoJSON FeatureCollection, as Studio's wallsData makes it): the roof of each building `{height, base}` and each wall
+/// `{type, height, base, azimuth}`, with the heights of roadstyle's rule of the 3D buildings (`building_heights`), so a wall has the height of its
+/// building in the tiles.
+fn walls_of(lk: &roadstyle::Look, roofs: &[Value], faces: &[Value]) -> Result<String, String> {
+    let text = |v: &Value| v.as_str().map(String::from).or_else(|| (!v.is_null()).then(|| v.to_string()));
+    let tags: Vec<[Option<String>; 6]> = roofs.iter().map(|r| ["height", "levels", "roof_levels", "kind", "min_height", "min_level"].map(|k| text(&r[k]))).collect();
+    let hb = roadstyle::features::building_heights(lk, &tags).map_err(|e| e.to_string())?;
+    let geo = |v: &Value| v.as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).unwrap_or_else(|| v.clone());
+    let (mut of, mut features) = (std::collections::HashMap::new(), Vec::new());
+    for (r, (h, b)) in roofs.iter().zip(hb) {
+        let id = r["id"].as_str().unwrap_or_default().to_string();
+        if of.contains_key(&id) {
+            continue;                       // the first row of a building
+        }
+        features.push(json!({"type": "Feature", "properties": {"height": h, "base": b}, "geometry": geo(&r["g"])}));
+        of.insert(id, (h, b));
+    }
+    for w in faces {
+        if let Some((h, b)) = w["id"].as_str().and_then(|id| of.get(id)) {
+            features.push(json!({"type": "Feature", "properties": {"type": w["face_type"], "height": h, "base": b, "azimuth": w["azimuth_deg"]}, "geometry": geo(&w["g"])}));
+        }
+    }
+    Ok(json!({"type": "FeatureCollection", "features": features}).to_string())
 }
 
 fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<String, String> {
-    let (roads, features, o, lk) = prepare(db, name, script, style, basemap)?;
+    let (roads, features, o, lk, _) = prepare(db, name, script, style, basemap, false)?;
     let given = roadstyle::page_options::given_of(&lk, &o.args);
     let page = roadstyle::page_options::page_from(roads, features, &lk, &o, &given).map_err(|e| e.to_string())?;
     for w in &page.warnings {
@@ -184,9 +221,9 @@ fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Op
 
 /// What way D (roadstyle-local) makes the map of an area from: the roads, the base-map rows and the look, with the blank base map. `duckosm studio`
 /// puts the map's style on its own map (rs.roadLayers), so an open area changes only the map.
-pub fn map_parts(db: &mut dyn Db, name: &str) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::Look), String> {
-    let (roads, features, _, lk) = prepare(db, name, "", "", Some("blank"))?;
-    Ok((roads, features, lk))
+pub fn map_parts(db: &mut dyn Db, name: &str) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::Look, Option<String>), String> {
+    let (roads, features, _, lk, walls) = prepare(db, name, "", "", Some("blank"), true)?;
+    Ok((roads, features, lk, walls))
 }
 
 /// The page of `duckosm studio`: roadstyle's standard dashboard (the same template, toolbox and panel as the page of `duckosm edit`) for an area with no

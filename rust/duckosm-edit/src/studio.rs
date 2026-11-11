@@ -108,7 +108,8 @@ pub struct Studio {
     current: Mutex<String>,
     /// The map of an open area, way D (roadstyle-local): its name and the program's state (the style, the tiles, the rows, the lines, the queries).
     /// The maps of the areas that were opened last (at most `TILED_KEPT`, the newest last): two tabs with two areas both get their tiles.
-    tiled: Mutex<Vec<(String, Arc<roadstyle_local::Local>)>>,
+    /// With each map, the walls of its buildings (`page::walls_of`: the GeoJSON of rsSetWalls), cut into tiles when the page asks (`GET areas/<name>/walls`).
+    tiled: Mutex<Vec<(String, Arc<roadstyle_local::Local>, Option<Arc<String>>)>>,
     /// One making of a tiled map at a time: the tiles of an area that the server does not have (after a restart) make it once, and wait.
     making: Mutex<()>,
     pager: Pager,
@@ -695,13 +696,13 @@ impl Studio {
         db.open()?;
         let made = crate::page::map_parts(db.as_mut(), name);
         db.close();
-        let (roads, features, look) = made?;
+        let (roads, features, look, walls) = made?;
         let database = cfg!(feature = "duckdb").then_some(file);
         let local = roadstyle_local::Local::open(roadstyle_local::Config { roads, features, database, roads_file: None, name: name.to_string(), look,
                                                                          tables: Vec::new(), frames: None, port: self.port })?;
         let mut kept = self.tiled.lock().unwrap();
         kept.retain(|t| t.0 != name);
-        kept.push((name.to_string(), Arc::new(local)));
+        kept.push((name.to_string(), Arc::new(local), walls.map(Arc::new)));
         let over = kept.len().saturating_sub(TILED_KEPT);
         kept.drain(..over);
         Ok(())
@@ -990,7 +991,7 @@ impl Studio {
         if let Some(rest) = path.strip_prefix("areas/") {
             // the map of an area, way D: areas/<name>/<the address of roadstyle local>; the page's rsHttpAdapter asks them
             let (n, sub) = rest.split_once('/').unwrap_or((rest, ""));
-            let find = |n: &str| self.tiled.lock().unwrap().iter().find(|t| t.0 == n).map(|t| t.1.clone());
+            let find = |n: &str| self.tiled.lock().unwrap().iter().find(|t| t.0 == n).map(|t| (t.1.clone(), t.2.clone()));
             let mut t = find(n);
             // an area that the server does not keep (a page from before a restart, or a fourth area): it makes the area's map once, and the request waits
             if t.is_none() {
@@ -1002,7 +1003,18 @@ impl Studio {
                     }
                 }
             }
-            let Some(t) = t else { return req.say("404 Not Found", "text/plain", b"no such area") };
+            let Some((t, walls)) = t else { return req.say("404 Not Found", "text/plain", b"no such area") };
+            if sub == "walls" && read {
+                // the walls of the area's buildings as tiles of its map (roadstyle's set_walls): their vector source; 204: the area has no walls
+                // (main.building_faces is made with the option building_faces, "Wall labels")
+                return match walls {
+                    Some(fc) => match t.set_walls(fc.as_bytes()) {
+                        Ok(v) => req.say("200 OK", "application/json", v.to_string().as_bytes()),
+                        Err(e) => req.say("500 Internal Server Error", "text/plain", e.as_bytes()),
+                    },
+                    None => req.say("204 No Content", "application/json", b""),
+                };
+            }
             if let Some(op) = sub.strip_prefix("levels/") {
                 return self.levels(req, n, op, &t);
             }
