@@ -22,10 +22,16 @@ This page tells what duckOSM stores, how the data goes to a map, and which choic
 | `edges.z_vertices` | the height at each point of the edge line, in the order of the line | the same |
 | [`main.elevation_metadata`](../reference/database.md#elevation_metadata) | where the heights come from: source, product (`DTM` or `DSM`), resolution, vertical datum, licence, and `sha256`, the SHA-256 of the DEM file (the ground id) | both |
 
-The database has one form for both builds: the heights are columns of each mode's `nodes` and `edges`. Only the Parquet files of
-the Rust build keep them apart, in `elevation_nodes_<mode>.parquet` (`node_id`, `ele`) and `elevation_edges_<mode>.parquet`
-(`edge_id`, `z_from`, `z_to`, `z_vertices`), because the build writes `edges_<mode>.parquet` before it samples the DEM. When it
-makes the `.duckdb`, it joins them into the columns. A reader of the Parquet files joins them on `node_id` and `edge_id`.
+The heights are in two forms today:
+
+| Where | The heights |
+|---|---|
+| the `.duckdb` of the native build (`duckosm-rust --dem`) and of `duckosm elevation` | columns of each mode's `nodes` and `edges`, as in the table above |
+| the Parquet files of the Rust build | apart, in `elevation_nodes_<mode>.parquet` (`node_id`, `ele`) and `elevation_edges_<mode>.parquet` (`edge_id`, `z_from`, `z_to`, `z_vertices`): the build writes `edges_<mode>.parquet` before it samples the DEM |
+| duckOSM Studio, and its `make_duckdb.sql` | apart, as the tables `<mode>.elevation_nodes` and `<mode>.elevation_edges`: Studio makes one table for each Parquet file |
+
+A reader of the Parquet files or of Studio's tables joins the heights to `nodes` on `node_id` and to `edges` on `edge_id`. One form
+for every output is to do.
 
 The grid is the terrain itself. The heights at the nodes and edges are samples of the same file at the road points.
 
@@ -78,7 +84,7 @@ State on 2026-11-10.
 | Part | Reads | Does | Writes or shows | State |
 |---|---|---|---|---|
 | **duckOSM build** (`duckosm-rust --dem`) | the DEM file (GeoTIFF, EPSG:4326, 32-bit floats) and its product, vertical datum and licence | reads the DEM one time; takes its pixels over the area and samples it at each node and at each point of each edge | `main.elevation_grid`, `nodes.ele`, `edges.z_from`, `z_to`, `z_vertices`, `main.elevation_metadata` with the ground id (`sha256`) | done |
-| **duckOSM Studio** (browser) | the DEM file that you select in the step "Ground"; the step sets its product, datum and licence from a catalog | the same Rust build, in WebAssembly | the same tables; the terrain file for its map (made by roadstyle's WebAssembly) | done (Studio PRs 137 and 138) |
+| **duckOSM Studio** (browser) | the DEM file that you select in the step "Ground"; the step sets its product, datum and licence from a catalog | the same Rust build, in WebAssembly | the same data; the heights as the tables `<mode>.elevation_nodes` and `<mode>.elevation_edges`, not as columns; the terrain file for its map (made by roadstyle's WebAssembly) | done (Studio PRs 137 and 138) |
 | **`duckosm elevation`** (Python) | a DEM file or a global source | samples the DEM at the nodes and the edge points | the same columns `ele`, `z_from`, `z_to`, `z_vertices`; no grid | done |
 | **SimReady** `import-elevation` | the heights at the road points (duckOSM) and the bridge groups | writes heights at stations along each carriageway, then fits the graded profile: straight grades and vertical curves | `sim.elevation_profile` (`dem_sample`, `graded`, `earthwork_m`: cut or fill) | done for Monaco (FABDEM) and Vancouver (1 m LiDAR); some height checks still fail where a junction meets a lane |
 | **SimReady** `gltf` adapter | `main.elevation_grid` and the graded profile | bends the ground to the roads (`terrain-conform`): the road's height across the roadway, a blend back to the DEM beside it | the conformed ground as a mesh in the GLB | on SimReady `main`; the conformed ground is not yet a grid that other projects read |
