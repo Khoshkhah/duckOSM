@@ -18,7 +18,8 @@ duckosm studio areas
 Open the address that the command prints (`http://127.0.0.1:8792/`). The page opens in the browser by itself when the computer has a desktop;
 `--no-open` stops this. Each area is made in its own folder, `areas/<name>/`. The page answers only on this computer. Ctrl+C stops it.
 
-`duckosm-rust studio` is the same page with the native engine of the Rust program. It has no base-map layers.
+The page and its server are Rust. `duckosm-rust studio` is the program: the build is the native Rust engine, with no Python. `duckosm studio` is the same page for the Python package, and its build is
+`duckosm build` (the Rust engine and the Python steps); it is the cross-check of the Rust build.
 
 ## The steps
 
