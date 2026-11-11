@@ -6,12 +6,11 @@
 //! The files that it writes are in the folder of the area, `<out>/<name>/`: `boundary.geojson`, `dem.tif`, `config.yaml`, the PBF file of a
 //! download, and the `<name>.duckdb` of the build. A local PBF file is read from the path that the page gives (the page is on the same computer).
 //!
-//! The routes: `GET /` the page; `GET /parts/<file>` the parts; `GET /vendor/<file>` MapLibre; `GET /roadstyle/<file>` roadstyle's modules and
-//! style; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `POST /api/file` (the path of a local PBF file: its size);
+//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `POST /api/file` (the path of a local PBF file: its size);
 //! `PUT /api/dem/<name>` the DEM of the area; `POST /api/build` start the build; `GET /api/job` the state of the build; `GET /edit/...` the
 //! page of `duckosm edit` for the area that was built last.
 
-use crate::{inside, read_request, Db, Mode, Pager, Req, Site};
+use crate::{read_request, Db, Mode, Pager, Req, Site};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -31,8 +30,6 @@ pub trait Host: Send + Sync {
 
 /// The files of the page: its own, the parts of this repository's `web/`, and the catalog of the DEM sources.
 const PARTS: &[(&str, &str, &str)] = &[
-    ("studio.js", "text/javascript", include_str!("../page/studio.js")),
-    ("studio.css", "text/css", include_str!("../page/studio.css")),
     ("ground_step/ground_step.js", "text/javascript", include_str!("../../../web/ground_step/ground_step.js")),
     ("ground_step/ground_core.js", "text/javascript", include_str!("../../../web/ground_step/ground_core.js")),
     ("ground_step/ground_step.css", "text/css", include_str!("../../../web/ground_step/ground_step.css")),
@@ -45,9 +42,6 @@ const PARTS: &[(&str, &str, &str)] = &[
     ("build_steps/steps.css", "text/css", include_str!("../../../web/build_steps/steps.css")),
     ("data/dem_sources.json", "application/json", include_str!("../../../src/duckosm/data/dem_sources.json")),
 ];
-const PAGE: &str = include_str!("../page/studio.html");
-const MAPLIBRE_JS: &str = roadstyle::assets::text!("vendor/maplibre-gl.js");
-const MAPLIBRE_CSS: &str = roadstyle::assets::text!("vendor/maplibre-gl.css");
 /// The default list of the extracts. A mirror or a file can take its place (`--geofabrik-index`).
 pub const GEOFABRIK_INDEX: &str = "https://download.geofabrik.de/index-v1.json";
 
@@ -83,6 +77,8 @@ pub struct Studio {
     /// Where the list of Geofabrik extracts comes from: a URL or a file.
     index: String,
     index_text: Mutex<Option<String>>,
+    /// The page: roadstyle's dashboard with the script of the steps (`page::make_studio`), made once.
+    page: String,
     job: Mutex<Job>,
     edit: Mutex<Option<Arc<Site>>>,
     pager: Pager,
@@ -130,7 +126,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out, own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), job: Mutex::new(Job::default()), edit: Mutex::new(None), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), edit: Mutex::new(None), pager })
     }
 
     pub fn url(&self) -> String {
@@ -295,20 +291,14 @@ impl Studio {
                 None => req.say("404 Not Found", "text/plain", b"no area is built yet"),
             };
         }
-        if path.is_empty() || path == "index.html" || path.starts_with("parts/") || path.starts_with("vendor/") || path.starts_with("roadstyle/") {
+        if path.is_empty() || path == "index.html" || path.starts_with("parts/") {
             if !read {
                 return req.say("405 Method Not Allowed", "text/plain", b"the page's files are read only");
             }
             let found: Option<(&str, &[u8])> = if path.is_empty() || path == "index.html" {
-                Some(("text/html; charset=utf-8", PAGE.as_bytes()))
-            } else if let Some(f) = path.strip_prefix("parts/") {
-                PARTS.iter().find(|p| p.0 == f).map(|p| (p.1, p.2.as_bytes()))
-            } else if let Some(f) = path.strip_prefix("vendor/") {
-                match f { "maplibre-gl.js" => Some(("text/javascript", MAPLIBRE_JS.as_bytes())), "maplibre-gl.css" => Some(("text/css", MAPLIBRE_CSS.as_bytes())), _ => None }
+                Some(("text/html; charset=utf-8", self.page.as_bytes()))
             } else {
-                let f = &path["roadstyle/".len()..];
-                let kind = if f.ends_with(".js") { Some("text/javascript") } else if f == "dashboard.css" { Some("text/css") } else { None };
-                kind.zip(inside(Path::new(""), f)).and_then(|(k, _)| roadstyle::assets::get(&format!("static/dashboard/{f}")).map(|b| (k, b)))
+                PARTS.iter().find(|p| p.0 == &path["parts/".len()..]).map(|p| (p.1, p.2.as_bytes()))
             };
             return match found {
                 Some((kind, body)) => req.say("200 OK", kind, body),
@@ -436,13 +426,13 @@ mod tests {
         let (_, ask, port, _) = server("page", None);
         let get = |p: &str| ask(&format!("GET /{p} HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n"));
         assert!(get("").contains("<title>duckOSM Studio"));
-        for f in ["parts/studio.js", "parts/ground_step/ground_step.js", "parts/build_steps/area_step.js", "parts/data/dem_sources.json", "vendor/maplibre-gl.js", "roadstyle/search.js", "roadstyle/dashboard.css"] {
+        for f in ["parts/ground_step/ground_step.js", "parts/build_steps/area_step.js", "parts/data/dem_sources.json"] {
             assert!(get(f).starts_with("HTTP/1.1 200"), "{f}");
         }
-        for f in ["parts/../Cargo.toml", "parts/nothing.js", "vendor/other.js", "roadstyle/../x.js", "roadstyle/dashboard.html", "edit/", "api/nothing"] {
+        for f in ["parts/../Cargo.toml", "parts/nothing.js", "parts/studio.js", "vendor/maplibre-gl.js", "edit/", "api/nothing"] {
             assert!(get(f).starts_with("HTTP/1.1 404"), "{f}");
         }
-        assert!(ask(&format!("PUT /parts/studio.js HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\n\r\n")).starts_with("HTTP/1.1 405"));
+        assert!(ask(&format!("PUT /parts/data/dem_sources.json HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\n\r\n")).starts_with("HTTP/1.1 405"));
         assert!(ask("GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n").starts_with("HTTP/1.1 403"));
         assert!(get("edit").contains("Location: /edit/"));
     }

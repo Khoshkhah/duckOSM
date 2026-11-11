@@ -45,10 +45,11 @@ export function initAreaStep({ root, map, rs, geocode = nominatim, padding = () 
 		map.addLayer({ id: "bs-area-fill", type: "fill", source: "bs-area", paint: { "fill-color": "#0e7c8e", "fill-opacity": 0.14 } });
 		map.addLayer({ id: "bs-area-line", type: "line", source: "bs-area", paint: { "line-color": "#0e7c8e", "line-width": 2.5 } });
 	};
-	const draw = (g) => {
-		const put = () => { layers(); map.getSource("bs-area").setData({ type: "FeatureCollection", features: g ? [{ type: "Feature", properties: {}, geometry: g }] : [] }); };
-		map.loaded() || map.isStyleLoaded() ? put() : map.once("load", put);
-	};
+	let shape = null;
+	const put = () => { layers(); map.getSource("bs-area").setData({ type: "FeatureCollection", features: shape ? [{ type: "Feature", properties: {}, geometry: shape }] : [] }); };
+	const draw = (g) => { shape = g; map.loaded() || map.isStyleLoaded() ? put() : map.once("load", put); };
+	// a new style (the dashboard swaps the base map) drops the layers of the area: they come back with the style
+	map.on("styledata", () => { if (shape && !map.getSource("bs-area")) try { put(); } catch { /* the style is not ready: the next styledata tries again */ } });
 
 	function set(g, name = "", from = "") {
 		const polys = polygonsOf(g);

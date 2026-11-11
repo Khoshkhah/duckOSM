@@ -31,14 +31,15 @@ export async function fetchTile(z, x, y) {
  *   status,      // optional: status(text, ms), a short message for the user
  *   onChange,    // optional: (): the choice or the file is new
  *   loadTile,    // optional: (z, x, y) gives the RGBA bytes of a tile (the tests give their own)
+ *   drop,        // optional: roadstyle's rs.drop. With it the file field is a drop zone, and the step shows the ground id (the SHA-256 of the file)
  * })
  * It returns { refresh(), dem(), choice() }.
  */
-export async function initGroundStep({ root, catalog, bbox, status = () => {}, onChange = () => {}, loadTile = fetchTile }) {
+export async function initGroundStep({ root, catalog, bbox, status = () => {}, onChange = () => {}, loadTile = fetchTile, drop = null }) {
 	const all = Array.isArray(catalog) ? catalog : (await (await fetch(catalog)).json()).sources;
 	const byId = Object.fromEntries(all.map((s) => [s.id, s]));
 	const aws = all.find((s) => s.fallback);
-	let chosen = null, file = null, info = null, listed = "", shown = null;
+	let chosen = null, file = null, info = null, sha = "", listed = "", shown = null;
 	root.id = root.id || "ground-step";
 	root.classList.add("gs");
 	root.innerHTML = `<p class="gs-area small muted" data-gs="area"></p>
@@ -68,7 +69,7 @@ export async function initGroundStep({ root, catalog, bbox, status = () => {}, o
 		if (key !== listed) {                                                       // the area changed: a new list, and nothing is chosen: a file gets the product, the datum and the licence of the source that the person names, never of a guess
 			listed = key;
 			chosen = null;
-			file = info = null;
+			file = info = null; sha = "";
 		}
 		q("list").innerHTML = list.slice(0, SHOWN).map(option).join("");
 		q("rest").innerHTML = list.slice(SHOWN).map(option).join("");
@@ -94,20 +95,38 @@ export async function initGroundStep({ root, catalog, bbox, status = () => {}, o
 		const warn = info?.problems?.length ? `<p class="rs-field-msg gs-bad" role="alert">${esc(info.problems.join(" "))} ${info.epsg !== 4326 || info.bits !== 32 ? `Make a new file with this command, then select it:<br><code>${esc(gdalwarpCommand(file.name))}</code>` : ""}</p>` : "";
 		const note = info && !info.problems.length && info.bounds && !coversBox(info.bounds, bbox())
 			? `<p class="small gs-warn">The file covers ${esc(fmt(info.bounds))}. The area reaches outside it: the nodes there get no height.</p>` : "";
+		const field = drop
+			? (file ? `<p class="small"><b>${esc(file.name)}</b> <span class="muted">${(file.size / 1048576).toFixed(1)} MB</span> <button type="button" class="rs-link" data-gs="remove">Remove</button></p>` : `<div data-gs="drop"></div>`)
+			: `<button class="pick" type="button" data-gs="pick"><span>${file ? esc(file.name) : "Select the file (.tif)"}</span></button><input type="file" accept=".tif,.tiff" hidden data-gs="file">`;
 		d.innerHTML = `<p class="small">${s.access.url ? `<a class="rs-link" href="${esc(s.access.url)}" target="_blank" rel="noopener">Download page of ${esc(s.name)}</a>` : ""} <span class="muted">${esc(s.access.text.replace(/`/g, ""))}</span></p>
 			${s.crs !== "EPSG:4326" ? `<p class="small muted">The file is in ${esc(s.crs)}. The build needs EPSG:4326 with 32-bit floats: <code>${esc(gdalwarpCommand("file.tif"))}</code></p>` : ""}
-			<button class="pick" type="button" data-gs="pick"><span>${file ? esc(file.name) : "Select the file (.tif)"}</span></button><input type="file" accept=".tif,.tiff" hidden data-gs="file">
+			${field}
 			${warn}${note}
-			<dl class="gs-facts small"><dt>Product</dt><dd>${esc(s.product)}${s.product === "DSM" ? " (surface: not a bare-earth ground)" : ""}</dd><dt>Vertical datum</dt><dd>${esc(s.vertical_datum)}</dd><dt>Licence</dt><dd>${esc(s.license)}</dd></dl>
+			<dl class="gs-facts small"><dt>Product</dt><dd>${esc(s.product)}${s.product === "DSM" ? " (surface: not a bare-earth ground)" : ""}</dd><dt>Vertical datum</dt><dd>${esc(s.vertical_datum)}</dd><dt>Licence</dt><dd>${esc(s.license)}</dd>${drop && file && !info?.problems?.length ? `<dt>Ground id</dt><dd><code data-gs="sha">${esc(sha || "…")}</code></dd>` : ""}</dl>
 			${s.commercial_use === false ? `<p class="small gs-warn">This licence does not allow commercial use.</p>` : ""}`;
-		const input = d.querySelector('[data-gs="file"]');
-		d.querySelector('[data-gs="pick"]').onclick = () => input.click();
-		input.onchange = async () => {
-			file = input.files[0] || null;
+		const take = async (f) => {
+			file = f || null;
 			info = file ? inspectGeoTiff(await file.arrayBuffer()) : null;           // all of the file: GDAL puts the tags at its end
+			sha = "";
 			detail();
 			onChange();
+			if (file && drop && crypto?.subtle) {                                     // the ground id: the SHA-256 of the bytes, as `sha256sum` gives it
+				const mine = file, h = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
+				if (file === mine) { sha = [...h].map((b) => b.toString(16).padStart(2, "0")).join(""); const el = q("detail").querySelector('[data-gs="sha"]'); if (el) el.textContent = sha; }
+			} else if (file && drop) { sha = "(needs a secure page: localhost or https)"; const el = q("detail").querySelector('[data-gs="sha"]'); if (el) el.textContent = sha; }
 		};
+		if (drop) {
+			const zone = d.querySelector('[data-gs="drop"]');
+			if (zone) {
+				drop(zone, { accept: ".tif,.tiff", text: "Drop the DEM file here, or <u>choose a file</u>", hint: "GeoTIFF in EPSG:4326, 32-bit floats", onFiles: (fs) => take(fs[0]) });
+				zone.querySelector("input")?.setAttribute("data-gs", "file");
+			}
+			d.querySelector('[data-gs="remove"]')?.addEventListener("click", () => take(null));
+		} else {
+			const input = d.querySelector('[data-gs="file"]');
+			d.querySelector('[data-gs="pick"]').onclick = () => input.click();
+			input.onchange = () => take(input.files[0]);
+		}
 	}
 
 	root.addEventListener("change", (e) => {

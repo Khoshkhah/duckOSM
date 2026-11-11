@@ -37,6 +37,11 @@ under `/edit/` to it. The page uses relative addresses, so it works under the pr
 
 ## Decisions
 
+0. **The page is roadstyle's dashboard.** The server makes the page with roadstyle's page writer (`page::make_studio`: the template `dashboard`, an empty road table, `tiles: false`), as it does for `duckosm edit`, so the panel,
+   the toolbox, the theme and the phone sheet are roadstyle's, unchanged. `page/studio.js` adds each step as a card with `rs.sections.add({ step, fold })`, as duckOSM Studio does, and `page/studio.css` has only the
+   rules that Studio's own page has for its step cards. The roadstyle pin of `duckosm-edit` moves with the page (to `34e21f30`). Gaps of roadstyle that the page works around, for a roadstyle change:
+   a page with no roads shows the banner "0 road features" (the script removes it); a `label.rs-opt` in the panel is upper case (`#sb label`; the part CSS resets it); the first view of a page with no roads is 0, 0 (the script jumps to Europe).
+
 1. **The place keys come from the server, the settings from the page.** The config of a build is the keys of the place (`name`, `output_path`, `source`, `boundary`,
    `elevation`) and then the text of the Settings step. The page does not know a path on the disk. The config is written to `config.yaml` in the folder of the area, and it
    is the record of the build (`build_config` of `main.visualization_metadata`), so **Build again** of the edit page works.

@@ -1,19 +1,17 @@
 /* The look of the build steps (area_step.js, data_step.js, settings_step.js, build_step.js, result_step.js): only their own content. The tabs (rs-tabs, rs-tab), the
    option rows (rs-opts, rs-opt), the caption (rs-cap), the links (rs-link), the message under a field (rs-field-msg) and the status line (rs-status) are roadstyle's
    parts. Every rule starts with .bs. The colours are the tokens of the panel: --ink, --mut, --line, --accent. */
+.bs .rs-opt, #sb .bs .rs-opt { text-transform: none; letter-spacing: 0; }      /* `#sb label` of the dashboard is a small caption; an option row is not (a gap of roadstyle: its rule `.rs-opt` should reset it) */
 .bs .small { font-size: 12.5px; }
 .bs .muted { color: var(--mut); }
-.bs input[type=text] { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); color: var(--ink); font: inherit; }
 .bs .rs-field-msg.err, .bs .rs-status.err { color: color-mix(in srgb, #dc2626 75%, var(--ink)); }
 .bs [data-as="area"] { margin-top: 10px; }
 .bs [data-as="summary"] { margin: 6px 0; }
 .bs .pick[aria-pressed=true] { outline: 2px solid var(--accent); }
 .bs-build progress { width: 100%; margin-top: 8px; }
-.bs-build .sb-primary, .bs-result .bs-open { display: inline-flex; align-items: center; justify-content: center; padding: 9px 16px; border: 0; border-radius: 10px;
-	background: var(--accent-fill, var(--accent)); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; cursor: pointer; }
 .bs-build .sb-primary:disabled { opacity: .45; cursor: default; }
+.bs-result .bs-open { text-align: center; text-decoration: none; }
 .bs-steps { margin: 6px 0 0; padding-left: 20px; font-size: 12px; color: var(--mut); max-height: 160px; overflow: auto; }
 .bs-config pre, .bs-summary { margin: 6px 0 0; padding: 8px 10px; border-radius: 9px; background: var(--card); font: 11.5px/1.4 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bs-open { margin-top: 10px; }
 html.rs-phone .bs button, html.rs-phone .bs summary, html.rs-phone .bs-open { min-height: 44px; }      /* a finger's size on a phone */
-@media (max-width: 700px) { .bs button, .bs summary, .bs-open { min-height: 44px; } .bs input[type=text] { min-height: 44px; } }

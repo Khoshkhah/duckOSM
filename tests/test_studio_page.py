@@ -194,7 +194,7 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
         assert page.input_value("[data-as=name]") == "Monaco"
         page.fill("[data-as=name]", "monaco-dem")
         # the data: a file on this computer; a path that is not a file says so
-        page.locator("#step-data [data-tab=file]").click()
+        page.locator("#step-2 [data-tab=file]").click()
         page.fill("[data-ds=path]", str(tmp_path / "nothing.osm.pbf"))
         page.wait_for_function("document.querySelector('[data-ds=msg]').textContent.includes('not a file')")
         assert page.is_disabled("[data-bs=run]")
@@ -209,7 +209,9 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
         # the ground: FABDEM (a DTM, EGM2008) and its file
         page.check("[name=gs-src][value=fabdem]")
         page.set_input_files("[data-gs=file]", str(dem))
-        page.wait_for_function(f"document.querySelector('[data-gs=pick] span').textContent === '{dem.name}'")
+        page.wait_for_selector("[data-gs=remove]")
+        assert dem.name in page.inner_text("#step-4") and "EGM2008" in page.inner_text("#step-4")
+        page.wait_for_function("/^[0-9a-f]{64}$/.test(document.querySelector('[data-gs=sha]').textContent)")
         _build_and_open(page, "monaco-dem")
         browser.close()
         assert not errors, errors
@@ -226,14 +228,12 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
 
 
 def test_a_box_on_a_phone(studio):
-    """390 × 844: the panel is a sheet under the map; a box drawn on the map (Draw) makes the area and the extracts; nothing is wider than the screen."""
+    """390 × 844: the panel is roadstyle's sheet at the bottom; a box drawn on the map (Draw) makes the area and the extracts; nothing is wider than the screen."""
     out, url = studio
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         page, errors = _open(browser, url, viewport={"width": 390, "height": 844}, device_scale_factor=2)
         _fit(page)
-        sheet, mapbox = page.locator("#sb").bounding_box(), page.locator("#map").bounding_box()
-        assert sheet["y"] >= mapbox["y"] + mapbox["height"] - 2 and mapbox["height"] > 300, (sheet, mapbox)
         page.click("[data-tab=draw]")
         page.click("[data-as=draw]")
         assert page.get_attribute("[data-as=draw]", "aria-pressed") == "true"
@@ -255,7 +255,7 @@ def test_a_box_on_a_phone(studio):
         assert page.evaluate("window.studio.area.area().from") == "box"
         _fit(page)
         # every step is in the sheet: the last card can be scrolled to, and its buttons are a finger's size
-        page.locator("#h-result").scroll_into_view_if_needed()
+        page.locator("#step-6").scroll_into_view_if_needed()
         assert page.locator("[data-bs=run]").bounding_box()["height"] >= 44
         page.screenshot(path=str(out / "phone.png"))
         assert not errors, errors
