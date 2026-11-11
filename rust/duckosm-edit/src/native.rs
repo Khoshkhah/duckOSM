@@ -96,6 +96,13 @@ impl crate::studio::Host for NativeHost {
         Box::new(NativeDb::new(path))
     }
 
+    fn buffer(&self, wkt: &str, epsg: u32, metres: f64) -> Result<String, String> {
+        let con = Connection::open_in_memory().map_err(|e| e.to_string())?;
+        con.execute_batch("INSTALL spatial; LOAD spatial;").map_err(|e| format!("the spatial extension of DuckDB: {e}"))?;
+        let sql = format!("SELECT ST_AsGeoJSON(ST_Transform(ST_Buffer(ST_Transform(ST_GeomFromText('{wkt}'), 'EPSG:4326', 'EPSG:{epsg}', true), {metres}), 'EPSG:{epsg}', 'EPSG:4326', true))");
+        con.query_row(&sql, [], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())
+    }
+
     fn build(&self, config: &str, dir: &Path, db: &Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
         let c = read_config(config, dir)?;
         let mut p = c.params;

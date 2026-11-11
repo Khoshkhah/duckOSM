@@ -132,6 +132,10 @@ def _build_and_open(page, area, timeout=600_000):
     _unfold(page, 6)
     page.wait_for_selector(".bs-open", state="visible", timeout=timeout)
     assert page.is_hidden("[data-bs=error]")
+    # the build details: the time of each step, and the total
+    steps = page.evaluate("[...document.querySelectorAll('.bs-steplog tbody tr')].map((r) => [r.cells[0].textContent, r.cells[1].textContent])")
+    assert len(steps) > 5 and all(re.fullmatch(r"\d+\.\d", sec) for _, sec in steps), steps
+    assert re.fullmatch(r"\d+\.\d", page.evaluate("document.querySelector('[data-bs=total]').textContent"))
     assert area in page.inner_text("[data-rs=line]")
     with page.expect_navigation(timeout=60_000):
         page.click(".bs-open")
@@ -151,7 +155,15 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         page.wait_for_function("document.querySelectorAll('[name=bs-place]').length === 2")
         assert page.locator("[name=bs-place]:not([disabled])").count() == 1 and page.locator("[name=bs-place][disabled]").count() == 1, "a place with no boundary is listed with no choice"
         assert page.is_disabled("[data-bs=run]") and "Choose the area" in page.inner_text("[data-bs=why]")
+        # the place under the mouse shows its outline on the map (the purple preview of Studio), and it goes when the mouse leaves the list
+        preview = "(() => { try { return window.studio.map.getSource('bs-preview').serialize().data.features.length; } catch { return -1; } })()"      # -1: the layers are not made yet
+        page.hover(".bs-area label[data-i='0']")
+        page.wait_for_function(f"{preview} === 1")
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{preview} === 0")
         page.click("[name=bs-place] + span")
+        page.wait_for_function("window.studio.area.area()")
+        assert page.evaluate(preview) == 0, "after a pick only the area shows"
         assert page.input_value("[data-as=name]") == "Monaco"
         _unfold(page, 2)
         page.fill("[data-as=name]", "monaco-a")
@@ -159,6 +171,9 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         # the extracts that cover the area: Monaco first, Europe second; the first is chosen
         page.wait_for_selector("[name=bs-extract]")
         assert page.eval_on_selector_all("[name=bs-extract]", "els => els.map(e => e.value)") == ["monaco", "europe"]
+        assert page.query_selector("[name=bs-extract]:checked") is None, "nothing is chosen at the start, as in Studio"
+        _unfold(page, 3)
+        page.click("[name=bs-extract][value=monaco] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco"
         assert page.is_enabled("[data-bs=run]")
         # the settings: two networks; the text of the config follows
@@ -270,6 +285,8 @@ def test_a_box_on_a_phone(studio):
         a = page.evaluate("window.studio.area.area()")
         assert a["from"] == "drawn" and a["name"] == "drawn_area" and a["km2"] > 1000, a
         page.wait_for_selector("[name=bs-extract]")
+        _unfold(page, 3)
+        page.click("[name=bs-extract][value=europe] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "europe"
         assert page.is_enabled("[data-bs=run]")
         _fit(page)
@@ -278,6 +295,63 @@ def test_a_box_on_a_phone(studio):
         page.locator("[data-bs=run]").scroll_into_view_if_needed()
         assert page.locator("[data-bs=run]").bounding_box()["height"] >= 44
         page.screenshot(path=str(out / "phone.png"))
+        assert not errors, errors
+        browser.close()
+
+
+def test_h3_cells_are_the_area(studio):
+    """The H3 tab of Studio: a hexagon that the person clicks is the area; a second click takes it away; a cell ID in the search box makes the area."""
+    out, url = studio
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        page.evaluate("window.studio.map.jumpTo({center: [7.42, 43.735], zoom: 12})")
+        page.click("[data-tab=h3]")
+        page.wait_for_function("document.querySelector('[data-as=h3-level]').options.length === 6", timeout=60_000)      # h3-js has loaded
+        page.evaluate("() => { const s = document.querySelector('[data-as=h3-level]'); s.value = '8'; s.dispatchEvent(new Event('change', { bubbles: true })); }")      # roadstyle draws its own list over the select
+        page.wait_for_function("document.querySelector('[data-as=h3-grid-note]').textContent.includes('hexagon')", timeout=30_000)
+        page.mouse.click(900, 450)
+        page.wait_for_function("window.studio.area.area()?.from === 'h3'", timeout=30_000)
+        a = page.evaluate("window.studio.area.area()")
+        assert re.fullmatch(r"[0-9a-f]{15}", a["name"]) and 0.5 < a["km2"] < 1.2, a            # one level-8 hexagon is 0.74 km²
+        assert page.evaluate("window.studio.area.h3Cells().length") == 1
+        page.mouse.click(900, 450)                                                              # the same hexagon: it goes
+        page.wait_for_function("window.studio.area.area() === null", timeout=30_000)
+        # a cell ID in the search box
+        page.click("[data-tab=search]")
+        page.fill("[data-as=search] input", "883969a40bfffff")
+        page.wait_for_function("window.studio.area.area()?.from === 'h3'", timeout=30_000)
+        assert "H3 cell, level 8" in page.inner_text(".bs-area [data-as=msg]")
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_buffer_a_fixes_file_and_the_time_of_each_step(studio):
+    """The buffer around the area (the server grows it in DuckDB, as Studio does in the browser), the fixes file (a path that the server checks), and the build details."""
+    out, url = studio
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        page.evaluate("(g) => window.studio.area.set(g, 'monaco-buf', 'file')", MONACO["features"][0]["geometry"])
+        before = page.evaluate("window.studio.area.area().km2")
+        _unfold(page, 2)
+        page.fill(".bs-area [data-as=buffer-field] input", "500")
+        page.wait_for_function(f"window.studio.area.area().km2 > {before} * 1.5", timeout=60_000)          # 500 m around Monaco: about 2.4 -> 7 km²
+        assert "+500 m" in page.inner_text("[data-as=kpis]")
+        assert page.evaluate("window.studio.area.area().base.length") == 2, "the shape as chosen stays"
+        page.fill(".bs-area [data-as=buffer-field] input", "0")
+        page.wait_for_function(f"Math.abs(window.studio.area.area().km2 - {before}) < 0.001", timeout=60_000)
+        # the fixes file: a path that is there goes into the config; one that is not says so (the card Build opens when the data is chosen)
+        page.wait_for_selector("[name=bs-extract]")
+        _unfold(page, 3)
+        page.click("[name=bs-extract][value=monaco] + span")
+        _options(page)
+        page.fill("[data-ss=fixes]", str(ROOT / "tests" / "data" / "osm_fixes.yaml"))
+        page.wait_for_function("document.querySelector('[data-ss=fixes-msg]').textContent === 'Found.'")
+        assert 'osm_overrides: "' in page.text_content("[data-ss=yaml]")
+        page.fill("[data-ss=fixes]", "/nowhere/fixes.yaml")
+        page.wait_for_function("document.querySelector('[data-ss=fixes-msg]').textContent.includes('not a file')")
+        assert "osm_overrides" not in page.text_content("[data-ss=yaml]")
         assert not errors, errors
         browser.close()
 

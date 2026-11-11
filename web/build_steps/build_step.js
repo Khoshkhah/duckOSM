@@ -18,7 +18,7 @@ export function initBuildStep({ root, ready, run, poll, onDone = () => {}, every
 	root.innerHTML = `<div class="build-go"><button type="button" class="sb-primary" data-bs="run" disabled>Build<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button><p class="why" data-bs="why"></p></div>
 		<progress data-bs="bar" max="1" hidden></progress><p class="rs-status" role="status" aria-live="polite" data-bs="status"></p>
 		<p class="rs-field-msg err" role="alert" data-bs="error" hidden></p>
-		<details class="drow" data-bs="log" hidden><summary>Build details</summary><ol class="bs-steps" data-bs="steps"></ol></details>`;
+		<details class="drow" data-bs="log" hidden><summary>Build details</summary><table class="bs-steplog" data-bs="steps"><thead><tr><th>Step</th><th>Time (s)</th></tr></thead><tbody></tbody><tfoot><tr><td>Total</td><td data-bs="total"></td></tr></tfoot></table></details>`;
 	const q = (k) => root.querySelector(`[data-bs="${k}"]`);
 	let running = false;
 
@@ -34,7 +34,10 @@ export function initBuildStep({ root, ready, run, poll, onDone = () => {}, every
 		bar.hidden = !(job.state === "downloading" && job.total);
 		if (!bar.hidden) { bar.max = job.total; bar.value = job.bytes; }
 		q("log").hidden = !job.steps?.length;
-		q("steps").innerHTML = (job.steps ?? []).map((s) => `<li>${esc(s)}</li>`).join("");
+		// the time of each step: from its start to the start of the next (the last: to now, or to the end of the build)
+		const at = job.step_secs ?? [], steps = job.steps ?? [];
+		q("steps").tBodies[0].innerHTML = steps.map((s, i) => `<tr><td>${esc(s)}</td><td>${((at[i + 1] ?? job.seconds) - (at[i] ?? 0)).toFixed(1)}</td></tr>`).join("");
+		q("total").textContent = Number(job.seconds ?? 0).toFixed(1);
 	}
 
 	async function watch() {

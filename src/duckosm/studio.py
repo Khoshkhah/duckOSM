@@ -16,6 +16,18 @@ class _Host:
 
         return _Db(Path(path))
 
+    def buffer(self, wkt: str, epsg: int, metres: float) -> str:
+        """The buffer of an area (``boundary.buffer_m`` of duckOSM): the MULTIPOLYGON ``wkt`` grown by ``metres`` in the UTM zone ``epsg``, as GeoJSON text."""
+        import duckdb
+
+        con = duckdb.connect()
+        try:
+            con.execute("INSTALL spatial; LOAD spatial;")
+            return con.execute("SELECT ST_AsGeoJSON(ST_Transform(ST_Buffer(ST_Transform(ST_GeomFromText(?), 'EPSG:4326', ?, true), ?), ?, 'EPSG:4326', true))",
+                               [wkt, f"EPSG:{epsg}", metres, f"EPSG:{epsg}"]).fetchone()[0]
+        finally:
+            con.close()
+
     def build(self, config: str, folder: str, db: str, sink) -> str:
         from duckosm.edit import build_area
 

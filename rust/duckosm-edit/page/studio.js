@@ -44,6 +44,13 @@
     for (const href of ["parts/ground_step/ground_step.css", "parts/build_steps/steps.css"]) document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href }));
     const title = document.querySelector("#sb .sb-top h2");        // the title with a line under it, as in Studio
     if (title) { const wrap = document.createElement("div"); title.replaceWith(wrap); wrap.append(title, Object.assign(document.createElement("p"), { textContent: "Make the data of an area on this computer" })); }
+    // the "?" of the panel title (roadstyle's help window), as in Studio
+    rs.help.set({ title: "duckOSM Studio", button: "Help: how this page works",
+      intro: "This page makes the data of an area on this computer. The server of this page builds the area: the page itself shows the steps. The files stay on this computer, in the folder of the areas.",
+      terms: [["1 Choose an area", "Search for a place, draw shapes on the map, open a GeoJSON file, or click hexagons."], ["2 The area", "Check the name and the size of the area, and set a buffer."],
+        ["3 The data", "Select the OpenStreetMap data: a Geofabrik extract, or a file on this computer."], ["4 Ground", "Select the DEM (the height of the ground), or none."],
+        ["5 Build", "Select the networks and the options, and press Build."], ["6 The result", "Open the map of the new area and edit the OSM data."]],
+      note: 'Documentation: <a href="https://khoshkhah.github.io/duckOSM/guides/studio/" target="_blank" rel="noopener">Make the data of an area on your computer</a>' });
     const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
       import("./parts/build_steps/area_step.js"), import("./parts/build_steps/data_step.js"), import("./parts/build_steps/settings_step.js"),
       import("./parts/build_steps/build_step.js"), import("./parts/build_steps/result_step.js"), import("./parts/build_steps/core.js"), import("./parts/ground_step/ground_step.js")]);
@@ -101,8 +108,9 @@
       const r = $("sb").getBoundingClientRect(), left = r.left < innerWidth / 2;                // the panel is at the left (the default) or at the right (Settings)
       return { top: 40, bottom: 40, left: left ? r.right + 30 : 40, right: left ? 90 : innerWidth - r.left + 30 };      // 90: the toolbox at the other edge
     };
-    const parts = { search: rs.search, drop: rs.drop, tabs: rs.tabs, toggle: rs.toggle, kpi: rs.kpi };
-    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, onChange: () => { ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });
+    const parts = { search: rs.search, drop: rs.drop, tabs: rs.tabs, toggle: rs.toggle, kpi: rs.kpi, number: rs.number };
+    const post = async (path, body) => (await api(path, { method: "POST", body })).json();
+    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });
     const zoomBtn = Object.assign(rs.sections.button("step2", { icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>', title: "Zoom to the area", onClick: () => area.zoom() }), { disabled: true });
     let extracts = null;
     const data = initDataStep({ root: roots[3], rs: parts, area: () => area.area(),
@@ -110,7 +118,7 @@
       checkFile: async (path) => (await (await api("file", { method: "POST", body: path })).json()).size, onChange: () => { build.refresh(); refreshSteps(); } });
     const ground = await initGroundStep({ root: roots[4], catalog: "parts/data/dem_sources.json", bbox: () => area.area()?.bbox ?? null, drop: rs.drop,
       status: (t) => rs.sections.note("step4", t), onChange: () => { build.refresh(); refreshSteps(); } });
-    const settings = initSettingsStep({ root: $("settings-box"), onChange: () => build.refresh() });
+    const settings = initSettingsStep({ root: $("settings-box"), onChange: () => build.refresh(), checkFile: async (path) => (await post("file", path)).size });
     const result = initResultStep({ root: roots[6], href: "edit/" });
     let built = false, auto = false, touched = false, current = null;
     const autoFold = (c, folded) => { auto = true; try { rs.sections.fold(c.dataset.rsSection, folded); } finally { auto = false; } };
@@ -162,7 +170,8 @@
         current = next;
         autoFold(next, false);
         // the area card (the name) stays open beside the data step; the data and the ground stay open beside the build
-        const keep = (c) => (next.dataset.n === "3" && c.dataset.n === "2") || (next.dataset.n === "5" && ["3", "4"].includes(c.dataset.n));
+        // card 1 stays open when the area is hexagons: the person clicks more cells there (as in Studio)
+        const keep = (c) => (next.dataset.n === "3" && c.dataset.n === "2") || (next.dataset.n === "5" && ["3", "4"].includes(c.dataset.n)) || (c.dataset.n === "1" && area.area()?.from === "h3");
         if (!touched) for (const c of cards) if (c !== next) autoFold(c, !keep(c));
       }
     }
