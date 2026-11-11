@@ -333,6 +333,62 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
     con.close()
 
 
+def test_card_8_edits_the_levels_of_an_area(studio):
+    """Card 8, Edit levels: roadstyle's level-edit part over the area's map. It opens from the stored levels, a change is drawn again by the server
+    (way D, POST relevel), and "← Steps" writes the change into the area's .duckdb file. At 390 x 844 the editor opens in the sheet."""
+    out, url = studio
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        asked = []
+        page.on("request", lambda r: "/areas/" in r.url and "/tiles/" not in r.url and asked.append(r.method + " " + r.url.split("/areas/")[1]))
+        page.click("[data-tab=file]")
+        page.set_input_files("[data-as=drop] input[type=file]", str(ROOT / "tests" / "data" / "monaco.geojson"))
+        page.wait_for_function("window.studio.area.area()")
+        _unfold(page, 2)
+        page.fill("[data-as=name]", "monaco-lv")
+        page.locator(".bs-data [data-tab=file]").click()
+        page.fill("[data-ds=path]", str(PBF))
+        page.wait_for_function("document.querySelector('[data-ds=msg]').textContent.startsWith('Found')")
+        _options(page)
+        for k in ("bus_routes", "build_features"):                 # the levels stay: card 8 edits them
+            page.uncheck(f"[name=opt][value={k}]")
+        for m in ("walking", "cycling"):
+            page.uncheck(f"[name=mode][value={m}]")
+        _build_and_open(page, "monaco-lv")
+        card = "[data-rs-section=step8]"
+        page.click(card + " .rs-sec-title")
+        page.wait_for_function("document.body.dataset.rsEditing === 'levels' || /failed/.test(document.querySelector('[data-rs-section=step8]').innerText)", timeout=300_000)
+        assert "open in" in page.inner_text(card), page.inner_text(card)
+        assert page.evaluate("window.studio.levelPart.editor.answer().resolve.how") == "given", "the editor starts from the stored levels"
+        road = page.evaluate("(async () => { const e = window.studio.levelPart.editor, ids = e.roads.slice(0, 300), f = await e.facts(ids); return ids.find((i) => f[i].length_m > 30); })()")
+        said = page.evaluate("r => window.lvApi('/api/apply', {ops: [{op: 'head', road: r, end: 'end', m: '7'}]})", road)
+        assert said["ok"] and said["redrawn"], said
+        assert "POST monaco-lv/relevel" in asked, ("the server draws the changed road again", asked)
+        page.click("#lv-back")
+        page.wait_for_function("/Applied|failed/.test(document.querySelector('[data-rs-section=step8]').innerText)", timeout=120_000)
+        assert "Applied" in page.inner_text(card), page.inner_text(card)
+        browser.close()
+        assert not errors, errors
+    con = duckdb.connect(str(out / "monaco-lv" / "monaco-lv.duckdb"), read_only=True)
+    assert con.execute("SELECT road::VARCHAR, end_m FROM visualization.level_heads").fetchall() == [(str(road), "7")]
+    assert con.execute("SELECT source, area FROM visualization.edge_levels_meta").fetchall() == [("area", "monaco-lv")]
+    con.close()
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url + "?area=monaco-lv", viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+        page.wait_for_function(OPEN, arg="monaco-lv", timeout=120_000)
+        page.click("[data-rs-section=step8] .rs-sec-title")
+        page.wait_for_function("document.body.dataset.rsEditing === 'levels'", timeout=300_000)
+        assert page.evaluate("window.studio.levelPart.editor.answer().resolve.how") == "given", "a new browser starts from the levels of the file (with the change)"
+        assert page.is_visible("#lv")
+        _fit(page)
+        page.click("#lv-back")
+        page.wait_for_function("!document.body.dataset.rsEditing", timeout=60_000)
+        browser.close()
+        assert not errors, errors
+
+
 def test_a_box_on_a_phone(studio):
     """390 × 844: the panel is roadstyle's sheet at the bottom; a box drawn on the map (Draw) makes the area and the extracts; nothing is wider than the screen."""
     out, url = studio

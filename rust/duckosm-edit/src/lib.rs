@@ -473,6 +473,11 @@ impl Site {
     pub fn close(&self) {
         self.state.lock().unwrap().db.close();
     }
+
+    /// Open the database again after `close` (another connection wrote the file: card 8 of `duckosm studio` saved the levels).
+    pub fn reopen(&self) -> Result<(), String> {
+        self.state.lock().unwrap().db.open()
+    }
 }
 
 /// `rel` under `root`, or None for a path with `..`, a root or a drive in it.

@@ -38,6 +38,9 @@
       ["Add the ground", "Builds the area again with the DEM: the same OSM data and settings, and the heights of the nodes and the edges."]] },
     7: { title: "Edit OSM data", intro: "Fix the OSM data of the area: the panel Edit OSM data of duckOSM, over the map of the area.", terms: [
       ["Back", "The panel has a back button to these steps."]] },
+    8: { title: "Edit levels", intro: "Change the drawing order of the roads of the open area: roadstyle's level editor, over the map of the area.", terms: [
+      ["← Steps", "Closes the editor. After a change, it writes the new levels into the area's .duckdb file."],
+      ["The map", "Each change draws the changed roads again at once (the server redraws them)."]] },
   };
 
   async function start() {
@@ -50,7 +53,8 @@
       intro: "This page makes the data of an area on this computer. The server of this page builds the area: the page itself shows the steps. The files stay on this computer, in the folder of the areas.",
       terms: [["1 Choose an area", "Search for a place, draw shapes on the map, open a GeoJSON file, or click hexagons."], ["2 The area", "Check the name and the size of the area, and set a buffer."],
         ["3 OSM data", "Download a Geofabrik extract into the folder and use it, or give a file on this computer."], ["4 Build", "Select the networks and the options, and press Build. The map shows the new area."],
-        ["5 The result", "The networks and the files that the build made."], ["6 Ground", "Add the height of the ground (a DEM) to a built area, or none."], ["7 Edit OSM data", "The panel Edit OSM data of the area."]],
+        ["5 The result", "The networks and the files that the build made."], ["6 Ground", "Add the height of the ground (a DEM) to a built area, or none."], ["7 Edit OSM data", "The panel Edit OSM data of the area."],
+        ["8 Edit levels", "The level editor of the open area: the drawing order of the roads at bridges and tunnels."]],
       note: 'Documentation: <a href="https://khoshkhah.github.io/duckOSM/guides/studio/" target="_blank" rel="noopener">Make the data of an area on your computer</a>' });
     const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { initFolderStep }, , { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
       import("./parts/build_steps/area_step.js"), import("./parts/build_steps/data_step.js"), import("./parts/build_steps/settings_step.js"),
@@ -93,7 +97,7 @@
     // pmtiles.js, which rsGround needs to read a terrain file (this page was made with no ground, so it does not have it), loaded once
     let pmtilesLoading = null;
     const loadPmtiles = (src) => (window.pmtiles ? Promise.resolve() : (pmtilesLoading ??= new Promise((ok, no) => document.head.append(Object.assign(document.createElement("script"), { src, onload: ok, onerror: () => no(new Error("pmtiles.js did not load")) })))));
-    let openName = null, pageArea = null;      // pageArea: the area of this page (the server opened it), set at the end of start()
+    let openName = null, pageArea = null, levelPart = null;      // pageArea: the area of this page (the server opened it), set at the end of start()
     const markOpen = (name) => { openName = name; for (const r of saved.querySelectorAll('input[name="saved-area"]')) r.checked = r.value === name; };
     // Open: the server opens the area and makes its map, way D (roadstyle local at areas/<name>/); this page puts the style on its own map (rs.roadLayers)
     // with the blank base map, the adapter of way D (rsHttpAdapter: the rows, the lines and the queries of the area come from the server), and fills the steps. Only the map and the steps change: the page does not load again. b: the button that shows "Opening…"
@@ -102,6 +106,7 @@
       const label = b?.textContent;
       if (b) b.innerHTML = '<span class="gs-spin" aria-hidden="true"></span> Opening…';
       rs.sections.note("areas", `Opening ${name}…`);
+      if (levelPart?.isOpen()) levelPart.close();                       // the level editor edits the area that was open
       try {
         let info = await (await api("info")).json();
         const ready = (i) => (i.tiled ?? []).includes(name) && i.area === name;
@@ -124,6 +129,7 @@
     }
     // no open area: its map goes, and the base map of the page is back
     function closeArea() {
+      if (levelPart?.isOpen()) levelPart.close();
       roadsOn?.remove();
       rs.setAdapter(null);
       window.rsSetBasemap?.("ofm_liberty");
@@ -272,6 +278,45 @@
     }
     where();
 
+    // ---- card 8: roadstyle's level-edit part (Studio's card 8). The card, the store, the open, the close, the redraw of the changed roads and the
+    // write-back are roadstyle's; this page gives its map, its dashboard and the data of the open area from the server: the roads of the level area
+    // (levels/edges), the stored levels (levels/stored), the save into the .duckdb file (levels/save) and the redraw of way D (relevel). The level
+    // editor's WebAssembly package comes from the program (rs/level_editor/pkg/, rust/duckosm-edit/editor_pkg.sh). ----
+    let levelWhy = "";
+    try {
+      const info = await (await api("info")).json();
+      if (!info.level_package) throw new Error("this program has no level editor package: build it with rust/duckosm-edit/editor_pkg.sh, then build the program again");
+      const { levelEditPart } = await import("./rs/dashboard/editor/level_part.js");
+      const base = () => `${location.origin}/areas/${encodeURIComponent(pageArea)}`;
+      const ask = async (path, init) => {
+        const r = await fetch(`${base()}/${path}`, init);
+        if (!r.ok) throw new Error((await r.text()) || r.statusText);
+        return r;
+      };
+      const post = (path, body) => ask(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      levelPart = levelEditPart({ dashboard: rs, map, pkgUrl: new URL("./rs/level_editor/pkg/roadstyle_wasm.js", location.href), areaName: () => pageArea ?? "area",
+        prefix: "rs-", before: map.getLayer("bs-area-fill") ? "bs-area-fill" : null, card: { id: "step8", label: "Edit levels", step: 8 },
+        data: {
+          edges: async () => new Uint8Array(await (await ask("levels/edges")).arrayBuffer()),
+          storedLevels: async () => (await ask("levels/stored")).json(),
+          saveLevels: async (files, { name }) => { await post("levels/save", { files, name }); },
+          // the server draws the changed roads again (way D); a new style has the program's tile addresses, as rsHttpAdapter's style()
+          relevel: async (rows) => {
+            const r = await (await post("relevel", rows)).json();
+            if (r.style) for (const src of Object.values(r.style.sources || {})) if (src.tiles) src.tiles = src.tiles.map((t) => (t.startsWith("/") ? base() + t : t));
+            return r.style ? { style: r.style } : {};
+          },
+          ensureRoads: async () => {},                                        // card 8 is ready only when the roads of the open area are on the map
+        } });
+    } catch (e) { levelWhy = e.message; }
+    const levelCard = rs.sections.get?.("step8") ?? rs.sections.add({ id: "step8", label: "Edit levels", step: 8, note: levelWhy });
+    levelCard.classList.add("step");
+    levelCard.dataset.n = 8;
+    levelCard.querySelector(".rs-sec-title").insertAdjacentHTML("afterend", '<span class="after"></span>');
+    levelCard.querySelector(":scope > .rs-sec-hd > svg")?.before(rs.help.button(levelCard, { ...HELP[8], button: "Help: Edit levels" }));
+    if (levelWhy) rs.sections.note("step8", levelWhy);
+    cards.push(levelCard);
+
     // ---- the flow of the steps, as in Studio (refreshSteps): what each step needs ("" when ready, else the reason), when it is done, and the one open step ----
     const STEP = {
       1: { ready: () => "", done: () => !!area.area() },
@@ -281,6 +326,7 @@
       5: { ready: () => (built ? "" : "after step 4"), done: () => built },
       6: { ready: () => (built ? "" : "after step 4"), done: () => hasDem, optional: true },      // optional: an area has a DEM only when the person adds one
       7: { ready: () => (built ? "" : "after step 4"), done: () => false, optional: true },
+      8: { ready: () => (levelWhy ? "not in this program" : pageArea ? "" : "open an area"), done: () => false, optional: true },
     };
     // the person opened or folded a card: the next step does not fold the others
     document.addEventListener("rs:sectionchange", (e) => {
@@ -314,7 +360,7 @@
     // the address names an open area (/?area=<name>: back from the editor, or a reload): it opens on the map; a new visit (/) has no area
     const want = new URLSearchParams(location.search).get("area");
     paintAreas().then(async () => { if (want) await openArea(want); }).catch((e) => { closeArea(); rs.sections.note("areas", e.message); });
-    window.studio = { area, data, settings, ground, build, result, viz, map };           // for the tests
+    window.studio = { area, data, settings, ground, build, result, viz, map, levelPart };           // for the tests
     window.studioReady = true;
   }
   const go = () => start().catch((e) => { console.error(e); document.body.insertAdjacentHTML("beforeend", `<p id="edit-error" role="alert">duckosm studio: ${String(e.message).replace(/</g, "&lt;")}</p>`); });
