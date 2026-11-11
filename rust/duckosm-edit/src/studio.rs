@@ -543,8 +543,13 @@ impl Studio {
         self.step(&format!("Build from {} into {}", pbf.display(), db.display()));
         let text = self.host.build(&config, dir, &db, &|line| self.step(line))?;
         self.step(&format!("The terrain of {name} (from the ground of the database, if it has one)"));
-        self.make_terrain(dir, name)?;
-        self.make_tiled(dir, name)?;
+        // the database is built: a terrain or a map that cannot be made is a step with its reason, not a failed build
+        if let Err(e) = self.make_terrain(dir, name) {
+            self.step(&format!("The terrain was not made: {e}"));
+        }
+        if let Err(e) = self.make_tiled(dir, name) {
+            self.step(&format!("The map of {name} was not made: {e}"));
+        }
         self.step(&format!("Visualization: make the map page of {name} (the roads and the layers of the database on a blank base map)"));
         let site = Site::with_cache(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager, Some(dir.join(format!("{name}.map.html"))))?;
         *self.edit.lock().unwrap() = Some(Arc::new(site));
