@@ -160,6 +160,20 @@ def _build_and_open(page, area, timeout=600_000):
     page.wait_for_function(OPEN, arg=area, timeout=120_000)
 
 
+def _wait_job(url, done, timeout=600):
+    """Wait until the server's build job is as `done` says (a fetch in wait_for_function gives a Promise, which counts as true at once)."""
+    import time
+    import urllib.request
+    end = time.time() + timeout
+    while time.time() < end:
+        j = json.loads(urllib.request.urlopen(url + "api/job").read())
+        if done(j):
+            assert j["state"] == "done", j.get("error")
+            return j
+        time.sleep(1)
+    raise AssertionError("the build did not end")
+
+
 def _download(page, extract):
     """Download an extract in step 3 (into the folder of the areas): the row's Download, the progress, then In use."""
     _unfold(page, 3)
@@ -301,7 +315,9 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
         page.wait_for_function("/^[0-9a-f]{64}$/.test(document.querySelector('[data-gs=sha]').textContent)")
         page.evaluate("window.__same = 1")
         page.click("[data-rs-section=step6] [data-bs=run]")
-        page.wait_for_function("fetch('api/area/monaco-dem').then((r) => r.json()).then((a) => !!a.ground)", timeout=600_000, polling=1000)
+        _wait_job(url, lambda j: j["state"] == "error" or (j["state"] == "done" and any(f["name"] == "dem.tif" for f in j["files"])))
+        assert page.evaluate("window.__same") == 1
+        page.wait_for_function(OPEN, arg="monaco-dem", timeout=120_000)
         assert page.evaluate("window.__same") == 1
         browser.close()
         assert not errors, errors
