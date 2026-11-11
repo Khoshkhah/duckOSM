@@ -30,6 +30,13 @@
       // under `duckosm studio` the page is at /edit/ and the frame has a back button to the steps of Studio; `duckosm edit` has no page to go back to
       const studio = /\/edit\/$/.test(location.pathname);
       const f = window.rs.frame({ ...opts, panel: $("sb"), back: studio ? "Studio" : null });
+      // under duckosm studio: the map terrain from the area's own ground (the server keeps its terrain file), not from the AWS Terrain Tiles
+      if (studio && window.rsGround) api("info").then((r) => r.json()).then(async (i) => {
+        const a = await (await fetch(`../api/area/${encodeURIComponent(i.name)}`)).json();
+        if (!a.ground) return;
+        const t = await fetch(`../api/terrain/${encodeURIComponent(i.name)}`);
+        if (t.ok) window.rsGround({ ...a.ground, terrain: await t.arrayBuffer() });
+      }).catch(() => {});
       if (studio) f.addEventListener("back", async () => { const n = (await (await api("info")).json()).name; location.href = `../?area=${encodeURIComponent(n)}`; });      // the steps, with this area
       f.top.insertAdjacentHTML("beforeend", `<span class="small muted" title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</span>`);
       f.head.insertAdjacentHTML("beforeend", '<p id="fix-status" class="small" role="status" hidden></p>');

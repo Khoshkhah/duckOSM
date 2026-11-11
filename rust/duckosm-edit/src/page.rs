@@ -62,7 +62,8 @@ pub fn make_ask(db: &mut dyn Db, name: &str) -> Result<String, String> {
     make_with(db, name, ASK_SCRIPT, "", None)
 }
 
-fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<String, String> {
+/// The roads, the base-map rows and the look of an area's page (the stored levels, the layers of the database), for `make_with` and `make_tiled`.
+fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look), String> {
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let catalog = db.texts("SELECT current_database()")?.into_iter().next().flatten().unwrap_or_default();
     let [tq, cq] = d::catalog_sql(&catalog);
@@ -104,14 +105,30 @@ fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Op
         args["basemap"] = json!(b);
     }
     let (o, lk) = look(args)?;
-    let given = roadstyle::page_options::given_of(&lk, &o.args);
     let roads = roadstyle::read::read_roads(roads, "geometry").map_err(|e| e.to_string())?;
     let features = features.map(roadstyle::read_features).transpose().map_err(|e| e.to_string())?;
+    Ok((roads, features, o, lk))
+}
+
+fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<String, String> {
+    let (roads, features, o, lk) = prepare(db, name, script, style, basemap)?;
+    let given = roadstyle::page_options::given_of(&lk, &o.args);
     let page = roadstyle::page_options::page_from(roads, features, &lk, &o, &given).map_err(|e| e.to_string())?;
     for w in &page.warnings {
         eprintln!("duckosm edit: the map: {w}");
     }
     Ok(page.html.replacen("__MAPLIBRE_CSS__", MAPLIBRE_CSS, 1).replacen("__MAPLIBRE_JS__", &MAPLIBRE_JS.replace("</script>", "<\\/script>"), 1))
+}
+
+/// The map of an area as a tiled style and its tiles (roadstyle's `tiled_of`): the style's tile addresses start with `prefix`, and the server answers
+/// each tile with `Tiles::tile`. `duckosm studio` puts the style on its own map (rs.roadLayers), so an open area changes only the map.
+pub fn make_tiled(db: &mut dyn Db, name: &str, prefix: &str) -> Result<(String, roadstyle::tiles::Tiles), String> {
+    let (roads, features, _, lk) = prepare(db, name, "", "", Some("blank"))?;
+    let (style, tiles, warnings) = roadstyle::tiled_of(roads, &lk, features, Some(name.to_string()), prefix, &[]).map_err(|e| e.to_string())?;
+    for w in &warnings {
+        eprintln!("duckosm studio: the map: {w}");
+    }
+    Ok((style, tiles))
 }
 
 /// The page of `duckosm studio`: roadstyle's standard dashboard (the same template, toolbox and panel as the page of `duckosm edit`) for an area with no

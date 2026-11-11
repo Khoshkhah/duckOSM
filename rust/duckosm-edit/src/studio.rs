@@ -6,7 +6,7 @@
 //! The files that it writes are in the folder of the area, `<out>/<name>/`: `boundary.geojson`, `dem.tif`, `config.yaml`, the PBF file of a
 //! download, and the `<name>.duckdb` of the build. A local PBF file is read from the path that the page gives (the page is on the same computer).
 //!
-//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`; with an open area, the page of the area: the steps over its map); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/folders` (the folders inside a folder, for the folder picker) and `POST /api/folder` (use another folder for the areas); `POST /api/buffer` (an area and a distance: the area grown by it); `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/delete` (the name of a saved area: its folder is deleted); `POST /api/ground` (a built area with a DEM, or with none: it is built again); `POST /api/file` (the path of a local PBF file: its size); `GET /api/pbf` and `POST /api/pbfget` (the OSM extracts in `<out>/osm/`: listed, downloaded); `POST /api/demfiles` and `POST /api/demget` (the DEM files of a model for a box: listed, downloaded);
+//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /api/style/<name>` and `GET /tiles/<name>/...` the map of the open area (its tiled style and tiles); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/folders` (the folders inside a folder, for the folder picker) and `POST /api/folder` (use another folder for the areas); `POST /api/buffer` (an area and a distance: the area grown by it); `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/delete` (the name of a saved area: its folder is deleted); `POST /api/ground` (a built area with a DEM, or with none: it is built again); `GET /api/terrain/<name>` (the terrain file of the area's ground); `POST /api/file` (the path of a local PBF file: its size); `GET /api/pbf` and `POST /api/pbfget` (the OSM extracts in `<out>/osm/`: listed, downloaded); `POST /api/demfiles` and `POST /api/demget` (the DEM files of a model for a box: listed, downloaded);
 //! `PUT /api/dem/<name>` the DEM of the area; `POST /api/build` start the build; `GET /api/job` the state of the build; `GET /edit/...` the
 //! page of `duckosm edit` for the area that was built last.
 
@@ -100,6 +100,8 @@ pub struct Studio {
     opening: Mutex<String>,
     /// The area that is open now (the last Open or build), or empty: the page of the steps shows it again when it comes back from the map.
     current: Mutex<String>,
+    /// The map of the open area: its name, its tiled style and its tiles (`page::make_tiled`). The page puts the style on its map, and asks this server for the tiles.
+    tiled: Mutex<Option<(String, String, Arc<roadstyle::tiles::Tiles>)>>,
     pager: Pager,
 }
 
@@ -300,7 +302,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(None), pager })
     }
 
     /// The folder of the areas now.
@@ -539,6 +541,9 @@ impl Studio {
         let db = dir.join(format!("{name}.duckdb"));
         self.step(&format!("Build from {} into {}", pbf.display(), db.display()));
         let text = self.host.build(&config, dir, &db, &|line| self.step(line))?;
+        self.step(&format!("The terrain of {name} (from the ground of the database, if it has one)"));
+        self.make_terrain(dir, name)?;
+        self.make_tiled(dir, name)?;
         self.step(&format!("Visualization: make the map page of {name} (the roads and the layers of the database on a blank base map)"));
         let site = Site::with_cache(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager, Some(dir.join(format!("{name}.map.html"))))?;
         *self.edit.lock().unwrap() = Some(Arc::new(site));
@@ -597,7 +602,8 @@ impl Studio {
         let boundary: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("boundary.geojson")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         let files: Vec<Value> = folder_files(&dir).into_iter().map(|(n, b)| json!({"name": n, "size": b})).collect();
         Ok(json!({"name": name, "boundary": boundary, "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default(),
-                  "dir": dir.display().to_string(), "db": dir.join(format!("{name}.duckdb")).display().to_string(), "files": files}).to_string())
+                  "dir": dir.display().to_string(), "db": dir.join(format!("{name}.duckdb")).display().to_string(), "files": files,
+                  "ground": std::fs::read_to_string(dir.join(format!("{name}.terrain.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())}).to_string())
     }
 
     /// The ground of a built area (`POST /api/ground`, `{"name", "dem": {...} | null}`): the area is built again from its own config (the same OSM file and
@@ -619,6 +625,55 @@ impl Studio {
         self.current.lock().unwrap().clear();
         if let Some(old) = self.edit.lock().unwrap().take() {
             old.close();
+        }
+    }
+
+    /// The tiled map of an area (`page::make_tiled`) with its own connection to the database: call it when no page of the area has the database open.
+    fn make_tiled(&self, dir: &Path, name: &str) -> Result<(), String> {
+        let mut db = self.host.db(&dir.join(format!("{name}.duckdb")));
+        db.open()?;
+        let made = crate::page::make_tiled(db.as_mut(), name, &format!("__ORIGIN__/tiles/{name}/"));
+        db.close();
+        let (style, tiles) = made?;
+        *self.tiled.lock().unwrap() = Some((name.to_string(), style, Arc::new(tiles)));
+        Ok(())
+    }
+
+    /// The terrain file of an area: roadstyle's terrain archive (`terrain_pmtiles`) of `main.elevation_grid`, kept in `<name>.terrain.pmtiles`
+    /// with the facts of the ground (`main.elevation_metadata`) in `<name>.terrain.json`. A file newer than the database is used as it is.
+    /// Nothing when the area has no grid. It opens the database for itself: call it when no page of the area has the database open.
+    fn make_terrain(&self, dir: &Path, name: &str) -> Result<(), String> {
+        let (db_path, file, facts) = (dir.join(format!("{name}.duckdb")), dir.join(format!("{name}.terrain.pmtiles")), dir.join(format!("{name}.terrain.json")));
+        let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        if matches!((modified(&file), modified(&db_path)), (Some(a), Some(b)) if a >= b) && facts.is_file() {
+            return Ok(());
+        }
+        let mut db = self.host.db(&db_path);
+        db.open()?;
+        let made = (|| -> Result<Option<(Value, Vec<u8>)>, String> {
+            let n = crate::rows(db.as_mut(), "SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = 'main' AND table_name IN ('elevation_grid', 'elevation_metadata')")?;
+            if n.first().and_then(|r| r["n"].as_i64()) != Some(2) {
+                return Ok(None);
+            }
+            let cells = db.texts("SELECT to_json({c: list(col), r: list(\"row\"), x: list(lon), y: list(lat), z: list(z)})::VARCHAR FROM main.elevation_grid")?;
+            let v: Value = serde_json::from_str(cells.first().cloned().flatten().as_deref().unwrap_or("null")).map_err(|e| format!("the ground grid: {e}"))?;
+            let ints = |k: &str| v[k].as_array().map(|a| a.iter().map(|x| x.as_i64().unwrap_or(0) as i32).collect::<Vec<_>>()).unwrap_or_default();
+            let floats = |k: &str| v[k].as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect::<Vec<_>>()).unwrap_or_default();
+            let g = roadstyle::tiles::terrain::Ground::from_cells(&ints("c"), &ints("r"), &floats("x"), &floats("y"), &floats("z"))?;
+            let meta = crate::rows(db.as_mut(), "SELECT sha256 AS id, source, product, vertical_datum, resolution_m, license FROM main.elevation_metadata LIMIT 1")?;
+            let meta = meta.into_iter().next().unwrap_or(Value::Null);
+            Ok(Some((meta.clone(), roadstyle::tiles::terrain::terrain_pmtiles(&g, &meta))))
+        })();
+        db.close();
+        match made? {
+            Some((meta, bytes)) => {
+                std::fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+                std::fs::write(&facts, meta.to_string()).map_err(|e| format!("{}: {e}", facts.display()))
+            }
+            None => {
+                let _ = (std::fs::remove_file(&file), std::fs::remove_file(&facts));
+                Ok(())
+            }
         }
     }
 
@@ -657,6 +712,12 @@ impl Studio {
         let (me, name) = (self.clone(), name.to_string());
         std::thread::spawn(move || {
             let db = dir.join(format!("{name}.duckdb"));
+            if let Err(e) = me.make_terrain(&dir, &name) {
+                eprintln!("duckosm studio: {name}: the terrain: {e}");
+            }
+            if let Err(e) = me.make_tiled(&dir, &name) {
+                eprintln!("duckosm studio: {name}: the map: {e}");
+            }
             let site = Site::with_cache(me.host.db(&db), &db, &dir.join("osm_fixes.yaml"), me.port, Mode::Edit, me.pager, Some(dir.join(format!("{name}.map.html"))));
             let mut opening = me.opening.lock().unwrap();
             if *opening != name {
@@ -846,15 +907,22 @@ impl Studio {
                 None => req.say("404 Not Found", "text/plain", b"no area is built yet"),
             };
         }
+        if let Some(rest) = path.strip_prefix("tiles/") {
+            // the tiles of the open area's map: tiles/<name>/<source>/<z>/<x>/<y>, in MLT (one tile has every source of the style)
+            let parts: Vec<&str> = rest.split('/').collect();
+            let t = self.tiled.lock().unwrap().clone();
+            let zxy = (parts.len() >= 4).then(|| { let n = parts.len(); (parts[n - 3].parse::<u32>(), parts[n - 2].parse::<u32>(), parts[n - 1].trim_end_matches(".mlt").trim_end_matches(".pbf").parse::<u32>()) });
+            return match (t.filter(|t| parts.first() == Some(&t.0.as_str())), zxy) {
+                (Some(t), Some((Ok(z), Ok(x), Ok(y)))) => match t.2.tile_in(roadstyle::tiles::TileFormat::Mlt, z, x, y) {      // the style's source has "encoding": "mlt"
+                    Ok(b) => req.say("200 OK", "application/octet-stream", &b),
+                    Err(e) => req.say("500 Internal Server Error", "text/plain", e.to_string().as_bytes()),
+                },
+                _ => req.say("404 Not Found", "text/plain", b"no such tile"),
+            };
+        }
         if path.is_empty() || path == "index.html" || path.starts_with("parts/") {
             if !read {
                 return req.say("405 Method Not Allowed", "text/plain", b"the page's files are read only");
-            }
-            // `/?area=<name>` of the open area: the page of the area (the steps over its map, a blank base map); `/` is the page with no area (a new visit)
-            let cur = self.current.lock().unwrap().clone();
-            let area_page = (path.is_empty() || path == "index.html") && !cur.is_empty() && req.query.split('&').any(|kv| kv == format!("area={cur}"));
-            if let Some(site) = self.edit.lock().unwrap().clone().filter(|_| area_page) {
-                return req.say("200 OK", "text/html; charset=utf-8", site.page().as_bytes());
             }
             let found: Option<(&str, &[u8])> = if path.is_empty() || path == "index.html" {
                 Some(("text/html; charset=utf-8", self.page.as_bytes()))
@@ -869,7 +937,8 @@ impl Studio {
         let api = path.strip_prefix("api/").unwrap_or("").to_string();
         match (req.method.as_str(), api.as_str()) {
             ("GET" | "HEAD", "info") => {
-                let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap(), "area": *self.current.lock().unwrap()});
+                let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap(), "area": *self.current.lock().unwrap(),
+                                 "tiled": self.tiled.lock().unwrap().as_ref().map(|t| t.0.clone())});
                 req.say("200 OK", "application/json", info.to_string().as_bytes())
             }
             ("GET" | "HEAD", "job") => {
@@ -878,6 +947,20 @@ impl Studio {
             }
             ("GET" | "HEAD", "areas") => req.say("200 OK", "application/json", self.areas().to_string().as_bytes()),
             ("GET" | "HEAD", "pbf") => req.say("200 OK", "application/json", self.pbf_list().as_bytes()),
+            ("GET" | "HEAD", a) if a.starts_with("style/") => {
+                let t = self.tiled.lock().unwrap().clone();
+                match t.filter(|t| t.0 == a["style/".len()..]) {
+                    Some(t) => req.say("200 OK", "application/json", t.1.as_bytes()),
+                    None => req.say("404 Not Found", "text/plain", b"this area is not open"),
+                }
+            }
+            ("GET" | "HEAD", a) if a.starts_with("terrain/") => {
+                let name = &a["terrain/".len()..];
+                match self.area_dir(name).map(|d| d.join(format!("{name}.terrain.pmtiles"))).and_then(|f| std::fs::read(f).ok()) {
+                    Some(b) => req.say("200 OK", "application/octet-stream", &b),
+                    None => req.say("404 Not Found", "text/plain", b"no terrain for this area"),
+                }
+            }
             ("GET" | "HEAD", a) if a.starts_with("area/") => match self.area_info(&a["area/".len()..]) {
                 Ok(t) => req.say("200 OK", "application/json", t.as_bytes()),
                 Err(e) => req.say("404 Not Found", "text/plain", e.as_bytes()),
