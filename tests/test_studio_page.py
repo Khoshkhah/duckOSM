@@ -339,6 +339,10 @@ def test_a_box_on_a_phone(studio):
         page.click("[name=bs-extract][value=europe] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "europe"
         assert page.is_disabled("[data-bs=run]") and "Download" in page.inner_text("[data-bs=why]"), "Europe is not downloaded: the build waits"
+        page.locator(".bs-data [data-tab=file]").click()                 # a file on this computer: the build is ready
+        page.fill("[data-ds=path]", str(PBF))
+        page.wait_for_function("document.querySelector('[data-ds=msg]').textContent.startsWith('Found')")
+        assert page.is_enabled("[data-bs=run]")
         _fit(page)
         # the Build card is in the sheet: it can be scrolled to, and its button is a finger's size
         _unfold(page, 5)
