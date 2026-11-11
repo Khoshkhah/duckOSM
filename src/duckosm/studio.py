@@ -28,6 +28,19 @@ class _Host:
         finally:
             con.close()
 
+    def write(self, db: str, sql: str) -> None:
+        """Run the SQL script ``sql`` (with its own BEGIN and COMMIT) on the database ``db``, open for writing: card 8 saves the levels."""
+        import duckdb
+
+        con = duckdb.connect(db)
+        try:
+            con.execute(sql)
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+        finally:
+            con.close()
+
     def build(self, config: str, folder: str, db: str, sink) -> str:
         from duckosm.edit import build_area
 

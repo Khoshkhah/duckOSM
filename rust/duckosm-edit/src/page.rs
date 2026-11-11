@@ -62,13 +62,74 @@ pub fn make_ask(db: &mut dyn Db, name: &str) -> Result<String, String> {
     make_with(db, name, ASK_SCRIPT, "", None)
 }
 
-/// The roads, the base-map rows and the look of an area's page (the stored levels, the layers of the database), for `make_with` and `make_tiled`.
-fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look), String> {
+/// The tables and the columns of the open database, as roadstyle's plan of a duckOSM file reads them.
+fn catalog(db: &mut dyn Db) -> Result<d::Catalog, String> {
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let catalog = db.texts("SELECT current_database()")?.into_iter().next().flatten().unwrap_or_default();
     let [tq, cq] = d::catalog_sql(&catalog);
-    let cat = d::Catalog { tables: values(db, &tq)?.iter().map(|r| (s(&r[0]), s(&r[1]))).collect(),
-                           columns: values(db, &cq)?.iter().map(|r| (s(&r[0]), s(&r[1]), s(&r[2]))).collect() };
+    Ok(d::Catalog { tables: values(db, &tq)?.iter().map(|r| (s(&r[0]), s(&r[1]))).collect(),
+                    columns: values(db, &cq)?.iter().map(|r| (s(&r[0]), s(&r[1]), s(&r[2]))).collect() })
+}
+
+/// Card 8 of `duckosm studio` (roadstyle's level-edit part; its adapter levels_sql.js, here in Rust): the roads of the area's level area as
+/// GeoParquet bytes (roadstyle's `level_edges_sql`).
+pub fn level_edges(db: &mut dyn Db) -> Result<Vec<u8>, String> {
+    let cat = catalog(db)?;
+    parquet(db, &d::level_edges_sql(&cat).map_err(|e| e.to_string())?)
+}
+
+/// Card 8: the stored levels, `{"csv", "edge_hash"}` (visualization.edge_levels as levels.csv text, and the edge hash of edge_levels_meta), or
+/// null when the database has none.
+pub fn stored_levels(db: &mut dyn Db) -> Result<Value, String> {
+    if db.texts("SELECT table_name FROM information_schema.tables WHERE table_schema = 'visualization' AND table_name = 'edge_levels_meta'")?.is_empty() {
+        return Ok(Value::Null);
+    }
+    let Some(hash) = db.texts("SELECT edge_hash::VARCHAR FROM visualization.edge_levels_meta LIMIT 1")?.into_iter().next().flatten() else { return Ok(Value::Null) };
+    let file = std::env::temp_dir().join(format!("duckosm-edit-{}-levels.csv", std::process::id()));
+    db.execute(&format!("COPY (SELECT edge_id AS edge, casing_start, casing_level, casing_end, fill_level FROM visualization.edge_levels) TO '{}' (HEADER)",
+                        file.display().to_string().replace('\'', "''")))?;
+    let csv = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()));
+    let _ = std::fs::remove_file(&file);
+    Ok(json!({"csv": csv?, "edge_hash": hash}))
+}
+
+/// Card 8: the SQL script that writes the level editor's result into the database (roadstyle's levels_sql.js `saveLevels`, here once for both
+/// hosts: `Host::write` runs it on a writing connection). levels.csv goes into visualization.edge_levels (the build's edges must be the same: else
+/// the script stops with an error that says how many differ), the meta row gets source "area", `name` and the time (UTC), and edits.csv, heads.csv
+/// and caps.csv go into level_edits, level_heads and level_caps. The texts are written as files into `dir`, which the script reads.
+pub fn save_levels_sql(dir: &std::path::Path, files: &Value, name: &str) -> Result<String, String> {
+    let text = |f: &str| files[f].as_str().unwrap_or_default();
+    let q = |s: &str| s.replace('\'', "''");
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let file = |f: &str| -> Result<String, String> {
+        let p = dir.join(f);
+        std::fs::write(&p, text(f)).map_err(|e| format!("{}: {e}", p.display()))?;
+        Ok(q(&p.display().to_string()))
+    };
+    let levels = file("levels.csv")?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros());      // (DuckDB with no time zones)
+    let mut sql = format!("BEGIN;
+SELECT CASE WHEN n <> m THEN error('levels.csv has ' || n || ' edges, the build has ' || m || ': open the editor again') END
+  FROM (SELECT (SELECT count(*) FROM read_csv('{levels}', header = true)) AS n, (SELECT n_edges FROM visualization.edge_levels_meta) AS m);
+DELETE FROM visualization.edge_levels;
+INSERT INTO visualization.edge_levels BY NAME SELECT * EXCLUDE (edge) REPLACE (CAST(cap_start AS VARCHAR) AS cap_start, CAST(cap_end AS VARCHAR) AS cap_end), edge AS edge_id
+  FROM read_csv('{levels}', header = true, types = {{'edge': 'BIGINT'}});
+UPDATE visualization.edge_levels_meta SET source = 'area', area = '{}', created = strftime(make_timestamp({now}), '%Y-%m-%dT%H:%M:%S') || '+00:00';
+", q(name));
+    for (f, table, ids) in [("edits.csv", "level_edits", &["a", "b"][..]), ("heads.csv", "level_heads", &["road"]), ("caps.csv", "level_caps", &["road"])] {
+        if text(f).trim().is_empty() {
+            continue;
+        }
+        let path = file(f)?;
+        let cast = ids.iter().map(|c| format!("CAST(NULLIF(\"{c}\", '') AS BIGINT) AS \"{c}\"")).collect::<Vec<_>>().join(", ");
+        sql += &format!("CREATE OR REPLACE TABLE visualization.{table} AS SELECT * REPLACE ({cast}) FROM read_csv('{path}', header = true, all_varchar = true);\n");
+    }
+    Ok(sql + "COMMIT;")
+}
+
+/// The roads, the base-map rows and the look of an area's page (the stored levels, the layers of the database), for `make_with` and `make_tiled`.
+fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look), String> {
+    let cat = catalog(db)?;
     // the stored levels of the build (visualization.edge_levels); a file with none: the tags rule (no solve: the page opens at once)
     let tags = !cat.tables.iter().any(|(a, b)| a == "visualization" && b == "edge_levels");
     let run = d::Run::new("duckosm_edit").map_err(|e| e.to_string())?;

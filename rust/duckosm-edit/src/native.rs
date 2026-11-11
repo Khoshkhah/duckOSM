@@ -96,6 +96,14 @@ impl crate::studio::Host for NativeHost {
         Box::new(NativeDb::new(path))
     }
 
+    fn write(&self, db: &Path, sql: &str) -> Result<(), String> {
+        let con = Connection::open(db).map_err(|e| format!("{}: {e}", db.display()))?;
+        con.execute_batch(sql).map_err(|e| {
+            let _ = con.execute_batch("ROLLBACK");
+            e.to_string()
+        })
+    }
+
     fn buffer(&self, wkt: &str, epsg: u32, metres: f64) -> Result<String, String> {
         let con = Connection::open_in_memory().map_err(|e| e.to_string())?;
         con.execute_batch("INSTALL spatial; LOAD spatial;").map_err(|e| format!("the spatial extension of DuckDB: {e}"))?;
@@ -124,5 +132,41 @@ impl crate::studio::Host for NativeHost {
         let mut lines: Vec<String> = sum.lines();
         lines.extend(c.skipped.iter().map(|s| format!("skipped: {s}")));
         Ok(lines.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::studio::Host;
+    use serde_json::json;
+
+    /// Card 8's save (`page::save_levels_sql`, run by the host's `write`): the levels, the meta row and a head go into the tables; levels.csv
+    /// with another number of edges stops the script, and the tables do not change.
+    #[test]
+    fn the_level_editor_save_writes_the_tables_and_stops_on_other_edges() {
+        let dir = std::env::temp_dir().join(format!("duckosm-edit-level-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("a.duckdb");
+        duckdb::Connection::open(&db).unwrap().execute_batch("CREATE SCHEMA visualization;
+            CREATE TABLE visualization.edge_levels AS SELECT * FROM (VALUES (9007199254740993::BIGINT, 0, 0, 0, 0, NULL::DOUBLE, NULL::DOUBLE, NULL::VARCHAR, NULL::VARCHAR),
+              (2, 0, 0, 0, 0, NULL, NULL, NULL, NULL)) t(edge_id, casing_start, casing_level, casing_end, fill_level, head_start_m, head_end_m, cap_start, cap_end);
+            CREATE TABLE visualization.edge_levels_meta AS SELECT 2 AS n_edges, 'h' AS edge_hash, 'build' AS source, '' AS area, '' AS created;").unwrap();
+        let files = json!({"levels.csv": "edge,casing_start,casing_level,casing_end,fill_level,head_start_m,head_end_m,cap_start,cap_end\n9007199254740993,1,1,1,1,,7,,\n2,0,0,0,0,,,,\n",
+                           "heads.csv": "road,start_m,end_m,time\n9007199254740993,,7,2026-11-11 12:00\n", "edits.csv": "", "caps.csv": ""});
+        let sql = crate::page::save_levels_sql(&dir.join("files"), &files, "monaco").unwrap();
+        super::NativeHost.write(&db, &sql).unwrap();
+        let con = duckdb::Connection::open(&db).unwrap();
+        let one = |q: &str| con.query_row(q, [], |r| r.get::<_, String>(0)).unwrap();
+        assert_eq!(one("SELECT fill_level::VARCHAR FROM visualization.edge_levels WHERE edge_id = 9007199254740993"), "1");
+        assert_eq!(one("SELECT source || ' ' || area || ' ' || (created LIKE '20__-__-__T__:__:__+00:00')::VARCHAR FROM visualization.edge_levels_meta"), "area monaco true");
+        assert_eq!(one("SELECT road::VARCHAR || ' ' || end_m FROM visualization.level_heads"), "9007199254740993 7");
+        drop(con);
+        let short = json!({"levels.csv": "edge,casing_start,casing_level,casing_end,fill_level\n2,3,3,3,3\n"});
+        let err = super::NativeHost.write(&db, &crate::page::save_levels_sql(&dir.join("files"), &short, "monaco").unwrap()).unwrap_err();
+        assert!(err.contains("levels.csv has 1 edges, the build has 2"), "{err}");
+        let con = duckdb::Connection::open(&db).unwrap();
+        assert_eq!(con.query_row("SELECT fill_level::VARCHAR FROM visualization.edge_levels WHERE edge_id = 2", [], |r| r.get::<_, String>(0)).unwrap(), "0", "no change");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

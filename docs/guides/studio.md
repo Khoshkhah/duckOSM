@@ -1,7 +1,7 @@
 # Make the data of an area on your computer
 
-`duckosm studio` starts a page on your computer. The page makes the data of an area in six steps. The last step opens the map of the new
-area, with the panel **Edit OSM data**. The steps are the steps of [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), the
+`duckosm studio` starts a page on your computer. The page makes the data of an area in steps. Then it shows the map of the new
+area, with the panels **Edit OSM data** and **Edit levels**. The steps are the steps of [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), the
 page that runs in a browser. The two pages use the same parts of duckOSM (`web/build_steps/` and `web/ground_step/`).
 
 The difference: here the build runs on your computer. It is `duckosm build`, so the area can be as large as your computer can build, and the
@@ -53,6 +53,12 @@ One step is open at a time, and the next step opens when the one before is done.
 7. **Edit OSM data.** The card opens the panel Edit OSM data of the area: the page of [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit).
    Each change goes into `OUT_DIR/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file. Its back button comes back to the steps,
    with the area open.
+8. **Edit levels.** The card opens roadstyle's level editor over the map of the open area: the drawing order of the roads at bridges and
+   tunnels (the same editor as card 8 of duckOSM Studio). Each change draws the changed roads again at once: the server redraws them.
+   **← Steps** closes the editor and writes the change into the area's `.duckdb` file (`visualization.edge_levels`, `edge_levels_meta`,
+   `level_edits`, `level_heads` and `level_caps`). The area must have levels: the option **levels** of the build is on by default. The
+   editor runs in the page with roadstyle's WebAssembly package. The program has the package only when `rust/duckosm-edit/editor_pkg.sh`
+   ran before its build. Without the package, the card says so.
 
 Studio has two more ways to get the OSM data (Overpass, and a cut file that you open in the browser). They are not here: the build reads a Geofabrik extract or a file on this computer.
 
