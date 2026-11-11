@@ -26,8 +26,8 @@ roadstyle's guide "How a dashboard holds its data" names four ways to run a dash
 
 | Way | duckOSM program | Where DuckDB is | Load step |
 |---|---|---|---|
-| C. Made in the browser | duckOSM Studio | DuckDB-Wasm, a separate WebAssembly module | Rust writes Parquet files to the browser disk (OPFS); DuckDB-Wasm reads them |
-| D. Made by a local program | `duckosm-rust studio` | built into the Rust program (`duckdb` crate) | `read_osm` in the program's DuckDB |
+| C. Made in the browser (online) | duckOSM Studio | DuckDB-Wasm, a separate WebAssembly module | Rust writes Parquet files to the browser disk (OPFS); DuckDB-Wasm reads them |
+| D. Made by a local program (offline) | `duckosm-rust studio` | built into the Rust program (`duckdb` crate) | `read_osm` in the program's DuckDB |
 
 In way C, the Rust module and DuckDB-Wasm have separate memories, and they can only share files. So the browser
 needs the Parquet hand-over. In way D, DuckDB is in the same program, so the rows go into DuckDB directly.
