@@ -98,6 +98,8 @@ pub struct Studio {
     edit: Mutex<Option<Arc<Site>>>,
     /// The name of the area whose map page is made now (Open makes it in the background), or empty.
     opening: Mutex<String>,
+    /// The area that is open now (the last Open or build), or empty: the page of the steps shows it again when it comes back from the map.
+    current: Mutex<String>,
     pager: Pager,
 }
 
@@ -210,7 +212,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), pager })
     }
 
     /// The folder of the areas now.
@@ -452,6 +454,7 @@ impl Studio {
         self.step(&format!("Visualization: make the map page of {name} (the roads and the layers of the database on a blank base map)"));
         let site = Site::with_cache(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager, Some(dir.join(format!("{name}.map.html"))))?;
         *self.edit.lock().unwrap() = Some(Arc::new(site));
+        *self.current.lock().unwrap() = name.to_string();
         Ok(text)
     }
 
@@ -522,6 +525,10 @@ impl Studio {
         if let Some(old) = self.edit.lock().unwrap().take() {      // the map page may have the database open
             old.close();
         }
+        let mut cur = self.current.lock().unwrap();
+        if *cur == name {
+            cur.clear();
+        }
         std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
     }
 
@@ -536,6 +543,7 @@ impl Studio {
             old.close();
         }
         *self.opening.lock().unwrap() = name.to_string();
+        *self.current.lock().unwrap() = name.to_string();
         let (me, name) = (self.clone(), name.to_string());
         std::thread::spawn(move || {
             let db = dir.join(format!("{name}.duckdb"));
@@ -732,7 +740,7 @@ impl Studio {
         let api = path.strip_prefix("api/").unwrap_or("").to_string();
         match (req.method.as_str(), api.as_str()) {
             ("GET" | "HEAD", "info") => {
-                let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap()});
+                let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap(), "area": *self.current.lock().unwrap()});
                 req.say("200 OK", "application/json", info.to_string().as_bytes())
             }
             ("GET" | "HEAD", "job") => {

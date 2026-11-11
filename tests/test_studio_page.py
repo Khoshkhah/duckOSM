@@ -126,8 +126,8 @@ def _fit(page):
 
 
 def _build_and_open(page, area, timeout=600_000):
-    """Push Build, wait for the result, and open the map of the new area from step 7: the page of `duckosm edit` at /edit/, in a new tab. Nothing opens by itself,
-    and the page of the steps keeps its state."""
+    """Push Build, wait for the result, and open the map of the new area from step 7: the page of `duckosm edit` at /edit/. Nothing opens by itself; the back
+    button of the map comes back to the steps, with the same area."""
     _unfold(page, 5)
     page.click("[data-bs=run]")
     _unfold(page, 6)
@@ -145,17 +145,20 @@ def _build_and_open(page, area, timeout=600_000):
     page.wait_for_timeout(2000)
     assert len(page.context.pages) == 1 and not page.url.endswith("/edit/"), "the map does not open by itself"
     _unfold(page, 7)
-    with page.context.expect_page(timeout=60_000) as tab:
+    with page.expect_navigation(timeout=60_000):
         page.click(".bs-open")
-    m = tab.value
+    m = page
     m.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
     assert m.url.endswith("/edit/")
     assert m.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == area
     # the visualization of the new area: the base map is blank (the layers of the database are the base map), and the roads are there
     assert m.evaluate("window.map.getLayoutProperty('basemap', 'visibility') === 'none' || !window.map.getLayer('basemap')"), "the base map is blank"
     assert m.evaluate("window.map.getStyle().layers.some((l) => l.id.startsWith('roads'))"), "the roads are on the map"
-    m.close()
-    assert page.evaluate("window.studio.area.area()?.name") == area, "the page of the steps keeps its state"
+    # back to the steps: the same area is open there again
+    page.click("#rs-frame-back, .rs-frame-back")
+    page.wait_for_function("window.studioReady", timeout=60_000)
+    page.wait_for_function(f"window.studio.area.area()?.name === {json.dumps(area)}", timeout=60_000)
+    assert not page.url.endswith("/edit/")
 
 
 def _download(page, extract):
@@ -472,19 +475,21 @@ def test_saved_areas_are_listed_opened_and_deleted(studio):
         text = row.inner_text()
         assert "driving" in text and "walking" in text and "cycling" not in text and "MB" in text, text
         assert row.locator("button").all_inner_texts() == ["Open", "Delete"]
-        row.locator("[data-do=open]").click()
-        page.wait_for_function("window.studio.area.area()?.name === 'monaco-a'")
+        # Open shows the visualization of the area: its map page (blank base map), in this tab
+        with page.expect_navigation(timeout=60_000):
+            row.locator("[data-do=open]").click()
+        page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
+        assert page.url.endswith("/edit/") and page.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == "monaco-a"
+        assert page.evaluate("window.map.getLayoutProperty('basemap', 'visibility') === 'none' || !window.map.getLayer('basemap')"), "the base map is blank"
+        # back: the steps have the area again (boundary, settings, result), and its row is selected
+        page.click("#rs-frame-back, .rs-frame-back")
+        page.wait_for_function("window.studioReady", timeout=60_000)
+        page.wait_for_function("window.studio.area.area()?.name === 'monaco-a'", timeout=60_000)
         assert page.evaluate("window.studio.settings.values().modes") == ["driving", "walking"]
         assert page.evaluate("window.studio.settings.values().levels") is False and page.evaluate("window.studio.settings.values().build_features") is True
-        page.wait_for_function("document.querySelector('#sb').innerText.includes('is open')", timeout=60_000)
-        _unfold(page, 6, 7)
+        assert page.evaluate("[...document.querySelectorAll('input[name=saved-area]:checked')].map((e) => e.value)") == ["monaco-a"]
+        _unfold(page, 6)
         assert "monaco-a" in page.inner_text("[data-rs=line]") and "monaco-a.duckdb" in page.inner_text(".bs-files")
-        assert len(page.context.pages) == 1, "Open opens no other tab"
-        with page.context.expect_page(timeout=60_000) as tab:
-            page.click(".bs-open")
-        tab.value.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
-        assert tab.value.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == "monaco-a"
-        tab.value.close()
         # Delete: the person confirms, and the folder goes; the downloaded extract stays
         if (out / "monaco-dem").is_dir():
             page.once("dialog", lambda d: d.accept())
