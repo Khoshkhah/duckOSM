@@ -38,3 +38,25 @@ html.rs-phone .bs button, html.rs-phone .bs summary, html.rs-phone .bs-open { mi
 .bs-h3box p { margin: 0; }
 .bs-h3box [data-as=h3-grid-note]:not(:empty) { margin-top: 4px; }
 .bs .rs-tab svg { flex: none; }
+.bs-path { display: block; overflow-wrap: anywhere; user-select: all; font: 11.5px/1.4 ui-monospace, monospace; }
+.bs-files { width: 100%; }
+.bs-folder .area-acts { align-items: center; }
+.bs-folder [data-fs=dirs] { max-height: 180px; overflow: auto; }
+.bs .where { margin: 0; font-size: 12px; color: var(--mut); overflow-wrap: anywhere; }
+.bs .where code { font: 11.5px/1.4 ui-monospace, monospace; user-select: all; }
+.bs-steplog tr.run td { color: var(--ink); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.bs-run { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+.bs-spin { display: inline-block; width: 11px; height: 11px; margin-right: 6px; vertical-align: -1px; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: bs-turn .8s linear infinite; }
+.bs-run { animation: bs-pulse 1.4s ease-in-out infinite; }
+@keyframes bs-turn { to { transform: rotate(360deg); } }
+@keyframes bs-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .bs-spin, .bs-run { animation: none; } }
+/* the extract rows of the data step, as Studio's: Get, Use or In use, the progress under the name, the file to this computer */
+.bs-data .rs-opt { align-items: center; }
+.bs-data .rs-opt > button { padding: 5px 9px; margin-left: auto; flex: none; }
+.bs-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; flex: none; color: var(--muted, currentColor); }
+.bs-ico:hover { background: color-mix(in srgb, currentColor 10%, transparent); color: var(--ink, currentColor); }
+.bs-prog { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.bs-bar { display: block; height: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 15%, transparent); overflow: hidden; }
+.bs-bar > span { display: block; height: 100%; background: var(--accent, #0e7490); transition: width 0.3s; }
+.bs-err { color: color-mix(in srgb, #dc2626 75%, var(--ink, currentColor)); }

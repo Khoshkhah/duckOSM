@@ -213,7 +213,24 @@ pub fn sample_mode(
 
 #[cfg(test)]
 mod tests {
-    use super::round_cm;
+    use super::{round_cm, write_area_dem, Dem};
+    use std::path::Path;
+
+    /// The Monaco crop of Copernicus GLO-30, cut to a smaller box and written again: the same heights at the same points, and the box is inside the file.
+    #[test]
+    fn area_dem_keeps_the_heights() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/monaco-copernicus-glo30.tif");
+        let out = std::env::temp_dir().join(format!("duckosm-area-dem-{}.tif", std::process::id()));
+        let bbox = [7.41, 43.725, 7.43, 43.745];
+        let (w, h) = write_area_dem(&[src.as_path()], bbox, 2, &out).unwrap();
+        assert!(w > 70 && w < 80 && h > 70 && h < 80, "{w} × {h}");
+        let (a, b) = (Dem::open(&src).unwrap(), Dem::open(&out).unwrap());
+        for (lon, lat) in [(7.415, 43.73), (7.4201, 43.7377), (7.428, 43.744)] {
+            assert_eq!(a.sample(lon, lat), b.sample(lon, lat), "{lon} {lat}");
+        }
+        assert!(b.sample(bbox[0], bbox[1]).is_some() && b.sample(bbox[2], bbox[3]).is_some());
+        std::fs::remove_file(out).ok();
+    }
 
     #[test]
     fn round_cm_ties_to_even() {
@@ -223,6 +240,48 @@ mod tests {
         assert_eq!(round_cm(-3.456), -3.46);
         assert_eq!(round_cm(12.3), 12.3);
     }
+}
+
+/// Join the DEM files `inputs` (tiles of one model, for example the 1° tiles of Copernicus GLO-30) over the box `bbox` (degrees) plus `margin`
+/// pixels, and write them as one GeoTIFF `out`: EPSG:4326, 32-bit floats, deflate, nodata -9999. The pixel size is the smallest of the inputs; a
+/// pixel takes the value of the first input that has the point. Gives the width and the height. `duckosm studio` uses it for a downloaded model.
+pub fn write_area_dem(inputs: &[&Path], bbox: [f64; 4], margin: usize, out: &Path) -> Result<(usize, usize), String> {
+    use tiff::encoder::{colortype::Gray32Float, Compression, DeflateLevel, TiffEncoder};
+    const NODATA: f32 = -9999.0;
+    let dems = inputs.iter().map(|p| Dem::open(p)).collect::<Result<Vec<_>, _>>()?;
+    let first = dems.first().ok_or("no DEM file to join")?;
+    let (sx, sy) = dems.iter().fold((first.sx.abs(), first.sy.abs()), |(a, b), d| (a.min(d.sx.abs()), b.min(d.sy.abs())));
+    let m = margin as f64;
+    // the grid of the first file, so that its pixels are not moved: the west and the north edge are on its pixel lines
+    let x0 = first.x0 + ((bbox[0] - first.x0) / sx).floor() * sx - m * sx;
+    let y0 = first.y0 - ((first.y0 - bbox[3]) / sy).floor() * sy + m * sy;
+    let width = (((bbox[2] - x0) / sx).ceil() + m) as usize;
+    let height = (((y0 - bbox[1]) / sy).ceil() + m) as usize;
+    if width == 0 || height == 0 || width * height > 400_000_000 {
+        return Err(format!("the area gives a DEM of {width} × {height} pixels: too large"));
+    }
+    let mut data = vec![NODATA; width * height];
+    for row in 0..height {
+        let lat = y0 - (row as f64 + 0.5) * sy;
+        for col in 0..width {
+            let lon = x0 + (col as f64 + 0.5) * sx;
+            if let Some(z) = dems.iter().find_map(|d| d.sample(lon, lat)) {
+                data[row * width + col] = z as f32;
+            }
+        }
+    }
+    let err = |e: tiff::TiffError| format!("{}: {e}", out.display());
+    let file = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let mut enc = TiffEncoder::new(std::io::BufWriter::new(file)).map_err(err)?.with_compression(Compression::Deflate(DeflateLevel::default()));
+    let mut img = enc.new_image::<Gray32Float>(width as u32, height as u32).map_err(err)?;
+    let dir = img.encoder();
+    dir.write_tag(Tag::ModelPixelScaleTag, &[sx, sy, 0.0][..]).map_err(err)?;
+    dir.write_tag(Tag::ModelTiepointTag, &[0.0, 0.0, 0.0, x0, y0, 0.0][..]).map_err(err)?;
+    // GeoKeys: version 1.1.0, 3 keys; GTModelType geographic, GTRasterType PixelIsArea, GeographicType EPSG:4326
+    dir.write_tag(Tag::GeoKeyDirectoryTag, &[1u16, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326][..]).map_err(err)?;
+    dir.write_tag(Tag::GdalNodata, "-9999").map_err(err)?;
+    img.write_data(&data).map_err(err)?;
+    Ok((width, height))
 }
 
 /// Write the pixels of the DEM file `dem` over the box (degrees) plus `margin` pixels as `elevation_grid_main.parquet` rows into `out` (the same rows

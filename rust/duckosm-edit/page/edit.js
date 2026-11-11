@@ -27,7 +27,10 @@
     // the editor is in roadstyle's editor frame in the dashboard's panel (rs.frame): the page is the editor, so the frame has no back button. The
     // title line has the name of the fixes file, and the head row has the line of state under the tabs.
     const frame = (opts) => {
-      const f = window.rs.frame({ ...opts, panel: $("sb"), back: null });
+      // under `duckosm studio` the page is at /edit/ and the frame has a back button to the steps of Studio; `duckosm edit` has no page to go back to
+      const studio = /\/edit\/$/.test(location.pathname);
+      const f = window.rs.frame({ ...opts, panel: $("sb"), back: studio ? "Studio" : null });
+      if (studio) f.addEventListener("back", () => { location.href = "../"; });
       f.top.insertAdjacentHTML("beforeend", `<span class="small muted" title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</span>`);
       f.head.insertAdjacentHTML("beforeend", '<p id="fix-status" class="small" role="status" hidden></p>');
       return f;

@@ -240,6 +240,11 @@ impl duckosm_edit::studio::Host for PyHost {
     }
     fn build(&self, config: &str, dir: &std::path::Path, db: &std::path::Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
         let (tx, rx) = std::sync::mpsc::channel::<String>();
+        // the steps of the Rust engine (read ways, build driving, ...) go to the page too, inside the step of Python that calls the engine
+        let engine = tx.clone();
+        duckosm_build::set_progress(Some(Box::new(move |step| {
+            let _ = engine.send(format!("    Rust engine: {step}"));
+        })));
         let sink = Python::attach(|py| Py::new(py, StepSink(std::sync::Mutex::new(Some(tx)))).map_err(|e| e.to_string()))?;
         std::thread::scope(|s| {
             s.spawn(move || rx.iter().for_each(|line| log(&line)));
@@ -247,6 +252,7 @@ impl duckosm_edit::studio::Host for PyHost {
                 self.0.call_method1(py, "build", (config, dir.display().to_string(), db.display().to_string(), sink.clone_ref(py)))
                     .and_then(|r| r.bind(py).extract::<String>()).map_err(|e| e.to_string())
             });
+            duckosm_build::set_progress(None);
             Python::attach(|py| sink.borrow(py).0.lock().unwrap().take());       // the sender goes: the reader ends
             r
         })

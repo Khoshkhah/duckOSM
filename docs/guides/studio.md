@@ -32,15 +32,19 @@ One step is open at a time, and the next step opens when the one before is done.
     - **File.** Drop a GeoJSON file with a polygon or a multipolygon, for example the file of `duckosm boundary`.
     - **H3.** Choose the size of a hexagon (the levels 5 to 10), then click the hexagons on the map; the hexagons together are the area (at most 500 cells and 5,000 km²). A click on a picked hexagon removes it. You can also type H3 cell IDs in the search box.
 2. **The area.** The name (it is the name of the folder of the area), **Buffer around the area** (0 to 50,000 m: the area grows on all sides, in the UTM zone of its centre, as `boundary.buffer_m` of duckOSM does; the server does it with DuckDB), the numbers (area in km², polygons, vertices), **Boundary** (saves the boundary as a GeoJSON file) and **Unselect**. The magnifier moves the map to the area.
-3. **The data.** The tab **Geofabrik** shows the extracts of Geofabrik that cover the whole area, the smallest first. The build downloads the one that you pick into the folder of the area. The tab **File**
-   takes the path of a `.osm.pbf` file on this computer. The build cuts the file to the area.
-4. **Ground.** The page lists the DEM sources that cover the area, best first. Choose the source of your DEM file, download the file from it, then drop the file in the box. The product, the vertical datum and the
+3. **The data.** The tab **Geofabrik** shows the extracts of Geofabrik that cover the whole area, the smallest first. The outline of the extract under the mouse shows on the map. When you choose
+   an extract, it stays on the map, and the other rows show nothing on the map until you choose it again to deselect it. **Download** puts the extract into `OUT_DIR/osm/`, with a progress
+   bar under its name. Then the button is **Use**, or **In use** for the extract of the build. One extract serves every area that it covers, and the build does not download.
+   The tab **File** takes the path of a `.osm.pbf` file on this computer. The build cuts the file to the area.
+4. **Ground.** The page lists the DEM sources that cover the area, best first. The row that you choose has the web page of the source, and its state under the name. For Copernicus GLO-30 and GLO-90,
+   **Download** puts the files of the area (one for each 1° tile) into `OUT_DIR/dem/<source>/`. Then the button is **In use**: the build joins the files and cuts them to the area into `dem.tif`. A file that
+   you put into that folder yourself is used too. Or drop another file in the box. The product, the vertical datum and the
    licence of the file are the source's, and the ground id is the SHA-256 of the file. With no source chosen, the area has no DEM. The choice **Ground: AWS Terrain Tiles** makes a DEM for the map terrain, and it is
    never the reference ground of the area. Read [The ground reference](../concepts/ground-reference.md) and [Add elevation](elevation.md). A DEM needs `pip install "duckosm[elevation]"` with `duckosm studio`.
 5. **Build.** The networks and the options (the keys of [the config of `duckosm build`](../reference/configuration.md); open **Config of the build** to see the text), **Fixes** (the path of a [fixes file](fix-osm-errors.md) on this computer: the key `osm_overrides`), and the button **Build**. The page shows the
-   download, the steps, and in **Build details** the time of each step. The build writes `areas/<name>/<name>.duckdb`, the config it used (`config.yaml`) and the boundary (`boundary.geojson`).
-6. **The result.** The networks that the build made, and **Open the map and edit OSM data**: roadstyle's dashboard of the new area, the same page as
-   [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit). Each change goes into `areas/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file.
+   steps, and in **Build details** the time of each step. The build writes `areas/<name>/<name>.duckdb`, the config it used (`config.yaml`) and the boundary (`boundary.geojson`).
+6. **The result.** The networks that the build made, and the files in the folder of the area. Step 7, **Visualization**, has **Open the map and edit OSM data**: roadstyle's dashboard of the new area, the same page as
+   [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit), in a new tab. This page keeps its steps. Each change goes into `areas/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file.
    The record of the build is in the database, so Build again works.
 
 Studio has two more ways to get the OSM data (Overpass, and a cut file that you open in the browser). They are not here: the build reads a Geofabrik extract or a file on this computer.
@@ -48,12 +52,11 @@ Studio has two more ways to get the OSM data (Overpass, and a cut file that you 
 ## Your areas
 
 The areas are files on your disk, in `OUT_DIR/<name>/`. A new visit of the page lists them in the card **Your areas** (as Studio lists the areas that it keeps in the browser).
-For each area the card shows the date, the size, the networks and whether it has a DEM, with two buttons:
+For each area the card shows the date, the size, the networks and whether it has a DEM, with two buttons. The outline of the area under the mouse shows on the map.
 
-- **Open** shows the map of the area with the panel **Edit OSM data** (the page of `duckosm edit`).
-- **Load** puts the boundary and the settings of the area back into the steps 1 and 3, so that you can change them and build again. Choose the OSM data and the ground again.
-
-The card has no Delete button. To delete an area, delete its folder.
+- **Open** puts the area into the steps: its boundary and its settings, its result in step 6, and its map in step 7. To build it again, choose the OSM data and the ground, change what you want, and click Build.
+  A large area takes some seconds to open.
+- **Delete** deletes the folder of the area and all its files, after you confirm. The downloaded extracts (`OUT_DIR/osm/`) and DEM files (`OUT_DIR/dem/`) stay.
 
 ## On a phone
 
@@ -72,5 +75,6 @@ The panel is a sheet at the bottom and the map is above it. Draw the box on the 
 
 - The Rust build makes the base-map layers (`features.*`), the H3 columns and, with the setting Sea, `features.ocean`. It makes no `main.boundary_cells`, checks, report, maps or multimodal graph. The Python build (`duckosm studio`) makes them.
 - The page builds one area at a time.
-- A DEM file is at most 16 MB. A larger DEM does not go through the page: give it with `elevation:` in a config and run `duckosm build`.
+- A DEM file that you drop is at most 16 MB. The downloaded files of a model have no limit.
+- Only Copernicus GLO-30 and GLO-90 have **Download**. The other models need an account, or their files are in another projection.
 - The page does not stop a build that runs. Stop the command, then start it again.

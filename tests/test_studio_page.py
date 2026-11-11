@@ -126,22 +126,43 @@ def _fit(page):
 
 
 def _build_and_open(page, area, timeout=600_000):
-    """Push Build, wait for the result, and open the map of the new area: the page of `duckosm edit` at /edit/."""
+    """Push Build, wait for the result, and open the map of the new area from step 7: the page of `duckosm edit` at /edit/, in a new tab. Nothing opens by itself,
+    and the page of the steps keeps its state."""
     _unfold(page, 5)
     page.click("[data-bs=run]")
     _unfold(page, 6)
-    page.wait_for_selector(".bs-open", state="visible", timeout=timeout)
+    page.wait_for_selector(".bs-open[href]", state="attached", timeout=timeout)
     assert page.is_hidden("[data-bs=error]")
+    assert area in page.inner_text("[data-rs=line]")
+    # the result shows where the files are: the folder of the area and each file with its size
+    assert area in page.inner_text(".bs-result [data-rs=dir]") and page.inner_text(".bs-result [data-rs=dir]").startswith("/")
+    files = page.eval_on_selector_all(".bs-files tbody tr", "els => els.map((r) => r.cells[0].textContent)")
+    assert f"{area}.duckdb" in files and "config.yaml" in files and "boundary.geojson" in files, files
     # the build details: the time of each step, and the total
     steps = page.evaluate("[...document.querySelectorAll('.bs-steplog tbody tr')].map((r) => [r.cells[0].textContent, r.cells[1].textContent])")
-    assert len(steps) > 5 and all(re.fullmatch(r"\d+\.\d", sec) for _, sec in steps), steps
+    assert len(steps) > 3 and all(re.fullmatch(r"\d+\.\d", sec) for _, sec in steps), steps
     assert re.fullmatch(r"\d+\.\d", page.evaluate("document.querySelector('[data-bs=total]').textContent"))
-    assert area in page.inner_text("[data-rs=line]")
-    with page.expect_navigation(timeout=60_000):
+    page.wait_for_timeout(2000)
+    assert len(page.context.pages) == 1 and not page.url.endswith("/edit/"), "the map does not open by itself"
+    _unfold(page, 7)
+    with page.context.expect_page(timeout=60_000) as tab:
         page.click(".bs-open")
-    page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
-    assert page.url.endswith("/edit/")
-    assert page.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == area
+    m = tab.value
+    m.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
+    assert m.url.endswith("/edit/")
+    assert m.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == area
+    # the visualization of the new area: the base map is blank (the layers of the database are the base map), and the roads are there
+    assert m.evaluate("window.map.getLayoutProperty('basemap', 'visibility') === 'none' || !window.map.getLayer('basemap')"), "the base map is blank"
+    assert m.evaluate("window.map.getStyle().layers.some((l) => l.id.startsWith('roads'))"), "the roads are on the map"
+    m.close()
+    assert page.evaluate("window.studio.area.area()?.name") == area, "the page of the steps keeps its state"
+
+
+def _download(page, extract):
+    """Download an extract in step 3 (into the folder of the areas): the row's Download, the progress, then In use."""
+    _unfold(page, 3)
+    page.click(f"[data-ds-get={extract}]")
+    page.wait_for_function(f"[...document.querySelectorAll('.bs-data .rs-opt')].some((r) => r.querySelector('[value={extract}]') && /In use/.test(r.textContent))", timeout=120_000)
 
 
 def test_a_place_a_geofabrik_extract_and_no_dem(studio):
@@ -159,6 +180,17 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         preview = "(() => { try { return window.studio.map.getSource('bs-preview').serialize().data.features.length; } catch { return -1; } })()"      # -1: the layers are not made yet
         page.hover(".bs-area label[data-i='0']")
         page.wait_for_function(f"{preview} === 1")
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)      # the place is small on the world map: the map moves to it (Studio's rule)
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{preview} === 0")
+        # a place with no boundary (a point) shows too, and a click on it moves the map to it
+        page.evaluate("window.studio.map.jumpTo({center: [0, 0], zoom: 2})")
+        page.hover(".bs-area label.point")
+        page.wait_for_function(f"{preview} === 1")
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)
+        page.evaluate("window.studio.map.jumpTo({center: [0, 0], zoom: 2})")
+        page.click(".bs-area label.point", force=True)
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)
         page.mouse.move(900, 400)
         page.wait_for_function(f"{preview} === 0")
         page.click("[name=bs-place] + span")
@@ -173,8 +205,26 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         assert page.eval_on_selector_all("[name=bs-extract]", "els => els.map(e => e.value)") == ["monaco", "europe"]
         assert page.query_selector("[name=bs-extract]:checked") is None, "nothing is chosen at the start, as in Studio"
         _unfold(page, 3)
+        # the extract under the mouse shows on the map (orange, dashed), and goes when the mouse leaves; a click keeps it, a second click hides it and takes the choice away (Studio)
+        ext = "(() => { try { return window.studio.map.getSource('bs-extract').serialize().data.features.length; } catch { return -1; } })()"
+        page.evaluate("window.studio.map.jumpTo({center: [0, 0], zoom: 2})")
+        page.hover("[name=bs-extract][value=monaco] + span")
+        page.wait_for_function(f"{ext} === 1")
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)      # the map moves to the extract under the mouse
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{ext} === 0")
+        page.click("[name=bs-extract][value=monaco] + span")
+        page.mouse.move(900, 400)
+        assert page.evaluate(ext) == 1 and page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco", "a click keeps the outline"
+        page.click("[name=bs-extract][value=monaco] + span")
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{ext} === 0")
+        assert page.query_selector("[name=bs-extract]:checked") is None and page.is_disabled("[data-bs=run]"), "a second click takes the choice away"
         page.click("[name=bs-extract][value=monaco] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco"
+        # a chosen extract that is not downloaded is not the data yet; Download puts it into the folder, and it is in use
+        assert page.is_disabled("[data-bs=run]") and "Download" in page.inner_text("[data-bs=why]")
+        _download(page, "monaco")
         assert page.is_enabled("[data-bs=run]")
         # the settings: two networks; the text of the config follows
         _options(page)
@@ -195,7 +245,7 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         browser.close()
         assert not errors, errors
     folder = out / "monaco-a"
-    assert (folder / "monaco-latest.osm.pbf").read_bytes() == PBF.read_bytes(), "the extract was downloaded"
+    assert (out / "osm" / "monaco-latest.osm.pbf").read_bytes() == PBF.read_bytes(), "step 3 downloaded the extract into the folder of the areas"
     assert (folder / "boundary.geojson").is_file() and not (folder / "dem.tif").exists()
     config = (folder / "config.yaml").read_text()
     assert "modes: [driving, walking]" in config and "elevation:" not in config and "monaco-latest.osm.pbf" in config, config
@@ -288,7 +338,7 @@ def test_a_box_on_a_phone(studio):
         _unfold(page, 3)
         page.click("[name=bs-extract][value=europe] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "europe"
-        assert page.is_enabled("[data-bs=run]")
+        assert page.is_disabled("[data-bs=run]") and "Download" in page.inner_text("[data-bs=why]"), "Europe is not downloaded: the build waits"
         _fit(page)
         # the Build card is in the sheet: it can be scrolled to, and its button is a finger's size
         _unfold(page, 5)
@@ -334,6 +384,8 @@ def test_a_buffer_a_fixes_file_and_the_time_of_each_step(studio):
         page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
         page.evaluate("(g) => window.studio.area.set(g, 'monaco-buf', 'file')", MONACO["features"][0]["geometry"])
         before = page.evaluate("window.studio.area.area().km2")
+        page.wait_for_function("document.querySelector('.bs-area .where, .where') && [...document.querySelectorAll('.where')].some((e) => e.textContent.includes('monaco-buf'))")
+        assert any(f"monaco-buf" in e for e in page.eval_on_selector_all(".where", "els => els.map((e) => e.textContent)")), "the card The area says where the area is saved"
         _unfold(page, 2)
         page.fill(".bs-area [data-as=buffer-field] input", "500")
         page.wait_for_function(f"window.studio.area.area().km2 > {before} * 1.5", timeout=60_000)          # 500 m around Monaco: about 2.4 -> 7 km²
@@ -356,9 +408,46 @@ def test_a_buffer_a_fixes_file_and_the_time_of_each_step(studio):
         browser.close()
 
 
-def test_saved_areas_are_listed_loaded_and_opened(studio):
-    """The areas are on the disk: a new visit lists them (the card Your areas), Load puts the area and the settings of one back into the steps, and Open shows its map
-    and the editor. It uses the area of the first test (the tests run in the order of the file)."""
+def test_the_folder_of_the_areas_can_change(studio, tmp_path):
+    """The folder of the areas is chosen on the page: it is shown, the picker lists the folders inside, a folder that is not there is made on request, and the areas of the new folder are listed."""
+    out, url = studio
+    other = tmp_path / "other-areas"
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        page.evaluate("rs.sections.fold('areas', false)")
+        assert page.inner_text(".bs-folder [data-fs=path]") == str(out)
+        page.click(".bs-folder [data-fs=change]")
+        page.wait_for_function("document.querySelector('.bs-folder [data-fs=input]').value.length > 0")
+        assert page.input_value(".bs-folder [data-fs=input]") == str(out)
+        assert out.name != "" and page.locator(".bs-folder [data-dir]").count() >= 1, "the folders inside are listed"
+        # a folder that is not there: the button says that it makes it
+        page.fill(".bs-folder [data-fs=input]", str(other))
+        page.press(".bs-folder [data-fs=input]", "Enter")
+        page.wait_for_function("document.querySelector('.bs-folder [data-fs=use]').textContent.startsWith('Create')")
+        assert not other.exists()
+        page.click(".bs-folder [data-fs=use]")
+        page.wait_for_function(f"document.querySelector('.bs-folder [data-fs=path]').textContent === {json.dumps(str(other))}")
+        assert other.is_dir() and "No area in this folder yet." in page.inner_text(".saved-area, #sb") 
+        # the page says where the next area is saved
+        page.evaluate("(g) => window.studio.area.set(g, 'elsewhere', 'file')", MONACO["features"][0]["geometry"])
+        page.wait_for_function(f"[...document.querySelectorAll('.where')].some((e) => e.textContent.includes({json.dumps(str(other))}))")
+        # back to the first folder: its areas are listed again
+        _unfold(page, 1)
+        page.evaluate("rs.sections.fold('areas', false)")
+        page.click(".bs-folder [data-fs=change]")
+        page.fill(".bs-folder [data-fs=input]", str(out))
+        page.press(".bs-folder [data-fs=input]", "Enter")
+        page.wait_for_function("document.querySelector('.bs-folder [data-fs=use]').textContent === 'Use this folder'")
+        page.click(".bs-folder [data-fs=use]")
+        page.wait_for_function(f"document.querySelector('.bs-folder [data-fs=path]').textContent === {json.dumps(str(out))}")
+        assert not errors, errors
+        browser.close()
+
+
+def test_saved_areas_are_listed_opened_and_deleted(studio):
+    """The areas are on the disk: a new visit lists them (the card Your areas). Open puts the area and the settings of one into the steps, with its result and its map
+    (step 7); Delete deletes the folder of an area after the person confirms. It uses the areas of the first tests (the tests run in the order of the file)."""
     out, url = studio
     if not (out / "monaco-a" / "monaco-a.duckdb").exists():
         pytest.skip("needs the area that the first test builds")
@@ -368,17 +457,36 @@ def test_saved_areas_are_listed_loaded_and_opened(studio):
         page.wait_for_selector(".saved-area")
         assert "monaco-a" in page.eval_on_selector_all(".saved-area", "els => els.map(e => e.dataset.name)")
         row = page.locator(".saved-area[data-name=monaco-a]")
+        # a saved area under the mouse shows its boundary on the map (the purple outline of the search list), and it goes when the mouse leaves
+        preview = "(() => { try { return window.studio.map.getSource('bs-preview').serialize().data.features.length; } catch { return -1; } })()"
+        page.evaluate("window.studio.map.jumpTo({center: [0, 0], zoom: 2})")
+        row.hover()
+        page.wait_for_function(f"{preview} === 1", timeout=30_000)
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)      # the map moves to the area
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{preview} === 0")
         text = row.inner_text()
         assert "driving" in text and "walking" in text and "cycling" not in text and "MB" in text, text
-        row.locator("[data-do=load]").click()
+        assert row.locator("button").all_inner_texts() == ["Open", "Delete"]
+        row.locator("[data-do=open]").click()
         page.wait_for_function("window.studio.area.area()?.name === 'monaco-a'")
         assert page.evaluate("window.studio.settings.values().modes") == ["driving", "walking"]
         assert page.evaluate("window.studio.settings.values().levels") is False and page.evaluate("window.studio.settings.values().build_features") is True
-        assert "is loaded" in page.inner_text("#sb")
-        with page.expect_navigation(timeout=60_000):
-            row.locator("[data-do=open]").click()
-        page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
-        assert page.url.endswith("/edit/") and page.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == "monaco-a"
+        page.wait_for_function("document.querySelector('#sb').innerText.includes('is open')", timeout=60_000)
+        _unfold(page, 6, 7)
+        assert "monaco-a" in page.inner_text("[data-rs=line]") and "monaco-a.duckdb" in page.inner_text(".bs-files")
+        assert len(page.context.pages) == 1, "Open opens no other tab"
+        with page.context.expect_page(timeout=60_000) as tab:
+            page.click(".bs-open")
+        tab.value.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
+        assert tab.value.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == "monaco-a"
+        tab.value.close()
+        # Delete: the person confirms, and the folder goes; the downloaded extract stays
+        if (out / "monaco-dem").is_dir():
+            page.once("dialog", lambda d: d.accept())
+            page.locator(".saved-area[data-name=monaco-dem] [data-do=delete]").click()
+            page.wait_for_function("!document.querySelector('.saved-area[data-name=monaco-dem]')")
+            assert not (out / "monaco-dem").exists() and (out / "osm" / "monaco-latest.osm.pbf").is_file()
         browser.close()
         assert not errors, errors
 

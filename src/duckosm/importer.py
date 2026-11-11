@@ -93,6 +93,11 @@ class DuckOSM:
             t = progress.tasks[task]
             self.on_step(f"[{int(t.completed) + 1}/{int(t.total)}] {description.rstrip('.')}")
 
+    def _note(self, text):
+        """Give ``on_step`` a step that the console does not show as a task (the work after "Cleaning up...")."""
+        if self.on_step:
+            self.on_step(text)
+
     def run(self) -> Path:
         """
         Run the full import pipeline.
@@ -312,6 +317,7 @@ class DuckOSM:
                 progress.advance(main_task)
                 
                 # Generate visualization metadata in the main schema
+                self._note("Writing the metadata and the time zone")
                 try:
                     self.con.execute("USE main")
                     self._generate_metadata()
@@ -333,12 +339,14 @@ class DuckOSM:
                         logger.warning(f"Report generation failed: {e}")
 
                 # Final checkpoint to ensure disk persistence
+                self._note("Saving the file to the disk (checkpoint)")
                 self._checkpoint()
                 
         finally:
             if self.con:
                 self.con.close()
         # the drawing order (roadstyle) once the database is closed: it opens the file itself, and the maps below use it
+        self._note("Solving the drawing order of the roads (levels)")
         self._levels_step()
         # maps (mapstyle) once the database is closed: mapstyle opens it again, read-only
         if self.config.viz.enabled:
