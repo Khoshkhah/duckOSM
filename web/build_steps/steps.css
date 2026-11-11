@@ -24,3 +24,5 @@ html.rs-phone .bs button, html.rs-phone .bs summary, html.rs-phone .bs-open { mi
 .bs .build-go { display: flex; flex-direction: column; gap: 6px; }
 .bs .build-go .sb-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .bs-nets { width: 100%; }
+.bs .rs-opt .rs-chip { align-self: flex-start; }      /* the kind of a place (city, lake, ...) is a small chip, not a bar */
+.bs .rs-opt.point { opacity: .6; }

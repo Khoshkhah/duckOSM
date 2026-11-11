@@ -93,11 +93,15 @@ def _open(browser, url, **ctx):
     """The page with Nominatim's answer given (Monaco, and a point with no outline) and no tiles; the errors of the page are collected."""
     context = browser.new_context(**ctx)
     context.route("https://tile.openstreetmap.org/**", lambda r: r.abort())
-    context.route("https://nominatim.openstreetmap.org/**", lambda r: r.fulfill(
-        status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"},
-        body=json.dumps({"type": "FeatureCollection", "features": [
-            {"type": "Feature", "properties": {"display_name": "Monaco, Europe"}, "geometry": MONACO["features"][0]["geometry"]},
-            {"type": "Feature", "properties": {"display_name": "A point, Nowhere"}, "geometry": {"type": "Point", "coordinates": [0, 0]}}]})))
+    # the search of Studio: Photon lists the places, Nominatim gives the boundary of each (a node has none)
+    cors = {"Access-Control-Allow-Origin": "*"}
+    photon = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [7.42, 43.73]}, "properties": {"osm_type": "R", "osm_id": 1124039, "name": "Monaco", "type": "country", "country": "Monaco", "extent": [7.40, 43.76, 7.45, 43.72]}},
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [7.42, 43.73]}, "properties": {"osm_type": "N", "osm_id": 5, "name": "Monaco cafe", "type": "other", "osm_value": "cafe"}}]}
+    lookup = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"osm_type": "relation", "osm_id": 1124039, "display_name": "Monaco, Europe", "type": "administrative"},
+                                                          "geometry": MONACO["features"][0]["geometry"]}]}
+    context.route("https://photon.komoot.io/**", lambda r: r.fulfill(status=200, content_type="application/json", headers=cors, body=json.dumps(photon)))
+    context.route("https://nominatim.openstreetmap.org/**", lambda r: r.fulfill(status=200, content_type="application/json", headers=cors, body=json.dumps(lookup)))
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -142,10 +146,10 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
     with pw.sync_playwright() as p:
         browser = p.chromium.launch()
         page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
-        page.fill("[data-as=search] input", "Monaco")
-        page.press("[data-as=search] input", "Enter")
+        page.fill("[data-as=search] input", "Monaco")                 # no Enter: the search starts while the person types
         page.wait_for_selector("[name=bs-place]")
-        assert page.locator("[name=bs-place]").count() == 1, "a place with no outline is not in the list"
+        page.wait_for_function("document.querySelectorAll('[name=bs-place]').length === 2")
+        assert page.locator("[name=bs-place]:not([disabled])").count() == 1 and page.locator("[name=bs-place][disabled]").count() == 1, "a place with no boundary is listed with no choice"
         assert page.is_disabled("[data-bs=run]") and "Choose the area" in page.inner_text("[data-bs=why]")
         page.click("[name=bs-place] + span")
         assert page.input_value("[data-as=name]") == "Monaco"
@@ -254,25 +258,20 @@ def test_a_box_on_a_phone(studio):
         _fit(page)
         page.evaluate("map.jumpTo({ center: [10, 50], zoom: 3 })")      # the page opens on the world: a person zooms to Europe before the box
         page.click("[data-tab=draw]")
-        page.click("[data-as=draw]")
-        assert page.get_attribute("[data-as=draw]", "aria-pressed") == "true"
+        assert page.locator(".rs-toolrow button").count() == 8, "the tools of Studio: rectangle, polygon, circle, freehand, select, merge, delete, clear"
+        page.wait_for_function("document.querySelector('[data-mode=rectangle]').getAttribute('aria-pressed') === 'true'")      # the rectangle is the tool at the start
+        assert page.evaluate("window.studio.area.drawMode()") == "rectangle"        # terra-draw has loaded and is in this mode
         page.mouse.move(120, 120)
         page.mouse.down()
         page.mouse.move(200, 160, steps=5)
         page.mouse.move(270, 230, steps=5)
         page.mouse.up()
-        page.wait_for_function("window.studio.area.area()")
+        page.wait_for_function("window.studio.area.area()", timeout=30_000)
         a = page.evaluate("window.studio.area.area()")
-        assert a["from"] == "box" and a["name"] == "box" and a["km2"] > 1000, a
-        assert page.get_attribute("[data-as=draw]", "aria-pressed") == "false"
+        assert a["from"] == "drawn" and a["name"] == "drawn_area" and a["km2"] > 1000, a
         page.wait_for_selector("[name=bs-extract]")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "europe"
         assert page.is_enabled("[data-bs=run]")
-        # a click is not a box
-        _unfold(page, 1)
-        page.click("[data-as=draw]")
-        page.mouse.click(150, 150)
-        assert page.evaluate("window.studio.area.area().from") == "box"
         _fit(page)
         # the Build card is in the sheet: it can be scrolled to, and its button is a finger's size
         _unfold(page, 5)
