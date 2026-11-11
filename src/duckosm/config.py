@@ -139,8 +139,9 @@ class Viz:
 
 @dataclass
 class Elevation:
-    """The area's DEM, its ground reference (docs/concepts/ground-reference.md). Only the Rust build
-    (duckosm-rust) reads it; its --dem wins. `duckosm elevation` takes its file on the command line."""
+    """The area's DEM, its ground reference (docs/concepts/ground-reference.md). The Rust build
+    (duckosm-rust) reads it; its --dem wins. `duckosm studio` and Build again of `duckosm edit` sample it
+    after the build (duckosm.edit.build_area). `duckosm elevation` takes its file on the command line."""
     dem: Optional[str] = None
     product: Optional[str] = None                  # DTM or DSM
     vertical_datum: Optional[str] = None

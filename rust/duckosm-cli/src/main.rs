@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// duckosm-rust: build the road networks of duckOSM (driving, walking, cycling) from an .osm.pbf file.
 #[derive(Parser)]
-#[command(name = "duckosm-rust", version, after_help = "To edit the OSM data of a database on a page: duckosm-rust edit <AREA>.duckdb (duckosm-rust edit --help)")]
+#[command(name = "duckosm-rust", version, after_help = "To edit the OSM data of a database on a page: duckosm-rust edit <AREA>.duckdb (duckosm-rust edit --help). To make the data of an area on a page: duckosm-rust studio (duckosm-rust studio --help)")]
 struct Cli {
     /// The input .osm.pbf file (already cut to the area). Not with --config.
     #[arg(required_unless_present = "config", conflicts_with = "config")]
@@ -149,6 +149,46 @@ struct EditCli {
     port: u16,
 }
 
+/// duckosm-rust studio: a page on 127.0.0.1 that makes the data of an area, step by step (docs/guides/studio.md): the area, the OSM data, the settings,
+/// the ground (DEM), the build and the result. The build is the native engine. Each area is made in `<OUT>/<name>/`.
+#[derive(Parser)]
+#[command(name = "duckosm-rust studio", version)]
+struct StudioCli {
+    /// The folder of the areas (default: the current folder).
+    out: Option<PathBuf>,
+    /// The port of the page on 127.0.0.1.
+    #[arg(long, default_value_t = 8792)]
+    port: u16,
+    /// The list of the Geofabrik extracts (a URL or a file). Default: https://download.geofabrik.de/index-v1.json.
+    #[arg(long, value_name = "URL_OR_FILE")]
+    geofabrik_index: Option<String>,
+    /// Do not open the page in the browser.
+    #[arg(long)]
+    no_open: bool,
+}
+
+#[cfg(feature = "duckdb")]
+fn studio(args: &[String]) -> Result<(), String> {
+    let cli = StudioCli::parse_from(args);
+    let out = cli.out.unwrap_or_else(|| PathBuf::from("."));
+    let listener = duckosm_edit::bind(cli.port)?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let site = duckosm_edit::studio::Studio::new(Box::new(duckosm_edit::native::NativeHost), &out, port, cli.geofabrik_index)?;
+    eprintln!("duckosm-rust studio: {}  (the areas are in {}; Ctrl+C stops)", site.url(), site.out.display());
+    if !cli.no_open {
+        // the browser of the desktop; on a computer with no desktop (an ssh session) nothing opens, and the address above is the way
+        let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+        let _ = std::process::Command::new(opener).arg(site.url()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    }
+    duckosm_edit::studio::serve(std::sync::Arc::new(site), listener);
+    Ok(())
+}
+
+#[cfg(not(feature = "duckdb"))]
+fn studio(_: &[String]) -> Result<(), String> {
+    Err("studio needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
+}
+
 #[cfg(feature = "duckdb")]
 fn edit(args: &[String]) -> Result<(), String> {
     let cli = EditCli::parse_from(args);
@@ -173,7 +213,11 @@ fn edit(_: &[String]) -> Result<(), String> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
-    let r = if args.get(1).map(String::as_str) == Some("edit") { edit(&args[1..]) } else { run() };
+    let r = match args.get(1).map(String::as_str) {
+        Some("edit") => edit(&args[1..]),
+        Some("studio") => studio(&args[1..]),
+        _ => run(),
+    };
     if let Err(e) = r {
         eprintln!("error: {e}");
         std::process::exit(1);

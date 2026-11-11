@@ -225,6 +225,23 @@ duckosm edit [OPTIONS] DB
 Build again needs the record of the build in the database (`build_config` and `build_dir` of
 [`visualization_metadata`](database.md#visualization_metadata)). `duckosm build` writes it, and `duckosm-rust --config` too.
 
+### `studio`
+
+Makes the data of an area on a page on your computer, in six steps: the area, the OSM data (a Geofabrik extract, or a `.osm.pbf` file), the settings,
+the ground (the DEM), the build and the result. The steps are the steps of duckOSM Studio. The build is `duckosm build`. The result is the page of
+[`edit`](#edit). Each area is made in `OUT_DIR/<name>/`. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
+`duckosm-rust studio` is the same page in the Rust program. Guide: [Make the data of an area on your computer](../guides/studio.md).
+
+```text
+duckosm studio [OPTIONS] [OUT_DIR]
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--port INTEGER` | the port of the page on 127.0.0.1 | `8792` |
+| `--geofabrik-index URL_OR_FILE` | the list of the Geofabrik extracts: a mirror, or a file for a test | `https://download.geofabrik.de/index-v1.json` |
+| `--no-open` | do not open the page in the browser | off |
+
 ### `ask`
 
 Asks questions about the OSM data of the database, and about its changes, on a page on your computer: roadstyle's dashboard of the database with a

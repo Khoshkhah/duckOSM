@@ -85,6 +85,8 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 - **In the browser:** [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) builds the same tables in a web page,
   with the same Rust engine. Its panel **Edit OSM data** (`web/fixes_editor/`) writes the fixes file that `duckosm build` reads
   ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
+- **Make an area on your computer:** `duckosm studio areas` opens a page with the steps of Studio: the area, the OSM data, the settings, the ground (DEM), the
+  build and the result, which is the page of `duckosm edit` ([how](https://khoshkhah.github.io/duckOSM/guides/studio/)).
 - **Edit on your computer:** `duckosm edit my_area.duckdb` opens the same panel on a page on your computer, and
   **Build again** builds the area with your fixes ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/#edit-on-your-computer-duckosm-edit)).
 - **Ask on your computer:** `duckosm ask my_area.duckdb` opens the map with an SQL line and Ask (a question in words, answered with SQL). Roads and

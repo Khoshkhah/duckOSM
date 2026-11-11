@@ -86,3 +86,36 @@ pub fn record(db: &Path, config: &str, dir: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// The program's host of `duckosm studio`: the native engine builds the area (`duckosm-build`, the same as `duckosm-rust --config`), and the
+/// page of the result opens the file with the bundled DuckDB. The DEM is the config's `elevation:` section.
+pub struct NativeHost;
+
+impl crate::studio::Host for NativeHost {
+    fn db(&self, path: &Path) -> Box<dyn Db> {
+        Box::new(NativeDb::new(path))
+    }
+
+    fn build(&self, config: &str, dir: &Path, db: &Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
+        let c = read_config(config, dir)?;
+        let mut p = c.params;
+        p.name = db.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "area".into());
+        (p.duckdb, p.geoparquet) = (true, false);
+        let out = db.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        // the steps of the engine go to `log` while the build runs
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        duckosm_build::set_progress(Some(Box::new(move |step| {
+            let _ = tx.send(step.to_string());
+        })));
+        let sum = std::thread::scope(|s| {
+            s.spawn(move || rx.iter().for_each(|line| log(&line)));
+            let r = duckosm_build::build(&c.pbf, out, &p);
+            duckosm_build::set_progress(None);       // the hook held the sender: the reader ends
+            r
+        })?;
+        record(db, config, dir)?;
+        let mut lines: Vec<String> = sum.lines();
+        lines.extend(c.skipped.iter().map(|s| format!("skipped: {s}")));
+        Ok(lines.join("\n"))
+    }
+}

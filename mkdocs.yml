@@ -76,6 +76,7 @@ plugins:
           - guides/prepare-area.md
           - guides/build.md
           - guides/fix-osm-errors.md
+          - guides/studio.md
           - guides/edit-osm-data.md
           - guides/query.md
           - guides/ask-questions.md
@@ -127,6 +128,7 @@ nav:
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
       - Fix OSM errors: guides/fix-osm-errors.md
+      - Make the data of an area: guides/studio.md
       - Edit OSM data: guides/edit-osm-data.md
       - Query the database: guides/query.md
       - Questions to ask the AI agent: guides/ask-questions.md

@@ -13,6 +13,9 @@ const SCRIPT: &str = include_str!("../page/edit.js");
 const STYLE: &str = include_str!("../page/edit.css");
 /// The host part of the page of `duckosm ask` (page/ask.js): roadstyle's data dock and Ask, and the changes of the fixes file as a table.
 const ASK_SCRIPT: &str = include_str!("../page/ask.js");
+/// The host part of the page of `duckosm studio` (page/studio.js, page/studio.css): the steps in the dashboard's panel.
+const STUDIO_SCRIPT: &str = include_str!("../page/studio.js");
+const STUDIO_STYLE: &str = include_str!("../page/studio.css");
 const MAPLIBRE_JS: &str = roadstyle::assets::text!("vendor/maplibre-gl.js");
 const MAPLIBRE_CSS: &str = roadstyle::assets::text!("vendor/maplibre-gl.css");
 
@@ -96,6 +99,20 @@ fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str) -> Result<S
     let page = roadstyle::page_options::page_from(roads, features, &lk, &o, &given).map_err(|e| e.to_string())?;
     for w in &page.warnings {
         eprintln!("duckosm edit: the map: {w}");
+    }
+    Ok(page.html.replacen("__MAPLIBRE_CSS__", MAPLIBRE_CSS, 1).replacen("__MAPLIBRE_JS__", &MAPLIBRE_JS.replace("</script>", "<\\/script>"), 1))
+}
+
+/// The page of `duckosm studio`: roadstyle's standard dashboard (the same template, toolbox and panel as the page of `duckosm edit`) for an area with no
+/// roads yet. The panel starts empty; the script (page/studio.js) puts the steps into it, as cards. MapLibre and roadstyle's own files come from the program.
+pub fn make_studio() -> Result<String, String> {
+    let args = json!({"name": "duckOSM Studio", "template": "dashboard", "tooltip": null, "state": "live", "tiles": false, "page_script": STUDIO_SCRIPT, "page_style": STUDIO_STYLE});
+    let o = roadstyle::look::Options::from_value(&json!({"args": args})).map_err(|e| e.to_string())?;
+    let lk = roadstyle::Look::resolve(&o).map_err(|e| e.to_string())?;
+    let given = roadstyle::page_options::given_of(&lk, &o.args);
+    let page = roadstyle::page_options::page_from(roadstyle::RoadTable::empty(), None, &lk, &o, &given).map_err(|e| e.to_string())?;
+    for w in &page.warnings {
+        eprintln!("duckosm studio: the map: {w}");
     }
     Ok(page.html.replacen("__MAPLIBRE_CSS__", MAPLIBRE_CSS, 1).replacen("__MAPLIBRE_JS__", &MAPLIBRE_JS.replace("</script>", "<\\/script>"), 1))
 }

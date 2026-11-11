@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "duckdb")]
 pub mod native;
 pub mod page;
+pub mod studio;
 
 /// The largest body of a request (a fixes file, a query), and of the request line and the headers.
 pub const MAX_BODY: usize = 16 << 20;
@@ -95,8 +96,13 @@ impl Site {
     }
 
     /// As `new`, for the page of `mode`.
-    pub fn with_mode(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode) -> Result<Site, String> {
+    pub fn with_mode(db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode) -> Result<Site, String> {
         let pager: Pager = if mode == Mode::Ask { page::make_ask } else { page::make };
+        Site::with_pager(db, db_path, fixes, port, mode, pager)
+    }
+
+    /// As `with_mode`, with the function that makes the page (the tests of `studio` give a placeholder).
+    pub fn with_pager(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode, pager: Pager) -> Result<Site, String> {
         let (page, tables, source) = load(db.as_mut(), db_path, pager)?;
         Ok(Site { db: db_path.to_path_buf(), fixes: fixes.to_path_buf(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
                   state: Mutex::new(State { db, page, tables, source }), pager, backed_up: Mutex::new(false) })
@@ -264,19 +270,65 @@ pub fn serve(site: Arc<Site>, listener: TcpListener) {
     for stream in listener.incoming().flatten() {
         let site = site.clone();
         std::thread::spawn(move || {
-            if let Err(e) = answer(stream, &site) {
+            let r = read_request(stream, &site.own).and_then(|req| req.map_or(Ok(()), |mut req| site.route(&mut req)));
+            if let Err(e) = r {
                 eprintln!("duckosm edit: {e}");
             }
         });
     }
 }
 
-/// One request.
-fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
+/// One request that passed the rules of the server: its method, its path (no query, no first `/`), its headers, and the stream to answer on.
+pub struct Req {
+    pub method: String,
+    pub path: String,
+    headers: Vec<(String, String)>,
+    reader: BufReader<TcpStream>,
+    out: TcpStream,
+}
+
+impl Req {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|h| h.0.eq_ignore_ascii_case(name)).map(|h| h.1.as_str())
+    }
+
+    /// A GET or a HEAD.
+    pub fn read(&self) -> bool {
+        matches!(self.method.as_str(), "GET" | "HEAD")
+    }
+
+    /// Answer. A HEAD has no body.
+    pub fn say(&mut self, status: &str, kind: &str, body: &[u8]) -> Result<(), String> {
+        let body = if self.method == "HEAD" { &[][..] } else { body };
+        reply(&mut self.out, status, kind, body)
+    }
+
+    /// The body of a write (PUT, POST): from this server's page only (a browser sends Origin with a PUT and a POST), with a Content-Length
+    /// (a chunked body is refused: its size is known only at its end) of at most `MAX_BODY`. `Ok(None)`: the request was refused and answered.
+    pub fn write_body(&mut self, own: &[String; 2]) -> Result<Option<Vec<u8>>, String> {
+        if self.header("origin").is_some_and(|o| !own.iter().any(|h| o == format!("http://{h}"))) {
+            self.say("403 Forbidden", "text/plain", b"not this server's page")?;
+            return Ok(None);
+        }
+        let Some(length) = self.header("content-length").and_then(|v| v.parse::<usize>().ok()) else {
+            self.say("411 Length Required", "text/plain", b"a write needs a Content-Length")?;
+            return Ok(None);
+        };
+        if length > MAX_BODY {
+            self.say("413 Content Too Large", "text/plain", b"more than 16 MB")?;
+            return Ok(None);
+        }
+        let mut body = vec![0u8; length];
+        self.reader.read_exact(&mut body).map_err(|e| e.to_string())?;
+        Ok(Some(body))
+    }
+}
+
+/// Read the request line and the headers (at most `MAX_HEAD` bytes, up to the empty line) and check the rules that hold for every route: an HTTP
+/// request, and this server's name in `Host` (`own`). `Ok(None)`: the request was refused and answered.
+pub fn read_request(stream: TcpStream, own: &[String; 2]) -> Result<Option<Req>, String> {
     let mut out = stream.try_clone().map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stream);
-    let say = |out: &mut TcpStream, status: &str, kind: &str, body: &[u8]| reply(out, status, kind, body);
-    // the request line and the headers, at most MAX_HEAD bytes, up to the empty line
     let mut head = Vec::new();
     {
         let mut limited = (&mut reader).take(MAX_HEAD as u64);
@@ -284,7 +336,8 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
             let start = head.len();
             if limited.read_until(b'\n', &mut head).map_err(|e| e.to_string())? == 0 {
                 if limited.limit() == 0 {
-                    return say(&mut out, "431 Request Header Fields Too Large", "text/plain", b"headers too large");
+                    reply(&mut out, "431 Request Header Fields Too Large", "text/plain", b"headers too large")?;
+                    return Ok(None);
                 }
                 break;
             }
@@ -297,94 +350,96 @@ fn answer(stream: TcpStream, site: &Site) -> Result<(), String> {
     let mut req = httparse::Request::new(&mut headers);
     match req.parse(&head) {
         Ok(httparse::Status::Complete(_)) => {}
-        Err(httparse::Error::TooManyHeaders) => return say(&mut out, "431 Request Header Fields Too Large", "text/plain", b"too many headers"),
-        _ => return say(&mut out, "400 Bad Request", "text/plain", b"not an HTTP request"),
+        Err(httparse::Error::TooManyHeaders) => return reply(&mut out, "431 Request Header Fields Too Large", "text/plain", b"too many headers").map(|_| None),
+        _ => return reply(&mut out, "400 Bad Request", "text/plain", b"not an HTTP request").map(|_| None),
     }
-    let (method, target) = (req.method.unwrap_or(""), req.path.unwrap_or(""));
-    let header = |name: &str| req.headers.iter().find(|h| h.name.eq_ignore_ascii_case(name)).and_then(|h| std::str::from_utf8(h.value).ok()).map(str::trim);
+    let headers: Vec<(String, String)> = req.headers.iter().filter_map(|h| Some((h.name.to_string(), std::str::from_utf8(h.value).ok()?.trim().to_string()))).collect();
     // this server only: a page of another site reaches 127.0.0.1 through DNS rebinding with its own name in Host
-    if !header("host").is_some_and(|h| site.own.iter().any(|o| o == h)) {
-        return say(&mut out, "403 Forbidden", "text/plain", b"not this server's Host");
+    if !headers.iter().any(|h| h.0.eq_ignore_ascii_case("host") && own.iter().any(|o| *o == h.1)) {
+        reply(&mut out, "403 Forbidden", "text/plain", b"not this server's Host")?;
+        return Ok(None);
     }
-    let path = target.split(['?', '#']).next().unwrap_or("/").trim_start_matches('/');
-    let read = matches!(method, "GET" | "HEAD");
-    let body_of = |b: &[u8]| -> Vec<u8> { if method == "HEAD" { Vec::new() } else { b.to_vec() } };
-    // the page and the editor's files: read only
-    // roadstyle's dashboard modules that the page of `duckosm ask` imports (the data dock and Ask): only .js files of the dashboard, read only
-    if let Some(f) = path.strip_prefix("roadstyle/") {
-        let file = read.then(|| inside(Path::new(""), f)).flatten().filter(|_| f.ends_with(".js"));
-        return match file.and_then(|_| roadstyle::assets::get(&format!("static/dashboard/{f}"))) {
-            Some(b) => say(&mut out, "200 OK", "text/javascript", &body_of(b)),
-            None => say(&mut out, "404 Not Found", "text/plain", b"not found"),
-        };
-    }
-    if path.is_empty() || path == "index.html" || path.starts_with("fixes_editor/") || path.starts_with("ask/") {
-        if !read {
-            return say(&mut out, "405 Method Not Allowed", "text/plain", b"the page's files are read only");
-        }
-        if let Some(f) = path.strip_prefix("ask/") {
-            return match ask_file(f) {
-                Some(t) => say(&mut out, "200 OK", "text/javascript", &body_of(t.as_bytes())),
-                None => say(&mut out, "404 Not Found", "text/plain", b"not found"),
+    let target = req.path.unwrap_or("");
+    let path = target.split(['?', '#']).next().unwrap_or("/").trim_start_matches('/').to_string();
+    Ok(Some(Req { method: req.method.unwrap_or("").to_string(), path, headers, reader, out }))
+}
+
+impl Site {
+    /// Answer one request.
+    pub fn route(&self, req: &mut Req) -> Result<(), String> {
+        let site = self;
+        let (method, path) = (req.method.clone(), req.path.clone());
+        let read = req.read();
+        // the page and the editor's files: read only
+        // roadstyle's dashboard modules that the page of `duckosm ask` imports (the data dock and Ask): only .js files of the dashboard, read only
+        if let Some(f) = path.strip_prefix("roadstyle/") {
+            let file = read.then(|| inside(Path::new(""), f)).flatten().filter(|_| f.ends_with(".js"));
+            return match file.and_then(|_| roadstyle::assets::get(&format!("static/dashboard/{f}"))) {
+                Some(b) => req.say("200 OK", "text/javascript", b),
+                None => req.say("404 Not Found", "text/plain", b"not found"),
             };
         }
-        if let Some(f) = path.strip_prefix("fixes_editor/") {
-            return match editor_file(f) {
-                Some(t) => say(&mut out, "200 OK", kind(f), &body_of(t.as_bytes())),
-                None => say(&mut out, "404 Not Found", "text/plain", b"not found"),
-            };
-        }
-        let page = site.state.lock().unwrap().page.clone();
-        return say(&mut out, "200 OK", "text/html; charset=utf-8", &body_of(page.as_bytes()));
-    }
-    let api = path.strip_prefix("api/").unwrap_or("");
-    match (method, api) {
-        ("GET" | "HEAD", "info") => say(&mut out, "200 OK", "application/json", &body_of(site.info().to_string().as_bytes())),
-        ("GET" | "HEAD", "fixes") => match std::fs::read(&site.fixes) {
-            Ok(b) => say(&mut out, "200 OK", "text/yaml; charset=utf-8", &body_of(&b)),
-            Err(_) => say(&mut out, "404 Not Found", "text/plain", b"no fixes file yet"),
-        },
-        ("PUT", "fixes") | ("POST", "query" | "build" | "sql" | "table") => {
-            // from this server's own page only (a browser sends Origin with a PUT and a POST)
-            if header("origin").is_some_and(|o| !site.own.iter().any(|h| o == format!("http://{h}"))) {
-                return say(&mut out, "403 Forbidden", "text/plain", b"not this server's page");
+        if path.is_empty() || path == "index.html" || path.starts_with("fixes_editor/") || path.starts_with("ask/") {
+            if !read {
+                return req.say("405 Method Not Allowed", "text/plain", b"the page's files are read only");
             }
-            // a Content-Length (a chunked body is refused: its size is known only at its end)
-            let Some(length) = header("content-length").and_then(|v| v.parse::<usize>().ok()) else {
-                return say(&mut out, "411 Length Required", "text/plain", b"a write needs a Content-Length");
-            };
-            if length > MAX_BODY {
-                return say(&mut out, "413 Content Too Large", "text/plain", b"more than 16 MB");
+            if let Some(f) = path.strip_prefix("ask/") {
+                return match ask_file(f) {
+                    Some(t) => req.say("200 OK", "text/javascript", t.as_bytes()),
+                    None => req.say("404 Not Found", "text/plain", b"not found"),
+                };
             }
-            let mut body = vec![0u8; length];
-            reader.read_exact(&mut body).map_err(|e| e.to_string())?;
-            match api {
-                "fixes" => match site.save(&body) {
-                    Ok(()) => say(&mut out, "200 OK", "text/plain", b"saved"),
-                    Err(e) => say(&mut out, "500 Internal Server Error", "text/plain", e.as_bytes()),
-                },
-                "query" => match site.query(&String::from_utf8_lossy(&body)) {
-                    Ok(j) => say(&mut out, "200 OK", "application/json", j.as_bytes()),
-                    Err(e) => say(&mut out, "400 Bad Request", "text/plain", e.as_bytes()),
-                },
-                "sql" => match site.sql(&String::from_utf8_lossy(&body)) {
-                    Ok(j) => say(&mut out, "200 OK", "application/json", j.as_bytes()),
-                    Err(e) => say(&mut out, "400 Bad Request", "text/plain", e.as_bytes()),
-                },
-                "table" if site.mode == Mode::Ask => match site.table(&body) {
-                    Ok(()) => say(&mut out, "200 OK", "text/plain", b"saved"),
-                    Err(e) => say(&mut out, "400 Bad Request", "text/plain", e.as_bytes()),
-                },
-                "table" => say(&mut out, "404 Not Found", "text/plain", b"not found"),
-                _ => {
-                    let r = site.rebuild();
-                    let j = match &r { Ok(t) => json!({"ok": true, "text": t}), Err(e) => json!({"ok": false, "error": e}) };
-                    say(&mut out, "200 OK", "application/json", j.to_string().as_bytes())
+            if let Some(f) = path.strip_prefix("fixes_editor/") {
+                return match editor_file(f) {
+                    Some(t) => req.say("200 OK", kind(f), t.as_bytes()),
+                    None => req.say("404 Not Found", "text/plain", b"not found"),
+                };
+            }
+            let page = site.state.lock().unwrap().page.clone();
+            return req.say("200 OK", "text/html; charset=utf-8", page.as_bytes());
+        }
+        let api = path.strip_prefix("api/").unwrap_or("");
+        match (method.as_str(), api) {
+            ("GET" | "HEAD", "info") => req.say("200 OK", "application/json", site.info().to_string().as_bytes()),
+            ("GET" | "HEAD", "fixes") => match std::fs::read(&site.fixes) {
+                Ok(b) => req.say("200 OK", "text/yaml; charset=utf-8", &b),
+                Err(_) => req.say("404 Not Found", "text/plain", b"no fixes file yet"),
+            },
+            ("PUT", "fixes") | ("POST", "query" | "build" | "sql" | "table") => {
+                let Some(body) = req.write_body(&site.own)? else { return Ok(()) };
+                match api {
+                    "fixes" => match site.save(&body) {
+                        Ok(()) => req.say("200 OK", "text/plain", b"saved"),
+                        Err(e) => req.say("500 Internal Server Error", "text/plain", e.as_bytes()),
+                    },
+                    "query" => match site.query(&String::from_utf8_lossy(&body)) {
+                        Ok(j) => req.say("200 OK", "application/json", j.as_bytes()),
+                        Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
+                    },
+                    "sql" => match site.sql(&String::from_utf8_lossy(&body)) {
+                        Ok(j) => req.say("200 OK", "application/json", j.as_bytes()),
+                        Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
+                    },
+                    "table" if site.mode == Mode::Ask => match site.table(&body) {
+                        Ok(()) => req.say("200 OK", "text/plain", b"saved"),
+                        Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
+                    },
+                    "table" => req.say("404 Not Found", "text/plain", b"not found"),
+                    _ => {
+                        let r = site.rebuild();
+                        let j = match &r { Ok(t) => json!({"ok": true, "text": t}), Err(e) => json!({"ok": false, "error": e}) };
+                        req.say("200 OK", "application/json", j.to_string().as_bytes())
+                    }
                 }
             }
+            (_, "info" | "fixes" | "query" | "build" | "sql" | "table") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
+            _ => req.say("404 Not Found", "text/plain", b"not found"),
         }
-        (_, "info" | "fixes" | "query" | "build" | "sql" | "table") => say(&mut out, "405 Method Not Allowed", "text/plain", b"not this method"),
-        _ => say(&mut out, "404 Not Found", "text/plain", b"not found"),
+    }
+
+    /// Close the database (a build can write the file).
+    pub fn close(&self) {
+        self.state.lock().unwrap().db.close();
     }
 }
 

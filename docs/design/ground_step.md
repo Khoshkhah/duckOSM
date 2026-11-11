@@ -26,6 +26,10 @@ stops without them.
    the label is "Ground: AWS Terrain Tiles" and `not_reference` is true. It is never a reference: a DSM does not pass the checks of the ground reference.
 7. **No relay** (option B). The Copernicus COG files on AWS send no CORS header (checked on 2026-11-10), so a page cannot read them. A person who wants GLO-30 downloads it.
 
+8. **Nothing is chosen at the start** (2026-11-10). A file gets the product, the vertical datum and the licence of the source that the person names. The step used to choose the best source,
+   so a person who selected a Copernicus file and did not change the choice got the label of EU-DTM (DTM, not DSM). Now the detail asks the person to choose the source first, and `dem()`
+   gives `null` while no source is chosen. A new area gives a new list and clears the choice.
+
 ## Host contract
 
 `initGroundStep({ root, catalog, bbox, status, onChange, loadTile })` returns `{ refresh(), dem(), choice() }`. `catalog` is the array or the URL of `dem_sources.json`

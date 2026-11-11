@@ -352,6 +352,15 @@ pub enum Input<'a> {
     Area(Open<'a>, &'a Boundary),
 }
 
+type Progress = Box<dyn Fn(&str) + Send>;
+static PROGRESS: std::sync::Mutex<Option<Progress>> = std::sync::Mutex::new(None);
+
+/// Call `f` with the name of each step that ends, in every build of this process (`duckosm studio` shows it). `None` takes the hook away.
+/// ponytail: one hook for the process, so two builds at the same time share it; the page runs one build at a time.
+pub fn set_progress(f: Option<Progress>) {
+    *PROGRESS.lock().unwrap() = f;
+}
+
 /// The time and the memory of each step of [`run`]. The caller gives the clock: WebAssembly has no clock in std.
 pub struct StepLog {
     clock: fn() -> f64,
@@ -384,12 +393,15 @@ impl StepLog {
         )
     }
 
-    /// The end of a step: its time since the step before, and the memory now.
+    /// The end of a step: its time since the step before, and the memory now. The hook of [`set_progress`] gets the name.
     pub fn step(&mut self, name: &str) {
         let t = (self.clock)();
         self.rows
             .push((name.to_string(), t - self.last, (self.memory)()));
         self.last = t;
+        if let Some(f) = PROGRESS.lock().unwrap().as_ref() {
+            f(name);
+        }
     }
 
     /// The steps as JSON (the names are plain text, with no quotes).
