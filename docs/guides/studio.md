@@ -40,7 +40,8 @@ One step is open at a time, and the next step opens when the one before is done.
    **Fixes** (the path of a [fixes file](fix-osm-errors.md) on this computer: the key `osm_overrides`), and the button **Build**. The page shows the steps, and the
    time of each one. The build writes `OUT_DIR/<name>/<name>.duckdb`, the config it used (`config.yaml`) and the boundary (`boundary.geojson`). Then the map of
    the page shows the new area: its roads with their levels and the layers of the database, on a blank base map, with only the line of the boundary. The page
-   does not load again: the server gives the tiles of the area.
+   does not load again: the server gives the map of the area as roadstyle's way D (`roadstyle local`): the tiles, the fields and the line of a
+   road that you click, and the queries over the area's `.duckdb` file. The page keeps no table of the roads.
 5. **The result.** The networks that the build made, and the files in the folder of the area.
 6. **Ground.** The height of the ground (a DEM) of the built area. The page lists the DEM sources that cover the area, best first. The row that you choose has the
    web page of the source, and its state under the name. **Download** puts the files of the area into `OUT_DIR/dem/<source>/`: the 1° tiles of Copernicus GLO-30
