@@ -104,6 +104,8 @@ pub struct Studio {
     /// The map of the open area: its name, its tiled style and its tiles (`page::make_tiled`). The page puts the style on its map, and asks this server for the tiles.
     /// The tiled maps of the areas that were opened last (at most `TILED_KEPT`, the newest last): two tabs with two areas both get their tiles.
     tiled: Mutex<Vec<(String, String, Arc<roadstyle::tiles::Tiles>)>>,
+    /// One making of a tiled map at a time: the tiles of an area that the server does not have (after a restart) make it once, and wait.
+    making: Mutex<()>,
     pager: Pager,
 }
 
@@ -307,7 +309,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(Vec::new()), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(Vec::new()), making: Mutex::new(()), pager })
     }
 
     /// The folder of the areas now.
@@ -924,7 +926,18 @@ impl Studio {
         if let Some(rest) = path.strip_prefix("tiles/") {
             // the tiles of the open area's map: tiles/<name>/<source>/<z>/<x>/<y>, in MLT (one tile has every source of the style)
             let parts: Vec<&str> = rest.split('/').collect();
-            let t = parts.first().and_then(|n| self.tiled.lock().unwrap().iter().find(|t| t.0 == *n).cloned());
+            let find = |n: &str| self.tiled.lock().unwrap().iter().find(|t| t.0 == n).cloned();
+            let mut t = parts.first().and_then(|n| find(n));
+            // an area that the server does not keep (a page from before a restart, or a fourth area): it makes the area's map once, and the tile waits
+            if let (None, Some(n)) = (&t, parts.first()) {
+                if let Some(dir) = self.area_dir(n).filter(|d| d.join(format!("{n}.duckdb")).is_file()) {
+                    let _one = self.making.lock().unwrap();
+                    t = find(n);
+                    if t.is_none() && self.make_tiled(&dir, n).is_ok() {
+                        t = find(n);
+                    }
+                }
+            }
             let zxy = (parts.len() >= 4).then(|| { let n = parts.len(); (parts[n - 3].parse::<u32>(), parts[n - 2].parse::<u32>(), parts[n - 1].trim_end_matches(".mlt").trim_end_matches(".pbf").parse::<u32>()) });
             return match (t, zxy) {
                 (Some(t), Some((Ok(z), Ok(x), Ok(y)))) => match t.2.tile_in(roadstyle::tiles::TileFormat::Mlt, z, x, y) {      // the style's source has "encoding": "mlt"
