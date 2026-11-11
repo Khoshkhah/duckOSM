@@ -250,7 +250,7 @@ writes the layers into the `.duckdb` file:
   SQL), and the raw files are removed (`raw.*` is in the file). With `Params.raw` (`--raw`) they stay in the output folder.
 - `Params.sea` (config `options.sea`; CLI `--sea`): `duckosm_duckdb::write_ocean` is the port of `features/ocean.py`: the newest Overture
   release, `base/water` with the subtype `ocean`, cut to the box of `main.boundary` grown by 10 %. A failure is a warning and an empty table.
-  It is off by default in `Params`; a config has duckOSM's default (`overture`), and duckOSM Studio gives `sea: false`.
+  It is off by default in `Params`; a config has duckOSM's default (`overture`), and the settings of duckOSM Studio give `sea: false` unless the user turns the sea on.
 - The check: `rust/duckosm-build/tests/features_h3.rs` compares the md5 of each `features.*` table, each `raw.*` table and the H3 columns of
   the three modes with `tests/data/monaco_features_h3_summary.tsv`, written from the Python build (`tools/make_golden_features.py`). By hand
   on 2026-11-10: every row of the 11 `features.*` tables, of `raw.*` and of `features.ocean` equals duckOSM's, and so do the H3 columns.
