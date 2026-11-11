@@ -1,11 +1,14 @@
 // The OSM data step: where the OpenStreetMap data of the area comes from. A Geofabrik extract that covers the area (the smallest first), or a .osm.pbf
 // file on this computer (its path). The step gives the choice; the host downloads or reads. A host in a browser with no file system does not use the file tab.
-import { bytes, covering, esc } from "./core.js";
+import { bytes, covering, esc, geometry } from "./core.js";
 
 /**
  * initDataStep({
  *   root,       // the element that gets the step
  *   rs,         // roadstyle's parts: { tabs }
+ *   map,        // optional: the MapLibre map. With it an extract shows on the map (orange, dashed): under the mouse, and after a click (the map moves out to it)
+ *   padding,    // optional: () gives the padding of the map for fitBounds
+ *   zoomToArea, // optional: () moves the map back to the area (a second click on the shown extract)
  *   area,       // () gives the area of the Area step ({polygons, ...}) or null
  *   extracts,   // () gives a promise of the Geofabrik extracts (core.js extractsOf)
  *   checkFile,  // (path) gives a promise of the size of the file, or throws an Error that says why it cannot be used
@@ -13,7 +16,7 @@ import { bytes, covering, esc } from "./core.js";
  * })
  * It returns { refresh(), choice() }. choice() is null, { kind: "geofabrik", id, name, url, km2 } or { kind: "file", path, size }.
  */
-export function initDataStep({ root, rs, area, extracts, checkFile, onChange = () => {} }) {
+export function initDataStep({ root, rs, map = null, padding = () => 40, zoomToArea = () => {}, area, extracts, checkFile, onChange = () => {} }) {
 	root.classList.add("bs", "bs-data");
 	root.innerHTML = `<div class="rs-tabs" role="tablist" aria-label="Where the OSM data comes from">
 			<button type="button" class="rs-tab on" data-tab="geofabrik">Geofabrik</button>
@@ -78,5 +81,37 @@ export function initDataStep({ root, rs, area, extracts, checkFile, onChange = (
 			onChange();
 		}, 250);
 	});
+	// the extract on the map, as in Studio: the outline of the extract under the mouse; a click keeps it and moves the map out to it; a second click on it hides it and moves the map back to the area
+	let shown = null, hovered = null;
+	const outline = (x) => (x ? { type: "Feature", properties: { name: `${x.name} (Geofabrik)` }, geometry: geometry(x.polygon) } : null);
+	function paint() {
+		const x = list.find((e) => e.id === (hovered ?? shown));
+		if (!map) return;
+		const put = () => {
+			if (!map.getSource("bs-extract")) {
+				map.addSource("bs-extract", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+				map.addLayer({ id: "bs-extract-casing", type: "line", source: "bs-extract", paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 } });
+				map.addLayer({ id: "bs-extract-line", type: "line", source: "bs-extract", paint: { "line-color": "#ea580c", "line-width": 3, "line-dasharray": [2, 1.5] } });
+				map.addLayer({ id: "bs-extract-label", type: "symbol", source: "bs-extract", layout: { "symbol-placement": "line", "symbol-spacing": 300, "text-field": ["get", "name"], "text-font": ["Noto Sans Bold"], "text-size": 12, "text-offset": [0, -1] },
+					paint: { "text-color": "#c2410c", "text-halo-color": "#ffffff", "text-halo-width": 2 } });
+			}
+			map.getSource("bs-extract").setData({ type: "FeatureCollection", features: x ? [outline(x)] : [] });
+		};
+		if (map.getSource("bs-extract") || map.isStyleLoaded()) put(); else map.once("idle", put);
+	}
+	const fit = (x) => { const b = x.bbox; map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: padding(), maxZoom: 15, duration: 600 }); };
+	if (map) {
+		map.on("styledata", () => { if ((shown || hovered) && !map.getSource("bs-extract")) try { paint(); } catch { /* the next styledata tries again */ } });
+		const over = (e) => { const r = e.target.closest("label")?.querySelector('input[name="bs-extract"]'); if (r) { hovered = r.value; paint(); } };
+		q("list").addEventListener("mouseover", over);
+		q("list").addEventListener("focusin", over);
+		q("list").addEventListener("mouseleave", () => { hovered = null; paint(); });
+		q("list").addEventListener("click", (e) => {
+			const r = e.target.closest('input[name="bs-extract"]');
+			if (!r) return;
+			if (shown === r.value) { r.checked = false; shown = null; picked = ""; paint(); zoomToArea(); return onChange(); }       // a second click: the outline goes, the map goes back to the area
+			shown = r.value; paint(); fit(list.find((x) => x.id === shown));
+		});
+	}
 	return { refresh, choice };
 }

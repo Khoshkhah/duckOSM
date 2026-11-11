@@ -239,7 +239,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 			list(items);
 			if (!source) boundaries(items).then((real) => {                    // the real boundaries come behind the list
 				if (found !== items || mine.signal.aborted) return;
-				if (q("found").querySelector("input:checked")) real.forEach((f, i) => { items[i] = f; }); else list(real);
+				if (q("found").querySelector("input:checked")) real.forEach((f, i) => { items[i] = f; }); else { list(real); if (previewed != null) preview(previewed); }      // the row under the mouse is new: show its outline again
 			}).catch(() => {});
 		} catch (e) {
 			if (!mine.signal.aborted) q("found").innerHTML = `<p class="rs-status error"><span>The search failed: ${esc(e.message)}</span></p>`;
@@ -263,15 +263,21 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		const f = i == null ? null : found[i];
 		previewShape = f ? { name: String(f.properties.display_name).split(",")[0], geometry: f.geometry } : null;
 		draw(shape);
-		if (f) {
-			const polys = polygonsOf(f.geometry), pts = polys.length ? bbox(polys) : f.geometry?.coordinates ? [...f.geometry.coordinates, ...f.geometry.coordinates] : null;
-			if (pts && !(map.getBounds().contains([pts[0], pts[1]]) && map.getBounds().contains([pts[2], pts[3]]))) map.fitBounds([[pts[0], pts[1]], [pts[2], pts[3]]], { padding: padding(), duration: 0, maxZoom: 14 });
-		}
+		if (f) fitIfHidden(f.geometry);
+	}
+	// the map moves to a place when it is out of view or too small to see (Studio's rule: under a quarter of the view). Any geometry: a point, a line or a polygon.
+	function fitIfHidden(g, always = false) {
+		const c = g?.coordinates?.flat(Infinity) ?? [], xs = c.filter((_, i) => i % 2 === 0), ys = c.filter((_, i) => i % 2 === 1);
+		if (!xs.length) return;
+		const sw = [Math.min(...xs), Math.min(...ys)], ne = [Math.max(...xs), Math.max(...ys)], view = map.getBounds();
+		const small = ne[0] - sw[0] < (view.getEast() - view.getWest()) / 4 && ne[1] - sw[1] < (view.getNorth() - view.getSouth()) / 4;
+		if (always || !(view.contains(sw) && view.contains(ne)) || small) map.fitBounds([sw, ne], { padding: padding(), maxZoom: 15, duration: 600 });
 	}
 	const over = (e) => { const l = e.target.closest("label[data-i]"); if (l) preview(Number(l.dataset.i)); };
 	q("found").addEventListener("mouseover", over);
 	q("found").addEventListener("focusin", over);
 	q("found").addEventListener("mouseleave", () => preview(null));
+	q("found").addEventListener("click", (e) => { const l = e.target.closest("label.point"); if (l) fitIfHidden(found[Number(l.dataset.i)]?.geometry, true); });      // a place with no boundary: the click moves the map to it
 	// a second click on the picked place takes the area away, as in Studio
 	q("found").addEventListener("mousedown", (e) => { const l = e.target.closest("label[data-i]"); if (l) l.dataset.was = l.querySelector("input").checked ? "1" : ""; });
 	q("found").addEventListener("click", (e) => { const l = e.target.closest("label[data-i]"); if (l && l.dataset.was === "1" && l.querySelector("input").checked) { l.querySelector("input").checked = false; clear(); } });

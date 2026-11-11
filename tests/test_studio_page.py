@@ -159,6 +159,17 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         preview = "(() => { try { return window.studio.map.getSource('bs-preview').serialize().data.features.length; } catch { return -1; } })()"      # -1: the layers are not made yet
         page.hover(".bs-area label[data-i='0']")
         page.wait_for_function(f"{preview} === 1")
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)      # the place is small on the world map: the map moves to it (Studio's rule)
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{preview} === 0")
+        # a place with no boundary (a point) shows too, and a click on it moves the map to it
+        page.evaluate("window.studio.map.jumpTo({center: [0, 0], zoom: 2})")
+        page.hover(".bs-area label.point")
+        page.wait_for_function(f"{preview} === 1")
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)
+        page.evaluate("window.studio.map.jumpTo({center: [0, 0], zoom: 2})")
+        page.click(".bs-area label.point", force=True)
+        page.wait_for_function("window.studio.map.getZoom() > 6", timeout=30_000)
         page.mouse.move(900, 400)
         page.wait_for_function(f"{preview} === 0")
         page.click("[name=bs-place] + span")
@@ -173,6 +184,19 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         assert page.eval_on_selector_all("[name=bs-extract]", "els => els.map(e => e.value)") == ["monaco", "europe"]
         assert page.query_selector("[name=bs-extract]:checked") is None, "nothing is chosen at the start, as in Studio"
         _unfold(page, 3)
+        # the extract under the mouse shows on the map (orange, dashed), and goes when the mouse leaves; a click keeps it, a second click hides it and takes the choice away (Studio)
+        ext = "(() => { try { return window.studio.map.getSource('bs-extract').serialize().data.features.length; } catch { return -1; } })()"
+        page.hover("[name=bs-extract][value=monaco] + span")
+        page.wait_for_function(f"{ext} === 1")
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{ext} === 0")
+        page.click("[name=bs-extract][value=monaco] + span")
+        page.mouse.move(900, 400)
+        assert page.evaluate(ext) == 1 and page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco", "a click keeps the outline"
+        page.click("[name=bs-extract][value=monaco] + span")
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{ext} === 0")
+        assert page.query_selector("[name=bs-extract]:checked") is None and page.is_disabled("[data-bs=run]"), "a second click takes the choice away"
         page.click("[name=bs-extract][value=monaco] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco"
         assert page.is_enabled("[data-bs=run]")
