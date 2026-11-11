@@ -104,8 +104,9 @@
       rs.sections.note("areas", `Opening ${name}…`);
       try {
         let info = await (await api("info")).json();
-        if (info.tiled !== name || info.area !== name) await api("open", { method: "POST", body: name });
-        for (let i = 0; info.tiled !== name || info.area !== name; i++) {
+        const ready = (i) => (i.tiled ?? []).includes(name) && i.area === name;
+        if (!ready(info)) await api("open", { method: "POST", body: name });
+        for (let i = 0; !ready(info); i++) {
           if (i > 600) throw new Error(`${name} did not open: see the server's messages.`);
           await new Promise((r) => setTimeout(r, 300));
           info = await (await api("info")).json();

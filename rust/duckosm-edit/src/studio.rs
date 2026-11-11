@@ -102,7 +102,8 @@ pub struct Studio {
     /// The area that is open now (the last Open or build), or empty: the page of the steps shows it again when it comes back from the map.
     current: Mutex<String>,
     /// The map of the open area: its name, its tiled style and its tiles (`page::make_tiled`). The page puts the style on its map, and asks this server for the tiles.
-    tiled: Mutex<Option<(String, String, Arc<roadstyle::tiles::Tiles>)>>,
+    /// The tiled maps of the areas that were opened last (at most `TILED_KEPT`, the newest last): two tabs with two areas both get their tiles.
+    tiled: Mutex<Vec<(String, String, Arc<roadstyle::tiles::Tiles>)>>,
     pager: Pager,
 }
 
@@ -218,6 +219,9 @@ impl std::io::Seek for HttpFile {
     }
 }
 
+/// The tiled maps that the server keeps: the areas that were opened last (a tab with an older area asks the server to open it again).
+const TILED_KEPT: usize = 3;
+
 /// The models whose part for an area the server cuts out of one large cloud file (a STAC catalog gives the file): the catalog's id, the STAC
 /// search, the asset and the projection. The file name of a cut names its box.
 const CUT_MODELS: [(&str, &str, &str, u32); 1] = [("ca-nrcan-hrdem", "https://datacube.services.geo.ca/stac/api/search?collections=hrdem-mosaic-1m", "dtm", 3979)];
@@ -303,7 +307,7 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(None), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(Vec::new()), pager })
     }
 
     /// The folder of the areas now.
@@ -641,7 +645,11 @@ impl Studio {
         let made = crate::page::make_tiled(db.as_mut(), name, &format!("__ORIGIN__/tiles/{name}/"));
         db.close();
         let (style, tiles) = made?;
-        *self.tiled.lock().unwrap() = Some((name.to_string(), style, Arc::new(tiles)));
+        let mut kept = self.tiled.lock().unwrap();
+        kept.retain(|t| t.0 != name);
+        kept.push((name.to_string(), style, Arc::new(tiles)));
+        let over = kept.len().saturating_sub(TILED_KEPT);
+        kept.drain(..over);
         Ok(())
     }
 
@@ -916,9 +924,9 @@ impl Studio {
         if let Some(rest) = path.strip_prefix("tiles/") {
             // the tiles of the open area's map: tiles/<name>/<source>/<z>/<x>/<y>, in MLT (one tile has every source of the style)
             let parts: Vec<&str> = rest.split('/').collect();
-            let t = self.tiled.lock().unwrap().clone();
+            let t = parts.first().and_then(|n| self.tiled.lock().unwrap().iter().find(|t| t.0 == *n).cloned());
             let zxy = (parts.len() >= 4).then(|| { let n = parts.len(); (parts[n - 3].parse::<u32>(), parts[n - 2].parse::<u32>(), parts[n - 1].trim_end_matches(".mlt").trim_end_matches(".pbf").parse::<u32>()) });
-            return match (t.filter(|t| parts.first() == Some(&t.0.as_str())), zxy) {
+            return match (t, zxy) {
                 (Some(t), Some((Ok(z), Ok(x), Ok(y)))) => match t.2.tile_in(roadstyle::tiles::TileFormat::Mlt, z, x, y) {      // the style's source has "encoding": "mlt"
                     Ok(b) => req.say("200 OK", "application/octet-stream", &b),
                     Err(e) => req.say("500 Internal Server Error", "text/plain", e.to_string().as_bytes()),
@@ -944,7 +952,7 @@ impl Studio {
         match (req.method.as_str(), api.as_str()) {
             ("GET" | "HEAD", "info") => {
                 let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap(), "area": *self.current.lock().unwrap(),
-                                 "tiled": self.tiled.lock().unwrap().as_ref().map(|t| t.0.clone())});
+                                 "tiled": self.tiled.lock().unwrap().iter().map(|t| t.0.clone()).collect::<Vec<_>>()});
                 req.say("200 OK", "application/json", info.to_string().as_bytes())
             }
             ("GET" | "HEAD", "job") => {
@@ -954,8 +962,8 @@ impl Studio {
             ("GET" | "HEAD", "areas") => req.say("200 OK", "application/json", self.areas().to_string().as_bytes()),
             ("GET" | "HEAD", "pbf") => req.say("200 OK", "application/json", self.pbf_list().as_bytes()),
             ("GET" | "HEAD", a) if a.starts_with("style/") => {
-                let t = self.tiled.lock().unwrap().clone();
-                match t.filter(|t| t.0 == a["style/".len()..]) {
+                let t = self.tiled.lock().unwrap().iter().find(|t| t.0 == a["style/".len()..]).cloned();
+                match t {
                     Some(t) => req.say("200 OK", "application/json", t.1.as_bytes()),
                     None => req.say("404 Not Found", "text/plain", b"this area is not open"),
                 }
