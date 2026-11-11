@@ -120,14 +120,14 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		<div class="rs-kpis" data-as="kpis" hidden></div>
 		<div class="area-acts"><button type="button" data-as="boundary" disabled>${ICONS.download}Boundary</button>${unselect}</div>`;
 	if (detail === root) root.insertAdjacentHTML("beforeend", detailHtml); else detail.innerHTML = detailHtml;
-	let current = null, h3On = false, td = null, tdLoading = null, merged = [], selected = null;
+	let current = null, fillOn = true, h3On = false, td = null, tdLoading = null, merged = [], selected = null;
 	const msg = (t, bad = false) => { q("msg").textContent = t; q("msg").classList.toggle("err", bad); };
 
 	// the area on the map: a fill and a line (made when the style has loaded, and again for a new style)
 	const layers = () => {
 		if (map.getSource("bs-area")) return;
 		map.addSource("bs-area", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-		map.addLayer({ id: "bs-area-fill", type: "fill", source: "bs-area", paint: { "fill-color": "#2563eb", "fill-opacity": 0.14 } });
+		map.addLayer({ id: "bs-area-fill", type: "fill", source: "bs-area", layout: { visibility: fillOn ? "visible" : "none" }, paint: { "fill-color": "#2563eb", "fill-opacity": 0.14 } });
 		map.addLayer({ id: "bs-area-line", type: "line", source: "bs-area", paint: { "line-color": "#2563eb", "line-width": 2.5 } });
 		// the place under the mouse in the list (as in Studio): purple, on a white casing, with its name along the line; a point is a purple dot
 		map.addSource("bs-preview", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -527,5 +527,10 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		draw(shape);
 		if (previewShape) fitIfHidden(previewShape.geometry);
 	}
-	return { area: () => current, showPlace, rebuffer, set, clear, zoom, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
+	/** The blue fill of the area on or off (the line stays). Off for an area whose own map shows (a built area): the fill would cover its map. */
+	function filled(on) {
+		fillOn = !!on;
+		if (map.getLayer("bs-area-fill")) map.setLayoutProperty("bs-area-fill", "visibility", fillOn ? "visible" : "none");
+	}
+	return { area: () => current, showPlace, rebuffer, set, clear, zoom, filled, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
 }

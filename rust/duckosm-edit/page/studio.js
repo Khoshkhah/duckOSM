@@ -99,6 +99,7 @@
     async function showOpen(name, job) {
       const a = await (await api("area/" + encodeURIComponent(name))).json();
       area.set(a.boundary, a.name, "saved");
+      area.filled(false);                                                  // its own map shows: only the line of the boundary
       loadedArea = a.name;
       settings.set(parseSettings(a.config));
       markOpen(a.name);
@@ -171,7 +172,7 @@
     };
     const parts = { search: rs.search, drop: rs.drop, tabs: rs.tabs, toggle: rs.toggle, kpi: rs.kpi, number: rs.number };
     const post = async (path, body) => (await api(path, { method: "POST", body })).json();
-    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { if (pageArea && !area.area()) { location.assign("./"); return; } if (openName && area.area()?.name !== openName) markOpen(null); if (built && area.area()?.name !== builtName) { built = false; result.clear(); viz.ready(false); } ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });      // another area: the result of the old one goes
+    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { if (pageArea && !area.area()) { location.assign("./"); return; } if (openName && area.area()?.name !== openName) { markOpen(null); area.filled(true); } if (built && area.area()?.name !== builtName) { built = false; result.clear(); viz.ready(false); } ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });      // another area: the result of the old one goes
     const zoomBtn = Object.assign(rs.sections.button("step2", { icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>', title: "Zoom to the area", onClick: () => area.zoom() }), { disabled: true });
     let extracts = null;
     const data = initDataStep({ root: roots[3], rs: parts, map, padding, zoomToArea: () => area.zoom(), area: () => area.area(),
