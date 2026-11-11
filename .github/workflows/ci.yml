@@ -30,6 +30,8 @@ jobs:
       - run: node web/fixes_editor/fixes_units.mjs
       # the Ground step (web/ground_step/, docs/design/ground_step.md)
       - run: node web/ground_step/ground_units.mjs
+      # the build steps of `duckosm studio` (web/build_steps/): the logic of the Area, OSM data, Settings and Build steps
+      - run: node web/build_steps/steps_units.mjs
 
   # The Rust engine (rust/, docs/design/rust_engine_move.md): the golden tests of the crates. One invocation compiles DuckDB one time.
   rust:
@@ -63,6 +65,26 @@ jobs:
       - run: pip install -e ".[dev]" "playwright==1.55.0"
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest tests/test_edit_page.py tests/test_editor_host_shapes.py tests/test_editor_building.py tests/test_editor_road_node.py tests/test_editor_turn_changes.py -q -rs
+
+  # duckosm studio in a browser (tests/test_studio_page.py, docs/guides/studio.md): the six steps on Monaco, at a desktop width and at 390 x 844
+  studio-page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
+      # [elevation]: the DEM of the Ground step is sampled by rasterio
+      - run: pip install -e ".[dev,elevation]" "playwright==1.55.0"
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest tests/test_studio_page.py -q -rs
 
   package:
     runs-on: ubuntu-latest

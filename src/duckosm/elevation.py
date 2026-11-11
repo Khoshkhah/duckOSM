@@ -334,6 +334,27 @@ def _write_metadata(con, meta, nodata_fill, n_nodes, n_nodata, ele_column):
         meta["sha256"]])
 
 
+def write_grid(db, dem) -> int:
+    """Write ``main.elevation_grid`` of the local file ``dem``: the pixels of the DEM over the box of the nodes of every mode, plus 3 pixels on each
+    side, as the Rust build writes them (docs/reference/database.md). Needs the engine module ``duckosm._rust``. Gives the number of pixels."""
+    import tempfile
+
+    from duckosm import _rust
+
+    con = duckdb.connect(str(db))
+    con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
+    try:
+        bbox = _db_bbox(con, _mode_schemas(con, None))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "elevation_grid.parquet")
+            n = _rust.elevation_grid(str(dem), out, list(bbox))
+            con.execute("CREATE OR REPLACE TABLE main.elevation_grid AS SELECT * FROM read_parquet(?)", [out])
+        con.execute("CHECKPOINT")
+    finally:
+        con.close()
+    return n
+
+
 def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix="",
                  vertical_datum=None, license=None, reference=True, product=None):
     """Add elevation to a built duckOSM db in place. Returns a stats dict.

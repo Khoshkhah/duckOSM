@@ -1,0 +1,20 @@
+/* The layout of the page of `duckosm studio`: the map fills the window, the panel (roadstyle's #sb) is at the right. On a phone the panel is a sheet at the
+   bottom, and the map is above it. The steps have their own look (build_steps/steps.css, ground_step/ground_step.css). */
+html, body { margin: 0; height: 100%; }
+body { font: 13px/1.5 system-ui, -apple-system, sans-serif; }
+#map { position: fixed; inset: 0; }
+#sb .sb-top h2 { margin: 0; font-size: 17px; }
+#sb .sb-top p { margin: 2px 0 0; color: var(--mut); }
+#sb .step { padding: 12px 0; border-top: 1px solid var(--line); }
+#sb .step:first-child { border-top: 0; }
+#sb .step > h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; }
+#sb .step .n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-fill); color: #fff; font-size: 12px; }
+#sb .rs-opt { text-transform: none; letter-spacing: 0; }                 /* `#sb label` of the dashboard is a small caption; an option row is not */
+#sb .pick { display: flex; width: 100%; align-items: center; justify-content: center; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; cursor: pointer; }
+#sb .pick:hover { border-color: var(--accent); }
+#edit-error { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px; background: #b91c1c; color: #fff; }
+@media (max-width: 700px) {
+	#map { bottom: 52vh; }
+	#sb { top: auto; left: 0; right: 0; width: auto; height: 52vh; border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; }
+	#sb .sb-top p { display: none; }
+}

@@ -84,7 +84,15 @@ class DuckOSM:
         self.stats = {}
         self.mode_stats = {}
         self.validation_results = {}
+        self.on_step = None        # optional: on_step(text) gets "[n/N] step" when a step starts (duckosm studio shows it)
     
+    def _say(self, progress, task, description):
+        """Show the step on the console, and give it to ``on_step``."""
+        progress.update(task, description=description)
+        if self.on_step:
+            t = progress.tasks[task]
+            self.on_step(f"[{int(t.completed) + 1}/{int(t.total)}] {description.rstrip('.')}")
+
     def run(self) -> Path:
         """
         Run the full import pipeline.
@@ -239,7 +247,7 @@ class DuckOSM:
                 
                 # Execute global steps
                 for name, desc, func in global_steps:
-                    progress.update(main_task, description=desc)
+                    self._say(progress, main_task, desc)
                     func()
                     progress.advance(main_task)
                 
@@ -250,7 +258,7 @@ class DuckOSM:
                     
                     mode_start = time.time()
                     for name, desc, func in get_mode_steps(mode):
-                        progress.update(main_task, description=desc)
+                        self._say(progress, main_task, desc)
                         func()
                         progress.advance(main_task)
                     
@@ -267,7 +275,7 @@ class DuckOSM:
                 # layered graph so a trip can switch mode mid-route (walk->drive->walk). Runs once,
                 # after every mode is built; guarded (needs >=2 modes incl. walking).
                 if self.config.multimodal.enabled:
-                    progress.update(main_task, description="Building multimodal graph...")
+                    self._say(progress, main_task, "Building multimodal graph...")
                     self._build_multimodal()
 
                 # Base-map feature layers (features.*: water, land, buildings, POIs, transit,
@@ -275,13 +283,13 @@ class DuckOSM:
                 # Runs after modes (needs raw.*, still present until _cleanup), so only when
                 # building from a PBF; on by default, options.build_features / --no-features.
                 if self.config.options.build_features and self.config.source.type == "pbf":
-                    progress.update(main_task, description="Building feature layers...")
+                    self._say(progress, main_task, "Building feature layers...")
                     self._build_features()
 
                 # Bus routes (bus.routes, bus.route_edges): each OSM bus route relation as the driving edges it travels.
                 # Needs raw.* and the driving network; options.bus_routes (on).
                 if self.config.options.bus_routes and "driving" in self.config.modes and self.config.source.type == "pbf":
-                    progress.update(main_task, description="Matching bus routes...")
+                    self._say(progress, main_task, "Matching bus routes...")
                     from duckosm.bus import write_bus_routes
                     routes = write_bus_routes(self.con)
                     logger.info(f"  Bus routes: {len(routes)}, {int((routes['gaps'].str.len() > 0).sum())} with gaps (bus.routes)")
@@ -289,7 +297,7 @@ class DuckOSM:
                 # Every driving edge's lanes, decided once (docs/design/gmns_lane_profile.md): after all modes (a bus-only edge in the
                 # cycling network is shared by bikes) and while raw.* is still here
                 if "driving" in self.config.modes and self.config.source.type == "pbf":
-                    progress.update(main_task, description="Lane profile...")
+                    self._say(progress, main_task, "Lane profile...")
                     self._lane_profile()
 
                 # Persist the canonical stable-edge_id macro (callable anywhere as
@@ -299,7 +307,7 @@ class DuckOSM:
                 create_edge_id_macro(self.con)
 
                 # Final cleanup
-                progress.update(main_task, description="Cleaning up...")
+                self._say(progress, main_task, "Cleaning up...")
                 self._cleanup()
                 progress.advance(main_task)
                 

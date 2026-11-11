@@ -139,6 +139,8 @@ The area's DEM: its [ground reference](../concepts/ground-reference.md). Set it 
 command line. Only the Rust build (`duckosm-rust --config`) reads this section: it samples the DEM and writes the heights,
 `main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
 `duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
+[`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit) do that
+step themselves, with the keys of this section (they need `duckosm[elevation]`).
 
 | Key | Default | Does |
 |---|---|---|

@@ -7,7 +7,7 @@ description = "duckosm edit: a page on 127.0.0.1 that edits the OSM fixes of a d
 
 [features]
 # the native database and the native build (the CLI). The Python module gives its own database (duckosm/edit.py) and has no DuckDB inside
-duckdb = ["dep:duckdb", "dep:duckosm-build", "duckosm-build/duckdb"]
+duckdb = ["dep:duckdb", "duckosm-build/duckdb"]
 
 [dependencies]
 duckosm-editor = { path = "../duckosm-editor" }   # the files of the fixes editor
@@ -15,5 +15,6 @@ httparse = "=1.10.1"           # the request line and the headers, as roadstyle-
 serde_json = { version = "1", features = ["preserve_order"] }
 # the map: roadstyle's standard dashboard page of a duckOSM file (roadstyle_io::duckosm reads the file, page_options::page_from writes the page)
 roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f3d1efc542d9ff1c4723947e75d2497b0fd7ebac" }
-duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"], optional = true }
+duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }   # the progress hook of the build (set_progress)
+ureq = "3"                     # duckosm studio: the download of a Geofabrik extract and of its index
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }

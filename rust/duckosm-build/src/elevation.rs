@@ -224,3 +224,12 @@ mod tests {
         assert_eq!(round_cm(12.3), 12.3);
     }
 }
+
+/// Write the pixels of the DEM file `dem` over the box (degrees) plus `margin` pixels as `elevation_grid_main.parquet` rows into `out` (the same rows
+/// that a build with a DEM writes). Gives the number of pixels. Python's `duckosm studio` uses it: its build has no DEM step of the engine.
+pub fn write_grid_file(dem: &Path, out: &Path, bbox: [f64; 4], margin: usize) -> Result<usize, String> {
+    let cells = Dem::open(dem)?.grid(bbox[0], bbox[1], bbox[2], bbox[3], margin);
+    let file = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    duckosm_parquet::write_elevation_grid_to(file, &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>())?;
+    Ok(cells.len())
+}

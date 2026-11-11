@@ -34,21 +34,53 @@ class _Db:
 
     def build(self, config: str, folder: str, fixes: str, db: str) -> str:
         """``duckosm build`` with the config of the last build (``build_config``), in its folder, with the fixes file, into ``db``."""
-        from duckosm.config import Config
-        from duckosm.importer import DuckOSM
+        return build_area(config, folder, db, fixes)
 
-        fixes, db = str(Path(fixes).resolve()), str(Path(db).resolve())
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(config)
+
+def build_area(config: str, folder: str, db: str, fixes: str | None = None, on_step=None) -> str:
+    """``duckosm build`` with the config text ``config`` in the folder ``folder`` (the config's relative paths), into ``db``, with the fixes file
+    ``fixes`` when there is one. The DEM of the config's ``elevation:`` section is applied after the build (needs ``duckosm[elevation]``), and the
+    build's record (``build_config``, ``build_dir`` of main.visualization_metadata) is written, so that Build again of ``duckosm edit`` can run it
+    again. ``on_step(text)`` gets each step. Gives a line about the build."""
+    import duckdb
+
+    from duckosm.config import Config
+    from duckosm.importer import DuckOSM
+
+    db = str(Path(db).resolve())
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(config)
+    try:
+        os.chdir(folder)        # ponytail: the config's relative paths are for the folder of the build; the process does nothing else
+        cfg = Config.from_yaml(f.name)
+    finally:
+        os.unlink(f.name)
+    cfg.output_path = db
+    if fixes:
+        cfg.osm_overrides = str(Path(fixes).resolve())
+    t0 = time.time()
+    importer = DuckOSM(cfg)
+    importer.on_step = on_step
+    importer.run()
+    dem = cfg.elevation.dem
+    if dem:
+        if on_step:
+            on_step("Sampling the DEM")
         try:
-            os.chdir(folder)        # ponytail: the config's relative paths are for the folder of the build; the process does nothing else
-            cfg = Config.from_yaml(f.name)
-        finally:
-            os.unlink(f.name)
-        cfg.osm_overrides, cfg.output_path = fixes, db
-        t0 = time.time()
-        DuckOSM(cfg).run()
-        return f"{Path(db).name} in {time.time() - t0:.0f} s, with {Path(fixes).name}"
+            from duckosm.elevation import to_elevation, write_grid
+        except ImportError as e:
+            raise RuntimeError(f"the DEM step needs rasterio and pyproj: pip install 'duckosm[elevation]' ({e})")
+        e = cfg.elevation
+        to_elevation(db, dem=str(Path(dem).resolve()), product=e.product, vertical_datum=e.vertical_datum, license=e.license, reference=e.reference)
+        write_grid(db, Path(dem).resolve())
+    con = duckdb.connect(db)
+    try:
+        con.execute("ALTER TABLE main.visualization_metadata ADD COLUMN IF NOT EXISTS build_config VARCHAR")
+        con.execute("ALTER TABLE main.visualization_metadata ADD COLUMN IF NOT EXISTS build_dir VARCHAR")
+        con.execute("UPDATE main.visualization_metadata SET build_config = ?, build_dir = ?", [config, str(Path(folder).resolve())])
+    finally:
+        con.close()
+    return f"{Path(db).name} in {time.time() - t0:.0f} s" + (f", with {Path(fixes).name}" if fixes else "")
 
 
 def serve(db, fixes=None, port: int = 8790, ask: bool = False):
