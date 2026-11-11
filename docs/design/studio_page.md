@@ -66,10 +66,11 @@ Studio keeps the areas in the browser (OPFS), so this page keeps them where `duc
 (`GET /api/area/<name>`) gives the boundary and the config, and the page puts them into the Area and Settings steps (`parseSettings` of `core.js` reads back what `settingsYaml` wrote). There is no Delete:
 the server does not delete files.
 
-## Gap: the Rust build is smaller than the Python build
+## The Rust build and the Python build
 
-The native build makes `features.*` (with `raw.*`), the H3 columns and `features.ocean` (PR 77). It does not make `main.boundary_cells` and the optional checks, report, maps and multimodal graph. Until this is done,
-`duckosm studio` (Python) gives the full result.
+Rust is the product (decision 3). The native build now writes `features.*` (the SQL of `duckosm_build::FEATURES_SQL` on the bundled DuckDB, over `raw.*`), the H3 columns and, with the setting Sea,
+`features.ocean` (duckOSM PR 77; its test compares them with the Python build on Monaco). It still makes no `main.boundary_cells`, checks, report, maps or multimodal graph. `duckosm studio` (Python) keeps the
+Python build as the cross-check, and it makes those extras.
 
 ## Limits
 
