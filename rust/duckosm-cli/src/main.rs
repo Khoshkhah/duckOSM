@@ -84,6 +84,16 @@ struct Cli {
     /// raw_relations.parquet, as osmium's smart cut), the input of the base-map layers (docs/features.md).
     #[arg(long, requires = "boundary")]
     raw: bool,
+    /// With --boundary and the .duckdb output: make the base-map layers, features.* (water, land, buildings, ...), and keep raw.* in the
+    /// file, as duckOSM does (docs/reference/features.md). duckOSM's SQL runs on DuckDB's spatial extension (the first run downloads it).
+    #[arg(long, requires = "boundary")]
+    features: bool,
+    /// With --features: also make features.ocean from Overture Maps (reads the network; a failure is a warning).
+    #[arg(long, requires = "features")]
+    sea: bool,
+    /// Add duckOSM's H3 columns (nodes.h3_cell, edges.from_cell, to_cell, lca_res) at this resolution (0 to 15; duckOSM's default is 8).
+    #[arg(long, value_name = "RES", conflicts_with = "config")]
+    h3_resolution: Option<u8>,
     /// With --boundary: also write the cut area as cut.osm.pbf (the nodes, ways and relations of osmium's smart cut,
     /// before the OSM fixes), to read in other tools or to use as the cut file of the browser page.
     #[arg(long, requires = "boundary")]
@@ -207,6 +217,11 @@ fn run() -> Result<(), String> {
         p.cut_pbf = cli.cut_pbf;
         p.cut_osm = cli.cut_osm;
         p.building_faces = cli.building_faces;
+        p.features = cli.features;
+        p.sea = cli.sea;
+    }
+    if cli.config.is_none() {
+        p.h3_resolution = cli.h3_resolution;
     }
     if let Some(f) = &cli.format {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;

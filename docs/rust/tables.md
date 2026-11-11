@@ -25,12 +25,11 @@ mode: `edges`, `nodes`, `private_edges`, `edge_graph`, `edge_id_map`, `turn_perm
 | 2 | `visualization.edge_levels`, `edge_levels_meta` | The drawing order of the roads (bridges over roads). | 13,298 / 1 | Done: [levels.md](levels.md). The tags rule (the default) and roadstyle's solver (`--levels solve`). |
 | 2 | `driving.lane_profile` | Each lane of each driving edge and bus-only edge, left to right. | 3,176 | Done: [lane_profile.md](lane_profile.md). Equal to duckOSM's on Monaco and Tartu. |
 | 2 | `bus.routes`, `bus.route_edges` | The bus routes (OSM relations) as the driving edges they travel, in order. | 56 / 5,609 | Medium: the relations, and a walk along the edges (as the turn restrictions through a way). |
-| 3 | `raw.nodes`, `raw.ways`, `raw.relations` | The OSM data of the area as read from the PBF. | 34,326 / 5,715 / 336 | In the session "Base map features" (its approach A writes `raw.*`). |
-| 3 | `features.*` (12 tables) | The base map: buildings, land, water, POIs, place labels, … | 1 to 3,496 each | In the session "Base map features" (`docs/features.md`). |
+| 3 | `raw.nodes`, `raw.ways`, `raw.relations` | The OSM data of the area as read from the PBF. | 34,326 / 5,715 / 336 | Done (2026-11-10): `duckosm-rust` keeps them in the `.duckdb` file with `features.*`. Equal to duckOSM's, tested on Monaco. |
+| 3 | `features.*` (12 tables) | The base map: buildings, land, water, POIs, place labels, … | 1 to 3,496 each | Done (2026-11-10): [features.md](features.md), the SQL runs in the program. `features.ocean` with `--sea`. |
 
 Not in this list: `visualization.level_edits`, `level_heads`, `level_caps` and `level_unmatched` (the manual
-edits of the drawing levels in duckOSM's level editor), `main.boundary_cells` and the H3 columns (duckOSM option
-H3), `main.elevation_metadata` (elevation), `main.admin_boundaries` (the boundaries for `duckosm boundary`).
+edits of the drawing levels in duckOSM's level editor), `main.boundary_cells` (the H3 columns are done, 2026-11-10), `main.elevation_metadata` (elevation), `main.admin_boundaries` (the boundaries for `duckosm boundary`).
 They come from separate duckOSM tools or options.
 
 ## Decisions (Kaveh, 2026-10-22)

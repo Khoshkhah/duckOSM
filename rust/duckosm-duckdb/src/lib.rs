@@ -36,6 +36,27 @@ pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(
             &["edge_levels", "edge_levels_meta"],
         )?;
     }
+    // duckOSM's H3 step (before the elevation, as in duckOSM): the cell of each node, and the cells and lca_res of each edge
+    for mode in modes {
+        let (nz, ez) = (
+            parquet_dir.join(format!("h3_nodes_{mode}.parquet")),
+            parquet_dir.join(format!("h3_edges_{mode}.parquet")),
+        );
+        if nz.exists() && ez.exists() {
+            con.execute_batch(&format!(
+                "ALTER TABLE {mode}.nodes ADD COLUMN h3_cell BIGINT;
+                 UPDATE {mode}.nodes n SET h3_cell = t.h3_cell FROM read_parquet('{}') t WHERE t.node_id = n.node_id;
+                 ALTER TABLE {mode}.edges ADD COLUMN from_cell BIGINT;
+                 ALTER TABLE {mode}.edges ADD COLUMN to_cell BIGINT;
+                 ALTER TABLE {mode}.edges ADD COLUMN lca_res TINYINT;
+                 UPDATE {mode}.edges e SET from_cell = t.from_cell, to_cell = t.to_cell, lca_res = t.lca_res::TINYINT
+                   FROM read_parquet('{}') t WHERE t.edge_id = e.edge_id;",
+                nz.display(),
+                ez.display()
+            ))
+            .map_err(|e| format!("{mode}: H3 columns: {e}"))?;
+        }
+    }
     // the elevation step: duckOSM's columns on the nodes and the edges, and main.elevation_metadata
     for mode in modes {
         let (nz, ez) = (
@@ -65,6 +86,95 @@ pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(
             .map_err(|e| e.to_string())?;
     }
     con.execute_batch(MACROS).map_err(|e| e.to_string())
+}
+
+/// duckOSM's base-map layers: run `sql` (`features.sql`, made from duckOSM's `FeaturesBuilder`) on the `.duckdb` file. It reads
+/// `raw_nodes.parquet`, `raw_ways.parquet` and `raw_relations.parquet` of `parquet_dir`, and leaves `raw.*` and `features.*`
+/// in the file. It needs DuckDB's spatial extension (the first `INSTALL` downloads it).
+pub fn write_features(db: &Path, parquet_dir: &Path, sql: &str) -> Result<(), String> {
+    let con = Connection::open(db).map_err(|e| e.to_string())?;
+    let mut sql = sql.to_string();
+    for f in ["raw_nodes", "raw_ways", "raw_relations"] {
+        let full = parquet_dir.join(format!("{f}.parquet")).display().to_string().replace('\'', "''");
+        sql = sql.replace(&format!("'{f}.parquet'"), &format!("'{full}'"));
+    }
+    con.execute_batch(&sql).map_err(|e| format!("features: {e}"))?;
+    con.execute_batch("CHECKPOINT").map_err(|e| e.to_string())
+}
+
+/// The sea of the area, `features.ocean`, from Overture Maps (duckOSM `features/ocean.py`): the polygons of `base/water` with the
+/// subtype `ocean` of the newest release, cut to the box of `main.boundary` grown by 10 % (at least 500 m). It reads Overture's
+/// public GeoParquet on S3. Offline or on any error: a warning, an empty table, and `Ok(0)`, as duckOSM does.
+pub fn write_ocean(db: &Path) -> Result<usize, String> {
+    const OVERTURE: &str = "s3://overturemaps-us-west-2/release";
+    let con = Connection::open(db).map_err(|e| e.to_string())?;
+    con.execute_batch(
+        "INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; CREATE SCHEMA IF NOT EXISTS features;
+         CREATE OR REPLACE TABLE features.ocean (osm_id BIGINT, osm_type VARCHAR, kind VARCHAR, name VARCHAR, source VARCHAR, geom GEOMETRY);",
+    )
+    .map_err(|e| format!("features.ocean: {e}"))?;
+    let fetch = || -> Result<(String, Vec<Vec<u8>>), String> {
+        let (x0, y0, x1, y1): (f64, f64, f64, f64) = con
+            .query_row(
+                "SELECT min(ST_XMin(geom)), min(ST_YMin(geom)), max(ST_XMax(geom)), max(ST_YMax(geom)) FROM main.boundary",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        let my = (0.10 * (y1 - y0)).max(500.0 / 111320.0);
+        let mx = (0.10 * (x1 - x0)).max(500.0 / (111320.0 * ((y0 + y1) / 2.0).to_radians().cos()));
+        let (x0, y0, x1, y1) = (x0 - mx, y0 - my, x1 + mx, y1 + my);
+        let remote = Connection::open_in_memory().map_err(|e| e.to_string())?; // its own connection: the S3 settings stay out of the file
+        remote
+            .execute_batch(
+                "INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; SET s3_region = 'us-west-2'",
+            )
+            .map_err(|e| e.to_string())?;
+        let release: String = remote
+            .query_row(
+                &format!(
+                    "SELECT max(regexp_extract(file, 'release/([^/]+)/', 1)) FROM glob('{OVERTURE}/*/theme=base/type=water/*')"
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let mut st = remote
+            .prepare(&format!(
+                "SELECT ST_AsWKB(g)::BLOB FROM (
+                    SELECT ST_Intersection(geometry, ST_MakeEnvelope({x0}, {y0}, {x1}, {y1})) AS g
+                    FROM read_parquet('{OVERTURE}/{release}/theme=base/type=water/*', hive_partitioning = 1)
+                    WHERE subtype = 'ocean'
+                      AND bbox.xmin < {x1} AND bbox.xmax > {x0} AND bbox.ymin < {y1} AND bbox.ymax > {y0})
+                 WHERE NOT ST_IsEmpty(g)"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = st
+            .query_map([], |r| r.get::<_, Vec<u8>>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok((release, rows))
+    };
+    match fetch() {
+        Ok((release, rows)) => {
+            let src = format!("Overture Maps {release} (base/water ocean, from OSM coastlines)");
+            for wkb in &rows {
+                con.execute(
+                    "INSERT INTO features.ocean VALUES (NULL, NULL, 'ocean', NULL, ?, ST_GeomFromWKB(?))",
+                    duckdb::params![src, wkb],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            con.execute_batch("CHECKPOINT").map_err(|e| e.to_string())?;
+            Ok(rows.len())
+        }
+        Err(e) => {
+            // offline, S3 or a change of the schema: no sea, never a failed build
+            eprintln!("[features] ocean skipped: {}", e.lines().next().unwrap_or(""));
+            Ok(0)
+        }
+    }
 }
 
 /// The tables of a mode, when their files exist (the options decide which ones exist).

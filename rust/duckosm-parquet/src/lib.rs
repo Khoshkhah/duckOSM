@@ -1156,6 +1156,46 @@ pub fn write_node_heights_to<W: Write + Send>(out: W, rows: &[(i64, f64)]) -> Re
     })
 }
 
+/// Write the H3 cells of the nodes of a mode (`h3_nodes_<mode>.parquet`): `node_id`, `h3_cell` (the cell as a signed 64-bit number).
+pub fn write_h3_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)]) -> Result<(), String> {
+    let fields = vec![
+        field("node_id", DataType::Int64),
+        field("h3_cell", DataType::Int64),
+    ];
+    write_rows(out, fields, rows, |c| {
+        let mut cell = Int64Builder::new();
+        c.iter().for_each(|r| cell.append_option(r.1));
+        vec![i64s(c.iter().map(|r| r.0)), Arc::new(cell.finish())]
+    })
+}
+
+/// Write the H3 columns of the edges of a mode (`h3_edges_<mode>.parquet`): `edge_id`, `from_cell`, `to_cell`, `lca_res`.
+pub fn write_h3_edges_to<W: Write + Send>(
+    out: W,
+    rows: &[(i64, Option<i64>, Option<i64>, Option<i64>)],
+) -> Result<(), String> {
+    let fields = vec![
+        field("edge_id", DataType::Int64),
+        field("from_cell", DataType::Int64),
+        field("to_cell", DataType::Int64),
+        field("lca_res", DataType::Int64),
+    ];
+    write_rows(out, fields, rows, |c| {
+        let (mut f, mut t, mut l) = (Int64Builder::new(), Int64Builder::new(), Int64Builder::new());
+        for r in c {
+            f.append_option(r.1);
+            t.append_option(r.2);
+            l.append_option(r.3);
+        }
+        vec![
+            i64s(c.iter().map(|r| r.0)),
+            Arc::new(f.finish()),
+            Arc::new(t.finish()),
+            Arc::new(l.finish()),
+        ]
+    })
+}
+
 /// Write the heights of the edges of a mode (`elevation_edges_<mode>.parquet`): `edge_id`, `z_from`, `z_to`,
 /// `z_vertices` (one height for each vertex of the geometry, in its order).
 pub fn write_edge_heights_to<W: Write + Send>(
