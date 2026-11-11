@@ -78,13 +78,13 @@ names the two ids.
 | the map terrain | the terrain tiles of a page minus the conformed ground grid, at the tile pixels' points (each pixel's north-west corner, where MapLibre reads it): at most 0.10 m (the PNG step). Not at the grid's points: MapLibre interpolates the tile pixels again, so there the difference is metres on steep ground |
 | one ground in an area | every product of the area has the same ground id |
 
-## Where each project stands (2026-11-10)
+## Where each project stands (2026-11-10, evening)
 
 | Project | Now | To do |
 |---|---|---|
 | duckOSM | Done. `main.elevation_metadata` has `product`, `vertical_datum`, `license` and `sha256` (the ground id) in the Python command and in the Rust build (file and browser bytes); `main.elevation_grid` from the Rust build. A `--dem` file in `ele` needs its product, its vertical datum and its license (options or the config section `elevation`), or `--not-reference`. The default source with no `--dem` is still Copernicus GLO-30 (a DSM, no ground id) | nothing |
-| SimReady | Monaco on FABDEM (a DTM), Vancouver on a 1 m LiDAR DTM; `terrain-conform` and the GLB on the branch `claude/gltf-adapter-design-5047c6`; the connecting roads of the `.xodr` have no elevation | the ground id in its products; the conformed ground as a grid that others read; the elevation of the connecting roads |
-| roadstyle | the map terrain is always the AWS Terrain Tiles | terrain tiles from the conformed ground for an area with a reference; the page option `ground`; the vehicles take the road heights |
+| SimReady | Monaco on FABDEM (a DTM), Vancouver on a 1 m LiDAR DTM; `terrain-conform` and the GLB on `main` (the `gltf` adapter); the connecting roads of the `.xodr` have no elevation | the ground id in its products; the conformed ground as a grid that others read; the elevation of the connecting roads |
+| roadstyle | the map terrain comes from the area's ground (the page option `ground`: a PMTiles file made from `main.elevation_grid`; roadstyle PRs 145-147), and the attribution names it; the 3D bridge decks stand on it. With no ground, the AWS Terrain Tiles, and the page says so | the conformed ground instead of the reference grid; the vehicles take the road heights from the data (`z_vertices`, then SimReady's graded profile), not from the map's terrain (roadstyle PR 149) |
 | urbanstyle | a "rough terrain" switch with the AWS Terrain Tiles; bridge heights from LiDAR feed SimReady | the same terrain tiles as roadstyle |
 
 Related: [Add elevation](../guides/elevation.md), [Elevation sources](../reference/elevation-sources.md).
