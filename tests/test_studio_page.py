@@ -171,6 +171,9 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         # the extracts that cover the area: Monaco first, Europe second; the first is chosen
         page.wait_for_selector("[name=bs-extract]")
         assert page.eval_on_selector_all("[name=bs-extract]", "els => els.map(e => e.value)") == ["monaco", "europe"]
+        assert page.query_selector("[name=bs-extract]:checked") is None, "nothing is chosen at the start, as in Studio"
+        _unfold(page, 3)
+        page.click("[name=bs-extract][value=monaco] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco"
         assert page.is_enabled("[data-bs=run]")
         # the settings: two networks; the text of the config follows
@@ -282,6 +285,8 @@ def test_a_box_on_a_phone(studio):
         a = page.evaluate("window.studio.area.area()")
         assert a["from"] == "drawn" and a["name"] == "drawn_area" and a["km2"] > 1000, a
         page.wait_for_selector("[name=bs-extract]")
+        _unfold(page, 3)
+        page.click("[name=bs-extract][value=europe] + span")
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "europe"
         assert page.is_enabled("[data-bs=run]")
         _fit(page)
@@ -336,7 +341,10 @@ def test_a_buffer_a_fixes_file_and_the_time_of_each_step(studio):
         assert page.evaluate("window.studio.area.area().base.length") == 2, "the shape as chosen stays"
         page.fill(".bs-area [data-as=buffer-field] input", "0")
         page.wait_for_function(f"Math.abs(window.studio.area.area().km2 - {before}) < 0.001", timeout=60_000)
-        # the fixes file: a path that is there goes into the config; one that is not says so
+        # the fixes file: a path that is there goes into the config; one that is not says so (the card Build opens when the data is chosen)
+        page.wait_for_selector("[name=bs-extract]")
+        _unfold(page, 3)
+        page.click("[name=bs-extract][value=monaco] + span")
         _options(page)
         page.fill("[data-ss=fixes]", str(ROOT / "tests" / "data" / "osm_fixes.yaml"))
         page.wait_for_function("document.querySelector('[data-ss=fixes-msg]').textContent === 'Found.'")

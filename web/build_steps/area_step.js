@@ -221,7 +221,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 			const p = f.properties, ok = p.photon || polygonsOf(f.geometry).length > 0, [title, ...rest] = String(p.display_name ?? "").split(", ");
 			return `<label class="rs-opt${ok ? "" : " point"}" data-i="${i}" title="${esc(p.display_name)}"><input type="radio" name="bs-place" value="${i}"${ok ? "" : " disabled"}>` +
 				(ok ? `<span><b>${esc(title)}</b><span class="rs-chip">${esc(p.addresstype ?? p.type ?? "")}</span><small>${esc(rest.join(", ") || `${p.osm_type} ${p.osm_id}`)}</small></span></label>`
-					: `<span><b>${esc(title)}</b><span class="rs-chip">${esc(p.addresstype ?? p.type ?? "")}, no boundary</span></span></label>`);
+					: `<span><b>${esc(title)}</b><span class="rs-chip">${esc(p.addresstype ?? p.type ?? "")}, ${f.geometry?.type === "Point" ? "a point, " : ""}no boundary</span></span></label>`);
 		}).join("") || `<p class="small muted">${none}</p>`;
 	};
 	async function find(text, source) {
@@ -482,16 +482,24 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 
 	// the file
 	rs.drop(q("drop"), {
-		accept: ".geojson,.json", text: "Drop a GeoJSON file here, or <u>choose a file</u>", hint: "A polygon or a multipolygon",
-		onFiles: async (files) => {
-			try {
-				const json = JSON.parse(await files[0].text());
-				set(json, json.features?.[0]?.properties?.name ?? files[0].name.replace(/\.[^.]*$/, ""), "file");
-			} catch (e) {
-				msg(`${files[0].name}: ${e.message}`, true);
-			}
-		},
+		accept: ".geojson,.json", text: "Drop a GeoJSON file here or on the map, or <u>choose a file</u>",
+		onFiles: (files) => openFile(files[0]),
 		onClear: clear,
+	});
+	async function openFile(file) {
+		try {
+			const json = JSON.parse(await file.text());
+			set(json, json.features?.[0]?.properties?.name ?? file.name.replace(/\.[^.]*$/, ""), "file");
+		} catch (e) {
+			msg(`${file.name}: ${e.message}`, true);
+		}
+	}
+	// a file dropped on the map (or anywhere on the page) opens too, as in Studio; the drop zone of the File tab takes its own drop
+	addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); });
+	addEventListener("drop", (e) => {
+		e.preventDefault();
+		if (e.target.closest?.(".rs-drop")) return;
+		if (e.dataTransfer?.files?.[0]) openFile(e.dataTransfer.files[0]);
 	});
 
 	if (buffer && rs.number) {                                                          // the field of roadstyle, as in Studio

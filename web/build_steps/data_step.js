@@ -49,9 +49,9 @@ export function initDataStep({ root, rs, area, extracts, checkFile, onChange = (
 			if (mine === loading) { key = ""; q("note").textContent = `The list of the extracts did not load: ${e.message}. Use a file.`; }
 			return onChange();
 		}
-		picked = list[0]?.id ?? "";
-		q("note").textContent = list.length ? "The extracts of Geofabrik that cover the area. The first is the smallest." : "No Geofabrik extract covers the whole area. Use a file.";
-		q("list").innerHTML = list.slice(0, 6).map((x) => `<label class="rs-opt"><input type="radio" name="bs-extract" value="${esc(x.id)}"${x.id === picked ? " checked" : ""}><span><b>${esc(x.name)}</b><small>${Math.round(x.km2).toLocaleString("en")} km² · ${esc(x.pbf.split("/").slice(-1)[0])}</small></span></label>`).join("");
+		picked = "";
+		q("note").textContent = list.length ? "The extracts of Geofabrik that cover the area, the smallest first. Choose one." : "No Geofabrik extract covers the whole area. Use a file.";
+		q("list").innerHTML = list.slice(0, 6).map((x) => `<label class="rs-opt"><input type="radio" name="bs-extract" value="${esc(x.id)}"><span><b>${esc(x.name)}</b><small>${Math.round(x.km2).toLocaleString("en")} km² · ${esc(x.pbf.split("/").slice(-1)[0])}</small></span></label>`).join("");
 		onChange();
 	}
 	q("list").addEventListener("change", (e) => { picked = e.target.value; onChange(); });
