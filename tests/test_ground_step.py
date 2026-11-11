@@ -97,10 +97,11 @@ def test_the_step_in_a_browser(server, tmp_path):
                                                                                          headers={"Access-Control-Allow-Origin": "*"}))
         page.goto(server + "/page.html")
         page.wait_for_function("window.ready")
-        # Monaco: EU-DTM, FABDEM, Copernicus GLO-30 first; the best one is chosen; with no file there is no DEM
+        # Monaco: EU-DTM, FABDEM, Copernicus GLO-30 first; nothing is chosen (a file would get the label of a guess); with no choice there is no DEM
         names = page.eval_on_selector_all('[data-gs=list] input', "els => els.map(e => e.value)")
         assert names == ["eudtm", "fabdem", "copernicus-glo30", "eu-dem"]
-        assert page.eval_on_selector('input[name=gs-src]:checked', "e => e.value") == "eudtm"
+        assert page.query_selector('input[name=gs-src]:checked') is None
+        assert "Choose the source of your DEM file" in page.inner_text("[data-gs=detail]")
         assert "needs a key" in page.inner_text("[data-gs=list]")
         assert "not for commercial use" in page.inner_text("[data-gs=list]")
         assert page.evaluate("window.gs.dem()") is None
@@ -130,9 +131,11 @@ def test_the_step_in_a_browser(server, tmp_path):
         assert "Ground: AWS Terrain Tiles" in page.inner_text("[data-gs=aws]")
         dem = page.evaluate("window.gs.dem().then(d => ({...d, bytes: Array.from(new Uint8Array(d.bytes.slice(0, 4)))}))")
         assert dem["name"] == "Ground: AWS Terrain Tiles" and dem["product"] == "DSM" and dem["not_reference"] is True and dem["bytes"] == [0x49, 0x49, 42, 0]
-        # a new area gives a new list: Tartu starts with the Estonian DTM, and the best source is chosen again
+        # a new area gives a new list: Tartu starts with the Estonian DTM, and nothing is chosen again
         page.evaluate("window.area = [26.60, 58.30, 26.85, 58.45]; window.gs.refresh()")
-        assert page.eval_on_selector('input[name=gs-src]:checked', "e => e.value") == "ee-maaamet-dtm"
+        assert page.query_selector('input[name=gs-src]:checked') is None and page.evaluate("window.gs.dem()") is None
+        assert page.eval_on_selector_all('[data-gs=list] input', "els => els[0].value") == "ee-maaamet-dtm"
+        page.check('input[value=ee-maaamet-dtm]')
         assert "EPSG:3301" in page.inner_text("[data-gs=detail]")
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         assert errors == []

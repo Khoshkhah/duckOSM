@@ -33,7 +33,7 @@ Open the address that the command prints (`http://127.0.0.1:8792/`). The page op
    file to the area.
 3. **Settings.** The networks and the options of the build. Open **Config of the build** to see the text. The keys are the keys of
    [the config of `duckosm build`](../reference/configuration.md).
-4. **Ground.** The page suggests the DEM sources that cover the area, best first. Download the file from the source, then select it. The
+4. **Ground.** The page suggests the DEM sources that cover the area, best first. Choose the source of your DEM file, download the file from it, then select the file. The
    product, the vertical datum and the license of the file come from the catalog. With no file, the area has no DEM. The choice
    **Ground: AWS Terrain Tiles** makes a DEM for the map terrain, and it is never the reference ground of the area. Read
    [The ground reference](../concepts/ground-reference.md) and [Add elevation](elevation.md). A DEM needs `pip install "duckosm[elevation]"`.

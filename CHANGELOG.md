@@ -38,6 +38,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Fixed
 
+- **The Ground step chooses no source at the start** (`web/ground_step/`). It chose the best source, so a file that the person selected without changing the choice got the product, the datum and the licence of that source (a Copernicus DSM file was labelled EU-DTM, a DTM). Now the person names the source first; with no choice `dem()` gives `null`, and a new area clears the choice. *Host: nothing is needed. A test that selects a file must choose the source first (duckOSM Studio's `ground_e2e.py`).*
 - **"Changes on the map: Hide" takes the changed roads off the map** (`web/fixes_editor/fixes_panel.js`). Hide made only the editor's own layers invisible. A road of the
   map is in roadstyle's highlight sets `fix-edits` (amber) and `fix-gone` (red), so it stayed lit. Now Hide sets these two sets empty and Show lights them again; the editor keeps
   their rows. Test: `test_editor_turn_changes.py::test_hide_takes_the_changed_roads_off_the_map_and_show_brings_them_back`.

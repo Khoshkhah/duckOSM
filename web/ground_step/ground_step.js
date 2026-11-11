@@ -65,9 +65,9 @@ export async function initGroundStep({ root, catalog, bbox, status = () => {}, o
 		shown = sig;
 		q("area").textContent = b ? `Area: ${fmt(b)} (west, south, east, north)` : "Choose the area in step 1 first.";
 		const key = list.map((s) => s.id).join();
-		if (key !== listed) {                                                       // the area changed: a new list, and the best source is the choice
+		if (key !== listed) {                                                       // the area changed: a new list, and nothing is chosen: a file gets the product, the datum and the licence of the source that the person names, never of a guess
 			listed = key;
-			chosen = list[0]?.id || null;
+			chosen = null;
 			file = info = null;
 		}
 		q("list").innerHTML = list.slice(0, SHOWN).map(option).join("");
@@ -85,8 +85,8 @@ export async function initGroundStep({ root, catalog, bbox, status = () => {}, o
 	}
 
 	function detail() {
-		const d = q("detail"), s = chosen && byId[chosen];
-		if (!s) { d.innerHTML = ""; return; }
+		const d = q("detail"), s = chosen && byId[chosen], b = bbox();
+		if (!s) { d.innerHTML = b ? `<p class="small muted">Choose the source of your DEM file. The product, the vertical datum and the licence of the file are the source's. With no choice, the area has no DEM.</p>` : ""; return; }
 		if (s.fallback) {
 			d.innerHTML = `<p class="small muted">The build makes a DEM from the AWS Terrain Tiles when you click Build. This DEM has product DSM and the label “${esc(AWS_NAME)}”: no other project takes it as the ground of the area. For a reference ground, choose a model above and select its file.</p>`;
 			return;

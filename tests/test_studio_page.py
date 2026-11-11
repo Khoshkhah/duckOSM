@@ -153,8 +153,8 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         assert page.is_disabled("[data-bs=run]") and "at least one network" in page.inner_text("[data-bs=why]")
         for m in ("driving", "walking"):
             page.check(f"[name=mode][value={m}]")
-        # the ground: the best source of Monaco is chosen and no file is selected, so there is no DEM
-        assert page.eval_on_selector("[name=gs-src]:checked", "e => e.value") == "eudtm"
+        # the ground: no source is chosen, so there is no DEM
+        assert page.query_selector("[name=gs-src]:checked") is None
         assert page.evaluate("window.studio.ground.dem()") is None
         _fit(page)
         _build_and_open(page, "monaco-a")
