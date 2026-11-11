@@ -589,18 +589,6 @@ pub fn threads() -> usize {
     rayon::current_num_threads()
 }
 
-/// Run `f` with `threads` threads for the work in parallel (`threads()` then gives this number). None: all cores.
-pub fn with_threads<T: Send>(threads: Option<usize>, f: impl FnOnce() -> T + Send) -> Result<T, String> {
-    match threads {
-        None => Ok(f()),
-        Some(n) => Ok(rayon::ThreadPoolBuilder::new()
-            .num_threads(n.max(1))
-            .build()
-            .map_err(|e| e.to_string())?
-            .install(f)),
-    }
-}
-
 /// Decode one block of the file and give each of its elements to `sink`. A block that is not data (the header) gives
 /// nothing.
 pub fn raw_block(blob: &Blob, sink: &mut impl RawSink) -> Result<(), String> {

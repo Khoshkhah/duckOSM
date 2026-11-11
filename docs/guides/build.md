@@ -59,6 +59,6 @@ example.
 ## Large areas
 
 A whole country takes time and memory (Sweden: 835 MB of PBF). The build processes the network in
-batches sized to fit. The load of the file stays in the memory budget `options.memory_limit` (1 GB if it is not set). If the build still runs out of memory, set `options.memory_limit` (e.g. `"16GB"`) and
+batches sized to fit; if it still runs out of memory, set `options.memory_limit` (e.g. `"16GB"`) and
 `options.threads` in the config. Build a big region once and [cut areas from it](prepare-area.md#several-areas-from-one-region)
 instead of rebuilding each one.

@@ -8,7 +8,7 @@
 //! ```
 
 use duckosm_build::{
-    build as run_build, load_raw as run_load_raw, parse_memory, config, parse_levels, NetworkMode, NetworkOptions, Params, Summary,
+    build as run_build, config, parse_levels, NetworkMode, NetworkOptions, Params, Summary,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -278,43 +278,9 @@ fn edge_id_hash(osm_id: i64, source: i64, target: i64) -> i64 {
     duckosm_core::hash::edge_id(osm_id, source, target)
 }
 
-/// The load step: duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole file `pbf`, written into the
-/// folder `out` as `raw_nodes_*.parquet`, `raw_ways_*.parquet` and `raw_relations_*.parquet` (one file of each table for
-/// each thread). `memory` is the memory budget
-/// as DuckDB writes it (`"2GB"`, `"512MB"`); the default is 1 GB. `threads` is the number of threads; the default is all cores. The memory does not grow with the size of the file.
-/// Returns the rows of each table, the number of blocks and the time in seconds.
-#[pyfunction]
-#[pyo3(signature = (pbf, out, *, memory = None, threads = None))]
-fn load_raw<'py>(
-    py: Python<'py>,
-    pbf: PathBuf,
-    out: PathBuf,
-    memory: Option<String>,
-    threads: Option<usize>,
-) -> PyResult<Bound<'py, PyDict>> {
-    let budget = match &memory {
-        Some(m) => parse_memory(m).map_err(PyValueError::new_err)?,
-        None => 1_000_000_000,
-    };
-    let t = std::time::Instant::now();
-    let s = py
-        .detach(|| run_load_raw(&pbf, &out, budget, threads))
-        .map_err(PyRuntimeError::new_err)?;
-    let d = PyDict::new(py);
-    d.set_item("nodes", s.rows[0])?;
-    d.set_item("ways", s.rows[1])?;
-    d.set_item("relations", s.rows[2])?;
-    d.set_item("blocks", s.blocks)?;
-    d.set_item("most_in_flight", s.most_in_flight)?;
-    d.set_item("budget", budget)?;
-    d.set_item("seconds", t.elapsed().as_secs_f64())?;
-    Ok(d)
-}
-
 #[pymodule]
 fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
-    m.add_function(wrap_pyfunction!(load_raw, m)?)?;
     m.add_function(wrap_pyfunction!(build_from_config, m)?)?;
     m.add_function(wrap_pyfunction!(edge_id_hash, m)?)?;
     m.add_function(wrap_pyfunction!(edit, m)?)?;

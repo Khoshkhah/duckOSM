@@ -2,10 +2,14 @@
 
 ## Unreleased
 
-- **The load step in a memory budget** (`options.engine: rust`, the default). The Rust engine reads the `.osm.pbf` file and writes `raw.nodes`, `raw.ways` and
-  `raw.relations` while it reads, with the same rows and types as `ST_READOSM`. The memory does not grow with the size of the file: `options.memory_limit` is the
-  budget (1 GB if it is not set). A test with a counting allocator fails if the load goes above its budget. `duckosm._rust.load_raw` is the new function.
-  Design: `docs/design/streaming_load.md`.
+- **`read_osm`, the load of `raw.*` in Rust** (`duckosm-duckdb`, `docs/design/streaming_load.md`). A DuckDB table function, `read_osm(path, kind)`, gives the
+  nodes, the ways or the relations of a `.osm.pbf` file with the columns and the types of `ST_READOSM`, and DuckDB calls it from all its threads. A whole-file
+  build of `duckosm-rust` now has `raw.nodes`, `raw.ways` and `raw.relations` (before: none), and it reads `options.memory_limit` and `options.threads` for this
+  step. France, all of `raw.*`: about 30% less CPU than `ST_READOSM`. A test compares it with `ST_READOSM` on Monaco. `duckosm build` (Python) keeps `ST_READOSM`.
+- **A fast PBF decoder, `pbfraw`** (`duckosm-core`). It reads the protobuf bytes in place: 5 times faster than the `osmpbf` crate on the way blocks of France,
+  and faster than libosmium (`osmium fileinfo -e --no-crc`) for the data of `raw.*`. A test compares it with `osmpbf` on Monaco.
+- **The Parquet load in a memory budget** (`duckosm-parquet`, feature `pbf`), for the browser: `load_raw` writes `raw.*` as Parquet shards while it reads,
+  and a test with a counting allocator fails if it goes above its budget. Nothing calls it yet.
 
 ### Host changes
 
@@ -26,6 +30,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Fixed
 
+- **`duckosm studio` on a phone: the base map stays blank when an area opens** (roadstyle `d07131ab`, PR 169). The page asked for the blank map before the first base map (OpenFreeMap) had come, and the late base map came back over the area. Now only the last choice of a base map is used.
 - **`duckosm studio` has no patch for a page with no roads** (roadstyle `8dfd5e2c`, PR 153; `rust/duckosm-edit/page/studio.js`, `web/build_steps/steps.css`, `web/ground_step/ground_step.css`). The roadstyle dashboard now shows no banner "0 road features" on a page with no roads, opens on the world, and sets `text-transform` and `letter-spacing` of an option row (`label.rs-opt`) back. The page removed its three workarounds: the script that removed the banner, the jump to Europe, and the two CSS resets. *Host: move the roadstyle pin to `8dfd5e2c` and remove the same patches. A host that sets its own first view keeps it.*
 
 ### Changed
@@ -43,6 +48,13 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Added
 
+- **`duckosm studio`: card 8, Edit levels** ([guide](docs/guides/studio.md); roadstyle `1c909e5b`, PR 170). roadstyle's level-edit part (`levelEditPart`, unchanged) over the map of the open area.
+  The server gives it the roads of the level area (`GET /areas/<name>/levels/edges`), the stored levels (`levels/stored`) and the save (`POST levels/save`:
+  one SQL script, `page::save_levels_sql`, that each host runs on a writing connection, `Host::write`), and way D draws each change again (`POST relevel`).
+  roadstyle's page files and the editor's WebAssembly package are at `/rs/` (`roadstyle_serve::embedded`). `rust/duckosm-edit/editor_pkg.sh` builds the
+  package in the roadstyle checkout of the pin; the CI job studio-page runs it. The Python `_Db` opens the file in an instance of its own (an attached
+  database), so a second reader does not get the locked settings of the page of `/edit/`. Tests: `test_card_8_edits_the_levels_of_an_area`,
+  `the_level_editor_save_writes_the_tables_and_stops_on_other_edges`.
 - **`duckosm-rust` makes the H3 columns and the base-map layers** (`rust/duckosm-build`). `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res` (`options.h3_indexing`, `options.h3_resolution`; the Rust crate `h3o`), `features.*` with `raw.*` (`options.build_features`, with a boundary; the SQL of `features.sql` on the DuckDB of the program) and `features.ocean` (`options.sea`, flag `--sea`; needs the network). The `.duckdb` file now equals the file of `duckosm build` for these tables; `rust/duckosm-build/tests/features_h3.rs` compares them on Monaco. `options.boundary_cells` is still skipped. New flags of `duckosm-rust`: `--features`, `--sea`, `--h3-resolution`. *Host: nothing is needed.*
 - **`duckosm studio [OUT_DIR]`: a page on your computer that makes the data of an area** ([guide](docs/guides/studio.md)). Six steps as in duckOSM Studio: the area (a place name, a box on the map or a GeoJSON file), the OSM data (a Geofabrik extract, or a local `.osm.pbf`), the settings, the ground (the Ground step), the build with its progress, and the result, which is the page of `duckosm edit` served at `/edit/`. The server is the Rust server of `duckosm edit` (`rust/duckosm-edit/src/studio.rs`); `duckosm-rust studio` is the program (all steps in Rust, with no base-map layers or H3 columns yet); `duckosm studio` is the same page with the Python build, for the cross-check. The page is roadstyle's dashboard (the pin of `duckosm-edit` moves to roadstyle `34e21f30`), and each step is a card as in Studio. The card **Your areas** lists the areas on the disk, with Open (the map and the editor) and Load (the area and the settings back into the steps). The steps are the new parts `web/build_steps/` (`initAreaStep`, `initDataStep`, `initSettingsStep`, `initBuildStep`, `initResultStep`). `duckosm edit` now writes the record of the build also after a Python build, so Build again works on an area that `duckosm studio` made. *Host: duckOSM Studio moves its pin and can use the parts `initAreaStep`, `initSettingsStep`, `initBuildStep` and `initResultStep`, and `core.js` (`covering`, `settingsYaml`); `initDataStep` needs a path on disk, so it is for a local host only. Other hosts: nothing is needed.*
 - **The catalog of DEM sources** (`src/duckosm/data/dem_sources.json`, `duckosm.dem_sources.sources_for_bbox(bbox)`). One entry for each source of [Elevation sources](docs/reference/elevation-sources.md): coverage, resolution, product, CRS, vertical datum, licence, commercial use, access and `cors`. The function gives the sources that cover a box: a national 1 m DTM, EU-DTM, FABDEM, Copernicus GLO-30, then the others. Two tables of the docs page are made from the file (`scripts/update_elevation_sources_doc.py`); a test checks them. Tests: Monaco, Tartu, Stockholm.

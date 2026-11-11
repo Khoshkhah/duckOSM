@@ -23,7 +23,6 @@ pub mod h3;
 pub mod levels;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
-pub use duckosm_parquet::{parse_memory, LoadSummary, RAW_TABLES};
 
 pub use duckosm_core::filter::Mode as NetworkMode;
 pub use duckosm_core::network::Options as NetworkOptions;
@@ -95,6 +94,10 @@ pub struct Params {
     /// duckOSM `options.sea` (with `features`): also make `features.ocean` from Overture Maps. It reads the network, and
     /// a failure is a warning, as in duckOSM.
     pub sea: bool,
+    /// duckOSM `options.memory_limit` and `options.threads`: DuckDB's settings for the load of `raw.*` with `read_osm`
+    /// (docs/design/streaming_load.md). None: DuckDB's defaults (80% of the RAM, all cores).
+    pub memory_limit: Option<String>,
+    pub threads: Option<usize>,
 }
 
 impl Default for Params {
@@ -123,6 +126,8 @@ impl Default for Params {
             dem_license: None,
             dem_not_reference: false,
             building_faces: false,
+            memory_limit: None,
+            threads: None,
             h3_resolution: None,
             features: false,
             sea: false,
@@ -715,33 +720,6 @@ pub fn run<W: Write + Send>(
     Ok(sum)
 }
 
-/// The load step (docs/design/streaming_load.md): duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole
-/// `.osm.pbf` file, written into the folder `out` as the files `<table>_<shard>.parquet` of [`RAW_TABLES`] (one shard for
-/// each thread), with at most about `budget` bytes of memory and `threads` threads (None: all cores). The memory does not
-/// grow with the size of the file.
-pub fn load_raw(
-    pbf_path: &Path,
-    out: &Path,
-    budget: usize,
-    threads: Option<usize>,
-) -> Result<LoadSummary, String> {
-    std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
-    let f = std::fs::File::open(pbf_path).map_err(|e| format!("{}: {e}", pbf_path.display()))?;
-    duckosm_core::pbf::with_threads(threads, || {
-        duckosm_parquet::load_raw(
-            std::io::BufReader::new(f),
-            budget,
-            duckosm_core::pbf::threads(),
-            |name| {
-                let p = out.join(name);
-                std::fs::File::create(&p)
-                    .map(std::io::BufWriter::new)
-                    .map_err(|e| format!("{}: {e}", p.display()))
-            },
-        )
-    })?
-}
-
 /// Build from the PBF file `pbf_path` (cut to `p.boundary` when there is one) and write the files into `out`.
 pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String> {
     if p.duckdb && !cfg!(feature = "duckdb") {
@@ -826,6 +804,13 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             let db = out.join(format!("{}.duckdb", p.name));
             duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
             log.step("write duckdb");
+            // a build of the whole file: raw.* of duckOSM, with read_osm in DuckDB (an area gets raw.* from the cut, with
+            // the base-map layers below)
+            if cut.is_none() {
+                let n = duckosm_duckdb::write_raw(&db, pbf_path, p.memory_limit.as_deref(), p.threads)?;
+                sum.raw = Some(n);
+                log.step("raw (read_osm)");
+            }
             if p.features {
                 duckosm_duckdb::write_features(&db, &pq_dir, FEATURES_SQL)?;
                 log.step("features");

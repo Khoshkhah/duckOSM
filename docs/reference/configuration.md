@@ -103,8 +103,8 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.building_faces` | `false` (`true` in the config templates) | | write [`main.building_faces`](database.md#building_faces), the walls of the buildings with a type each ([The walls of the buildings](../concepts/building-walls.md)), and apply the wall rules (`extra.building_faces`) of the [fixes file](../guides/edit-osm-data.md). Needs the Rust engine, a PBF and a boundary: another build writes a warning and makes no walls |
 | `options.bus_routes` | `true` | | match the OSM bus routes to the driving edges: schema [`bus`](database.md#bus-schema). Needs driving and `raw.*`, so a `duckdb` build skips it |
 | `options.clip_strategy` | none | | how `osmium` cuts the PBF: `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
-| `options.memory_limit` | none | | The memory budget, e.g. `"16GB"`: DuckDB's memory limit, and the budget of the load step of the Rust engine ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/streaming_load.md)). None: DuckDB's default, and 1 GB for the load step |
-| `options.threads` | none | | The number of threads of DuckDB and of the load step of the Rust engine; none: all cores |
+| `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default. The program `duckosm-rust` uses it for the load of `raw.*` |
+| `options.threads` | none | | number of DuckDB threads; none is DuckDB's default. The program `duckosm-rust` uses it for the load of `raw.*` |
 | `options.simplify_batches` | `0` | | split the simplify step into this many batches to save memory; `0` sizes them from the node count, `1` is one pass |
 
 ## `validation`

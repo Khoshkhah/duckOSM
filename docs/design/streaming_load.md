@@ -1,7 +1,8 @@
 # The load step in Rust: `read_osm` and a fast PBF decoder
 
-Status: 2026-11-11. The code is on the branch `claude/streaming-load`. The offline build (way D) and the browser
-(way C) are not connected to it yet: see "The stages".
+Status: 2026-11-11. A whole-file build of `duckosm-rust` (way D) makes `raw.*` with `read_osm`. `duckosm build`
+(Python) keeps `ST_READOSM`: its wheel has no DuckDB inside, so it cannot load a function of the Rust module. The
+browser (way C) is a later stage: see "The stages".
 
 ## Summary
 
@@ -114,6 +115,9 @@ How it works:
 
 ## The comparison with the C++ readers
 
+To measure again: `cargo run --release -p duckosm-duckdb --example read_osm_compare -- <file.osm.pbf> <folder> <rust|st> [memory_limit] [threads]`
+makes `raw.*` in `<folder>/<rust|st>.duckdb` and prints the time of each table. Run both in both orders.
+
 ### Decode only
 
 All 75,506 blocks of France, read and decoded, nothing stored:
@@ -206,8 +210,10 @@ them into tables: a query reads the files. A copy into a `.duckdb` file is only 
 
 | Setting | Effect |
 |---|---|
-| `options.threads` | The threads of DuckDB and of the Rust load step. Not set: all cores. |
-| `options.memory_limit` | DuckDB's `memory_limit`, and the budget of the Parquet load. Not set: DuckDB's default (80% of the RAM), and 1 GB for the Parquet load. |
+| `options.threads` | DuckDB's threads. In `duckosm-rust`, also the threads of `read_osm` (DuckDB calls it from its threads). Not set: all cores. |
+| `options.memory_limit` | DuckDB's `memory_limit`. In `duckosm-rust`, the setting is read for the load of `raw.*` (before this work, the program ignored it). Not set: DuckDB's default, 80% of the RAM. |
+
+The Parquet load (way C) takes its budget as an argument; the page sets it when stage 3 connects it.
 
 DuckDB uses more memory than its limit: about 0.2 to 1.2 GB for its threads (France, 4 to 20 threads, measured with
 `ST_READOSM` and with `read_osm`). Fewer threads make this smaller.
@@ -216,7 +222,8 @@ DuckDB uses more memory than its limit: about 0.2 to 1.2 GB for its threads (Fra
 
 | Stage | Work | Check |
 |---|---|---|
-| 1 (this branch) | `pbfraw`, `read_osm`, the Parquet load with its budget, the measurements. | `equals_osmpbf`, `load_memory`, the Monaco comparisons with `ST_READOSM` |
-| 2 | Way D: `duckosm_build::build` makes `raw.*` with `read_osm`. The Python `duckosm build` keeps `ST_READOSM` (its wheel has no DuckDB inside). A CI test compares `read_osm` with `ST_READOSM` on Monaco. | The golden tests: every row and every `edge_id` stays equal |
+| 1 (done) | `pbfraw`, `read_osm`, the Parquet load with its budget, the measurements. | `pbfraw::tests::equals_osmpbf`, `duckosm-parquet/tests/load_memory.rs` |
+| 2 (done) | Way D: a whole-file build of `duckosm_build::build` makes `raw.*` with `read_osm`. The Python `duckosm build` keeps `ST_READOSM`. | `duckosm-duckdb/tests/read_osm.rs` compares `read_osm` with `ST_READOSM` on Monaco; the golden tests |
+| 2b | Way D with a boundary: the cut in rounds (the nodes inside the boundary on disk), then `read_osm` on the cut. Today an area still gets `raw.*` from the cut in memory. | The golden tests |
 | 3 | Way C: Studio writes the Parquet files to OPFS and DuckDB-Wasm reads them with `registerFileHandle`. | The same tests in the browser build, and a phone check |
 | 4 | The network step uses `pbfraw` in place of `osmpbf`, and reads in blocks. | The golden tests |

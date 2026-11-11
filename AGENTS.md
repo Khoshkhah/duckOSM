@@ -31,8 +31,7 @@ Several tests skip themselves unless local artifacts or tools exist: `pbf/soderm
 list from the config and executes it; read it first — step order carries real dependencies:
 
 - **Global steps once:** connect → (osmium pre-clip of the PBF to the boundary, cached in `pbf/`) →
-  the load into `raw.nodes/ways/relations` (engine rust: `rust_engine.load_raw`, the Rust load step in the memory budget
-  `options.memory_limit`, `docs/design/streaming_load.md`; engine python: `ST_READOSM`) → boundary → `global_junctions` (a mode-agnostic
+  `ST_READOSM` into `raw.nodes/ways/relations` → boundary → `global_junctions` (a mode-agnostic
   junction set so every mode splits roads at the same points and shares `edge_id`s).
 - **Per mode** (`CREATE SCHEMA <mode>; USE <mode>`, so unqualified table names are per-mode):
   RoadFilter → OSM overrides → GraphBuilder → GraphSimplifier (incl. `merge_segments`) →
