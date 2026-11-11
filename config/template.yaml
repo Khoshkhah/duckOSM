@@ -60,7 +60,7 @@ options:
   calculate_costs: true                # cost_s travel time
   boundary_cells: false                # main.boundary_cells H3 grid (needs a boundary)
   boundary_cell_resolutions: null      # e.g. [6, 7, 8]; null = [h3_resolution]
-  memory_limit: null                   # e.g. "16GB"; null = DuckDB default
+  memory_limit: null                   # e.g. "16GB": DuckDB's limit and the budget of the Rust load step; null = DuckDB default, 1 GB for the load
   threads: null                        # cap worker threads; null = DuckDB default
   simplify_batches: 0                  # 0 = auto-size by node count; 1 = single pass
   global_junctions: true               # every mode splits roads at the same points -> same edge_id in every mode

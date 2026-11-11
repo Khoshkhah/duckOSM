@@ -493,10 +493,27 @@ class DuckOSM:
             self.con.execute("INSERT INTO raw.ways VALUES (?, MAP(?::VARCHAR[], ?::VARCHAR[]), ?)", [wid, list(tags), list(tags.values()), refs])
 
     def _load_pbf(self) -> None:
-        """Load PBF file using ST_READOSM and save raw data."""
+        """Load the PBF file into raw.nodes, raw.ways and raw.relations. options.engine rust: the load step of the Rust
+        engine (rust_engine.load_raw, in the memory budget options.memory_limit); python: ST_READOSM."""
         logger.info("Loading PBF file...")
         start = time.time()
-        
+        if self.config.options.engine == "rust":
+            self.con.execute("CREATE SCHEMA IF NOT EXISTS raw")
+            res = rust_engine.load_raw(self.con, self.pbf_path, self.output_path.parent, self.config.name,
+                                       self.config.options.memory_limit)
+            logger.info(f"  duckosm-rust loaded {res['blocks']:,} blocks in {res['seconds']:.2f}s "
+                        f"(budget {res['budget'] / 1e9:.2f} GB, at most {res['most_in_flight']} blocks at a time)")
+        else:
+            self._load_pbf_st_readosm()
+        self.stats['pbf_load_time'] = time.time() - start
+        raw_nodes = self.con.execute("SELECT COUNT(*) FROM raw.nodes").fetchone()[0]
+        raw_ways = self.con.execute("SELECT COUNT(*) FROM raw.ways").fetchone()[0]
+        raw_rels = self.con.execute("SELECT COUNT(*) FROM raw.relations").fetchone()[0]
+        logger.info(f"  PBF loaded in {self.stats['pbf_load_time']:.2f}s")
+        logger.info(f"  Raw: {raw_nodes:,} nodes, {raw_ways:,} ways, {raw_rels:,} relations")
+
+    def _load_pbf_st_readosm(self) -> None:
+        """The load of the Python engine: DuckDB's ST_READOSM."""
         self.con.execute(f"""
             CREATE OR REPLACE VIEW osm_raw AS 
             SELECT * FROM ST_READOSM('{self.pbf_path}')
@@ -543,16 +560,6 @@ class DuckOSM:
             FROM osm_raw
             WHERE kind = 'relation'
         """)
-        
-        self.stats['pbf_load_time'] = time.time() - start
-        
-        # Get raw counts
-        raw_nodes = self.con.execute("SELECT COUNT(*) FROM raw.nodes").fetchone()[0]
-        raw_ways = self.con.execute("SELECT COUNT(*) FROM raw.ways").fetchone()[0]
-        raw_rels = self.con.execute("SELECT COUNT(*) FROM raw.relations").fetchone()[0]
-        
-        logger.info(f"  PBF loaded in {self.stats['pbf_load_time']:.2f}s")
-        logger.info(f"  Raw: {raw_nodes:,} nodes, {raw_ways:,} ways, {raw_rels:,} relations")
     
     def _effective_boundary_path(self) -> Optional[str]:
         """Boundary file to clip against: the raw path, or a cached outward-buffered copy when

@@ -12,7 +12,8 @@ duckOSM builds the road networks with an engine in Rust. It is the default since
 | Step | Engine |
 |---|---|
 | The network: `edges`, `private_edges`, `nodes`, `edge_id_map`, `edge_graph`, turn restrictions | Rust |
-| The osmium cut, `raw.*`, the base-map layers (`features.*`), the bus routes, the drawing levels | Python, for now |
+| The load of the file into `raw.*`, in a memory budget (`options.memory_limit`) | Rust |
+| The osmium cut, the base-map layers (`features.*`), the bus routes, the drawing levels | Python, for now |
 
 The Python steps move to Rust one at a time. Each move has a test that the tables stay equal.
 

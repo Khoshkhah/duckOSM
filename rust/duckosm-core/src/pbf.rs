@@ -6,7 +6,7 @@ use crate::geom::Pt;
 use crate::graph::{MemberType, Relation};
 use crate::model::{OtherTags, Tags, Way};
 use crate::network::Coords;
-use crate::raw::{Raw, RawNode, RawTags, RawWay};
+use crate::raw::{Raw, RawNode, RawSink, RawTags, RawWay};
 use crate::util::{FxHashMap, FxHashSet};
 use osmpbf::{Blob, BlobDecode, ByteOffset, Element, PrimitiveBlock};
 pub use osmpbf::{BlobReader, ElementReader};
@@ -87,14 +87,17 @@ fn relation(r: &osmpbf::Relation) -> Relation {
         members: r
             .members()
             .map(|m| {
-                let t = match m.member_type {
-                    osmpbf::RelMemberType::Node => MemberType::Node,
-                    osmpbf::RelMemberType::Way => MemberType::Way,
-                    osmpbf::RelMemberType::Relation => MemberType::Relation,
-                };
-                (m.member_id, t, m.role().unwrap_or("").to_string())
+                (m.member_id, member_type(&m.member_type), m.role().unwrap_or("").to_string())
             })
             .collect(),
+    }
+}
+
+fn member_type(t: &osmpbf::RelMemberType) -> MemberType {
+    match t {
+        osmpbf::RelMemberType::Node => MemberType::Node,
+        osmpbf::RelMemberType::Way => MemberType::Way,
+        osmpbf::RelMemberType::Relation => MemberType::Relation,
     }
 }
 
@@ -579,6 +582,113 @@ fn coords_of<R: Read + Send>(reader: ElementReader<R>, ways: &[Way]) -> Result<C
         .map_err(|e| e.to_string())?;
     drop(needed);
     Ok(Coords::new(nodes))
+}
+
+/// The number of threads that decode the blocks.
+pub fn threads() -> usize {
+    rayon::current_num_threads()
+}
+
+/// Decode one block of the file and give each of its elements to `sink`. A block that is not data (the header) gives
+/// nothing.
+pub fn raw_block(blob: &Blob, sink: &mut impl RawSink) -> Result<(), String> {
+    let Some(b) = data(blob)? else {
+        return Ok(());
+    };
+    for g in b.groups() {
+        for n in g.dense_nodes() {
+            sink.node(n.id(), n.lat(), n.lon(), &mut n.tags());
+        }
+        for n in g.nodes() {
+            sink.node(n.id(), n.lat(), n.lon(), &mut n.tags());
+        }
+        for w in g.ways() {
+            sink.way(w.id(), &mut w.tags(), &mut w.refs());
+        }
+        for r in g.relations() {
+            let mut members = r
+                .members()
+                .map(|m| (m.member_id, member_type(&m.member_type), m.role().unwrap_or("")));
+            sink.relation(r.id(), &mut r.tags(), &mut members);
+        }
+    }
+    Ok(())
+}
+
+/// A reader that counts its bytes: `BlobReader` reads each block with `take`, so the count after a block minus the
+/// count before it is the size of the block in the file (compressed).
+struct Counted<R> {
+    inner: R,
+    n: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl<R: Read> Read for Counted<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let k = self.inner.read(buf)?;
+        self.n.fetch_add(k, std::sync::atomic::Ordering::Relaxed);
+        Ok(k)
+    }
+}
+
+/// Read all blocks of the file in rounds, and decode the blocks of a round at the same time (`new` gives a sink for
+/// each block, `finish` makes its part). `fits(size, round)` says if one more block of `size` bytes (in the file,
+/// compressed) goes into the round that has the sizes `round`. A round always takes its first block. `done` gets each
+/// part and the size of its block, in the order of the file. Only the blocks of one round are in memory, so `fits`
+/// sets the memory of this step. Returns the number of blocks.
+pub fn stream_raw<R, S, T>(
+    reader: R,
+    mut fits: impl FnMut(usize, &[usize]) -> bool,
+    new: impl Fn() -> S + Sync,
+    finish: impl Fn(S) -> Result<T, String> + Sync,
+    mut done: impl FnMut(T, usize) -> Result<(), String>,
+) -> Result<usize, String>
+where
+    R: Read + Send,
+    S: RawSink,
+    T: Send,
+{
+    let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut blobs = BlobReader::new(Counted {
+        inner: reader,
+        n: n.clone(),
+    });
+    let mut next = || -> Result<Option<(Blob, usize)>, String> {
+        let before = n.load(std::sync::atomic::Ordering::Relaxed);
+        match blobs.next() {
+            None => Ok(None),
+            Some(b) => {
+                let b = b.map_err(|e| e.to_string())?;
+                Ok(Some((b, n.load(std::sync::atomic::Ordering::Relaxed) - before)))
+            }
+        }
+    };
+    let (mut count, mut waiting) = (0, next()?);
+    while let Some(first) = waiting.take() {
+        let (mut round, mut sizes) = (vec![first.0], vec![first.1]);
+        while let Some((b, size)) = next()? {
+            if fits(size, &sizes) {
+                round.push(b);
+                sizes.push(size);
+            } else {
+                waiting = Some((b, size));
+                break;
+            }
+        }
+        count += round.len();
+        let parts: Vec<Result<T, String>> = round
+            .par_iter()
+            .map(|b| {
+                let mut s = new();
+                raw_block(b, &mut s)?;
+                finish(s)
+            })
+            .collect();
+        drop(round);
+        for (p, size) in parts.into_iter().zip(sizes) {
+            done(p?, size)?;
+        }
+    }
+    Ok(count)
 }
 
 #[cfg(test)]

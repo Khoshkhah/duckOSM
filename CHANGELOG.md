@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The load step in a memory budget** (`options.engine: rust`, the default). The Rust engine reads the `.osm.pbf` file and writes `raw.nodes`, `raw.ways` and
+  `raw.relations` while it reads, with the same rows and types as `ST_READOSM`. The memory does not grow with the size of the file: `options.memory_limit` is the
+  budget (1 GB if it is not set). A test with a counting allocator fails if the load goes above its budget. `duckosm._rust.load_raw` is the new function.
+  Design: `docs/design/streaming_load.md`.
+
 ### Host changes
 
 For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each entry says what the host must do.

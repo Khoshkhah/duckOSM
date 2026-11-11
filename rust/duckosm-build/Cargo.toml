@@ -17,7 +17,7 @@ zstd = ["duckosm-parquet/zstd"]
 
 [dependencies]
 duckosm-core = { path = "../duckosm-core" }
-duckosm-parquet = { path = "../duckosm-parquet", default-features = false }
+duckosm-parquet = { path = "../duckosm-parquet", default-features = false, features = ["pbf"] }
 duckosm-duckdb = { path = "../duckosm-duckdb", optional = true }
 yaml-rust2 = "0.13"
 # the H3 columns (h3.rs): pure Rust, its cells equal those of the C library that the Python package h3 wraps

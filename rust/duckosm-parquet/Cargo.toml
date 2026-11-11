@@ -9,6 +9,8 @@ default = ["zstd"]
 # zstd is a C library: it does not build for WebAssembly. Use "snap" (pure Rust) there.
 zstd = ["parquet/zstd"]
 snap = ["parquet/snap"]
+# load_raw: the load step reads the .osm.pbf file (docs/design/streaming_load.md)
+pbf = ["duckosm-core/pbf"]
 
 [dependencies]
 duckosm-core = { path = "../duckosm-core", default-features = false }
@@ -17,3 +19,11 @@ arrow-schema = "=60.0.0"
 parquet = { version = "=60.0.0", default-features = false, features = ["arrow"] }
 # the rows of visualization.edge_levels (the same commit as duckosm-build)
 roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f0a161b9abd2d993c7963b909de0a9a4322f38bf" }
+
+[dev-dependencies]
+duckosm-core = { path = "../duckosm-core" }
+
+# the memory of the load step stays in its budget (a counting allocator, so a test file of its own)
+[[test]]
+name = "load_memory"
+required-features = ["pbf"]

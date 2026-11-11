@@ -3,12 +3,31 @@
 //! duckOSM's own SQL (docs/features.md). The OSM fixes and the sidewalk rule change `raw.ways` as in duckOSM.
 
 use crate::fixes::{Elem, NewNode, OsmFixes, TagEdit, NEW_WAY_ID_MIN};
-use crate::graph::Relation;
+use crate::graph::{MemberType, Relation};
 use crate::model::Way;
 use crate::util::FxHashMap;
 
 /// The tags in the order of the PBF file. No tags: an empty list (NULL in `raw.*`).
 pub type RawTags = Vec<(String, String)>;
+
+/// A receiver of the elements of duckOSM's `raw.*` tables: all nodes, ways and relations of a file, with all their
+/// tags, in the order of the file (the load step, docs/design/streaming_load.md). The tags come in the order of the
+/// file; no tags is an empty iterator; a member without a role has the role "".
+pub trait RawSink {
+    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>);
+    fn way<'a>(
+        &mut self,
+        id: i64,
+        tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+        refs: &mut dyn Iterator<Item = i64>,
+    );
+    fn relation<'a>(
+        &mut self,
+        id: i64,
+        tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+        members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+    );
+}
 
 pub struct RawNode {
     pub id: i64,
