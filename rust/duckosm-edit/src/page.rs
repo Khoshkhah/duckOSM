@@ -100,7 +100,7 @@ fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Opti
     db.execute(&run.drop_sql(&made))?;
     // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
     // the clicked road in the panel (no tooltip)
-    let mut args = json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels, "page_script": script, "page_style": style});
+    let mut args = json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels, "page_script": script, "page_style": style, "street_view": false});
     if let Some(b) = basemap {
         args["basemap"] = json!(b);
     }
@@ -134,7 +134,9 @@ pub fn make_tiled(db: &mut dyn Db, name: &str, prefix: &str) -> Result<(String, 
 /// The page of `duckosm studio`: roadstyle's standard dashboard (the same template, toolbox and panel as the page of `duckosm edit`) for an area with no
 /// roads yet. The panel starts empty; the script (page/studio.js) puts the steps into it, as cards. MapLibre and roadstyle's own files come from the program.
 pub fn make_studio() -> Result<String, String> {
-    let args = json!({"name": "duckOSM Studio", "template": "dashboard", "tooltip": null, "state": "live", "tiles": false, "basemap": "ofm_liberty", "page_script": STUDIO_SCRIPT, "page_style": STUDIO_STYLE});
+    // no Street View link in the popup (Kaveh, 2026-11-11)
+    let args = json!({"name": "duckOSM Studio", "template": "dashboard", "tooltip": null, "state": "live", "tiles": false, "basemap": "ofm_liberty", "page_script": STUDIO_SCRIPT, "page_style": STUDIO_STYLE,
+                      "street_view": false});
     let o = roadstyle::look::Options::from_value(&json!({"args": args})).map_err(|e| e.to_string())?;
     let lk = roadstyle::Look::resolve(&o).map_err(|e| e.to_string())?;
     let given = roadstyle::page_options::given_of(&lk, &o.args);
