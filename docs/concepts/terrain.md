@@ -17,9 +17,12 @@ This page tells what duckOSM stores, how the data goes to a map, and which choic
 | Table or column | What it is | Made by |
 |---|---|---|
 | [`main.elevation_grid`](../reference/database.md#elevation_grid) | the **terrain**: one row for each pixel of the DEM over the area (`col`, `row`, `lon`, `lat`, `z`) | the Rust build with `--dem` |
-| `nodes.ele` | the ground height at each node | the Rust build with `--dem`, or `duckosm elevation` |
-| `edges.z_from`, `edges.z_to` | the height at the two ends of each edge | the same |
-| `edges.z_vertices` | the height at each point of the edge line | the Rust build with `--dem` |
+| `<mode>.elevation_nodes` (`node_id`, `ele`) | the ground height at each node | the Rust build with `--dem` |
+| `<mode>.elevation_edges` (`edge_id`, `z_from`, `z_to`, `z_vertices`) | the height at the two ends of each edge, and at each point of the edge line, in the order of the line | the Rust build with `--dem` |
+| `nodes.ele`, `edges.z_from`, `edges.z_to`, `edges.z_vertices` | the same heights, as columns of the mode's own tables | `duckosm elevation` (the Python command) |
+
+The Rust build keeps the heights in their own tables: join them to `nodes` on `node_id` and to `edges` on `edge_id`. The Python
+command adds them to `nodes` and `edges` as columns. The values are the same.
 | [`main.elevation_metadata`](../reference/database.md#elevation_metadata) | where the heights come from: source, product (`DTM` or `DSM`), resolution, vertical datum, licence, and `sha256`, the SHA-256 of the DEM file (the ground id) | both |
 
 The grid is the terrain itself. The heights at the nodes and edges are samples of the same file at the road points.
@@ -41,21 +44,93 @@ pixels (14,420 rows, `z` from 0 to 543.77 m) and takes 45 KB of Parquet, about 3
 ```mermaid
 flowchart LR
   DEM["DEM file<br/>(one for each area)"] --> B["duckOSM build<br/>--dem"]
-  B --> G["main.elevation_grid<br/>nodes.ele, edges.z_*"]
-  G --> S["SimReady<br/>the ground bent to the roads"]
-  G --> R["roadstyle<br/>terrain tiles"]
-  S --> R
-  R --> M["map: 3D terrain<br/>and hillshade"]
+  B --> G["main.elevation_grid<br/>(the terrain)"]
+  B --> Z["elevation_edges.z_vertices<br/>(the ground at the road points)"]
+  B --> M["main.elevation_metadata<br/>(the ground id)"]
+  Z --> SP["SimReady<br/>graded road profile"]
+  G --> SC["SimReady<br/>conformed ground (GLB)"]
+  SP --> SC
+  G --> T["roadstyle<br/>terrain file (PMTiles)"]
+  T --> MAP["map: 3D terrain, hillshade,<br/>roads on the terrain"]
+  T --> D["roadstyle<br/>3D bridge decks"]
+  Z -.->|next| V["roadstyle<br/>vehicles"]
+  T --> V
 ```
 
-1. **duckOSM** writes the grid and the heights from the area's DEM.
-2. **SimReady** can bend the ground to the road heights ("the conformed ground"). Under a road the ground then has the road's height,
-   so a road does not float above the terrain or go into it. Away from the roads, the ground stays as the DEM gives it.
-3. **roadstyle** makes terrain tiles from that ground, one file for each area, and the map draws its 3D terrain and hillshade from
-   that file. A map of an area that has a ground does not use the AWS Terrain Tiles.
+1. **duckOSM** writes the terrain grid, the heights at the road points and the ground id, all from the area's DEM.
+2. **SimReady** makes the designed height of each road (the graded profile) from the heights at the road points. It then bends the
+   ground to the roads (the conformed ground), so a road does not float above the terrain or go into it. Away from the roads, the
+   ground stays as the DEM gives it.
+3. **roadstyle** makes one terrain file for each area from the grid. The map draws its 3D terrain and hillshade from that file, and
+   the roads, the bridge decks and the vehicles stand on it. A map of an area that has a ground does not use the AWS Terrain Tiles.
+
+The dotted line is not built yet: the vehicles take their heights from the map's terrain today (see [The road profile](#the-road-profile)).
 
 The same grid can go to the browser: a build with no file system (duckOSM Studio) gives the DEM as bytes, and the build writes the
 same tables.
+
+## Each part and its terrain
+
+State on 2026-11-10.
+
+| Part | Reads | Does | Writes or shows | State |
+|---|---|---|---|---|
+| **duckOSM build** (`duckosm-rust --dem`) | the DEM file (GeoTIFF, EPSG:4326, 32-bit floats) and its product, vertical datum and licence | reads the DEM one time; takes its pixels over the area and samples it at each node and at each point of each edge | `main.elevation_grid`, `<mode>.elevation_nodes`, `<mode>.elevation_edges`, `main.elevation_metadata` with the ground id (`sha256`) | done |
+| **duckOSM Studio** (browser) | the DEM file that you select in the step "Ground"; the step sets its product, datum and licence from a catalog | the same Rust build, in WebAssembly | the same tables; the terrain file for its map (made by roadstyle's WebAssembly) | done (Studio PRs 137 and 138) |
+| **`duckosm elevation`** (Python) | a DEM file or a global source | samples the DEM at the nodes and the edge points | the columns `ele`, `z_from`, `z_to`, `z_vertices`; no grid | done |
+| **SimReady** `import-elevation` | the heights at the road points (duckOSM) and the bridge groups | writes heights at stations along each carriageway, then fits the graded profile: straight grades and vertical curves | `sim.elevation_profile` (`dem_sample`, `graded`, `earthwork_m`: cut or fill) | done for Monaco (FABDEM) and Vancouver (1 m LiDAR); some height checks still fail where a junction meets a lane |
+| **SimReady** `gltf` adapter | `main.elevation_grid` and the graded profile | bends the ground to the roads (`terrain-conform`): the road's height across the roadway, a blend back to the DEM beside it | the conformed ground as a mesh in the GLB | on SimReady `main`; the conformed ground is not yet a grid that other projects read |
+| **roadstyle** map terrain | the page option `ground`: the facts of `main.elevation_metadata` and the terrain file made from `main.elevation_grid` | encodes the grid as Terrarium PNG tiles in one PMTiles file (`roadstyle terrain`, `terrain_pmtiles`) | the 3D terrain and the hillshade; the attribution names the ground. With no ground: the AWS Terrain Tiles, and the page says "Ground: AWS Terrain Tiles" | done (roadstyle PRs 145, 146, 147); it draws the reference grid, not yet the conformed ground |
+| **roadstyle** roads | the terrain of the page | draws each road as a line; MapLibre lays the line on the terrain | the road's height at each pixel is the terrain's height there | done |
+| **roadstyle** 3D bridge decks | the terrain of the page | a deck is level between the ground at the two end nodes of its chain; its ramps rise from the ground at each free end; one height for each group of bridges (`rsSetBridgeHeight`) | the decks as one sloped mesh | done |
+| **roadstyle** vehicles | a SUMO run (FCD and `net.xml`) and the page's roads | gives each vehicle the height of its road ([The road profile](#the-road-profile)) | the vehicles in 3D, with the tunnels' look | roadstyle PR 149 (not merged): the heights come from the map's terrain along each road; `z_vertices` is next |
+| **urbanstyle** | the AWS Terrain Tiles (a switch "rough terrain") | sends the bridge deck heights from LiDAR to SimReady | its 3D map | to do: the same terrain file as roadstyle |
+
+## The road profile
+
+A **road profile** is the height of one road along its line: a list of (distance along the line, height), with a straight line
+between two points. Every 3D product draws the road at that height, and a vehicle on the road takes its height from it, never from
+the ground at its longitude and latitude. Two roads can cross at one point (a bridge over a road), so a point alone does not tell
+the height. The road does.
+
+### Where the heights come from
+
+| Source | Heights | What it is | Who uses it |
+|---|---|---|---|
+| SimReady graded profile | `sim.elevation_profile`, method `graded`, at stations along each carriageway | the designed road: straight grades and vertical curves, with cut and fill (`earthwork_m`) | SimReady's `.xodr`, GLB and 3D dashboard |
+| duckOSM `z_vertices` | one height at each point of the edge line | the DEM at the road's points: the ground, not a designed road. No cut, no fill | SimReady `import-elevation`; roadstyle vehicles (next) |
+| the map's terrain | the terrain file of the page, read along the road's own line | the same ground as the drawn road, at the road's centre line | roadstyle vehicles today, every 5 m |
+
+A reader takes the first source that it has, in this order, and the page says which one it took. No source is used in silence.
+
+### The rule for each kind of road
+
+| Road | Profile |
+|---|---|
+| ground road | the heights of the source along its line |
+| bridge | the deck surface: level between the ground at the two ends of its chain of bridges, ramps from the ground at each free end, the group's height. The deck mesh and the vehicles use the same rule |
+| tunnel | today the terrain along its line (the tunnel is drawn on the hill above it, and a vehicle in it has the tunnel's look: shown, faded or hidden). A tunnel's own depth is to do |
+| junction | there is no drawn road inside a junction: the height goes in a straight line from the end of the road in to the start of the road out (SimReady: from the stop line of the road in to the stop line of the road out) |
+| lane | a lane has the profile of its road. SUMO cuts each lane back from its junctions, so the lane's start and end are first put on the road's line; a place on the lane is the same fraction of that part of the road |
+
+### The road and the ground must agree
+
+A road profile and the drawn terrain are two surfaces. Where they differ, a road or a vehicle floats or sinks. The standard fixes
+this with the conformed ground ([The ground reference](ground-reference.md), section 3): under a road the ground has the road's height.
+
+Until roadstyle draws the conformed ground, the map lays each road on the reference terrain, and two differences stay:
+
+- **Between road points that are far apart.** A profile is a straight line between two points; the terrain follows the hill. On
+  Monaco's driving roads the median distance between two points is 7.5 m, but 9.5 % of the distances are more than 30 m (one DEM
+  pixel), and the longest is 270 m.
+- **Across a road on a side slope.** The terrain under a road is not level across it, but a road is. A vehicle 1.6 m beside the
+  centre line has the centre line's height, and the drawn road under it can be about 1 m higher (measured on Monaco at the
+  Sainte-Dévote roundabout).
+
+### Memory
+
+A profile is about 2 KB for each km of road (one 4-byte height every 2 m). Monaco's 2,765 driving roads (93 km) need about 0.3 MB,
+and an area of 10,000 km of road about 20 MB.
 
 ## Choose the DEM
 
@@ -108,4 +183,6 @@ The file is a GeoTIFF in EPSG:4326 with 32-bit floats. `duckosm elevation` can a
   gives a finer terrain, and a bigger grid.
 
 Related: [The ground reference](ground-reference.md), [Add elevation](../guides/elevation.md),
+roadstyle's [map terrain design](https://github.com/Khoshkhah/roadstyle/blob/main/docs/design/ground_terrain.md) and
+[road heights design](https://github.com/Khoshkhah/roadstyle/blob/claude/vehicles-p2/docs/design/road_heights.md),
 [Database schema](../reference/database.md#elevation_grid).
