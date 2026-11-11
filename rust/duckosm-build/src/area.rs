@@ -8,7 +8,7 @@ use duckosm_core::fixes::OsmFixes;
 use duckosm_core::geom::Pt;
 use duckosm_core::lanes::{self, LaneEdges};
 use duckosm_core::model::{Node, Way};
-use duckosm_core::network::{self, Coords, Options};
+use duckosm_core::network::{Coords, Options};
 use duckosm_parquet::{self as pq, Metadata, Prop, Transfer};
 use serde_json::Value;
 use std::io::Write;
@@ -17,12 +17,14 @@ use std::io::Write;
 pub struct Area<'a> {
     /// The boundary file (GeoJSON text), if the area has one.
     pub boundary: Option<&'a str>,
-    /// The ways as read (after the fixes): the global junctions.
+    /// The ways as read (after the fixes).
     pub ways: &'a [Way],
     /// The coordinates of the nodes: the box of the area when there is no boundary.
     pub coords: &'a Coords,
     /// The nodes of each mode that was built: the transfers and the time zone.
     pub nodes: &'a [(Mode, Vec<Node>)],
+    /// `network::global_junctions(ways)`, computed one time for the modes (empty when `opts.global_junctions` is off).
+    pub junctions: &'a duckosm_core::util::FxHashMap<i64, bool>,
     pub opts: &'a Options,
     /// The build time, microseconds since 1970 (UTC). The caller gives it: WebAssembly has no clock in Rust.
     pub built_at: i64,
@@ -40,7 +42,7 @@ pub fn write_area_tables<W: Write + Send>(
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<(), String> {
     if a.opts.global_junctions {
-        let mut gj: Vec<(i64, bool)> = network::global_junctions(a.ways).into_iter().collect();
+        let mut gj: Vec<(i64, bool)> = a.junctions.iter().map(|(&n, &r)| (n, r)).collect();
         gj.sort_unstable();
         pq::write_global_junctions_to(file("global_junctions_main.parquet")?, &gj)?;
     }
