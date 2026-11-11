@@ -151,7 +151,15 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         page.wait_for_function("document.querySelectorAll('[name=bs-place]').length === 2")
         assert page.locator("[name=bs-place]:not([disabled])").count() == 1 and page.locator("[name=bs-place][disabled]").count() == 1, "a place with no boundary is listed with no choice"
         assert page.is_disabled("[data-bs=run]") and "Choose the area" in page.inner_text("[data-bs=why]")
+        # the place under the mouse shows its outline on the map (the purple preview of Studio), and it goes when the mouse leaves the list
+        preview = "(() => { try { return window.studio.map.getSource('bs-preview').serialize().data.features.length; } catch { return -1; } })()"      # -1: the layers are not made yet
+        page.hover(".bs-area label[data-i='0']")
+        page.wait_for_function(f"{preview} === 1")
+        page.mouse.move(900, 400)
+        page.wait_for_function(f"{preview} === 0")
         page.click("[name=bs-place] + span")
+        page.wait_for_function("window.studio.area.area()")
+        assert page.evaluate(preview) == 0, "after a pick only the area shows"
         assert page.input_value("[data-as=name]") == "Monaco"
         _unfold(page, 2)
         page.fill("[data-as=name]", "monaco-a")
@@ -278,6 +286,33 @@ def test_a_box_on_a_phone(studio):
         page.locator("[data-bs=run]").scroll_into_view_if_needed()
         assert page.locator("[data-bs=run]").bounding_box()["height"] >= 44
         page.screenshot(path=str(out / "phone.png"))
+        assert not errors, errors
+        browser.close()
+
+
+def test_h3_cells_are_the_area(studio):
+    """The H3 tab of Studio: a hexagon that the person clicks is the area; a second click takes it away; a cell ID in the search box makes the area."""
+    out, url = studio
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        page.evaluate("window.studio.map.jumpTo({center: [7.42, 43.735], zoom: 12})")
+        page.click("[data-tab=h3]")
+        page.wait_for_function("document.querySelector('[data-as=h3-level]').options.length === 6", timeout=60_000)      # h3-js has loaded
+        page.evaluate("() => { const s = document.querySelector('[data-as=h3-level]'); s.value = '8'; s.dispatchEvent(new Event('change', { bubbles: true })); }")      # roadstyle draws its own list over the select
+        page.wait_for_function("document.querySelector('[data-as=h3-grid-note]').textContent.includes('hexagon')", timeout=30_000)
+        page.mouse.click(900, 450)
+        page.wait_for_function("window.studio.area.area()?.from === 'h3'", timeout=30_000)
+        a = page.evaluate("window.studio.area.area()")
+        assert re.fullmatch(r"[0-9a-f]{15}", a["name"]) and 0.5 < a["km2"] < 1.2, a            # one level-8 hexagon is 0.74 km²
+        assert page.evaluate("window.studio.area.h3Cells().length") == 1
+        page.mouse.click(900, 450)                                                              # the same hexagon: it goes
+        page.wait_for_function("window.studio.area.area() === null", timeout=30_000)
+        # a cell ID in the search box
+        page.click("[data-tab=search]")
+        page.fill("[data-as=search] input", "883969a40bfffff")
+        page.wait_for_function("window.studio.area.area()?.from === 'h3'", timeout=30_000)
+        assert "H3 cell, level 8" in page.inner_text(".bs-area [data-as=msg]")
         assert not errors, errors
         browser.close()
 

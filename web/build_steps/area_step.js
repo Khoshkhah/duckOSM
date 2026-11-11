@@ -5,6 +5,7 @@ import { areaKm2, bbox, box, esc, geometry, polygonsOf, slug } from "./core.js";
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 // the drawing tools of Studio (terra-draw), and the union of the shapes (polyclip-ts): the same versions, loaded when the tab Draw opens the first time
+const H3 = "https://cdn.jsdelivr.net/npm/h3-js@4.2.1/+esm", H3_MAX_CELLS = 500, H3_MAX_KM2 = 5000, H3_MAX_GRID = 4000;      // H3: the same library and limits as Studio (a mistake cannot ask for a huge build)
 const TERRA = "https://cdn.jsdelivr.net/npm/terra-draw@1.38.0/+esm", TERRA_MAPLIBRE = "https://cdn.jsdelivr.net/npm/terra-draw-maplibre-gl-adapter@1.5.0/+esm", POLYCLIP = "https://cdn.jsdelivr.net/npm/polyclip-ts@0.16.8/+esm";
 const icon = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICONS = {
@@ -12,6 +13,7 @@ const ICONS = {
 	file: icon('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/>'), target: icon('<circle cx="12" cy="12" r="8"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>'),
 	download: icon('<path d="M12 4v12M7 11l5 5 5-5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
 	rectangle: icon('<rect x="3.5" y="5.5" width="17" height="13" rx="1"/>'), polygon: icon('<path d="m12 3 8.5 6.2-3.2 10.3H6.7L3.5 9.2Z"/>'), circle: icon('<circle cx="12" cy="12" r="8.5"/>'),
+	hex: icon('<path d="M12 2.5 20.2 7.2v9.6L12 21.5l-8.2-4.7V7.2Z"/>'),
 	freehand: icon('<path d="M3 15c2-5 5-8 7-5s1 7 4 7 4-6 7-9"/>'), select: icon('<path d="m4 4 7 17 2.5-7.5L21 11Z"/>'), merge: icon('<rect x="3" y="3" width="11" height="11" rx="1"/><rect x="10" y="10" width="11" height="11" rx="1"/>'),
 	trash: icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'), x: icon('<path d="M6 6l12 12M18 6 6 18"/>'),
 };
@@ -90,7 +92,8 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 	root.innerHTML = `<div class="rs-tabs" role="tablist" aria-label="The ways to make an area">
 			<button type="button" class="rs-tab on" data-tab="search">${ICONS.search}Search</button>
 			<button type="button" class="rs-tab" data-tab="draw">${ICONS.draw}Draw</button>
-			<button type="button" class="rs-tab" data-tab="file">${ICONS.file}File</button></div>
+			<button type="button" class="rs-tab" data-tab="file">${ICONS.file}File</button>
+			<button type="button" class="rs-tab" data-tab="h3">${ICONS.hex}H3</button></div>
 		<section data-pane="search"><div data-as="search"></div><div class="rs-opts" role="radiogroup" aria-label="The places found" data-as="found"></div></section>
 		<section data-pane="draw" hidden>
 			<div class="rs-toolrow" role="toolbar" aria-label="Drawing tools">
@@ -105,6 +108,8 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 			</div>
 			<p class="small muted" data-as="hint" aria-live="polite">Pick a tool, then draw on the map.</p></section>
 		<section data-pane="file" hidden><div data-as="drop"></div></section>
+		<section data-pane="h3" hidden><select data-as="h3-level" aria-label="The size of a hexagon (H3 level)"></select>
+			<div class="bs-h3box"><p data-as="h3-hint" aria-live="polite">Click a hexagon on the map to add it to the area.</p><p data-as="h3-grid-note"></p></div></section>
 		<p class="rs-field-msg" role="status" data-as="msg"></p>
 		<div class="area-acts">${unselect}</div>`;
 	const q = (k) => root.querySelector(`[data-as="${k}"]`);
@@ -113,7 +118,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		<div class="rs-kpis" data-as="kpis" hidden></div>
 		<div class="area-acts"><button type="button" data-as="boundary" disabled>${ICONS.download}Boundary</button>${unselect}</div>`;
 	if (detail === root) root.insertAdjacentHTML("beforeend", detailHtml); else detail.innerHTML = detailHtml;
-	let current = null, td = null, tdLoading = null, merged = [], selected = null;
+	let current = null, h3On = false, td = null, tdLoading = null, merged = [], selected = null;
 	const msg = (t, bad = false) => { q("msg").textContent = t; q("msg").classList.toggle("err", bad); };
 
 	// the area on the map: a fill and a line (made when the style has loaded, and again for a new style)
@@ -122,17 +127,31 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		map.addSource("bs-area", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 		map.addLayer({ id: "bs-area-fill", type: "fill", source: "bs-area", paint: { "fill-color": "#2563eb", "fill-opacity": 0.14 } });
 		map.addLayer({ id: "bs-area-line", type: "line", source: "bs-area", paint: { "line-color": "#2563eb", "line-width": 2.5 } });
+		// the place under the mouse in the list (as in Studio): purple, on a white casing, with its name along the line; a point is a purple dot
+		map.addSource("bs-preview", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+		const notPoint = ["!=", ["geometry-type"], "Point"];
+		map.addLayer({ id: "bs-preview-fill", type: "fill", source: "bs-preview", filter: notPoint, paint: { "fill-color": "#7c3aed", "fill-opacity": 0.15 } });
+		map.addLayer({ id: "bs-preview-casing", type: "line", source: "bs-preview", filter: notPoint, paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.9 } });
+		map.addLayer({ id: "bs-preview-line", type: "line", source: "bs-preview", filter: notPoint, paint: { "line-color": "#7c3aed", "line-width": 2.5 } });
+		map.addLayer({ id: "bs-preview-label", type: "symbol", source: "bs-preview", filter: notPoint, layout: { "symbol-placement": "line", "symbol-spacing": 300, "text-field": ["get", "name"], "text-font": ["Noto Sans Bold"], "text-size": 12, "text-offset": [0, -1] },
+			paint: { "text-color": "#6d28d9", "text-halo-color": "#ffffff", "text-halo-width": 2 } });
+		map.addLayer({ id: "bs-preview-point", type: "circle", source: "bs-preview", filter: ["==", ["geometry-type"], "Point"], paint: { "circle-radius": 8, "circle-color": "#7c3aed", "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
 	};
-	let shape = null;
-	const put = () => { layers(); map.getSource("bs-area").setData({ type: "FeatureCollection", features: shape ? [{ type: "Feature", properties: {}, geometry: shape }] : [] }); };
-	const draw = (g) => { shape = g; map.loaded() || map.isStyleLoaded() ? put() : map.once("load", put); };
-	map.on("styledata", () => { if (shape && !map.getSource("bs-area")) try { put(); } catch { /* the style is not ready: the next styledata tries again */ } });
+	let shape = null, previewShape = null;
+	const put = () => {
+		layers();
+		map.getSource("bs-area").setData({ type: "FeatureCollection", features: shape ? [{ type: "Feature", properties: {}, geometry: shape }] : [] });
+		map.getSource("bs-preview").setData({ type: "FeatureCollection", features: previewShape ? [{ type: "Feature", properties: { name: previewShape.name }, geometry: previewShape.geometry }] : [] });
+	};
+	const draw = (g) => { shape = g; if (map.getSource("bs-area") || map.isStyleLoaded()) put(); else map.once("idle", put); };      // "idle": the style is there (a map that loaded before has no more load event)
+	map.on("styledata", () => { if (!map.getSource("bs-area") && (shape || cells.size)) try { put(); h3Put(); } catch { /* the style is not ready: the next styledata tries again */ } });
 	const zoom = () => { if (current) { const b = current.bbox; map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: padding(), duration: 0, maxZoom: 17 }); } };
 
 	function set(g, name = "", from = "", { zoom: fit = true, show = true } = {}) {
 		const polys = polygonsOf(g);
 		if (!polys.length) return msg("This has no polygon.", true);
 		const b = bbox(polys), km2 = areaKm2(polys), vertices = polys.reduce((n, p) => n + p.reduce((m, r) => m + r.length, 0), 0);
+		if (from !== "h3") h3Forget();
 		current = { name: slug(name) || "area", geometry: geometry(polys), polygons: polys, bbox: b, km2, vertices, from };
 		d("name").value = current.name;
 		for (const el of [d("name"), d("boundary"), ...detail.querySelectorAll('[data-as="unselect"]'), ...root.querySelectorAll('[data-as="unselect"]')]) el.disabled = false;
@@ -140,6 +159,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		d("kpis").hidden = false;
 		d("kpis").innerHTML = rs.kpi("Area", num(km2, 2), "km²") + rs.kpi("Polygons", num(polys.length), "") + rs.kpi("Vertices", num(vertices), "");
 		msg("");
+		preview(null);
 		draw(show ? current.geometry : null);                  // terra-draw shows the shapes that the person draws
 		if (fit) zoom();
 		onChange();
@@ -147,6 +167,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 
 	function clear() {
 		current = null;
+		h3Forget();
 		try { td?.clear(); } catch { /* no shape */ }
 		d("name").value = ""; d("kpis").hidden = true; d("kpis").innerHTML = "";
 		for (const el of [d("name"), d("boundary"), ...detail.querySelectorAll('[data-as="unselect"]'), ...root.querySelectorAll('[data-as="unselect"]')]) el.disabled = true;
@@ -155,7 +176,12 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 	}
 
 	// the tabs: roadstyle's rs.tabs shows the pane of the chosen tab (the panes beside the tabs); the box stops when another tab opens
-	rs.tabs.use(root.querySelector(".rs-tabs"), (id) => { if (id !== "search") here.set(false); tool(id === "draw" ? (td?.getSnapshot().length ? "select" : "rectangle") : null); });
+	rs.tabs.use(root.querySelector(".rs-tabs"), (id) => {
+		if (id !== "search") here.set(false);
+		tool(id === "draw" ? (td?.getSnapshot().length ? "select" : "rectangle") : null);
+		h3On = id === "h3";
+		if (h3On) h3Open().then(h3Grid); else h3Grid();
+	});
 
 	// search, as in Studio: while the person types (after 300 ms, from 2 letters) the places of Photon are listed, then each gets its boundary from Nominatim.
 	// A place with no boundary is listed with no choice. "What is here?" gives the places around a point of the map.
@@ -164,7 +190,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		found = items;
 		q("found").innerHTML = items.map((f, i) => {
 			const p = f.properties, ok = p.photon || polygonsOf(f.geometry).length > 0, [title, ...rest] = String(p.display_name ?? "").split(", ");
-			return `<label class="rs-opt${ok ? "" : " point"}" title="${esc(p.display_name)}"><input type="radio" name="bs-place" value="${i}"${ok ? "" : " disabled"}>` +
+			return `<label class="rs-opt${ok ? "" : " point"}" data-i="${i}" title="${esc(p.display_name)}"><input type="radio" name="bs-place" value="${i}"${ok ? "" : " disabled"}>` +
 				(ok ? `<span><b>${esc(title)}</b><span class="rs-chip">${esc(p.addresstype ?? p.type ?? "")}</span><small>${esc(rest.join(", ") || `${p.osm_type} ${p.osm_id}`)}</small></span></label>`
 					: `<span><b>${esc(title)}</b><span class="rs-chip">${esc(p.addresstype ?? p.type ?? "")}, no boundary</span></span></label>`);
 		}).join("") || `<p class="small muted">${none}</p>`;
@@ -174,6 +200,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		asking?.abort();
 		text = (text ?? "").trim();
 		if (!source && text.length < 2) { found = []; q("found").innerHTML = ""; return msg(""); }
+		if (!source && h3Ids(text)) return h3Search(h3Ids(text));
 		const mine = (asking = new AbortController());
 		msg("");
 		q("found").innerHTML = '<p class="small muted">Searching…</p>';
@@ -199,10 +226,30 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		if (!polygonsOf(g).length) return msg("This place has no boundary. Draw a box or use a file.", true);
 		set(g, String(f.properties.display_name).split(",")[0], "search");
 	});
+	// the place under the mouse (or the keyboard) shows its outline on the map, and the map moves to it when it is out of view; after a pick only the picked area shows
+	let previewed = null;
+	function preview(i) {
+		if (i != null && q("found").querySelector("input:checked")) i = null;
+		previewed = i;
+		const f = i == null ? null : found[i];
+		previewShape = f ? { name: String(f.properties.display_name).split(",")[0], geometry: f.geometry } : null;
+		draw(shape);
+		if (f) {
+			const polys = polygonsOf(f.geometry), pts = polys.length ? bbox(polys) : f.geometry?.coordinates ? [...f.geometry.coordinates, ...f.geometry.coordinates] : null;
+			if (pts && !(map.getBounds().contains([pts[0], pts[1]]) && map.getBounds().contains([pts[2], pts[3]]))) map.fitBounds([[pts[0], pts[1]], [pts[2], pts[3]]], { padding: padding(), duration: 0, maxZoom: 14 });
+		}
+	}
+	const over = (e) => { const l = e.target.closest("label[data-i]"); if (l) preview(Number(l.dataset.i)); };
+	q("found").addEventListener("mouseover", over);
+	q("found").addEventListener("focusin", over);
+	q("found").addEventListener("mouseleave", () => preview(null));
+	// a second click on the picked place takes the area away, as in Studio
+	q("found").addEventListener("mousedown", (e) => { const l = e.target.closest("label[data-i]"); if (l) l.dataset.was = l.querySelector("input").checked ? "1" : ""; });
+	q("found").addEventListener("click", (e) => { const l = e.target.closest("label[data-i]"); if (l && l.dataset.was === "1" && l.querySelector("input").checked) { l.querySelector("input").checked = false; clear(); } });
 	const hereBtn = Object.assign(document.createElement("button"), { type: "button", title: "What is here? Click the map", innerHTML: ICONS.target });
 	hereBtn.setAttribute("aria-label", "What is here? Click the map");
 	const here = rs.toggle(hereBtn, (on) => { map.getCanvas().style.cursor = on ? "crosshair" : ""; if (on) msg("Click a point on the map."); else if (q("msg").textContent.startsWith("Click a point")) msg(""); });
-	rs.search(q("search"), { placeholder: "City, region or country", label: "Name of a place", end: hereBtn, onSubmit: (t) => find(t), onClear: () => find("") });
+	rs.search(q("search"), { placeholder: "City, region, country or H3 ID", label: "Name of a place", end: hereBtn, onSubmit: (t) => find(t), onClear: () => find("") });
 	q("search").querySelector("input").addEventListener("input", (e) => { clearTimeout(typing); typing = setTimeout(() => find(e.target.value), 300); });
 	map.on("click", (e) => {
 		if (!here.value()) return;
@@ -274,6 +321,136 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		if (mode) tool(mode);
 	});
 
+	// H3: the area is the union of the hexagons that the person clicks on the map. h3-js loads at the first use of the tab. While the tab shows, a thin gray grid draws every hexagon
+	// in view at the chosen level, the hexagon under the pointer is lit, and the picked cells are filled. Too many hexagons for the view: no grid, and the note says what to do.
+	const cells = new Set();
+	let h3Level = 8, h3Mod = null, hover = null, gridOn = null, estimate = 0, token = 0, autoName = "";
+	const lib = () => (h3Mod ??= import(H3).catch((e) => { h3Mod = null; throw e; }));
+	const nothing = { type: "FeatureCollection", features: [] }, num = (x, dg = 0) => x.toLocaleString("en", { maximumFractionDigits: dg });
+	const metres = (km) => (km < 1 ? `${Math.round(km * 1000)} m` : `${num(km, 1)} km`);
+	const h3 = (k) => root.querySelector(`[data-as="${k}"]`);
+	const visible = () => root.offsetParent !== null && h3On;                      // the tab shows, and the card is open
+	function h3Layers() {
+		if (map.getSource("bs-h3grid")) return;
+		for (const id of ["grid", "hover", "cells"]) map.addSource(`bs-h3${id}`, { type: "geojson", data: nothing });
+		map.addLayer({ id: "bs-h3-grid", type: "line", source: "bs-h3grid", paint: { "line-color": "#475569", "line-width": 1, "line-opacity": 0.5 } });
+		map.addLayer({ id: "bs-h3-fill", type: "fill", source: "bs-h3cells", paint: { "fill-color": "#2563eb", "fill-opacity": 0.22 } });
+		map.addLayer({ id: "bs-h3-hover", type: "fill", source: "bs-h3hover", paint: { "fill-color": "#2563eb", "fill-opacity": 0.12 } });
+		map.addLayer({ id: "bs-h3-line", type: "line", source: "bs-h3cells", paint: { "line-color": "#2563eb", "line-width": 1.5, "line-opacity": 0.7 } });
+	}
+	async function h3Put() {
+		h3Layers();
+		const lb = await lib(), ring = (id) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [lb.cellToBoundary(id, true)] } });
+		map.getSource("bs-h3cells").setData({ type: "FeatureCollection", features: [...cells].map(ring) });
+	}
+	async function h3Open() {
+		let lb;
+		try { lb = await lib(); } catch (e) { return msg(`H3 did not load: ${e.message}`, true); }
+		h3Layers();
+		const sel = h3("h3-level");
+		if (sel.options.length) return;
+		sel.innerHTML = [5, 6, 7, 8, 9, 10].map((l) => { const km2 = lb.getHexagonAreaAvg(l, "km2"); return `<option value="${l}">Level ${l}: edge ${metres(lb.getHexagonEdgeLengthAvg(l, "km"))}, ${num(km2, km2 < 1 ? 3 : 1)} km²</option>`; }).join("");
+		sel.value = h3Level;
+	}
+	function h3Text(km2, note) {                                                     // what to do, the size of the picks, or why the last click did nothing
+		const n = cells.size;
+		h3("h3-hint").textContent = note ?? (n ? `${num(n)} cell${n > 1 ? "s" : ""}, ${num(km2, 2)} km². Click a hexagon to add or remove it.` : "Click a hexagon on the map to add it to the area.");
+	}
+	async function h3Update(lb, note) {
+		const ids = [...cells];
+		await h3Put();
+		if (!ids.length) { if (current?.from === "h3") clear(); return h3Text(0, note); }
+		const polys = lb.cellsToMultiPolygon(ids, true);                             // touching cells merge; a ring of cells keeps its hole
+		// the name is the H3 ID (the first cell, and "-plus-N" for N more); a name that the person typed stays
+		const auto = ids.length === 1 ? ids[0] : `${ids[0]}-plus-${ids.length - 1}`, typed = current?.from === "h3" && d("name").value && d("name").value !== slug(autoName);
+		autoName = auto;
+		set(geometry(polys), typed ? d("name").value : auto, "h3", { zoom: false, show: false });
+		h3Text(areaKm2(polys), note);
+	}
+	function h3Forget() {                                                          // another way of making the area replaced the cells
+		if (!cells.size) return;
+		cells.clear();
+		map.getSource("bs-h3cells")?.setData(nothing);
+		h3Text(0);
+	}
+	async function h3Grid() {
+		const my = ++token, src = map.getSource("bs-h3grid");
+		if (!src) return;
+		if (!visible()) { src.setData(nothing); map.getSource("bs-h3hover")?.setData(nothing); hover = null; gridOn = null; h3("h3-grid-note").textContent = ""; return; }
+		let lb;
+		try { lb = await lib(); } catch { return; }
+		if (my !== token) return;
+		const b = map.getBounds(), pad = lb.getHexagonEdgeLengthAvg(h3Level, "km") / 111 * 1.5;      // a cell shows when its center is out of view but its corner is in
+		const w = b.getWest() - pad, e = b.getEast() + pad, south = Math.max(-85, b.getSouth() - pad), north = Math.min(85, b.getNorth() + pad);
+		estimate = ((e - w) * 111 * Math.cos(((south + north) / 2) * Math.PI / 180)) * ((north - south) * 111) / lb.getHexagonAreaAvg(h3Level, "km2");
+		if (estimate > H3_MAX_GRID) {
+			src.setData(nothing);
+			gridOn = false;
+			h3("h3-grid-note").innerHTML = 'The view has too many hexagons. Zoom in, or choose a bigger hexagon, to pick hexagons. <a href="#" role="button" data-as="h3-zoom">Zoom in</a>';
+			return;
+		}
+		gridOn = true;
+		const ids = lb.polygonToCells([[[w, south], [e, south], [e, north], [w, north], [w, south]]], h3Level, true);
+		src.setData({ type: "FeatureCollection", features: ids.map((id) => ({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [lb.cellToBoundary(id, true)] } })) });
+		h3("h3-grid-note").textContent = `${num(ids.length)} hexagon${ids.length === 1 ? "" : "s"} in view.`;
+	}
+	map.on("moveend", h3Grid);
+	map.on("mousemove", async (ev) => {                                            // the hexagon under the pointer is lit
+		if (!visible()) return;
+		let lb;
+		try { lb = await lib(); } catch { return; }
+		const { lat, lng } = ev.lngLat.wrap(), id = lb.latLngToCell(lat, lng, h3Level);
+		if (id === hover) return;
+		hover = id;
+		map.getSource("bs-h3hover")?.setData({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [lb.cellToBoundary(id, true)] } });
+	});
+	map.on("click", async (ev) => {
+		if (!visible()) return;
+		let lb;
+		try { lb = await lib(); } catch (e) { return msg(`H3 did not load: ${e.message}`, true); }
+		if (gridOn === false) return h3Text(0, "The view has too many hexagons to pick one. Zoom in, or choose a bigger hexagon.");      // a cell that cannot be seen is not picked
+		const { lat, lng } = ev.lngLat.wrap(), id = lb.latLngToCell(lat, lng, h3Level);
+		let note;
+		if (!cells.delete(id)) {
+			if (cells.size >= H3_MAX_CELLS) note = `The area has the most cells: ${num(H3_MAX_CELLS)}. Remove a cell or clear them.`;
+			else if ((cells.size + 1) * lb.getHexagonAreaAvg(h3Level, "km2") > H3_MAX_KM2) note = `The area has the most km²: ${num(H3_MAX_KM2)}. Remove a cell, clear them or use a smaller level.`;
+			else cells.add(id);
+		}
+		h3Update(lb, note);
+	});
+	h3("h3-level").addEventListener("change", async () => {
+		const lb = await lib(), had = cells.size;
+		h3Level = Number(h3("h3-level").value);
+		cells.clear();
+		h3Update(lb, had ? "You changed the level. The cells are removed." : undefined);
+		hover = null; h3Grid();
+	});
+	h3("h3-grid-note").addEventListener("click", (e) => {                           // zoom in until about 150 hexagons are in view (a zoom step is 4 times the area)
+		if (!e.target.closest('[data-as="h3-zoom"]')) return;
+		e.preventDefault();
+		map.easeTo({ zoom: Math.min(map.getZoom() + Math.max(1, Math.log(estimate / 150) / Math.log(4)), 18), duration: 600 });
+	});
+	// H3 cell IDs in the search box (15 hex digits each, separated by spaces or commas) make the area with no network: the cells of one level (5 to 10)
+	const h3Ids = (t) => { const x = t.split(/[\s,;]+/).filter(Boolean); return x.length && x.every((i) => /^[0-9a-f]{15}$/i.test(i)) ? x.map((i) => i.toLowerCase()) : null; };
+	async function h3Search(ids) {
+		const say = (t, bad = true) => { q("found").innerHTML = ""; msg(t, bad); };
+		let lb;
+		try { lb = await lib(); } catch (e) { return say(`H3 did not load: ${e.message}`); }
+		ids = [...new Set(ids)];
+		if (!ids.every((i) => lb.isValidCell(i))) return say("This is not an H3 cell ID.");
+		const level = lb.getResolution(ids[0]);
+		if (ids.some((i) => lb.getResolution(i) !== level)) return say("The cells must have one level.");
+		if (level < 5 || level > 10) return say(`The H3 tab works with the levels 5 to 10. This cell has level ${level}.`);
+		if (ids.length > H3_MAX_CELLS || ids.length * lb.getHexagonAreaAvg(level, "km2") > H3_MAX_KM2) return say(`The area has the most ${num(H3_MAX_CELLS)} cells and ${num(H3_MAX_KM2)} km².`);
+		root.querySelector('[data-tab="h3"]').click();
+		await h3Open();
+		h3Level = level; h3("h3-level").value = level;
+		cells.clear(); for (const i of ids) cells.add(i);
+		await h3Update(lb);
+		zoom();
+		say(`${ids.length === 1 ? "H3 cell" : `${ids.length} H3 cells`}, level ${level}.`, false);
+	}
+
 	// the file
 	rs.drop(q("drop"), {
 		accept: ".geojson,.json", text: "Drop a GeoJSON file here, or <u>choose a file</u>", hint: "A polygon or a multipolygon",
@@ -296,5 +473,5 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		Object.assign(document.createElement("a"), { href: url, download: `${current.name}.geojson` }).click();
 		setTimeout(() => URL.revokeObjectURL(url), 1000);
 	});
-	return { area: () => current, set, clear, zoom, drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
+	return { area: () => current, set, clear, zoom, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
 }

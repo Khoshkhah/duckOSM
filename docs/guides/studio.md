@@ -26,10 +26,11 @@ The page and its server are Rust. `duckosm-rust studio` is the program: the buil
 The page is roadstyle's dashboard, and the cards are the cards of Studio: a round number (a check mark when the step is done), the title, a "?" with its help, and the line "after step N" for a step that is not ready.
 One step is open at a time, and the next step opens when the one before is done. Step 4 (Ground) is the one that Studio has only as a folded box in its Build card.
 
-1. **Choose an area.** Search a place, draw a box, open a GeoJSON file, or use "What is here?" (the target in the search field) and click the map:
-    - **Search.** Type the name of a place: the matches show while you type (the names from Photon, the outlines from Nominatim), and you pick one. A place with no outline is listed with no choice. The page needs the internet for this.
+1. **Choose an area.** Search a place, draw shapes, open a GeoJSON file, click hexagons, or use "What is here?" (the target in the search field) and click the map:
+    - **Search.** Type the name of a place: the matches show while you type (the names from Photon, the outlines from Nominatim), and you pick one. The outline of the place under the mouse shows on the map, and a second click on the picked place takes the area away. A place with no outline is listed with no choice. The page needs the internet for this.
     - **Draw.** The tools of Studio: rectangle, polygon, circle, freehand and select (move a shape, or change its corners), with **Merge** (the shapes that overlap), **Delete** and **Clear**. The keys R, P, C, F and S pick a tool. The shapes together are the area.
     - **File.** Drop a GeoJSON file with a polygon or a multipolygon, for example the file of `duckosm boundary`.
+    - **H3.** Choose the size of a hexagon (the levels 5 to 10), then click the hexagons on the map; the hexagons together are the area (at most 500 cells and 5,000 km²). A click on a picked hexagon removes it. You can also type H3 cell IDs in the search box.
 2. **The area.** The name (it is the name of the folder of the area), the numbers (area in km², polygons, vertices), **Boundary** (saves the boundary as a GeoJSON file) and **Unselect**. The magnifier moves the map to the area.
 3. **The data.** The tab **Geofabrik** shows the extracts of Geofabrik that cover the whole area, the smallest first. The build downloads the one that you pick into the folder of the area. The tab **File**
    takes the path of a `.osm.pbf` file on this computer. The build cuts the file to the area.
@@ -42,7 +43,7 @@ One step is open at a time, and the next step opens when the one before is done.
    [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit). Each change goes into `areas/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file.
    The record of the build is in the database, so Build again works.
 
-Not in Studio's cards yet: the H3 tab of step 1 and the buffer around the area.
+Not in Studio's cards yet: the buffer around the area.
 
 ## Your areas
 

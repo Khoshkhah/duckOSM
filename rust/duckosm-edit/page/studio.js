@@ -162,7 +162,8 @@
         current = next;
         autoFold(next, false);
         // the area card (the name) stays open beside the data step; the data and the ground stay open beside the build
-        const keep = (c) => (next.dataset.n === "3" && c.dataset.n === "2") || (next.dataset.n === "5" && ["3", "4"].includes(c.dataset.n));
+        // card 1 stays open when the area is hexagons: the person clicks more cells there (as in Studio)
+        const keep = (c) => (next.dataset.n === "3" && c.dataset.n === "2") || (next.dataset.n === "5" && ["3", "4"].includes(c.dataset.n)) || (c.dataset.n === "1" && area.area()?.from === "h3");
         if (!touched) for (const c of cards) if (c !== next) autoFold(c, !keep(c));
       }
     }
