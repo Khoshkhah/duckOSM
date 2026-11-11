@@ -94,6 +94,40 @@ State on 2026-11-10.
 | **roadstyle** vehicles | a SUMO run (FCD and `net.xml`) and the page's roads | gives each vehicle the height of its road ([The road profile](#the-road-profile)) | the vehicles in 3D, with the tunnels' look | roadstyle PR 149 (not merged): the heights come from the map's terrain along each road; `z_vertices` is next |
 | **urbanstyle** | the AWS Terrain Tiles (a switch "rough terrain") | sends the bridge deck heights from LiDAR to SimReady | its 3D map | to do: the same terrain file as roadstyle |
 
+## The terrain data of SimReady and roadstyle
+
+duckOSM's data is in [What the database holds](#what-the-database-holds). This section gives the data that SimReady and roadstyle
+make from it.
+
+### SimReady
+
+| Data | Form | What it holds |
+|---|---|---|
+| `sim.elevation_profile` | a table of the model | the height of the road along each carriageway: one row for each station, with `carriageway_id`, `station_m`, `z_m` (the road surface at the reference line), `grade_pct`, `earthwork_m`, `outlier`, `source_id` and `method` |
+| `method` of a row | a column | where the height comes from: `dem_node` (duckOSM's `nodes.ele`), `dem_sample` (duckOSM's `edges.z_vertices`), `osm_ele`, `dsm_sample`, `bridge_profile` (urbanstyle's LiDAR decks), `lidar_surface`, `survey_point`, `structure_line` (a span with no height: a straight line between its two ends), and `graded` |
+| the `graded` rows | rows of `sim.elevation_profile` | the designed road that the lanes use: straight grades and vertical curves, fitted to the lower envelope of the samples, so a roof or a tree in a surface model is left out (`outlier`). `earthwork_m` is the graded height minus the terrain: positive is fill, negative is cut |
+| a junction's height | computed in the `gltf` adapter | each movement path goes in a straight line from the graded height at the stop line of the road in to the stop line of the road out; each point of the junction area takes the height of the nearest path |
+| the conformed ground | a height grid computed in the `gltf` adapter, not a table | a square grid of `gltf_terrain_step_m` (5 m). A point in the roadway has the road's height; beside it the ground blends back to the DEM over `max(terrain_blend_m, earthwork / embankment_slope_max)`; next to a road edge it stays 0.03 m under the road. A bridge or a tunnel bends nothing |
+| the GLB | a file | the node `terrain` (one mesh of the conformed ground), one mesh for each carriageway and junction at its graded height, and the ground id in the root node's `extras.ground` |
+
+Details: [elevation_profile](https://github.com/Khoshkhah/simready/blob/main/docs/2-model/elevation-profile.md),
+[terrain-conform](https://github.com/Khoshkhah/simready/blob/main/docs/4-algorithms/terrain-conform.md), [the gltf adapter](https://github.com/Khoshkhah/simready/blob/main/docs/3-modules/adapters/gltf.md).
+
+### roadstyle
+
+| Data | Form | What it holds |
+|---|---|---|
+| the terrain file | one PMTiles v3 file for each area (`roadstyle terrain`, `terrain_pmtiles`) | Terrarium PNG tiles of 256 px. A pixel's RGB gives the height: `R × 256 + G + B / 256 − 32768` m (step 1/256 m). Its metadata has the ground id, `source`, `product`, `vertical_datum`, `resolution_m` and `license`. Monaco at 30 m: 105 KB, zooms 8 to 13 |
+| the zooms of the file | a rule | the last zoom is the first zoom with a pixel not larger than the DEM's resolution (z13 for 30 m, at most z16); the first zoom is 5 zooms below it |
+| a tile pixel | a rule | its height is the grid's bilinear value at the pixel's north-west corner (where MapLibre reads it). A pixel outside the grid takes the nearest valid height |
+| the page option `ground` | JSON in the page | `{id, source, product, vertical_datum, resolution_m, license, terrain}`, where `terrain` is the file's URL, a `data:` URL or (in Studio) a file in the browser's disk. With no `ground`, the page uses the AWS Terrain Tiles and says so |
+| the map's terrain | MapLibre's `raster-dem` source `rs-dem`, read through the protocol `rsground://` | the 3D terrain and the hillshade. MapLibre lays every road line on it |
+| the 3D bridge decks | the style's source `decks`, one feature for each deck piece | `__rs_group` (the group of bridges), `__rs_s0`, `__rs_s1` (where the piece is along its chain), `__rs_enda`, `__rs_endb` (the chain's end nodes), `__rs_lift0`, `__rs_lift1` (0 on the ground, 1 at the full height), `__rs_full` (the full height, m). The page reads the ground under the deck from the terrain file |
+| the vehicles' road profiles | in the page's memory only (roadstyle PR 149, not merged) | for each road that a vehicle uses: its length and one 4-byte height every 5 m along its line, read from the terrain file; for each SUMO lane, where its start and end are on the road's line. Made when a vehicle first needs the road; made again when the terrain changes |
+
+Details: roadstyle's [ground_terrain.md](https://github.com/Khoshkhah/roadstyle/blob/main/docs/design/ground_terrain.md) and
+[road_heights.md](https://github.com/Khoshkhah/roadstyle/blob/claude/vehicles-p2/docs/design/road_heights.md).
+
 ## The road profile
 
 A **road profile** is the height of one road along its line: a list of (distance along the line, height), with a straight line
