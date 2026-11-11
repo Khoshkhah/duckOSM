@@ -106,13 +106,26 @@ def _open(browser, url, **ctx):
     return page, errors
 
 
+def _unfold(page, *steps):
+    """Open the cards of these steps (a card that is not the open step is folded, as in Studio; Playwright cannot use a hidden field)."""
+    page.evaluate("(ns) => ns.forEach((n) => rs.sections.fold('step' + n, false))", list(steps))
+
+
+def _options(page):
+    """The settings: the card Build is open, and the box More options too."""
+    _unfold(page, 5)
+    page.evaluate("document.querySelectorAll('.bs-settings details.drow').forEach((d) => { d.open = true; })")
+
+
 def _fit(page):
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "the page is wider than the screen"
 
 
 def _build_and_open(page, area, timeout=600_000):
     """Push Build, wait for the result, and open the map of the new area: the page of `duckosm edit` at /edit/."""
+    _unfold(page, 5)
     page.click("[data-bs=run]")
+    _unfold(page, 6)
     page.wait_for_selector(".bs-open", state="visible", timeout=timeout)
     assert page.is_hidden("[data-bs=error]")
     assert area in page.inner_text("[data-rs=line]")
@@ -136,14 +149,16 @@ def test_a_place_a_geofabrik_extract_and_no_dem(studio):
         assert page.is_disabled("[data-bs=run]") and "Choose the area" in page.inner_text("[data-bs=why]")
         page.click("[name=bs-place] + span")
         assert page.input_value("[data-as=name]") == "Monaco"
+        _unfold(page, 2)
         page.fill("[data-as=name]", "monaco-a")
-        assert "km²" in page.inner_text("[data-as=summary]")
+        assert "km²" in page.inner_text("[data-as=kpis]") and "vertices" in page.inner_text("[data-as=kpis]").lower()
         # the extracts that cover the area: Monaco first, Europe second; the first is chosen
         page.wait_for_selector("[name=bs-extract]")
         assert page.eval_on_selector_all("[name=bs-extract]", "els => els.map(e => e.value)") == ["monaco", "europe"]
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "monaco"
         assert page.is_enabled("[data-bs=run]")
         # the settings: two networks; the text of the config follows
+        _options(page)
         page.uncheck("[name=mode][value=cycling]")
         page.uncheck("[name=opt][value=levels]")
         assert "modes: [driving, walking]" in page.text_content("[data-ss=yaml]")
@@ -192,9 +207,10 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
         page.set_input_files("[data-as=drop] input[type=file]", str(ROOT / "tests" / "data" / "monaco.geojson"))
         page.wait_for_function("window.studio.area.area()")
         assert page.input_value("[data-as=name]") == "Monaco"
+        _unfold(page, 2)
         page.fill("[data-as=name]", "monaco-dem")
         # the data: a file on this computer; a path that is not a file says so
-        page.locator("#step-2 [data-tab=file]").click()
+        page.locator(".bs-data [data-tab=file]").click()
         page.fill("[data-ds=path]", str(tmp_path / "nothing.osm.pbf"))
         page.wait_for_function("document.querySelector('[data-ds=msg]').textContent.includes('not a file')")
         assert page.is_disabled("[data-bs=run]")
@@ -202,15 +218,17 @@ def test_a_file_a_local_pbf_and_a_dem(studio, tmp_path):
         page.wait_for_function("document.querySelector('[data-ds=msg]').textContent.startsWith('Found')")
         assert page.is_enabled("[data-bs=run]")
         # fewer steps in this build: the DEM is what this test is about
+        _options(page)
         for k in ("levels", "bus_routes", "build_features"):
             page.uncheck(f"[name=opt][value={k}]")
         for m in ("walking", "cycling"):
             page.uncheck(f"[name=mode][value={m}]")
         # the ground: FABDEM (a DTM, EGM2008) and its file
+        _unfold(page, 4)
         page.check("[name=gs-src][value=fabdem]")
         page.set_input_files("[data-gs=file]", str(dem))
         page.wait_for_selector("[data-gs=remove]")
-        assert dem.name in page.inner_text("#step-4") and "EGM2008" in page.inner_text("#step-4")
+        assert dem.name in page.inner_text(".gs") and "EGM2008" in page.inner_text(".gs")
         page.wait_for_function("/^[0-9a-f]{64}$/.test(document.querySelector('[data-gs=sha]').textContent)")
         _build_and_open(page, "monaco-dem")
         browser.close()
@@ -250,12 +268,14 @@ def test_a_box_on_a_phone(studio):
         assert page.eval_on_selector("[name=bs-extract]:checked", "e => e.value") == "europe"
         assert page.is_enabled("[data-bs=run]")
         # a click is not a box
+        _unfold(page, 1)
         page.click("[data-as=draw]")
         page.mouse.click(150, 150)
         assert page.evaluate("window.studio.area.area().from") == "box"
         _fit(page)
-        # every step is in the sheet: the last card can be scrolled to, and its buttons are a finger's size
-        page.locator("#step-6").scroll_into_view_if_needed()
+        # the Build card is in the sheet: it can be scrolled to, and its button is a finger's size
+        _unfold(page, 5)
+        page.locator("[data-bs=run]").scroll_into_view_if_needed()
         assert page.locator("[data-bs=run]").bounding_box()["height"] >= 44
         page.screenshot(path=str(out / "phone.png"))
         assert not errors, errors

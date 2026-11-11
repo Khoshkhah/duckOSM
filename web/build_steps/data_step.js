@@ -5,6 +5,7 @@ import { bytes, covering, esc } from "./core.js";
 /**
  * initDataStep({
  *   root,       // the element that gets the step
+ *   rs,         // roadstyle's parts: { tabs }
  *   area,       // () gives the area of the Area step ({polygons, ...}) or null
  *   extracts,   // () gives a promise of the Geofabrik extracts (core.js extractsOf)
  *   checkFile,  // (path) gives a promise of the size of the file, or throws an Error that says why it cannot be used
@@ -12,13 +13,13 @@ import { bytes, covering, esc } from "./core.js";
  * })
  * It returns { refresh(), choice() }. choice() is null, { kind: "geofabrik", id, name, url, km2 } or { kind: "file", path, size }.
  */
-export function initDataStep({ root, area, extracts, checkFile, onChange = () => {} }) {
+export function initDataStep({ root, rs, area, extracts, checkFile, onChange = () => {} }) {
 	root.classList.add("bs", "bs-data");
 	root.innerHTML = `<div class="rs-tabs" role="tablist" aria-label="Where the OSM data comes from">
-			<button type="button" class="rs-tab on" role="tab" aria-selected="true" data-tab="geofabrik">Geofabrik</button>
-			<button type="button" class="rs-tab" role="tab" aria-selected="false" data-tab="file">File</button></div>
-		<section data-p="geofabrik"><p class="small muted" data-ds="note"></p><div class="rs-opts" role="radiogroup" aria-label="The extracts that cover the area" data-ds="list"></div></section>
-		<section data-p="file" hidden><label class="rs-cap" for="bs-pbf">Path of a .osm.pbf file on this computer</label>
+			<button type="button" class="rs-tab on" data-tab="geofabrik">Geofabrik</button>
+			<button type="button" class="rs-tab" data-tab="file">File</button></div>
+		<section data-pane="geofabrik"><p class="small muted" data-ds="note"></p><div class="rs-opts" role="radiogroup" aria-label="The extracts that cover the area" data-ds="list"></div></section>
+		<section data-pane="file" hidden><label class="rs-cap" for="bs-pbf">Path of a .osm.pbf file on this computer</label>
 			<input id="bs-pbf" type="text" data-ds="path" autocomplete="off" spellcheck="false" placeholder="/data/area.osm.pbf">
 			<p class="rs-field-msg" role="status" data-ds="msg"></p></section>`;
 	const q = (k) => root.querySelector(`[data-ds="${k}"]`);
@@ -55,12 +56,7 @@ export function initDataStep({ root, area, extracts, checkFile, onChange = () =>
 	}
 	q("list").addEventListener("change", (e) => { picked = e.target.value; onChange(); });
 
-	root.querySelectorAll("[data-tab]").forEach((t) => t.addEventListener("click", () => {
-		tab = t.dataset.tab;
-		root.querySelectorAll("[data-tab]").forEach((x) => { const on = x === t; x.classList.toggle("on", on); x.setAttribute("aria-selected", on); });
-		root.querySelectorAll("[data-p]").forEach((p) => { p.hidden = p.dataset.p !== tab; });
-		onChange();
-	}));
+	rs.tabs.use(root.querySelector(".rs-tabs"), (id) => { tab = id; onChange(); });      // roadstyle shows the pane of the chosen tab
 
 	let timer = 0;
 	q("path").addEventListener("input", () => {

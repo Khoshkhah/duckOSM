@@ -106,7 +106,7 @@ fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str) -> Result<S
 /// The page of `duckosm studio`: roadstyle's standard dashboard (the same template, toolbox and panel as the page of `duckosm edit`) for an area with no
 /// roads yet. The panel starts empty; the script (page/studio.js) puts the steps into it, as cards. MapLibre and roadstyle's own files come from the program.
 pub fn make_studio() -> Result<String, String> {
-    let args = json!({"name": "duckOSM Studio", "template": "dashboard", "tooltip": null, "state": "live", "tiles": false, "page_script": STUDIO_SCRIPT, "page_style": STUDIO_STYLE});
+    let args = json!({"name": "duckOSM Studio", "template": "dashboard", "tooltip": null, "state": "live", "tiles": false, "basemap": "ofm_liberty", "page_script": STUDIO_SCRIPT, "page_style": STUDIO_STYLE});
     let o = roadstyle::look::Options::from_value(&json!({"args": args})).map_err(|e| e.to_string())?;
     let lk = roadstyle::Look::resolve(&o).map_err(|e| e.to_string())?;
     let given = roadstyle::page_options::given_of(&lk, &o.args);
