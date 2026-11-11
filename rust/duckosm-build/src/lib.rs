@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 pub mod area;
 pub mod config;
 pub mod elevation;
+pub mod h3;
 pub mod levels;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
@@ -83,6 +84,16 @@ pub struct Params {
     /// Also make `main.building_faces` (`building_faces_main.parquet`, docs/osm-editing.md): the walls of the buildings of the raw cut, each with a
     /// type (front, back, side, party), from the street edges of the driving and walking modes. Needs a boundary and a region file, as `raw` does.
     pub building_faces: bool,
+    /// duckOSM `options.h3_indexing` with `options.h3_resolution`: add `nodes.h3_cell` and `edges.from_cell`, `to_cell`
+    /// and `lca_res` (h3.rs). None: no H3 columns.
+    pub h3_resolution: Option<u8>,
+    /// duckOSM `options.build_features`: make the base-map layers, `features.*`, and keep `raw.*` in the `.duckdb` file.
+    /// duckOSM's SQL runs on DuckDB's spatial extension (docs/features.md). Needs a boundary and a region file, as `raw` does,
+    /// and the `.duckdb` output.
+    pub features: bool,
+    /// duckOSM `options.sea` (with `features`): also make `features.ocean` from Overture Maps. It reads the network, and
+    /// a failure is a warning, as in duckOSM.
+    pub sea: bool,
 }
 
 impl Default for Params {
@@ -111,6 +122,9 @@ impl Default for Params {
             dem_license: None,
             dem_not_reference: false,
             building_faces: false,
+            h3_resolution: None,
+            features: false,
+            sea: false,
         }
     }
 }
@@ -143,6 +157,8 @@ pub struct Summary {
     pub bus_routes: Option<usize>,
     /// The rows of `raw.nodes`, `raw.ways` and `raw.relations`, when they were written.
     pub raw: Option<(usize, usize, usize)>,
+    /// The polygons of `features.ocean`, when it was made (0: Overture was not reachable, or has no sea here).
+    pub ocean: Option<usize>,
     /// The walls and the buildings of `main.building_faces`, when it was made.
     pub building_faces: Option<(usize, usize)>,
     /// A summary of the drawing levels, when they were made.
@@ -177,6 +193,9 @@ impl Summary {
         }
         if let Some((n, w, r)) = self.raw {
             out.push(format!("raw: {n} nodes, {w} ways, {r} relations"));
+        }
+        if let Some(n) = self.ocean {
+            out.push(format!("features.ocean: {n} polygons"));
         }
         if let Some((f, b)) = self.building_faces {
             out.push(format!("building faces: {f} walls of {b} buildings"));
@@ -438,7 +457,9 @@ pub fn run<W: Write + Send>(
     // the bus routes need the route relations and the member ways of the raw cut (docs/bus.md)
     let bus = p.bus_routes && driving && matches!(input, Input::Area(..)); // OSM JSON has no route relations
     let cut_file = p.cut_pbf || p.cut_osm;
-    if (p.raw || p.building_faces) && !matches!(input, Input::Area(..) | Input::OsmJson(..)) {
+    // the base-map layers run on raw.*, so they need it, but write it to a file only with p.raw (see `build`)
+    let want_raw = p.raw || p.features;
+    if (want_raw || p.building_faces) && !matches!(input, Input::Area(..) | Input::OsmJson(..)) {
         return Err(
             "raw.* (the base-map layers) and the building faces need a boundary and a region file, or OSM JSON".into(),
         );
@@ -466,7 +487,7 @@ pub fn run<W: Write + Send>(
         )?,
         // duckOSM with a boundary: cut the PBF (osmium complete_ways, or smart for raw.*), then the fixes on the raw ways
         Input::Area(open, boundary) => {
-            let (mut ways, coords, relations) = if p.raw || bus || cut_file || p.building_faces {
+            let (mut ways, coords, relations) = if want_raw || bus || cut_file || p.building_faces {
                 let (w, c, r, mut rw) = pbf::read_area_raw(open, boundary)?;
                 log.step("cut to the boundary");
                 // the cut as osmium gives it: before the fixes change the ways
@@ -490,7 +511,7 @@ pub fn run<W: Write + Send>(
             (ways, coords, relations)
         }
         Input::OsmJson(bytes, boundary) => {
-            let mut data = OsmJson::read(bytes, p.raw || p.building_faces)?;
+            let mut data = OsmJson::read(bytes, want_raw || p.building_faces)?;
             if let Some(b) = boundary {
                 data.cut(b);
             }
@@ -544,6 +565,12 @@ pub fn run<W: Write + Send>(
         log.step(&format!("build {n}"));
         write_tables(&net, *mode, opts, &ways, &mut file)?;
         log.step(&format!("write geoparquet {n}"));
+        if let Some(res) = p.h3_resolution {
+            let (nodes, edges) = h3::index(&net.nodes, &net.edges, res)?;
+            duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes)?;
+            duckosm_parquet::write_h3_edges_to(file(&format!("h3_edges_{n}.parquet"))?, &edges)?;
+            log.step(&format!("h3 {n}"));
+        }
         if let Some(d) = &dem {
             let (nz, ez, nodata) = elevation::sample_mode(d, &net.nodes, &net.edges, 0.0);
             dem_nodes += nz.len() as i64;
@@ -653,7 +680,7 @@ pub fn run<W: Write + Send>(
         sum.building_faces = Some((faces.len(), buildings.len()));
         log.step("building faces");
     }
-    if let Some(r) = raw.as_mut().filter(|_| p.raw) {
+    if let Some(r) = raw.as_mut().filter(|_| want_raw) {
         // the tags that the steps set on the network's ways (the sidewalk rule, the arrows of the fixes)
         r.sync_tags(&ways);
         write_raw(r, &mut file)?;
@@ -747,8 +774,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             p,
             &mut log,
             |name| {
-                // raw.* and the cut file are not in the .duckdb file, so they go to the output folder
-                let path = if name.starts_with("raw_") || name.starts_with("cut.") {
+                // the cut file, and raw.* when the user asked for them (p.raw), go to the output folder. The raw files
+                // of the base-map layers stay with the other files that the .duckdb writer reads.
+                let path = if (name.starts_with("raw_") && p.raw) || name.starts_with("cut.") {
                     out
                 } else {
                     &pq_dir
@@ -769,8 +797,23 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             let names: Vec<&str> = p.modes.iter().map(|m| m.name()).collect();
             let db = out.join(format!("{}.duckdb", p.name));
             duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
-            sum.files.push(("duckdb".to_string(), db));
             log.step("write duckdb");
+            if p.features {
+                duckosm_duckdb::write_features(&db, &pq_dir, FEATURES_SQL)?;
+                log.step("features");
+                if p.sea {
+                    sum.ocean = Some(duckosm_duckdb::write_ocean(&db)?);
+                    log.step("ocean");
+                }
+                if !p.raw {
+                    // the .duckdb file has raw.*: the files are only the input of the SQL
+                    for f in ["raw_nodes", "raw_ways", "raw_relations"] {
+                        let _ = std::fs::remove_file(pq_dir.join(format!("{f}.parquet")));
+                    }
+                    sum.files.retain(|(k, _)| !k.starts_with("raw_"));
+                }
+            }
+            sum.files.push(("duckdb".to_string(), db));
         }
         Ok(sum)
     })();

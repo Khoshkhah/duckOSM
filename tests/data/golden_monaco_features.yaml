@@ -1,0 +1,21 @@
+# Golden build for the H3 columns and the base-map layers of duckosm-rust (rust/duckosm-build/tests/features_h3.rs):
+# Monaco, three modes, its boundary, no OSM fixes, duckOSM's defaults, no sea (it needs the network).
+# Run from the root of the repository, with duckOSM 0.7.0 (DuckDB 1.5.3) and the Python engine (the reference), after you set
+# output_path to a new folder:
+#   duckosm build --config tests/data/golden_monaco_features.yaml --engine python
+#   python tools/make_golden_features.py <output_path>/golden_features.duckdb tests/data/monaco_features_h3_summary.tsv
+name: golden_features
+output_path: golden_features_out
+source:
+  type: pbf
+  pbf_path: tests/data/monaco_sample.osm.pbf
+boundary:
+  path: tests/data/monaco.geojson
+modes:
+  - driving
+  - walking
+  - cycling
+options:
+  sea: false
+  levels: false
+  bus_routes: false

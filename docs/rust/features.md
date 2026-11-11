@@ -123,8 +123,8 @@ Rust writes each way there as WKB, from the points of its nodes, as `ST_MakeLine
 `ST_MakeLine` were 75 % of the SQL time on Tartu.
 
 - The wasm module gives the text: `features_sql()` (`include_str!`). The page needs no other file.
-- The native CLI can run the same text in its DuckDB: `duckosm --features`. This is a small step, but it needs the spatial extension
-  in the native DuckDB 1.5.6 (`INSTALL spatial` downloads it one time). I put it last, and Kaveh decides if it is in this plan.
+- The native CLI runs the same text in its DuckDB (done 2026-11-10): `duckosm-rust --features` with `--boundary`, or `build_features` in a config.
+  It needs the spatial extension in the native DuckDB (`INSTALL spatial` downloads it one time).
 
 ### 3. The page
 
@@ -240,3 +240,18 @@ Changes from the design:
   downloads the extension (4.5 MB), so the time from the click to the first query includes that download.
 - The layers are made from a region file or from Overpass. With a cut file, the box has no effect.
 
+## The native build (2026-11-10)
+
+Kaveh's rule of 2026-11-10: everything is written in Rust, and the Python build stays only for cross-validation. So `duckosm-build` now
+writes the layers into the `.duckdb` file:
+
+- `Params.features` (config `options.build_features`; CLI `--features`, with a boundary). `write_raw` writes the three raw files to the
+  folder of the Parquet files, `duckosm_duckdb::write_features` runs `features.sql` on the file (the paths of the raw files are put into the
+  SQL), and the raw files are removed (`raw.*` is in the file). With `Params.raw` (`--raw`) they stay in the output folder.
+- `Params.sea` (config `options.sea`; CLI `--sea`): `duckosm_duckdb::write_ocean` is the port of `features/ocean.py`: the newest Overture
+  release, `base/water` with the subtype `ocean`, cut to the box of `main.boundary` grown by 10 %. A failure is a warning and an empty table.
+  It is off by default in `Params`; a config has duckOSM's default (`overture`), and the settings of duckOSM Studio give `sea: false` unless the user turns the sea on.
+- The check: `rust/duckosm-build/tests/features_h3.rs` compares the md5 of each `features.*` table, each `raw.*` table and the H3 columns of
+  the three modes with `tests/data/monaco_features_h3_summary.tsv`, written from the Python build (`tools/make_golden_features.py`). By hand
+  on 2026-11-10: every row of the 11 `features.*` tables, of `raw.*` and of `features.ocean` equals duckOSM's, and so do the H3 columns.
+  Monaco: 1.2 s for the layers (a debug build).

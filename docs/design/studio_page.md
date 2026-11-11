@@ -68,9 +68,8 @@ the server does not delete files.
 
 ## Gap: the Rust build is smaller than the Python build
 
-The native build does not make `features.*` (the base-map layers), the H3 columns (`h3_cell`, `from_cell`, `to_cell`, `lca_res`), `features.ocean`, and the optional checks, report, maps and multimodal graph. The page of
-Studio (browser) makes `features.*` by running roadstyle's SQL (`features_sql`) on DuckDB. The native program can run the same SQL on its bundled DuckDB over `raw.*`; H3 can use a Rust H3 crate. Until this is done,
-`duckosm studio` (Python) gives the full result. This is the next task after this page.
+The native build makes `features.*` (with `raw.*`), the H3 columns and `features.ocean` (PR 77). It does not make `main.boundary_cells` and the optional checks, report, maps and multimodal graph. Until this is done,
+`duckosm studio` (Python) gives the full result.
 
 ## Limits
 
