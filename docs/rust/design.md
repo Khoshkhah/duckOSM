@@ -61,7 +61,7 @@ The features of version 0.1 are complete after milestone M2. M3 releases them (s
 | 14 | Connect dangling paths, mark dismount edges | Yes | Done (2026-10-21). The connector adds the same edges as duckOSM. See the note on connector direction in section 6. |
 | 15 | Speeds, travel-time costs, walk and cycle type | Yes | Done (2026-10-21). Speeds and costs: `maxspeed_kmh` replaces `maxspeed`, and `cost_s` is added, with the `f32` arithmetic of the SQL. `--no-speeds` and `--no-costs` switch them off (then the raw `maxspeed` stays). `walk_type` (walking) and `cycle_type` (cycling) are written as in duckOSM (`filter.rs`; a cycling edge that is walked has the type `dismount`); `--no-functional-types` switches them off. |
 | 16 | Turn restrictions, edge graph | Yes | Done on 2026-10-22 (`graph.rs`, [edge_graph.md](edge_graph.md)): `edge_graph`, `turn_permission`, and in driving `turn_restrictions` and `turn_path_restrictions`, with the synthetic rules of the OSM fixes. Options `build_graph` and `extract_restrictions` (CLI `--no-graph`, `--no-restrictions`). |
-| 17 | H3 cells | No | |
+| 17 | H3 cells | Yes | `duckosm-build/src/h3.rs` (`h3o`): `nodes.h3_cell`, `edges.from_cell`, `to_cell`, `lca_res`. Equal to duckOSM's on Monaco (`tests/features_h3.rs`). `main.boundary_cells` is not done. |
 | 18 | Multimodal graph, `features.*`, bus routes, lane profile, drawing order | Partly | `mm.transfers` and the view `mm.edges`, `bus.*` ([bus.md](bus.md)), the lane profile ([lane_profile.md](lane_profile.md)) and the drawing order ([levels.md](levels.md)) are done. `features.*` comes from `raw.*` with duckOSM's SQL (`features.sql`, [features.md](features.md)): the page runs it in duckdb-wasm. The rest of the multimodal graph is not done. |
 | 19 | `edge_id_hash` macros, metadata, time zone, report, maps | Partly | The macros, `main.visualization_metadata` and its time zone are written. Python keeps the report and the maps. |
 
@@ -159,15 +159,15 @@ writes this part of what duckOSM writes today (checked in `monaco.duckdb` of 202
 | duckOSM today | Version 0.1 writes |
 |---|---|
 | `<mode>.edges` | Yes. Columns (without the speed step) `edge_id`, `edge_ref`, `source`, `target`, `osm_id`, `highway`, `name`, `oneway`, `lanes`, `surface`, `access`, `junction`, `layer`, `bridge`, `tunnel`, `service`, `refs`, `geometry`, `is_reverse`, `length_m`. It also has `maxspeed` (text). With the speed step (the default) `maxspeed` is replaced by `maxspeed_kmh` and `cost_s`, as in duckOSM. |
-| `edges`: `from_cell`, `to_cell`, `lca_res` | No. H3 is not ported. |
-| `<mode>.nodes` | Yes. `node_id` and `geom`. The column `h3_cell` is not written. |
+| `edges`: `from_cell`, `to_cell`, `lca_res` | Yes (`options.h3_indexing`, 2026-11-10). |
+| `<mode>.nodes` | Yes. `node_id`, `geom` and `h3_cell`. |
 | `<mode>.private_edges` | Yes. |
 | `main.edge_id_hash`, `main.edge_id_hash_v1` (macros) | Yes. The same SQL as `edge_id.py`. They call the `hash()` of the DuckDB in the file, so they agree with the ids only for DuckDB 1.3 and later (section 5). |
 | `<mode>.edge_id_map` | Yes (with `merge_segments`). |
 | `<mode>.edge_graph`, `<mode>.turn_permission`, `driving.turn_restrictions`, `driving.turn_path_restrictions` | Yes (with `build_graph` and `extract_restrictions`, both on by default). |
 | `lane_profile`, `virtual_nodes`, `way_nodes`, `ways` | Yes. `virtual_nodes` is empty, as in duckOSM (the virtual nodes are in `nodes`). `--no-ways-tables` removes `ways` and `way_nodes`. |
 | `main.global_junctions`, `main.boundary`, `main.visualization_metadata`, `bus.*`, `mm.*`, `visualization.*` | Yes. `main.boundary` and `bus.*` need a boundary. `mm.*` is `mm.transfers` and the view `mm.edges`. |
-| `raw.*`, `features.*` | `raw.*` only as Parquet files (`--raw`, with a boundary). `features.*` only in the page. |
+| `raw.*`, `features.*` | Yes, with a boundary (`options.build_features`, `--features`, 2026-11-10): duckOSM's SQL (`sql/features.sql`) runs on the DuckDB in the program, and `raw.*` stays in the file. `features.ocean` with `--sea`. `--raw` also writes `raw.*` as Parquet files. |
 
 Python duckOSM can read the file and continue with the steps that are not ported. The DuckDB in the
 program can be newer than the DuckDB in the Python environment of the user. Today the program has
@@ -215,12 +215,10 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
   - With a boundary, the program cuts the PBF to it, as osmium's `complete_ways` does (no `osmium` is
     necessary). When the PBF is already cut, say so (`pbf_is_cut=True`, CLI `--pbf-is-cut`): then the program
     does not cut. The component filter runs as in duckOSM (with a boundary and `build_graph` on).
-  - A duckOSM step that the program does not have (H3, `features.*`, the
-    drawing order, the bus routes, the sea, the checks, the report, the maps, the multimodal
-    graph) is an error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
+  - A duckOSM step that the program does not have (`boundary_cells`, the checks, the report, the maps,
+    the multimodal graph; the base-map layers when there is no boundary) is an error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
     (CLI `--allow-skipped`). The result then lists them under `skipped`.
-  - Keys that only tune DuckDB in duckOSM (`memory_limit`, `threads`, `simplify_batches`, `clip_strategy`,
-    `h3_resolution`) have no effect. The result lists them under `ignored`.
+  - Keys that only tune DuckDB in duckOSM (`memory_limit`, `threads`, `simplify_batches`, `clip_strategy`) have no effect. The result lists them under `ignored`.
 - Python duckOSM can later call this API with a config option `engine: rust`. Rust then builds the
   network and Python continues the other steps in DuckDB (section 12).
 

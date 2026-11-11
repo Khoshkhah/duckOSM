@@ -286,25 +286,27 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the steps of duckOSM that are not here (on by default in duckOSM)
     let build_graph = options.bool("build_graph", true)?;
-    for (key, default, what) in [
-        (
-            "h3_indexing",
-            true,
-            "the H3 cells (from_cell, to_cell, lca_res, h3_cell)",
-        ),
-        ("build_features", true, "the base-map layers (features.*)"),
-        ("boundary_cells", false, "the boundary cells"),
-    ] {
-        if options.bool(key, default)? {
-            skip(format!(
-                "options.{key} is on{}, but this program does not make {what}",
-                if options.get(key).is_none() {
-                    " by default"
-                } else {
-                    ""
-                }
-            ))?;
+    if options.bool("boundary_cells", false)? {
+        skip("options.boundary_cells is on, but this program does not make the boundary cells".into())?;
+    }
+    // the H3 columns (h3.rs): on by default, at options.h3_resolution (default 8)
+    let h3_resolution = if options.bool("h3_indexing", true)? {
+        let r = options.f64("h3_resolution", crate::h3::DEFAULT_RESOLUTION as f64)?;
+        if !(0.0..=15.0).contains(&r) || r.fract() != 0.0 {
+            return Err(format!("config: options.h3_resolution: {r} is not a whole number from 0 to 15"));
         }
+        Some(r as u8)
+    } else {
+        None
+    };
+    // the base-map layers (features.*) run on raw.*, which this program has only for an area with a boundary
+    let mut features = options.bool("build_features", true)?;
+    if features && !has_boundary {
+        skip(format!(
+            "options.build_features is on{}, but this program makes the base-map layers (features.*) only with a boundary (boundary.path)",
+            if options.get("build_features").is_none() { " by default" } else { "" }
+        ))?;
+        features = false;
     }
     let sea = match options.get("sea") {
         None => Some("overture".to_string()),
@@ -313,9 +315,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         Some(Yaml::String(s)) => Some(s.clone()),
         Some(v) => return Err(format!("options.sea: {v:?} is not one of overture, false")),
     };
-    if sea.is_some() && options.bool("build_features", true)? {
-        skip("options.sea is on, but this program does not make the sea (features.ocean)".into())?;
-    }
+    // the sea (features.ocean) is a layer of features.*: it needs them
+    let sea = sea.is_some() && features;
     for (sec, what) in [
         (&validation, "the build checks"),
         (&report, "the build report"),
@@ -334,7 +335,6 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         "threads",
         "simplify_batches",
         "clip_strategy",
-        "h3_resolution",
         "boundary_cell_resolutions",
     ] {
         if options.get(k).is_some() {
@@ -399,6 +399,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         },
         infer_sidewalks: options.bool("infer_separate_sidewalks", true)?,
         osm_fixes,
+        h3_resolution,
+        features,
+        sea,
         boundary: cut_to,
         // main.boundary and the metadata, also when the PBF is cut already (a missing file is an error there)
         area_boundary: boundary_path.map(PathBuf::from).filter(|b| b.exists()),
@@ -878,11 +881,33 @@ mod tests {
     fn defaults_need_strict_off() {
         let c = write(&format!("name: m\noutput_path: out\npbf_path: {}\n", pbf()));
         let e = read(&c, false, true).unwrap_err();
-        assert!(e.contains("h3_indexing"), "{e}");
+        // the base-map layers need a boundary: without one they are skipped (the H3 columns need nothing)
+        assert!(e.contains("build_features"), "{e}");
         let r = read(&c, false, false).unwrap();
-        assert!(r.skipped.iter().any(|s| s.contains("h3_indexing")));
+        assert!(r.skipped.iter().any(|s| s.contains("build_features")));
+        assert!(!r.params.features && !r.params.sea);
+        assert_eq!(r.params.h3_resolution, Some(8));
         assert_eq!(r.params.name, "m");
         assert!(r.params.options.merge_segments && !r.params.options.keep_largest_component);
+    }
+
+    #[test]
+    fn features_and_h3_with_a_boundary() {
+        let c = write(&format!(
+            "pbf_path: {}\nboundary:\n  path: x.geojson\noptions:\n  h3_resolution: 9\n",
+            pbf()
+        ));
+        let r = read(&c, true, true).unwrap(); // strict: nothing is skipped
+        assert!(r.skipped.is_empty() && r.params.features && r.params.sea);
+        assert_eq!(r.params.h3_resolution, Some(9));
+        let c = write(&format!(
+            "pbf_path: {}\nboundary:\n  path: x.geojson\noptions:\n  sea: false\n  h3_indexing: false\n",
+            pbf()
+        ));
+        let r = read(&c, true, true).unwrap();
+        assert!(r.params.features && !r.params.sea && r.params.h3_resolution.is_none());
+        let c = write(&format!("pbf_path: {}\noptions:\n  h3_resolution: 16\n", pbf()));
+        assert!(read(&c, true, false).unwrap_err().contains("0 to 15"));
     }
 
     #[test]

@@ -19,6 +19,10 @@ The layers are built from `raw.*` at the end of the build. With a boundary, the 
 the `smart` strategy, so rivers and land-use areas that cross the border stay whole
 (`options.clip_strategy`). A build cut from a parent database has no `raw.*` and can't build them.
 
+The native program `duckosm-rust` makes the same tables. Give it a boundary and `options.build_features` (the default), or the
+flags `--boundary` and `--features`. It runs the same SQL on the DuckDB inside the program, so the rows equal those of
+`duckosm build` (a test compares every row on Monaco). `features.ocean` needs `--sea`; offline it is empty, as in `duckosm build`.
+
 On a database that still has `raw.*`, you can also build them afterwards:
 
 ```python
