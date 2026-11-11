@@ -19,6 +19,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Changed
 
+- **`duckosm studio`: the search and the Draw tab are Studio's.** The search starts while the person types (after 300 ms, from 2 letters): Photon lists the places, then one Nominatim lookup gives their boundaries (a place with no boundary is listed with no choice), through a queue of one request each second. The Draw tab has the tools of Studio (terra-draw: rectangle, polygon, circle, freehand, select, Merge, Delete, Clear; the keys R, P, C, F, S) in place of one box button. `initAreaStep` options `geocode` (now `(text, signal)`), `boundaries` and `reverse`. *Host: nothing is needed.*
 - **`duckosm studio` has the cards of duckOSM Studio** (Kaveh: "all steps should have almost the same interface as Studio except the new step 4"). The page ports Studio's flow: the cards 1 Choose an area (tabs with icons, "What is here?"), 2 The area (name, number tiles, Boundary, Unselect, zoom), 3 The data, 4 Ground (new), 5 Build (the networks, the base map, More options, Build) and 6 The result (a table of the networks), the check mark of a step that is done, the line "after step N", one open step, and the "?" of each card. The base map is OpenFreeMap Liberty, as in Studio. `initAreaStep` takes `detail` (the card "The area") and `rs: { search, drop, tabs, toggle, kpi }`, and `initDataStep` takes `rs: { tabs }`. *Host: duckOSM Studio does not use these two steps; nothing is needed.*
 
 ### Added
