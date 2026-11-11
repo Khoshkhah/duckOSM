@@ -23,7 +23,7 @@ pub mod h3;
 pub mod levels;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
-pub use duckosm_parquet::{parse_memory, LoadSummary, RAW_FILES};
+pub use duckosm_parquet::{parse_memory, LoadSummary, RAW_TABLES};
 
 pub use duckosm_core::filter::Mode as NetworkMode;
 pub use duckosm_core::network::Options as NetworkOptions;
@@ -716,22 +716,30 @@ pub fn run<W: Write + Send>(
 }
 
 /// The load step (docs/design/streaming_load.md): duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole
-/// `.osm.pbf` file, written into the folder `out` as the three files of [`RAW_FILES`], with at most about `budget` bytes
-/// of memory. The memory does not grow with the size of the file.
-pub fn load_raw(pbf_path: &Path, out: &Path, budget: usize) -> Result<LoadSummary, String> {
+/// `.osm.pbf` file, written into the folder `out` as the files `<table>_<shard>.parquet` of [`RAW_TABLES`] (one shard for
+/// each thread), with at most about `budget` bytes of memory and `threads` threads (None: all cores). The memory does not
+/// grow with the size of the file.
+pub fn load_raw(
+    pbf_path: &Path,
+    out: &Path,
+    budget: usize,
+    threads: Option<usize>,
+) -> Result<LoadSummary, String> {
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let f = std::fs::File::open(pbf_path).map_err(|e| format!("{}: {e}", pbf_path.display()))?;
-    duckosm_parquet::load_raw(
-        std::io::BufReader::new(f),
-        budget,
-        duckosm_core::pbf::threads(),
-        |name| {
-            let p = out.join(name);
-            std::fs::File::create(&p)
-                .map(std::io::BufWriter::new)
-                .map_err(|e| format!("{}: {e}", p.display()))
-        },
-    )
+    duckosm_core::pbf::with_threads(threads, || {
+        duckosm_parquet::load_raw(
+            std::io::BufReader::new(f),
+            budget,
+            duckosm_core::pbf::threads(),
+            |name| {
+                let p = out.join(name);
+                std::fs::File::create(&p)
+                    .map(std::io::BufWriter::new)
+                    .map_err(|e| format!("{}: {e}", p.display()))
+            },
+        )
+    })?
 }
 
 /// Build from the PBF file `pbf_path` (cut to `p.boundary` when there is one) and write the files into `out`.

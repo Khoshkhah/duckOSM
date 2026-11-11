@@ -500,7 +500,7 @@ class DuckOSM:
         if self.config.options.engine == "rust":
             self.con.execute("CREATE SCHEMA IF NOT EXISTS raw")
             res = rust_engine.load_raw(self.con, self.pbf_path, self.output_path.parent, self.config.name,
-                                       self.config.options.memory_limit)
+                                       self.config.options.memory_limit, self.config.options.threads)
             logger.info(f"  duckosm-rust loaded {res['blocks']:,} blocks in {res['seconds']:.2f}s "
                         f"(budget {res['budget'] / 1e9:.2f} GB, at most {res['most_in_flight']} blocks at a time)")
         else:

@@ -48,25 +48,26 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
 
 
 # The load step (docs/design/streaming_load.md): the Rust engine writes raw_nodes, raw_ways and raw_relations as Parquet
-# while it reads the file, in a memory budget; DuckDB reads them into raw.* with the types of ST_READOSM.
+# files (one of each table for each thread) while it reads the file, in a memory budget; DuckDB reads them into raw.* with the types of ST_READOSM.
 RAW_SQL = {
-    "nodes": "SELECT osm_id, lat, lon, tags FROM read_parquet('{d}/raw_nodes.parquet')",
-    "ways": "SELECT osm_id, tags, refs FROM read_parquet('{d}/raw_ways.parquet')",
+    "nodes": "SELECT osm_id, lat, lon, tags FROM read_parquet('{d}/raw_nodes_*.parquet')",
+    "ways": "SELECT osm_id, tags, refs FROM read_parquet('{d}/raw_ways_*.parquet')",
     "relations": "SELECT osm_id, tags, refs, ref_roles, "
-                 "CAST(ref_types AS ENUM('node', 'way', 'relation')[]) AS ref_types FROM read_parquet('{d}/raw_relations.parquet')",
+                 "CAST(ref_types AS ENUM('node', 'way', 'relation')[]) AS ref_types FROM read_parquet('{d}/raw_relations_*.parquet')",
 }
 
 
-def load_raw(con, pbf_path, folder, name: str, memory_limit=None) -> dict:
+def load_raw(con, pbf_path, folder, name: str, memory_limit=None, threads=None) -> dict:
     """Create raw.nodes, raw.ways and raw.relations from ``pbf_path`` with the load step of the Rust engine. The Parquet
     files wait in a temporary folder in ``folder`` and are deleted after DuckDB reads them. ``memory_limit`` (as DuckDB
-    writes it, for example "2GB") is the memory budget of the load; None: 1 GB. Returns the summary dict of
+    writes it, for example "2GB") is the memory budget of the load; None: 1 GB. ``threads`` is the number of threads; None:
+    all cores. Returns the summary dict of
     ``duckosm._rust.load_raw``."""
     import shutil
     import tempfile
     tmp = Path(tempfile.mkdtemp(prefix=f".{name}.raw-", dir=folder))
     try:
-        res = module().load_raw(str(pbf_path), str(tmp), memory=memory_limit)
+        res = module().load_raw(str(pbf_path), str(tmp), memory=memory_limit, threads=threads)
         d = str(tmp).replace("'", "''")
         for table, sql in RAW_SQL.items():
             con.execute(f"CREATE OR REPLACE TABLE raw.{table} AS " + sql.format(d=d))

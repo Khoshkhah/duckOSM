@@ -1,112 +1,222 @@
-# The load step in a memory budget
+# The load step in Rust: `read_osm` and a fast PBF decoder
 
-Status: done for the offline build (`options.engine: rust`), 2026-11-11. The browser (duckOSM Studio) is stage 2, below.
+Status: 2026-11-11. The code is on the branch `claude/streaming-load`. The offline build (way D) and the browser
+(way C) are not connected to it yet: see "The stages".
 
-## The problem
+## Summary
 
-The load step makes `raw.nodes`, `raw.ways` and `raw.relations` from the `.osm.pbf` file. Before this change, the two
-versions did it in two ways, and neither had a memory limit that we control:
+The load step makes duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` from a `.osm.pbf` file. Before this work,
+DuckDB's `ST_READOSM` (C++, the spatial extension) did it. This work gives the load step in Rust, in two parts:
 
-| Version | How | Memory |
+1. **A fast PBF decoder** (`duckosm-core`, `pbfraw.rs`). It reads the protobuf bytes in place. It is 5 times faster
+   than the `osmpbf` crate, and faster than the two C++ readers (`ST_READOSM` and libosmium) for this job.
+2. **A DuckDB table function `read_osm(path, kind)`** (`duckosm-duckdb`, `read_osm.rs`). DuckDB calls it from all
+   its threads and writes the rows into its own tables, as it does with `ST_READOSM`.
+
+France (5.1 GB file), all of `raw.*`, in the same DuckDB: **`read_osm` uses about 30% less CPU time than
+`ST_READOSM`**, with the same rows and the same memory.
+
+The work also measured four other designs. They were slower, and this note keeps their numbers, so that nobody tries
+them again without a new reason.
+
+## How a dashboard holds its data: ways C and D
+
+roadstyle's guide "How a dashboard holds its data" names four ways to run a dashboard. Two of them build data:
+
+| Way | duckOSM program | Where DuckDB is | Load step |
+|---|---|---|---|
+| C. Made in the browser | duckOSM Studio | DuckDB-Wasm, a separate WebAssembly module | Rust writes Parquet files to the browser disk (OPFS); DuckDB-Wasm reads them |
+| D. Made by a local program | `duckosm-rust studio` | built into the Rust program (`duckdb` crate) | `read_osm` in the program's DuckDB |
+
+In way C, the Rust module and DuckDB-Wasm have separate memories, and they can only share files. So the browser
+needs the Parquet hand-over. In way D, DuckDB is in the same program, so the rows go into DuckDB directly.
+
+## The test data and the computer
+
+| Item | Value |
+|---|---|
+| File | `france-latest.osm.pbf` of Geofabrik, 2026-11-11, 5,112,749,993 bytes, sorted by type (`Sort.Type_then_ID`) |
+| Content | 529,233,838 nodes, 73,692,922 ways, 1,106,136 relations, 75,506 data blocks |
+| Computer | WSL2, 20 threads, 23 GB of RAM, 24 GB of swap |
+| DuckDB | 1.5.6 (the `duckdb` crate 1.10506.1, built in) for the comparisons of `read_osm` and `ST_READOSM`; 1.5.3 (Python) for the earlier designs |
+| Settings | `memory_limit` 4 GB, `threads` 20, `preserve_insertion_order` false, unless a table says other values |
+
+**Other sessions used the computer during many measurements** (load average 9 to 21). The wall times change by up
+to 2 times from one run to the next. The CPU time (user seconds) changes less, so the tables give both. A run that
+comes first can also be slower, because the file is not yet in the file cache of Linux. The comparisons run in both
+orders for this reason.
+
+## The PBF decoder
+
+### Why `osmpbf` was slow
+
+The way blocks of France (9,214 blocks), 20 threads, nothing stored:
+
+| Step | Time |
+|---|---|
+| Read the blocks from the file | 0.1 s |
+| Inflate the zlib data only | 0.7 s |
+| `osmpbf`: inflate and decode (`to_primitiveblock`) | 6.2 s |
+| `osmpbf`: and visit each tag and each node id | 6.7 s |
+
+So almost all of the time is the protobuf decode of `osmpbf`. It uses `rust-protobuf`, which makes owned objects: new
+vectors for the keys, the values and the node ids of each way (more than 200 million allocations for France), and it
+also decodes the metadata (`Info`: version, time, user) that `raw.*` does not use. A change of the zlib backend
+(`zlib-rs` in place of `miniz_oxide`) did not change the time, because the inflate is only 0.7 s.
+
+### The new decoder
+
+`pbfraw.rs` reads the bytes of a block in place, as `ST_READOSM` (protozero) does:
+
+- It checks the string table as UTF-8 one time for each block, and then it uses `&str` slices of it.
+- It reads the keys, the values and the node ids into buffers that it uses again for each element.
+- It skips the metadata and the groups of the kinds that the caller does not want.
+- It gives the coordinates with the formula of `osmpbf`, `1e-9 * (offset + granularity * value)`.
+- It supports raw and zlib blocks. A block with lzma, lz4 or zstd gives an error.
+
+The test `pbfraw::tests::equals_osmpbf` compares it with `osmpbf` on Monaco: the same elements, the same tags and the
+same coordinates, to the bit.
+
+| The way blocks of France | `osmpbf` | `pbfraw` |
 |---|---|---|
-| Offline (`duckosm build`) | DuckDB `ST_READOSM` from Python. It reads the file three times (one time for each table). | DuckDB fills its `memory_limit` and adds more for each thread. France (5.1 GB file) with `memory_limit` 4 GB: 4.5 GB with 20 threads (measured). |
-| Online (Studio) | The Rust cut keeps all of `raw.*` of the area in memory (`Raw`), then writes the Parquet files. | It grows with the area. |
+| Decode and visit each tag and node id | 6.7 s | **1.3 s** |
+| Decode and build the Arrow columns | 9.0 s | **2.3 s** |
 
-Measured on 2026-11-11 for France with `memory_limit` 4 GB: DuckDB counted 3.8 GB in its buffer, and the process had
-0.2 to 1.2 GB more (more with more threads). Only the scan (no table) used 283 MiB. So the memory is in the tables
-that are made, not in the reader.
+## The table function `read_osm`
 
-## The design
-
-The Rust engine reads the file and writes the three tables as Parquet while it reads. The memory does not grow with
-the size of the file. One setting, the **memory budget**, sets the memory of the step.
-
-```text
-.osm.pbf ──> blocks, in rounds ──> each block decoded on its own thread into Arrow columns (a "part")
-                                         │
-                                         └──> in the order of the file ──> raw_nodes / raw_ways / raw_relations.parquet
-                                                                           (a row group closes at its share of the budget)
+```sql
+CREATE TABLE raw.nodes AS SELECT * FROM read_osm('france.osm.pbf', 'node');
+CREATE TABLE raw.ways AS SELECT * FROM read_osm('france.osm.pbf', 'way');
+CREATE TABLE raw.relations AS
+  SELECT osm_id, tags, refs, ref_roles, CAST(ref_types AS ENUM('node', 'way', 'relation')[]) AS ref_types
+  FROM read_osm('france.osm.pbf', 'relation');
 ```
 
-| Part | Where | What it does |
-|---|---|---|
-| `RawSink`, `pbf::raw_block`, `pbf::stream_raw` | `duckosm-core` | Decode one block and give each element to a sink. Read the blocks in rounds: the caller says, for each block, if it fits in the round. |
-| `RawColumns`, `RawWriter`, `load_raw` | `duckosm-parquet` (feature `pbf`) | Build the Arrow columns of a block (a tag costs its bytes and two offsets, not two allocations). Write the parts. Choose the rounds from the budget. |
-| `load_raw` | `duckosm-build` | The step on a file: the threads and the three files in a folder. |
-| `duckosm._rust.load_raw(pbf, out, memory=...)` | `duckosm-py` | The Python binding. |
-| `rust_engine.load_raw` | `src/duckosm/rust_engine.py` | Calls the binding, and DuckDB reads the three files into `raw.*`. `_load_pbf` uses it when `options.engine` is `rust`. |
+`read_osm::raw_sql(path)` gives these statements. The columns and the types are the same as duckOSM's `raw.*` from
+`ST_READOSM`: `ref_types` is text from the function and DuckDB casts it to the ENUM list.
 
-### How the budget is shared
+How it works:
 
-| Share | Size | How it is kept |
-|---|---|---|
-| The blocks in work | 50% of the budget | A round takes the next block only if the cost of the round stays in this share. |
-| The open row groups | 50% of the budget: 1/12 of the budget for each of the three tables, and the rest as margin for the encoder | A table closes its row group when `ArrowWriter::memory_size` reaches its share, or at 65,536 rows. |
+1. **A block index.** `pbf::block_index` reads the file one time and skips the data of each block: it notes where
+   each block starts and how long it is, and if the header says `Sort.Type_then_ID`.
+2. **Only the blocks of the kind.** In a sorted file, `pbf::kind_range` does a binary search: it decodes some blocks
+   to find where the ways and the relations start. The pass for the ways of France reads 9,214 blocks of the 75,506
+   (measured). A file that is not sorted gives all blocks to each pass.
+3. **A parallel read.** DuckDB calls the function from all its threads (`set_max_threads`). Each call takes the
+   next block number from a shared counter and reads the block at its place in the file (`read_at`), with no lock.
+4. **The copy into DuckDB.** The call decodes the block with `pbfraw` into Arrow columns, and copies up to one
+   vector (2,048 rows) into DuckDB's vectors: the ids and the coordinates as flat copies, the tags as a `MAP`, the
+   node ids and the members as lists. The rest of the block waits in a queue for the next call.
+5. **DuckDB writes.** DuckDB's own insert writes the table. So the memory is DuckDB's `memory_limit`, the extra
+   memory of DuckDB's threads, and one block for each thread in Rust.
 
-The cost of one block in work is `size × (1 + 4 × ratio)`:
+`read_osm` is only for a program with DuckDB built in (way D). DuckDB-Wasm cannot load a function of our Rust module.
 
-- `size` is the size of the block in the file (compressed). `osmpbf` reads each block with `take`, so a reader that
-  counts its bytes gives the size before the block is decoded.
-- `ratio` is the largest ratio of the Arrow bytes of a part to the size of its block, so far in the file. Monaco: 11.9.
-- `4` (`BLOCK_COST`) is the memory of a block while it is decoded, as a multiple of its part: the decompressed block
-  and the builders, which grow by doubling. Measured: 3.2 for Monaco (4.9 MB for a part of 1.5 MB).
+## The comparison with the C++ readers
 
-The first round has one block, because the ratio is not known yet. A round always takes one block, so **the budget
-cannot be less than one block**. A file of Geofabrik has blocks of 8,000 elements: about 5 MB in work for the largest
-block of Monaco. A round has at most 2 blocks for each thread.
+### Decode only
 
-### The same rows as ST_READOSM
+All 75,506 blocks of France, read and decoded, nothing stored:
 
-`raw.*` has the rows and the column types of `ST_READOSM`:
+| Reader | Language | Wall time | CPU time (user) | Peak RSS |
+|---|---|---|---|---|
+| **`pbfraw`** (this work) | Rust | **3.5 to 4.7 s** | **57 s** | 73 MB |
+| `osmium fileinfo -e --no-crc` (libosmium 2.18) | C++ | 8.7 to 10.0 s | 80 to 85 s | 264 MB |
+| `osmium fileinfo -e` (with the CRC32 of the data) | C++ | 13.8 to 14.5 s | 96 to 98 s | 256 MB |
 
-- `raw.nodes`: `osm_id`, `lat`, `lon`, `tags`. All nodes.
-- `raw.ways`: `osm_id`, `tags`, `refs`. The ways with 2 or more nodes. No `line` column (the Studio files have one,
-  because `features.sql` reads it; it needs the coordinates of all nodes, so it is not in this step).
-- `raw.relations`: `osm_id`, `tags`, `refs`, `ref_roles`, `ref_types`. All relations. DuckDB casts `ref_types` to
-  `ENUM('node', 'way', 'relation')[]`.
-- No tags: `tags` is NULL. A member with no role: the role is NULL.
+The comparison is of the same result for `raw.*`, not of the same work. `osmium` is a general tool: it decodes the
+metadata and makes full objects. `pbfraw` does only what `raw.*` needs.
 
-`tests/test_rust_load.py` compares the column types and all rows (`EXCEPT ALL` in both directions) on Monaco, with a
-budget of 16 MB.
+### The ways only, in DuckDB, no table
 
-### The check of the budget
+`SELECT count(*), sum(len(refs)), sum(cardinality(tags)) FROM ...`, so that both read every column of the 73.7
+million ways:
 
-`rust/duckosm-parquet/tests/load_memory.rs` counts the heap with a counting allocator. The input is Monaco 20 times
-in a row (a `.osm.pbf` file is a list of blocks, so this is a valid file): 97 MiB of parts, which is more than every
-budget of the test. The test fails if the peak goes above the budget. Measured:
-
-| Budget | Threads | Peak | Blocks at most in one round |
+| Function | Language | Wall time | CPU time (user) |
 |---|---|---|---|
-| 16 MiB | 1 | 5.7 MiB | 2 |
-| 16 MiB | 8 | 7.4 MiB | 5 |
-| 32 MiB | 20 | 11.3 MiB | 12 |
-| 64 MiB | 20 | 21.7 MiB | 21 |
+| **`read_osm(path, 'way')`** | Rust | **3.8 to 4.2 s** | **58 to 62 s** |
+| `ST_READOSM(path) WHERE kind = 'way'` | C++ | 5.0 to 9.4 s | 85 to 92 s |
 
-The test counts the memory of the Rust code exactly. It does not count the memory of DuckDB when DuckDB reads the
-files into `raw.*`. DuckDB has its own `memory_limit`, and the build sets it from the same setting.
+A probe that skipped one column showed the cost of the copy into DuckDB: the tags about 14 CPU seconds, the node ids
+about 6.
 
-## The setting
+### All of `raw.*`, in DuckDB
 
-`options.memory_limit` (for example `"2GB"`) is the budget of the load step and DuckDB's `memory_limit`. The two run
-one after the other, so each one can use all of it. With no value, the load step uses 1 GB, and DuckDB uses its
-default (80% of the RAM).
+| Run (order) | Function | nodes | ways | relations | **Total** | CPU (user) | Peak RSS |
+|---|---|---|---|---|---|---|---|
+| 1 | `read_osm` (Rust) | 32.0 s | 31.4 s | 5.8 s | **69.2 s** | 338 s | 6.0 GB |
+| 2 | `ST_READOSM` (C++) | 53.2 s | 24.3 s | 12.9 s | **90.4 s** | 462 s | 6.0 GB |
+| 3 | `read_osm` (Rust) | 22.3 s | 15.7 s | 5.0 s | **42.9 s** | 325 s | 6.1 GB |
+| 4 | `ST_READOSM` (C++) | 38.2 s | 44.0 s | 11.2 s | **93.5 s** | 466 s | 6.1 GB |
 
-## France
+On a quieter computer earlier in the day, `ST_READOSM` took 39.2 s and 42.9 s for the same work. So the wall times
+of the table are not a fair answer alone. The CPU time is: **`read_osm` does the same work with about 30% less CPU.**
+The peak memory is the same, because DuckDB's limit and its threads set it.
 
-TO BE MEASURED.
+The rows are equal: on Monaco, the three tables of `read_osm` and of `ST_READOSM` have the same column types and the
+same rows (`EXCEPT ALL` in both directions).
 
-## What this does not change
+## The designs that were slower
 
-- **The cut to a boundary.** A build with a boundary still cuts the file with osmium first (`pbf/` cache), then loads
-  the cut file. The Rust cut (`pbf::cut`) keeps the area in memory.
-- **The network step.** It reads the file again by itself and keeps the network in memory (France: more than 26 GB,
-  measured on 2026-11-11). That is the next step of this work.
-- **The browser.** Stage 2.
+France, all of `raw.*`. The wall times are from runs at different load of the computer, so they show the size of the
+difference, not exact values.
+
+| Design | Total | Peak memory | Why it was slower |
+|---|---|---|---|
+| `ST_READOSM` (the old load, before this work) | 65 s | 4.5 GB | (the reference) |
+| Rust writes Parquet (one writer, zstd), DuckDB copies the files | 274 s | Rust 0.5 GB, DuckDB 3.1 GB | One thread compresses all the files |
+| The same, with DELTA_BINARY_PACKED and BYTE_STREAM_SPLIT | slower | | The encoders cost more for Rust and for DuckDB (nodes copy: 116 s, not 47 s) |
+| The same, with no compression | 307 s | DuckDB 3.3 GB | The writer is still one thread |
+| Parquet shards (one writer for each thread), no compression | 186 s | Rust 0.7 GB, DuckDB 3.3 GB | 22 GB written and read again |
+| The same, with LZ4 | 191 s | DuckDB 3.6 GB | Less to write, but a slower copy |
+| Rust appends Arrow batches to DuckDB (one connection for each thread) | 236 s (1 GB budget), 563 s (4 GB) | 2.0 to 3.3 GB | The conversion of each batch in Rust, and many commits on the same tables |
+| An Arrow stream from Python into DuckDB (only the nodes) | 108 s for the nodes | 3.7 GB | DuckDB reads one stream on one thread |
+| `read_osm` with `osmpbf` and one reader lock | 68 s | 6.2 GB | One thread read the file, and each pass decoded all blocks |
+
+The lesson: the slow part was never the language. It was the way that the rows went into DuckDB (files, conversions
+or one thread), and the decode of `osmpbf`. When DuckDB pulls the rows from a table function and the decode reads the
+bytes in place, Rust is faster than the C++ readers for this job.
+
+## The Parquet load for the browser (way C)
+
+`duckosm-parquet` has the load that writes Parquet files in a memory budget, for the browser:
+
+- `pbf::stream_raw` reads the blocks in rounds and decodes a round in parallel with `pbfraw`.
+- `load_parts` chooses the blocks of a round so that they stay in the budget. The cost of a block is its size in the
+  file times `1 + 4 × ratio`, where `ratio` is the largest ratio of the Arrow bytes of a part to the size of its block
+  (Monaco: 11.9).
+- `load_raw` gives each thread its own shard of three files, `<table>_<shard>.parquet`. A row group closes when it
+  holds its share of the budget.
+
+`rust/duckosm-parquet/tests/load_memory.rs` counts the heap with a counting allocator, on Monaco 20 times in a row
+(97 MiB of rows). The test fails if the peak goes above the budget:
+
+| Budget | Threads | Peak |
+|---|---|---|
+| 16 MiB | 1 | 5.9 MiB |
+| 16 MiB | 8 | 6.7 MiB |
+| 32 MiB | 20 | 10.9 MiB |
+| 64 MiB | 20 | 19.8 MiB |
+
+France with a 1 GB budget: the Rust part used 0.7 GB at most. In the browser, DuckDB-Wasm must read the files from
+OPFS with `registerFileHandle`, not `registerFileBuffer` (which copies each file into its memory), and it does not copy
+them into tables: a query reads the files. A copy into a `.duckdb` file is only for the export.
+
+## The settings
+
+| Setting | Effect |
+|---|---|
+| `options.threads` | The threads of DuckDB and of the Rust load step. Not set: all cores. |
+| `options.memory_limit` | DuckDB's `memory_limit`, and the budget of the Parquet load. Not set: DuckDB's default (80% of the RAM), and 1 GB for the Parquet load. |
+
+DuckDB uses more memory than its limit: about 0.2 to 1.2 GB for its threads (France, 4 to 20 threads, measured with
+`ST_READOSM` and with `read_osm`). Fewer threads make this smaller.
 
 ## The stages
 
 | Stage | Work | Check |
 |---|---|---|
-| 1 (done) | The load step in Rust with a budget, for the offline build. | `test_rust_load.py` (equal to `ST_READOSM`), `load_memory.rs` (the budget). |
-| 2 | Studio: the load step writes the files to OPFS, and DuckDB-Wasm reads them. The cut to the area uses the same rounds: the nodes inside the boundary go to a sorted file, not to a set in memory. | The same tests in the browser build, and a phone check. |
-| 3 | The network step reads `raw.*` in blocks (by tile), not the whole file into memory. | The golden tests: every row and every `edge_id` stays equal. |
+| 1 (this branch) | `pbfraw`, `read_osm`, the Parquet load with its budget, the measurements. | `equals_osmpbf`, `load_memory`, the Monaco comparisons with `ST_READOSM` |
+| 2 | Way D: `duckosm_build::build` makes `raw.*` with `read_osm`. The Python `duckosm build` keeps `ST_READOSM` (its wheel has no DuckDB inside). A CI test compares `read_osm` with `ST_READOSM` on Monaco. | The golden tests: every row and every `edge_id` stays equal |
+| 3 | Way C: Studio writes the Parquet files to OPFS and DuckDB-Wasm reads them with `registerFileHandle`. | The same tests in the browser build, and a phone check |
+| 4 | The network step uses `pbfraw` in place of `osmpbf`, and reads in blocks. | The golden tests |

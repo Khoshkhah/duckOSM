@@ -1,6 +1,10 @@
 //! Write the network as a DuckDB file. The Parquet files that `duckosm-parquet` wrote are loaded
 //! with DuckDB itself, so the types are the types of duckOSM (BIGINT, FLOAT, BIGINT[], GEOMETRY).
 
+mod raw;
+pub mod read_osm;
+pub use raw::load_raw_duckdb;
+
 use duckdb::Connection;
 use std::path::Path;
 

@@ -7,11 +7,14 @@ license.workspace = true
 [features]
 default = ["pbf"]
 # Reading a .osm.pbf file. Off for builds that get their data from somewhere else (WebAssembly).
-pbf = ["dep:osmpbf", "dep:rayon"]
+pbf = ["dep:osmpbf", "dep:rayon", "dep:flate2"]
 
 [dependencies]
 rstar = "0.12"
 osmpbf = { version = "0.3.8", optional = true }
+# osmpbf inflates each block with flate2; zlib-rs (pure Rust, also WebAssembly) is about 2 times faster than the default
+# miniz_oxide (docs/design/streaming_load.md). Cargo joins the features, so osmpbf uses it too.
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"], optional = true }
 # the passes of the cut to a boundary decode the blocks in parallel (the same rayon as osmpbf)
 rayon = { version = "1.12", optional = true }
 # OSM JSON (the output format of the Overpass API): the input of the browser page from a place name

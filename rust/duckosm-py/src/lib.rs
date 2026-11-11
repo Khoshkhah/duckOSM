@@ -279,19 +279,26 @@ fn edge_id_hash(osm_id: i64, source: i64, target: i64) -> i64 {
 }
 
 /// The load step: duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole file `pbf`, written into the
-/// folder `out` as `raw_nodes.parquet`, `raw_ways.parquet` and `raw_relations.parquet`. `memory` is the memory budget
-/// as DuckDB writes it (`"2GB"`, `"512MB"`); the default is 1 GB. The memory does not grow with the size of the file.
+/// folder `out` as `raw_nodes_*.parquet`, `raw_ways_*.parquet` and `raw_relations_*.parquet` (one file of each table for
+/// each thread). `memory` is the memory budget
+/// as DuckDB writes it (`"2GB"`, `"512MB"`); the default is 1 GB. `threads` is the number of threads; the default is all cores. The memory does not grow with the size of the file.
 /// Returns the rows of each table, the number of blocks and the time in seconds.
 #[pyfunction]
-#[pyo3(signature = (pbf, out, *, memory = None))]
-fn load_raw<'py>(py: Python<'py>, pbf: PathBuf, out: PathBuf, memory: Option<String>) -> PyResult<Bound<'py, PyDict>> {
+#[pyo3(signature = (pbf, out, *, memory = None, threads = None))]
+fn load_raw<'py>(
+    py: Python<'py>,
+    pbf: PathBuf,
+    out: PathBuf,
+    memory: Option<String>,
+    threads: Option<usize>,
+) -> PyResult<Bound<'py, PyDict>> {
     let budget = match &memory {
         Some(m) => parse_memory(m).map_err(PyValueError::new_err)?,
         None => 1_000_000_000,
     };
     let t = std::time::Instant::now();
     let s = py
-        .detach(|| run_load_raw(&pbf, &out, budget))
+        .detach(|| run_load_raw(&pbf, &out, budget, threads))
         .map_err(PyRuntimeError::new_err)?;
     let d = PyDict::new(py);
     d.set_item("nodes", s.rows[0])?;

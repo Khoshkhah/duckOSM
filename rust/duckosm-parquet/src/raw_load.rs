@@ -2,7 +2,7 @@
 //! `.osm.pbf` file, written as Parquet while the file is read, in a memory budget. The memory does not grow with the
 //! size of the file: only the blocks of one round and one open row group of each table are in memory.
 
-use super::{compression, err, ROW_GROUP};
+use super::{err, ROW_GROUP};
 use arrow_array::builder::{Float64Builder, Int64Builder, ListBuilder, MapBuilder, StringBuilder};
 use arrow_array::{ArrayRef, RecordBatch};
 use duckosm_core::graph::MemberType;
@@ -12,12 +12,9 @@ use parquet::file::properties::WriterProperties;
 use std::io::Write;
 use std::sync::Arc;
 
-/// The file names of the three tables, in the order of [`RawPart::batches`].
-pub const RAW_FILES: [&str; 3] = [
-    "raw_nodes.parquet",
-    "raw_ways.parquet",
-    "raw_relations.parquet",
-];
+/// The three tables, in the order of [`RawPart::batches`]. [`load_raw`] writes each table as files
+/// `<table>_<shard>.parquet` (one shard for each thread), so DuckDB reads `<table>_*.parquet`.
+pub const RAW_TABLES: [&str; 3] = ["raw_nodes", "raw_ways", "raw_relations"];
 
 type Tags = MapBuilder<StringBuilder, StringBuilder>;
 
@@ -37,6 +34,8 @@ pub struct RawColumns {
     r_roles: ListBuilder<StringBuilder>,
     r_types: ListBuilder<StringBuilder>,
     refs: Vec<i64>,
+    /// The tables to fill (nodes, ways, relations); the elements of the others are skipped.
+    keep: [bool; 3],
 }
 
 /// The tags as a DuckDB `MAP(VARCHAR, VARCHAR)`; no tags: NULL, as `ST_READOSM`.
@@ -68,7 +67,17 @@ impl Default for RawColumns {
             r_roles: ListBuilder::new(StringBuilder::new()),
             r_types: ListBuilder::new(StringBuilder::new()),
             refs: Vec::new(),
+            keep: [true; 3],
         }
+    }
+}
+
+impl RawColumns {
+    /// Columns for only one table (0 nodes, 1 ways, 2 relations): a pass that makes one table builds nothing else.
+    pub fn only(table: usize) -> Self {
+        let mut c = RawColumns::default();
+        c.keep = [table == 0, table == 1, table == 2];
+        c
     }
 }
 
@@ -80,6 +89,9 @@ impl RawSink for RawColumns {
         lon: f64,
         t: &mut dyn Iterator<Item = (&'a str, &'a str)>,
     ) {
+        if !self.keep[0] {
+            return;
+        }
         self.n_id.append_value(id);
         self.n_lat.append_value(lat);
         self.n_lon.append_value(lon);
@@ -92,6 +104,9 @@ impl RawSink for RawColumns {
         t: &mut dyn Iterator<Item = (&'a str, &'a str)>,
         refs: &mut dyn Iterator<Item = i64>,
     ) {
+        if !self.keep[1] {
+            return;
+        }
         self.refs.clear();
         self.refs.extend(refs);
         // duckOSM's raw.ways has only the ways with 2 or more nodes
@@ -110,6 +125,9 @@ impl RawSink for RawColumns {
         t: &mut dyn Iterator<Item = (&'a str, &'a str)>,
         members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
     ) {
+        if !self.keep[2] {
+            return;
+        }
         self.r_id.append_value(id);
         tags(&mut self.r_tags, t);
         for (m, ty, role) in members {
@@ -174,27 +192,15 @@ impl RawColumns {
     }
 }
 
-/// The encodings of the `raw_*` files. The ids (`osm_id`, and the node ids in `refs`) are sorted or close together, so
-/// `DELTA_BINARY_PACKED` stores small differences. `BYTE_STREAM_SPLIT` puts the same byte of each coordinate together,
-/// so zstd compresses the coordinates better. DuckDB reads both encodings.
+/// The properties of the `raw_*` files. They are temporary (DuckDB copies them into `raw.*`, then they are deleted), so
+/// they have no compression: zstd on one thread was most of the time of the step, and DuckDB had to decompress it again
+/// (France: 182 s with zstd). The plain encodings are also the fastest for DuckDB to read (DELTA_BINARY_PACKED and
+/// BYTE_STREAM_SPLIT made the copy of the nodes 116 s, not 47 s).
 fn raw_props() -> WriterProperties {
-    use parquet::basic::Encoding;
-    use parquet::schema::types::ColumnPath;
-    let mut b = WriterProperties::builder()
-        .set_compression(compression())
-        .set_max_row_group_row_count(Some(ROW_GROUP));
-    for (path, enc) in [
-        (vec!["osm_id"], Encoding::DELTA_BINARY_PACKED),
-        (vec!["refs", "list", "item"], Encoding::DELTA_BINARY_PACKED),
-        (vec!["lat"], Encoding::BYTE_STREAM_SPLIT),
-        (vec!["lon"], Encoding::BYTE_STREAM_SPLIT),
-    ] {
-        let c = ColumnPath::new(path.into_iter().map(String::from).collect());
-        b = b
-            .set_column_dictionary_enabled(c.clone(), false)
-            .set_column_encoding(c, enc);
-    }
-    b.build()
+    WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::UNCOMPRESSED)
+        .set_max_row_group_row_count(Some(ROW_GROUP))
+        .build()
 }
 
 /// The three Parquet files, written part by part. A table closes its row group when the row group holds
@@ -287,19 +293,85 @@ pub struct LoadSummary {
     pub most_in_flight: usize,
 }
 
-/// The share of the budget for the blocks in work. The open row groups of the three tables get the rest.
-const BLOCKS_SHARE: f64 = 0.5;
+/// The share of the budget for the blocks in work. The rest is for the store of the rows: the open row groups of the
+/// Parquet shards, or DuckDB.
+pub const BLOCKS_SHARE: f64 = 0.5;
 /// The memory of one block in work, as a multiple of its Arrow part: the decompressed block and the builders (they
 /// grow by doubling) are in memory while the part is made. Measured: about 3.2 for the blocks of Monaco.
 const BLOCK_COST: f64 = 4.0;
 
-/// Load duckOSM's `raw.*` tables from a `.osm.pbf` file (`reader`) into the three files of [`RAW_FILES`] (each from
-/// `file`), with at most about `budget` bytes of memory. `threads` is the number of threads that decode blocks.
+/// Decode all blocks of a `.osm.pbf` file (`reader`) into parts on `threads` threads, and give each part to `consume`
+/// on the thread that made it, so the parts are also stored in parallel. The blocks in work use at most about
+/// `blocks_budget` bytes. Returns the number of blocks, the largest ratio and the most blocks of one round.
 ///
 /// The memory of a block in work is about `BLOCK_COST` times its Arrow part, and the part is about `ratio` times the
 /// size of the block in the file. The size in the file is known before the block is decoded, so a round takes the
 /// blocks that fit in the budget with the largest `ratio` so far. The first round has one block (no ratio yet). The
 /// budget cannot be less than one block: a round always takes one block.
+#[cfg(feature = "pbf")]
+pub fn load_parts<R: std::io::Read + Send>(
+    reader: R,
+    blocks_budget: usize,
+    threads: usize,
+    consume: impl Fn(RawPart) -> Result<(), String> + Sync,
+) -> Result<(usize, f64, usize), String> {
+    use std::cell::Cell;
+    let threads = threads.max(1);
+    let ratio = Cell::new(0.0f64);
+    let most = Cell::new(1usize);
+    let cost = |size: usize| size as f64 * (1.0 + BLOCK_COST * ratio.get());
+    let blocks = duckosm_core::pbf::stream_raw(
+        reader,
+        |size, round| {
+            let ok = ratio.get() > 0.0
+                && round.len() < 2 * threads
+                && round.iter().map(|&s| cost(s)).sum::<f64>() + cost(size) <= blocks_budget as f64;
+            if ok {
+                most.set(most.get().max(round.len() + 1));
+            }
+            ok
+        },
+        RawColumns::default,
+        |c: RawColumns| {
+            let part = c.finish()?;
+            let bytes = if part.batches.iter().any(|b| b.num_rows() > 0) {
+                part.bytes()
+            } else {
+                0
+            };
+            consume(part)?;
+            Ok(bytes)
+        },
+        |bytes, size| {
+            if bytes > 0 && size > 0 {
+                ratio.set(ratio.get().max(bytes as f64 / size as f64));
+            }
+            Ok(())
+        },
+    )?;
+    Ok((blocks, ratio.get(), most.get()))
+}
+
+/// Give `part` to the first of `slots` that no other thread uses now, and run `f` on it. With at least as many slots
+/// as threads, a thread always finds a free slot.
+pub fn with_free_slot<S, T>(
+    slots: &[std::sync::Mutex<S>],
+    f: impl FnOnce(&mut S) -> Result<T, String>,
+) -> Result<T, String> {
+    loop {
+        for s in slots {
+            if let Ok(mut s) = s.try_lock() {
+                return f(&mut s);
+            }
+        }
+        std::thread::yield_now();
+    }
+}
+
+/// Load duckOSM's `raw.*` tables from a `.osm.pbf` file (`reader`) into Parquet files, with at most about `budget`
+/// bytes of memory and `threads` threads ([`load_parts`]). Each thread writes the parts that it decodes into a shard
+/// of its own: three files `<table>_<shard>.parquet` (each from `file`), so all threads write at the same time. The
+/// rows of a table are the rows of all its files.
 #[cfg(feature = "pbf")]
 pub fn load_raw<R, W>(
     reader: R,
@@ -311,43 +383,36 @@ where
     R: std::io::Read + Send,
     W: Write + Send,
 {
-    use std::cell::Cell;
-    let blocks_budget = budget as f64 * BLOCKS_SHARE;
-    let group_bytes = (budget as f64 * (1.0 - BLOCKS_SHARE)) as usize / (2 * RAW_FILES.len());
-    let files = [
-        file(RAW_FILES[0])?,
-        file(RAW_FILES[1])?,
-        file(RAW_FILES[2])?,
-    ];
-    let mut w = RawWriter::new(files, group_bytes)?;
-    let ratio = Cell::new(0.0f64);
-    let most = Cell::new(1usize);
-    let cost = |size: usize| size as f64 * (1.0 + BLOCK_COST * ratio.get());
-    let blocks = duckosm_core::pbf::stream_raw(
-        reader,
-        |size, round| {
-            let ok = ratio.get() > 0.0
-                && round.len() < 2 * threads.max(1)
-                && round.iter().map(|&s| cost(s)).sum::<f64>() + cost(size) <= blocks_budget;
-            if ok {
-                most.set(most.get().max(round.len() + 1));
-            }
-            ok
-        },
-        RawColumns::default,
-        RawColumns::finish,
-        |part, size| {
-            if part.batches.iter().any(|b| b.num_rows() > 0) && size > 0 {
-                ratio.set(ratio.get().max(part.bytes() as f64 / size as f64));
-            }
-            w.write(part)
-        },
-    )?;
+    use std::sync::Mutex;
+    let threads = threads.max(1);
+    let blocks_budget = (budget as f64 * BLOCKS_SHARE) as usize;
+    let group_bytes =
+        (budget as f64 * (1.0 - BLOCKS_SHARE)) as usize / (2 * RAW_TABLES.len() * threads);
+    let mut writers = Vec::with_capacity(threads);
+    for i in 0..threads {
+        let f = |t: &str| format!("{t}_{i:03}.parquet");
+        let files = [
+            file(&f(RAW_TABLES[0]))?,
+            file(&f(RAW_TABLES[1]))?,
+            file(&f(RAW_TABLES[2]))?,
+        ];
+        writers.push(Mutex::new(RawWriter::new(files, group_bytes)?));
+    }
+    let (blocks, ratio, most_in_flight) = load_parts(reader, blocks_budget, threads, |part| {
+        with_free_slot(&writers, |w| w.write(part))
+    })?;
+    let mut rows = [0; 3];
+    for w in writers {
+        let r = w.into_inner().map_err(err)?.finish()?;
+        for (a, b) in rows.iter_mut().zip(r) {
+            *a += b;
+        }
+    }
     Ok(LoadSummary {
-        rows: w.finish()?,
+        rows,
         blocks,
-        ratio: ratio.get(),
-        most_in_flight: most.get(),
+        ratio,
+        most_in_flight,
     })
 }
 
