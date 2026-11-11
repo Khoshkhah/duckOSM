@@ -155,6 +155,48 @@ A reader takes the first source that it has, in this order, and the page says wh
 | junction | there is no drawn road inside a junction: the height goes in a straight line from the end of the road in to the start of the road out (SimReady: from the stop line of the road in to the stop line of the road out) |
 | lane | a lane has the profile of its road. SUMO cuts each lane back from its junctions, so the lane's start and end are first put on the road's line; a place on the lane is the same fraction of that part of the road |
 
+### An object on the road: a vehicle
+
+A vehicle gets its height from its road, never from the ground at its longitude and latitude. roadstyle does this for the vehicles
+of a SUMO run (roadstyle PR 149). The standard gives the same rule for a road surface and a bridge deck
+([The ground reference](ground-reference.md), section 3).
+
+```mermaid
+flowchart LR
+  F["SUMO sample<br/>lane, place on the lane"] --> P["the vehicle's road place<br/>(lane, distance, weight)"]
+  P --> R["the road profile<br/>of each lane's road"]
+  R --> Z["height, pitch"]
+  Z --> D["the 3D box on the map"]
+```
+
+1. **The road place.** A SUMO sample gives the vehicle's lane and the place of its front on that lane. Between two samples, the
+   vehicle moves along the chain of lanes that joins them. Its middle is half its length behind its front. Its state is one to three
+   entries of (lane, distance along the lane, weight):
+    - one entry on a lane or in a junction;
+    - two or three during a lane change, which takes 2 s: the weights go from the old lane to the new lane, and the position is the
+      same blend of the two places.
+2. **The height of each entry.**
+    - On a lane: the profile of the lane's road, at the same fraction of the lane's part of the road.
+    - In a junction (SUMO's internal lane): a straight line from the end of the road in to the start of the road out.
+3. **The height of the vehicle** is the sum of the entries' heights times their weights, so a lane change has no step.
+4. **The tilt.** The pitch is the slope of the main entry's profile over the vehicle's length. The roll is 0: a road is level across.
+5. **The tunnel.** A vehicle on a tunnel road (or in a junction between two tunnel roads) has the tunnels' look of the page:
+   shown, faded or hidden.
+6. **The drawing.** The page draws each vehicle as a box: its bottom at the height, turned to its heading and pitch. The boxes are
+   one custom layer in metres, above the 3D buildings, so the terrain and the buildings hide a vehicle behind them.
+
+**A height that is not known yet** (the road's line, or a terrain tile, has not come): the vehicle is not drawn in that frame, and
+the page asks again in the next frame. It is never drawn at a wrong height. `rs.vehicles.waiting()` gives how many wait.
+
+**A vehicle with no lane** (a run with no `net.xml`, only longitude and latitude): it has no road, so it takes the terrain under it,
+read on a 5 m grid. This is the only case where a point gives the height.
+
+**The exaggeration** of the terrain applies to the vehicles too: a height from the terrain file includes it, so the road, the
+deck and the vehicle stay together.
+
+**State on 2026-11-10:** the road profiles come from the map's terrain along each road. Next: from `edges.z_vertices`, then from
+SimReady's graded profile, and on a 3D bridge from the deck rule.
+
 ### The road and the ground must agree
 
 A road profile and the drawn terrain are two surfaces. Where they differ, a road or a vehicle floats or sinks. The standard fixes
