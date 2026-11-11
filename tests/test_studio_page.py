@@ -252,6 +252,7 @@ def test_a_box_on_a_phone(studio):
         browser = p.chromium.launch()
         page, errors = _open(browser, url, viewport={"width": 390, "height": 844}, device_scale_factor=2)
         _fit(page)
+        page.evaluate("map.jumpTo({ center: [10, 50], zoom: 3 })")      # the page opens on the world: a person zooms to Europe before the box
         page.click("[data-tab=draw]")
         page.click("[data-as=draw]")
         assert page.get_attribute("[data-as=draw]", "aria-pressed") == "true"
@@ -305,5 +306,21 @@ def test_saved_areas_are_listed_loaded_and_opened(studio):
             row.locator("[data-do=open]").click()
         page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
         assert page.url.endswith("/edit/") and page.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == "monaco-a"
+        browser.close()
+        assert not errors, errors
+
+
+def test_a_page_with_no_roads_has_no_patch_of_the_page(studio):
+    """The page has no roads before a build, and uses roadstyle's dashboard unchanged: no banner "0 road features", a first view of the world (not 0, 0),
+    and the option rows (the networks) in the type of an option, not in the capitals of a label (roadstyle PR 153)."""
+    _, url = studio
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url)
+        _options(page)
+        page.wait_for_timeout(3500)                          # roadstyle's check for a map with no road features waits 2.5 s
+        assert page.locator("#rs-diag").count() == 0
+        assert page.evaluate("map.getZoom()") < 4 and page.evaluate("map.getCenter().lat") != 0
+        assert page.evaluate("getComputedStyle(document.querySelector('#sb .rs-opt')).textTransform") == "none"
         browser.close()
         assert not errors, errors

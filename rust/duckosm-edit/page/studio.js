@@ -42,11 +42,6 @@
   async function start() {
     const rs = window.rs, map = window.map;
     for (const href of ["parts/ground_step/ground_step.css", "parts/build_steps/steps.css"]) document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href }));
-    // the page has no roads, so roadstyle's first view is a point at 0, 0: start with Europe, as Studio does
-    const home = () => map.jumpTo({ center: [10, 50], zoom: 3, pitch: 0, bearing: 0 });
-    map.loaded() ? home() : map.once("load", home);
-    // the page has no roads yet: roadstyle's check for a map with no road features is not for it
-    new MutationObserver(() => document.getElementById("rs-diag")?.remove()).observe(document.body, { childList: true });
     const title = document.querySelector("#sb .sb-top h2");        // the title with a line under it, as in Studio
     if (title) { const wrap = document.createElement("div"); title.replaceWith(wrap); wrap.append(title, Object.assign(document.createElement("p"), { textContent: "Make the data of an area on this computer" })); }
     const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
