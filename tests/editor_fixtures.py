@@ -107,6 +107,8 @@ def _open(browser, url, **ctx):
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(url)
     page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
+    # the map's load event has come: on it the page fits the camera to the area, so a camera move of a test before it is lost (the panel is ready first)
+    page.wait_for_function("window.map && window.map._loaded", timeout=60_000)
     return page, errors
 
 

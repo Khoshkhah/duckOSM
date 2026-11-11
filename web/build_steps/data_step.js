@@ -150,9 +150,8 @@ export function initDataStep({ root, rs, map = null, padding = () => 40, zoomToA
 	if (map) {
 		map.on("styledata", () => { if ((shown || hovered) && !map.getSource("bs-extract")) try { paint(); } catch { /* the next styledata tries again */ } });
 		const over = (e) => { if (shown) return; const r = e.target.closest("label")?.querySelector('input[name="bs-extract"]'); if (r && hovered !== r.value) { hovered = r.value; paint(); const x = list.find((e) => e.id === hovered); if (x) fitIfHidden(x); } };
-		q("list").addEventListener("mouseover", over);
-		q("list").addEventListener("focusin", over);
-		q("list").addEventListener("mouseleave", () => { hovered = null; if (!shown) paint(); });
+		// no hover: the outline of an extract shows when the person chooses it (Kaveh, 2026-11-11: the hover was in the way). `over` stays for a host that wants it.
+		void over;
 		q("list").addEventListener("click", (e) => {
 			const r = e.target.closest('input[name="bs-extract"]');
 			if (!r) return;
