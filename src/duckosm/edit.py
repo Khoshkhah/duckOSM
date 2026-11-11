@@ -18,8 +18,13 @@ class _Db:
     def open(self):
         import duckdb
 
-        self.con = duckdb.connect(self.path, read_only=True)
+        # an instance of its own: duckdb.connect(path) gives each connection of a file the same instance, so a second _Db of the file (card 8 of
+        # duckosm studio reads the levels) would have the locked settings of the first (LOCK in rust/duckosm-edit/src/lib.rs). The file is
+        # attached read only, with its own name as the database, as the native program opens it.
+        self.con = duckdb.connect()
         self.con.execute("INSTALL spatial; LOAD spatial;")
+        name, path = Path(self.path).stem.replace('"', '""'), self.path.replace("'", "''")
+        self.con.execute(f"ATTACH '{path}' AS \"{name}\" (READ_ONLY); USE \"{name}\"")
 
     def close(self):
         if self.con is not None:

@@ -30,6 +30,11 @@ pub trait Host: Send + Sync {
     fn buffer(&self, _wkt: &str, _epsg: u32, _metres: f64) -> Result<String, String> {
         Err("this program cannot buffer an area".into())
     }
+    /// Run the SQL script `sql` on the database `db`, open for writing (card 8 saves the levels: `page::save_levels_sql`). The script has its
+    /// own BEGIN and COMMIT; after an error the host rolls back. No reader of the file is open while it writes.
+    fn write(&self, _db: &Path, _sql: &str) -> Result<(), String> {
+        Err("this program cannot write the database".into())
+    }
 }
 
 /// The files of the page: its own, the parts of this repository's `web/`, and the catalog of the DEM sources.
@@ -640,6 +645,48 @@ impl Studio {
         }
     }
 
+    /// Card 8, the level editor's data of the area `name` (roadstyle's level-edit part; the adapter levels_sql.js, here on the server):
+    /// `GET levels/edges` the roads of the level area (GeoParquet), `GET levels/stored` the stored levels (`{"csv", "edge_hash"}` or null), and
+    /// `POST levels/save` (`{"files", "name"}`) writes the editor's files into the database. The map (way D) already has the new levels: the
+    /// editor redraws each change with `POST relevel`.
+    fn levels(&self, req: &mut Req, name: &str, op: &str, map: &roadstyle_local::Local) -> Result<(), String> {
+        let file = self.area_dir(name).map(|d| d.join(format!("{name}.duckdb"))).ok_or("no such area")?;
+        let read = |f: fn(&mut dyn Db) -> Result<Vec<u8>, String>| {
+            let mut db = self.host.db(&file);
+            db.open()?;
+            let r = f(db.as_mut());
+            db.close();
+            r
+        };
+        let r = match (req.method.as_str(), op) {
+            ("GET" | "HEAD", "edges") => read(|db| crate::page::level_edges(db)).map(|b| ("application/vnd.apache.parquet", b)),
+            ("GET" | "HEAD", "stored") => read(|db| crate::page::stored_levels(db).map(|v| v.to_string().into_bytes())).map(|b| ("application/json", b)),
+            ("POST", "save") => {
+                let own = self.own.clone();
+                let Some(body) = req.write_body(&own)? else { return Ok(()) };
+                let b: Value = serde_json::from_slice(&body).map_err(|e| format!("the request: {e}"))?;
+                // no reader has the file open while it is written: the page of the area (/edit/) closes and opens again, and the map reads it again
+                let site = self.edit.lock().unwrap().clone().filter(|s| s.db == file);
+                if let Some(s) = &site {
+                    s.close();
+                }
+                let dir = std::env::temp_dir().join(format!("duckosm-studio-{}-levels", std::process::id()));
+                let saved = crate::page::save_levels_sql(&dir, &b["files"], b["name"].as_str().unwrap_or(name)).and_then(|sql| self.host.write(&file, &sql));
+                let _ = std::fs::remove_dir_all(&dir);
+                if let Some(s) = &site {
+                    s.reopen()?;
+                }
+                map.reopen_database()?;
+                saved.map(|()| ("application/json", b"{}".to_vec()))
+            }
+            _ => return req.say("404 Not Found", "text/plain", b"not found"),
+        };
+        match r {
+            Ok((kind, b)) => req.say("200 OK", kind, &b),
+            Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
+        }
+    }
+
     /// The map of an area, way D (roadstyle-local, from `page::map_parts`) with its own connection to the database: call it when no page of the area
     /// has the database open. With DuckDB (the feature duckdb) the queries read the area's file, read only; the Python module has no DuckDB inside.
     fn make_tiled(&self, dir: &Path, name: &str) -> Result<(), String> {
@@ -929,6 +976,17 @@ impl Studio {
                 None => req.say("404 Not Found", "text/plain", b"no area is built yet"),
             };
         }
+        if let Some(rest) = path.strip_prefix("rs/") {
+            // roadstyle's page files at the pin (roadstyle_serve::embedded): the modules of the level-edit part (card 8) and the level editor's
+            // WebAssembly package (level_editor/pkg/, when editor_pkg.sh made it before the build)
+            let kind = match rest.rsplit('.').next() { Some("js") => "text/javascript", Some("wasm") => "application/wasm", Some("css") => "text/css",
+                                                        Some("json") => "application/json", Some("html") => "text/html; charset=utf-8", _ => "application/octet-stream" };
+            return match roadstyle_serve::embedded(rest) {
+                Some(b) if read => req.say("200 OK", kind, b),
+                Some(_) => req.say("405 Method Not Allowed", "text/plain", b"read only"),
+                None => req.say("404 Not Found", "text/plain", b"not found"),
+            };
+        }
         if let Some(rest) = path.strip_prefix("areas/") {
             // the map of an area, way D: areas/<name>/<the address of roadstyle local>; the page's rsHttpAdapter asks them
             let (n, sub) = rest.split_once('/').unwrap_or((rest, ""));
@@ -945,6 +1003,9 @@ impl Studio {
                 }
             }
             let Some(t) = t else { return req.say("404 Not Found", "text/plain", b"no such area") };
+            if let Some(op) = sub.strip_prefix("levels/") {
+                return self.levels(req, n, op, &t);
+            }
             let body = if req.read() {
                 Vec::new()
             } else {
@@ -980,7 +1041,7 @@ impl Studio {
         match (req.method.as_str(), api.as_str()) {
             ("GET" | "HEAD", "info") => {
                 let info = json!({"out": self.out().display().to_string(), "geofabrik": self.index, "edit": self.edit.lock().unwrap().is_some(), "opening": *self.opening.lock().unwrap(), "area": *self.current.lock().unwrap(),
-                                 "tiled": self.tiled.lock().unwrap().iter().map(|t| t.0.clone()).collect::<Vec<_>>()});
+                                 "tiled": self.tiled.lock().unwrap().iter().map(|t| t.0.clone()).collect::<Vec<_>>(), "level_package": roadstyle_serve::has_package()});
                 req.say("200 OK", "application/json", info.to_string().as_bytes())
             }
             ("GET" | "HEAD", "job") => {

@@ -238,6 +238,9 @@ impl duckosm_edit::studio::Host for PyHost {
     fn buffer(&self, wkt: &str, epsg: u32, metres: f64) -> Result<String, String> {
         Python::attach(|py| self.0.call_method1(py, "buffer", (wkt, epsg, metres)).and_then(|r| r.bind(py).extract::<String>()).map_err(|e| e.to_string()))
     }
+    fn write(&self, db: &std::path::Path, sql: &str) -> Result<(), String> {
+        Python::attach(|py| self.0.call_method1(py, "write", (db.display().to_string(), sql)).map(|_| ()).map_err(|e| e.to_string()))
+    }
     fn build(&self, config: &str, dir: &std::path::Path, db: &std::path::Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         // the steps of the Rust engine (read ways, build driving, ...) go to the page too, inside the step of Python that calls the engine
