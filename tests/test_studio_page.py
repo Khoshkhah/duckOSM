@@ -132,6 +132,10 @@ def _build_and_open(page, area, timeout=600_000):
     _unfold(page, 6)
     page.wait_for_selector(".bs-open", state="visible", timeout=timeout)
     assert page.is_hidden("[data-bs=error]")
+    # the build details: the time of each step, and the total
+    steps = page.evaluate("[...document.querySelectorAll('.bs-steplog tbody tr')].map((r) => [r.cells[0].textContent, r.cells[1].textContent])")
+    assert len(steps) > 5 and all(re.fullmatch(r"\d+\.\d", sec) for _, sec in steps), steps
+    assert re.fullmatch(r"\d+\.\d", page.evaluate("document.querySelector('[data-bs=total]').textContent"))
     assert area in page.inner_text("[data-rs=line]")
     with page.expect_navigation(timeout=60_000):
         page.click(".bs-open")
@@ -313,6 +317,33 @@ def test_h3_cells_are_the_area(studio):
         page.fill("[data-as=search] input", "883969a40bfffff")
         page.wait_for_function("window.studio.area.area()?.from === 'h3'", timeout=30_000)
         assert "H3 cell, level 8" in page.inner_text(".bs-area [data-as=msg]")
+        assert not errors, errors
+        browser.close()
+
+
+def test_a_buffer_a_fixes_file_and_the_time_of_each_step(studio):
+    """The buffer around the area (the server grows it in DuckDB, as Studio does in the browser), the fixes file (a path that the server checks), and the build details."""
+    out, url = studio
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        page.evaluate("(g) => window.studio.area.set(g, 'monaco-buf', 'file')", MONACO["features"][0]["geometry"])
+        before = page.evaluate("window.studio.area.area().km2")
+        _unfold(page, 2)
+        page.fill(".bs-area [data-as=buffer-field] input", "500")
+        page.wait_for_function(f"window.studio.area.area().km2 > {before} * 1.5", timeout=60_000)          # 500 m around Monaco: about 2.4 -> 7 km²
+        assert "+500 m" in page.inner_text("[data-as=kpis]")
+        assert page.evaluate("window.studio.area.area().base.length") == 2, "the shape as chosen stays"
+        page.fill(".bs-area [data-as=buffer-field] input", "0")
+        page.wait_for_function(f"Math.abs(window.studio.area.area().km2 - {before}) < 0.001", timeout=60_000)
+        # the fixes file: a path that is there goes into the config; one that is not says so
+        _options(page)
+        page.fill("[data-ss=fixes]", str(ROOT / "tests" / "data" / "osm_fixes.yaml"))
+        page.wait_for_function("document.querySelector('[data-ss=fixes-msg]').textContent === 'Found.'")
+        assert 'osm_overrides: "' in page.text_content("[data-ss=yaml]")
+        page.fill("[data-ss=fixes]", "/nowhere/fixes.yaml")
+        page.wait_for_function("document.querySelector('[data-ss=fixes-msg]').textContent.includes('not a file')")
+        assert "osm_overrides" not in page.text_content("[data-ss=yaml]")
         assert not errors, errors
         browser.close()
 

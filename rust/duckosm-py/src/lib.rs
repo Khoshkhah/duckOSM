@@ -235,6 +235,9 @@ impl duckosm_edit::studio::Host for PyHost {
         let db = Python::attach(|py| self.0.call_method1(py, "db", (path.display().to_string(),)).expect("the host gives a database"));
         Box::new(PyDb(db))
     }
+    fn buffer(&self, wkt: &str, epsg: u32, metres: f64) -> Result<String, String> {
+        Python::attach(|py| self.0.call_method1(py, "buffer", (wkt, epsg, metres)).and_then(|r| r.bind(py).extract::<String>()).map_err(|e| e.to_string()))
+    }
     fn build(&self, config: &str, dir: &std::path::Path, db: &std::path::Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         let sink = Python::attach(|py| Py::new(py, StepSink(std::sync::Mutex::new(Some(tx)))).map_err(|e| e.to_string()))?;

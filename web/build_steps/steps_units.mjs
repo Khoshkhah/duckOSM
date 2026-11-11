@@ -63,6 +63,12 @@ assert.deepEqual(parseSettings(changed), { modes: ["walking"], ...Object.fromEnt
 assert.deepEqual(parseSettings("name: x\n"), {});
 assert.deepEqual(parseSettings(null), {});
 
+// a fixes file is the key osm_overrides, and it is read back
+const withFixes = settingsYaml({ modes: ["driving"], fixes: "/data/my fixes.yaml" });
+assert.ok(withFixes.startsWith('osm_overrides: "/data/my fixes.yaml"\nmodes: [driving]\n'), withFixes);
+assert.equal(parseSettings(withFixes).fixes, "/data/my fixes.yaml");
+assert.equal(parseSettings(yaml).fixes, undefined);
+
 // the line of progress
 assert.equal(progressText({ state: "downloading", bytes: 1048576, total: 2097152 }), "Downloading 1.0 MB of 2.0 MB");
 assert.equal(progressText({ state: "building", steps: ["[2/9] Loading PBF file"], seconds: 3.2 }), "[2/9] Loading PBF file (3 s)");

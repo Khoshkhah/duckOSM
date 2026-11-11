@@ -6,7 +6,7 @@
 //! The files that it writes are in the folder of the area, `<out>/<name>/`: `boundary.geojson`, `dem.tif`, `config.yaml`, the PBF file of a
 //! download, and the `<name>.duckdb` of the build. A local PBF file is read from the path that the page gives (the page is on the same computer).
 //!
-//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/file` (the path of a local PBF file: its size);
+//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/buffer` (an area and a distance: the area grown by it); `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/file` (the path of a local PBF file: its size);
 //! `PUT /api/dem/<name>` the DEM of the area; `POST /api/build` start the build; `GET /api/job` the state of the build; `GET /edit/...` the
 //! page of `duckosm edit` for the area that was built last.
 
@@ -26,6 +26,10 @@ pub trait Host: Send + Sync {
     /// Build the area from `config` (YAML) in the folder `dir` (the config's relative paths) into the database `db`. `log` gets a line for each
     /// step that ends. Gives the summary of the build. The DEM is in the config (`elevation:`).
     fn build(&self, config: &str, dir: &Path, db: &Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String>;
+    /// The buffer of an area: `wkt` is a MULTIPOLYGON in EPSG:4326; it grows by `metres` in the UTM zone `epsg`. Gives the GeoJSON geometry (text) in EPSG:4326.
+    fn buffer(&self, _wkt: &str, _epsg: u32, _metres: f64) -> Result<String, String> {
+        Err("this program cannot buffer an area".into())
+    }
 }
 
 /// The files of the page: its own, the parts of this repository's `web/`, and the catalog of the DEM sources.
@@ -54,6 +58,8 @@ struct Job {
     /// The database file of the area.
     db: String,
     steps: Vec<String>,
+    /// The seconds since the start of the build at which each step began (the page shows the time of each step).
+    step_secs: Vec<f64>,
     bytes: u64,
     total: u64,
     text: String,
@@ -63,7 +69,7 @@ struct Job {
 
 impl Job {
     fn json(&self) -> Value {
-        json!({"state": if self.state.is_empty() { "idle" } else { self.state }, "name": self.name, "db": self.db, "steps": self.steps, "bytes": self.bytes,
+        json!({"state": if self.state.is_empty() { "idle" } else { self.state }, "name": self.name, "db": self.db, "steps": self.steps, "step_secs": self.step_secs, "bytes": self.bytes,
                "total": self.total, "text": self.text, "error": self.error, "seconds": self.started.map_or(0.0, |t| t.elapsed().as_secs_f64())})
     }
 }
@@ -234,7 +240,9 @@ impl Studio {
     fn step(&self, line: &str) {
         let mut j = self.job.lock().unwrap();
         if j.steps.len() < 500 {
+            let t = j.started.map_or(0.0, |t| t.elapsed().as_secs_f64());
             j.steps.push(line.to_string());
+            j.step_secs.push(t);
         }
     }
 
@@ -299,6 +307,40 @@ impl Studio {
         Ok(())
     }
 
+    /// The buffer around an area, as Studio makes it (duckOSM's `boundary.buffer_m`): `{"geometry": Polygon | MultiPolygon, "metres": 0 to 50000}` gives `{"geometry"}`.
+    /// The SQL text has numbers only: the page's JSON is turned to WKT here.
+    fn buffer(&self, body: &[u8]) -> Result<String, String> {
+        let b: Value = serde_json::from_slice(body).map_err(|e| format!("the request: {e}"))?;
+        let metres = b["metres"].as_f64().filter(|m| (0.0..=50000.0).contains(m)).ok_or("the buffer is 0 to 50000 metres")?;
+        let polys: Vec<&Value> = match b["geometry"]["type"].as_str() {
+            Some("Polygon") => vec![&b["geometry"]["coordinates"]],
+            Some("MultiPolygon") => b["geometry"]["coordinates"].as_array().ok_or("no coordinates")?.iter().collect(),
+            _ => return Err("the geometry is a Polygon or a MultiPolygon".into()),
+        };
+        let (mut w, mut s_, mut e, mut n) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        let mut wkt = Vec::new();
+        for p in polys {
+            let mut rings = Vec::new();
+            for r in p.as_array().ok_or("a polygon has rings")? {
+                let mut pts = Vec::new();
+                for c in r.as_array().ok_or("a ring has points")? {
+                    let (x, y) = (c[0].as_f64().ok_or("a point has numbers")?, c[1].as_f64().ok_or("a point has numbers")?);
+                    (w, s_, e, n) = (w.min(x), s_.min(y), e.max(x), n.max(y));
+                    pts.push(format!("{x} {y}"));
+                }
+                rings.push(format!("({})", pts.join(",")));
+            }
+            wkt.push(format!("({})", rings.join(",")));
+        }
+        if wkt.is_empty() {
+            return Err("the area has no polygon".into());
+        }
+        let zone = (((w + e) / 2.0 + 180.0) / 6.0).floor().clamp(0.0, 59.0) as u32 + 1;
+        let epsg = if n + s_ >= 0.0 { 32600 } else { 32700 } + zone;
+        let g = self.host.buffer(&format!("MULTIPOLYGON({})", wkt.join(",")), epsg, metres)?;
+        Ok(format!("{{\"geometry\":{g}}}"))
+    }
+
     fn dem(&self, name: &str, body: &[u8]) -> Result<(), String> {
         let dir = self.area_dir(name).ok_or("the name of the area is letters, digits, _, - and . (at most 64)")?;
         // a GeoTIFF starts with II*\0 or MM\0* (or the BigTIFF 43)
@@ -359,7 +401,7 @@ impl Studio {
                 Ok(t) => req.say("200 OK", "application/json", t.as_bytes()),
                 Err(e) => req.say("502 Bad Gateway", "text/plain", e.as_bytes()),
             },
-            ("POST", "file" | "build" | "open") | ("PUT", _) if api == "file" || api == "build" || api == "open" || api.starts_with("dem/") => {
+            ("POST", "file" | "build" | "open" | "buffer") | ("PUT", _) if api == "file" || api == "build" || api == "open" || api == "buffer" || api.starts_with("dem/") => {
                 let own = self.own.clone();
                 let Some(body) = req.write_body(&own)? else { return Ok(()) };
                 let r: Result<String, String> = match (req.method.as_str(), api.as_str()) {
@@ -369,6 +411,7 @@ impl Studio {
                             .ok_or_else(|| format!("{}: not a file", p.display()))
                     }
                     ("POST", "build") => self.start(&body).map(|_| "{}".to_string()),
+                    ("POST", "buffer") => self.buffer(&body),
                     ("POST", "open") => self.open(String::from_utf8_lossy(&body).trim()).map(|_| "{}".to_string()),
                     ("PUT", a) if a.starts_with("dem/") => self.dem(&a["dem/".len()..], &body).map(|_| "{}".to_string()),
                     _ => Err("not this method".into()),
@@ -378,7 +421,7 @@ impl Studio {
                     Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
                 }
             }
-            (_, "info" | "job" | "geofabrik" | "areas" | "file" | "build" | "open") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
+            (_, "info" | "job" | "geofabrik" | "areas" | "file" | "build" | "open" | "buffer") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
             _ => req.say("404 Not Found", "text/plain", b"not found"),
         }
     }
@@ -418,6 +461,9 @@ mod tests {
     struct FakeHost(Arc<Mutex<Vec<String>>>);
     impl Host for FakeHost {
         fn db(&self, _: &Path) -> Box<dyn Db> { Box::new(FakeDb) }
+        fn buffer(&self, wkt: &str, epsg: u32, metres: f64) -> Result<String, String> {
+            Ok(format!("{{\"type\":\"Polygon\",\"coordinates\":[],\"note\":\"{epsg} {metres} {}\"}}", wkt.len()))
+        }
         fn build(&self, config: &str, dir: &Path, db: &Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
             log("a step");
             self.0.lock().unwrap().push(config.to_string());
@@ -564,9 +610,35 @@ mod tests {
     }
 
     #[test]
+    fn the_buffer_turns_the_area_to_wkt_and_picks_the_utm_zone() {
+        let (_, ask, port, _) = server("buffer", None);
+        let area = json!({"type": "Polygon", "coordinates": [[[7.4, 43.7], [7.5, 43.7], [7.5, 43.8], [7.4, 43.7]]]});
+        let r = post(port, &ask, "POST", "buffer", &json!({"geometry": area, "metres": 100}).to_string());
+        assert!(r.contains("32632 100"), "Monaco is in the zone 32 north: {r}");
+        let south = json!({"type": "Polygon", "coordinates": [[[-70.0, -33.0], [-69.9, -33.0], [-69.9, -32.9], [-70.0, -33.0]]]});
+        assert!(post(port, &ask, "POST", "buffer", &json!({"geometry": south, "metres": 5}).to_string()).contains("32719 5"), "the southern zone has 327..");
+        for bad in [json!({"geometry": area, "metres": -1}), json!({"geometry": area, "metres": 50001}), json!({"geometry": {"type": "Point", "coordinates": [0, 0]}, "metres": 5}),
+                    json!({"geometry": {"type": "Polygon", "coordinates": [[["x", 1]]]}, "metres": 5})] {
+            assert!(post(port, &ask, "POST", "buffer", &bad.to_string()).starts_with("HTTP/1.1 400"), "{bad}");
+        }
+    }
+
+    #[test]
     fn a_name_is_a_folder_name() {
         for ok in ["monaco", "tartu-1", "a.b_c"] { assert!(is_name(ok), "{ok}"); }
         for bad in ["", ".", "..", ".hidden", "a/b", "a b", "ä", &"x".repeat(65)] { assert!(!is_name(bad), "{bad}"); }
+    }
+
+    /// The native host buffers an area with the bundled DuckDB, in the UTM zone: 200 m around a small triangle makes it larger (the box grows by about 400 m).
+    #[cfg(feature = "duckdb")]
+    #[test]
+    fn the_native_host_buffers_an_area() {
+        use crate::studio::Host;
+        let g = crate::native::NativeHost.buffer("MULTIPOLYGON(((7.41 43.73,7.43 43.73,7.43 43.75,7.41 43.73)))", 32632, 200.0).unwrap();
+        let v: Value = serde_json::from_str(&g).unwrap();
+        let xs: Vec<f64> = v["coordinates"][0].as_array().unwrap().iter().map(|p| p[0].as_f64().unwrap()).collect();
+        let width = xs.iter().cloned().fold(f64::MIN, f64::max) - xs.iter().cloned().fold(f64::MAX, f64::min);
+        assert!(v["type"] == "Polygon" && width > 0.02 + 0.003, "{g}");      // 0.02 degrees before; 200 m on both sides is 0.005 degrees more
     }
 
     /// The program's host builds Monaco from a request of the page, with the DEM of the engine's tests: the database has the heights, the grid and the

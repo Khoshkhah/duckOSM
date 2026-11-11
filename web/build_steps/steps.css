@@ -26,3 +26,8 @@ html.rs-phone .bs button, html.rs-phone .bs summary, html.rs-phone .bs-open { mi
 .bs-nets { width: 100%; }
 .bs .rs-opt .rs-chip { align-self: flex-start; }      /* the kind of a place (city, lake, ...) is a small chip, not a bar */
 .bs .rs-opt.point { opacity: .6; }
+.bs-steplog { width: 100%; margin-top: 6px; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.bs-steplog th, .bs-steplog td { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.bs-steplog th:first-child, .bs-steplog td:first-child { text-align: left; white-space: normal; }
+.bs-steplog th { color: var(--mut); font-weight: 500; }
+.bs-steplog tfoot td { font-weight: 600; border-bottom: 0; }

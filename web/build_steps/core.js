@@ -99,7 +99,9 @@ export function settingsYaml(values = {}) {
     // `sea: overture` is the default of the build; `sea: false` is no sea
     sections[o.at].push(o.key === "sea" ? `  sea: ${v ? "overture" : "false"}` : `  ${o.key}: ${v}`);
   }
-  return `modes: [${modes.join(", ")}]\noptions:\n${sections.options.join("\n")}\nclip:\n${sections.clip.join("\n")}\n`;
+  // `fixes`: the path of a fixes file on this computer (the key osm_overrides of the config)
+  const fixes = values.fixes ? `osm_overrides: ${JSON.stringify(String(values.fixes))}\n` : "";
+  return `${fixes}modes: [${modes.join(", ")}]\noptions:\n${sections.options.join("\n")}\nclip:\n${sections.clip.join("\n")}\n`;
 }
 
 /** The text of one line of progress, for the state of the build job (`{state, steps, bytes, total, seconds}`). */
@@ -113,6 +115,8 @@ export function progressText(job) {
 /** The settings from the text of a config that `settingsYaml` wrote (the other keys are not read): { modes, <key>: bool }. A key that is missing keeps its default. */
 export function parseSettings(text) {
 	const values = {}, modes = /^modes:\s*\[([^\]]*)\]/m.exec(text ?? "");
+	const fixes = /^osm_overrides:\s*"((?:[^"\\]|\\.)*)"/m.exec(text ?? "");
+	if (fixes) values.fixes = JSON.parse(`"${fixes[1]}"`);
 	if (modes) values.modes = modes[1].split(",").map((m) => m.trim()).filter((m) => MODES.includes(m));
 	for (const o of OPTIONS) {
 		const m = new RegExp(`^\\s+${o.key}:\\s*(\\S+)`, "m").exec(text ?? "");

@@ -79,13 +79,14 @@ export async function nominatimAt(lat, lon) {
  *   rs,        // roadstyle's parts: { search, drop, tabs, toggle, kpi }
  *   geocode,   // optional: (text, signal) gives Nominatim-shaped features (default: `photonSearch`, as in Studio)
  *   boundaries,// optional: (features) gives the same features with their boundaries (default: `boundariesOf`)
+ *   buffer,    // optional: (geometry, metres) gives the geometry grown by that distance (a server does it): with it the card "The area" has the field Buffer
  *   reverse,   // optional: (lat, lon) gives Nominatim-shaped features (default: `nominatimAt`)
  *   padding,   // optional: () gives the padding of the map for fitBounds (the panel covers a part of the map)
  *   onChange,  // optional: the area or its name is new
  * })
  * It returns { area(), set(geometry, name, from, { zoom, show }), clear(), zoom(), drawMode() }. area() is null or { name, geometry, polygons, bbox, km2, from }.
  */
-export function initAreaStep({ root, detail = root, map, rs, geocode = photonSearch, boundaries = boundariesOf, reverse = nominatimAt, padding = () => 40, onChange = () => {} }) {
+export function initAreaStep({ root, detail = root, map, rs, geocode = photonSearch, boundaries = boundariesOf, buffer = null, reverse = nominatimAt, padding = () => 40, onChange = () => {} }) {
 	root.classList.add("bs", "bs-area");
 	detail.classList.add("bs", "bs-area");
 	const unselect = '<button type="button" data-as="unselect" disabled>Unselect</button>';
@@ -115,6 +116,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 	const q = (k) => root.querySelector(`[data-as="${k}"]`);
 	const d = (k) => detail.querySelector(`[data-as="${k}"]`);
 	const detailHtml = `<input type="text" data-as="name" aria-label="Name of the area" placeholder="Name" autocomplete="off" spellcheck="false" disabled>
+		<div data-as="buffer-field"></div>
 		<div class="rs-kpis" data-as="kpis" hidden></div>
 		<div class="area-acts"><button type="button" data-as="boundary" disabled>${ICONS.download}Boundary</button>${unselect}</div>`;
 	if (detail === root) root.insertAdjacentHTML("beforeend", detailHtml); else detail.innerHTML = detailHtml;
@@ -147,22 +149,49 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 	map.on("styledata", () => { if (!map.getSource("bs-area") && (shape || cells.size)) try { put(); h3Put(); } catch { /* the style is not ready: the next styledata tries again */ } });
 	const zoom = () => { if (current) { const b = current.bbox; map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: padding(), duration: 0, maxZoom: 17 }); } };
 
+	const num = (x, dg = 0) => x.toLocaleString("en", { maximumFractionDigits: dg });
+	const kpis = () => {
+		const m = bufferM();
+		d("kpis").hidden = false;
+		d("kpis").innerHTML = rs.kpi("Area", num(current.km2, 2), `km²${m > 0 ? ` · +${num(m)} m` : ""}`) + rs.kpi("Polygons", num(current.polygons.length), "") + rs.kpi("Vertices", num(current.vertices), "");
+	};
+	const shapeOf = (polys, name, from, base, show) => ({ name: slug(name) || "area", geometry: geometry(polys), polygons: polys, bbox: bbox(polys), km2: areaKm2(polys), from, base, show,
+		vertices: polys.reduce((n, p) => n + p.reduce((m, r) => m + r.length, 0), 0) });
+
+	// the buffer (duckOSM's boundary.buffer_m): the area grows by so many metres on all sides, in the UTM zone of its centre. The cut and the build use the grown area; `base` is the shape as chosen.
+	const bufferM = () => Math.max(0, Number(d("buffer-field").querySelector("input")?.value) || 0);
+	let bufferTimer = 0;
+	function rebuffer(delay = 500) {
+		clearTimeout(bufferTimer);
+		bufferTimer = setTimeout(async () => {
+			if (!current) return;
+			const m = bufferM(), mine = current;
+			let polys = mine.base;
+			if (m > 0) {
+				try { polys = polygonsOf((await buffer(geometry(mine.base), m)).geometry ?? null); } catch (e) { msg(`The buffer failed: ${e.message}`, true); polys = mine.base; }
+				if (current !== mine || !polys.length) return;
+			}
+			current = { ...shapeOf(polys, mine.name, mine.from, mine.base, mine.show), name: current.name };
+			kpis();
+			draw(mine.show || m > 0 ? current.geometry : null);                // terra-draw shows the drawn shapes itself, unless the buffer grew them
+			onChange();
+		}, delay);
+	}
+
 	function set(g, name = "", from = "", { zoom: fit = true, show = true } = {}) {
 		const polys = polygonsOf(g);
 		if (!polys.length) return msg("This has no polygon.", true);
-		const b = bbox(polys), km2 = areaKm2(polys), vertices = polys.reduce((n, p) => n + p.reduce((m, r) => m + r.length, 0), 0);
 		if (from !== "h3") h3Forget();
-		current = { name: slug(name) || "area", geometry: geometry(polys), polygons: polys, bbox: b, km2, vertices, from };
+		current = shapeOf(polys, name, from, polys, show);
 		d("name").value = current.name;
 		for (const el of [d("name"), d("boundary"), ...detail.querySelectorAll('[data-as="unselect"]'), ...root.querySelectorAll('[data-as="unselect"]')]) el.disabled = false;
-		const num = (x, dg = 0) => x.toLocaleString("en", { maximumFractionDigits: dg });
-		d("kpis").hidden = false;
-		d("kpis").innerHTML = rs.kpi("Area", num(km2, 2), "km²") + rs.kpi("Polygons", num(polys.length), "") + rs.kpi("Vertices", num(vertices), "");
+		kpis();
 		msg("");
 		preview(null);
 		draw(show ? current.geometry : null);                  // terra-draw shows the shapes that the person draws
 		if (fit) zoom();
 		onChange();
+		if (bufferM() > 0) rebuffer(0);
 	}
 
 	function clear() {
@@ -326,7 +355,7 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 	const cells = new Set();
 	let h3Level = 8, h3Mod = null, hover = null, gridOn = null, estimate = 0, token = 0, autoName = "";
 	const lib = () => (h3Mod ??= import(H3).catch((e) => { h3Mod = null; throw e; }));
-	const nothing = { type: "FeatureCollection", features: [] }, num = (x, dg = 0) => x.toLocaleString("en", { maximumFractionDigits: dg });
+	const nothing = { type: "FeatureCollection", features: [] };
 	const metres = (km) => (km < 1 ? `${Math.round(km * 1000)} m` : `${num(km, 1)} km`);
 	const h3 = (k) => root.querySelector(`[data-as="${k}"]`);
 	const visible = () => root.offsetParent !== null && h3On;                      // the tab shows, and the card is open
@@ -465,6 +494,10 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		onClear: clear,
 	});
 
+	if (buffer && rs.number) {                                                          // the field of roadstyle, as in Studio
+		rs.number(d("buffer-field"), { label: "Buffer around the area", unit: "m", min: 0, max: 50000, step: 50, snap: false, value: 0, onChange: () => rebuffer() });
+		d("buffer-field").querySelector("input").addEventListener("input", () => rebuffer());      // typing; the - and + buttons call onChange
+	}
 	d("name").addEventListener("input", () => { if (current) { current.name = slug(d("name").value); onChange(); } });
 	for (const el of [...root.querySelectorAll('[data-as="unselect"]'), ...detail.querySelectorAll('[data-as="unselect"]')]) el.addEventListener("click", clear);
 	d("boundary").addEventListener("click", () => {                                    // the boundary as a GeoJSON file
@@ -473,5 +506,5 @@ export function initAreaStep({ root, detail = root, map, rs, geocode = photonSea
 		Object.assign(document.createElement("a"), { href: url, download: `${current.name}.geojson` }).click();
 		setTimeout(() => URL.revokeObjectURL(url), 1000);
 	});
-	return { area: () => current, set, clear, zoom, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
+	return { area: () => current, rebuffer, set, clear, zoom, h3Cells: () => [...cells], drawMode: async () => (await terra()).getMode() };      // drawMode: the tool of terra-draw (for the tests)
 }
