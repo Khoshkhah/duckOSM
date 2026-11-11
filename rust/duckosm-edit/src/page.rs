@@ -44,7 +44,9 @@ pub fn make(db: &mut dyn Db, name: &str) -> Result<String, String> {
 /// The page of the result of `duckosm studio`: the same page, with the base map "blank", so that the base map is the layers of the database itself (`features.*`: water, land
 /// use, buildings, ...) and the roads, with no tiles from the internet under them. The person can choose another base map in the bar.
 pub fn make_result(db: &mut dyn Db, name: &str) -> Result<String, String> {
-    make_with(db, name, SCRIPT, STYLE, Some("blank"))
+    // one page for the area, with two hosts: at `/` the steps of `duckosm studio` over the map of the area (the visualization), at `/edit/` the fixes editor
+    let script = format!("if (/\\/edit\\/$/.test(location.pathname)) {{\n{SCRIPT}\n}} else {{\n{STUDIO_SCRIPT}\n}}");
+    make_with(db, name, &script, &format!("{STYLE}\n{STUDIO_STYLE}"), Some("blank"))
 }
 
 /// The page of `duckosm ask`: the same map, with roadstyle's data dock and Ask. `extra` is a small database file in the temp folder for the page's

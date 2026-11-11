@@ -10,12 +10,13 @@ import { esc, progressText } from "./core.js";
  *   poll,     // () gives a promise of the state of the build
  *   onDone,   // optional: (job) the build ended well
  *   every,    // optional: the time between two reads of the state, in ms (default 500)
+ *   label,    // optional: the text of the button (default "Build")
  * })
  * It returns { refresh(), busy() }. refresh() reads `ready` again: call it when a step before changes.
  */
-export function initBuildStep({ root, ready, run, poll, onDone = () => {}, every = 500 }) {
+export function initBuildStep({ root, ready, run, poll, onDone = () => {}, every = 500, label = "Build" }) {
 	root.classList.add("bs", "bs-build");
-	root.innerHTML = `<div class="build-go"><button type="button" class="sb-primary" data-bs="run" disabled>Build<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button><p class="why" data-bs="why"></p></div>
+	root.innerHTML = `<div class="build-go"><button type="button" class="sb-primary" data-bs="run" disabled>${esc(label)}<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button><p class="why" data-bs="why"></p></div>
 		<progress data-bs="bar" max="1" hidden></progress><p class="rs-status" role="status" aria-live="polite"><span class="bs-spin" data-bs="spin" hidden aria-hidden="true"></span><span data-bs="status"></span></p>
 		<p class="rs-field-msg err" role="alert" data-bs="error" hidden></p>
 		<details class="drow" data-bs="log" hidden><summary>Time of each part</summary><table class="bs-steplog" data-bs="steps"><thead><tr><th>Part</th><th>Time (s)</th></tr></thead><tbody></tbody><tfoot><tr><td>Total</td><td data-bs="total"></td></tr></tfoot></table></details>`;

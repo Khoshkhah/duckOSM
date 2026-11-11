@@ -25,20 +25,19 @@
       ["Boundary", "Saves the boundary as a GeoJSON file."],
       ["Zoom button", "Moves the map to the area."]] },
     3: { title: "The data", intro: "The OpenStreetMap data of the area.", terms: [
-      ["Geofabrik", "The extracts of Geofabrik that cover the whole area, the smallest first. The build downloads the one that you pick into the folder of the area."],
+      ["Geofabrik", "The extracts of Geofabrik that cover the whole area, the smallest first. Download puts one into the folder of the areas; then Use it."],
       ["File", "The path of a .osm.pbf file on this computer. The build cuts it to the area."]] },
-    4: { title: "Ground", intro: "The height of the ground (a DEM). It is optional.", terms: [
-      ["Sources", "The DEM sources that cover the area, best first. Choose the source of your file: the product, the vertical datum and the licence are the source's."],
-      ["File", "Drop the GeoTIFF of the DEM (EPSG:4326, 32-bit floats). The ground id is its SHA-256."],
-      ["AWS Terrain Tiles", "A DEM that needs no file. It is a surface model and never the reference ground of the area."]] },
-    5: { title: "Build", intro: "The settings and the build, on this computer.", terms: [
+    4: { title: "Build", intro: "The settings and the build, on this computer.", terms: [
       ["Networks", "The networks to build: driving, walking and cycling."],
       ["Base map", "The layers of the base map (water, land use, buildings, ...)."],
-      ["Build", "Builds the area into a .duckdb file in its folder. The steps show while it runs."]] },
-    6: { title: "The result", intro: "What the build made: the networks, and the files with the folder where they are saved.", terms: [] },
-    7: { title: "Visualization", intro: "The roads of the new area on the map, with the panel Edit OSM data (the page of `duckosm edit`).", terms: [
-      ["Open the map when the build ends", "The page opens the map by itself, after the build. Turn it off to stay here."],
-      ["Back", "The panel Edit OSM data has a back button to these steps."]] },
+      ["Build", "Builds the area into a .duckdb file in its folder. Then the page shows the roads and the layers of the area on its map."]] },
+    5: { title: "The result", intro: "What the build made: the networks, and the files with the folder where they are saved.", terms: [] },
+    6: { title: "Ground", intro: "The height of the ground (a DEM) of a built area. It is optional.", terms: [
+      ["Sources", "The DEM sources that cover the area, best first. Download puts the files of a source into the folder; the product, the vertical datum and the licence are the source's."],
+      ["File", "Drop the GeoTIFF of the DEM (EPSG:4326, 32-bit floats). The ground id is its SHA-256."],
+      ["Add the ground", "Builds the area again with the DEM: the same OSM data and settings, and the heights of the nodes and the edges."]] },
+    7: { title: "Edit OSM data", intro: "Fix the OSM data of the area: the panel Edit OSM data of duckOSM, over the map of the area.", terms: [
+      ["Back", "The panel has a back button to these steps."]] },
   };
 
   async function start() {
@@ -61,7 +60,7 @@
     const cards = [];
     const body = () => Object.assign(document.createElement("div"), { className: "step-body" });
     const roots = {};
-    for (const [n, label] of [[1, "Choose an area"], [2, "The area"], [3, "The data"], [4, "Ground"], [5, "Build"], [6, "The result"], [7, "Visualization"]]) {
+    for (const [n, label] of [[1, "Choose an area"], [2, "The area"], [3, "The data"], [4, "Build"], [5, "The result"], [6, "Ground"], [7, "Edit OSM data"]]) {
       const el = (roots[n] = body());
       const c = rs.sections.add({ id: `step${n}`, label, step: n, fold: true, el });
       c.classList.add("step");
@@ -70,7 +69,9 @@
       c.querySelector(":scope > .rs-sec-hd > svg")?.before(rs.help.button(c, { ...HELP[n], button: `Help: ${label}` }));
       cards.push(c);
     }
-    roots[5].append(Object.assign(document.createElement("div"), { id: "settings-box", className: "step-body" }), Object.assign(document.createElement("div"), { id: "build-box", className: "step-body" }));
+    roots[4].append(Object.assign(document.createElement("div"), { id: "settings-box", className: "step-body" }), Object.assign(document.createElement("div"), { id: "build-box", className: "step-body" }));
+    const groundPart = body(), groundGo = body();
+    roots[6].append(groundPart, groundGo);
 
     // the areas on the disk (the folder of the server): as in Studio, a card with a row for each area, with Open (the area in the steps, its result and its map) and Delete
     const saved = body();
@@ -79,22 +80,34 @@
     saved.append(folderBox, listBox);
     initFolderStep({ root: folderBox, folder: async () => (await (await api("info")).json()).out, list: async (path) => post("folders", path),
       choose: async (path, create) => { await post("folder", JSON.stringify({ path, create })); await paintAreas(); where(); }, onChange: () => rs.sections.note("areas", "") });
-    let openName = null;
+    let openName = null, pageArea = null;      // pageArea: the area of this page (the server opened it), set at the end of start()
     const markOpen = (name) => { openName = name; for (const r of saved.querySelectorAll('input[name="saved-area"]')) r.checked = r.value === name; };
-    // an area in the steps: its boundary and settings, its row selected, its result (step 6) and its map (step 7); b: the button that shows "Opening…"
+    // Open: the server opens the area and makes its page (the steps over the map of the area, a blank base map, or the kept page), then this page loads again
+    // and shows it. b: the button that shows "Opening…"
     async function openArea(name, b = null) {
-      const label = b?.textContent;
       if (b) b.innerHTML = '<span class="gs-spin" aria-hidden="true"></span> Opening…';
-      try { await api("open", { method: "POST", body: name }); } finally { if (b) b.textContent = label; }
+      rs.sections.note("areas", `Opening ${name}…`);
+      await api("open", { method: "POST", body: name });
+      for (let i = 0; i < 600; i++) {                                     // the page of a large area is made once (Burnaby: about 13 s), then kept
+        const info = await (await api("info")).json();
+        if (info.edit && info.area === name) return location.assign(`./?area=${encodeURIComponent(name)}`);
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      throw new Error(`${name} did not open: see the server's messages.`);
+    }
+    // the area that this page shows (the server opened it): its boundary and settings in the steps, its row selected, its result (step 5) and its map (step 7)
+    async function showOpen(name, job) {
       const a = await (await api("area/" + encodeURIComponent(name))).json();
-      hoveredArea = null; area.showPlace(null);
       area.set(a.boundary, a.name, "saved");
       loadedArea = a.name;
       settings.set(parseSettings(a.config));
       markOpen(a.name);
-      built = true; builtName = a.name; result.show({ ...a, text: "", seconds: null }); viz.ready(true); refreshSteps();
-      autoFold(cards[5], false); autoFold(cards[6], false);
-      rs.sections.note("areas", `${a.name} is open. Change a step and build again, or open its map in step 7.`);
+      hasDem = /^elevation:/m.test(a.config);
+      built = true; builtName = a.name;
+      result.show(job?.state === "done" && job.name === a.name ? job : { ...a, text: "", seconds: null });
+      viz.ready(true); refreshSteps();
+      autoFold(cards[4], false);
+      rs.sections.note("areas", `${a.name} is open: its roads and layers are on the map. Edit it in step 7, or change a step and build again.`);
     }
     const paintAreas = async () => {
       const list = await (await api("areas")).json();
@@ -122,13 +135,17 @@
     saved.addEventListener("focusin", overArea);
     saved.addEventListener("mouseleave", () => { if (hoveredArea) area.showPlace(null); hoveredArea = null; });
     saved.addEventListener("click", async (e) => {
-      const b = e.target.closest("button[data-do]"), name = b?.closest(".saved-area")?.dataset.name;
-      if (!name) return;
+      let b = e.target.closest("button[data-do]");
+      const row = e.target.closest(".saved-area");
+      if (!b && row && !e.target.closest("button, a, input")) b = row.querySelector('[data-do="open"]');      // a click on the card is Open
+      const name = b?.closest(".saved-area")?.dataset.name;
+      if (!name || b.disabled) return;
       b.disabled = true;
       try {
         if (b.dataset.do === "delete") {
           if (!confirm(`Delete the area ${name} and all the files in its folder? This cannot be undone.`)) { b.disabled = false; return; }
           await api("delete", { method: "POST", body: name });
+          if (name === pageArea) return location.assign("./");
           if (area.area()?.name === name) { built = false; result.clear(); viz.ready(false); }
           outlines.delete(name); hoveredArea = null; area.showPlace(null);
           await paintAreas(); refreshSteps();
@@ -138,7 +155,6 @@
         // Open: the area in the steps (its boundary, settings and result) and its visualization: the map page of the area (blank base map), in this tab.
         // Its back button comes back here, and the page shows the same area again (the server keeps it)
         await openArea(name, b);
-        location.href = "edit/";
         return;
       } catch (err) {
         rs.sections.note("areas", err.message);
@@ -155,7 +171,7 @@
     };
     const parts = { search: rs.search, drop: rs.drop, tabs: rs.tabs, toggle: rs.toggle, kpi: rs.kpi, number: rs.number };
     const post = async (path, body) => (await api(path, { method: "POST", body })).json();
-    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { if (openName && area.area()?.name !== openName) markOpen(null); if (built && area.area()?.name !== builtName) { built = false; result.clear(); viz.ready(false); } ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });      // another area: the result of the old one goes
+    const area = initAreaStep({ root: roots[1], detail: roots[2], map, rs: parts, padding, buffer: (geometry, metres) => post("buffer", JSON.stringify({ geometry, metres })), onChange: () => { if (pageArea && !area.area()) { location.assign("./"); return; } if (openName && area.area()?.name !== openName) markOpen(null); if (built && area.area()?.name !== builtName) { built = false; result.clear(); viz.ready(false); } ground.refresh(); data.refresh(); build.refresh(); refreshSteps(); } });      // another area: the result of the old one goes
     const zoomBtn = Object.assign(rs.sections.button("step2", { icon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>', title: "Zoom to the area", onClick: () => area.zoom() }), { disabled: true });
     let extracts = null;
     const data = initDataStep({ root: roots[3], rs: parts, map, padding, zoomToArea: () => area.zoom(), area: () => area.area(),
@@ -164,12 +180,12 @@
       files: { list: async () => (await api("pbf")).json(), get: (url) => api("pbfget", { method: "POST", body: url }) } });
     const demReq = (source, bbox) => JSON.stringify({ source, bbox });
     const demFiles = { list: (source, bbox) => post("demfiles", demReq(source, bbox)), get: (source, bbox) => post("demget", demReq(source, bbox)) };
-    const ground = await initGroundStep({ root: roots[4], catalog: "parts/data/dem_sources.json", bbox: () => area.area()?.bbox ?? null, drop: rs.drop, files: demFiles,
-      status: (t) => rs.sections.note("step4", t), onChange: () => { build.refresh(); refreshSteps(); where(); } });
+    const ground = await initGroundStep({ root: groundPart, catalog: "parts/data/dem_sources.json", bbox: () => area.area()?.bbox ?? null, drop: rs.drop, files: demFiles,
+      status: (t) => rs.sections.note("step6", t), onChange: () => { groundBuild?.refresh(); refreshSteps(); } });
     const settings = initSettingsStep({ root: $("settings-box"), onChange: () => build.refresh(), checkFile: async (path) => (await post("file", path)).size });
-    const result = initResultStep({ root: roots[6] });
-    const viz = initVisualizationStep({ root: roots[7], href: "edit/" });
-    let built = false, builtName = null, auto = false, touched = false, current = null;
+    const result = initResultStep({ root: roots[5] });
+    const viz = initVisualizationStep({ root: roots[7], href: "edit/", text: "Open the editor", note: "The panel Edit OSM data of duckOSM, over the map of this area. Each change goes into the fixes file of the area (osm_fixes.yaml), and Build again builds the area with it. Its back button comes back to these steps." });
+    let built = false, builtName = null, auto = false, touched = false, current = null, hasDem = false, groundBuild = null;
     const autoFold = (c, folded) => { auto = true; try { rs.sections.fold(c.dataset.rsSection, folded); } finally { auto = false; } };
     const build = initBuildStep({ root: $("build-box"),
       ready: () => {
@@ -180,24 +196,35 @@
       },
       run: async () => {
         built = false; result.clear(); viz.ready(false); refreshSteps();
-        const a = area.area(), dem = await ground.dem();
-        if (dem?.bytes) await api(`dem/${a.name}`, { method: "PUT", body: dem.bytes });      // a dropped file; the files of the folder stay on the disk
-        await api("build", { method: "POST", body: JSON.stringify({ name: a.name, boundary: a.geometry, data: data.choice(), settings: settings.yaml(),
-          dem: dem && { product: dem.product, vertical_datum: dem.vertical_datum, license: dem.license, not_reference: dem.not_reference, ...(dem.files ? { source: dem.source, files: dem.files } : {}) } }) });
+        const a = area.area();
+        await api("build", { method: "POST", body: JSON.stringify({ name: a.name, boundary: a.geometry, data: data.choice(), settings: settings.yaml(), dem: null }) });      // the ground is step 6
       },
       poll: async () => (await api("job")).json(),
-      onDone: (job) => { built = true; builtName = job.name; openName = job.name; paintAreas(); result.show(job); viz.built(); refreshSteps(); autoFold(cards[5], false); autoFold(cards[6], false); } });
+      onDone: (job) => { built = true; builtName = job.name; openName = job.name; result.show(job); refreshSteps(); location.assign(`./?area=${encodeURIComponent(job.name)}`); } });      // the page of the new area: the steps over its map
+
+    // step 6, Ground: the DEM of a built area. "Add the ground" builds the area again from its own config (the same OSM file and settings) with the DEM.
+    groundBuild = initBuildStep({ root: groundGo, label: "Add the ground",
+      ready: () => (!built ? "Build the area first (step 4)." : !ground.choice().id ? "Choose the source of the ground." : !ground.choice().file && !byFallback() ? "Download the files of the source, or drop a file." : ""),
+      run: async () => {
+        const a = area.area(), dem = await ground.dem();
+        if (!dem) throw new Error("Choose the ground: download the files of a source, or drop a file.");
+        if (dem.bytes) await api(`dem/${a.name}`, { method: "PUT", body: dem.bytes });
+        await api("ground", { method: "POST", body: JSON.stringify({ name: a.name,
+          dem: { product: dem.product, vertical_datum: dem.vertical_datum, license: dem.license, not_reference: dem.not_reference, ...(dem.files ? { source: dem.source, files: dem.files } : {}) } }) });
+      },
+      poll: async () => (await api("job")).json(),
+      onDone: () => location.assign(`./?area=${encodeURIComponent(area.area().name)}`) });
+    const byFallback = () => ground.choice().id === "aws-terrain-tiles";
 
     // ---- where the files are: the folder of the area (loading, downloading and saving), shown in the cards ----
     const place = (card, first) => { const p = Object.assign(document.createElement("p"), { className: "where" }); first ? card.prepend(p) : card.append(p); return p; };
-    const [where2, where3, where5] = [place(roots[2]), place(roots[3]), place(roots[5], true)];
+    const [where2, where3, where5] = [place(roots[2]), place(roots[3]), place(roots[4], true)];
     async function where() {
       const out = (await (await api("info")).json()).out, sep = out.includes("\\") ? "\\" : "/", a = area.area(), c = data.choice(), code = (t) => `<code>${esc(t)}</code>`;
       const dir = a ? `${out}${sep}${a.name}${sep}` : "";
       where2.innerHTML = a ? `Saved in ${code(dir)}` : "";
       where3.innerHTML = !a ? "" : c?.kind === "geofabrik" ? `In use: ${code(c.path)}` : c?.kind === "file" ? `Read from ${code(c.path)}` : `The data is saved in ${code(dir)}`;
-      const dem = ground.choice().id ? ", dem.tif" : "";
-      where5.innerHTML = a ? `The build writes ${code(`${dir}${a.name}.duckdb`)}, config.yaml, boundary.geojson${dem} and osm_fixes.yaml (your changes) in that folder.` : "";
+      where5.innerHTML = a ? `The build writes ${code(`${dir}${a.name}.duckdb`)}, config.yaml, boundary.geojson and osm_fixes.yaml (your changes) in that folder.` : "";
     }
     where();
 
@@ -206,10 +233,10 @@
       1: { ready: () => "", done: () => !!area.area() },
       2: { ready: () => (area.area() ? "" : "after step 1"), done: () => !!area.area() },
       3: { ready: () => (area.area() ? "" : "after step 1"), done: () => !!data.choice() },
-      4: { ready: () => (area.area() ? "" : "after step 1"), done: () => !!ground.choice().id, optional: true },      // optional: the page does not open it by itself
-      5: { ready: () => (area.area() && data.choice() ? "" : "after step 3"), done: () => built },
-      6: { ready: () => (built ? "" : "after step 5"), done: () => built },
-      7: { ready: () => (built ? "" : "after step 5"), done: () => false, optional: true },      // optional: the page opens the map by itself, or the person does
+      4: { ready: () => (area.area() && data.choice() ? "" : "after step 3"), done: () => built },
+      5: { ready: () => (built ? "" : "after step 4"), done: () => built },
+      6: { ready: () => (built ? "" : "after step 4"), done: () => hasDem, optional: true },      // optional: an area has a DEM only when the person adds one
+      7: { ready: () => (built ? "" : "after step 4"), done: () => false, optional: true },
     };
     // the person opened or folded a card: the next step does not fold the others
     document.addEventListener("rs:sectionchange", (e) => {
@@ -227,6 +254,7 @@
         rs.sections.done(c.dataset.rsSection, !!done && !why);
         if (why && !c.classList.contains("folded")) autoFold(c, true);      // a card that is not ready keeps only its title
       }
+      groundBuild?.refresh();
       zoomBtn.disabled = !area.area();
       const next = cards.find((c) => !STEP[c.dataset.n].optional && !STEP[c.dataset.n].ready() && !STEP[c.dataset.n].done());
       if (next && next !== current) {
@@ -234,13 +262,17 @@
         autoFold(next, false);
         // the area card (the name) stays open beside the data step; the data and the ground stay open beside the build
         // card 1 stays open when the area is hexagons: the person clicks more cells there (as in Studio)
-        const keep = (c) => (next.dataset.n === "3" && c.dataset.n === "2") || (next.dataset.n === "5" && ["3", "4"].includes(c.dataset.n)) || (c.dataset.n === "1" && area.area()?.from === "h3");
+        const keep = (c) => (next.dataset.n === "3" && c.dataset.n === "2") || (next.dataset.n === "4" && c.dataset.n === "3") || (c.dataset.n === "1" && area.area()?.from === "h3");
         if (!touched) for (const c of cards) if (c !== next) autoFold(c, !keep(c));
       }
     }
     refreshSteps();
-    // back from the map page: the area that is open on the server comes into the steps again
-    paintAreas().then(async () => { const cur = (await (await api("info")).json()).area; if (cur && !area.area()) await openArea(cur); }).catch(() => {});
+    // the page of an open area (after Open, a build, or the back button of the editor): the area comes into the steps
+    // the area of this page: the address names it (/?area=<name>) and the server has it open; a new visit (/) has no area
+    const want = new URLSearchParams(location.search).get("area"), info0 = await (await api("info")).json();
+    pageArea = want && info0.area === want && info0.edit ? want : null;
+    if (want && !pageArea) history.replaceState(null, "", "./");
+    paintAreas().then(async () => { if (pageArea) await showOpen(pageArea, await (await api("job")).json()); }).catch((e) => rs.sections.note("areas", e.message));
     window.studio = { area, data, settings, ground, build, result, viz, map };           // for the tests
     window.studioReady = true;
   }

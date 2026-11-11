@@ -10,16 +10,17 @@
  *   auto,        // optional: the choice "Open the map when the build ends" at the start (default false)
  *   keep,        // optional: { get(), set(on) }: where the host keeps the choice (default: localStorage)
  *   delay,       // optional: ms between the end of the build and the opening (default 1500); a click on Cancel, or the choice off, stops it
+ *   text, note,  // optional: the text of the button, and the note above it (a host whose page shows the map already makes this step its editor)
  * })
  * It returns { ready(on), built(), auto() }. ready(on) enables the button; built() is called when a build ended well: it opens the map after `delay` when the choice is on.
  */
-export function initVisualizationStep({ root, href, open = (h) => { location.href = h; }, auto = false, keep = null, delay = 1500 }) {
+export function initVisualizationStep({ root, href, open = (h) => { location.href = h; }, auto = false, keep = null, delay = 1500, text = "Open the map and edit OSM data", note = null }) {
 	root.classList.add("bs", "bs-viz");
 	const store = keep ?? { get: () => { try { const v = localStorage.getItem("duckosm-studio-open-map-tab"); return v === null ? auto : v === "1"; } catch { return auto; } },
 		set: (on) => { try { localStorage.setItem("duckosm-studio-open-map-tab", on ? "1" : "0"); } catch { /* no storage */ } } };
-	root.innerHTML = `<p class="small muted" data-vz="note">The roads of the area on the map, with the panel Edit OSM data. Each change goes into the fixes file of the area, and Build again builds the area again with it.</p>
-		<label class="rs-opt"><input type="checkbox" data-vz="auto"><span><b>Open the map when the build ends</b></span></label>
-		<a class="sb-primary bs-open" data-vz="open" aria-disabled="true">Open the map and edit OSM data</a>
+	root.innerHTML = `<p class="small muted" data-vz="note">${note ?? "The roads of the area on the map, with the panel Edit OSM data. Each change goes into the fixes file of the area, and Build again builds the area again with it."}</p>
+		<label class="rs-opt"${note ? " hidden" : ""}><input type="checkbox" data-vz="auto"><span><b>Open the map when the build ends</b></span></label>
+		<a class="sb-primary bs-open" data-vz="open" aria-disabled="true">${text}</a>
 		<p class="rs-status" role="status" aria-live="polite" data-vz="status"></p>`;
 	const q = (k) => root.querySelector(`[data-vz="${k}"]`);
 	q("auto").checked = store.get();

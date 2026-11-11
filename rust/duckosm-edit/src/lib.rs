@@ -116,6 +116,11 @@ impl Site {
                   state: Mutex::new(State { db, page, tables, source }), pager, backed_up: Mutex::new(false), cache })
     }
 
+    /// The page of the open database (the HTML that `GET /` gives).
+    pub fn page(&self) -> String {
+        self.state.lock().unwrap().page.clone()
+    }
+
     /// The address of the page.
     pub fn url(&self) -> String {
         format!("http://{}/", self.own[0])
@@ -228,7 +233,10 @@ fn load(db: &mut dyn Db, path: &Path, pager: Pager, cache: Option<&Path>) -> Res
     db.open()?;
     let name = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "area".into());
     let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    let kept = cache.filter(|c| matches!((modified(c), modified(path)), (Some(c), Some(d)) if c >= d)).and_then(|c| std::fs::read_to_string(c).ok());
+    // the kept page is used when it is newer than the database and than this program (a new program can make another page)
+    let program = std::env::current_exe().ok().and_then(|p| modified(&p));
+    let kept = cache.filter(|c| matches!((modified(c), modified(path)), (Some(c), Some(d)) if c >= d && program.is_none_or(|p| c >= p)))
+        .and_then(|c| std::fs::read_to_string(c).ok());
     let page = match kept {
         Some(page) => page,
         None => {
@@ -303,6 +311,8 @@ pub fn serve(site: Arc<Site>, listener: TcpListener) {
 pub struct Req {
     pub method: String,
     pub path: String,
+    /// The query of the address (after `?`, before `#`), or empty.
+    pub query: String,
     headers: Vec<(String, String)>,
     reader: BufReader<TcpStream>,
     out: TcpStream,
@@ -382,7 +392,8 @@ pub fn read_request(stream: TcpStream, own: &[String; 2]) -> Result<Option<Req>,
     }
     let target = req.path.unwrap_or("");
     let path = target.split(['?', '#']).next().unwrap_or("/").trim_start_matches('/').to_string();
-    Ok(Some(Req { method: req.method.unwrap_or("").to_string(), path, headers, reader, out }))
+    let query = target.split('#').next().unwrap_or("").split_once('?').map_or("", |q| q.1).to_string();
+    Ok(Some(Req { method: req.method.unwrap_or("").to_string(), path, query, headers, reader, out }))
 }
 
 impl Site {
