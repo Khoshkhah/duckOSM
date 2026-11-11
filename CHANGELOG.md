@@ -17,6 +17,10 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 - **A host can give the data dock `kinds` as a function and read it again** (roadstyle `f3d1efc5`, PR 134 and 136; `viewKinds` needs no change). A host whose tables change after the start (Studio: a build with other layers) gives `kinds: () => viewKinds({ names, hasTags, h3, query })`
   and calls `await data.refreshKinds()` after the change. The dock then draws the rows of the new tables. *Host: nothing is needed. `duckosm ask` adds no table while it runs, so its page still gives the object. Studio replaced its proxy of kinds with the function.*
 
+### Fixed
+
+- **`duckosm studio` has no patch for a page with no roads** (roadstyle `8dfd5e2c`, PR 153; `rust/duckosm-edit/page/studio.js`, `web/build_steps/steps.css`, `web/ground_step/ground_step.css`). The roadstyle dashboard now shows no banner "0 road features" on a page with no roads, opens on the world, and sets `text-transform` and `letter-spacing` of an option row (`label.rs-opt`) back. The page removed its three workarounds: the script that removed the banner, the jump to Europe, and the two CSS resets. *Host: move the roadstyle pin to `8dfd5e2c` and remove the same patches. A host that sets its own first view keeps it.*
+
 ### Changed
 
 - **`duckosm studio` has the cards of duckOSM Studio** (Kaveh: "all steps should have almost the same interface as Studio except the new step 4"). The page ports Studio's flow: the cards 1 Choose an area (tabs with icons, "What is here?"), 2 The area (name, number tiles, Boundary, Unselect, zoom), 3 The data, 4 Ground (new), 5 Build (the networks, the base map, More options, Build) and 6 The result (a table of the networks), the check mark of a step that is done, the line "after step N", one open step, and the "?" of each card. The base map is OpenFreeMap Liberty, as in Studio. `initAreaStep` takes `detail` (the card "The area") and `rs: { search, drop, tabs, toggle, kpi }`, and `initDataStep` takes `rs: { tabs }`. *Host: duckOSM Studio does not use these two steps; nothing is needed.*
