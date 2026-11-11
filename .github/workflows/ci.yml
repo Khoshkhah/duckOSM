@@ -28,6 +28,8 @@ jobs:
       - run: python -m pytest tests/ -q -rs
       # the fixes editor of the page (web/fixes_editor/, docs/design/fixes_editor.md): its unit tests need only Node (on the runner)
       - run: node web/fixes_editor/fixes_units.mjs
+      # the Ground step (web/ground_step/, docs/design/ground_step.md)
+      - run: node web/ground_step/ground_units.mjs
 
   # The Rust engine (rust/, docs/design/rust_engine_move.md): the golden tests of the crates. One invocation compiles DuckDB one time.
   rust:

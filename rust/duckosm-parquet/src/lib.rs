@@ -1229,12 +1229,46 @@ pub fn write_edge_heights_to<W: Write + Send>(
     })
 }
 
+/// Write the pixels of the DEM over the network (`elevation_grid_main.parquet`): `col`, `row` (0 at the west and
+/// the north edge), `lon`, `lat` (the centre of the pixel), `z` (NULL on nodata). Rows: (col, row, lon, lat, z).
+pub fn write_elevation_grid_to<W: Write + Send>(
+    out: W,
+    rows: &[(i32, i32, f64, f64, Option<f64>)],
+) -> Result<(), String> {
+    let fields = vec![
+        field("col", DataType::Int32),
+        field("row", DataType::Int32),
+        field("lon", DataType::Float64),
+        field("lat", DataType::Float64),
+        field("z", DataType::Float64),
+    ];
+    write_rows(out, fields, rows, |c| {
+        let (mut col, mut row) = (Int32Builder::new(), Int32Builder::new());
+        let (mut lon, mut lat, mut z) = (Float64Builder::new(), Float64Builder::new(), Float64Builder::new());
+        for r in c {
+            col.append_value(r.0);
+            row.append_value(r.1);
+            lon.append_value(r.2);
+            lat.append_value(r.3);
+            z.append_option(r.4);
+        }
+        vec![
+            Arc::new(col.finish()),
+            Arc::new(row.finish()),
+            Arc::new(lon.finish()),
+            Arc::new(lat.finish()),
+            Arc::new(z.finish()),
+        ]
+    })
+}
+
 /// Write duckOSM's `main.elevation_metadata` (`elevation_metadata_main.parquet`), one row for the column `ele`:
 /// the text columns in duckOSM's order (ele_column, source, source_type, uri, product, dem_crs, vertical_datum,
-/// license, sampled_at, duckosm_version), the resolution, the fill value and the two counts.
+/// license, sampled_at, duckosm_version, sha256), the resolution, the fill value and the two counts. `sha256` is the
+/// ground id: the SHA-256 of the bytes of the DEM file, in lowercase hexadecimal.
 pub fn write_elevation_metadata_to<W: Write + Send>(
     out: W,
-    text: [&str; 10],
+    text: [&str; 11],
     resolution_m: f64,
     nodata_fill: f64,
     n_nodes: i64,
@@ -1255,6 +1289,7 @@ pub fn write_elevation_metadata_to<W: Write + Send>(
         "n_nodata",
         "sampled_at",
         "duckosm_version",
+        "sha256",
     ];
     let fields = names
         .iter()
@@ -1287,6 +1322,7 @@ pub fn write_elevation_metadata_to<W: Write + Send>(
             i64s(std::iter::once(n_nodata)),
             t(8),
             t(9),
+            t(10),
         ]
     })
 }

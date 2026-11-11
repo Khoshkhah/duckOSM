@@ -20,7 +20,7 @@ It adds:
 - `nodes.ele`: the height at each node, in metres;
 - `edges.z_from`, `edges.z_to`: the height at each edge's two ends;
 - a row in `main.elevation_metadata` saying where the heights came from (source, resolution,
-  vertical datum, licence).
+  vertical datum, licence), and the SHA-256 of the elevation file, the ground id.
 
 The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md), [GIS](../exports/gis.md) and
 [GMNS](../exports/gmns_tables.md) exports then include the heights (GMNS: `node.z_coord`, `link.grade`).
@@ -33,8 +33,12 @@ when you set an [OpenTopography](https://opentopography.org) key in `OPENTOPOGRA
 better accuracy, point it at your own file, e.g. a national 1 m model:
 
 ```bash
-duckosm elevation monaco.duckdb --dem my_dtm.tif          # any GDAL raster
+duckosm elevation monaco.duckdb --dem my_dtm.tif --product DTM --vertical-datum EGM2008 --license CC-BY-4.0
 ```
+
+A `--dem` file in `ele` is the area's ground reference. Its product (`DTM` or `DSM`), its vertical datum and its license
+are necessary: without them the command stops. For a file that is not the reference (a test, a surface model), add `--not-reference`. A file with
+`--suffix` is never the reference.
 
 | Option | Does | Default |
 |---|---|---|
@@ -43,8 +47,45 @@ duckosm elevation monaco.duckdb --dem my_dtm.tif          # any GDAL raster
 | `-m MODE` | only this mode; repeat for several | every mode |
 | `--nodata-fill` | height written where the model has no value | `0` |
 | `--suffix dsm` | store as a second surface (`ele_dsm`, `z_from_dsm`, …) instead of replacing | |
+| `--product` | `DTM` (bare earth) or `DSM` (surface): the product of the `--dem` file | |
+| `--vertical-datum` | the vertical datum of the `--dem` file, for example `EGM2008` | |
+| `--license` | the license of the `--dem` file | |
+| `--not-reference` | the `--dem` file is not the area's ground reference | |
+
+The Rust build (`duckosm-rust --dem FILE`) has the same rule, with the options `--dem-product`, `--dem-vertical-datum`,
+`--dem-license` and `--dem-not-reference`. To set the DEM one time for each area, put it in the config file, in the section
+[`elevation`](../reference/configuration.md#elevation) (`dem`, `product`, `vertical_datum`, `license`); `--dem` wins over it. The browser build gives them as `Params.dem_product`,
+`dem_vertical_datum`, `dem_license` and `dem_not_reference`.
+
+### The ground id
+
+`main.elevation_metadata.sha256` is the SHA-256 of the elevation file's bytes. It is the same value that `sha256sum`
+gives, so you can check a database against its file:
+
+```bash
+sha256sum my_dtm.tif
+duckdb monaco.duckdb -c "SELECT sha256 FROM main.elevation_metadata WHERE ele_column = 'ele'"
+```
+
+The value is NULL when the step read no whole file: Copernicus GLO-30 is streamed in parts, and a `--dem` URL is read in
+parts. To get a ground id, give the reference as a local file.
 
 Where to get elevation data, and how the sources compare: [Elevation sources](../reference/elevation-sources.md).
+
+To find the sources that cover an area, best first, ask the catalog:
+
+```python
+from duckosm.dem_sources import sources_for_bbox
+
+for s in sources_for_bbox((7.41, 43.73, 7.44, 43.75)):      # Monaco: west, south, east, north
+    print(s["name"], s["resolution_text"], s["product"], s["license"])
+```
+
+The order is a national 1 m DTM, EU-DTM, FABDEM, Copernicus GLO-30 and then the others. Each entry has the `product`, `vertical_datum` and `license`
+that `--product`, `--vertical-datum` and `--license` need. In duckOSM Studio the step "Ground" does the same for the area on the map.
+
+For an area that SimReady, urbanstyle or roadstyle also use, the heights must follow [The ground reference](../concepts/ground-reference.md):
+one bare-earth model (DTM) with a known vertical datum, recorded once and used by every project.
 
 ## What the heights mean
 

@@ -29,7 +29,7 @@ mode: `edges`, `nodes`, `private_edges`, `edge_graph`, `edge_id_map`, `turn_perm
 | 3 | `features.*` (12 tables) | The base map: buildings, land, water, POIs, place labels, … | 1 to 3,496 each | Done (2026-11-10): [features.md](features.md), the SQL runs in the program. `features.ocean` with `--sea`. |
 
 Not in this list: `visualization.level_edits`, `level_heads`, `level_caps` and `level_unmatched` (the manual
-edits of the drawing levels in duckOSM's level editor), `main.boundary_cells` (the H3 columns are done, 2026-11-10), `main.elevation_metadata` (elevation), `main.admin_boundaries` (the boundaries for `duckosm boundary`).
+edits of the drawing levels in duckOSM's level editor), `main.boundary_cells` (the H3 columns are done, 2026-11-10), `main.elevation_metadata` and `main.elevation_grid` (elevation), `main.admin_boundaries` (the boundaries for `duckosm boundary`).
 They come from separate duckOSM tools or options.
 
 ## Decisions (Kaveh, 2026-10-22)

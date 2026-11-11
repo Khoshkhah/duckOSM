@@ -217,6 +217,7 @@ Left over from the build and always empty: the virtual nodes are in `nodes`, wit
 | [`global_junctions`](#global_junctions) | a build from a PBF, with `options.global_junctions` (on) |
 | [`boundary_cells`](#boundary_cells) | a build from a PBF, with `options.boundary_cells` (off) and a boundary |
 | [`elevation_metadata`](#elevation_metadata) | after `duckosm elevation` |
+| [`elevation_grid`](#elevation_grid) | the Rust build with `--dem` |
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 
@@ -282,15 +283,31 @@ Where the heights came from: one row per height column (`ele`, `ele_dsm`, …). 
 | `source_type` | VARCHAR | `download` (from `--source`) or `file` (from `--dem`) |
 | `uri` | VARCHAR | where it was read from |
 | `resolution_m` | DOUBLE | the model's resolution in metres |
-| `product` | VARCHAR | `DTM` (bare earth), `DSM` (surface) or `unknown` |
+| `product` | VARCHAR | `DTM` (bare earth), `DSM` (surface) or `unknown`. For a `--dem` file, the value of `--product` (`--dem-product` in `duckosm-rust`); `unknown` like `vertical_datum` |
 | `dem_crs` | VARCHAR | the model's CRS, e.g. `EPSG:4326` |
-| `vertical_datum` | VARCHAR | e.g. `EGM2008`; `unknown` for a `--dem` file |
-| `license` | VARCHAR | the model's licence; `unknown` for a `--dem` file |
+| `vertical_datum` | VARCHAR | e.g. `EGM2008`. For a `--dem` file, the value of `--vertical-datum` (`--dem-vertical-datum` in `duckosm-rust`); `unknown` only with `--not-reference` or `--suffix` |
+| `license` | VARCHAR | the model's licence. For a `--dem` file, the value of `--license` (`--dem-license`); `unknown` like `vertical_datum` |
 | `nodata_fill` | DOUBLE | the height written where the model had no value |
 | `n_nodes` | BIGINT | nodes sampled, over all modes |
 | `n_nodata` | BIGINT | nodes that got `nodata_fill` |
 | `sampled_at` | VARCHAR | when, as a UTC ISO time |
 | `duckosm_version` | VARCHAR | the duckOSM version |
+| `sha256` | VARCHAR | the **ground id**: the SHA-256 of the bytes of the DEM file, in lowercase hexadecimal, as `sha256sum` gives it. NULL when the step read no whole file: Copernicus tiles streamed from AWS, or a `--dem` URL or GDAL virtual path (`/vsi…`). EU-DTM is a downloaded file and has a hash. NULL in a database from an older duckOSM ([The ground reference](../concepts/ground-reference.md)) |
+
+### `elevation_grid`
+
+The pixels of the DEM over the network: the ground between the roads, for a reader that makes a terrain (SimReady's
+`gltf` adapter). The rows are the raster's own pixels, with no resampling, over the bounding box of the nodes of
+every mode, plus 3 pixels on each side. Only the Rust build writes it: `duckosm-rust --dem`, or `Params.dem_bytes` (the bytes of the GeoTIFF) in a build with no file system, as the browser. Monaco (`tests/data/monaco.osm.pbf`, the modes driving,
+walking and cycling) with the FABDEM crop: 140 × 103 pixels (14,420 rows), 45 KB of Parquet.
+
+| Column | Type | Description |
+|---|---|---|
+| `col` | INTEGER | the column of the pixel, 0 at the west edge |
+| `row` | INTEGER | the row of the pixel, 0 at the north edge (the order of the raster) |
+| `lon` | DOUBLE | the longitude of the pixel centre (the CRS of the DEM, EPSG:4326) |
+| `lat` | DOUBLE | the latitude of the pixel centre |
+| `z` | DOUBLE | the height of the pixel to the cm, as `ele` and `z_vertices` give it; NULL on nodata |
 
 ### `admin_boundaries`
 

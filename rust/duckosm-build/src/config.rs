@@ -31,7 +31,7 @@ pub struct FromConfig {
     pub ignored: Vec<String>,
 }
 
-const TOP: [&str; 15] = [
+const TOP: [&str; 16] = [
     "name",
     "output_path",
     "osm_overrides",
@@ -47,6 +47,7 @@ const TOP: [&str; 15] = [
     "pbf_path",
     "boundary_path",
     "h3_cell",
+    "elevation",
 ];
 const OPTIONS: [&str; 21] = [
     "build_graph",
@@ -92,6 +93,8 @@ const VALIDATION: [&str; 7] = [
 const REPORT: [&str; 1] = ["enabled"];
 const VIZ: [&str; 2] = ["enabled", "basemap"];
 const MULTIMODAL: [&str; 3] = ["enabled", "transfer_s", "transfer_costs"];
+/// The area's DEM, its ground reference (docs/concepts/ground-reference.md). The command line `--dem` wins.
+const ELEVATION: [&str; 5] = ["dem", "product", "vertical_datum", "license", "reference"];
 
 struct Section<'a> {
     name: &'a str,
@@ -195,6 +198,12 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     report.check_keys(&REPORT)?;
     viz.check_keys(&VIZ)?;
     multimodal.check_keys(&MULTIMODAL)?;
+    let elevation = section(root, "elevation")?;
+    elevation.check_keys(&ELEVATION)?;
+    let dem = elevation.str("dem")?.map(PathBuf::from);
+    if let Some(d) = dem.as_ref().filter(|d| !d.exists()) {
+        return Err(format!("DEM file not found: {}", d.display()));
+    }
 
     let mut skipped: Vec<String> = Vec::new();
     let mut ignored: Vec<String> = Vec::new();
@@ -396,6 +405,11 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         boundary: cut_to,
         // main.boundary and the metadata, also when the PBF is cut already (a missing file is an error there)
         area_boundary: boundary_path.map(PathBuf::from).filter(|b| b.exists()),
+        dem,
+        dem_product: elevation.str("product")?,
+        dem_vertical_datum: elevation.str("vertical_datum")?,
+        dem_license: elevation.str("license")?,
+        dem_not_reference: !elevation.bool("reference", true)?,
         ..Params::default()
     };
     Ok(FromConfig {
@@ -839,6 +853,28 @@ mod tests {
             "{before:?}"
         );
         assert!(after.iter().all(|l| *l == Some(1)) && n == 1, "{after:?}");
+    }
+
+    #[test]
+    fn elevation_section() {
+        let tif = format!("{}/tests/data/monaco-copernicus-glo30.tif", env!("CARGO_MANIFEST_DIR"));
+        let c = write(&format!(
+            "pbf_path: {}\nelevation:\n  dem: {tif}\n  product: DTM\n  vertical_datum: EGM2008\n  license: open\n",
+            pbf()
+        ));
+        let p = read(&c, false, false).unwrap().params;
+        assert_eq!(p.dem, Some(PathBuf::from(&tif)));
+        assert_eq!(
+            (p.dem_product.as_deref(), p.dem_vertical_datum.as_deref(), p.dem_license.as_deref()),
+            (Some("DTM"), Some("EGM2008"), Some("open"))
+        );
+        assert!(!p.dem_not_reference);
+        let c = write(&format!("pbf_path: {}\nelevation:\n  dem: {tif}\n  reference: false\n", pbf()));
+        assert!(read(&c, false, false).unwrap().params.dem_not_reference);
+        let c = write(&format!("pbf_path: {}\nelevation:\n  dem: nope.tif\n", pbf()));
+        assert!(read(&c, false, false).unwrap_err().contains("DEM file not found"));
+        let c = write(&format!("pbf_path: {}\nelevation:\n  datum: EGM2008\n", pbf()));
+        assert!(read(&c, false, false).unwrap_err().contains("elevation.datum"));
     }
 
     #[test]

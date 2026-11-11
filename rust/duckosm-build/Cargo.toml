@@ -28,6 +28,8 @@ tzf-rs = { version = "2.1", default-features = false, features = ["bundled"], op
 # main.boundary keeps the order of the properties of the file, as GDAL does
 # the DEM of the elevation step (a GeoTIFF, uncompressed or deflate)
 tiff = { version = "=0.11.3", default-features = false, features = ["deflate"] }
+# the ground id in main.elevation_metadata: the SHA-256 of the DEM file
+sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order"] }
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place
 roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f0a161b9abd2d993c7963b909de0a9a4322f38bf" }

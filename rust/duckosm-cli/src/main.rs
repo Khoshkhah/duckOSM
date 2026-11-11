@@ -114,6 +114,21 @@ struct Cli {
     /// (duckOSM `duckosm elevation --dem`). Writes nodes.ele, edges.z_from, z_to and z_vertices.
     #[arg(long, value_name = "FILE")]
     dem: Option<PathBuf>,
+    /// The product of the --dem file: DTM (bare earth) or DSM (surface), for main.elevation_metadata. Necessary when the
+    /// DEM is the area's reference ground.
+    #[arg(long, value_name = "DTM|DSM", requires = "dem")]
+    dem_product: Option<String>,
+    /// The vertical datum of the --dem file (for example EGM2008), for main.elevation_metadata. Necessary when the
+    /// DEM is the area's reference ground (docs/concepts/ground-reference.md).
+    #[arg(long, value_name = "DATUM", requires = "dem")]
+    dem_vertical_datum: Option<String>,
+    /// The license of the --dem file, for main.elevation_metadata. Necessary when the DEM is the area's reference ground.
+    #[arg(long, value_name = "TEXT", requires = "dem")]
+    dem_license: Option<String>,
+    /// The --dem file is not the area's reference ground (a test or a second surface): its product, its vertical datum
+    /// and its license can stay unknown.
+    #[arg(long, requires = "dem")]
+    dem_not_reference: bool,
     /// Print the time of each step.
     #[arg(long)]
     timing: bool,
@@ -207,7 +222,14 @@ fn run() -> Result<(), String> {
     if let Some(m) = &cli.levels {
         p.levels = parse_levels(m)?;
     }
-    p.dem = cli.dem.clone();
+    // --dem wins over the config's elevation section, with its own datum and license
+    if cli.dem.is_some() {
+        p.dem = cli.dem.clone();
+        p.dem_product = cli.dem_product.clone();
+        p.dem_vertical_datum = cli.dem_vertical_datum.clone();
+        p.dem_license = cli.dem_license.clone();
+        p.dem_not_reference = cli.dem_not_reference;
+    }
     if let Some(f) = &cli.fixes {
         p.osm_fixes = Some(f.clone());
     }

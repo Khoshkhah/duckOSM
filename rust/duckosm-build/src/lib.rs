@@ -11,6 +11,7 @@ use duckosm_core::network::{build_network_with, Coords, Options};
 use duckosm_core::osmjson::OsmJson;
 use duckosm_core::raw::Raw;
 use duckosm_core::{building_faces, cutfile, pbf, sidewalks};
+use sha2::{Digest, Sha256};
 use levels::LevelEdges;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -70,6 +71,16 @@ pub struct Params {
     /// and writes `elevation_nodes_<mode>.parquet`, `elevation_edges_<mode>.parquet` (with `z_vertices`, the
     /// height at each vertex) and `elevation_metadata_main.parquet`; the .duckdb gets duckOSM's columns.
     pub dem: Option<PathBuf>,
+    /// The DEM as the bytes of a GeoTIFF and a file name, for a build with no file system (the browser). `dem` wins
+    /// when both are set. The same step and the same files as `dem`; the metadata's `uri` is the file name.
+    pub dem_bytes: Option<(String, Vec<u8>)>,
+    /// The product (`DTM` or `DSM`), the vertical datum (for example `EGM2008`) and the license of the DEM, for
+    /// `main.elevation_metadata`. The DEM is the area's reference ground (docs/concepts/ground-reference.md): the build
+    /// stops when one of them is None, unless `dem_not_reference` is set. Then the unknown values are written as `unknown`.
+    pub dem_product: Option<String>,
+    pub dem_vertical_datum: Option<String>,
+    pub dem_license: Option<String>,
+    pub dem_not_reference: bool,
     /// Also make `main.building_faces` (`building_faces_main.parquet`, docs/osm-editing.md): the walls of the buildings of the raw cut, each with a
     /// type (front, back, side, party), from the street edges of the driving and walking modes. Needs a boundary and a region file, as `raw` does.
     pub building_faces: bool,
@@ -105,6 +116,11 @@ impl Default for Params {
             built_at: None,
             timezone_entry: None,
             dem: None,
+            dem_bytes: None,
+            dem_product: None,
+            dem_vertical_datum: None,
+            dem_license: None,
+            dem_not_reference: false,
             building_faces: false,
             h3_resolution: None,
             features: false,
@@ -509,7 +525,23 @@ pub fn run<W: Write + Send>(
         sum.sidewalk_roads = Some(sidewalks::infer_separate_sidewalks(&mut ways, &coords));
         log.step("sidewalk rule");
     }
-    let dem = p.dem.as_deref().map(elevation::Dem::open).transpose()?;
+    if let Some(x) = p.dem_product.as_deref().filter(|x| !matches!(*x, "DTM" | "DSM")) {
+        return Err(format!("the DEM product must be DTM (bare earth) or DSM (surface), not {x}"));
+    }
+    if (p.dem.is_some() || p.dem_bytes.is_some())
+        && !p.dem_not_reference
+        && (p.dem_product.is_none() || p.dem_vertical_datum.is_none() || p.dem_license.is_none())
+    {
+        return Err("the DEM is the area's reference ground: give its product, its vertical datum and its license \
+                    (--dem-product, --dem-vertical-datum, --dem-license), or mark it as not the reference \
+                    (--dem-not-reference)"
+            .into());
+    }
+    let dem = match (&p.dem, &p.dem_bytes) {
+        (Some(path), _) => Some(elevation::Dem::open(path)?),
+        (None, Some((name, bytes))) => Some(elevation::Dem::from_reader(std::io::Cursor::new(bytes), name)?),
+        (None, None) => None,
+    };
     let (mut dem_nodes, mut dem_nodata) = (0i64, 0i64);
     let mut mode_nodes = Vec::new();
     let mut level_edges = LevelEdges::default();
@@ -570,11 +602,24 @@ pub fn run<W: Write + Send>(
         }
         mode_nodes.push((*mode, net.nodes));
     }
-    if let (Some(d), Some(path)) = (&dem, &p.dem) {
-        let name = path
-            .file_name()
-            .map_or(String::new(), |f| f.to_string_lossy().into_owned());
-        let uri = std::fs::canonicalize(path).unwrap_or(path.clone());
+    if let Some(d) = &dem {
+        // the ground id: the SHA-256 of the bytes of the DEM file
+        let mut hash = Sha256::new();
+        let (name, uri) = match (&p.dem, &p.dem_bytes) {
+            (Some(path), _) => {
+                let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+                std::io::copy(&mut f, &mut hash).map_err(|e| format!("{}: {e}", path.display()))?;
+                (
+                    path.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned()),
+                    std::fs::canonicalize(path).unwrap_or(path.clone()).to_string_lossy().into_owned(),
+                )
+            }
+            (None, Some((n, bytes))) => {
+                hash.update(bytes);
+                (n.clone(), n.clone())
+            }
+            (None, None) => unreachable!("a DEM comes from dem or dem_bytes"),
+        };
         let sampled = area::iso_time(p.built_at.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -586,13 +631,14 @@ pub fn run<W: Write + Send>(
                 "ele",
                 &name,
                 "file",
-                &uri.to_string_lossy(),
-                "unknown",
+                &uri,
+                p.dem_product.as_deref().unwrap_or("unknown"),
                 "EPSG:4326",
-                "unknown",
-                "unknown",
+                p.dem_vertical_datum.as_deref().unwrap_or("unknown"),
+                p.dem_license.as_deref().unwrap_or("unknown"),
                 &sampled,
                 concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")),
+                &format!("{:x}", hash.finalize()),
             ],
             d.resolution_m,
             0.0,
@@ -600,6 +646,19 @@ pub fn run<W: Write + Send>(
             dem_nodata,
         )?;
         log.step("elevation metadata");
+        // the ground between the roads: the pixels over the box of the nodes of every mode, 3 pixels more on each side
+        let (mut w, mut s, mut e, mut n) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for nd in mode_nodes.iter().flat_map(|(_, ns)| ns) {
+            (w, s, e, n) = (w.min(nd.lon), s.min(nd.lat), e.max(nd.lon), n.max(nd.lat));
+        }
+        if w <= e && s <= n {
+            let cells = d.grid(w, s, e, n, 3);
+            duckosm_parquet::write_elevation_grid_to(
+                file("elevation_grid_main.parquet")?,
+                &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>(),
+            )?;
+            log.step("elevation grid");
+        }
     }
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
         let faces = building_faces::building_faces(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits);
