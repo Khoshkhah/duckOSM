@@ -94,6 +94,10 @@ pub struct Params {
     /// duckOSM `options.sea` (with `features`): also make `features.ocean` from Overture Maps. It reads the network, and
     /// a failure is a warning, as in duckOSM.
     pub sea: bool,
+    /// duckOSM `options.memory_limit` and `options.threads`: DuckDB's settings for the load of `raw.*` with `read_osm`
+    /// (docs/design/streaming_load.md). None: DuckDB's defaults (80% of the RAM, all cores).
+    pub memory_limit: Option<String>,
+    pub threads: Option<usize>,
 }
 
 impl Default for Params {
@@ -122,6 +126,8 @@ impl Default for Params {
             dem_license: None,
             dem_not_reference: false,
             building_faces: false,
+            memory_limit: None,
+            threads: None,
             h3_resolution: None,
             features: false,
             sea: false,
@@ -798,6 +804,13 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             let db = out.join(format!("{}.duckdb", p.name));
             duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
             log.step("write duckdb");
+            // a build of the whole file: raw.* of duckOSM, with read_osm in DuckDB (an area gets raw.* from the cut, with
+            // the base-map layers below)
+            if cut.is_none() {
+                let n = duckosm_duckdb::write_raw(&db, pbf_path, p.memory_limit.as_deref(), p.threads)?;
+                sum.raw = Some(n);
+                log.step("raw (read_osm)");
+            }
             if p.features {
                 duckosm_duckdb::write_features(&db, &pq_dir, FEATURES_SQL)?;
                 log.step("features");

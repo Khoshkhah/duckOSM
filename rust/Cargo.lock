@@ -793,6 +793,7 @@ dependencies = [
 name = "duckosm-core"
 version = "0.7.0"
 dependencies = [
+ "flate2",
  "miniz_oxide 0.8.9",
  "osmpbf",
  "rayon",
@@ -805,8 +806,11 @@ dependencies = [
 name = "duckosm-duckdb"
 version = "0.7.0"
 dependencies = [
+ "arrow-array 60.0.0",
+ "arrow-schema 60.0.0",
  "duckdb",
  "duckosm-core",
+ "duckosm-parquet",
 ]
 
 [[package]]

@@ -1,6 +1,8 @@
 //! Write the network as a DuckDB file. The Parquet files that `duckosm-parquet` wrote are loaded
 //! with DuckDB itself, so the types are the types of duckOSM (BIGINT, FLOAT, BIGINT[], GEOMETRY).
 
+pub mod read_osm;
+
 use duckdb::Connection;
 use std::path::Path;
 
@@ -86,6 +88,39 @@ pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(
             .map_err(|e| e.to_string())?;
     }
     con.execute_batch(MACROS).map_err(|e| e.to_string())
+}
+
+/// duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole `.osm.pbf` file `pbf`, in the `.duckdb` file `db`, with
+/// the table function `read_osm` (docs/design/streaming_load.md): the same tables as `ST_READOSM` gives duckOSM.
+/// `memory_limit` (as DuckDB writes it, for example "4GB") and `threads` set DuckDB; None: DuckDB's defaults. Returns the
+/// rows of the three tables.
+pub fn write_raw(
+    db: &Path,
+    pbf: &Path,
+    memory_limit: Option<&str>,
+    threads: Option<usize>,
+) -> Result<(usize, usize, usize), String> {
+    let err = |e: duckdb::Error| format!("raw.*: {e}");
+    let con = Connection::open(db).map_err(err)?;
+    let mut set = String::from("SET preserve_insertion_order = false;");
+    if let Some(m) = memory_limit {
+        set += &format!("SET memory_limit = '{}';", m.replace('\'', "''"));
+    }
+    if let Some(t) = threads {
+        set += &format!("SET threads = {t};");
+    }
+    con.execute_batch(&set).map_err(err)?;
+    read_osm::register(&con).map_err(err)?;
+    let path = pbf.display().to_string().replace('\'', "''");
+    con.execute_batch(&read_osm::raw_sql(&path)).map_err(err)?;
+    let n = |t: &str| -> Result<usize, String> {
+        con.query_row(&format!("SELECT count(*) FROM raw.{t}"), [], |r| r.get::<_, i64>(0))
+            .map(|n| n as usize)
+            .map_err(err)
+    };
+    let rows = (n("nodes")?, n("ways")?, n("relations")?);
+    con.execute_batch("CHECKPOINT").map_err(err)?;
+    Ok(rows)
 }
 
 /// duckOSM's base-map layers: run `sql` (`features.sql`, made from duckOSM's `FeaturesBuilder`) on the `.duckdb` file. It reads

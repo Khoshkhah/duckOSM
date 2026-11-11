@@ -81,7 +81,7 @@ This move changes one thing: the network step and its tables (section "The test"
 | Step | Why it stays | Rust state |
 |---|---|---|
 | osmium cut of the PBF (`pbf/` cache) | The build cuts with the osmium strategy `smart` when features are on. The Rust cut (`--boundary`) equals `complete_ways` and `smart` needs a check. | `cutfile.rs` and the boundary cut exist |
-| `raw.*` (`ST_READOSM`) | Features, bus routes and the fixes read it. | The Rust build can write `raw` tables (`Params.raw`) |
+| `raw.*` (`ST_READOSM`) | Features, bus routes and the fixes read it. | The Rust build can write `raw` tables (`Params.raw`). A whole-file build of `duckosm-rust` makes them with the table function `read_osm` (2026-11-11, [streaming_load.md](streaming_load.md)). |
 | Features (`features.*`) | A step that has a large output and its own golden test. | Layers exist for the page |
 | Bus routes (`bus.py`) | As above. | `bus.rs` |
 | Levels (`visualization.edge_levels`) | Python calls roadstyle. | `levels.rs` calls `roadstyle-levels` |

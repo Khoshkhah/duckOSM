@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`read_osm`, the load of `raw.*` in Rust** (`duckosm-duckdb`, `docs/design/streaming_load.md`). A DuckDB table function, `read_osm(path, kind)`, gives the
+  nodes, the ways or the relations of a `.osm.pbf` file with the columns and the types of `ST_READOSM`, and DuckDB calls it from all its threads. A whole-file
+  build of `duckosm-rust` now has `raw.nodes`, `raw.ways` and `raw.relations` (before: none), and it reads `options.memory_limit` and `options.threads` for this
+  step. France, all of `raw.*`: about 30% less CPU than `ST_READOSM`. A test compares it with `ST_READOSM` on Monaco. `duckosm build` (Python) keeps `ST_READOSM`.
+- **A fast PBF decoder, `pbfraw`** (`duckosm-core`). It reads the protobuf bytes in place: 5 times faster than the `osmpbf` crate on the way blocks of France,
+  and faster than libosmium (`osmium fileinfo -e --no-crc`) for the data of `raw.*`. A test compares it with `osmpbf` on Monaco.
+- **The Parquet load in a memory budget** (`duckosm-parquet`, feature `pbf`), for the browser: `load_raw` writes `raw.*` as Parquet shards while it reads,
+  and a test with a counting allocator fails if it goes above its budget. Nothing calls it yet.
+
 ### Host changes
 
 For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each entry says what the host must do.

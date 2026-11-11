@@ -6,10 +6,10 @@ use crate::geom::Pt;
 use crate::graph::{MemberType, Relation};
 use crate::model::{OtherTags, Tags, Way};
 use crate::network::Coords;
-use crate::raw::{Raw, RawNode, RawTags, RawWay};
+use crate::raw::{Raw, RawNode, RawSink, RawTags, RawWay};
 use crate::util::{FxHashMap, FxHashSet};
-use osmpbf::{Blob, BlobDecode, ByteOffset, Element, PrimitiveBlock};
-pub use osmpbf::{BlobReader, ElementReader};
+use osmpbf::{BlobDecode, ByteOffset, Element, PrimitiveBlock};
+pub use osmpbf::{Blob, BlobReader, ElementReader};
 use rayon::prelude::*;
 use std::io::{Cursor, Read, Seek};
 use std::path::Path;
@@ -87,14 +87,17 @@ fn relation(r: &osmpbf::Relation) -> Relation {
         members: r
             .members()
             .map(|m| {
-                let t = match m.member_type {
-                    osmpbf::RelMemberType::Node => MemberType::Node,
-                    osmpbf::RelMemberType::Way => MemberType::Way,
-                    osmpbf::RelMemberType::Relation => MemberType::Relation,
-                };
-                (m.member_id, t, m.role().unwrap_or("").to_string())
+                (m.member_id, member_type(&m.member_type), m.role().unwrap_or("").to_string())
             })
             .collect(),
+    }
+}
+
+fn member_type(t: &osmpbf::RelMemberType) -> MemberType {
+    match t {
+        osmpbf::RelMemberType::Node => MemberType::Node,
+        osmpbf::RelMemberType::Way => MemberType::Way,
+        osmpbf::RelMemberType::Relation => MemberType::Relation,
     }
 }
 
@@ -579,6 +582,186 @@ fn coords_of<R: Read + Send>(reader: ElementReader<R>, ways: &[Way]) -> Result<C
         .map_err(|e| e.to_string())?;
     drop(needed);
     Ok(Coords::new(nodes))
+}
+
+/// The number of threads that decode the blocks.
+pub fn threads() -> usize {
+    rayon::current_num_threads()
+}
+
+/// Decode one block of the file and give each of its elements to `sink`. A block that is not data (the header) gives
+/// nothing.
+pub fn raw_block(blob: &Blob, sink: &mut impl RawSink) -> Result<(), String> {
+    let Some(b) = data(blob)? else {
+        return Ok(());
+    };
+    for g in b.groups() {
+        for n in g.dense_nodes() {
+            sink.node(n.id(), n.lat(), n.lon(), &mut n.tags());
+        }
+        for n in g.nodes() {
+            sink.node(n.id(), n.lat(), n.lon(), &mut n.tags());
+        }
+        for w in g.ways() {
+            sink.way(w.id(), &mut w.tags(), &mut w.refs());
+        }
+        for r in g.relations() {
+            let mut members = r
+                .members()
+                .map(|m| (m.member_id, member_type(&m.member_type), m.role().unwrap_or("")));
+            sink.relation(r.id(), &mut r.tags(), &mut members);
+        }
+    }
+    Ok(())
+}
+
+/// Where the data blocks of a `.osm.pbf` file are: the start and the size in bytes of each block (its length, its
+/// header and its data), and if the header says that the file is sorted by type (`Sort.Type_then_ID`: all nodes, then
+/// all ways, then all relations). One pass that skips the data of each block makes it.
+#[derive(Debug, Clone, Default)]
+pub struct BlockIndex {
+    pub blocks: Vec<(u64, usize)>,
+    pub sorted: bool,
+}
+
+/// Make the [`BlockIndex`] of a file that can seek.
+pub fn block_index<R: Read + Seek + Send>(reader: R) -> Result<BlockIndex, String> {
+    let err = |e: osmpbf::Error| e.to_string();
+    let mut r = BlobReader::new_seekable(reader).map_err(err)?;
+    let mut starts = Vec::new();
+    let mut header = None;
+    while let Some(h) = r.next_header_skip_blob() {
+        let (h, at) = h.map_err(err)?;
+        let at = at.ok_or("the reader gives no position")?.0;
+        match h.blob_type() {
+            osmpbf::BlobType::OsmData => starts.push(at),
+            osmpbf::BlobType::OsmHeader => header = Some(at),
+            _ => {}
+        }
+    }
+    let end = r.seek_raw(std::io::SeekFrom::End(0)).map_err(err)?;
+    let sorted = match header {
+        Some(at) => match r.blob_from_offset(osmpbf::ByteOffset(at)).map_err(err)?.decode().map_err(err)? {
+            BlobDecode::OsmHeader(h) => h.optional_features().iter().any(|f| f == "Sort.Type_then_ID"),
+            _ => false,
+        },
+        None => false,
+    };
+    // a block ends where the next block (or the header, or the file) starts
+    let mut bounds: Vec<u64> = starts.iter().copied().chain(header).chain([end]).collect();
+    bounds.sort_unstable();
+    let blocks = starts
+        .iter()
+        .map(|&s| {
+            let next = bounds[bounds.partition_point(|&b| b <= s)];
+            (s, (next - s) as usize)
+        })
+        .collect();
+    Ok(BlockIndex { blocks, sorted })
+}
+
+/// The block in `bytes` (one entry of a [`BlockIndex`], read from the file).
+pub fn blob_from_bytes(bytes: &[u8]) -> Result<Blob, String> {
+    BlobReader::new(Cursor::new(bytes))
+        .next()
+        .ok_or("no block in the bytes")?
+        .map_err(|e| e.to_string())
+}
+
+/// Which kinds a block holds: nodes, ways, relations.
+pub fn kinds_in(blob: &Blob) -> Result<[bool; 3], String> {
+    let mut k = [false; 3];
+    if let Some(b) = data(blob)? {
+        for g in b.groups() {
+            k[0] |= g.dense_nodes().next().is_some() || g.nodes().next().is_some();
+            k[1] |= g.ways().next().is_some();
+            k[2] |= g.relations().next().is_some();
+        }
+    }
+    Ok(k)
+}
+
+/// The blocks (indexes into `index.blocks`) that can hold elements of `kind` (0 nodes, 1 ways, 2 relations). In a
+/// sorted file, a binary search finds where the ways and the relations start, so it decodes only some blocks
+/// (`block(i)` gives block `i`). The range takes one block more at each border, so a block that holds two kinds is
+/// in both ranges. In a file that is not sorted, it is all blocks.
+pub fn kind_range(
+    index: &BlockIndex,
+    kind: usize,
+    block: impl Fn(usize) -> Result<Blob, String>,
+) -> Result<std::ops::Range<usize>, String> {
+    let n = index.blocks.len();
+    if !index.sorted || kind > 2 {
+        return Ok(0..n);
+    }
+    // the first block that holds a kind after `k`: in a sorted file, this is true for all blocks after it
+    let first_after = |k: usize| -> Result<usize, String> {
+        let (mut lo, mut hi) = (0, n);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if kinds_in(&block(mid)?)?[k + 1..].iter().any(|&x| x) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        Ok(lo)
+    };
+    let ways = first_after(0)?;
+    let rels = first_after(1)?;
+    let (start, end) = match kind {
+        0 => (0, ways + 1),
+        1 => (ways.saturating_sub(1), rels + 1),
+        _ => (rels.saturating_sub(1), n),
+    };
+    Ok(start.min(n)..end.min(n))
+}
+
+/// Read all blocks of the file in rounds, and decode the blocks of a round at the same time with the fast decoder
+/// ([`crate::pbfraw`]; `new` gives a sink for each block, `finish` makes its part). `fits(size, round)` says if one
+/// more block of `size` bytes (in the file, compressed) goes into the round that has the sizes `round`. A round always
+/// takes its first block. `done` gets each part and the size of its block, in the order of the file. Only the blocks
+/// of one round are in memory, so `fits` sets the memory of this step. Returns the number of blocks.
+pub fn stream_raw<R, S, T>(
+    mut reader: R,
+    mut fits: impl FnMut(usize, &[usize]) -> bool,
+    new: impl Fn() -> S + Sync,
+    finish: impl Fn(S) -> Result<T, String> + Sync,
+    mut done: impl FnMut(T, usize) -> Result<(), String>,
+) -> Result<usize, String>
+where
+    R: Read + Send,
+    S: RawSink,
+    T: Send,
+{
+    let (mut count, mut waiting) = (0, crate::pbfraw::read_block(&mut reader)?);
+    while let Some(first) = waiting.take() {
+        let mut round = vec![first];
+        while let Some(b) = crate::pbfraw::read_block(&mut reader)? {
+            let sizes: Vec<usize> = round.iter().map(Vec::len).collect();
+            if fits(b.len(), &sizes) {
+                round.push(b);
+            } else {
+                waiting = Some(b);
+                break;
+            }
+        }
+        count += round.len();
+        let parts: Vec<(Result<T, String>, usize)> = round
+            .par_iter()
+            .map(|b| {
+                let mut s = new();
+                let r = crate::pbfraw::decode_block(b, [true; 3], &mut crate::pbfraw::Buffers::default(), &mut s)
+                    .and_then(|_| finish(s));
+                (r, b.len())
+            })
+            .collect();
+        drop(round);
+        for (p, size) in parts {
+            done(p?, size)?;
+        }
+    }
+    Ok(count)
 }
 
 #[cfg(test)]

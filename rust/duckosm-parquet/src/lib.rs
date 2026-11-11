@@ -28,6 +28,9 @@ use std::sync::Arc;
 
 const ROW_GROUP: usize = 65_536;
 
+mod raw_load;
+pub use raw_load::*;
+
 fn geo_metadata(geometry_type: &str) -> KeyValue {
     let json = format!(
         "{{\"version\":\"1.0.0\",\"primary_column\":\"geometry\",\"columns\":{{\"geometry\":{{\"encoding\":\"WKB\",\"geometry_types\":[\"{geometry_type}\"]}}}}}}"

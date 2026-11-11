@@ -6,8 +6,8 @@
 //! - A step that duckOSM runs and that this program does not have (for example H3, the edge graph, the
 //!   base-map layers) is an error in strict mode. With `strict = false` the build goes on, and the step
 //!   is in the list `skipped`.
-//! - A key that only tunes duckOSM's DuckDB (memory, threads, batches) has no effect here. It is in the
-//!   list `ignored`.
+//! - A key that only tunes duckOSM's DuckDB (batches) has no effect here. It is in the list `ignored`.
+//!   `memory_limit` and `threads` set the DuckDB of the load of `raw.*` (`read_osm`).
 
 use crate::levels::Method;
 use crate::Params;
@@ -332,8 +332,6 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         }
     }
     for k in [
-        "memory_limit",
-        "threads",
         "simplify_batches",
         "clip_strategy",
         "boundary_cell_resolutions",
@@ -413,6 +411,13 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         dem_vertical_datum: elevation.str("vertical_datum")?,
         dem_license: elevation.str("license")?,
         dem_not_reference: !elevation.bool("reference", true)?,
+        // DuckDB's settings for the load of raw.* (read_osm)
+        memory_limit: options.str("memory_limit")?,
+        threads: match options.f64("threads", 0.0)? {
+            t if t >= 1.0 && t.fract() == 0.0 => Some(t as usize),
+            0.0 => None,
+            t => return Err(format!("config: options.threads: {t} is not a whole number of 1 or more")),
+        },
         ..Params::default()
     };
     Ok(FromConfig {
@@ -946,7 +951,9 @@ mod tests {
         assert_eq!(r.out, PathBuf::from("out"));
         assert_eq!(r.params.modes, vec![Mode::Driving, Mode::Walking]);
         assert!(!r.params.options.merge_segments);
-        assert_eq!(r.ignored.len(), 1);
+        // threads sets the DuckDB of the load of raw.* (read_osm), so it is not ignored
+        assert_eq!(r.params.threads, Some(4));
+        assert!(r.ignored.is_empty(), "{:?}", r.ignored);
     }
 
     #[test]

@@ -15,6 +15,8 @@ pub mod network;
 pub mod osmjson;
 #[cfg(feature = "pbf")]
 pub mod pbf;
+#[cfg(feature = "pbf")]
+pub mod pbfraw;
 pub mod raw;
 pub mod sidewalks;
 pub mod speeds;
