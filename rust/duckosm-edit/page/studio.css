@@ -1,0 +1,17 @@
+/* The look that duckOSM Studio's page adds to roadstyle's dashboard for its step cards (the same rules as Studio's index.html). The dashboard itself (the panel, the
+   toolbox, the phone sheet) is roadstyle's, unchanged. */
+#sb .muted, #sb .why { color: var(--mut); }
+.step-body { display: flex; flex-direction: column; gap: 10px; }
+.step-body > * { margin-top: 0 !important; margin-bottom: 0 !important; }
+#sb .step-body .rs-tabs { flex-wrap: nowrap; }
+#sb .step-body .rs-tab { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; }
+#sb .pick { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; text-align: left; justify-content: flex-start; }
+.pick span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.why { margin: 0; font-size: 12.5px; color: var(--mut); }
+.why:empty { display: none; }
+.saved-area .sa-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }      /* the rows of Studio's saved areas */
+.saved-area .sa-nets { display: flex; flex-wrap: wrap; gap: 6px; }
+#edit-error { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px; background: #b91c1c; color: #fff; z-index: 10; }
+@media (max-width: 700px) {
+	#sb .step-body button:not([class*="rs-"]), #sb .rs-tab, #sb :is(input[type=text], input[type=search]) { min-height: 44px; }      /* plain buttons; roadstyle's parts have their own phone sizes */
+}

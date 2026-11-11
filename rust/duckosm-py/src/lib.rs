@@ -207,6 +207,62 @@ fn serve_page(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: P
     Ok(url)
 }
 
+/// The pixels of the DEM file `dem` over the box `bbox` (west, south, east, north) plus 3 pixels on each side, written to the Parquet file `out`: the table
+/// `main.elevation_grid` (docs/reference/database.md). Gives the number of pixels. `duckosm studio` loads the file after its build.
+#[pyfunction]
+fn elevation_grid(py: Python<'_>, dem: PathBuf, out: PathBuf, bbox: [f64; 4]) -> PyResult<usize> {
+    py.detach(|| duckosm_build::elevation::write_grid_file(&dem, &out, bbox, 3)).map_err(PyRuntimeError::new_err)
+}
+
+/// The steps of a build, from Python to the page of `duckosm studio`: the Python build calls `step(text)`, and the server shows the text.
+#[pyclass]
+struct StepSink(std::sync::Mutex<Option<std::sync::mpsc::Sender<String>>>);
+
+#[pymethods]
+impl StepSink {
+    fn step(&self, text: String) {
+        if let Some(tx) = self.0.lock().unwrap().as_ref() {
+            let _ = tx.send(text);
+        }
+    }
+}
+
+/// The host of `duckosm studio` in Python (src/duckosm/studio.py): the database of the result page, and the build of `duckosm build`.
+struct PyHost(Py<PyAny>);
+
+impl duckosm_edit::studio::Host for PyHost {
+    fn db(&self, path: &std::path::Path) -> Box<dyn duckosm_edit::Db> {
+        let db = Python::attach(|py| self.0.call_method1(py, "db", (path.display().to_string(),)).expect("the host gives a database"));
+        Box::new(PyDb(db))
+    }
+    fn build(&self, config: &str, dir: &std::path::Path, db: &std::path::Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        let sink = Python::attach(|py| Py::new(py, StepSink(std::sync::Mutex::new(Some(tx)))).map_err(|e| e.to_string()))?;
+        std::thread::scope(|s| {
+            s.spawn(move || rx.iter().for_each(|line| log(&line)));
+            let r = Python::attach(|py| {
+                self.0.call_method1(py, "build", (config, dir.display().to_string(), db.display().to_string(), sink.clone_ref(py)))
+                    .and_then(|r| r.bind(py).extract::<String>()).map_err(|e| e.to_string())
+            });
+            Python::attach(|py| sink.borrow(py).0.lock().unwrap().take());       // the sender goes: the reader ends
+            r
+        })
+    }
+}
+
+/// `duckosm studio` (rust/duckosm-edit/src/studio.rs): serve the build page on 127.0.0.1:`port` in a thread of its own, for the folder `out`. `host` is the
+/// Python object of the build (duckosm/studio.py). `index`: the list of the Geofabrik extracts (URL or file; None: Geofabrik's). Returns the address of the page.
+#[pyfunction]
+#[pyo3(signature = (out, port, host, index = None))]
+fn studio(py: Python<'_>, out: PathBuf, port: u16, host: Py<PyAny>, index: Option<String>) -> PyResult<String> {
+    let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
+    let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
+    let site = py.detach(|| duckosm_edit::studio::Studio::new(Box::new(PyHost(host)), &out, port, index)).map_err(PyRuntimeError::new_err)?;
+    let url = site.url();
+    std::thread::spawn(move || duckosm_edit::studio::serve(std::sync::Arc::new(site), listener));
+    Ok(url)
+}
+
 /// The stable edge id of duckOSM: `(hash(osm_id, source, target) >> 1)` with the DuckDB hash.
 #[pyfunction]
 fn edge_id_hash(osm_id: i64, source: i64, target: i64) -> i64 {
@@ -220,6 +276,9 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(edge_id_hash, m)?)?;
     m.add_function(wrap_pyfunction!(edit, m)?)?;
     m.add_function(wrap_pyfunction!(ask, m)?)?;
+    m.add_function(wrap_pyfunction!(studio, m)?)?;
+    m.add_function(wrap_pyfunction!(elevation_grid, m)?)?;
+    m.add_class::<StepSink>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

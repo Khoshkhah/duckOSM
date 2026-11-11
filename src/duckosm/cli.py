@@ -336,6 +336,30 @@ def edit(db, fixes, port):
 
 
 @main.command()
+@click.argument("out_dir", type=click.Path(file_okay=False), default=".")
+@click.option("--port", type=int, default=8792, show_default=True, help="The port of the page on 127.0.0.1")
+@click.option("--geofabrik-index", default=None, metavar="URL_OR_FILE",
+              help="The list of the Geofabrik extracts (default: https://download.geofabrik.de/index-v1.json). A mirror, or a file for a test.")
+@click.option("--no-open", is_flag=True, help="Do not open the page in the browser")
+def studio(out_dir, port, geofabrik_index, no_open):
+    """Make the data of an area on a page on your computer: area, OSM data, settings, ground (DEM), build, result.
+
+    \b
+    The steps are the steps of duckOSM Studio. The build is `duckosm build`. Each area is made in
+    OUT_DIR/<name>/ (default: the current folder). The result is the page of `duckosm edit`:
+    roadstyle's dashboard with the panel Edit OSM data.
+    Example:
+        duckosm studio areas        # then open http://127.0.0.1:8792/
+    """
+    from duckosm.studio import serve
+
+    try:
+        serve(out_dir, port, geofabrik_index, open_browser=not no_open)
+    except Exception as e:
+        raise click.ClickException(str(e))
+
+
+@main.command()
 @click.argument("db", type=DB_PATH)
 @click.option("--fixes", type=click.Path(dir_okay=False), default=None,
               help="The fixes file whose changes you can ask about (default: osm_fixes.yaml beside DB)")
