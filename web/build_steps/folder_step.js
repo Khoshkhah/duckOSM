@@ -22,12 +22,14 @@ export function initFolderStep({ root, folder, list, choose, onChange = () => {}
 			<div class="area-acts"><button type="button" data-fs="up">Up</button><button type="button" class="sb-primary" data-fs="use">Use this folder</button></div>
 		</div>`;
 	const q = (k) => root.querySelector(`[data-fs="${k}"]`);
-	let shown = "", missing = false;
+	let shown = "", missing = false, asked = 0;                                             // asked: the number of the last look; an older answer that comes late is not used
 	const msg = (t, bad = false) => { q("msg").textContent = t; q("msg").classList.toggle("err", bad); };
 
 	async function look(path) {
+		const n = ++asked;
 		try {
 			const r = await list(path);
+			if (n !== asked) return;
 			shown = r.path; missing = false;
 			q("input").value = r.path;
 			q("up").disabled = !r.parent; q("up").dataset.to = r.parent ?? "";
@@ -36,6 +38,7 @@ export function initFolderStep({ root, folder, list, choose, onChange = () => {}
 			q("use").textContent = "Use this folder";
 			msg(r.dirs.length ? "" : "No folder inside.");
 		} catch (e) {
+			if (n !== asked) return;
 			missing = true;                                                                      // a path that is not there: the person can make it
 			q("dirs").innerHTML = ""; q("use").textContent = "Create and use this folder";
 			msg(e.message, true);

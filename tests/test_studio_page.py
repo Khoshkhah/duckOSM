@@ -455,13 +455,17 @@ def test_the_folder_of_the_areas_can_change(studio, tmp_path):
         # the page says where the next area is saved
         page.evaluate("(g) => window.studio.area.set(g, 'elsewhere', 'file')", MONACO["features"][0]["geometry"])
         page.wait_for_function(f"[...document.querySelectorAll('.where')].some((e) => e.textContent.includes({json.dumps(str(other))}))")
-        # back to the first folder: its areas are listed again
+        # back to the first folder: its areas are listed again. The list of the folder now (asked by Change…) comes late, after the typed path: the page keeps the typed path
         _unfold(page, 1)
         page.evaluate("rs.sections.fold('areas', false)")
+        page.evaluate("""(() => { const f = window.fetch; window.fetch = (u, o) => String(u).endsWith('api/folders') && o?.body === ''
+            ? new Promise((r) => setTimeout(r, 1500)).then(() => f(u, o)) : f(u, o); })()""")
         page.click(".bs-folder [data-fs=change]")
         page.fill(".bs-folder [data-fs=input]", str(out))
         page.press(".bs-folder [data-fs=input]", "Enter")
         page.wait_for_function("document.querySelector('.bs-folder [data-fs=use]').textContent === 'Use this folder'")
+        page.wait_for_timeout(2000)                                                               # the late answer has come
+        assert page.input_value(".bs-folder [data-fs=input]") == str(out)
         page.click(".bs-folder [data-fs=use]")
         page.wait_for_function(f"document.querySelector('.bs-folder [data-fs=path]').textContent === {json.dumps(str(out))}")
         assert not errors, errors
