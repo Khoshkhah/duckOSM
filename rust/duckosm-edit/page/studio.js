@@ -15,7 +15,7 @@
     // the page has no roads, so roadstyle's first view is a point at 0, 0: start with Europe, as Studio does
     const home = () => map.jumpTo({ center: [10, 50], zoom: 3, pitch: 0, bearing: 0 });
     map.loaded() ? home() : map.once("load", home);
-    const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { extractsOf }, { initGroundStep }] = await Promise.all([
+    const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
       import("./parts/build_steps/area_step.js"), import("./parts/build_steps/data_step.js"), import("./parts/build_steps/settings_step.js"),
       import("./parts/build_steps/build_step.js"), import("./parts/build_steps/result_step.js"), import("./parts/build_steps/core.js"), import("./parts/ground_step/ground_step.js")]);
     // one card for each step: roadstyle's section with a round number, a title and a chevron
@@ -25,6 +25,36 @@
       return el;
     };
     const roots = Object.fromEntries([[1, "Area"], [2, "OSM data"], [3, "Settings"], [4, "Ground"], [5, "Build"], [6, "Result"]].map(([n, l]) => [n, card(n, l)]));
+    // the areas on the disk (the folder of the server): as in Studio, a card with a row for each area, with Open (the map and the editor) and Load (the area and the settings again)
+    const saved = Object.assign(document.createElement("div"), { className: "step-body" });
+    rs.sections.add({ id: "areas", label: "Your areas", fold: true, el: saved, before: "step1" });
+    rs.sections.hide("areas");
+    const paintAreas = async () => {
+      const list = await (await api("areas")).json();
+      list[0] ? rs.sections.show("areas") : rs.sections.hide("areas");
+      saved.innerHTML = list.map((a) => {
+        const modes = parseSettings(a.config).modes ?? [];
+        return `<div class="rs-opt saved-area" data-name="${esc(a.name)}"><span><strong>${esc(a.name)}</strong>
+          <small>${new Date(a.modified * 1000).toLocaleString()} · ${bytes(a.size)}${a.dem ? " · with a DEM" : ""}</small>
+          <span class="sa-nets">${modes.map((m) => `<span class="rs-chip">${esc(m)}</span>`).join("")}</span>
+          <span class="sa-actions"><button type="button" class="sb-primary" data-do="open">Open</button><button type="button" data-do="load">Load</button></span></span></div>`;
+      }).join("");
+    };
+    saved.addEventListener("click", async (e) => {
+      const b = e.target.closest("button[data-do]"), name = b?.closest(".saved-area")?.dataset.name;
+      if (!name) return;
+      b.disabled = true;
+      try {
+        if (b.dataset.do === "open") { await api("open", { method: "POST", body: name }); location.href = "edit/"; return; }
+        const a = await (await api("area/" + encodeURIComponent(name))).json();
+        area.set(a.boundary, a.name, "saved");
+        settings.set(parseSettings(a.config));
+        rs.sections.note("areas", `${a.name} is loaded: choose the OSM data and the ground again.`);
+      } catch (err) {
+        rs.sections.note("areas", err.message);
+      }
+      b.disabled = false;
+    });
     // the panel covers a part of the map: the area is fitted to the rest (a sheet at the bottom on a phone)
     const padding = () => {
       if (document.documentElement.classList.contains("rs-phone")) return { top: 30, left: 30, right: 30, bottom: Math.round(innerHeight * 0.5) };
@@ -57,10 +87,11 @@
           dem: dem && { product: dem.product, vertical_datum: dem.vertical_datum, license: dem.license, not_reference: dem.not_reference } }) });
       },
       poll: async () => (await api("job")).json(),
-      onDone: (job) => { result.show(job); rs.sections.done("step5", true); rs.sections.done("step6", true); roots[6].scrollIntoView({ block: "nearest" }); } });
+      onDone: (job) => { paintAreas(); result.show(job); rs.sections.done("step5", true); rs.sections.done("step6", true); roots[6].scrollIntoView({ block: "nearest" }); } });
     // as in Studio: a card that waits for the area says so under its title
     const notes = () => { for (const id of ["step2", "step4"]) rs.sections.note(id, area.area() ? "" : "after step 1"); };
     notes();
+    paintAreas().catch(() => {});
     window.studio = { area, data, settings, ground, build, result, map };           // for the tests
     window.studioReady = true;
   }

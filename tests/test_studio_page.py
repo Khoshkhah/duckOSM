@@ -260,3 +260,30 @@ def test_a_box_on_a_phone(studio):
         page.screenshot(path=str(out / "phone.png"))
         assert not errors, errors
         browser.close()
+
+
+def test_saved_areas_are_listed_loaded_and_opened(studio):
+    """The areas are on the disk: a new visit lists them (the card Your areas), Load puts the area and the settings of one back into the steps, and Open shows its map
+    and the editor. It uses the area of the first test (the tests run in the order of the file)."""
+    out, url = studio
+    if not (out / "monaco-a" / "monaco-a.duckdb").exists():
+        pytest.skip("needs the area that the first test builds")
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page, errors = _open(browser, url, viewport={"width": 1280, "height": 900})
+        page.wait_for_selector(".saved-area")
+        assert "monaco-a" in page.eval_on_selector_all(".saved-area", "els => els.map(e => e.dataset.name)")
+        row = page.locator(".saved-area[data-name=monaco-a]")
+        text = row.inner_text()
+        assert "driving" in text and "walking" in text and "cycling" not in text and "MB" in text, text
+        row.locator("[data-do=load]").click()
+        page.wait_for_function("window.studio.area.area()?.name === 'monaco-a'")
+        assert page.evaluate("window.studio.settings.values().modes") == ["driving", "walking"]
+        assert page.evaluate("window.studio.settings.values().levels") is False and page.evaluate("window.studio.settings.values().build_features") is True
+        assert "is loaded" in page.inner_text("#sb")
+        with page.expect_navigation(timeout=60_000):
+            row.locator("[data-do=open]").click()
+        page.wait_for_function("window.fixesPanel && document.body.classList.contains('editing-fixes')", timeout=60_000)
+        assert page.url.endswith("/edit/") and page.evaluate("fetch('api/info').then(r => r.json()).then(i => i.name)") == "monaco-a"
+        browser.close()
+        assert not errors, errors

@@ -109,3 +109,14 @@ export function progressText(job) {
   if (job.state === "building") return `${last || "Starting"} (${Math.round(job.seconds)} s)`;
   return last;
 }
+
+/** The settings from the text of a config that `settingsYaml` wrote (the other keys are not read): { modes, <key>: bool }. A key that is missing keeps its default. */
+export function parseSettings(text) {
+	const values = {}, modes = /^modes:\s*\[([^\]]*)\]/m.exec(text ?? "");
+	if (modes) values.modes = modes[1].split(",").map((m) => m.trim()).filter((m) => MODES.includes(m));
+	for (const o of OPTIONS) {
+		const m = new RegExp(`^\\s+${o.key}:\\s*(\\S+)`, "m").exec(text ?? "");
+		if (m) values[o.key] = o.key === "sea" ? m[1] !== "false" : m[1] === "true";
+	}
+	return values;
+}

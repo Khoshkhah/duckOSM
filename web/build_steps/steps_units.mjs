@@ -1,6 +1,6 @@
 // Unit tests of the logic of the build steps (core.js): `node web/build_steps/steps_units.mjs`. They need only Node.
 import assert from "node:assert/strict";
-import { areaKm2, bbox, box, covering, extractsOf, geometry, OPTIONS, polygonsOf, progressText, settingsYaml, slug } from "./core.js";
+import { parseSettings, areaKm2, bbox, box, covering, extractsOf, geometry, OPTIONS, polygonsOf, progressText, settingsYaml, slug } from "./core.js";
 
 const monaco = box([7.4, 43.72, 7.45, 43.76]);
 const index = { type: "FeatureCollection", features: [
@@ -56,6 +56,12 @@ const changed = settingsYaml({ modes: ["walking"], build_features: false, sea: t
 assert.ok(changed.startsWith("modes: [walking]\n") && changed.includes("  build_features: false\n") && changed.includes("  sea: overture\n"), changed);
 assert.throws(() => settingsYaml({ modes: [] }), /at least one network/);
 assert.ok(settingsYaml({ modes: ["driving", "flying"] }).startsWith("modes: [driving]\n"));
+
+// the settings are read back from the text of a config (a saved area): the same values
+assert.deepEqual(parseSettings(yaml), { modes: ["driving", "walking", "cycling"], ...Object.fromEntries(OPTIONS.map((o) => [o.key, o.on])) });
+assert.deepEqual(parseSettings(changed), { modes: ["walking"], ...Object.fromEntries(OPTIONS.map((o) => [o.key, o.key === "build_features" ? false : o.key === "sea" ? true : o.on])) });
+assert.deepEqual(parseSettings("name: x\n"), {});
+assert.deepEqual(parseSettings(null), {});
 
 // the line of progress
 assert.equal(progressText({ state: "downloading", bytes: 1048576, total: 2097152 }), "Downloading 1.0 MB of 2.0 MB");

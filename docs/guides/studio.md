@@ -43,6 +43,16 @@ Open the address that the command prints (`http://127.0.0.1:8792/`). The page op
    page as [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit). Each change goes into `areas/<name>/osm_fixes.yaml`, and
    **Build again** builds the area again with the file. The record of the build is in the database, so Build again works.
 
+## Your areas
+
+The areas are files on your disk, in `OUT_DIR/<name>/`. A new visit of the page lists them in the card **Your areas** (as Studio lists the areas that it keeps in the browser).
+For each area the card shows the date, the size, the networks and whether it has a DEM, with two buttons:
+
+- **Open** shows the map of the area with the panel **Edit OSM data** (the page of `duckosm edit`).
+- **Load** puts the boundary and the settings of the area back into the steps 1 and 3, so that you can change them and build again. Choose the OSM data and the ground again.
+
+The card has no Delete button. To delete an area, delete its folder.
+
 ## On a phone
 
 The panel is a sheet at the bottom and the map is above it. Draw the box on the map, then use the steps in the sheet.

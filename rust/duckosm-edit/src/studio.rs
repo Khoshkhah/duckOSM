@@ -6,7 +6,7 @@
 //! The files that it writes are in the folder of the area, `<out>/<name>/`: `boundary.geojson`, `dem.tif`, `config.yaml`, the PBF file of a
 //! download, and the `<name>.duckdb` of the build. A local PBF file is read from the path that the page gives (the page is on the same computer).
 //!
-//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `POST /api/file` (the path of a local PBF file: its size);
+//! The routes: `GET /` the page (roadstyle's dashboard, made by `page::make_studio`); `GET /parts/<file>` the parts; `GET /api/info`; `GET /api/geofabrik` the list of the Geofabrik extracts; `GET /api/areas` the saved areas and `GET /api/area/<name>` the boundary and the config of one; `POST /api/open` (the name of a saved area: its result page at `/edit/`); `POST /api/file` (the path of a local PBF file: its size);
 //! `PUT /api/dem/<name>` the DEM of the area; `POST /api/build` start the build; `GET /api/job` the state of the build; `GET /edit/...` the
 //! page of `duckosm edit` for the area that was built last.
 
@@ -264,6 +264,41 @@ impl Studio {
         Ok(text)
     }
 
+    /// The areas of the folder: each folder `<name>/` that has `<name>.duckdb`, newest first. The config is in the answer (the page reads the networks from it).
+    fn areas(&self) -> Value {
+        let mut list: Vec<(u64, Value)> = std::fs::read_dir(&self.out).into_iter().flatten().flatten().filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let (dir, db) = (e.path(), e.path().join(format!("{name}.duckdb")));
+            let meta = std::fs::metadata(&db).ok().filter(|m| m.is_file() && is_name(&name))?;
+            let secs = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+            Some((secs, json!({"name": name, "size": meta.len(), "modified": secs, "dem": dir.join("dem.tif").is_file(), "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default()})))
+        }).collect();
+        list.sort_by(|a, b| b.0.cmp(&a.0));
+        Value::Array(list.into_iter().map(|x| x.1).collect())
+    }
+
+    /// The boundary and the config of a saved area, to load them into the steps again.
+    fn area_info(&self, name: &str) -> Result<String, String> {
+        let dir = self.area_dir(name).filter(|d| d.join(format!("{name}.duckdb")).is_file()).ok_or("no such area")?;
+        let boundary: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("boundary.geojson")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        Ok(json!({"name": name, "boundary": boundary, "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default()}).to_string())
+    }
+
+    /// Open the page of the result for a saved area (the page of `duckosm edit`, at `/edit/`).
+    fn open(&self, name: &str) -> Result<(), String> {
+        let dir = self.area_dir(name).filter(|d| d.join(format!("{name}.duckdb")).is_file()).ok_or("no such area")?;
+        if matches!(self.job.lock().unwrap().state, "downloading" | "building") {
+            return Err("a build runs: wait for it".into());
+        }
+        if let Some(old) = self.edit.lock().unwrap().take() {
+            old.close();
+        }
+        let db = dir.join(format!("{name}.duckdb"));
+        let site = Site::with_pager(self.host.db(&db), &db, &dir.join("osm_fixes.yaml"), self.port, Mode::Edit, self.pager)?;
+        *self.edit.lock().unwrap() = Some(Arc::new(site));
+        Ok(())
+    }
+
     fn dem(&self, name: &str, body: &[u8]) -> Result<(), String> {
         let dir = self.area_dir(name).ok_or("the name of the area is letters, digits, _, - and . (at most 64)")?;
         // a GeoTIFF starts with II*\0 or MM\0* (or the BigTIFF 43)
@@ -315,11 +350,16 @@ impl Studio {
                 let j = self.job.lock().unwrap().json();
                 req.say("200 OK", "application/json", j.to_string().as_bytes())
             }
+            ("GET" | "HEAD", "areas") => req.say("200 OK", "application/json", self.areas().to_string().as_bytes()),
+            ("GET" | "HEAD", a) if a.starts_with("area/") => match self.area_info(&a["area/".len()..]) {
+                Ok(t) => req.say("200 OK", "application/json", t.as_bytes()),
+                Err(e) => req.say("404 Not Found", "text/plain", e.as_bytes()),
+            },
             ("GET" | "HEAD", "geofabrik") => match self.geofabrik() {
                 Ok(t) => req.say("200 OK", "application/json", t.as_bytes()),
                 Err(e) => req.say("502 Bad Gateway", "text/plain", e.as_bytes()),
             },
-            ("POST", "file" | "build") | ("PUT", _) if api == "file" || api == "build" || api.starts_with("dem/") => {
+            ("POST", "file" | "build" | "open") | ("PUT", _) if api == "file" || api == "build" || api == "open" || api.starts_with("dem/") => {
                 let own = self.own.clone();
                 let Some(body) = req.write_body(&own)? else { return Ok(()) };
                 let r: Result<String, String> = match (req.method.as_str(), api.as_str()) {
@@ -329,6 +369,7 @@ impl Studio {
                             .ok_or_else(|| format!("{}: not a file", p.display()))
                     }
                     ("POST", "build") => self.start(&body).map(|_| "{}".to_string()),
+                    ("POST", "open") => self.open(String::from_utf8_lossy(&body).trim()).map(|_| "{}".to_string()),
                     ("PUT", a) if a.starts_with("dem/") => self.dem(&a["dem/".len()..], &body).map(|_| "{}".to_string()),
                     _ => Err("not this method".into()),
                 };
@@ -337,7 +378,7 @@ impl Studio {
                     Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
                 }
             }
-            (_, "info" | "job" | "geofabrik" | "file" | "build") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
+            (_, "info" | "job" | "geofabrik" | "areas" | "file" | "build" | "open") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
             _ => req.say("404 Not Found", "text/plain", b"not found"),
         }
     }
@@ -495,6 +536,31 @@ mod tests {
         assert!(post(port, &ask, "POST", "file", &out.join("a.osm.pbf").display().to_string()).ends_with(r#"{"size":4}"#));
         assert!(post(port, &ask, "POST", "file", "/nowhere.osm.pbf").starts_with("HTTP/1.1 400"));
         assert!(ask(&format!("GET /api/geofabrik HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")).ends_with(r#"{"features": []}"#));
+    }
+
+    #[test]
+    fn saved_areas_are_listed_loaded_and_opened() {
+        let (out, ask, port, _) = server("areas", None);
+        let get = |p: &str| ask(&format!("GET /api/{p} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"));
+        assert!(get("areas").ends_with("[]"));
+        for (n, t) in [("old", 1), ("new", 2)] {
+            std::fs::create_dir_all(out.join(n)).unwrap();
+            std::fs::write(out.join(n).join(format!("{n}.duckdb")), vec![0u8; t]).unwrap();
+            std::fs::write(out.join(n).join("config.yaml"), format!("name: {n}\nmodes: [driving]\n")).unwrap();
+            std::fs::write(out.join(n).join("boundary.geojson"), r#"{"type":"FeatureCollection","features":[]}"#).unwrap();
+        }
+        std::fs::create_dir_all(out.join("no-db")).unwrap();
+        let list = get("areas");
+        let names: Vec<_> = serde_json::from_str::<Value>(list.split("\r\n\r\n").nth(1).unwrap()).unwrap().as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names.len(), 2, "{list}");
+        assert!(names.contains(&"old".to_string()) && names.contains(&"new".to_string()) && !list.contains("no-db"));
+        assert!(get("area/old").contains("\"boundary\"") && get("area/old").contains("modes: [driving]"));
+        for bad in ["area/..", "area/no-db", "area/nothing"] {
+            assert!(get(bad).starts_with("HTTP/1.1 404"), "{bad}");
+        }
+        assert!(post(port, &ask, "POST", "open", "no-db").starts_with("HTTP/1.1 400"));
+        assert!(post(port, &ask, "POST", "open", "old").starts_with("HTTP/1.1 200"));
+        assert!(ask(&format!("GET /edit/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")).ends_with("the result page"));
     }
 
     #[test]

@@ -59,6 +59,13 @@ under `/edit/` to it. The page uses relative addresses, so it works under the pr
 7. **Offline-friendly.** MapLibre and roadstyle's modules come from the program (`/vendor/`, `/roadstyle/`). Only the map tiles, Nominatim, Geofabrik and the
    js-yaml of the edit page use the internet.
 
+## The areas on the disk
+
+Studio keeps the areas in the browser (OPFS), so this page keeps them where `duckosm` keeps them: on the disk. The card **Your areas** (`rs.sections.add`, as in Studio) lists the folders of `OUT_DIR` that have
+`<name>/<name>.duckdb` (`GET /api/areas`, newest first, with the config text for the networks). **Open** (`POST /api/open`) makes the page of the result for that area at `/edit/`. **Load**
+(`GET /api/area/<name>`) gives the boundary and the config, and the page puts them into the Area and Settings steps (`parseSettings` of `core.js` reads back what `settingsYaml` wrote). There is no Delete:
+the server does not delete files.
+
 ## Limits
 
 One build at a time. A DEM file is at most 16 MB. The build cannot be stopped from the page.
