@@ -7,14 +7,17 @@ description = "duckosm edit: a page on 127.0.0.1 that edits the OSM fixes of a d
 
 [features]
 # the native database and the native build (the CLI). The Python module gives its own database (duckosm/edit.py) and has no DuckDB inside
-duckdb = ["dep:duckdb", "duckosm-build/duckdb"]
+duckdb = ["dep:duckdb", "duckosm-build/duckdb", "roadstyle-local/duckdb"]
 
 [dependencies]
 duckosm-editor = { path = "../duckosm-editor" }   # the files of the fixes editor
 httparse = "=1.10.1"           # the request line and the headers, as roadstyle-serve
 serde_json = { version = "1", features = ["preserve_order"] }
 # the map: roadstyle's standard dashboard page of a duckOSM file (roadstyle_io::duckosm reads the file, page_options::page_from writes the page)
-roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "b1c0773483543fbb34d5ca54725ccab7164c432d" }
+roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "76646b7f216f1137874b52a177b3d40e16678371" }
+# duckosm studio: the map of an open area is way D (roadstyle local): the style, the tiles, the rows and the lines; with DuckDB (the feature duckdb), the queries
+roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "76646b7f216f1137874b52a177b3d40e16678371", default-features = false }
+roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "76646b7f216f1137874b52a177b3d40e16678371" }   # the request and the answer of way D (Api)
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }   # the progress hook of the build (set_progress)
 ureq = "3"                     # duckosm studio: the download of a Geofabrik extract and of its index
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }

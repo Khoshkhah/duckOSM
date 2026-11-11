@@ -95,8 +95,8 @@
     const loadPmtiles = (src) => (window.pmtiles ? Promise.resolve() : (pmtilesLoading ??= new Promise((ok, no) => document.head.append(Object.assign(document.createElement("script"), { src, onload: ok, onerror: () => no(new Error("pmtiles.js did not load")) })))));
     let openName = null, pageArea = null;      // pageArea: the area of this page (the server opened it), set at the end of start()
     const markOpen = (name) => { openName = name; for (const r of saved.querySelectorAll('input[name="saved-area"]')) r.checked = r.value === name; };
-    // Open: the server opens the area and makes its map (a tiled style, page::make_tiled); this page puts the style on its own map (rs.roadLayers) with the
-    // blank base map, and fills the steps. Only the map and the steps change: the page does not load again. b: the button that shows "Opening…"
+    // Open: the server opens the area and makes its map, way D (roadstyle local at areas/<name>/); this page puts the style on its own map (rs.roadLayers)
+    // with the blank base map, the adapter of way D (rsHttpAdapter: the rows, the lines and the queries of the area come from the server), and fills the steps. Only the map and the steps change: the page does not load again. b: the button that shows "Opening…"
     let roadsOn = null;
     async function openArea(name, b = null) {
       const label = b?.textContent;
@@ -111,7 +111,9 @@
           await new Promise((r) => setTimeout(r, 300));
           info = await (await api("info")).json();
         }
-        const style = JSON.parse((await (await api(`style/${encodeURIComponent(name)}`)).text()).split("__ORIGIN__").join(location.origin));
+        const adapter = window.rsHttpAdapter(`${location.origin}/areas/${encodeURIComponent(name)}`);
+        const style = await adapter.style();
+        rs.setAdapter(adapter);
         window.rsSetBasemap?.("blank");                                   // first: the base map's own tools (its 3D buildings) give way to the area's, which the style brings
         roadsOn ??= rs.roadLayers({ prefix: "rs-", before: map.getLayer("bs-area-fill") ? "bs-area-fill" : null });
         await roadsOn.show(style);
@@ -123,6 +125,7 @@
     // no open area: its map goes, and the base map of the page is back
     function closeArea() {
       roadsOn?.remove();
+      rs.setAdapter(null);
       window.rsSetBasemap?.("ofm_liberty");
       pageArea = null;
       history.replaceState(null, "", "./");

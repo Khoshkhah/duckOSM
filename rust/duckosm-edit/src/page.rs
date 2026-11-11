@@ -121,15 +121,11 @@ fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Op
     Ok(page.html.replacen("__MAPLIBRE_CSS__", MAPLIBRE_CSS, 1).replacen("__MAPLIBRE_JS__", &MAPLIBRE_JS.replace("</script>", "<\\/script>"), 1))
 }
 
-/// The map of an area as a tiled style and its tiles (roadstyle's `tiled_of`): the style's tile addresses start with `prefix`, and the server answers
-/// each tile with `Tiles::tile`. `duckosm studio` puts the style on its own map (rs.roadLayers), so an open area changes only the map.
-pub fn make_tiled(db: &mut dyn Db, name: &str, prefix: &str) -> Result<(String, roadstyle::tiles::Tiles), String> {
+/// What way D (roadstyle-local) makes the map of an area from: the roads, the base-map rows and the look, with the blank base map. `duckosm studio`
+/// puts the map's style on its own map (rs.roadLayers), so an open area changes only the map.
+pub fn map_parts(db: &mut dyn Db, name: &str) -> Result<(roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::Look), String> {
     let (roads, features, _, lk) = prepare(db, name, "", "", Some("blank"))?;
-    let (style, tiles, warnings) = roadstyle::tiled_of(roads, &lk, features, Some(name.to_string()), prefix, &[]).map_err(|e| e.to_string())?;
-    for w in &warnings {
-        eprintln!("duckosm studio: the map: {w}");
-    }
-    Ok((style, tiles))
+    Ok((roads, features, lk))
 }
 
 /// The page of `duckosm studio`: roadstyle's standard dashboard (the same template, toolbox and panel as the page of `duckosm edit`) for an area with no
