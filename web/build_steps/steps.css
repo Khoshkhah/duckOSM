@@ -1,7 +1,6 @@
 /* The look of the build steps (area_step.js, data_step.js, settings_step.js, build_step.js, result_step.js): only their own content. The tabs (rs-tabs, rs-tab), the
    option rows (rs-opts, rs-opt), the caption (rs-cap), the links (rs-link), the message under a field (rs-field-msg) and the status line (rs-status) are roadstyle's
    parts. Every rule starts with .bs. The colours are the tokens of the panel: --ink, --mut, --line, --accent. */
-.bs .rs-opt, #sb .bs .rs-opt { text-transform: none; letter-spacing: 0; }      /* `#sb label` of the dashboard is a small caption; an option row is not (a gap of roadstyle: its rule `.rs-opt` should reset it) */
 .bs .small { font-size: 12.5px; }
 .bs .muted { color: var(--mut); }
 .bs .rs-field-msg.err, .bs .rs-status.err { color: color-mix(in srgb, #dc2626 75%, var(--ink)); }

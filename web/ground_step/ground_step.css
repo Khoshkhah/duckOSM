@@ -1,7 +1,6 @@
 /* The look of the Ground step (ground_step.js): only its own content. The option rows (rs-opts, rs-opt), the caption (rs-cap), the links (rs-link), the
    message under a field (rs-field-msg) and the button (pick, in the host) are roadstyle's parts. Every rule starts with .gs. The colours are the tokens of
    the panel: --ink, --mut, --line. */
-.gs .rs-opt, #sb .gs .rs-opt { text-transform: none; letter-spacing: 0; }      /* `#sb label` of the dashboard is a small caption; an option row is not (a gap of roadstyle: its rule `.rs-opt` should reset it) */
 .gs .small { font-size: 12.5px; }
 .gs .muted { color: var(--mut); }
 .gs .gs-area { margin: 0 0 8px; }
