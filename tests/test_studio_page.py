@@ -473,7 +473,9 @@ def test_saved_areas_are_listed_opened_and_deleted(studio):
         page.mouse.move(900, 400)
         page.wait_for_function(f"{preview} === 0")
         text = row.inner_text()
-        assert "driving" in text and "walking" in text and "cycling" not in text and "MB" in text, text
+        assert "MB" in text, text
+        has = row.locator(".sa-ico").evaluate_all("els => els.map((e) => e.dataset.has)")
+        assert has == ["driving", "walking", "layers"], has      # monaco-a: two networks and the base-map layers (no levels, no ground, no sea)
         assert row.locator("button").all_inner_texts() == ["Open", "Delete"]
         # Open (a click on the card) shows the area on this page's map: the page does not load again
         page.evaluate("window.__same = 1")

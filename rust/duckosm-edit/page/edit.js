@@ -34,6 +34,7 @@
       if (studio && window.rsGround) api("info").then((r) => r.json()).then(async (i) => {
         const a = await (await fetch(`../api/area/${encodeURIComponent(i.name)}`)).json();
         if (!a.ground) return;
+        if (!window.pmtiles) await new Promise((ok, no) => document.head.append(Object.assign(document.createElement("script"), { src: "../parts/vendor/pmtiles.js", onload: ok, onerror: no })));
         const t = await fetch(`../api/terrain/${encodeURIComponent(i.name)}`);
         if (t.ok) window.rsGround({ ...a.ground, terrain: await t.arrayBuffer() });
       }).catch(() => {});

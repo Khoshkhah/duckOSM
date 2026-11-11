@@ -82,6 +82,17 @@
     saved.append(folderBox, listBox);
     initFolderStep({ root: folderBox, folder: async () => (await (await api("info")).json()).out, list: async (path) => post("folders", path),
       choose: async (path, create) => { await post("folder", JSON.stringify({ path, create })); await paintAreas(); where(); }, onChange: () => rs.sections.note("areas", "") });
+    const svg = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+    const ICONS = {
+      driving: svg('<path d="M5 17h14v-5l-2-5H7l-2 5z"/><path d="M5 12h14"/><circle cx="8" cy="17" r="1.6"/><circle cx="16" cy="17" r="1.6"/>'),
+      walking: svg('<circle cx="13" cy="4.5" r="1.6"/><path d="M11 21l2-6 3 3v3M9 11l3-3 3 2 2 3M12 8l-1 5"/>'),
+      cycling: svg('<circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/><path d="M6 16l4-7h5l3 7M10 9l3 7h-7M14 6h2"/>'),
+      layers: svg('<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'),
+      ground: svg('<path d="M2 19l7-11 4 6 3-4 6 9z"/>'),
+    };
+    // pmtiles.js, which rsGround needs to read a terrain file (this page was made with no ground, so it does not have it), loaded once
+    let pmtilesLoading = null;
+    const loadPmtiles = (src) => (window.pmtiles ? Promise.resolve() : (pmtilesLoading ??= new Promise((ok, no) => document.head.append(Object.assign(document.createElement("script"), { src, onload: ok, onerror: () => no(new Error("pmtiles.js did not load")) })))));
     let openName = null, pageArea = null;      // pageArea: the area of this page (the server opened it), set at the end of start()
     const markOpen = (name) => { openName = name; for (const r of saved.querySelectorAll('input[name="saved-area"]')) r.checked = r.value === name; };
     // Open: the server opens the area and makes its map (a tiled style, page::make_tiled); this page puts the style on its own map (rs.roadLayers) with the
@@ -100,9 +111,9 @@
           info = await (await api("info")).json();
         }
         const style = JSON.parse((await (await api(`style/${encodeURIComponent(name)}`)).text()).split("__ORIGIN__").join(location.origin));
+        window.rsSetBasemap?.("blank");                                   // first: the base map's own tools (its 3D buildings) give way to the area's, which the style brings
         roadsOn ??= rs.roadLayers({ prefix: "rs-", before: map.getLayer("bs-area-fill") ? "bs-area-fill" : null });
         await roadsOn.show(style);
-        window.rsSetBasemap?.("blank");
         pageArea = name;
         history.replaceState(null, "", `./?area=${encodeURIComponent(name)}`);
         await showOpen(name, await (await api("job")).json());
@@ -125,7 +136,8 @@
       markOpen(a.name);
       hasDem = /^elevation:/m.test(a.config);
       // the map terrain from the area's own ground (main.elevation_grid), not from the AWS Terrain Tiles
-      if (a.ground && window.rsGround) fetch(`api/terrain/${encodeURIComponent(a.name)}`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => b && window.rsGround({ ...a.ground, terrain: b })).catch(() => {});
+      if (a.ground && window.rsGround) loadPmtiles("parts/vendor/pmtiles.js").then(() => fetch(`api/terrain/${encodeURIComponent(a.name)}`)).then((r) => (r.ok ? r.arrayBuffer() : null))
+        .then((b) => b && window.rsGround({ ...a.ground, terrain: b })).catch((e) => rs.sections.note("step6", `The terrain of the ground did not load: ${e.message}`));
       built = true; builtName = a.name;
       result.show(job?.state === "done" && job.name === a.name ? job : { ...a, text: "", seconds: null });
       viz.ready(true); refreshSteps();
@@ -136,11 +148,15 @@
       const list = await (await api("areas")).json();
       listBox.innerHTML = list.length ? "" : '<p class="small muted">No area in this folder yet.</p>';
       listBox.insertAdjacentHTML("beforeend", list.map((a) => {
-        const modes = parseSettings(a.config).modes ?? [];
+        const v = parseSettings(a.config), modes = v.modes ?? [];
+        // what the area has, as icons with a tip: its networks, its base-map layers (the sea is one of them) and its ground. Every area has drawing levels: no icon
+        const has = [...modes.map((m) => [m, `The ${m} network`]),
+          ...(v.build_features ? [["layers", "The base-map layers (water, land, buildings, ...)"]] : []),
+          ...(/^elevation:/m.test(a.config) ? [["ground", "The ground: a DEM, with the heights of the roads and the terrain of the map"]] : [])];
         // the area that is open in the steps keeps its row selected (roadstyle's style of a chosen row: a hidden radio that is checked)
         return `<div class="rs-opt saved-area" data-name="${esc(a.name)}"><input type="radio" name="saved-area" value="${esc(a.name)}" hidden tabindex="-1"${a.name === openName ? " checked" : ""}><span><strong>${esc(a.name)}</strong>
-          <small>${new Date(a.modified * 1000).toLocaleString()} · ${bytes(a.size)}${a.dem ? " · with a DEM" : ""}</small>
-          <span class="sa-nets">${modes.map((m) => `<span class="rs-chip">${esc(m)}</span>`).join("")}</span>
+          <small>${new Date(a.modified * 1000).toLocaleString()} · ${bytes(a.size)}</small>
+          <span class="sa-nets">${has.map(([k, tip]) => `<span class="sa-ico" data-has="${k}" title="${esc(tip)}" aria-label="${esc(tip)}" role="img">${ICONS[k]}</span>`).join("")}</span>
           <span class="sa-actions"><button type="button" class="sb-primary" data-do="open" title="Open this area: its boundary and settings go into the steps, its result into step 6, and step 7 opens its map">Open</button><button type="button" class="sb-danger" data-do="delete" title="Delete the folder of this area and all its files">Delete</button></span></span></div>`;
       }).join(""));
     };

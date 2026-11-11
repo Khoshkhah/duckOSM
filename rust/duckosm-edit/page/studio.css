@@ -23,3 +23,5 @@
 }
 .saved-area .gs-spin { display: inline-block; width: 11px; height: 11px; margin-right: 4px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: sa-spin 0.8s linear infinite; vertical-align: -1px; }
 @keyframes sa-spin { to { transform: rotate(360deg); } }
+.saved-area .sa-ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; border-radius: 8px;
+  background: color-mix(in srgb, var(--ink, currentColor) 8%, transparent); color: var(--ink, currentColor); }

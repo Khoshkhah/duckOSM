@@ -34,6 +34,7 @@ pub trait Host: Send + Sync {
 
 /// The files of the page: its own, the parts of this repository's `web/`, and the catalog of the DEM sources.
 const PARTS: &[(&str, &str, &str)] = &[
+    ("vendor/pmtiles.js", "text/javascript", roadstyle::assets::text!("vendor/pmtiles.js")),      // rsGround reads the terrain file with it
     ("ground_step/ground_step.js", "text/javascript", include_str!("../../../web/ground_step/ground_step.js")),
     ("ground_step/ground_core.js", "text/javascript", include_str!("../../../web/ground_step/ground_core.js")),
     ("ground_step/ground_step.css", "text/css", include_str!("../../../web/ground_step/ground_step.css")),
