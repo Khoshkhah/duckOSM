@@ -552,7 +552,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         assert!(job.contains(r#""state":"done""#), "{job}");
-        assert!(job.contains("read ways") && job.contains("elevation grid"), "the steps of the engine are in the job: {job}");
+        assert!(job.contains("build driving") && job.contains("elevation grid"), "the steps of the engine are in the job: {job}");
         let con = duckdb::Connection::open_with_flags(out.join("monaco/monaco.duckdb"), duckdb::Config::default().access_mode(duckdb::AccessMode::ReadOnly).unwrap()).unwrap();
         let n = |sql: &str| con.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
         assert!(n("SELECT count(*) FROM driving.edges") > 1000 && n("SELECT count(*) FROM main.elevation_grid WHERE z IS NOT NULL") > 100);
