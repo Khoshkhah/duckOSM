@@ -21,6 +21,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 ### Fixed
 
+- **`duckosm studio` on a phone: the base map stays blank when an area opens** (roadstyle `d07131ab`, PR 169). The page asked for the blank map before the first base map (OpenFreeMap) had come, and the late base map came back over the area. Now only the last choice of a base map is used.
 - **`duckosm studio` has no patch for a page with no roads** (roadstyle `8dfd5e2c`, PR 153; `rust/duckosm-edit/page/studio.js`, `web/build_steps/steps.css`, `web/ground_step/ground_step.css`). The roadstyle dashboard now shows no banner "0 road features" on a page with no roads, opens on the world, and sets `text-transform` and `letter-spacing` of an option row (`label.rs-opt`) back. The page removed its three workarounds: the script that removed the banner, the jump to Europe, and the two CSS resets. *Host: move the roadstyle pin to `8dfd5e2c` and remove the same patches. A host that sets its own first view keeps it.*
 
 ### Changed
