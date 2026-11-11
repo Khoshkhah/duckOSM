@@ -82,8 +82,8 @@ fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Opti
         d::levels_keyword(row).map_err(|e| e.to_string())?
     };
     // the base map of the duckOSM file: its look gives the layers (layers.yaml), and each layer's first query that runs makes its table
-    // the buildings from zoom 12 (Kaveh, 2026-11-11; roadstyle's default is the theme's, 14): a tilted map shows them far away too
-    let base = json!({"mode": "all", "theme": "liberty", "paths": "google", "place": name, "buildings_min_zoom": 12});
+    // the buildings from zoom 11 (Kaveh, 2026-11-11; roadstyle's default is the theme's, 14): a tilted map shows them far away too
+    let base = json!({"mode": "all", "theme": "liberty", "paths": "google", "place": name, "buildings_min_zoom": 11});
     let look = |args: Value| -> Result<(roadstyle::look::Options, roadstyle::Look), String> {
         let o = roadstyle::look::Options::from_value(&json!({"base_map": base, "args": args})).map_err(|e| e.to_string())?;
         let l = roadstyle::Look::resolve(&o).map_err(|e| e.to_string())?;
