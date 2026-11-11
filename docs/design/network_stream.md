@@ -1,0 +1,114 @@
+# The network step in limited memory
+
+Status: proposal, 2026-11-11. Part A is the first work. The load of `raw.*` (`read_osm`) and the global junctions are
+done before it: see [streaming_load.md](streaming_load.md).
+
+## The problem
+
+The network step (`duckosm_core::network::build_network_junctions`) keeps all the data of a mode in RAM until the
+end: the ways, their coordinates, the filtered ways, the edges and the edge graph. A France build (5.1 GB file,
+driving) went above 26 GB and did not finish on a computer with 23 GB of RAM (2026-11-11).
+
+## The measurements
+
+`rust/duckosm-core/examples/mem_probe.rs` on a Mac mini (Apple Silicon, 12 cores, 16 GB), 2026-11-11. The live heap is
+counted by a counting allocator. The time is the time of each part (one thread).
+
+Kentucky, driving (2,114,699 edges, 7.5 vertices for each edge; peak RSS 2.49 GB, 7.2 s):
+
+| Sub-step | Time | Memory added (live heap) |
+|---|---|---|
+| 0a Read the highway ways from the PBF (`osmpbf`) | 1.55 s | +179 MB |
+| 0b Read the coordinates of their nodes (`osmpbf`) | 2.03 s | +192 MB (and +181 MB for a moment) |
+| Prep: global and local junctions, the mode filter | 0.40 s | +379 MB |
+| 1 Cut the ways into forward edges | 0.56 s | +509 MB |
+| 2b, 3, 4 Merge the chains, split parallel and antiparallel arcs | 0.28 s | 0 (+190 MB for a moment) |
+| 5, 6, 7 Reverse edges, `edge_id` and `edge_ref`, length | 0.49 s | +362 MB |
+| 8, 8b, 8c, 9 Nodes, path connectors, speeds, private roads | 0.30 s | +23 MB |
+| 9b, 9b2 Turn restrictions, edge graph | 1.03 s | +241 MB |
+| 10 Keep the largest connected part | 0.37 s | -40 MB (+170 MB for a moment) |
+
+Estonia, walking (1,394,642 edges; peak RSS 1.38 GB, 4.4 s) has the same shape: reading 2.5 s, prep +190 MB, cut
++226 MB, edge graph 0.5 s, largest part 0.2 s.
+
+At the end, the network holds: the edges 801 MB (397 bytes for each edge: a 160-byte `Edge`, the node ids and the
+coordinates), the edge graph 241 MB, the tables `ways` and `way_nodes` 178 MB, the coordinates 192 MB and the ways as
+read 179 MB.
+
+Three facts from the measurements:
+
+1. Reading the PBF with `osmpbf` is half of the time. `pbfraw` reads it 5 times faster, and `raw.*` is already in
+   DuckDB after `read_osm`.
+2. The sub-steps use one thread. With 12 threads, only the reading is faster (Kentucky: 7.2 s to 5.3 s).
+3. The memory grows in four places, and each one keeps all ways or all edges of the mode: the prep, the cut, the
+   reverse edges and the edge graph.
+
+## The data that each sub-step reads
+
+| Data | Read by |
+|---|---|
+| All ways as read (`all_ways`) | the global junctions, the mode filter, step 6 (`edge_ref` needs the node list of the raw way) |
+| The filtered ways (`mw`) | the cut, step 5 (the lanes and the type of the reverse edge, the bus lane), step 9b (turn restrictions), the output `ways` and `way_nodes` |
+| The coordinates (`coords`) | the cut, step 2b (the merge of chains), step 8 (the position of each node) |
+| The forward edges, then the edges | steps 2b to 10 |
+| Outside the network step | the area tables, the levels and the lane profile read the ways and the coordinates again |
+
+So a stream of sub-steps 0 and 1 alone frees nothing: the later steps keep the ways, the filtered ways and the
+coordinates in RAM. Part A must also give the edges the values that the later steps read through these data.
+
+## The target design
+
+All data is on disk (DuckDB tables or Parquet files), and the network step is a series of passes. Each pass works on
+one part of the data at a time. Most sub-steps need only one way, one edge, one node or one key:
+
+| Kind of pass | Sub-steps | Part of the data |
+|---|---|---|
+| By way | 0, the mode filter, 1, 5, 6, 7, 8c, 9 | a batch of ways, with the junction flags of their nodes |
+| By key | 3, 4 | the edges with the same end nodes |
+| By node | 8, 9b2 | the edges at a node |
+| Global, small | 2b, 10 | only the ids and the end nodes of the edges (a union-find), not the geometry or the tags |
+| By tile, with a margin | 8b | the edges near a point (walking and cycling only) |
+
+The `edge_id` is a hash of the way and its two end nodes, so it does not depend on how the work is divided.
+
+## Part A: the ways in a stream, the edges on disk
+
+The input is `raw.ways`, `raw.nodes` and `main.global_junctions` in DuckDB. For a whole-file build of `duckosm-rust`,
+they are there before the network step (`read_osm` and the global junctions SQL). This needs one change of the order
+of the build: today, the Rust build makes the network first and the `.duckdb` file after it.
+
+1. **Pass 1, the mode filter (Rust, by way).** DuckDB gives the highway ways with their tags. Each way goes through
+   `filter::mode_way` and the per-mode OSM fixes. The pass writes the ids of the kept ways, their road flag, and the
+   tables `ways` and `way_nodes` of the mode (they no longer stay in RAM).
+2. **The local junctions (SQL).** The same rule as `local_junctions`, on the kept ways, as the global junctions do.
+3. **Pass 2, the cut (Rust, by way, on all threads).** DuckDB gives the kept ways with the coordinates of their nodes
+   and the junction flags (a join, which DuckDB can do with limited memory). Each way is cut into forward edges. The
+   edge gets the values that steps 5 and 6 read today through `mw` and `all_ways`: the lanes and the type of the
+   reverse direction, the bus-lane flag and the position of the edge in the raw way. The forward edges go to a file.
+4. **The bridge.** Steps 2b to 10 read the forward edges back into RAM and run as today. Step 9b reads only the ways
+   that a turn restriction names. Step 8 takes the node positions from the edges.
+
+After part A, the RAM of the network step holds only the edges, not the ways, the filtered ways and the coordinates.
+My estimate for Kentucky: the peak goes down by about 0.5 to 0.75 GB of 1.9 GB (live heap). This is an estimate; part A
+measures it.
+
+### The checks of part A
+
+- Every table of the network step is equal to the output before part A: the golden tests on Monaco and Tartu, and a
+  comparison of all rows (`EXCEPT ALL` in both directions) of the edges, the nodes and the edge graph on Estonia and
+  Kentucky.
+- `mem_probe` and the peak RSS on Kentucky and Estonia, before and after, on the Mac mini, several runs (the peak RSS
+  of macOS changes by about 0.4 GB from one run to the next).
+
+## The later parts
+
+| Part | Work | Gain (to measure) |
+|---|---|---|
+| B | Steps 3 to 7 as passes by key and by edge; the reverse edge made only when it is written | the reverse edges (+362 MB) and the split maps |
+| C | The nodes and the edge graph by node; the graph rows written as they are made | the edge graph (+241 MB) |
+| D | The merge of chains and the largest part as union-finds on ids only | the global steps without the edges in RAM |
+| E | The path connectors (8b) by tile with a margin | the last step that reads all edges |
+| F | The steps after the network (area tables, levels, lane profile) read DuckDB, not the ways in RAM | |
+| G | The browser (way C): the same passes, with DuckDB-Wasm and the Parquet files in OPFS | |
+
+Each part is one pull request with the same checks as part A.
