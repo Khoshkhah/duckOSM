@@ -15,10 +15,10 @@ import { esc, progressText } from "./core.js";
  */
 export function initBuildStep({ root, ready, run, poll, onDone = () => {}, every = 500 }) {
 	root.classList.add("bs", "bs-build");
-	root.innerHTML = `<button type="button" class="sb-primary" data-bs="run" disabled>Build</button><p class="small muted" data-bs="why"></p>
+	root.innerHTML = `<div class="build-go"><button type="button" class="sb-primary" data-bs="run" disabled>Build<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button><p class="why" data-bs="why"></p></div>
 		<progress data-bs="bar" max="1" hidden></progress><p class="rs-status" role="status" aria-live="polite" data-bs="status"></p>
 		<p class="rs-field-msg err" role="alert" data-bs="error" hidden></p>
-		<details data-bs="log" hidden><summary>Steps</summary><ol class="bs-steps" data-bs="steps"></ol></details>`;
+		<details class="drow" data-bs="log" hidden><summary>Build details</summary><ol class="bs-steps" data-bs="steps"></ol></details>`;
 	const q = (k) => root.querySelector(`[data-bs="${k}"]`);
 	let running = false;
 

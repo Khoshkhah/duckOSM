@@ -22,26 +22,26 @@ Open the address that the command prints (`http://127.0.0.1:8792/`). The page op
 
 ## The steps
 
-1. **Area.** Choose the area in one of three ways:
+The page is roadstyle's dashboard, and the cards are the cards of Studio: a round number (a check mark when the step is done), the title, a "?" with its help, and the line "after step N" for a step that is not ready.
+One step is open at a time, and the next step opens when the one before is done. Step 4 (Ground) is the one that Studio has only as a folded box in its Build card.
+
+1. **Choose an area.** Search a place, draw a box, open a GeoJSON file, or use "What is here?" (the target in the search field) and click the map:
     - **Search.** Type the name of a place and pick a match. The outlines come from Nominatim, so the page needs the internet for this.
     - **Draw.** Push **Draw a box on the map**, then drag on the map from one corner to the other.
     - **File.** Drop a GeoJSON file with a polygon or a multipolygon, for example the file of `duckosm boundary`.
+2. **The area.** The name (it is the name of the folder of the area), the numbers (area in km², polygons, vertices), **Boundary** (saves the boundary as a GeoJSON file) and **Unselect**. The magnifier moves the map to the area.
+3. **The data.** The tab **Geofabrik** shows the extracts of Geofabrik that cover the whole area, the smallest first. The build downloads the one that you pick into the folder of the area. The tab **File**
+   takes the path of a `.osm.pbf` file on this computer. The build cuts the file to the area.
+4. **Ground.** The page lists the DEM sources that cover the area, best first. Choose the source of your DEM file, download the file from it, then drop the file in the box. The product, the vertical datum and the
+   licence of the file are the source's, and the ground id is the SHA-256 of the file. With no source chosen, the area has no DEM. The choice **Ground: AWS Terrain Tiles** makes a DEM for the map terrain, and it is
+   never the reference ground of the area. Read [The ground reference](../concepts/ground-reference.md) and [Add elevation](elevation.md). A DEM needs `pip install "duckosm[elevation]"` with `duckosm studio`.
+5. **Build.** The networks and the options (the keys of [the config of `duckosm build`](../reference/configuration.md); open **Config of the build** to see the text), and the button **Build**. The page shows the
+   download, the steps and the time. The build writes `areas/<name>/<name>.duckdb`, the config it used (`config.yaml`) and the boundary (`boundary.geojson`).
+6. **The result.** The networks that the build made, and **Open the map and edit OSM data**: roadstyle's dashboard of the new area, the same page as
+   [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit). Each change goes into `areas/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file.
+   The record of the build is in the database, so Build again works.
 
-    The name of the area is the name of its folder. You can change it.
-2. **OSM data.** The tab **Geofabrik** shows the extracts of Geofabrik that cover the whole area, the smallest first. The build downloads the
-   one that you pick into the folder of the area. The tab **File** takes the path of a `.osm.pbf` file on this computer. The build cuts the
-   file to the area.
-3. **Settings.** The networks and the options of the build. Open **Config of the build** to see the text. The keys are the keys of
-   [the config of `duckosm build`](../reference/configuration.md).
-4. **Ground.** The page suggests the DEM sources that cover the area, best first. Choose the source of your DEM file, download the file from it, then select the file. The
-   product, the vertical datum and the license of the file come from the catalog. With no file, the area has no DEM. The choice
-   **Ground: AWS Terrain Tiles** makes a DEM for the map terrain, and it is never the reference ground of the area. Read
-   [The ground reference](../concepts/ground-reference.md) and [Add elevation](elevation.md). A DEM needs `pip install "duckosm[elevation]"`.
-5. **Build.** Push **Build**. The page shows the download, the steps and the time. The build writes `areas/<name>/<name>.duckdb`, the config
-   it used (`config.yaml`) and the boundary (`boundary.geojson`).
-6. **Result.** The page shows what the build made. **Open the map and edit OSM data** opens roadstyle's dashboard of the new area, the same
-   page as [`duckosm edit`](edit-osm-data.md#edit-on-your-computer-duckosm-edit). Each change goes into `areas/<name>/osm_fixes.yaml`, and
-   **Build again** builds the area again with the file. The record of the build is in the database, so Build again works.
+Not in Studio's cards yet: the H3 tab of step 1 and the buffer around the area.
 
 ## Your areas
 

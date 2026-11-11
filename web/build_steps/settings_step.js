@@ -9,11 +9,14 @@ import { MODES, OPTIONS, esc, settingsYaml } from "./core.js";
 export function initSettingsStep({ root, onChange = () => {} }) {
 	root.classList.add("bs", "bs-settings");
 	const opt = (attrs, name, note = "") => `<label class="rs-opt"><input type="checkbox" ${attrs}><span><b>${esc(name)}</b>${note ? `<small>${esc(note)}</small>` : ""}</span></label>`;
-	root.innerHTML = `<div class="rs-cap">Networks</div>
-		<div class="rs-opts rs-opts-row" role="group" aria-label="The networks">${MODES.map((m) => opt(`name="mode" value="${m}" checked`, m[0].toUpperCase() + m.slice(1))).join("")}</div>
-		<div class="rs-cap">Options</div>
-		<div class="rs-opts" role="group" aria-label="The options of the build">${OPTIONS.map((o) => opt(`name="opt" value="${o.key}"${o.on ? " checked" : ""}`, o.name, o.note)).join("")}</div>
-		<details class="bs-config"><summary>Config of the build</summary><pre data-ss="yaml"></pre></details>`;
+	// as the card Build of Studio: the networks in a row, the base-map layers, and the other options in a folded box
+	const main = OPTIONS.filter((o) => o.key === "build_features"), more = OPTIONS.filter((o) => o.key !== "build_features");
+	const row = (o) => opt(`name="opt" value="${o.key}"${o.on ? " checked" : ""}`, o.name, o.note);
+	root.innerHTML = `<div class="bgroup"><div class="rs-cap">Networks</div>
+		<div class="rs-opts rs-opts-row" role="group" aria-label="The networks">${MODES.map((m) => opt(`name="mode" value="${m}" checked`, m[0].toUpperCase() + m.slice(1))).join("")}</div></div>
+		<div class="bgroup"><div class="rs-cap">Base map</div><div class="rs-opts" role="group" aria-label="The base map">${main.map(row).join("")}</div></div>
+		<details class="drow"><summary>More options</summary><div class="rs-opts" role="group" aria-label="The other options of the build">${more.map(row).join("")}</div></details>
+		<details class="bs-config drow"><summary>Config of the build</summary><pre data-ss="yaml"></pre></details>`;
 	const values = () => ({ modes: [...root.querySelectorAll('[name="mode"]:checked')].map((i) => i.value),
 		...Object.fromEntries([...root.querySelectorAll('[name="opt"]')].map((i) => [i.value, i.checked])) });
 	const yaml = () => settingsYaml(values());
