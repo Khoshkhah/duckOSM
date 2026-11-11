@@ -24,7 +24,7 @@
       ["Numbers", "The size of the area in km², its polygons and its vertices."],
       ["Boundary", "Saves the boundary as a GeoJSON file."],
       ["Zoom button", "Moves the map to the area."]] },
-    3: { title: "The data", intro: "The OpenStreetMap data of the area.", terms: [
+    3: { title: "OSM data", intro: "The OpenStreetMap data of the area.", terms: [
       ["Geofabrik", "The extracts of Geofabrik that cover the whole area, the smallest first. Download puts one into the folder of the areas; then Use it."],
       ["File", "The path of a .osm.pbf file on this computer. The build cuts it to the area."]] },
     4: { title: "Build", intro: "The settings and the build, on this computer.", terms: [
@@ -49,8 +49,8 @@
     rs.help.set({ title: "duckOSM Studio", button: "Help: how this page works",
       intro: "This page makes the data of an area on this computer. The server of this page builds the area: the page itself shows the steps. The files stay on this computer, in the folder of the areas.",
       terms: [["1 Choose an area", "Search for a place, draw shapes on the map, open a GeoJSON file, or click hexagons."], ["2 The area", "Check the name and the size of the area, and set a buffer."],
-        ["3 The data", "Select the OpenStreetMap data: a Geofabrik extract, or a file on this computer."], ["4 Ground", "Select the DEM (the height of the ground), or none."],
-        ["5 Build", "Select the networks and the options, and press Build."], ["6 The result", "The networks and the files that the build made."], ["7 Visualization", "The map of the new area, and the panel Edit OSM data."]],
+        ["3 OSM data", "Download a Geofabrik extract into the folder and use it, or give a file on this computer."], ["4 Build", "Select the networks and the options, and press Build. The map shows the new area."],
+        ["5 The result", "The networks and the files that the build made."], ["6 Ground", "Add the height of the ground (a DEM) to a built area, or none."], ["7 Edit OSM data", "The panel Edit OSM data of the area."]],
       note: 'Documentation: <a href="https://khoshkhah.github.io/duckOSM/guides/studio/" target="_blank" rel="noopener">Make the data of an area on your computer</a>' });
     const [{ initAreaStep }, { initDataStep }, { initSettingsStep }, { initBuildStep }, { initResultStep }, { initFolderStep }, , { extractsOf, parseSettings, esc, bytes }, { initGroundStep }] = await Promise.all([
       import("./parts/build_steps/area_step.js"), import("./parts/build_steps/data_step.js"), import("./parts/build_steps/settings_step.js"),
@@ -60,7 +60,7 @@
     const cards = [];
     const body = () => Object.assign(document.createElement("div"), { className: "step-body" });
     const roots = {};
-    for (const [n, label] of [[1, "Choose an area"], [2, "The area"], [3, "The data"], [4, "Build"], [5, "The result"], [6, "Ground"], [7, "Edit OSM data"]]) {
+    for (const [n, label] of [[1, "Choose an area"], [2, "The area"], [3, "OSM data"], [4, "Build"], [5, "The result"], [6, "Ground"], [7, "Edit OSM data"]]) {
       const el = (roots[n] = body());
       // card 7 opens a panel, as in Studio: the editor of the open area (the page of duckosm edit), with a line of its state
       const c = n === 7 ? rs.sections.add({ id: "step7", label, step: 7, open: () => { if (built) location.href = "edit/"; }, note: "No fixes." })
