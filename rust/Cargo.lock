@@ -772,7 +772,7 @@ dependencies = [
  "duckosm-duckdb",
  "duckosm-parquet",
  "h3o",
- "roadstyle-levels 0.25.0",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=59c30597ca943d5ebbf30da46c1d889e0d8b0b22)",
  "serde_json",
  "sha2",
  "tiff",
@@ -840,7 +840,8 @@ dependencies = [
  "arrow-schema 60.0.0",
  "duckosm-core",
  "parquet",
- "roadstyle-levels 0.25.0",
+ "rayon",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=59c30597ca943d5ebbf30da46c1d889e0d8b0b22)",
 ]
 
 [[package]]
@@ -2142,7 +2143,7 @@ dependencies = [
  "roadstyle-assets",
  "roadstyle-engine",
  "roadstyle-io",
- "roadstyle-levels 0.29.0",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
  "roadstyle-look",
  "roadstyle-model",
  "roadstyle-tiles",
@@ -2163,7 +2164,7 @@ dependencies = [
  "base64 0.22.1",
  "foldhash 0.2.0",
  "indexmap",
- "roadstyle-levels 0.29.0",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
  "roadstyle-look",
  "roadstyle-model",
  "rstar",
@@ -2184,7 +2185,7 @@ dependencies = [
  "parquet",
  "proj4rs",
  "proj4wkt",
- "roadstyle-levels 0.29.0",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
  "roadstyle-model",
  "rstar",
  "serde_json",
@@ -2193,8 +2194,8 @@ dependencies = [
 
 [[package]]
 name = "roadstyle-levels"
-version = "0.25.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=f0a161b9abd2d993c7963b909de0a9a4322f38bf#f0a161b9abd2d993c7963b909de0a9a4322f38bf"
+version = "0.29.0"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=59c30597ca943d5ebbf30da46c1d889e0d8b0b22#59c30597ca943d5ebbf30da46c1d889e0d8b0b22"
 dependencies = [
  "rstar",
  "sha2",
@@ -2245,7 +2246,7 @@ dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
  "arrow-select 60.0.0",
- "roadstyle-levels 0.29.0",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
  "rstar",
  "serde",
  "serde_json",

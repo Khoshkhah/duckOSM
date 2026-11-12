@@ -430,7 +430,7 @@ pub fn building_faces(
     edits: &[FaceEdit],
 ) -> Vec<BuildingFace> {
     let mut all = Vec::new();
-    building_faces_each(ways, nodes, relations, streets, edits, |mut f| {
+    building_faces_each(ways, nodes, relations, streets.to_vec(), edits, |mut f| {
         all.append(&mut f);
         Ok(())
     })
@@ -447,7 +447,7 @@ pub fn building_faces_each(
     ways: &[RawWay],
     nodes: &[RawNode],
     relations: &[Relation],
-    streets: &[Street],
+    streets: Vec<Street>,
     edits: &[FaceEdit],
     mut sink: impl FnMut(Vec<BuildingFace>) -> Result<(), String>,
 ) -> Result<(), String> {
@@ -541,9 +541,12 @@ pub fn building_faces_each(
     }
     let proj = Proj::new(((lo.0 + hi.0) / 2.0, (lo.1 + hi.1) / 2.0));
     // 3. the streets, each segment once (an edge has one copy for each direction)
+    // the exact sizes first: a list or a map that doubles needs up to three times its size for a moment (WebAssembly memory
+    // never shrinks)
     let mut seen: FxHashMap<(i64, [u64; 4]), ()> = FxHashMap::default();
-    let mut segs = Vec::new();
-    for s in streets {
+    seen.reserve(streets.len());
+    let mut segs = Vec::with_capacity(streets.len());
+    for s in &streets {
         let (a, b) = if s.a <= s.b { (s.a, s.b) } else { (s.b, s.a) };
         if seen
             .insert(
@@ -566,6 +569,8 @@ pub fn building_faces_each(
             weight: class_weight(&s.highway),
         });
     }
+    // the streets and the seen map go before the tree is made: the tree can use their memory
+    drop((streets, seen));
     let tree = RTree::bulk_load(segs);
     crate::util::step("building faces 3: the tree of the streets");
     // 4. a wall that two buildings have (the same two nodes) is a party wall
