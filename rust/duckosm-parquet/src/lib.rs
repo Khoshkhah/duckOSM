@@ -17,7 +17,6 @@ use duckosm_core::lanes::LaneRow;
 use duckosm_core::model::{Attrs, Edge, MapRow, Node, Way};
 use duckosm_core::network::Options;
 use duckosm_core::raw::{RawNode, RawTags, RawWay};
-use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
@@ -28,7 +27,9 @@ use std::sync::Arc;
 
 const ROW_GROUP: usize = 65_536;
 
+mod par_writer;
 mod raw_load;
+pub use par_writer::ParWriter;
 pub use raw_load::*;
 
 fn geo_metadata(geometry_type: &str) -> KeyValue {
@@ -278,7 +279,7 @@ pub fn write_edges(path: &Path, rows: &[Edge], oc: EdgeCols) -> Result<(), Strin
 pub fn write_edges_to<W: Write + Send>(out: W, rows: &[Edge], oc: EdgeCols) -> Result<(), String> {
     let schema = Arc::new(edges_schema(oc));
     let mut w =
-        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+        ParWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         w.write(&edges_batch(&schema, chunk, oc)).map_err(err)?;
     }
@@ -295,7 +296,7 @@ pub fn write_edges_iter_to<W: Write + Send>(
 ) -> Result<(), String> {
     let schema = Arc::new(edges_schema(oc));
     let mut w =
-        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+        ParWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
     let mut chunk: Vec<Edge> = Vec::with_capacity(ROW_GROUP);
     for e in rows {
         chunk.push(e?);
@@ -319,7 +320,7 @@ pub fn write_nodes(path: &Path, rows: &[Node]) -> Result<(), String> {
 /// The same as [`write_nodes`], to any writer (for example a `Vec<u8>` in WebAssembly).
 pub fn write_nodes_to<W: Write + Send>(out: W, rows: &[Node]) -> Result<(), String> {
     let schema = Arc::new(nodes_schema());
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props("Point"))).map_err(err)?;
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(props("Point"))).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         let mut id = Int64Builder::with_capacity(chunk.len());
         let mut g = BinaryBuilder::new();
@@ -352,7 +353,7 @@ pub fn write_edge_id_map_to<W: Write + Send>(out: W, rows: &[MapRow]) -> Result<
     let plain = WriterProperties::builder()
         .set_compression(compression())
         .build();
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         let mut old = Int64Builder::with_capacity(chunk.len());
         let mut new = Int64Builder::with_capacity(chunk.len());
@@ -391,7 +392,7 @@ fn write_rows<W: Write + Send, T>(
     let plain = WriterProperties::builder()
         .set_compression(compression())
         .build();
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         w.write(&RecordBatch::try_new(schema.clone(), columns(chunk)).map_err(err)?)
             .map_err(err)?;
@@ -446,7 +447,7 @@ pub fn write_edge_graph_to<W: Write + Send>(out: W, rows: &[GraphRow]) -> Result
 /// `edge_graph` written row by row while the rows are made (docs/design/network_stream.md, part C): it holds one block of
 /// [`ROW_GROUP`] rows, not all rows. The blocks are the blocks of [`write_edge_graph_to`], so the file is the same.
 pub struct EdgeGraphWriter<W: Write + Send> {
-    w: ArrowWriter<W>,
+    w: ParWriter<W>,
     schema: Arc<Schema>,
     buf: Vec<GraphRow>,
     rows: usize,
@@ -459,7 +460,7 @@ impl<W: Write + Send> EdgeGraphWriter<W> {
             .set_compression(compression())
             .build();
         Ok(EdgeGraphWriter {
-            w: ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?,
+            w: ParWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?,
             schema,
             buf: Vec::with_capacity(ROW_GROUP),
             rows: 0,
@@ -829,7 +830,7 @@ pub fn write_boundary_to<W: Write + Send>(
     cols.push(Arc::new(g.finish()));
     let schema = Arc::new(Schema::new(fields));
     let kind = if multi { "MultiPolygon" } else { "Polygon" };
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props(kind))).map_err(err)?;
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(props(kind))).map_err(err)?;
     w.write(&RecordBatch::try_new(schema, cols).map_err(err)?)
         .map_err(err)?;
     w.close().map_err(err)?;
@@ -895,7 +896,7 @@ fn write_parts<W: Write + Send, T>(
         .set_compression(compression())
         .set_max_row_group_row_count(Some(ROW_GROUP))
         .build();
-    let mut w = ArrowWriter::try_new(out, first.schema(), Some(plain)).map_err(err)?;
+    let mut w = ParWriter::try_new(out, first.schema(), Some(plain)).map_err(err)?;
     w.write(&first).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP).skip(1) {
         w.write(&part(chunk)?).map_err(err)?;
@@ -1170,7 +1171,7 @@ pub fn building_faces_schema() -> Schema {
 /// Write `building_faces_main.parquet` as GeoParquet with a LineString for each wall.
 pub fn write_building_faces_to<W: Write + Send>(out: W, rows: &[BuildingFace]) -> Result<(), String> {
     let schema = Arc::new(building_faces_schema());
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         let n = chunk.len();
         let (mut building_id, mut from_node, mut to_node) = (Int64Builder::with_capacity(n), Int64Builder::with_capacity(n), Int64Builder::with_capacity(n));
