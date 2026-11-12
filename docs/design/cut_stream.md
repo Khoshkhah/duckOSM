@@ -141,3 +141,25 @@ of the cargo feature `heap-probe`):
 
 All files of the network, the bus routes and the building faces have the same bytes. Most of the memory is now in the
 building faces: the step itself, and the street segments that it reads (1.9 GB on Kentucky).
+
+## The building faces in parts
+
+The building faces step (`building_faces::building_faces_each`) gives the faces in parts of 32,768 rings, in the order
+of the result, and `BuildingFacesWriter` writes each part. All threads compute the walls of the rings of a part. The
+segments of the streets share the name and the `highway` value of their edge (`Arc<str>`), not one copy for each
+segment. Kentucky, the same run as above:
+
+| Building faces | Before | After |
+|---|---|---|
+| Peak heap | 14,860 MiB | 6,636 MiB |
+| Time | 15.0 s | 7.4 s |
+
+The file has the same rows in the same order and the same row groups (the values of each column are equal); the pages
+in the file are not the same bytes.
+
+The bus routes (`bus::routes`) look up the node pairs of the member ways of the routes only, so their map of node pairs
+has only the edges of these ways, not all edges. Kentucky: the peak heap of the step goes from 7,218 MiB to 3,991 MiB
+(no more than the memory before it), and its time from 1.85 s to 0.28 s. The files have the same bytes.
+
+After these changes, the peak heap of the whole Kentucky build (driving, `raw.*`, building faces) is 6,636 MiB, in the
+building faces, and the build takes 36.8 s (before: 17,206 MiB and 54.2 s).

@@ -233,7 +233,8 @@ pub fn routes(
     type Pairs<'a> = FxHashMap<(i64, i64, i64), Vec<(&'a Edge, bool)>>;
     let mut pairs: Pairs = FxHashMap::default();
     for (list, lane) in [(edges, false), (private_edges, true)] {
-        for e in list {
+        // only the edges of the member ways: a route looks up only their pairs (Kentucky: all edges made a peak of 3 GB)
+        for e in list.iter().filter(|e| way_of.contains_key(&e.osm_id)) {
             for uv in e.refs.windows(2) {
                 pairs
                     .entry((e.osm_id, uv[0], uv[1]))

@@ -15,6 +15,7 @@ use crate::graph::{MemberType, Relation};
 use crate::raw::{RawNode, RawWay};
 use crate::util::FxHashMap;
 use rstar::{RTree, RTreeObject, AABB};
+use std::sync::Arc;
 
 /// A street farther than this from the middle of a wall is not the street of the wall (meters).
 pub const MAX_STREET_M: f64 = 60.0;
@@ -92,9 +93,10 @@ pub struct Street {
     pub b: Pt,
     pub edge_id: i64,
     pub osm_id: i64,
-    pub name: Option<String>,
-    /// The `highway` value of the edge: a street of a higher class (a wider street) wins over a smaller one at the same distance.
-    pub highway: String,
+    /// The name and the `highway` value of the edge, shared by the segments of the edge. A street of a higher class (a wider street)
+    /// wins over a smaller one at the same distance.
+    pub name: Option<Arc<str>>,
+    pub highway: Arc<str>,
 }
 
 /// The weight of a street class in the score of a street for a wall: a wide street is more of a front than a service road.
@@ -177,7 +179,7 @@ struct Seg {
     b: P,
     edge_id: i64,
     osm_id: i64,
-    name: Option<String>,
+    name: Option<Arc<str>>,
     weight: f64,
 }
 
@@ -218,7 +220,7 @@ struct Match {
     q: P,
     edge_id: i64,
     osm_id: i64,
-    name: Option<String>,
+    name: Option<Arc<str>>,
     dist: f64,
     align: f64,
     score: f64,
@@ -424,6 +426,28 @@ pub fn building_faces(
     streets: &[Street],
     edits: &[FaceEdit],
 ) -> Vec<BuildingFace> {
+    let mut all = Vec::new();
+    building_faces_each(ways, nodes, relations, streets, edits, |mut f| {
+        all.append(&mut f);
+        Ok(())
+    })
+    .expect("the sink gives no error");
+    all
+}
+
+/// The rings of one call of the sink of [`building_faces_each`].
+const RINGS_PER_PART: usize = 1 << 15;
+
+/// [`building_faces`], given to `sink` in parts in the order of the result, so that all faces are never in memory at once. The walls
+/// of the buildings of a part are computed on all threads.
+pub fn building_faces_each(
+    ways: &[RawWay],
+    nodes: &[RawNode],
+    relations: &[Relation],
+    streets: &[Street],
+    edits: &[FaceEdit],
+    mut sink: impl FnMut(Vec<BuildingFace>) -> Result<(), String>,
+) -> Result<(), String> {
     let coords = |refs: &[i64]| -> Option<Vec<Pt>> {
         refs.iter()
             .map(|id| {
@@ -503,7 +527,7 @@ pub fn building_faces(
         }
     }
     if rings.is_empty() {
-        return Vec::new();
+        return Ok(());
     }
     // 2. one local scale for the whole area: the middle of the buildings
     let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
@@ -619,12 +643,22 @@ pub fn building_faces(
             .any(|w| crosses(from, to, w.a, w.b))
     };
 
-    let mut out = Vec::new();
-    let mut next_index: FxHashMap<(i64, bool), i32> = FxHashMap::default(); // the place of a wall in the building goes on from the outer ring to the inner rings
-    for (id, relation, inner, ids, pts, local, addr) in oriented {
+    // the place of the first wall of each ring in its building: the places go on from the outer ring to the inner rings
+    let mut next_index: FxHashMap<(i64, bool), i32> = FxHashMap::default();
+    let offsets: Vec<i32> = oriented
+        .iter()
+        .map(|(id, relation, _, _, _, local, _)| {
+            let offset = *next_index.entry((*id, *relation)).or_default();
+            next_index.insert((*id, *relation), offset + (local.len() - 1) as i32);
+            offset
+        })
+        .collect();
+    drop(next_index);
+    let ring_faces = |k: usize| -> Vec<BuildingFace> {
+        let (id, relation, inner, ids, pts, local, addr) = &oriented[k];
+        let (id, relation, inner, offset) = (*id, *relation, *inner, offsets[k]);
+        let mut out = Vec::new();
         let n = local.len() - 1;
-        let offset = *next_index.entry((id, relation)).or_default();
-        next_index.insert((id, relation), offset + n as i32);
         let building_type = if relation { "relation" } else { "way" };
         if inner {
             for i in 0..n {
@@ -660,7 +694,7 @@ pub fn building_faces(
                     geometry: vec![pts[i], pts[i + 1]],
                 });
             }
-            continue;
+            return out;
         }
         let mut walls: Vec<Wall> = Vec::new();
         for i in 0..n {
@@ -849,13 +883,25 @@ pub fn building_faces(
                 azimuth_deg: w.azimuth as f32,
                 street_osm_id: street.map(|s| s.osm_id),
                 street_edge_id: street.map(|s| s.edge_id),
-                street_name: street.and_then(|s| s.name.clone()),
+                street_name: street.and_then(|s| s.name.as_deref().map(str::to_string)),
                 distance_m: street.map(|s| s.dist as f32),
                 geometry: vec![w.p1, w.p2],
             });
         }
+        out
+    };
+    for start in (0..oriented.len()).step_by(RINGS_PER_PART) {
+        let part = start..(start + RINGS_PER_PART).min(oriented.len());
+        #[cfg(feature = "pbf")]
+        let faces: Vec<BuildingFace> = {
+            use rayon::prelude::*;
+            part.into_par_iter().flat_map_iter(ring_faces).collect()
+        };
+        #[cfg(not(feature = "pbf"))]
+        let faces: Vec<BuildingFace> = part.flat_map(ring_faces).collect();
+        sink(faces)?;
     }
-    out
+    Ok(())
 }
 
 #[cfg(test)]
@@ -895,7 +941,7 @@ mod tests {
             b: (b.0 * M, b.1 * M),
             edge_id: osm_id * 10,
             osm_id,
-            name: Some(format!("street {osm_id}")),
+            name: Some(format!("street {osm_id}").into()),
             highway: "residential".into(),
         }
     }
