@@ -94,7 +94,7 @@ impl IdSet {
 
 /// Read the blocks of `r` in batches, decode each batch on all threads with `per_block`, and give the results to
 /// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false.
-fn each_block<R: Read, T: Send>(
+pub(crate) fn each_block<R: Read, T: Send>(
     r: &mut R,
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
     mut done: impl FnMut(T, u64) -> Result<bool, String>,
