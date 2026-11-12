@@ -365,33 +365,38 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
             .ok()
             .map(|i| &ways[i])
     };
-    fn tags_of(w: Option<&Way>) -> Vec<(&str, &str)> {
-        w.map_or(Vec::new(), |w| w.all_tags().collect())
-    }
-    let tagged: Vec<bool> = driving
-        .iter()
-        .map(|e| {
-            let tags = tags_of(way(e.osm_id));
-            tags.iter().any(|(k, _)| LANE_TAGS.contains(k)) || overrides.contains(&e.osm_id.abs())
-        })
-        .collect();
-    let inherited = inherit_lanes(driving, &tagged);
-    let mut out = Vec::new();
-    let mut push = |edge_id: i64, lanes: Vec<Lane>| {
-        out.extend(lanes.into_iter().map(|l| LaneRow {
-            edge_id,
-            lane_num: l.lane_num,
-            use_: l.use_,
-            width_m: l.width_m,
-            turn: l.turn,
-            source: l.source,
-            width_source: l.width_source,
-        }))
+    // The tags of each way, one time: the edges of a way and the two passes below share them (each edge made the list
+    // of all tags of its way, two times, and that was most of the time of the lane profile).
+    let mut ids: Vec<i64> = driving.iter().chain(bus).map(|e| e.osm_id.abs()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let lists: Vec<Vec<(&str, &str)>> = map_all(&ids, |&id| way(id).map_or(Vec::new(), |w| w.all_tags().collect()));
+    let tags_of = |osm_id: i64| -> &[(&str, &str)] {
+        ids.binary_search(&osm_id.abs()).map_or(&[][..], |i| &lists[i])
     };
-    for e in driving {
+    let tagged: Vec<bool> = map_all(driving, |e| {
+        tags_of(e.osm_id).iter().any(|(k, _)| LANE_TAGS.contains(k)) || overrides.contains(&e.osm_id.abs())
+    });
+    let inherited = inherit_lanes(driving, &tagged);
+    let rows = |edge_id: i64, lanes: Vec<Lane>| -> Vec<LaneRow> {
+        lanes
+            .into_iter()
+            .map(|l| LaneRow {
+                edge_id,
+                lane_num: l.lane_num,
+                use_: l.use_,
+                width_m: l.width_m,
+                turn: l.turn,
+                source: l.source,
+                width_source: l.width_source,
+            })
+            .collect()
+    };
+    // each edge alone, on all threads; the rows keep the order of the edges
+    let mut out: Vec<LaneRow> = map_all(driving, |e| {
         let w = way(e.osm_id);
-        let tags = tags_of(w);
-        let t = WayTags(&tags);
+        let tags = tags_of(e.osm_id);
+        let t = WayTags(tags);
         let dir = if e.is_reverse {
             "lanes:backward"
         } else {
@@ -417,7 +422,7 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
             end == Some(&e.target)
         });
         let lanes = lanes_of(
-            &tags,
+            tags,
             EdgeLanes {
                 reverse: e.is_reverse,
                 oneway: e.oneway,
@@ -429,11 +434,14 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
                 way_end,
             },
         );
-        push(e.edge_id, lanes);
-    }
+        rows(e.edge_id, lanes)
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     for e in bus {
-        let tags = tags_of(way(e.osm_id));
-        let t = WayTags(&tags);
+        let tags = tags_of(e.osm_id);
+        let t = WayTags(tags);
         // bikes share a bus-only edge: oneway:bicycle=no, a share_busway, or the edge is in the cycling network
         let shared = t.is("oneway:bicycle", "no")
             || input.cycling.contains(&e.edge_id)
@@ -441,7 +449,7 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
                 .iter()
                 .any(|k| t.is(k, "share_busway"));
         let lanes = lanes_of(
-            &tags,
+            tags,
             EdgeLanes {
                 reverse: e.is_reverse,
                 oneway: false,
@@ -453,9 +461,20 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
                 way_end: true,
             },
         );
-        push(e.edge_id, lanes);
+        out.extend(rows(e.edge_id, lanes));
     }
     Some(out)
+}
+
+/// `f` on each item, on all threads when the crate has rayon (the feature `pbf`), in the order of the items.
+fn map_all<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync + Send) -> Vec<R> {
+    #[cfg(feature = "pbf")]
+    {
+        use rayon::prelude::*;
+        items.par_iter().map(f).collect()
+    }
+    #[cfg(not(feature = "pbf"))]
+    items.iter().map(f).collect()
 }
 
 #[cfg(test)]
