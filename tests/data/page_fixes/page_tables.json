@@ -1,7 +1,7 @@
 {
  "page": {
   "changes": 8,
-  "commit": "062cda8be7d24589d72475cec902ff4dca9f880d"
+  "commit": "813da99b545662dc6c76bd02336078007ad37ce4"
  },
  "tables": {
   "cycling.edge_graph": {
@@ -466,33 +466,32 @@
     "osm_id": "b5b2ad2fa4b5443442f9e72f1e3b27e6",
     "osm_type": "ef3d4967bf2d8ca72ccc45a27971278a",
     "street": "e209989d60d37d97765daec3cddc5343",
-    "tags": "e7e5507f4c4821a83abea86c94c3988b",
     "wheelchair": "ae8cdb47fc3476071d73dabd090baf1b"
    },
    "n": 110,
-   "rows": "de8b55d6fff82d155c55c32d73cf2388"
+   "rows": "36403d4f10aef1d823db91cea867a397"
   },
   "main.building_faces": {
    "columns": {
     "azimuth_deg": "9dfddcb9f39fd642ceabb4c78f980e49",
     "building_id": "366d031829055acd345a9cdf33393743",
     "building_type": "3c1248cb900a711f8920d34b998ded54",
-    "computed_type": "5bb68ff40362642513a3c441659e9bae",
-    "distance_m": "3939073654e09d231cf30215f02b0c78",
+    "computed_type": "afeb9e39d025664ac5d832c2ea61e3aa",
+    "distance_m": "517f7222d8a6c02b6244be58748cb7c5",
     "door": "5eafd41c84bb0b86a322510981511025",
     "edited": "5d33c79ca21f78bc416870a64604c426",
     "face_index": "dc0bcdd94a7badfe43f240f68074d7b4",
-    "face_type": "c222315132f33b0e5673a514b62c681b",
+    "face_type": "606cf0597d9951bc87832b4219c9205a",
     "from_node": "074938717a845196c18e245132103820",
     "length_m": "99bce54f52771932ab80857d920ed86e",
-    "street_edge_id": "7f86214e3f81dcc248374d1adab110b9",
-    "street_name": "235ca5b09bd3c6a8497df5f93a40914d",
-    "street_osm_id": "da1f56896e7b985f0046c5cc1b225950",
+    "street_edge_id": "fd2b4fef70bd4ecd94beb5ac01d4876a",
+    "street_name": "cacc10a2325bc10eb06578a819dd0211",
+    "street_osm_id": "3de63986987e18b68af606832a3cee76",
     "to_node": "074938717a845196c18e245132103820",
-    "type_reason": "39bdd67233108d503f0dcea1c683a359"
+    "type_reason": "eaad3247532adab91055f1d0649673f6"
    },
    "n": 10857,
-   "rows": "2f8ed2cdc7971230e27686469d32bd1c"
+   "rows": "84fa718dac2fc459f87a49246cd7e602"
   },
   "main.building_info": {
    "columns": {

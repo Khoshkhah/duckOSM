@@ -199,11 +199,20 @@ so it is the peak until then).
 | 5. `raw.*` | 3.7 s | 1,868 MiB | 5.6 s | 3,625 MiB |
 | **All** | **37.9 s** | **4,624 MiB** | **55 s** | **3,625–4,095 MiB** |
 
-Online, the build with the layers and the faces is at the limit of 4 GB: it finished at 4,095 MiB in one run, and it
-stopped in another. The street filter of the building faces (duckOSM PR #118: only the street segments near a building,
-1.5 GB less natively) brings it to 3,506 MiB in two of two runs. Without the layers and the faces, the online build takes
-38 s and 2,510 MiB.
+The table above is the state before duckOSM PRs #118 and #120. They make the build smaller, with these changes:
 
-The largest remaining step of memory online is the drawing levels: roadstyle's `LevelEdges` grows its list one edge at
-a time (Kentucky: +960 MiB of WebAssembly memory). It needs a `reserve` in roadstyle-levels, and duckOSM's pin of
-roadstyle-levels is older than roadstyle main, whose levels API is different.
+- The drawing levels reserve the space of the edges of a mode before the edges are added (roadstyle-levels
+  `LevelEdges::reserve`). Before, the list doubled while it grew.
+- An edge and its reverse edge give their street segments one time. The faces kept only the first copy of a segment
+  before.
+- The faces take the list of the street segments, and free it and the map of the seen segments before the tree of the
+  streets is made.
+- The faces use only the street segments near a building (a grid of cells at least 150 m wide). The point of a wall on
+  a street is the nearest point of the nearest segment, so it does not depend on the order of the tree. This change
+  alters 1.38% of the face rows on Kentucky (the street of a wall) and 0.07% of the face types.
+
+| Kentucky | Before | After |
+|---|---|---|
+| Offline: time, peak heap | 37.9 s, 4,624 MiB | 35.9 s, 3,203 MiB |
+| Online with the layers and the faces | stopped at the limit of 4 GB in some runs | 55 s, 3,375 MiB (2 of 2 runs) |
+| Online without the layers | 38 s, 2,510 MiB | 38 s, 2,106 MiB |
