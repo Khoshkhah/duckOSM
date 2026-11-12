@@ -20,4 +20,5 @@ pub mod pbfraw;
 pub mod raw;
 pub mod sidewalks;
 pub mod speeds;
+pub mod spill;
 pub mod util;
