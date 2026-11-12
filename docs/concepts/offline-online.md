@@ -234,14 +234,14 @@ give the same rows.
 | Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores, 16 GB memory, internal SSD, macOS 27.2 |
 | Input | Kentucky cut from `us-south-latest.osm.pbf` (Geofabrik, 4.16 GB) with Geofabrik's border of the state, driving mode: 2,224,823 edges. This cut keeps each way with a node inside, whole, so it has more edges than `kentucky-latest.osm.pbf` |
 | Offline | `duckosm-rust us-south-latest.osm.pbf --boundary kentucky.geojson --modes driving --format geoparquet`, 12 threads, `cargo build --release --features heap-probe`. Memory: the peak of the Rust heap in the step. Time: the middle value of three runs |
-| Online | duckOSM Studio in Chromium (Playwright), 12 threads (the page uses the number of cores, at most 12), the area file and the temporary files of the network in OPFS. Memory: the WebAssembly memory after the step. It never gets smaller, so it is the peak up to that step. Two runs: the totals were the same to 0.1 s and the memory to 6 MiB |
+| Online | duckOSM Studio in Chromium (Playwright), 12 threads (the page uses the number of cores, at most 12), the area file and the temporary files of the network in OPFS. Memory: the WebAssembly memory after the step. It never gets smaller, so it is the peak up to that step. Three runs (the whole build: 45.8 to 46.5 s), the middle run; the other steps are from an earlier run of the same build |
 
 **The whole build:**
 
 | Kentucky, driving | Offline | Online |
 |---|---|---|
 | The network, area tables, levels and lane profile | 24.4 s, 2,161 MiB | 36.0 to 36.5 s, 2,130 MiB |
-| The same, with `raw.*`, the base-map layers and the building faces | 34.4 s, 3,228 MiB | 48.4 s, 3,255 MiB |
+| The same, with `raw.*`, the base-map layers and the building faces | 34.4 s, 3,228 MiB | 46.4 s, 3,256 MiB |
 
 A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with the layers has about 840 MiB free.
 
@@ -253,23 +253,22 @@ A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with 
 | 1. Ways, coordinates, turn restrictions | 1.0 s | 619 MiB | 1.5 s | 886 MiB |
 | 1. The raw part | 0.6 s | 1,423 MiB | 0.9 s | 1,702 MiB |
 | 2. Sidewalk rule, global junctions | 0.4 s | 1,455 MiB | 0.8 s | 1,702 MiB |
-| 3. The network of the mode | 4.9 s | 1,933 MiB | 9.6 s | 1,702 MiB |
+| 3. The network of the mode | 4.9 s | 1,933 MiB | 7.0 s | 1,702 MiB |
 | 4. Write the network files | 2.1 s | 2,085 MiB | 2.4 s | 2,350 MiB |
 | 5. Read back the edges, bus routes | 0.8 s | 2,755 MiB | 1.0 s | 2,368 MiB |
 | 5. Area tables, levels, lane profile | 4.2 s | 3,228 MiB | 3.4 s | 3,131 MiB |
 | 5. Building faces | 4.7 s | 2,817 MiB | 6.6 s | 3,131 MiB |
 | 5. `raw.*` (and online: join the parts of the files) | 2.7 s | 1,796 MiB | 4.8 s | 3,255 MiB |
-| **All** | **34.4 s** | **3,228 MiB** | **48.4 s** | **3,255 MiB** |
+| **All** | **34.4 s** | **3,228 MiB** | **46.4 s** | **3,256 MiB** |
 
 - Step 0 is the slowest step in both versions: it reads all of the 4.16 GB region file. Online, the file comes from
   OPFS in pieces, and each thread unpacks and decodes about 1.6 times slower than natively.
 - The area file has full blocks (3,053 for Kentucky). Before PR #122 it had one small block for each block of the region
   file (37,534), and each later step paid for each block.
-- Step 3 takes 7.0 to 9.7 s online and 4.9 to 8.5 s offline, with 8 and with 12 threads. Its sort of the edges by
-  `edge_id` writes sorted runs (about 580 MB) to temporary files. In some runs this writing paused for about 3 s (one
-  native run: 3.19 s, the other three: 0.11 s). The disk of the Mac was 96% full; a nearly full SSD can pause writes, but
-  this is not proved. The step does not wait for the allocator (0 spins on its lock). The table gives runs with the
-  pause online (both runs) and without it offline (the middle run).
+- Step 3 sorts the edges by `edge_id` and writes sorted runs (about 580 MB) to temporary files. When the disk of the
+  Mac was 96% full, this writing paused for about 3 s in some runs (one native run of four: 3.19 s, the others 0.11 s;
+  online, step 3 took up to 9.7 s). With 30 GB and more free, no run paused: 8 of 8 native runs and 3 of 3 online runs.
+  So keep free space on the disk for the temporary files of a large area.
 - Online, the memory in the last row includes the Parquet files of the result (2.6 GB in all), which stay in the tab
   memory until the page writes them to OPFS.
 - On 2026-11-12, at the start of this work, the offline build took 54.2 s and 17,206 MiB, and the online build
