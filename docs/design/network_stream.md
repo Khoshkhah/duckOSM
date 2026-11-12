@@ -154,6 +154,21 @@ Measured on the Mac mini, against `main`:
 All tables are equal on Monaco (38), Estonia (38) and Kentucky (20), with the same comparison as in part A. The build
 peak is now in `write the area tables`, which part F moves to DuckDB.
 
+## The levels take the edges (done)
+
+After the network files of a mode are written, the levels made a copy of the geometry of all edges, while the network
+was still in memory: this was the peak of the build. Now `LevelEdges::add` takes the edges, and their geometry moves into
+the level edges. The tags (`Arc<Attrs>`) are shared and only the five tags that the levels read are copied. The bus
+routes, which read the edges, run before.
+
+| Kentucky, driving | before | after |
+|---|---|---|
+| Peak heap of the build | 2726 MiB | 2347 MiB |
+| Live heap after the network | 1767 MiB | 1769 MiB |
+
+The live heap after the network (1.77 GB: the ways, the coordinates, the level edges, the lane edges and the nodes) stays
+until the levels and the lane profile are written. Part F reads them from DuckDB.
+
 ## The later parts
 
 | Part | Work | Gain (to measure) |
