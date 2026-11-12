@@ -7,7 +7,7 @@ use duckosm_core::fixes::OsmFixes;
 use duckosm_core::graph::Relation;
 use duckosm_core::lanes::LaneEdges;
 use duckosm_core::model::{Network, Way};
-use duckosm_core::network::{build_network_junctions, Coords, Options};
+use duckosm_core::network::{build_network_files, Coords, NetworkFiles, Options};
 use duckosm_core::osmjson::OsmJson;
 use duckosm_core::raw::Raw;
 use duckosm_core::{building_faces, cutfile, pbf, sidewalks};
@@ -226,10 +226,43 @@ pub fn write_tables<W: Write + Send>(
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
     let n = mode.name();
-    let mut out = |table: &str| file(&format!("{table}_{n}.parquet"));
     let oc = pq::EdgeCols::of(mode, opts);
-    pq::write_edges_to(out("edges")?, &net.edges, oc)?;
-    pq::write_edges_to(out("private_edges")?, &net.private_edges, oc)?;
+    pq::write_edges_to(file(&format!("edges_{n}.parquet"))?, &net.edges, oc)?;
+    pq::write_edges_to(file(&format!("private_edges_{n}.parquet"))?, &net.private_edges, oc)?;
+    write_other_tables(net, mode, opts, all_ways, file)
+}
+
+/// [`write_tables`] for a network with its edges in temporary files ([`build_network_files`]): the edge tables are
+/// written from the files, one row group at a time.
+pub fn write_tables_files<W: Write + Send>(
+    net: &mut NetworkFiles,
+    mode: Mode,
+    opts: &Options,
+    all_ways: &[Way],
+    mut file: impl FnMut(&str) -> Result<W, String>,
+) -> Result<(), String> {
+    use duckosm_parquet as pq;
+    let n = mode.name();
+    let oc = pq::EdgeCols::of(mode, opts);
+    let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
+    let rows = net.files.edges().map_err(err)?.map(|e| e.map_err(err));
+    pq::write_edges_iter_to(file(&format!("edges_{n}.parquet"))?, rows, oc)?;
+    let rows = net.files.private_edges().map_err(err)?.map(|e| e.map_err(err));
+    pq::write_edges_iter_to(file(&format!("private_edges_{n}.parquet"))?, rows, oc)?;
+    write_other_tables(&net.net, mode, opts, all_ways, file)
+}
+
+/// The tables of a network but `edges` and `private_edges`.
+fn write_other_tables<W: Write + Send>(
+    net: &Network,
+    mode: Mode,
+    opts: &Options,
+    all_ways: &[Way],
+    mut file: impl FnMut(&str) -> Result<W, String>,
+) -> Result<(), String> {
+    use duckosm_parquet as pq;
+    let n = mode.name();
+    let mut out = |table: &str| file(&format!("{table}_{n}.parquet"));
     pq::write_nodes_to(out("nodes")?, &net.nodes)?;
     // duckOSM: left over from its build and always empty (the virtual nodes are in `nodes`)
     pq::write_nodes_to(out("virtual_nodes")?, &[])?;
@@ -614,7 +647,7 @@ pub fn run<W: Write + Send>(
             None
         };
         let mut sink = |r| graph_file.as_mut().expect("a file when there is a graph").push(r);
-        let mut net = build_network_junctions(
+        let mut net = build_network_files(
             &ways,
             &coords,
             *mode,
@@ -628,8 +661,11 @@ pub fn run<W: Write + Send>(
             w.finish()?;
         }
         log.step(&format!("build {n}"));
-        write_tables(&net, *mode, opts, &ways, &mut file)?;
+        write_tables_files(&mut net, *mode, opts, &ways, &mut file)?;
         log.step(&format!("write geoparquet {n}"));
+        // the steps after the network still take the edges in memory (docs/design/network_stream.md, part B5)
+        let mut net = net.into_network()?;
+        log.step(&format!("read the edges {n}"));
         if let Some(res) = p.h3_resolution {
             let (nodes, edges) = h3::index(&net.nodes, &net.edges, res)?;
             duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes)?;

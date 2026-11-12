@@ -212,14 +212,9 @@ impl WayEnds {
     }
 }
 
-/// `turn_restrictions` and `turn_path_restrictions` of the driving mode (`RestrictionProcessor`).
-pub fn restrictions(
-    relations: &[Relation],
-    synthetic: &[TurnFix],
-    mw: &[ModeWay],
-    edges: &[Edge],
-) -> (Vec<TurnRestriction>, Vec<TurnPath>) {
-    let mut rule_ways: FxHashSet<i64> = relations
+/// The ways that the rules name (members of the relations, and the ways of the synthetic rules).
+fn rule_ways(relations: &[Relation], synthetic: &[TurnFix]) -> FxHashSet<i64> {
+    let mut ways: FxHashSet<i64> = relations
         .iter()
         .flat_map(|r| {
             r.members
@@ -229,8 +224,48 @@ pub fn restrictions(
         })
         .collect();
     for s in synthetic {
-        rule_ways.extend([s.from_way, s.to_way]);
+        ways.extend([s.from_way, s.to_way]);
     }
+    ways
+}
+
+/// The edges that [`restrictions`] reads (docs/design/network_stream.md, part B4): an edge at a via node, or with a way of a
+/// rule at one of its ends. `restrictions` on these edges gives the same rows as on all edges, so one read of the edges
+/// can collect them.
+pub struct RestrictionEdges {
+    ends: WayEnds,
+    via_nodes: FxHashSet<i64>,
+}
+
+impl RestrictionEdges {
+    pub fn new(relations: &[Relation], synthetic: &[TurnFix], mw: &[ModeWay]) -> Self {
+        let mut via_nodes: FxHashSet<i64> = relations
+            .iter()
+            .filter_map(|r| member(r, "via", MemberType::Node))
+            .collect();
+        via_nodes.extend(synthetic.iter().map(|s| s.via_node));
+        RestrictionEdges {
+            ends: WayEnds::new(mw, &rule_ways(relations, synthetic)),
+            via_nodes,
+        }
+    }
+
+    pub fn wants(&self, e: &Edge) -> bool {
+        self.via_nodes.contains(&e.source)
+            || self.via_nodes.contains(&e.target)
+            || !self.ends.source(e).is_empty()
+            || !self.ends.target(e).is_empty()
+    }
+}
+
+/// `turn_restrictions` and `turn_path_restrictions` of the driving mode (`RestrictionProcessor`).
+pub fn restrictions(
+    relations: &[Relation],
+    synthetic: &[TurnFix],
+    mw: &[ModeWay],
+    edges: &[Edge],
+) -> (Vec<TurnRestriction>, Vec<TurnPath>) {
+    let rule_ways = rule_ways(relations, synthetic);
     let ends = WayEnds::new(mw, &rule_ways);
     drop(rule_ways);
     // the rules with a via node: (rule, from way, via node, to way)
@@ -440,75 +475,118 @@ pub fn edge_graph_each(
     restrictions: Option<&[TurnRestriction]>,
     mut out: impl FnMut(GraphRow) -> Result<(), String>,
 ) -> Result<Vec<TurnPermission>, String> {
-    let own = match mode {
-        Mode::Driving => "car",
-        Mode::Walking => "walk",
-        Mode::Cycling => "bike",
-    };
     // the edges, and the private edges with a restricted access label: (edge, label)
-    let label = |e: &Edge| {
-        RESTRICTED_USES
-            .iter()
-            .copied()
-            .find(|u| e.access.as_deref() == Some(*u))
-    };
     let all: Vec<(&Edge, Option<&'static str>)> = edges
         .iter()
         .map(|e| (e, None))
-        .chain(
-            private_edges
-                .iter()
-                .filter_map(|e| label(e).map(|l| (e, Some(l)))),
-        )
+        .chain(private_edges.iter().filter_map(|e| restricted_label(e).map(|l| (e, Some(l)))))
         .collect();
-    // The edges that start at each node, with what a move reads of them, sorted by (source, edge_id): the moves of an
-    // edge are one slice, already in the order of to_edge, and the loop below reads no other edge (the edges are in the
-    // order of edge_id, so a look-up of each `all[j]` is a random read).
-    struct Next {
-        source: i64,
-        edge_id: i64,
-        start: f64, // the heading at the start, only for an edge on a bridge
-        label: Option<&'static str>,
-        bridge: bool,
+    let mut g = EdgeGraph::new(mode, restrictions);
+    for &(e, label) in &all {
+        g.add(e, label);
     }
-    let mut next: Vec<Next> = all
-        .iter()
-        .map(|&(e, label)| {
-            let bridge = on_bridge(e);
-            Next {
-                source: e.source,
-                edge_id: e.edge_id,
-                start: if bridge { headings(e).1 } else { 0.0 },
-                label,
-                bridge,
-            }
-        })
-        .collect();
-    next.sort_unstable_by_key(|n| (n.source, n.edge_id));
-    // node -> its slice of `next`: one look-up for each edge (a binary search in edge_id order reads ~20 random places)
-    let mut at: FxHashMap<i64, (usize, usize)> = FxHashMap::default();
-    for (k, n) in next.iter().enumerate() {
-        at.entry(n.source).or_insert((k, k)).1 = k + 1;
-    }
-    let starting_at = |node: i64| at.get(&node).map_or(&next[..0], |&(lo, hi)| &next[lo..hi]);
+    g.ready();
     // the edges in the order of their edge_id: the rows come out sorted by (from_edge, to_edge) (the edge ids are unique)
     let mut order: Vec<usize> = (0..all.len()).collect();
     order.sort_unstable_by_key(|&i| all[i].0.edge_id);
-    let mut by_from: FxHashMap<i64, Vec<&TurnRestriction>> = FxHashMap::default();
-    for tr in restrictions.unwrap_or(&[]) {
-        by_from.entry(tr.from_edge_id).or_default().push(tr);
-    }
-    let bans = |tr: &TurnRestriction, to: i64| {
-        (like_prefix(&tr.restriction_type, "no") && tr.to_edge_id == to)
-            || (like_prefix(&tr.restriction_type, "only") && tr.to_edge_id != to)
-    };
-    let mut permission = Vec::new();
-    let mut moves: Vec<GraphRow> = Vec::new();
     for i in order {
-        let (e1, l1) = all[i];
+        g.moves(all[i].0, all[i].1, &mut out)?;
+    }
+    Ok(g.finish())
+}
+
+/// The access label of a private edge that has rows in `edge_graph`, else `None`.
+pub fn restricted_label(e: &Edge) -> Option<&'static str> {
+    RESTRICTED_USES
+        .iter()
+        .copied()
+        .find(|u| e.access.as_deref() == Some(*u))
+}
+
+/// What a move reads of the next edge.
+struct Next {
+    source: i64,
+    edge_id: i64,
+    start: f64, // the heading at the start, only for an edge on a bridge
+    label: Option<&'static str>,
+    bridge: bool,
+}
+
+/// The edge graph of one mode, made in two reads of the edges (docs/design/network_stream.md, part B4):
+/// 1. [`EdgeGraph::add`] each edge of the mode (label `None`) and each private edge with a [`restricted_label`];
+///    the graph keeps only a compact list of the next edges (node, `edge_id`, label, bridge, heading), then
+///    [`EdgeGraph::ready`];
+/// 2. [`EdgeGraph::moves`] for the same edges in the order of their `edge_id` gives the rows, sorted by
+///    `(from_edge, to_edge)`; [`EdgeGraph::finish`] gives `turn_permission`.
+pub struct EdgeGraph<'r> {
+    own: &'static str,
+    // the edges that start at each node, sorted by (source, edge_id): the moves of an edge are one slice, already in the
+    // order of to_edge
+    next: Vec<Next>,
+    // node -> its slice of `next`: one look-up for each edge (a binary search in edge_id order reads ~20 random places)
+    at: FxHashMap<i64, (usize, usize)>,
+    restrictions: bool,
+    by_from: FxHashMap<i64, Vec<&'r TurnRestriction>>,
+    permission: Vec<TurnPermission>,
+    moves: Vec<GraphRow>,
+}
+
+impl<'r> EdgeGraph<'r> {
+    pub fn new(mode: Mode, restrictions: Option<&'r [TurnRestriction]>) -> Self {
+        let own = match mode {
+            Mode::Driving => "car",
+            Mode::Walking => "walk",
+            Mode::Cycling => "bike",
+        };
+        let mut by_from: FxHashMap<i64, Vec<&TurnRestriction>> = FxHashMap::default();
+        for tr in restrictions.unwrap_or(&[]) {
+            by_from.entry(tr.from_edge_id).or_default().push(tr);
+        }
+        EdgeGraph {
+            own,
+            next: Vec::new(),
+            at: FxHashMap::default(),
+            restrictions: restrictions.is_some(),
+            by_from,
+            permission: Vec::new(),
+            moves: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, e: &Edge, label: Option<&'static str>) {
+        let bridge = on_bridge(e);
+        self.next.push(Next {
+            source: e.source,
+            edge_id: e.edge_id,
+            start: if bridge { headings(e).1 } else { 0.0 },
+            label,
+            bridge,
+        });
+    }
+
+    pub fn ready(&mut self) {
+        self.next.shrink_to_fit();
+        self.next.sort_unstable_by_key(|n| (n.source, n.edge_id));
+        for (k, n) in self.next.iter().enumerate() {
+            self.at.entry(n.source).or_insert((k, k)).1 = k + 1;
+        }
+    }
+
+    /// The rows of the moves from `e1` (with its label), sorted by `to_edge`.
+    pub fn moves(
+        &mut self,
+        e1: &Edge,
+        l1: Option<&'static str>,
+        out: &mut impl FnMut(GraphRow) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let bans = |tr: &TurnRestriction, to: i64| {
+            (like_prefix(&tr.restriction_type, "no") && tr.to_edge_id == to)
+                || (like_prefix(&tr.restriction_type, "only") && tr.to_edge_id != to)
+        };
         let end = if on_bridge(e1) { headings(e1).0 } else { 0.0 };
-        moves.clear();
-        for e2 in starting_at(e1.target) {
+        let starting_at = self.at.get(&e1.target).map_or(&self.next[..0], |&(lo, hi)| &self.next[lo..hi]);
+        self.moves.clear();
+        for e2 in starting_at {
             if e1.edge_id == e2.edge_id {
                 continue;
             }
@@ -521,31 +599,31 @@ pub fn edge_graph_each(
                             continue;
                         }
                     }
-                    own
+                    self.own
                 }
                 (Some(a), Some(b)) if a != b => continue, // no user takes two different restricted edges
                 (Some(a), _) | (None, Some(a)) => a,
             };
-            moves.push(GraphRow {
+            self.moves.push(GraphRow {
                 from_edge: e1.edge_id,
                 to_edge: e2.edge_id,
                 cost: e1.cost_s,
                 uses,
             });
         }
-        let trs = if restrictions.is_some() {
-            by_from.get(&e1.edge_id).map_or(&[][..], |v| v.as_slice())
+        let trs = if self.restrictions {
+            self.by_from.get(&e1.edge_id).map_or(&[][..], |v| v.as_slice())
         } else {
             &[][..]
         };
-        for g in moves.drain(..) {
+        for g in self.moves.drain(..) {
             // what edge_graph will not say, recorded before it changes
             for tr in trs {
                 if !bans(tr, g.to_edge) {
                     continue;
                 }
                 if tr.applies_to.is_none() && tr.condition.is_none() && tr.except_vehicles.is_some() {
-                    permission.push(TurnPermission {
+                    self.permission.push(TurnPermission {
                         from_edge: g.from_edge,
                         to_edge: g.to_edge,
                         allowed: true,
@@ -555,7 +633,7 @@ pub fn edge_graph_each(
                         restriction_id: tr.restriction_id,
                     });
                 } else if tr.applies_to.is_some() || tr.condition.is_some() {
-                    permission.push(TurnPermission {
+                    self.permission.push(TurnPermission {
                         from_edge: g.from_edge,
                         to_edge: g.to_edge,
                         allowed: false,
@@ -574,9 +652,14 @@ pub fn edge_graph_each(
                 out(g)?;
             }
         }
+        Ok(())
     }
-    permission.sort();
-    Ok(permission)
+
+    /// `turn_permission`, sorted.
+    pub fn finish(mut self) -> Vec<TurnPermission> {
+        self.permission.sort();
+        self.permission
+    }
 }
 
 impl Graph {
