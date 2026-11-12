@@ -13,6 +13,7 @@ const SIDE_M: f64 = 12.0; // a sidewalk line this near the road line can be its 
 const STEP_M: f64 = 5.0; // one spot every this many metres along the road
 const ANGLE_DEG: f64 = 30.0; // the sidewalk runs within this angle of the road
 const SHARE: f64 = 0.6; // a side has a sidewalk when this share of the spots find one there
+const GROUP: usize = 16; // the segments of a line in groups of this many, each with a box (Line::locate)
 
 const CAR_ROADS: [&str; 15] = [
     "residential",
@@ -52,6 +53,8 @@ type P = (f64, f64);
 struct Line {
     pts: Vec<P>,
     cum: Vec<f64>, // distance along the line at each vertex
+    /// the segments in groups of `GROUP`: (the box of the group's points, its first segment, its end)
+    groups: Vec<((f64, f64, f64, f64), usize, usize)>,
     kind: u8,      // 2 sidewalk line, 1 road without a sidewalk tag, 0 other car road
     ow: i32,       // one-way: 1, -1 (against the line), 0
     lvl: i32,      // level: layer, else tunnel -1, bridge 1
@@ -66,10 +69,9 @@ impl Line {
     fn interp(&self, d: f64) -> P {
         let n = self.pts.len();
         let d = d.clamp(0.0, self.len());
-        let mut i = 0;
-        while i + 2 < n && d > self.cum[i + 1] {
-            i += 1;
-        }
+        // the first segment that ends at or after `d` (else the last): a binary search on the sorted distances, not a
+        // walk from the start of the line, which made the rule take points x spots on each road
+        let i = self.cum[1..n - 1].partition_point(|&c| d > c);
         let (a, b) = (self.pts[i], self.pts[i + 1]);
         let seg = self.cum[i + 1] - self.cum[i];
         if d >= self.cum[i + 1] || seg == 0.0 {
@@ -79,10 +81,10 @@ impl Line {
         (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
     }
 
-    /// Distance along the line of the point nearest to `p` (the first nearest segment).
-    fn locate(&self, p: P) -> f64 {
-        let mut best = (f64::INFINITY, 0.0);
-        for i in 0..self.pts.len() - 1 {
+    /// The nearest point to `p` on the segments `first..end`: `best` gets (squared distance, distance along the line)
+    /// when a segment is strictly nearer, so the first nearest segment wins.
+    fn nearest_in(&self, p: P, first: usize, end: usize, best: &mut (f64, f64)) {
+        for i in first..end {
             let (a, b) = (self.pts[i], self.pts[i + 1]);
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
             let l2 = dx * dx + dy * dy;
@@ -94,44 +96,52 @@ impl Line {
             let q = (a.0 + dx * t, a.1 + dy * t);
             let d2 = (p.0 - q.0).powi(2) + (p.1 - q.1).powi(2);
             if d2 < best.0 {
-                best = (d2, self.cum[i] + t * l2.sqrt());
+                *best = (d2, self.cum[i] + t * l2.sqrt());
             }
         }
-        best.1
     }
 
-    fn dist(&self, p: P) -> f64 {
-        let q = self.interp(self.locate(p));
-        ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt()
-    }
-
-    fn envelope(&self) -> AABB<P> {
-        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        for p in &self.pts {
-            x0 = x0.min(p.0);
-            y0 = y0.min(p.1);
-            x1 = x1.max(p.0);
-            y1 = y1.max(p.1);
-        }
-        AABB::from_corners((x0, y0), (x1, y1))
-    }
-
-    /// Does the segment `a-b` touch the line?
-    fn touched_by(&self, a: P, b: P) -> bool {
-        self.pts.windows(2).any(|w| segments_meet(a, b, w[0], w[1]))
-    }
 }
 
-struct Item {
+/// A group of segments of a line (`Line::groups`) in a tree: a spot reads only the groups near it, not whole lines.
+struct Group {
     env: AABB<P>,
-    idx: usize,
+    line: usize,
+    group: usize,
 }
 
-impl RTreeObject for Item {
+impl RTreeObject for Group {
     type Envelope = AABB<P>;
     fn envelope(&self) -> Self::Envelope {
         self.env
     }
+}
+
+/// The lines with a group in `env`, each once, sorted by line, with their groups in `env` in the order of the line.
+fn groups_in(tree: &RTree<Group>, env: &AABB<P>, buf: &mut Vec<(usize, usize)>) {
+    buf.clear();
+    buf.extend(tree.locate_in_envelope_intersecting(env).map(|g| (g.line, g.group)));
+    buf.sort_unstable();
+}
+
+/// For each line in `found` (from [`groups_in`]): the line, its distance to `p` and the distance along it of its
+/// nearest point. Only the segments of the found groups are read. When a line is within `r` of `p`, its nearest
+/// segments are in found groups (their boxes are within `r`), so the first nearest segment is that of the whole line.
+fn nearest_lines<'a>(
+    lines: &'a [Line],
+    found: &'a [(usize, usize)],
+    p: P,
+) -> impl Iterator<Item = (usize, f64, f64)> + 'a {
+    found.chunk_by(|a, b| a.0 == b.0).map(move |gs| {
+        let line = &lines[gs[0].0];
+        let mut best = (f64::INFINITY, 0.0);
+        for &(_, g) in gs {
+            let (_, first, end) = line.groups[g];
+            line.nearest_in(p, first, end, &mut best);
+        }
+        let q = line.interp(best.1);
+        (gs[0].0, ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt(), best.1)
+    })
 }
 
 fn orient(a: P, b: P, c: P) -> f64 {
@@ -255,7 +265,19 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             } else {
                 0
             };
+            let groups = (0..pts.len() - 1)
+                .step_by(GROUP)
+                .map(|first| {
+                    let end = (first + GROUP).min(pts.len() - 1);
+                    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+                    for q in &pts[first..=end] {
+                        (x0, y0, x1, y1) = (x0.min(q.0), y0.min(q.1), x1.max(q.0), y1.max(q.1));
+                    }
+                    ((x0, y0, x1, y1), first, end)
+                })
+                .collect();
             Line {
+                groups,
                 pts,
                 cum,
                 kind: *kind,
@@ -264,22 +286,22 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             }
         })
         .collect();
-    let item = |i: usize| Item {
-        env: lines[i].envelope(),
-        idx: i,
+    let tree = |side: bool| {
+        RTree::bulk_load(
+            (0..lines.len())
+                .filter(|&i| (lines[i].kind == 2) == side)
+                .flat_map(|i| {
+                    lines[i].groups.iter().enumerate().map(move |(g, &((x0, y0, x1, y1), ..))| Group {
+                        env: AABB::from_corners((x0, y0), (x1, y1)),
+                        line: i,
+                        group: g,
+                    })
+                })
+                .collect(),
+        )
     };
-    let side_tree = RTree::bulk_load(
-        (0..lines.len())
-            .filter(|&i| lines[i].kind == 2)
-            .map(item)
-            .collect(),
-    );
-    let car_tree = RTree::bulk_load(
-        (0..lines.len())
-            .filter(|&i| lines[i].kind != 2)
-            .map(item)
-            .collect(),
-    );
+    let (side_tree, car_tree) = (tree(true), tree(false));
+    let (mut near_groups, mut crossing) = (Vec::new(), Vec::new());
     let around = |p: P, r: f64| AABB::from_corners((p.0 - r, p.1 - r), (p.0 + r, p.1 + r));
     let cos_a = ANGLE_DEG.to_radians().cos();
 
@@ -309,12 +331,12 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             let (mut left, mut right) = (false, false);
 
             // each sidewalk line near the spot
-            for it in side_tree.locate_in_envelope_intersecting(&around(pt, SIDE_M)) {
-                let sw = &lines[it.idx];
-                if sw.dist(pt) > SIDE_M {
+            groups_in(&side_tree, &around(pt, SIDE_M), &mut near_groups);
+            for (i, dd, loc) in nearest_lines(&lines, &near_groups, pt) {
+                let sw = &lines[i];
+                if dd > SIDE_M {
                     continue;
                 }
-                let loc = sw.locate(pt);
                 let near = sw.interp(loc);
                 let v = (near.0 - pt.0, near.1 - pt.1);
                 let side = sign(t.0 * v.1 - t.1 * v.0);
@@ -329,12 +351,15 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
                     continue;
                 }
                 // no other car road between the spot and the sidewalk
-                let blocked = car_tree
-                    .locate_in_envelope_intersecting(&AABB::from_corners(
-                        (pt.0.min(near.0), pt.1.min(near.1)),
-                        (pt.0.max(near.0), pt.1.max(near.1)),
-                    ))
-                    .any(|c| c.idx != k && lines[c.idx].touched_by(pt, near));
+                groups_in(
+                    &car_tree,
+                    &AABB::from_corners((pt.0.min(near.0), pt.1.min(near.1)), (pt.0.max(near.0), pt.1.max(near.1))),
+                    &mut crossing,
+                );
+                let blocked = crossing.iter().any(|&(c, g)| {
+                    let (_, first, end) = lines[c].groups[g];
+                    c != k && lines[c].pts[first..=end].windows(2).any(|w| segments_meet(pt, near, w[0], w[1]))
+                });
                 if !blocked {
                     if side > 0.0 {
                         left = true;
@@ -345,12 +370,12 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             }
 
             // the other half of a dual carriageway
-            for it in car_tree.locate_in_envelope_intersecting(&around(pt, SIDE_M)) {
-                let c = &lines[it.idx];
-                if it.idx == k || c.dist(pt) > SIDE_M {
+            groups_in(&car_tree, &around(pt, SIDE_M), &mut near_groups);
+            for (i, cdd, cl) in nearest_lines(&lines, &near_groups, pt) {
+                let c = &lines[i];
+                if i == k || cdd > SIDE_M {
                     continue;
                 }
-                let cl = c.locate(pt);
                 let cn = c.interp(cl);
                 let cv = (cn.0 - pt.0, cn.1 - pt.1);
                 let cside = sign(t.0 * cv.1 - t.1 * cv.0);
