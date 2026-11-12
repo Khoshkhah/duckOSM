@@ -26,6 +26,8 @@ pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
 
 pub use duckosm_core::filter::Mode as NetworkMode;
 pub use duckosm_core::network::Options as NetworkOptions;
+/// The hook of the sub-steps of the network step (the memory probe).
+pub use duckosm_core::util::STEP_HOOK;
 pub use levels::Method as LevelsMethod;
 
 /// What to build and write.
@@ -612,7 +614,7 @@ pub fn run<W: Write + Send>(
             None
         };
         let mut sink = |r| graph_file.as_mut().expect("a file when there is a graph").push(r);
-        let net = build_network_junctions(
+        let mut net = build_network_junctions(
             &ways,
             &coords,
             *mode,
@@ -667,13 +669,14 @@ pub fn run<W: Write + Send>(
         // duckOSM: the arrows of the fixes go into the raw tags after this mode, so the next modes see them
         fixes.set_arrows(&mut ways, &net.ways, *mode);
         lane_edges.add(*mode, &net);
-        if p.levels != LevelsMethod::None {
-            level_edges.add(*mode, false, &net.edges);
-            level_edges.add(*mode, true, &net.private_edges);
-        }
         if let Some(r) = raw.as_ref().filter(|_| *mode == Mode::Driving && bus) {
             sum.bus_routes = Some(write_bus(r, &net, &mut file)?);
             log.step("bus routes");
+        }
+        // the last use of the edges of this mode: the levels take them
+        if p.levels != LevelsMethod::None {
+            level_edges.add(*mode, false, std::mem::take(&mut net.edges));
+            level_edges.add(*mode, true, std::mem::take(&mut net.private_edges));
         }
         mode_nodes.push((*mode, net.nodes));
     }

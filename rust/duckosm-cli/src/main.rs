@@ -260,6 +260,8 @@ mod heap {
 fn main() {
     #[cfg(feature = "heap-probe")]
     duckosm_build::set_progress(Some(Box::new(heap::report)));
+    #[cfg(feature = "heap-probe")]
+    let _ = duckosm_build::STEP_HOOK.set(heap::report);
     let args: Vec<String> = std::env::args().collect();
     // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
