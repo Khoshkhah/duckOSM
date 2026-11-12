@@ -231,10 +231,13 @@ pub struct BuildingFace {
     /// The street that the wall faces (None when no street is near it and aligned).
     pub street_osm_id: Option<i64>,
     pub street_edge_id: Option<i64>,
-    pub street_name: Option<String>,
+    /// Shared with the street segments (no copy for each wall).
+    pub street_name: Option<Arc<str>>,
     pub distance_m: Option<f32>,
     /// The two ends, in (lon, lat).
-    pub geometry: Vec<Pt>,
+    /// The two ends of the wall. A fixed size: a face has no object of its own on the heap, so a part of faces that the threads
+    /// make and the writer frees leaves no small blocks behind (the allocator of the browser build keeps them on the thread that frees).
+    pub geometry: [Pt; 2],
 }
 
 type P = (f64, f64);
@@ -776,7 +779,7 @@ pub fn building_faces_each(
                     street_edge_id: None,
                     street_name: None,
                     distance_m: None,
-                    geometry: vec![pts[i], pts[i + 1]],
+                    geometry: [pts[i], pts[i + 1]],
                 });
             }
             return out;
@@ -968,9 +971,9 @@ pub fn building_faces_each(
                 azimuth_deg: w.azimuth as f32,
                 street_osm_id: street.map(|s| s.osm_id),
                 street_edge_id: street.map(|s| s.edge_id),
-                street_name: street.and_then(|s| s.name.as_deref().map(str::to_string)),
+                street_name: street.and_then(|s| s.name.clone()),
                 distance_m: street.map(|s| s.dist as f32),
-                geometry: vec![w.p1, w.p2],
+                geometry: [w.p1, w.p2],
             });
         }
         out
