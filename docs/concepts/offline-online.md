@@ -106,13 +106,69 @@ flowchart TB
 | **0. Cut to the area** | A whole-file build has no cut. An area with a boundary: the Rust cut reads the file and keeps the area in **memory**. | Always. The Rust cut reads the region file **in blocks**, from OPFS, and keeps the ways, the coordinates and `raw.*` of the area in **tab memory, to the end**. |
 | **1. Read the file** | The highway ways, the coordinates of their nodes and the turn restrictions: read **in blocks**, kept in **memory to the end**, because the network, the area tables, the levels and the lane profile read them again. | Part of the cut (step 0). |
 | **2. Sidewalk rule, global junctions** | Work on the ways in **memory**. The junction set is made one time for all modes, in **memory**. | The same, in tab memory. |
-| **3. Network of each mode** | All edges, nodes and the edge graph of the mode are in **memory** at the same time. The memory of a mode is free again when the mode is written; the largest mode sets the peak. | The same code, in **tab memory**, inside the 4 GB of the module. |
+| **3. Network of each mode** | The edges and the nodes of the mode are in **memory** until the mode is written. The rows of the edge graph go to the file while they are made. The largest mode sets the peak. See [step 3 in detail](#step-3-in-detail-the-network-of-a-mode). | The same code, in **tab memory**, inside the 4 GB of the module. The rows of the edge graph go to Parquet bytes in tab memory. |
 | **4. Write the network files** | GeoParquet files to **storage**, from the network in memory. | Parquet files as bytes in **tab memory**. |
 | **5. Area tables, levels, lane profile** | Read the ways and the coordinates in **memory**; write files to **storage**. | The same, files as bytes in **tab memory**. |
 | **6. The tables** | DuckDB reads the GeoParquet files into the `.duckdb` file in **storage**. It uses its `memory_limit` and **spills** what is more. | The page gives each file to DuckDB-Wasm, which takes a **copy** into its own memory. So each file is two times in memory: the page keeps its copy for the download. |
 | **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: from the cut, through Parquet files. | From the cut, as Parquet bytes in tab memory, then a copy in DuckDB-Wasm. |
 | **The base-map layers** | An area: `features.sql` runs in DuckDB on `raw.*`; it **spills**. | `features.sql` runs in DuckDB-Wasm on the `raw_*` files in its memory. |
 | **The result** | The `.duckdb` file in **storage**. | The tables in DuckDB-Wasm (**memory**). **Save** writes the Parquet files to **OPFS**; **Export** copies the tables into a `.duckdb` file to download. |
+
+## Step 3 in detail: the network of a mode
+
+The network step runs one time for each mode (driving, walking, cycling). The offline and the online build run the same
+Rust code. Only the place of the files is different: offline they go to the disk, online they stay as bytes in the
+memory of the tab.
+
+```mermaid
+flowchart TB
+    IN("ways, coordinates,<br/>junction set<br/>[memory, to the end]")
+    S0["<b>Mode filter</b><br/>ways of the mode,<br/>OSM fixes,<br/>local junctions"]
+    S1["<b>1. Cut</b><br/>each way into<br/>forward edges"]
+    M1("forward edges<br/>[memory]")
+    S2["<b>2b. Merge chains</b><br/><b>3–4. Split arcs</b><br/>parallel and<br/>antiparallel"]
+    S5["<b>5. Reverse edges</b><br/><b>6. edge_id</b><br/><b>7. Lengths</b>"]
+    M5("all edges and nodes<br/>of the mode<br/>[memory, until written]")
+    S8["<b>8. Nodes</b><br/><b>8b. Path connectors</b><br/><b>8c. Speeds</b>"]
+    S9["<b>9. Private roads</b><br/><b>10. Largest part</b><br/><b>9b. Turn restrictions</b>"]
+    S9b["<b>9b2. Edge graph</b><br/>the moves of each edge,<br/>in edge_id order"]
+    W["<b>Write the</b><br/><b>network files</b>"]
+    LV["<b>Levels</b><br/>take the edges<br/>(no copy)"]
+    F1[("offline:<br/>GeoParquet files<br/>[storage]")]
+    F2("online:<br/>Parquet bytes<br/>[tab memory]")
+
+    IN --> S0 --> S1 --> M1 --> S2 --> S5 --> M5
+    M5 --> S8 --> S9 --> S9b
+    S9b -- "rows, while made" --> W
+    M5 -- "after the mode" --> W
+    W --> F1
+    W --> F2
+    W --> LV
+
+    classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
+    classDef mem fill:#ef444433,stroke:#ef4444,stroke-width:2px
+    class F1 disk
+    class IN,M1,M5,F2 mem
+```
+
+The memory of each sub-step, measured on Kentucky (driving, 2.1 million edges) on a Mac mini. The values are the live
+Rust heap after the sub-step (cargo feature `heap-probe` of `duckosm-cli`):
+
+| Sub-step | What it reads | What it keeps | Kentucky, change of live heap |
+|---|---|---|---|
+| Mode filter, local junctions | the ways | the ways of the mode, the local junctions | +347 MiB |
+| 1. Cut | the ways of the mode, the coordinates, the junctions | the forward edges, with their nodes and geometry; the local junctions are free after it | +509 MiB |
+| 2b. Merge chains | the forward edges at each node | longer edges, the map of the old edge ids | 0 (peak +155 MiB) |
+| 3–4. Split arcs | the edges with the same way and end nodes | the edges, some cut in two | −142 MiB |
+| 5. Reverse edges | each two-way edge | a reversed copy of the edge | +362 MiB |
+| 6–8c. edge_id, lengths, nodes, connectors, speeds | each edge; the edges at each node | the nodes; values on the edges | +23 MiB |
+| 9, 10, 9b. Private roads, largest part, turn restrictions | the end nodes of all edges | fewer edges | −7 MiB |
+| 9b2. Edge graph | the edges that start at each node | nothing: the rows go to the file | 0 (peak +303 MiB) |
+
+After the mode, 1.5 GB is live on Kentucky: the ways and the coordinates (0.4 GB, kept for the next modes and the
+later steps) and the edges and the nodes of the mode (1.1 GB). The network files are then written, and the levels take
+the edges. The edges are the largest part, so the next work moves them to storage (see
+[What changes next](#what-changes-next)).
 
 ## The limits today
 
