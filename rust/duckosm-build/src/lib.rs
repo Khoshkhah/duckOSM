@@ -902,7 +902,7 @@ pub fn run<W: Write + Send>(
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
         let (mut faces, mut buildings, mut last) = (0, 0, None);
-        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits, |part| {
+        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, std::mem::take(&mut streets), &fixes.face_edits, |part| {
             faces += part.len();
             for f in &part {
                 buildings += usize::from(last != Some(f.building_id));
@@ -911,7 +911,6 @@ pub fn run<W: Write + Send>(
             w.write(&part)
         })?;
         w.close()?;
-        drop(std::mem::take(&mut streets));
         sum.building_faces = Some((faces, buildings));
         log.step("building faces");
     }
