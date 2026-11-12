@@ -7,7 +7,7 @@ use duckosm_core::fixes::OsmFixes;
 use duckosm_core::graph::Relation;
 use duckosm_core::lanes::LaneEdges;
 use duckosm_core::model::{Network, Way};
-use duckosm_core::network::{build_network_with, Coords, Options};
+use duckosm_core::network::{build_network_junctions, Coords, Options};
 use duckosm_core::osmjson::OsmJson;
 use duckosm_core::raw::Raw;
 use duckosm_core::{building_faces, cutfile, pbf, sidewalks};
@@ -565,9 +565,16 @@ pub fn run<W: Write + Send>(
     let mut level_edges = LevelEdges::default();
     let mut lane_edges = LaneEdges::default();
     let mut streets: Vec<building_faces::Street> = Vec::new();
+    // the global junctions depend only on the ways: one time for all modes and for main.global_junctions
+    let junctions = if opts.global_junctions {
+        duckosm_core::network::global_junctions(&ways)
+    } else {
+        Default::default()
+    };
+    log.step("global junctions");
     for mode in &p.modes {
         let n = mode.name();
-        let net = build_network_with(&ways, &coords, *mode, opts, fixes, &relations)?;
+        let net = build_network_junctions(&ways, &coords, *mode, opts, fixes, &relations, &junctions)?;
         log.step(&format!("build {n}"));
         write_tables(&net, *mode, opts, &ways, &mut file)?;
         log.step(&format!("write geoparquet {n}"));
@@ -703,6 +710,7 @@ pub fn run<W: Write + Send>(
         ways: &ways,
         coords: &coords,
         nodes: &mode_nodes,
+        junctions: &junctions,
         opts,
         built_at,
         timezone_entry: p.timezone_entry.as_deref(),

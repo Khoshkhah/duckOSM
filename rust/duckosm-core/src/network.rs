@@ -256,14 +256,29 @@ pub fn build_network_with(
     fixes: &OsmFixes,
     relations: &[Relation],
 ) -> Result<Network, String> {
-    let mut stats = Stats {
-        ways_read: all_ways.len(),
-        ..Default::default()
-    };
     let gj = if opts.global_junctions {
         global_junctions(all_ways)
     } else {
         FxHashMap::default()
+    };
+    build_network_junctions(all_ways, coords, mode, opts, fixes, relations, &gj)
+}
+
+/// [`build_network_with`] with the global junctions given: `global_junctions(all_ways)`, or an empty map when
+/// `opts.global_junctions` is off. A build of several modes computes them one time for all modes and for the table
+/// `main.global_junctions` (they depend only on the ways, not on the mode).
+pub fn build_network_junctions(
+    all_ways: &[Way],
+    coords: &Coords,
+    mode: Mode,
+    opts: &Options,
+    fixes: &OsmFixes,
+    relations: &[Relation],
+    gj: &FxHashMap<i64, bool>,
+) -> Result<Network, String> {
+    let mut stats = Stats {
+        ways_read: all_ways.len(),
+        ..Default::default()
     };
     let mut mw: Vec<ModeWay> = all_ways
         .iter()
@@ -350,14 +365,13 @@ pub fn build_network_with(
     // 2b. Merge the chains of edges that are one road.
     let mut edge_id_map: Vec<MapRow> = Vec::new();
     if opts.merge_segments {
-        let (merged, map, n_chains, n_pieces) = merge_chains(fwd, &gj, coords);
+        let (merged, map, n_chains, n_pieces) = merge_chains(fwd, gj, coords);
         fwd = merged;
         edge_id_map = map;
         stats.merged_chains = n_chains;
         stats.merged_pieces = n_pieces;
     }
 
-    drop(gj);
     crate::util::step("start of step 3: Split same-direction parallel arcs (all");
     // 3. Split same-direction parallel arcs (all but the shortest of each group).
     // The map lives in a block: with one vector for each key it is as large as the edges, and it is not needed after the split.

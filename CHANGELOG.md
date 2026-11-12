@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The Rust build computes the global junctions one time** (`duckosm-core`, `build_network_junctions`). Before, it computed them for each mode and again for
+  `main.global_junctions`. The output is the same. The gain is small (the junctions take 0.06 s for Estonia, 0.19 s for Kentucky, on a Mac mini); the change
+  lets a later step give the network step the junctions from DuckDB (`docs/design/streaming_load.md`, stage 4).
+
 - **`read_osm`, the load of `raw.*` in Rust** (`duckosm-duckdb`, `docs/design/streaming_load.md`). A DuckDB table function, `read_osm(path, kind)`, gives the
   nodes, the ways or the relations of a `.osm.pbf` file with the columns and the types of `ST_READOSM`, and DuckDB calls it from all its threads. A whole-file
   build of `duckosm-rust` now has `raw.nodes`, `raw.ways` and `raw.relations` (before: none), and it reads `options.memory_limit` and `options.threads` for this
