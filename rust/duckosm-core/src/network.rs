@@ -203,13 +203,38 @@ impl Pos {
     }
 }
 
-/// [`Fwd`] in a temporary file.
+/// [`Fwd`] in a temporary file. The way and `Pos` come first, at fixed places, so a sort can read its key with no
+/// decode of the edge (`spill::sort_bytes`).
 #[derive(Default)]
 struct FwdCodec(EdgeCodec);
 
+/// The bytes of the way and of `Pos` at the start of a row of [`FwdCodec`].
+const FWD_HEAD: usize = 30;
+
+impl FwdCodec {
+    fn pos(mut b: &[u8]) -> Pos {
+        let b = &mut b;
+        get_u32(b); // the way
+        let group = take::<1>(b)[0];
+        let (first, start, end, walk) = (get_u32(b), get_i64(b), get_i64(b), get_u32(b));
+        let half = take::<1>(b)[0];
+        Pos {
+            group,
+            first,
+            start,
+            end,
+            walk,
+            half,
+        }
+    }
+
+    fn osm_id(b: &[u8]) -> i64 {
+        EdgeCodec::osm_id(&b[FWD_HEAD..])
+    }
+}
+
 impl Codec<Fwd> for FwdCodec {
     fn put(&self, f: &Fwd, o: &mut Vec<u8>) {
-        self.0.put(&f.e, o);
         let p = &f.pos;
         put_u32(o, f.way as u32);
         o.push(p.group);
@@ -218,25 +243,17 @@ impl Codec<Fwd> for FwdCodec {
         put_i64(o, p.end);
         put_u32(o, p.walk);
         o.push(p.half);
+        self.0.put(&f.e, o);
     }
 
     fn get(&self, b: &mut &[u8]) -> Fwd {
-        let e = self.0.get(b);
-        let way = get_u32(b) as usize;
-        let group = take::<1>(b)[0];
-        let (first, start, end, walk) = (get_u32(b), get_i64(b), get_i64(b), get_u32(b));
-        let half = take::<1>(b)[0];
+        let way = u32::from_le_bytes(b[..4].try_into().unwrap()) as usize;
+        let pos = FwdCodec::pos(b);
+        *b = &b[FWD_HEAD..];
         Fwd {
-            e,
+            e: self.0.get(b),
             way,
-            pos: Pos {
-                group,
-                first,
-                start,
-                end,
-                walk,
-                half,
-            },
+            pos,
         }
     }
 }
@@ -250,6 +267,19 @@ struct End {
 }
 
 struct EndCodec;
+
+/// A node id in a temporary file.
+struct IdCodec;
+
+impl Codec<i64> for IdCodec {
+    fn put(&self, n: &i64, o: &mut Vec<u8>) {
+        put_i64(o, *n);
+    }
+
+    fn get(&self, b: &mut &[u8]) -> i64 {
+        get_i64(b)
+    }
+}
 
 impl Codec<End> for EndCodec {
     fn put(&self, h: &End, o: &mut Vec<u8>) {
@@ -601,15 +631,15 @@ pub fn build_network_junctions(
     // 3 to 7. Split the parallel and antiparallel arcs, add the reverse edges, set edge_id, edge_ref and the length. The
     // steps read the forward edges of one way (one osm_id) at a time: the keys of steps 3, 4 and 6 contain osm_id.
     let raw_refs: FxHashMap<i64, &Vec<i64>> = all_ways.iter().map(|w| (w.id, &w.refs)).collect();
-    let by_way = spill::sort(
+    let by_way = spill::sort_bytes(
         fwd,
-        &codec,
-        |f: &Fwd| (f.e.osm_id, f.pos),
+        |b| (FwdCodec::osm_id(b), FwdCodec::pos(b)),
         SORT_BUDGET,
         store,
     )
     .map_err(io)?;
     let mut done = Writer::new(store).map_err(io)?;
+    let mut node_ends = Writer::new(store).map_err(io)?; // the two end nodes of each edge, for step 8
     let mut split_nodes: Vec<(u8, Pos, Node)> = Vec::new();
     let rows = by_way.read(&codec).map_err(io)?.map(|r| r.map_err(io));
     for_groups(
@@ -625,6 +655,8 @@ pub fn build_network_junctions(
                 &mut stats,
             )? {
                 done.push(&codec, &f).map_err(io)?;
+                node_ends.push(&IdCodec, &f.e.source).map_err(io)?;
+                node_ends.push(&IdCodec, &f.e.target).map_err(io)?;
             }
             Ok(())
         },
@@ -634,43 +666,39 @@ pub fn build_network_junctions(
     split_nodes.sort_by_key(|v| (v.0, v.1));
     virtual_nodes.extend(split_nodes.into_iter().map(|v| v.2));
 
-    crate::util::step("start of the sort of the edges into the order of step 8");
-    // Step 8 and later still take a list of all edges (part B3 changes them), in the old order: the reverse edges, then
-    // the forward edges, each in the order of `Pos`. They are all in memory after this, so the sort is in memory too.
-    let done = done.finish().map_err(io)?;
-    let mut all: Vec<Fwd> = Vec::with_capacity(done.len);
-    for f in done.read(&codec).map_err(io)? {
-        all.push(f.map_err(io)?);
-    }
-    all.sort_unstable_by_key(|f| (!f.e.is_reverse, f.pos)); // the keys are unique
-    // collected in place: the block of `all` stays, with free places at its end (a `Fwd` is larger than an `Edge`)
-    let mut edges: Vec<Edge> = all.into_iter().map(|f| f.e).collect();
-    edges.shrink_to_fit();
-    drop(codec); // its table of the shared tags of all ways
+    let mut done = done.finish().map_err(io)?;
+    let node_ends = node_ends.finish().map_err(io)?;
 
     crate::util::step("start of step 8: The nodes");
-    // 8. The nodes.
-    let used: FxHashSet<i64> = edges.iter().flat_map(|e| [e.source, e.target]).collect();
+    // 8. The nodes: the end nodes of the edges (sorted, one time each), with their coordinates, and the virtual nodes.
+    // The list is sorted by node_id as the table; of two virtual nodes with the same id, the first stays (the order of
+    // `virtual_nodes` is the old order).
     let mut nodes: Vec<Node> = Vec::new();
-    for &n in &used {
+    let mut last = None;
+    for n in spill::sort_bytes(node_ends, |b| get_i64(&mut &b[..]), SORT_BUDGET, store).map_err(io)?.read(&IdCodec).map_err(io)? {
+        let n = n.map_err(io)?;
+        if last == Some(n) {
+            continue;
+        }
+        last = Some(n);
         if n > 0 {
             if let Some(&(lon, lat)) = coords.get(&n) {
-                nodes.push(Node {
-                    node_id: n,
-                    lon,
-                    lat,
-                });
+                nodes.push(Node { node_id: n, lon, lat });
             }
         }
     }
-    drop(used);
     nodes.extend(virtual_nodes);
+    nodes.sort_by_key(|n| n.node_id); // stable
+    nodes.dedup_by_key(|n| n.node_id);
+    nodes.shrink_to_fit();
 
     crate::util::step("start of step 8b: Connect the dangling path ends to the ne");
     // 8b. Connect the dangling path ends to the network (walking and cycling).
+    let mut connectors: Vec<Edge> = Vec::new();
     if opts.connect_paths && mode != Mode::Driving {
-        stats.connectors = connect_paths(
-            &mut edges,
+        let rows = done.read_ref(&codec).map_err(io)?.map(|r| r.map_err(io));
+        connectors = connect_paths(
+            rows,
             &nodes,
             opts.snap_m,
             mode == Mode::Cycling && opts.cycling_dismount,
@@ -679,60 +707,109 @@ pub fn build_network_junctions(
             } else {
                 None
             },
-        );
+        )?;
+        stats.connectors = connectors.len() / 2;
     }
-
-    crate::util::step("start of step 8b2: Edges that are walked get the cycle_type");
-    // 8b2. Edges that are walked get the cycle_type 'dismount'.
-    if opts.functional_types && mode == Mode::Cycling {
-        for e in edges.iter_mut().filter(|e| e.dismount == Some(true)) {
-            e.ftype = Some("dismount");
-        }
-    }
-
-    crate::util::step("start of step 8c: Speeds and travel times");
-    // 8c. Speeds and travel times.
     if opts.calculate_costs && !opts.process_speeds {
         return Err("calculate_costs needs process_speeds".to_string());
     }
-    if opts.process_speeds {
-        crate::speeds::apply(&mut edges, mode, opts.calculate_costs);
-    }
 
-    crate::util::step("start of step 9: Move private roads, bus-only roads and p");
-    // 9. Move private roads, bus-only roads and pedestrian streets to private_edges.
+    crate::util::step("start of steps 8b2 to 10: The cycle type, the speeds, the");
+    // 8b2, 8c, 9 and the union-find of step 10, edge by edge:
+    // - 8b2. Edges that are walked get the cycle_type 'dismount'.
+    // - 8c. Speeds and travel times.
+    // - 9. Move private roads, bus-only roads and pedestrian streets to private_edges.
+    // - 10. The connected parts of the other edges: a union-find on the index of the end nodes in `nodes`. The root of
+    //   a part is its smallest index, so its smallest node_id.
+    // Step 10 runs before the turn restrictions and the edge graph (duckOSM: after them, and it removes their rows of the
+    // dropped edges): the dropped edges are in other connected parts, so they share no node with the kept edges, and the
+    // rows of the kept edges are the same. Then the graph rows can go to a file while they are made.
+    let ecodec = &codec.0;
     let moved = |e: &Edge| {
         matches!(e.access.as_deref(), Some("private") | Some("bus"))
             || (mode == Mode::Driving && e.attrs.highway == "pedestrian")
     };
-    // extract_if keeps the order, and it does not make a second copy of all edges like partition
-    let mut private_edges: Vec<Edge> = edges.extract_if(.., |e| moved(e)).collect();
-    stats.private_edges = private_edges.len();
-    if !private_edges.is_empty() {
-        prune_nodes(&mut nodes, &edges);
-    }
-    // The vectors grew by pushes (the connectors, the collect above), so each has up to half of its capacity unused: an Edge has
-    // 160 bytes, so 60,000 unused places are 9.6 MiB (Tartu, walking). Give the memory back before the edge graph needs its own.
-    edges.shrink_to_fit();
-    private_edges.shrink_to_fit();
-    nodes.shrink_to_fit();
-
-    crate::util::step("start of step 10: Keep the largest connected part. It also");
-    // 10. Keep the largest connected part. It runs before the turn restrictions and the edge graph (duckOSM: after them, and it
-    // removes their rows of the dropped edges): the dropped edges are in other connected parts, so they share no node with the
-    // kept edges, and the rows of the kept edges are the same. Then the graph rows can go to a file while they are made.
-    if opts.keep_largest_component && !edges.is_empty() {
-        let before = edges.len();
-        keep_largest(&mut edges);
-        stats.dropped_by_component_filter = before - edges.len();
-        if before != edges.len() {
-            prune_nodes(&mut nodes, &edges);
+    let node_index = |n: i64| {
+        nodes
+            .binary_search_by_key(&n, |x| x.node_id)
+            .map(|i| i as u32)
+            .map_err(|_| format!("the edge end {n} is not a node"))
+    };
+    let filter = opts.keep_largest_component;
+    let mut parent: Vec<u32> = if filter { (0..nodes.len() as u32).collect() } else { Vec::new() };
+    let mut count: Vec<u32> = if filter { vec![0; nodes.len()] } else { Vec::new() }; // the edges of a root
+    let mut kept = Writer::new(store).map_err(io)?;
+    let mut private = Writer::new(store).map_err(io)?;
+    let rows = done.read(&codec).map_err(io)?.map(|f| f.map(|f| f.e));
+    for e in rows.chain(connectors.into_iter().map(Ok)) {
+        let mut e = e.map_err(io)?;
+        if opts.functional_types && mode == Mode::Cycling && e.dismount == Some(true) {
+            e.ftype = Some("dismount");
         }
+        if opts.process_speeds {
+            crate::speeds::apply(std::slice::from_mut(&mut e), mode, opts.calculate_costs);
+        }
+        if moved(&e) {
+            private.push(ecodec, &e).map_err(io)?;
+            continue;
+        }
+        if filter {
+            let (a, b) = (find(&mut parent, node_index(e.source)?), find(&mut parent, node_index(e.target)?));
+            let (lo, hi) = (a.min(b), a.max(b));
+            if lo != hi {
+                parent[hi as usize] = lo;
+                count[lo as usize] += count[hi as usize];
+            }
+            count[lo as usize] += 1;
+        }
+        kept.push(ecodec, &e).map_err(io)?;
     }
-    // The edges in the order of their edge_id (the order of the tables), here and not at the end: the edge graph takes the edges
-    // in this order, so it reads them one after the other in memory. After the filter, whose tie rule uses the order before.
-    edges.sort_by_key(|e| e.edge_id);
-    private_edges.sort_by_key(|e| e.edge_id);
+    let (kept, private) = (kept.finish().map_err(io)?, private.finish().map_err(io)?);
+    stats.private_edges = private.len;
+    // 10. The largest part: the most edges, then the smallest root.
+    let largest = (filter && kept.len > 0).then(|| {
+        (0..nodes.len() as u32)
+            .filter(|&r| parent[r as usize] == r)
+            .max_by_key(|&r| (count[r as usize], std::cmp::Reverse(r)))
+            .unwrap()
+    });
+    drop(count);
+
+    crate::util::step("start of the sort of the edges by edge_id");
+    // The edges in the order of their edge_id (the order of the tables): the edge graph takes the edges in this order.
+    // The edge graph and the writers still take a list of all edges (part B4 changes them). The edges of the other parts
+    // stay out, and the nodes that only they or the private edges use go.
+    let n_kept = kept.len;
+    let mut edges: Vec<Edge> = Vec::with_capacity(n_kept);
+    let mut used: Vec<bool> = vec![false; nodes.len()];
+    for e in spill::sort_bytes(kept, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
+        let e = e.map_err(io)?;
+        let (a, b) = (node_index(e.source)?, node_index(e.target)?);
+        if let Some(r) = largest {
+            if find(&mut parent, a) != r {
+                continue;
+            }
+        }
+        used[a as usize] = true;
+        used[b as usize] = true;
+        edges.push(e);
+    }
+    edges.shrink_to_fit();
+    stats.dropped_by_component_filter = n_kept - edges.len();
+    let mut private_edges: Vec<Edge> = Vec::with_capacity(private.len);
+    for e in spill::sort_bytes(private, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
+        private_edges.push(e.map_err(io)?);
+    }
+    drop(codec); // its table of the shared tags of all ways
+    if stats.private_edges > 0 || stats.dropped_by_component_filter > 0 {
+        let mut i = 0;
+        nodes.retain(|_| {
+            i += 1;
+            used[i - 1]
+        });
+    }
+    drop(used);
+    drop(parent);
 
     crate::util::step("start of step 9b: Turn restrictions (driving) and the edge");
     // 9b. Turn restrictions (driving) and the edge graph.
@@ -1016,55 +1093,6 @@ fn set_refs_and_ids(edges: &mut [Fwd], raw_refs: &FxHashMap<i64, &Vec<i64>>) {
         e.seq = seq.map(|q| q as u32);
     }
 }
-fn prune_nodes(nodes: &mut Vec<Node>, edges: &[Edge]) {
-    let used: FxHashSet<i64> = edges.iter().flat_map(|e| [e.source, e.target]).collect();
-    nodes.retain(|n| used.contains(&n.node_id));
-}
-
-/// Keep the largest weakly connected component (union-find over the edge ends).
-fn keep_largest(edges: &mut Vec<Edge>) {
-    let mut id: FxHashMap<i64, usize> = FxHashMap::default();
-    let mut parent: Vec<usize> = Vec::new();
-    fn find(p: &mut [usize], mut x: usize) -> usize {
-        while p[x] != x {
-            p[x] = p[p[x]];
-            x = p[x];
-        }
-        x
-    }
-    let mut ends = Vec::with_capacity(edges.len());
-    for e in edges.iter() {
-        let mut get = |n: i64, parent: &mut Vec<usize>| {
-            *id.entry(n).or_insert_with(|| {
-                parent.push(parent.len());
-                parent.len() - 1
-            })
-        };
-        let a = get(e.source, &mut parent);
-        let b = get(e.target, &mut parent);
-        ends.push(a);
-        let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
-        if ra != rb {
-            parent[ra] = rb;
-        }
-    }
-    let mut sizes: FxHashMap<usize, usize> = FxHashMap::default();
-    let roots: Vec<usize> = ends.iter().map(|&a| find(&mut parent, a)).collect();
-    for &r in &roots {
-        *sizes.entry(r).or_default() += 1;
-    }
-    let largest = *sizes
-        .iter()
-        .max_by_key(|(r, n)| (**n, std::cmp::Reverse(**r)))
-        .unwrap()
-        .0;
-    let mut i = 0;
-    edges.retain(|_| {
-        i += 1;
-        roots[i - 1] == largest
-    });
-}
-
 /// Do two ways agree on every attribute that the merge compares? Before the merge, a forward edge has these values of
 /// its way.
 fn same_road(a: &ModeWay, b: &ModeWay) -> bool {
@@ -1134,7 +1162,7 @@ fn merge_chains(
     let n = fwd.len;
     let mut parent: Vec<u32> = (0..n as u32).collect();
     let mut at: Vec<u8> = vec![0; n]; // SRC, TGT: the source, the target of the edge is a contraction node
-    let ends = spill::sort(ends, &EndCodec, |h: &End| h.node, SORT_BUDGET, store)?;
+    let ends = spill::sort_bytes(ends, |b| get_i64(&mut &b[..]), SORT_BUDGET, store)?;
     for_groups(
         ends.read(&EndCodec)?,
         |h| h.node,
@@ -1167,7 +1195,8 @@ fn merge_chains(
         }
     }
     let key = |f: &Fwd| set[f.pos.first as usize];
-    let in_sets = spill::sort(in_sets.finish()?, codec, key, SORT_BUDGET, store)?;
+    let first = |b: &[u8]| set[FwdCodec::pos(b).first as usize];
+    let in_sets = spill::sort_bytes(in_sets.finish()?, first, SORT_BUDGET, store)?;
     let mut map: Vec<(MapRow, Pos, usize)> = Vec::new();
     let (mut n_chains, mut n_pieces) = (0, 0);
     for_groups(in_sets.read(codec)?, key, |g| {
@@ -1350,22 +1379,40 @@ const PATH_CLASSES: [&str; 6] = [
     "track",
 ];
 
-/// `PathConnector`: reconnect dangling path ends. Returns the number of connectors (each has two edges).
+/// `PathConnector`: reconnect dangling path ends. `edges` gives all edges, one time; `nodes` is sorted by `node_id`.
+/// Returns the connector edges (two for each connector).
 fn connect_paths(
-    edges: &mut Vec<Edge>,
+    edges: impl Iterator<Item = Result<Fwd, String>>,
     nodes: &[Node],
     snap_m: f64,
     dismount: bool,
     types_for: Option<Mode>,
-) -> usize {
-    // 1. the undirected segments: (a, b) -> (smallest osm_id, a highway)
-    let mut und: FxHashMap<(i64, i64), (i64, String)> = FxHashMap::default();
-    for e in edges.iter() {
+) -> Result<Vec<Edge>, String> {
+    // 1. the undirected segments: (a, b) -> (smallest osm_id, the highway of the first edge in the old order of the
+    // edges: the reverse edges, then the forward edges, each in the order of `Pos`)
+    let mut first: FxHashMap<(i64, i64), (i64, (bool, Pos), String)> = FxHashMap::default();
+    // the ends of the edges that are walked, for step 5
+    let mut walked: FxHashSet<(String, i64)> = FxHashSet::default();
+    for f in edges {
+        let Fwd { e, pos, .. } = f?;
         let key = (e.source.min(e.target), e.source.max(e.target));
-        und.entry(key)
-            .and_modify(|v| v.0 = v.0.min(e.osm_id))
-            .or_insert((e.osm_id, e.attrs.highway.clone()));
+        let order = (!e.is_reverse, pos);
+        first
+            .entry(key)
+            .and_modify(|v| {
+                v.0 = v.0.min(e.osm_id);
+                if order < v.1 {
+                    v.1 = order;
+                    v.2.clone_from(&e.attrs.highway);
+                }
+            })
+            .or_insert_with(|| (e.osm_id, order, e.attrs.highway.clone()));
+        if dismount && e.osm_id > 0 && e.dismount == Some(true) {
+            walked.insert((e.attrs.highway.clone(), e.source));
+            walked.insert((e.attrs.highway.clone(), e.target));
+        }
     }
+    let und: FxHashMap<(i64, i64), (i64, String)> = first.into_iter().map(|(k, v)| (k, (v.0, v.2))).collect();
     // 2. for each node: how many segments touch it, the other end and way of the last one, the smallest osm_id
     struct Touch {
         count: u32,
@@ -1408,9 +1455,10 @@ fn connect_paths(
         .collect();
     dangles.sort_by_key(|d| d.0);
     if dangles.is_empty() {
-        return 0;
+        return Ok(Vec::new());
     }
-    // 3. the nearest node within snap_m (a local metric at the latitude of the dangle)
+    // 3. the nearest node within snap_m (a local metric at the latitude of the dangle). Of two nodes at the same
+    // distance, the node with the smaller index wins: `nodes` is sorted, so the smaller node_id.
     let tree = RTree::bulk_load(
         nodes
             .iter()
@@ -1469,10 +1517,7 @@ fn connect_paths(
         v.sort();
         v.dedup();
     }
-    let first_new = edges.len();
-    // Two edges for each pair. Without this, the first push into the full vector doubles its capacity: at the size of Estonia
-    // walking (1.4 million edges of 160 bytes) it holds the old and the new block at one time (+400 MiB at the peak).
-    edges.reserve_exact(pairs.len() * 2);
+    let mut out: Vec<Edge> = Vec::with_capacity(pairs.len() * 2);
     for (a, b, hw, dist, osm_id) in &pairs {
         let seq = rank[osm_id].binary_search(&(*a.min(b), *a.max(b))).unwrap() + 1;
         let attrs = Arc::new(Attrs {
@@ -1488,7 +1533,7 @@ fn connect_paths(
         });
         for (s, t, is_reverse) in [(*a, *b, false), (*b, *a, true)] {
             let (ns, nt) = (nodes[by_id[&s]], nodes[by_id[&t]]);
-            edges.push(Edge {
+            out.push(Edge {
                 edge_id: hash::edge_id(*osm_id, s, t),
                 seq: Some(seq as u32),
                 source: s,
@@ -1516,28 +1561,69 @@ fn connect_paths(
     }
     // 5. a connector that extends a footway or pedestrian way that is walked is walked too
     if dismount {
-        let walked: Vec<(String, i64, i64)> = edges[..first_new]
-            .iter()
-            .filter(|e| e.osm_id > 0 && e.dismount == Some(true))
-            .map(|e| (e.attrs.highway.clone(), e.source, e.target))
-            .collect();
-        let mut by_node: FxHashMap<(&str, i64), ()> = FxHashMap::default();
-        for (hw, s, t) in &walked {
-            by_node.insert((hw.as_str(), *s), ());
-            by_node.insert((hw.as_str(), *t), ());
-        }
-        let flags: Vec<bool> = edges[first_new..]
-            .iter()
-            .map(|e| {
-                let hw = e.attrs.highway.as_str();
-                matches!(hw, "footway" | "pedestrian")
-                    && (by_node.contains_key(&(hw, e.source))
-                        || by_node.contains_key(&(hw, e.target)))
-            })
-            .collect();
-        for (e, f) in edges[first_new..].iter_mut().zip(flags) {
-            e.dismount = Some(f);
+        for e in &mut out {
+            let hw = &e.attrs.highway;
+            let on = |n: i64| walked.contains(&(hw.clone(), n));
+            e.dismount = Some(matches!(hw.as_str(), "footway" | "pedestrian") && (on(e.source) || on(e.target)));
         }
     }
-    pairs.len()
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fwd_keys_come_from_the_bytes() {
+        let attrs = Arc::new(Attrs {
+            highway: "residential".into(),
+            name: None,
+            maxspeed: None,
+            surface: None,
+            junction: None,
+            layer: None,
+            bridge: None,
+            tunnel: None,
+            service: None,
+        });
+        let f = Fwd {
+            e: Edge {
+                edge_id: -7,
+                seq: Some(3),
+                source: 11,
+                target: -12,
+                osm_id: 987654321,
+                attrs,
+                oneway: false,
+                lanes: Some(2),
+                access: None,
+                refs: vec![11, 5, -12],
+                geometry: vec![(1.0, 2.0), (1.5, 2.5), (2.0, 3.0)],
+                is_reverse: true,
+                length_m: 12.5,
+                dismount: None,
+                maxspeed_kmh: None,
+                cost_s: None,
+                ftype: None,
+            },
+            way: 42,
+            pos: Pos {
+                group: 0,
+                first: 77,
+                start: -5,
+                end: 9,
+                walk: 2,
+                half: 3,
+            },
+        };
+        let codec = FwdCodec::default();
+        let mut b = Vec::new();
+        codec.put(&f, &mut b);
+        assert_eq!(FwdCodec::pos(&b), f.pos);
+        assert_eq!(FwdCodec::osm_id(&b), f.e.osm_id);
+        assert_eq!(EdgeCodec::edge_id(&b[FWD_HEAD..]), f.e.edge_id);
+        let g = codec.get(&mut &b[..]);
+        assert_eq!((g.way, g.pos, format!("{:?}", g.e)), (f.way, f.pos, format!("{:?}", f.e)));
+    }
 }
