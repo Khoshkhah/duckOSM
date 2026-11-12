@@ -52,6 +52,16 @@ pub fn read_restrictions_bytes(pbf: &[u8]) -> Result<Vec<Relation>, String> {
     restrictions_of(from_bytes(pbf))
 }
 
+/// Pass 1 on any reader (the browser reads a file in OPFS piece by piece).
+pub fn read_ways_from<R: Read + Send>(reader: R) -> Result<Vec<Way>, String> {
+    ways_of(ElementReader::new(reader))
+}
+
+/// Pass 2 on any reader.
+pub fn read_coords_from<R: Read + Send>(reader: R, ways: &[Way]) -> Result<Coords, String> {
+    coords_of(ElementReader::new(reader), ways)
+}
+
 /// Pass 3 on any reader (the browser reads a file piece by piece).
 pub fn restrictions_of<R: Read + Send>(reader: ElementReader<R>) -> Result<Vec<Relation>, String> {
     let mut rels = reader
