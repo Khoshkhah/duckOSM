@@ -13,6 +13,12 @@ pub use roadstyle_levels::{Levels, Method, Row, ROADSTYLE_VERSION};
 pub struct LevelEdges(roadstyle_levels::LevelEdges);
 
 impl LevelEdges {
+    /// Makes space for `n` more edges: call it before the tables of a mode are added, so that the list does not double
+    /// while it grows (in WebAssembly the memory never shrinks).
+    pub fn reserve(&mut self, n: usize) {
+        self.0.reserve(n);
+    }
+
     /// Takes the edges: their geometry moves into the level edges, with no copy (a copy of all geometries made the
     /// peak of the build while the network was still in memory). The tags are shared (`Arc`) and are copied.
     pub fn add(&mut self, mode: Mode, private: bool, edges: Vec<Edge>) {

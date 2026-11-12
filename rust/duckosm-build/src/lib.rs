@@ -298,7 +298,26 @@ fn street_segments(
     out: &mut Vec<building_faces::Street>,
 ) {
     const NOT_STREETS: [&str; 7] = ["footway", "path", "steps", "corridor", "bridleway", "cycleway", "track"];
-    let streets = || edges.iter().filter(|e| !NOT_STREETS.contains(&e.attrs.highway.as_str()));
+    let is_street = |e: &duckosm_core::model::Edge| !NOT_STREETS.contains(&e.attrs.highway.as_str());
+    // An edge and its reverse edge (the same osm_id and seq) have the same segments, and the faces keep only the first copy
+    // of a segment. So only the first edge of the pair gives its segments: the faces get the same segments, and the list is
+    // about half as long. The second edge is skipped only when its line is the first one's line reversed.
+    let bits = |p: &(f64, f64)| (p.0.to_bits(), p.1.to_bits());
+    let mut first: duckosm_core::util::FxHashMap<(i64, u32), usize> = Default::default();
+    let keep: Vec<bool> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let Some(seq) = e.seq.filter(|_| is_street(e)) else {
+                return is_street(e);
+            };
+            let j = *first.entry((e.osm_id, seq)).or_insert(i);
+            let t = &edges[j];
+            j == i || t.is_reverse == e.is_reverse || !t.geometry.iter().rev().map(bits).eq(e.geometry.iter().map(bits))
+        })
+        .collect();
+    drop(first);
+    let streets = || edges.iter().zip(&keep).filter(|(_, k)| **k).map(|(e, _)| e);
     // the exact size first: a list that doubles needs three times its size for a moment (WebAssembly memory never shrinks)
     let n: usize = streets().map(|e| e.geometry.windows(2).filter(|w| near.near(w[0], w[1])).count()).sum();
     out.reserve_exact(n);
@@ -797,6 +816,7 @@ pub fn run<W: Write + Send>(
         }
         // the last use of the edges of this mode: the levels take them
         if p.levels != LevelsMethod::None {
+            level_edges.reserve(net.edges.len() + net.private_edges.len());
             level_edges.add(*mode, false, std::mem::take(&mut net.edges));
             level_edges.add(*mode, true, std::mem::take(&mut net.private_edges));
         }
@@ -892,7 +912,7 @@ pub fn run<W: Write + Send>(
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
         let (mut faces, mut buildings, mut last) = (0, 0, None);
-        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits, |part| {
+        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, std::mem::take(&mut streets), &fixes.face_edits, |part| {
             faces += part.len();
             for f in &part {
                 buildings += usize::from(last != Some(f.building_id));
@@ -901,7 +921,6 @@ pub fn run<W: Write + Send>(
             w.write(&part)
         })?;
         w.close()?;
-        drop(std::mem::take(&mut streets));
         sum.building_faces = Some((faces, buildings));
         log.step("building faces");
     }
