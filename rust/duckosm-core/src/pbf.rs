@@ -139,6 +139,40 @@ pub fn read_coords_from<R: Read>(mut reader: R, ways: &[Way]) -> Result<Coords, 
     Ok(Coords::new(nodes))
 }
 
+/// Pass 3 on any reader: the same relations as [`read_restrictions`], read as [`read_ways_from`] reads (the
+/// `osmpbf` reader of [`restrictions_of`] reads the blocks on the threads of the pool, which the browser does not
+/// allow for a file in OPFS).
+pub fn read_restrictions_from<R: Read>(mut reader: R) -> Result<Vec<Relation>, String> {
+    struct Rels(Vec<Relation>);
+    impl RawSink for Rels {
+        fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
+        fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+        fn relation<'a>(
+            &mut self,
+            id: i64,
+            tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+            let tags: Vec<(String, String)> = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            if tags.iter().find(|t| t.0 == "type").map(|t| t.1.as_str()) == Some("restriction") {
+                let members = members.map(|(m, t, r)| (m, t, r.to_string())).collect();
+                self.0.push(Relation { id, tags, members });
+            }
+        }
+    }
+    let mut rels = Vec::new();
+    crate::cutstream::each_block(&mut reader, |b, buf| {
+        let mut s = Rels(Vec::new());
+        crate::pbfraw::decode_block(b, [false, false, true], buf, &mut s)?;
+        Ok(s.0)
+    }, |mut r, _| {
+        rels.append(&mut r);
+        Ok(true)
+    })?;
+    rels.sort_by_key(|r| r.id);
+    Ok(rels)
+}
+
 /// Pass 3 on any reader (the browser reads a file piece by piece).
 pub fn restrictions_of<R: Read + Send>(reader: ElementReader<R>) -> Result<Vec<Relation>, String> {
     let mut rels = reader
@@ -877,6 +911,9 @@ mod tests {
         let (a, b) = (read_coords(&path, &want).unwrap(), read_coords_from(file(), &want).unwrap());
         assert!(a.len() > 0);
         assert_eq!(a.iter().collect::<Vec<_>>(), b.iter().collect::<Vec<_>>());
+        let (ra, rb) = (read_restrictions(&path).unwrap(), read_restrictions_from(file()).unwrap());
+        assert!(!ra.is_empty());
+        assert_eq!(format!("{rb:?}"), format!("{ra:?}"));
     }
 
     use super::*;
