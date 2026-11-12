@@ -192,8 +192,8 @@ network files 2.9 s, the levels 1.8 s, the lane profile 3.0 s, writing the `.duc
 Since then, all sub-steps of step 3 and step 4 keep the edges in temporary files, not in memory (see
 [the network step in limited memory](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/network_stream.md)).
 The table above shows the memory before that change. On Kentucky the live heap during step 3 now holds only the ways,
-the coordinates, the junctions and the nodes (770 MiB), and the peak of the network step went from 1918 MiB (before
-part C) to 964 MiB. The network step takes 4.9 s: each pass writes and reads the edges. Step 5 still reads the edges
+the coordinates, the junctions and the nodes (770 MiB), and the peak of the network step went from 1803 MiB (the
+table above) to 964 MiB. The network step takes 4.9 s: each pass writes and reads the edges. Step 5 still reads the edges
 into memory again, so the peak of the build does not change yet (2347 MiB).
 
 After the mode, 1.5 GB is live on Kentucky: the ways and the coordinates (0.4 GB, kept for the next modes and the
