@@ -291,6 +291,7 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
         }
         Ok(!other)
     })?;
+    crate::util::step("cut pass 1: the nodes inside");
     let inside = IdSet::new(parts);
     let ways_at = ways_at.unwrap_or(0);
     // pass 2: the kept ways, their nodes outside, and the relations
@@ -311,6 +312,7 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
         Ok((ways, outside, rels))
     };
     let (way_parts, mut outside, rels) = pass2(None)?;
+    crate::util::step("cut pass 2: the ways and relations");
     let mut kept = IdSet::new(way_parts);
     // the relations: a member node inside or a member way kept, then their parents
     let direct = |r: &Rel| {
@@ -354,6 +356,7 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
         kept = IdSet::new(all);
         outside.extend(more_outside);
     }
+    crate::util::step("cut: the relations, the member ways");
     let outside = IdSet::new(outside);
     let mut w = PbfWriter::new(out, timestamp)?;
     let mut counts = CutCounts::default();
@@ -394,9 +397,11 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
         })
     };
     emit(&mut open()?, Some(node_blocks), [true, false, false], &mut w, &mut counts)?;
+    crate::util::step("cut pass 3: write the nodes");
     let mut r = open()?;
     r.seek(SeekFrom::Start(ways_at)).map_err(|e| e.to_string())?;
     emit(&mut r, None, [false, true, true], &mut w, &mut counts)?;
+    crate::util::step("cut pass 4: write the ways and relations");
     Ok((w.finish()?, counts))
 }
 
