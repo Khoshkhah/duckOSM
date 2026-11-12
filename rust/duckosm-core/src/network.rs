@@ -66,39 +66,106 @@ impl Default for Options {
 
 /// Node id -> (longitude, latitude), as a list sorted by node id. It uses 24 bytes for each node,
 /// with no unused capacity. A hash map uses about twice that, and more while it grows.
+///
+/// A look-up uses a directory: for each range of ids, the place of its first node in the list. The directory has about
+/// one entry for each 64 nodes (4 bytes each), so it stays in the cache of the processor, and a look-up searches only
+/// the nodes of one range. A binary search of the whole list reads about 23 places far apart in memory, and it was a
+/// quarter to a third of the time of the cut (3.2) on Kentucky.
 #[derive(Default, Debug)]
-pub struct Coords(Vec<(i64, Pt)>);
+pub struct Coords {
+    nodes: Vec<(i64, Pt)>,
+    /// `dir[b]`: the index of the first node whose id is in range `b`, that is `(id - min) >> shift >= b`
+    dir: Vec<u32>,
+    min: i64,
+    shift: u32,
+}
 
 impl Coords {
     pub fn new(mut nodes: Vec<(i64, Pt)>) -> Coords {
         nodes.sort_unstable_by_key(|n| n.0);
         nodes.dedup_by_key(|n| n.0);
         nodes.shrink_to_fit();
-        Coords(nodes)
+        assert!(nodes.len() < u32::MAX as usize, "more than 2^32 nodes");
+        let (Some(first), Some(last)) = (nodes.first(), nodes.last()) else {
+            return Coords::default();
+        };
+        let (min, span) = (first.0, last.0.abs_diff(first.0));
+        let ranges = (nodes.len() / 64).max(1) as u64;
+        let mut shift = 0;
+        while shift < 63 && (span >> shift) >= ranges {
+            shift += 1;
+        }
+        let range = |id: i64| (id.abs_diff(min) >> shift) as usize;
+        let mut dir = Vec::with_capacity(range(last.0) + 2);
+        for (i, n) in nodes.iter().enumerate() {
+            while dir.len() <= range(n.0) {
+                dir.push(i as u32);
+            }
+        }
+        dir.push(nodes.len() as u32);
+        Coords { nodes, dir, min, shift }
     }
 
     pub fn get(&self, id: &i64) -> Option<&Pt> {
-        let i = self.0.binary_search_by_key(id, |n| n.0).ok()?;
-        Some(&self.0[i].1)
+        if *id < self.min {
+            return None;
+        }
+        let b = (id.abs_diff(self.min) >> self.shift) as usize;
+        let (lo, hi) = (*self.dir.get(b)? as usize, *self.dir.get(b + 1)? as usize);
+        let part = &self.nodes[lo..hi];
+        let i = part.binary_search_by_key(id, |n| n.0).ok()?;
+        Some(&part[i].1)
     }
 
     /// Add nodes (the new nodes of the OSM fixes). A node that is already here keeps its place.
     pub fn extend(&mut self, nodes: impl IntoIterator<Item = (i64, Pt)>) {
-        let mut all = std::mem::take(&mut self.0);
+        let mut all = std::mem::take(&mut self.nodes);
         all.extend(nodes);
         *self = Coords::new(all);
     }
 
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.nodes.len()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &(i64, Pt)> {
-        self.0.iter()
+        self.nodes.iter()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.nodes.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod coords_tests {
+    use super::Coords;
+
+    /// The directory gives the same answer as a binary search of the whole list: ids with gaps of many sizes,
+    /// negative ids, ids out of the range, and one node.
+    #[test]
+    fn directory_finds_the_same_nodes() {
+        let mut x: u64 = 7;
+        let mut next = || {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            x >> 33
+        };
+        let mut id = -5_000i64;
+        let mut ids = Vec::new();
+        for _ in 0..20_000 {
+            id += 1 + (next() % [2, 50, 10_000, 3_000_000][(next() % 4) as usize]) as i64;
+            ids.push(id);
+        }
+        let c = Coords::new(ids.iter().map(|&i| (i, (i as f64, 0.0))).collect());
+        let all: Vec<i64> = c.iter().map(|n| n.0).collect();
+        for probe in ids.iter().flat_map(|&i| [i - 1, i, i + 1]).chain([i64::MIN, -5_001, i64::MAX]) {
+            let want = all.binary_search(&probe).ok().map(|_| (probe as f64, 0.0));
+            assert_eq!(c.get(&probe).copied(), want, "id {probe}");
+        }
+        let one = Coords::new(vec![(42, (1.0, 2.0))]);
+        assert_eq!(one.get(&42), Some(&(1.0, 2.0)));
+        assert_eq!(one.get(&41), None);
+        assert_eq!(Coords::default().get(&1), None);
     }
 }
 
