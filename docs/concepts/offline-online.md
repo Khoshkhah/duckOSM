@@ -269,8 +269,9 @@ A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with 
   Mac was 96% full, this writing paused for about 3 s in some runs (one native run of four: 3.19 s, the others 0.11 s;
   online, step 3 took up to 9.7 s). With 30 GB and more free, no run paused: 8 of 8 native runs and 3 of 3 online runs.
   So keep free space on the disk for the temporary files of a large area.
-- Online, the memory in the last row includes the Parquet files of the result (2.6 GB in all), which stay in the tab
-  memory until the page writes them to OPFS.
+- Online, the build copies each Parquet file of the result (2.6 GB in all) into JavaScript memory, outside the
+  WebAssembly memory of the table. So at the end the tab holds about 3.3 GB of WebAssembly memory and 2.6 GB of
+  result files, until the page writes the files to OPFS.
 - On 2026-11-12, at the start of this work, the offline build took 54.2 s and 17,206 MiB, and the online build
   stopped at the limit of 4 GB. The changes are in
   [the cut to an area file](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/cut_stream.md).
