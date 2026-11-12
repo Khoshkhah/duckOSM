@@ -74,6 +74,12 @@ impl IdSet {
         IdSet { ids, dir, min, shift }
     }
 
+    /// Is an id of the set in `lo..=hi`?
+    fn any_in(&self, lo: i64, hi: i64) -> bool {
+        let i = self.ids.partition_point(|&x| x < lo);
+        i < self.ids.len() && self.ids[i] <= hi
+    }
+
     fn contains(&self, id: i64) -> bool {
         if id < self.min || self.ids.is_empty() {
             return false;
@@ -87,10 +93,9 @@ impl IdSet {
 }
 
 /// Read the blocks of `r` in batches, decode each batch on all threads with `per_block`, and give the results to
-/// `done` in the order of the file. `stop`: after a batch, end when it says so. Gives the number of blocks read.
+/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false.
 fn each_block<R: Read, T: Send>(
     r: &mut R,
-    mut limit: Option<usize>,
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
     mut done: impl FnMut(T, u64) -> Result<bool, String>,
 ) -> Result<(), String> {
@@ -98,12 +103,9 @@ fn each_block<R: Read, T: Send>(
     let mut at = 0u64;
     loop {
         let mut batch = Vec::with_capacity(n);
-        while batch.len() < n && limit != Some(0) {
+        while batch.len() < n {
             match read_block(r)? {
-                Some(b) => {
-                    limit = limit.map(|l| l - 1);
-                    batch.push(b)
-                }
+                Some(b) => batch.push(b),
                 None => break,
             }
         }
@@ -124,15 +126,55 @@ fn each_block<R: Read, T: Send>(
     }
 }
 
+/// The lowest and the highest id of the elements of one kind in a block (`EMPTY` when the block has none).
+type Span = (i64, i64);
+const EMPTY: Span = (i64::MAX, i64::MIN);
+
+fn widen(s: &mut Span, id: i64) {
+    *s = (s.0.min(id), s.1.max(id));
+}
+
+/// [`each_block`] for the blocks that start at `offsets` (ascending) only: the other blocks are not read, not
+/// unpacked and not decoded. The passes that write the area file read only the blocks with a kept element.
+fn each_block_at<R: Read + Seek, T: Send>(
+    r: &mut R,
+    offsets: &[u64],
+    per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
+    mut done: impl FnMut(T) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut pos = None;
+    for part in offsets.chunks(2 * rayon::current_num_threads()) {
+        let mut batch = Vec::with_capacity(part.len());
+        for &at in part {
+            if pos != Some(at) {
+                r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?; // a seek empties the buffer of the reader
+            }
+            let b = read_block(r)?.ok_or("a block after the end of the file")?;
+            pos = Some(at + b.len() as u64);
+            batch.push(b);
+        }
+        let out: Vec<T> = batch
+            .par_iter()
+            .map_init(Buffers::default, |buf, b| per_block(b, buf))
+            .collect::<Result<_, _>>()?;
+        for t in out {
+            done(t)?;
+        }
+    }
+    Ok(())
+}
+
 /// Pass 1: the ids of the nodes inside, and whether the block has ways or relations.
 struct Inside<'a> {
     boundary: &'a Boundary,
     ids: Vec<i64>,
     other: bool,
+    span: Span,
 }
 
 impl RawSink for Inside<'_> {
     fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+        widen(&mut self.span, id);
         if self.boundary.contains(lon, lat) {
             self.ids.push(id);
         }
@@ -166,11 +208,14 @@ struct Kept<'a> {
     outside: Vec<i64>,
     rels: Vec<Rel>,
     refs: Vec<i64>,
+    /// the ids of the ways and of the relations of the block
+    spans: [Span; 2],
 }
 
 impl RawSink for Kept<'_> {
     fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
     fn way<'a>(&mut self, id: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
+        widen(&mut self.spans[0], id);
         self.refs.clear();
         self.refs.extend(refs);
         let keep = match self.wanted {
@@ -189,6 +234,7 @@ impl RawSink for Kept<'_> {
         tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
         members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
     ) {
+        widen(&mut self.spans[1], id);
         if self.wanted.is_some() {
             return;
         }
@@ -277,15 +323,16 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     if !sorted {
         return Err("the region file is not sorted by type and id (Sort.Type_then_ID)".into());
     }
-    // pass 1: the nodes inside; it stops after the first block with ways or relations
-    let (mut parts, mut node_blocks, mut ways_at) = (Vec::new(), 0usize, None);
-    each_block(&mut open()?, None, |b, buf| {
-        let mut s = Inside { boundary, ids: Vec::new(), other: false };
+    // pass 1: the nodes inside, and the ids of the nodes of each block; it stops after the first block with ways or
+    // relations
+    let (mut parts, mut node_spans, mut ways_at) = (Vec::new(), Vec::new(), None);
+    each_block(&mut open()?, |b, buf| {
+        let mut s = Inside { boundary, ids: Vec::new(), other: false, span: EMPTY };
         decode_block_tags(b, [true, true, true], [false; 3], buf, &mut s)?;
-        Ok((s.ids, s.other))
-    }, |(ids, other), at| {
+        Ok((s.ids, s.other, s.span))
+    }, |(ids, other, span), at| {
         parts.push(ids);
-        node_blocks += 1;
+        node_spans.push((at, span));
         if other {
             ways_at = Some(at);
         }
@@ -294,25 +341,31 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     crate::util::step("cut pass 1: the nodes inside");
     let inside = IdSet::new(parts);
     let ways_at = ways_at.unwrap_or(0);
-    // pass 2: the kept ways, their nodes outside, and the relations
-    let pass2 = |wanted: Option<&IdSet>| -> Result<(Vec<Vec<i64>>, Vec<Vec<i64>>, Vec<Rel>), String> {
-        let mut r = open()?;
-        r.seek(SeekFrom::Start(ways_at)).map_err(|e| e.to_string())?;
-        let (mut ways, mut outside, mut rels) = (Vec::new(), Vec::new(), Vec::new());
-        each_block(&mut r, None, |b, buf| {
-            let mut s = Kept { inside: &inside, wanted, ways: Vec::new(), outside: Vec::new(), rels: Vec::new(), refs: Vec::new() };
-            // only a relation needs its tags here (type=multipolygon)
-            decode_block_tags(b, [false, true, true], [false, false, wanted.is_none()], buf, &mut s)?;
-            Ok((s.ways, s.outside, s.rels))
-        }, |(w, o, mut rl), _| {
-            ways.push(w);
-            outside.push(o);
-            rels.append(&mut rl);
-            Ok(true)
-        })?;
-        Ok((ways, outside, rels))
+    // pass 2: the kept ways, their nodes outside, the relations, and the ids of the ways and relations of each block
+    let kept_sink = |wanted| Kept {
+        inside: &inside,
+        wanted,
+        ways: Vec::new(),
+        outside: Vec::new(),
+        rels: Vec::new(),
+        refs: Vec::new(),
+        spans: [EMPTY; 2],
     };
-    let (way_parts, mut outside, rels) = pass2(None)?;
+    let (mut way_parts, mut outside, mut rels, mut way_spans) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut r = open()?;
+    r.seek(SeekFrom::Start(ways_at)).map_err(|e| e.to_string())?;
+    each_block(&mut r, |b, buf| {
+        let mut s = kept_sink(None);
+        // only a relation needs its tags here (type=multipolygon)
+        decode_block_tags(b, [false, true, true], [false, false, true], buf, &mut s)?;
+        Ok((s.ways, s.outside, s.rels, s.spans))
+    }, |(w, o, mut rl, spans), at| {
+        way_parts.push(w);
+        outside.push(o);
+        rels.append(&mut rl);
+        way_spans.push((ways_at + at, spans));
+        Ok(true)
+    })?;
     crate::util::step("cut pass 2: the ways and relations");
     let mut kept = IdSet::new(way_parts);
     // the relations: a member node inside or a member way kept, then their parents
@@ -350,23 +403,38 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     drop(rels);
     outside.push(more_nodes);
     if !more_ways.is_empty() {
+        // the member ways: only the blocks with one of them
         let wanted = IdSet::new(vec![more_ways]);
-        let (found, more_outside, _) = pass2(Some(&wanted))?;
+        let at: Vec<u64> = way_spans.iter().filter(|(_, s)| wanted.any_in(s[0].0, s[0].1)).map(|b| b.0).collect();
         let mut all = vec![std::mem::take(&mut kept.ids)];
-        all.extend(found);
+        each_block_at(&mut open()?, &at, |b, buf| {
+            let mut s = kept_sink(Some(&wanted));
+            decode_block_tags(b, [false, true, false], [false; 3], buf, &mut s)?;
+            Ok((s.ways, s.outside))
+        }, |(w, o)| {
+            all.push(w);
+            outside.push(o);
+            Ok(())
+        })?;
         kept = IdSet::new(all);
-        outside.extend(more_outside);
     }
     crate::util::step("cut: the relations, the member ways");
     let outside = IdSet::new(outside);
+    let mut chosen_ids: Vec<i64> = chosen.iter().copied().collect();
+    chosen_ids.sort_unstable();
+    let any_chosen = |lo: i64, hi: i64| {
+        let i = chosen_ids.partition_point(|&x| x < lo);
+        i < chosen_ids.len() && chosen_ids[i] <= hi
+    };
     let mut w = PbfWriter::new(out, timestamp)?;
     let mut counts = CutCounts::default();
-    // pass 3: the nodes; pass 4: the ways and relations. Each thread makes the elements of its block, compresses
-    // them into blocks of the area file and frees them: an element is freed on the thread that made it (the
-    // allocator of the browser build keeps a freed block on the thread that frees it), and the compression runs on
-    // all threads. The main thread writes the ready blocks in the order of the region file.
-    let emit = |r: &mut R, limit: Option<usize>, kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts| {
-        each_block(r, limit, |b, buf| {
+    // pass 3: the nodes; pass 4: the ways and relations; each only in the blocks that have a kept element. Each
+    // thread makes the elements of its block, compresses them into blocks of the area file and frees them: an element
+    // is freed on the thread that made it (the allocator of the browser build keeps a freed block on the thread that
+    // frees it), and the compression runs on all threads. The main thread writes the ready blocks in the order of the
+    // region file.
+    let emit = |at: &[u64], kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts| {
+        each_block_at(&mut open()?, at, |b, buf| {
             let mut s = Out {
                 nodes_in: [&inside, &outside],
                 ways_in: &kept,
@@ -389,19 +457,26 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
                 file_blob(&mut out, "OSMData", &relations_block(c))?;
             }
             Ok((out, n))
-        }, |(bytes, n), _| {
+        }, |(bytes, n)| {
             counts.nodes += n.nodes;
             counts.ways += n.ways;
             counts.relations += n.relations;
-            w.blocks(&bytes)?;
-            Ok(true)
+            w.blocks(&bytes)
         })
     };
-    emit(&mut open()?, Some(node_blocks), [true, false, false], &mut w, &mut counts)?;
+    let node_at: Vec<u64> = node_spans
+        .iter()
+        .filter(|(_, (lo, hi))| inside.any_in(*lo, *hi) || outside.any_in(*lo, *hi))
+        .map(|b| b.0)
+        .collect();
+    emit(&node_at, [true, false, false], &mut w, &mut counts)?;
     crate::util::step("cut pass 3: write the nodes");
-    let mut r = open()?;
-    r.seek(SeekFrom::Start(ways_at)).map_err(|e| e.to_string())?;
-    emit(&mut r, None, [false, true, true], &mut w, &mut counts)?;
+    let way_at: Vec<u64> = way_spans
+        .iter()
+        .filter(|(_, s)| kept.any_in(s[0].0, s[0].1) || any_chosen(s[1].0, s[1].1))
+        .map(|b| b.0)
+        .collect();
+    emit(&way_at, [false, true, true], &mut w, &mut counts)?;
     crate::util::step("cut pass 4: write the ways and relations");
     Ok((w.finish()?, counts))
 }
