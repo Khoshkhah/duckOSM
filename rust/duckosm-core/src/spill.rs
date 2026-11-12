@@ -154,12 +154,12 @@ impl Writer {
 }
 
 /// Reads the bytes of each row from the start of a file.
-pub struct RawIter {
-    r: BufReader<Box<dyn Blob>>,
+pub struct RawIter<R = Box<dyn Blob>> {
+    r: BufReader<R>,
     left: usize,
 }
 
-impl RawIter {
+impl<R: Read> RawIter<R> {
     fn next_into(&mut self, buf: &mut Vec<u8>) -> io::Result<bool> {
         if self.left == 0 {
             return Ok(false);
@@ -168,6 +168,20 @@ impl RawIter {
         self.r.read_exact(&mut n)?;
         buf.resize(u32::from_le_bytes(n) as usize, 0);
         self.r.read_exact(buf)?;
+        self.left -= 1;
+        Ok(true)
+    }
+
+    /// Add the bytes of the next row at the end of `data`.
+    fn append_into(&mut self, data: &mut Vec<u8>) -> io::Result<bool> {
+        if self.left == 0 {
+            return Ok(false);
+        }
+        let mut n = [0u8; 4];
+        self.r.read_exact(&mut n)?;
+        let start = data.len();
+        data.resize(start + u32::from_le_bytes(n) as usize, 0);
+        self.r.read_exact(&mut data[start..])?;
         self.left -= 1;
         Ok(true)
     }
@@ -180,6 +194,24 @@ impl Rows {
             r: BufReader::with_capacity(1 << 20, self.blob),
             left: self.len,
         })
+    }
+
+    /// Read the rows, one at a time, and keep the file for a next read.
+    pub fn read_ref<'a, T, C: Codec<T>>(
+        &'a mut self,
+        codec: &'a C,
+    ) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a> {
+        self.blob.seek(SeekFrom::Start(0))?;
+        let mut raw = RawIter {
+            r: BufReader::with_capacity(1 << 20, &mut self.blob),
+            left: self.len,
+        };
+        let mut buf = Vec::new();
+        Ok(std::iter::from_fn(move || match raw.next_into(&mut buf) {
+            Ok(true) => Some(Ok(codec.get(&mut &buf[..]))),
+            Ok(false) => None,
+            Err(e) => Some(Err(e)),
+        }))
     }
 
     /// Read the rows, one at a time. The file is gone after the last row.
@@ -197,9 +229,7 @@ impl Rows {
     }
 }
 
-/// The rows of `rows` in the order of `key` (stable). Each sorted block holds rows of at most about `budget` bytes of
-/// memory: for each row its bytes, its key and its place in the block. (A small row uses more memory than its bytes in
-/// the file: the end of an edge has 21 bytes in the file and about 70 in a block.)
+/// The rows of `rows` in the order of `key` (stable), with the key from the decoded row. See [`sort_bytes`].
 pub fn sort<T, K: Ord, C: Codec<T>>(
     rows: Rows,
     codec: &C,
@@ -207,52 +237,68 @@ pub fn sort<T, K: Ord, C: Codec<T>>(
     budget: usize,
     store: &dyn Store,
 ) -> io::Result<Rows> {
+    sort_bytes(rows, |b| key(&codec.get(&mut &b[..])), budget, store)
+}
+
+/// The rows of `rows` in the order of `key` (stable), with the key from the bytes of the row: a codec with its key
+/// fields at fixed places at the start of the row gives a key with no decode of the rest. Each sorted block holds about
+/// `budget` bytes of memory: the bytes of its rows in one buffer, and for each row its key and its place.
+pub fn sort_bytes<K: Ord>(
+    rows: Rows,
+    key: impl Fn(&[u8]) -> K,
+    budget: usize,
+    store: &dyn Store,
+) -> io::Result<Rows> {
     let total = rows.len;
     let mut raw = rows.raw()?;
     let mut runs: Vec<Rows> = Vec::new();
-    let mut block: Vec<(K, Vec<u8>)> = Vec::new();
-    let mut size = 0usize;
-    let flush = |block: &mut Vec<(K, Vec<u8>)>, runs: &mut Vec<Rows>| -> io::Result<()> {
-        block.sort_by(|a, b| a.0.cmp(&b.0)); // stable
+    let mut data: Vec<u8> = Vec::new();
+    let mut index: Vec<(K, usize, usize)> = Vec::new(); // key, start and end of the row in `data`
+    let flush = |data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, runs: &mut Vec<Rows>| -> io::Result<()> {
+        index.sort_by(|a, b| a.0.cmp(&b.0)); // stable
         let mut w = Writer::new(store)?;
-        for (_, b) in block.drain(..) {
-            w.push_bytes(&b)?;
+        for (_, a, b) in index.drain(..) {
+            w.push_bytes(&data[a..b])?;
         }
+        data.clear();
         runs.push(w.finish()?);
         Ok(())
     };
-    let mut buf = Vec::new();
-    while raw.next_into(&mut buf)? {
-        size += buf.capacity() + std::mem::size_of::<(K, Vec<u8>)>();
-        block.push((key(&codec.get(&mut &buf[..])), std::mem::take(&mut buf)));
-        if size >= budget {
-            flush(&mut block, &mut runs)?;
-            size = 0;
+    let row = std::mem::size_of::<(K, usize, usize)>();
+    loop {
+        let start = data.len();
+        if !raw.append_into(&mut data)? {
+            break;
+        }
+        index.push((key(&data[start..]), start, data.len()));
+        if data.len() + index.len() * row >= budget {
+            flush(&mut data, &mut index, &mut runs)?;
         }
     }
     drop(raw);
     if runs.is_empty() {
         // one block: no merge
-        flush(&mut block, &mut runs)?;
+        flush(&mut data, &mut index, &mut runs)?;
         return Ok(runs.pop().unwrap());
     }
-    if !block.is_empty() {
-        flush(&mut block, &mut runs)?;
+    if !index.is_empty() {
+        flush(&mut data, &mut index, &mut runs)?;
     }
+    drop((data, index));
     // the merge: the smallest (key, run) first; a run is in the order of the input, so the result is stable
     let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
     let mut heap = BinaryHeap::new();
     let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
     for (i, it) in its.iter_mut().enumerate() {
         if it.next_into(&mut heads[i])? {
-            heap.push(Reverse((key(&codec.get(&mut &heads[i][..])), i)));
+            heap.push(Reverse((key(&heads[i]), i)));
         }
     }
     let mut w = Writer::new(store)?;
     while let Some(Reverse((_, i))) = heap.pop() {
         w.push_bytes(&heads[i])?;
         if its[i].next_into(&mut heads[i])? {
-            heap.push(Reverse((key(&codec.get(&mut &heads[i][..])), i)));
+            heap.push(Reverse((key(&heads[i]), i)));
         }
     }
     let out = w.finish()?;
@@ -343,6 +389,18 @@ impl EdgeValues {
                 (self.ftypes.len() - 1) as u32
             }
         }
+    }
+}
+
+impl EdgeCodec {
+    /// The `edge_id` of an edge from its bytes: the first 8 bytes.
+    pub fn edge_id(b: &[u8]) -> i64 {
+        i64::from_le_bytes(b[..8].try_into().unwrap())
+    }
+
+    /// The `osm_id` of an edge from its bytes: after `edge_id`, `seq`, `source` and `target`.
+    pub fn osm_id(b: &[u8]) -> i64 {
+        i64::from_le_bytes(b[28..36].try_into().unwrap())
     }
 }
 
