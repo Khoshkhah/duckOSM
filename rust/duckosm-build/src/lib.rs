@@ -294,14 +294,17 @@ fn write_other_tables<W: Write + Send>(
 fn street_segments(edges: &[duckosm_core::model::Edge], out: &mut Vec<building_faces::Street>) {
     const NOT_STREETS: [&str; 7] = ["footway", "path", "steps", "corridor", "bridleway", "cycleway", "track"];
     for e in edges.iter().filter(|e| !NOT_STREETS.contains(&e.attrs.highway.as_str())) {
+        // one copy of the texts for each edge, not for each segment
+        let name: Option<std::sync::Arc<str>> = e.attrs.name.as_deref().map(Into::into);
+        let highway: std::sync::Arc<str> = e.attrs.highway.as_str().into();
         for w in e.geometry.windows(2) {
             out.push(building_faces::Street {
                 a: w[0],
                 b: w[1],
                 edge_id: e.edge_id,
                 osm_id: e.osm_id,
-                name: e.attrs.name.clone(),
-                highway: e.attrs.highway.clone(),
+                name: name.clone(),
+                highway: highway.clone(),
             });
         }
     }
@@ -840,11 +843,20 @@ pub fn run<W: Write + Send>(
         }
     }
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
-        let faces = building_faces::building_faces(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits);
-        duckosm_parquet::write_building_faces_to(file("building_faces_main.parquet")?, &faces)?;
-        let mut buildings: Vec<i64> = faces.iter().map(|f| f.building_id).collect();
-        buildings.dedup();
-        sum.building_faces = Some((faces.len(), buildings.len()));
+        let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
+        // the faces, and the buildings: a new building id after the one before
+        let (mut faces, mut buildings, mut last) = (0, 0, None);
+        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits, |part| {
+            faces += part.len();
+            for f in &part {
+                buildings += usize::from(last != Some(f.building_id));
+                last = Some(f.building_id);
+            }
+            w.write(&part)
+        })?;
+        w.close()?;
+        drop(std::mem::take(&mut streets));
+        sum.building_faces = Some((faces, buildings));
         log.step("building faces");
     }
     if let Some(r) = raw.as_mut().filter(|_| want_raw) {
