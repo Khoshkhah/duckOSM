@@ -301,14 +301,13 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
         )
     };
     let (side_tree, car_tree) = (tree(true), tree(false));
-    let (mut near_groups, mut crossing) = (Vec::new(), Vec::new());
     let around = |p: P, r: f64| AABB::from_corners((p.0 - r, p.1 - r), (p.0 + r, p.1 + r));
     let cos_a = ANGLE_DEG.to_radians().cos();
 
     // 2. The spots: every STEP_M along each road without a sidewalk tag (at least its middle).
     let roads: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].kind == 1).collect();
-    let mut found: Vec<usize> = Vec::new();
-    for &k in &roads {
+    // A road reads only the lines and the trees, so the roads run on all threads; the result keeps their order.
+    let covered = |k: usize, near_groups: &mut Vec<(usize, usize)>, crossing: &mut Vec<(usize, usize)>| -> bool {
         let road = &lines[k];
         let n = road.len();
         let ats: Vec<f64> = if n > STEP_M {
@@ -331,8 +330,8 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             let (mut left, mut right) = (false, false);
 
             // each sidewalk line near the spot
-            groups_in(&side_tree, &around(pt, SIDE_M), &mut near_groups);
-            for (i, dd, loc) in nearest_lines(&lines, &near_groups, pt) {
+            groups_in(&side_tree, &around(pt, SIDE_M), near_groups);
+            for (i, dd, loc) in nearest_lines(&lines, near_groups, pt) {
                 let sw = &lines[i];
                 if dd > SIDE_M {
                     continue;
@@ -354,7 +353,7 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
                 groups_in(
                     &car_tree,
                     &AABB::from_corners((pt.0.min(near.0), pt.1.min(near.1)), (pt.0.max(near.0), pt.1.max(near.1))),
-                    &mut crossing,
+                    crossing,
                 );
                 let blocked = crossing.iter().any(|&(c, g)| {
                     let (_, first, end) = lines[c].groups[g];
@@ -370,8 +369,8 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             }
 
             // the other half of a dual carriageway
-            groups_in(&car_tree, &around(pt, SIDE_M), &mut near_groups);
-            for (i, cdd, cl) in nearest_lines(&lines, &near_groups, pt) {
+            groups_in(&car_tree, &around(pt, SIDE_M), near_groups);
+            for (i, cdd, cl) in nearest_lines(&lines, near_groups, pt) {
                 let c = &lines[i];
                 if i == k || cdd > SIDE_M {
                     continue;
@@ -403,10 +402,22 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
             right_n += right as usize;
         }
         let spots = ats.len().max(1) as f64;
-        if left_n as f64 / spots >= SHARE && right_n as f64 / spots >= SHARE {
-            found.push(k);
-        }
-    }
+        left_n as f64 / spots >= SHARE && right_n as f64 / spots >= SHARE
+    };
+    #[cfg(feature = "pbf")]
+    let flags: Vec<bool> = {
+        use rayon::prelude::*;
+        roads
+            .par_iter()
+            .map_init(|| (Vec::new(), Vec::new()), |(g, c), &k| covered(k, g, c))
+            .collect()
+    };
+    #[cfg(not(feature = "pbf"))]
+    let flags: Vec<bool> = {
+        let (mut g, mut c) = (Vec::new(), Vec::new());
+        roads.iter().map(|&k| covered(k, &mut g, &mut c)).collect()
+    };
+    let found: Vec<usize> = roads.iter().zip(flags).filter(|(_, f)| *f).map(|(&k, _)| k).collect();
 
     // 3. Tag the roads. (lines[k] is made from raw[k])
     let n = found.len();
