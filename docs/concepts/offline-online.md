@@ -227,11 +227,11 @@ Chromium on the same Mac mini, with a boundary box around the whole file:
 | Area | Result |
 |---|---|
 | Kentucky, driving | **stops** in step 0 (cut to the area), about 5 s after the start, with the WebAssembly error `unreachable` |
-| Monaco, driving (for comparison) | builds in 1.6 s, with 8 threads and 41 MiB |
 
 The cut keeps everything of the area in the memory of the tab (on Kentucky: 19.6 million nodes and 1.7 million ways,
 with `raw.*`), and a WebAssembly module has at most 4 GB. When an allocation fails there, the module stops with this
-error and gives no message; a fault in the code (a Rust panic) gives its message, and none came. So the memory limit is
+error and gives no message; a fault in the code (a Rust panic) gives its message, and none came. The same page
+builds a small area with this engine, so the engine itself works in WebAssembly. So the memory limit is
 the most probable cause, but the page does not show its memory at the moment of the stop. The next work for the online
 version (the data in OPFS, not in the tab) is for this limit.
 
