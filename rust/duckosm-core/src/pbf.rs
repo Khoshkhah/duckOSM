@@ -52,14 +52,91 @@ pub fn read_restrictions_bytes(pbf: &[u8]) -> Result<Vec<Relation>, String> {
     restrictions_of(from_bytes(pbf))
 }
 
-/// Pass 1 on any reader (the browser reads a file in OPFS piece by piece).
-pub fn read_ways_from<R: Read + Send>(reader: R) -> Result<Vec<Way>, String> {
-    ways_of(ElementReader::new(reader))
+/// Pass 1 on any reader: the same ways as [`read_ways`]. One thread reads the blocks in the order of the file, and
+/// all threads decode them ([`crate::pbfraw`]). In the browser, only the thread that owns a file in OPFS can read it,
+/// so the readers of `osmpbf`, which read the blocks on the threads of the pool, wait there for ever.
+pub fn read_ways_from<R: Read>(mut reader: R) -> Result<Vec<Way>, String> {
+    struct Ways(Vec<Way>);
+    impl RawSink for Ways {
+        fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
+        fn way<'a>(
+            &mut self,
+            id: i64,
+            tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            refs: &mut dyn Iterator<Item = i64>,
+        ) {
+            let pairs: Vec<(&str, &str)> = tags.collect();
+            let tags = Tags::from_pairs(pairs.iter().copied());
+            if filter::is_kept_by_reader(&tags) {
+                self.0.push(Way {
+                    id,
+                    refs: refs.collect(),
+                    tags,
+                    other: OtherTags::of(pairs.iter().copied()),
+                });
+            }
+        }
+        fn relation<'a>(
+            &mut self,
+            _: i64,
+            _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+        }
+    }
+    let mut ways = Vec::new();
+    crate::cutstream::each_block(&mut reader, |b, buf| {
+        let mut s = Ways(Vec::new());
+        crate::pbfraw::decode_block(b, [false, true, false], buf, &mut s)?;
+        Ok(s.0)
+    }, |mut w, _| {
+        ways.append(&mut w);
+        Ok(true)
+    })?;
+    ways.sort_by_key(|w| w.id);
+    ways.shrink_to_fit();
+    Ok(ways)
 }
 
-/// Pass 2 on any reader.
-pub fn read_coords_from<R: Read + Send>(reader: R, ways: &[Way]) -> Result<Coords, String> {
-    coords_of(ElementReader::new(reader), ways)
+/// Pass 2 on any reader: the same coordinates as [`read_coords`], read as [`read_ways_from`] reads.
+pub fn read_coords_from<R: Read>(mut reader: R, ways: &[Way]) -> Result<Coords, String> {
+    let mut needed: FxHashSet<i64> = FxHashSet::default();
+    needed.reserve(ways.iter().map(|w| w.refs.len()).sum());
+    needed.extend(ways.iter().flat_map(|w| w.refs.iter().copied()));
+    struct Nodes<'n> {
+        needed: &'n FxHashSet<i64>,
+        out: Vec<(i64, Pt)>,
+    }
+    impl RawSink for Nodes<'_> {
+        fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            if self.needed.contains(&id) {
+                self.out.push((id, (lon, lat)));
+            }
+        }
+        fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+        fn relation<'a>(
+            &mut self,
+            _: i64,
+            _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+        }
+    }
+    let mut parts = Vec::new();
+    crate::cutstream::each_block(&mut reader, |b, buf| {
+        let mut s = Nodes { needed: &needed, out: Vec::new() };
+        crate::pbfraw::decode_block_tags(b, [true, false, false], [false; 3], buf, &mut s)?;
+        Ok(s.out)
+    }, |n, _| {
+        parts.push(n);
+        Ok(true)
+    })?;
+    drop(needed);
+    let mut nodes = Vec::with_capacity(parts.iter().map(Vec::len).sum());
+    for p in parts {
+        nodes.extend(p);
+    }
+    Ok(Coords::new(nodes))
 }
 
 /// Pass 3 on any reader (the browser reads a file piece by piece).
@@ -787,6 +864,21 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    /// The readers from any reader give the same ways and coordinates as the readers of a path, on Monaco.
+    #[test]
+    fn readers_from_any_reader() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
+        let file = || std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+        let want = read_ways(&path).unwrap();
+        let got = read_ways_from(file()).unwrap();
+        assert!(!want.is_empty());
+        assert_eq!(format!("{got:?}"), format!("{want:?}"));
+        let (a, b) = (read_coords(&path, &want).unwrap(), read_coords_from(file(), &want).unwrap());
+        assert!(a.len() > 0);
+        assert_eq!(a.iter().collect::<Vec<_>>(), b.iter().collect::<Vec<_>>());
+    }
+
     use super::*;
 
     /// A file without the sort flag: pass 1 reads all blocks, pass 2 skips the blocks of only nodes. The result
