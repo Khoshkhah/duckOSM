@@ -139,7 +139,7 @@ The rows of `edge_graph` go to the file writer while the network step makes them
 - `edge_graph` (the function that keeps the rows, for the browser and the tests) collects the rows of `edge_graph_each`.
 
 The feature `heap-probe` of `duckosm-cli` counts the bytes that the program has from the allocator, and prints the live
-and the peak bytes at each step. The RSS of macOS is not a good measure, because the allocator keeps free memory.
+and the peak bytes and the time at each step. The RSS of macOS is not a good measure, because the allocator keeps free memory.
 
 Measured on the Mac mini, against `main`:
 
@@ -183,13 +183,79 @@ are Parquet.
 | Stage | Work |
 |---|---|
 | B1 (done) | `spill`: files of rows, `EdgeCodec` (the shared tags are stored one time), and a stable sort with a memory budget (sorted blocks, then a merge) |
-| B2 | Steps 1 to 7 as passes: the cut writes the forward edges to a file; 2b finds the chains with a sort of the edge ends and a union-find on edge numbers, then sorts the edges by chain; 3 to 7 read the edges sorted by `osm_id`, one way at a time |
+| B2 (done) | Steps 1 to 7 as passes: the cut writes the forward edges to a file; 2b finds the chains with a sort of the edge ends and a union-find on edge numbers, then sorts the edges by chain; 3 to 7 read the edges sorted by `osm_id`, one way at a time |
 | B3 | Steps 8 to 10 as passes: the nodes from a sort of the edge ends; the speeds and the private roads edge by edge; the largest part with a union-find on node ids |
 | B4 | The edge graph and the writers read the file sorted by `edge_id`; the edge graph keeps only its compact list of the next edges |
 | B5 | The steps after the network (levels, lane profile, bus routes, street segments) read the file. The levels of roadstyle (`roadstyle-levels`) hold the geometry of all edges of all modes: this needs a change in roadstyle |
 | B6 | The path connectors (8b, walking and cycling) by tile with a margin (part E) |
 
 Each stage keeps the output equal (all tables, `EXCEPT ALL`) and is measured with the heap probe on Kentucky.
+
+### Stage B2 (done): steps 1 to 7 as passes
+
+The steps 1 to 7 of `build_network_junctions` keep no edges in memory. The store is a temporary folder natively
+(`spill::temp_store`) and memory in WebAssembly. Each sort has a budget of 64 MiB.
+
+1. **The cut (steps 1 and 2)** writes each forward edge to a file (`Fwd`: the edge, the index of its way and its `Pos`,
+   below). For the merge of chains, the two ends of each edge go to a second file.
+2. **The merge of chains (2b)** sorts the ends by node, and finds the contraction nodes with the same rule as before. All
+   edges at a contraction node join one set (a union-find on the edge numbers: 4 bytes and 1 byte for each edge). The
+   edges at no contraction node go to the result as they are. The other edges go to a file sorted by their set, and
+   each set is merged in memory with the walk of before. A set holds all edges that one walk can visit, so the chains
+   are the same.
+3. **Steps 3 to 7** read the edges sorted by `(osm_id, Pos)`, one way at a time. The keys of steps 3, 4 and 6 contain
+   `osm_id`, so each way is independent.
+4. **The bridge to step 8.** Step 8 and later still take a `Vec<Edge>` in the old order. The bridge reads the file into
+   memory and sorts it there. Part B3 removes the bridge.
+
+**The order of before.** These results depend on the order of the old list of all edges: the tie-break of step 3, the
+order of the chains, of the virtual nodes and of `edge_id_map`, and the order of the edges at step 8 (the tie rules of
+step 8b and of the largest part in step 10). Each edge carries `Pos`, its place in the old list: after 2b the merged
+chains in the order (first edge, start, end, order of the walk), then the other edges in the order of the cut, and
+`half` for the halves of a split edge. A virtual node gets the step that made it and the `Pos` of its edge.
+
+**A change in `spill`.** `Codec::put` takes `&self` (the codec has its tables in a `RefCell`), so that a pass reads one
+file and writes the next with the same codec. The budget of `sort` now counts the memory of each row in a block (its
+bytes, its key and its place), not only its bytes in the file. Before, the sort of the 2.4 million edge ends of
+Kentucky (21 bytes each) used about 210 MiB with a budget of 64 MiB.
+
+Measured on the Mac mini, Kentucky, driving (`--h3-resolution 8 --timing`, heap probe, three runs; the times are the
+middle values):
+
+| Kentucky, driving | main | B2 |
+|---|---|---|
+| Step 1, the cut | 0.57 s | 0.72 s |
+| Step 2b, the merge of chains | 0.09 s | 0.21 s |
+| Steps 3 to 7 (B2: with the sort by `osm_id`) | 0.69 s | 0.91 s |
+| The bridge to step 8 | | 0.32 s |
+| Network step (`build driving`) | 3.07 s | 3.90 s |
+| Live heap during steps 1 to 7 | up to 1484 MiB | 748 MiB |
+| Peak heap during steps 1 to 7 | 1680 MiB | 860 MiB |
+| Live heap after step 7 | 1484 MiB | 1482 MiB |
+| Peak heap of the network step | 1803 MiB | 1800 MiB |
+| Peak heap of the build | 2348 MiB | 2345 MiB |
+| Build | 17.6 s | 18.3 s |
+
+B2 alone gives no memory gain, as expected: the bridge makes the list of all edges again, and steps 8 to 10 and the edge
+graph hold it. But during steps 1 to 7 the live heap holds only the ways, the coordinates and the junctions (748 MiB):
+when the later steps are passes too, the peak goes down. The network step is 0.8 s slower: each pass writes and reads
+the edges, and a sort decodes each row to get its key (one time in a block, one time more in the merge of the blocks;
+the merges cost about 0.25 s).
+
+All tables are equal on Monaco (38), Estonia (38) and Kentucky (20), with the comparison of part A. With
+`--no-global-junctions` too (37, 37 and 19 tables): with the global junctions there is almost no contraction node, so
+only this build tests the merge of chains (Kentucky: 51,450 rows of `edge_id_map`).
+
+**What B3 needs.**
+
+- Steps 8 to 10 read the file of edges, not a `Vec`. The tie rules that use the order of the list must use `Pos`
+  directly: the highway of a segment in step 8b (the first edge of the segment), the order of the nodes (the tie of the
+  nearest node in step 8b) and the root of the largest part in step 10. Then the bridge goes away.
+- The nodes come from a sort of the edge ends. The virtual nodes already carry their order.
+- A sort decodes the whole row to get its key. With more passes, a key that a codec reads from the start of the row,
+  with no decode of the geometry, can save time. Measure it first.
+- The merge of chains reads the tags of the ways (`mw`) by the way index, to compare two edges. Part A removes `mw`
+  from memory; then the end rows must carry a number for the tags of the road.
 
 ## The later parts
 

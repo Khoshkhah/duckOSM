@@ -165,6 +165,10 @@ Rust heap after the sub-step (cargo feature `heap-probe` of `duckosm-cli`):
 | 9, 10, 9b. Private roads, largest part, turn restrictions | the end nodes of all edges | fewer edges | −7 MiB |
 | 9b2. Edge graph | the edges that start at each node | nothing: the rows go to the file | 0 (peak +303 MiB) |
 
+Since part B2 of [the network step in limited memory](../design/network_stream.md), steps 1 to 7 keep the edges in
+temporary files, not in memory. The table above shows the memory before B2. Step 8 still makes the list of all edges
+again, so the live heap after step 7 and the peak of the mode do not change yet.
+
 After the mode, 1.5 GB is live on Kentucky: the ways and the coordinates (0.4 GB, kept for the next modes and the
 later steps) and the edges and the nodes of the mode (1.1 GB). The network files are then written, and the levels take
 the edges. The edges are the largest part, so the next work moves them to storage (see
