@@ -350,9 +350,32 @@ pub type Open<'a> = &'a dyn Fn() -> Result<pbf::BlobReader<Box<dyn Source + 'a>>
 /// The input of [`run`]: a `.osm.pbf` file (its path, or its bytes in WebAssembly), OSM JSON (the output of the
 /// Overpass API; with a boundary, only the ways with a node inside are kept), or a region PBF and a boundary (the
 /// PBF is cut to the boundary, as osmium's `complete_ways` does).
+/// Another source of the network input (the ways, the coordinates and the turn restrictions) with the same values
+/// as the reader of the file: the `raw.*` tables of a `.duckdb` file (docs/design/network_stream.md, part A1).
+pub trait NetworkSource {
+    fn ways(&self) -> Result<Vec<duckosm_core::model::Way>, String>;
+    fn coords(&self, ways: &[duckosm_core::model::Way]) -> Result<Coords, String>;
+    fn restrictions(&self) -> Result<Vec<duckosm_core::graph::Relation>, String>;
+}
+
+#[cfg(feature = "duckdb")]
+impl NetworkSource for duckosm_duckdb::RawInput {
+    fn ways(&self) -> Result<Vec<duckosm_core::model::Way>, String> {
+        duckosm_duckdb::RawInput::ways(self)
+    }
+    fn coords(&self, ways: &[duckosm_core::model::Way]) -> Result<Coords, String> {
+        duckosm_duckdb::RawInput::coords(self, ways)
+    }
+    fn restrictions(&self) -> Result<Vec<duckosm_core::graph::Relation>, String> {
+        duckosm_duckdb::RawInput::restrictions(self)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Input<'a> {
     Path(&'a Path),
+    /// The whole file, read from another source than the file (`raw.*` in DuckDB).
+    Source(&'a dyn NetworkSource),
     Pbf(&'a [u8]),
     OsmJson(&'a [u8], Option<&'a Boundary>),
     Area(Open<'a>, &'a Boundary),
@@ -479,6 +502,14 @@ pub fn run<W: Write + Send>(
             || pbf::read_ways(path),
             |w| pbf::read_coords(path, w),
             || pbf::read_restrictions(path),
+            need_relations,
+            fixes,
+            log,
+        )?,
+        Input::Source(s) => read_pbf(
+            || s.ways(),
+            |w| s.coords(w),
+            || s.restrictions(),
             need_relations,
             fixes,
             log,
@@ -778,6 +809,26 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             .map_or(0, |d| d.as_nanos());
         std::env::temp_dir().join(format!("duckosm-{}-{n}-{t}", std::process::id()))
     };
+    // a build of the whole file with the .duckdb output: raw.* first (read_osm), and the network reads its input from
+    // raw.*, not from the file a second time (docs/design/network_stream.md, part A1)
+    #[cfg(feature = "duckdb")]
+    let raw_first = p.duckdb && cut.is_none();
+    #[cfg(feature = "duckdb")]
+    let (raw_rows, source) = if raw_first {
+        std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+        let db = out.join(format!("{}.duckdb", p.name));
+        let _ = std::fs::remove_file(&db);
+        let n = duckosm_duckdb::write_raw(&db, pbf_path, p.memory_limit.as_deref(), p.threads)?;
+        log.step("raw (read_osm)");
+        (Some(n), Some(duckosm_duckdb::RawInput::open(&db)?))
+    } else {
+        (None, None)
+    };
+    #[cfg(feature = "duckdb")]
+    let input = match &source {
+        Some(s) => Input::Source(s),
+        None => input,
+    };
     std::fs::create_dir_all(&pq_dir).map_err(|e| e.to_string())?;
     let res = (|| -> Result<Summary, String> {
         let mut files = Vec::new();
@@ -810,15 +861,17 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         if p.duckdb {
             let names: Vec<&str> = p.modes.iter().map(|m| m.name()).collect();
             let db = out.join(format!("{}.duckdb", p.name));
-            duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
-            log.step("write duckdb");
-            // a build of the whole file: raw.* of duckOSM, with read_osm in DuckDB (an area gets raw.* from the cut, with
-            // the base-map layers below)
-            if cut.is_none() {
-                let n = duckosm_duckdb::write_raw(&db, pbf_path, p.memory_limit.as_deref(), p.threads)?;
-                sum.raw = Some(n);
-                log.step("raw (read_osm)");
+            if raw_first {
+                // the file has raw.* already; the connection of the input closes first (one DuckDB per file in a process)
+                if let Some(s) = &source {
+                    s.close();
+                }
+                duckosm_duckdb::write_network_tables(&db, &pq_dir, &names)?;
+                sum.raw = raw_rows;
+            } else {
+                duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
             }
+            log.step("write duckdb");
             if p.features {
                 duckosm_duckdb::write_features(&db, &pq_dir, FEATURES_SQL)?;
                 log.step("features");

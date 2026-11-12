@@ -92,6 +92,29 @@ After part A, the RAM of the network step holds only the edges, not the ways, th
 My estimate for Kentucky: the peak goes down by about 0.5 to 0.75 GB of 1.9 GB (live heap). This is an estimate; part A
 measures it.
 
+### Step A1 (done): `raw.*` first, the input from DuckDB
+
+A whole-file build of `duckosm-rust` with the `.duckdb` output now writes `raw.*` with `read_osm` first. The network
+reads the highway ways, the coordinates of their nodes and the turn restrictions from `raw.*`
+(`duckosm_duckdb::RawInput`, through the trait `NetworkSource` and `Input::Source`), not from the file a second time.
+`write_network_tables` adds the network tables to the file. A build of an area is the same as before.
+
+Measured on the Mac mini, against `main`:
+
+| Area | main | A1 | Tables |
+|---|---|---|---|
+| Monaco, 3 modes | 0.88 s, 0.15 GB | 0.28 s, 0.15 GB | 38 equal |
+| Estonia, 3 modes | 23.5 s, 3.45 GB | 23.3 s, 3.98 GB | 38 equal |
+| Kentucky, driving | 17.3 s, 4.38 GB | 18.2 s, 4.49 GB | 20 equal |
+
+"Equal" means every row of every table (`EXCEPT ALL` in both directions), except the build time in
+`main.visualization_metadata` and `visualization.edge_levels_meta`. The memory is the same within the run-to-run range of
+macOS (about 0.4 GB), as expected: A1 changes the order and the source, not what stays in RAM. On 12 threads the reader of
+the file is already fast (Kentucky: 0.91 s; from `raw.*`: 0.97 s).
+
+The step times of Kentucky (`--timing`) show one more cost: the network tables go to DuckDB through GeoParquet files.
+Writing the files takes 3.2 s and DuckDB reads them again in 3.1–3.4 s, together 37% of the build (17.6 s). Part H below.
+
 ### The checks of part A
 
 - Every table of the network step is equal to the output before part A: the golden tests on Monaco and Tartu, and a
@@ -110,5 +133,6 @@ measures it.
 | E | The path connectors (8b) by tile with a margin | the last step that reads all edges |
 | F | The steps after the network (area tables, levels, lane profile) read DuckDB, not the ways in RAM | |
 | G | The browser (way C): the same passes, with DuckDB-Wasm and the Parquet files in OPFS | |
+| H | The network tables go into DuckDB directly, not through GeoParquet files (as `read_osm` does for `raw.*`) | Kentucky: up to 6.4 s of 17.6 s |
 
 Each part is one pull request with the same checks as part A.
