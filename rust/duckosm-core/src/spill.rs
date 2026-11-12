@@ -68,9 +68,25 @@ impl Seek for TempFile {
     }
 }
 
-/// The store of the network step: a folder for temporary files natively, memory in the browser (WebAssembly has no
-/// files until the page gives a store in OPFS).
+/// A maker of the store that [`temp_store`] gives on this thread.
+pub type StoreMaker = std::rc::Rc<dyn Fn() -> Box<dyn Store>>;
+
+thread_local! {
+    static STORE: std::cell::RefCell<Option<StoreMaker>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Set the store of the temporary files of the steps that run on this thread, or `None` for the default of
+/// [`temp_store`]. The browser gives a store in OPFS, so that the temporary files are not in the memory of the tab.
+pub fn set_temp_store(maker: Option<StoreMaker>) {
+    STORE.with(|s| *s.borrow_mut() = maker);
+}
+
+/// The store of the network step: the store that [`set_temp_store`] gave on this thread, else a folder for temporary
+/// files natively and memory in the browser.
 pub fn temp_store() -> Box<dyn Store> {
+    if let Some(maker) = STORE.with(|s| s.borrow().clone()) {
+        return maker();
+    }
     #[cfg(target_arch = "wasm32")]
     return Box::new(MemStore);
     #[cfg(not(target_arch = "wasm32"))]
