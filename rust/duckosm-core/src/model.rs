@@ -352,4 +352,6 @@ pub struct Stats {
     pub dropped_by_component_filter: usize,
     /// The per-mode rules of the OSM fixes that matched a way of this mode.
     pub osm_fixes: usize,
+    /// The rows of `edge_graph` (also when they went to a file and are not in `Graph::edge_graph`).
+    pub edge_graph_rows: usize,
 }

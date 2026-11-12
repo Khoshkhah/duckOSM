@@ -391,26 +391,80 @@ fn field(name: &str, t: DataType) -> Field {
     Field::new(name, t, true)
 }
 
-/// Write `edge_graph` (`via_edge` is `to_edge`).
-pub fn write_edge_graph_to<W: Write + Send>(out: W, rows: &[GraphRow]) -> Result<(), String> {
-    let fields = vec![
+fn edge_graph_fields() -> Vec<Field> {
+    vec![
         field("from_edge", DataType::Int64),
         field("to_edge", DataType::Int64),
         field("via_edge", DataType::Int64),
         field("cost", DataType::Float32),
         field("uses", DataType::Utf8),
-    ];
-    write_rows(out, fields, rows, |c| {
-        let mut cost = Float32Builder::with_capacity(c.len());
-        c.iter().for_each(|r| cost.append_option(r.cost));
-        vec![
-            i64s(c.iter().map(|r| r.from_edge)),
-            i64s(c.iter().map(|r| r.to_edge)),
-            i64s(c.iter().map(|r| r.to_edge)),
-            Arc::new(cost.finish()),
-            texts(c.iter().map(|r| Some(r.uses))),
-        ]
-    })
+    ]
+}
+
+fn edge_graph_columns(c: &[GraphRow]) -> Vec<ArrayRef> {
+    let mut cost = Float32Builder::with_capacity(c.len());
+    c.iter().for_each(|r| cost.append_option(r.cost));
+    vec![
+        i64s(c.iter().map(|r| r.from_edge)),
+        i64s(c.iter().map(|r| r.to_edge)),
+        i64s(c.iter().map(|r| r.to_edge)),
+        Arc::new(cost.finish()),
+        texts(c.iter().map(|r| Some(r.uses))),
+    ]
+}
+
+/// Write `edge_graph` (`via_edge` is `to_edge`).
+pub fn write_edge_graph_to<W: Write + Send>(out: W, rows: &[GraphRow]) -> Result<(), String> {
+    write_rows(out, edge_graph_fields(), rows, edge_graph_columns)
+}
+
+/// `edge_graph` written row by row while the rows are made (docs/design/network_stream.md, part C): it holds one block of
+/// [`ROW_GROUP`] rows, not all rows. The blocks are the blocks of [`write_edge_graph_to`], so the file is the same.
+pub struct EdgeGraphWriter<W: Write + Send> {
+    w: ArrowWriter<W>,
+    schema: Arc<Schema>,
+    buf: Vec<GraphRow>,
+    rows: usize,
+}
+
+impl<W: Write + Send> EdgeGraphWriter<W> {
+    pub fn new(out: W) -> Result<Self, String> {
+        let schema = Arc::new(Schema::new(edge_graph_fields()));
+        let plain = WriterProperties::builder()
+            .set_compression(compression())
+            .build();
+        Ok(EdgeGraphWriter {
+            w: ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?,
+            schema,
+            buf: Vec::with_capacity(ROW_GROUP),
+            rows: 0,
+        })
+    }
+
+    pub fn push(&mut self, row: GraphRow) -> Result<(), String> {
+        self.buf.push(row);
+        if self.buf.len() == ROW_GROUP {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), String> {
+        if !self.buf.is_empty() {
+            let b = RecordBatch::try_new(self.schema.clone(), edge_graph_columns(&self.buf)).map_err(err)?;
+            self.w.write(&b).map_err(err)?;
+            self.rows += self.buf.len();
+            self.buf.clear();
+        }
+        Ok(())
+    }
+
+    /// Close the file. Returns the number of rows.
+    pub fn finish(mut self) -> Result<usize, String> {
+        self.flush()?;
+        self.w.close().map_err(err)?;
+        Ok(self.rows)
+    }
 }
 
 /// Write `turn_restrictions`.

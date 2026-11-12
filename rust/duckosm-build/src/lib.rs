@@ -605,7 +605,26 @@ pub fn run<W: Write + Send>(
     log.step("global junctions");
     for mode in &p.modes {
         let n = mode.name();
-        let net = build_network_junctions(&ways, &coords, *mode, opts, fixes, &relations, &junctions)?;
+        // the rows of edge_graph go to their file while the network step makes them (docs/design/network_stream.md, part C)
+        let mut graph_file = if opts.build_graph {
+            Some(duckosm_parquet::EdgeGraphWriter::new(file(&format!("edge_graph_{n}.parquet"))?)?)
+        } else {
+            None
+        };
+        let mut sink = |r| graph_file.as_mut().expect("a file when there is a graph").push(r);
+        let net = build_network_junctions(
+            &ways,
+            &coords,
+            *mode,
+            opts,
+            fixes,
+            &relations,
+            &junctions,
+            if opts.build_graph { Some(&mut sink) } else { None },
+        )?;
+        if let Some(w) = graph_file {
+            w.finish()?;
+        }
         log.step(&format!("build {n}"));
         write_tables(&net, *mode, opts, &ways, &mut file)?;
         log.step(&format!("write geoparquet {n}"));
@@ -639,7 +658,7 @@ pub fn run<W: Write + Send>(
             edge_id_map: net.edge_id_map.len(),
             connectors: net.stats.connectors,
             osm_fixes: net.stats.osm_fixes,
-            edge_graph: net.graph.edge_graph.as_ref().map_or(0, Vec::len),
+            edge_graph: net.stats.edge_graph_rows,
             turn_restrictions: net.graph.turn_restrictions.as_ref().map_or(0, Vec::len),
         });
         if p.building_faces && matches!(*mode, Mode::Driving | Mode::Walking) {

@@ -123,12 +123,43 @@ Writing the files takes 3.2 s and DuckDB reads them again in 3.1–3.4 s, togeth
 - `mem_probe` and the peak RSS on Kentucky and Estonia, before and after, on the Mac mini, several runs (the peak RSS
   of macOS changes by about 0.4 GB from one run to the next).
 
+## Part C (done): the edge graph written while it is made
+
+The rows of `edge_graph` go to the file writer while the network step makes them (`graph::edge_graph_each` and
+`duckosm_parquet::EdgeGraphWriter`). The network does not keep them. To make this possible:
+
+- The largest part (step 10) runs before the edge graph (step 9b). The graph is then made only for the kept edges, and
+  `Graph::prune` is not necessary.
+- The edges are sorted by `edge_id` before the edge graph. `edge_graph_each` gives the rows of each edge in the order of
+  `to_edge`, so the file has the rows sorted by `(from_edge, to_edge)`, as before, with no sort of all rows.
+- The edges that start at a node are one slice of a compact list (source, `edge_id`, label, bridge, heading), sorted by
+  `(source, edge_id)`, with a hash map from the node to its slice. A binary search for each edge in the order of
+  `edge_id` reads about 20 random places, and made the step 0.9 s slower on Kentucky. With the hash map it is faster
+  than before.
+- `edge_graph` (the function that keeps the rows, for the browser and the tests) collects the rows of `edge_graph_each`.
+
+The feature `heap-probe` of `duckosm-cli` counts the bytes that the program has from the allocator, and prints the live
+and the peak bytes at each step. The RSS of macOS is not a good measure, because the allocator keeps free memory.
+
+Measured on the Mac mini, against `main`:
+
+| Kentucky, driving | main | part C |
+|---|---|---|
+| Network step (`build driving`) | 3.20 s | 3.07 s |
+| Write the network files | 3.26 s | 2.98 s |
+| Live heap after the network step | 1741 MiB | 1497 MiB |
+| Peak heap in the network step | 1918 MiB | 1803 MiB |
+| Peak heap of the build (`write the area tables`) | 2970 MiB | 2726 MiB |
+
+All tables are equal on Monaco (38), Estonia (38) and Kentucky (20), with the same comparison as in part A. The build
+peak is now in `write the area tables`, which part F moves to DuckDB.
+
 ## The later parts
 
 | Part | Work | Gain (to measure) |
 |---|---|---|
 | B | Steps 3 to 7 as passes by key and by edge; the reverse edge made only when it is written | the reverse edges (+362 MB) and the split maps |
-| C | The nodes and the edge graph by node; the graph rows written as they are made | the edge graph (+241 MB) |
+| C | Done (above) | |
 | D | The merge of chains and the largest part as union-finds on ids only | the global steps without the edges in RAM |
 | E | The path connectors (8b) by tile with a margin | the last step that reads all edges |
 | F | The steps after the network (area tables, levels, lane profile) read DuckDB, not the ways in RAM | |

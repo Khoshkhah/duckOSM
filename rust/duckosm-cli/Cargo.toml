@@ -11,6 +11,9 @@ path = "src/main.rs"
 [features]
 default = ["duckdb"]
 duckdb = ["duckosm-build/duckdb", "dep:duckosm-edit", "duckosm-edit/duckdb"]
+# a counting allocator: after each step, the live and the peak Rust heap (docs/design/network_stream.md). DuckDB's own memory is
+# not counted (it has its own memory_limit). Only for measurements: the counting costs some time.
+heap-probe = []
 
 [dependencies]
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }

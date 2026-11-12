@@ -210,7 +210,56 @@ fn edit(_: &[String]) -> Result<(), String> {
     Err("edit needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
 }
 
+/// The live and the peak Rust heap after each step of a build (cargo feature `heap-probe`, for measurements).
+#[cfg(feature = "heap-probe")]
+mod heap {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+    struct Counting;
+    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            let p = unsafe { System.alloc(l) };
+            if !p.is_null() {
+                PEAK.fetch_max(LIVE.fetch_add(l.size(), Relaxed) + l.size(), Relaxed);
+            }
+            p
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            unsafe { System.dealloc(p, l) };
+            LIVE.fetch_sub(l.size(), Relaxed);
+        }
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
+            let q = unsafe { System.realloc(p, l, new) };
+            if !q.is_null() {
+                if new >= l.size() {
+                    PEAK.fetch_max(LIVE.fetch_add(new - l.size(), Relaxed) + new - l.size(), Relaxed);
+                } else {
+                    LIVE.fetch_sub(l.size() - new, Relaxed);
+                }
+            }
+            q
+        }
+    }
+
+    #[global_allocator]
+    static A: Counting = Counting;
+
+    /// Print the live heap after the step `name` and its peak during the step, then start a new peak.
+    pub fn report(name: &str) {
+        let mib = |b: usize| b as f64 / 1048576.0;
+        let live = LIVE.load(Relaxed);
+        eprintln!("  heap {name:<30} live {:>8.1} MiB   peak {:>8.1} MiB", mib(live), mib(PEAK.load(Relaxed)));
+        PEAK.store(live, Relaxed);
+    }
+}
+
 fn main() {
+    #[cfg(feature = "heap-probe")]
+    duckosm_build::set_progress(Some(Box::new(heap::report)));
     let args: Vec<String> = std::env::args().collect();
     // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
