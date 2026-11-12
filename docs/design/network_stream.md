@@ -169,11 +169,33 @@ routes, which read the edges, run before.
 The live heap after the network (1.77 GB: the ways, the coordinates, the level edges, the lane edges and the nodes) stays
 until the levels and the lane profile are written. Part F reads them from DuckDB.
 
+## Part B: the edges in temporary files
+
+The measurements show that the edges of a mode are the largest part of the memory (Kentucky: 1.1 GB of 1.5 GB after the
+network step). A gain comes only when no step holds all edges, so part B changes the steps one after the other. Until
+the last stage, the peak does not go down: the steps that are not changed still hold all edges.
+
+**Where the edges go.** The temporary files are Rust files of rows (`duckosm_core::spill`), not DuckDB tables. The
+reason: the same code must run in the browser, where Rust cannot call DuckDB-Wasm, and a file of rows needs no
+conversion of each row. The browser gives a store in OPFS; until then its files are in memory. Only the result tables
+are Parquet.
+
+| Stage | Work |
+|---|---|
+| B1 (done) | `spill`: files of rows, `EdgeCodec` (the shared tags are stored one time), and a stable sort with a memory budget (sorted blocks, then a merge) |
+| B2 | Steps 1 to 7 as passes: the cut writes the forward edges to a file; 2b finds the chains with a sort of the edge ends and a union-find on edge numbers, then sorts the edges by chain; 3 to 7 read the edges sorted by `osm_id`, one way at a time |
+| B3 | Steps 8 to 10 as passes: the nodes from a sort of the edge ends; the speeds and the private roads edge by edge; the largest part with a union-find on node ids |
+| B4 | The edge graph and the writers read the file sorted by `edge_id`; the edge graph keeps only its compact list of the next edges |
+| B5 | The steps after the network (levels, lane profile, bus routes, street segments) read the file. The levels of roadstyle (`roadstyle-levels`) hold the geometry of all edges of all modes: this needs a change in roadstyle |
+| B6 | The path connectors (8b, walking and cycling) by tile with a margin (part E) |
+
+Each stage keeps the output equal (all tables, `EXCEPT ALL`) and is measured with the heap probe on Kentucky.
+
 ## The later parts
 
 | Part | Work | Gain (to measure) |
 |---|---|---|
-| B | Steps 3 to 7 as passes by key and by edge; the reverse edge made only when it is written | the reverse edges (+362 MB) and the split maps |
+| B | The edges in temporary files (above) | the edges of a mode (Kentucky: 1.1 GB) |
 | C | Done (above) | |
 | D | The merge of chains and the largest part as union-finds on ids only | the global steps without the edges in RAM |
 | E | The path connectors (8b) by tile with a margin | the last step that reads all edges |
