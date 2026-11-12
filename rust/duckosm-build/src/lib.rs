@@ -291,17 +291,22 @@ fn write_other_tables<W: Write + Send>(
 
 /// The roads that a building can face: the segments of the edges of a mode, but not the paths that run along or across a street (footways, steps,
 /// cycleways), which would be the nearest "street" of a wall that faces the real one.
-fn street_segments(edges: &[duckosm_core::model::Edge], out: &mut Vec<building_faces::Street>) {
+/// Only the segments near a building (`near`): the others cannot be the street of a wall.
+fn street_segments(
+    edges: &[duckosm_core::model::Edge],
+    near: &building_faces::NearBuildings,
+    out: &mut Vec<building_faces::Street>,
+) {
     const NOT_STREETS: [&str; 7] = ["footway", "path", "steps", "corridor", "bridleway", "cycleway", "track"];
     let streets = || edges.iter().filter(|e| !NOT_STREETS.contains(&e.attrs.highway.as_str()));
     // the exact size first: a list that doubles needs three times its size for a moment (WebAssembly memory never shrinks)
-    let n: usize = streets().map(|e| e.geometry.len().saturating_sub(1)).sum();
+    let n: usize = streets().map(|e| e.geometry.windows(2).filter(|w| near.near(w[0], w[1])).count()).sum();
     out.reserve_exact(n);
     for e in streets() {
         // one copy of the texts for each edge, not for each segment
         let name: Option<std::sync::Arc<str>> = e.attrs.name.as_deref().map(Into::into);
         let highway: std::sync::Arc<str> = e.attrs.highway.as_str().into();
-        for w in e.geometry.windows(2) {
+        for w in e.geometry.windows(2).filter(|w| near.near(w[0], w[1])) {
             out.push(building_faces::Street {
                 a: w[0],
                 b: w[1],
@@ -707,6 +712,11 @@ pub fn run<W: Write + Send>(
     let mut level_edges = LevelEdges::default();
     let mut lane_edges = LaneEdges::default();
     let mut streets: Vec<building_faces::Street> = Vec::new();
+    // the grid near the buildings of the raw part: only the street segments near a building are kept for the faces
+    let near = raw
+        .as_ref()
+        .filter(|_| p.building_faces)
+        .map(|r| building_faces::NearBuildings::new(&r.ways, &r.nodes));
     // the global junctions depend only on the ways: one time for all modes and for main.global_junctions
     let junctions = if opts.global_junctions {
         duckosm_core::network::global_junctions(&ways)
@@ -776,7 +786,7 @@ pub fn run<W: Write + Send>(
             turn_restrictions: net.graph.turn_restrictions.as_ref().map_or(0, Vec::len),
         });
         if p.building_faces && matches!(*mode, Mode::Driving | Mode::Walking) {
-            street_segments(&net.edges, &mut streets);
+            street_segments(&net.edges, near.as_ref().expect("made with the faces"), &mut streets);
         }
         // duckOSM: the arrows of the fixes go into the raw tags after this mode, so the next modes see them
         fixes.set_arrows(&mut ways, &net.ways, *mode);

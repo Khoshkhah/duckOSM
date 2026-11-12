@@ -99,6 +99,90 @@ pub struct Street {
     pub highway: Arc<str>,
 }
 
+/// The cells of a grid near the buildings: a street segment that is in no marked cell is farther than [`INFER_STREET_M`] from
+/// every building, so no wall can use it (each search of a street is in a box of a wall of at most that size). The build keeps
+/// only the other segments (Kentucky: most roads are far from a building). A cell is at least `INFER_STREET_M` wide in the
+/// projection of [`building_faces`], and the marks go one cell around the box of each building way.
+pub struct NearBuildings {
+    min: Pt,
+    cell: Pt,
+    cols: usize,
+    rows: usize,
+    bits: Vec<u64>,
+}
+
+impl NearBuildings {
+    /// The grid of the boxes of `ways` (all ways with their nodes in `nodes`, sorted by id).
+    pub fn new(ways: &[RawWay], nodes: &[RawNode]) -> NearBuildings {
+        let boxes: Vec<(Pt, Pt)> = ways
+            .iter()
+            .filter_map(|w| {
+                let mut b = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+                for id in &w.refs {
+                    let i = nodes.binary_search_by_key(id, |n| n.id).ok()?;
+                    let (x, y) = (nodes[i].lon, nodes[i].lat);
+                    b = ((b.0 .0.min(x), b.0 .1.min(y)), (b.1 .0.max(x), b.1 .1.max(y)));
+                }
+                (b.0 .0 <= b.1 .0).then_some(b)
+            })
+            .collect();
+        let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+        for (a, b) in &boxes {
+            lo = (lo.0.min(a.0), lo.1.min(a.1));
+            hi = (hi.0.max(b.0), hi.1.max(b.1));
+        }
+        if boxes.is_empty() {
+            return NearBuildings { min: (0.0, 0.0), cell: (1.0, 1.0), cols: 0, rows: 0, bits: Vec::new() };
+        }
+        // the cell in degrees: INFER_STREET_M at the latitude farthest from the equator (a degree of longitude is shortest
+        // there), so the cell is at least that wide at the middle latitude of the projection too
+        let far = lo.1.abs().max(hi.1.abs()).min(89.0).to_radians().cos();
+        let cell = (INFER_STREET_M / (M_PER_DEG * far), INFER_STREET_M / M_PER_DEG);
+        let min = (lo.0 - 2.0 * cell.0, lo.1 - 2.0 * cell.1);
+        let cols = ((hi.0 - min.0) / cell.0) as usize + 3;
+        let rows = ((hi.1 - min.1) / cell.1) as usize + 3;
+        let mut g = NearBuildings { min, cell, cols, rows, bits: vec![0; (cols * rows).div_ceil(64)] };
+        for (a, b) in boxes {
+            let (c0, r0) = g.at(a);
+            let (c1, r1) = g.at(b);
+            for r in r0.saturating_sub(1)..=(r1 + 1).min(rows - 1) {
+                for c in c0.saturating_sub(1)..=(c1 + 1).min(cols - 1) {
+                    let k = r * cols + c;
+                    g.bits[k / 64] |= 1 << (k % 64);
+                }
+            }
+        }
+        g
+    }
+
+    /// The cell of a point, in the grid or at its edge.
+    fn at(&self, p: Pt) -> (usize, usize) {
+        let c = ((p.0 - self.min.0) / self.cell.0).max(0.0) as usize;
+        let r = ((p.1 - self.min.1) / self.cell.1).max(0.0) as usize;
+        (c.min(self.cols.saturating_sub(1)), r.min(self.rows.saturating_sub(1)))
+    }
+
+    /// Is the segment from `a` to `b` in a marked cell (near a building)?
+    pub fn near(&self, a: Pt, b: Pt) -> bool {
+        if self.bits.is_empty() {
+            return false;
+        }
+        let (lo, hi) = ((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1)));
+        // a segment out of the grid: the grid has two free cells around all marks
+        if hi.0 < self.min.0 || hi.1 < self.min.1 {
+            return false;
+        }
+        let (c0, r0) = self.at(lo);
+        let (c1, r1) = self.at(hi);
+        (r0..=r1).any(|r| {
+            (c0..=c1).any(|c| {
+                let k = r * self.cols + c;
+                self.bits[k / 64] & (1 << (k % 64)) != 0
+            })
+        })
+    }
+}
+
 /// The weight of a street class in the score of a street for a wall: a wide street is more of a front than a service road.
 fn class_weight(highway: &str) -> f64 {
     match highway.trim_end_matches("_link") {
@@ -250,9 +334,10 @@ fn closest_to_street(tree: &RTree<Seg>, m: &Match, p: P) -> P {
     let env = AABB::from_corners((m.q.0 - 1e-6, m.q.1 - 1e-6), (m.q.0 + 1e-6, m.q.1 + 1e-6));
     tree.locate_in_envelope_intersecting(&env)
         .filter(|s| s.edge_id == m.edge_id)
-        .map(|s| closest_on(s.a, s.b, p).0)
-        .next()
-        .unwrap_or(m.q)
+        .map(|s| closest_on(s.a, s.b, p))
+        // the nearest of the segments of the street at `q` (two meet at a node): the first one would depend on the order of the tree
+        .min_by(|x, y| x.1.total_cmp(&y.1).then(x.0 .0.total_cmp(&y.0 .0)).then(x.0 .1.total_cmp(&y.0 .1)))
+        .map_or(m.q, |x| x.0)
 }
 
 struct Wall {
@@ -942,6 +1027,19 @@ mod tests {
             refs: refs.to_vec(),
         }
     }
+    /// A street segment within INFER_STREET_M of a building is near; one 1 km away is not; with no building, none is.
+    #[test]
+    fn near_buildings_grid() {
+        let nodes = vec![node(1, 0.0, 0.0), node(2, 10.0, 0.0), node(3, 10.0, 10.0), node(4, 0.0, 10.0)];
+        let ways = vec![RawWay { id: 9, tags: vec![("building".into(), "yes".into())], refs: vec![1, 2, 3, 4, 1] }];
+        let g = NearBuildings::new(&ways, &nodes);
+        assert!(g.near((-140.0 * M, 5.0 * M), (-140.0 * M, 6.0 * M)));
+        assert!(g.near((-2000.0 * M, 5.0 * M), (2000.0 * M, 5.0 * M)), "a long segment that crosses the area");
+        assert!(!g.near((1000.0 * M, 1000.0 * M), (1001.0 * M, 1000.0 * M)));
+        assert!(!g.near((-1000.0 * M, -1000.0 * M), (-999.0 * M, -1000.0 * M)));
+        assert!(!NearBuildings::new(&[], &nodes).near((0.0, 0.0), (M, M)));
+    }
+
     fn street(osm_id: i64, a: (f64, f64), b: (f64, f64)) -> Street {
         Street {
             a: (a.0 * M, a.1 * M),
