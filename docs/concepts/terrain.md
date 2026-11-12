@@ -139,9 +139,9 @@ the height. The road does.
 
 | Source | Heights | What it is | Who uses it |
 |---|---|---|---|
-| SimReady graded profile | `sim.elevation_profile`, method `graded`, at stations along each carriageway | the designed road: straight grades and vertical curves, with cut and fill (`earthwork_m`) | SimReady's `.xodr`, GLB and 3D dashboard |
-| duckOSM `z_vertices` | one height at each point of the edge line | the DEM at the road's points: the ground, not a designed road. No cut, no fill | SimReady `import-elevation`; roadstyle vehicles (next) |
-| the map's terrain | the terrain file of the page, read along the road's own line | the same ground as the drawn road, at the road's centre line | roadstyle vehicles today, every 5 m |
+| SimReady graded profile | `sim.elevation_profile`, method `graded`, at stations along each carriageway | the designed road: straight grades and vertical curves, with cut and fill (`earthwork_m`) | SimReady's `.xodr`, GLB and 3D dashboard; roadstyle vehicles (2026-11-11) |
+| duckOSM `z_vertices` | one height at each point of the edge line | the DEM at the road's points: the ground, not a designed road. No cut, no fill | SimReady `import-elevation` |
+| the map's terrain | the terrain file of the page, read along the road's own line | the same ground as the drawn road, at the road's centre line | roadstyle vehicles on a page with no road heights file, every 5 m |
 
 A reader takes the first source that it has, in this order, and the page says which one it took. No source is used in silence.
 
@@ -150,8 +150,9 @@ A reader takes the first source that it has, in this order, and the page says wh
 | Road | Profile |
 |---|---|
 | ground road | the heights of the source along its line |
-| bridge | the deck surface: level between the ground at the two ends of its chain of bridges, ramps from the ground at each free end, the group's height. The deck mesh and the vehicles use the same rule |
-| tunnel | today the terrain along its line (the tunnel is drawn on the hill above it, and a vehicle in it has the tunnel's look: shown, faded or hidden). A tunnel's own depth is to do |
+| bridge | the heights of the source (SimReady's graded profile: the deck). The deck mesh is drawn on the same profile as the vehicles. Without a source, the deck rule of the page: level between the ground at the two ends of its chain of bridges, ramps from the ground at each free end, the group's height |
+| tunnel | the heights of the source: under the ground. The tunnel is drawn at that depth, not on the hill above it. A vehicle in it has the tunnels' look: shown, faded or hidden |
+| road beside a road at another height | the heights of the source. The road is drawn at that height as its own surface, with a wall at its side, not on the terrain ([The ground reference](ground-reference.md#where-the-ground-cannot-hold-a-road)) |
 | junction | there is no drawn road inside a junction: the height goes in a straight line from the end of the road in to the start of the road out (SimReady: from the stop line of the road in to the stop line of the road out) |
 | lane | a lane has the profile of its road. SUMO cuts each lane back from its junctions, so the lane's start and end are first put on the road's line; a place on the lane is the same fraction of that part of the road |
 
@@ -194,13 +195,20 @@ read on a 5 m grid. This is the only case where a point gives the height.
 **The exaggeration** of the terrain applies to the vehicles too: a height from the terrain file includes it, so the road, the
 deck and the vehicle stay together.
 
-**State on 2026-11-10:** the road profiles come from the map's terrain along each road. Next: from `edges.z_vertices`, then from
-SimReady's graded profile, and on a 3D bridge from the deck rule.
+**State on 2026-11-11:** the road profiles come from SimReady's graded profile (roadstyle branch `claude/vehicles-p2`, not
+merged). `edges.z_vertices` is not used: it is the DEM at the road's points, not a designed road. Next: the roads that the ground
+cannot hold are drawn at the same profile.
 
 ### The road and the ground must agree
 
 A road profile and the drawn terrain are two surfaces. Where they differ, a road or a vehicle floats or sinks. The standard fixes
 this with the conformed ground ([The ground reference](ground-reference.md), section 3): under a road the ground has the road's height.
+
+The conformed ground does this only where it can hold the road. At a bridge, a tunnel, or a road beside a road at another
+height (a wall), one height grid cannot have both heights. There the road is drawn as its own surface at its profile, and
+not on the terrain ([Where the ground cannot hold a road](ground-reference.md#where-the-ground-cannot-hold-a-road)). A road
+laid on the terrain there is wrong, and a vehicle on it seems to leave the road in a tilted view: the vehicle is at the
+road's height, and the drawn road is not.
 
 Until roadstyle draws the conformed ground, the map lays each road on the reference terrain, and two differences stay:
 
@@ -263,6 +271,8 @@ The file is a GeoTIFF in EPSG:4326 with 32-bit floats. `duckosm elevation` can a
 
 - **Tunnels and bridges.** The ground is the ground. A tunnel lies under the hill, and a bridge spans the valley. Their own heights
   come from the road heights, not from the grid.
+- **A wall between two roads.** Two roads side by side at different heights have a wall between them. The grid steps from cell
+  to cell there, as a saw-tooth. The roads are drawn at their own heights, not on the grid.
 - **More detail than the DEM has.** A 30 m DEM shows the hills of Monaco, not a step or a kerb. A finer DEM (a 1 m LiDAR model)
   gives a finer terrain, and a bigger grid.
 
