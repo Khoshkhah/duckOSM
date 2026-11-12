@@ -1,6 +1,6 @@
 """The digest of the tables of a build, the same SQL for the duckosm-rust page (duckdb-wasm) and for a duckOSM db (docs/design/fixes_editor.md).
 
-For each table: the row count, an md5 of the sorted rows and an md5 of each column. A row is its columns in name order, as text; the geometry
+For each table (the page keeps its large tables as views of Parquet files): the row count, an md5 of the sorted rows and an md5 of each column. A row is its columns in name order, as text; the geometry
 is left out (it comes from the node ids); a MAP is its sorted key=value pairs; a float is rounded to 6 digits. ``q(sql)`` runs a query and
 gives a list of dicts. ``scripts/page_tables.py`` writes the digests of the page (tests/data/page_fixes/page_tables.json), and
 ``tests/test_page_fixes.py`` compares a ``duckosm build`` with them.
@@ -11,14 +11,15 @@ SKIP = {"main.visualization_metadata", "main.build_info"}
 
 def tables(q):
     rows = q("SELECT table_schema AS s, table_name AS t FROM information_schema.tables "
-             f"WHERE table_schema IN {SCHEMAS} AND table_type = 'BASE TABLE' ORDER BY 1, 2")
+             f"WHERE table_schema IN {SCHEMAS} AND table_type IN ('BASE TABLE', 'VIEW') ORDER BY 1, 2")
     return [f"{r['s']}.{r['t']}" for r in rows if f"{r['s']}.{r['t']}" not in SKIP]
 
 
 def columns(q, table):
     s, t = table.split(".")
     rows = q(f"SELECT column_name AS c, data_type AS d FROM information_schema.columns WHERE table_schema = '{s}' AND table_name = '{t}'")
-    return {r["c"]: r["d"] for r in rows}
+    # rowid: the row number that the page's view of a Parquet file adds for its map, not data of the table
+    return {r["c"]: r["d"] for r in rows if r["c"] != "rowid"}
 
 
 def _text(c, d):
