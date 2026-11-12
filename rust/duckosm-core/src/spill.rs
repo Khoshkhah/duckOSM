@@ -7,6 +7,7 @@
 
 use crate::model::{Attrs, Edge};
 use crate::util::FxHashMap;
+use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -67,6 +68,15 @@ impl Seek for TempFile {
     }
 }
 
+/// The store of the network step: a folder for temporary files natively, memory in the browser (WebAssembly has no
+/// files until the page gives a store in OPFS).
+pub fn temp_store() -> Box<dyn Store> {
+    #[cfg(target_arch = "wasm32")]
+    return Box::new(MemStore);
+    #[cfg(not(target_arch = "wasm32"))]
+    Box::new(DirStore(std::env::temp_dir()))
+}
+
 impl Store for DirStore {
     fn create(&self) -> io::Result<Box<dyn Blob>> {
         static N: AtomicU64 = AtomicU64::new(0);
@@ -85,9 +95,9 @@ impl Store for DirStore {
 }
 
 /// How a row is written as bytes and read back. `put` can add to the codec (for example a new shared value), `get`
-/// only reads it.
+/// only reads it. A pass reads one file and writes the next with the same codec, so `put` takes `&self`.
 pub trait Codec<T> {
-    fn put(&mut self, row: &T, out: &mut Vec<u8>);
+    fn put(&self, row: &T, out: &mut Vec<u8>);
     fn get(&self, b: &mut &[u8]) -> T;
 }
 
@@ -116,7 +126,7 @@ impl Writer {
         })
     }
 
-    pub fn push<T>(&mut self, codec: &mut impl Codec<T>, row: &T) -> io::Result<()> {
+    pub fn push<T>(&mut self, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
         let mut buf = std::mem::take(&mut self.buf);
         buf.clear();
         codec.put(row, &mut buf);
@@ -173,7 +183,10 @@ impl Rows {
     }
 
     /// Read the rows, one at a time. The file is gone after the last row.
-    pub fn read<'c, T, C: Codec<T>>(self, codec: &'c C) -> io::Result<impl Iterator<Item = io::Result<T>> + 'c> {
+    pub fn read<'c, T, C: Codec<T>>(
+        self,
+        codec: &'c C,
+    ) -> io::Result<impl Iterator<Item = io::Result<T>> + 'c> {
         let mut raw = self.raw()?;
         let mut buf = Vec::new();
         Ok(std::iter::from_fn(move || match raw.next_into(&mut buf) {
@@ -246,30 +259,30 @@ pub fn sort<T, K: Ord, C: Codec<T>>(
     Ok(out)
 }
 
-fn put_u32(o: &mut Vec<u8>, v: u32) {
+pub(crate) fn put_u32(o: &mut Vec<u8>, v: u32) {
     o.extend_from_slice(&v.to_le_bytes());
 }
-fn put_i64(o: &mut Vec<u8>, v: i64) {
+pub(crate) fn put_i64(o: &mut Vec<u8>, v: i64) {
     o.extend_from_slice(&v.to_le_bytes());
 }
-fn put_f32(o: &mut Vec<u8>, v: f32) {
+pub(crate) fn put_f32(o: &mut Vec<u8>, v: f32) {
     o.extend_from_slice(&v.to_le_bytes());
 }
-fn take<const N: usize>(b: &mut &[u8]) -> [u8; N] {
+pub(crate) fn take<const N: usize>(b: &mut &[u8]) -> [u8; N] {
     let (h, t) = b.split_at(N);
     *b = t;
     h.try_into().unwrap()
 }
-fn get_u32(b: &mut &[u8]) -> u32 {
+pub(crate) fn get_u32(b: &mut &[u8]) -> u32 {
     u32::from_le_bytes(take(b))
 }
-fn get_i64(b: &mut &[u8]) -> i64 {
+pub(crate) fn get_i64(b: &mut &[u8]) -> i64 {
     i64::from_le_bytes(take(b))
 }
-fn get_f32(b: &mut &[u8]) -> f32 {
+pub(crate) fn get_f32(b: &mut &[u8]) -> f32 {
     f32::from_le_bytes(take(b))
 }
-fn get_f64(b: &mut &[u8]) -> f64 {
+pub(crate) fn get_f64(b: &mut &[u8]) -> f64 {
     f64::from_le_bytes(take(b))
 }
 
@@ -305,7 +318,10 @@ impl<T: ?Sized> Shared<T> {
 /// edges: the codec keeps them, and an edge has their numbers. The codec keeps each shared value alive, so its address
 /// is not used again for another value.
 #[derive(Default)]
-pub struct EdgeCodec {
+pub struct EdgeCodec(RefCell<EdgeValues>);
+
+#[derive(Default)]
+struct EdgeValues {
     attrs: Shared<Attrs>,
     access: Shared<str>,
     ftypes: Vec<&'static str>,
@@ -313,9 +329,13 @@ pub struct EdgeCodec {
 
 const NONE: u32 = u32::MAX;
 
-impl EdgeCodec {
+impl EdgeValues {
     fn ftype_id(&mut self, t: &'static str) -> u32 {
-        match self.ftypes.iter().position(|&x| std::ptr::eq(x, t) || x == t) {
+        match self
+            .ftypes
+            .iter()
+            .position(|&x| std::ptr::eq(x, t) || x == t)
+        {
             Some(i) => i as u32,
             None => {
                 self.ftypes.push(t);
@@ -326,15 +346,16 @@ impl EdgeCodec {
 }
 
 impl Codec<Edge> for EdgeCodec {
-    fn put(&mut self, e: &Edge, o: &mut Vec<u8>) {
+    fn put(&self, e: &Edge, o: &mut Vec<u8>) {
+        let mut v = self.0.borrow_mut();
         put_i64(o, e.edge_id);
         put_u32(o, e.seq.unwrap_or(NONE));
         put_i64(o, e.source);
         put_i64(o, e.target);
         put_i64(o, e.osm_id);
-        put_u32(o, self.attrs.id(&e.attrs));
-        put_u32(o, e.access.as_ref().map_or(NONE, |a| self.access.id(a)));
-        put_u32(o, e.ftype.map_or(NONE, |t| self.ftype_id(t)));
+        put_u32(o, v.attrs.id(&e.attrs));
+        put_u32(o, e.access.as_ref().map_or(NONE, |a| v.access.id(a)));
+        put_u32(o, e.ftype.map_or(NONE, |t| v.ftype_id(t)));
         let flags = e.oneway as u8
             | (e.is_reverse as u8) << 1
             | (e.lanes.is_some() as u8) << 2
@@ -368,16 +389,17 @@ impl Codec<Edge> for EdgeCodec {
     }
 
     fn get(&self, b: &mut &[u8]) -> Edge {
+        let v = self.0.borrow();
         let edge_id = get_i64(b);
         let seq = Some(get_u32(b)).filter(|&s| s != NONE);
         let (source, target, osm_id) = (get_i64(b), get_i64(b), get_i64(b));
-        let attrs = self.attrs.values[get_u32(b) as usize].clone();
+        let attrs = v.attrs.values[get_u32(b) as usize].clone();
         let access = Some(get_u32(b))
             .filter(|&a| a != NONE)
-            .map(|a| self.access.values[a as usize].clone());
+            .map(|a| v.access.values[a as usize].clone());
         let ftype = Some(get_u32(b))
             .filter(|&t| t != NONE)
-            .map(|t| self.ftypes[t as usize]);
+            .map(|t| v.ftypes[t as usize]);
         let flags = take::<1>(b)[0];
         let lanes = (flags & 4 != 0).then(|| i32::from_le_bytes(take(b)));
         let length_m = get_f32(b);
@@ -429,7 +451,9 @@ mod tests {
             lanes: (i % 5 == 0).then_some(2),
             access: (i % 7 == 0).then(|| Arc::from("bus")),
             refs: (0..(i % 4 + 2)).collect(),
-            geometry: (0..(i % 4 + 2)).map(|k| (k as f64 * 0.5, i as f64)).collect(),
+            geometry: (0..(i % 4 + 2))
+                .map(|k| (k as f64 * 0.5, i as f64))
+                .collect(),
             is_reverse: i % 3 == 0,
             length_m: i as f32 * 1.5,
             dismount: [None, Some(false), Some(true)][(i % 3) as usize],
@@ -457,20 +481,24 @@ mod tests {
             service: None,
         });
         let edges: Vec<Edge> = (0..500).map(|i| edge(i, &attrs)).collect();
-        let mut codec = EdgeCodec::default();
+        let codec = EdgeCodec::default();
         for (store, budget) in [(&MemStore as &dyn Store, 1 << 30), (&MemStore, 2000)] {
             let mut w = Writer::new(store).unwrap();
             for e in &edges {
-                w.push(&mut codec, e).unwrap();
+                w.push(&codec, e).unwrap();
             }
             let rows = w.finish().unwrap();
             let sorted = sort(rows, &codec, |e: &Edge| e.osm_id, budget, store).unwrap();
-            let got: Vec<String> = sorted.read(&codec).unwrap().map(|e| key(&e.unwrap())).collect();
+            let got: Vec<String> = sorted
+                .read(&codec)
+                .unwrap()
+                .map(|e| key(&e.unwrap()))
+                .collect();
             let mut want = edges.clone();
             want.sort_by_key(|e| e.osm_id); // stable, as the sort of the files
             assert_eq!(got, want.iter().map(key).collect::<Vec<_>>());
         }
-        assert_eq!(codec.attrs.values.len(), 1);
+        assert_eq!(codec.0.borrow().attrs.values.len(), 1);
     }
 
     #[test]
@@ -479,7 +507,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = DirStore(dir.clone());
         let mut w = Writer::new(&store).unwrap();
-        let mut c = EdgeCodec::default();
+        let c = EdgeCodec::default();
         let attrs = Arc::new(Attrs {
             highway: "service".into(),
             name: None,
@@ -492,7 +520,7 @@ mod tests {
             service: None,
         });
         for i in 0..100 {
-            w.push(&mut c, &edge(i, &attrs)).unwrap();
+            w.push(&c, &edge(i, &attrs)).unwrap();
         }
         let rows = sort(w.finish().unwrap(), &c, |e: &Edge| e.edge_id, 1000, &store).unwrap();
         assert_eq!(rows.read(&c).unwrap().count(), 100);

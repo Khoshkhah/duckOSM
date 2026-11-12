@@ -8,6 +8,9 @@ use crate::geom::{self, Pt};
 use crate::graph::{Graph, Relation};
 use crate::hash;
 use crate::model::{Attrs, Edge, MapRow, Network, Node, Stats, Way};
+use crate::spill::{
+    self, get_i64, get_u32, put_i64, put_u32, take, Codec, EdgeCodec, Rows, Store, Writer,
+};
 use crate::util::{FxHashMap, FxHashSet};
 use rstar::{primitives::GeomWithData, RTree, AABB};
 use std::sync::Arc;
@@ -103,8 +106,128 @@ impl Coords {
 struct Fwd {
     e: Edge,
     way: usize,
+    pos: Pos,
 }
 
+/// The place of a forward edge in the one list of all edges that steps 1 to 7 used before part B2
+/// (docs/design/network_stream.md). The steps now read the edges one way at a time, from files, and `Pos` keeps the old
+/// order where it decides a tie (step 3, the largest part in step 10) or the order of a result (the edges, the virtual
+/// nodes, `edge_id_map`). The fields compare in their order:
+/// - after step 2b, the merged chains in the order (first edge, start, end, order of the walk), then the other edges in
+///   the order of the cut;
+/// - `half`: a split edge of step 3 gives its halves 0 and 2, step 4 adds 0 and 1 (the halves come in place of the edge).
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Pos {
+    group: u8,  // 0: a merged chain, 1: an edge that is not merged
+    first: u32, // the number of the edge in the cut (of a chain: of its first edge)
+    start: i64,
+    end: i64,
+    walk: u32,
+    half: u8,
+}
+
+impl Pos {
+    fn cut(n: u32) -> Pos {
+        Pos {
+            group: 1,
+            first: n,
+            ..Pos::default()
+        }
+    }
+}
+
+/// [`Fwd`] in a temporary file.
+#[derive(Default)]
+struct FwdCodec(EdgeCodec);
+
+impl Codec<Fwd> for FwdCodec {
+    fn put(&self, f: &Fwd, o: &mut Vec<u8>) {
+        self.0.put(&f.e, o);
+        let p = &f.pos;
+        put_u32(o, f.way as u32);
+        o.push(p.group);
+        put_u32(o, p.first);
+        put_i64(o, p.start);
+        put_i64(o, p.end);
+        put_u32(o, p.walk);
+        o.push(p.half);
+    }
+
+    fn get(&self, b: &mut &[u8]) -> Fwd {
+        let e = self.0.get(b);
+        let way = get_u32(b) as usize;
+        let group = take::<1>(b)[0];
+        let (first, start, end, walk) = (get_u32(b), get_i64(b), get_i64(b), get_u32(b));
+        let half = take::<1>(b)[0];
+        Fwd {
+            e,
+            way,
+            pos: Pos {
+                group,
+                first,
+                start,
+                end,
+                walk,
+                half,
+            },
+        }
+    }
+}
+
+/// One end of a forward edge, for the merge of chains: the node, the number of the edge in the cut, its way.
+struct End {
+    node: i64,
+    edge: u32,
+    way: u32,
+    at_source: bool,
+}
+
+struct EndCodec;
+
+impl Codec<End> for EndCodec {
+    fn put(&self, h: &End, o: &mut Vec<u8>) {
+        put_i64(o, h.node);
+        put_u32(o, h.edge);
+        put_u32(o, h.way);
+        o.push(h.at_source as u8);
+    }
+
+    fn get(&self, b: &mut &[u8]) -> End {
+        End {
+            node: get_i64(b),
+            edge: get_u32(b),
+            way: get_u32(b),
+            at_source: take::<1>(b)[0] != 0,
+        }
+    }
+}
+
+/// The memory of each sorted block of a sort of a temporary file (`spill::sort`).
+const SORT_BUDGET: usize = 64 << 20;
+
+fn io(e: std::io::Error) -> String {
+    format!("temporary file of the network step: {e}")
+}
+
+/// Call `f` with each run of rows that have the same `key`. The rows are sorted by `key`.
+fn for_groups<T, K: PartialEq, E>(
+    rows: impl Iterator<Item = Result<T, E>>,
+    key: impl Fn(&T) -> K,
+    mut f: impl FnMut(Vec<T>) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut g: Vec<T> = Vec::new();
+    for r in rows {
+        let r = r?;
+        if g.last().is_some_and(|l| key(l) != key(&r)) {
+            f(std::mem::take(&mut g))?;
+        }
+        g.push(r);
+    }
+    if !g.is_empty() {
+        f(g)?;
+    }
+    Ok(())
+}
 /// Count the uses of each node with a sort, not a hash map of all nodes: the entries use 16 bytes
 /// for each node of each way, and only the result map is a hash map. `uses` gives
 /// (node, flags) for each node of each way; `keep` gets the flags of all uses of one node.
@@ -297,10 +420,16 @@ pub fn build_network_junctions(
     let lj = local_junctions(&mw);
 
     crate::util::step("start of step 1: Cut every way into forward edges. Step 2");
-    // 1. Cut every way into forward edges. Step 2 runs on each edge as it is made, so the forward
-    // edges are not copied to a second list.
-    let mut fwd: Vec<Fwd> = Vec::new();
+    // 1. Cut every way into forward edges, and write them to a temporary file (docs/design/network_stream.md, part
+    // B2). Step 2 runs on each edge as it is made. For the merge of chains, the two ends of each edge go to a second file.
+    let store = spill::temp_store();
+    let store = &*store;
+    let codec = FwdCodec::default();
+    let mut cut = Writer::new(store).map_err(io)?;
+    let mut ends = Writer::new(store).map_err(io)?;
     let mut virtual_nodes: Vec<Node> = Vec::new();
+    let mut made: Vec<Fwd> = Vec::new();
+    let mut n_cut = 0u32;
     for (wi, w) in mw.iter().enumerate() {
         let is_road = !NON_ROAD.contains(&w.attrs.highway.as_str());
         let split: Vec<bool> = w
@@ -360,148 +489,99 @@ pub fn build_network_junctions(
                     },
                 },
                 way: wi,
+                pos: Pos::default(),
             };
-            if push_split_loop(&mut fwd, f, &mut virtual_nodes) {
+            if push_split_loop(&mut made, f, &mut virtual_nodes) {
                 stats.self_loops_split += 1;
+            }
+            for mut f in made.drain(..) {
+                f.pos = Pos::cut(n_cut);
+                if opts.merge_segments {
+                    for (node, at_source) in [(f.e.source, true), (f.e.target, false)] {
+                        let end = End {
+                            node,
+                            edge: n_cut,
+                            way: wi as u32,
+                            at_source,
+                        };
+                        ends.push(&EndCodec, &end).map_err(io)?;
+                    }
+                }
+                cut.push(&codec, &f).map_err(io)?;
+                n_cut = n_cut.checked_add(1).ok_or("more than 2^32 forward edges")?;
             }
         }
     }
-
     drop(lj); // the junction maps are as large as the nodes of the area, and the later steps do not read them
+    let cut = cut.finish().map_err(io)?;
+    let ends = ends.finish().map_err(io)?;
+
     crate::util::step("start of step 2b: Merge the chains of edges that are one r");
     // 2b. Merge the chains of edges that are one road.
     let mut edge_id_map: Vec<MapRow> = Vec::new();
-    if opts.merge_segments {
-        let (merged, map, n_chains, n_pieces) = merge_chains(fwd, gj, coords);
-        fwd = merged;
+    let fwd = if opts.merge_segments {
+        let (merged, map, n_chains, n_pieces) =
+            merge_chains(cut, ends, &mw, gj, coords, &codec, store).map_err(io)?;
         edge_id_map = map;
         stats.merged_chains = n_chains;
         stats.merged_pieces = n_pieces;
-    }
-
-    crate::util::step("start of step 3: Split same-direction parallel arcs (all");
-    // 3. Split same-direction parallel arcs (all but the shortest of each group).
-    // The map lives in a block: with one vector for each key it is as large as the edges, and it is not needed after the split.
-    let sel = {
-        let mut groups: FxHashMap<(i64, i64, i64), Vec<usize>> = FxHashMap::default();
-        for (i, f) in fwd.iter().enumerate() {
-            if f.e.source != f.e.target {
-                groups
-                    .entry((f.e.osm_id, f.e.source, f.e.target))
-                    .or_default()
-                    .push(i);
-            }
-        }
-        let mut sel = FxHashSet::default();
-        for idx in groups.values().filter(|v| v.len() > 1) {
-            // The index is the last tie-break: a way that walks one segment twice makes two arcs with the same
-            // length and the same refs, and duckOSM keeps both (it stops with an error). Here the first stays whole.
-            let key = |i: usize| (fwd[i].e.length_m, refs_key(&fwd[i].e), i);
-            let min = idx
-                .iter()
-                .map(|&i| key(i))
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap();
-            for &i in idx {
-                if key(i).partial_cmp(&min) == Some(std::cmp::Ordering::Greater) {
-                    sel.insert(i);
-                }
-            }
-        }
-        sel
+        merged
+    } else {
+        cut
     };
-    stats.parallel_split = sel.len();
-    fwd = split_arcs(fwd, &sel, &mut virtual_nodes);
 
-    crate::util::step("start of step 4: Split two-way antiparallel pairs (the lo");
-    // 4. Split two-way antiparallel pairs (the longer arc of each pair).
-    let sel = {
-        let mut by_key: FxHashMap<(i64, i64, i64), Vec<usize>> = FxHashMap::default();
-        for (i, f) in fwd.iter().enumerate() {
-            by_key
-                .entry((f.e.osm_id, f.e.source, f.e.target))
-                .or_default()
-                .push(i);
-        }
-        let mut sel = FxHashSet::default();
-        for (i, f) in fwd.iter().enumerate() {
-            if f.e.oneway || f.e.source == f.e.target {
-                continue;
-            }
-            if let Some(others) = by_key.get(&(f.e.osm_id, f.e.target, f.e.source)) {
-                let mine = (f.e.length_m, refs_key(&f.e));
-                for &j in others {
-                    if fwd[j].e.oneway {
-                        continue;
-                    }
-                    let theirs = (fwd[j].e.length_m, refs_key(&fwd[j].e));
-                    if mine.partial_cmp(&theirs) == Some(std::cmp::Ordering::Greater) {
-                        sel.insert(i);
-                    }
-                }
-            }
-        }
-        sel
-    };
-    stats.antiparallel_split = sel.len();
-    fwd = split_arcs(fwd, &sel, &mut virtual_nodes);
-
-    crate::util::step("start of step 5: Add the reverse edge of each two-way way");
-    // 5. Add the reverse edge of each two-way way (and of a one-way way with a bus lane).
-    // The reverse edges are made straight into the vector of all edges, so there is no third block (`rev`) next to `fwd` and `edges`;
-    // then the forward edges follow, and `rotate_right` puts them first, as before.
-    let has_rev = |f: &Fwd| !f.e.oneway || mw[f.way].bus_back;
-    let n_rev = fwd.iter().filter(|f| has_rev(f)).count();
-    let mut edges: Vec<Edge> = Vec::with_capacity(fwd.len() + n_rev);
-    for f in &fwd {
-        let w = &mw[f.way];
-        if has_rev(f) {
-            let mut r = f.e.clone();
-            r.source = f.e.target;
-            r.target = f.e.source;
-            r.lanes = w.lanes_bwd;
-            if f.e.oneway {
-                r.access = Some(Arc::from("bus"));
-            }
-            r.refs.reverse();
-            r.geometry.reverse();
-            r.is_reverse = true;
-            r.ftype = if opts.functional_types {
-                w.type_rev
-            } else {
-                None
-            };
-            edges.push(r);
-        }
-    }
-    edges.extend(fwd.into_iter().map(|f| f.e));
-    edges.rotate_right(n_rev);
-
-    crate::util::step("start of step 6: The stable edge_id, edge_ref, and the ch");
-    // 6. The stable edge_id, edge_ref, and the check that (osm_id, source, target) is unique.
-    let mut seen: FxHashSet<(i64, i64, i64)> = FxHashSet::default();
-    for e in &edges {
-        if !seen.insert((e.osm_id, e.source, e.target)) {
-            return Err(format!(
-                "duplicate (osm_id, source, target) after the splits: {} {}->{}",
-                e.osm_id, e.source, e.target
-            ));
-        }
-    }
-    drop(seen);
+    crate::util::step("start of steps 3 to 7: Split the arcs, add the reverse edg");
+    // 3 to 7. Split the parallel and antiparallel arcs, add the reverse edges, set edge_id, edge_ref and the length. The
+    // steps read the forward edges of one way (one osm_id) at a time: the keys of steps 3, 4 and 6 contain osm_id.
     let raw_refs: FxHashMap<i64, &Vec<i64>> = all_ways.iter().map(|w| (w.id, &w.refs)).collect();
-    set_refs_and_ids(&mut edges, &raw_refs);
+    let by_way = spill::sort(
+        fwd,
+        &codec,
+        |f: &Fwd| (f.e.osm_id, f.pos),
+        SORT_BUDGET,
+        store,
+    )
+    .map_err(io)?;
+    let mut done = Writer::new(store).map_err(io)?;
+    let mut split_nodes: Vec<(u8, Pos, Node)> = Vec::new();
+    let rows = by_way.read(&codec).map_err(io)?.map(|r| r.map_err(io));
+    for_groups(
+        rows,
+        |f| f.e.osm_id,
+        |g| {
+            for f in way_steps(
+                g,
+                &mw,
+                &raw_refs,
+                opts.functional_types,
+                &mut split_nodes,
+                &mut stats,
+            )? {
+                done.push(&codec, &f).map_err(io)?;
+            }
+            Ok(())
+        },
+    )?;
     drop(raw_refs);
+    // the virtual nodes in the old order: of step 1 (in the order of the cut), then of step 3, then of step 4
+    split_nodes.sort_by_key(|v| (v.0, v.1));
+    virtual_nodes.extend(split_nodes.into_iter().map(|v| v.2));
 
-    crate::util::step("start of step 7: Correct the length of the edges whose ha");
-    // 7. Correct the length of the edges whose halves were wrong by more than 0.1 %.
-    for e in &mut edges {
-        let m = geom::line_length_m(&e.geometry);
-        if m > 0.0 && (((e.length_m / m) - 1.0f32).abs() as f64) > 0.001 {
-            e.length_m = m;
-        }
+    crate::util::step("start of the sort of the edges into the order of step 8");
+    // Step 8 and later still take a list of all edges (part B3 changes them), in the old order: the reverse edges, then
+    // the forward edges, each in the order of `Pos`.
+    let done = spill::sort(
+        done.finish().map_err(io)?,
+        &codec,
+        |f: &Fwd| (!f.e.is_reverse, f.pos),
+        SORT_BUDGET,
+        store,
+    )
+    .map_err(io)?;
+    let mut edges: Vec<Edge> = Vec::with_capacity(done.len);
+    for f in done.read(&codec).map_err(io)? {
+        edges.push(f.map_err(io)?.e);
     }
-
     crate::util::step("start of step 8: The nodes");
     // 8. The nodes.
     let used: FxHashSet<i64> = edges.iter().flat_map(|e| [e.source, e.target]).collect();
@@ -603,15 +683,22 @@ pub fn build_network_junctions(
         match graph_rows {
             Some(sink) => {
                 let mut n = 0;
-                let permission = crate::graph::edge_graph_each(mode, &edges, &private_edges, restrictions, |r| {
-                    n += 1;
-                    sink(r)
-                })?;
+                let permission = crate::graph::edge_graph_each(
+                    mode,
+                    &edges,
+                    &private_edges,
+                    restrictions,
+                    |r| {
+                        n += 1;
+                        sink(r)
+                    },
+                )?;
                 stats.edge_graph_rows = n;
                 graph.turn_permission = Some(permission);
             }
             None => {
-                let (rows, permission) = crate::graph::edge_graph(mode, &edges, &private_edges, restrictions);
+                let (rows, permission) =
+                    crate::graph::edge_graph(mode, &edges, &private_edges, restrictions);
                 stats.edge_graph_rows = rows.len();
                 graph.edge_graph = Some(rows);
                 graph.turn_permission = Some(permission);
@@ -654,19 +741,142 @@ fn push_split_loop(fwd: &mut Vec<Fwd>, f: Fwd, vnodes: &mut Vec<Node>) -> bool {
     fwd.push(Fwd {
         e: half(&f.e, f.e.source, v, r1, geom::substring(&rr, 0.0, 0.5)),
         way: f.way,
+        pos: f.pos,
     });
     fwd.push(Fwd {
         e: half(&f.e, v, f.e.source, r2, geom::substring(&rr, 0.5, 1.0)),
         way: f.way,
+        pos: f.pos,
     });
     true
 }
 
-/// Split the forward edges in `sel` at their midpoint with a virtual node (`_split_arcs_at_midpoint`).
-fn split_arcs(fwd: Vec<Fwd>, sel: &FxHashSet<usize>, vnodes: &mut Vec<Node>) -> Vec<Fwd> {
+/// Steps 3 to 7 on the forward edges of one way (one `osm_id`), in the order of `Pos`. Returns the forward and the
+/// reverse edges of the way, with `edge_id`, `seq` and the length.
+fn way_steps(
+    mut g: Vec<Fwd>,
+    mw: &[ModeWay],
+    raw_refs: &FxHashMap<i64, &Vec<i64>>,
+    types: bool,
+    vnodes: &mut Vec<(u8, Pos, Node)>,
+    stats: &mut Stats,
+) -> Result<Vec<Fwd>, String> {
+    if g.len() > 1 {
+        // 3. Split same-direction parallel arcs (all but the shortest of each group).
+        let mut groups: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
+        for (i, f) in g.iter().enumerate() {
+            if f.e.source != f.e.target {
+                groups.entry((f.e.source, f.e.target)).or_default().push(i);
+            }
+        }
+        let mut sel = FxHashSet::default();
+        for idx in groups.values().filter(|v| v.len() > 1) {
+            // `Pos` (the index in the old list) is the last tie-break: a way that walks one segment twice makes two arcs
+            // with the same length and the same refs, and duckOSM keeps both (it stops with an error). Here the first
+            // stays whole.
+            let key = |i: usize| (g[i].e.length_m, refs_key(&g[i].e), g[i].pos);
+            let min = idx
+                .iter()
+                .map(|&i| key(i))
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
+            for &i in idx {
+                if key(i).partial_cmp(&min) == Some(std::cmp::Ordering::Greater) {
+                    sel.insert(i);
+                }
+            }
+        }
+        stats.parallel_split += sel.len();
+        g = split_arcs(g, &sel, 3, vnodes);
+
+        // 4. Split two-way antiparallel pairs (the longer arc of each pair).
+        let mut by_key: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
+        for (i, f) in g.iter().enumerate() {
+            by_key.entry((f.e.source, f.e.target)).or_default().push(i);
+        }
+        let mut sel = FxHashSet::default();
+        for (i, f) in g.iter().enumerate() {
+            if f.e.oneway || f.e.source == f.e.target {
+                continue;
+            }
+            if let Some(others) = by_key.get(&(f.e.target, f.e.source)) {
+                let mine = (f.e.length_m, refs_key(&f.e));
+                for &j in others {
+                    if g[j].e.oneway {
+                        continue;
+                    }
+                    let theirs = (g[j].e.length_m, refs_key(&g[j].e));
+                    if mine.partial_cmp(&theirs) == Some(std::cmp::Ordering::Greater) {
+                        sel.insert(i);
+                    }
+                }
+            }
+        }
+        stats.antiparallel_split += sel.len();
+        g = split_arcs(g, &sel, 4, vnodes);
+    }
+
+    // 5. Add the reverse edge of each two-way way (and of a one-way way with a bus lane).
+    let mut out: Vec<Fwd> = Vec::with_capacity(2 * g.len());
+    for f in g {
+        let w = &mw[f.way];
+        if !f.e.oneway || w.bus_back {
+            let mut r = f.e.clone();
+            r.source = f.e.target;
+            r.target = f.e.source;
+            r.lanes = w.lanes_bwd;
+            if f.e.oneway {
+                r.access = Some(Arc::from("bus"));
+            }
+            r.refs.reverse();
+            r.geometry.reverse();
+            r.is_reverse = true;
+            r.ftype = if types { w.type_rev } else { None };
+            out.push(Fwd {
+                e: r,
+                way: f.way,
+                pos: f.pos,
+            });
+        }
+        out.push(f);
+    }
+
+    // 6. The stable edge_id, edge_ref, and the check that (osm_id, source, target) is unique.
+    if out.len() > 1 {
+        let mut seen: FxHashSet<(i64, i64)> = FxHashSet::default();
+        for f in &out {
+            if !seen.insert((f.e.source, f.e.target)) {
+                return Err(format!(
+                    "duplicate (osm_id, source, target) after the splits: {} {}->{}",
+                    f.e.osm_id, f.e.source, f.e.target
+                ));
+            }
+        }
+    }
+    set_refs_and_ids(&mut out, raw_refs);
+
+    // 7. Correct the length of the edges whose halves were wrong by more than 0.1 %.
+    for f in &mut out {
+        let m = geom::line_length_m(&f.e.geometry);
+        if m > 0.0 && (((f.e.length_m / m) - 1.0f32).abs() as f64) > 0.001 {
+            f.e.length_m = m;
+        }
+    }
+    Ok(out)
+}
+
+/// Split the forward edges in `sel` at their midpoint with a virtual node (`_split_arcs_at_midpoint`). `stage` is the
+/// step (3 or 4); the virtual nodes get it and the `Pos` of their edge, for the old order.
+fn split_arcs(
+    fwd: Vec<Fwd>,
+    sel: &FxHashSet<usize>,
+    stage: u8,
+    vnodes: &mut Vec<(u8, Pos, Node)>,
+) -> Vec<Fwd> {
     if sel.is_empty() {
         return fwd;
     }
+    let add = if stage == 3 { 2 } else { 1 }; // see `Pos::half`
     let mut out = Vec::with_capacity(fwd.len() + sel.len());
     for (i, f) in fwd.into_iter().enumerate() {
         if !sel.contains(&i) {
@@ -680,18 +890,27 @@ fn split_arcs(fwd: Vec<Fwd>, sel: &FxHashSet<usize>, vnodes: &mut Vec<Node>) -> 
         let v = hash::virtual_node_arc(f.e.osm_id, f.e.source, f.e.target, &f.e.refs);
         let mid = geom::interpolate(&rr, 0.5);
         let (r1, r2) = split_refs(&f.e.refs);
-        vnodes.push(Node {
-            node_id: v,
-            lon: mid.0,
-            lat: mid.1,
-        });
+        vnodes.push((
+            stage,
+            f.pos,
+            Node {
+                node_id: v,
+                lon: mid.0,
+                lat: mid.1,
+            },
+        ));
         out.push(Fwd {
             e: half(&f.e, f.e.source, v, r1, geom::substring(&rr, 0.0, 0.5)),
             way: f.way,
+            pos: f.pos,
         });
         out.push(Fwd {
             e: half(&f.e, v, f.e.target, r2, geom::substring(&rr, 0.5, 1.0)),
             way: f.way,
+            pos: Pos {
+                half: f.pos.half + add,
+                ..f.pos
+            },
         });
     }
     out
@@ -699,9 +918,9 @@ fn split_arcs(fwd: Vec<Fwd>, sel: &FxHashSet<usize>, vnodes: &mut Vec<Node>) -> 
 
 /// `edge_id` and `edge_ref` (`{osm_id}#{seq}{f|r}`). seq numbers the forward edges of a way by the
 /// position of their source node in the original node list; a reverse edge takes the seq of its twin.
-fn set_refs_and_ids(edges: &mut [Edge], raw_refs: &FxHashMap<i64, &Vec<i64>>) {
+fn set_refs_and_ids(edges: &mut [Fwd], raw_refs: &FxHashMap<i64, &Vec<i64>>) {
     let mut keys: FxHashMap<i64, Vec<(usize, i64, i64)>> = FxHashMap::default();
-    for e in edges.iter().filter(|e| !e.is_reverse) {
+    for e in edges.iter().map(|f| &f.e).filter(|e| !e.is_reverse) {
         let pos = raw_refs
             .get(&e.osm_id)
             .and_then(|r| r.iter().position(|&n| n == e.source))
@@ -714,7 +933,7 @@ fn set_refs_and_ids(edges: &mut [Edge], raw_refs: &FxHashMap<i64, &Vec<i64>>) {
         v.sort();
         v.dedup();
     }
-    for e in edges.iter_mut() {
+    for e in edges.iter_mut().map(|f| &mut f.e) {
         e.edge_id = hash::edge_id(e.osm_id, e.source, e.target);
         let (s, t) = if e.is_reverse {
             (e.target, e.source)
@@ -731,7 +950,6 @@ fn set_refs_and_ids(edges: &mut [Edge], raw_refs: &FxHashMap<i64, &Vec<i64>>) {
         e.seq = seq.map(|q| q as u32);
     }
 }
-
 fn prune_nodes(nodes: &mut Vec<Node>, edges: &[Edge]) {
     let used: FxHashSet<i64> = edges.iter().flat_map(|e| [e.source, e.target]).collect();
     nodes.retain(|n| used.contains(&n.node_id));
@@ -781,10 +999,47 @@ fn keep_largest(edges: &mut Vec<Edge>) {
     });
 }
 
-/// Do two edges agree on every attribute that the merge compares?
-fn same_road(a: &Edge, b: &Edge) -> bool {
-    a.attrs == b.attrs && a.oneway == b.oneway && a.lanes == b.lanes && a.access == b.access
+/// Do two ways agree on every attribute that the merge compares? Before the merge, a forward edge has these values of
+/// its way.
+fn same_road(a: &ModeWay, b: &ModeWay) -> bool {
+    a.attrs == b.attrs && a.oneway == b.oneway && a.lanes_fwd == b.lanes_fwd && a.access == b.access
 }
+
+/// Is the node of `run` (the ends of the forward edges at one node) a contraction node: real, exactly two half-edges
+/// (after the junction rule), agreeing edges?
+fn contraction(run: &[End], mw: &[ModeWay], gj: &FxHashMap<i64, bool>) -> bool {
+    let node = run[0].node;
+    if node <= 0 || gj.get(&node) == Some(&true) {
+        return false;
+    }
+    let rows: Vec<&End> = run
+        .iter()
+        .filter(|h| {
+            !(NON_ROAD.contains(&mw[h.way as usize].attrs.highway.as_str())
+                && gj.contains_key(&node))
+        })
+        .collect();
+    if rows.len() != 2 {
+        return false;
+    }
+    let (a, b) = (&mw[rows[0].way as usize], &mw[rows[1].way as usize]);
+    let one_in_one_out = rows[0].at_source != rows[1].at_source;
+    if (a.oneway || b.oneway) && !one_in_one_out {
+        return false;
+    }
+    same_road(a, b)
+}
+
+fn find(p: &mut [u32], mut x: u32) -> u32 {
+    while p[x as usize] != x {
+        p[x as usize] = p[p[x as usize] as usize];
+        x = p[x as usize];
+    }
+    x
+}
+
+const SRC: u8 = 1;
+const TGT: u8 = 2;
 
 struct Chain {
     start: i64,
@@ -793,48 +1048,104 @@ struct Chain {
     refs: Vec<i64>,
 }
 
-/// Join each maximal chain of forward edges that are the same road into one edge (`_contract_chains`).
-/// Returns the new forward edges, the rows of `edge_id_map`, the number of chains and of pieces.
+/// Join each maximal chain of forward edges that are the same road into one edge (`_contract_chains`). The forward
+/// edges are in the file `fwd`, and their ends in the file `ends`:
+/// 1. the ends sorted by node give the contraction nodes; all edges at a contraction node join one set (a union-find on
+///    the edge numbers), because the walk of step 3 follows each of them;
+/// 2. the edges at no contraction node go to the result as they are, the others to a file sorted by their set;
+/// 3. each set is merged in memory.
+///
+/// Returns the forward edges, the rows of `edge_id_map`, the number of chains and of pieces.
 fn merge_chains(
-    fwd: Vec<Fwd>,
+    fwd: Rows,
+    ends: Rows,
+    mw: &[ModeWay],
     gj: &FxHashMap<i64, bool>,
     coords: &Coords,
-) -> (Vec<Fwd>, Vec<MapRow>, usize, usize) {
-    // the two half-edges of each forward edge: (edge index, true at its source)
+    codec: &FwdCodec,
+    store: &dyn Store,
+) -> std::io::Result<(Rows, Vec<MapRow>, usize, usize)> {
+    let n = fwd.len;
+    let mut parent: Vec<u32> = (0..n as u32).collect();
+    let mut at: Vec<u8> = vec![0; n]; // SRC, TGT: the source, the target of the edge is a contraction node
+    let ends = spill::sort(ends, &EndCodec, |h: &End| h.node, SORT_BUDGET, store)?;
+    for_groups(
+        ends.read(&EndCodec)?,
+        |h| h.node,
+        |run| {
+            if contraction(&run, mw, gj) {
+                let r = find(&mut parent, run[0].edge);
+                for h in &run {
+                    at[h.edge as usize] |= if h.at_source { SRC } else { TGT };
+                    let rh = find(&mut parent, h.edge);
+                    parent[rh as usize] = r;
+                }
+            }
+            Ok(())
+        },
+    )?;
+    if at.iter().all(|&a| a == 0) {
+        return Ok((fwd, Vec::new(), 0, 0));
+    }
+    let set: Vec<u32> = (0..n as u32).map(|i| find(&mut parent, i)).collect();
+    drop(parent);
+
+    let mut out = Writer::new(store)?;
+    let mut in_sets = Writer::new(store)?;
+    for f in fwd.read(codec)? {
+        let f = f?;
+        if at[f.pos.first as usize] == 0 {
+            out.push(codec, &f)?;
+        } else {
+            in_sets.push(codec, &f)?;
+        }
+    }
+    let key = |f: &Fwd| set[f.pos.first as usize];
+    let in_sets = spill::sort(in_sets.finish()?, codec, key, SORT_BUDGET, store)?;
+    let mut map: Vec<(MapRow, Pos, usize)> = Vec::new();
+    let (mut n_chains, mut n_pieces) = (0, 0);
+    for_groups(in_sets.read(codec)?, key, |g| {
+        let (merged, pieces) = merge_set(g, &at, coords, &mut map);
+        n_chains += merged.iter().filter(|f| f.pos.group == 0).count();
+        n_pieces += pieces;
+        for f in &merged {
+            out.push(codec, f)?;
+        }
+        Ok(())
+    })?;
+    // the old order of the rows (the chains in the order of `Pos`, the rows of a chain in their order) breaks the ties
+    map.sort_by_key(|(m, p, k)| (m.new_edge_id, m.seq, m.old_edge_id, *p, *k));
+    Ok((
+        out.finish()?,
+        map.into_iter().map(|m| m.0).collect(),
+        n_chains,
+        n_pieces,
+    ))
+}
+
+/// Merge the chains of one set of forward edges (in the order of the cut). Returns the merged chains and the edges that
+/// are in no chain, and the number of pieces. The rows of `edge_id_map` go to `map`, with the `Pos` of their chain and
+/// their order in it.
+fn merge_set(
+    set: Vec<Fwd>,
+    at: &[u8],
+    coords: &Coords,
+    map: &mut Vec<(MapRow, Pos, usize)>,
+) -> (Vec<Fwd>, usize) {
+    let end_at = |f: &Fwd, src: bool| at[f.pos.first as usize] & if src { SRC } else { TGT } != 0;
+    // the two half-edges of each edge at a contraction node, in the order of the edges, the source first
     let mut inc: FxHashMap<i64, Vec<(usize, bool)>> = FxHashMap::default();
-    for (i, f) in fwd.iter().enumerate() {
-        inc.entry(f.e.source).or_default().push((i, true));
-        inc.entry(f.e.target).or_default().push((i, false));
-    }
-    // contraction nodes: real, exactly two half-edges (after the junction rule), agreeing edges
-    let mut node2: FxHashSet<i64> = FxHashSet::default();
-    for (&node, halves) in &inc {
-        if node <= 0 || gj.get(&node) == Some(&true) {
-            continue;
+    for (i, f) in set.iter().enumerate() {
+        if end_at(f, true) {
+            inc.entry(f.e.source).or_default().push((i, true));
         }
-        let rows: Vec<&(usize, bool)> = halves
-            .iter()
-            .filter(|(i, _)| {
-                !(NON_ROAD.contains(&fwd[*i].e.attrs.highway.as_str()) && gj.contains_key(&node))
-            })
-            .collect();
-        if rows.len() != 2 {
-            continue;
-        }
-        let (a, b) = (&fwd[rows[0].0].e, &fwd[rows[1].0].e);
-        let one_in_one_out = (rows[0].1 as u8 + rows[1].1 as u8) == 1;
-        if (a.oneway || b.oneway) && !one_in_one_out {
-            continue;
-        }
-        if same_road(a, b) {
-            node2.insert(node);
+        if end_at(f, false) {
+            inc.entry(f.e.target).or_default().push((i, false));
         }
     }
-    if node2.is_empty() {
-        return (fwd, Vec::new(), 0, 0);
-    }
+    let node2 = |n: &i64| inc.contains_key(n);
     let oriented = |i: usize, at_source: bool| -> Vec<i64> {
-        let r = &fwd[i].e.refs;
+        let r = &set[i].e.refs;
         if at_source {
             r.clone()
         } else {
@@ -842,19 +1153,19 @@ fn merge_chains(
         }
     };
     let mut chains: Vec<Chain> = Vec::new();
-    for (i, f) in fwd.iter().enumerate() {
+    for (i, f) in set.iter().enumerate() {
         for (at_source, node, other) in [
             (true, f.e.source, f.e.target),
             (false, f.e.target, f.e.source),
         ] {
-            if node2.contains(&node) || !node2.contains(&other) {
+            if node2(&node) || !node2(&other) {
                 continue;
             }
             // walk from this terminal through the contraction nodes
             let mut stack: Vec<(Vec<usize>, i64, Vec<i64>)> =
                 vec![(vec![i], other, oriented(i, at_source))];
             while let Some((edges, cur, refs)) = stack.pop() {
-                if !node2.contains(&cur) {
+                if !node2(&cur) {
                     let ok = edges.len() > 1
                         && node != cur
                         && if f.e.oneway { at_source } else { node < cur };
@@ -878,28 +1189,33 @@ fn merge_chains(
                     let mut r2 = refs.clone();
                     r2.extend(oriented(j, j_at_source).into_iter().skip(1));
                     let next = if j_at_source {
-                        fwd[j].e.target
+                        set[j].e.target
                     } else {
-                        fwd[j].e.source
+                        set[j].e.source
                     };
                     stack.push((e2, next, r2));
                 }
             }
         }
     }
-    if chains.is_empty() {
-        return (fwd, Vec::new(), 0, 0);
-    }
-    chains.sort_by_key(|c| (c.edges[0], c.start, c.end));
-    let removed: FxHashSet<usize> = chains
-        .iter()
-        .flat_map(|c| c.edges.iter().copied())
-        .collect();
-    let n_pieces = removed.len();
-    let mut map: Vec<MapRow> = Vec::new();
-    let mut merged: Vec<Fwd> = Vec::with_capacity(fwd.len());
+    let mut removed = vec![false; set.len()];
     for c in &chains {
-        let first = &fwd[c.edges[0]];
+        for &i in &c.edges {
+            removed[i] = true;
+        }
+    }
+    let n_pieces = removed.iter().filter(|&&r| r).count();
+    let mut merged: Vec<Fwd> = Vec::with_capacity(set.len());
+    for (walk, c) in chains.iter().enumerate() {
+        let first = &set[c.edges[0]];
+        let pos = Pos {
+            group: 0,
+            first: first.pos.first,
+            start: c.start,
+            end: c.end,
+            walk: walk as u32,
+            half: 0,
+        };
         let geometry: Vec<Pt> = c
             .refs
             .iter()
@@ -918,43 +1234,47 @@ fn merge_chains(
         let new_fwd = hash::edge_id(e.osm_id, e.source, e.target);
         let new_rev = hash::edge_id(e.osm_id, e.target, e.source);
         for (k, &pi) in c.edges.iter().enumerate() {
-            let p = &fwd[pi].e;
-            let pos = |n: i64| c.refs.iter().position(|&x| x == n).map_or(0, |x| x + 1);
-            let against = pos(p.source) > pos(p.target);
-            let (a, b) = if pos(p.source) < pos(p.target) {
+            let p = &set[pi].e;
+            let pos_of = |n: i64| c.refs.iter().position(|&x| x == n).map_or(0, |x| x + 1);
+            let against = pos_of(p.source) > pos_of(p.target);
+            let (a, b) = if pos_of(p.source) < pos_of(p.target) {
                 (p.source, p.target)
             } else {
                 (p.target, p.source)
             };
-            map.push(MapRow {
+            let row = MapRow {
                 old_edge_id: hash::edge_id(p.osm_id, a, b),
                 new_edge_id: new_fwd,
                 seq: k as i32 + 1,
                 is_reverse: against,
                 osm_id: p.osm_id,
-            });
+            };
+            map.push((row, pos, 2 * k));
             if !e.oneway {
-                map.push(MapRow {
+                let row = MapRow {
                     old_edge_id: hash::edge_id(p.osm_id, b, a),
                     new_edge_id: new_rev,
                     seq: k as i32 + 1,
                     is_reverse: !against,
                     osm_id: p.osm_id,
-                });
+                };
+                map.push((row, pos, 2 * k + 1));
             }
         }
-        merged.push(Fwd { e, way: first.way });
+        merged.push(Fwd {
+            e,
+            way: first.way,
+            pos,
+        });
     }
-    let n_chains = merged.len();
-    for (i, f) in fwd.into_iter().enumerate() {
-        if !removed.contains(&i) {
-            merged.push(f);
-        }
-    }
-    map.sort_by_key(|m| (m.new_edge_id, m.seq, m.old_edge_id));
-    (merged, map, n_chains, n_pieces)
+    merged.extend(
+        set.into_iter()
+            .zip(removed)
+            .filter(|(_, r)| !r)
+            .map(|(f, _)| f),
+    );
+    (merged, n_pieces)
 }
-
 const PATH_CLASSES: [&str; 6] = [
     "cycleway",
     "footway",
