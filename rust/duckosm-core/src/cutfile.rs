@@ -13,7 +13,7 @@ use crate::util::FxHashMap;
 use std::io::Write;
 
 /// Entities in one block of the PBF (the number that osmium uses).
-const BLOCK: usize = 8000;
+pub(crate) const BLOCK: usize = 8000;
 
 fn varint(out: &mut Vec<u8>, mut v: u64) {
     while v >= 0x80 {
@@ -94,7 +94,7 @@ impl<'a> Strings<'a> {
     }
 }
 
-fn file_blob<W: Write>(w: &mut W, kind: &str, data: &[u8]) -> Result<(), String> {
+pub(crate) fn file_blob<W: Write>(w: &mut W, kind: &str, data: &[u8]) -> Result<(), String> {
     let mut blob = Vec::new();
     int(&mut blob, 2, data.len() as i64);
     bytes(
@@ -172,6 +172,14 @@ impl<W: Write> PbfWriter<W> {
         Ok(())
     }
 
+    /// Write blocks that are ready (each made by [`file_blob`]), after the elements given before.
+    pub(crate) fn blocks(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.flush_nodes()?;
+        self.flush_ways()?;
+        self.flush_relations()?;
+        self.w.write_all(bytes).map_err(|e| e.to_string())
+    }
+
     /// Write the last blocks; gives the writer back.
     pub fn finish(mut self) -> Result<W, String> {
         self.flush_nodes()?;
@@ -205,7 +213,7 @@ impl<W: Write> PbfWriter<W> {
     }
 }
 
-fn nodes_block(chunk: &[RawNode]) -> Vec<u8> {
+pub(crate) fn nodes_block(chunk: &[RawNode]) -> Vec<u8> {
     let mut s = Strings::new();
     let (mut ids, mut lats, mut lons, mut kv) = (vec![], vec![], vec![], vec![]);
     let (mut id0, mut lat0, mut lon0) = (0, 0, 0);
@@ -234,7 +242,7 @@ fn nodes_block(chunk: &[RawNode]) -> Vec<u8> {
     s.block(&group)
 }
 
-fn ways_block(chunk: &[RawWay]) -> Vec<u8> {
+pub(crate) fn ways_block(chunk: &[RawWay]) -> Vec<u8> {
     let mut s = Strings::new();
     let mut group = Vec::new();
     for way in chunk {
@@ -259,7 +267,7 @@ fn ways_block(chunk: &[RawWay]) -> Vec<u8> {
     s.block(&group)
 }
 
-fn relations_block(chunk: &[Relation]) -> Vec<u8> {
+pub(crate) fn relations_block(chunk: &[Relation]) -> Vec<u8> {
     let mut s = Strings::new();
     let mut group = Vec::new();
     for rel in chunk {

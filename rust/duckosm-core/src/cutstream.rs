@@ -19,7 +19,7 @@
 //! 4. The ways and relations again: each kept way, then each kept relation, goes to the area file.
 
 use crate::boundary::Boundary;
-use crate::cutfile::PbfWriter;
+use crate::cutfile::{file_blob, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
 use crate::graph::{MemberType, Relation};
 use crate::pbfraw::{decode_block, read_block, Buffers};
 use crate::raw::{RawNode, RawSink, RawWay};
@@ -357,7 +357,10 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     let outside = IdSet::new(outside);
     let mut w = PbfWriter::new(out, timestamp)?;
     let mut counts = CutCounts::default();
-    // pass 3: the nodes; pass 4: the ways and relations
+    // pass 3: the nodes; pass 4: the ways and relations. Each thread makes the elements of its block, compresses
+    // them into blocks of the area file and frees them: an element is freed on the thread that made it (the
+    // allocator of the browser build keeps a freed block on the thread that frees it), and the compression runs on
+    // all threads. The main thread writes the ready blocks in the order of the region file.
     let emit = |r: &mut R, limit: Option<usize>, kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts| {
         each_block(r, limit, |b, buf| {
             let mut s = Out {
@@ -369,20 +372,24 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
                 rels: Vec::new(),
             };
             decode_block(b, kinds, buf, &mut s)?;
-            Ok((s.nodes, s.ways, s.rels))
-        }, |(n, x, rl), _| {
-            counts.nodes += n.len();
-            counts.ways += x.len();
-            counts.relations += rl.len();
-            for e in n {
-                w.node(e)?;
+            let n = CutCounts { nodes: s.nodes.len(), ways: s.ways.len(), relations: s.rels.len() };
+            let mut out = Vec::new();
+            // blocks of at most BLOCK elements (a block of a Geofabrik file has 8000, so usually one of each kind)
+            for c in s.nodes.chunks(BLOCK) {
+                file_blob(&mut out, "OSMData", &nodes_block(c))?;
             }
-            for e in x {
-                w.way(e)?;
+            for c in s.ways.chunks(BLOCK) {
+                file_blob(&mut out, "OSMData", &ways_block(c))?;
             }
-            for e in rl {
-                w.relation(e)?;
+            for c in s.rels.chunks(BLOCK) {
+                file_blob(&mut out, "OSMData", &relations_block(c))?;
             }
+            Ok((out, n))
+        }, |(bytes, n), _| {
+            counts.nodes += n.nodes;
+            counts.ways += n.ways;
+            counts.relations += n.relations;
+            w.blocks(&bytes)?;
             Ok(true)
         })
     };
@@ -398,9 +405,44 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    /// The cut that streams writes the same bytes as the cut in memory (`read_area_raw`, then `cutfile::write_pbf`).
+    /// All elements of a `.osm.pbf` file, in the order of the file.
+    #[derive(Default, PartialEq, Debug)]
+    struct All {
+        nodes: Vec<(i64, u64, u64, Vec<(String, String)>)>,
+        ways: Vec<(i64, Vec<(String, String)>, Vec<i64>)>,
+        rels: Vec<(i64, Vec<(String, String)>, Vec<(i64, u8, String)>)>,
+    }
+
+    impl RawSink for All {
+        fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, t: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            self.nodes.push((id, lat.to_bits(), lon.to_bits(), t.map(|(k, v)| (k.into(), v.into())).collect()));
+        }
+        fn way<'a>(&mut self, id: i64, t: &mut dyn Iterator<Item = (&'a str, &'a str)>, r: &mut dyn Iterator<Item = i64>) {
+            self.ways.push((id, t.map(|(k, v)| (k.into(), v.into())).collect(), r.collect()));
+        }
+        fn relation<'a>(
+            &mut self,
+            id: i64,
+            t: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            m: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+            let m = m.map(|(i, ty, r)| (i, ty as u8, r.to_string())).collect();
+            self.rels.push((id, t.map(|(k, v)| (k.into(), v.into())).collect(), m));
+        }
+    }
+
+    fn elements(mut r: impl Read) -> All {
+        let (mut all, mut buf) = (All::default(), Buffers::default());
+        while let Some(b) = read_block(&mut r).unwrap() {
+            decode_block(&b, [true; 3], &mut buf, &mut all).unwrap();
+        }
+        all
+    }
+
+    /// The cut that streams has the same elements as the cut in memory (`read_area_raw`, then `cutfile::write_pbf`),
+    /// with the same tags and coordinates, in the same order.
     #[test]
-    fn the_same_file_as_the_cut_in_memory() {
+    fn the_same_elements_as_the_cut_in_memory() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
         let pbf = dir.join("monaco.osm.pbf");
         let boundary = Boundary::parse(&std::fs::read_to_string(dir.join("monaco.geojson")).unwrap()).unwrap();
@@ -415,6 +457,17 @@ mod tests {
         let (got, n) = cut_to_pbf(open, &boundary, Vec::new()).unwrap();
         assert_eq!((n.nodes, n.ways, n.relations), (raw.nodes.len(), raw.ways.len(), raw.relations.len()));
         assert!(n.nodes > 0 && n.ways > 0 && n.relations > 0);
-        assert!(got == want, "the files differ: {} and {} bytes", got.len(), want.len());
+        assert_eq!(elements(&got[..]), elements(&want[..]));
+    }
+
+    /// Two files on the disk (CUT_A and CUT_B) have the same elements: the check of a large cut, for example
+    /// `CUT_A=old.osm.pbf CUT_B=new.osm.pbf cargo test --release -p duckosm-core files_have_the_same_elements -- --ignored`.
+    #[test]
+    #[ignore]
+    fn files_have_the_same_elements() {
+        let read = |v: &str| elements(std::io::BufReader::new(std::fs::File::open(std::env::var(v).unwrap()).unwrap()));
+        let (a, b) = (read("CUT_A"), read("CUT_B"));
+        assert_eq!((a.nodes.len(), a.ways.len(), a.rels.len()), (b.nodes.len(), b.ways.len(), b.rels.len()));
+        assert!(a == b, "the elements differ");
     }
 }
