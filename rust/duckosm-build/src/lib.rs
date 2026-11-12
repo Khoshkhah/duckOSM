@@ -1074,12 +1074,10 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
 
 /// Step 0 alone: cut the region file `region` to `boundary` (GeoJSON text) and write the area to `out` as a
 /// `.osm.pbf` file. The cut keeps only lists of ids in memory ([`duckosm_core::cutstream`]).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn cut_file(region: &Path, boundary: &str, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
     cut_to_file(region, &Boundary::parse(boundary)?, out)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn cut_to_file(region: &Path, b: &Boundary, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
     let open = || {
         std::fs::File::open(region)
