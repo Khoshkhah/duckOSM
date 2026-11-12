@@ -112,10 +112,32 @@ deleted after them.
 When the storage quota of the site is full, Chromium gives the error −8 (`FILE_ERROR_NO_SPACE`) as the count of
 written bytes of a `FileSystemSyncAccessHandle` write. A test browser had a quota under 1 GB.
 
-## What is next
+## The build reads the area file
 
-1. The build with a boundary writes `cut.osm.pbf` in step 0 and reads it as a whole file: offline, `raw.*` goes into
-   DuckDB first (`read_osm`), and the network reads from DuckDB.
-2. Online, Studio writes the area file to OPFS through a `FileSystemSyncAccessHandle`. A test of this writer once gave
-   a wrong count of written bytes (the value −8 as an unsigned number, probably a `FILE_ERROR_NO_SPACE` of the
-   browser). This must be understood before Studio uses it.
+A build with a boundary (`duckosm_build::build`) runs step 0 first and writes the area file: `cut.osm.pbf` in the
+output folder when the user asks for it, else a temporary file. Then `run` reads the area file (`Input::Area`):
+
+- **The network input** (step 1): the readers of a whole file (`read_ways_from`, `read_coords_from`,
+  `read_restrictions_from`). The network keeps only the ways with a node inside the boundary, as osmium's
+  `complete_ways`; the area file also has the member ways of its multipolygons.
+- **The raw part** (`raw::read_part`): only the elements that the build needs in memory: the elements that the OSM
+  fixes touch, the route relations of the bus routes with their member ways, and the buildings with their nodes (for
+  the building faces). The fixes change the part (`Raw::apply_fixes`).
+- **`raw.*`** (`duckosm_parquet::write_area_raw`): written while the area file is read, in two passes (the nodes,
+  then the ways and the relations). Each element gets its version of the raw part, and the tags of the network's
+  ways (`RawPatch`). In memory: the coordinates of all nodes, for the column `line` of the ways.
+
+A test on Monaco (`raw_of_the_area_file_equals_the_cut_in_memory`) shows that `raw.*` has the rows of the cut in
+memory, with the fixes of both fixture files and the tags of the sidewalk rule.
+
+Kentucky from the US South file, the driving mode, `raw.*` and the building faces (the Mac mini above, the Rust heap
+of the cargo feature `heap-probe`):
+
+| | Before (the cut in memory) | After (the area file) |
+|---|---|---|
+| Heap after the input is read | 3,663 MiB | 1,317 MiB |
+| Peak heap (in the building faces) | 17,206 MiB | 14,860 MiB |
+| Time | 54.2 s | 44.5–46.9 s |
+
+All files of the network, the bus routes and the building faces have the same bytes. Most of the memory is now in the
+building faces: the step itself, and the street segments that it reads (1.9 GB on Kentucky).
