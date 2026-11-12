@@ -10,7 +10,7 @@ use crate::model::Edge;
 use crate::raw::RawWay;
 use crate::util::FxHashMap;
 
-const ROUTES: [&str; 3] = ["bus", "trolleybus", "share_taxi"];
+pub const ROUTES: [&str; 3] = ["bus", "trolleybus", "share_taxi"];
 
 /// A row of `bus.routes`.
 #[derive(Clone, Debug, PartialEq)]

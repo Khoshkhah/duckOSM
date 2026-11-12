@@ -62,7 +62,7 @@ fn props(geometry_type: &str) -> WriterProperties {
         .build()
 }
 
-fn line_wkb(pts: &[Pt]) -> Vec<u8> {
+pub(crate) fn line_wkb(pts: &[Pt]) -> Vec<u8> {
     let mut b = Vec::with_capacity(9 + pts.len() * 16);
     b.push(1u8); // little endian
     b.extend_from_slice(&2u32.to_le_bytes()); // LineString

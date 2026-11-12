@@ -99,10 +99,15 @@ pub fn read_ways_from<R: Read>(mut reader: R) -> Result<Vec<Way>, String> {
 }
 
 /// Pass 2 on any reader: the same coordinates as [`read_coords`], read as [`read_ways_from`] reads.
-pub fn read_coords_from<R: Read>(mut reader: R, ways: &[Way]) -> Result<Coords, String> {
+pub fn read_coords_from<R: Read>(reader: R, ways: &[Way]) -> Result<Coords, String> {
     let mut needed: FxHashSet<i64> = FxHashSet::default();
     needed.reserve(ways.iter().map(|w| w.refs.len()).sum());
     needed.extend(ways.iter().flat_map(|w| w.refs.iter().copied()));
+    read_node_coords_from(reader, needed)
+}
+
+/// The coordinates of the nodes `needed`, read as [`read_ways_from`] reads.
+pub fn read_node_coords_from<R: Read>(mut reader: R, needed: FxHashSet<i64>) -> Result<Coords, String> {
     struct Nodes<'n> {
         needed: &'n FxHashSet<i64>,
         out: Vec<(i64, Pt)>,
