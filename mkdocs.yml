@@ -154,6 +154,7 @@ nav:
           - Lane-level routing: exports/lane-routing.md
   - Concepts:
       - How a build works: concepts/build.md
+      - Offline and online builds: concepts/offline-online.md
       - The ground reference: concepts/ground-reference.md
       - The terrain of an area: concepts/terrain.md
       - The Rust engine: concepts/rust-engine.md

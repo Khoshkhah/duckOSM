@@ -11,7 +11,7 @@ The two pages are duckOSM's two versions:
 - **Online:** duckOSM Studio in the browser. The browser builds the area. Its limit is the memory of the tab (later: the
   browser disk, OPFS).
 
-[The load step in Rust](../design/streaming_load.md) tells how each version loads the PBF file.
+[Offline and online builds](../concepts/offline-online.md) shows each step of the build in each version, and where it keeps its data.
 
 The difference: here the build runs on your computer. It is `duckosm build`, so the area can be as large as your computer can build, and the
 result is a `.duckdb` file on your disk.

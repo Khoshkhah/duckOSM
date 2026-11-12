@@ -4,6 +4,9 @@ A build (`duckosm build`, or `DuckOSM(config).run()` in Python) runs a list of s
 config. There are two ways in: **build from a PBF**, or **clip from a parent build**. Each step is SQL
 that runs inside the output DuckDB file.
 
+This page is the Python `duckosm build`. For the Rust build, offline and in the browser, and where each step keeps
+its data (in memory or in storage), see [Offline and online builds](offline-online.md).
+
 ## Build from a PBF
 
 Dashed boxes only run under a condition (see the table below).
