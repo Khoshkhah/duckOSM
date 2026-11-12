@@ -163,3 +163,47 @@ has only the edges of these ways, not all edges. Kentucky: the peak heap of the 
 
 After these changes, the peak heap of the whole Kentucky build (driving, `raw.*`, building faces) is 6,636 MiB, in the
 building faces, and the build takes 36.8 s (before: 17,206 MiB and 54.2 s).
+
+## The order of the last steps, and less memory in the raw part
+
+- The area tables, the drawing levels and the lane profile come before the building faces and `raw.*`. Their data (the
+  level and lane edges, the nodes of the modes, the coordinates, the junctions) goes before the faces start.
+- `write_area_raw` keeps the coordinates of the nodes in the parts of the blocks (`NodeParts`). One list made of them
+  needs twice their size for a moment.
+- The raw part keeps all tags only of the elements that the fixes touch, of the relations and of the route member ways.
+  The other ways keep `building` and `addr:street`, the other nodes `entrance`: the tags that the faces read.
+  `RawPatch` replaces only the elements that the fixes touch.
+- A face has no heap object of its own (`geometry: [Pt; 2]`, a shared street name). In the browser, a small block that
+  one thread frees stays with that thread.
+
+The files are the same as before.
+
+## Kentucky, offline and online, step by step
+
+Kentucky from the US South file, the driving mode, `raw.*` and the building faces. Mac mini (Apple M6, 12 cores, 16 GB).
+Offline: `duckosm-rust` with 12 threads, the Rust heap (cargo feature `heap-probe`). Online: duckOSM Studio in Chromium
+with 8 threads, the area file and the temporary files of the network in OPFS, the WebAssembly memory (it never shrinks,
+so it is the peak until then).
+
+| Step | Offline time | Offline peak heap | Online time | Online memory |
+|---|---|---|---|---|
+| 0. Cut to the area file | 11.1 s | 356 MiB | 20.4 s | 439 MiB |
+| 1. Ways, coordinates, turn restrictions | 1.4 s | 624 MiB | 2.3 s | 865 MiB |
+| 1. The raw part | 0.9 s | 1,398 MiB | 1.7 s | 1,770 MiB |
+| 2. Sidewalk rule, global junctions | 0.2 s | 1,429 MiB | 0.8 s | 1,770 MiB |
+| 3. The network of the mode | 4.8 s | 1,907 MiB | 7.3 s | 1,784 MiB |
+| 4. Write the network files | 2.1 s | 2,062 MiB | 2.5 s | 2,301 MiB |
+| 5. Read back, bus routes | 0.6 s | 3,683 MiB | 1.0 s | 2,665 MiB |
+| 5. Area tables, levels, lane profile | 4.2 s | 4,502 MiB | 3.5 s | 3,625 MiB |
+| 5. Building faces | 3.5 s | 4,624 MiB | 9.8 s | 3,625 MiB |
+| 5. `raw.*` | 3.7 s | 1,868 MiB | 5.6 s | 3,625 MiB |
+| **All** | **37.9 s** | **4,624 MiB** | **55 s** | **3,625–4,095 MiB** |
+
+Online, the build with the layers and the faces is at the limit of 4 GB: it finished at 4,095 MiB in one run, and it
+stopped in another. The street filter of the building faces (duckOSM PR #118: only the street segments near a building,
+1.5 GB less natively) brings it to 3,506 MiB in two of two runs. Without the layers and the faces, the online build takes
+38 s and 2,510 MiB.
+
+The largest remaining step of memory online is the drawing levels: roadstyle's `LevelEdges` grows its list one edge at
+a time (Kentucky: +960 MiB of WebAssembly memory). It needs a `reserve` in roadstyle-levels, and duckOSM's pin of
+roadstyle-levels is older than roadstyle main, whose levels API is different.
