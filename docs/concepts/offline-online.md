@@ -265,8 +265,11 @@ A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with 
   OPFS in pieces, and each thread unpacks and decodes about 1.6 times slower than natively.
 - The area file has full blocks (3,053 for Kentucky). Before PR #122 it had one small block for each block of the region
   file (37,534), and each later step paid for each block.
-- Online, step 3 takes 9.6 s with 12 threads; with 8 threads it took 7.2 s. In the browser the threads share one lock
-  of the allocator, so this step probably waits for it, as the faces and `raw.*` did before PR #122. Not measured yet.
+- Step 3 takes 7.0 to 9.7 s online and 4.9 to 8.5 s offline, with 8 and with 12 threads. Its sort of the edges by
+  `edge_id` writes sorted runs (about 580 MB) to temporary files. In some runs this writing paused for about 3 s (one
+  native run: 3.19 s, the other three: 0.11 s). The disk of the Mac was 96% full; a nearly full SSD can pause writes, but
+  this is not proved. The step does not wait for the allocator (0 spins on its lock). The table gives runs with the
+  pause online (both runs) and without it offline (the middle run).
 - Online, the memory in the last row includes the Parquet files of the result (2.6 GB in all), which stay in the tab
   memory until the page writes them to OPFS.
 - On 2026-11-12, at the start of this work, the offline build took 54.2 s and 17,206 MiB, and the online build
