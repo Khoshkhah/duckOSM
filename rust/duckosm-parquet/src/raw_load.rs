@@ -416,8 +416,61 @@ where
     })
 }
 
+/// [`load_raw`] for a reader that only the calling thread may read and files that only the calling thread may write
+/// (in the browser, a file in OPFS belongs to the thread that opened it). The other threads decode the blocks into
+/// parts; the calling thread reads the blocks and writes the parts in the order of the file, one file for each table
+/// (`files`: nodes, ways, relations). In memory: the blocks of one batch (two for each thread) and their parts, and
+/// one open row group of about `group_bytes` for each table. Gives the rows of each table.
+#[cfg(feature = "pbf")]
+pub fn load_raw_here<R: std::io::Read, W: Write + Send>(
+    mut reader: R,
+    files: [W; 3],
+    group_bytes: usize,
+) -> Result<[usize; 3], String> {
+    use duckosm_core::pbfraw::{decode_block, read_block, Buffers};
+    use rayon::prelude::*;
+    let mut w = RawWriter::new(files, group_bytes)?;
+    let n = 2 * rayon::current_num_threads();
+    loop {
+        let mut batch = Vec::with_capacity(n);
+        while batch.len() < n {
+            match read_block(&mut reader)? {
+                Some(b) => batch.push(b),
+                None => break,
+            }
+        }
+        if batch.is_empty() {
+            break;
+        }
+        let parts: Vec<RawPart> = batch
+            .par_iter()
+            .map_init(Buffers::default, |buf, b| -> Result<RawPart, String> {
+                let mut c = RawColumns::default();
+                decode_block(b, [true; 3], buf, &mut c)?;
+                c.finish()
+            })
+            .collect::<Result<_, _>>()?;
+        for p in parts {
+            w.write(p)?;
+        }
+    }
+    w.finish()
+}
+
 #[cfg(test)]
 mod tests {
+    /// The writer on the calling thread gives the same rows as `load_raw`, on Monaco.
+    #[cfg(feature = "pbf")]
+    #[test]
+    fn load_raw_here_has_the_rows_of_load_raw() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
+        let file = || std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+        let want = load_raw(file(), 64 << 20, 2, |_| Ok(Vec::new())).unwrap().rows;
+        let got = load_raw_here(file(), [Vec::new(), Vec::new(), Vec::new()], 16 << 20).unwrap();
+        assert!(want.iter().all(|&n| n > 0));
+        assert_eq!(got, want);
+    }
+
     use super::*;
 
     #[test]
