@@ -44,7 +44,22 @@ Other parts of the design:
   elements arrive in the order of the area file.
 
 The area file has the same elements as the file of the cut in memory, with the same tags and coordinates. It does
-not have the same bytes: it has one block of the area file for each block of the region file.
+not have the same bytes: its blocks are different.
+
+**Full blocks.** The ids of a region file are not in the order of the place, so a block of the region file often has
+only a few hundred elements of the area. Passes 3 and 4 read the blocks in runs with up to 8000 kept elements (the
+number of kept elements of a block is known from passes 1 and 2), and one thread writes each run as one block of the
+area file. Kentucky: 3,053 blocks with a median of 32 KB (before: 37,534 blocks with a median of 873 bytes). Each later
+step that reads the area file pays less for each block: in the browser, `raw.*` called the global allocator 8.0 million
+times before, and 2.4 million times now.
+
+**Fewer allocations in the faces.** Each thread keeps its lists of the walls and of the street candidates for its next
+building. Before, the faces called the global allocator 17.7 million times on Kentucky. In the browser the threads wait
+for the lock of that allocator, so the faces and `raw.*` got slower with more threads (natively they did not). Now: 1.2
+million calls.
+
+Online, Kentucky with the layers and the faces (Chromium, Mac mini M6): 54.9 s before; now 50.4 s with 8 threads and
+46.7 s with 12 threads.
 
 ## The measurements
 

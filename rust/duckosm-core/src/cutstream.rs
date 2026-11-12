@@ -80,6 +80,11 @@ impl IdSet {
         i < self.ids.len() && self.ids[i] <= hi
     }
 
+    /// The number of ids of the set in `lo..=hi` (0 for an empty span, `lo > hi`).
+    fn count_in(&self, lo: i64, hi: i64) -> usize {
+        self.ids.partition_point(|&x| x <= hi).saturating_sub(self.ids.partition_point(|&x| x < lo))
+    }
+
     fn contains(&self, id: i64) -> bool {
         if id < self.min || self.ids.is_empty() {
             return false;
@@ -135,27 +140,65 @@ fn widen(s: &mut Span, id: i64) {
 }
 
 /// [`each_block`] for the blocks that start at `offsets` (ascending) only: the other blocks are not read, not
-/// unpacked and not decoded. The passes that write the area file read only the blocks with a kept element.
+/// unpacked and not decoded.
 fn each_block_at<R: Read + Seek, T: Send>(
     r: &mut R,
     offsets: &[u64],
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
+    done: impl FnMut(T) -> Result<(), String>,
+) -> Result<(), String> {
+    let runs: Vec<Vec<u64>> = offsets.iter().map(|&at| vec![at]).collect();
+    each_run_at(r, &runs, |run, buf| per_block(&run[0], buf), done)
+}
+
+/// The input bytes of the runs that [`each_run_at`] reads before it decodes them: a bound of the memory.
+const RUN_BATCH_BYTES: usize = 64 << 20;
+
+/// Runs of consecutive blocks (the place of each block, and its number of kept elements) with at most [`BLOCK`] kept
+/// elements in all, so that a run gives one full block of the area file. A block with more is a run of its own.
+fn runs(blocks: impl Iterator<Item = (u64, usize)>) -> Vec<Vec<u64>> {
+    let (mut out, mut n): (Vec<Vec<u64>>, usize) = (Vec::new(), 0);
+    for (at, k) in blocks.filter(|b| b.1 > 0) {
+        if out.is_empty() || n + k > BLOCK {
+            out.push(Vec::new());
+            n = 0;
+        }
+        out.last_mut().expect("a run").push(at);
+        n += k;
+    }
+    out
+}
+
+/// Read the blocks of each run (ascending places), and decode each run on one thread with `per_run`, the runs of a
+/// batch on all threads. The results go to `done` in the order of the file. The passes that write the area file read
+/// only the blocks with a kept element.
+fn each_run_at<R: Read + Seek, T: Send>(
+    r: &mut R,
+    runs: &[Vec<u64>],
+    per_run: impl Fn(&[Vec<u8>], &mut Buffers) -> Result<T, String> + Sync,
     mut done: impl FnMut(T) -> Result<(), String>,
 ) -> Result<(), String> {
-    let mut pos = None;
-    for part in offsets.chunks(2 * rayon::current_num_threads()) {
-        let mut batch = Vec::with_capacity(part.len());
-        for &at in part {
-            if pos != Some(at) {
-                r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?; // a seek empties the buffer of the reader
+    let n = 2 * rayon::current_num_threads();
+    let (mut pos, mut i) = (None, 0);
+    while i < runs.len() {
+        let (mut batch, mut bytes) = (Vec::with_capacity(n), 0);
+        while i < runs.len() && batch.len() < n && bytes < RUN_BATCH_BYTES {
+            let mut blocks = Vec::with_capacity(runs[i].len());
+            for &at in &runs[i] {
+                if pos != Some(at) {
+                    r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?; // a seek empties the buffer of the reader
+                }
+                let b = read_block(r)?.ok_or("a block after the end of the file")?;
+                pos = Some(at + b.len() as u64);
+                bytes += b.len();
+                blocks.push(b);
             }
-            let b = read_block(r)?.ok_or("a block after the end of the file")?;
-            pos = Some(at + b.len() as u64);
-            batch.push(b);
+            batch.push(blocks);
+            i += 1;
         }
         let out: Vec<T> = batch
             .par_iter()
-            .map_init(Buffers::default, |buf, b| per_block(b, buf))
+            .map_init(Buffers::default, |buf, run| per_run(run, buf))
             .collect::<Result<_, _>>()?;
         for t in out {
             done(t)?;
@@ -422,19 +465,21 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     let outside = IdSet::new(outside);
     let mut chosen_ids: Vec<i64> = chosen.iter().copied().collect();
     chosen_ids.sort_unstable();
-    let any_chosen = |lo: i64, hi: i64| {
-        let i = chosen_ids.partition_point(|&x| x < lo);
-        i < chosen_ids.len() && chosen_ids[i] <= hi
+    let chosen_in = |lo: i64, hi: i64| {
+        chosen_ids.partition_point(|&x| x <= hi).saturating_sub(chosen_ids.partition_point(|&x| x < lo))
     };
     let mut w = PbfWriter::new(out, timestamp)?;
     let mut counts = CutCounts::default();
-    // pass 3: the nodes; pass 4: the ways and relations; each only in the blocks that have a kept element. Each
-    // thread makes the elements of its block, compresses them into blocks of the area file and frees them: an element
+    // pass 3: the nodes; pass 4: the ways and relations; each only in the blocks that have a kept element. The blocks
+    // go in runs with up to BLOCK kept elements (a block of the region file often has only a few hundred, because the
+    // ids are not in the order of the place), so that the area file has full blocks: Kentucky has 2.8 thousand, not
+    // 37 thousand, and each later step pays less for each block. Each
+    // thread makes the elements of its run, compresses them into blocks of the area file and frees them: an element
     // is freed on the thread that made it (the allocator of the browser build keeps a freed block on the thread that
     // frees it), and the compression runs on all threads. The main thread writes the ready blocks in the order of the
     // region file.
-    let emit = |at: &[u64], kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts| {
-        each_block_at(&mut open()?, at, |b, buf| {
+    let emit = |runs: &[Vec<u64>], kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts| {
+        each_run_at(&mut open()?, runs, |run, buf| {
             let mut s = Out {
                 nodes_in: [&inside, &outside],
                 ways_in: &kept,
@@ -443,10 +488,12 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
                 ways: Vec::new(),
                 rels: Vec::new(),
             };
-            decode_block(b, kinds, buf, &mut s)?;
+            for b in run {
+                decode_block(b, kinds, buf, &mut s)?;
+            }
             let n = CutCounts { nodes: s.nodes.len(), ways: s.ways.len(), relations: s.rels.len() };
             let mut out = Vec::new();
-            // blocks of at most BLOCK elements (a block of a Geofabrik file has 8000, so usually one of each kind)
+            // blocks of at most BLOCK elements (a run has at most BLOCK, unless one block of the region file has more)
             for c in s.nodes.chunks(BLOCK) {
                 file_blob(&mut out, "OSMData", &nodes_block(c))?;
             }
@@ -464,19 +511,12 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
             w.blocks(&bytes)
         })
     };
-    let node_at: Vec<u64> = node_spans
-        .iter()
-        .filter(|(_, (lo, hi))| inside.any_in(*lo, *hi) || outside.any_in(*lo, *hi))
-        .map(|b| b.0)
-        .collect();
-    emit(&node_at, [true, false, false], &mut w, &mut counts)?;
+    // the region file is sorted, so the kept ids in the span of a block are the kept elements of the block
+    let node_runs = runs(node_spans.iter().map(|&(at, (lo, hi))| (at, inside.count_in(lo, hi) + outside.count_in(lo, hi))));
+    emit(&node_runs, [true, false, false], &mut w, &mut counts)?;
     crate::util::step("cut pass 3: write the nodes");
-    let way_at: Vec<u64> = way_spans
-        .iter()
-        .filter(|(_, s)| kept.any_in(s[0].0, s[0].1) || any_chosen(s[1].0, s[1].1))
-        .map(|b| b.0)
-        .collect();
-    emit(&way_at, [false, true, true], &mut w, &mut counts)?;
+    let way_runs = runs(way_spans.iter().map(|&(at, s)| (at, kept.count_in(s[0].0, s[0].1) + chosen_in(s[1].0, s[1].1))));
+    emit(&way_runs, [false, true, true], &mut w, &mut counts)?;
     crate::util::step("cut pass 4: write the ways and relations");
     Ok((w.finish()?, counts))
 }
