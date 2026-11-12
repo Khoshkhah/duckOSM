@@ -154,12 +154,12 @@ impl Writer {
 }
 
 /// Reads the bytes of each row from the start of a file.
-pub struct RawIter {
-    r: BufReader<Box<dyn Blob>>,
+pub struct RawIter<R = Box<dyn Blob>> {
+    r: BufReader<R>,
     left: usize,
 }
 
-impl RawIter {
+impl<R: Read> RawIter<R> {
     fn next_into(&mut self, buf: &mut Vec<u8>) -> io::Result<bool> {
         if self.left == 0 {
             return Ok(false);
@@ -180,6 +180,24 @@ impl Rows {
             r: BufReader::with_capacity(1 << 20, self.blob),
             left: self.len,
         })
+    }
+
+    /// Read the rows, one at a time, and keep the file for a next read.
+    pub fn read_ref<'a, T, C: Codec<T>>(
+        &'a mut self,
+        codec: &'a C,
+    ) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a> {
+        self.blob.seek(SeekFrom::Start(0))?;
+        let mut raw = RawIter {
+            r: BufReader::with_capacity(1 << 20, &mut self.blob),
+            left: self.len,
+        };
+        let mut buf = Vec::new();
+        Ok(std::iter::from_fn(move || match raw.next_into(&mut buf) {
+            Ok(true) => Some(Ok(codec.get(&mut &buf[..]))),
+            Ok(false) => None,
+            Err(e) => Some(Err(e)),
+        }))
     }
 
     /// Read the rows, one at a time. The file is gone after the last row.
