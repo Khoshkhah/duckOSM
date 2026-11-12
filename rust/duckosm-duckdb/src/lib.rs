@@ -1,7 +1,9 @@
 //! Write the network as a DuckDB file. The Parquet files that `duckosm-parquet` wrote are loaded
 //! with DuckDB itself, so the types are the types of duckOSM (BIGINT, FLOAT, BIGINT[], GEOMETRY).
 
+pub mod input;
 pub mod read_osm;
+pub use input::RawInput;
 
 use duckdb::Connection;
 use std::path::Path;
@@ -15,6 +17,12 @@ CREATE OR REPLACE MACRO main.edge_id_hash_v1(osm_id, source, target, is_reverse)
 
 pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(), String> {
     let _ = std::fs::remove_file(db);
+    write_network_tables(db, parquet_dir, modes)
+}
+
+/// [`write_database`] into a file that is already there: a whole-file build writes `raw.*` first (`write_raw`), and the
+/// network tables come after it (docs/design/network_stream.md, part A1).
+pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(), String> {
     let con = Connection::open(db).map_err(|e| e.to_string())?;
     for mode in modes {
         write_schema(&con, parquet_dir, mode, MODE_TABLES)?;
