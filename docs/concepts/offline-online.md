@@ -151,19 +151,36 @@ flowchart TB
     class IN,M1,M5,F2 mem
 ```
 
-The memory of each sub-step, measured on Kentucky (driving, 2.1 million edges) on a Mac mini. The values are the live
-Rust heap after the sub-step (cargo feature `heap-probe` of `duckosm-cli`):
+### The memory and the time of each sub-step
 
-| Sub-step | What it reads | What it keeps | Kentucky, change of live heap |
-|---|---|---|---|
-| Mode filter, local junctions | the ways | the ways of the mode, the local junctions | +347 MiB |
-| 1. Cut | the ways of the mode, the coordinates, the junctions | the forward edges, with their nodes and geometry; the local junctions are free after it | +509 MiB |
-| 2b. Merge chains | the forward edges at each node | longer edges, the map of the old edge ids | 0 (peak +155 MiB) |
-| 3–4. Split arcs | the edges with the same way and end nodes | the edges, some cut in two | −142 MiB |
-| 5. Reverse edges | each two-way edge | a reversed copy of the edge | +362 MiB |
-| 6–8c. edge_id, lengths, nodes, connectors, speeds | each edge; the edges at each node | the nodes; values on the edges | +23 MiB |
-| 9, 10, 9b. Private roads, largest part, turn restrictions | the end nodes of all edges | fewer edges | −7 MiB |
-| 9b2. Edge graph | the edges that start at each node | nothing: the rows go to the file | 0 (peak +303 MiB) |
+| How it was measured | |
+|---|---|
+| Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores (2 super, 4 performance, 6 efficiency), 16 GB memory, internal SSD, macOS 27.2 |
+| Program | `duckosm-rust` from duckOSM `main` of 2026-11-11 (after part C), `cargo build --release --features heap-probe` |
+| Area | Kentucky, the Geofabrik file `kentucky-latest.osm.pbf` (148 MB); the driving mode: 2.1 million edges, 0.9 million nodes |
+| Command | `duckosm-rust kentucky-latest.osm.pbf -o out --name kentucky -f duckdb -m driving --h3-resolution 8 --timing` |
+| Memory | the live Rust heap after the sub-step: a counting allocator (`heap-probe`) that counts the bytes that the program has from the system. It does not include the memory of DuckDB |
+| Time | the wall time of the sub-step: the middle value of three runs, with no other program working. The three runs had the same memory to 0.1 MiB, and times within 0.02 s |
+
+| Sub-step | What it reads | What it keeps | Change of live heap | Time |
+|---|---|---|---|---|
+| Mode filter, local junctions | the ways | the ways of the mode, the local junctions | +347 MiB | 0.22 s |
+| 1. Cut | the ways of the mode, the coordinates, the junctions | the forward edges, with their nodes and geometry; the local junctions are free after it | +509 MiB | 0.56 s |
+| 2b. Merge chains | the forward edges at each node | longer edges, the map of the old edge ids | 0 (peak +155 MiB) | 0.08 s |
+| 3–4. Split arcs | the edges with the same way and end nodes | the edges, some cut in two | −142 MiB | 0.19 s |
+| 5. Reverse edges | each two-way edge | a reversed copy of the edge | +362 MiB | 0.18 s |
+| 6. edge_id | each edge, the nodes of its way | the stable `edge_id` and `edge_ref` | 0 | 0.20 s |
+| 7. Lengths | each edge | a corrected length | 0 | 0.12 s |
+| 8. Nodes | the end nodes of all edges | the nodes | +23 MiB | 0.17 s |
+| 8b–8c. Connectors, speeds | each edge (driving: no connectors) | values on the edges | 0 | 0.01 s |
+| 9. Private roads | each edge | two lists of edges | −2 MiB | 0.05 s |
+| 10. Largest part, then the sort by `edge_id` | the end nodes of all edges | fewer edges | −6 MiB | 0.32 s |
+| 9b. Turn restrictions | the restriction relations, the edges of their ways | the restrictions | 0 | 0.05 s |
+| 9b2. Edge graph | the edges that start at each node | nothing: the rows go to the file (the time includes the Parquet encoding) | 0 (peak +303 MiB) | 0.85 s |
+| **The network step** | | | **+1093 MiB** | **3.0 s** |
+
+The other steps of the same build, for comparison (middle values): `raw.*` 1.2 s, the global junctions 0.18 s, writing the
+network files 2.9 s, the levels 1.8 s, the lane profile 3.0 s, writing the `.duckdb` file 3.4 s, the whole build 17.0 s.
 
 Since part B2 of [the network step in limited memory](../design/network_stream.md), steps 1 to 7 keep the edges in
 temporary files, not in memory. The table above shows the memory before B2. Step 8 still makes the list of all edges
