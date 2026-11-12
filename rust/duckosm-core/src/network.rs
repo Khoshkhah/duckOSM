@@ -261,12 +261,18 @@ pub fn build_network_with(
     } else {
         FxHashMap::default()
     };
-    build_network_junctions(all_ways, coords, mode, opts, fixes, relations, &gj)
+    build_network_junctions(all_ways, coords, mode, opts, fixes, relations, &gj, None)
 }
+
+/// Where the rows of `edge_graph` go while the network step makes them: a file writer (docs/design/network_stream.md,
+/// part C). Then `Graph::edge_graph` is `None` and `Stats::edge_graph_rows` has the number of rows.
+pub type GraphRows<'a> = &'a mut dyn FnMut(crate::graph::GraphRow) -> Result<(), String>;
 
 /// [`build_network_with`] with the global junctions given: `global_junctions(all_ways)`, or an empty map when
 /// `opts.global_junctions` is off. A build of several modes computes them one time for all modes and for the table
-/// `main.global_junctions` (they depend only on the ways, not on the mode).
+/// `main.global_junctions` (they depend only on the ways, not on the mode). With `graph_rows`, the rows of `edge_graph` go
+/// there while they are made, and the network does not keep them.
+#[allow(clippy::too_many_arguments)]
 pub fn build_network_junctions(
     all_ways: &[Way],
     coords: &Coords,
@@ -275,6 +281,7 @@ pub fn build_network_junctions(
     fixes: &OsmFixes,
     relations: &[Relation],
     gj: &FxHashMap<i64, bool>,
+    graph_rows: Option<GraphRows>,
 ) -> Result<Network, String> {
     let mut stats = Stats {
         ways_read: all_ways.len(),
@@ -564,8 +571,25 @@ pub fn build_network_junctions(
     private_edges.shrink_to_fit();
     nodes.shrink_to_fit();
 
+    crate::util::step("start of step 10: Keep the largest connected part. It also");
+    // 10. Keep the largest connected part. It runs before the turn restrictions and the edge graph (duckOSM: after them, and it
+    // removes their rows of the dropped edges): the dropped edges are in other connected parts, so they share no node with the
+    // kept edges, and the rows of the kept edges are the same. Then the graph rows can go to a file while they are made.
+    if opts.keep_largest_component && !edges.is_empty() {
+        let before = edges.len();
+        keep_largest(&mut edges);
+        stats.dropped_by_component_filter = before - edges.len();
+        if before != edges.len() {
+            prune_nodes(&mut nodes, &edges);
+        }
+    }
+    // The edges in the order of their edge_id (the order of the tables), here and not at the end: the edge graph takes the edges
+    // in this order, so it reads them one after the other in memory. After the filter, whose tie rule uses the order before.
+    edges.sort_by_key(|e| e.edge_id);
+    private_edges.sort_by_key(|e| e.edge_id);
+
     crate::util::step("start of step 9b: Turn restrictions (driving) and the edge");
-    // 9b. Turn restrictions (driving) and the edge graph, before the component filter as in duckOSM.
+    // 9b. Turn restrictions (driving) and the edge graph.
     let mut graph = Graph::default();
     if opts.extract_restrictions && mode == Mode::Driving {
         let (tr, paths) =
@@ -575,31 +599,26 @@ pub fn build_network_junctions(
     }
     crate::util::step("start of step 9b2: The edge graph and the turn permissions");
     if opts.build_graph {
-        let (rows, permission) = crate::graph::edge_graph(
-            mode,
-            &edges,
-            &private_edges,
-            graph.turn_restrictions.as_deref(),
-        );
-        graph.edge_graph = Some(rows);
-        graph.turn_permission = Some(permission);
-    }
-
-    crate::util::step("start of step 10: Keep the largest connected part. It also");
-    // 10. Keep the largest connected part. It also removes the graph rows of the dropped edges.
-    if opts.keep_largest_component && !edges.is_empty() {
-        let before = edges.len();
-        let dropped = keep_largest(&mut edges);
-        stats.dropped_by_component_filter = before - edges.len();
-        if before != edges.len() {
-            prune_nodes(&mut nodes, &edges);
-            graph.prune(&dropped);
+        let restrictions = graph.turn_restrictions.as_deref();
+        match graph_rows {
+            Some(sink) => {
+                let mut n = 0;
+                let permission = crate::graph::edge_graph_each(mode, &edges, &private_edges, restrictions, |r| {
+                    n += 1;
+                    sink(r)
+                })?;
+                stats.edge_graph_rows = n;
+                graph.turn_permission = Some(permission);
+            }
+            None => {
+                let (rows, permission) = crate::graph::edge_graph(mode, &edges, &private_edges, restrictions);
+                stats.edge_graph_rows = rows.len();
+                graph.edge_graph = Some(rows);
+                graph.turn_permission = Some(permission);
+            }
         }
     }
 
-    edges.sort_by_key(|e| e.edge_id);
-    let mut private_edges = private_edges;
-    private_edges.sort_by_key(|e| e.edge_id);
     nodes.sort_by_key(|n| n.node_id);
     nodes.dedup_by_key(|n| n.node_id);
     Ok(Network {
@@ -719,8 +738,7 @@ fn prune_nodes(nodes: &mut Vec<Node>, edges: &[Edge]) {
 }
 
 /// Keep the largest weakly connected component (union-find over the edge ends).
-/// Returns the `edge_id` of each edge that it dropped.
-fn keep_largest(edges: &mut Vec<Edge>) -> FxHashSet<i64> {
+fn keep_largest(edges: &mut Vec<Edge>) {
     let mut id: FxHashMap<i64, usize> = FxHashMap::default();
     let mut parent: Vec<usize> = Vec::new();
     fn find(p: &mut [usize], mut x: usize) -> usize {
@@ -756,17 +774,11 @@ fn keep_largest(edges: &mut Vec<Edge>) -> FxHashSet<i64> {
         .max_by_key(|(r, n)| (**n, std::cmp::Reverse(**r)))
         .unwrap()
         .0;
-    let mut dropped = FxHashSet::default();
     let mut i = 0;
-    edges.retain(|e| {
-        let keep = roots[i] == largest;
-        if !keep {
-            dropped.insert(e.edge_id);
-        }
+    edges.retain(|_| {
         i += 1;
-        keep
+        roots[i - 1] == largest
     });
-    dropped
 }
 
 /// Do two edges agree on every attribute that the merge compares?

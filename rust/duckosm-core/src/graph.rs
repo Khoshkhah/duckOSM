@@ -420,6 +420,26 @@ pub fn edge_graph(
     private_edges: &[Edge],
     restrictions: Option<&[TurnRestriction]>,
 ) -> (Vec<GraphRow>, Vec<TurnPermission>) {
+    let mut rows = Vec::new();
+    let permission = edge_graph_each(mode, edges, private_edges, restrictions, |r| {
+        rows.push(r);
+        Ok(())
+    })
+    .expect("collecting the rows does not fail");
+    rows.shrink_to_fit();
+    (rows, permission)
+}
+
+/// [`edge_graph`] that gives each row of `edge_graph` to `out` while it makes it, sorted by `(from_edge, to_edge)`, and returns
+/// `turn_permission`. The rows are not kept (docs/design/network_stream.md, part C): the edges are taken in the order of their
+/// `edge_id`, and the moves of one edge in the order of the `edge_id` of the next edge.
+pub fn edge_graph_each(
+    mode: Mode,
+    edges: &[Edge],
+    private_edges: &[Edge],
+    restrictions: Option<&[TurnRestriction]>,
+    mut out: impl FnMut(GraphRow) -> Result<(), String>,
+) -> Result<Vec<TurnPermission>, String> {
     let own = match mode {
         Mode::Driving => "car",
         Mode::Walking => "walk",
@@ -441,35 +461,62 @@ pub fn edge_graph(
                 .filter_map(|e| label(e).map(|l| (e, Some(l)))),
         )
         .collect();
-    // (source, index), sorted: 16 bytes for each edge, where a hash map with one vector for each source needs about 100
-    let mut by_source: Vec<(i64, usize)> = all
+    // The edges that start at each node, with what a move reads of them, sorted by (source, edge_id): the moves of an
+    // edge are one slice, already in the order of to_edge, and the loop below reads no other edge (the edges are in the
+    // order of edge_id, so a look-up of each `all[j]` is a random read).
+    struct Next {
+        source: i64,
+        edge_id: i64,
+        start: f64, // the heading at the start, only for an edge on a bridge
+        label: Option<&'static str>,
+        bridge: bool,
+    }
+    let mut next: Vec<Next> = all
         .iter()
-        .enumerate()
-        .map(|(i, (e, _))| (e.source, i))
+        .map(|&(e, label)| {
+            let bridge = on_bridge(e);
+            Next {
+                source: e.source,
+                edge_id: e.edge_id,
+                start: if bridge { headings(e).1 } else { 0.0 },
+                label,
+                bridge,
+            }
+        })
         .collect();
-    by_source.sort_unstable();
-    let starting_at = |node: i64| {
-        let lo = by_source.partition_point(|k| k.0 < node);
-        let n = by_source[lo..].partition_point(|k| k.0 == node);
-        &by_source[lo..lo + n]
+    next.sort_unstable_by_key(|n| (n.source, n.edge_id));
+    // node -> its slice of `next`: one look-up for each edge (a binary search in edge_id order reads ~20 random places)
+    let mut at: FxHashMap<i64, (usize, usize)> = FxHashMap::default();
+    for (k, n) in next.iter().enumerate() {
+        at.entry(n.source).or_insert((k, k)).1 = k + 1;
+    }
+    let starting_at = |node: i64| at.get(&node).map_or(&next[..0], |&(lo, hi)| &next[lo..hi]);
+    // the edges in the order of their edge_id: the rows come out sorted by (from_edge, to_edge) (the edge ids are unique)
+    let mut order: Vec<usize> = (0..all.len()).collect();
+    order.sort_unstable_by_key(|&i| all[i].0.edge_id);
+    let mut by_from: FxHashMap<i64, Vec<&TurnRestriction>> = FxHashMap::default();
+    for tr in restrictions.unwrap_or(&[]) {
+        by_from.entry(tr.from_edge_id).or_default().push(tr);
+    }
+    let bans = |tr: &TurnRestriction, to: i64| {
+        (like_prefix(&tr.restriction_type, "no") && tr.to_edge_id == to)
+            || (like_prefix(&tr.restriction_type, "only") && tr.to_edge_id != to)
     };
-    let heads: Vec<(f64, f64)> = all.iter().map(|(e, _)| headings(e)).collect();
-    // The number of moves is known before the rows are made (a move that a bridge rule or two access labels remove only makes the
-    // vector a little too large). Without this, the vector doubles its capacity by pushes: it holds the old and the new block at the
-    // same time, and it keeps up to half of the capacity unused.
-    let moves: usize = all.iter().map(|(e, _)| starting_at(e.target).len()).sum();
-    let mut rows = Vec::with_capacity(moves);
-    for (i, &(e1, l1)) in all.iter().enumerate() {
-        for &(_, j) in starting_at(e1.target) {
-            let (e2, l2) = all[j];
+    let mut permission = Vec::new();
+    let mut moves: Vec<GraphRow> = Vec::new();
+    for i in order {
+        let (e1, l1) = all[i];
+        let end = if on_bridge(e1) { headings(e1).0 } else { 0.0 };
+        moves.clear();
+        for e2 in starting_at(e1.target) {
             if e1.edge_id == e2.edge_id {
                 continue;
             }
-            let uses = match (l1, l2) {
+            let uses = match (l1, e2.label) {
                 (None, None) => {
                     // no turn back on a bridge (only between two edges of the mode)
-                    if on_bridge(e1) && on_bridge(e2) {
-                        let turn = ((heads[j].1 - heads[i].0 + 540.0) % 360.0 - 180.0).abs();
+                    if e2.bridge && on_bridge(e1) {
+                        let turn = ((e2.start - end + 540.0) % 360.0 - 180.0).abs();
                         if turn > BRIDGE_MAX_TURN_DEG {
                             continue;
                         }
@@ -479,32 +526,25 @@ pub fn edge_graph(
                 (Some(a), Some(b)) if a != b => continue, // no user takes two different restricted edges
                 (Some(a), _) | (None, Some(a)) => a,
             };
-            rows.push(GraphRow {
+            moves.push(GraphRow {
                 from_edge: e1.edge_id,
                 to_edge: e2.edge_id,
                 cost: e1.cost_s,
                 uses,
             });
         }
-    }
-    let mut permission = Vec::new();
-    if let Some(trs) = restrictions {
-        let mut by_from: FxHashMap<i64, Vec<&TurnRestriction>> = FxHashMap::default();
-        for tr in trs {
-            by_from.entry(tr.from_edge_id).or_default().push(tr);
-        }
-        let bans = |tr: &TurnRestriction, to: i64| {
-            (like_prefix(&tr.restriction_type, "no") && tr.to_edge_id == to)
-                || (like_prefix(&tr.restriction_type, "only") && tr.to_edge_id != to)
+        let trs = if restrictions.is_some() {
+            by_from.get(&e1.edge_id).map_or(&[][..], |v| v.as_slice())
+        } else {
+            &[][..]
         };
-        // what edge_graph will not say, recorded before it changes
-        for g in &rows {
-            for tr in by_from.get(&g.from_edge).map_or(&[][..], |v| v.as_slice()) {
+        for g in moves.drain(..) {
+            // what edge_graph will not say, recorded before it changes
+            for tr in trs {
                 if !bans(tr, g.to_edge) {
                     continue;
                 }
-                if tr.applies_to.is_none() && tr.condition.is_none() && tr.except_vehicles.is_some()
-                {
+                if tr.applies_to.is_none() && tr.condition.is_none() && tr.except_vehicles.is_some() {
                     permission.push(TurnPermission {
                         from_edge: g.from_edge,
                         to_edge: g.to_edge,
@@ -526,22 +566,17 @@ pub fn edge_graph(
                     });
                 }
             }
+            // a rule for all vehicles, always, changes the graph
+            let banned = trs
+                .iter()
+                .any(|tr| tr.applies_to.is_none() && tr.condition.is_none() && bans(tr, g.to_edge));
+            if !banned {
+                out(g)?;
+            }
         }
-        // a rule for all vehicles, always, changes the graph
-        rows.retain(|g| {
-            !by_from.get(&g.from_edge).is_some_and(|trs| {
-                trs.iter().any(|tr| {
-                    tr.applies_to.is_none() && tr.condition.is_none() && bans(tr, g.to_edge)
-                })
-            })
-        });
     }
-    // Each (from, to) pair has one row (a pair of edge indexes makes one move, and the edge ids are unique), so the sort needs no
-    // tie rule. An unstable sort works in place; the stable one allocates half of the rows again.
-    rows.sort_unstable_by_key(|g| (g.from_edge, g.to_edge));
-    rows.shrink_to_fit();
     permission.sort();
-    (rows, permission)
+    Ok(permission)
 }
 
 impl Graph {
