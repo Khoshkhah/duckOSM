@@ -161,5 +161,16 @@ The bus routes (`bus::routes`) look up the node pairs of the member ways of the 
 has only the edges of these ways, not all edges. Kentucky: the peak heap of the step goes from 7,218 MiB to 3,991 MiB
 (no more than the memory before it), and its time from 1.85 s to 0.28 s. The files have the same bytes.
 
+The build keeps only the street segments near a building (`building_faces::NearBuildings`, a grid of cells at least
+`INFER_STREET_M` wide, marked one cell around the box of each way of the raw part): every search of a street for a wall is
+in a box of at most that size around the wall. Kentucky: the street segments go from 1,497 MiB to 502 MiB, the peak heap
+of the building faces from 6,636 MiB to 5,030 MiB and its time from 7.1 s to 5.6 s.
+
+The point of a street that a wall sees (`closest_to_street`) is now the nearest of the segments of the street at the
+point. Before, it was the first segment that the R-tree gave, and two segments meet at a node: so the result depended on
+the order of the tree, which changes with the segments in it (about 1% of the walls of Kentucky). With this rule, the
+build with all segments and the build with the segments near the buildings give the same file.
+
 After these changes, the peak heap of the whole Kentucky build (driving, `raw.*`, building faces) is 6,636 MiB, in the
-building faces, and the build takes 36.8 s (before: 17,206 MiB and 54.2 s).
+building faces, and the build takes 36.8 s (before: 17,206 MiB and 54.2 s). With the street filter: 5,030 MiB and
+35.9 s.
