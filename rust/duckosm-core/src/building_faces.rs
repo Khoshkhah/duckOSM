@@ -303,6 +303,7 @@ fn crosses(p: P, q: P, a: P, b: P) -> bool {
 }
 
 /// The street that a wall faces: the best score of the segments within `MAX_STREET_M` that the wall points at and that it can see.
+#[derive(Clone)]
 struct Match {
     q: P,
     edge_id: i64,
@@ -338,6 +339,14 @@ fn closest_to_street(tree: &RTree<Seg>, m: &Match, p: P) -> P {
         // the nearest of the segments of the street at `q` (two meet at a node): the first one would depend on the order of the tree
         .min_by(|x, y| x.1.total_cmp(&y.1).then(x.0 .0.total_cmp(&y.0 .0)).then(x.0 .1.total_cmp(&y.0 .1)))
         .map_or(m.q, |x| x.0)
+}
+
+/// The lists that the faces of one ring use, kept by a thread for its next ring: a new list for each ring and each wall
+/// took the lock of the global allocator millions of times in the browser build, where the threads wait for each other.
+#[derive(Default)]
+struct Scratch {
+    walls: Vec<Wall>,
+    candidates: Vec<Match>,
 }
 
 struct Wall {
@@ -750,10 +759,9 @@ pub fn building_faces_each(
         })
         .collect();
     drop(next_index);
-    let ring_faces = |k: usize| -> Vec<BuildingFace> {
+    let ring_faces = |k: usize, sc: &mut Scratch, out: &mut Vec<BuildingFace>| {
         let (id, relation, inner, ids, pts, local, addr) = &oriented[k];
         let (id, relation, inner, offset) = (*id, *relation, *inner, offsets[k]);
-        let mut out = Vec::new();
         let n = local.len() - 1;
         let building_type = if relation { "relation" } else { "way" };
         if inner {
@@ -790,9 +798,10 @@ pub fn building_faces_each(
                     geometry: [pts[i], pts[i + 1]],
                 });
             }
-            return out;
+            return;
         }
-        let mut walls: Vec<Wall> = Vec::new();
+        let Scratch { walls, candidates } = sc;
+        walls.clear();
         for i in 0..n {
             let (v1, v2) = (local[i], local[i + 1]);
             let (dx, dy) = (v2.0 - v1.0, v2.1 - v1.1);
@@ -806,7 +815,7 @@ pub fn building_faces_each(
                 (mid.0 - MAX_STREET_M, mid.1 - MAX_STREET_M),
                 (mid.0 + MAX_STREET_M, mid.1 + MAX_STREET_M),
             );
-            let mut candidates: Vec<Match> = Vec::new();
+            candidates.clear();
             for s in tree.locate_in_envelope(&env) {
                 let (q, dist) = closest_on(s.a, s.b, mid);
                 if dist > MAX_STREET_M || dist < 1e-4 {
@@ -850,7 +859,7 @@ pub fn building_faces_each(
                     )
                 })
                 .collect();
-            let best = candidates.into_iter().find(|m| {
+            let best = candidates.iter().find(|m| {
                 samples.iter().any(|&p| {
                     let seg_q = if p == samples[0] {
                         m.q
@@ -859,7 +868,7 @@ pub fn building_faces_each(
                     };
                     visible(p, seg_q)
                 })
-            });
+            }).cloned();
             let (a, b) = (ids[i], ids[i + 1]);
             walls.push(Wall {
                 index: i,
@@ -952,7 +961,7 @@ pub fn building_faces_each(
                 front_reason = "inferred";
             }
         }
-        let types = wall_types(&walls, front, front_reason);
+        let types = wall_types(walls, front, front_reason);
         for (k, w) in walls.iter().enumerate() {
             let (computed, reason) = types[k];
             let (ruled, door) = match rules.get(&(id, w.from.min(w.to), w.from.max(w.to))) {
@@ -984,7 +993,6 @@ pub fn building_faces_each(
                 geometry: [w.p1, w.p2],
             });
         }
-        out
     };
     crate::util::step("building faces 5: the oriented rings and the tree of the walls");
     for start in (0..oriented.len()).step_by(RINGS_PER_PART) {
@@ -992,10 +1000,27 @@ pub fn building_faces_each(
         #[cfg(feature = "pbf")]
         let faces: Vec<BuildingFace> = {
             use rayon::prelude::*;
-            part.into_par_iter().flat_map_iter(ring_faces).collect()
+            // each piece of the part has its own lists; the pieces come back in the order of the rings
+            part.into_par_iter()
+                .fold(
+                    || (Scratch::default(), Vec::new()),
+                    |(mut sc, mut out), k| {
+                        ring_faces(k, &mut sc, &mut out);
+                        (sc, out)
+                    },
+                )
+                .map(|(_, out)| out)
+                .collect::<Vec<Vec<BuildingFace>>>()
+                .concat()
         };
         #[cfg(not(feature = "pbf"))]
-        let faces: Vec<BuildingFace> = part.flat_map(ring_faces).collect();
+        let faces: Vec<BuildingFace> = {
+            let (mut sc, mut out) = (Scratch::default(), Vec::new());
+            for k in part {
+                ring_faces(k, &mut sc, &mut out);
+            }
+            out
+        };
         sink(faces)?;
     }
     Ok(())
