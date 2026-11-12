@@ -136,13 +136,38 @@ impl Pos {
     }
 }
 
-/// [`Fwd`] in a temporary file.
+/// [`Fwd`] in a temporary file. The way and `Pos` come first, at fixed places, so a sort can read its key with no
+/// decode of the edge (`spill::sort_bytes`).
 #[derive(Default)]
 struct FwdCodec(EdgeCodec);
 
+/// The bytes of the way and of `Pos` at the start of a row of [`FwdCodec`].
+const FWD_HEAD: usize = 30;
+
+impl FwdCodec {
+    fn pos(mut b: &[u8]) -> Pos {
+        let b = &mut b;
+        get_u32(b); // the way
+        let group = take::<1>(b)[0];
+        let (first, start, end, walk) = (get_u32(b), get_i64(b), get_i64(b), get_u32(b));
+        let half = take::<1>(b)[0];
+        Pos {
+            group,
+            first,
+            start,
+            end,
+            walk,
+            half,
+        }
+    }
+
+    fn osm_id(b: &[u8]) -> i64 {
+        EdgeCodec::osm_id(&b[FWD_HEAD..])
+    }
+}
+
 impl Codec<Fwd> for FwdCodec {
     fn put(&self, f: &Fwd, o: &mut Vec<u8>) {
-        self.0.put(&f.e, o);
         let p = &f.pos;
         put_u32(o, f.way as u32);
         o.push(p.group);
@@ -151,25 +176,17 @@ impl Codec<Fwd> for FwdCodec {
         put_i64(o, p.end);
         put_u32(o, p.walk);
         o.push(p.half);
+        self.0.put(&f.e, o);
     }
 
     fn get(&self, b: &mut &[u8]) -> Fwd {
-        let e = self.0.get(b);
-        let way = get_u32(b) as usize;
-        let group = take::<1>(b)[0];
-        let (first, start, end, walk) = (get_u32(b), get_i64(b), get_i64(b), get_u32(b));
-        let half = take::<1>(b)[0];
+        let way = u32::from_le_bytes(b[..4].try_into().unwrap()) as usize;
+        let pos = FwdCodec::pos(b);
+        *b = &b[FWD_HEAD..];
         Fwd {
-            e,
+            e: self.0.get(b),
             way,
-            pos: Pos {
-                group,
-                first,
-                start,
-                end,
-                walk,
-                half,
-            },
+            pos,
         }
     }
 }
@@ -547,10 +564,9 @@ pub fn build_network_junctions(
     // 3 to 7. Split the parallel and antiparallel arcs, add the reverse edges, set edge_id, edge_ref and the length. The
     // steps read the forward edges of one way (one osm_id) at a time: the keys of steps 3, 4 and 6 contain osm_id.
     let raw_refs: FxHashMap<i64, &Vec<i64>> = all_ways.iter().map(|w| (w.id, &w.refs)).collect();
-    let by_way = spill::sort(
+    let by_way = spill::sort_bytes(
         fwd,
-        &codec,
-        |f: &Fwd| (f.e.osm_id, f.pos),
+        |b| (FwdCodec::osm_id(b), FwdCodec::pos(b)),
         SORT_BUDGET,
         store,
     )
@@ -592,7 +608,7 @@ pub fn build_network_junctions(
     // `virtual_nodes` is the old order).
     let mut nodes: Vec<Node> = Vec::new();
     let mut last = None;
-    for n in spill::sort(node_ends, &IdCodec, |&n| n, SORT_BUDGET, store).map_err(io)?.read(&IdCodec).map_err(io)? {
+    for n in spill::sort_bytes(node_ends, |b| get_i64(&mut &b[..]), SORT_BUDGET, store).map_err(io)?.read(&IdCodec).map_err(io)? {
         let n = n.map_err(io)?;
         if last == Some(n) {
             continue;
@@ -696,11 +712,10 @@ pub fn build_network_junctions(
     // The edges in the order of their edge_id (the order of the tables): the edge graph takes the edges in this order.
     // The edge graph and the writers still take a list of all edges (part B4 changes them). The edges of the other parts
     // stay out, and the nodes that only they or the private edges use go.
-    let by_id = |e: &Edge| e.edge_id;
     let n_kept = kept.len;
     let mut edges: Vec<Edge> = Vec::with_capacity(n_kept);
     let mut used: Vec<bool> = vec![false; nodes.len()];
-    for e in spill::sort(kept, ecodec, by_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
+    for e in spill::sort_bytes(kept, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
         let e = e.map_err(io)?;
         let (a, b) = (node_index(e.source)?, node_index(e.target)?);
         if let Some(r) = largest {
@@ -715,7 +730,7 @@ pub fn build_network_junctions(
     edges.shrink_to_fit();
     stats.dropped_by_component_filter = n_kept - edges.len();
     let mut private_edges: Vec<Edge> = Vec::with_capacity(private.len);
-    for e in spill::sort(private, ecodec, by_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
+    for e in spill::sort_bytes(private, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
         private_edges.push(e.map_err(io)?);
     }
     drop(codec); // its table of the shared tags of all ways
@@ -1080,7 +1095,7 @@ fn merge_chains(
     let n = fwd.len;
     let mut parent: Vec<u32> = (0..n as u32).collect();
     let mut at: Vec<u8> = vec![0; n]; // SRC, TGT: the source, the target of the edge is a contraction node
-    let ends = spill::sort(ends, &EndCodec, |h: &End| h.node, SORT_BUDGET, store)?;
+    let ends = spill::sort_bytes(ends, |b| get_i64(&mut &b[..]), SORT_BUDGET, store)?;
     for_groups(
         ends.read(&EndCodec)?,
         |h| h.node,
@@ -1113,7 +1128,8 @@ fn merge_chains(
         }
     }
     let key = |f: &Fwd| set[f.pos.first as usize];
-    let in_sets = spill::sort(in_sets.finish()?, codec, key, SORT_BUDGET, store)?;
+    let first = |b: &[u8]| set[FwdCodec::pos(b).first as usize];
+    let in_sets = spill::sort_bytes(in_sets.finish()?, first, SORT_BUDGET, store)?;
     let mut map: Vec<(MapRow, Pos, usize)> = Vec::new();
     let (mut n_chains, mut n_pieces) = (0, 0);
     for_groups(in_sets.read(codec)?, key, |g| {
@@ -1485,4 +1501,62 @@ fn connect_paths(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fwd_keys_come_from_the_bytes() {
+        let attrs = Arc::new(Attrs {
+            highway: "residential".into(),
+            name: None,
+            maxspeed: None,
+            surface: None,
+            junction: None,
+            layer: None,
+            bridge: None,
+            tunnel: None,
+            service: None,
+        });
+        let f = Fwd {
+            e: Edge {
+                edge_id: -7,
+                seq: Some(3),
+                source: 11,
+                target: -12,
+                osm_id: 987654321,
+                attrs,
+                oneway: false,
+                lanes: Some(2),
+                access: None,
+                refs: vec![11, 5, -12],
+                geometry: vec![(1.0, 2.0), (1.5, 2.5), (2.0, 3.0)],
+                is_reverse: true,
+                length_m: 12.5,
+                dismount: None,
+                maxspeed_kmh: None,
+                cost_s: None,
+                ftype: None,
+            },
+            way: 42,
+            pos: Pos {
+                group: 0,
+                first: 77,
+                start: -5,
+                end: 9,
+                walk: 2,
+                half: 3,
+            },
+        };
+        let codec = FwdCodec::default();
+        let mut b = Vec::new();
+        codec.put(&f, &mut b);
+        assert_eq!(FwdCodec::pos(&b), f.pos);
+        assert_eq!(FwdCodec::osm_id(&b), f.e.osm_id);
+        assert_eq!(EdgeCodec::edge_id(&b[FWD_HEAD..]), f.e.edge_id);
+        let g = codec.get(&mut &b[..]);
+        assert_eq!((g.way, g.pos, format!("{:?}", g.e)), (f.way, f.pos, format!("{:?}", f.e)));
+    }
 }
