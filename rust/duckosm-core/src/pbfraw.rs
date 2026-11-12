@@ -144,11 +144,18 @@ fn block_data<'a>(block: &'a [u8], data: &'a mut Vec<u8>) -> R<(bool, &'a [u8])>
 /// Decode one block of the file (`block`: as [`crate::pbf::BlockIndex`] gives it, the length, the header and the data)
 /// and give the elements of the kinds in `keep` (nodes, ways, relations) to `sink`, in the order of the block.
 pub fn decode_block(block: &[u8], keep: [bool; 3], buf: &mut Buffers, sink: &mut impl RawSink) -> R<()> {
+    decode_block_tags(block, keep, keep, buf, sink)
+}
+
+/// [`decode_block`], with the tags only of the kinds in `tags` (nodes, ways, relations): the elements of the other
+/// kinds come with no tags (and a relation with no roles). With no tags at all, the string table of the block is not
+/// read. A pass that needs only ids, coordinates, node lists or members is then faster.
+pub fn decode_block_tags(block: &[u8], keep: [bool; 3], tags: [bool; 3], buf: &mut Buffers, sink: &mut impl RawSink) -> R<()> {
     let mut data = std::mem::take(&mut buf.data);
     let r = (|| {
         let (is_data, d) = block_data(block, &mut data)?;
         if is_data {
-            primitive_block(d, keep, buf, sink)?;
+            primitive_block(d, keep, tags, buf, sink)?;
         }
         Ok(())
     })();
@@ -156,7 +163,7 @@ pub fn decode_block(block: &[u8], keep: [bool; 3], buf: &mut Buffers, sink: &mut
     r
 }
 
-fn primitive_block(d: &[u8], keep: [bool; 3], buf: &mut Buffers, sink: &mut impl RawSink) -> R<()> {
+fn primitive_block(d: &[u8], keep: [bool; 3], tags: [bool; 3], buf: &mut Buffers, sink: &mut impl RawSink) -> R<()> {
     // the fields 17 to 20 come after the groups, so the block is read two times
     let (mut table, mut groups) = (None, Vec::new());
     let (mut gran, mut lat_off, mut lon_off) = (100i64, 0i64, 0i64);
@@ -172,7 +179,8 @@ fn primitive_block(d: &[u8], keep: [bool; 3], buf: &mut Buffers, sink: &mut impl
         }
     }
     let mut strings: Vec<&str> = Vec::new();
-    let mut t = Msg(table.unwrap_or(&[]));
+    let any_tags = (0..3).any(|k| keep[k] && tags[k]);
+    let mut t = Msg(if any_tags { table.unwrap_or(&[]) } else { &[] });
     while let Some((f, w)) = t.key()? {
         if f == 1 && w == 2 {
             strings.push(std::str::from_utf8(t.bytes()?).map_err(|_| bad("a string that is not UTF-8"))?);
@@ -186,10 +194,10 @@ fn primitive_block(d: &[u8], keep: [bool; 3], buf: &mut Buffers, sink: &mut impl
         let mut g = Msg(g);
         while let Some((f, w)) = g.key()? {
             match (f, w) {
-                (1, 2) if keep[0] => node(g.bytes()?, buf, sink, s, &coord, lat_off, lon_off)?,
-                (2, 2) if keep[0] => dense(g.bytes()?, buf, sink, s, &coord, lat_off, lon_off)?,
-                (3, 2) if keep[1] => way(g.bytes()?, buf, sink, s)?,
-                (4, 2) if keep[2] => relation(g.bytes()?, buf, sink, s)?,
+                (1, 2) if keep[0] => node(g.bytes()?, tags[0], buf, sink, s, &coord, lat_off, lon_off)?,
+                (2, 2) if keep[0] => dense(g.bytes()?, tags[0], buf, sink, s, &coord, lat_off, lon_off)?,
+                (3, 2) if keep[1] => way(g.bytes()?, tags[1], buf, sink, s)?,
+                (4, 2) if keep[2] => relation(g.bytes()?, tags[2], buf, sink, s)?,
                 _ => g.skip(w)?,
             }
         }
@@ -210,8 +218,10 @@ fn tags<'s, 'b>(keys: &'b [u64], vals: &'b [u64], s: &'b [&'s str]) -> impl Iter
     keys.iter().zip(vals).map(move |(&k, &v)| (s[k as usize], s[v as usize]))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn node<'s>(
     b: &[u8],
+    with_tags: bool,
     buf: &mut Buffers,
     sink: &mut impl RawSink,
     s: &[&'s str],
@@ -226,8 +236,8 @@ fn node<'s>(
     while let Some((f, w)) = m.key()? {
         match (f, w) {
             (1, 0) => id = zigzag(m.varint()?),
-            (2, 2) => packed(m.bytes()?, &mut buf.a)?,
-            (3, 2) => packed(m.bytes()?, &mut buf.b)?,
+            (2, 2) if with_tags => packed(m.bytes()?, &mut buf.a)?,
+            (3, 2) if with_tags => packed(m.bytes()?, &mut buf.b)?,
             (8, 0) => lat = zigzag(m.varint()?),
             (9, 0) => lon = zigzag(m.varint()?),
             _ => m.skip(w)?,
@@ -239,8 +249,10 @@ fn node<'s>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dense<'s>(
     b: &[u8],
+    with_tags: bool,
     buf: &mut Buffers,
     sink: &mut impl RawSink,
     s: &[&'s str],
@@ -255,7 +267,7 @@ fn dense<'s>(
             (1, 2) => packed_delta(m.bytes()?, &mut buf.ids)?,
             (8, 2) => packed_delta(m.bytes()?, &mut buf.lats)?,
             (9, 2) => packed_delta(m.bytes()?, &mut buf.lons)?,
-            (10, 2) => packed(m.bytes()?, &mut buf.a)?,
+            (10, 2) if with_tags => packed(m.bytes()?, &mut buf.a)?,
             _ => m.skip(w)?,
         }
     }
@@ -278,7 +290,7 @@ fn dense<'s>(
     Ok(())
 }
 
-fn way<'s>(b: &[u8], buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s str]) -> R<()> {
+fn way<'s>(b: &[u8], with_tags: bool, buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s str]) -> R<()> {
     let mut id = 0;
     buf.a.clear();
     buf.b.clear();
@@ -287,8 +299,8 @@ fn way<'s>(b: &[u8], buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s str]) 
     while let Some((f, w)) = m.key()? {
         match (f, w) {
             (1, 0) => id = m.varint()? as i64,
-            (2, 2) => packed(m.bytes()?, &mut buf.a)?,
-            (3, 2) => packed(m.bytes()?, &mut buf.b)?,
+            (2, 2) if with_tags => packed(m.bytes()?, &mut buf.a)?,
+            (3, 2) if with_tags => packed(m.bytes()?, &mut buf.b)?,
             (8, 2) => packed_delta(m.bytes()?, &mut buf.ids)?,
             _ => m.skip(w)?,
         }
@@ -299,7 +311,7 @@ fn way<'s>(b: &[u8], buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s str]) 
     Ok(())
 }
 
-fn relation<'s>(b: &[u8], buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s str]) -> R<()> {
+fn relation<'s>(b: &[u8], with_tags: bool, buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s str]) -> R<()> {
     let mut id = 0;
     buf.a.clear();
     buf.b.clear();
@@ -310,9 +322,9 @@ fn relation<'s>(b: &[u8], buf: &mut Buffers, sink: &mut impl RawSink, s: &[&'s s
     while let Some((f, w)) = m.key()? {
         match (f, w) {
             (1, 0) => id = m.varint()? as i64,
-            (2, 2) => packed(m.bytes()?, &mut buf.a)?,
-            (3, 2) => packed(m.bytes()?, &mut buf.b)?,
-            (8, 2) => packed(m.bytes()?, &mut roles)?,
+            (2, 2) if with_tags => packed(m.bytes()?, &mut buf.a)?,
+            (3, 2) if with_tags => packed(m.bytes()?, &mut buf.b)?,
+            (8, 2) if with_tags => packed(m.bytes()?, &mut roles)?,
             (9, 2) => packed_delta(m.bytes()?, &mut buf.ids)?,
             (10, 2) => packed(m.bytes()?, &mut buf.c)?,
             _ => m.skip(w)?,
@@ -392,6 +404,35 @@ mod tests {
             let m = m.map(|(i, ty, r)| (i, ty as u8, r.to_string())).collect();
             self.rels.push((id, t.map(|(k, v)| (k.into(), v.into())).collect(), m));
         }
+    }
+
+    /// With no tags, the elements are the same, with no tags and no roles, on Monaco.
+    #[test]
+    fn no_tags_gives_the_same_elements() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
+        let read = |tags: [bool; 3]| {
+            let (mut all, mut buf) = (All::default(), Buffers::default());
+            let mut f = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+            while let Some(b) = read_block(&mut f).unwrap() {
+                decode_block_tags(&b, [true; 3], tags, &mut buf, &mut all).unwrap();
+            }
+            all
+        };
+        let mut want = read([true; 3]);
+        for n in &mut want.nodes {
+            n.3.clear();
+        }
+        for w in &mut want.ways {
+            w.1.clear();
+        }
+        for r in &mut want.rels {
+            r.1.clear();
+            for m in &mut r.2 {
+                m.2.clear();
+            }
+        }
+        assert!(!want.nodes.is_empty() && !want.ways.is_empty() && !want.rels.is_empty());
+        assert_eq!(read([false; 3]), want);
     }
 
     /// The fast decoder gives the same elements, tags and coordinates (to the bit) as osmpbf, on Monaco.

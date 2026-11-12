@@ -21,7 +21,7 @@
 use crate::boundary::Boundary;
 use crate::cutfile::{file_blob, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
 use crate::graph::{MemberType, Relation};
-use crate::pbfraw::{decode_block, read_block, Buffers};
+use crate::pbfraw::{decode_block, decode_block_tags, read_block, Buffers};
 use crate::raw::{RawNode, RawSink, RawWay};
 use crate::util::FxHashSet;
 use rayon::prelude::*;
@@ -281,7 +281,7 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     let (mut parts, mut node_blocks, mut ways_at) = (Vec::new(), 0usize, None);
     each_block(&mut open()?, None, |b, buf| {
         let mut s = Inside { boundary, ids: Vec::new(), other: false };
-        decode_block(b, [true, true, true], buf, &mut s)?;
+        decode_block_tags(b, [true, true, true], [false; 3], buf, &mut s)?;
         Ok((s.ids, s.other))
     }, |(ids, other), at| {
         parts.push(ids);
@@ -301,7 +301,8 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
         let (mut ways, mut outside, mut rels) = (Vec::new(), Vec::new(), Vec::new());
         each_block(&mut r, None, |b, buf| {
             let mut s = Kept { inside: &inside, wanted, ways: Vec::new(), outside: Vec::new(), rels: Vec::new(), refs: Vec::new() };
-            decode_block(b, [false, true, true], buf, &mut s)?;
+            // only a relation needs its tags here (type=multipolygon)
+            decode_block_tags(b, [false, true, true], [false, false, wanted.is_none()], buf, &mut s)?;
             Ok((s.ways, s.outside, s.rels))
         }, |(w, o, mut rl), _| {
             ways.push(w);
