@@ -28,24 +28,25 @@ but it cuts the file with osmium and loads `raw.*` with DuckDB first: see [How a
 
 ## The offline build
 
-A build of a whole file with `duckosm-rust`. In the diagram, a cylinder is storage and a rounded box is memory.
+A build of a whole file with `duckosm-rust`. In the diagrams, a blue cylinder is storage, a red rounded box is memory, and a
+plain box is a step.
 
 ```mermaid
 flowchart TB
-    PBF[(".osm.pbf file<br/><i>storage</i>")]
+    PBF[(".osm.pbf file<br/>[storage]")]
 
-    S1["<b>1. Read the file</b><br/>the highway ways, the coordinates of their nodes,<br/>the turn restrictions · in blocks"]
-    M1(["ways · coordinates · restrictions<br/><i>memory, kept to the end</i>"])
-    S2["<b>2. Sidewalk rule · global junctions</b>"]
-    M2(["the junction set<br/><i>memory</i>"])
-    S3["<b>3. Network of each mode</b><br/>cut · merge · split · reverse edges · edge_id ·<br/>nodes · speeds · edge graph · largest part"]
-    M3(["edges · nodes · edge graph of one mode<br/><i>memory, until the mode is written</i>"])
-    S4["<b>4. Write the network files</b><br/>one mode after the other"]
-    S5["<b>5. Area tables · levels · lane profile</b>"]
-    F1[("GeoParquet files<br/><i>storage</i>")]
-    S6["<b>6. Write the .duckdb file</b><br/>DuckDB reads the files · spills"]
-    S7["<b>7. raw.*</b><br/>read_osm: DuckDB reads the file<br/>one block for each thread"]
-    DB[(".duckdb file<br/><i>storage</i>")]
+    S1["<b>1. Read the file</b><br/>highway ways,<br/>node coordinates,<br/>turn restrictions<br/>(in blocks)"]
+    M1("ways, coordinates,<br/>restrictions<br/>[memory, to the end]")
+    S2["<b>2. Sidewalk rule,</b><br/><b>global junctions</b>"]
+    M2("junction set<br/>[memory]")
+    S3["<b>3. Network of each mode</b><br/>cut, merge, split,<br/>reverse edges, edge_id,<br/>nodes, speeds,<br/>edge graph, largest part"]
+    M3("edges, nodes, edge graph<br/>of one mode<br/>[memory, until written]")
+    S4["<b>4. Write the network files</b><br/>one mode at a time"]
+    S5["<b>5. Area tables,</b><br/><b>levels, lane profile</b>"]
+    F1[("GeoParquet files<br/>[storage]")]
+    S6["<b>6. Write the .duckdb file</b><br/>DuckDB reads the files<br/>(spills to disk)"]
+    S7["<b>7. raw.*</b><br/>read_osm: DuckDB reads<br/>the file, one block<br/>for each thread"]
+    DB[(".duckdb file<br/>[storage]")]
 
     PBF --> S1 --> M1
     M1 --> S2 --> M2
@@ -56,8 +57,8 @@ flowchart TB
     F1 --> S6 --> DB
     PBF --> S7 --> DB
 
-    classDef disk fill:#dbeafe,stroke:#1d4ed8,color:#0b1b3a
-    classDef mem fill:#fde2e1,stroke:#b42318,color:#3a0b0b
+    classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
+    classDef mem fill:#ef444433,stroke:#ef4444,stroke-width:2px
     class PBF,F1,DB disk
     class M1,M2,M3 mem
 ```
@@ -68,21 +69,21 @@ Studio in the browser. The page always builds an area that you choose inside a r
 
 ```mermaid
 flowchart TB
-    REG[("region .osm.pbf<br/><i>storage: OPFS</i>")]
+    REG[("region .osm.pbf<br/>[storage: OPFS]")]
 
-    S0["<b>0. Cut to the area</b><br/>reads the region file in pieces"]
-    M0(["ways · coordinates · restrictions ·<br/>raw.* of the area<br/><i>tab memory, kept to the end</i>"])
-    S2["<b>2. Sidewalk rule · global junctions</b>"]
+    S0["<b>0. Cut to the area</b><br/>reads the region file<br/>in pieces"]
+    M0("ways, coordinates,<br/>restrictions, raw.*<br/>of the area<br/>[tab memory, to the end]")
+    S2["<b>2. Sidewalk rule,</b><br/><b>global junctions</b>"]
     S3["<b>3. Network of each mode</b><br/>the same Rust engine"]
-    M3(["edges · nodes · edge graph of one mode<br/><i>tab memory</i>"])
-    S4["<b>4–5. Write the files</b><br/>network, area tables, levels, lane profile, raw.*"]
-    M4(["Parquet files as bytes<br/><i>tab memory</i>"])
-    S6["<b>6. Give the files to DuckDB-Wasm</b><br/>each file is copied into its memory"]
-    M6(["DuckDB-Wasm: the files and the tables<br/><i>its own memory, at most 4 GB</i>"])
+    M3("edges, nodes, edge graph<br/>of one mode<br/>[tab memory]")
+    S4["<b>4–5. Write the files</b><br/>network, area tables,<br/>levels, lane profile, raw.*"]
+    M4("Parquet files as bytes<br/>[tab memory]")
+    S6["<b>6. Give the files</b><br/><b>to DuckDB-Wasm</b><br/>each file is copied"]
+    M6("DuckDB-Wasm:<br/>files and tables<br/>[its memory, at most 4 GB]")
     SAVE["<b>Save the area</b>"]
-    O[("Parquet files<br/><i>storage: OPFS</i>")]
-    EXP["<b>Export</b><br/>copy the tables into a .duckdb file"]
-    DL[(".duckdb download<br/><i>storage</i>")]
+    O[("Parquet files<br/>[storage: OPFS]")]
+    EXP["<b>Export</b><br/>copy the tables<br/>into a .duckdb file"]
+    DL[(".duckdb download<br/>[storage]")]
 
     REG --> S0 --> M0
     M0 --> S2 --> S3 --> M3 --> S4
@@ -91,8 +92,8 @@ flowchart TB
     M4 --> SAVE --> O
     M6 --> EXP --> DL
 
-    classDef disk fill:#dbeafe,stroke:#1d4ed8,color:#0b1b3a
-    classDef mem fill:#fde2e1,stroke:#b42318,color:#3a0b0b
+    classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
+    classDef mem fill:#ef444433,stroke:#ef4444,stroke-width:2px
     class REG,O,DL disk
     class M0,M3,M4,M6 mem
 ```
