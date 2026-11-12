@@ -248,19 +248,11 @@ mod heap {
     #[global_allocator]
     static A: Counting = Counting;
 
-    /// Print the live heap after the step `name`, its peak during the step and the seconds since the last report, then
-    /// start a new peak.
+    /// Print the live heap after the step `name` and its peak during the step, then start a new peak.
     pub fn report(name: &str) {
-        static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
         let mib = |b: usize| b as f64 / 1048576.0;
         let live = LIVE.load(Relaxed);
-        let now = std::time::Instant::now();
-        let s = LAST.lock().unwrap().replace(now).map_or(0.0, |t| (now - t).as_secs_f64());
-        eprintln!(
-            "  heap {name:<30} live {:>8.1} MiB   peak {:>8.1} MiB   {s:>7.3} s",
-            mib(live),
-            mib(PEAK.load(Relaxed))
-        );
+        eprintln!("  heap {name:<30} live {:>8.1} MiB   peak {:>8.1} MiB", mib(live), mib(PEAK.load(Relaxed)));
         PEAK.store(live, Relaxed);
     }
 }
