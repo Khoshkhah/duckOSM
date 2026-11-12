@@ -134,6 +134,38 @@ struct Cli {
     timing: bool,
 }
 
+/// duckosm-rust cut: step 0 alone. Cut a region file to a boundary and write the area as a `.osm.pbf` file
+/// (osmium's smart cut). Only lists of ids stay in memory.
+#[derive(Parser)]
+#[command(name = "duckosm-rust cut", version)]
+struct CutCli {
+    /// The region file (.osm.pbf, sorted by type and id, as the files of Geofabrik).
+    region: PathBuf,
+    /// The boundary (GeoJSON).
+    #[arg(long)]
+    boundary: PathBuf,
+    /// The area file to write (.osm.pbf).
+    #[arg(short, long)]
+    out: PathBuf,
+}
+
+fn cut(args: &[String]) -> Result<(), String> {
+    let cli = CutCli::parse_from(args);
+    let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
+    let t = std::time::Instant::now();
+    let n = duckosm_build::cut_file(&cli.region, &text, &cli.out)?;
+    eprintln!(
+        "cut: {} nodes, {} ways, {} relations in {:.2} s",
+        n.nodes,
+        n.ways,
+        n.relations,
+        t.elapsed().as_secs_f64()
+    );
+    #[cfg(feature = "heap-probe")]
+    heap::report("cut");
+    Ok(())
+}
+
 /// duckosm-rust edit: a page on 127.0.0.1 that edits the OSM data of a database (docs/guides/edit-osm-data.md, "Edit on your computer").
 /// Each change goes into the fixes file at once. Build again builds the database again with the file.
 #[derive(Parser)]
@@ -282,6 +314,7 @@ fn main() {
     let r = match args.get(1).map(String::as_str) {
         Some("edit") => edit(&args[1..]),
         Some("studio") => studio(&args[1..]),
+        Some("cut") => cut(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {

@@ -7,8 +7,8 @@
 //! The bytes do not depend on the target: `miniz_oxide` is pure Rust. The browser build and the native build write the
 //! same file.
 
-use crate::graph::MemberType;
-use crate::raw::{Raw, RawTags};
+use crate::graph::{MemberType, Relation};
+use crate::raw::{Raw, RawNode, RawTags, RawWay};
 use crate::util::FxHashMap;
 use std::io::Write;
 
@@ -111,112 +111,203 @@ fn file_blob<W: Write>(w: &mut W, kind: &str, data: &[u8]) -> Result<(), String>
     w.write_all(&blob).map_err(e)
 }
 
+/// Writes a `.osm.pbf` file from elements given one at a time, in the order of the file (all nodes, then all ways,
+/// then all relations, each sorted by id): a block for each [`BLOCK`] elements of a kind. Only one block is in memory,
+/// so a cut can write its file while it reads the region file ([`crate::cutstream`]).
+pub struct PbfWriter<W: Write> {
+    w: W,
+    nodes: Vec<RawNode>,
+    ways: Vec<RawWay>,
+    relations: Vec<Relation>,
+}
+
+impl<W: Write> PbfWriter<W> {
+    /// Write the header. `timestamp` (seconds since 1970) is the replication time of the region file's header.
+    pub fn new(mut w: W, timestamp: Option<i64>) -> Result<Self, String> {
+        let mut head = Vec::new();
+        bytes(&mut head, 4, b"OsmSchema-V0.6");
+        bytes(&mut head, 4, b"DenseNodes");
+        bytes(&mut head, 5, b"Sort.Type_then_ID");
+        bytes(
+            &mut head,
+            16,
+            concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")).as_bytes(),
+        );
+        if let Some(t) = timestamp {
+            int(&mut head, 32, t);
+        }
+        file_blob(&mut w, "OSMHeader", &head)?;
+        Ok(PbfWriter {
+            w,
+            nodes: Vec::with_capacity(BLOCK),
+            ways: Vec::new(),
+            relations: Vec::new(),
+        })
+    }
+
+    pub fn node(&mut self, n: RawNode) -> Result<(), String> {
+        self.nodes.push(n);
+        if self.nodes.len() == BLOCK {
+            self.flush_nodes()?;
+        }
+        Ok(())
+    }
+
+    pub fn way(&mut self, x: RawWay) -> Result<(), String> {
+        self.flush_nodes()?;
+        self.ways.push(x);
+        if self.ways.len() == BLOCK {
+            self.flush_ways()?;
+        }
+        Ok(())
+    }
+
+    pub fn relation(&mut self, r: Relation) -> Result<(), String> {
+        self.flush_nodes()?;
+        self.flush_ways()?;
+        self.relations.push(r);
+        if self.relations.len() == BLOCK {
+            self.flush_relations()?;
+        }
+        Ok(())
+    }
+
+    /// Write the last blocks; gives the writer back.
+    pub fn finish(mut self) -> Result<W, String> {
+        self.flush_nodes()?;
+        self.flush_ways()?;
+        self.flush_relations()?;
+        Ok(self.w)
+    }
+
+    fn flush_nodes(&mut self) -> Result<(), String> {
+        if !self.nodes.is_empty() {
+            file_blob(&mut self.w, "OSMData", &nodes_block(&self.nodes))?;
+            self.nodes.clear();
+        }
+        Ok(())
+    }
+
+    fn flush_ways(&mut self) -> Result<(), String> {
+        if !self.ways.is_empty() {
+            file_blob(&mut self.w, "OSMData", &ways_block(&self.ways))?;
+            self.ways.clear();
+        }
+        Ok(())
+    }
+
+    fn flush_relations(&mut self) -> Result<(), String> {
+        if !self.relations.is_empty() {
+            file_blob(&mut self.w, "OSMData", &relations_block(&self.relations))?;
+            self.relations.clear();
+        }
+        Ok(())
+    }
+}
+
+fn nodes_block(chunk: &[RawNode]) -> Vec<u8> {
+    let mut s = Strings::new();
+    let (mut ids, mut lats, mut lons, mut kv) = (vec![], vec![], vec![], vec![]);
+    let (mut id0, mut lat0, mut lon0) = (0, 0, 0);
+    for n in chunk {
+        let lat = (n.lat * 1e7).round() as i64;
+        let lon = (n.lon * 1e7).round() as i64;
+        ids.push(zigzag(n.id - id0));
+        lats.push(zigzag(lat - lat0));
+        lons.push(zigzag(lon - lon0));
+        (id0, lat0, lon0) = (n.id, lat, lon);
+        for (k, v) in &n.tags {
+            kv.extend([s.id(k), s.id(v)]);
+        }
+        kv.push(0);
+    }
+    let mut dense = Vec::new();
+    packed(&mut dense, 1, ids);
+    packed(&mut dense, 8, lats);
+    packed(&mut dense, 9, lons);
+    // no tags at all: the standard allows to leave `keys_vals` out
+    if chunk.iter().any(|n| !n.tags.is_empty()) {
+        packed(&mut dense, 10, kv);
+    }
+    let mut group = Vec::new();
+    bytes(&mut group, 2, &dense);
+    s.block(&group)
+}
+
+fn ways_block(chunk: &[RawWay]) -> Vec<u8> {
+    let mut s = Strings::new();
+    let mut group = Vec::new();
+    for way in chunk {
+        let (mut k, mut v) = (vec![], vec![]);
+        s.tags(&way.tags, &mut k, &mut v);
+        let mut m = Vec::new();
+        int(&mut m, 1, way.id);
+        packed(&mut m, 2, k);
+        packed(&mut m, 3, v);
+        let mut prev = 0;
+        packed(
+            &mut m,
+            8,
+            way.refs.iter().map(|&r| {
+                let d = zigzag(r - prev);
+                prev = r;
+                d
+            }),
+        );
+        bytes(&mut group, 3, &m);
+    }
+    s.block(&group)
+}
+
+fn relations_block(chunk: &[Relation]) -> Vec<u8> {
+    let mut s = Strings::new();
+    let mut group = Vec::new();
+    for rel in chunk {
+        let (mut k, mut v) = (vec![], vec![]);
+        s.tags(&rel.tags, &mut k, &mut v);
+        let mut m = Vec::new();
+        int(&mut m, 1, rel.id);
+        packed(&mut m, 2, k);
+        packed(&mut m, 3, v);
+        packed(&mut m, 8, rel.members.iter().map(|(_, _, role)| s.id(role)));
+        let mut prev = 0;
+        packed(
+            &mut m,
+            9,
+            rel.members.iter().map(|&(id, ..)| {
+                let d = zigzag(id - prev);
+                prev = id;
+                d
+            }),
+        );
+        packed(
+            &mut m,
+            10,
+            rel.members.iter().map(|&(_, t, _)| match t {
+                MemberType::Node => 0,
+                MemberType::Way => 1,
+                MemberType::Relation => 2,
+            }),
+        );
+        bytes(&mut group, 4, &m);
+    }
+    s.block(&group)
+}
+
 /// Write the cut as a `.osm.pbf` file. `timestamp` (seconds since 1970) is the replication time of the region
 /// file's header, when it has one.
 pub fn write_pbf<W: Write>(raw: &Raw, timestamp: Option<i64>, w: &mut W) -> Result<(), String> {
-    let mut head = Vec::new();
-    bytes(&mut head, 4, b"OsmSchema-V0.6");
-    bytes(&mut head, 4, b"DenseNodes");
-    bytes(&mut head, 5, b"Sort.Type_then_ID");
-    bytes(
-        &mut head,
-        16,
-        concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")).as_bytes(),
-    );
-    if let Some(t) = timestamp {
-        int(&mut head, 32, t);
-    }
-    file_blob(w, "OSMHeader", &head)?;
-
+    let mut out = PbfWriter::new(w, timestamp)?;
     for chunk in raw.nodes.chunks(BLOCK) {
-        let mut s = Strings::new();
-        let (mut ids, mut lats, mut lons, mut kv) = (vec![], vec![], vec![], vec![]);
-        let (mut id0, mut lat0, mut lon0) = (0, 0, 0);
-        for n in chunk {
-            let lat = (n.lat * 1e7).round() as i64;
-            let lon = (n.lon * 1e7).round() as i64;
-            ids.push(zigzag(n.id - id0));
-            lats.push(zigzag(lat - lat0));
-            lons.push(zigzag(lon - lon0));
-            (id0, lat0, lon0) = (n.id, lat, lon);
-            for (k, v) in &n.tags {
-                kv.extend([s.id(k), s.id(v)]);
-            }
-            kv.push(0);
-        }
-        let mut dense = Vec::new();
-        packed(&mut dense, 1, ids);
-        packed(&mut dense, 8, lats);
-        packed(&mut dense, 9, lons);
-        // no tags at all: the standard allows to leave `keys_vals` out
-        if chunk.iter().any(|n| !n.tags.is_empty()) {
-            packed(&mut dense, 10, kv);
-        }
-        let mut group = Vec::new();
-        bytes(&mut group, 2, &dense);
-        file_blob(w, "OSMData", &s.block(&group))?;
+        file_blob(&mut out.w, "OSMData", &nodes_block(chunk))?;
     }
-
     for chunk in raw.ways.chunks(BLOCK) {
-        let mut s = Strings::new();
-        let mut group = Vec::new();
-        for way in chunk {
-            let (mut k, mut v) = (vec![], vec![]);
-            s.tags(&way.tags, &mut k, &mut v);
-            let mut m = Vec::new();
-            int(&mut m, 1, way.id);
-            packed(&mut m, 2, k);
-            packed(&mut m, 3, v);
-            let mut prev = 0;
-            packed(
-                &mut m,
-                8,
-                way.refs.iter().map(|&r| {
-                    let d = zigzag(r - prev);
-                    prev = r;
-                    d
-                }),
-            );
-            bytes(&mut group, 3, &m);
-        }
-        file_blob(w, "OSMData", &s.block(&group))?;
+        file_blob(&mut out.w, "OSMData", &ways_block(chunk))?;
     }
-
     for chunk in raw.relations.chunks(BLOCK) {
-        let mut s = Strings::new();
-        let mut group = Vec::new();
-        for rel in chunk {
-            let (mut k, mut v) = (vec![], vec![]);
-            s.tags(&rel.tags, &mut k, &mut v);
-            let mut m = Vec::new();
-            int(&mut m, 1, rel.id);
-            packed(&mut m, 2, k);
-            packed(&mut m, 3, v);
-            packed(&mut m, 8, rel.members.iter().map(|(_, _, role)| s.id(role)));
-            let mut prev = 0;
-            packed(
-                &mut m,
-                9,
-                rel.members.iter().map(|&(id, ..)| {
-                    let d = zigzag(id - prev);
-                    prev = id;
-                    d
-                }),
-            );
-            packed(
-                &mut m,
-                10,
-                rel.members.iter().map(|&(_, t, _)| match t {
-                    MemberType::Node => 0,
-                    MemberType::Way => 1,
-                    MemberType::Relation => 2,
-                }),
-            );
-            bytes(&mut group, 4, &m);
-        }
-        file_blob(w, "OSMData", &s.block(&group))?;
+        file_blob(&mut out.w, "OSMData", &relations_block(chunk))?;
     }
-    Ok(())
+    out.finish().map(|_| ())
 }
 
 /// The text with the characters that XML attributes need escaped.
