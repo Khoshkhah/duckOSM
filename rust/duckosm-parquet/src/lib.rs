@@ -286,6 +286,31 @@ pub fn write_edges_to<W: Write + Send>(out: W, rows: &[Edge], oc: EdgeCols) -> R
     Ok(())
 }
 
+/// [`write_edges_to`] from a stream of edges (for example a temporary file, docs/design/network_stream.md, part B4): it
+/// keeps one row group of edges in memory.
+pub fn write_edges_iter_to<W: Write + Send>(
+    out: W,
+    rows: impl Iterator<Item = Result<Edge, String>>,
+    oc: EdgeCols,
+) -> Result<(), String> {
+    let schema = Arc::new(edges_schema(oc));
+    let mut w =
+        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+    let mut chunk: Vec<Edge> = Vec::with_capacity(ROW_GROUP);
+    for e in rows {
+        chunk.push(e?);
+        if chunk.len() == ROW_GROUP {
+            w.write(&edges_batch(&schema, &chunk, oc)).map_err(err)?;
+            chunk.clear();
+        }
+    }
+    if !chunk.is_empty() {
+        w.write(&edges_batch(&schema, &chunk, oc)).map_err(err)?;
+    }
+    w.close().map_err(err)?;
+    Ok(())
+}
+
 /// Write the nodes as a GeoParquet file with Point geometry.
 pub fn write_nodes(path: &Path, rows: &[Node]) -> Result<(), String> {
     write_nodes_to(File::create(path).map_err(err)?, rows)

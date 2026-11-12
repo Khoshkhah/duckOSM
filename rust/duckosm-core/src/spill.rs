@@ -249,7 +249,17 @@ pub fn sort_bytes<K: Ord>(
     budget: usize,
     store: &dyn Store,
 ) -> io::Result<Rows> {
-    let total = rows.len;
+    sort_bytes_where(rows, |_| true, key, budget, store)
+}
+
+/// [`sort_bytes`] of the rows for which `keep` is true. `keep` sees each row one time, in the order of the file.
+pub fn sort_bytes_where<K: Ord>(
+    rows: Rows,
+    mut keep: impl FnMut(&[u8]) -> bool,
+    key: impl Fn(&[u8]) -> K,
+    budget: usize,
+    store: &dyn Store,
+) -> io::Result<Rows> {
     let mut raw = rows.raw()?;
     let mut runs: Vec<Rows> = Vec::new();
     let mut data: Vec<u8> = Vec::new();
@@ -269,6 +279,10 @@ pub fn sort_bytes<K: Ord>(
         let start = data.len();
         if !raw.append_into(&mut data)? {
             break;
+        }
+        if !keep(&data[start..]) {
+            data.truncate(start);
+            continue;
         }
         index.push((key(&data[start..]), start, data.len()));
         if data.len() + index.len() * row >= budget {
@@ -301,9 +315,7 @@ pub fn sort_bytes<K: Ord>(
             heap.push(Reverse((key(&heads[i]), i)));
         }
     }
-    let out = w.finish()?;
-    debug_assert_eq!(out.len, total);
-    Ok(out)
+    w.finish()
 }
 
 pub(crate) fn put_u32(o: &mut Vec<u8>, v: u32) {
@@ -396,6 +408,14 @@ impl EdgeCodec {
     /// The `edge_id` of an edge from its bytes: the first 8 bytes.
     pub fn edge_id(b: &[u8]) -> i64 {
         i64::from_le_bytes(b[..8].try_into().unwrap())
+    }
+
+    /// The `source` and the `target` of an edge from its bytes: after `edge_id` and `seq`.
+    pub fn ends(b: &[u8]) -> (i64, i64) {
+        (
+            i64::from_le_bytes(b[12..20].try_into().unwrap()),
+            i64::from_le_bytes(b[20..28].try_into().unwrap()),
+        )
     }
 
     /// The `osm_id` of an edge from its bytes: after `edge_id`, `seq`, `source` and `target`.

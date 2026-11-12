@@ -436,6 +436,22 @@ pub fn build_network_junctions(
     gj: &FxHashMap<i64, bool>,
     graph_rows: Option<GraphRows>,
 ) -> Result<Network, String> {
+    build_network_files(all_ways, coords, mode, opts, fixes, relations, gj, graph_rows)?.into_network()
+}
+
+/// [`build_network_junctions`] with the edges and the private edges in temporary files, sorted by `edge_id`
+/// (docs/design/network_stream.md, part B4): no step holds all edges of the mode.
+#[allow(clippy::too_many_arguments)]
+pub fn build_network_files(
+    all_ways: &[Way],
+    coords: &Coords,
+    mode: Mode,
+    opts: &Options,
+    fixes: &OsmFixes,
+    relations: &[Relation],
+    gj: &FxHashMap<i64, bool>,
+    graph_rows: Option<GraphRows>,
+) -> Result<NetworkFiles, String> {
     let mut stats = Stats {
         ways_read: all_ways.len(),
         ..Default::default()
@@ -709,31 +725,41 @@ pub fn build_network_junctions(
     drop(count);
 
     crate::util::step("start of the sort of the edges by edge_id");
-    // The edges in the order of their edge_id (the order of the tables): the edge graph takes the edges in this order.
-    // The edge graph and the writers still take a list of all edges (part B4 changes them). The edges of the other parts
-    // stay out, and the nodes that only they or the private edges use go.
-    let n_kept = kept.len;
-    let mut edges: Vec<Edge> = Vec::with_capacity(n_kept);
+    // The edges in the order of their edge_id (the order of the tables): the edge graph and the writers read them in this
+    // order. The edges of the other parts stay out (step 10), and the nodes that only they or the private edges use go.
+    let ecodec = { codec }.0; // the codec of the edges, with the table of the shared tags of all ways
+    let root: Vec<u32> = if largest.is_some() {
+        (0..nodes.len() as u32).map(|i| find(&mut parent, i)).collect()
+    } else {
+        Vec::new()
+    };
+    drop(parent);
     let mut used: Vec<bool> = vec![false; nodes.len()];
-    for e in spill::sort_bytes(kept, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
-        let e = e.map_err(io)?;
-        let (a, b) = (node_index(e.source)?, node_index(e.target)?);
-        if let Some(r) = largest {
-            if find(&mut parent, a) != r {
-                continue;
+    let mut bad_end: Option<String> = None;
+    let n_kept = kept.len;
+    let keep = |b: &[u8]| {
+        let (s, t) = EdgeCodec::ends(b);
+        let (a, b) = match (node_index(s), node_index(t)) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) | (_, Err(e)) => {
+                bad_end.get_or_insert(e);
+                return false;
             }
+        };
+        if largest.is_some_and(|r| root[a as usize] != r) {
+            return false;
         }
         used[a as usize] = true;
         used[b as usize] = true;
-        edges.push(e);
+        true
+    };
+    let edges = spill::sort_bytes_where(kept, keep, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?;
+    if let Some(e) = bad_end {
+        return Err(e);
     }
-    edges.shrink_to_fit();
-    stats.dropped_by_component_filter = n_kept - edges.len();
-    let mut private_edges: Vec<Edge> = Vec::with_capacity(private.len);
-    for e in spill::sort_bytes(private, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?.read(ecodec).map_err(io)? {
-        private_edges.push(e.map_err(io)?);
-    }
-    drop(codec); // its table of the shared tags of all ways
+    drop(root);
+    stats.dropped_by_component_filter = n_kept - edges.len;
+    let private_edges = spill::sort_bytes(private, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?;
     if stats.private_edges > 0 || stats.dropped_by_component_filter > 0 {
         let mut i = 0;
         nodes.retain(|_| {
@@ -742,57 +768,153 @@ pub fn build_network_junctions(
         });
     }
     drop(used);
-    drop(parent);
+    let mut files = EdgeFiles {
+        edges,
+        private_edges,
+        codec: ecodec,
+    };
 
     crate::util::step("start of step 9b: Turn restrictions (driving) and the edge");
-    // 9b. Turn restrictions (driving) and the edge graph.
+    // 9b. Turn restrictions (driving): one read of the edges collects the edges that the rules use.
     let mut graph = Graph::default();
     if opts.extract_restrictions && mode == Mode::Driving {
-        let (tr, paths) =
-            crate::graph::restrictions(relations, &fixes.turn_restrictions, &mw, &edges);
+        let wanted = crate::graph::RestrictionEdges::new(relations, &fixes.turn_restrictions, &mw);
+        let mut some: Vec<Edge> = Vec::new();
+        for e in files.edges().map_err(io)? {
+            let e = e.map_err(io)?;
+            if wanted.wants(&e) {
+                some.push(e);
+            }
+        }
+        let (tr, paths) = crate::graph::restrictions(relations, &fixes.turn_restrictions, &mw, &some);
         graph.turn_restrictions = Some(tr);
         graph.turn_path_restrictions = Some(paths);
     }
     crate::util::step("start of step 9b2: The edge graph and the turn permissions");
+    // 9b2. The edge graph: a read of the edges and the private edges for the compact list of the next edges, then a read in
+    // the order of edge_id for the moves.
     if opts.build_graph {
-        let restrictions = graph.turn_restrictions.as_deref();
-        match graph_rows {
-            Some(sink) => {
-                let mut n = 0;
-                let permission = crate::graph::edge_graph_each(
-                    mode,
-                    &edges,
-                    &private_edges,
-                    restrictions,
-                    |r| {
-                        n += 1;
-                        sink(r)
-                    },
-                )?;
-                stats.edge_graph_rows = n;
-                graph.turn_permission = Some(permission);
+        let mut rows: Vec<crate::graph::GraphRow> = Vec::new();
+        let mut n = 0;
+        let mut sink = graph_rows;
+        let mut out = |r| {
+            n += 1;
+            match sink.as_mut() {
+                Some(s) => s(r),
+                None => {
+                    rows.push(r);
+                    Ok(())
+                }
             }
-            None => {
-                let (rows, permission) =
-                    crate::graph::edge_graph(mode, &edges, &private_edges, restrictions);
-                stats.edge_graph_rows = rows.len();
-                graph.edge_graph = Some(rows);
-                graph.turn_permission = Some(permission);
+        };
+        let mut g = crate::graph::EdgeGraph::new(mode, graph.turn_restrictions.as_deref());
+        for e in files.edges().map_err(io)? {
+            g.add(&e.map_err(io)?, None);
+        }
+        for e in files.private_edges().map_err(io)? {
+            let e = e.map_err(io)?;
+            if let Some(l) = crate::graph::restricted_label(&e) {
+                g.add(&e, Some(l));
             }
+        }
+        g.ready();
+        // the edges and the labelled private edges, merged in the order of edge_id (the ids are unique)
+        let codec = &files.codec;
+        let mut a = files.edges.read_ref(codec).map_err(io)?.peekable();
+        let mut b = files
+            .private_edges
+            .read_ref(codec)
+            .map_err(io)?
+            .filter_map(|e| match e {
+                Ok(e) => crate::graph::restricted_label(&e).map(|l| Ok((e, l))),
+                Err(err) => Some(Err(err)),
+            })
+            .peekable();
+        loop {
+            let take_a = match (a.peek(), b.peek()) {
+                (None, None) => break,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (Some(Ok(x)), Some(Ok((y, _)))) => x.edge_id < y.edge_id,
+                (Some(Err(_)), _) => true,
+                (_, Some(Err(_))) => false,
+            };
+            if take_a {
+                let e = a.next().unwrap().map_err(io)?;
+                g.moves(&e, None, &mut out)?;
+            } else {
+                let (e, l) = b.next().unwrap().map_err(io)?;
+                g.moves(&e, Some(l), &mut out)?;
+            }
+        }
+        drop(out);
+        stats.edge_graph_rows = n;
+        graph.turn_permission = Some(g.finish());
+        if sink.is_none() {
+            rows.shrink_to_fit();
+            graph.edge_graph = Some(rows);
         }
     }
 
-    nodes.sort_by_key(|n| n.node_id);
-    nodes.dedup_by_key(|n| n.node_id);
-    Ok(Network {
-        edges,
-        private_edges,
-        nodes,
-        edge_id_map,
-        graph,
-        stats,
-        ways: if opts.ways_tables { mw } else { Vec::new() },
+    Ok(NetworkFiles {
+        net: Network {
+            edges: Vec::new(),
+            private_edges: Vec::new(),
+            nodes,
+            edge_id_map,
+            graph,
+            stats,
+            ways: if opts.ways_tables { mw } else { Vec::new() },
+        },
+        files,
     })
+}
+
+/// The edges and the private edges of a mode in temporary files, sorted by `edge_id`.
+pub struct EdgeFiles {
+    edges: Rows,
+    private_edges: Rows,
+    codec: EdgeCodec,
+}
+
+impl EdgeFiles {
+    /// Read the edges in the order of `edge_id`. The file stays for a next read.
+    pub fn edges(&mut self) -> std::io::Result<impl Iterator<Item = std::io::Result<Edge>> + '_> {
+        self.edges.read_ref(&self.codec)
+    }
+
+    /// Read the private edges in the order of `edge_id`. The file stays for a next read.
+    pub fn private_edges(&mut self) -> std::io::Result<impl Iterator<Item = std::io::Result<Edge>> + '_> {
+        self.private_edges.read_ref(&self.codec)
+    }
+
+    /// The edges and the private edges in memory.
+    pub fn into_vecs(self) -> Result<(Vec<Edge>, Vec<Edge>), String> {
+        let read = |rows: Rows| -> Result<Vec<Edge>, String> {
+            let mut v = Vec::with_capacity(rows.len);
+            for e in rows.read(&self.codec).map_err(io)? {
+                v.push(e.map_err(io)?);
+            }
+            Ok(v)
+        };
+        Ok((read(self.edges)?, read(self.private_edges)?))
+    }
+}
+
+/// The network of a mode with its edges in temporary files ([`build_network_files`]). `net` has all tables but the
+/// edges and the private edges.
+pub struct NetworkFiles {
+    pub net: Network,
+    pub files: EdgeFiles,
+}
+
+impl NetworkFiles {
+    /// The network with its edges in memory.
+    pub fn into_network(self) -> Result<Network, String> {
+        let NetworkFiles { mut net, files } = self;
+        (net.edges, net.private_edges) = files.into_vecs()?;
+        Ok(net)
+    }
 }
 
 /// Step 2: split a self-loop with a virtual node in the middle, and push the two halves. Push any other

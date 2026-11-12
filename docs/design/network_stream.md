@@ -185,7 +185,7 @@ are Parquet.
 | B1 (done) | `spill`: files of rows, `EdgeCodec` (the shared tags are stored one time), and a stable sort with a memory budget (sorted blocks, then a merge) |
 | B2 (done) | Steps 1 to 7 as passes: the cut writes the forward edges to a file; 2b finds the chains with a sort of the edge ends and a union-find on edge numbers, then sorts the edges by chain; 3 to 7 read the edges sorted by `osm_id`, one way at a time |
 | B3 (done) | Steps 8 to 10 as passes: the nodes from a sort of the edge ends; the speeds and the private roads edge by edge; the largest part with a union-find on node ids |
-| B4 | The edge graph and the writers read the file sorted by `edge_id`; the edge graph keeps only its compact list of the next edges |
+| B4 (done) | The edge graph and the writers read the file sorted by `edge_id`; the edge graph keeps only its compact list of the next edges |
 | B5 | The steps after the network (levels, lane profile, bus routes, street segments) read the file. The levels of roadstyle (`roadstyle-levels`) hold the geometry of all edges of all modes: this needs a change in roadstyle |
 | B6 | The path connectors (8b, walking and cycling) by tile with a margin (part E) |
 
@@ -316,6 +316,50 @@ All tables are equal on Monaco (38), Estonia (38) and Kentucky (20), and also wi
   the edges and the private edges sorted by `edge_id` for the moves.
 - The network files (step 4) are written from the files sorted by `edge_id`. `Network` keeps `Vec<Edge>` for the
   callers that need it (the tests, the Python module, the page of Studio), so the host contract does not change.
+
+### Stage B4 (done): 3.12, 3.13 and step 4 read the edge files
+
+After 3.11, the edges and the private edges stay in two temporary files sorted by `edge_id`
+(`network::build_network_files` gives `NetworkFiles`: the tables of the network and the `EdgeFiles`). No step of the
+network holds all edges.
+
+1. **3.11 Largest part.** The sort by `edge_id` keeps only the edges of the largest part (`spill::sort_bytes_where`: a
+   sort that drops the rows for which a test on the bytes is false). The test also marks the nodes that the kept edges
+   use.
+2. **3.12 Turn restrictions.** One read of the edges collects the edges at a via node or with a way of a rule at one end
+   (`graph::RestrictionEdges`). `restrictions` on these few edges gives the same rows as on all edges.
+3. **3.13 Edge graph.** `graph::EdgeGraph` keeps only its compact list of the next edges (node, `edge_id`, label, bridge,
+   heading). A first read of the edges and the private edges fills the list; a second read, the two files merged in
+   the order of `edge_id`, gives the moves. `edge_graph_each` (the edges in memory) uses the same `EdgeGraph`.
+4. **Step 4, write the network files.** `duckosm_parquet::write_edges_iter_to` writes `edges` and `private_edges`
+   from the files, one row group (65,536 edges) at a time.
+5. **The bridge to step 5.** The h3 index, the elevation, the street segments, the lane profile, the bus routes and the
+   levels still take the edges in memory: after step 4 the build reads the files into memory (part B5 changes this).
+
+`build_network_junctions` reads the files into memory at the end, so the callers that take a `Network` (the tests, the
+Python module, the page of Studio) do not change.
+
+Measured on the Mac mini, Kentucky, driving (three runs with the Mac lock, the middle values):
+
+| Kentucky, driving | main (B3) | B4 |
+|---|---|---|
+| 3.12 Turn restrictions | 0.04 s | 0.26 s |
+| 3.13 Edge graph | 0.85 s | 1.58 s |
+| Network step (`build driving`) | 4.40 s | 4.86 s |
+| Write the network files (`write geoparquet`) | 2.85 s | 3.21 s |
+| Read the edges back for step 5 | | 0.27 s |
+| **Peak heap of the network step** | **1797 MiB** | **964 MiB** |
+| Live heap after the network step | 1492 MiB | 768 MiB |
+| Peak heap while the network files are written | 1829 MiB | 1105 MiB |
+| Peak heap of the build (`levels`) | 2347 MiB | 2347 MiB |
+| Build | 18.8 s | 19.4 s |
+
+The peak of the network step goes down by 833 MiB (46 %): this is the first gain of part B. The peak of the build does
+not change yet: the steps after the network read the edges into memory again (B5). The edge graph is 0.7 s slower,
+because it reads the two files two times and decodes each edge.
+
+All tables are equal on Monaco (38), Estonia (38) and Kentucky (20), and also with `--no-global-junctions` (37, 37 and
+19 tables).
 
 ## The later parts
 
