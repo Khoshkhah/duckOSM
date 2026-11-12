@@ -228,13 +228,13 @@ middle values):
 | Step 2b, the merge of chains | 0.09 s | 0.21 s |
 | Steps 3 to 7 (B2: with the sort by `osm_id`) | 0.69 s | 0.91 s |
 | The bridge to step 8 | | 0.32 s |
-| Network step (`build driving`) | 3.07 s | 3.88 s |
+| Network step (`build driving`) | 3.07 s | 3.90 s |
 | Live heap during steps 1 to 7 | up to 1484 MiB | 748 MiB |
 | Peak heap during steps 1 to 7 | 1680 MiB | 860 MiB |
-| Live heap after step 7 | 1484 MiB | LIVE7 MiB |
-| Peak heap of the network step | 1803 MiB | NETPEAK MiB |
-| Peak heap of the build | 2348 MiB | BUILDPEAK MiB |
-| Build | 17.6 s | 18.0 s |
+| Live heap after step 7 | 1484 MiB | 1482 MiB |
+| Peak heap of the network step | 1803 MiB | 1800 MiB |
+| Peak heap of the build | 2348 MiB | 2345 MiB |
+| Build | 17.6 s | 18.3 s |
 
 B2 alone gives no memory gain, as expected: the bridge makes the list of all edges again, and steps 8 to 10 and the edge
 graph hold it. But during steps 1 to 7 the live heap holds only the ways, the coordinates and the junctions (748 MiB):
