@@ -184,7 +184,7 @@ are Parquet.
 |---|---|
 | B1 (done) | `spill`: files of rows, `EdgeCodec` (the shared tags are stored one time), and a stable sort with a memory budget (sorted blocks, then a merge) |
 | B2 (done) | Steps 1 to 7 as passes: the cut writes the forward edges to a file; 2b finds the chains with a sort of the edge ends and a union-find on edge numbers, then sorts the edges by chain; 3 to 7 read the edges sorted by `osm_id`, one way at a time |
-| B3 | Steps 8 to 10 as passes: the nodes from a sort of the edge ends; the speeds and the private roads edge by edge; the largest part with a union-find on node ids |
+| B3 (done) | Steps 8 to 10 as passes: the nodes from a sort of the edge ends; the speeds and the private roads edge by edge; the largest part with a union-find on node ids |
 | B4 | The edge graph and the writers read the file sorted by `edge_id`; the edge graph keeps only its compact list of the next edges |
 | B5 | The steps after the network (levels, lane profile, bus routes, street segments) read the file. The levels of roadstyle (`roadstyle-levels`) hold the geometry of all edges of all modes: this needs a change in roadstyle |
 | B6 | The path connectors (8b, walking and cycling) by tile with a margin (part E) |
@@ -256,6 +256,66 @@ only this build tests the merge of chains (Kentucky: 51,450 rows of `edge_id_map
   with no decode of the geometry, can save time. Measure it first.
 - The merge of chains reads the tags of the ways (`mw`) by the way index, to compare two edges. Part A removes `mw`
   from memory; then the end rows must carry a number for the tags of the road.
+
+### Stage B3 (done): sub-steps 3.8 to 3.11 as passes
+
+Sub-steps 3.8 to 3.11 (code steps 8 to 10) read the file of edges. The B2 bridge to step 8 is gone. The step numbers
+3.1 to 3.13 are the numbers of [offline and online](../concepts/offline-online.md).
+
+1. **3.8 Nodes.** Sub-steps 3.4 to 3.7 also write the two end nodes of each edge to a file. Its sort gives each node
+   one time; the nodes with their coordinates and the virtual nodes are sorted by `node_id`.
+2. **3.9 Connectors (walking and cycling).** One read of the edges gives the segments and the ends of the walked
+   edges. The highway of a segment is the highway of its first edge in the order of before: the reverse edges, then
+   the forward edges, each in the order of `Pos`. The connector edges stay in memory (they are few).
+3. **3.9 walked edges and speeds, 3.10 private roads, 3.11 the parts:** one pass, edge by edge, over the edges and the
+   connectors. A private edge goes to its own file. The other edges go to a file, and their end nodes go into a
+   union-find on the index of the node in the sorted list of nodes. The root of a part is its smallest index.
+4. **3.11 Largest part:** the part with the most edges; of two parts with the same number, the part with the smaller
+   root (the smaller node id).
+5. **The bridge to 3.12.** The turn restrictions, the edge graph and the writers still take a list of all edges. The
+   file of edges is sorted by `edge_id` and read into memory; the edges of the other parts stay out, and the nodes
+   that only they or the private edges use go. Part B4 removes this bridge.
+
+**Two tie rules are new.** Before, the order of the nodes in 3.9 and the root of a part in 3.11 came from the order of
+a hash set and of the edges. Now they come from the node ids:
+
+- in 3.9, of two nodes at the same distance from a path end, the node with the smaller `node_id` is the target;
+- in 3.11, of two largest parts with the same number of edges, the part with the smaller node id stays.
+
+Real data has no such ties: all tables are equal on the three areas.
+
+**A change in `spill`: `sort_bytes`.** A sort reads its key from the bytes of the row, with no decode of the geometry,
+and a block keeps the bytes of its rows in one buffer. The codecs put their key fields at fixed places at the start of
+the row. On Kentucky the sort by `edge_id` went from 1.30 s to 0.92 s, and the sort by `osm_id` of 3.4 from 0.90 s to
+0.77 s. `Rows::read_ref` reads a file and keeps it for a next read (3.9 reads the edges two times).
+
+Measured on the Mac mini, Kentucky, driving (three runs, the middle values):
+
+| Kentucky, driving | main (B2) | B3 |
+|---|---|---|
+| 3.8 Nodes | 0.17 s (with the B2 bridge: 0.33 s more) | 0.24 s |
+| 3.9 to 3.11, one pass | 0.06 s | 0.51 s |
+| The sort by `edge_id` (B3: the bridge to 3.12) | 0.34 s | 0.93 s |
+| Network step | 3.90 s | 4.45 s |
+| Live heap during 3.8 to 3.11 | about 1500 MiB | 770 MiB |
+| Peak heap of the network step | 1800 MiB | 1797 MiB |
+| Peak heap of the build | 2345 MiB | 2347 MiB |
+| Build | 18.4 s | 18.7 s |
+
+The peak does not go down yet: the bridge to 3.12 makes the list of all edges again. One of the three runs took 2.7 s
+in the sort by `edge_id`, not 0.9 s: the macOS disk cache stops a large write for a moment (B2 had the same effect).
+
+All tables are equal on Monaco (38), Estonia (38) and Kentucky (20), and also with `--no-global-junctions` (37, 37 and
+19 tables). The walking and cycling modes of Monaco and Estonia test the connectors.
+
+**What B4 needs.**
+
+- The turn restrictions (3.12) use only the edges at their via nodes and the edges on the ways of their rules: one
+  read of the file can collect them, and the code of today runs on that small list.
+- The edge graph (3.13) keeps its compact list of the next edges (node, `edge_id`, label, bridge, heading), and reads
+  the edges and the private edges sorted by `edge_id` for the moves.
+- The network files (step 4) are written from the files sorted by `edge_id`. `Network` keeps `Vec<Edge>` for the
+  callers that need it (the tests, the Python module, the page of Studio), so the host contract does not change.
 
 ## The later parts
 
