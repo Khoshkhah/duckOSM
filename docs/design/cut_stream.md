@@ -82,6 +82,36 @@ Online is slower than offline for two reasons, both measured:
    The allocator is not a cause: with one thread, the allocator of the browser build and the standard allocator give
    the same time.
 
+## Step 1 online: readers that the browser can use
+
+In the browser, only the thread that opened a file in OPFS can read or write it. The readers of `osmpbf`
+(`par_map_reduce`) read the blocks on the threads of the pool, so in the browser they wait for ever, and `load_raw`
+writes its shards from the threads of the pool. The new functions read (and write) on the calling thread and decode
+on all threads:
+
+- `pbf::read_ways_from`, `pbf::read_coords_from`, `pbf::read_restrictions_from`: the network input from any reader,
+  the same as `read_ways`, `read_coords` and `read_restrictions` (a test on Monaco).
+- `duckosm_parquet::load_raw_here`: `raw.*` as Parquet, written on the calling thread (a test on Monaco; on Kentucky
+  the files are equal, row by row, to the tables of `read_osm`).
+
+Step 1 on Kentucky's area file (the same code offline and online, three runs each):
+
+| Step 1 | Offline | Online (8 threads) |
+|---|---|---|
+| Highway ways (690,243) | 0.33 s | 0.51 s |
+| Coordinates (8,616,177) | 0.40 s | 0.80 s |
+| Turn restrictions (3,062) | 0.18 s | 0.38 s |
+
+**Online, the raw data stays in the area file.** `raw.*` as Parquet is 816 MB uncompressed in OPFS (325 MB with
+gzip; zstd does not build for WebAssembly), against 149 MB for the area file, and writing it takes 4.4 s online.
+Reading is not the reason: with one thread each, the Rust engine reads all of the area file into Arrow columns in
+2.0 s, and DuckDB-Wasm opens and reads the three Parquet files in 2.0 s. So online, the steps in Rust read their part
+of the area file, and `raw.*` as Parquet is made only for the base-map layers (their SQL runs in DuckDB-Wasm) and
+deleted after them.
+
+When the storage quota of the site is full, Chromium gives the error −8 (`FILE_ERROR_NO_SPACE`) as the count of
+written bytes of a `FileSystemSyncAccessHandle` write. A test browser had a quota under 1 GB.
+
 ## What is next
 
 1. The build with a boundary writes `cut.osm.pbf` in step 0 and reads it as a whole file: offline, `raw.*` goes into
