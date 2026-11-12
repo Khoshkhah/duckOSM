@@ -223,13 +223,14 @@ pub fn write_tables<W: Write + Send>(
     opts: &Options,
     all_ways: &[Way],
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
     let n = mode.name();
     let oc = pq::EdgeCols::of(mode, opts);
-    pq::write_edges_to(file(&format!("edges_{n}.parquet"))?, &net.edges, oc)?;
-    pq::write_edges_to(file(&format!("private_edges_{n}.parquet"))?, &net.private_edges, oc)?;
-    write_other_tables(net, mode, opts, all_ways, file)
+    pq::write_edges_to(file(&format!("edges_{n}.parquet"))?, &net.edges, oc, c)?;
+    pq::write_edges_to(file(&format!("private_edges_{n}.parquet"))?, &net.private_edges, oc, c)?;
+    write_other_tables(net, mode, opts, all_ways, file, c)
 }
 
 /// [`write_tables`] for a network with its edges in temporary files ([`build_network_files`]): the edge tables are
@@ -240,16 +241,17 @@ pub fn write_tables_files<W: Write + Send>(
     opts: &Options,
     all_ways: &[Way],
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
     let n = mode.name();
     let oc = pq::EdgeCols::of(mode, opts);
     let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
     let rows = net.files.edges().map_err(err)?.map(|e| e.map_err(err));
-    pq::write_edges_iter_to(file(&format!("edges_{n}.parquet"))?, rows, oc)?;
+    pq::write_edges_iter_to(file(&format!("edges_{n}.parquet"))?, rows, oc, c)?;
     let rows = net.files.private_edges().map_err(err)?.map(|e| e.map_err(err));
-    pq::write_edges_iter_to(file(&format!("private_edges_{n}.parquet"))?, rows, oc)?;
-    write_other_tables(&net.net, mode, opts, all_ways, file)
+    pq::write_edges_iter_to(file(&format!("private_edges_{n}.parquet"))?, rows, oc, c)?;
+    write_other_tables(&net.net, mode, opts, all_ways, file, c)
 }
 
 /// The tables of a network but `edges` and `private_edges`.
@@ -259,32 +261,33 @@ fn write_other_tables<W: Write + Send>(
     opts: &Options,
     all_ways: &[Way],
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
     let n = mode.name();
     let mut out = |table: &str| file(&format!("{table}_{n}.parquet"));
-    pq::write_nodes_to(out("nodes")?, &net.nodes)?;
+    pq::write_nodes_to(out("nodes")?, &net.nodes, c)?;
     // duckOSM: left over from its build and always empty (the virtual nodes are in `nodes`)
-    pq::write_nodes_to(out("virtual_nodes")?, &[])?;
+    pq::write_nodes_to(out("virtual_nodes")?, &[], c)?;
     if opts.ways_tables {
-        pq::write_ways_to(out("ways")?, &net.ways, all_ways)?;
-        pq::write_way_nodes_to(out("way_nodes")?, &net.ways)?;
+        pq::write_ways_to(out("ways")?, &net.ways, all_ways, c)?;
+        pq::write_way_nodes_to(out("way_nodes")?, &net.ways, c)?;
     }
     if opts.merge_segments {
-        pq::write_edge_id_map_to(out("edge_id_map")?, &net.edge_id_map)?;
+        pq::write_edge_id_map_to(out("edge_id_map")?, &net.edge_id_map, c)?;
     }
     let g = &net.graph;
     if let Some(rows) = &g.edge_graph {
-        pq::write_edge_graph_to(out("edge_graph")?, rows)?;
+        pq::write_edge_graph_to(out("edge_graph")?, rows, c)?;
     }
     if let Some(rows) = &g.turn_permission {
-        pq::write_turn_permission_to(out("turn_permission")?, rows)?;
+        pq::write_turn_permission_to(out("turn_permission")?, rows, c)?;
     }
     if let Some(rows) = &g.turn_restrictions {
-        pq::write_turn_restrictions_to(out("turn_restrictions")?, rows)?;
+        pq::write_turn_restrictions_to(out("turn_restrictions")?, rows, c)?;
     }
     if let Some(rows) = &g.turn_path_restrictions {
-        pq::write_turn_path_restrictions_to(out("turn_path_restrictions")?, rows)?;
+        pq::write_turn_path_restrictions_to(out("turn_path_restrictions")?, rows, c)?;
     }
     Ok(())
 }
@@ -313,11 +316,12 @@ pub fn write_bus<W: Write + Send>(
     raw: &Raw,
     net: &Network,
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<usize, String> {
     let (routes, edges) =
         duckosm_core::bus::routes(&raw.relations, &raw.ways, &net.edges, &net.private_edges);
-    duckosm_parquet::write_routes_to(file("routes_bus.parquet")?, &routes)?;
-    duckosm_parquet::write_route_edges_to(file("route_edges_bus.parquet")?, &edges)?;
+    duckosm_parquet::write_routes_to(file("routes_bus.parquet")?, &routes, c)?;
+    duckosm_parquet::write_route_edges_to(file("route_edges_bus.parquet")?, &edges, c)?;
     Ok(routes.len())
 }
 
@@ -326,11 +330,12 @@ pub fn write_bus<W: Write + Send>(
 pub fn write_raw<W: Write + Send>(
     raw: &Raw,
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
-    pq::write_raw_nodes_to(file("raw_nodes.parquet")?, &raw.nodes)?;
-    pq::write_raw_ways_to(file("raw_ways.parquet")?, &raw.ways, &raw.nodes)?;
-    pq::write_raw_relations_to(file("raw_relations.parquet")?, &raw.relations)
+    pq::write_raw_nodes_to(file("raw_nodes.parquet")?, &raw.nodes, c)?;
+    pq::write_raw_ways_to(file("raw_ways.parquet")?, &raw.ways, &raw.nodes, c)?;
+    pq::write_raw_relations_to(file("raw_relations.parquet")?, &raw.relations, c)
 }
 
 /// duckOSM's SQL of the base-map layers (`features.*`), from the `raw.*` files of [`write_raw`]: made by
@@ -516,6 +521,13 @@ pub fn run<W: Write + Send>(
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<Summary, String> {
     let opts = &p.options;
+    // A .duckdb build that keeps no GeoParquet files writes them only for DuckDB, which reads each one time: no
+    // compression (zstd only costs time there). The kept files have the default (zstd natively, snappy in WebAssembly).
+    let c = if p.duckdb && !p.geoparquet {
+        duckosm_parquet::Compression::UNCOMPRESSED
+    } else {
+        duckosm_parquet::default_compression()
+    };
     let driving = p.modes.contains(&Mode::Driving);
     let need_relations = opts.extract_restrictions && driving;
     // the bus routes need the route relations and the member ways of the raw cut (docs/bus.md)
@@ -642,7 +654,7 @@ pub fn run<W: Write + Send>(
         let n = mode.name();
         // the rows of edge_graph go to their file while the network step makes them (docs/design/network_stream.md, part C)
         let mut graph_file = if opts.build_graph {
-            Some(duckosm_parquet::EdgeGraphWriter::new(file(&format!("edge_graph_{n}.parquet"))?)?)
+            Some(duckosm_parquet::EdgeGraphWriter::new(file(&format!("edge_graph_{n}.parquet"))?, c)?)
         } else {
             None
         };
@@ -661,15 +673,15 @@ pub fn run<W: Write + Send>(
             w.finish()?;
         }
         log.step(&format!("build {n}"));
-        write_tables_files(&mut net, *mode, opts, &ways, &mut file)?;
+        write_tables_files(&mut net, *mode, opts, &ways, &mut file, c)?;
         log.step(&format!("write geoparquet {n}"));
         // the steps after the network still take the edges in memory (docs/design/network_stream.md, part B5)
         let mut net = net.into_network()?;
         log.step(&format!("read the edges {n}"));
         if let Some(res) = p.h3_resolution {
             let (nodes, edges) = h3::index(&net.nodes, &net.edges, res)?;
-            duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes)?;
-            duckosm_parquet::write_h3_edges_to(file(&format!("h3_edges_{n}.parquet"))?, &edges)?;
+            duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes, c)?;
+            duckosm_parquet::write_h3_edges_to(file(&format!("h3_edges_{n}.parquet"))?, &edges, c)?;
             log.step(&format!("h3 {n}"));
         }
         if let Some(d) = &dem {
@@ -679,12 +691,14 @@ pub fn run<W: Write + Send>(
             duckosm_parquet::write_node_heights_to(
                 file(&format!("elevation_nodes_{n}.parquet"))?,
                 &nz.iter().map(|r| (r.node_id, r.ele)).collect::<Vec<_>>(),
+                c,
             )?;
             duckosm_parquet::write_edge_heights_to(
                 file(&format!("elevation_edges_{n}.parquet"))?,
                 &ez.into_iter()
                     .map(|r| (r.edge_id, r.z_from, r.z_to, r.z_vertices))
                     .collect::<Vec<_>>(),
+                    c,
             )?;
             log.step(&format!("elevation {n}"));
         }
@@ -706,7 +720,7 @@ pub fn run<W: Write + Send>(
         fixes.set_arrows(&mut ways, &net.ways, *mode);
         lane_edges.add(*mode, &net);
         if let Some(r) = raw.as_ref().filter(|_| *mode == Mode::Driving && bus) {
-            sum.bus_routes = Some(write_bus(r, &net, &mut file)?);
+            sum.bus_routes = Some(write_bus(r, &net, &mut file, c)?);
             log.step("bus routes");
         }
         // the last use of the edges of this mode: the levels take them
@@ -758,6 +772,7 @@ pub fn run<W: Write + Send>(
             0.0,
             dem_nodes,
             dem_nodata,
+            c,
         )?;
         log.step("elevation metadata");
         // the ground between the roads: the pixels over the box of the nodes of every mode, 3 pixels more on each side
@@ -770,13 +785,14 @@ pub fn run<W: Write + Send>(
             duckosm_parquet::write_elevation_grid_to(
                 file("elevation_grid_main.parquet")?,
                 &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>(),
+                c,
             )?;
             log.step("elevation grid");
         }
     }
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
         let faces = building_faces::building_faces(&r.ways, &r.nodes, &r.relations, &streets, &fixes.face_edits);
-        duckosm_parquet::write_building_faces_to(file("building_faces_main.parquet")?, &faces)?;
+        duckosm_parquet::write_building_faces_to(file("building_faces_main.parquet")?, &faces, c)?;
         let mut buildings: Vec<i64> = faces.iter().map(|f| f.building_id).collect();
         buildings.dedup();
         sum.building_faces = Some((faces.len(), buildings.len()));
@@ -785,7 +801,7 @@ pub fn run<W: Write + Send>(
     if let Some(r) = raw.as_mut().filter(|_| want_raw) {
         // the tags that the steps set on the network's ways (the sidewalk rule, the arrows of the fixes)
         r.sync_tags(&ways);
-        write_raw(r, &mut file)?;
+        write_raw(r, &mut file, c)?;
         sum.raw = Some((r.nodes.len(), r.ways.len(), r.relations.len()));
         log.step("write raw");
     }
@@ -804,13 +820,13 @@ pub fn run<W: Write + Send>(
         built_at,
         timezone_entry: p.timezone_entry.as_deref(),
     };
-    write_area_tables(&area, &mut file)?;
+    write_area_tables(&area, &mut file, c)?;
     log.step("write the area tables");
-    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file, c)?;
     if sum.levels.is_some() {
         log.step("levels");
     }
-    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
+    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file, c)?;
     if sum.lanes.is_some() {
         log.step("lane profile");
     }

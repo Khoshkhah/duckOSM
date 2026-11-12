@@ -18,7 +18,7 @@ use duckosm_core::model::{Attrs, Edge, MapRow, Node, Way};
 use duckosm_core::network::Options;
 use duckosm_core::raw::{RawNode, RawTags, RawWay};
 use parquet::arrow::ArrowWriter;
-use parquet::basic::Compression;
+pub use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
 use std::fs::File;
@@ -38,24 +38,27 @@ fn geo_metadata(geometry_type: &str) -> KeyValue {
     KeyValue::new("geo".to_string(), json)
 }
 
+/// The compression of the Parquet files when the caller has no reason to choose: zstd natively (cargo feature `zstd`),
+/// snappy in WebAssembly (`snap`, the files stay in OPFS), else none. A file that is only a hand-over (DuckDB reads it one
+/// time) needs none: the caller gives `Compression::UNCOMPRESSED` to each writer.
 #[cfg(feature = "zstd")]
-fn compression() -> Compression {
+pub fn default_compression() -> Compression {
     Compression::ZSTD(parquet::basic::ZstdLevel::default())
 }
 
 #[cfg(all(not(feature = "zstd"), feature = "snap"))]
-fn compression() -> Compression {
+pub fn default_compression() -> Compression {
     Compression::SNAPPY
 }
 
 #[cfg(not(any(feature = "zstd", feature = "snap")))]
-fn compression() -> Compression {
+pub fn default_compression() -> Compression {
     Compression::UNCOMPRESSED
 }
 
-fn props(geometry_type: &str) -> WriterProperties {
+fn props(geometry_type: &str, c: Compression) -> WriterProperties {
     WriterProperties::builder()
-        .set_compression(compression())
+        .set_compression(c)
         .set_max_row_group_row_count(Some(ROW_GROUP))
         .set_key_value_metadata(Some(vec![geo_metadata(geometry_type)]))
         .build()
@@ -271,14 +274,14 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 
 /// Write the edges as a GeoParquet file with LineString geometry.
 pub fn write_edges(path: &Path, rows: &[Edge], oc: EdgeCols) -> Result<(), String> {
-    write_edges_to(File::create(path).map_err(err)?, rows, oc)
+    write_edges_to(File::create(path).map_err(err)?, rows, oc, default_compression())
 }
 
 /// The same as [`write_edges`], to any writer (for example a `Vec<u8>` in WebAssembly).
-pub fn write_edges_to<W: Write + Send>(out: W, rows: &[Edge], oc: EdgeCols) -> Result<(), String> {
+pub fn write_edges_to<W: Write + Send>(out: W, rows: &[Edge], oc: EdgeCols, c: Compression) -> Result<(), String> {
     let schema = Arc::new(edges_schema(oc));
     let mut w =
-        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString", c))).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         w.write(&edges_batch(&schema, chunk, oc)).map_err(err)?;
     }
@@ -292,10 +295,11 @@ pub fn write_edges_iter_to<W: Write + Send>(
     out: W,
     rows: impl Iterator<Item = Result<Edge, String>>,
     oc: EdgeCols,
+    c: Compression,
 ) -> Result<(), String> {
     let schema = Arc::new(edges_schema(oc));
     let mut w =
-        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+        ArrowWriter::try_new(out, schema.clone(), Some(props("LineString", c))).map_err(err)?;
     let mut chunk: Vec<Edge> = Vec::with_capacity(ROW_GROUP);
     for e in rows {
         chunk.push(e?);
@@ -313,13 +317,13 @@ pub fn write_edges_iter_to<W: Write + Send>(
 
 /// Write the nodes as a GeoParquet file with Point geometry.
 pub fn write_nodes(path: &Path, rows: &[Node]) -> Result<(), String> {
-    write_nodes_to(File::create(path).map_err(err)?, rows)
+    write_nodes_to(File::create(path).map_err(err)?, rows, default_compression())
 }
 
 /// The same as [`write_nodes`], to any writer (for example a `Vec<u8>` in WebAssembly).
-pub fn write_nodes_to<W: Write + Send>(out: W, rows: &[Node]) -> Result<(), String> {
+pub fn write_nodes_to<W: Write + Send>(out: W, rows: &[Node], c: Compression) -> Result<(), String> {
     let schema = Arc::new(nodes_schema());
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props("Point"))).map_err(err)?;
+    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props("Point", c))).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         let mut id = Int64Builder::with_capacity(chunk.len());
         let mut g = BinaryBuilder::new();
@@ -337,11 +341,11 @@ pub fn write_nodes_to<W: Write + Send>(out: W, rows: &[Node]) -> Result<(), Stri
 
 /// Write `edge_id_map` as a plain Parquet file (no geometry).
 pub fn write_edge_id_map(path: &Path, rows: &[MapRow]) -> Result<(), String> {
-    write_edge_id_map_to(File::create(path).map_err(err)?, rows)
+    write_edge_id_map_to(File::create(path).map_err(err)?, rows, default_compression())
 }
 
 /// The same as [`write_edge_id_map`], to any writer (for example a `Vec<u8>` in WebAssembly).
-pub fn write_edge_id_map_to<W: Write + Send>(out: W, rows: &[MapRow]) -> Result<(), String> {
+pub fn write_edge_id_map_to<W: Write + Send>(out: W, rows: &[MapRow], c: Compression) -> Result<(), String> {
     let schema = Arc::new(Schema::new(vec![
         Field::new("old_edge_id", DataType::Int64, false),
         Field::new("new_edge_id", DataType::Int64, false),
@@ -350,7 +354,7 @@ pub fn write_edge_id_map_to<W: Write + Send>(out: W, rows: &[MapRow]) -> Result<
         Field::new("osm_id", DataType::Int64, false),
     ]));
     let plain = WriterProperties::builder()
-        .set_compression(compression())
+        .set_compression(c)
         .build();
     let mut w = ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
@@ -383,13 +387,14 @@ pub fn write_edge_id_map_to<W: Write + Send>(out: W, rows: &[MapRow]) -> Result<
 /// Write the rows of a plain table (no geometry), in row groups of `ROW_GROUP`.
 fn write_rows<W: Write + Send, T>(
     out: W,
+    c: Compression,
     fields: Vec<Field>,
     rows: &[T],
     columns: impl Fn(&[T]) -> Vec<ArrayRef>,
 ) -> Result<(), String> {
     let schema = Arc::new(Schema::new(fields));
     let plain = WriterProperties::builder()
-        .set_compression(compression())
+        .set_compression(c)
         .build();
     let mut w = ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
@@ -439,8 +444,8 @@ fn edge_graph_columns(c: &[GraphRow]) -> Vec<ArrayRef> {
 }
 
 /// Write `edge_graph` (`via_edge` is `to_edge`).
-pub fn write_edge_graph_to<W: Write + Send>(out: W, rows: &[GraphRow]) -> Result<(), String> {
-    write_rows(out, edge_graph_fields(), rows, edge_graph_columns)
+pub fn write_edge_graph_to<W: Write + Send>(out: W, rows: &[GraphRow], c: Compression) -> Result<(), String> {
+    write_rows(out, c, edge_graph_fields(), rows, edge_graph_columns)
 }
 
 /// `edge_graph` written row by row while the rows are made (docs/design/network_stream.md, part C): it holds one block of
@@ -453,10 +458,10 @@ pub struct EdgeGraphWriter<W: Write + Send> {
 }
 
 impl<W: Write + Send> EdgeGraphWriter<W> {
-    pub fn new(out: W) -> Result<Self, String> {
+    pub fn new(out: W, c: Compression) -> Result<Self, String> {
         let schema = Arc::new(Schema::new(edge_graph_fields()));
         let plain = WriterProperties::builder()
-            .set_compression(compression())
+            .set_compression(c)
             .build();
         Ok(EdgeGraphWriter {
             w: ArrowWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?,
@@ -496,6 +501,7 @@ impl<W: Write + Send> EdgeGraphWriter<W> {
 pub fn write_turn_restrictions_to<W: Write + Send>(
     out: W,
     rows: &[TurnRestriction],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("restriction_id", DataType::Int64),
@@ -507,7 +513,7 @@ pub fn write_turn_restrictions_to<W: Write + Send>(
         field("from_edge_id", DataType::Int64),
         field("to_edge_id", DataType::Int64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         vec![
             i64s(c.iter().map(|r| r.restriction_id)),
             texts(c.iter().map(|r| Some(r.restriction_type.as_str()))),
@@ -525,6 +531,7 @@ pub fn write_turn_restrictions_to<W: Write + Send>(
 pub fn write_turn_permission_to<W: Write + Send>(
     out: W,
     rows: &[TurnPermission],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("from_edge", DataType::Int64),
@@ -535,7 +542,7 @@ pub fn write_turn_permission_to<W: Write + Send>(
         field("condition", DataType::Utf8),
         field("restriction_id", DataType::Int64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut allowed = BooleanBuilder::with_capacity(c.len());
         c.iter().for_each(|r| allowed.append_value(r.allowed));
         vec![
@@ -554,6 +561,7 @@ pub fn write_turn_permission_to<W: Write + Send>(
 pub fn write_turn_path_restrictions_to<W: Write + Send>(
     out: W,
     rows: &[TurnPath],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("restriction_id", DataType::Int64),
@@ -565,7 +573,7 @@ pub fn write_turn_path_restrictions_to<W: Write + Send>(
         list_field("via_edges"),
         field("to_edge", DataType::Int64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut via = ListBuilder::new(Int64Builder::new());
         for r in c {
             via.values().append_slice(&r.via_edges);
@@ -610,7 +618,7 @@ fn map_type() -> DataType {
 
 /// Write `<mode>.ways` (duckOSM `RoadFilter`): the ways of the mode after the road filter and the fixes,
 /// with all their OSM tags (`all`: the ways as read, sorted by id, where the tags are).
-pub fn write_ways_to<W: Write + Send>(out: W, rows: &[ModeWay], all: &[Way]) -> Result<(), String> {
+pub fn write_ways_to<W: Write + Send>(out: W, rows: &[ModeWay], all: &[Way], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("osm_id", DataType::Int64),
         field("highway", DataType::Utf8),
@@ -630,7 +638,7 @@ pub fn write_ways_to<W: Write + Send>(out: W, rows: &[ModeWay], all: &[Way]) -> 
         field("tags", map_type()),
         list_field("refs"),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut tags = MapBuilder::new(None, StringBuilder::new(), StringBuilder::new());
         let mut refs = ListBuilder::new(Int64Builder::new());
         for r in c {
@@ -668,7 +676,7 @@ pub fn write_ways_to<W: Write + Send>(out: W, rows: &[ModeWay], all: &[Way]) -> 
 }
 
 /// Write `<mode>.way_nodes`: the nodes of `ways`, one row per node (`seq` from 0).
-pub fn write_way_nodes_to<W: Write + Send>(out: W, rows: &[ModeWay]) -> Result<(), String> {
+pub fn write_way_nodes_to<W: Write + Send>(out: W, rows: &[ModeWay], c: Compression) -> Result<(), String> {
     let flat: Vec<(i64, i64, i64)> = rows
         .iter()
         .flat_map(|w| {
@@ -683,7 +691,7 @@ pub fn write_way_nodes_to<W: Write + Send>(out: W, rows: &[ModeWay]) -> Result<(
         field("node_id", DataType::Int64),
         field("seq", DataType::Int64),
     ];
-    write_rows(out, fields, &flat, |c| {
+    write_rows(out, c, fields, &flat, |c| {
         vec![
             i64s(c.iter().map(|r| r.0)),
             i64s(c.iter().map(|r| r.1)),
@@ -696,12 +704,13 @@ pub fn write_way_nodes_to<W: Write + Send>(out: W, rows: &[ModeWay]) -> Result<(
 pub fn write_global_junctions_to<W: Write + Send>(
     out: W,
     rows: &[(i64, bool)],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("node_id", DataType::Int64),
         field("is_road_junction", DataType::Boolean),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         vec![i64s(c.iter().map(|r| r.0)), bools(c.iter().map(|r| r.1))]
     })
 }
@@ -716,7 +725,7 @@ pub struct Transfer {
 }
 
 /// Write `mm.transfers`.
-pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer]) -> Result<(), String> {
+pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("node_id", DataType::Int64),
         field("from_mode", DataType::Utf8),
@@ -724,7 +733,7 @@ pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer]) -> Result<
         field("cost_s", DataType::Float64),
         field("kind", DataType::Utf8),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut cost = Float64Builder::new();
         c.iter().for_each(|r| cost.append_value(r.cost_s));
         vec![
@@ -738,7 +747,7 @@ pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer]) -> Result<
 }
 
 /// Write `driving.lane_profile`.
-pub fn write_lane_profile_to<W: Write + Send>(out: W, rows: &[LaneRow]) -> Result<(), String> {
+pub fn write_lane_profile_to<W: Write + Send>(out: W, rows: &[LaneRow], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("edge_id", DataType::Int64),
         field("lane_num", DataType::Int32),
@@ -748,7 +757,7 @@ pub fn write_lane_profile_to<W: Write + Send>(out: W, rows: &[LaneRow]) -> Resul
         field("source", DataType::Utf8),
         field("width_source", DataType::Utf8),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut width = Float64Builder::new();
         c.iter().for_each(|r| width.append_value(r.width_m));
         vec![
@@ -805,6 +814,7 @@ pub fn write_boundary_to<W: Write + Send>(
     columns: &[(String, Prop)],
     wkb: &[u8],
     multi: bool,
+    c: Compression,
 ) -> Result<(), String> {
     let mut fields = vec![field("OGC_FID", DataType::Int64)];
     let mut cols: Vec<ArrayRef> = vec![i64s(std::iter::once(0))];
@@ -829,7 +839,7 @@ pub fn write_boundary_to<W: Write + Send>(
     cols.push(Arc::new(g.finish()));
     let schema = Arc::new(Schema::new(fields));
     let kind = if multi { "MultiPolygon" } else { "Polygon" };
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props(kind))).map_err(err)?;
+    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props(kind, c))).map_err(err)?;
     w.write(&RecordBatch::try_new(schema, cols).map_err(err)?)
         .map_err(err)?;
     w.close().map_err(err)?;
@@ -850,7 +860,7 @@ pub struct Metadata {
 }
 
 /// Write `main.visualization_metadata` (one row).
-pub fn write_metadata_to<W: Write + Send>(out: W, m: &Metadata) -> Result<(), String> {
+pub fn write_metadata_to<W: Write + Send>(out: W, m: &Metadata, c: Compression) -> Result<(), String> {
     let fields = vec![
         field("boundary_geojson", DataType::Utf8),
         field("center_lat", DataType::Float64),
@@ -860,7 +870,7 @@ pub fn write_metadata_to<W: Write + Send>(out: W, m: &Metadata) -> Result<(), St
         field("built_at", DataType::Timestamp(TimeUnit::Microsecond, None)),
         field("duckosm_version", DataType::Utf8),
     ];
-    write_rows(out, fields, std::slice::from_ref(m), |c| {
+    write_rows(out, c, fields, std::slice::from_ref(m), |c| {
         let mut lat = Float64Builder::new();
         let mut lon = Float64Builder::new();
         let mut at = TimestampMicrosecondBuilder::new();
@@ -886,13 +896,14 @@ pub fn write_metadata_to<W: Write + Send>(out: W, m: &Metadata) -> Result<(), St
 /// not come from the data of a part.
 fn write_parts<W: Write + Send, T>(
     out: W,
+    c: Compression,
     rows: &[T],
     batch: impl Fn(&[T]) -> Vec<(&'static str, ArrayRef, bool)>,
 ) -> Result<(), String> {
     let part = |c: &[T]| RecordBatch::try_from_iter_with_nullable(batch(c)).map_err(err);
     let first = part(&rows[..rows.len().min(ROW_GROUP)])?;
     let plain = WriterProperties::builder()
-        .set_compression(compression())
+        .set_compression(c)
         .set_max_row_group_row_count(Some(ROW_GROUP))
         .build();
     let mut w = ArrowWriter::try_new(out, first.schema(), Some(plain)).map_err(err)?;
@@ -919,8 +930,8 @@ fn tags_column<'a>(rows: impl Iterator<Item = &'a RawTags>) -> ArrayRef {
 }
 
 /// `raw.nodes` of duckOSM: osm_id, lat, lon, tags.
-pub fn write_raw_nodes_to<W: Write + Send>(out: W, rows: &[RawNode]) -> Result<(), String> {
-    write_parts(out, rows, |c| {
+pub fn write_raw_nodes_to<W: Write + Send>(out: W, rows: &[RawNode], c: Compression) -> Result<(), String> {
+    write_parts(out, c, rows, |c| {
         let mut id = Int64Builder::with_capacity(c.len());
         let (mut lat, mut lon) = (
             Float64Builder::with_capacity(c.len()),
@@ -948,9 +959,10 @@ pub fn write_raw_ways_to<W: Write + Send>(
     out: W,
     rows: &[RawWay],
     nodes: &[RawNode],
+    c: Compression,
 ) -> Result<(), String> {
     let rows: Vec<&RawWay> = rows.iter().filter(|w| w.refs.len() >= 2).collect();
-    write_parts(out, &rows, |c| {
+    write_parts(out, c, &rows, |c| {
         let mut id = Int64Builder::with_capacity(c.len());
         let mut refs = ListBuilder::new(Int64Builder::new());
         let mut line = BinaryBuilder::new();
@@ -979,8 +991,8 @@ pub fn write_raw_ways_to<W: Write + Send>(
 
 /// `raw.relations` of duckOSM: osm_id, tags, refs, ref_roles, ref_types (`node`, `way` or `relation`; DuckDB
 /// casts the text to duckOSM's ENUM).
-pub fn write_raw_relations_to<W: Write + Send>(out: W, rows: &[Relation]) -> Result<(), String> {
-    write_parts(out, rows, |c| {
+pub fn write_raw_relations_to<W: Write + Send>(out: W, rows: &[Relation], c: Compression) -> Result<(), String> {
+    write_parts(out, c, rows, |c| {
         let mut id = Int64Builder::with_capacity(c.len());
         let mut refs = ListBuilder::new(Int64Builder::new());
         let mut roles = ListBuilder::new(StringBuilder::new());
@@ -1017,6 +1029,7 @@ pub fn write_raw_relations_to<W: Write + Send>(out: W, rows: &[Relation]) -> Res
 pub fn write_edge_levels_to<W: Write + Send>(
     out: W,
     rows: &[roadstyle_levels::Row],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("edge_id", DataType::Int64),
@@ -1029,7 +1042,7 @@ pub fn write_edge_levels_to<W: Write + Send>(
         field("cap_start", DataType::Utf8),
         field("cap_end", DataType::Utf8),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let f64s = |get: fn(&roadstyle_levels::Row) -> Option<f64>| -> ArrayRef {
             let mut b = Float64Builder::new();
             c.iter().for_each(|r| b.append_option(get(r)));
@@ -1061,7 +1074,7 @@ pub struct LevelsMeta {
 }
 
 /// Write `visualization.edge_levels_meta`.
-pub fn write_edge_levels_meta_to<W: Write + Send>(out: W, m: &LevelsMeta) -> Result<(), String> {
+pub fn write_edge_levels_meta_to<W: Write + Send>(out: W, m: &LevelsMeta, c: Compression) -> Result<(), String> {
     let fields = vec![
         field("source", DataType::Utf8),
         field("area", DataType::Utf8),
@@ -1070,7 +1083,7 @@ pub fn write_edge_levels_meta_to<W: Write + Send>(out: W, m: &LevelsMeta) -> Res
         field("roadstyle_version", DataType::Utf8),
         field("created", DataType::Utf8),
     ];
-    write_rows(out, fields, std::slice::from_ref(m), |c| {
+    write_rows(out, c, fields, std::slice::from_ref(m), |c| {
         vec![
             texts(c.iter().map(|r| Some(r.source))),
             texts(c.iter().map(|_| None)),
@@ -1083,7 +1096,7 @@ pub fn write_edge_levels_meta_to<W: Write + Send>(out: W, m: &LevelsMeta) -> Res
 }
 
 /// Write `bus.routes` (`gaps` is a list of text, VARCHAR[]).
-pub fn write_routes_to<W: Write + Send>(out: W, rows: &[Route]) -> Result<(), String> {
+pub fn write_routes_to<W: Write + Send>(out: W, rows: &[Route], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("osm_id", DataType::Int64),
         field("route", DataType::Utf8),
@@ -1100,7 +1113,7 @@ pub fn write_routes_to<W: Write + Send>(out: W, rows: &[Route]) -> Result<(), St
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
         ),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut gaps = ListBuilder::new(StringBuilder::new());
         for r in c {
             r.gaps.iter().for_each(|g| gaps.values().append_value(g));
@@ -1123,7 +1136,7 @@ pub fn write_routes_to<W: Write + Send>(out: W, rows: &[Route]) -> Result<(), St
 }
 
 /// Write `bus.route_edges`.
-pub fn write_route_edges_to<W: Write + Send>(out: W, rows: &[RouteEdge]) -> Result<(), String> {
+pub fn write_route_edges_to<W: Write + Send>(out: W, rows: &[RouteEdge], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("route_id", DataType::Int64),
         field("ref", DataType::Utf8),
@@ -1132,7 +1145,7 @@ pub fn write_route_edges_to<W: Write + Send>(out: W, rows: &[RouteEdge]) -> Resu
         field("edge_ref", DataType::Utf8),
         field("bus_lane", DataType::Boolean),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         vec![
             i64s(c.iter().map(|r| r.route_id)),
             texts(c.iter().map(|r| r.ref_.as_deref())),
@@ -1168,9 +1181,9 @@ pub fn building_faces_schema() -> Schema {
 }
 
 /// Write `building_faces_main.parquet` as GeoParquet with a LineString for each wall.
-pub fn write_building_faces_to<W: Write + Send>(out: W, rows: &[BuildingFace]) -> Result<(), String> {
+pub fn write_building_faces_to<W: Write + Send>(out: W, rows: &[BuildingFace], c: Compression) -> Result<(), String> {
     let schema = Arc::new(building_faces_schema());
-    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props("LineString"))).map_err(err)?;
+    let mut w = ArrowWriter::try_new(out, schema.clone(), Some(props("LineString", c))).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         let n = chunk.len();
         let (mut building_id, mut from_node, mut to_node) = (Int64Builder::with_capacity(n), Int64Builder::with_capacity(n), Int64Builder::with_capacity(n));
@@ -1226,12 +1239,12 @@ pub fn write_building_faces_to<W: Write + Send>(out: W, rows: &[BuildingFace]) -
 }
 
 /// Write the heights of the nodes of a mode (`elevation_nodes_<mode>.parquet`): `node_id`, `ele`.
-pub fn write_node_heights_to<W: Write + Send>(out: W, rows: &[(i64, f64)]) -> Result<(), String> {
+pub fn write_node_heights_to<W: Write + Send>(out: W, rows: &[(i64, f64)], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("node_id", DataType::Int64),
         field("ele", DataType::Float64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut ele = Float64Builder::new();
         c.iter().for_each(|r| ele.append_value(r.1));
         vec![i64s(c.iter().map(|r| r.0)), Arc::new(ele.finish())]
@@ -1239,12 +1252,12 @@ pub fn write_node_heights_to<W: Write + Send>(out: W, rows: &[(i64, f64)]) -> Re
 }
 
 /// Write the H3 cells of the nodes of a mode (`h3_nodes_<mode>.parquet`): `node_id`, `h3_cell` (the cell as a signed 64-bit number).
-pub fn write_h3_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)]) -> Result<(), String> {
+pub fn write_h3_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)], c: Compression) -> Result<(), String> {
     let fields = vec![
         field("node_id", DataType::Int64),
         field("h3_cell", DataType::Int64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let mut cell = Int64Builder::new();
         c.iter().for_each(|r| cell.append_option(r.1));
         vec![i64s(c.iter().map(|r| r.0)), Arc::new(cell.finish())]
@@ -1255,6 +1268,7 @@ pub fn write_h3_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)]) -
 pub fn write_h3_edges_to<W: Write + Send>(
     out: W,
     rows: &[(i64, Option<i64>, Option<i64>, Option<i64>)],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("edge_id", DataType::Int64),
@@ -1262,7 +1276,7 @@ pub fn write_h3_edges_to<W: Write + Send>(
         field("to_cell", DataType::Int64),
         field("lca_res", DataType::Int64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let (mut f, mut t, mut l) = (Int64Builder::new(), Int64Builder::new(), Int64Builder::new());
         for r in c {
             f.append_option(r.1);
@@ -1283,6 +1297,7 @@ pub fn write_h3_edges_to<W: Write + Send>(
 pub fn write_edge_heights_to<W: Write + Send>(
     out: W,
     rows: &[(i64, f64, f64, Vec<f64>)],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("edge_id", DataType::Int64),
@@ -1293,7 +1308,7 @@ pub fn write_edge_heights_to<W: Write + Send>(
             DataType::List(Arc::new(Field::new("item", DataType::Float64, true))),
         ),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let (mut zf, mut zt) = (Float64Builder::new(), Float64Builder::new());
         let mut zv = ListBuilder::new(Float64Builder::new());
         for r in c {
@@ -1316,6 +1331,7 @@ pub fn write_edge_heights_to<W: Write + Send>(
 pub fn write_elevation_grid_to<W: Write + Send>(
     out: W,
     rows: &[(i32, i32, f64, f64, Option<f64>)],
+    c: Compression,
 ) -> Result<(), String> {
     let fields = vec![
         field("col", DataType::Int32),
@@ -1324,7 +1340,7 @@ pub fn write_elevation_grid_to<W: Write + Send>(
         field("lat", DataType::Float64),
         field("z", DataType::Float64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows(out, c, fields, rows, |c| {
         let (mut col, mut row) = (Int32Builder::new(), Int32Builder::new());
         let (mut lon, mut lat, mut z) = (Float64Builder::new(), Float64Builder::new(), Float64Builder::new());
         for r in c {
@@ -1355,6 +1371,7 @@ pub fn write_elevation_metadata_to<W: Write + Send>(
     nodata_fill: f64,
     n_nodes: i64,
     n_nodata: i64,
+    c: Compression,
 ) -> Result<(), String> {
     let names = [
         "ele_column",
@@ -1386,7 +1403,7 @@ pub fn write_elevation_metadata_to<W: Write + Send>(
             )
         })
         .collect();
-    write_rows(out, fields, &[()], |_| {
+    write_rows(out, c, fields, &[()], |_| {
         let t = |i: usize| texts(std::iter::once(Some(text[i])));
         let f = |v: f64| -> ArrayRef { Arc::new(arrow_array::Float64Array::from(vec![v])) };
         vec![
@@ -1429,7 +1446,7 @@ mod tests {
         rows.last_mut().unwrap().tags.clear();
         let path =
             std::env::temp_dir().join(format!("duckosm-null-{}.parquet", std::process::id()));
-        write_raw_nodes_to(std::fs::File::create(&path).unwrap(), &rows).unwrap();
+        write_raw_nodes_to(std::fs::File::create(&path).unwrap(), &rows, default_compression()).unwrap();
         let reader = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&path).unwrap())
             .unwrap()
             .build()

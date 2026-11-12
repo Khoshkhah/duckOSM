@@ -448,6 +448,6 @@ pub fn cut_projected<R: Read + Seek>(r: R, name: &str, crs: u32, bbox: [f64; 4],
 pub fn write_grid_file(dem: &Path, out: &Path, bbox: [f64; 4], margin: usize) -> Result<usize, String> {
     let cells = Dem::open(dem)?.grid(bbox[0], bbox[1], bbox[2], bbox[3], margin);
     let file = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    duckosm_parquet::write_elevation_grid_to(file, &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>())?;
+    duckosm_parquet::write_elevation_grid_to(file, &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>(), duckosm_parquet::default_compression())?;
     Ok(cells.len())
 }

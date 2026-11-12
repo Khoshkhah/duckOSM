@@ -40,11 +40,12 @@ const TRANSFER_S: f64 = 60.0;
 pub fn write_area_tables<W: Write + Send>(
     a: &Area,
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<(), String> {
     if a.opts.global_junctions {
         let mut gj: Vec<(i64, bool)> = a.junctions.iter().map(|(&n, &r)| (n, r)).collect();
         gj.sort_unstable();
-        pq::write_global_junctions_to(file("global_junctions_main.parquet")?, &gj)?;
+        pq::write_global_junctions_to(file("global_junctions_main.parquet")?, &gj, c)?;
     }
     let shape = match a.boundary {
         Some(text) => {
@@ -54,6 +55,7 @@ pub fn write_area_tables<W: Write + Send>(
                 &props,
                 &pq::polygons_wkb(&polys, multi),
                 multi,
+                c,
             )?;
             Some((polys, json))
         }
@@ -62,10 +64,11 @@ pub fn write_area_tables<W: Write + Send>(
     pq::write_metadata_to(
         file("visualization_metadata_main.parquet")?,
         &metadata(a, shape.as_ref()),
+        c,
     )?;
     // duckOSM's multimodal step stops before it writes mm.* when edges.cost_s is missing, and the build goes on
     if a.opts.calculate_costs {
-        pq::write_transfers_to(file("transfers_mm.parquet")?, &transfers(a.nodes))?;
+        pq::write_transfers_to(file("transfers_mm.parquet")?, &transfers(a.nodes), c)?;
     }
     Ok(())
 }
@@ -290,11 +293,12 @@ pub fn write_levels<W: Write + Send>(
     method: Method,
     built_at: i64,
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<Option<String>, String> {
     let Some(lv) = levels::compute(edges, method)? else {
         return Ok(None);
     };
-    pq::write_edge_levels_to(file("edge_levels_visualization.parquet")?, &lv.rows)?;
+    pq::write_edge_levels_to(file("edge_levels_visualization.parquet")?, &lv.rows, c)?;
     let meta = pq::LevelsMeta {
         source: method.name(),
         n_edges: lv.rows.len() as i64,
@@ -302,7 +306,7 @@ pub fn write_levels<W: Write + Send>(
         roadstyle_version: levels::ROADSTYLE_VERSION,
         created: iso_time(built_at),
     };
-    pq::write_edge_levels_meta_to(file("edge_levels_meta_visualization.parquet")?, &meta)?;
+    pq::write_edge_levels_meta_to(file("edge_levels_meta_visualization.parquet")?, &meta, c)?;
     let mut line = format!(
         "levels ({}): {} edges, {} roads",
         method.name(),
@@ -325,11 +329,12 @@ pub fn write_lane_profile<W: Write + Send>(
     ways: &[Way],
     fixes: &OsmFixes,
     mut file: impl FnMut(&str) -> Result<W, String>,
+    c: duckosm_parquet::Compression,
 ) -> Result<Option<String>, String> {
     let Some(rows) = lanes::lane_profile(edges, ways, fixes) else {
         return Ok(None);
     };
-    pq::write_lane_profile_to(file("lane_profile_driving.parquet")?, &rows)?;
+    pq::write_lane_profile_to(file("lane_profile_driving.parquet")?, &rows, c)?;
     Ok(Some(format!("lane profile: {} lanes", rows.len())))
 }
 
