@@ -617,6 +617,7 @@ pub fn building_faces_each(
     if rings.is_empty() {
         return Ok(());
     }
+    crate::util::step("building faces 1: the rings");
     // 2. one local scale for the whole area: the middle of the buildings
     let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
     for p in rings.iter().flat_map(|r| r.pts.iter()) {
@@ -651,6 +652,7 @@ pub fn building_faces_each(
         });
     }
     let tree = RTree::bulk_load(segs);
+    crate::util::step("building faces 3: the tree of the streets");
     // 4. a wall that two buildings have (the same two nodes) is a party wall
     let mut shared: FxHashMap<(i64, i64), u32> = FxHashMap::default();
     for r in &rings {
@@ -685,6 +687,7 @@ pub fn building_faces_each(
         .map(|n| (n.id, ()))
         .collect();
 
+    crate::util::step("building faces 4: the party walls, the rules, the entrances");
     // 5. each ring counter-clockwise, so that the outward normal of a wall is (dy, -dx); and the tree of all walls, for the line of sight
     let mut oriented = Vec::new();
     let mut wall_segs = Vec::new();
@@ -978,6 +981,7 @@ pub fn building_faces_each(
         }
         out
     };
+    crate::util::step("building faces 5: the oriented rings and the tree of the walls");
     for start in (0..oriented.len()).step_by(RINGS_PER_PART) {
         let part = start..(start + RINGS_PER_PART).min(oriented.len());
         #[cfg(feature = "pbf")]
