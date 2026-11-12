@@ -20,7 +20,7 @@ parquet = { version = "=60.0.0", default-features = false, features = ["arrow"] 
 # the writers encode the columns of a row group on all threads; load_raw_here decodes the blocks on all threads
 rayon = "1.12"
 # the rows of visualization.edge_levels (the same commit as duckosm-build)
-roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f0a161b9abd2d993c7963b909de0a9a4322f38bf" }
+roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "59c30597ca943d5ebbf30da46c1d889e0d8b0b22" }
 
 [dev-dependencies]
 duckosm-core = { path = "../duckosm-core" }

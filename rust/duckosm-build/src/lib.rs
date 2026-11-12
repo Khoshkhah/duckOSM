@@ -787,6 +787,7 @@ pub fn run<W: Write + Send>(
         }
         // the last use of the edges of this mode: the levels take them
         if p.levels != LevelsMethod::None {
+            level_edges.reserve(net.edges.len() + net.private_edges.len());
             level_edges.add(*mode, false, std::mem::take(&mut net.edges));
             level_edges.add(*mode, true, std::mem::take(&mut net.private_edges));
         }
