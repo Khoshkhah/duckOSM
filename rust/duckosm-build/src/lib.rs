@@ -291,13 +291,22 @@ fn write_other_tables<W: Write + Send>(
 
 /// The roads that a building can face: the segments of the edges of a mode, but not the paths that run along or across a street (footways, steps,
 /// cycleways), which would be the nearest "street" of a wall that faces the real one.
-fn street_segments(edges: &[duckosm_core::model::Edge], out: &mut Vec<building_faces::Street>) {
+/// Only the segments near a building (`near`): the others cannot be the street of a wall.
+fn street_segments(
+    edges: &[duckosm_core::model::Edge],
+    near: &building_faces::NearBuildings,
+    out: &mut Vec<building_faces::Street>,
+) {
     const NOT_STREETS: [&str; 7] = ["footway", "path", "steps", "corridor", "bridleway", "cycleway", "track"];
-    for e in edges.iter().filter(|e| !NOT_STREETS.contains(&e.attrs.highway.as_str())) {
+    let streets = || edges.iter().filter(|e| !NOT_STREETS.contains(&e.attrs.highway.as_str()));
+    // the exact size first: a list that doubles needs three times its size for a moment (WebAssembly memory never shrinks)
+    let n: usize = streets().map(|e| e.geometry.windows(2).filter(|w| near.near(w[0], w[1])).count()).sum();
+    out.reserve_exact(n);
+    for e in streets() {
         // one copy of the texts for each edge, not for each segment
         let name: Option<std::sync::Arc<str>> = e.attrs.name.as_deref().map(Into::into);
         let highway: std::sync::Arc<str> = e.attrs.highway.as_str().into();
-        for w in e.geometry.windows(2) {
+        for w in e.geometry.windows(2).filter(|w| near.near(w[0], w[1])) {
             out.push(building_faces::Street {
                 a: w[0],
                 b: w[1],
@@ -527,13 +536,13 @@ fn fix_ids(fixes: &OsmFixes) -> [duckosm_core::util::FxHashSet<i64>; 3] {
     ids
 }
 
-/// The part of the `raw.*` of an area file that the build needs in memory: the elements that the fixes touch, the route
-/// relations of the bus routes and their member ways (`bus`), and the buildings with their nodes (`faces`).
-fn read_raw_part(open: Open, fixes: &OsmFixes, bus: bool, faces: bool) -> Result<Raw, String> {
+/// The part of the `raw.*` of an area file that the build needs in memory: the elements that the fixes touch (`ids`, with
+/// all their tags), the route relations of the bus routes and their member ways (`bus`, all tags), and the buildings with
+/// their nodes (`faces`, only the tags that the faces read: `building` and `addr:street` of a way, `entrance` of a node).
+fn read_raw_part(open: Open, ids: &[duckosm_core::util::FxHashSet<i64>; 3], bus: bool, faces: bool) -> Result<Raw, String> {
     fn tag<'t>(t: &[(&'t str, &'t str)], k: &str) -> Option<&'t str> {
         t.iter().find(|x| x.0 == k).map(|x| x.1)
     }
-    let ids = fix_ids(fixes);
     let building = |t: &[(&str, &str)]| tag(t, "building").is_some_and(|b| b != "no");
     let relation = |id: i64, t: &[(&str, &str)]| {
         ids[2].contains(&id)
@@ -542,7 +551,10 @@ fn read_raw_part(open: Open, fixes: &OsmFixes, bus: bool, faces: bool) -> Result
     };
     let way = |id: i64, t: &[(&str, &str)]| ids[1].contains(&id) || (faces && building(t));
     let node = |id: i64| ids[0].contains(&id);
-    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes: faces })
+    let tag = |kind: usize, id: i64, key: &str| {
+        ids[kind].contains(&id) || if kind == 0 { key == "entrance" } else { key == "building" || key == "addr:street" }
+    };
+    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes: faces, tag: &tag })
 }
 
 /// The whole build without a file system, for the native build and the browser build (duckosm-wasm): read the
@@ -619,7 +631,7 @@ pub fn run<W: Write + Send>(
             if p.cut_osm {
                 // ponytail: all of the area in memory; the XML is only for small areas
                 let all = |_: i64, _: &[(&str, &str)]| true;
-                let want = Want { relation: &all, way: &all, node: &|_| true, way_nodes: false };
+                let want = Want { relation: &all, way: &all, node: &|_| true, way_nodes: false, tag: &|_, _, _| true };
                 cutfile::write_xml(&duckosm_core::raw::read_part(open, &want)?, &mut file("cut.osm")?)?;
                 log.step("write cut.osm");
             }
@@ -642,8 +654,9 @@ pub fn run<W: Write + Send>(
                 Vec::new()
             };
             if want_raw || bus || p.building_faces {
-                let mut part = read_raw_part(open, fixes, bus, p.building_faces)?;
-                area_read = Some(RawPatch::ids(&part));
+                let touched = fix_ids(fixes);
+                let mut part = read_raw_part(open, &touched, bus, p.building_faces)?;
+                area_read = Some(RawPatch::ids(&part, &touched));
                 part.apply_fixes(fixes);
                 raw = Some(part);
                 log.step("read the raw part");
@@ -699,6 +712,11 @@ pub fn run<W: Write + Send>(
     let mut level_edges = LevelEdges::default();
     let mut lane_edges = LaneEdges::default();
     let mut streets: Vec<building_faces::Street> = Vec::new();
+    // the grid near the buildings of the raw part: only the street segments near a building are kept for the faces
+    let near = raw
+        .as_ref()
+        .filter(|_| p.building_faces)
+        .map(|r| building_faces::NearBuildings::new(&r.ways, &r.nodes));
     // the global junctions depend only on the ways: one time for all modes and for main.global_junctions
     let junctions = if opts.global_junctions {
         duckosm_core::network::global_junctions(&ways)
@@ -768,7 +786,7 @@ pub fn run<W: Write + Send>(
             turn_restrictions: net.graph.turn_restrictions.as_ref().map_or(0, Vec::len),
         });
         if p.building_faces && matches!(*mode, Mode::Driving | Mode::Walking) {
-            street_segments(&net.edges, &mut streets);
+            street_segments(&net.edges, near.as_ref().expect("made with the faces"), &mut streets);
         }
         // duckOSM: the arrows of the fixes go into the raw tags after this mode, so the next modes see them
         fixes.set_arrows(&mut ways, &net.ways, *mode);
@@ -842,6 +860,34 @@ pub fn run<W: Write + Send>(
             log.step("elevation grid");
         }
     }
+    let built_at = p.built_at.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_micros() as i64)
+    });
+    let area = Area {
+        boundary,
+        ways: &ways,
+        coords: &coords,
+        nodes: &mode_nodes,
+        junctions: &junctions,
+        opts,
+        built_at,
+        timezone_entry: p.timezone_entry.as_deref(),
+    };
+    write_area_tables(&area, &mut file)?;
+    log.step("write the area tables");
+    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+    if sum.levels.is_some() {
+        log.step("levels");
+    }
+    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
+    if sum.lanes.is_some() {
+        log.step("lane profile");
+    }
+    // the building faces and raw.* come last: before them, the data that only the steps above need goes, so the memory of
+    // the faces comes on top of less (Kentucky: 0.8 GB less; the browser build has at most 4 GB)
+    drop((level_edges, lane_edges, mode_nodes, coords, junctions));
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
@@ -877,31 +923,6 @@ pub fn run<W: Write + Send>(
             }
         }
         log.step("write raw");
-    }
-    let built_at = p.built_at.unwrap_or_else(|| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_micros() as i64)
-    });
-    let area = Area {
-        boundary,
-        ways: &ways,
-        coords: &coords,
-        nodes: &mode_nodes,
-        junctions: &junctions,
-        opts,
-        built_at,
-        timezone_entry: p.timezone_entry.as_deref(),
-    };
-    write_area_tables(&area, &mut file)?;
-    log.step("write the area tables");
-    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
-    if sum.levels.is_some() {
-        log.step("levels");
-    }
-    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
-    if sum.lanes.is_some() {
-        log.step("lane profile");
     }
     Ok(sum)
 }
@@ -1119,8 +1140,9 @@ mod area_raw_tests {
             // the area file
             let (area, _) = duckosm_core::cutstream::cut_to_pbf(|| Ok(Cursor::new(&region[..])), &b, Vec::new()).unwrap();
             let open = || -> Result<Box<dyn Read + Send>, String> { Ok(Box::new(Cursor::new(area.clone()))) };
-            let mut part = read_raw_part(&open, &fixes, true, true).unwrap();
-            let read = RawPatch::ids(&part);
+            let touched = fix_ids(&fixes);
+            let mut part = read_raw_part(&open, &touched, true, true).unwrap();
+            let read = RawPatch::ids(&part, &touched);
             part.apply_fixes(&fixes);
             let mut net: Vec<&Way> = ways.iter().collect();
             net.sort_by_key(|w| w.id);

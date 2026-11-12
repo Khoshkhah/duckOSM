@@ -37,7 +37,7 @@ pub struct RawColumns {
     /// The tables to fill (nodes, ways, relations); the elements of the others are skipped.
     keep: [bool; 3],
     /// The column `line` of the ways, from these coordinates (see [`write_area_raw`]).
-    line: Option<(Arc<duckosm_core::network::Coords>, BinaryBuilder)>,
+    line: Option<(Arc<NodeParts>, BinaryBuilder)>,
 }
 
 /// The tags as a DuckDB `MAP(VARCHAR, VARCHAR)`; no tags: NULL, as `ST_READOSM`.
@@ -84,7 +84,7 @@ impl RawColumns {
     }
 
     /// Columns for the ways and the relations, and the column `line` of the ways from `coords`.
-    pub fn lines(coords: Arc<duckosm_core::network::Coords>) -> Self {
+    pub fn lines(coords: Arc<NodeParts>) -> Self {
         let mut c = RawColumns::default();
         c.keep = [false, true, true];
         c.line = Some((coords, BinaryBuilder::new()));
@@ -481,6 +481,33 @@ pub fn load_raw_here<R: std::io::Read, W: Write + Send>(
     w.finish()
 }
 
+/// The coordinates of the nodes of a file, in the parts of its blocks, each sorted by id and the parts in the order of the
+/// ids (a file sorted by type and id). A look-up searches the part, then the node in it.
+#[derive(Default)]
+pub struct NodeParts(Vec<Vec<(i64, duckosm_core::geom::Pt)>>);
+
+impl NodeParts {
+    /// Parts that are not in the order of the ids become one sorted part.
+    pub fn new(mut parts: Vec<Vec<(i64, duckosm_core::geom::Pt)>>) -> NodeParts {
+        parts.retain(|p| !p.is_empty());
+        let sorted = parts.iter().all(|p| p.windows(2).all(|w| w[0].0 < w[1].0))
+            && parts.windows(2).all(|w| w[0].last().map(|x| x.0) < w[1].first().map(|x| x.0));
+        if !sorted {
+            let mut all: Vec<_> = parts.into_iter().flatten().collect();
+            all.sort_unstable_by_key(|x| x.0);
+            all.dedup_by_key(|x| x.0);
+            parts = vec![all];
+        }
+        NodeParts(parts)
+    }
+
+    pub fn get(&self, id: &i64) -> Option<&duckosm_core::geom::Pt> {
+        let k = self.0.partition_point(|p| p[0].0 <= *id).checked_sub(1)?;
+        let part = &self.0[k];
+        part.binary_search_by_key(id, |x| x.0).ok().map(|i| &part[i].1)
+    }
+}
+
 /// duckOSM's `raw.*` of an area file (the output of step 0) with the changes of the build (`patch`: the OSM fixes, the
 /// tags of the network's ways), as the `raw_*.parquet` files of the area build (with the column `line` of the ways, as
 /// `write_raw_ways_to`). Two passes read the file, on the calling thread: the nodes, then the ways and the relations;
@@ -496,7 +523,6 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
 ) -> Result<[usize; 3], String> {
     use duckosm_core::cutstream::each_block;
     use duckosm_core::geom::Pt;
-    use duckosm_core::network::Coords;
     use duckosm_core::pbfraw::decode_block;
     use duckosm_core::raw::{sync_way, Patched, RawTags};
     fn pairs(t: &RawTags) -> Vec<(&str, &str)> {
@@ -562,7 +588,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
             }
         }
     }
-    let mut w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(Coords::default())))?;
+    let mut w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(NodeParts::default())))?;
     let mut rows = [0usize; 3];
     // pass 1: the nodes, and their coordinates
     let mut parts: Vec<Vec<(i64, Pt)>> = Vec::new();
@@ -589,13 +615,9 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     rows[0] += part.batches[0].num_rows();
     w.write(part)?;
     parts.push(s.coords);
-    // ponytail: the coordinates of all nodes are in memory (Kentucky: 20.5 million nodes, 0.5 GB); a file of them sorted
-    // by id would keep them out of memory if an area needs it
-    let mut all = Vec::with_capacity(parts.iter().map(Vec::len).sum());
-    for p in parts {
-        all.extend(p);
-    }
-    let coords = Arc::new(Coords::new(all));
+    // ponytail: the coordinates of all nodes are in memory (Kentucky: 20.5 million nodes, 0.5 GB), in the parts of the blocks:
+    // one list made of them would need twice that for a moment. A file of them sorted by id keeps them out of memory if needed.
+    let coords = Arc::new(NodeParts::new(parts));
     // pass 2: the ways with their lines, and the relations
     each_block(
         &mut open()?,
