@@ -3,7 +3,7 @@
 //! size of the file: only the blocks of one round and one open row group of each table are in memory.
 
 use super::{err, ROW_GROUP};
-use arrow_array::builder::{Float64Builder, Int64Builder, ListBuilder, MapBuilder, StringBuilder};
+use arrow_array::builder::{BinaryBuilder, Float64Builder, Int64Builder, ListBuilder, MapBuilder, StringBuilder};
 use arrow_array::{ArrayRef, RecordBatch};
 use duckosm_core::graph::MemberType;
 use duckosm_core::raw::RawSink;
@@ -36,6 +36,8 @@ pub struct RawColumns {
     refs: Vec<i64>,
     /// The tables to fill (nodes, ways, relations); the elements of the others are skipped.
     keep: [bool; 3],
+    /// The column `line` of the ways, from these coordinates (see [`write_area_raw`]).
+    line: Option<(Arc<duckosm_core::network::Coords>, BinaryBuilder)>,
 }
 
 /// The tags as a DuckDB `MAP(VARCHAR, VARCHAR)`; no tags: NULL, as `ST_READOSM`.
@@ -68,6 +70,7 @@ impl Default for RawColumns {
             r_types: ListBuilder::new(StringBuilder::new()),
             refs: Vec::new(),
             keep: [true; 3],
+            line: None,
         }
     }
 }
@@ -77,6 +80,14 @@ impl RawColumns {
     pub fn only(table: usize) -> Self {
         let mut c = RawColumns::default();
         c.keep = [table == 0, table == 1, table == 2];
+        c
+    }
+
+    /// Columns for the ways and the relations, and the column `line` of the ways from `coords`.
+    pub fn lines(coords: Arc<duckosm_core::network::Coords>) -> Self {
+        let mut c = RawColumns::default();
+        c.keep = [false, true, true];
+        c.line = Some((coords, BinaryBuilder::new()));
         c
     }
 }
@@ -117,6 +128,11 @@ impl RawSink for RawColumns {
         tags(&mut self.w_tags, t);
         self.w_refs.values().append_slice(&self.refs);
         self.w_refs.append(true);
+        if let Some((coords, line)) = &mut self.line {
+            // as write_raw_ways_to: a node that has no coordinates is left out; fewer than 2 points: NULL
+            let pts: Vec<_> = self.refs.iter().filter_map(|r| coords.get(r).copied()).collect();
+            line.append_option((pts.len() >= 2).then(|| super::line_wkb(&pts)));
+        }
     }
 
     fn relation<'a>(
@@ -172,12 +188,15 @@ impl RawColumns {
             ("tags", Arc::new(self.n_tags.finish()) as ArrayRef, true),
         ])
         .map_err(err)?;
-        let ways = RecordBatch::try_from_iter_with_nullable(vec![
+        let mut way_cols = vec![
             ("osm_id", a(&mut self.w_id), false),
             ("tags", Arc::new(self.w_tags.finish()) as ArrayRef, true),
             ("refs", Arc::new(self.w_refs.finish()), false),
-        ])
-        .map_err(err)?;
+        ];
+        if let Some((_, line)) = &mut self.line {
+            way_cols.push(("line", Arc::new(line.finish()), true));
+        }
+        let ways = RecordBatch::try_from_iter_with_nullable(way_cols).map_err(err)?;
         let relations = RecordBatch::try_from_iter_with_nullable(vec![
             ("osm_id", a(&mut self.r_id), false),
             ("tags", Arc::new(self.r_tags.finish()) as ArrayRef, true),
@@ -213,7 +232,12 @@ pub struct RawWriter<W: Write + Send> {
 
 impl<W: Write + Send> RawWriter<W> {
     pub fn new(files: [W; 3], group_bytes: usize) -> Result<Self, String> {
-        let empty = RawColumns::default().finish()?;
+        Self::with_columns(files, group_bytes, RawColumns::default())
+    }
+
+    /// The writer of the files of `empty` (with or without the column `line`).
+    fn with_columns(files: [W; 3], group_bytes: usize, empty: RawColumns) -> Result<Self, String> {
+        let empty = empty.finish()?;
         let props = raw_props();
         let writers = files
             .into_iter()
@@ -455,6 +479,150 @@ pub fn load_raw_here<R: std::io::Read, W: Write + Send>(
         }
     }
     w.finish()
+}
+
+/// duckOSM's `raw.*` of an area file (the output of step 0) with the changes of the build (`patch`: the OSM fixes, the
+/// tags of the network's ways), as the `raw_*.parquet` files of the area build (with the column `line` of the ways, as
+/// `write_raw_ways_to`). Two passes read the file, on the calling thread: the nodes, then the ways and the relations;
+/// all threads decode and patch. In memory: the coordinates of all nodes (for the lines), one batch of blocks and one
+/// open row group of each table. Gives the rows of each table; for the ways, also those with fewer than 2 nodes, which
+/// are not written (as `Raw` counts them).
+#[cfg(feature = "pbf")]
+pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
+    open: impl Fn() -> Result<R, String>,
+    patch: &duckosm_core::raw::RawPatch,
+    files: [W; 3],
+    group_bytes: usize,
+) -> Result<[usize; 3], String> {
+    use duckosm_core::cutstream::each_block;
+    use duckosm_core::geom::Pt;
+    use duckosm_core::network::Coords;
+    use duckosm_core::pbfraw::decode_block;
+    use duckosm_core::raw::{sync_way, Patched, RawTags};
+    fn pairs(t: &RawTags) -> Vec<(&str, &str)> {
+        t.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+    }
+    struct Patching<'p> {
+        cols: RawColumns,
+        patch: &'p duckosm_core::raw::RawPatch<'p>,
+        coords: Vec<(i64, Pt)>,
+        ways: usize,
+    }
+    impl RawSink for Patching<'_> {
+        fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, t: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            match self.patch.node(id) {
+                Patched::Same => self.cols.node(id, lat, lon, t),
+                Patched::Removed => return,
+                Patched::Fixed(n) => {
+                    self.cols.node(id, lat, lon, &mut n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+                }
+            }
+            self.coords.push((id, (lon, lat)));
+        }
+        fn way<'a>(
+            &mut self,
+            id: i64,
+            t: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            refs: &mut dyn Iterator<Item = i64>,
+        ) {
+            let net = self.patch.net_way(id);
+            let (mut tags, fixed): (RawTags, _) = match self.patch.way(id) {
+                Patched::Removed => return,
+                Patched::Fixed(w) => (w.tags.clone(), Some(w)),
+                Patched::Same if net.is_none() => {
+                    self.ways += 1;
+                    return self.cols.way(id, t, refs);
+                }
+                Patched::Same => (t.map(|(k, v)| (k.to_string(), v.to_string())).collect(), None),
+            };
+            self.ways += 1;
+            if let Some(n) = net {
+                sync_way(&mut tags, n);
+            }
+            let mut t = tags.iter().map(|(k, v)| (k.as_str(), v.as_str()));
+            match fixed {
+                Some(w) => self.cols.way(id, &mut t, &mut w.refs.iter().copied()),
+                None => self.cols.way(id, &mut t, refs),
+            }
+        }
+        fn relation<'a>(
+            &mut self,
+            id: i64,
+            t: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+            match self.patch.relation(id) {
+                Patched::Same => self.cols.relation(id, t, members),
+                Patched::Removed => {}
+                Patched::Fixed(r) => self.cols.relation(
+                    id,
+                    &mut r.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                    &mut r.members.iter().map(|(m, ty, role)| (*m, *ty, role.as_str())),
+                ),
+            }
+        }
+    }
+    let mut w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(Coords::default())))?;
+    let mut rows = [0usize; 3];
+    // pass 1: the nodes, and their coordinates
+    let mut parts: Vec<Vec<(i64, Pt)>> = Vec::new();
+    each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut s = Patching { cols: RawColumns::only(0), patch, coords: Vec::new(), ways: 0 };
+            decode_block(b, [true, false, false], buf, &mut s)?;
+            Ok((s.cols.finish()?, s.coords))
+        },
+        |(part, c), _| {
+            rows[0] += part.batches[0].num_rows();
+            w.write(part)?;
+            parts.push(c);
+            Ok(true)
+        },
+    )?;
+    let mut s = Patching { cols: RawColumns::only(0), patch, coords: Vec::new(), ways: 0 };
+    for n in patch.new_nodes() {
+        s.cols.node(n.id, n.lat, n.lon, &mut pairs(&n.tags).into_iter());
+        s.coords.push((n.id, (n.lon, n.lat)));
+    }
+    let part = s.cols.finish()?;
+    rows[0] += part.batches[0].num_rows();
+    w.write(part)?;
+    parts.push(s.coords);
+    // ponytail: the coordinates of all nodes are in memory (Kentucky: 20.5 million nodes, 0.5 GB); a file of them sorted
+    // by id would keep them out of memory if an area needs it
+    let mut all = Vec::with_capacity(parts.iter().map(Vec::len).sum());
+    for p in parts {
+        all.extend(p);
+    }
+    let coords = Arc::new(Coords::new(all));
+    // pass 2: the ways with their lines, and the relations
+    each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut s = Patching { cols: RawColumns::lines(coords.clone()), patch, coords: Vec::new(), ways: 0 };
+            decode_block(b, [false, true, true], buf, &mut s)?;
+            Ok((s.cols.finish()?, s.ways))
+        },
+        |(part, ways), _| {
+            rows[1] += ways;
+            rows[2] += part.batches[2].num_rows();
+            w.write(part)?;
+            Ok(true)
+        },
+    )?;
+    let mut c = RawColumns::lines(coords);
+    for nw in patch.new_ways() {
+        let mut tags = nw.tags.clone();
+        if let Some(n) = patch.net_way(nw.id) {
+            sync_way(&mut tags, n);
+        }
+        c.way(nw.id, &mut pairs(&tags).into_iter(), &mut nw.refs.iter().copied());
+        rows[1] += 1;
+    }
+    w.write(c.finish()?)?;
+    w.finish()?;
+    Ok(rows)
 }
 
 #[cfg(test)]

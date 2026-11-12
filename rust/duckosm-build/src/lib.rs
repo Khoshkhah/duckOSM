@@ -9,11 +9,11 @@ use duckosm_core::lanes::LaneEdges;
 use duckosm_core::model::{Network, Way};
 use duckosm_core::network::{build_network_files, Coords, NetworkFiles, Options};
 use duckosm_core::osmjson::OsmJson;
-use duckosm_core::raw::Raw;
+use duckosm_core::raw::{Raw, RawPatch, Want};
 use duckosm_core::{building_faces, cutfile, pbf, sidewalks};
 use sha2::{Digest, Sha256};
 use levels::LevelEdges;
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod area;
@@ -375,16 +375,13 @@ pub fn parse_levels(name: &str) -> Result<LevelsMethod, String> {
     LevelsMethod::parse(name).ok_or_else(|| format!("levels: '{name}' is not tags, solve or none"))
 }
 
-/// A file that the cut can read and seek in.
-pub trait Source: Read + Seek + Send {}
-impl<T: Read + Seek + Send> Source for T {}
-
-/// A new reader of a PBF file for each pass of the cut.
-pub type Open<'a> = &'a dyn Fn() -> Result<pbf::BlobReader<Box<dyn Source + 'a>>, String>;
+/// A new reader of the area file for each pass over it.
+pub type Open<'a> = &'a dyn Fn() -> Result<Box<dyn Read + Send + 'a>, String>;
 
 /// The input of [`run`]: a `.osm.pbf` file (its path, or its bytes in WebAssembly), OSM JSON (the output of the
-/// Overpass API; with a boundary, only the ways with a node inside are kept), or a region PBF and a boundary (the
-/// PBF is cut to the boundary, as osmium's `complete_ways` does).
+/// Overpass API; with a boundary, only the ways with a node inside are kept), or an area file and its boundary (the
+/// output of step 0, [`cut_file`]: the network has the ways with a node inside, as osmium's `complete_ways` cut;
+/// `raw.*` is the whole file, as osmium's `smart` cut).
 /// Another source of the network input (the ways, the coordinates and the turn restrictions) with the same values
 /// as the reader of the file: the `raw.*` tables of a `.duckdb` file (docs/design/network_stream.md, part A1).
 pub trait NetworkSource {
@@ -503,6 +500,48 @@ fn read_pbf(
     Ok((ways, coords, rels))
 }
 
+/// The ids that the OSM fixes touch: the OSM nodes of the new ways, the ways (removed, changed, edited, or whose tags a
+/// new way takes), and the relations (edited).
+fn fix_ids(fixes: &OsmFixes) -> [duckosm_core::util::FxHashSet<i64>; 3] {
+    use duckosm_core::fixes::{Elem, NewNode};
+    let mut ids: [duckosm_core::util::FxHashSet<i64>; 3] = Default::default();
+    for n in &fixes.new_ways {
+        ids[0].extend(n.nodes.iter().filter_map(|x| match x {
+            NewNode::Osm(id) => Some(*id),
+            NewNode::At(_) => None,
+        }));
+        ids[1].extend(n.tags_from);
+    }
+    ids[1].extend(fixes.ways.iter().map(|r| r.osm_id));
+    for e in &fixes.tag_edits {
+        let i = match e.elem {
+            Elem::Node => 0,
+            Elem::Way => 1,
+            Elem::Relation => 2,
+        };
+        ids[i].insert(e.id);
+    }
+    ids
+}
+
+/// The part of the `raw.*` of an area file that the build needs in memory: the elements that the fixes touch, the route
+/// relations of the bus routes and their member ways (`bus`), and the buildings with their nodes (`faces`).
+fn read_raw_part(open: Open, fixes: &OsmFixes, bus: bool, faces: bool) -> Result<Raw, String> {
+    fn tag<'t>(t: &[(&'t str, &'t str)], k: &str) -> Option<&'t str> {
+        t.iter().find(|x| x.0 == k).map(|x| x.1)
+    }
+    let ids = fix_ids(fixes);
+    let building = |t: &[(&str, &str)]| tag(t, "building").is_some_and(|b| b != "no");
+    let relation = |id: i64, t: &[(&str, &str)]| {
+        ids[2].contains(&id)
+            || (bus && tag(t, "route").is_some_and(|v| duckosm_core::bus::ROUTES.contains(&v)))
+            || (faces && tag(t, "type") == Some("multipolygon") && building(t))
+    };
+    let way = |id: i64, t: &[(&str, &str)]| ids[1].contains(&id) || (faces && building(t));
+    let node = |id: i64| ids[0].contains(&id);
+    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes: faces })
+}
+
 /// The whole build without a file system, for the native build and the browser build (duckosm-wasm): read the
 /// input with the OSM fixes, the sidewalk rule, each mode (written with [`write_tables`]), the bus routes, `raw.*`,
 /// the area tables (`boundary` is the boundary file, GeoJSON text), the drawing levels and the lane profile. Each
@@ -532,6 +571,8 @@ pub fn run<W: Write + Send>(
         return Err("the cut file needs a boundary and a region file".into());
     }
     let mut raw = None;
+    // with an area file: the ids of the raw part before the fixes (see RawPatch)
+    let mut area_read = None;
     let (mut ways, mut coords, relations) = match input {
         Input::Path(path) => read_pbf(
             || pbf::read_ways(path),
@@ -557,29 +598,53 @@ pub fn run<W: Write + Send>(
             fixes,
             log,
         )?,
-        // duckOSM with a boundary: cut the PBF (osmium complete_ways, or smart for raw.*), then the fixes on the raw ways
         Input::Area(open, boundary) => {
-            let (mut ways, coords, relations) = if want_raw || bus || cut_file || p.building_faces {
-                let (w, c, r, mut rw) = pbf::read_area_raw(open, boundary)?;
-                log.step("cut to the boundary");
-                // the cut as osmium gives it: before the fixes change the ways
-                if p.cut_pbf {
-                    cutfile::write_pbf(&rw, rw.timestamp, &mut file("cut.osm.pbf")?)?;
-                    log.step("write cut.osm.pbf");
-                }
-                if p.cut_osm {
-                    cutfile::write_xml(&rw, &mut file("cut.osm")?)?;
-                    log.step("write cut.osm");
-                }
-                rw.apply_fixes(fixes);
-                raw = Some(rw);
-                (w, c, r)
-            } else {
-                let cut = pbf::read_area(open, boundary)?;
-                log.step("cut to the boundary");
-                cut
-            };
+            let mut ways = pbf::read_ways_from(open()?)?;
+            log.step("read ways");
+            let mut coords = pbf::read_coords_from(open()?, &ways)?;
+            // osmium's complete_ways: the network has only the ways with a node inside. The area file has more: the
+            // member ways of its multipolygons (osmium's smart cut)
+            ways.retain(|w| {
+                w.refs.iter().any(|n| coords.get(n).is_some_and(|p| boundary.contains(p.0, p.1)))
+            });
+            log.step("read nodes");
+            // the cut as osmium gives it: before the fixes change the ways
+            if p.cut_pbf {
+                std::io::copy(&mut open()?, &mut file("cut.osm.pbf")?).map_err(|e| e.to_string())?;
+                log.step("write cut.osm.pbf");
+            }
+            if p.cut_osm {
+                // ponytail: all of the area in memory; the XML is only for small areas
+                let all = |_: i64, _: &[(&str, &str)]| true;
+                let want = Want { relation: &all, way: &all, node: &|_| true, way_nodes: false };
+                cutfile::write_xml(&duckosm_core::raw::read_part(open, &want)?, &mut file("cut.osm")?)?;
+                log.step("write cut.osm");
+            }
             fixes.apply_to_ways(&mut ways)?;
+            // the OSM nodes of the new ways of the fixes that no read way has
+            let missing: duckosm_core::util::FxHashSet<i64> = fix_ids(fixes)[0]
+                .iter()
+                .copied()
+                .filter(|id| coords.get(id).is_none())
+                .collect();
+            if !missing.is_empty() {
+                let more = pbf::read_node_coords_from(open()?, missing)?;
+                coords.extend(more.iter().copied());
+            }
+            let relations = if need_relations {
+                let r = pbf::read_restrictions_from(open()?)?;
+                log.step("read restrictions");
+                r
+            } else {
+                Vec::new()
+            };
+            if want_raw || bus || p.building_faces {
+                let mut part = read_raw_part(open, fixes, bus, p.building_faces)?;
+                area_read = Some(RawPatch::ids(&part));
+                part.apply_fixes(fixes);
+                raw = Some(part);
+                log.step("read the raw part");
+            }
             (ways, coords, relations)
         }
         Input::OsmJson(bytes, boundary) => {
@@ -784,9 +849,21 @@ pub fn run<W: Write + Send>(
     }
     if let Some(r) = raw.as_mut().filter(|_| want_raw) {
         // the tags that the steps set on the network's ways (the sidewalk rule, the arrows of the fixes)
-        r.sync_tags(&ways);
-        write_raw(r, &mut file)?;
-        sum.raw = Some((r.nodes.len(), r.ways.len(), r.relations.len()));
+        match (input, area_read) {
+            (Input::Area(open, _), Some(read)) => {
+                let mut net: Vec<&Way> = ways.iter().collect();
+                net.sort_by_key(|w| w.id);
+                let patch = RawPatch { fixed: r, read, net };
+                let files = [file("raw_nodes.parquet")?, file("raw_ways.parquet")?, file("raw_relations.parquet")?];
+                let n = duckosm_parquet::write_area_raw(open, &patch, files, 64 << 20)?;
+                sum.raw = Some((n[0], n[1], n[2]));
+            }
+            _ => {
+                r.sync_tags(&ways);
+                write_raw(r, &mut file)?;
+                sum.raw = Some((r.nodes.len(), r.ways.len(), r.relations.len()));
+            }
+        }
         log.step("write raw");
     }
     let built_at = p.built_at.unwrap_or_else(|| {
@@ -845,16 +922,6 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         Some(path) => Some(read(path)?),
         None => None,
     };
-    let open = || -> Result<pbf::BlobReader<Box<dyn Source>>, String> {
-        let f =
-            std::fs::File::open(pbf_path).map_err(|e| format!("{}: {e}", pbf_path.display()))?;
-        let r: Box<dyn Source> = Box::new(std::io::BufReader::new(f));
-        pbf::BlobReader::new_seekable(r).map_err(|e| e.to_string())
-    };
-    let input = match &cut {
-        Some(b) => Input::Area(&open, b),
-        None => Input::Path(pbf_path),
-    };
     // the GeoParquet files are the input of the .duckdb writer, so they always go to a folder: without the format
     // geoparquet, a new temporary folder for each call (two Python threads can build at the same time)
     let pq_dir = if p.geoparquet {
@@ -882,13 +949,34 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     } else {
         (None, None)
     };
+    std::fs::create_dir_all(&pq_dir).map_err(|e| e.to_string())?;
+    // step 0: cut the region file to the area file. It is the output cut.osm.pbf when the user asks for it
+    let area_file = match &cut {
+        Some(_) if p.cut_pbf => Some(out.join("cut.osm.pbf")),
+        Some(_) => Some(pq_dir.join("area.osm.pbf")),
+        None => None,
+    };
+    let open = || -> Result<Box<dyn Read + Send>, String> {
+        let f = area_file.as_deref().unwrap_or(pbf_path);
+        let r = std::fs::File::open(f).map_err(|e| format!("{}: {e}", f.display()))?;
+        Ok(Box::new(std::io::BufReader::with_capacity(1 << 20, r)))
+    };
+    let input = match &cut {
+        Some(b) => Input::Area(&open, b),
+        None => Input::Path(pbf_path),
+    };
     #[cfg(feature = "duckdb")]
     let input = match &source {
         Some(s) => Input::Source(s),
         None => input,
     };
-    std::fs::create_dir_all(&pq_dir).map_err(|e| e.to_string())?;
+    // run() writes no cut.osm.pbf: step 0 has written it
+    let p = &Params { cut_pbf: false, ..p.clone() };
     let res = (|| -> Result<Summary, String> {
+        if let (Some(b), Some(f)) = (&cut, &area_file) {
+            cut_to_file(pbf_path, b, f)?;
+            log.step("cut to the boundary");
+        }
         let mut files = Vec::new();
         let mut sum = run(
             input,
@@ -910,6 +998,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             },
         )?;
         sum.files = files;
+        if let Some(f) = area_file.as_ref().filter(|f| f.starts_with(out) && f.ends_with("cut.osm.pbf")) {
+            sum.files.push(("cut.osm.pbf".to_string(), f.clone()));
+        }
         if p.geoparquet {
             write_layers_json(&pq_dir, &sum)?;
             sum.files
@@ -949,7 +1040,10 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         }
         Ok(sum)
     })();
-    // the temporary folder goes also after an error
+    // the temporary folder and the area file go also after an error
+    if let Some(f) = area_file.as_ref().filter(|f| f.ends_with("area.osm.pbf")) {
+        let _ = std::fs::remove_file(f);
+    }
     if !p.geoparquet {
         let _ = std::fs::remove_dir_all(&pq_dir);
     }
@@ -970,14 +1064,79 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
 /// `.osm.pbf` file. The cut keeps only lists of ids in memory ([`duckosm_core::cutstream`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn cut_file(region: &Path, boundary: &str, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
-    let b = duckosm_core::boundary::Boundary::parse(boundary)?;
+    cut_to_file(region, &Boundary::parse(boundary)?, out)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cut_to_file(region: &Path, b: &Boundary, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
     let open = || {
         std::fs::File::open(region)
             .map(|f| std::io::BufReader::with_capacity(1 << 20, f))
             .map_err(|e| format!("{}: {e}", region.display()))
     };
     let f = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let (w, n) = duckosm_core::cutstream::cut_to_pbf(open, &b, std::io::BufWriter::with_capacity(1 << 20, f))?;
+    let (w, n) = duckosm_core::cutstream::cut_to_pbf(open, b, std::io::BufWriter::with_capacity(1 << 20, f))?;
     w.into_inner().map_err(|e| format!("{}: {e}", out.display()))?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod area_raw_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// `raw.*` from the area file (step 0's file, the raw part, the patch while the file is read) has the rows of the
+    /// cut in memory (`read_area_raw`, `apply_fixes`, `sync_tags`, `write_raw`): Monaco, with the fixes of both fixture
+    /// files (removed ways, `keep_nodes`, new ways with `tags_from`, tag edits) and the tags of the sidewalk rule.
+    #[test]
+    fn raw_of_the_area_file_equals_the_cut_in_memory() {
+        let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+        let region = std::fs::read(data.join("monaco_sample.osm.pbf")).unwrap();
+        let b = Boundary::parse(&std::fs::read_to_string(data.join("monaco.geojson")).unwrap()).unwrap();
+        let dir = std::env::temp_dir().join(format!("duckosm-area-raw-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (k, fixes) in ["osm_fixes.yaml", "page_fixes/osm_fixes.yaml"].iter().enumerate() {
+            let fixes = config::read_osm_fixes(&data.join(fixes)).unwrap();
+            // the cut in memory, and the network's ways with the fixes and the sidewalk rule
+            let open = || pbf::BlobReader::new_seekable(Cursor::new(&region[..])).map_err(|e| e.to_string());
+            let (mut ways, coords, _, mut want) = pbf::read_area_raw(open, &b).unwrap();
+            fixes.apply_to_ways(&mut ways).unwrap();
+            assert!(sidewalks::infer_separate_sidewalks(&mut ways, &coords) > 0);
+            want.apply_fixes(&fixes);
+            want.sync_tags(&ways);
+            let file = |n: &str| std::fs::File::create(dir.join(format!("want_{k}_{n}"))).map_err(|e| e.to_string());
+            write_raw(&want, file).unwrap();
+            // the area file
+            let (area, _) = duckosm_core::cutstream::cut_to_pbf(|| Ok(Cursor::new(&region[..])), &b, Vec::new()).unwrap();
+            let open = || -> Result<Box<dyn Read + Send>, String> { Ok(Box::new(Cursor::new(area.clone()))) };
+            let mut part = read_raw_part(&open, &fixes, true, true).unwrap();
+            let read = RawPatch::ids(&part);
+            part.apply_fixes(&fixes);
+            let mut net: Vec<&Way> = ways.iter().collect();
+            net.sort_by_key(|w| w.id);
+            let files = ["raw_nodes", "raw_ways", "raw_relations"]
+                .map(|n| std::fs::File::create(dir.join(format!("got_{k}_{n}.parquet"))).unwrap());
+            let n = duckosm_parquet::write_area_raw(&open, &RawPatch { fixed: &part, read, net }, files, 1 << 20).unwrap();
+            assert_eq!(n, [want.nodes.len(), want.ways.len(), want.relations.len()]);
+            let con = duckdb::Connection::open_in_memory().unwrap();
+            con.execute_batch("SET threads = 1").unwrap();
+            for (t, cols) in [
+                ("raw_nodes", "osm_id, lat, lon, tags::VARCHAR"),
+                ("raw_ways", "osm_id, tags::VARCHAR, refs::VARCHAR, hex(line)"),
+                ("raw_relations", "osm_id, tags::VARCHAR, refs::VARCHAR, ref_roles::VARCHAR, ref_types::VARCHAR"),
+            ] {
+                let rows = |who: &str| -> (i64, String) {
+                    let f = dir.join(format!("{who}_{k}_{t}.parquet")).display().to_string();
+                    con.query_row(
+                        &format!("SELECT count(*), md5(string_agg(concat_ws('|', {cols}), '\n')) FROM read_parquet('{f}')"),
+                        [],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .unwrap()
+                };
+                assert_eq!(rows("got"), rows("want"), "{t}, fixes file {k}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
