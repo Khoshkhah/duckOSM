@@ -156,3 +156,10 @@ segment. Kentucky, the same run as above:
 
 The file has the same rows in the same order and the same row groups (the values of each column are equal); the pages
 in the file are not the same bytes.
+
+The bus routes (`bus::routes`) look up the node pairs of the member ways of the routes only, so their map of node pairs
+has only the edges of these ways, not all edges. Kentucky: the peak heap of the step goes from 7,218 MiB to 3,991 MiB
+(no more than the memory before it), and its time from 1.85 s to 0.28 s. The files have the same bytes.
+
+After these changes, the peak heap of the whole Kentucky build (driving, `raw.*`, building faces) is 6,636 MiB, in the
+building faces, and the build takes 36.8 s (before: 17,206 MiB and 54.2 s).
