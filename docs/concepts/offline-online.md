@@ -78,18 +78,19 @@ flowchart TB
     M3("edges, nodes, edge graph<br/>of one mode<br/>[tab memory]")
     S4["<b>4–5. Write the files</b><br/>network, area tables,<br/>levels, lane profile, raw.*"]
     M4("Parquet files as bytes<br/>[tab memory]")
-    S6["<b>6. Give the files</b><br/><b>to DuckDB-Wasm</b><br/>each file is copied"]
-    M6("DuckDB-Wasm:<br/>files and tables<br/>[its memory, at most 4 GB]")
-    SAVE["<b>Save the area</b>"]
-    O[("Parquet files<br/>[storage: OPFS]")]
+    S6["<b>6. Keep the files</b><br/>in the folder of the tab"]
+    O[("Parquet files<br/>of the tables<br/>[storage: OPFS]")]
+    M6("DuckDB-Wasm: a view<br/>on each file over 256 KB;<br/>the smaller tables in<br/>its memory (max 4 GB)")
+    SAVE["<b>Save the area</b><br/>keeps the files<br/>after the tab closes"]
     EXP["<b>Export</b><br/>copy the tables<br/>into a .duckdb file"]
     DL[(".duckdb download<br/>[storage]")]
 
     REG --> S0 --> M0
     M0 --> S2 --> S3 --> M3 --> S4
     M0 --> S4
-    S4 --> M4 --> S6 --> M6
-    M4 --> SAVE --> O
+    S4 --> M4 --> S6 --> O
+    O --> M6
+    O --> SAVE
     M6 --> EXP --> DL
 
     classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
@@ -109,10 +110,10 @@ flowchart TB
 | **3. Network of each mode** | The edges and the nodes of the mode are in **memory** until the mode is written. The rows of the edge graph go to the file while they are made. The largest mode sets the peak. See [step 3 in detail](#step-3-in-detail-the-network-of-a-mode). | The same code, in **tab memory**, inside the 4 GB of the module. The rows of the edge graph go to Parquet bytes in tab memory. |
 | **4. Write the network files** | GeoParquet files to **storage**, from the network in memory. | Parquet files as bytes in **tab memory**. |
 | **5. Area tables, levels, lane profile** | Read the ways and the coordinates in **memory**; write files to **storage**. | The same, files as bytes in **tab memory**. |
-| **6. The tables** | DuckDB reads the GeoParquet files into the `.duckdb` file in **storage**. It uses its `memory_limit` and **spills** what is more. | The page gives each file to DuckDB-Wasm, which takes a **copy** into its own memory. So each file is two times in memory: the page keeps its copy for the download. |
-| **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: from the cut, through Parquet files. | From the cut, as Parquet bytes in tab memory, then a copy in DuckDB-Wasm. |
-| **The base-map layers** | An area: `features.sql` runs in DuckDB on `raw.*`; it **spills**. | `features.sql` runs in DuckDB-Wasm on the `raw_*` files in its memory. |
-| **The result** | The `.duckdb` file in **storage**. | The tables in DuckDB-Wasm (**memory**). **Save** writes the Parquet files to **OPFS**; **Export** copies the tables into a `.duckdb` file to download. |
+| **6. The tables** | DuckDB reads the GeoParquet files into the `.duckdb` file in **storage**. It uses its `memory_limit` and **spills** what is more. | The page writes each file to **OPFS**, in a folder of the tab. A file larger than 256 KB **stays there**: DuckDB-Wasm reads it through a view, at each query. A smaller file, and the tables of the level editor (`visualization.*`), are copied into DuckDB-Wasm's **memory**. |
+| **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: from the cut, through Parquet files. | From the cut, as Parquet bytes in **tab memory**. DuckDB-Wasm reads them only to make the base-map layers, and then drops them: online there are no `raw.*` tables. |
+| **The base-map layers** | An area: `features.sql` runs in DuckDB on `raw.*`; it **spills**. | `features.sql` runs in DuckDB-Wasm on the `raw_*` files in memory. The layers become Parquet files in **OPFS**, as the other tables. |
+| **The result** | The `.duckdb` file in **storage**. | The Parquet files in **OPFS**, with views in DuckDB-Wasm (small tables in its **memory**). **Save** keeps the files after the tab closes; **Export** copies the tables into a `.duckdb` file to download. |
 
 ## Step 3 in detail: the network of a mode
 
@@ -129,7 +130,7 @@ flowchart TB
     IN("ways, coordinates,<br/>junction set<br/>[memory, to the end]")
     S0["<b>3.1 Mode filter</b><br/>ways of the mode,<br/>OSM fixes,<br/>local junctions"]
     S1["<b>3.2 Cut</b><br/>each way into<br/>forward edges"]
-    M1[("edges of 3.2 to 3.7<br/>[temporary files,<br/>storage]")]
+    M1[("edges of 3.2 to 3.11<br/>[temporary files,<br/>storage]")]
     S2["<b>3.3 Merge chains</b><br/><b>3.4 Split arcs</b><br/>parallel and<br/>antiparallel"]
     S5["<b>3.5 Reverse edges</b><br/><b>3.6 edge_id</b><br/><b>3.7 Lengths</b>"]
     M5("all edges and nodes<br/>of the mode, read back<br/>[memory, until written]")
@@ -158,13 +159,30 @@ flowchart TB
     class IN,M5,F2 mem
 ```
 
-### The memory and the time of each sub-step
+### The area: Kentucky
+
+All measurements on this page use one area, the US state of Kentucky. The numbers come from the `.duckdb` file of the
+measured build.
+
+| Kentucky | Value |
+|---|---|
+| Land area | about 104,700 km² (the Geofabrik extract follows the border of the state) |
+| Box | longitude −90.03 to −81.68, latitude 35.06 to 39.82 |
+| Input file | `kentucky-latest.osm.pbf` from Geofabrik, 148 MB |
+| OSM nodes, ways, relations | 19,621,446 / 1,739,326 / 14,561 |
+| OSM roads (ways with a `highway` tag) | 643,820 |
+| Driving: OSM roads in the network | 472,001 |
+| Driving: edges / private edges / nodes | 2,114,699 / 221,101 / 923,134 |
+| Driving: length of all edges (both directions together) | 350,771 km |
+| Driving: rows of the edge graph / turn restrictions | 6,210,008 / 2,393 |
+
+### The memory and the time of each sub-step (offline)
 
 | How it was measured | |
 |---|---|
 | Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores (2 super, 4 performance, 6 efficiency), 16 GB memory, internal SSD, macOS 27.2 |
-| Program | `duckosm-rust` from duckOSM `main` of 2026-11-11 (after part C), `cargo build --release --features heap-probe` |
-| Area | Kentucky, the Geofabrik file `kentucky-latest.osm.pbf` (148 MB); the driving mode: 2.1 million edges, 0.9 million nodes |
+| Version | **offline only**: the native program `duckosm-rust` from duckOSM `main` of 2026-11-11 (before 3.1 to 3.11 moved to temporary files), `cargo build --release --features heap-probe`. For the online version, see [Online on Kentucky](#online-on-kentucky) |
+| Area | Kentucky, driving mode (see [the area](#the-area-kentucky)) |
 | Command | `duckosm-rust kentucky-latest.osm.pbf -o out --name kentucky -f duckdb -m driving --h3-resolution 8 --timing` |
 | Memory | the live Rust heap after the sub-step: a counting allocator (`heap-probe`) that counts the bytes that the program has from the system. It does not include the memory of DuckDB |
 | Time | the wall time of the sub-step: the middle value of three runs, with no other program working. The three runs had the same memory to 0.1 MiB, and times within 0.02 s |
@@ -201,12 +219,29 @@ later steps) and the edges and the nodes of the mode (1.1 GB). The network files
 the edges. The edges are the largest part, so the next work moves them to storage (see
 [What changes next](#what-changes-next)).
 
+### Online on Kentucky
+
+The online version cannot build Kentucky today. Studio, built with the same engine (duckOSM `main` of 2026-11-11), in
+Chromium on the same Mac mini, with a boundary box around the whole file:
+
+| Area | Result |
+|---|---|
+| Kentucky, driving | **stops** in step 0 (cut to the area), about 5 s after the start, with the WebAssembly error `unreachable` |
+
+The cut keeps everything of the area in the memory of the tab (on Kentucky: 19.6 million nodes and 1.7 million ways,
+with `raw.*`), and a WebAssembly module has at most 4 GB. When an allocation fails there, the module stops with this
+error and gives no message; a fault in the code (a Rust panic) gives its message, and none came. The same page
+builds a small area with this engine, so the engine itself works in WebAssembly. So the memory limit is
+the most probable cause, but the page does not show its memory at the moment of the stop. The next work for the online
+version (the data in OPFS, not in the tab) is for this limit.
+
 ## The limits today
 
 - **Offline:** the network step. It keeps the ways, the coordinates and all edges of a mode in RAM, so the RAM of the
   computer limits the area. A whole country can be more than the RAM: France (driving) needed more than 26 GB.
-- **Online:** the memory of the tab. The cut, the network and DuckDB-Wasm's copy of the files are all in memory, and a
-  WebAssembly module has at most 4 GB. The files in OPFS also count against the browser's storage for the site.
+- **Online:** the memory of the tab. The cut and the network are in memory, and a WebAssembly module has at most 4 GB:
+  Kentucky does not fit (see [Online on Kentucky](#online-on-kentucky)). The Parquet files of the tables are in OPFS,
+  and they count against the browser's storage for the site.
 
 ## What changes next
 
