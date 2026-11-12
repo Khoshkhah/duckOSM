@@ -249,8 +249,11 @@ fn cut<R: Read + Seek + Send>(
         },
         None => return Err("the PBF file is empty".into()),
     };
-    let (mut blocks, mut inside, mut inside_tags, mut ways_at) =
-        (Vec::new(), Vec::new(), Vec::new(), None);
+    // The nodes inside stay one list for each block until pass 1 ends: one list that grows by doubling needs a new
+    // block of twice the size at each step, and WebAssembly memory never moves or shrinks, so its high mark became
+    // several times the data (Kentucky online: 3.8 GB, natively 1.3 GB). Then the total is known.
+    let (mut blocks, mut inside_parts, mut inside_tags, mut ways_at) =
+        (Vec::new(), Vec::<Vec<(i64, Pt)>>::new(), Vec::new(), None);
     'pass1: loop {
         let b = batch(&mut blobs)?;
         if b.is_empty() {
@@ -291,7 +294,9 @@ fn cut<R: Read + Seek + Send>(
         for (nb, mixed, mut pts, mut tags) in found.into_iter().flatten() {
             if nb.first <= nb.last {
                 blocks.push((nb, mixed));
-                inside.append(&mut pts);
+                if !pts.is_empty() {
+                    inside_parts.push(std::mem::take(&mut pts));
+                }
                 inside_tags.append(&mut tags);
             }
             if mixed && sorted {
@@ -300,7 +305,12 @@ fn cut<R: Read + Seek + Send>(
             }
         }
     }
-    let ids: FxHashSet<i64> = inside.iter().map(|n| n.0).collect();
+    let mut inside: Vec<(i64, Pt)> = Vec::with_capacity(inside_parts.iter().map(Vec::len).sum());
+    for part in inside_parts {
+        inside.extend(part); // each list of a block is free after it is moved
+    }
+    let mut ids: FxHashSet<i64> = FxHashSet::with_capacity_and_hasher(inside.len(), Default::default());
+    ids.extend(inside.iter().map(|n| n.0));
     // pass 2: from the first block of ways, or all blocks that are not only nodes
     let only_nodes: FxHashSet<u64> = blocks.iter().filter(|b| !b.1).map(|b| b.0.at.0).collect();
     let blocks: Vec<Range> = blocks.into_iter().map(|b| b.0).collect();
@@ -497,6 +507,7 @@ fn cut<R: Read + Seek + Send>(
         (net, rn)
     })?;
     let mut nodes = inside;
+    nodes.reserve_exact(found.iter().map(|(net, _)| net.len()).sum()); // no doubling of the list of all nodes
     for (mut net, mut rn) in found {
         nodes.append(&mut net);
         if let Some(r) = raw_out.as_mut() {
