@@ -536,13 +536,13 @@ fn fix_ids(fixes: &OsmFixes) -> [duckosm_core::util::FxHashSet<i64>; 3] {
     ids
 }
 
-/// The part of the `raw.*` of an area file that the build needs in memory: the elements that the fixes touch, the route
-/// relations of the bus routes and their member ways (`bus`), and the buildings with their nodes (`faces`).
-fn read_raw_part(open: Open, fixes: &OsmFixes, bus: bool, faces: bool) -> Result<Raw, String> {
+/// The part of the `raw.*` of an area file that the build needs in memory: the elements that the fixes touch (`ids`, with
+/// all their tags), the route relations of the bus routes and their member ways (`bus`, all tags), and the buildings with
+/// their nodes (`faces`, only the tags that the faces read: `building` and `addr:street` of a way, `entrance` of a node).
+fn read_raw_part(open: Open, ids: &[duckosm_core::util::FxHashSet<i64>; 3], bus: bool, faces: bool) -> Result<Raw, String> {
     fn tag<'t>(t: &[(&'t str, &'t str)], k: &str) -> Option<&'t str> {
         t.iter().find(|x| x.0 == k).map(|x| x.1)
     }
-    let ids = fix_ids(fixes);
     let building = |t: &[(&str, &str)]| tag(t, "building").is_some_and(|b| b != "no");
     let relation = |id: i64, t: &[(&str, &str)]| {
         ids[2].contains(&id)
@@ -551,7 +551,10 @@ fn read_raw_part(open: Open, fixes: &OsmFixes, bus: bool, faces: bool) -> Result
     };
     let way = |id: i64, t: &[(&str, &str)]| ids[1].contains(&id) || (faces && building(t));
     let node = |id: i64| ids[0].contains(&id);
-    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes: faces })
+    let tag = |kind: usize, id: i64, key: &str| {
+        ids[kind].contains(&id) || if kind == 0 { key == "entrance" } else { key == "building" || key == "addr:street" }
+    };
+    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes: faces, tag: &tag })
 }
 
 /// The whole build without a file system, for the native build and the browser build (duckosm-wasm): read the
@@ -628,7 +631,7 @@ pub fn run<W: Write + Send>(
             if p.cut_osm {
                 // ponytail: all of the area in memory; the XML is only for small areas
                 let all = |_: i64, _: &[(&str, &str)]| true;
-                let want = Want { relation: &all, way: &all, node: &|_| true, way_nodes: false };
+                let want = Want { relation: &all, way: &all, node: &|_| true, way_nodes: false, tag: &|_, _, _| true };
                 cutfile::write_xml(&duckosm_core::raw::read_part(open, &want)?, &mut file("cut.osm")?)?;
                 log.step("write cut.osm");
             }
@@ -651,8 +654,9 @@ pub fn run<W: Write + Send>(
                 Vec::new()
             };
             if want_raw || bus || p.building_faces {
-                let mut part = read_raw_part(open, fixes, bus, p.building_faces)?;
-                area_read = Some(RawPatch::ids(&part));
+                let touched = fix_ids(fixes);
+                let mut part = read_raw_part(open, &touched, bus, p.building_faces)?;
+                area_read = Some(RawPatch::ids(&part, &touched));
                 part.apply_fixes(fixes);
                 raw = Some(part);
                 log.step("read the raw part");
@@ -1136,8 +1140,9 @@ mod area_raw_tests {
             // the area file
             let (area, _) = duckosm_core::cutstream::cut_to_pbf(|| Ok(Cursor::new(&region[..])), &b, Vec::new()).unwrap();
             let open = || -> Result<Box<dyn Read + Send>, String> { Ok(Box::new(Cursor::new(area.clone()))) };
-            let mut part = read_raw_part(&open, &fixes, true, true).unwrap();
-            let read = RawPatch::ids(&part);
+            let touched = fix_ids(&fixes);
+            let mut part = read_raw_part(&open, &touched, true, true).unwrap();
+            let read = RawPatch::ids(&part, &touched);
             part.apply_fixes(&fixes);
             let mut net: Vec<&Way> = ways.iter().collect();
             net.sort_by_key(|w| w.id);

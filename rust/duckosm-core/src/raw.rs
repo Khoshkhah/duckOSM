@@ -201,6 +201,8 @@ pub struct Want<'a> {
     pub node: &'a (dyn Fn(i64) -> bool + Sync),
     /// Also keep the nodes of the kept ways.
     pub way_nodes: bool,
+    /// The tags to keep of a kept node (0) or way (1), by id and key. A member way of a kept relation keeps all its tags.
+    pub tag: &'a (dyn Fn(usize, i64, &str) -> bool + Sync),
 }
 
 /// A part of the `raw.*` of an area file (the output of step 0, `cutstream`): the elements that `want` keeps, each
@@ -223,7 +225,7 @@ pub fn read_part<R: std::io::Read>(
         fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
             let want = self.want.unwrap();
             if (want.node)(id) || self.keep.is_some_and(|k| k.contains(&id)) {
-                let tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+                let tags = tags.filter(|t| (want.tag)(0, id, t.0)).map(|(k, v)| (k.to_string(), v.to_string())).collect();
                 self.raw.nodes.push(RawNode { id, lon, lat, tags });
             }
         }
@@ -234,8 +236,14 @@ pub fn read_part<R: std::io::Read>(
             refs: &mut dyn Iterator<Item = i64>,
         ) {
             let tags: Vec<(&str, &str)> = tags.collect();
-            if (self.want.unwrap().way)(id, &tags) || self.keep.is_some_and(|k| k.contains(&id)) {
-                let tags = tags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            let want = self.want.unwrap();
+            let member = self.keep.is_some_and(|k| k.contains(&id));
+            if member || (want.way)(id, &tags) {
+                let tags = tags
+                    .iter()
+                    .filter(|t| member || (want.tag)(1, id, t.0))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
                 self.raw.ways.push(RawWay { id, tags, refs: refs.collect() });
             }
         }
@@ -294,10 +302,11 @@ pub fn read_part<R: std::io::Read>(
 
 /// The changes of a build to the `raw.*` of its area file: the OSM fixes, and the tags that the network steps set on
 /// their ways ([`Raw::sync_tags`]). `fixed` is a part of the file ([`read_part`]) after [`Raw::apply_fixes`], with every
-/// element that a fix touches; `read` has the ids of that part before the fixes (nodes, ways, relations). An element of
-/// the file that is in `read` gets its version in `fixed`, or is removed when `fixed` does not have it. The elements of
-/// `fixed` that are not in `read` are new (the new ways of the fixes and their new nodes): they come after the elements
-/// of the file, as their ids are larger than OSM ids.
+/// element that a fix touches, with all its tags; `read` has the ids of these elements that the part had before the fixes
+/// (nodes, ways, relations). An element of the file that is in `read` gets its version in `fixed`, or is removed when
+/// `fixed` does not have it. The other elements of the part can have only some of their tags: the file gives them. The
+/// elements of `fixed` with an id from `NEW_WAY_ID_MIN` are new (the new ways of the fixes and their new nodes): they come
+/// after the elements of the file, as their ids are larger than OSM ids.
 pub struct RawPatch<'a> {
     pub fixed: &'a Raw,
     pub read: [Vec<i64>; 3],
@@ -326,13 +335,13 @@ fn find<'a, T>(read: &[i64], list: &'a [T], id: i64, key: impl Fn(&T) -> i64) ->
 }
 
 impl<'a> RawPatch<'a> {
-    /// `fixed` before the fixes: keep its ids as `read`.
-    pub fn ids(part: &Raw) -> [Vec<i64>; 3] {
-        let mut rels: Vec<i64> = part.relations.iter().map(|r| r.id).collect();
+    /// The ids of the part before the fixes that are in `touched` (the elements that the fixes touch): `read`.
+    pub fn ids(part: &Raw, touched: &[crate::util::FxHashSet<i64>; 3]) -> [Vec<i64>; 3] {
+        let mut rels: Vec<i64> = part.relations.iter().map(|r| r.id).filter(|i| touched[2].contains(i)).collect();
         rels.sort_unstable();
         [
-            part.nodes.iter().map(|n| n.id).collect(),
-            part.ways.iter().map(|w| w.id).collect(),
+            part.nodes.iter().map(|n| n.id).filter(|i| touched[0].contains(i)).collect(),
+            part.ways.iter().map(|w| w.id).filter(|i| touched[1].contains(i)).collect(),
             rels,
         ]
     }
@@ -357,11 +366,11 @@ impl<'a> RawPatch<'a> {
 
     /// The new nodes and the new ways, in the order of their ids.
     pub fn new_nodes(&self) -> impl Iterator<Item = &'a RawNode> + '_ {
-        self.fixed.nodes.iter().filter(|n| self.read[0].binary_search(&n.id).is_err())
+        self.fixed.nodes.iter().filter(|n| n.id >= NEW_WAY_ID_MIN)
     }
 
     pub fn new_ways(&self) -> impl Iterator<Item = &'a RawWay> + '_ {
-        self.fixed.ways.iter().filter(|w| self.read[1].binary_search(&w.id).is_err())
+        self.fixed.ways.iter().filter(|w| w.id >= NEW_WAY_ID_MIN)
     }
 }
 
