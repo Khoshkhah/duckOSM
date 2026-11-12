@@ -120,24 +120,31 @@ The network step runs one time for each mode (driving, walking, cycling). The of
 Rust code. Only the place of the files is different: offline they go to the disk, online they stay as bytes in the
 memory of the tab.
 
+The sub-steps have the numbers 3.1 to 3.13, in the order in which they run. The code (`build_network_junctions` in
+`rust/duckosm-core/src/network.rs`) keeps the older numbers of the Python build, which are not in this order (for
+example, its step 10 runs before its step 9b). The column "Code" in the table below gives them.
+
 ```mermaid
 flowchart TB
     IN("ways, coordinates,<br/>junction set<br/>[memory, to the end]")
-    S0["<b>Mode filter</b><br/>ways of the mode,<br/>OSM fixes,<br/>local junctions"]
-    S1["<b>1. Cut</b><br/>each way into<br/>forward edges"]
-    M1("forward edges<br/>[memory]")
-    S2["<b>2b. Merge chains</b><br/><b>3–4. Split arcs</b><br/>parallel and<br/>antiparallel"]
-    S5["<b>5. Reverse edges</b><br/><b>6. edge_id</b><br/><b>7. Lengths</b>"]
-    M5("all edges and nodes<br/>of the mode<br/>[memory, until written]")
-    S8["<b>8. Nodes</b><br/><b>8b. Path connectors</b><br/><b>8c. Speeds</b>"]
-    S9["<b>9. Private roads</b><br/><b>10. Largest part</b><br/><b>9b. Turn restrictions</b>"]
-    S9b["<b>9b2. Edge graph</b><br/>the moves of each edge,<br/>in edge_id order"]
+    S0["<b>3.1 Mode filter</b><br/>ways of the mode,<br/>OSM fixes,<br/>local junctions"]
+    S1["<b>3.2 Cut</b><br/>each way into<br/>forward edges"]
+    M1[("edges of 3.2 to 3.7<br/>[temporary files,<br/>storage]")]
+    S2["<b>3.3 Merge chains</b><br/><b>3.4 Split arcs</b><br/>parallel and<br/>antiparallel"]
+    S5["<b>3.5 Reverse edges</b><br/><b>3.6 edge_id</b><br/><b>3.7 Lengths</b>"]
+    M5("all edges and nodes<br/>of the mode, read back<br/>[memory, until written]")
+    S8["<b>3.8 Nodes</b><br/><b>3.9 Connectors,</b><br/><b>speeds</b>"]
+    S9["<b>3.10 Private roads</b><br/><b>3.11 Largest part</b><br/><b>3.12 Turn restrictions</b>"]
+    S9b["<b>3.13 Edge graph</b><br/>the moves of each edge,<br/>in edge_id order"]
     W["<b>Write the</b><br/><b>network files</b>"]
     LV["<b>Levels</b><br/>take the edges<br/>(no copy)"]
     F1[("offline:<br/>GeoParquet files<br/>[storage]")]
     F2("online:<br/>Parquet bytes<br/>[tab memory]")
 
-    IN --> S0 --> S1 --> M1 --> S2 --> S5 --> M5
+    IN --> S0 --> S1 --> M1
+    M1 <--> S2
+    M1 <--> S5
+    M1 -- "read back" --> M5
     M5 --> S8 --> S9 --> S9b
     S9b -- "rows, while made" --> W
     M5 -- "after the mode" --> W
@@ -147,8 +154,8 @@ flowchart TB
 
     classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
     classDef mem fill:#ef444433,stroke:#ef4444,stroke-width:2px
-    class F1 disk
-    class IN,M1,M5,F2 mem
+    class F1,M1 disk
+    class IN,M5,F2 mem
 ```
 
 ### The memory and the time of each sub-step
@@ -162,29 +169,30 @@ flowchart TB
 | Memory | the live Rust heap after the sub-step: a counting allocator (`heap-probe`) that counts the bytes that the program has from the system. It does not include the memory of DuckDB |
 | Time | the wall time of the sub-step: the middle value of three runs, with no other program working. The three runs had the same memory to 0.1 MiB, and times within 0.02 s |
 
-| Sub-step | What it reads | What it keeps | Change of live heap | Time |
-|---|---|---|---|---|
-| Mode filter, local junctions | the ways | the ways of the mode, the local junctions | +347 MiB | 0.22 s |
-| 1. Cut | the ways of the mode, the coordinates, the junctions | the forward edges, with their nodes and geometry; the local junctions are free after it | +509 MiB | 0.56 s |
-| 2b. Merge chains | the forward edges at each node | longer edges, the map of the old edge ids | 0 (peak +155 MiB) | 0.08 s |
-| 3–4. Split arcs | the edges with the same way and end nodes | the edges, some cut in two | −142 MiB | 0.19 s |
-| 5. Reverse edges | each two-way edge | a reversed copy of the edge | +362 MiB | 0.18 s |
-| 6. edge_id | each edge, the nodes of its way | the stable `edge_id` and `edge_ref` | 0 | 0.20 s |
-| 7. Lengths | each edge | a corrected length | 0 | 0.12 s |
-| 8. Nodes | the end nodes of all edges | the nodes | +23 MiB | 0.17 s |
-| 8b–8c. Connectors, speeds | each edge (driving: no connectors) | values on the edges | 0 | 0.01 s |
-| 9. Private roads | each edge | two lists of edges | −2 MiB | 0.05 s |
-| 10. Largest part, then the sort by `edge_id` | the end nodes of all edges | fewer edges | −6 MiB | 0.32 s |
-| 9b. Turn restrictions | the restriction relations, the edges of their ways | the restrictions | 0 | 0.05 s |
-| 9b2. Edge graph | the edges that start at each node | nothing: the rows go to the file (the time includes the Parquet encoding) | 0 (peak +303 MiB) | 0.85 s |
-| **The network step** | | | **+1093 MiB** | **3.0 s** |
+| Sub-step | Code | What it reads | What it keeps | Change of live heap | Time |
+|---|---|---|---|---|---|
+| 3.1 Mode filter, local junctions | before 1 | the ways | the ways of the mode, the local junctions | +347 MiB | 0.22 s |
+| 3.2 Cut | 1, 2 | the ways of the mode, the coordinates, the junctions | the forward edges, with their nodes and geometry; the local junctions are free after it | +509 MiB | 0.56 s |
+| 3.3 Merge chains | 2b | the forward edges at each node | longer edges, the map of the old edge ids | 0 (peak +155 MiB) | 0.08 s |
+| 3.4 Split arcs (parallel, antiparallel) | 3, 4 | the edges with the same way and end nodes | the edges, some cut in two | −142 MiB | 0.19 s |
+| 3.5 Reverse edges | 5 | each two-way edge | a reversed copy of the edge | +362 MiB | 0.18 s |
+| 3.6 edge_id | 6 | each edge, the nodes of its way | the stable `edge_id` and `edge_ref` | 0 | 0.20 s |
+| 3.7 Lengths | 7 | each edge | a corrected length | 0 | 0.12 s |
+| 3.8 Nodes | 8 | the end nodes of all edges | the nodes | +23 MiB | 0.17 s |
+| 3.9 Connectors, walked edges, speeds | 8b, 8b2, 8c | each edge (driving: no connectors) | values on the edges | 0 | 0.01 s |
+| 3.10 Private roads | 9 | each edge | two lists of edges | −2 MiB | 0.05 s |
+| 3.11 Largest part, then the sort by `edge_id` | 10 | the end nodes of all edges | fewer edges | −6 MiB | 0.32 s |
+| 3.12 Turn restrictions | 9b | the restriction relations, the edges of their ways | the restrictions | 0 | 0.05 s |
+| 3.13 Edge graph | 9b2 | the edges that start at each node | nothing: the rows go to the file (the time includes the Parquet encoding) | 0 (peak +303 MiB) | 0.85 s |
+| **The network step** | | | | **+1093 MiB** | **3.0 s** |
 
 The other steps of the same build, for comparison (middle values): `raw.*` 1.2 s, the global junctions 0.18 s, writing the
 network files 2.9 s, the levels 1.8 s, the lane profile 3.0 s, writing the `.duckdb` file 3.4 s, the whole build 17.0 s.
 
-Since part B2 of [the network step in limited memory](../design/network_stream.md), steps 1 to 7 keep the edges in
-temporary files, not in memory. The table above shows the memory before B2. Step 8 still makes the list of all edges
-again, so the live heap after step 7 and the peak of the mode do not change yet.
+Since then, sub-steps 3.1 to 3.7 keep the edges in temporary files, not in memory (see
+[the network step in limited memory](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/network_stream.md)).
+The table above shows the memory before that change. Sub-step 3.8 still makes the list of all edges again, so the live
+heap after 3.7 and the peak of the mode do not change yet.
 
 After the mode, 1.5 GB is live on Kentucky: the ways and the coordinates (0.4 GB, kept for the next modes and the
 later steps) and the edges and the nodes of the mode (1.1 GB). The network files are then written, and the levels take
