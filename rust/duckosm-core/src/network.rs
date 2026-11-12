@@ -569,19 +569,18 @@ pub fn build_network_junctions(
 
     crate::util::step("start of the sort of the edges into the order of step 8");
     // Step 8 and later still take a list of all edges (part B3 changes them), in the old order: the reverse edges, then
-    // the forward edges, each in the order of `Pos`.
-    let done = spill::sort(
-        done.finish().map_err(io)?,
-        &codec,
-        |f: &Fwd| (!f.e.is_reverse, f.pos),
-        SORT_BUDGET,
-        store,
-    )
-    .map_err(io)?;
-    let mut edges: Vec<Edge> = Vec::with_capacity(done.len);
+    // the forward edges, each in the order of `Pos`. They are all in memory after this, so the sort is in memory too.
+    let done = done.finish().map_err(io)?;
+    let mut all: Vec<Fwd> = Vec::with_capacity(done.len);
     for f in done.read(&codec).map_err(io)? {
-        edges.push(f.map_err(io)?.e);
+        all.push(f.map_err(io)?);
     }
+    all.sort_unstable_by_key(|f| (!f.e.is_reverse, f.pos)); // the keys are unique
+    // collected in place: the block of `all` stays, with free places at its end (a `Fwd` is larger than an `Edge`)
+    let mut edges: Vec<Edge> = all.into_iter().map(|f| f.e).collect();
+    edges.shrink_to_fit();
+    drop(codec); // its table of the shared tags of all ways
+
     crate::util::step("start of step 8: The nodes");
     // 8. The nodes.
     let used: FxHashSet<i64> = edges.iter().flat_map(|e| [e.source, e.target]).collect();

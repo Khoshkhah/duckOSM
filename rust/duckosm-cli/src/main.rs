@@ -248,16 +248,31 @@ mod heap {
     #[global_allocator]
     static A: Counting = Counting;
 
-    /// Print the live heap after the step `name` and its peak during the step, then start a new peak.
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    static LAST_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// Print the live heap after the step `name`, its peak during the step and the time of the step, then start a new
+    /// peak. A network sub-step reports at its start: its line has the peak and the time of the part before it.
     pub fn report(name: &str) {
         let mib = |b: usize| b as f64 / 1048576.0;
         let live = LIVE.load(Relaxed);
-        eprintln!("  heap {name:<30} live {:>8.1} MiB   peak {:>8.1} MiB", mib(live), mib(PEAK.load(Relaxed)));
+        let now = START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_nanos() as u64;
+        let secs = (now - LAST_NS.swap(now, Relaxed)) as f64 / 1e9;
+        eprintln!(
+            "  heap {name:<30} live {:>8.1} MiB   peak {:>8.1} MiB   {secs:>6.3} s",
+            mib(live),
+            mib(PEAK.load(Relaxed))
+        );
         PEAK.store(live, Relaxed);
     }
 }
 
 fn main() {
+    #[cfg(feature = "heap-probe")]
+    heap::report("start");
     #[cfg(feature = "heap-probe")]
     duckosm_build::set_progress(Some(Box::new(heap::report)));
     #[cfg(feature = "heap-probe")]

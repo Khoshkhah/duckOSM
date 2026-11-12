@@ -197,8 +197,9 @@ impl Rows {
     }
 }
 
-/// The rows of `rows` in the order of `key` (stable). Each sorted block holds rows of at most `budget` bytes (the
-/// bytes in the file; in memory a row also has its key and about 32 bytes more).
+/// The rows of `rows` in the order of `key` (stable). Each sorted block holds rows of at most about `budget` bytes of
+/// memory: for each row its bytes, its key and its place in the block. (A small row uses more memory than its bytes in
+/// the file: the end of an edge has 21 bytes in the file and about 70 in a block.)
 pub fn sort<T, K: Ord, C: Codec<T>>(
     rows: Rows,
     codec: &C,
@@ -222,7 +223,7 @@ pub fn sort<T, K: Ord, C: Codec<T>>(
     };
     let mut buf = Vec::new();
     while raw.next_into(&mut buf)? {
-        size += buf.len() + 4;
+        size += buf.capacity() + std::mem::size_of::<(K, Vec<u8>)>();
         block.push((key(&codec.get(&mut &buf[..])), std::mem::take(&mut buf)));
         if size >= budget {
             flush(&mut block, &mut runs)?;
