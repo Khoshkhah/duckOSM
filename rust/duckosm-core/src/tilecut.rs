@@ -78,14 +78,8 @@ struct Book {
     last: Option<(i64, i64, u32)>,
     open: bool,
     runs: usize,
-    /// the pages in a file instead of `bytes` (to measure the book on disk)
-    file: Option<std::fs::File>,
 }
 
-thread_local! {
-    /// The last page that this thread read from a book on disk: (book, page, bytes).
-    static PAGE_CACHE: std::cell::RefCell<(usize, usize, Vec<u8>)> = const { std::cell::RefCell::new((0, usize::MAX, Vec::new())) };
-}
 
 const PAGE: usize = 32;
 
@@ -151,41 +145,12 @@ impl Book {
         }
         self.bytes.shrink_to_fit();
         self.pages.shrink_to_fit();
-        if std::env::var_os("DUCKOSM_BOOK_ON_DISK").is_some() {
-            // ponytail: a test of the book on disk, to compare the time
-            let path = std::env::temp_dir().join(format!("duckosm-book-{}-{}", std::process::id(), self as *const _ as usize));
-            std::fs::write(&path, &self.bytes).expect("the book file");
-            self.file = Some(std::fs::File::open(&path).expect("the book file"));
-            let _ = std::fs::remove_file(&path);
-            self.bytes = Vec::new();
-        }
     }
 
     /// The bytes of page `i`.
     fn page_bytes<T>(&self, i: usize, f: impl FnOnce(&[u8]) -> T) -> T {
-        let end = self.pages.get(i + 1).map_or(self.size_bytes(), |p| p.1);
-        let start = self.pages[i].1;
-        match &self.file {
-            None => f(&self.bytes[start..end]),
-            Some(file) => PAGE_CACHE.with(|c| {
-                let mut c = c.borrow_mut();
-                let key = self as *const _ as usize;
-                if c.0 != key || c.1 != i {
-                    c.2.resize(end - start, 0);
-                    std::os::unix::fs::FileExt::read_exact_at(file, &mut c.2, start as u64).expect("a page of the book");
-                    c.0 = key;
-                    c.1 = i;
-                }
-                f(&c.2)
-            }),
-        }
-    }
-
-    fn size_bytes(&self) -> usize {
-        match &self.file {
-            None => self.bytes.len(),
-            Some(f) => f.metadata().map_or(0, |m| m.len() as usize),
-        }
+        let end = self.pages.get(i + 1).map_or(self.bytes.len(), |p| p.1);
+        f(&self.bytes[self.pages[i].1..end])
     }
 
     /// Scan the runs from the page that can hold `id`: `f(first, last, tile)` gives Some(answer) to stop, or None to go on.
@@ -246,7 +211,7 @@ impl Book {
     }
 
     fn size(&self) -> usize {
-        self.size_bytes() + self.pages.len() * 16
+        self.bytes.len() + self.pages.len() * 16
     }
 }
 
