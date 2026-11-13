@@ -630,3 +630,85 @@ mod tests {
         std::fs::remove_dir(&dir).unwrap();
     }
 }
+
+/// A join on disk of the nodes of ways with the coordinates of the nodes (docs/concepts/memory-by-step.md): the nodes of
+/// the ways and the coordinates, both sorted by node id, give the points of each way in the order of the ways. The memory
+/// is that of the sorts. The rows are fixed bytes with the sort key at the start.
+pub mod join {
+    use super::{sort_bytes, Codec, Rows, Store, Writer};
+    use std::io;
+
+    fn i64_at(b: &[u8], at: usize) -> i64 {
+        i64::from_le_bytes(b[at..at + 8].try_into().expect("8 bytes"))
+    }
+    fn f64_at(b: &[u8], at: usize) -> f64 {
+        f64::from_bits(u64::from_le_bytes(b[at..at + 8].try_into().expect("8 bytes")))
+    }
+    fn u32_at(b: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(b[at..at + 4].try_into().expect("4 bytes"))
+    }
+
+    /// A node of a way: (node id, number of the way, place in the way).
+    pub struct Request;
+    impl Codec<(i64, u32, u32)> for Request {
+        fn put(&self, r: &(i64, u32, u32), out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.0.to_le_bytes());
+            out.extend_from_slice(&r.1.to_le_bytes());
+            out.extend_from_slice(&r.2.to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> (i64, u32, u32) {
+            (i64_at(b, 0), u32_at(b, 8), u32_at(b, 12))
+        }
+    }
+
+    /// A node and its coordinates: (id, lon, lat). The coordinates keep their bits.
+    pub struct Position;
+    impl Codec<(i64, f64, f64)> for Position {
+        fn put(&self, r: &(i64, f64, f64), out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.0.to_le_bytes());
+            out.extend_from_slice(&r.1.to_bits().to_le_bytes());
+            out.extend_from_slice(&r.2.to_bits().to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> (i64, f64, f64) {
+            (i64_at(b, 0), f64_at(b, 8), f64_at(b, 16))
+        }
+    }
+
+    /// A point of a way: (number of the way, place in the way, lon, lat).
+    pub struct Point;
+    impl Codec<(u32, u32, f64, f64)> for Point {
+        fn put(&self, r: &(u32, u32, f64, f64), out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.0.to_le_bytes());
+            out.extend_from_slice(&r.1.to_le_bytes());
+            out.extend_from_slice(&r.2.to_bits().to_le_bytes());
+            out.extend_from_slice(&r.3.to_bits().to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> (u32, u32, f64, f64) {
+            (u32_at(b, 0), u32_at(b, 4), f64_at(b, 8), f64_at(b, 16))
+        }
+    }
+
+    /// The node id at the start of a request or a position.
+    pub fn node_id(b: &[u8]) -> i64 {
+        i64_at(b, 0)
+    }
+
+    /// The points of the ways of `requests` (in any order) from `positions` (sorted by node id, read again later), sorted by
+    /// the number of the way and the place. A node with no coordinates gives no point.
+    pub fn points(requests: Rows, positions: &mut Rows, budget: usize, store: &dyn Store) -> io::Result<Rows> {
+        let requests = sort_bytes(requests, node_id, budget, store)?;
+        let mut points = Writer::new(store)?;
+        let mut pos = positions.read_ref(&Position)?.peekable();
+        for r in requests.read(&Request)? {
+            let (node, way, place) = r?;
+            while pos.next_if(|p| p.as_ref().is_ok_and(|p| p.0 < node)).is_some() {}
+            match pos.peek() {
+                Some(Ok(p)) if p.0 == node => points.push(&Point, &(way, place, p.1, p.2))?,
+                Some(Err(_)) => return Err(pos.next().expect("peeked").expect_err("an error")),
+                _ => {}
+            }
+        }
+        drop(pos);
+        sort_bytes(points.finish()?, |b| (u32_at(b, 0), u32_at(b, 4)), budget, store)
+    }
+}

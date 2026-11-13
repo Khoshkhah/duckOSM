@@ -135,6 +135,16 @@ impl Coords {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
+
+    /// The nodes and their coordinates in a temporary file, sorted by id ([`spill::join::Position`]): the network step reads
+    /// them from there ([`build_network_files`]), so the coordinates need not stay in memory during it.
+    pub fn positions_file(&self, store: &dyn Store) -> std::io::Result<Rows> {
+        let mut w = Writer::new(store)?;
+        for &(id, (lon, lat)) in &self.nodes {
+            w.push(&spill::join::Position, &(id, lon, lat))?;
+        }
+        w.finish()
+    }
 }
 
 #[cfg(test)]
@@ -503,7 +513,9 @@ pub fn build_network_junctions(
     gj: &FxHashMap<i64, bool>,
     graph_rows: Option<GraphRows>,
 ) -> Result<Network, String> {
-    build_network_files(all_ways, coords, mode, opts, fixes, relations, gj, graph_rows, None)?.into_network()
+    let store = spill::temp_store();
+    let mut positions = coords.positions_file(&*store).map_err(io)?;
+    build_network_files(all_ways, &mut positions, mode, opts, fixes, relations, gj, graph_rows, None)?.into_network()
 }
 
 /// [`build_network_junctions`] with the edges and the private edges in temporary files, sorted by `edge_id`
@@ -511,7 +523,7 @@ pub fn build_network_junctions(
 #[allow(clippy::too_many_arguments)]
 pub fn build_network_files(
     all_ways: &[Way],
-    coords: &Coords,
+    positions: &mut Rows,
     mode: Mode,
     opts: &Options,
     fixes: &OsmFixes,
@@ -565,7 +577,31 @@ pub fn build_network_files(
     let mut virtual_nodes: Vec<Node> = Vec::new();
     let mut made: Vec<Fwd> = Vec::new();
     let mut n_cut = 0u32;
+    // the coordinates of the nodes of each mode way, from a join on disk with `positions` (the coordinates of all nodes of the
+    // ways were in memory during the whole network step: Kentucky 198 MiB)
+    let points = {
+        let mut requests = Writer::new(store).map_err(io)?;
+        for (wi, w) in mw.iter().enumerate() {
+            for (k, &n) in w.refs.iter().enumerate() {
+                requests.push(&spill::join::Request, &(n, wi as u32, k as u32)).map_err(io)?;
+            }
+        }
+        spill::join::points(requests.finish().map_err(io)?, positions, SORT_BUDGET, store).map_err(io)?
+    };
+    let mut points = points.read(&spill::join::Point).map_err(io)?.peekable();
+    let mut way_pts: Vec<Option<Pt>> = Vec::new();
+    // the nodes of the self-loops that the cut splits: their halves have a line that does not follow their nodes (2b reads them)
+    let mut loop_pts: FxHashMap<i64, Pt> = FxHashMap::default();
     for (wi, w) in mw.iter().enumerate() {
+        way_pts.clear();
+        way_pts.resize(w.refs.len(), None);
+        while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == wi as u32)) {
+            let p = p.map_err(io)?;
+            way_pts[p.1 as usize] = Some((p.2, p.3));
+        }
+        if let Some(Err(_)) = points.peek() {
+            return Err(io(points.next().expect("peeked").expect_err("an error")));
+        }
         let is_road = !NON_ROAD.contains(&w.attrs.highway.as_str());
         let split: Vec<bool> = w
             .refs
@@ -589,7 +625,7 @@ pub fn build_network_files(
             let mut refs = Vec::with_capacity(g.len());
             let mut geometry = Vec::with_capacity(g.len());
             for &i in &g {
-                if let Some(&p) = coords.get(&w.refs[i]) {
+                if let Some(p) = way_pts[i] {
                     refs.push(w.refs[i]);
                     geometry.push(p);
                 }
@@ -626,6 +662,9 @@ pub fn build_network_files(
                 way: wi,
                 pos: Pos::default(),
             };
+            if f.e.source == f.e.target {
+                loop_pts.extend(f.e.refs.iter().copied().zip(f.e.geometry.iter().copied()));
+            }
             if push_split_loop(&mut made, f, &mut virtual_nodes) {
                 stats.self_loops_split += 1;
             }
@@ -663,8 +702,9 @@ pub fn build_network_files(
     // 2b. Merge the chains of edges that are one road.
     let mut edge_id_map: Vec<MapRow> = Vec::new();
     let fwd = if opts.merge_segments {
+        let virtual_ids: crate::util::FxHashSet<i64> = virtual_nodes.iter().map(|v| v.node_id).collect();
         let (merged, map, n_chains, n_pieces) =
-            merge_chains(cut, ends, &mw, gj, coords, &codec, store).map_err(io)?;
+            merge_chains(cut, ends, &mw, gj, (&loop_pts, &virtual_ids), &codec, store).map_err(io)?;
         edge_id_map = map;
         stats.merged_chains = n_chains;
         stats.merged_pieces = n_pieces;
@@ -721,6 +761,8 @@ pub fn build_network_files(
     // `virtual_nodes` is the old order).
     let mut nodes: Vec<Node> = Vec::new();
     let mut last = None;
+    // the end nodes come sorted by id, as the positions: one read of the positions gives their coordinates
+    let mut positions_read = positions.read_ref(&spill::join::Position).map_err(io)?.peekable();
     for n in spill::sort_bytes(node_ends, |b| get_i64(&mut &b[..]), SORT_BUDGET, store).map_err(io)?.read(&IdCodec).map_err(io)? {
         let n = n.map_err(io)?;
         if last == Some(n) {
@@ -728,8 +770,11 @@ pub fn build_network_files(
         }
         last = Some(n);
         if n > 0 {
-            if let Some(&(lon, lat)) = coords.get(&n) {
-                nodes.push(Node { node_id: n, lon, lat });
+            while positions_read.next_if(|p| p.as_ref().is_ok_and(|p| p.0 < n)).is_some() {}
+            match positions_read.peek() {
+                Some(Ok(p)) if p.0 == n => nodes.push(Node { node_id: n, lon: p.1, lat: p.2 }),
+                Some(Err(_)) => return Err(io(positions_read.next().expect("peeked").expect_err("an error"))),
+                _ => {}
             }
         }
     }
@@ -1315,7 +1360,7 @@ fn merge_chains(
     ends: Rows,
     mw: &[ModeWay],
     gj: &FxHashMap<i64, bool>,
-    coords: &Coords,
+    loops: Loops,
     codec: &FwdCodec,
     store: &dyn Store,
 ) -> std::io::Result<(Rows, Vec<MapRow>, usize, usize)> {
@@ -1360,7 +1405,7 @@ fn merge_chains(
     let mut map: Vec<(MapRow, Pos, usize)> = Vec::new();
     let (mut n_chains, mut n_pieces) = (0, 0);
     for_groups(in_sets.read(codec)?, key, |g| {
-        let (merged, pieces) = merge_set(g, &at, coords, &mut map);
+        let (merged, pieces) = merge_set(g, &at, loops, &mut map);
         n_chains += merged.iter().filter(|f| f.pos.group == 0).count();
         n_pieces += pieces;
         for f in &merged {
@@ -1381,12 +1426,25 @@ fn merge_chains(
 /// Merge the chains of one set of forward edges (in the order of the cut). Returns the merged chains and the edges that
 /// are in no chain, and the number of pieces. The rows of `edge_id_map` go to `map`, with the `Pos` of their chain and
 /// their order in it.
+/// The nodes of the self-loops that the cut split, with their coordinates, and the ids of the virtual nodes of the split.
+type Loops<'a> = (&'a FxHashMap<i64, Pt>, &'a crate::util::FxHashSet<i64>);
+
 fn merge_set(
     set: Vec<Fwd>,
     at: &[u8],
-    coords: &Coords,
+    (loop_pts, virtual_ids): Loops,
     map: &mut Vec<(MapRow, Pos, usize)>,
 ) -> (Vec<Fwd>, usize) {
+    // the coordinates of the nodes of the set, from the lines of its edges: the line of an edge of the cut has one point for
+    // each node. The halves of a split self-loop (they have a virtual node) do not, so their nodes come from `loop_pts`; a
+    // virtual node has no coordinates, as before.
+    let mut pts: FxHashMap<i64, Pt> = FxHashMap::default();
+    for f in &set {
+        if f.e.refs.len() == f.e.geometry.len() && !f.e.refs.iter().any(|n| virtual_ids.contains(n)) {
+            pts.extend(f.e.refs.iter().copied().zip(f.e.geometry.iter().copied()));
+        }
+    }
+    let position = |n: &i64| pts.get(n).or_else(|| loop_pts.get(n)).copied();
     let end_at = |f: &Fwd, src: bool| at[f.pos.first as usize] & if src { SRC } else { TGT } != 0;
     // the two half-edges of each edge at a contraction node, in the order of the edges, the source first
     let mut inc: FxHashMap<i64, Vec<(usize, bool)>> = FxHashMap::default();
@@ -1474,7 +1532,7 @@ fn merge_set(
         let geometry: Vec<Pt> = c
             .refs
             .iter()
-            .filter_map(|n| coords.get(n).copied())
+            .filter_map(position)
             .collect();
         if geometry.len() < 2 {
             continue;
