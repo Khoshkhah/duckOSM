@@ -8,7 +8,7 @@ use duckosm_core::fixes::OsmFixes;
 use duckosm_core::geom::Pt;
 use duckosm_core::lanes::{self, LaneEdges};
 use duckosm_core::model::{Node, Way};
-use duckosm_core::network::{Coords, Options};
+use duckosm_core::network::Options;
 use duckosm_parquet::{self as pq, Metadata, Prop, Transfer};
 use serde_json::Value;
 use std::io::Write;
@@ -19,8 +19,8 @@ pub struct Area<'a> {
     pub boundary: Option<&'a str>,
     /// The ways as read (after the fixes).
     pub ways: &'a [Way],
-    /// The coordinates of the nodes: the box of the area when there is no boundary.
-    pub coords: &'a Coords,
+    /// The box of the coordinates of all nodes, `[west, south, east, north]`: the box of the area when there is no boundary.
+    pub nodes_box: [f64; 4],
     /// The nodes of each mode that was built: the transfers and the time zone.
     pub nodes: &'a [(Mode, Vec<Node>)],
     /// `network::global_junctions(ways)`, computed one time for the modes (empty when `opts.global_junctions` is off).
@@ -131,12 +131,11 @@ fn boundary(text: &str) -> Result<(Vec<(String, Prop)>, Vec<Vec<Vec<Pt>>>, bool,
 /// `main.visualization_metadata` (duckOSM importer.py): the center and the zoom of the box of the boundary
 /// (else of all nodes), and the time zone at the node nearest the median of the nodes of a mode.
 fn metadata(a: &Area, shape: Option<&(Vec<Vec<Vec<Pt>>>, String)>) -> Metadata {
-    let pts: Vec<Pt> = match shape {
-        Some((polys, _)) => polys.iter().flatten().flatten().copied().collect(),
-        None => a.coords.iter().map(|(_, p)| *p).collect(),
+    let [mut w, mut s, mut e, mut n] = match shape {
+        Some(_) => [f64::MAX, f64::MAX, f64::MIN, f64::MIN],
+        None => a.nodes_box,
     };
-    let (mut w, mut s, mut e, mut n) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for p in &pts {
+    for p in shape.iter().flat_map(|(polys, _)| polys.iter().flatten().flatten()) {
         (w, s, e, n) = (w.min(p.0), s.min(p.1), e.max(p.0), n.max(p.1));
     }
     let width = e - w;

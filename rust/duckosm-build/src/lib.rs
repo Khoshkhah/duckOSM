@@ -780,6 +780,16 @@ pub fn run<W: Write + Send>(
         Default::default()
     };
     log.step("global junctions");
+    // the coordinates go to a temporary file, sorted by id: the network reads them there (a join on disk), and the area tables
+    // need only their box. The coordinates of all nodes of the ways stayed in memory to the area tables (Kentucky 198 MiB).
+    let mut positions = {
+        let store = duckosm_core::spill::temp_store();
+        coords.positions_file(&*store).map_err(|e| format!("a temporary file of the coordinates: {e}"))?
+    };
+    let nodes_box = coords.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |[w, s, e, n], (_, p)| {
+        [w.min(p.0), s.min(p.1), e.max(p.0), n.max(p.1)]
+    });
+    drop(coords);
     for mode in &p.modes {
         let n = mode.name();
         // the rows of edge_graph go to their file while the network step makes them (docs/design/network_stream.md, part C)
@@ -795,7 +805,7 @@ pub fn run<W: Write + Send>(
         };
         let mut net = build_network_files(
             &ways,
-            &coords,
+            &mut positions,
             *mode,
             opts,
             fixes,
@@ -862,7 +872,7 @@ pub fn run<W: Write + Send>(
     }
     // each step after the network reads its data when it runs, and each part goes after the last step that reads it: the area
     // tables first, so that the node positions, the junctions and the nodes go before the levels
-    drop(relations);
+    drop((relations, positions));
     let built_at = p.built_at.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -929,7 +939,7 @@ pub fn run<W: Write + Send>(
     let area = Area {
         boundary,
         ways: &ways,
-        coords: &coords,
+        nodes_box,
         nodes: &mode_nodes,
         junctions: &junctions,
         opts,
@@ -939,7 +949,7 @@ pub fn run<W: Write + Send>(
     write_area_tables(&area, &mut file)?;
     log.step("write the area tables");
     // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
-    drop((mode_nodes, coords, junctions));
+    drop((mode_nodes, junctions));
     if p.levels != LevelsMethod::None {
         let mut level_edges = LevelEdges::default();
         level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
