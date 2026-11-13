@@ -64,7 +64,7 @@ is in memory that the step does not read.
 
 The build writes a mark at the start of each substep; each line is the part that ends at that mark. During all substeps
 the build holds 1,292 MiB from the steps before (the table above) and the mode ways (318 MiB). The edges are in spill files
-on disk (stages B2 to B4 of [network_stream.md](network_stream.md)).
+on disk (stages B2 to B4 of [network_stream.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/network_stream.md)).
 
 | Part that ends at the mark | Live at the end | Peak |
 |---|---|---|

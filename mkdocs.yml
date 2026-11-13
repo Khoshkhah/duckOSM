@@ -155,6 +155,7 @@ nav:
   - Concepts:
       - How a build works: concepts/build.md
       - Offline and online builds: concepts/offline-online.md
+      - Memory at each step: concepts/memory-by-step.md
       - The ground reference: concepts/ground-reference.md
       - The terrain of an area: concepts/terrain.md
       - The Rust engine: concepts/rust-engine.md
