@@ -104,6 +104,8 @@ flowchart TB
 
 ## Each step: where the data is and how it is handled
 
+What each step holds in memory, and which part of it the step reads: [Memory at each step](memory-by-step.md).
+
 | Step | Offline | Online |
 |---|---|---|
 | **The input** | **Storage:** the `.osm.pbf` file on the disk. | **Storage:** the region file in OPFS. It comes one time through the relay, and the next area in the same region needs no download. |
