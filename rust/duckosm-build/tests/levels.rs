@@ -2,7 +2,8 @@
 //! summaries were checked against roadstyle 0.24.2 with `tools/compare_levels.py` on 2026-10-22: the tags rule
 //! equals roadstyle's on every row; the solve has the values of roadstyle's stages, and 13,288 of the 13,298 rows
 //! equal to roadstyle's. With the crossing rule (roadstyle-levels f0a161b) the summary has five stages; 7,360 of the
-//! 13,298 rows differ from the earlier values in at least one column.
+//! 13,298 rows differ from the earlier values in at least one column. With the local repair (roadstyle-levels 30c1f39, the tags rule
+//! and then each group of broken rules alone) 15 order wishes are not kept, not 18; the steps by which they are broken are 47, not 43.
 
 use duckosm_build::{build, LevelsMethod, NetworkMode, Params};
 use std::path::PathBuf;
@@ -15,8 +16,8 @@ fn monaco_levels() {
         (LevelsMethod::Tags, "levels (tags): 13298 edges, 6830 roads"),
         (
             LevelsMethod::Solve,
-            "levels (solve): 13298 edges, 6830 roads, 0 stack pairs given up, 18 order wishes not kept \
-             (best values of the stages: [0, 4, 43, 0, 6561080])",
+            "levels (solve): 13298 edges, 6830 roads, 0 stack pairs given up, 15 order wishes not kept \
+             (best values of the stages: [0, 4, 47, 0, 6563100])",
         ),
     ] {
         let mut p = Params {
