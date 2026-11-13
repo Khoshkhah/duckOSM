@@ -64,6 +64,13 @@ fn props(geometry_type: &str) -> WriterProperties {
 
 pub(crate) fn line_wkb(pts: &[Pt]) -> Vec<u8> {
     let mut b = Vec::with_capacity(9 + pts.len() * 16);
+    line_wkb_into(pts, &mut b);
+    b
+}
+
+/// [`line_wkb`] into `b` (emptied first): a writer of many lines keeps one buffer.
+pub(crate) fn line_wkb_into(pts: &[Pt], b: &mut Vec<u8>) {
+    b.clear();
     b.push(1u8); // little endian
     b.extend_from_slice(&2u32.to_le_bytes()); // LineString
     b.extend_from_slice(&(pts.len() as u32).to_le_bytes());
@@ -71,7 +78,6 @@ pub(crate) fn line_wkb(pts: &[Pt]) -> Vec<u8> {
         b.extend_from_slice(&p.0.to_le_bytes());
         b.extend_from_slice(&p.1.to_le_bytes());
     }
-    b
 }
 
 fn point_wkb(p: Pt) -> Vec<u8> {
