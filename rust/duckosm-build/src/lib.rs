@@ -978,10 +978,13 @@ pub fn run<W: Write + Send>(
             }
         }
         drop(near);
+        // the rings and the entrances are all that the faces need of the raw buildings: these go before the faces are made
+        let rings = building_faces::building_rings(&r.ways, &r.nodes, &r.relations);
+        drop(read);
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
         let (mut faces, mut buildings, mut last) = (0, 0, None);
-        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, streets, &fixes.face_edits, |part| {
+        building_faces::building_faces_of(rings, streets, &fixes.face_edits, |part| {
             faces += part.len();
             for f in &part {
                 buildings += usize::from(last != Some(f.building_id));
