@@ -855,51 +855,14 @@ pub fn run<W: Write + Send>(
         mode_nodes.push((*mode, net.nodes));
         mode_files.push((*mode, files));
     }
-    // each step after the network reads its data when it runs, and each part goes after the last step that reads it
+    // each step after the network reads its data when it runs, and each part goes after the last step that reads it: the area
+    // tables first, so that the node positions, the junctions and the nodes go before the levels
     drop(relations);
     let built_at = p.built_at.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as i64)
     });
-    if p.levels != LevelsMethod::None {
-        let mut level_edges = LevelEdges::default();
-        level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
-        for (mode, files) in &mut mode_files {
-            for private in [false, true] {
-                let mut err = None;
-                level_edges.add(*mode, private, edges_of(files, private, &mut err)?);
-                err.map_or(Ok(()), Err)?;
-            }
-        }
-        sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
-        if sum.levels.is_some() {
-            log.step("levels");
-        }
-    }
-    {
-        let mut lane_edges = LaneEdges::default();
-        for (mode, files) in &mut mode_files {
-            if matches!(*mode, Mode::Driving | Mode::Cycling) {
-                // the private edges only for driving (its bus lanes); the files are read one after the other
-                let mut private_edges = Vec::new();
-                if *mode == Mode::Driving {
-                    each_edge(files, true, |e| {
-                        if e.access.as_deref() == Some("bus") {
-                            private_edges.push(e)
-                        }
-                    })?;
-                }
-                let mut err = None;
-                lane_edges.add_edges(*mode, edges_of(files, false, &mut err)?, private_edges.into_iter());
-                err.map_or(Ok(()), Err)?;
-            }
-        }
-        sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
-        if sum.lanes.is_some() {
-            log.step("lane profile");
-        }
-    }
     if let Some(d) = &dem {
         // the ground id: the SHA-256 of the bytes of the DEM file
         let mut hash = Sha256::new();
@@ -972,6 +935,44 @@ pub fn run<W: Write + Send>(
     log.step("write the area tables");
     // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
     drop((mode_nodes, coords, junctions));
+    if p.levels != LevelsMethod::None {
+        let mut level_edges = LevelEdges::default();
+        level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
+        for (mode, files) in &mut mode_files {
+            for private in [false, true] {
+                let mut err = None;
+                level_edges.add(*mode, private, edges_of(files, private, &mut err)?);
+                err.map_or(Ok(()), Err)?;
+            }
+        }
+        sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+        if sum.levels.is_some() {
+            log.step("levels");
+        }
+    }
+    {
+        let mut lane_edges = LaneEdges::default();
+        for (mode, files) in &mut mode_files {
+            if matches!(*mode, Mode::Driving | Mode::Cycling) {
+                // the private edges only for driving (its bus lanes); the files are read one after the other
+                let mut private_edges = Vec::new();
+                if *mode == Mode::Driving {
+                    each_edge(files, true, |e| {
+                        if e.access.as_deref() == Some("bus") {
+                            private_edges.push(e)
+                        }
+                    })?;
+                }
+                let mut err = None;
+                lane_edges.add_edges(*mode, edges_of(files, false, &mut err)?, private_edges.into_iter());
+                err.map_or(Ok(()), Err)?;
+            }
+        }
+        sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
+        if sum.lanes.is_some() {
+            log.step("lane profile");
+        }
+    }
     if p.building_faces {
         // the buildings with the fixes, read from the area file here (OSM JSON has its whole raw part in memory); the grid near
         // them; the street segments near them, from the edges of the spill files
