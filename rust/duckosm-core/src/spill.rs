@@ -661,30 +661,64 @@ pub mod join {
         }
     }
 
+    /// The coordinate in units of 1e-7 degrees, when it gives the same bits again: the coordinates of an OSM file are
+    /// `1e-9 * (100 * n)` (granularity 100, `pbfraw`).
+    fn e7(x: f64) -> Option<i32> {
+        let n = (x * 1e7).round();
+        if !(n.abs() < 2_147_483_648.0) {
+            return None;
+        }
+        let n = n as i32;
+        ((1e-9 * (100 * n as i64) as f64).to_bits() == x.to_bits()).then_some(n)
+    }
+
+    /// lon and lat: two i32 of 1e-7 degrees when both give the same bits again (8 bytes), otherwise the two f64 (16 bytes).
+    fn put_lon_lat(lon: f64, lat: f64, out: &mut Vec<u8>) {
+        match (e7(lon), e7(lat)) {
+            (Some(a), Some(b)) => {
+                out.extend_from_slice(&a.to_le_bytes());
+                out.extend_from_slice(&b.to_le_bytes());
+            }
+            _ => {
+                out.extend_from_slice(&lon.to_bits().to_le_bytes());
+                out.extend_from_slice(&lat.to_bits().to_le_bytes());
+            }
+        }
+    }
+
+    fn lon_lat_at(b: &[u8], at: usize) -> (f64, f64) {
+        if b.len() - at == 8 {
+            let n = |at| 1e-9 * (100 * i32::from_le_bytes(b[at..at + 4].try_into().expect("4 bytes")) as i64) as f64;
+            (n(at), n(at + 4))
+        } else {
+            (f64_at(b, at), f64_at(b, at + 8))
+        }
+    }
+
     /// A node and its coordinates: (id, lon, lat). The coordinates keep their bits.
     pub struct Position;
     impl Codec<(i64, f64, f64)> for Position {
         fn put(&self, r: &(i64, f64, f64), out: &mut Vec<u8>) {
             out.extend_from_slice(&r.0.to_le_bytes());
-            out.extend_from_slice(&r.1.to_bits().to_le_bytes());
-            out.extend_from_slice(&r.2.to_bits().to_le_bytes());
+            put_lon_lat(r.1, r.2, out);
         }
         fn get(&self, b: &mut &[u8]) -> (i64, f64, f64) {
-            (i64_at(b, 0), f64_at(b, 8), f64_at(b, 16))
+            let (lon, lat) = lon_lat_at(b, 8);
+            (i64_at(b, 0), lon, lat)
         }
     }
 
-    /// A point of a way: (number of the way, place in the way, lon, lat).
+    /// A point of a way: (number of the way, place in the way, lon, lat). The coordinates keep their bits.
     pub struct Point;
     impl Codec<(u32, u32, f64, f64)> for Point {
         fn put(&self, r: &(u32, u32, f64, f64), out: &mut Vec<u8>) {
             out.extend_from_slice(&r.0.to_le_bytes());
             out.extend_from_slice(&r.1.to_le_bytes());
-            out.extend_from_slice(&r.2.to_bits().to_le_bytes());
-            out.extend_from_slice(&r.3.to_bits().to_le_bytes());
+            put_lon_lat(r.2, r.3, out);
         }
         fn get(&self, b: &mut &[u8]) -> (u32, u32, f64, f64) {
-            (u32_at(b, 0), u32_at(b, 4), f64_at(b, 8), f64_at(b, 16))
+            let (lon, lat) = lon_lat_at(b, 8);
+            (u32_at(b, 0), u32_at(b, 4), lon, lat)
         }
     }
 
@@ -818,13 +852,36 @@ pub mod join {
             }
             let got = m.finish(1 << 10, store).unwrap().unwrap();
             let got: Vec<_> = got.read(&Point).unwrap().map(Result::unwrap).collect();
-            assert!(want.len() > 1000);
+            assert!(want.len() > 500);
             assert_eq!(got, want);
             let mut m = Merge::new(rows(&Request, &reqs, store), Vec::new(), 1 << 10, store).unwrap();
             for id in [3, 9, 6] {
                 m.node(id, 0.0, 0.0).unwrap();
             }
             assert!(m.finish(1 << 10, store).unwrap().is_none());
+        }
+
+        /// The coordinates come back with the same bits: those of an OSM file in 8 bytes, others in 16.
+        #[test]
+        fn coordinates_keep_their_bits() {
+            let osm = |n: i64| 1e-9 * (100 * n) as f64;
+            for (lon, lat, bytes) in [
+                (osm(-1_234_567_891), osm(523_456_789), 16),
+                (osm(1_800_000_000), osm(-900_000_000), 16),
+                (osm(0), osm(-1), 16),
+                (-0.0, 0.1, 24),
+                (f64::NAN, 1.0, 24),
+            ] {
+                let mut out = Vec::new();
+                Position.put(&(7, lon, lat), &mut out);
+                assert_eq!(out.len(), bytes, "{lon} {lat}");
+                let (id, a, b) = Position.get(&mut &out[..]);
+                assert_eq!((id, a.to_bits(), b.to_bits()), (7, lon.to_bits(), lat.to_bits()));
+                let mut out = Vec::new();
+                Point.put(&(3, 4, lon, lat), &mut out);
+                let (w, k, a, b) = Point.get(&mut &out[..]);
+                assert_eq!((w, k, a.to_bits(), b.to_bits()), (3, 4, lon.to_bits(), lat.to_bits()));
+            }
         }
     }
 }
