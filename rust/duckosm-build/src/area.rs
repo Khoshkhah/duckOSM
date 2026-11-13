@@ -290,13 +290,25 @@ pub fn write_levels<W: Write + Send>(
     built_at: i64,
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<Option<String>, String> {
-    let Some(lv) = levels::compute(edges, method)? else {
+    // the rows go to the file in parts, as they are made: all rows at once were in memory before (Kentucky 255 MiB)
+    let (mut w, mut n) = (None, 0usize);
+    let Some(lv) = levels::compute_each(edges, method, |rows| {
+        n += rows.len();
+        if w.is_none() {
+            w = Some(pq::EdgeLevelsWriter::new(file("edge_levels_visualization.parquet")?)?);
+        }
+        w.as_mut().expect("made above").write(&rows)
+    })?
+    else {
         return Ok(None);
     };
-    pq::write_edge_levels_to(file("edge_levels_visualization.parquet")?, &lv.rows)?;
+    match w {
+        Some(w) => w.close()?,
+        None => pq::write_edge_levels_to(file("edge_levels_visualization.parquet")?, &[])?,
+    }
     let meta = pq::LevelsMeta {
         source: method.name(),
-        n_edges: lv.rows.len() as i64,
+        n_edges: n as i64,
         edge_hash: lv.edge_hash.clone(),
         roadstyle_version: levels::ROADSTYLE_VERSION,
         created: iso_time(built_at),
@@ -305,7 +317,7 @@ pub fn write_levels<W: Write + Send>(
     let mut line = format!(
         "levels ({}): {} edges, {} roads",
         method.name(),
-        lv.rows.len(),
+        n,
         lv.roads
     );
     if method == Method::Solve {

@@ -1090,7 +1090,40 @@ pub fn write_edge_levels_to<W: Write + Send>(
     out: W,
     rows: &[roadstyle_levels::Row],
 ) -> Result<(), String> {
-    let fields = vec![
+    let mut w = EdgeLevelsWriter::new(out)?;
+    w.write(rows)?;
+    w.close()
+}
+
+/// [`write_edge_levels_to`] in parts (`roadstyle_levels::levels_each`): one row group at a time.
+pub struct EdgeLevelsWriter<W: Write + Send> {
+    w: ParWriter<W>,
+    schema: Arc<Schema>,
+}
+
+impl<W: Write + Send> EdgeLevelsWriter<W> {
+    pub fn new(out: W) -> Result<Self, String> {
+        let schema = Arc::new(Schema::new(edge_levels_fields()));
+        let w = ParWriter::try_new(out, schema.clone(), Some(rows_props())).map_err(err)?;
+        Ok(EdgeLevelsWriter { w, schema })
+    }
+
+    pub fn write(&mut self, rows: &[roadstyle_levels::Row]) -> Result<(), String> {
+        for chunk in rows.chunks(ROW_GROUP) {
+            let batch = RecordBatch::try_new(self.schema.clone(), edge_levels_columns(chunk)).map_err(err)?;
+            self.w.write(&batch).map_err(err)?;
+        }
+        Ok(())
+    }
+
+    pub fn close(self) -> Result<(), String> {
+        self.w.close().map_err(err)?;
+        Ok(())
+    }
+}
+
+fn edge_levels_fields() -> Vec<Field> {
+    vec![
         field("edge_id", DataType::Int64),
         field("casing_start", DataType::Int64),
         field("casing_level", DataType::Int64),
@@ -1100,8 +1133,11 @@ pub fn write_edge_levels_to<W: Write + Send>(
         field("head_end_m", DataType::Float64),
         field("cap_start", DataType::Utf8),
         field("cap_end", DataType::Utf8),
-    ];
-    write_rows(out, fields, rows, |c| {
+    ]
+}
+
+fn edge_levels_columns(c: &[roadstyle_levels::Row]) -> Vec<ArrayRef> {
+    {
         let f64s = |get: fn(&roadstyle_levels::Row) -> Option<f64>| -> ArrayRef {
             let mut b = Float64Builder::new();
             c.iter().for_each(|r| b.append_option(get(r)));
@@ -1118,7 +1154,7 @@ pub fn write_edge_levels_to<W: Write + Send>(
             texts(c.iter().map(|r| r.cap_start)),
             texts(c.iter().map(|r| r.cap_end)),
         ]
-    })
+    }
 }
 
 /// The one row of `visualization.edge_levels_meta`: where the numbers come from (`source` is `tags` or `solve`; a
