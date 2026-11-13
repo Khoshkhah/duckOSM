@@ -31,6 +31,8 @@ tiff = { version = "=0.11.3", default-features = false, features = ["deflate", "
 # the ground id in main.elevation_metadata: the SHA-256 of the DEM file
 sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order"] }
+# the tiles of the levels that do not wait for each other run at the same time (the same rayon as duckosm-core)
+rayon = "1.12"
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place
 roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "d9dfcdca5c02aa5fd11e95267c4ee618b429a39a" }
 
