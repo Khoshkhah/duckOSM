@@ -79,9 +79,7 @@ flowchart TB
     S3["<b>3. Network of each mode</b><br/>the same Rust engine"]
     T[("edges of 3.2 to 3.11<br/>[temporary files: OPFS]")]
     M3("edges, nodes, edge graph<br/>of one mode<br/>[tab memory]")
-    S4["<b>4–5. Write the files</b><br/>network, area tables,<br/>levels, lane profile,<br/>building faces, raw.*"]
-    M4("Parquet files as bytes<br/>[tab memory]")
-    S6["<b>6. Keep the files</b><br/>in the folder of the tab"]
+    S4["<b>4–5. Write the files</b><br/>network, area tables,<br/>levels, lane profile,<br/>building faces, raw.*,<br/>each to an OPFS file"]
     O[("Parquet files<br/>of the tables<br/>[storage: OPFS]")]
     M6("DuckDB-Wasm: a view<br/>on each file over 256 KB;<br/>the smaller tables in<br/>its memory (max 4 GB)")
     SAVE["<b>Save the area</b><br/>keeps the files<br/>after the tab closes"]
@@ -93,7 +91,7 @@ flowchart TB
     S3 <--> T
     S3 --> M3 --> S4
     M1 --> S4
-    S4 --> M4 --> S6 --> O
+    S4 --> O
     O --> M6
     O --> SAVE
     M6 --> EXP --> DL
@@ -101,7 +99,7 @@ flowchart TB
     classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
     classDef mem fill:#ef444433,stroke:#ef4444,stroke-width:2px
     class REG,A,T,O,DL disk
-    class M1,M3,M4,M6 mem
+    class M1,M3,M6 mem
 ```
 
 ## Each step: where the data is and how it is handled
@@ -113,11 +111,11 @@ flowchart TB
 | **1. Read the file** | The highway ways, the coordinates of their nodes and the turn restrictions: read **in blocks**, kept in **memory to the end**, because the network, the area tables, the levels and the lane profile read them again. With the bus routes, the base-map layers or the building faces, also the raw part: the elements that these steps read. An area: from the area file. | The same, from the area file in OPFS, in **tab memory**. |
 | **2. Sidewalk rule, global junctions** | Work on the ways in **memory**. The junction set is made one time for all modes, in **memory**. | The same, in tab memory. |
 | **3. Network of each mode** | Sub-steps 3.2 to 3.11 keep the edges in temporary files in **storage**. Then the edges and the nodes of the mode are in **memory** until the mode is written. The rows of the edge graph go to the file while they are made. See [step 3 in detail](#step-3-in-detail-the-network-of-a-mode). | The same code. The temporary files are in **OPFS**, the rest is in **tab memory**, inside the 4 GB of the module. The rows of the edge graph go to Parquet bytes in tab memory. |
-| **4. Write the network files** | GeoParquet files to **storage**, from the network in memory. | Parquet files as bytes in **tab memory**. |
-| **5. Area tables, levels, lane profile** | Read the ways and the coordinates in **memory**; write files to **storage**. | The same, files as bytes in **tab memory**. |
-| **6. The tables** | DuckDB reads the GeoParquet files into the `.duckdb` file in **storage**. It uses its `memory_limit` and **spills** what is more. | The page writes each file to **OPFS**, in a folder of the tab. A file larger than 256 KB **stays there**: DuckDB-Wasm reads it through a view, at each query. A smaller file, and the tables of the level editor (`visualization.*`), are copied into DuckDB-Wasm's **memory**. |
-| **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: the area file is read again **in blocks** into Parquet files. Only the elements that the fixes change, and the tags of the network's ways, come from memory. | From the area file, as Parquet bytes in **tab memory**. DuckDB-Wasm reads them only to make the base-map layers, and then drops them: online there are no `raw.*` tables. |
-| **The base-map layers** | An area: `features.sql` runs in DuckDB on `raw.*`; it **spills**. | `features.sql` runs in DuckDB-Wasm on the `raw_*` files in memory. The layers become Parquet files in **OPFS**, as the other tables. |
+| **4. Write the network files** | GeoParquet files to **storage**, from the network in memory. | Parquet files in **OPFS**: each file of the result goes to an OPFS file of its own, in a folder of the tab. |
+| **5. Area tables, levels, lane profile** | Read the ways and the coordinates in **memory**; write files to **storage**. | The same, files in **OPFS**. |
+| **6. The tables** | DuckDB reads the GeoParquet files into the `.duckdb` file in **storage**. It uses its `memory_limit` and **spills** what is more. | The files are already in **OPFS**, in a folder of the tab: the build wrote them there. A file larger than 256 KB **stays there**: DuckDB-Wasm reads it through a view, at each query. A smaller file, and the tables of the level editor (`visualization.*`), are copied into DuckDB-Wasm's **memory**. |
+| **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: the area file is read again **in blocks** into Parquet files. Only the elements that the fixes change, and the tags of the network's ways, come from memory. | From the area file, as Parquet files in **OPFS**. DuckDB-Wasm reads them only to make the base-map layers, and then drops them: online there are no `raw.*` tables. |
+| **The base-map layers** | An area: `features.sql` runs in DuckDB on `raw.*`; it **spills**. | `features.sql` runs in DuckDB-Wasm on the `raw_*` files in OPFS. The layers become Parquet files in **OPFS**, as the other tables. |
 | **The result** | The `.duckdb` file in **storage**. | The Parquet files in **OPFS**, with views in DuckDB-Wasm (small tables in its **memory**). **Save** keeps the files after the tab closes; **Export** copies the tables into a `.duckdb` file to download. |
 
 ## Step 3 in detail: the network of a mode
@@ -145,7 +143,7 @@ flowchart TB
     W["<b>Write the</b><br/><b>network files</b>"]
     LV["<b>Levels</b><br/>take the edges<br/>(no copy)"]
     F1[("offline:<br/>GeoParquet files<br/>[storage]")]
-    F2("online:<br/>Parquet bytes<br/>[tab memory]")
+    F2[("online:<br/>Parquet files<br/>[storage: OPFS]")]
 
     IN --> S0 --> S1 --> M1
     M1 <--> S2
@@ -160,8 +158,8 @@ flowchart TB
 
     classDef disk fill:#3b82f633,stroke:#3b82f6,stroke-width:2px
     classDef mem fill:#ef444433,stroke:#ef4444,stroke-width:2px
-    class F1,M1 disk
-    class IN,M5,F2 mem
+    class F1,F2,M1 disk
+    class IN,M5 mem
 ```
 
 ### The area: Kentucky
@@ -269,9 +267,9 @@ A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with 
   Mac was 96% full, this writing paused for about 3 s in some runs (one native run of four: 3.19 s, the others 0.11 s;
   online, step 3 took up to 9.7 s). With 30 GB and more free, no run paused: 8 of 8 native runs and 3 of 3 online runs.
   So keep free space on the disk for the temporary files of a large area.
-- Online, the build copies each Parquet file of the result (2.6 GB in all) into JavaScript memory, outside the
-  WebAssembly memory of the table. So at the end the tab holds about 3.3 GB of WebAssembly memory and 2.6 GB of
-  result files, until the page writes the files to OPFS.
+- Online, the build writes each Parquet file of the result (2.6 GB in all) straight to OPFS, not to the memory of the
+  tab. All Chromium processes together peaked at 4.7 GB on Kentucky. Before, when the files were in JavaScript memory
+  until the page wrote them to OPFS, they peaked at 7.9 to 8.5 GB.
 - On 2026-11-12, at the start of this work, the offline build took 54.2 s and 17,206 MiB, and the online build
   stopped at the limit of 4 GB. The changes are in
   [the cut to an area file](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/cut_stream.md).
