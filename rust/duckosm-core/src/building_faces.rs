@@ -757,8 +757,15 @@ pub fn building_faces_of(
                 .filter(|w| w[0] != w[1])
                 .map(|w| WallSeg { a: w[0], b: w[1] }),
         );
-        oriented.push((id, relation, inner, ids, pts, local, addr));
+        // the party walls of the ring (the same two nodes in two rings): one answer for each wall, so that the map of all wall
+        // pairs goes before the tree of the walls is made (Kentucky: 200 MiB)
+        let party: Vec<bool> = ids
+            .windows(2)
+            .map(|p| shared.get(&(p[0].min(p[1]), p[0].max(p[1]))).is_some_and(|&c| c >= 2))
+            .collect();
+        oriented.push((id, relation, inner, ids, pts, local, addr, party));
     }
+    drop(shared);
     let wall_tree = RTree::bulk_load(wall_segs);
     // from a point on the wall to a point on the street: is there a wall in the way?
     let visible = |from: P, to: P| {
@@ -775,7 +782,7 @@ pub fn building_faces_of(
     let mut next_index: FxHashMap<(i64, bool), i32> = FxHashMap::default();
     let offsets: Vec<i32> = oriented
         .iter()
-        .map(|(id, relation, _, _, _, local, _)| {
+        .map(|(id, relation, _, _, _, local, _, _)| {
             let offset = *next_index.entry((*id, *relation)).or_default();
             next_index.insert((*id, *relation), offset + (local.len() - 1) as i32);
             offset
@@ -783,7 +790,7 @@ pub fn building_faces_of(
         .collect();
     drop(next_index);
     let ring_faces = |k: usize, sc: &mut Scratch, out: &mut Vec<BuildingFace>| {
-        let (id, relation, inner, ids, pts, local, addr) = &oriented[k];
+        let (id, relation, inner, ids, pts, local, addr, party) = &oriented[k];
         let (id, relation, inner, offset) = (*id, *relation, *inner, offsets[k]);
         let n = local.len() - 1;
         let building_type = if relation { "relation" } else { "way" };
@@ -903,7 +910,7 @@ pub fn building_faces_of(
                 azimuth: (90.0 - normal.1.atan2(normal.0).to_degrees()).rem_euclid(360.0),
                 length,
                 street: best,
-                party: shared.get(&(a.min(b), a.max(b))).is_some_and(|&c| c >= 2),
+                party: party[i],
                 entrance: entrances.contains_key(&a) || entrances.contains_key(&b),
             });
         }
