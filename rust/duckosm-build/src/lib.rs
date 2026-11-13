@@ -822,6 +822,24 @@ pub fn run<W: Write + Send>(
         }
         mode_nodes.push((*mode, net.nodes));
     }
+    // each step after the network runs when its data is ready, and each part goes after the last step that reads it (Kentucky with
+    // raw.* and the faces: 2.5 GB held after the network; the area tables read 0.44 GB of it, the levels 0.78 GB)
+    drop((relations, near));
+    let built_at = p.built_at.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_micros() as i64)
+    });
+    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+    if sum.levels.is_some() {
+        log.step("levels");
+    }
+    drop(level_edges);
+    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
+    if sum.lanes.is_some() {
+        log.step("lane profile");
+    }
+    drop(lane_edges);
     if let Some(d) = &dem {
         // the ground id: the SHA-256 of the bytes of the DEM file
         let mut hash = Sha256::new();
@@ -880,11 +898,6 @@ pub fn run<W: Write + Send>(
             log.step("elevation grid");
         }
     }
-    let built_at = p.built_at.unwrap_or_else(|| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_micros() as i64)
-    });
     let area = Area {
         boundary,
         ways: &ways,
@@ -897,17 +910,8 @@ pub fn run<W: Write + Send>(
     };
     write_area_tables(&area, &mut file)?;
     log.step("write the area tables");
-    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
-    if sum.levels.is_some() {
-        log.step("levels");
-    }
-    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
-    if sum.lanes.is_some() {
-        log.step("lane profile");
-    }
-    // the building faces and raw.* come last: before them, the data that only the steps above need goes, so the memory of
-    // the faces comes on top of less (Kentucky: 0.8 GB less; the browser build has at most 4 GB)
-    drop((level_edges, lane_edges, mode_nodes, coords, junctions));
+    // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
+    drop((mode_nodes, coords, junctions));
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
