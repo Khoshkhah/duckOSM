@@ -861,11 +861,12 @@ pub fn building_faces_of(
     owned.sort_unstable();
     let ring_boxes = RTree::bulk_load(boxes.into_iter().map(|(k, b)| RingBox(k, b)).collect());
     crate::util::step("building faces 5: the turned rings, their party walls and boxes, the tiles");
-    for tile in owned.chunk_by(|a, b| a.0 == b.0) {
+    // the faces of one tile, from its rings and the party walls of each ring
+    let tile_faces = |tile: &[((i64, i64), usize)], mut party: Vec<Vec<bool>>| -> Vec<BuildingFace> {
         // the rings of the tile, turned, and the box of their buildings
         let mut oriented = Vec::with_capacity(tile.len());
         let mut area_box: Option<AABB<P>> = None;
-        for &(_, k) in tile {
+        for (i, &(_, k)) in tile.iter().enumerate() {
             let r = &rings[k];
             let (flip, mut local) = turn(r).expect("a ring with an area");
             let (mut ids, mut pts) = (r.ids.clone(), r.pts.clone());
@@ -876,7 +877,7 @@ pub fn building_faces_of(
             }
             let b = AABB::from_points(&local);
             area_box = Some(area_box.map_or(b, |a| a.merged(&b)));
-            oriented.push((r.id, r.relation, r.inner, ids, pts, local, r.addr.clone(), std::mem::take(&mut party[k])));
+            oriented.push((r.id, r.relation, r.inner, ids, pts, local, r.addr.clone(), std::mem::take(&mut party[i])));
         }
         let area_box = area_box.expect("a tile has rings");
         let around = |d: f64| {
@@ -1170,34 +1171,36 @@ pub fn building_faces_of(
                 });
             }
         };
-        for start in (0..oriented.len()).step_by(RINGS_PER_PART) {
-            let part = start..(start + RINGS_PER_PART).min(oriented.len());
-            #[cfg(feature = "pbf")]
-            let faces: Vec<BuildingFace> = {
-                use rayon::prelude::*;
-                // each piece of the part has its own lists; the pieces come back in the order of the rings
-                part.into_par_iter()
-                    .fold(
-                        || (Scratch::default(), Vec::new()),
-                        |(mut sc, mut out), k| {
-                            ring_faces(k, &mut sc, &mut out);
-                            (sc, out)
-                        },
-                    )
-                    .map(|(_, out)| out)
-                    .collect::<Vec<Vec<BuildingFace>>>()
-                    .concat()
-            };
-            #[cfg(not(feature = "pbf"))]
-            let faces: Vec<BuildingFace> = {
-                let (mut sc, mut out) = (Scratch::default(), Vec::new());
-                for k in part {
-                    ring_faces(k, &mut sc, &mut out);
-                }
-                out
-            };
-            sink(faces)?;
+        let (mut sc, mut out) = (Scratch::default(), Vec::new());
+        for k in 0..oriented.len() {
+            ring_faces(k, &mut sc, &mut out);
         }
+        out
+    };
+    // the tiles in groups of about RINGS_PER_PART rings: the tiles of a group at the same time (one tile on one thread: a tile has
+    // few rings, and the threads waited when only the rings of one tile ran at the same time), then their faces to the sink in
+    // the order of the tiles
+    let tiles: Vec<&[((i64, i64), usize)]> = owned.chunk_by(|a, b| a.0 == b.0).collect();
+    let mut i = 0;
+    while i < tiles.len() {
+        let (mut j, mut n) = (i, 0);
+        while j < tiles.len() && (j == i || n + tiles[j].len() <= RINGS_PER_PART) {
+            n += tiles[j].len();
+            j += 1;
+        }
+        let work: Vec<_> = tiles[i..j]
+            .iter()
+            .map(|t| (*t, t.iter().map(|&(_, k)| std::mem::take(&mut party[k])).collect::<Vec<_>>()))
+            .collect();
+        #[cfg(feature = "pbf")]
+        let faces: Vec<Vec<BuildingFace>> = {
+            use rayon::prelude::*;
+            work.into_par_iter().map(|(t, p)| tile_faces(t, p)).collect()
+        };
+        #[cfg(not(feature = "pbf"))]
+        let faces: Vec<Vec<BuildingFace>> = work.into_iter().map(|(t, p)| tile_faces(t, p)).collect();
+        sink(faces.concat())?;
+        i = j;
     }
     crate::util::step("building faces 6: the tiles");
     Ok(())

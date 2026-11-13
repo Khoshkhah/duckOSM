@@ -624,6 +624,17 @@ fn read_raw_part(
     duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes, tag: &tag })
 }
 
+/// A hash of all tags of a way, in their order.
+fn tags_hash(w: &Way) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = duckosm_core::util::FxHasher::default();
+    for (k, v) in w.all_tags() {
+        k.hash(&mut h);
+        v.hash(&mut h);
+    }
+    h.finish()
+}
+
 /// The points of the ways of a part: `pts[i]`, the coordinates of all nodes of `ways[i]` (None when one is missing).
 type WayPoints = Vec<Option<Vec<duckosm_core::geom::Pt>>>;
 
@@ -637,6 +648,7 @@ fn faces_input(open: Open, fixes: &OsmFixes) -> Result<(Raw, WayPoints, duckosm_
     let touched = fix_ids(fixes);
     let mut part = read_raw_part(open, &touched, false, true, false)?;
     part.apply_fixes(fixes);
+    duckosm_core::util::step("building faces 0a: read the buildings");
     let store = spill::temp_store();
     let store = &*store;
     // the nodes of the file, but those that the fixes touch (the part has them, after the fixes): their coordinates, and the
@@ -692,6 +704,7 @@ fn faces_input(open: Open, fixes: &OsmFixes) -> Result<(Raw, WayPoints, duckosm_
     let extra: Vec<_> = part.nodes.iter().map(|n| (n.id, n.lon, n.lat)).collect();
     // joined with the nodes of the file as they come (sorted by id), with no file of the positions
     let mut merge = join::Merge::new(requests()?, extra.clone(), BUDGET, store).map_err(io)?;
+    duckosm_core::util::step("building faces 0b: the nodes of the buildings, sorted");
     each_node(&mut |id, lon, lat, entrance| {
         if entrance {
             entrances.insert(id, ());
@@ -712,6 +725,7 @@ fn faces_input(open: Open, fixes: &OsmFixes) -> Result<(Raw, WayPoints, duckosm_
             join::points(requests()?, &mut positions, BUDGET, store).map_err(io)?
         }
     };
+    duckosm_core::util::step("building faces 0c: the join with the nodes of the file");
     let mut points = points.read(&join::Point).map_err(io)?.peekable();
     let mut pts: WayPoints = Vec::with_capacity(part.ways.len());
     for (i, w) in part.ways.iter().enumerate() {
@@ -759,6 +773,8 @@ pub fn run<W: Write + Send>(
     let mut raw = None;
     // with an area file: the ids of the raw part before the fixes (see RawPatch)
     let mut area_read = None;
+    // with an area file and raw.*: the tags of each way as the file has them (a hash), to find the ways that the build changes
+    let mut read_tags: Option<Vec<(i64, u64)>> = None;
     let (mut ways, mut coords, relations) = match input {
         Input::Path(path) => read_pbf(
             || pbf::read_ways(path),
@@ -805,6 +821,11 @@ pub fn run<W: Write + Send>(
                 let want = Want { relation: &all, way: &all, node: &|_| true, way_nodes: false, tag: &|_, _, _| true };
                 cutfile::write_xml(&duckosm_core::raw::read_part(open, &want)?, &mut file("cut.osm")?)?;
                 log.step("write cut.osm");
+            }
+            if want_raw {
+                let mut h: Vec<(i64, u64)> = ways.iter().map(|w| (w.id, tags_hash(w))).collect();
+                h.sort_unstable();
+                read_tags = Some(h);
             }
             fixes.apply_to_ways(&mut ways)?;
             // the OSM nodes of the new ways of the fixes that no read way has
@@ -1061,25 +1082,6 @@ pub fn run<W: Write + Send>(
     log.step("write the area tables");
     // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
     drop((mode_nodes, junctions));
-    if p.levels == LevelsMethod::Solve {
-        // by tiles: the level edges, the roads and the rules of the whole area are never in memory at once (levels::tiled)
-        sum.levels = levels::tiled::write_levels_tiled(&mut mode_files, built_at, &mut file)?;
-        log.step("levels");
-    } else if p.levels != LevelsMethod::None {
-        let mut level_edges = LevelEdges::default();
-        level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
-        for (mode, files) in &mut mode_files {
-            for private in [false, true] {
-                let mut err = None;
-                level_edges.add(*mode, private, edges_of(files, private, &mut err)?);
-                err.map_or(Ok(()), Err)?;
-            }
-        }
-        sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
-        if sum.levels.is_some() {
-            log.step("levels");
-        }
-    }
     {
         let mut lane_edges = LaneEdges::default();
         for (mode, files) in &mut mode_files {
@@ -1101,6 +1103,35 @@ pub fn run<W: Write + Send>(
         sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
         if sum.lanes.is_some() {
             log.step("lane profile");
+        }
+    }
+    // raw.* needs only the network's ways whose tags the build changed (the fixes, the sidewalk rule, the arrows of the fixes):
+    // all ways stayed in memory through the levels and the faces (Kentucky 187 MiB)
+    let ways: Vec<Way> = match read_tags.take() {
+        Some(h) => ways
+            .into_iter()
+            .filter(|w| h.binary_search_by_key(&w.id, |x| x.0).map_or(true, |i| h[i].1 != tags_hash(w)))
+            .collect(),
+        None if want_raw => ways,
+        None => Vec::new(),
+    };
+    if p.levels == LevelsMethod::Solve {
+        // by tiles: the level edges, the roads and the rules of the whole area are never in memory at once (levels::tiled)
+        sum.levels = levels::tiled::write_levels_tiled(&mut mode_files, built_at, &mut file)?;
+        log.step("levels");
+    } else if p.levels != LevelsMethod::None {
+        let mut level_edges = LevelEdges::default();
+        level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
+        for (mode, files) in &mut mode_files {
+            for private in [false, true] {
+                let mut err = None;
+                level_edges.add(*mode, private, edges_of(files, private, &mut err)?);
+                err.map_or(Ok(()), Err)?;
+            }
+        }
+        sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+        if sum.levels.is_some() {
+            log.step("levels");
         }
     }
     if p.building_faces {

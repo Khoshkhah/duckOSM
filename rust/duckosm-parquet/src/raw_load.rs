@@ -233,9 +233,13 @@ impl RawColumns {
 /// The properties of the `raw_*` files. They are temporary (DuckDB copies them into `raw.*`, then they are deleted), so
 /// they have no compression: zstd on one thread was most of the time of the step, and DuckDB had to decompress it again
 /// (France: 182 s with zstd). The plain encodings are also the fastest for DuckDB to read (DELTA_BINARY_PACKED and
-/// BYTE_STREAM_SPLIT made the copy of the nodes 116 s, not 47 s).
+/// BYTE_STREAM_SPLIT made the copy of the nodes 116 s, not 47 s). The ids and the coordinates have no dictionary: each value
+/// is in a row group about one time, and the dictionary of the coordinates was the largest part of the time of the nodes.
 fn raw_props() -> WriterProperties {
-    WriterProperties::builder()
+    use parquet::schema::types::ColumnPath;
+    ["osm_id", "lat", "lon"]
+        .into_iter()
+        .fold(WriterProperties::builder(), |b, c| b.set_column_dictionary_enabled(ColumnPath::from(c), false))
         .set_compression(parquet::basic::Compression::UNCOMPRESSED)
         .set_max_row_group_row_count(Some(ROW_GROUP))
         .build()
@@ -617,7 +621,6 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
             }
         }
     }
-    use arrow_array::cast::AsArray;
     use duckosm_core::spill::{self, join, Writer};
     const BUDGET: usize = 64 << 20; // each sort holds about this much (spill::sort_bytes)
     let io = |e: std::io::Error| format!("a temporary file of raw.*: {e}");
@@ -627,15 +630,55 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     let mut rows = [0usize; 3];
     // pass 1: the nodes of each way that is written, with the number of the way (the order of the ways) and the place in it
     let requests = || -> Result<spill::Rows, String> {
+        // only the nodes of each way that is written (as Patching writes it): no columns of the tags
+        struct Refs<'p> {
+            patch: &'p duckosm_core::raw::RawPatch<'p>,
+            refs: Vec<i64>,
+            ends: Vec<usize>,
+        }
+        impl Refs<'_> {
+            /// raw.ways has only the ways with 2 or more nodes (RawColumns::way)
+            fn end(&mut self, start: usize) {
+                if self.refs.len() - start < 2 {
+                    self.refs.truncate(start);
+                } else {
+                    self.ends.push(self.refs.len());
+                }
+            }
+        }
+        impl RawSink for Refs<'_> {
+            fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
+            fn way<'a>(
+                &mut self,
+                id: i64,
+                _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+                refs: &mut dyn Iterator<Item = i64>,
+            ) {
+                let start = self.refs.len();
+                match self.patch.way(id) {
+                    Patched::Removed => return,
+                    Patched::Fixed(w) => self.refs.extend(w.refs.iter().copied()),
+                    Patched::Same => self.refs.extend(refs),
+                }
+                self.end(start);
+            }
+            fn relation<'a>(
+                &mut self,
+                _: i64,
+                _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+                _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+            ) {
+            }
+        }
         let mut requests = Writer::new(store).map_err(io)?;
         let mut number = 0u32;
-        let mut ask = |ways: &RecordBatch, requests: &mut Writer| -> Result<(), String> {
-            let refs = ways.column(2).as_list::<i32>();
-            for i in 0..ways.num_rows() {
-                let ids = refs.value(i);
-                for (k, id) in ids.as_primitive::<arrow_array::types::Int64Type>().values().iter().enumerate() {
+        let mut ask = |r: Refs, requests: &mut Writer| -> Result<(), String> {
+            let mut start = 0;
+            for end in r.ends {
+                for (k, id) in r.refs[start..end].iter().enumerate() {
                     requests.push(&join::Request, &(*id, number, k as u32)).map_err(io)?;
                 }
+                start = end;
                 number = number.checked_add(1).ok_or("raw.*: more than 2^32 ways")?;
             }
             Ok(())
@@ -643,20 +686,19 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
         each_block(
             &mut open()?,
             |b, buf| {
-                let mut s = Patching { cols: RawColumns::only(1), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
+                let mut s = Refs { patch, refs: Vec::new(), ends: Vec::new() };
                 decode_block(b, [false, true, false], buf, &mut s)?;
-                s.cols.finish()
+                Ok(s)
             },
-            |part, _| {
-                ask(&part.batches[1], &mut requests)?;
-                Ok(true)
-            },
+            |r, _| ask(r, &mut requests).map(|_| true),
         )?;
-        let mut c = RawColumns::only(1);
+        let mut r = Refs { patch, refs: Vec::new(), ends: Vec::new() };
         for nw in patch.new_ways() {
-            c.way(nw.id, &mut std::iter::empty(), &mut nw.refs.iter().copied());
+            let start = r.refs.len();
+            r.refs.extend(nw.refs.iter().copied());
+            r.end(start);
         }
-        ask(&c.finish()?.batches[1], &mut requests)?;
+        ask(r, &mut requests)?;
         requests.finish().map_err(io)
     };
     // the nodes of the file, then the new nodes of the fixes
@@ -684,6 +726,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     // the order of the ids), with no file of the positions (that was 20.5 million rows on Kentucky)
     let new: Vec<_> = patch.new_nodes().map(|n| (n.id, n.lon, n.lat)).collect();
     let mut merge = join::Merge::new(requests()?, new, BUDGET, store).map_err(io)?;
+    duckosm_core::util::step("raw 1: the nodes of the ways, sorted");
     each_node(true, &mut |part, c, new| {
         let part = part.expect("the table");
         rows[0] += part.batches[0].num_rows();
@@ -711,6 +754,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
             join::points(requests()?, &mut positions, BUDGET, store).map_err(io)?
         }
     };
+    duckosm_core::util::step("raw 2: the nodes, and the join");
     // pass 3: the ways with their lines (the points come in the order of the ways), and the relations
     let mut points = points.read(&join::Point).map_err(io)?.peekable();
     let (mut number, mut pts, mut wkb) = (0u32, Vec::<Pt>::new(), Vec::<u8>::new());
@@ -770,6 +814,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     }
     w.write(lines(c.finish()?)?)?;
     w.finish()?;
+    duckosm_core::util::step("raw 3: the ways and the relations");
     Ok(rows)
 }
 
