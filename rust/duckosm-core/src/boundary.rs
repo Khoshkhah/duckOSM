@@ -124,6 +124,39 @@ impl Boundary {
         })
     }
 
+    /// Does the boundary touch the box from (`w`, `s`) to (`e`, `n`): a corner of the box inside, or an edge of a ring in the
+    /// box or across it?
+    pub fn touches_box(&self, w: f64, s: f64, e: f64, n: f64) -> bool {
+        let (bw, bs, be, bn) = self.bbox;
+        if be < w || bw > e || bn < s || bs > n {
+            return false;
+        }
+        if [(w, s), (e, s), (e, n), (w, n)].iter().any(|&(x, y)| self.contains(x, y)) {
+            return true;
+        }
+        // the segment a-b clipped to the box (Liang-Barsky): something is left
+        let crosses = |a: (f64, f64), b: (f64, f64)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let (mut t0, mut t1) = (0.0f64, 1.0f64);
+            for (p, q) in [(-dx, a.0 - w), (dx, e - a.0), (-dy, a.1 - s), (dy, n - a.1)] {
+                if p == 0.0 {
+                    if q < 0.0 {
+                        return false;
+                    }
+                } else {
+                    let r = q / p;
+                    if p < 0.0 {
+                        t0 = t0.max(r);
+                    } else {
+                        t1 = t1.min(r);
+                    }
+                }
+            }
+            t0 <= t1
+        };
+        self.polygons.iter().flatten().any(|ring| (0..ring.len()).any(|k| crosses(ring[k], ring[(k + 1) % ring.len()])))
+    }
+
     /// west, south, east, north
     pub fn bbox(&self) -> (f64, f64, f64, f64) {
         self.bbox

@@ -310,6 +310,12 @@ pub fn sort_bytes_where<K: Ord + Send>(
         index.push((key(&data[start..]), start, data.len()));
         if data.len() + index.len() * row >= budget {
             flush(&mut data, &mut index, &mut runs)?;
+            // each run is an open file: at most MERGE_FAN of them (France: hundreds of runs, more files than a process can
+            // open). The runs so far are the first rows of the input, so their merge keeps the sort stable.
+            if runs.len() == MERGE_FAN {
+                let all = std::mem::take(&mut runs);
+                runs.push(merge(all, &key, store)?);
+            }
         }
     }
     drop(raw);
@@ -322,7 +328,14 @@ pub fn sort_bytes_where<K: Ord + Send>(
         flush(&mut data, &mut index, &mut runs)?;
     }
     drop((data, index));
-    // the merge: the smallest (key, run) first; a run is in the order of the input, so the result is stable
+    merge(runs, &key, store)
+}
+
+/// The runs that a merge of [`sort_bytes`] reads at once.
+const MERGE_FAN: usize = 64;
+
+/// The merge of sorted runs: the smallest (key, run) first; a run is in the order of the input, so the result is stable.
+fn merge<K: Ord>(runs: Vec<Rows>, key: &impl Fn(&[u8]) -> K, store: &dyn Store) -> io::Result<Rows> {
     let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
     let mut heap = BinaryHeap::new();
     let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
@@ -601,6 +614,22 @@ mod tests {
             assert_eq!(got, want.iter().map(key).collect::<Vec<_>>());
         }
         assert_eq!(codec.0.borrow().attrs.values.len(), 1);
+    }
+
+    /// A sort with more runs than MERGE_FAN: the runs merge while they build up; the order is the key, then the input.
+    #[test]
+    fn a_sort_with_many_runs_is_stable() {
+        let store = MemStore;
+        let mut w = Writer::new(&store).unwrap();
+        for i in 0..20_000u32 {
+            w.push(&join::Request, &((i as i64 * 7919) % 1000, i, 0)).unwrap();
+        }
+        let rows = w.finish().unwrap();
+        let sorted = sort_bytes(rows, join::node_id, 4096, &store).unwrap();
+        let got: Vec<(i64, u32)> = sorted.read(&join::Request).unwrap().map(|r| r.map(|x| (x.0, x.1)).unwrap()).collect();
+        let mut want: Vec<(i64, u32)> = (0..20_000u32).map(|i| ((i as i64 * 7919) % 1000, i)).collect();
+        want.sort();
+        assert_eq!(got, want);
     }
 
     #[test]

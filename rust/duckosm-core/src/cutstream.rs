@@ -132,16 +132,16 @@ pub fn each_block<R: Read, T: Send>(
 }
 
 /// The lowest and the highest id of the elements of one kind in a block (`EMPTY` when the block has none).
-type Span = (i64, i64);
-const EMPTY: Span = (i64::MAX, i64::MIN);
+pub(crate) type Span = (i64, i64);
+pub(crate) const EMPTY: Span = (i64::MAX, i64::MIN);
 
-fn widen(s: &mut Span, id: i64) {
+pub(crate) fn widen(s: &mut Span, id: i64) {
     *s = (s.0.min(id), s.1.max(id));
 }
 
 /// [`each_block`] for the blocks that start at `offsets` (ascending) only: the other blocks are not read, not
 /// unpacked and not decoded.
-fn each_block_at<R: Read + Seek, T: Send>(
+pub(crate) fn each_block_at<R: Read + Seek, T: Send>(
     r: &mut R,
     offsets: &[u64],
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
@@ -209,7 +209,7 @@ fn each_run_at<R: Read + Seek, T: Send>(
 
 /// Pass 1: the ids of the nodes inside, and whether the block has ways or relations.
 struct Inside<'a> {
-    boundary: &'a Boundary,
+    inside: &'a (dyn Fn(f64, f64) -> bool + Sync),
     ids: Vec<i64>,
     other: bool,
     span: Span,
@@ -218,7 +218,7 @@ struct Inside<'a> {
 impl RawSink for Inside<'_> {
     fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
         widen(&mut self.span, id);
-        if self.boundary.contains(lon, lat) {
+        if (self.inside)(lon, lat) {
             self.ids.push(id);
         }
     }
@@ -340,7 +340,7 @@ impl RawSink for Out<'_> {
 }
 
 /// The replication time of the region file's header, and whether the file is sorted by type, then id.
-fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
+pub(crate) fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
     let err = |e: osmpbf::Error| e.to_string();
     let mut blobs = osmpbf::BlobReader::new(r);
     match blobs.next().transpose().map_err(err)? {
@@ -362,6 +362,15 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     boundary: &Boundary,
     out: W,
 ) -> Result<(W, CutCounts), String> {
+    cut_where(open, &|lon, lat| boundary.contains(lon, lat), out)
+}
+
+/// [`cut_to_pbf`] with the nodes inside given by `inside` (for example, a boundary and a tile).
+pub fn cut_where<R: Read + Seek + Send, W: Write>(
+    open: impl Fn() -> Result<R, String>,
+    inside: &(dyn Fn(f64, f64) -> bool + Sync),
+    out: W,
+) -> Result<(W, CutCounts), String> {
     let (timestamp, sorted) = header(open()?)?;
     if !sorted {
         return Err("the region file is not sorted by type and id (Sort.Type_then_ID)".into());
@@ -370,7 +379,7 @@ pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(
     // relations
     let (mut parts, mut node_spans, mut ways_at) = (Vec::new(), Vec::new(), None);
     each_block(&mut open()?, |b, buf| {
-        let mut s = Inside { boundary, ids: Vec::new(), other: false, span: EMPTY };
+        let mut s = Inside { inside, ids: Vec::new(), other: false, span: EMPTY };
         decode_block_tags(b, [true, true, true], [false; 3], buf, &mut s)?;
         Ok((s.ids, s.other, s.span))
     }, |(ids, other, span), at| {
