@@ -229,7 +229,7 @@ pub fn write_tables<W: Write + Send>(
     let oc = pq::EdgeCols::of(mode, opts);
     pq::write_edges_to(file(&format!("edges_{n}.parquet"))?, &net.edges, oc)?;
     pq::write_edges_to(file(&format!("private_edges_{n}.parquet"))?, &net.private_edges, oc)?;
-    write_other_tables(net, mode, opts, all_ways, file)
+    write_other_tables(net, mode, opts, Some(all_ways), file)
 }
 
 /// [`write_tables`] for a network with its edges in temporary files ([`build_network_files`]): the edge tables are
@@ -238,7 +238,6 @@ pub fn write_tables_files<W: Write + Send>(
     net: &mut NetworkFiles,
     mode: Mode,
     opts: &Options,
-    all_ways: &[Way],
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
@@ -249,7 +248,8 @@ pub fn write_tables_files<W: Write + Send>(
     pq::write_edges_iter_to(file(&format!("edges_{n}.parquet"))?, rows, oc)?;
     let rows = net.files.private_edges().map_err(err)?.map(|e| e.map_err(err));
     pq::write_edges_iter_to(file(&format!("private_edges_{n}.parquet"))?, rows, oc)?;
-    write_other_tables(&net.net, mode, opts, all_ways, file)
+    // the tables `ways` and `way_nodes` are written by the network step (`ways_out` of build_network_files)
+    write_other_tables(&net.net, mode, opts, None, file)
 }
 
 /// The tables of a network but `edges` and `private_edges`.
@@ -257,7 +257,7 @@ fn write_other_tables<W: Write + Send>(
     net: &Network,
     mode: Mode,
     opts: &Options,
-    all_ways: &[Way],
+    all_ways: Option<&[Way]>,
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<(), String> {
     use duckosm_parquet as pq;
@@ -266,7 +266,7 @@ fn write_other_tables<W: Write + Send>(
     pq::write_nodes_to(out("nodes")?, &net.nodes)?;
     // duckOSM: left over from its build and always empty (the virtual nodes are in `nodes`)
     pq::write_nodes_to(out("virtual_nodes")?, &[])?;
-    if opts.ways_tables {
+    if let Some(all_ways) = all_ways.filter(|_| opts.ways_tables) {
         pq::write_ways_to(out("ways")?, &net.ways, all_ways)?;
         pq::write_way_nodes_to(out("way_nodes")?, &net.ways)?;
     }
@@ -789,6 +789,10 @@ pub fn run<W: Write + Send>(
             None
         };
         let mut sink = |r| graph_file.as_mut().expect("a file when there is a graph").push(r);
+        let mut ways_out = |mw: &[duckosm_core::filter::ModeWay]| -> Result<(), String> {
+            duckosm_parquet::write_ways_to(file(&format!("ways_{n}.parquet"))?, mw, &ways)?;
+            duckosm_parquet::write_way_nodes_to(file(&format!("way_nodes_{n}.parquet"))?, mw)
+        };
         let mut net = build_network_files(
             &ways,
             &coords,
@@ -798,12 +802,13 @@ pub fn run<W: Write + Send>(
             &relations,
             &junctions,
             if opts.build_graph { Some(&mut sink) } else { None },
+            if opts.ways_tables { Some(&mut ways_out) } else { None },
         )?;
         if let Some(w) = graph_file {
             w.finish()?;
         }
         log.step(&format!("build {n}"));
-        write_tables_files(&mut net, *mode, opts, &ways, &mut file)?;
+        write_tables_files(&mut net, *mode, opts, &mut file)?;
         log.step(&format!("write geoparquet {n}"));
         if p.h3_resolution.is_some() || dem.is_some() {
             // ponytail: H3 and the heights take all edges of the mode in memory, for this part only

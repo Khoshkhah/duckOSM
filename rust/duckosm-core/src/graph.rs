@@ -213,7 +213,7 @@ impl WayEnds {
 }
 
 /// The ways that the rules name (members of the relations, and the ways of the synthetic rules).
-fn rule_ways(relations: &[Relation], synthetic: &[TurnFix]) -> FxHashSet<i64> {
+pub(crate) fn rule_ways(relations: &[Relation], synthetic: &[TurnFix]) -> FxHashSet<i64> {
     let mut ways: FxHashSet<i64> = relations
         .iter()
         .flat_map(|r| {
