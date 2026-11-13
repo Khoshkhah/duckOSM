@@ -34,6 +34,10 @@ pub struct RawColumns {
     r_roles: ListBuilder<StringBuilder>,
     r_types: ListBuilder<StringBuilder>,
     refs: Vec<i64>,
+    /// The points and the WKB of the line of one way, kept for the next way: a new list for each way took the lock of the
+    /// global allocator of the browser build millions of times.
+    pts: Vec<duckosm_core::geom::Pt>,
+    wkb: Vec<u8>,
     /// The tables to fill (nodes, ways, relations); the elements of the others are skipped.
     keep: [bool; 3],
     /// The column `line` of the ways, from these coordinates (see [`write_area_raw`]).
@@ -69,6 +73,8 @@ impl Default for RawColumns {
             r_roles: ListBuilder::new(StringBuilder::new()),
             r_types: ListBuilder::new(StringBuilder::new()),
             refs: Vec::new(),
+            pts: Vec::new(),
+            wkb: Vec::new(),
             keep: [true; 3],
             line: None,
         }
@@ -130,8 +136,14 @@ impl RawSink for RawColumns {
         self.w_refs.append(true);
         if let Some((coords, line)) = &mut self.line {
             // as write_raw_ways_to: a node that has no coordinates is left out; fewer than 2 points: NULL
-            let pts: Vec<_> = self.refs.iter().filter_map(|r| coords.get(r).copied()).collect();
-            line.append_option((pts.len() >= 2).then(|| super::line_wkb(&pts)));
+            self.pts.clear();
+            self.pts.extend(self.refs.iter().filter_map(|r| coords.get(r).copied()));
+            if self.pts.len() >= 2 {
+                super::line_wkb_into(&self.pts, &mut self.wkb);
+                line.append_value(&self.wkb);
+            } else {
+                line.append_null();
+            }
         }
     }
 
@@ -533,6 +545,8 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
         patch: &'p duckosm_core::raw::RawPatch<'p>,
         coords: Vec<(i64, Pt)>,
         ways: usize,
+        /// the tags of a way of the network, kept for the next one (see RawColumns::pts)
+        tags: RawTags,
     }
     impl RawSink for Patching<'_> {
         fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, t: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
@@ -559,7 +573,12 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
                     self.ways += 1;
                     return self.cols.way(id, t, refs);
                 }
-                Patched::Same => (t.map(|(k, v)| (k.to_string(), v.to_string())).collect(), None),
+                Patched::Same => {
+                    let mut b = std::mem::take(&mut self.tags);
+                    b.clear();
+                    b.extend(t.map(|(k, v)| (k.to_string(), v.to_string())));
+                    (b, None)
+                }
             };
             self.ways += 1;
             if let Some(n) = net {
@@ -570,6 +589,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
                 Some(w) => self.cols.way(id, &mut t, &mut w.refs.iter().copied()),
                 None => self.cols.way(id, &mut t, refs),
             }
+            self.tags = tags;
         }
         fn relation<'a>(
             &mut self,
@@ -595,7 +615,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     each_block(
         &mut open()?,
         |b, buf| {
-            let mut s = Patching { cols: RawColumns::only(0), patch, coords: Vec::new(), ways: 0 };
+            let mut s = Patching { cols: RawColumns::only(0), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
             decode_block(b, [true, false, false], buf, &mut s)?;
             Ok((s.cols.finish()?, s.coords))
         },
@@ -606,7 +626,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
             Ok(true)
         },
     )?;
-    let mut s = Patching { cols: RawColumns::only(0), patch, coords: Vec::new(), ways: 0 };
+    let mut s = Patching { cols: RawColumns::only(0), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
     for n in patch.new_nodes() {
         s.cols.node(n.id, n.lat, n.lon, &mut pairs(&n.tags).into_iter());
         s.coords.push((n.id, (n.lon, n.lat)));
@@ -622,7 +642,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     each_block(
         &mut open()?,
         |b, buf| {
-            let mut s = Patching { cols: RawColumns::lines(coords.clone()), patch, coords: Vec::new(), ways: 0 };
+            let mut s = Patching { cols: RawColumns::lines(coords.clone()), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
             decode_block(b, [false, true, true], buf, &mut s)?;
             Ok((s.cols.finish()?, s.ways))
         },
