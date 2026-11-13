@@ -89,6 +89,13 @@ impl RawColumns {
         c
     }
 
+    /// Columns for the ways and the relations, without the column `line` (see [`write_area_raw`], which adds it).
+    pub fn ways_and_relations() -> Self {
+        let mut c = RawColumns::default();
+        c.keep = [false, true, true];
+        c
+    }
+
     /// Columns for the ways and the relations, and the column `line` of the ways from `coords`.
     pub fn lines(coords: Arc<NodeParts>) -> Self {
         let mut c = RawColumns::default();
@@ -520,11 +527,72 @@ impl NodeParts {
     }
 }
 
+/// The rows of the join of the lines of the ways (see [`write_area_raw`]), as fixed bytes; the sort key is at the start.
+#[cfg(feature = "pbf")]
+mod join {
+    use duckosm_core::spill::Codec;
+    fn i64_at(b: &[u8], at: usize) -> i64 {
+        i64::from_le_bytes(b[at..at + 8].try_into().expect("8 bytes"))
+    }
+    fn f64_at(b: &[u8], at: usize) -> f64 {
+        f64::from_bits(u64::from_le_bytes(b[at..at + 8].try_into().expect("8 bytes")))
+    }
+    fn u32_at(b: &[u8], at: usize) -> u32 {
+        u32::from_le_bytes(b[at..at + 4].try_into().expect("4 bytes"))
+    }
+    /// A node of a way: (node id, number of the way, place in the way), sorted by the node id.
+    pub struct Request;
+    impl Codec<(i64, u32, u32)> for Request {
+        fn put(&self, r: &(i64, u32, u32), out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.0.to_le_bytes());
+            out.extend_from_slice(&r.1.to_le_bytes());
+            out.extend_from_slice(&r.2.to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> (i64, u32, u32) {
+            (i64_at(b, 0), u32_at(b, 8), u32_at(b, 12))
+        }
+    }
+    /// A node with its coordinates: (id, lon, lat), sorted by the id. The coordinates keep their bits.
+    pub struct Position;
+    impl Codec<(i64, f64, f64)> for Position {
+        fn put(&self, r: &(i64, f64, f64), out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.0.to_le_bytes());
+            out.extend_from_slice(&r.1.to_bits().to_le_bytes());
+            out.extend_from_slice(&r.2.to_bits().to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> (i64, f64, f64) {
+            (i64_at(b, 0), f64_at(b, 8), f64_at(b, 16))
+        }
+    }
+    /// A point of a way: (number of the way, place in the way, lon, lat), sorted by the number and the place.
+    pub struct Point;
+    impl Codec<(u32, u32, f64, f64)> for Point {
+        fn put(&self, r: &(u32, u32, f64, f64), out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.0.to_le_bytes());
+            out.extend_from_slice(&r.1.to_le_bytes());
+            out.extend_from_slice(&r.2.to_bits().to_le_bytes());
+            out.extend_from_slice(&r.3.to_bits().to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> (u32, u32, f64, f64) {
+            (u32_at(b, 0), u32_at(b, 4), f64_at(b, 8), f64_at(b, 16))
+        }
+    }
+    /// The sort keys from the bytes of a row (no decode).
+    pub fn first_i64(b: &[u8]) -> i64 {
+        i64_at(b, 0)
+    }
+    pub fn way_and_place(b: &[u8]) -> (u32, u32) {
+        (u32_at(b, 0), u32_at(b, 4))
+    }
+}
+
 /// duckOSM's `raw.*` of an area file (the output of step 0) with the changes of the build (`patch`: the OSM fixes, the
 /// tags of the network's ways), as the `raw_*.parquet` files of the area build (with the column `line` of the ways, as
-/// `write_raw_ways_to`). Two passes read the file, on the calling thread: the nodes, then the ways and the relations;
-/// all threads decode and patch. In memory: the coordinates of all nodes (for the lines), one batch of blocks and one
-/// open row group of each table. Gives the rows of each table; for the ways, also those with fewer than 2 nodes, which
+/// `write_raw_ways_to`). Three passes read the file, on the calling thread: the nodes, the nodes of the ways, then the
+/// ways and the relations; all threads decode and patch. The lines come from a join on disk (temporary files of
+/// `spill::temp_store`): the nodes of the ways and the coordinates, both sorted by node id, give the points of each way
+/// in the order of the ways. In memory: the sorts (64 MiB each), one batch of blocks and one open row group of each
+/// table. Gives the rows of each table; for the ways, also those with fewer than 2 nodes, which
 /// are not written (as `Raw` counts them).
 #[cfg(feature = "pbf")]
 pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
@@ -608,10 +676,23 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
             }
         }
     }
+    use arrow_array::cast::AsArray;
+    use duckosm_core::spill::{self, Writer};
+    const BUDGET: usize = 64 << 20; // each sort holds about this much (spill::sort_bytes)
+    let io = |e: std::io::Error| format!("a temporary file of raw.*: {e}");
+    let store = spill::temp_store();
+    let store = &*store;
     let mut w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(NodeParts::default())))?;
     let mut rows = [0usize; 3];
-    // pass 1: the nodes, and their coordinates
-    let mut parts: Vec<Vec<(i64, Pt)>> = Vec::new();
+    // pass 1: the nodes; their coordinates go to a temporary file, sorted by id (all of them in memory were 0.5 GB on Kentucky:
+    // 20.5 million nodes)
+    let mut positions = Writer::new(store).map_err(io)?;
+    let (mut last, mut in_order) = (i64::MIN, true); // the nodes of a file sorted by type and id come in the order of the ids
+    let mut put = |positions: &mut Writer, id: i64, lon: f64, lat: f64| -> Result<(), String> {
+        in_order &= id > last;
+        last = id;
+        positions.push(&join::Position, &(id, lon, lat)).map_err(io)
+    };
     each_block(
         &mut open()?,
         |b, buf| {
@@ -622,7 +703,9 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
         |(part, c), _| {
             rows[0] += part.batches[0].num_rows();
             w.write(part)?;
-            parts.push(c);
+            for (id, (lon, lat)) in c {
+                put(&mut positions, id, lon, lat)?;
+            }
             Ok(true)
         },
     )?;
@@ -634,26 +717,108 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     let part = s.cols.finish()?;
     rows[0] += part.batches[0].num_rows();
     w.write(part)?;
-    parts.push(s.coords);
-    // ponytail: the coordinates of all nodes are in memory (Kentucky: 20.5 million nodes, 0.5 GB), in the parts of the blocks:
-    // one list made of them would need twice that for a moment. A file of them sorted by id keeps them out of memory if needed.
-    let coords = Arc::new(NodeParts::new(parts));
-    // pass 2: the ways with their lines, and the relations
+    for (id, (lon, lat)) in s.coords {
+        put(&mut positions, id, lon, lat)?;
+    }
+    let positions = positions.finish().map_err(io)?;
+    let positions = if in_order { positions } else { spill::sort_bytes(positions, join::first_i64, BUDGET, store).map_err(io)? };
+    // pass 2: the nodes of each way that is written, with the number of the way (the order of the ways) and the place in it
+    let mut requests = Writer::new(store).map_err(io)?;
+    let mut number = 0u32;
+    let mut ask = |ways: &RecordBatch, requests: &mut Writer| -> Result<(), String> {
+        let refs = ways.column(2).as_list::<i32>();
+        for i in 0..ways.num_rows() {
+            let ids = refs.value(i);
+            for (k, id) in ids.as_primitive::<arrow_array::types::Int64Type>().values().iter().enumerate() {
+                requests.push(&join::Request, &(*id, number, k as u32)).map_err(io)?;
+            }
+            number = number.checked_add(1).ok_or("raw.*: more than 2^32 ways")?;
+        }
+        Ok(())
+    };
     each_block(
         &mut open()?,
         |b, buf| {
-            let mut s = Patching { cols: RawColumns::lines(coords.clone()), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
+            let mut s = Patching { cols: RawColumns::only(1), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
+            decode_block(b, [false, true, false], buf, &mut s)?;
+            s.cols.finish()
+        },
+        |part, _| {
+            ask(&part.batches[1], &mut requests)?;
+            Ok(true)
+        },
+    )?;
+    let mut c = RawColumns::only(1);
+    for nw in patch.new_ways() {
+        c.way(nw.id, &mut std::iter::empty(), &mut nw.refs.iter().copied());
+    }
+    ask(&c.finish()?.batches[1], &mut requests)?;
+    let requests = spill::sort_bytes(requests.finish().map_err(io)?, join::first_i64, BUDGET, store).map_err(io)?;
+    // the join: the requests and the positions, both in the order of the node ids. A node with no coordinates gives no point
+    // (as before: it is left out of the line)
+    let mut points = Writer::new(store).map_err(io)?;
+    {
+        let mut pos = positions.read(&join::Position).map_err(io)?.peekable();
+        for r in requests.read(&join::Request).map_err(io)? {
+            let (node, way, place) = r.map_err(io)?;
+            while pos.next_if(|p| p.as_ref().is_ok_and(|p| p.0 < node)).is_some() {}
+            match pos.peek() {
+                Some(Ok(p)) if p.0 == node => points.push(&join::Point, &(way, place, p.1, p.2)).map_err(io)?,
+                Some(Err(_)) => return Err(io(pos.next().expect("peeked").expect_err("an error"))),
+                _ => {}
+            }
+        }
+    }
+    let points = spill::sort_bytes(points.finish().map_err(io)?, join::way_and_place, BUDGET, store).map_err(io)?;
+    // pass 3: the ways with their lines (the points come in the order of the ways), and the relations
+    let mut points = points.read(&join::Point).map_err(io)?.peekable();
+    let (mut number, mut pts, mut wkb) = (0u32, Vec::<Pt>::new(), Vec::<u8>::new());
+    let mut lines = |mut part: RawPart| -> Result<RawPart, String> {
+        let ways = &part.batches[1];
+        let mut line = BinaryBuilder::new();
+        for _ in 0..ways.num_rows() {
+            pts.clear();
+            while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == number)) {
+                let p = p.map_err(io)?;
+                pts.push((p.2, p.3));
+            }
+            if let Some(Err(_)) = points.peek() {
+                return Err(io(points.next().expect("peeked").expect_err("an error")));
+            }
+            // as write_raw_ways_to: fewer than 2 points is NULL
+            if pts.len() >= 2 {
+                super::line_wkb_into(&pts, &mut wkb);
+                line.append_value(&wkb);
+            } else {
+                line.append_null();
+            }
+            number = number.wrapping_add(1);
+        }
+        let line: ArrayRef = Arc::new(line.finish());
+        part.batches[1] = RecordBatch::try_from_iter_with_nullable(vec![
+            ("osm_id", ways.column(0).clone(), false),
+            ("tags", ways.column(1).clone(), true),
+            ("refs", ways.column(2).clone(), false),
+            ("line", line, true),
+        ])
+        .map_err(err)?;
+        Ok(part)
+    };
+    each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut s = Patching { cols: RawColumns::ways_and_relations(), patch, coords: Vec::new(), ways: 0, tags: Vec::new() };
             decode_block(b, [false, true, true], buf, &mut s)?;
             Ok((s.cols.finish()?, s.ways))
         },
         |(part, ways), _| {
             rows[1] += ways;
             rows[2] += part.batches[2].num_rows();
-            w.write(part)?;
+            w.write(lines(part)?)?;
             Ok(true)
         },
     )?;
-    let mut c = RawColumns::lines(coords);
+    let mut c = RawColumns::ways_and_relations();
     for nw in patch.new_ways() {
         let mut tags = nw.tags.clone();
         if let Some(n) = patch.net_way(nw.id) {
@@ -662,7 +827,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
         c.way(nw.id, &mut pairs(&tags).into_iter(), &mut nw.refs.iter().copied());
         rows[1] += 1;
     }
-    w.write(c.finish()?)?;
+    w.write(lines(c.finish()?)?)?;
     w.finish()?;
     Ok(rows)
 }
