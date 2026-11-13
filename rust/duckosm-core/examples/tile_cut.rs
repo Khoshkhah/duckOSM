@@ -1,7 +1,7 @@
 //! The tile cut of a region file, and its test against the cut of each tile alone.
 //!
 //!   tile_cut REGION BOUNDARY ZOOM OUT            one read: a file for each tile (OUT/z_x_y.osm.pbf)
-//!   tile_cut REGION BOUNDARY ZOOM OUT reference  the cut of each tile alone (cut_where, the boundary and the tile)
+//!   tile_cut REGION BOUNDARY ZOOM OUT reference [z/x/y,...]  the cut of each tile alone (cut_where, the boundary and the tile)
 //!   tile_cut compare DIR_A DIR_B                 the same files with the same elements?
 
 use duckosm_core::boundary::Boundary;
@@ -160,7 +160,9 @@ fn main() {
     let start = std::time::Instant::now();
     if a.get(5).map(String::as_str) == Some("reference") {
         let mut files = 0;
-        for t in &list {
+        // only the tiles of a list (z/x/y,z/x/y,...), when one is given
+        let only: Option<Vec<String>> = a.get(6).map(|s| s.split(',').map(str::to_string).collect());
+        for t in list.iter().filter(|t| only.as_ref().is_none_or(|o| o.contains(&t.name()))) {
             let path = file_of(out, t);
             let inside = |lon: f64, lat: f64| boundary.contains(lon, lat) && Tile::of(z, lon, lat) == *t;
             let (_, n) = cut_where(open, &inside, BufWriter::new(File::create(&path).unwrap())).unwrap();
