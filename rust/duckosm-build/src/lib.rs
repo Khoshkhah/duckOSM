@@ -897,17 +897,13 @@ pub fn run<W: Write + Send>(
     };
     write_area_tables(&area, &mut file)?;
     log.step("write the area tables");
-    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
-    if sum.levels.is_some() {
-        log.step("levels");
-    }
     sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
     if sum.lanes.is_some() {
         log.step("lane profile");
     }
-    // the building faces and raw.* come last: before them, the data that only the steps above need goes, so the memory of
+    // the building faces and raw.* come next: before them, the data that only the steps above need goes, so the memory of
     // the faces comes on top of less (Kentucky: 0.8 GB less; the browser build has at most 4 GB)
-    drop((level_edges, lane_edges, mode_nodes, coords, junctions));
+    drop((lane_edges, mode_nodes, coords, junctions));
     if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
@@ -942,6 +938,13 @@ pub fn run<W: Write + Send>(
             }
         }
         log.step("write raw");
+    }
+    // the drawing levels come last: roadstyle's solver (levels = solve, the page's choice) needs the most memory of all steps
+    // (Kentucky: 1.7 GB), and here the raw part and the ways are gone, so it uses their memory again
+    drop((raw, ways));
+    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+    if sum.levels.is_some() {
+        log.step("levels");
     }
     Ok(sum)
 }
