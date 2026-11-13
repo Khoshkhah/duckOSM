@@ -10,8 +10,48 @@ pub struct Boundary {
     polygons: Vec<Vec<Ring>>,
     /// west, south, east, north
     bbox: (f64, f64, f64, f64),
+    /// The edges by latitude band, for [`Boundary::contains`].
+    bands: Bands,
     /// `properties.name` of the first Feature, if any.
     pub name: Option<String>,
+}
+
+/// An edge of a ring: the number of its polygon, and its two ends.
+type Edge = (usize, (f64, f64), (f64, f64));
+
+/// The edges of the polygons by latitude band. A point needs only the edges whose latitude range holds its own latitude: an
+/// edge that does not reach it can neither cross the ray of the point nor have the point on it. Step 0 tests each node of the
+/// region file in the box of the area (US South for Kentucky: tens of millions), and testing all edges of the border was
+/// its largest cost.
+struct Bands {
+    south: f64,
+    per_degree: f64,
+    edges: Vec<Vec<Edge>>,
+}
+
+impl Bands {
+    fn new(polygons: &[Vec<Ring>], south: f64, north: f64) -> Bands {
+        let count = polygons.iter().flatten().map(Vec::len).sum::<usize>().clamp(1, 1 << 16);
+        let per_degree = if north > south { count as f64 / (north - south) } else { 0.0 };
+        let mut b = Bands { south, per_degree, edges: vec![Vec::new(); count] };
+        for (p, rings) in polygons.iter().enumerate() {
+            for ring in rings {
+                for k in 0..ring.len() {
+                    let (a, c) = (ring[k], ring[(k + 1) % ring.len()]);
+                    for i in b.band(a.1.min(c.1))..=b.band(a.1.max(c.1)) {
+                        b.edges[i].push((p, a, c));
+                    }
+                }
+            }
+        }
+        b
+    }
+
+    /// The band of a latitude: the same function for the edges and the points, and it never gets smaller when the latitude
+    /// gets larger, so an edge is in the band of each latitude of its range.
+    fn band(&self, lat: f64) -> usize {
+        (((lat - self.south) * self.per_degree) as usize).min(self.edges.len() - 1)
+    }
 }
 
 impl Boundary {
@@ -27,9 +67,11 @@ impl Boundary {
         let bbox = pts.fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |b, &(x, y)| {
             (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y))
         });
+        let bands = Bands::new(&polygons, bbox.1, bbox.3);
         Ok(Boundary {
             polygons,
             bbox,
+            bands,
             name,
         })
     }
@@ -37,6 +79,28 @@ impl Boundary {
     /// Is the point inside? A hole of a polygon is outside (the even-odd rule over all rings of a polygon). A
     /// point on a ring counts as inside, as in osmium's cut: a border often runs through the nodes of a road.
     pub fn contains(&self, lon: f64, lat: f64) -> bool {
+        let (w, s, e, n) = self.bbox;
+        if lon < w || lon > e || lat < s || lat > n {
+            return false;
+        }
+        if self.polygons.len() > 64 {
+            return self.contains_all(lon, lat);
+        }
+        // the edges of the point's band only; the even-odd rule of each polygon is one bit
+        let mut inside = 0u64;
+        for &(p, a, b) in &self.bands.edges[self.bands.band(lat)] {
+            if on_segment((lon, lat), a, b) {
+                return true;
+            }
+            if (a.1 > lat) != (b.1 > lat) && lon < (b.0 - a.0) * (lat - a.1) / (b.1 - a.1) + a.0 {
+                inside ^= 1 << p;
+            }
+        }
+        inside != 0
+    }
+
+    /// [`Boundary::contains`] with all edges of all polygons (more than 64 polygons, and the test of the bands).
+    fn contains_all(&self, lon: f64, lat: f64) -> bool {
         let (w, s, e, n) = self.bbox;
         if lon < w || lon > e || lat < s || lat > n {
             return false;
@@ -166,5 +230,35 @@ mod tests {
         assert!(!b.contains(5.0, 5.0), "in the hole");
         assert!(!b.contains(11.0, 5.0) && !b.contains(5.0, -1.0));
         assert!(Boundary::parse(r#"{"type":"Point","coordinates":[1,2]}"#).is_err());
+    }
+
+    /// The test with the bands gives the answer of the test with all edges: on Monaco's boundary and on a multipolygon with
+    /// a hole, for random points in the box, the vertices, the middle of each edge and points just beside them.
+    #[test]
+    fn bands_give_the_answer_of_all_edges() {
+        let monaco = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/data/monaco.geojson")).unwrap();
+        let multi = r#"{"type":"MultiPolygon","coordinates":[[[[0,0],[10,0],[10,10],[0,10],[0,0]],[[4,4],[6,4],[6,6],[4,6],[4,4]]],
+            [[[12,1],[15,1],[13.5,9],[12,1]]]]}"#;
+        let mut seed = 12345u64;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for text in [monaco.as_str(), multi] {
+            let b = Boundary::parse(text).unwrap();
+            let (w, s, e, n) = b.bbox;
+            let mut pts: Vec<(f64, f64)> = (0..20_000).map(|_| (w + (e - w) * rnd(), s + (n - s) * rnd())).collect();
+            for ring in b.polygons.iter().flatten() {
+                for k in 0..ring.len() {
+                    let (a, c) = (ring[k], ring[(k + 1) % ring.len()]);
+                    pts.extend([a, ((a.0 + c.0) / 2.0, (a.1 + c.1) / 2.0), (a.0 + 1e-9, a.1), (a.0, a.1 - 1e-9)]);
+                }
+            }
+            let inside = pts.iter().filter(|p| b.contains(p.0, p.1)).count();
+            assert!(inside > 100 && inside < pts.len(), "the points are on both sides");
+            for &(x, y) in &pts {
+                assert_eq!(b.contains(x, y), b.contains_all(x, y), "({x}, {y})");
+            }
+        }
     }
 }
