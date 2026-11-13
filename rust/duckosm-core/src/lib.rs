@@ -23,4 +23,7 @@ pub mod raw;
 pub mod sidewalks;
 pub mod speeds;
 pub mod spill;
+#[cfg(feature = "pbf")]
+pub mod tilecut;
+pub mod tiles;
 pub mod util;

@@ -29,6 +29,7 @@ pub trait RawSink {
     );
 }
 
+#[derive(Clone)]
 pub struct RawNode {
     pub id: i64,
     pub lon: f64,
@@ -36,6 +37,7 @@ pub struct RawNode {
     pub tags: RawTags,
 }
 
+#[derive(Clone)]
 pub struct RawWay {
     pub id: i64,
     pub tags: RawTags,
