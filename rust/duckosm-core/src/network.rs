@@ -503,7 +503,7 @@ pub fn build_network_junctions(
     gj: &FxHashMap<i64, bool>,
     graph_rows: Option<GraphRows>,
 ) -> Result<Network, String> {
-    build_network_files(all_ways, coords, mode, opts, fixes, relations, gj, graph_rows)?.into_network()
+    build_network_files(all_ways, coords, mode, opts, fixes, relations, gj, graph_rows, None)?.into_network()
 }
 
 /// [`build_network_junctions`] with the edges and the private edges in temporary files, sorted by `edge_id`
@@ -518,6 +518,7 @@ pub fn build_network_files(
     relations: &[Relation],
     gj: &FxHashMap<i64, bool>,
     graph_rows: Option<GraphRows>,
+    ways_out: Option<WaysOut>,
 ) -> Result<NetworkFiles, String> {
     let mut stats = Stats {
         ways_read: all_ways.len(),
@@ -543,6 +544,14 @@ pub fn build_network_files(
     // duckOSM: after RoadFilter and before GraphBuilder, so oneway and the lanes act on the edges
     stats.osm_fixes = fixes.apply_to_mode(&mut mw, mode);
     stats.ways_kept = mw.len();
+    // the tables `ways` and `way_nodes` go to their files here, when the ways of the mode are made
+    let ways_written = match ways_out {
+        Some(out) => {
+            out(&mw)?;
+            true
+        }
+        None => false,
+    };
     let lj = local_junctions(&mw);
 
     crate::util::step("start of step 1: Cut every way into forward edges. Step 2");
@@ -639,6 +648,14 @@ pub fn build_network_files(
         }
     }
     drop(lj); // the junction maps are as large as the nodes of the area, and the later steps do not read them
+    // after the cut, only the turn restrictions (9b) read the node lists of the mode ways, and only of the ways that a rule names
+    // (Kentucky: 64 MiB of node lists). When the `ways` tables are not written yet, they need all of them.
+    if ways_written || !opts.ways_tables {
+        let named = crate::graph::rule_ways(relations, &fixes.turn_restrictions);
+        for w in mw.iter_mut().filter(|w| !named.contains(&w.id)) {
+            w.refs = Vec::new();
+        }
+    }
     let cut = cut.finish().map_err(io)?;
     let ends = ends.finish().map_err(io)?;
 
@@ -949,6 +966,9 @@ pub fn build_network_files(
         files,
     })
 }
+
+/// Where [`build_network_files`] writes the tables `ways` and `way_nodes` of the mode, when the ways of the mode are made.
+pub type WaysOut<'a> = &'a mut dyn FnMut(&[ModeWay]) -> Result<(), String>;
 
 /// The edges and the private edges of a mode in temporary files, sorted by `edge_id`.
 pub struct EdgeFiles {

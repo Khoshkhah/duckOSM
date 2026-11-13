@@ -358,6 +358,7 @@ pub fn write_edge_id_map_to<W: Write + Send>(out: W, rows: &[MapRow]) -> Result<
     ]));
     let plain = WriterProperties::builder()
         .set_compression(compression())
+        .set_max_row_group_row_count(Some(ROW_GROUP))
         .build();
     let mut w = ParWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
@@ -395,13 +396,47 @@ fn write_rows<W: Write + Send, T>(
     columns: impl Fn(&[T]) -> Vec<ArrayRef>,
 ) -> Result<(), String> {
     let schema = Arc::new(Schema::new(fields));
-    let plain = WriterProperties::builder()
-        .set_compression(compression())
-        .build();
-    let mut w = ParWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?;
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(rows_props())).map_err(err)?;
     for chunk in rows.chunks(ROW_GROUP) {
         w.write(&RecordBatch::try_new(schema.clone(), columns(chunk)).map_err(err)?)
             .map_err(err)?;
+    }
+    w.close().map_err(err)?;
+    Ok(())
+}
+
+/// The writer settings of [`write_rows`]: a row group is written when it has `ROW_GROUP` rows (the default of the
+/// writer is about a million rows, all in memory until it is written).
+fn rows_props() -> WriterProperties {
+    WriterProperties::builder()
+        .set_compression(compression())
+        .set_max_row_group_row_count(Some(ROW_GROUP))
+        .build()
+}
+
+/// [`write_rows`] from a stream of rows: one row group of `ROW_GROUP` rows at a time is in memory.
+fn write_rows_iter<W: Write + Send, T>(
+    out: W,
+    fields: Vec<Field>,
+    rows: impl Iterator<Item = T>,
+    columns: impl Fn(&[T]) -> Vec<ArrayRef>,
+) -> Result<(), String> {
+    let schema = Arc::new(Schema::new(fields));
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(rows_props())).map_err(err)?;
+    let mut chunk: Vec<T> = Vec::new();
+    let flush = |chunk: &mut Vec<T>, w: &mut ParWriter<W>| -> Result<(), String> {
+        w.write(&RecordBatch::try_new(schema.clone(), columns(chunk)).map_err(err)?).map_err(err)?;
+        chunk.clear();
+        Ok(())
+    };
+    for r in rows {
+        chunk.push(r);
+        if chunk.len() == ROW_GROUP {
+            flush(&mut chunk, &mut w)?;
+        }
+    }
+    if !chunk.is_empty() {
+        flush(&mut chunk, &mut w)?;
     }
     w.close().map_err(err)?;
     Ok(())
@@ -464,6 +499,7 @@ impl<W: Write + Send> EdgeGraphWriter<W> {
         let schema = Arc::new(Schema::new(edge_graph_fields()));
         let plain = WriterProperties::builder()
             .set_compression(compression())
+            .set_max_row_group_row_count(Some(ROW_GROUP))
             .build();
         Ok(EdgeGraphWriter {
             w: ParWriter::try_new(out, schema.clone(), Some(plain)).map_err(err)?,
@@ -676,21 +712,14 @@ pub fn write_ways_to<W: Write + Send>(out: W, rows: &[ModeWay], all: &[Way]) -> 
 
 /// Write `<mode>.way_nodes`: the nodes of `ways`, one row per node (`seq` from 0).
 pub fn write_way_nodes_to<W: Write + Send>(out: W, rows: &[ModeWay]) -> Result<(), String> {
-    let flat: Vec<(i64, i64, i64)> = rows
-        .iter()
-        .flat_map(|w| {
-            w.refs
-                .iter()
-                .enumerate()
-                .map(move |(i, &n)| (w.id, n, i as i64))
-        })
-        .collect();
+    // one row group at a time: all nodes of all ways at once were 8.4 million rows on Kentucky
+    let flat = rows.iter().flat_map(|w| w.refs.iter().enumerate().map(move |(i, &n)| (w.id, n, i as i64)));
     let fields = vec![
         field("way_id", DataType::Int64),
         field("node_id", DataType::Int64),
         field("seq", DataType::Int64),
     ];
-    write_rows(out, fields, &flat, |c| {
+    write_rows_iter(out, fields, flat, |c| {
         vec![
             i64s(c.iter().map(|r| r.0)),
             i64s(c.iter().map(|r| r.1)),
