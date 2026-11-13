@@ -944,8 +944,8 @@ pub fn is_entrance<'a>(mut tags: impl Iterator<Item = (&'a str, &'a str)>) -> bo
 /// By rows of tiles: each building belongs to the 1 km tile of the first point of its first ring with an area (all its rings with
 /// it). A tile has the walls within `MAX_STREET_M` of its buildings (the line of sight, and the party walls: a ring with the same
 /// two nodes has them in its box) and the streets within `INFER_STREET_M`, which is all that a wall reads. The rings and the
-/// streets are in temporary files sorted by the south side of their box; the rows of tiles go from south to north, and only the
-/// rings and the streets that can touch the row are in memory. The faces go to the sink tile by tile (the rings of a tile in
+/// streets are in temporary files sorted by the south side of their box; bands of rows of tiles go from south to north, and only
+/// the rings and the streets that can touch the band are in memory. The faces go to the sink tile by tile (the rings of a tile in
 /// their order).
 pub fn building_faces_of(
     rings: BuildingRings,
@@ -975,7 +975,7 @@ pub fn building_faces_of(
     // 3. each ring with its box and the tile of its building (the tile of the first ring with an area of the building: the rings of
     // a building come one after the other), sorted by the south side of the box; the box of the buildings of each tile
     const TILE_M: f64 = 1000.0;
-    let mut tiles: std::collections::BTreeMap<Tile, AABB<P>> = Default::default();
+    let mut tiles: std::collections::BTreeMap<Tile, (AABB<P>, usize)> = Default::default();
     let mut placed = Writer::new(store).map_err(io_err)?;
     let mut last: Option<((i64, bool), Tile)> = None;
     for (k, r) in file.read(&RingCodec).map_err(io_err)?.enumerate() {
@@ -995,7 +995,8 @@ pub fn building_faces_of(
                 }
             };
             last = Some((building, tile));
-            tiles.entry(tile).and_modify(|b| *b = b.merged(&bx)).or_insert(bx);
+            let t = tiles.entry(tile).or_insert((bx, 0));
+            *t = (t.0.merged(&bx), t.1 + 1);
         }
         placed.push(&PlacedCodec, &Placed { k: k as u32, tile, area, bx, ring }).map_err(io_err)?;
     }
@@ -1017,26 +1018,35 @@ pub fn building_faces_of(
             )
         })
         .collect();
-    // 4. the rows of tiles, south to north: the south and the north side of the boxes of the row, and the lowest south side of this
-    // row and the rows after it (a ring or a street north of it can still be read)
-    let tiles: Vec<(Tile, AABB<P>)> = tiles.into_iter().collect();
-    let rows: Vec<&[(Tile, AABB<P>)]> = tiles.chunk_by(|a, b| a.0 .0 == b.0 .0).collect();
-    let sides: Vec<(f64, f64)> = rows
-        .iter()
-        .map(|r| r.iter().fold((f64::MAX, f64::MIN), |(s, n), t| (s.min(t.1.lower().1), n.max(t.1.upper().1))))
-        .collect();
-    let mut floor = vec![f64::MAX; rows.len() + 1];
-    for i in (0..rows.len()).rev() {
-        floor[i] = floor[i + 1].min(sides[i].0);
+    // 4. the bands of rows of tiles, south to north, each with about RINGS_PER_PART rings (the tiles of a band run at the same
+    // time): the first and the last row, the north side of the boxes of the band, and the lowest south side of this band and
+    // the bands after it (a ring or a street north of it can still be read)
+    let tiles: Vec<(Tile, (AABB<P>, usize))> = tiles.into_iter().collect();
+    let mut bands: Vec<(i64, i64, f64, f64)> = Vec::new();
+    let mut n = 0;
+    for row in tiles.chunk_by(|a, b| a.0 .0 == b.0 .0) {
+        let (south, north) = row.iter().fold((f64::MAX, f64::MIN), |(s, n), t| (s.min(t.1 .0.lower().1), n.max(t.1 .0.upper().1)));
+        let r = row[0].0 .0;
+        match bands.last_mut() {
+            Some(b) if n < RINGS_PER_PART => *b = (b.0, r, b.2.max(north), b.3.min(south)),
+            _ => {
+                bands.push((r, r, north, south));
+                n = 0;
+            }
+        }
+        n += row.iter().map(|t| t.1 .1).sum::<usize>();
+    }
+    drop(tiles);
+    for i in (0..bands.len().saturating_sub(1)).rev() {
+        bands[i].3 = bands[i].3.min(bands[i + 1].3);
     }
     let mut placed = placed.read(&PlacedCodec).map_err(io_err)?.peekable();
     let mut streets = streets.read(&StreetCodec).map_err(io_err)?.peekable();
     let mut active: Vec<Placed> = Vec::new();
-    // the streets near the row: (number, key of the segment, north side, segment); the first copy of a segment wins
+    // the streets near the band: (number, key of the segment, north side, segment); the first copy of a segment wins
     type SegKey = (i64, [u64; 4]);
     let mut segs: Vec<(u64, SegKey, f64, Seg)> = Vec::new();
-    for (ri, row) in rows.iter().enumerate() {
-        let (north, floor) = (sides[ri].1, floor[ri]);
+    for &(first, last, north, floor) in &bands {
         active.retain(|p| p.bx.upper().1 >= floor - MAX_STREET_M);
         while let Some(p) = placed.next_if(|p| p.as_ref().map_or(true, |p| p.bx.lower().1 <= north + MAX_STREET_M)) {
             active.push(p.map_err(io_err)?);
@@ -1398,12 +1408,12 @@ pub fn building_faces_of(
             }
             out
         };
-        // the rings of each tile of the row, in their order; the tiles in groups of about RINGS_PER_PART rings: the tiles of a
+        // the rings of each tile of the band, in their order; the tiles in groups of about RINGS_PER_PART rings: the tiles of a
         // group at the same time (one tile on one thread), then their faces to the sink in the order of the tiles
         let mut owned: Vec<(Tile, u32, usize)> = active
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.area && p.tile.0 == row[0].0 .0)
+            .filter(|(_, p)| p.area && (first..=last).contains(&p.tile.0))
             .map(|(j, p)| (p.tile, p.k, j))
             .collect();
         owned.sort_unstable();
