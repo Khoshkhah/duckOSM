@@ -14,7 +14,7 @@ use crate::geom::Pt;
 use crate::graph::{MemberType, Relation};
 use crate::raw::{RawNode, RawWay};
 use crate::util::FxHashMap;
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{Envelope, RTree, RTreeObject, AABB};
 use std::sync::Arc;
 
 /// A street farther than this from the middle of a wall is not the street of the wall (meters).
@@ -261,6 +261,7 @@ impl Proj {
     }
 }
 
+#[derive(Clone)]
 struct Seg {
     a: P,
     b: P,
@@ -281,6 +282,16 @@ impl RTreeObject for Seg {
 }
 
 /// A wall of any building, for the test of the line of sight.
+/// The box of a ring (its number in the rings), in the tree that finds the rings near a tile.
+struct RingBox(usize, AABB<P>);
+
+impl RTreeObject for RingBox {
+    type Envelope = AABB<P>;
+    fn envelope(&self) -> Self::Envelope {
+        self.1
+    }
+}
+
 struct WallSeg {
     a: P,
     b: P,
@@ -699,7 +710,7 @@ pub fn building_faces_of(
     }
     // the streets and the seen map go before the tree is made: the tree can use their memory
     drop((streets, seen));
-    let tree = RTree::bulk_load(segs);
+    let all_streets = RTree::bulk_load(segs);
     crate::util::step("building faces 3: the tree of the streets");
     // 4. a wall that two buildings have (the same two nodes) is a party wall
     let mut shared: FxHashMap<(i64, i64), u32> = FxHashMap::default();
@@ -725,334 +736,399 @@ pub fn building_faces_of(
         .collect();
 
     crate::util::step("building faces 4: the party walls, the rules, the entrances");
-    // 5. each ring counter-clockwise, so that the outward normal of a wall is (dy, -dx); and the tree of all walls, for the line of sight
-    let mut oriented = Vec::new();
-    let mut wall_segs = Vec::new();
-    for Ring {
-        id,
-        relation,
-        inner,
-        mut ids,
-        mut pts,
-        addr,
-    } in rings
-    {
-        let mut local: Vec<P> = pts.iter().map(|&p| proj.pt(p)).collect();
+    // 5. by tiles: each building belongs to the 1 km tile of the first point of its first ring (all its rings with it), and a tile
+    // has the walls within MAX_STREET_M (the line of sight) and the streets within INFER_STREET_M of its buildings, which is all
+    // that a wall reads. The faces of a tile go to the sink tile by tile (the rings of a tile in their order). The rings, their
+    // party walls and the tree of the streets are of the whole area; the turned rings and the tree of the walls of all buildings
+    // were the peak of the step.
+    // a ring counter-clockwise, so that the outward normal of a wall is (dy, -dx); an inner ring clockwise (the normal points into the
+    // courtyard). None: no area (a line). The same for a ring of the tile and a ring around it, so a wall is the same segment.
+    let turn = |r: &Ring| -> Option<(bool, Vec<P>)> {
+        let local: Vec<P> = r.pts.iter().map(|&p| proj.pt(p)).collect();
         let n = local.len() - 1;
         let area: f64 = (0..n)
             .map(|i| local[i].0 * local[i + 1].1 - local[i + 1].0 * local[i].1)
             .sum();
-        if area == 0.0 {
-            continue; // no area: a line
-        }
-        // an outer ring counter-clockwise (the normal of a wall points out of the building); an inner ring clockwise (it points into the courtyard)
-        if (area < 0.0) != inner {
-            local.reverse();
-            ids.reverse();
-            pts.reverse();
-        }
-        wall_segs.extend(
-            local
-                .windows(2)
-                .filter(|w| w[0] != w[1])
-                .map(|w| WallSeg { a: w[0], b: w[1] }),
-        );
-        // the party walls of the ring (the same two nodes in two rings): one answer for each wall, so that the map of all wall
-        // pairs goes before the tree of the walls is made (Kentucky: 200 MiB)
-        let party: Vec<bool> = ids
+        (area != 0.0).then_some(((area < 0.0) != r.inner, local))
+    };
+    // the party walls of each ring (the same two nodes in two rings), in the order of the turned ring, and the box of each ring
+    let mut party: Vec<Vec<bool>> = Vec::with_capacity(rings.len());
+    let mut boxes: Vec<(usize, AABB<P>)> = Vec::with_capacity(rings.len());
+    for (k, r) in rings.iter().enumerate() {
+        let Some((flip, local)) = turn(r) else {
+            party.push(Vec::new());
+            continue;
+        };
+        let mut bits: Vec<bool> = r
+            .ids
             .windows(2)
             .map(|p| shared.get(&(p[0].min(p[1]), p[0].max(p[1]))).is_some_and(|&c| c >= 2))
             .collect();
-        oriented.push((id, relation, inner, ids, pts, local, addr, party));
+        if flip {
+            bits.reverse();
+        }
+        party.push(bits);
+        boxes.push((k, AABB::from_points(&local)));
     }
     drop(shared);
-    let wall_tree = RTree::bulk_load(wall_segs);
-    // from a point on the wall to a point on the street: is there a wall in the way?
-    let visible = |from: P, to: P| {
-        let env = AABB::from_corners(
-            (from.0.min(to.0), from.1.min(to.1)),
-            (from.0.max(to.0), from.1.max(to.1)),
+    // the tile of each ring: the tile of the first ring with an area of its building (the rings of a building come one after the other)
+    const TILE_M: f64 = 1000.0;
+    let mut owned: Vec<((i64, i64), usize)> = Vec::with_capacity(boxes.len());
+    let mut last: Option<((i64, bool), (i64, i64))> = None;
+    for &(k, _) in &boxes {
+        let building = (rings[k].id, rings[k].relation);
+        let tile = match last {
+            Some((x, t)) if x == building => t,
+            _ => {
+                let p = proj.pt(rings[k].pts[0]);
+                ((p.1 / TILE_M).floor() as i64, (p.0 / TILE_M).floor() as i64)
+            }
+        };
+        last = Some((building, tile));
+        owned.push((tile, k));
+    }
+    owned.sort_unstable();
+    let ring_boxes = RTree::bulk_load(boxes.into_iter().map(|(k, b)| RingBox(k, b)).collect());
+    crate::util::step("building faces 5: the turned rings, their party walls and boxes, the tiles");
+    for tile in owned.chunk_by(|a, b| a.0 == b.0) {
+        // the rings of the tile, turned, and the box of their buildings
+        let mut oriented = Vec::with_capacity(tile.len());
+        let mut area_box: Option<AABB<P>> = None;
+        for &(_, k) in tile {
+            let r = &rings[k];
+            let (flip, mut local) = turn(r).expect("a ring with an area");
+            let (mut ids, mut pts) = (r.ids.clone(), r.pts.clone());
+            if flip {
+                local.reverse();
+                ids.reverse();
+                pts.reverse();
+            }
+            let b = AABB::from_points(&local);
+            area_box = Some(area_box.map_or(b, |a| a.merged(&b)));
+            oriented.push((r.id, r.relation, r.inner, ids, pts, local, r.addr.clone(), std::mem::take(&mut party[k])));
+        }
+        let area_box = area_box.expect("a tile has rings");
+        let around = |d: f64| {
+            let (lo, hi) = (area_box.lower(), area_box.upper());
+            AABB::from_corners((lo.0 - d, lo.1 - d), (hi.0 + d, hi.1 + d))
+        };
+        // the walls of the rings near the tile, for the line of sight, turned as above (the same segments as with all walls)
+        let mut wall_segs = Vec::new();
+        for RingBox(j, _) in ring_boxes.locate_in_envelope_intersecting(&around(MAX_STREET_M)) {
+            let (flip, mut local) = turn(&rings[*j]).expect("a ring with an area");
+            if flip {
+                local.reverse();
+            }
+            wall_segs.extend(
+                local
+                    .windows(2)
+                    .filter(|w| w[0] != w[1])
+                    .map(|w| WallSeg { a: w[0], b: w[1] }),
+            );
+        }
+        // the streets near the tile: a wall reads the segments in a box of INFER_STREET_M around it
+        let tree = RTree::bulk_load(
+            all_streets
+                .locate_in_envelope_intersecting(&around(INFER_STREET_M))
+                .cloned()
+                .collect(),
         );
-        !wall_tree
-            .locate_in_envelope_intersecting(&env)
-            .any(|w| crosses(from, to, w.a, w.b))
-    };
+        let wall_tree = RTree::bulk_load(wall_segs);
+        // from a point on the wall to a point on the street: is there a wall in the way?
+        let visible = |from: P, to: P| {
+            let env = AABB::from_corners(
+                (from.0.min(to.0), from.1.min(to.1)),
+                (from.0.max(to.0), from.1.max(to.1)),
+            );
+            !wall_tree
+                .locate_in_envelope_intersecting(&env)
+                .any(|w| crosses(from, to, w.a, w.b))
+        };
 
-    // the place of the first wall of each ring in its building: the places go on from the outer ring to the inner rings
-    let mut next_index: FxHashMap<(i64, bool), i32> = FxHashMap::default();
-    let offsets: Vec<i32> = oriented
-        .iter()
-        .map(|(id, relation, _, _, _, local, _, _)| {
-            let offset = *next_index.entry((*id, *relation)).or_default();
-            next_index.insert((*id, *relation), offset + (local.len() - 1) as i32);
-            offset
-        })
-        .collect();
-    drop(next_index);
-    let ring_faces = |k: usize, sc: &mut Scratch, out: &mut Vec<BuildingFace>| {
-        let (id, relation, inner, ids, pts, local, addr, party) = &oriented[k];
-        let (id, relation, inner, offset) = (*id, *relation, *inner, offsets[k]);
-        let n = local.len() - 1;
-        let building_type = if relation { "relation" } else { "way" };
-        if inner {
+        // the place of the first wall of each ring in its building: the places go on from the outer ring to the inner rings
+        let mut next_index: FxHashMap<(i64, bool), i32> = FxHashMap::default();
+        let offsets: Vec<i32> = oriented
+            .iter()
+            .map(|(id, relation, _, _, _, local, _, _)| {
+                let offset = *next_index.entry((*id, *relation)).or_default();
+                next_index.insert((*id, *relation), offset + (local.len() - 1) as i32);
+                offset
+            })
+            .collect();
+        drop(next_index);
+        let ring_faces = |k: usize, sc: &mut Scratch, out: &mut Vec<BuildingFace>| {
+            let (id, relation, inner, ids, pts, local, addr, party) = &oriented[k];
+            let (id, relation, inner, offset) = (*id, *relation, *inner, offsets[k]);
+            let n = local.len() - 1;
+            let building_type = if relation { "relation" } else { "way" };
+            if inner {
+                for i in 0..n {
+                    let (v1, v2) = (local[i], local[i + 1]);
+                    let length = ((v2.0 - v1.0).powi(2) + (v2.1 - v1.1).powi(2)).sqrt();
+                    if length < MIN_FACE_M {
+                        continue;
+                    }
+                    let (a, b) = (ids[i], ids[i + 1]);
+                    let normal = ((v2.1 - v1.1) / length, -(v2.0 - v1.0) / length);
+                    let (ruled, door) = match rules.get(&(id, a.min(b), a.max(b))) {
+                        Some(&(t, d)) => (Some(t), d),
+                        None => (None, None),
+                    };
+                    out.push(BuildingFace {
+                        building_id: id,
+                        building_type,
+                        face_index: offset + i as i32,
+                        from_node: a,
+                        to_node: b,
+                        face_type: ruled.unwrap_or(FaceType::Court),
+                        computed_type: FaceType::Court,
+                        edited: ruled.is_some_and(|r| r != FaceType::Court),
+                        type_reason: "inner",
+                        door: door.map(str::to_string),
+                        length_m: length as f32,
+                        azimuth_deg: (90.0 - normal.1.atan2(normal.0).to_degrees()).rem_euclid(360.0)
+                            as f32,
+                        street_osm_id: None,
+                        street_edge_id: None,
+                        street_name: None,
+                        distance_m: None,
+                        geometry: [pts[i], pts[i + 1]],
+                    });
+                }
+                return;
+            }
+            let Scratch { walls, candidates } = sc;
+            walls.clear();
             for i in 0..n {
                 let (v1, v2) = (local[i], local[i + 1]);
-                let length = ((v2.0 - v1.0).powi(2) + (v2.1 - v1.1).powi(2)).sqrt();
+                let (dx, dy) = (v2.0 - v1.0, v2.1 - v1.1);
+                let length = (dx * dx + dy * dy).sqrt();
                 if length < MIN_FACE_M {
                     continue;
                 }
+                let normal = (dy / length, -dx / length);
+                let mid = ((v1.0 + v2.0) / 2.0, (v1.1 + v2.1) / 2.0);
+                let env = AABB::from_corners(
+                    (mid.0 - MAX_STREET_M, mid.1 - MAX_STREET_M),
+                    (mid.0 + MAX_STREET_M, mid.1 + MAX_STREET_M),
+                );
+                candidates.clear();
+                for s in tree.locate_in_envelope(&env) {
+                    let (q, dist) = closest_on(s.a, s.b, mid);
+                    if dist > MAX_STREET_M || dist < 1e-4 {
+                        continue;
+                    }
+                    let align = normal.0 * (q.0 - mid.0) / dist + normal.1 * (q.1 - mid.1) / dist;
+                    if align <= 0.0 {
+                        continue;
+                    }
+                    let by_address = addr.as_deref().is_some_and(|a| {
+                        s.name
+                            .as_deref()
+                            .is_some_and(|n| n.trim().to_lowercase() == a)
+                    });
+                    let score = align / (dist + 1.0).sqrt()
+                        * (1.0 + (length + 1.0).ln())
+                        * s.weight
+                        * if by_address { ADDRESS_BOOST } else { 1.0 };
+                    candidates.push(Match {
+                        q,
+                        edge_id: s.edge_id,
+                        osm_id: s.osm_id,
+                        name: s.name.clone(),
+                        dist,
+                        align,
+                        score,
+                        by_address,
+                        weight: s.weight,
+                    });
+                }
+                // the best score that the wall can see; a tie goes to the lower edge id, then to the point of the street, so that the result does not depend on the order of the tree (a tile has its own tree).
+                // A street is seen when a line from one of three points of the wall (at 20, 50 and 80 percent) to the nearest point of the street crosses no wall:
+                // a small building in the way of the middle point does not hide the street from the rest of the wall.
+                candidates.sort_by(|a, b| {
+                    b.score
+                        .total_cmp(&a.score)
+                        .then(a.edge_id.cmp(&b.edge_id))
+                        .then(a.q.0.total_cmp(&b.q.0))
+                        .then(a.q.1.total_cmp(&b.q.1))
+                });
+                let samples: Vec<P> = [0.5, 0.2, 0.8]
+                    .iter()
+                    .map(|t| {
+                        (
+                            v1.0 + dx * t + normal.0 * 0.05,
+                            v1.1 + dy * t + normal.1 * 0.05,
+                        )
+                    })
+                    .collect();
+                let best = candidates.iter().find(|m| {
+                    samples.iter().any(|&p| {
+                        let seg_q = if p == samples[0] {
+                            m.q
+                        } else {
+                            closest_to_street(&tree, m, p)
+                        };
+                        visible(p, seg_q)
+                    })
+                }).cloned();
                 let (a, b) = (ids[i], ids[i + 1]);
-                let normal = ((v2.1 - v1.1) / length, -(v2.0 - v1.0) / length);
-                let (ruled, door) = match rules.get(&(id, a.min(b), a.max(b))) {
+                walls.push(Wall {
+                    index: i,
+                    from: a,
+                    to: b,
+                    p1: pts[i],
+                    p2: pts[i + 1],
+                    normal,
+                    azimuth: (90.0 - normal.1.atan2(normal.0).to_degrees()).rem_euclid(360.0),
+                    length,
+                    street: best,
+                    party: party[i],
+                    entrance: entrances.contains_key(&a) || entrances.contains_key(&b),
+                });
+            }
+            // the front wall: the best score among the walls that face a street and are not party walls (the first one in the ring on a tie)
+            let mut front: Option<usize> = None;
+            for (k, w) in walls.iter().enumerate() {
+                let Some(s) = w
+                    .street
+                    .as_ref()
+                    .filter(|s| !w.party && s.align >= FRONT_ALIGN)
+                else {
+                    continue;
+                };
+                if front.map_or(true, |f| {
+                    s.score > walls[f].street.as_ref().map_or(0.0, |x| x.score)
+                }) {
+                    front = Some(k);
+                }
+            }
+            let mut front_reason = "street";
+            if let Some(f) = front {
+                if walls[f].street.as_ref().is_some_and(|s| s.by_address) {
+                    front_reason = "address";
+                }
+            }
+            // no street that a wall can see: the first wall with an entrance is the front wall
+            if front.is_none() {
+                front = walls.iter().position(|w| w.entrance && !w.party);
+                front_reason = "entrance";
+            }
+            // still none (a building behind other buildings): the wall that faces the nearest street within `INFER_STREET_M`, with no test of the line of sight
+            if front.is_none() {
+                let mut best: Option<(usize, Match)> = None;
+                for (k, w) in walls.iter().enumerate().filter(|(_, w)| !w.party) {
+                    let mid = (
+                        (proj.pt(w.p1).0 + proj.pt(w.p2).0) / 2.0,
+                        (proj.pt(w.p1).1 + proj.pt(w.p2).1) / 2.0,
+                    );
+                    let env = AABB::from_corners(
+                        (mid.0 - INFER_STREET_M, mid.1 - INFER_STREET_M),
+                        (mid.0 + INFER_STREET_M, mid.1 + INFER_STREET_M),
+                    );
+                    for s in tree.locate_in_envelope(&env) {
+                        let (q, dist) = closest_on(s.a, s.b, mid);
+                        if dist > INFER_STREET_M || dist < 1e-4 {
+                            continue;
+                        }
+                        let align =
+                            w.normal.0 * (q.0 - mid.0) / dist + w.normal.1 * (q.1 - mid.1) / dist;
+                        if align < FRONT_ALIGN {
+                            continue;
+                        }
+                        let score =
+                            align / (dist + 1.0).sqrt() * (1.0 + (w.length + 1.0).ln()) * s.weight;
+                        if best.as_ref().map_or(true, |(_, b)| {
+                            score > b.score
+                            || (score == b.score
+                                && (s.edge_id, q.0.to_bits(), q.1.to_bits()) < (b.edge_id, b.q.0.to_bits(), b.q.1.to_bits()))
+                        }) {
+                            best = Some((
+                                k,
+                                Match {
+                                    q,
+                                    edge_id: s.edge_id,
+                                    osm_id: s.osm_id,
+                                    name: s.name.clone(),
+                                    dist,
+                                    align,
+                                    score,
+                                    by_address: false,
+                                    weight: s.weight,
+                                },
+                            ));
+                        }
+                    }
+                }
+                if let Some((k, m)) = best {
+                    walls[k].street = Some(m);
+                    front = Some(k);
+                    front_reason = "inferred";
+                }
+            }
+            let types = wall_types(walls, front, front_reason);
+            for (k, w) in walls.iter().enumerate() {
+                let (computed, reason) = types[k];
+                let (ruled, door) = match rules.get(&(id, w.from.min(w.to), w.from.max(w.to))) {
                     Some(&(t, d)) => (Some(t), d),
                     None => (None, None),
                 };
+                // a street is named for a wall that faces it; the other walls have none
+                let street = w
+                    .street
+                    .as_ref()
+                    .filter(|_| computed != FaceType::Back && computed != FaceType::Party);
                 out.push(BuildingFace {
                     building_id: id,
                     building_type,
-                    face_index: offset + i as i32,
-                    from_node: a,
-                    to_node: b,
-                    face_type: ruled.unwrap_or(FaceType::Court),
-                    computed_type: FaceType::Court,
-                    edited: ruled.is_some_and(|r| r != FaceType::Court),
-                    type_reason: "inner",
+                    face_index: offset + w.index as i32,
+                    from_node: w.from,
+                    to_node: w.to,
+                    face_type: ruled.unwrap_or(computed),
+                    computed_type: computed,
+                    edited: ruled.is_some_and(|r| r != computed),
+                    type_reason: reason,
                     door: door.map(str::to_string),
-                    length_m: length as f32,
-                    azimuth_deg: (90.0 - normal.1.atan2(normal.0).to_degrees()).rem_euclid(360.0)
-                        as f32,
-                    street_osm_id: None,
-                    street_edge_id: None,
-                    street_name: None,
-                    distance_m: None,
-                    geometry: [pts[i], pts[i + 1]],
+                    length_m: w.length as f32,
+                    azimuth_deg: w.azimuth as f32,
+                    street_osm_id: street.map(|s| s.osm_id),
+                    street_edge_id: street.map(|s| s.edge_id),
+                    street_name: street.and_then(|s| s.name.clone()),
+                    distance_m: street.map(|s| s.dist as f32),
+                    geometry: [w.p1, w.p2],
                 });
             }
-            return;
-        }
-        let Scratch { walls, candidates } = sc;
-        walls.clear();
-        for i in 0..n {
-            let (v1, v2) = (local[i], local[i + 1]);
-            let (dx, dy) = (v2.0 - v1.0, v2.1 - v1.1);
-            let length = (dx * dx + dy * dy).sqrt();
-            if length < MIN_FACE_M {
-                continue;
-            }
-            let normal = (dy / length, -dx / length);
-            let mid = ((v1.0 + v2.0) / 2.0, (v1.1 + v2.1) / 2.0);
-            let env = AABB::from_corners(
-                (mid.0 - MAX_STREET_M, mid.1 - MAX_STREET_M),
-                (mid.0 + MAX_STREET_M, mid.1 + MAX_STREET_M),
-            );
-            candidates.clear();
-            for s in tree.locate_in_envelope(&env) {
-                let (q, dist) = closest_on(s.a, s.b, mid);
-                if dist > MAX_STREET_M || dist < 1e-4 {
-                    continue;
-                }
-                let align = normal.0 * (q.0 - mid.0) / dist + normal.1 * (q.1 - mid.1) / dist;
-                if align <= 0.0 {
-                    continue;
-                }
-                let by_address = addr.as_deref().is_some_and(|a| {
-                    s.name
-                        .as_deref()
-                        .is_some_and(|n| n.trim().to_lowercase() == a)
-                });
-                let score = align / (dist + 1.0).sqrt()
-                    * (1.0 + (length + 1.0).ln())
-                    * s.weight
-                    * if by_address { ADDRESS_BOOST } else { 1.0 };
-                candidates.push(Match {
-                    q,
-                    edge_id: s.edge_id,
-                    osm_id: s.osm_id,
-                    name: s.name.clone(),
-                    dist,
-                    align,
-                    score,
-                    by_address,
-                    weight: s.weight,
-                });
-            }
-            // the best score that the wall can see; a tie goes to the lower edge id, so that the result does not depend on the order of the tree.
-            // A street is seen when a line from one of three points of the wall (at 20, 50 and 80 percent) to the nearest point of the street crosses no wall:
-            // a small building in the way of the middle point does not hide the street from the rest of the wall.
-            candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.edge_id.cmp(&b.edge_id)));
-            let samples: Vec<P> = [0.5, 0.2, 0.8]
-                .iter()
-                .map(|t| {
-                    (
-                        v1.0 + dx * t + normal.0 * 0.05,
-                        v1.1 + dy * t + normal.1 * 0.05,
+        };
+        for start in (0..oriented.len()).step_by(RINGS_PER_PART) {
+            let part = start..(start + RINGS_PER_PART).min(oriented.len());
+            #[cfg(feature = "pbf")]
+            let faces: Vec<BuildingFace> = {
+                use rayon::prelude::*;
+                // each piece of the part has its own lists; the pieces come back in the order of the rings
+                part.into_par_iter()
+                    .fold(
+                        || (Scratch::default(), Vec::new()),
+                        |(mut sc, mut out), k| {
+                            ring_faces(k, &mut sc, &mut out);
+                            (sc, out)
+                        },
                     )
-                })
-                .collect();
-            let best = candidates.iter().find(|m| {
-                samples.iter().any(|&p| {
-                    let seg_q = if p == samples[0] {
-                        m.q
-                    } else {
-                        closest_to_street(&tree, m, p)
-                    };
-                    visible(p, seg_q)
-                })
-            }).cloned();
-            let (a, b) = (ids[i], ids[i + 1]);
-            walls.push(Wall {
-                index: i,
-                from: a,
-                to: b,
-                p1: pts[i],
-                p2: pts[i + 1],
-                normal,
-                azimuth: (90.0 - normal.1.atan2(normal.0).to_degrees()).rem_euclid(360.0),
-                length,
-                street: best,
-                party: party[i],
-                entrance: entrances.contains_key(&a) || entrances.contains_key(&b),
-            });
-        }
-        // the front wall: the best score among the walls that face a street and are not party walls (the first one in the ring on a tie)
-        let mut front: Option<usize> = None;
-        for (k, w) in walls.iter().enumerate() {
-            let Some(s) = w
-                .street
-                .as_ref()
-                .filter(|s| !w.party && s.align >= FRONT_ALIGN)
-            else {
-                continue;
+                    .map(|(_, out)| out)
+                    .collect::<Vec<Vec<BuildingFace>>>()
+                    .concat()
             };
-            if front.map_or(true, |f| {
-                s.score > walls[f].street.as_ref().map_or(0.0, |x| x.score)
-            }) {
-                front = Some(k);
-            }
-        }
-        let mut front_reason = "street";
-        if let Some(f) = front {
-            if walls[f].street.as_ref().is_some_and(|s| s.by_address) {
-                front_reason = "address";
-            }
-        }
-        // no street that a wall can see: the first wall with an entrance is the front wall
-        if front.is_none() {
-            front = walls.iter().position(|w| w.entrance && !w.party);
-            front_reason = "entrance";
-        }
-        // still none (a building behind other buildings): the wall that faces the nearest street within `INFER_STREET_M`, with no test of the line of sight
-        if front.is_none() {
-            let mut best: Option<(usize, Match)> = None;
-            for (k, w) in walls.iter().enumerate().filter(|(_, w)| !w.party) {
-                let mid = (
-                    (proj.pt(w.p1).0 + proj.pt(w.p2).0) / 2.0,
-                    (proj.pt(w.p1).1 + proj.pt(w.p2).1) / 2.0,
-                );
-                let env = AABB::from_corners(
-                    (mid.0 - INFER_STREET_M, mid.1 - INFER_STREET_M),
-                    (mid.0 + INFER_STREET_M, mid.1 + INFER_STREET_M),
-                );
-                for s in tree.locate_in_envelope(&env) {
-                    let (q, dist) = closest_on(s.a, s.b, mid);
-                    if dist > INFER_STREET_M || dist < 1e-4 {
-                        continue;
-                    }
-                    let align =
-                        w.normal.0 * (q.0 - mid.0) / dist + w.normal.1 * (q.1 - mid.1) / dist;
-                    if align < FRONT_ALIGN {
-                        continue;
-                    }
-                    let score =
-                        align / (dist + 1.0).sqrt() * (1.0 + (w.length + 1.0).ln()) * s.weight;
-                    if best.as_ref().map_or(true, |(_, b)| {
-                        score > b.score || (score == b.score && s.edge_id < b.edge_id)
-                    }) {
-                        best = Some((
-                            k,
-                            Match {
-                                q,
-                                edge_id: s.edge_id,
-                                osm_id: s.osm_id,
-                                name: s.name.clone(),
-                                dist,
-                                align,
-                                score,
-                                by_address: false,
-                                weight: s.weight,
-                            },
-                        ));
-                    }
+            #[cfg(not(feature = "pbf"))]
+            let faces: Vec<BuildingFace> = {
+                let (mut sc, mut out) = (Scratch::default(), Vec::new());
+                for k in part {
+                    ring_faces(k, &mut sc, &mut out);
                 }
-            }
-            if let Some((k, m)) = best {
-                walls[k].street = Some(m);
-                front = Some(k);
-                front_reason = "inferred";
-            }
-        }
-        let types = wall_types(walls, front, front_reason);
-        for (k, w) in walls.iter().enumerate() {
-            let (computed, reason) = types[k];
-            let (ruled, door) = match rules.get(&(id, w.from.min(w.to), w.from.max(w.to))) {
-                Some(&(t, d)) => (Some(t), d),
-                None => (None, None),
+                out
             };
-            // a street is named for a wall that faces it; the other walls have none
-            let street = w
-                .street
-                .as_ref()
-                .filter(|_| computed != FaceType::Back && computed != FaceType::Party);
-            out.push(BuildingFace {
-                building_id: id,
-                building_type,
-                face_index: offset + w.index as i32,
-                from_node: w.from,
-                to_node: w.to,
-                face_type: ruled.unwrap_or(computed),
-                computed_type: computed,
-                edited: ruled.is_some_and(|r| r != computed),
-                type_reason: reason,
-                door: door.map(str::to_string),
-                length_m: w.length as f32,
-                azimuth_deg: w.azimuth as f32,
-                street_osm_id: street.map(|s| s.osm_id),
-                street_edge_id: street.map(|s| s.edge_id),
-                street_name: street.and_then(|s| s.name.clone()),
-                distance_m: street.map(|s| s.dist as f32),
-                geometry: [w.p1, w.p2],
-            });
+            sink(faces)?;
         }
-    };
-    crate::util::step("building faces 5: the oriented rings and the tree of the walls");
-    for start in (0..oriented.len()).step_by(RINGS_PER_PART) {
-        let part = start..(start + RINGS_PER_PART).min(oriented.len());
-        #[cfg(feature = "pbf")]
-        let faces: Vec<BuildingFace> = {
-            use rayon::prelude::*;
-            // each piece of the part has its own lists; the pieces come back in the order of the rings
-            part.into_par_iter()
-                .fold(
-                    || (Scratch::default(), Vec::new()),
-                    |(mut sc, mut out), k| {
-                        ring_faces(k, &mut sc, &mut out);
-                        (sc, out)
-                    },
-                )
-                .map(|(_, out)| out)
-                .collect::<Vec<Vec<BuildingFace>>>()
-                .concat()
-        };
-        #[cfg(not(feature = "pbf"))]
-        let faces: Vec<BuildingFace> = {
-            let (mut sc, mut out) = (Scratch::default(), Vec::new());
-            for k in part {
-                ring_faces(k, &mut sc, &mut out);
-            }
-            out
-        };
-        sink(faces)?;
     }
+    crate::util::step("building faces 6: the tiles");
     Ok(())
 }
 
