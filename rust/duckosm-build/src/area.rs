@@ -326,11 +326,21 @@ pub fn write_lane_profile<W: Write + Send>(
     fixes: &OsmFixes,
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<Option<String>, String> {
-    let Some(rows) = lanes::lane_profile(edges, ways, fixes) else {
+    // the rows go to the file in parts, as they are made: all rows at once were in memory before
+    let mut w: Option<pq::LaneProfileWriter<W>> = None;
+    let n = lanes::lane_profile_each(edges, ways, fixes, |rows| {
+        if w.is_none() {
+            w = Some(pq::LaneProfileWriter::new(file("lane_profile_driving.parquet")?)?);
+        }
+        w.as_mut().expect("made above").write(&rows)
+    })?;
+    let Some(n) = n else {
         return Ok(None);
     };
-    pq::write_lane_profile_to(file("lane_profile_driving.parquet")?, &rows)?;
-    Ok(Some(format!("lane profile: {} lanes", rows.len())))
+    if let Some(w) = w {
+        w.close()?;
+    }
+    Ok(Some(format!("lane profile: {n} lanes")))
 }
 
 /// Microseconds since 1970 as roadstyle writes a time: `2026-10-22T00:20:45+00:00`.

@@ -775,7 +775,40 @@ pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer]) -> Result<
 
 /// Write `driving.lane_profile`.
 pub fn write_lane_profile_to<W: Write + Send>(out: W, rows: &[LaneRow]) -> Result<(), String> {
-    let fields = vec![
+    let mut w = LaneProfileWriter::new(out)?;
+    w.write(rows)?;
+    w.close()
+}
+
+/// [`write_lane_profile_to`] in parts (`duckosm_core::lanes::lane_profile_each`): one row group at a time.
+pub struct LaneProfileWriter<W: Write + Send> {
+    w: ParWriter<W>,
+    schema: Arc<Schema>,
+}
+
+impl<W: Write + Send> LaneProfileWriter<W> {
+    pub fn new(out: W) -> Result<Self, String> {
+        let schema = Arc::new(Schema::new(lane_profile_fields()));
+        let w = ParWriter::try_new(out, schema.clone(), Some(rows_props())).map_err(err)?;
+        Ok(LaneProfileWriter { w, schema })
+    }
+
+    pub fn write(&mut self, rows: &[LaneRow]) -> Result<(), String> {
+        for chunk in rows.chunks(ROW_GROUP) {
+            let batch = RecordBatch::try_new(self.schema.clone(), lane_profile_columns(chunk)).map_err(err)?;
+            self.w.write(&batch).map_err(err)?;
+        }
+        Ok(())
+    }
+
+    pub fn close(self) -> Result<(), String> {
+        self.w.close().map_err(err)?;
+        Ok(())
+    }
+}
+
+fn lane_profile_fields() -> Vec<Field> {
+    vec![
         field("edge_id", DataType::Int64),
         field("lane_num", DataType::Int32),
         field("use", DataType::Utf8),
@@ -783,8 +816,11 @@ pub fn write_lane_profile_to<W: Write + Send>(out: W, rows: &[LaneRow]) -> Resul
         field("turn", DataType::Utf8),
         field("source", DataType::Utf8),
         field("width_source", DataType::Utf8),
-    ];
-    write_rows(out, fields, rows, |c| {
+    ]
+}
+
+fn lane_profile_columns(c: &[LaneRow]) -> Vec<ArrayRef> {
+    {
         let mut width = Float64Builder::new();
         c.iter().for_each(|r| width.append_value(r.width_m));
         vec![
@@ -796,7 +832,7 @@ pub fn write_lane_profile_to<W: Write + Send>(out: W, rows: &[LaneRow]) -> Resul
             texts(c.iter().map(|r| Some(r.source.as_str()))),
             texts(c.iter().map(|r| Some(r.width_source.as_str()))),
         ]
-    })
+    }
 }
 
 /// A property of the boundary file, typed as DuckDB's `ST_Read` (GDAL) types it.
