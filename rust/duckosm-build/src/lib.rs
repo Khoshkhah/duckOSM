@@ -655,49 +655,63 @@ fn faces_input(open: Open, fixes: &OsmFixes) -> Result<(Raw, WayPoints, duckosm_
         ) {
         }
     }
-    let mut positions = Writer::new(store).map_err(io)?;
-    let mut entrances = duckosm_core::util::FxHashMap::default();
-    let (mut last, mut in_order) = (i64::MIN, true);
-    duckosm_core::cutstream::each_block(
-        &mut open()?,
-        |b, buf| {
-            let mut s = Nodes(Vec::new());
-            duckosm_core::pbfraw::decode_block(b, [true, false, false], buf, &mut s)?;
-            Ok(s.0)
-        },
-        |nodes, _| {
-            for (id, lon, lat, entrance) in nodes {
-                if touched[0].contains(&id) {
-                    continue;
+    let each_node = |f: &mut dyn FnMut(i64, f64, f64, bool) -> Result<(), String>| {
+        duckosm_core::cutstream::each_block(
+            &mut open()?,
+            |b, buf| {
+                let mut s = Nodes(Vec::new());
+                duckosm_core::pbfraw::decode_block(b, [true, false, false], buf, &mut s)?;
+                Ok(s.0)
+            },
+            |nodes, _| {
+                for (id, lon, lat, entrance) in nodes {
+                    if !touched[0].contains(&id) {
+                        f(id, lon, lat, entrance)?;
+                    }
                 }
-                in_order &= id > last;
-                last = id;
-                positions.push(&join::Position, &(id, lon, lat)).map_err(io)?;
-                if entrance {
-                    entrances.insert(id, ());
-                }
+                Ok(true)
+            },
+        )
+    };
+    // the nodes of each way of the part
+    let requests = || -> Result<spill::Rows, String> {
+        let mut requests = Writer::new(store).map_err(io)?;
+        for (i, w) in part.ways.iter().enumerate() {
+            for (k, &n) in w.refs.iter().enumerate() {
+                requests.push(&join::Request, &(n, i as u32, k as u32)).map_err(io)?;
             }
-            Ok(true)
-        },
-    )?;
-    in_order &= part.nodes.is_empty();
+        }
+        requests.finish().map_err(io)
+    };
+    let mut entrances = duckosm_core::util::FxHashMap::default();
     for n in &part.nodes {
-        positions.push(&join::Position, &(n.id, n.lon, n.lat)).map_err(io)?;
         if building_faces::is_entrance(n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str()))) {
             entrances.insert(n.id, ());
         }
     }
-    let positions = positions.finish().map_err(io)?;
-    let mut positions = if in_order { positions } else { spill::sort_bytes(positions, join::node_id, BUDGET, store).map_err(io)? };
-    // the nodes of each way of the part, joined with the coordinates
-    let mut requests = Writer::new(store).map_err(io)?;
-    for (i, w) in part.ways.iter().enumerate() {
-        for (k, &n) in w.refs.iter().enumerate() {
-            requests.push(&join::Request, &(n, i as u32, k as u32)).map_err(io)?;
+    let extra: Vec<_> = part.nodes.iter().map(|n| (n.id, n.lon, n.lat)).collect();
+    // joined with the nodes of the file as they come (sorted by id), with no file of the positions
+    let mut merge = join::Merge::new(requests()?, extra.clone(), BUDGET, store).map_err(io)?;
+    each_node(&mut |id, lon, lat, entrance| {
+        if entrance {
+            entrances.insert(id, ());
         }
-    }
-    let points = join::points(requests.finish().map_err(io)?, &mut positions, BUDGET, store).map_err(io)?;
-    drop(positions);
+        merge.node(id, lon, lat).map_err(io)
+    })?;
+    let points = match merge.finish(BUDGET, store).map_err(io)? {
+        Some(points) => points,
+        None => {
+            // a file not sorted by id: the positions to a temporary file, sorted
+            let mut positions = Writer::new(store).map_err(io)?;
+            each_node(&mut |id, lon, lat, _| positions.push(&join::Position, &(id, lon, lat)).map_err(io))?;
+            for (id, lon, lat) in extra {
+                positions.push(&join::Position, &(id, lon, lat)).map_err(io)?;
+            }
+            let positions = positions.finish().map_err(io)?;
+            let mut positions = spill::sort_bytes(positions, join::node_id, BUDGET, store).map_err(io)?;
+            join::points(requests()?, &mut positions, BUDGET, store).map_err(io)?
+        }
+    };
     let mut points = points.read(&join::Point).map_err(io)?.peekable();
     let mut pts: WayPoints = Vec::with_capacity(part.ways.len());
     for (i, w) in part.ways.iter().enumerate() {

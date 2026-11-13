@@ -709,6 +709,122 @@ pub mod join {
             }
         }
         drop(pos);
-        sort_bytes(points.finish()?, |b| (u32_at(b, 0), u32_at(b, 4)), budget, store)
+        sort_by_way(points.finish()?, budget, store)
+    }
+
+    fn sort_by_way(points: Rows, budget: usize, store: &dyn Store) -> io::Result<Rows> {
+        sort_bytes(points, |b| (u32_at(b, 0), u32_at(b, 4)), budget, store)
+    }
+
+    type RequestIter = std::iter::Peekable<Box<dyn Iterator<Item = io::Result<(i64, u32, u32)>>>>;
+
+    /// The join of [`points`] without a file of the positions: the nodes come one at a time in the order of their ids, as
+    /// the nodes of an area file sorted by type and id, and the requests, sorted by node, wait for them. The nodes of
+    /// `extra` (in any order; the new nodes of the fixes) go in their place in the order of the ids.
+    pub struct Merge {
+        requests: RequestIter,
+        points: Writer,
+        extra: Vec<(i64, f64, f64)>,
+        last: i64,
+        in_order: bool,
+    }
+
+    impl Merge {
+        pub fn new(requests: Rows, mut extra: Vec<(i64, f64, f64)>, budget: usize, store: &dyn Store) -> io::Result<Self> {
+            let requests = sort_bytes(requests, node_id, budget, store)?;
+            let requests: Box<dyn Iterator<Item = io::Result<(i64, u32, u32)>>> = Box::new(requests.read(&Request)?);
+            extra.sort_unstable_by_key(|n| std::cmp::Reverse(n.0));
+            Ok(Merge { requests: requests.peekable(), points: Writer::new(store)?, extra, last: i64::MIN, in_order: true })
+        }
+
+        /// The next node of the file.
+        pub fn node(&mut self, id: i64, lon: f64, lat: f64) -> io::Result<()> {
+            while self.extra.last().is_some_and(|n| n.0 < id) {
+                let n = self.extra.pop().expect("a node");
+                self.put(n.0, n.1, n.2)?;
+            }
+            self.put(id, lon, lat)
+        }
+
+        fn put(&mut self, id: i64, lon: f64, lat: f64) -> io::Result<()> {
+            if !self.in_order {
+                return Ok(());
+            }
+            if id <= self.last {
+                self.in_order = false;
+                return Ok(());
+            }
+            self.last = id;
+            let r = &mut self.requests;
+            while r.next_if(|r| r.as_ref().is_ok_and(|r| r.0 < id)).is_some() {}
+            while let Some(x) = r.next_if(|r| r.as_ref().is_ok_and(|r| r.0 == id)) {
+                let (_, way, place) = x?;
+                self.points.push(&Point, &(way, place, lon, lat))?;
+            }
+            if let Some(Err(_)) = r.peek() {
+                return Err(r.next().expect("peeked").expect_err("an error"));
+            }
+            Ok(())
+        }
+
+        /// The points, sorted by the number of the way and the place, or None when the nodes did not come in the order of
+        /// their ids (then use [`points`] with a file of the positions).
+        pub fn finish(mut self, budget: usize, store: &dyn Store) -> io::Result<Option<Rows>> {
+            while let Some(n) = self.extra.pop() {
+                self.put(n.0, n.1, n.2)?;
+            }
+            if !self.in_order {
+                return Ok(None);
+            }
+            drop(self.requests);
+            sort_by_way(self.points.finish()?, budget, store).map(Some)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn rows<T>(codec: &impl Codec<T>, items: &[T], store: &dyn Store) -> Rows {
+            let mut w = Writer::new(store).unwrap();
+            for x in items {
+                w.push(codec, x).unwrap();
+            }
+            w.finish().unwrap()
+        }
+
+        /// The merge gives the points of the join with a file of the positions; nodes out of order give None.
+        #[test]
+        fn merge_equals_points() {
+            let store = super::super::temp_store();
+            let store = &*store;
+            let nodes: Vec<(i64, f64, f64)> = (0..2000).map(|i| (i * 3, i as f64 * 0.5, -(i as f64))).collect();
+            let extra = vec![(4, 9.0, 9.0), (-7, 1.0, 2.0), (99_999, 3.0, 4.0)];
+            let mut reqs = Vec::new();
+            for w in 0..50u32 {
+                for k in 0..40u32 {
+                    reqs.push((((w * 131 + k * 17) % 6100) as i64, w, k));
+                }
+            }
+            reqs.extend([(4, 50, 0), (-7, 50, 1), (99_999, 50, 2), (5, 50, 3)]);
+            let mut all: Vec<_> = nodes.iter().chain(&extra).copied().collect();
+            all.sort_by_key(|n| n.0);
+            let mut pos = rows(&Position, &all, store);
+            let want = points(rows(&Request, &reqs, store), &mut pos, 1 << 10, store).unwrap();
+            let want: Vec<_> = want.read(&Point).unwrap().map(Result::unwrap).collect();
+            let mut m = Merge::new(rows(&Request, &reqs, store), extra.clone(), 1 << 10, store).unwrap();
+            for &(id, lon, lat) in &nodes {
+                m.node(id, lon, lat).unwrap();
+            }
+            let got = m.finish(1 << 10, store).unwrap().unwrap();
+            let got: Vec<_> = got.read(&Point).unwrap().map(Result::unwrap).collect();
+            assert!(want.len() > 1000);
+            assert_eq!(got, want);
+            let mut m = Merge::new(rows(&Request, &reqs, store), Vec::new(), 1 << 10, store).unwrap();
+            for id in [3, 9, 6] {
+                m.node(id, 0.0, 0.0).unwrap();
+            }
+            assert!(m.finish(1 << 10, store).unwrap().is_none());
+        }
     }
 }
