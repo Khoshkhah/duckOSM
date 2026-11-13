@@ -32,7 +32,7 @@ tiff = { version = "=0.11.3", default-features = false, features = ["deflate", "
 sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order"] }
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place
-roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "f9730547db07dc062852f5deec555610dff1ff77" }
+roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "d9dfcdca5c02aa5fd11e95267c4ee618b429a39a" }
 
 [dev-dependencies]
 # the tests read the .duckdb file that the build writes (the version of duckosm-duckdb)
