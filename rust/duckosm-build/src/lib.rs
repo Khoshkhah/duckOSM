@@ -1047,7 +1047,11 @@ pub fn run<W: Write + Send>(
     log.step("write the area tables");
     // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
     drop((mode_nodes, junctions));
-    if p.levels != LevelsMethod::None {
+    if p.levels == LevelsMethod::Solve {
+        // by tiles: the level edges, the roads and the rules of the whole area are never in memory at once (levels::tiled)
+        sum.levels = levels::tiled::write_levels_tiled(&mut mode_files, built_at, &mut file)?;
+        log.step("levels");
+    } else if p.levels != LevelsMethod::None {
         let mut level_edges = LevelEdges::default();
         level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
         for (mode, files) in &mut mode_files {
