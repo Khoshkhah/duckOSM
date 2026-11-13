@@ -110,6 +110,9 @@ pub mod tiled {
     const TILE_DEG: f64 = 0.1;
     const MARGIN_DEG: f64 = 0.001;
     const BUDGET: usize = 64 << 20;
+    /// the tiles that can run at the same time: at most this many tiles and about this many edges in memory
+    const WINDOW_TILES: usize = 64;
+    const WINDOW_EDGES: usize = 1 << 18;
 
     type Tile = (i32, i32);
 
@@ -270,7 +273,9 @@ pub mod tiled {
                 }
             }
         }
-        // 2. each edge to its tile, and to each tile whose box (with the margin) it touches; sorted by tile
+        // 2. each edge to its tile, and to each tile whose box (with the margin) it touches; sorted by tile. A tile waits for the
+        // earlier tiles that own a road of it (their numbers are fixed in it)
+        let mut waits: HashMap<Tile, FxHashSet<Tile>> = HashMap::new();
         let mut tags = TagTable::default();
         let mut rows = Writer::new(store).map_err(io)?;
         each_level_edge(modes, |rank, e| {
@@ -296,6 +301,9 @@ pub mod tiled {
                 }
             }
             let later = others.iter().any(|t| order[t] > order[&own]);
+            for t in others.iter().filter(|t| order[t] > order[&own]) {
+                waits.entry(*t).or_default().insert(own);
+            }
             let id = tags.id(&e.attrs);
             for t in &others {
                 rows.push(&TileEdgeCodec, &(*t, false, false, rank, e.edge_id, id, e.geometry.clone())).map_err(io)?;
@@ -303,19 +311,21 @@ pub mod tiled {
             rows.push(&TileEdgeCodec, &(own, true, later, rank, e.edge_id, id, e.geometry)).map_err(io)?;
             Ok(())
         })?;
-        drop((boxes, near, order));
+        drop((boxes, near));
         let rows = spill::sort_bytes(rows.finish().map_err(io)?, |b| u64::from_be_bytes(b[..8].try_into().expect("8 bytes")), BUDGET, store).map_err(io)?;
-        // 3. the tiles in order: the numbers of an edge that a later tile needs are kept
-        let mut earlier: FxHashMap<i64, [i64; 4]> = FxHashMap::default();
+        // 3. the tiles: the numbers of an edge that a later tile needs are kept, with the order of its tile. A tile reads only the
+        // numbers of earlier tiles, as when the tiles run one after the other; the tiles that wait for no tile still running run at
+        // the same time (a window of the next tiles in their order: the first one never waits)
+        let mut earlier: FxHashMap<i64, (usize, [i64; 4])> = FxHashMap::default();
         let mut raw = Writer::new(store).map_err(io)?;
         let (mut casing, mut values) = (HashMap::<i64, usize>::new(), BTreeSet::<i64>::new());
         let mut sums = roadstyle_levels::TileLevels::default();
-        let mut tile: Vec<TileEdge> = Vec::new();
-        let mut solve = |tile: &mut Vec<TileEdge>, raw: &mut Writer| -> Result<(), String> {
+        let solve = |tile: Vec<TileEdge>, earlier: &FxHashMap<i64, (usize, [i64; 4])>| {
+            let me = order[&tile[0].0];
             let mut edges = roadstyle_levels::LevelEdges::default();
             edges.reserve(tile.len());
             let (mut owned, mut keep) = (FxHashSet::default(), FxHashSet::default());
-            for (_, own, later, rank, id, t, g) in tile.drain(..) {
+            for (_, own, later, rank, id, t, g) in tile {
                 if own {
                     owned.insert(id);
                     if later {
@@ -324,48 +334,67 @@ pub mod tiled {
                 }
                 edges.add(rank, LevelEdge { edge_id: id, tags: tags.sets[t as usize].clone(), geometry: g, ..Default::default() });
             }
-            let r = roadstyle_levels::levels_tile(
-                &edges,
-                &TileRoles { owned: &|id| owned.contains(&id), earlier: &|id| earlier.get(&id).copied() },
-                &o,
-            )
-            .map_err(|e| e.to_string())?;
-            drop(edges);
-            for row in &r.rows {
-                let v = [row.casing_start, row.casing_level, row.casing_end, row.fill_level];
-                *casing.entry(v[1]).or_default() += 1;
-                values.extend(v);
-                let caps = u8::from(row.cap_start == Some("square")) | u8::from(row.cap_end == Some("square")) << 1;
-                raw.push(&RawRowCodec, &(row.edge_id, v, caps, row.head_start_m)).map_err(io)?;
-                if keep.contains(&row.edge_id) {
-                    earlier.insert(row.edge_id, v);
-                }
-            }
-            sums.roads += r.roads;
-            sums.pairs += r.pairs;
-            sums.order_pairs += r.order_pairs;
-            sums.given_up += r.given_up;
-            sums.orders_not_kept += r.orders_not_kept;
-            sums.crossings += r.crossings;
-            for (s, v) in sums.stages.iter_mut().zip(r.stages) {
-                *s += v;
-            }
-            Ok(())
+            let roles = TileRoles {
+                owned: &|id| owned.contains(&id),
+                earlier: &|id| earlier.get(&id).filter(|(o, _)| *o < me).map(|(_, v)| *v),
+            };
+            let r = roadstyle_levels::levels_tile(&edges, &roles, &o).map_err(|e| e.to_string())?;
+            Ok::<_, String>((me, r, keep))
         };
-        let mut at: Option<Tile> = None;
-        for r in rows.read(&TileEdgeCodec).map_err(io)? {
-            let r = r.map_err(io)?;
-            if at.is_some_and(|a| a != r.0) {
-                solve(&mut tile, &mut raw)?;
+        let mut done: FxHashSet<Tile> = FxHashSet::default();
+        let mut window: std::collections::VecDeque<Vec<TileEdge>> = std::collections::VecDeque::new();
+        let (mut in_window, mut tile) = (0usize, Vec::<TileEdge>::new());
+        let mut rows = rows.read(&TileEdgeCodec).map_err(io)?.peekable();
+        loop {
+            // the next tiles to the window, up to WINDOW_TILES tiles and WINDOW_EDGES edges
+            while window.len() < WINDOW_TILES && (window.is_empty() || in_window < WINDOW_EDGES) {
+                while let Some(r) = rows.next_if(|r| r.as_ref().map_or(true, |r| tile.is_empty() || r.0 == tile[0].0)) {
+                    tile.push(r.map_err(io)?);
+                }
+                if tile.is_empty() {
+                    break;
+                }
+                in_window += tile.len();
+                window.push_back(std::mem::take(&mut tile));
             }
-            at = Some(r.0);
-            tile.push(r);
+            if window.is_empty() {
+                break;
+            }
+            // the tiles of the window that wait for no tile that is not done
+            let ready = |t: &Tile| waits.get(t).is_none_or(|w| w.iter().all(|u| done.contains(u)));
+            let (run, wait): (Vec<_>, Vec<_>) = window.drain(..).partition(|x| ready(&x[0].0));
+            window.extend(wait);
+            in_window -= run.iter().map(Vec::len).sum::<usize>();
+            let tiles: Vec<Tile> = run.iter().map(|x| x[0].0).collect();
+            let results: Vec<_> = {
+                use rayon::prelude::*;
+                run.into_par_iter().map(|t| solve(t, &earlier)).collect()
+            };
+            for (t, r) in tiles.into_iter().zip(results) {
+                let (me, r, keep) = r?;
+                for row in &r.rows {
+                    let v = [row.casing_start, row.casing_level, row.casing_end, row.fill_level];
+                    *casing.entry(v[1]).or_default() += 1;
+                    values.extend(v);
+                    let caps = u8::from(row.cap_start == Some("square")) | u8::from(row.cap_end == Some("square")) << 1;
+                    raw.push(&RawRowCodec, &(row.edge_id, v, caps, row.head_start_m)).map_err(io)?;
+                    if keep.contains(&row.edge_id) {
+                        earlier.insert(row.edge_id, (me, v));
+                    }
+                }
+                sums.roads += r.roads;
+                sums.pairs += r.pairs;
+                sums.order_pairs += r.order_pairs;
+                sums.given_up += r.given_up;
+                sums.orders_not_kept += r.orders_not_kept;
+                sums.crossings += r.crossings;
+                for (s, v) in sums.stages.iter_mut().zip(r.stages) {
+                    *s += v;
+                }
+                done.insert(t);
+            }
         }
-        if !tile.is_empty() {
-            solve(&mut tile, &mut raw)?;
-        }
-        drop(solve);
-        drop((earlier, tags));
+        drop((earlier, tags, waits, done, order));
         // 4. one move to the ground for the whole area; the rows in the order of edge_id
         let ground = Ground::new(&casing, &values, o.max_level).map_err(|e| e.to_string())?;
         let span = match (values.first(), values.last()) {
