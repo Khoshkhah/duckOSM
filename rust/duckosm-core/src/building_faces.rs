@@ -126,6 +126,11 @@ impl NearBuildings {
                 (b.0 .0 <= b.1 .0).then_some(b)
             })
             .collect();
+        NearBuildings::from_boxes(boxes)
+    }
+
+    /// The grid of the boxes of ways (`(lower, upper)` corners in degrees).
+    pub fn from_boxes(boxes: Vec<(Pt, Pt)>) -> NearBuildings {
         let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
         for (a, b) in &boxes {
             lo = (lo.0.min(a.0), lo.1.min(a.1));
@@ -658,6 +663,72 @@ pub fn building_rings(ways: &[RawWay], nodes: &[RawNode], relations: &[Relation]
         .collect();
 
     BuildingRings { rings, entrances }
+}
+
+/// [`building_rings`] from the points of the ways (`pts[i]`: the coordinates of all nodes of `ways[i]`, None when one is
+/// missing), which a join on disk gives, and the entrance nodes: the raw nodes need not be in memory. The rings are the same.
+pub fn building_rings_from(
+    ways: &[RawWay],
+    mut pts: Vec<Option<Vec<Pt>>>,
+    relations: &[Relation],
+    entrances: FxHashMap<i64, ()>,
+) -> BuildingRings {
+    let building_mp = |r: &Relation| {
+        let tag = |k: &str| r.tags.iter().find(|t| t.0 == k).map(|t| t.1.as_str());
+        tag("type") == Some("multipolygon") && tag("building").is_some_and(|b| b != "no")
+    };
+    // the coordinates of the nodes of the member ways of the building relations (their rings join the ways)
+    let mut member_pts: FxHashMap<i64, Pt> = FxHashMap::default();
+    for r in relations.iter().filter(|r| building_mp(r)) {
+        for m in r.members.iter().filter(|m| m.1 == MemberType::Way) {
+            if let Ok(i) = ways.binary_search_by_key(&m.0, |w| w.id) {
+                if let Some(p) = &pts[i] {
+                    member_pts.extend(ways[i].refs.iter().copied().zip(p.iter().copied()));
+                }
+            }
+        }
+    }
+    let addr_of = |tags: &[(String, String)]| {
+        tags.iter()
+            .find(|t| t.0 == "addr:street" && !t.1.trim().is_empty())
+            .map(|t| t.1.trim().to_lowercase())
+    };
+    let mut rings: Vec<Ring> = Vec::new();
+    for (i, w) in ways.iter().enumerate() {
+        if !w.tags.iter().any(|t| t.0 == "building" && t.1 != "no")
+            || w.refs.len() < 4
+            || w.refs.first() != w.refs.last()
+        {
+            continue;
+        }
+        if let Some(p) = pts[i].take() {
+            rings.push(Ring { id: w.id, relation: false, inner: false, ids: w.refs.clone(), pts: p, addr: addr_of(&w.tags) });
+        }
+    }
+    drop(pts);
+    for r in relations.iter().filter(|r| building_mp(r)) {
+        let addr = addr_of(&r.tags);
+        for (role, inner) in [("outer", false), ("inner", true)] {
+            let parts: Vec<Vec<i64>> = r
+                .members
+                .iter()
+                .filter(|m| m.1 == MemberType::Way && (m.2 == role || (!inner && m.2.is_empty())))
+                .filter_map(|m| ways.binary_search_by_key(&m.0, |w| w.id).ok().map(|i| ways[i].refs.clone()))
+                .collect();
+            for ids in assemble(parts) {
+                let p: Option<Vec<Pt>> = ids.iter().map(|n| member_pts.get(n).copied()).collect();
+                if let Some(pts) = p {
+                    rings.push(Ring { id: r.id, relation: true, inner, ids, pts, addr: addr.clone() });
+                }
+            }
+        }
+    }
+    BuildingRings { rings, entrances }
+}
+
+/// Is a node with these tags an entrance (a way in for people)? See [`building_rings`].
+pub fn is_entrance<'a>(mut tags: impl Iterator<Item = (&'a str, &'a str)>) -> bool {
+    tags.any(|t| t.0 == "entrance" && !NOT_ENTRANCES.contains(&t.1))
 }
 
 /// [`building_faces_each`] from the rings of [`building_rings`].
