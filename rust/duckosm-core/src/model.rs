@@ -254,7 +254,7 @@ impl OtherTags {
 
 /// The columns of an edge that come from its way and are the same on all its edges.
 /// The edges of a way share one copy, so an edge does not keep its own strings.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Attrs {
     pub highway: String,
     pub name: Option<String>,

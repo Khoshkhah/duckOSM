@@ -523,10 +523,23 @@ pub fn build_network_files(
         ways_read: all_ways.len(),
         ..Default::default()
     };
+    // the ways with equal tags share one copy of them: the spill files keep one copy of each tag set in memory, as long as
+    // the edges are in the files (Kentucky: 106,381 tag sets for 589,133 ways; one copy for each way was 190 MiB)
+    let mut tag_sets: crate::util::FxHashSet<Arc<Attrs>> = Default::default();
     let mut mw: Vec<ModeWay> = all_ways
         .iter()
         .filter_map(|w| filter::mode_way(w, mode, opts.cycling_dismount))
+        .map(|mut w| {
+            match tag_sets.get(&w.attrs) {
+                Some(a) => w.attrs = a.clone(),
+                None => {
+                    tag_sets.insert(w.attrs.clone());
+                }
+            }
+            w
+        })
         .collect();
+    drop(tag_sets);
     // duckOSM: after RoadFilter and before GraphBuilder, so oneway and the lanes act on the edges
     stats.osm_fixes = fixes.apply_to_mode(&mut mw, mode);
     stats.ways_kept = mw.len();
