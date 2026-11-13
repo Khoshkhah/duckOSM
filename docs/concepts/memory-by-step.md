@@ -1,25 +1,31 @@
 # Memory at each step of the build
 
-Status: measurement, 2026-11-13. This page shows what is in memory at each step of `duckosm_build::run`, and which of it the
-step reads. It describes the code as it is on `main` (b58ea48). It is the base for the decision of what stays in memory and
-what goes to storage.
+Status: measurement, 2026-11-13. This page shows what is in memory at each step of `duckosm_build::run`. It describes the
+code on `main` after PR 147 (d7841f3). The page of the morning of the same day (main b58ea48) had a peak of 3.2 GB on
+Kentucky; the changes since then are in [What changed](#what-changed).
 
 ## How it was measured
 
-- **Area and options:** Kentucky, cut from the US South file with `kentucky.geojson`, driving, with `--raw --building-faces
-  --levels solve` (the options of the Studio page). Mac mini, 12 cores.
-- **Live heap:** a counting allocator (`--features heap-probe`). After each step the build writes the live heap and the
-  peak of the step. The numbers are MiB.
-- **Size of each held item:** a test copy of `run` stops at five points (before the network, after the network files are
-  written, after the edges are read back, at the area tables, at the faces). There it frees the held items one at a time
-  and writes the live heap after each. The difference is the size of the item.
+- **Areas and options:** driving, `--building-faces --levels solve`, on the Mac mini (12 cores, 16 GB).
+  - Kentucky, cut from the US South file with `kentucky.geojson`, also with `--raw` (the options of the Studio page).
+  - France, from the Geofabrik France file, with a box around metropolitan France as the boundary, without `--raw` (raw.*
+    of France is about 20 GB of files; its memory is that of its sorts, see step 7). France: 27.8 million edges, 49.5
+    million buildings, 894 s, peak RSS 7.3 GB.
+- **Live heap:** a counting allocator (`--features heap-probe`). At the end of each step the build writes the live heap and
+  the peak of the step. The numbers are MiB.
 - The browser build (Studio) runs the same function `run`. Its numbers are larger, because WebAssembly memory does not
   become smaller.
+
+## The rule
+
+Each table goes to its file when the step makes it, and a later step reads what it needs from storage: the area file, the
+spill files of the edges, or a temporary file. Data that a step does not read is not in memory during that step. The
+exceptions are in [What is still held](#what-is-still-held) and [What still grows with the area](#what-still-grows-with-the-area).
 
 ## The step numbers
 
 The numbers are the numbers of [Offline and online builds](offline-online.md#each-step-where-the-data-is-and-how-it-is-handled).
-This page splits some steps into smaller parts:
+The steps after the network run in this order: 5.2, 5.3, 5.5, 5.4, 5.6, 7.
 
 | Number | Step |
 |---|---|
@@ -27,95 +33,123 @@ This page splits some steps into smaller parts:
 | 1.1 | Read the ways |
 | 1.2 | Read the node positions |
 | 1.3 | Read the turn restrictions |
-| 1.4 | Read the raw part |
+| 1.4 | Read the raw part: the elements that the fixes touch, the route relations and their member ways |
 | 2 | Global junctions |
 | 3.1 to 3.13 | The network of the mode (the numbers of [step 3 in detail](offline-online.md#step-3-in-detail-the-network-of-a-mode)) |
 | 4 | Write the network files |
-| 5.1 | Read the edges back |
-| 5.2 | The end of the mode: bus routes, street segments, lane edges, level edges |
+| 5.2 | Bus routes |
 | 5.3 | Area tables |
-| 5.4 | Levels |
 | 5.5 | Lane profile |
-| 5.6 | Building faces |
-| 7 | `raw.*` (write raw) |
+| 5.4 | Levels, by tiles |
+| 5.6 | Building faces, by bands of tiles |
+| 7 | `raw.*` |
 
-## The data that stays in memory between steps
+## What stays in memory between steps
 
-| Data | Size (MiB) | Made in step | Freed after step | Read by steps |
-|---|---|---|---|---|
-| Ways: the highway ways as read, with the fixes | 187 | 1.1 | 7 (the end) | 2, 3, 5.3, 5.5, 7. Steps 2 (sidewalk rule) and 5.2 (arrows of the fixes) change their tags. |
-| Node positions | 198 | 1.2 | 5.5 | 3, 5.3 |
-| Turn restrictions | 1 | 1.3 | never freed | 3.12 |
-| Raw part: the elements that the fixes touch, the route relations, the buildings with their nodes | 871 | 1.4 | 7 (the end) | 5.2 (route relations, building grid), 5.6 (buildings), 7 (touched elements) |
-| Building grid | 1 | before 3 | 7 (the end) | 5.2 (street segments) |
-| Junctions | 34 | 2 | 5.5 | 3, 5.3 |
-| Mode ways (`net.ways`): the ways of the mode after the road filter | 318 | 3.1 | 5.2 | 3.2, 3.5, 3.12, 4 (the `ways` tables), 5.2 (arrows of the fixes) |
-| Network nodes (`net.nodes`) | 25 | 3.8 | 5.5 | 4, 5.3 |
-| Buffers of the edge spill files (the edges are on disk) | 29 | 3 | 5.2 | 4 |
-| Edges and private edges, read back from the spill files | 708 + 70 | 5.1 | 5.2 (they move into the level edges) | 5.2 |
-| Street segments | 202 | 5.2 | 5.6 | 5.6 |
-| Lane edges (a copy of fields of the edges) | 237 | 5.2 | 5.5 | 5.5 |
-| Level edges (the edges, moved) | 776 | 5.2 | 5.5 | 5.4 |
+| Data | Made in step | Freed after step | Read by steps |
+|---|---|---|---|
+| Ways: the highway ways as read, with the fixes | 1.1 | 5.5. With `raw.*`, only the ways whose tags the build changed stay, to 7. | 2, 3, 5.3, 5.5, 7 |
+| Node positions | 1.2 | before 3: they go to a temporary file sorted by id; only their box stays | 3 (from the file), 5.3 (the box) |
+| Turn restrictions | 1.3 | 4 | 3.12 |
+| Raw part | 1.4 | 5.2 for the route relations and their member ways; 7 for the elements that the fixes touch | 5.2, 7 |
+| Junctions | 2 | 5.3 | 3, 5.3 |
+| Network nodes | 3.8 | 5.3 | 4, 5.3 |
+| Edges | 3 | never in memory: spill files on disk. The table of the shared tag sets of the edges stays in memory to the end. | 4, 5.2 to 5.6 read their fields from the files |
 
 ## Memory at each step
 
-"Held" is the data from earlier steps that is in memory when the step starts. "Not read" is the part of it that the step
-does not read. Sizes in MiB.
+Heap peak of each step, MiB. "Held" is the live heap at the start of the step: the data from earlier steps.
 
-| Step | Live at start | Peak | Held from earlier steps | The step reads | Held and not read |
-|---|---|---|---|---|---|
-| 0. Cut | 0 | 356 | — | region file, boundary | — |
-| 1.1 Read the ways | 0 | 253 | — | area file | — |
-| 1.2 Read the node positions | 187 | 619 | ways | ways, area file | — |
-| 1.3 Read the turn restrictions | 385 | 404 | ways, node positions | area file | ways, node positions |
-| 1.4 Read the raw part | 386 | 1,423 | ways, node positions, restrictions | area file | ways, node positions, restrictions |
-| 2. Global junctions | 1,257 | 1,455 | + raw part | ways | node positions, restrictions, raw part: 1,070 |
-| 3. Network, 3.1 to 3.13 (next table) | 1,292 | 1,933 | ways, node positions, restrictions, junctions, raw part, building grid | ways, node positions, restrictions, junctions | raw part, building grid: 872 |
-| 4. Write the network files | 1,665 | 2,086 | + mode ways, network nodes, spill buffers | spill files, mode ways, network nodes | ways, node positions, junctions, raw part, grid, restrictions: 1,292 |
-| 5.1 Read the edges back | 1,665 | 2,443 | the same | spill files | the same: 1,292 and more |
-| 5.2 The end of the mode | 2,413 | 2,755 | + edges 778 | edges, raw part (route relations), building grid | ways, node positions, junctions, restrictions, most of the raw part |
-| 5.3 Area tables | 2,532 | 3,220 | ways, node positions, junctions, network nodes, raw part, grid, restrictions, street segments, lane edges, level edges | ways, node positions, network nodes, junctions: 444 | level edges, lane edges, street segments, raw part, grid, restrictions: 2,088 |
-| 5.4 Levels | 2,532 | 3,138 | the same | level edges: 776 | all the rest: 1,756 |
-| 5.5 Lane profile | 2,532 | 3,228 | the same | lane edges, ways: 424 | level edges and all the rest: 2,108 |
-| 5.6 Building faces | 1,263 | 2,817 | ways, raw part, street segments, grid, restrictions | buildings of the raw part, street segments | ways, restrictions, grid; the raw part that is not buildings (not measured) |
-| 7. `raw.*` | 1,060 | 1,796 | ways, raw part, restrictions | area file, touched elements of the raw part, ways | the buildings of the raw part (not measured), restrictions |
+| Step | Kentucky: held | Kentucky: peak | France: held | France: peak |
+|---|---|---|---|---|
+| 0. Cut | 0 | 356 | 0 | 8,179 |
+| 1.1 Read the ways | 0 | 253 | 0 | 3,346 |
+| 1.2 Read the node positions | 187 | 619 | 2,619 | 8,433 |
+| 1.3 Read the turn restrictions | 385 | 414 | 5,001 | 5,069 |
+| 1.4 Read the raw part | 397 | 422 | 5,049 | 5,919 |
+| 2. Global junctions | 404 | 601 | 5,868 | 8,541 |
+| 3. Network | 438 | 618 | 6,412 | 7,622 |
+| 4. Write the network files | 413 | 495 | 5,714 | 5,798 |
+| 5.2 Bus routes | 413 | 447 | 5,714 | 10,028 |
+| 5.3 Area tables | 413 | 413 | 5,714 | 5,714 |
+| 5.5 Lane profile | 299 | 750 | 3,927 | 7,700 |
+| 5.4 Levels | 88 | 227 | 462 | not measured (below 4,882) |
+| 5.6 Building faces | 88 | 367 | 462 | 855 |
+| 7. `raw.*` | 88 | 192 | — | — |
 
-The three highest peaks are 5.5 lane profile (3,228), 5.3 area tables (3,220) and 5.4 levels (3,138). In each of them,
-more than 1.7 GB is in memory that the step does not read.
+For the levels of France, the mark at the start of the step also has the lane edges, which go at once; the peak of the
+levels alone is not measured.
 
-### Step 3: the network substeps
+### Step 3: the network substeps (Kentucky)
 
-During all substeps the build holds 1,292 MiB from the steps before (the table above). From 3.1, it also holds the mode
-ways (318 MiB). The edges are in spill files on disk.
+During all substeps the build holds the ways, the junctions and the raw part (about 420 MiB). The node positions are in a
+temporary file, and the edges are in spill files on disk.
 
-| Substep | Live at the end | Peak |
+| Substep | Peak |
+|---|---|
+| 3.1 Mode filter (makes the mode ways and writes the `ways` tables) | 627 |
+| 3.2 Cut the ways into forward edges (a join on disk with the node positions) | 603 |
+| 3.3 Merge chains | 525 |
+| 3.4 to 3.7 Split arcs, reverse edges, `edge_id`, lengths | 531 |
+| 3.8 Nodes | 513 |
+| 3.9 Connectors (driving: none) | 424 |
+| 3.9 to 3.11 Walked edges, speeds, private roads, largest part | 435 |
+| 3.11 The sort by `edge_id` | 535 |
+| 3.12 Turn restrictions | 439 |
+| 3.13 Edge graph | 618 |
+
+### Steps 5.6 and 7 in parts
+
+| Part | Kentucky peak | France peak |
 |---|---|---|
-| 3.1 Mode filter (makes the mode ways) | 1,647 | 1,793 |
-| 3.2 Cut the ways into forward edges | 1,642 | 1,683 |
-| 3.3 Merge chains | 1,642 | 1,750 |
-| 3.4 to 3.7 Split arcs, reverse edges, `edge_id`, lengths | 1,643 | 1,769 |
-| 3.8 Nodes | 1,667 | 1,732 |
-| 3.9 Connectors (driving: none) | 1,667 | 1,667 |
-| 3.9 to 3.11 Walked edges, speeds, private roads, largest part | 1,671 | 1,678 |
-| 3.11 The sort by `edge_id` | 1,667 | 1,778 |
-| 3.12 Turn restrictions | 1,667 | 1,683 |
-| 3.13 Edge graph | 1,665 | 1,933 |
+| 5.6 The fixes and the building multipolygons | 115 | 577 |
+| 5.6 The building ways, to a temporary file | 131 | 583 |
+| 5.6 The join with the nodes of the file | 216 | 759 |
+| 5.6 The rings, to a temporary file | 101 | 615 |
+| 5.6 The rings and the streets, sorted by place | 214 | 715 |
+| 5.6 The bands of tiles | 367 | 855 |
+| 7 The nodes of the ways, sorted | 179 | — |
+| 7 The nodes, and the join | 181 | — |
+| 7 The ways and the relations | 192 | — |
 
-## The questions for the decision
+## What is still held
 
-For each item that is held and not read, the question is: must it stay in memory, or can the step that reads it read it from
-storage (the area file, the spill files or a written table)?
+After step 5.5 the build holds about 90 MiB on Kentucky and 460 MiB on France: the elements that the fixes touch, the ways
+whose tags the build changed (with `raw.*`), the table of the shared tag sets of the edges, and small lists.
 
-1. **Raw part (871 MiB).** It is read in step 1.4 and held to the end. The network does not read it. Only steps 5.2 (bus routes),
-   5.6 (building faces) and 7 (`raw.*`) read parts of it, and each part is in the area file.
-2. **Edges read back (778 MiB).** The edges are already on disk in the spill files, which can be read more than one time.
-   Each later step can read only its fields from them, and the level edges, lane edges and street segments need not be held.
-3. **Mode ways (318 MiB).** They are held through the network and to the end of the mode.
-4. **Ways and node positions (385 MiB).** The network reads them in each pass. After the network, the area tables, the lane
-   profile and write raw read them. They are also in the area file, but the build changes some tags of the ways.
-5. **Turn restrictions and building grid (2 MiB).** Small, but held to the end.
+## What still grows with the area
 
-## Open proposals
+These steps hold a list of the whole area:
 
-- [PR 130](https://github.com/Khoshkhah/duckOSM/pull/130) (not merged): each step runs when its data is ready, and each item goes
-  after the last step that reads it. The files are equal. Kentucky: 5.3 area tables 3,220 → 1,754, 5.5 lane profile 3,228 → 2,530.
+| Step | France peak | What is in memory |
+|---|---|---|
+| 0. Cut | 8.2 GB | the ids of all nodes inside the boundary (4.1 GB), and the kept ways |
+| 1.2 Read the node positions | 8.4 GB | all ways (2.6 GB) and the positions of their nodes |
+| 2. Global junctions | 8.5 GB | the ways, and the count of the ways at each node |
+| 3. Network | 7.6 GB | the ways, the junctions, and the mode ways of the cut |
+| 5.2 Bus routes | 10.0 GB | the route relations and the lines of their member ways |
+| 5.5 Lane profile | 7.7 GB | the lane fields of all edges |
+
+The levels (by tiles), the building faces (by bands of tiles) and `raw.*` (sorts on disk) do not hold a list of the whole
+area.
+
+## What changed
+
+The changes of 2026-11-13, Kentucky with the Studio options:
+
+| | Morning (main b58ea48) | Now |
+|---|---|---|
+| Highest heap peak | 3,228 MiB (lane profile) | 750 MiB (lane profile) |
+| Peak RSS | 5.7 GB | 2.1 GB |
+| Build time, native | 33.0 s | 33.5 s |
+| Studio page: memory | 3,251 MiB | 886 to 1,031 MiB |
+| Studio page: build time | 49.9 s | 53.5 s |
+
+- The tables go to their files when they are made (PRs 130 to 136, 143); the steps after the network read the edges from
+  the spill files.
+- The network and `raw.*` get the coordinates from a join on disk (PRs 138, 139, 145).
+- The levels run by tiles, and the tiles that wait for no running tile run at the same time (PRs 144, 145). A tile has no
+  meet rule between two roads of earlier tiles (roadstyle PR 190, in PR 147).
+- The building faces read the area file one way at a time and run by bands of tiles from temporary files (PRs 141, 142,
+  146).
+- After the lane profile and after the bus routes, the build frees the data that later steps do not read (PRs 145, 147).
