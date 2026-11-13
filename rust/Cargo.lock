@@ -772,7 +772,8 @@ dependencies = [
  "duckosm-duckdb",
  "duckosm-parquet",
  "h3o",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=d9dfcdca5c02aa5fd11e95267c4ee618b429a39a)",
+ "rayon",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=36f8ca9f7342b72dd64e0d945c186d9dd6bf6396)",
  "serde_json",
  "sha2",
  "tiff",
@@ -841,7 +842,7 @@ dependencies = [
  "duckosm-core",
  "parquet",
  "rayon",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=d9dfcdca5c02aa5fd11e95267c4ee618b429a39a)",
+ "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=36f8ca9f7342b72dd64e0d945c186d9dd6bf6396)",
 ]
 
 [[package]]
@@ -2195,7 +2196,7 @@ dependencies = [
 [[package]]
 name = "roadstyle-levels"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=d9dfcdca5c02aa5fd11e95267c4ee618b429a39a#d9dfcdca5c02aa5fd11e95267c4ee618b429a39a"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=36f8ca9f7342b72dd64e0d945c186d9dd6bf6396#36f8ca9f7342b72dd64e0d945c186d9dd6bf6396"
 dependencies = [
  "rstar",
  "sha2",

@@ -1096,6 +1096,17 @@ pub fn run<W: Write + Send>(
     // each step after the network reads its data when it runs, and each part goes after the last step that reads it: the area
     // tables first, so that the node positions, the junctions and the nodes go before the levels
     drop((relations, positions));
+    // raw.* reads only the elements that the fixes touch (RawPatch): the route relations and their member ways go after the bus
+    // routes (France: 0.8 GB)
+    if let Some(read) = &area_read {
+        if want_raw {
+            if let Some(r) = raw.as_mut() {
+                r.retain_touched(read);
+            }
+        } else {
+            raw = None;
+        }
+    }
     let built_at = p.built_at.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1204,7 +1215,10 @@ pub fn run<W: Write + Send>(
             .filter(|w| h.binary_search_by_key(&w.id, |x| x.0).map_or(true, |i| h[i].1 != tags_hash(w)))
             .collect(),
         None if want_raw => ways,
-        None => Vec::new(),
+        None => {
+            drop(ways); // a new binding alone keeps the old list to the end (France: 2.6 GB)
+            Vec::new()
+        }
     };
     if p.levels == LevelsMethod::Solve {
         // by tiles: the level edges, the roads and the rules of the whole area are never in memory at once (levels::tiled)

@@ -69,6 +69,17 @@ fn edit_tags(tags: &mut RawTags, e: &TagEdit) {
 }
 
 impl Raw {
+    /// Keep only the elements whose ids are in `read` (sorted, as [`RawPatch::ids`] gives them) and the new elements of the fixes.
+    pub fn retain_touched(&mut self, read: &[Vec<i64>; 3]) {
+        let keep = |k: usize, id: i64| id >= NEW_WAY_ID_MIN || read[k].binary_search(&id).is_ok();
+        self.nodes.retain(|n| keep(0, n.id));
+        self.ways.retain(|w| keep(1, w.id));
+        self.relations.retain(|r| keep(2, r.id));
+        self.nodes.shrink_to_fit();
+        self.ways.shrink_to_fit();
+        self.relations.shrink_to_fit();
+    }
+
     fn way_mut(&mut self, id: i64) -> Option<&mut RawWay> {
         let i = self.ways.binary_search_by_key(&id, |w| w.id).ok()?;
         Some(&mut self.ways[i])

@@ -322,6 +322,7 @@ pub mod tiled {
         let mut sums = roadstyle_levels::TileLevels::default();
         let solve = |tile: Vec<TileEdge>, earlier: &FxHashMap<i64, (usize, [i64; 4])>| {
             let me = order[&tile[0].0];
+            let (tile_y, tile_x) = tile[0].0;
             let mut edges = roadstyle_levels::LevelEdges::default();
             edges.reserve(tile.len());
             let (mut owned, mut keep) = (FxHashSet::default(), FxHashSet::default());
@@ -338,7 +339,8 @@ pub mod tiled {
                 owned: &|id| owned.contains(&id),
                 earlier: &|id| earlier.get(&id).filter(|(o, _)| *o < me).map(|(_, v)| *v),
             };
-            let r = roadstyle_levels::levels_tile(&edges, &roles, &o).map_err(|e| e.to_string())?;
+            let r = roadstyle_levels::levels_tile(&edges, &roles, &o)
+                .map_err(|e| format!("{e} (the tile of {:.1}, {:.1})", tile_y as f64 * TILE_DEG, tile_x as f64 * TILE_DEG))?;
             Ok::<_, String>((me, r, keep))
         };
         let mut done: FxHashSet<Tile> = FxHashSet::default();
