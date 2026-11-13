@@ -71,6 +71,24 @@ impl LevelEdges {
 }
 
 /// roadstyle's levels of the edges; None for `Method::None`.
+/// [`compute`] with the rows given to `sink` in parts, in the order of `edge_id`; the `Levels` has no rows.
+pub fn compute_each(
+    edges: &LevelEdges,
+    method: Method,
+    mut sink: impl FnMut(Vec<Row>) -> Result<(), String>,
+) -> Result<Option<Levels>, String> {
+    let o = roadstyle_levels::Options { method, ..Default::default() };
+    let mut failed = None;
+    let lv = roadstyle_levels::levels_each(&edges.edges, &o, &mut |rows| {
+        if failed.is_none() {
+            failed = sink(rows).err();
+        }
+        Ok(())
+    })
+    .map_err(|e| e.to_string())?;
+    failed.map_or(Ok(lv), Err)
+}
+
 pub fn compute(edges: &LevelEdges, method: Method) -> Result<Option<Levels>, String> {
     let o = roadstyle_levels::Options { method, ..Default::default() };
     roadstyle_levels::levels(&edges.edges, &o).map_err(|e| e.to_string())
