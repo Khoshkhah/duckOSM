@@ -599,7 +599,14 @@ fn fix_ids(fixes: &OsmFixes) -> [duckosm_core::util::FxHashSet<i64>; 3] {
 /// The part of the `raw.*` of an area file that the build needs in memory: the elements that the fixes touch (`ids`, with
 /// all their tags), the route relations of the bus routes and their member ways (`bus`, all tags), and the buildings with
 /// their nodes (`faces`, only the tags that the faces read: `building` and `addr:street` of a way, `entrance` of a node).
-fn read_raw_part(open: Open, ids: &[duckosm_core::util::FxHashSet<i64>; 3], bus: bool, faces: bool) -> Result<Raw, String> {
+/// `way_nodes`: also the nodes of the kept ways (else only the nodes that the fixes touch).
+fn read_raw_part(
+    open: Open,
+    ids: &[duckosm_core::util::FxHashSet<i64>; 3],
+    bus: bool,
+    faces: bool,
+    way_nodes: bool,
+) -> Result<Raw, String> {
     fn tag<'t>(t: &[(&'t str, &'t str)], k: &str) -> Option<&'t str> {
         t.iter().find(|x| x.0 == k).map(|x| x.1)
     }
@@ -614,7 +621,97 @@ fn read_raw_part(open: Open, ids: &[duckosm_core::util::FxHashSet<i64>; 3], bus:
     let tag = |kind: usize, id: i64, key: &str| {
         ids[kind].contains(&id) || if kind == 0 { key == "entrance" } else { key == "building" || key == "addr:street" }
     };
-    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes: faces, tag: &tag })
+    duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes, tag: &tag })
+}
+
+/// The points of the ways of a part: `pts[i]`, the coordinates of all nodes of `ways[i]` (None when one is missing).
+type WayPoints = Vec<Option<Vec<duckosm_core::geom::Pt>>>;
+
+/// The buildings of the faces from an area file, with the fixes: the ways and the relations of [`read_raw_part`] (the raw
+/// nodes of the buildings, with their tags, were 0.9 GB on Kentucky), the coordinates of the nodes of each way from a join on
+/// disk (the nodes of the file, then the nodes that the fixes touch, as the part has them), and the entrance nodes.
+fn faces_input(open: Open, fixes: &OsmFixes) -> Result<(Raw, WayPoints, duckosm_core::util::FxHashMap<i64, ()>), String> {
+    use duckosm_core::spill::{self, join, Writer};
+    const BUDGET: usize = 64 << 20; // each sort holds about this much
+    let io = |e: std::io::Error| format!("a temporary file of the building faces: {e}");
+    let touched = fix_ids(fixes);
+    let mut part = read_raw_part(open, &touched, false, true, false)?;
+    part.apply_fixes(fixes);
+    let store = spill::temp_store();
+    let store = &*store;
+    // the nodes of the file, but those that the fixes touch (the part has them, after the fixes): their coordinates, and the
+    // entrances
+    struct Nodes(Vec<(i64, f64, f64, bool)>);
+    impl duckosm_core::raw::RawSink for Nodes {
+        fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            self.0.push((id, lon, lat, building_faces::is_entrance(tags)));
+        }
+        fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+        fn relation<'a>(
+            &mut self,
+            _: i64,
+            _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            _: &mut dyn Iterator<Item = (i64, duckosm_core::graph::MemberType, &'a str)>,
+        ) {
+        }
+    }
+    let mut positions = Writer::new(store).map_err(io)?;
+    let mut entrances = duckosm_core::util::FxHashMap::default();
+    let (mut last, mut in_order) = (i64::MIN, true);
+    duckosm_core::cutstream::each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut s = Nodes(Vec::new());
+            duckosm_core::pbfraw::decode_block(b, [true, false, false], buf, &mut s)?;
+            Ok(s.0)
+        },
+        |nodes, _| {
+            for (id, lon, lat, entrance) in nodes {
+                if touched[0].contains(&id) {
+                    continue;
+                }
+                in_order &= id > last;
+                last = id;
+                positions.push(&join::Position, &(id, lon, lat)).map_err(io)?;
+                if entrance {
+                    entrances.insert(id, ());
+                }
+            }
+            Ok(true)
+        },
+    )?;
+    in_order &= part.nodes.is_empty();
+    for n in &part.nodes {
+        positions.push(&join::Position, &(n.id, n.lon, n.lat)).map_err(io)?;
+        if building_faces::is_entrance(n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str()))) {
+            entrances.insert(n.id, ());
+        }
+    }
+    let positions = positions.finish().map_err(io)?;
+    let mut positions = if in_order { positions } else { spill::sort_bytes(positions, join::node_id, BUDGET, store).map_err(io)? };
+    // the nodes of each way of the part, joined with the coordinates
+    let mut requests = Writer::new(store).map_err(io)?;
+    for (i, w) in part.ways.iter().enumerate() {
+        for (k, &n) in w.refs.iter().enumerate() {
+            requests.push(&join::Request, &(n, i as u32, k as u32)).map_err(io)?;
+        }
+    }
+    let points = join::points(requests.finish().map_err(io)?, &mut positions, BUDGET, store).map_err(io)?;
+    drop(positions);
+    let mut points = points.read(&join::Point).map_err(io)?.peekable();
+    let mut pts: WayPoints = Vec::with_capacity(part.ways.len());
+    for (i, w) in part.ways.iter().enumerate() {
+        let mut p = Vec::with_capacity(w.refs.len());
+        while let Some(x) = points.next_if(|x| x.as_ref().is_ok_and(|x| x.0 == i as u32)) {
+            let x = x.map_err(io)?;
+            p.push((x.2, x.3));
+        }
+        if let Some(Err(_)) = points.peek() {
+            return Err(io(points.next().expect("peeked").expect_err("an error")));
+        }
+        pts.push((p.len() == w.refs.len()).then_some(p));
+    }
+    Ok((part, pts, entrances))
 }
 
 /// The whole build without a file system, for the native build and the browser build (duckosm-wasm): read the
@@ -717,7 +814,7 @@ pub fn run<W: Write + Send>(
                 // the small part: the elements that the fixes touch and the route relations. The buildings are read in
                 // the faces step (all of them held through the build: Kentucky 0.87 GB)
                 let touched = fix_ids(fixes);
-                let mut part = read_raw_part(open, &touched, bus, false)?;
+                let mut part = read_raw_part(open, &touched, bus, false, false)?;
                 area_read = Some(RawPatch::ids(&part, &touched));
                 part.apply_fixes(fixes);
                 raw = Some(part);
@@ -991,16 +1088,37 @@ pub fn run<W: Write + Send>(
     if p.building_faces {
         // the buildings with the fixes, read from the area file here (OSM JSON has its whole raw part in memory); the grid near
         // them; the street segments near them, from the edges of the spill files
-        let read = match input {
+        let (read, pts, entrances) = match input {
             Input::Area(open, _) => {
-                let mut b = read_raw_part(open, &fix_ids(fixes), false, true)?;
-                b.apply_fixes(fixes);
-                Some(b)
+                let (b, pts, entrances) = faces_input(open, fixes)?;
+                (Some(b), Some(pts), entrances)
             }
-            _ => None,
+            _ => (None, None, Default::default()),
         };
         let r = read.as_ref().or(raw.as_ref()).ok_or("the building faces need a raw part")?;
-        let near = building_faces::NearBuildings::new(&r.ways, &r.nodes);
+        let near = match &pts {
+            // the box of each way with the coordinates of all its nodes, as NearBuildings::new
+            Some(pts) => building_faces::NearBuildings::from_boxes(
+                pts.iter()
+                    .flatten()
+                    .filter_map(|p| {
+                        let mut b = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+                        for &(x, y) in p {
+                            b = ((b.0 .0.min(x), b.0 .1.min(y)), (b.1 .0.max(x), b.1 .1.max(y)));
+                        }
+                        (b.0 .0 <= b.1 .0).then_some(b)
+                    })
+                    .collect(),
+            ),
+            None => building_faces::NearBuildings::new(&r.ways, &r.nodes),
+        };
+        // the rings and the entrances are all that the faces need of the raw buildings: these go before the faces are made
+        // the rings first, and the raw buildings go: then the street segments are made, and the two are not in memory together
+        let rings = match pts {
+            Some(pts) => building_faces::building_rings_from(&r.ways, pts, &r.relations, entrances),
+            None => building_faces::building_rings(&r.ways, &r.nodes, &r.relations),
+        };
+        drop(read);
         let mut streets: Vec<building_faces::Street> = Vec::new();
         for (mode, files) in &mut mode_files {
             if matches!(*mode, Mode::Driving | Mode::Walking) {
@@ -1016,9 +1134,6 @@ pub fn run<W: Write + Send>(
             }
         }
         drop(near);
-        // the rings and the entrances are all that the faces need of the raw buildings: these go before the faces are made
-        let rings = building_faces::building_rings(&r.ways, &r.nodes, &r.relations);
-        drop(read);
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
         let (mut faces, mut buildings, mut last) = (0, 0, None);
@@ -1271,7 +1386,7 @@ mod area_raw_tests {
             let (area, _) = duckosm_core::cutstream::cut_to_pbf(|| Ok(Cursor::new(&region[..])), &b, Vec::new()).unwrap();
             let open = || -> Result<Box<dyn Read + Send>, String> { Ok(Box::new(Cursor::new(area.clone()))) };
             let touched = fix_ids(&fixes);
-            let mut part = read_raw_part(&open, &touched, true, true).unwrap();
+            let mut part = read_raw_part(&open, &touched, true, true, true).unwrap();
             let read = RawPatch::ids(&part, &touched);
             part.apply_fixes(&fixes);
             let mut net: Vec<&Way> = ways.iter().collect();
