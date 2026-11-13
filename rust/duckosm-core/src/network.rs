@@ -955,6 +955,11 @@ impl EdgeFiles {
         self.private_edges.read_ref(&self.codec)
     }
 
+    /// The number of edges and of private edges.
+    pub fn counts(&self) -> (usize, usize) {
+        (self.edges.len, self.private_edges.len)
+    }
+
     /// The edges and the private edges in memory.
     pub fn into_vecs(self) -> Result<(Vec<Edge>, Vec<Edge>), String> {
         let read = |rows: Rows| -> Result<Vec<Edge>, String> {
