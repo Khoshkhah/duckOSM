@@ -246,7 +246,7 @@ impl Rows {
 }
 
 /// The rows of `rows` in the order of `key` (stable), with the key from the decoded row. See [`sort_bytes`].
-pub fn sort<T, K: Ord, C: Codec<T>>(
+pub fn sort<T, K: Ord + Send, C: Codec<T>>(
     rows: Rows,
     codec: &C,
     key: impl Fn(&T) -> K,
@@ -259,7 +259,7 @@ pub fn sort<T, K: Ord, C: Codec<T>>(
 /// The rows of `rows` in the order of `key` (stable), with the key from the bytes of the row: a codec with its key
 /// fields at fixed places at the start of the row gives a key with no decode of the rest. Each sorted block holds about
 /// `budget` bytes of memory: the bytes of its rows in one buffer, and for each row its key and its place.
-pub fn sort_bytes<K: Ord>(
+pub fn sort_bytes<K: Ord + Send>(
     rows: Rows,
     key: impl Fn(&[u8]) -> K,
     budget: usize,
@@ -269,7 +269,7 @@ pub fn sort_bytes<K: Ord>(
 }
 
 /// [`sort_bytes`] of the rows for which `keep` is true. `keep` sees each row one time, in the order of the file.
-pub fn sort_bytes_where<K: Ord>(
+pub fn sort_bytes_where<K: Ord + Send>(
     rows: Rows,
     mut keep: impl FnMut(&[u8]) -> bool,
     key: impl Fn(&[u8]) -> K,
@@ -281,7 +281,14 @@ pub fn sort_bytes_where<K: Ord>(
     let mut data: Vec<u8> = Vec::new();
     let mut index: Vec<(K, usize, usize)> = Vec::new(); // key, start and end of the row in `data`
     let flush = |data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, runs: &mut Vec<Rows>| -> io::Result<()> {
-        index.sort_by(|a, b| a.0.cmp(&b.0)); // stable
+        // stable; on all threads when the crate has rayon (the feature `pbf`)
+        #[cfg(feature = "pbf")]
+        {
+            use rayon::slice::ParallelSliceMut;
+            index.par_sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        #[cfg(not(feature = "pbf"))]
+        index.sort_by(|a, b| a.0.cmp(&b.0));
         let mut w = Writer::new(store)?;
         for (_, a, b) in index.drain(..) {
             w.push_bytes(&data[a..b])?;
