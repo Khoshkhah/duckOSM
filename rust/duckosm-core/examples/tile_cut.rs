@@ -62,22 +62,26 @@ mod heap {
     struct Counting;
     static LIVE: AtomicUsize = AtomicUsize::new(0);
     static PEAK: AtomicUsize = AtomicUsize::new(0);
+    /// count only with DUCKOSM_HEAP set (the count slows the threads down)
+    pub static ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     unsafe impl GlobalAlloc for Counting {
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
             let p = unsafe { System.alloc(l) };
-            if !p.is_null() {
+            if !p.is_null() && ON.load(Relaxed) {
                 PEAK.fetch_max(LIVE.fetch_add(l.size(), Relaxed) + l.size(), Relaxed);
             }
             p
         }
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
             unsafe { System.dealloc(p, l) };
-            LIVE.fetch_sub(l.size(), Relaxed);
+            if ON.load(Relaxed) {
+                LIVE.fetch_sub(l.size(), Relaxed);
+            }
         }
         unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
             let q = unsafe { System.realloc(p, l, new) };
-            if !q.is_null() {
+            if !q.is_null() && ON.load(Relaxed) {
                 if new >= l.size() {
                     PEAK.fetch_max(LIVE.fetch_add(new - l.size(), Relaxed) + new - l.size(), Relaxed);
                 } else {
@@ -105,6 +109,7 @@ mod heap {
 }
 
 fn main() {
+    heap::ON.store(std::env::var_os("DUCKOSM_HEAP").is_some(), std::sync::atomic::Ordering::Relaxed);
     heap::report("start");
     let _ = duckosm_core::util::STEP_HOOK.set(heap::report);
     let a: Vec<String> = std::env::args().collect();
