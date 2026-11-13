@@ -6,8 +6,8 @@ use duckosm_core::filter::Mode;
 use duckosm_core::fixes::OsmFixes;
 use duckosm_core::graph::Relation;
 use duckosm_core::lanes::LaneEdges;
-use duckosm_core::model::{Network, Way};
-use duckosm_core::network::{build_network_files, Coords, NetworkFiles, Options};
+use duckosm_core::model::{Edge, Network, Way};
+use duckosm_core::network::{build_network_files, Coords, EdgeFiles as NetworkEdges, NetworkFiles, Options};
 use duckosm_core::osmjson::OsmJson;
 use duckosm_core::raw::{Raw, RawPatch, Want};
 use duckosm_core::{building_faces, cutfile, pbf, sidewalks};
@@ -342,14 +342,39 @@ fn street_segments(
 /// the ways of the raw cut: `routes_bus.parquet` and `route_edges_bus.parquet`. Returns the number of routes.
 pub fn write_bus<W: Write + Send>(
     raw: &Raw,
-    net: &Network,
+    files: &mut NetworkEdges,
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<usize, String> {
-    let (routes, edges) =
-        duckosm_core::bus::routes(&raw.relations, &raw.ways, &net.edges, &net.private_edges);
+    // only the edges of the member ways of the relations: the routes look up no other (bus::routes)
+    let members: duckosm_core::util::FxHashSet<i64> = raw
+        .relations
+        .iter()
+        .flat_map(|r| r.members.iter())
+        .filter(|m| m.1 == duckosm_core::graph::MemberType::Way)
+        .map(|m| m.0)
+        .collect();
+    let (mut edges, mut private_edges) = (Vec::new(), Vec::new());
+    each_edge(files, false, |e| if members.contains(&e.osm_id) { edges.push(e) })?;
+    each_edge(files, true, |e| if members.contains(&e.osm_id) { private_edges.push(e) })?;
+    let (routes, edges) = duckosm_core::bus::routes(&raw.relations, &raw.ways, &edges, &private_edges);
     duckosm_parquet::write_routes_to(file("routes_bus.parquet")?, &routes)?;
     duckosm_parquet::write_route_edges_to(file("route_edges_bus.parquet")?, &edges)?;
     Ok(routes.len())
+}
+
+/// Each edge (or each private edge) of a mode, from its spill files, in the order of `edge_id`.
+fn each_edge(files: &mut NetworkEdges, private: bool, mut f: impl FnMut(Edge)) -> Result<(), String> {
+    let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
+    if private {
+        for e in files.private_edges().map_err(err)? {
+            f(e.map_err(err)?);
+        }
+    } else {
+        for e in files.edges().map_err(err)? {
+            f(e.map_err(err)?);
+        }
+    }
+    Ok(())
 }
 
 /// Write duckOSM's `raw.*` tables, each to a writer from `file`: `raw_nodes.parquet`, `raw_ways.parquet` and
@@ -672,9 +697,11 @@ pub fn run<W: Write + Send>(
             } else {
                 Vec::new()
             };
-            if want_raw || bus || p.building_faces {
+            if want_raw || bus {
+                // the small part: the elements that the fixes touch and the route relations. The buildings are read in
+                // the faces step (all of them held through the build: Kentucky 0.87 GB)
                 let touched = fix_ids(fixes);
-                let mut part = read_raw_part(open, &touched, bus, p.building_faces)?;
+                let mut part = read_raw_part(open, &touched, bus, false)?;
                 area_read = Some(RawPatch::ids(&part, &touched));
                 part.apply_fixes(fixes);
                 raw = Some(part);
@@ -728,14 +755,8 @@ pub fn run<W: Write + Send>(
     };
     let (mut dem_nodes, mut dem_nodata) = (0i64, 0i64);
     let mut mode_nodes = Vec::new();
-    let mut level_edges = LevelEdges::default();
-    let mut lane_edges = LaneEdges::default();
-    let mut streets: Vec<building_faces::Street> = Vec::new();
-    // the grid near the buildings of the raw part: only the street segments near a building are kept for the faces
-    let near = raw
-        .as_ref()
-        .filter(|_| p.building_faces)
-        .map(|r| building_faces::NearBuildings::new(&r.ways, &r.nodes));
+    // the edges of each mode stay in their spill files on disk; each step after the network reads them from there
+    let mut mode_files: Vec<(Mode, NetworkEdges)> = Vec::new();
     // the global junctions depend only on the ways: one time for all modes and for main.global_junctions
     let junctions = if opts.global_junctions {
         duckosm_core::network::global_junctions(&ways)
@@ -768,78 +789,95 @@ pub fn run<W: Write + Send>(
         log.step(&format!("build {n}"));
         write_tables_files(&mut net, *mode, opts, &ways, &mut file)?;
         log.step(&format!("write geoparquet {n}"));
-        // the steps after the network still take the edges in memory (docs/design/network_stream.md, part B5)
-        let mut net = net.into_network()?;
-        log.step(&format!("read the edges {n}"));
-        if let Some(res) = p.h3_resolution {
-            let (nodes, edges) = h3::index(&net.nodes, &net.edges, res)?;
-            duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes)?;
-            duckosm_parquet::write_h3_edges_to(file(&format!("h3_edges_{n}.parquet"))?, &edges)?;
-            log.step(&format!("h3 {n}"));
+        if p.h3_resolution.is_some() || dem.is_some() {
+            // ponytail: H3 and the heights take all edges of the mode in memory, for this part only
+            let mut edges = Vec::new();
+            each_edge(&mut net.files, false, |e| edges.push(e))?;
+            if let Some(res) = p.h3_resolution {
+                let (nodes, h3_edges) = h3::index(&net.net.nodes, &edges, res)?;
+                duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes)?;
+                duckosm_parquet::write_h3_edges_to(file(&format!("h3_edges_{n}.parquet"))?, &h3_edges)?;
+                log.step(&format!("h3 {n}"));
+            }
+            if let Some(d) = &dem {
+                let (nz, ez, nodata) = elevation::sample_mode(d, &net.net.nodes, &edges, 0.0);
+                dem_nodes += nz.len() as i64;
+                dem_nodata += nodata as i64;
+                duckosm_parquet::write_node_heights_to(
+                    file(&format!("elevation_nodes_{n}.parquet"))?,
+                    &nz.iter().map(|r| (r.node_id, r.ele)).collect::<Vec<_>>(),
+                )?;
+                duckosm_parquet::write_edge_heights_to(
+                    file(&format!("elevation_edges_{n}.parquet"))?,
+                    &ez.into_iter()
+                        .map(|r| (r.edge_id, r.z_from, r.z_to, r.z_vertices))
+                        .collect::<Vec<_>>(),
+                )?;
+                log.step(&format!("elevation {n}"));
+            }
         }
-        if let Some(d) = &dem {
-            let (nz, ez, nodata) = elevation::sample_mode(d, &net.nodes, &net.edges, 0.0);
-            dem_nodes += nz.len() as i64;
-            dem_nodata += nodata as i64;
-            duckosm_parquet::write_node_heights_to(
-                file(&format!("elevation_nodes_{n}.parquet"))?,
-                &nz.iter().map(|r| (r.node_id, r.ele)).collect::<Vec<_>>(),
-            )?;
-            duckosm_parquet::write_edge_heights_to(
-                file(&format!("elevation_edges_{n}.parquet"))?,
-                &ez.into_iter()
-                    .map(|r| (r.edge_id, r.z_from, r.z_to, r.z_vertices))
-                    .collect::<Vec<_>>(),
-            )?;
-            log.step(&format!("elevation {n}"));
-        }
+        let (edges, private_edges) = net.files.counts();
         sum.modes.push(ModeSummary {
             mode: *mode,
-            edges: net.edges.len(),
-            nodes: net.nodes.len(),
-            private_edges: net.private_edges.len(),
-            edge_id_map: net.edge_id_map.len(),
-            connectors: net.stats.connectors,
-            osm_fixes: net.stats.osm_fixes,
-            edge_graph: net.stats.edge_graph_rows,
-            turn_restrictions: net.graph.turn_restrictions.as_ref().map_or(0, Vec::len),
+            edges,
+            nodes: net.net.nodes.len(),
+            private_edges,
+            edge_id_map: net.net.edge_id_map.len(),
+            connectors: net.net.stats.connectors,
+            osm_fixes: net.net.stats.osm_fixes,
+            edge_graph: net.net.stats.edge_graph_rows,
+            turn_restrictions: net.net.graph.turn_restrictions.as_ref().map_or(0, Vec::len),
         });
-        if p.building_faces && matches!(*mode, Mode::Driving | Mode::Walking) {
-            street_segments(&net.edges, near.as_ref().expect("made with the faces"), &mut streets);
-        }
         // duckOSM: the arrows of the fixes go into the raw tags after this mode, so the next modes see them
-        fixes.set_arrows(&mut ways, &net.ways, *mode);
-        lane_edges.add(*mode, &net);
+        fixes.set_arrows(&mut ways, &net.net.ways, *mode);
         if let Some(r) = raw.as_ref().filter(|_| *mode == Mode::Driving && bus) {
-            sum.bus_routes = Some(write_bus(r, &net, &mut file)?);
+            sum.bus_routes = Some(write_bus(r, &mut net.files, &mut file)?);
             log.step("bus routes");
         }
-        // the last use of the edges of this mode: the levels take them
-        if p.levels != LevelsMethod::None {
-            level_edges.reserve(net.edges.len() + net.private_edges.len());
-            level_edges.add(*mode, false, std::mem::take(&mut net.edges));
-            level_edges.add(*mode, true, std::mem::take(&mut net.private_edges));
-        }
+        // the rest of the network of this mode (its ways, its graph) goes here
+        let NetworkFiles { net, files } = net;
         mode_nodes.push((*mode, net.nodes));
+        mode_files.push((*mode, files));
     }
-    // each step after the network runs when its data is ready, and each part goes after the last step that reads it (Kentucky with
-    // raw.* and the faces: 2.5 GB held after the network; the area tables read 0.44 GB of it, the levels 0.78 GB)
-    drop((relations, near));
+    // each step after the network reads its data when it runs, and each part goes after the last step that reads it
+    drop(relations);
     let built_at = p.built_at.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as i64)
     });
-    sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
-    if sum.levels.is_some() {
-        log.step("levels");
+    if p.levels != LevelsMethod::None {
+        let mut level_edges = LevelEdges::default();
+        level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
+        for (mode, files) in &mut mode_files {
+            for private in [false, true] {
+                let mut v = Vec::new();
+                each_edge(files, private, |e| v.push(e))?;
+                level_edges.add(*mode, private, v);
+            }
+        }
+        sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
+        if sum.levels.is_some() {
+            log.step("levels");
+        }
     }
-    drop(level_edges);
-    sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
-    if sum.lanes.is_some() {
-        log.step("lane profile");
+    {
+        let mut lane_edges = LaneEdges::default();
+        for (mode, files) in &mut mode_files {
+            if matches!(*mode, Mode::Driving | Mode::Cycling) {
+                let (mut edges, mut private_edges) = (Vec::new(), Vec::new());
+                each_edge(files, false, |e| edges.push(e))?;
+                if *mode == Mode::Driving {
+                    each_edge(files, true, |e| private_edges.push(e))?;
+                }
+                lane_edges.add_edges(*mode, edges.iter(), private_edges.iter());
+            }
+        }
+        sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
+        if sum.lanes.is_some() {
+            log.step("lane profile");
+        }
     }
-    drop(lane_edges);
     if let Some(d) = &dem {
         // the ground id: the SHA-256 of the bytes of the DEM file
         let mut hash = Sha256::new();
@@ -912,11 +950,38 @@ pub fn run<W: Write + Send>(
     log.step("write the area tables");
     // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
     drop((mode_nodes, coords, junctions));
-    if let Some(r) = raw.as_ref().filter(|_| p.building_faces) {
+    if p.building_faces {
+        // the buildings with the fixes, read from the area file here (OSM JSON has its whole raw part in memory); the grid near
+        // them; the street segments near them, from the edges of the spill files
+        let read = match input {
+            Input::Area(open, _) => {
+                let mut b = read_raw_part(open, &fix_ids(fixes), false, true)?;
+                b.apply_fixes(fixes);
+                Some(b)
+            }
+            _ => None,
+        };
+        let r = read.as_ref().or(raw.as_ref()).ok_or("the building faces need a raw part")?;
+        let near = building_faces::NearBuildings::new(&r.ways, &r.nodes);
+        let mut streets: Vec<building_faces::Street> = Vec::new();
+        for (mode, files) in &mut mode_files {
+            if matches!(*mode, Mode::Driving | Mode::Walking) {
+                // only the edges with a segment near a building: an edge and its reverse edge have one line, so both stay
+                // or both go, and the segments are the same
+                let mut edges = Vec::new();
+                each_edge(files, false, |e| {
+                    if e.geometry.windows(2).any(|w| near.near(w[0], w[1])) {
+                        edges.push(e);
+                    }
+                })?;
+                street_segments(&edges, &near, &mut streets);
+            }
+        }
+        drop(near);
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
         let (mut faces, mut buildings, mut last) = (0, 0, None);
-        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, std::mem::take(&mut streets), &fixes.face_edits, |part| {
+        building_faces::building_faces_each(&r.ways, &r.nodes, &r.relations, streets, &fixes.face_edits, |part| {
             faces += part.len();
             for f in &part {
                 buildings += usize::from(last != Some(f.building_id));
@@ -928,6 +993,7 @@ pub fn run<W: Write + Send>(
         sum.building_faces = Some((faces, buildings));
         log.step("building faces");
     }
+    drop(mode_files);
     if let Some(r) = raw.as_mut().filter(|_| want_raw) {
         // the tags that the steps set on the network's ways (the sidewalk rule, the arrows of the fixes)
         match (input, area_read) {

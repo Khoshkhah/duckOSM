@@ -56,6 +56,16 @@ pub struct LaneEdges {
 
 impl LaneEdges {
     pub fn add(&mut self, mode: Mode, net: &Network) {
+        self.add_edges(mode, net.edges.iter(), net.private_edges.iter());
+    }
+
+    /// The same from the edges and the private edges of a mode, one at a time (they can come from the spill files).
+    pub fn add_edges<'e>(
+        &mut self,
+        mode: Mode,
+        edges: impl Iterator<Item = &'e crate::model::Edge>,
+        private_edges: impl Iterator<Item = &'e crate::model::Edge>,
+    ) {
         let keep = |e: &crate::model::Edge| LaneEdge {
             edge_id: e.edge_id,
             osm_id: e.osm_id,
@@ -68,15 +78,10 @@ impl LaneEdges {
         };
         match mode {
             Mode::Driving => {
-                let bus = net
-                    .private_edges
-                    .iter()
-                    .filter(|e| e.access.as_deref() == Some("bus"))
-                    .map(keep)
-                    .collect();
-                self.driving = Some((net.edges.iter().map(keep).collect(), bus));
+                let bus = private_edges.filter(|e| e.access.as_deref() == Some("bus")).map(keep).collect();
+                self.driving = Some((edges.map(keep).collect(), bus));
             }
-            Mode::Cycling => self.cycling = net.edges.iter().map(|e| e.edge_id).collect(),
+            Mode::Cycling => self.cycling = edges.map(|e| e.edge_id).collect(),
             Mode::Walking => {}
         }
     }

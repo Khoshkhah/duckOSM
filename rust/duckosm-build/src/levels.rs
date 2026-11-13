@@ -21,7 +21,7 @@ impl LevelEdges {
 
     /// Takes the edges: their geometry moves into the level edges, with no copy (a copy of all geometries made the
     /// peak of the build while the network was still in memory). The tags are shared (`Arc`) and are copied.
-    pub fn add(&mut self, mode: Mode, private: bool, edges: Vec<Edge>) {
+    pub fn add(&mut self, mode: Mode, private: bool, edges: impl IntoIterator<Item = Edge>) {
         let rank = match mode {
             Mode::Driving => 0,
             Mode::Walking => 1,
