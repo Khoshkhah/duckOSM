@@ -60,11 +60,11 @@ impl LaneEdges {
     }
 
     /// The same from the edges and the private edges of a mode, one at a time (they can come from the spill files).
-    pub fn add_edges<'e>(
+    pub fn add_edges<E: std::borrow::Borrow<crate::model::Edge>, P: std::borrow::Borrow<crate::model::Edge>>(
         &mut self,
         mode: Mode,
-        edges: impl Iterator<Item = &'e crate::model::Edge>,
-        private_edges: impl Iterator<Item = &'e crate::model::Edge>,
+        edges: impl Iterator<Item = E>,
+        private_edges: impl Iterator<Item = P>,
     ) {
         let keep = |e: &crate::model::Edge| LaneEdge {
             edge_id: e.edge_id,
@@ -78,10 +78,13 @@ impl LaneEdges {
         };
         match mode {
             Mode::Driving => {
-                let bus = private_edges.filter(|e| e.access.as_deref() == Some("bus")).map(keep).collect();
-                self.driving = Some((edges.map(keep).collect(), bus));
+                let bus = private_edges
+                    .filter(|e| e.borrow().access.as_deref() == Some("bus"))
+                    .map(|e| keep(e.borrow()))
+                    .collect();
+                self.driving = Some((edges.map(|e| keep(e.borrow())).collect(), bus));
             }
-            Mode::Cycling => self.cycling = edges.map(|e| e.edge_id).collect(),
+            Mode::Cycling => self.cycling = edges.map(|e| e.borrow().edge_id).collect(),
             Mode::Walking => {}
         }
     }

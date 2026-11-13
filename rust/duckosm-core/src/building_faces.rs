@@ -543,8 +543,20 @@ pub fn building_faces_each(
     relations: &[Relation],
     streets: Vec<Street>,
     edits: &[FaceEdit],
-    mut sink: impl FnMut(Vec<BuildingFace>) -> Result<(), String>,
+    sink: impl FnMut(Vec<BuildingFace>) -> Result<(), String>,
 ) -> Result<(), String> {
+    building_faces_of(building_rings(ways, nodes, relations), streets, edits, sink)
+}
+
+/// The rings of the buildings, with their coordinates, and the entrance nodes: the only part of the faces that reads the raw
+/// ways, nodes and relations. The caller can free them before [`building_faces_of`] (Kentucky: 0.87 GB of raw buildings).
+pub struct BuildingRings {
+    rings: Vec<Ring>,
+    entrances: FxHashMap<i64, ()>,
+}
+
+/// The rings of the buildings of `ways` and `relations` (sorted by id, as `Raw` has them), with the coordinates of `nodes`.
+pub fn building_rings(ways: &[RawWay], nodes: &[RawNode], relations: &[Relation]) -> BuildingRings {
     let coords = |refs: &[i64]| -> Option<Vec<Pt>> {
         refs.iter()
             .map(|id| {
@@ -623,6 +635,28 @@ pub fn building_faces_each(
             }
         }
     }
+    // the entrances: the nodes with an `entrance` tag that is a way in for people
+    let entrances: FxHashMap<i64, ()> = nodes
+        .iter()
+        .filter(|n| {
+            n.tags
+                .iter()
+                .any(|t| t.0 == "entrance" && !NOT_ENTRANCES.contains(&t.1.as_str()))
+        })
+        .map(|n| (n.id, ()))
+        .collect();
+
+    BuildingRings { rings, entrances }
+}
+
+/// [`building_faces_each`] from the rings of [`building_rings`].
+pub fn building_faces_of(
+    rings: BuildingRings,
+    streets: Vec<Street>,
+    edits: &[FaceEdit],
+    mut sink: impl FnMut(Vec<BuildingFace>) -> Result<(), String>,
+) -> Result<(), String> {
+    let BuildingRings { rings, entrances } = rings;
     if rings.is_empty() {
         return Ok(());
     }
@@ -688,17 +722,6 @@ pub fn building_faces_each(
                 (e.face_type, e.door.as_deref()),
             )
         })
-        .collect();
-
-    // the entrances: the nodes with an `entrance` tag that is a way in for people
-    let entrances: FxHashMap<i64, ()> = nodes
-        .iter()
-        .filter(|n| {
-            n.tags
-                .iter()
-                .any(|t| t.0 == "entrance" && !NOT_ENTRANCES.contains(&t.1.as_str()))
-        })
-        .map(|n| (n.id, ()))
         .collect();
 
     crate::util::step("building faces 4: the party walls, the rules, the entrances");
