@@ -361,7 +361,29 @@ fn inherit_lanes(edges: &[LaneEdge], tagged: &[bool]) -> HashMap<i64, i32> {
 /// id, after all modes (the arrows of the fixes are then in their tags). The ways that a fixes rule gives a lane
 /// count have the source `override`.
 pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option<Vec<LaneRow>> {
-    let (driving, bus) = input.driving.as_ref()?;
+    let mut all = Vec::new();
+    lane_profile_each(input, ways, fixes, |mut rows| {
+        all.append(&mut rows);
+        Ok(())
+    })
+    .expect("the sink gives no error")?;
+    Some(all)
+}
+
+/// The edges of one part of [`lane_profile_each`]: their rows go to the sink before the next part is made.
+const LANE_PART: usize = 1 << 16;
+
+/// [`lane_profile`], given to `sink` in parts in the order of the result (the driving edges, then the bus-only edges), so
+/// that all rows are never in memory at once. Gives the number of rows, or None when the driving mode was not built.
+pub fn lane_profile_each(
+    input: &LaneEdges,
+    ways: &[Way],
+    fixes: &OsmFixes,
+    mut sink: impl FnMut(Vec<LaneRow>) -> Result<(), String>,
+) -> Result<Option<usize>, String> {
+    let Some((driving, bus)) = input.driving.as_ref() else {
+        return Ok(None);
+    };
     let overrides: HashSet<i64> = fixes
         .ways
         .iter()
@@ -401,7 +423,7 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
             .collect()
     };
     // each edge alone, on all threads; the rows keep the order of the edges
-    let mut out: Vec<LaneRow> = map_all(driving, |e| {
+    let one = |e: &LaneEdge| {
         let w = way(e.osm_id);
         let tags = tags_of(e.osm_id);
         let t = WayTags(tags);
@@ -443,10 +465,14 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
             },
         );
         rows(e.edge_id, lanes)
-    })
-    .into_iter()
-    .flatten()
-    .collect();
+    };
+    let mut n = 0;
+    for part in driving.chunks(LANE_PART) {
+        let rows: Vec<LaneRow> = map_all(part, &one).into_iter().flatten().collect();
+        n += rows.len();
+        sink(rows)?;
+    }
+    let mut out = Vec::new();
     for e in bus {
         let tags = tags_of(e.osm_id);
         let t = WayTags(tags);
@@ -471,7 +497,9 @@ pub fn lane_profile(input: &LaneEdges, ways: &[Way], fixes: &OsmFixes) -> Option
         );
         out.extend(rows(e.edge_id, lanes));
     }
-    Some(out)
+    n += out.len();
+    sink(out)?;
+    Ok(Some(n))
 }
 
 /// `f` on each item, on all threads when the crate has rayon (the feature `pbf`), in the order of the items.
