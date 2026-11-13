@@ -362,6 +362,22 @@ pub fn write_bus<W: Write + Send>(
     Ok(routes.len())
 }
 
+/// The edges (or the private edges) of a mode from its spill files, one at a time, in the order of `edge_id`. A read error
+/// ends the edges and goes to `err`.
+fn edges_of<'a>(
+    files: &'a mut NetworkEdges,
+    private: bool,
+    err: &'a mut Option<String>,
+) -> Result<Box<dyn Iterator<Item = Edge> + 'a>, String> {
+    let msg = |e: std::io::Error| format!("temporary file of the network step: {e}");
+    let rows: Box<dyn Iterator<Item = std::io::Result<Edge>> + 'a> = if private {
+        Box::new(files.private_edges().map_err(msg)?)
+    } else {
+        Box::new(files.edges().map_err(msg)?)
+    };
+    Ok(Box::new(rows.map_while(move |r| r.map_err(|e| *err = Some(msg(e))).ok())))
+}
+
 /// Each edge (or each private edge) of a mode, from its spill files, in the order of `edge_id`.
 fn each_edge(files: &mut NetworkEdges, private: bool, mut f: impl FnMut(Edge)) -> Result<(), String> {
     let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
@@ -851,9 +867,9 @@ pub fn run<W: Write + Send>(
         level_edges.reserve(mode_files.iter().map(|(_, f)| f.counts().0 + f.counts().1).sum());
         for (mode, files) in &mut mode_files {
             for private in [false, true] {
-                let mut v = Vec::new();
-                each_edge(files, private, |e| v.push(e))?;
-                level_edges.add(*mode, private, v);
+                let mut err = None;
+                level_edges.add(*mode, private, edges_of(files, private, &mut err)?);
+                err.map_or(Ok(()), Err)?;
             }
         }
         sum.levels = write_levels(&level_edges, p.levels, built_at, &mut file)?;
@@ -865,12 +881,18 @@ pub fn run<W: Write + Send>(
         let mut lane_edges = LaneEdges::default();
         for (mode, files) in &mut mode_files {
             if matches!(*mode, Mode::Driving | Mode::Cycling) {
-                let (mut edges, mut private_edges) = (Vec::new(), Vec::new());
-                each_edge(files, false, |e| edges.push(e))?;
+                // the private edges only for driving (its bus lanes); the files are read one after the other
+                let mut private_edges = Vec::new();
                 if *mode == Mode::Driving {
-                    each_edge(files, true, |e| private_edges.push(e))?;
+                    each_edge(files, true, |e| {
+                        if e.access.as_deref() == Some("bus") {
+                            private_edges.push(e)
+                        }
+                    })?;
                 }
-                lane_edges.add_edges(*mode, edges.iter(), private_edges.iter());
+                let mut err = None;
+                lane_edges.add_edges(*mode, edges_of(files, false, &mut err)?, private_edges.into_iter());
+                err.map_or(Ok(()), Err)?;
             }
         }
         sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
