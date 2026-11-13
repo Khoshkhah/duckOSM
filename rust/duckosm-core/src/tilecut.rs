@@ -349,12 +349,16 @@ impl RawSink for All {
     }
 }
 
-/// The blobs of elements of one kind (sorted by id), BLOCK elements in each, as in a `.osm.pbf` file. The elements move
-/// into the blocks (no copy).
+/// The blobs of elements of one kind (sorted by id), BLOCK elements in each, as in a `.osm.pbf` file, each after a record
+/// (first id, last id, number of elements: 20 bytes). The elements move into the blocks (no copy).
 fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>) -> Result<(), String> {
     let mut it = elems.into_iter().peekable();
     while it.peek().is_some() {
         let chunk: Vec<Elem> = it.by_ref().take(BLOCK).collect();
+        // the record of the blob: its first and last id and its number of elements, so that a merge can copy it unread
+        out.extend_from_slice(&chunk[0].id().to_le_bytes());
+        out.extend_from_slice(&chunk[chunk.len() - 1].id().to_le_bytes());
+        out.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
         let block = match &chunk[0] {
             Elem::Node(_) => nodes_block(&chunk.into_iter().filter_map(|e| if let Elem::Node(n) = e { Some(n) } else { None }).collect::<Vec<_>>()),
             Elem::Way(_) => ways_block(&chunk.into_iter().filter_map(|e| if let Elem::Way(w) = e { Some(w) } else { None }).collect::<Vec<_>>()),
@@ -418,34 +422,56 @@ impl Parts {
     }
 }
 
+/// The blobs of a part file, with their records: (first id, last id, number of elements, the blob as in a `.osm.pbf`).
+struct Blobs(Option<io::BufReader<std::fs::File>>);
+
+type Blob = (i64, i64, u32, Vec<u8>);
+
+impl Blobs {
+    fn open(path: &Path) -> Blobs {
+        Blobs(std::fs::File::open(path).ok().map(|f| io::BufReader::with_capacity(1 << 20, f)))
+    }
+    fn next(&mut self) -> Result<Option<Blob>, String> {
+        let Some(r) = self.0.as_mut() else { return Ok(None) };
+        let mut head = [0u8; 20];
+        match r.read_exact(&mut head) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        }
+        let i = |at: usize| i64::from_le_bytes(head[at..at + 8].try_into().expect("8 bytes"));
+        let n = u32::from_le_bytes(head[16..20].try_into().expect("4 bytes"));
+        let blob = read_block(r)?.ok_or("a part file ends in a record")?;
+        Ok(Some((i(0), i(8), n, blob)))
+    }
+}
+
 /// The elements of a part file, one at a time, in the order of the file.
 struct PartReader {
-    r: Option<io::BufReader<std::fs::File>>,
+    blobs: Blobs,
     buf: std::collections::VecDeque<Elem>,
     b: Buffers,
 }
 
 impl PartReader {
     fn open(path: &Path) -> PartReader {
-        let r = std::fs::File::open(path).ok().map(|f| io::BufReader::with_capacity(1 << 20, f));
-        PartReader { r, buf: Default::default(), b: Buffers::default() }
+        PartReader { blobs: Blobs::open(path), buf: Default::default(), b: Buffers::default() }
     }
     fn peek(&mut self) -> Result<Option<&Elem>, String> {
         while self.buf.is_empty() {
-            let Some(r) = self.r.as_mut() else { return Ok(None) };
-            match read_block(r)? {
-                None => {
-                    self.r = None;
-                    return Ok(None);
-                }
-                Some(block) => {
+            match self.blobs.next()? {
+                None => return Ok(None),
+                Some((_, _, _, blob)) => {
                     let mut all = All::default();
-                    decode_block(&block, [true; 3], &mut self.b, &mut all)?;
+                    decode_block(&blob, [true; 3], &mut self.b, &mut all)?;
                     self.buf.extend(all.0);
                 }
             }
         }
         Ok(self.buf.front())
+    }
+    fn peek_id(&mut self) -> Result<Option<i64>, String> {
+        Ok(self.peek()?.map(Elem::id))
     }
     fn next(&mut self) -> Result<Option<Elem>, String> {
         self.peek()?;
@@ -453,50 +479,77 @@ impl PartReader {
     }
 }
 
-/// The file of a tile from its parts: the nodes of the two node parts, then the ways of the two way parts, each merged in
-/// the order of the ids with no doubles, then the relations. Gives the numbers of elements.
+/// An element to the file of a tile, but one with the id of the element before (a node of the tile that a part of the
+/// extra elements also has).
+fn put<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, last: &mut Option<i64>, e: Elem) -> Result<(), String> {
+    if *last == Some(e.id()) {
+        return Ok(());
+    }
+    *last = Some(e.id());
+    match e {
+        Elem::Node(x) => {
+            n.nodes += 1;
+            w.node(x)
+        }
+        Elem::Way(x) => {
+            n.ways += 1;
+            w.way(x)
+        }
+        Elem::Relation(x) => {
+            n.relations += 1;
+            w.relation(x)
+        }
+    }
+}
+
+/// One kind of the file of a tile: the blobs of the main part, merged in the order of the ids with the elements of the
+/// extra part. A blob that no extra element falls into is copied as bytes; only the others are decoded and made again.
+fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: &Path, extra: &Path, kind: u8) -> Result<(), String> {
+    let (mut a, mut x, mut b) = (Blobs::open(main), PartReader::open(extra), Buffers::default());
+    let mut last = None;
+    while let Some((first, end, count, blob)) = a.next()? {
+        while x.peek_id()?.is_some_and(|id| id < first) {
+            let e = x.next()?.expect("peeked");
+            put(w, n, &mut last, e)?;
+        }
+        if x.peek_id()?.is_none_or(|id| id > end) {
+            w.blocks(&blob)?;
+            match kind {
+                0 => n.nodes += count as usize,
+                1 => n.ways += count as usize,
+                _ => n.relations += count as usize,
+            }
+            last = Some(end);
+            continue;
+        }
+        let mut all = All::default();
+        decode_block(&blob, [true; 3], &mut b, &mut all)?;
+        for e in all.0 {
+            while x.peek_id()?.is_some_and(|id| id < e.id()) {
+                let e = x.next()?.expect("peeked");
+                put(w, n, &mut last, e)?;
+            }
+            put(w, n, &mut last, e)?;
+        }
+    }
+    while let Some(e) = x.next()? {
+        put(w, n, &mut last, e)?;
+    }
+    Ok(())
+}
+
+/// The file of a tile from its parts: the nodes, the ways, the relations, each kind merged in the order of the ids with no
+/// doubles. Gives the numbers of elements.
 fn finish_tile(parts: &Parts, tile: u32, out: &Path, timestamp: Option<i64>) -> Result<CutCounts, String> {
     let file = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, file), timestamp)?;
     let mut n = CutCounts::default();
-    for pair in [["nodes", "extra-nodes"], ["ways", "extra-ways"], ["relations", "relations"]] {
-        let (mut a, mut b) = (PartReader::open(&parts.path(tile, pair[0])), PartReader::open(&parts.path(tile, pair[1])));
-        if pair[0] == pair[1] {
-            b = PartReader { r: None, buf: Default::default(), b: Buffers::default() };
-        }
-        let mut last = None;
-        loop {
-            let ida = a.peek()?.map(Elem::id);
-            let idb = b.peek()?.map(Elem::id);
-            let e = match (ida, idb) {
-                (None, None) => break,
-                (Some(x), Some(y)) if y < x => b.next()?,
-                (Some(_), _) => a.next()?,
-                (None, Some(_)) => b.next()?,
-            }
-            .expect("peeked");
-            if last == Some(e.id()) {
-                continue;
-            }
-            last = Some(e.id());
-            match e {
-                Elem::Node(x) => {
-                    n.nodes += 1;
-                    w.node(x)?
-                }
-                Elem::Way(x) => {
-                    n.ways += 1;
-                    w.way(x)?
-                }
-                Elem::Relation(x) => {
-                    n.relations += 1;
-                    w.relation(x)?
-                }
-            }
-        }
-        for part in pair {
-            let _ = std::fs::remove_file(parts.path(tile, part));
-        }
+    let none = parts.path(tile, "none");
+    for (kind, main, extra) in [(0, "nodes", "extra-nodes"), (1, "ways", "extra-ways"), (2, "relations", "none")] {
+        let extra = if extra == "none" { none.clone() } else { parts.path(tile, extra) };
+        merge_kind(&mut w, &mut n, &parts.path(tile, main), &extra, kind)?;
+        let _ = std::fs::remove_file(parts.path(tile, main));
+        let _ = std::fs::remove_file(extra);
     }
     w.finish()?.flush().map_err(|e| e.to_string())?;
     Ok(n)
