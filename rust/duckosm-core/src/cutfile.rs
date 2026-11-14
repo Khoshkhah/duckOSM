@@ -50,7 +50,10 @@ fn packed(out: &mut Vec<u8>, field: u32, vals: impl IntoIterator<Item = u64>) {
     }
 }
 
-/// The string table of one block. Index 0 is the empty string, as the standard asks.
+/// The string table of one block. Index 0 is the empty string, as the standard asks, and it is not used for a string
+/// of the data: in the `keys_vals` of the dense nodes, 0 is the end of the tags of a node. An empty key or value (OSM
+/// has tags such as `air_conditioning=`) gets its own index, as osmium writes it. Before, it got 0, and the tags of
+/// the next nodes moved by one node for a reader (Île-de-France: about 2 300 nodes).
 struct Strings<'a> {
     list: Vec<&'a str>,
     index: FxHashMap<&'a str, u64>,
@@ -58,11 +61,9 @@ struct Strings<'a> {
 
 impl<'a> Strings<'a> {
     fn new() -> Self {
-        let mut index = FxHashMap::default();
-        index.insert("", 0);
         Strings {
             list: vec![""],
-            index,
+            index: FxHashMap::default(),
         }
     }
 
@@ -394,4 +395,59 @@ pub fn write_xml<W: Write>(raw: &Raw, w: &mut W) -> Result<(), String> {
     }
     writeln!(w, "</osm>").map_err(e)?;
     w.flush().map_err(e)
+}
+
+#[cfg(all(test, feature = "pbf"))]
+mod tests {
+    use super::*;
+    use crate::pbfraw::{decode_block, read_block, Buffers};
+    use crate::raw::RawSink;
+
+    #[derive(Default)]
+    struct Nodes(Vec<(i64, RawTags)>);
+
+    impl RawSink for Nodes {
+        fn node<'a>(&mut self, id: i64, _: f64, _: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            self.0.push((id, tags.map(|(k, v)| (k.to_string(), v.to_string())).collect()));
+        }
+        fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+        fn relation<'a>(
+            &mut self,
+            _: i64,
+            _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn empty_tag_value_reads_back() {
+        let t = |v: &[(&str, &str)]| v.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<RawTags>();
+        let node = |id, tags| RawNode { id, lon: 2.0, lat: 48.0, tags };
+        let raw = Raw {
+            nodes: vec![
+                node(1, t(&[])),
+                node(2, t(&[("air_conditioning", ""), ("name", "LEA")])),
+                node(3, t(&[("amenity", "fast_food")])),
+            ],
+            ..Raw::default()
+        };
+        let mut file = Vec::new();
+        write_pbf(&raw, None, &mut file).unwrap();
+        let mut got = Nodes::default();
+        let mut r = std::io::Cursor::new(file);
+        while let Some(b) = read_block(&mut r).unwrap() {
+            decode_block(&b, [true; 3], &mut Buffers::default(), &mut got).unwrap();
+        }
+        let want: Vec<(i64, RawTags)> = raw.nodes.iter().map(|n| (n.id, n.tags.clone())).collect();
+        assert_eq!(got.0, want);
+    }
+
+    #[test]
+    fn the_empty_string_of_the_data_is_not_index_0() {
+        // index 0 ends the tags of a dense node: DuckDB's ST_READOSM (and so QuackOSM) moved the tags of the next nodes
+        let mut s = Strings::new();
+        assert_ne!(s.id(""), 0);
+        assert_eq!(s.id("name"), 2);
+    }
 }
