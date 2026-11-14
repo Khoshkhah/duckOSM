@@ -233,7 +233,9 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let t0 = std::time::Instant::now();
     let dir = cli.out.join("tiles");
     if cli.only_cut {
-        duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, &dir)?;
+        // the multipolygons of each tile are complete only when a part of the build reads them
+        let multipolygons = p.raw || p.features || p.building_faces;
+        duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, multipolygons, &dir)?;
         return Ok(());
     }
     // the cut, as a process of this program: its memory goes back to the system when it ends
@@ -245,7 +247,8 @@ fn tiles(args: &[String]) -> Result<(), String> {
         .arg(&cli.boundary)
         .arg("-o")
         .arg(&cli.out)
-        .args(["--zoom", &cli.zoom.to_string(), "--only-cut"])
+        .args(["--zoom", &cli.zoom.to_string(), "--only-cut", "--"])
+        .args(&cli.build)
         .status()
         .is_ok_and(|s| s.success());
     if !ok {

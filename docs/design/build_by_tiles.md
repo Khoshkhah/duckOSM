@@ -12,7 +12,9 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -
 1. **Cut** (`tilecut::cut_to_tiles`, in its own process). One read of the region file gives one file for each standard map
    tile (`z_x_y.osm.pbf`) of the boundary. A tile file has the elements of the cut of the area to the tile: the nodes
    inside the area and in the tile, the ways with such a node (whole), and their relations. The list of tiles comes from
-   one function, `tiles::tiles`.
+   one function, `tiles::tiles`. The cut completes the multipolygons of a tile with all their members (osmium's smart
+   cut) only when the build reads them (`--raw`, the features, the building faces): the road network does not, and in
+   France they were 60 of the 80 million nodes that the tiles took from outside.
 2. **Junctions file** (`z_x_y.junctions`). For each node outside the tile, the cut writes whether it is a junction in the
    whole area, and whether the tile is its **home tile**:
    - A tile does not have all ways of a node outside the tile, so without the file it does not see the junctions there,
@@ -58,7 +60,7 @@ The rows of a table are in the order of the tiles (each tile in its own order), 
 | Area | Cut | Tile builds | Union | Total |
 |---|---|---|---|---|
 | Kentucky, 142 tiles (driving, `--raw`) | 3.4 s | 6.6 s | 1.6 s | 11.7 s |
-| France, 1,311 tiles (driving, 6 × 2) | 108.3 s | 76.1 s | 14.5 s | 198.9 s |
+| France, 1,311 tiles (driving, 6 × 2) | 83.1 s | 81.1 s | 19.7 s | 183.9 s |
 
 - Kentucky: the 19 tables are equal to the whole build, except `built_at`.
 - France: the peak of the run is the cut (1.6 GB, in its own process); the largest tile (Paris) uses 0.78 GB. The whole

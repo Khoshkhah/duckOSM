@@ -762,6 +762,20 @@ impl RawSink for Take<'_> {
     }
 }
 
+/// A use of a node by a way, 8 bytes: the node id with the 2 bits of its flags (`JunctionUses::of_way`) below it, so the
+/// rows sort by the node.
+struct Use;
+impl Codec<(i64, u8)> for Use {
+    fn put(&self, r: &(i64, u8), out: &mut Vec<u8>) {
+        out.extend_from_slice(&((r.0 << 2) | (r.1 & 3) as i64).to_le_bytes());
+    }
+    fn get(&self, b: &mut &[u8]) -> (i64, u8) {
+        let v = i64::from_le_bytes(b[..8].try_into().expect("8 bytes"));
+        *b = &b[8..];
+        (v >> 2, (v & 3) as u8)
+    }
+}
+
 /// Two numbers, 16 bytes: (id, tile).
 struct Pair;
 impl Codec<(i64, i64)> for Pair {
@@ -941,12 +955,15 @@ pub fn node_positions<R: Read + Send>(r: R, ids: &crate::util::FxHashSet<i64>) -
 
 /// Cut the region file that `open` reads (a new reader for each pass) to the tiles of `tiles` (one zoom) inside `boundary`:
 /// the file of a tile goes into `dir` as `z_x_y.osm.pbf`; a tile with no node inside has no file. Gives the numbers of
-/// elements of each tile.
+/// elements of each tile. `multipolygons`: complete the multipolygons of each tile with all their members (osmium's smart
+/// cut). Only `raw.*`, the features and the building faces read them; the road network does not, and without them the
+/// cut of France reads 60 of 80 million extra nodes less.
 pub fn cut_to_tiles<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
     tiles: &[Tile],
     dir: &Path,
+    multipolygons: bool,
 ) -> Result<Vec<CutCounts>, String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let (timestamp, sorted) = header(open()?)?;
@@ -1039,7 +1056,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
                 outside.push(&Pair, &(n, t as i64)).map_err(io)?;
             }
             for (n, f) in u {
-                uses.push(&Pair, &(n, f as i64)).map_err(io)?;
+                uses.push(&Use, &(n, f)).map_err(io)?;
             }
             homes.extend(h);
             rels_bytes.extend_from_slice(&rels);
@@ -1117,10 +1134,11 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
         Some(t) => out.push(t),
         None => out.extend(tiles_in(&multi, id)),
     };
+    let complete = multipolygons;
     let (mut direct, mut parents, mut multipolygons) = (Vec::new(), Vec::new(), Vec::new());
     let mut buf = Vec::new();
     each_rel(&mut |r| {
-        if r.tags.iter().any(|(k, v)| k == "type" && v == "multipolygon") {
+        if complete && r.tags.iter().any(|(k, v)| k == "type" && v == "multipolygon") {
             multipolygons.push(r.id);
         }
         // the tiles of this relation, with no doubles (a route has thousands of members in a few tiles)
@@ -1238,9 +1256,15 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     crate::util::step(&format!("tile cut 4a: the nodes from outside, sorted ({} rows)", outside.len));
     let mut r = open()?;
     take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &mut parts, "extra-nodes")?;
-    let uses = sort_bytes(uses.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
+    crate::util::step("tile cut 4b: the extra nodes");
+    let uses = uses.finish().map_err(io)?;
+    let n_uses = uses.len;
+    let uses = sort_bytes(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store).map_err(io)?;
+    crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
     home_nodes.sort_unstable();
-    outside_junctions(outside.read(&Pair).map_err(io)?, uses.read(&Pair).map_err(io)?, &home_nodes, &mut parts)?;
+    let uses = uses.read(&Use).map_err(io)?.map(|u| u.map(|(n, f)| (n, f as i64)));
+    outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &mut parts)?;
+    crate::util::step("tile cut 4d: the junctions files");
     take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &mut parts, "extra-ways")?;
     parts.flush()?;
     drop(more);

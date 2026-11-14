@@ -285,12 +285,13 @@ const TRANSFER_S: f64 = 60.0;
 
 /// Step 0 of a build by tiles: cut the region file to the tiles of zoom `zoom` of the boundary (GeoJSON text), with the
 /// junctions file of each tile, into `dir`. Returns the tiles that have a file.
-pub fn cut_tiles(region: &Path, boundary: &str, zoom: u8, dir: &Path) -> Result<Vec<Tile>, String> {
+/// `multipolygons`: complete the multipolygons of each tile (only raw.*, the features and the building faces need them).
+pub fn cut_tiles(region: &Path, boundary: &str, zoom: u8, multipolygons: bool, dir: &Path) -> Result<Vec<Tile>, String> {
     let b = Boundary::parse(boundary)?;
     let list = duckosm_core::tiles::tiles(&b, zoom);
     std::fs::create_dir_all(dir).map_err(io)?;
     let open = || File::open(region).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", region.display()));
-    let counts = duckosm_core::tilecut::cut_to_tiles(open, &b, &list, dir)?;
+    let counts = duckosm_core::tilecut::cut_to_tiles(open, &b, &list, dir, multipolygons)?;
     Ok(list.into_iter().zip(counts).filter(|(_, c)| c.nodes > 0).map(|(t, _)| t).collect())
 }
 
