@@ -377,25 +377,15 @@ pub fn union_tiles(tiles: &[(Tile, PathBuf)], boundary: &Boundary, mode: Mode, o
     lw.close()?;
     duckosm_core::util::step("union 4: the lanes");
 
-    // 5. the tables that the tiles share: the same rows for one key in each tile; one row for each key
-    let shared: [(&str, &[&str]); 9] = [
+    // 5. the tables of the mode that the tiles share: the same rows for one key in each tile; one row for each key
+    let shared: [(&str, &[&str]); 5] = [
         (&format!("ways_{m}"), &["osm_id"]),
         (&format!("way_nodes_{m}"), &["way_id", "seq"]),
         (&format!("virtual_nodes_{m}"), &["node_id"]),
         (&format!("edge_id_map_{m}"), &["new_edge_id", "seq", "old_edge_id"]),
         (&format!("turn_path_restrictions_{m}"), &["restriction_id", "from_edge", "to_edge"]),
-        ("global_junctions_main", &["node_id"]),
-        ("raw_nodes", &["osm_id"]),
-        ("raw_ways", &["osm_id"]),
-        ("raw_relations", &["osm_id"]),
     ];
-    for (name, key) in shared {
-        let inputs: Vec<PathBuf> = tiles.iter().map(|t| t.1.join(format!("{name}.parquet"))).filter(|p| p.exists()).collect();
-        if !inputs.is_empty() {
-            let f = File::create(out.join(format!("{name}.parquet"))).map(BufWriter::new).map_err(io)?;
-            st.shared_rows += duckosm_parquet::merge::union_sorted(&inputs, key, f)?;
-        }
-    }
+    st.shared_rows += union_shared(tiles, &shared, out)?;
     duckosm_core::util::step("union 5: the shared tables");
     Ok(st)
 }
@@ -413,4 +403,74 @@ fn same(a: &Edge, b: &Edge) -> bool {
         && a.cost_s.map(f32::to_bits) == b.cost_s.map(f32::to_bits)
         && a.dismount == b.dismount
         && a.ftype == b.ftype
+}
+
+/// The tables of the whole area after the union of the tiles (`boundary_main`, `visualization_metadata_main`,
+/// `transfers_mm`), from the boundary of the area (GeoJSON text) and the nodes of the union in `out`.
+pub fn write_whole_area_tables(out: &Path, boundary: &str, modes: &[Mode], opts: &Options) -> Result<(), String> {
+    let mut nodes = Vec::new();
+    for &m in modes {
+        nodes.push((m, duckosm_parquet::read::read_nodes(&out.join(format!("nodes_{}.parquet", m.name())))?));
+    }
+    let nodes_box = nodes.iter().flat_map(|(_, ns)| ns).fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |[w, s, e, n], p| {
+        [w.min(p.lon), s.min(p.lat), e.max(p.lon), n.max(p.lat)]
+    });
+    // global_junctions_main is a table of the tiles (the union merges it)
+    let opts = Options { global_junctions: false, ..opts.clone() };
+    let area = crate::Area {
+        boundary: Some(boundary),
+        ways: &[],
+        nodes_box,
+        nodes: &nodes,
+        junctions: &Default::default(),
+        opts: &opts,
+        built_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64),
+        timezone_entry: None,
+    };
+    crate::write_area_tables(&area, |name| File::create(out.join(name)).map(BufWriter::new).map_err(io))
+}
+
+/// The tables of `shared` (name, key) that the tiles share: the same rows for one key in each tile; one row for each key.
+/// Returns the number of rows.
+fn union_shared(tiles: &[(Tile, PathBuf)], shared: &[(&str, &[&str])], out: &Path) -> Result<usize, String> {
+    let mut n = 0;
+    for (name, key) in shared {
+        let inputs: Vec<PathBuf> = tiles.iter().map(|t| t.1.join(format!("{name}.parquet"))).filter(|p| p.exists()).collect();
+        if !inputs.is_empty() {
+            let f = File::create(out.join(format!("{name}.parquet"))).map(BufWriter::new).map_err(io)?;
+            n += duckosm_parquet::merge::union_sorted(&inputs, key, f)?;
+        }
+    }
+    Ok(n)
+}
+
+/// Step 0 of a build by tiles: cut the region file to the tiles of zoom `zoom` of the boundary (GeoJSON text), with the
+/// junctions file of each tile, into `dir`. Returns the tiles that have a file.
+pub fn cut_tiles(region: &Path, boundary: &str, zoom: u8, dir: &Path) -> Result<Vec<Tile>, String> {
+    let b = Boundary::parse(boundary)?;
+    let list = duckosm_core::tiles::tiles(&b, zoom);
+    std::fs::create_dir_all(dir).map_err(io)?;
+    let open = || File::open(region).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", region.display()));
+    let counts = duckosm_core::tilecut::cut_to_tiles(open, &b, &list, dir)?;
+    Ok(list.into_iter().zip(counts).filter(|(_, c)| c.nodes > 0).map(|(t, _)| t).collect())
+}
+
+/// The last step of a build by tiles: the union of the tile builds (each tile with its output folder) into `out`, for
+/// the modes and the options of `p`, and the tables of the whole area. `boundary`: the GeoJSON text of the area.
+pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, out: &Path) -> Result<Vec<UnionStats>, String> {
+    let b = Boundary::parse(boundary)?;
+    std::fs::create_dir_all(out).map_err(io)?;
+    let mut stats = Vec::new();
+    for &m in &p.modes {
+        stats.push(union_tiles(tiles, &b, m, &p.options, out)?);
+    }
+    let main: [(&str, &[&str]); 4] = [
+        ("global_junctions_main", &["node_id"]),
+        ("raw_nodes", &["osm_id"]),
+        ("raw_ways", &["osm_id"]),
+        ("raw_relations", &["osm_id"]),
+    ];
+    union_shared(tiles, &main, out)?;
+    write_whole_area_tables(out, boundary, &p.modes, &p.options)?;
+    Ok(stats)
 }

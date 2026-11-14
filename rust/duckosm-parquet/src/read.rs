@@ -204,3 +204,20 @@ pub fn read_turn_permission(path: &Path) -> Result<Vec<TurnPermission>, String> 
     }
     Ok(out)
 }
+
+/// Read a `nodes` file of the build.
+pub fn read_nodes(path: &Path) -> Result<Vec<duckosm_core::model::Node>, String> {
+    let mut out = Vec::new();
+    for b in batches(path)? {
+        let b = b?;
+        let id = b.column_by_name("node_id").unwrap().as_primitive::<Int64Type>();
+        let g = b.column_by_name("geometry").unwrap().as_binary::<i32>();
+        for i in 0..b.num_rows() {
+            // a WKB Point: the byte order, the type, x, y
+            let w = g.value(i);
+            let f = |k: usize| f64::from_le_bytes(w[k..k + 8].try_into().unwrap());
+            out.push(duckosm_core::model::Node { node_id: id.value(i), lon: f(5), lat: f(13) });
+        }
+    }
+    Ok(out)
+}
