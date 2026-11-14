@@ -78,8 +78,10 @@ bus step uses a heap of 586 MB (all edges at once were 6.5 GB).
 
 ## The levels
 
-The drawing levels (`visualization.edge_levels`) run after the union, from its edge tables, each table sorted by
-`edge_id` on disk first (the order of the whole build):
+The drawing levels (`visualization.edge_levels`) run after the union, from its edge tables. Each pass reads only the
+columns of the levels (`edge_id`, the line, `highway`, `tunnel`, `bridge`, `layer`, `junction`) from the Parquet files:
+no temporary copy of the edges. One sort puts the edges of each tile together, in the order of the whole build (the
+table, then `edge_id`):
 
 - `--levels solve`: by tiles in their order, each with the numbers of the earlier tiles fixed (`levels::tiled`, the code
   of the whole build, with the union tables as its source): memory that does not grow with the area (France: 2.25 GB).
@@ -89,6 +91,23 @@ The drawing levels (`visualization.edge_levels`) run after the union, from its e
 
 Kentucky: the level rows are equal to the whole build with both methods (2,449,396 rows); the meta row differs only in
 `created`. France: 27,789,657 level rows.
+
+The speed of the solve: a tile starts when the tiles that it waits for are done (not when the tiles before it are
+done), and the tiles run in the order of their depth in the waits. The rule reads the numbers of the earlier tiles in
+their own order, so the result does not change. France on WSL (20 cores):
+
+| Step of the levels | Before | Now |
+|---|---|---|
+| Read the edge tables and sort them by `edge_id` | 180 s | (not done) |
+| The boxes of the tiles | 13 s | 9 s |
+| The edges to their tiles | 59 s | 16 s |
+| The sort by tile | 39 s | 25 s |
+| The tiles | 102 s | 31 s |
+| The rows | 10 s | 6 s |
+| All the levels | 404 s | 86 s |
+
+The union with the levels: 151 s (before 491 s); peak memory 1.99 GB. Before, the levels kept each tag set of the ways
+(558 MB) and the list of all edge ids (220 MB); now the memory of the levels does not grow with the area.
 
 ## The scheduler
 

@@ -109,7 +109,8 @@ pub mod tiled {
 
     const TILE_DEG: f64 = 0.1;
     const MARGIN_DEG: f64 = 0.001;
-    const BUDGET: usize = 64 << 20;
+    /// the memory of a sort of the temporary files (France: about 30 runs, one merge)
+    const BUDGET: usize = 256 << 20;
     /// the tiles that can run at the same time: at most this many tiles and about this many edges in memory
     const WINDOW_TILES: usize = 64;
     const WINDOW_EDGES: usize = 1 << 18;
@@ -133,6 +134,35 @@ pub mod tiled {
 
     /// One level edge in a tile: (tile, owned, needed by a later tile, rank, edge id, tag set, line). The tile is first: the sort key.
     type TileEdge = (Tile, bool, bool, u8, i64, u32, Vec<(f64, f64)>);
+    /// [`roadstyle_levels::edge_hash`] of the ids in their order (they come sorted), without a list of the ids.
+    #[derive(Default)]
+    struct EdgeHash(sha2::Sha256, usize);
+    impl EdgeHash {
+        fn add(&mut self, id: i64) {
+            sha2::Digest::update(&mut self.0, id.to_le_bytes());
+            self.1 += 1;
+        }
+        fn len(&self) -> usize {
+            self.1
+        }
+        fn finish(self) -> String {
+            sha2::Digest::finalize(self.0).iter().map(|b| format!("{b:02x}")).collect::<String>()[..32].to_string()
+        }
+    }
+
+    #[test]
+    fn edge_hash_of_sorted_ids_equals_roadstyle() {
+        let ids = [-7i64, -1, 0, 3, 3, 42, i64::MAX];
+        let mut h = EdgeHash::default();
+        ids.iter().for_each(|&i| h.add(i));
+        assert_eq!(h.finish(), roadstyle_levels::edge_hash(&[42, 3, -1, i64::MAX, 0, -7, 3]));
+    }
+
+    /// The tile of a stored [`TileEdge`] (its first 8 bytes).
+    fn tile_at(b: &[u8]) -> Tile {
+        let u = |b: &[u8]| (u32::from_be_bytes(b.try_into().expect("4 bytes")) as i64 + i32::MIN as i64) as i32;
+        (u(&b[0..4]), u(&b[4..8]))
+    }
     struct TileEdgeCodec;
     impl Codec<TileEdge> for TileEdgeCodec {
         fn put(&self, r: &TileEdge, out: &mut Vec<u8>) {
@@ -147,8 +177,7 @@ pub mod tiled {
             }
         }
         fn get(&self, b: &mut &[u8]) -> TileEdge {
-            let u = |b: &[u8]| (u32::from_be_bytes(b.try_into().expect("4 bytes")) as i64 + i32::MIN as i64) as i32;
-            let tile = (u(&b[0..4]), u(&b[4..8]));
+            let tile = tile_at(b);
             let id = i64::from_le_bytes(b[11..19].try_into().expect("8 bytes"));
             let tags = u32::from_le_bytes(b[19..23].try_into().expect("4 bytes"));
             let pts = b[23..]
@@ -243,13 +272,15 @@ pub mod tiled {
         built_at: i64,
         file: impl FnMut(&str) -> Result<W, String>,
     ) -> Result<Option<String>, String> {
-        write_levels_tiled_from(&mut |f| each_level_edge(modes, |r, e| f(r, e)), Method::Solve, built_at, file)
+        write_levels_tiled_from(&mut |f| each_level_edge(modes, |r, e| f(r, e.edge_id, &e.attrs, e.geometry)), Method::Solve, built_at, file)
     }
 
     /// A source of the level edges: it gives each edge of all modes with its rank (driving 0, walking 1, cycling 2, their
-    /// private edges 3 to 5), in the order of the build (each table in the order of `edge_id`). The levels read it two
-    /// times.
-    pub type EdgeSource<'a> = &'a mut dyn FnMut(&mut dyn FnMut(u8, Edge) -> Result<(), String>) -> Result<(), String>;
+    /// private edges 3 to 5), each table after the other in the order of the build. The rows of a table can be in any order:
+    /// each tile takes its edges in the order of the tables, then of `edge_id`. The levels read it two times. An edge is its
+    /// rank, its `edge_id`, the tags of its way (the levels read `highway`, `tunnel`, `bridge`, `layer` and `junction`; edges
+    /// with the same tags can share one `Arc`) and its line.
+    pub type EdgeSource<'a> = &'a mut dyn FnMut(&mut dyn FnMut(u8, i64, &Arc<Attrs>, Vec<(f64, f64)>) -> Result<(), String>) -> Result<(), String>;
 
     /// [`write_levels_tiled`] from any source of the level edges (the union of a build by tiles reads its tables), with
     /// `method` `solve` or `tags`. The tags rule reads only the edges at the ends of each edge (`roadstyle_levels::tags_tile`):
@@ -266,16 +297,23 @@ pub mod tiled {
         let io = |e: std::io::Error| format!("a temporary file of the levels: {e}");
         let store = spill::temp_store();
         let store = &*store;
-        // 1. the box of the roads of each tile
+        // 1. the box of the roads of each tile, and the order of the tables (the position of each rank)
         let mut boxes: HashMap<Tile, [f64; 4]> = HashMap::new();
-        each(&mut |_, e| {
-            if e.geometry.len() >= 2 {
-                let b = bbox(&e.geometry);
-                let t = boxes.entry(owner(&e.geometry)).or_insert([f64::MAX, f64::MAX, f64::MIN, f64::MIN]);
+        let mut table_of = [u8::MAX; 6];
+        let mut tables = 0u8;
+        each(&mut |rank, _, _, geometry| {
+            if table_of[rank as usize] == u8::MAX {
+                table_of[rank as usize] = tables;
+                tables += 1;
+            }
+            if geometry.len() >= 2 {
+                let b = bbox(&geometry);
+                let t = boxes.entry(owner(&geometry)).or_insert([f64::MAX, f64::MAX, f64::MIN, f64::MIN]);
                 *t = [t[0].min(b[0]), t[1].min(b[1]), t[2].max(b[2]), t[3].max(b[3])];
             }
             Ok(())
         })?;
+        duckosm_core::util::step("levels: the boxes of the tiles");
         let order: HashMap<Tile, usize> = {
             let mut t: Vec<Tile> = boxes.keys().copied().collect();
             t.sort_unstable();
@@ -296,12 +334,12 @@ pub mod tiled {
         let mut waits: HashMap<Tile, FxHashSet<Tile>> = HashMap::new();
         let mut tags = TagTable::default();
         let mut rows = Writer::new(store).map_err(io)?;
-        each(&mut |rank, e| {
-            if e.geometry.len() < 2 {
+        each(&mut |rank, edge_id, attrs, geometry| {
+            if geometry.len() < 2 {
                 return Ok(());
             }
-            let own = owner(&e.geometry);
-            let b = bbox(&e.geometry);
+            let own = owner(&geometry);
+            let b = bbox(&geometry);
             let (lo, hi) = (tile_of((b[0], b[1])), tile_of((b[2], b[3])));
             let mut others: Vec<Tile> = Vec::new();
             for y in lo.0..=hi.0 {
@@ -324,15 +362,36 @@ pub mod tiled {
                     waits.entry(*t).or_default().insert(own);
                 }
             }
-            let id = tags.id(&e.attrs);
+            let id = tags.id(attrs);
             for t in &others {
-                rows.push(&TileEdgeCodec, &(*t, false, false, rank, e.edge_id, id, e.geometry.clone())).map_err(io)?;
+                rows.push(&TileEdgeCodec, &(*t, false, false, rank, edge_id, id, geometry.clone())).map_err(io)?;
             }
-            rows.push(&TileEdgeCodec, &(own, true, later, rank, e.edge_id, id, e.geometry)).map_err(io)?;
+            rows.push(&TileEdgeCodec, &(own, true, later, rank, edge_id, id, geometry)).map_err(io)?;
             Ok(())
         })?;
         drop((boxes, near));
-        let rows = spill::sort_bytes(rows.finish().map_err(io)?, |b| u64::from_be_bytes(b[..8].try_into().expect("8 bytes")), BUDGET, store).map_err(io)?;
+        duckosm_core::util::step("levels: the edges to their tiles");
+        // the tiles in the order of their depth in the waits (a tile after all the tiles it waits for), then in their order: the
+        // tiles of one depth do not wait for each other and run at the same time. The rule reads the numbers of the earlier tiles
+        // in `order`, so the result does not change
+        let depth: HashMap<Tile, usize> = {
+            let mut tiles: Vec<(Tile, usize)> = order.iter().map(|(&t, &i)| (t, i)).collect();
+            tiles.sort_unstable_by_key(|&(_, i)| i);
+            let mut depth: HashMap<Tile, usize> = HashMap::with_capacity(tiles.len());
+            for (t, _) in tiles {
+                let d = waits.get(&t).map_or(0, |w| w.iter().map(|u| depth[u] + 1).max().unwrap_or(0));
+                depth.insert(t, d);
+            }
+            depth
+        };
+        // in a tile: the edges in the order of the tables, then of edge_id (the order of the whole build)
+        let key = |b: &[u8]| {
+            let t = tile_at(b);
+            (depth[&t], order[&t], table_of[b[10] as usize], i64::from_le_bytes(b[11..19].try_into().expect("8 bytes")))
+        };
+        let rows = spill::sort_bytes(rows.finish().map_err(io)?, key, BUDGET, store).map_err(io)?;
+        drop(depth);
+        duckosm_core::util::step("levels: the sort by tile");
         // 3. the tiles: the numbers of an edge that a later tile needs are kept, with the order of its tile. A tile reads only the
         // numbers of earlier tiles, as when the tiles run one after the other; the tiles that wait for no tile still running run at
         // the same time (a window of the next tiles in their order: the first one never waits)
@@ -340,7 +399,7 @@ pub mod tiled {
         let mut raw = Writer::new(store).map_err(io)?;
         let (mut casing, mut values) = (HashMap::<i64, usize>::new(), BTreeSet::<i64>::new());
         let mut sums = roadstyle_levels::TileLevels::default();
-        let solve = |tile: Vec<TileEdge>, earlier: &FxHashMap<i64, (usize, [i64; 4])>| {
+        let solve = |tile: Vec<TileEdge>, earlier: FxHashMap<i64, [i64; 4]>| {
             let me = order[&tile[0].0];
             let (tile_y, tile_x) = tile[0].0;
             let mut edges = roadstyle_levels::LevelEdges::default();
@@ -362,41 +421,68 @@ pub mod tiled {
             }
             let roles = TileRoles {
                 owned: &|id| owned.contains(&id),
-                earlier: &|id| earlier.get(&id).filter(|(o, _)| *o < me).map(|(_, v)| *v),
+                earlier: &|id| earlier.get(&id).copied(),
             };
             let r = roadstyle_levels::levels_tile(&edges, &roles, &o).map_err(at)?;
             Ok::<_, String>((me, r, keep))
         };
         let mut done: FxHashSet<Tile> = FxHashSet::default();
         let mut window: std::collections::VecDeque<Vec<TileEdge>> = std::collections::VecDeque::new();
-        let (mut in_window, mut tile) = (0usize, Vec::<TileEdge>::new());
+        // the edges of the tiles in the window and of the running tiles
+        let (mut in_memory, mut tile) = (0usize, Vec::<TileEdge>::new());
         let mut rows = rows.read(&TileEdgeCodec).map_err(io)?.peekable();
-        loop {
-            // the next tiles to the window, up to WINDOW_TILES tiles and WINDOW_EDGES edges
-            while window.len() < WINDOW_TILES && (window.is_empty() || in_window < WINDOW_EDGES) {
-                while let Some(r) = rows.next_if(|r| r.as_ref().map_or(true, |r| tile.is_empty() || r.0 == tile[0].0)) {
-                    tile.push(r.map_err(io)?);
+        // a tile starts when all the tiles it waits for are done (not when the tiles before it are done): the workers take the
+        // tiles from `jobs` and give back the results
+        let (job_tx, jobs) = std::sync::mpsc::channel::<(Vec<TileEdge>, FxHashMap<i64, [i64; 4]>)>();
+        let (jobs, (res_tx, results)) = (std::sync::Mutex::new(jobs), std::sync::mpsc::channel());
+        let earlier_of = |tile: &[TileEdge], earlier: &FxHashMap<i64, (usize, [i64; 4])>| {
+            let me = order[&tile[0].0];
+            tile.iter().filter_map(|r| earlier.get(&r.4).filter(|(o, _)| *o < me).map(|(_, v)| (r.4, *v))).collect()
+        };
+        let failed = std::thread::scope(|s| -> Result<(), String> {
+            // the scope waits for the workers: they stop when `job_tx` closes, at the end of this function (also at an error)
+            let (job_tx, results) = (job_tx, results);
+            for _ in 0..rayon::current_num_threads() {
+                let (jobs, res_tx, solve) = (&jobs, res_tx.clone(), &solve);
+                s.spawn(move || loop {
+                    let job = jobs.lock().expect("the jobs of the levels").recv();
+                    let Ok((tile, earlier)) = job else { return };
+                    let (t, n) = (tile[0].0, tile.len());
+                    if res_tx.send((t, n, solve(tile, earlier))).is_err() {
+                        return;
+                    }
+                });
+            }
+            drop(res_tx);
+            let mut running = 0usize;
+            loop {
+                // the next tiles to the window, up to WINDOW_TILES tiles and WINDOW_EDGES edges in memory
+                while window.len() < WINDOW_TILES && (in_memory == 0 || in_memory < WINDOW_EDGES) {
+                    while let Some(r) = rows.next_if(|r| r.as_ref().map_or(true, |r| tile.is_empty() || r.0 == tile[0].0)) {
+                        tile.push(r.map_err(io)?);
+                    }
+                    if tile.is_empty() {
+                        break;
+                    }
+                    in_memory += tile.len();
+                    window.push_back(std::mem::take(&mut tile));
                 }
-                if tile.is_empty() {
+                // the tiles of the window that wait for no tile that is not done start. The tiles are in the order of their depth in
+                // the waits: when no tile runs, the first tile of the window is ready
+                let ready = |t: &Tile| waits.get(t).is_none_or(|w| w.iter().all(|u| done.contains(u)));
+                let (run, wait): (Vec<_>, Vec<_>) = window.drain(..).partition(|x| ready(&x[0].0));
+                window.extend(wait);
+                for t in run {
+                    let e = earlier_of(&t, &earlier);
+                    job_tx.send((t, e)).map_err(|_| "the workers of the levels stopped".to_string())?;
+                    running += 1;
+                }
+                if running == 0 {
                     break;
                 }
-                in_window += tile.len();
-                window.push_back(std::mem::take(&mut tile));
-            }
-            if window.is_empty() {
-                break;
-            }
-            // the tiles of the window that wait for no tile that is not done
-            let ready = |t: &Tile| waits.get(t).is_none_or(|w| w.iter().all(|u| done.contains(u)));
-            let (run, wait): (Vec<_>, Vec<_>) = window.drain(..).partition(|x| ready(&x[0].0));
-            window.extend(wait);
-            in_window -= run.iter().map(Vec::len).sum::<usize>();
-            let tiles: Vec<Tile> = run.iter().map(|x| x[0].0).collect();
-            let results: Vec<_> = {
-                use rayon::prelude::*;
-                run.into_par_iter().map(|t| solve(t, &earlier)).collect()
-            };
-            for (t, r) in tiles.into_iter().zip(results) {
+                let (t, n, r) = results.recv().map_err(|_| "the workers of the levels stopped".to_string())?;
+                running -= 1;
+                in_memory -= n;
                 let (me, r, keep) = r?;
                 for row in &r.rows {
                     let v = [row.casing_start, row.casing_level, row.casing_end, row.fill_level];
@@ -422,8 +508,11 @@ pub mod tiled {
                 }
                 done.insert(t);
             }
-        }
+            Ok(())
+        });
+        failed?;
         drop((earlier, tags, waits, done, order));
+        duckosm_core::util::step("levels: the tiles");
         // 4. one move to the ground for the whole area (not for the tags rule: its numbers are final); the rows in the order of
         // edge_id
         let ground = if tags_rule { None } else { Some(Ground::new(&casing, &values, o.max_level).map_err(|e| e.to_string())?) };
@@ -435,11 +524,11 @@ pub mod tiled {
         sums.stages[4] = roadstyle_levels::tiled_stage4(sums.stages[4], sums.roads, span, &o);
         let raw = spill::sort_bytes(raw.finish().map_err(io)?, |b| u64::from_be_bytes(b[..8].try_into().expect("8 bytes")), BUDGET, store).map_err(io)?;
         let mut w = pq::EdgeLevelsWriter::new(file("edge_levels_visualization.parquet")?)?;
-        let (mut ids, mut part) = (Vec::new(), Vec::new());
+        let (mut ids, mut part) = (EdgeHash::default(), Vec::new());
         for r in raw.read(&RawRowCodec).map_err(io)? {
             let (id, v, caps, head) = r.map_err(io)?;
             let cap = |bit: u8| (caps & 8 == 0).then_some(if caps & bit != 0 { "square" } else { "round" });
-            ids.push(id);
+            ids.add(id);
             part.push(Row {
                 edge_id: id,
                 casing_start: level(v[0]),
@@ -458,20 +547,22 @@ pub mod tiled {
         }
         w.write(&part)?;
         w.close()?;
+        let n_edges = ids.len();
         let meta = pq::LevelsMeta {
             source: method.name(),
-            n_edges: ids.len() as i64,
-            edge_hash: roadstyle_levels::edge_hash(&ids),
+            n_edges: n_edges as i64,
+            edge_hash: ids.finish(),
             roadstyle_version: ROADSTYLE_VERSION,
             created: crate::area::iso_time(built_at),
         };
         pq::write_edge_levels_meta_to(file("edge_levels_meta_visualization.parquet")?, &meta)?;
+        duckosm_core::util::step("levels: the rows");
         if tags_rule {
-            return Ok(Some(format!("levels (tags): {} edges, {} roads", ids.len(), sums.roads)));
+            return Ok(Some(format!("levels (tags): {} edges, {} roads", n_edges, sums.roads)));
         }
         Ok(Some(format!(
             "levels (solve): {} edges, {} roads, {} stack pairs given up, {} order wishes not kept (best values of the stages: {:?})",
-            ids.len(),
+            n_edges,
             sums.roads,
             sums.given_up,
             sums.orders_not_kept,
