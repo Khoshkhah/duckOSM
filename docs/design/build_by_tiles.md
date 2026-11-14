@@ -76,6 +76,19 @@ the whole build) runs once, after the union (`union::bus_routes`):
 Kentucky: equal to the whole build (149 routes, 46,892 route edges). France: 25,985 routes, 7,479,730 route edges; the
 bus step uses a heap of 586 MB (all edges at once were 6.5 GB).
 
+## The levels
+
+The drawing levels (`visualization.edge_levels`) run after the union, from its edge tables, each table sorted by
+`edge_id` on disk first (the order of the whole build):
+
+- `--levels solve`: by tiles in their order, each with the numbers of the earlier tiles fixed (`levels::tiled`, the code
+  of the whole build, with the union tables as its source): memory that does not grow with the area (France: 2.25 GB).
+- `--levels tags` (the default): the rule of the whole build, with all level edges in memory (France: 11.7 GB). The rule
+  is local (the level of a road depends on the edges at its end nodes), but roadstyle's tile function has only the solve.
+
+Kentucky: the level rows are equal to the whole build with both methods (2,449,396 rows); the meta row differs only in
+`created`. France: 27,789,657 level rows.
+
 ## The scheduler
 
 `--memory` (default 2 GB) is the memory of the tile builds at the same time. The tiles start largest file first, at most
@@ -124,5 +137,5 @@ The default is the cores / 2 tiles at a time, with 2 threads each.
 
 ## Not yet in a build by tiles
 
-- The drawing levels (in the order of the tiles): the tile builds run without them.
+- The tags rule of the levels by tiles (it needs a tile function for it in roadstyle).
 - The `.duckdb` output: the build by tiles writes GeoParquet files.
