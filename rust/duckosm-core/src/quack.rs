@@ -1094,18 +1094,31 @@ pub fn features_owned<R: Read + Send>(
         counts.relations += part.len();
         emit(part)
     })?;
-    // the browser: the relations are read on this thread (the files in OPFS), then made on all threads
+    // the browser: the relations are read on this thread (the files in OPFS), then made on all threads, a batch of at
+    // most REL_BATCH points at a time (all relations at once: Île-de-France stopped at 4 GiB)
     #[cfg(target_arch = "wasm32")]
-    {
-        let mut made = Vec::new();
-        with_rels(&mut |rels| {
-            let all: Vec<Option<Rel>> = rels.collect::<Result<_, _>>()?;
-            made = all.into_par_iter().flatten().filter_map(make).collect();
-            Ok(())
-        })?;
-        counts.relations += made.len();
-        emit(made)?;
-    }
+    with_rels(&mut |rels| {
+        const REL_BATCH: usize = 4 << 20;
+        let (mut batch, mut points, mut more): (Vec<Rel>, usize, bool) = (Vec::new(), 0, true);
+        while more {
+            match rels.next() {
+                Some(r) => {
+                    if let Some(rel) = r? {
+                        points += rel.2.iter().map(|m| m.1.len()).sum::<usize>();
+                        batch.push(rel);
+                    }
+                }
+                None => more = false,
+            }
+            if points >= REL_BATCH || (!more && !batch.is_empty()) {
+                let made: Vec<Feature> = std::mem::take(&mut batch).into_par_iter().filter_map(make).collect();
+                points = 0;
+                counts.relations += made.len();
+                emit(made)?;
+            }
+        }
+        Ok(())
+    })?;
     crate::util::step("quack 4b: the relations");
     Ok(counts)
 }
