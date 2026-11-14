@@ -336,57 +336,26 @@ pub fn sort_bytes_where<K: Ord + Send>(
 }
 
 /// The runs that a merge of [`sort_bytes`] reads at once.
-pub const MERGE_FAN: usize = 64;
+const MERGE_FAN: usize = 64;
 
 /// The merge of sorted runs: the smallest (key, run) first; a run is in the order of the input, so the result is stable.
-pub fn merge<K: Ord>(runs: Vec<Rows>, key: &impl Fn(&[u8]) -> K, store: &dyn Store) -> io::Result<Rows> {
-    let mut m = Merge::new(runs, key)?;
+fn merge<K: Ord>(runs: Vec<Rows>, key: &impl Fn(&[u8]) -> K, store: &dyn Store) -> io::Result<Rows> {
+    let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
+    let mut heap = BinaryHeap::new();
+    let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
+    for (i, it) in its.iter_mut().enumerate() {
+        if it.next_into(&mut heads[i])? {
+            heap.push(Reverse((key(&heads[i]), i)));
+        }
+    }
     let mut w = Writer::new(store)?;
-    let mut buf = Vec::new();
-    while m.next_into(&mut buf)? {
-        w.push_bytes(&buf)?;
+    while let Some(Reverse((_, i))) = heap.pop() {
+        w.push_bytes(&heads[i])?;
+        if its[i].next_into(&mut heads[i])? {
+            heap.push(Reverse((key(&heads[i]), i)));
+        }
     }
     w.finish()
-}
-
-/// The rows of sorted runs in the order of `key`, one at a time, with no file for the result (see [`merge`]). Each
-/// file is gone when it is read.
-pub struct Merge<K, F> {
-    its: Vec<RawIter>,
-    heads: Vec<Vec<u8>>,
-    heap: BinaryHeap<Reverse<(K, usize)>>,
-    key: F,
-    last: Option<usize>,
-}
-
-impl<K: Ord, F: Fn(&[u8]) -> K> Merge<K, F> {
-    pub fn new(runs: Vec<Rows>, key: F) -> io::Result<Self> {
-        let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
-        let mut heap = BinaryHeap::new();
-        let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
-        for (i, it) in its.iter_mut().enumerate() {
-            if it.next_into(&mut heads[i])? {
-                heap.push(Reverse((key(&heads[i]), i)));
-            }
-        }
-        Ok(Merge { its, heads, heap, key, last: None })
-    }
-
-    /// The bytes of the next row in `out`; false when there is no more row.
-    pub fn next_into(&mut self, out: &mut Vec<u8>) -> io::Result<bool> {
-        if let Some(i) = self.last.take() {
-            if self.its[i].next_into(&mut self.heads[i])? {
-                self.heap.push(Reverse(((self.key)(&self.heads[i]), i)));
-            }
-        }
-        let Some(Reverse((_, i))) = self.heap.pop() else {
-            return Ok(false);
-        };
-        out.clear();
-        out.extend_from_slice(&self.heads[i]);
-        self.last = Some(i);
-        Ok(true)
-    }
 }
 
 pub(crate) fn put_u32(o: &mut Vec<u8>, v: u32) {

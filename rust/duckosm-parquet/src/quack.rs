@@ -65,7 +65,7 @@ impl Rows {
     pub fn push(&mut self, rows: Vec<Feature>) -> Result<Vec<RecordBatch>, String> {
         use rayon::prelude::*;
         if let Some(s) = self.sort.as_mut() {
-            rows.into_iter().try_for_each(|f| s.push(f))?;
+            s.push(rows)?;
             return Ok(Vec::new());
         }
         rows.par_chunks(20_000).map(batch).collect()
