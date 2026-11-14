@@ -44,12 +44,11 @@ fn fixed(v: &str) -> &'static str {
     }
 }
 
-/// Read the edges of an `edges` (or `private_edges`) file of the build whose line passes `want`, one edge at a time. Edges
-/// with equal tags share one `Attrs` (`attrs`: the shared values).
+/// Read the edges of an `edges` (or `private_edges`) file of the build whose `osm_id` passes `want`, one edge at a time. Edges with equal tags share one `Attrs` (`attrs`: the shared values).
 pub fn read_edges(
     path: &Path,
     attrs: &mut FxHashSet<Arc<Attrs>>,
-    want: impl Fn(&[Pt]) -> bool,
+    want: impl Fn(i64) -> bool,
     mut f: impl FnMut(Edge) -> Result<(), String>,
 ) -> Result<(), String> {
     for b in batches(path)? {
@@ -69,10 +68,10 @@ pub fn read_edges(
         let geom = b.column_by_name("geometry").unwrap().as_binary::<i32>();
         let opt_f32 = |c: &Option<arrow_array::Float32Array>, i: usize| c.as_ref().and_then(|c| c.is_valid(i).then(|| c.value(i)));
         for i in 0..b.num_rows() {
-            let geometry = line(geom.value(i));
-            if !want(&geometry) {
+            if !want(osm_id.value(i)) {
                 continue;
             }
+            let geometry = line(geom.value(i));
             let a = Attrs {
                 highway: text(&b, "highway", i).unwrap_or_default(),
                 name: text(&b, "name", i),

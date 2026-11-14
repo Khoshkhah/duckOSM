@@ -278,7 +278,9 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
     // the options of the tiles, as the build reads them (the union needs the modes and the options)
     // the global steps do not run in a tile: the bus routes, the drawing levels and the largest part need the whole area
-    let global = ["--no-bus-routes", "--no-component-filter"];
+    // the bus routes run after the union too, but the tiles give their route relations: only the user's --no-bus-routes
+    // goes to the tile builds
+    let global = ["--no-component-filter"];
     let mut opts: Vec<String> = cli.build.iter().filter(|a| !global.contains(&a.as_str())).cloned().collect();
     if let Some(i) = opts.iter().position(|a| a == "--levels") {
         opts.drain(i..(i + 2).min(opts.len()));
@@ -286,7 +288,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
     // the options of the user, as given (the union reads the filter of the largest part from them)
     let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
     all.push(cli.boundary.to_string_lossy().into_owned());
-    all.extend(cli.build.iter().filter(|a| *a != "--no-bus-routes").cloned());
+    all.extend(cli.build.iter().cloned());
     if let Some(i) = all.iter().position(|a| a == "--levels") {
         all.drain(i..(i + 2).min(all.len()));
     }

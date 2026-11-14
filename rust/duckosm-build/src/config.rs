@@ -795,7 +795,9 @@ mod tests {
     fn write(text: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("duckosm-config-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join(format!("c{}.yaml", text.len()));
+        // a file of its own for each call: two tests with texts of one length ran at the same time on one file
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let p = dir.join(format!("c{}.yaml", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::write(&p, text).unwrap();
         p
     }

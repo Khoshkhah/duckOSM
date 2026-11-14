@@ -29,6 +29,7 @@ mod heap {
             unsafe { System.dealloc(p, l) };
             if ON.load(Relaxed) {
                 // a block made before the count started can go: the count stays at 0 or more
+                #[allow(deprecated)] // fetch_update: the name of the stable toolchain of the Mac
                 let _ = LIVE.fetch_update(Relaxed, Relaxed, |v| Some(v.saturating_sub(l.size())));
             }
         }

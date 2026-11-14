@@ -59,6 +59,23 @@ network, so it runs after the tile builds and before the union, with memory that
 Kentucky: equal to the whole build with the filter (2,224,823 of 2,261,507 edges stay). France: 25,546,974 of
 25,919,914 edges stay.
 
+## The bus routes
+
+A bus route crosses tiles: a tile has only some of its ways. So the walk of the routes (`bus::routes`, the function of
+the whole build) runs once, after the union (`union::bus_routes`):
+
+1. Each tile build writes `bus.osm.pbf`: its route relations (`route=bus`, `trolleybus`, `share_taxi`) with their way
+   members only, and those member ways with their nodes and only the tags of their direction (`oneway`, `junction`).
+2. The union reads these files with one copy of each relation and way, and puts the routes into batches of about 20,000
+   member ways, in the order of their ids (the order of the whole build).
+3. One read of the union edges and bus lanes puts each edge of a member way, without its line, into one temporary file,
+   with a row for each batch that needs it; the file is sorted by batch.
+4. Each batch walks its routes on its own edges only, and writes its rows to a part file; the part files are joined as
+   blocks.
+
+Kentucky: equal to the whole build (149 routes, 46,892 route edges). France: 25,985 routes, 7,479,730 route edges; the
+bus step uses a heap of 586 MB (all edges at once were 6.5 GB).
+
 ## The scheduler
 
 `--memory` (default 2 GB) is the memory of the tile builds at the same time. The tiles start largest file first, at most
@@ -107,6 +124,5 @@ The default is the cores / 2 tiles at a time, with 2 threads each.
 
 ## Not yet in a build by tiles
 
-- The steps that need the whole area: the bus routes and the drawing levels (in the order of the tiles). The tile builds
-  run without them.
+- The drawing levels (in the order of the tiles): the tile builds run without them.
 - The `.duckdb` output: the build by tiles writes GeoParquet files.
