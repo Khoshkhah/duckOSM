@@ -19,6 +19,8 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
   the same time, and the threads of DuckDB. The default is all the cores.
 - `--no-sort` keeps the rows in the order in which they are made (QuackOSM `sort_result=False`). By default the rows are
   sorted as QuackOSM sorts them (see "The sort").
+- `--tiles N` makes the table tile by tile, with at most `N` nodes in a tile (for example `4000000`), so the memory follows
+  the size of a tile, not of the file (see "By tiles"). It writes GeoParquet only.
 
 The input must be sorted by type and id (nodes, then ways, then relations), as the files of Geofabrik are. To make the table of
 an area, cut the region file first with `duckosm-rust cut`.
@@ -110,6 +112,51 @@ the design above, each measured on France (unsorted GeoParquet):
 - A run that is stopped (a signal) left its temporary files: 45 GB after some stopped runs. Now, on macOS and Linux, a
   temporary file has no name while it is open (`spill::DirStore`), so the system frees it also when the process stops.
 
+## By tiles
+
+The browser has at most 4 GiB of WebAssembly memory, and this memory never shrinks. In one run, Kentucky (141 MB) needs
+1.9 GiB, and Île-de-France (338 MB) stops with no memory left in pass 3. Parts of one run grow with the area: the node
+buckets cover a fixed range of ids, the sorts have a budget of 512 MB (128 MB in the browser), and the browser collects
+the relations in memory. `features_by_tiles` (`duckosm-rust quack --tiles N`, `duckosm_build::quack_tiles_to`) makes the
+same rows tile by tile:
+
+1. **The tiles.** A pass over the nodes counts the nodes of each map tile of zoom 14. A tile with more than `N` nodes is
+   cut into its four tiles of the next zoom (a quadtree, down to zoom 14). So a city has small tiles and the country
+   around it large ones: France at 4 million nodes has 324 tiles of zoom 3 to 11, Kentucky 16 tiles of zoom 6 to 9.
+2. **The cut.** The tile cut of the build by tiles (`tilecut::cut_to_store`) writes the file of each tile, with the ways
+   whole (with their nodes from other tiles). Each multipolygon and boundary relation goes whole (all its member ways and
+   their nodes) into one tile only: the first tile with a member. In the cut of the build, a multipolygon goes whole
+   into each tile with a member; the boundary of France has about a million nodes and touches hundreds of tiles, and that
+   cut stopped at 32 GB of temporary files. The parts and the tile files are chunks of one temporary file of the store
+   (`tilecut::Chunks`), because the browser has no folders, only OPFS.
+3. **The rows of each tile.** `features_owned` runs on the file of each tile and keeps only the rows that the tile owns
+   (`quack::Owner`), so each row comes one time:
+   - a node: the tile of its place;
+   - a way: the tile of the place of its first node. The cut gives a way to the tile of each of its nodes, and the cut and
+     quack decode the same coordinates, so that tile has the way;
+   - a relation: the first tile that makes it. A set of the relation ids that the tiles made stays in memory (France:
+     286 000 ids).
+
+   A row that a tile makes is the row of the whole file: the ways are whole, and a relation is a row only when the tile
+   has all its member ways.
+4. **The sort**, as in one run (see "The sort"); its strip has a bounded memory too.
+
+Tile by tile gives the same rows as one run: on Monaco (a test, tiles of at most 2 000 nodes), Kentucky (2 393 139 rows)
+and France (99 412 535 rows), `quack_diff --large` finds the same ids, the same tags and the same normalized geometry for
+each row. The runs of the table below were on the same day, one after the other.
+
+| Area (unsorted GeoParquet, Mac mini) | Mode | Time | Peak RSS | Peak disk use |
+|---|---|---|---|---|
+| Kentucky (141 MB) | one run | 3.0 s | 1.0 GB | 0.3 GB |
+| Kentucky | 16 tiles | 7.7 s | 0.7 GB | 0.4 GB |
+| France (5.1 GB) | one run | 105.9 s | 4.6 GB | 23.1 GB |
+| France | 324 tiles | 223.5 s | 2.0 GB | 19.9 GB |
+
+Natively, one run is faster: the tile mode reads the file four times (the count, two passes of the cut, and the blocks
+of the extra elements), it writes and reads each element again, and the ways at the edge of a tile are made in each
+tile. The memory of the cut (its index of the nodes: 205 MB of runs for France) and of the tiles stays small. Use the
+tile mode where the memory has a limit: the browser.
+
 ## The sort
 
 QuackOSM sorts the rows by default with Sort-Tile-Recursive packing (`rq_geo_toolkit`, `_str_index_select_sql`), and
@@ -131,7 +178,9 @@ The sort needs all rows before it writes the first row. `duckosm_core::quack::St
    one temporary file.
 2. At the end, a merge of the runs gives the rows in the order of x. The merge keeps one block of each run in memory.
 3. The rows go into the bytes of the current strip. When the strip is full, it is sorted by y, and its rows are decoded
-   on all threads, one row group at a time.
+   on all threads, one row group at a time. A strip larger than the budget goes to the end of the temporary file in
+   sorted pieces of the budget, and a merge of the pieces by y gives its rows: so the memory of the sort does not grow
+   with the area (the strip is `sqrt(rows * 100 000)` rows: 3.2 million on France).
 
 The order is the order of `str_order` (a test compares them). On France, the 9.2 GB file needs 3.2 million rows (one
 strip) in memory, and the disk holds the rows one time. The tries before this design, on France:

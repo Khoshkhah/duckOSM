@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm-rust quack --tiles N`: the features table of QuackOSM tile by tile** (`docs/rust/quack.md`, "By tiles"). The file is cut into a
+  quadtree of tiles with at most `N` nodes, and each tile gives the rows that it owns, so the memory follows the size of a tile: the mode of the
+  browser for a large file. The same rows as one run (Monaco test; Kentucky and France with `quack_diff --large`). France: 223.5 s and 2.0 GB of
+  RSS (one run: 105.9 s, 4.6 GB). The tile cut can now keep its files in the temporary store (`tilecut::cut_to_store`, OPFS in the browser) and
+  takes tiles of mixed zooms. The on-disk sort of quack keeps a large strip on disk in sorted pieces.
 - **The Rust build computes the global junctions one time** (`duckosm-core`, `build_network_junctions`). Before, it computed them for each mode and again for
   `main.global_junctions`. The output is the same. The gain is small (the junctions take 0.06 s for Estonia, 0.19 s for Kentucky, on a Mac mini); the change
   lets a later step give the network step the junctions from DuckDB (`docs/design/streaming_load.md`, stage 4).
