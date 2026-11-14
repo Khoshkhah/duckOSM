@@ -446,7 +446,8 @@ driving mode, the files are also equal, byte for byte, to the native output with
 (2 of 1,391,194 edges) is not equal, because of `cos` (see below). Before the rebase, all rows for
 Kentucky were equal to the native output. Kentucky is the largest area that is tested and fits.
 
-**`cos` in WebAssembly.** The sidewalk rule computes a local metre frame with `cos(lat0)`. On Linux,
+**`cos` in WebAssembly.** The sidewalk rule computes a local metre frame with the `cos` of a latitude (since 2026-11-14 the
+mean latitude of each road; before, the mean of all lines of the area). On Linux,
 Rust and Python duckOSM use the `cos` of glibc. In WebAssembly, Rust uses the `cos` of the `libm`
 crate. For about 2 % of the latitudes from 57 to 60 degrees, the two results are different in the last
 bit. In Estonia, this changes the decision of the rule for one road: the native program and duckOSM

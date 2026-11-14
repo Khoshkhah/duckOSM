@@ -87,6 +87,13 @@ struct Cli {
     /// The build of one tile of a large build (duckosm-rust tiles): only the part of the boundary in this map tile.
     #[arg(long, value_name = "Z/X/Y", requires = "boundary")]
     tile: Option<String>,
+    /// The build of one tile of a large build: the roads that get sidewalk=separate in the whole area (the sidewalk step of
+    /// duckosm-rust tiles); the build does not run the sidewalk rule.
+    #[arg(long, value_name = "FILE", hide = true, requires = "tile")]
+    sidewalks: Option<PathBuf>,
+    /// Only the sidewalk step of the tile (duckosm-rust tiles): its roads that get sidewalk=separate, to sidewalks.bin.
+    #[arg(long, hide = true, requires = "tile")]
+    sidewalks_step: bool,
     /// With --boundary: also write duckOSM's raw.* of the area (raw_nodes.parquet, raw_ways.parquet,
     /// raw_relations.parquet, as osmium's smart cut), the input of the base-map layers (docs/features.md).
     #[arg(long, requires = "boundary")]
@@ -346,11 +353,14 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let threads = cli.tile_threads.max(1);
     let jobs = cli.jobs.unwrap_or(cores / threads).max(1);
     let limit = parse_size(&cli.memory)?;
-    let build = |t: &duckosm_build::Tile| -> Result<std::process::Child, String> {
+    // the sidewalk step (docs/design/build_by_tiles.md, "The sidewalks"): a road crosses tiles, so each tile decides its own
+    // roads with the lines of the tiles near them, and every tile build reads the roads of all tiles
+    let sidewalks = (p.infer_sidewalks && p.modes.contains(&duckosm_build::NetworkMode::Walking)).then(|| dir.join("sidewalks.all"));
+    let child = |t: &duckosm_build::Tile, step: bool| -> Result<std::process::Child, String> {
         let name = format!("{}_{}_{}", t.z, t.x, t.y);
-        let log = std::fs::File::create(dir.join(format!("{name}.log"))).map_err(|e| e.to_string())?;
-        std::process::Command::new(&exe)
-            .arg(dir.join(format!("{name}.osm.pbf")))
+        let log = std::fs::File::create(dir.join(format!("{name}{}.log", if step { ".sidewalks" } else { "" }))).map_err(|e| e.to_string())?;
+        let mut c = std::process::Command::new(&exe);
+        c.arg(dir.join(format!("{name}.osm.pbf")))
             .args(["--boundary".as_ref(), cli.boundary.as_os_str()])
             .args(["--tile", &t.name(), "--format", "geoparquet", "--levels", "none"])
             .args(global)
@@ -358,13 +368,42 @@ fn tiles(args: &[String]) -> Result<(), String> {
             .arg(dir.join(format!("{name}.junctions")))
             .arg("-o")
             .arg(dir.join(&name))
-            .args(&opts)
-            .env("RAYON_NUM_THREADS", threads.to_string())
+            .args(&opts);
+        match (&sidewalks, step) {
+            (_, true) => c.arg("--sidewalks-step"),
+            (Some(f), false) => c.arg("--sidewalks").arg(f),
+            (None, false) => &mut c,
+        };
+        c.env("RAYON_NUM_THREADS", threads.to_string())
             .stdout(log.try_clone().map_err(|e| e.to_string())?)
             .stderr(log)
             .spawn()
             .map_err(|e| e.to_string())
     };
+    if let Some(all) = &sidewalks {
+        let ts = std::time::Instant::now();
+        let failed = std::sync::Mutex::new(Vec::new());
+        schedule(&list, &dir, limit, jobs, &|t| child(t, true), |t, ok| {
+            if !ok {
+                failed.lock().unwrap().push(t.name());
+            }
+        })?;
+        let failed = failed.into_inner().unwrap();
+        if !failed.is_empty() {
+            return Err(format!("the sidewalk step of {} tiles failed (see {}/<tile>.sidewalks.log): {}", failed.len(), dir.display(), failed.join(", ")));
+        }
+        // the roads of all tiles, sorted (each road is in the file of the tile that owns it)
+        let mut ids: Vec<i64> = Vec::new();
+        for t in &list {
+            let f = dir.join(format!("{}_{}_{}", t.z, t.x, t.y)).join("sidewalks.bin");
+            ids.extend(duckosm_build::read_ids(&f)?);
+            let _ = std::fs::remove_file(f);
+        }
+        ids.sort_unstable();
+        duckosm_build::write_ids(all, &ids)?;
+        eprintln!("tiles: the sidewalk step: {} roads get sidewalk=separate, in {:.1} s", ids.len(), ts.elapsed().as_secs_f64());
+    }
+    let build = |t: &duckosm_build::Tile| child(t, false);
     let failed = std::sync::Mutex::new(Vec::new());
     let (peak, ratio) = schedule(&list, &dir, limit, jobs, &build, |t, ok| {
         let name = format!("{}_{}_{}", t.z, t.x, t.y);
@@ -776,6 +815,8 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
             return Err(format!("--tile {t}: not z/x/y"));
         };
         p.tile = Some(duckosm_build::Tile { z: z as u8, x, y });
+        p.sidewalks = cli.sidewalks.clone();
+        p.sidewalks_step = cli.sidewalks_step;
     }
     Ok((pbf, out, p))
 }

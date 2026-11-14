@@ -199,93 +199,33 @@ fn level(w: &Way) -> i32 {
     }
 }
 
-/// Find the roads that get `sidewalk=separate`, set the tag on them, and return how many.
-pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
-    // 1. The lines: car roads and sidewalk lines (nodes without coordinates leave the line).
-    let mut raw: Vec<(usize, Vec<P>, u8)> = Vec::new(); // (index in ways, points, kind)
-    for (wi, w) in ways.iter().enumerate() {
-        let t = &w.tags;
-        let hw = t.highway().unwrap_or("");
-        let is_sidewalk = hw == "footway" && t.footway() == Some("sidewalk");
-        if !(CAR_ROADS.contains(&hw) || is_sidewalk) {
-            continue;
-        }
-        let kind = if is_sidewalk {
-            2
-        } else if WALKED.contains(&hw)
-            && !matches!(
-                t.foot(),
-                Some("yes") | Some("designated") | Some("permissive")
-            )
-            && t.sidewalk().is_none()
-            && t.sidewalk_both().is_none()
-            && t.sidewalk_left().is_none()
-            && t.sidewalk_right().is_none()
-        {
-            1
-        } else {
-            0
-        };
-        let pts: Vec<P> = w
-            .refs
-            .iter()
-            .filter_map(|n| coords.get(n).copied())
-            .collect();
-        if pts.len() >= 2 {
-            raw.push((wi, pts, kind));
-        }
+/// The degrees of a line to metres in the flat frame of a road at the cosine `c` of its latitude.
+const M_PER_DEG: f64 = 111320.0;
+
+/// A line in a flat frame: its points scaled by `kx` and `ky`, with its distances and its groups.
+fn line_in(pts: &[P], kind: u8, ow: i32, lvl: i32, kx: f64, ky: f64) -> Line {
+    let pts: Vec<P> = pts.iter().map(|p| (p.0 * kx, p.1 * ky)).collect();
+    let mut cum = vec![0.0];
+    for w in pts.windows(2) {
+        let l = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+        cum.push(cum.last().unwrap() + l);
     }
-    if !raw.iter().any(|r| r.2 == 2) || !raw.iter().any(|r| r.2 == 1) {
-        return 0;
-    }
-    // the local frame: metres, from the mean latitude of the lines (the mean of the means)
-    let lat0 = raw
-        .iter()
-        .map(|r| r.1.iter().map(|p| p.1).sum::<f64>() / r.1.len() as f64)
-        .sum::<f64>()
-        / raw.len() as f64;
-    let kx = 111320.0 * lat0.to_radians().cos();
-    let ky = 111320.0;
-    let lines: Vec<Line> = raw
-        .iter()
-        .map(|(wi, pts, kind)| {
-            let pts: Vec<P> = pts.iter().map(|p| (p.0 * kx, p.1 * ky)).collect();
-            let mut cum = vec![0.0];
-            for w in pts.windows(2) {
-                let l = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
-                cum.push(cum.last().unwrap() + l);
+    let groups = (0..pts.len() - 1)
+        .step_by(GROUP)
+        .map(|first| {
+            let end = (first + GROUP).min(pts.len() - 1);
+            let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+            for q in &pts[first..=end] {
+                (x0, y0, x1, y1) = (x0.min(q.0), y0.min(q.1), x1.max(q.0), y1.max(q.1));
             }
-            let t = &ways[*wi].tags;
-            let ow = if matches!(t.oneway(), Some("yes") | Some("true") | Some("1"))
-                || t.junction() == Some("roundabout")
-            {
-                1
-            } else if t.oneway() == Some("-1") {
-                -1
-            } else {
-                0
-            };
-            let groups = (0..pts.len() - 1)
-                .step_by(GROUP)
-                .map(|first| {
-                    let end = (first + GROUP).min(pts.len() - 1);
-                    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-                    for q in &pts[first..=end] {
-                        (x0, y0, x1, y1) = (x0.min(q.0), y0.min(q.1), x1.max(q.0), y1.max(q.1));
-                    }
-                    ((x0, y0, x1, y1), first, end)
-                })
-                .collect();
-            Line {
-                groups,
-                pts,
-                cum,
-                kind: *kind,
-                ow,
-                lvl: level(&ways[*wi]),
-            }
+            ((x0, y0, x1, y1), first, end)
         })
         .collect();
+    Line { groups, pts, cum, kind, ow, lvl }
+}
+
+/// The trees of the groups of the sidewalk lines and of the car roads.
+fn trees(lines: &[Line]) -> (RTree<Group>, RTree<Group>) {
     let tree = |side: bool| {
         RTree::bulk_load(
             (0..lines.len())
@@ -300,14 +240,114 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
                 .collect(),
         )
     };
-    let (side_tree, car_tree) = (tree(true), tree(false));
-    let around = |p: P, r: f64| AABB::from_corners((p.0 - r, p.1 - r), (p.0 + r, p.1 + r));
+    (tree(true), tree(false))
+}
+
+/// The kind of a way in the rule: 2 a sidewalk line, 1 a road without a sidewalk tag (the rule decides it), 0 another car
+/// road; None when the rule does not read it.
+pub fn kind(w: &Way) -> Option<u8> {
+    let t = &w.tags;
+    let hw = t.highway().unwrap_or("");
+    let is_sidewalk = hw == "footway" && t.footway() == Some("sidewalk");
+    if !(CAR_ROADS.contains(&hw) || is_sidewalk) {
+        return None;
+    }
+    Some(if is_sidewalk {
+        2
+    } else if WALKED.contains(&hw)
+        && !matches!(t.foot(), Some("yes") | Some("designated") | Some("permissive"))
+        && t.sidewalk().is_none()
+        && t.sidewalk_both().is_none()
+        && t.sidewalk_left().is_none()
+        && t.sidewalk_right().is_none()
+    {
+        1
+    } else {
+        0
+    })
+}
+
+/// Set `sidewalk=separate` on the ways `found` (the result of [`separate_sidewalks`]).
+pub fn mark(ways: &mut [Way], found: &[usize]) {
+    for &i in found {
+        // duckOSM: map_concat(tags, MAP {'sidewalk': 'separate', 'duckosm:sidewalk': 'inferred'})
+        ways[i].set_tag("sidewalk", "separate");
+        ways[i].set_tag("duckosm:sidewalk", "inferred");
+    }
+}
+
+/// Find the roads that get `sidewalk=separate`, set the tag on them, and return how many.
+pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
+    let found = separate_sidewalks(ways, coords, |_| true);
+    mark(ways, &found);
+    found.len()
+}
+
+/// The roads of `ways` that get `sidewalk=separate` (their places in `ways`), of the roads for which `decide` is true.
+///
+/// Each road has its own flat frame, from the mean latitude of its points: the result of a road depends only on the road
+/// and on the lines within `SIDE_M` of it (a build by tiles gives the same result as the whole build).
+pub fn separate_sidewalks(ways: &[Way], coords: &Coords, decide: impl Fn(&Way) -> bool) -> Vec<usize> {
+    // 1. The lines: car roads and sidewalk lines (nodes without coordinates leave the line), in degrees.
+    // (index in ways, points, kind, one-way, level)
+    let mut raw: Vec<(usize, Vec<P>, u8, i32, i32)> = Vec::new();
+    for (wi, w) in ways.iter().enumerate() {
+        let Some(kind) = kind(w) else { continue };
+        let t = &w.tags;
+        let pts: Vec<P> = w
+            .refs
+            .iter()
+            .filter_map(|n| coords.get(n).copied())
+            .collect();
+        if pts.len() >= 2 {
+            let ow = if matches!(t.oneway(), Some("yes") | Some("true") | Some("1"))
+                || t.junction() == Some("roundabout")
+            {
+                1
+            } else if t.oneway() == Some("-1") {
+                -1
+            } else {
+                0
+            };
+            raw.push((wi, pts, kind, ow, level(w)));
+        }
+    }
+    if !raw.iter().any(|r| r.2 == 1) {
+        return Vec::new();
+    }
+    // the lines in degrees times M_PER_DEG on both axes: only to find the lines near a road (a box of SIDE_M / cos(lat)
+    // along x holds all the points within SIDE_M in the frame of the road)
+    let flat: Vec<Line> = raw.iter().map(|(_, pts, kind, ow, lvl)| line_in(pts, *kind, *ow, *lvl, M_PER_DEG, M_PER_DEG)).collect();
+    let (side_all, car_all) = trees(&flat);
     let cos_a = ANGLE_DEG.to_radians().cos();
 
     // 2. The spots: every STEP_M along each road without a sidewalk tag (at least its middle).
-    let roads: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].kind == 1).collect();
-    // A road reads only the lines and the trees, so the roads run on all threads; the result keeps their order.
+    let roads: Vec<usize> = (0..raw.len()).filter(|&i| raw[i].2 == 1 && decide(&ways[raw[i].0])).collect();
+    // A road reads only the lines near it, so the roads run on all threads; the result keeps their order.
     let covered = |k: usize, near_groups: &mut Vec<(usize, usize)>, crossing: &mut Vec<(usize, usize)>| -> bool {
+        // the frame of the road, and the lines within reach in it (the road first)
+        let c = (raw[k].1.iter().map(|p| p.1).sum::<f64>() / raw[k].1.len() as f64).to_radians().cos();
+        let (rx, ry) = (SIDE_M / c.max(1e-9) + 1.0, SIDE_M + 1.0);
+        let b = flat[k].groups.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |a, &((x0, y0, x1, y1), ..)| {
+            (a.0.min(x0), a.1.min(y0), a.2.max(x1), a.3.max(y1))
+        });
+        let reach = AABB::from_corners((b.0 - rx, b.1 - ry), (b.2 + rx, b.3 + ry));
+        let mut near: Vec<usize> = side_all
+            .locate_in_envelope_intersecting(&reach)
+            .chain(car_all.locate_in_envelope_intersecting(&reach))
+            .map(|g| g.line)
+            .filter(|&i| i != k)
+            .collect();
+        near.sort_unstable();
+        near.dedup();
+        near.insert(0, k);
+        let lines: Vec<Line> = near.iter().map(|&i| {
+            let (_, pts, kind, ow, lvl) = &raw[i];
+            line_in(pts, *kind, *ow, *lvl, M_PER_DEG * c, M_PER_DEG)
+        }).collect();
+        let (side_tree, car_tree) = trees(&lines);
+        let k = 0;
+        let around = |p: P, r: f64| AABB::from_corners((p.0 - r, p.1 - r), (p.0 + r, p.1 + r));
         let road = &lines[k];
         let n = road.len();
         let ats: Vec<f64> = if n > STEP_M {
@@ -417,14 +457,38 @@ pub fn infer_separate_sidewalks(ways: &mut [Way], coords: &Coords) -> usize {
         let (mut g, mut c) = (Vec::new(), Vec::new());
         roads.iter().map(|&k| covered(k, &mut g, &mut c)).collect()
     };
-    let found: Vec<usize> = roads.iter().zip(flags).filter(|(_, f)| *f).map(|(&k, _)| k).collect();
+    roads.iter().zip(flags).filter(|(_, f)| *f).map(|(&k, _)| raw[k].0).collect()
+}
 
-    // 3. Tag the roads. (lines[k] is made from raw[k])
-    let n = found.len();
-    for k in found {
-        // duckOSM: map_concat(tags, MAP {'sidewalk': 'separate', 'duckosm:sidewalk': 'inferred'})
-        ways[raw[k].0].set_tag("sidewalk", "separate");
-        ways[raw[k].0].set_tag("duckosm:sidewalk", "inferred");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{OtherTags, Tags};
+
+    fn way(id: i64, refs: &[i64], tags: &[(&str, &str)]) -> Way {
+        Way { id, refs: refs.to_vec(), tags: Tags::from_pairs(tags.iter().copied()), other: OtherTags::of(tags.iter().copied()) }
     }
-    n
+
+    /// A street with a sidewalk line 6 m on each side gets `sidewalk=separate`, and a line far away at another latitude
+    /// does not change the answer (each road has its own frame: a tile with other lines gives the same result).
+    #[test]
+    fn a_road_reads_only_the_lines_near_it() {
+        let (lat, dy) = (45.0, 6.0 / 111_320.0);
+        let mut nodes = Vec::new();
+        for (i, y) in [(1, 0.0), (2, dy), (3, -dy)] {
+            nodes.push((10 * i, (7.0, lat + y)));
+            nodes.push((10 * i + 1, (7.001, lat + y)));
+        }
+        nodes.extend([(100, (8.0, 60.0)), (101, (8.001, 60.0))]);
+        let mut ways = vec![
+            way(1, &[10, 11], &[("highway", "residential")]),
+            way(2, &[20, 21], &[("highway", "footway"), ("footway", "sidewalk")]),
+            way(3, &[30, 31], &[("highway", "footway"), ("footway", "sidewalk")]),
+        ];
+        let coords = Coords::new(nodes);
+        assert_eq!(separate_sidewalks(&ways, &coords, |_| true), vec![0]);
+        ways.push(way(4, &[100, 101], &[("highway", "residential")]));
+        assert_eq!(separate_sidewalks(&ways, &coords, |_| true), vec![0]);
+        assert_eq!(separate_sidewalks(&ways, &coords, |w| w.id != 1), Vec::<usize>::new());
+    }
 }

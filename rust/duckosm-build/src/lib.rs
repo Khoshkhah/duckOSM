@@ -60,6 +60,11 @@ pub struct Params {
     pub outside_junctions: Option<PathBuf>,
     /// The build of one tile of a large build: only the part of the boundary in this tile (`Boundary::within_tile`).
     pub tile: Option<duckosm_core::tiles::Tile>,
+    /// A build by tiles: the roads that get `sidewalk=separate` in the whole area (the file of [`tile_sidewalks`] of all
+    /// tiles). The build sets the tag on them and does not run the sidewalk rule.
+    pub sidewalks: Option<PathBuf>,
+    /// A build by tiles: only the sidewalk step of the tile ([`tile_sidewalks`]), into `sidewalks.bin` in the output folder.
+    pub sidewalks_step: bool,
     /// Also write duckOSM's `raw.*` of the area (`raw_nodes.parquet`, ...), the input of the base-map layers
     /// (docs/features.md). Needs a boundary.
     pub raw: bool,
@@ -124,6 +129,8 @@ impl Default for Params {
             boundary: None,
             outside_junctions: None,
             tile: None,
+            sidewalks: None,
+            sidewalks_step: false,
             raw: false,
             cut_pbf: false,
             cut_osm: false,
@@ -1247,7 +1254,17 @@ pub fn run<W: Write + Send>(
     fixes.add_new_nodes(&mut ways, &mut coords);
     let mut sum = Summary::default();
     if p.infer_sidewalks && p.modes.contains(&Mode::Walking) {
-        sum.sidewalk_roads = Some(sidewalks::infer_separate_sidewalks(&mut ways, &coords));
+        sum.sidewalk_roads = Some(match &p.sidewalks {
+            // a tile of a build by tiles: the roads of the sidewalk step (a road crosses tiles; the step reads the lines
+            // near all of it)
+            Some(path) => {
+                let ids = read_ids(path)?;
+                let found: Vec<usize> = (0..ways.len()).filter(|&i| ids.binary_search(&ways[i].id).is_ok()).collect();
+                sidewalks::mark(&mut ways, &found);
+                found.len()
+            }
+            None => sidewalks::infer_separate_sidewalks(&mut ways, &coords),
+        });
         log.step("sidewalk rule");
     }
     if let Some(x) = p.dem_product.as_deref().filter(|x| !matches!(*x, "DTM" | "DSM")) {
@@ -1643,6 +1660,97 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
 }
 
 /// Build from the PBF file `pbf_path` (cut to `p.boundary` when there is one) and write the files into `out`.
+/// Sorted ids, as 8-byte little-endian numbers (the file of [`tile_sidewalks`]).
+pub fn write_ids(path: &Path, ids: &[i64]) -> Result<(), String> {
+    std::fs::write(path, ids.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<u8>>()).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The ids of a file of [`write_ids`].
+pub fn read_ids(path: &Path) -> Result<Vec<i64>, String> {
+    let b = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(b.chunks_exact(8).map(|c| i64::from_le_bytes(c.try_into().expect("8 bytes"))).collect())
+}
+
+/// The sidewalk step of a build by tiles (docs/design/build_by_tiles.md, "The sidewalks"): the ids of the roads of the tile
+/// `tile` (the ways that the tile owns, `union::Owner::way`) that get `sidewalk=separate`, sorted. The rule reads the lines
+/// within reach of each road (`sidewalks::separate_sidewalks`), and a road can cross tiles: the step reads the car roads and
+/// the sidewalk lines of the file of the tile and of the files of the other tiles that the boxes of its roads touch, in `dir`
+/// (the files of the cut, `z_x_y.osm.pbf`). As the whole build, it keeps the ways with a node in the area, after the fixes.
+pub fn tile_sidewalks(dir: &Path, tile: duckosm_core::tiles::Tile, area: &Boundary, fixes: &OsmFixes) -> Result<Vec<i64>, String> {
+    use duckosm_core::tiles::Tile;
+    use duckosm_core::util::FxHashSet;
+    let path = |t: Tile| dir.join(format!("{}_{}_{}.osm.pbf", t.z, t.x, t.y));
+    // the lines of the rule in the file of a tile (with `keep`: only those whose box meets a box of `keep`)
+    let read = |t: Tile, keep: &dyn Fn([f64; 4]) -> bool, ways: &mut Vec<Way>, coords: &mut Coords, seen: &mut FxHashSet<i64>| -> Result<(), String> {
+        let open = || std::fs::File::open(path(t)).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path(t).display()));
+        let mut w = pbf::read_ways_from(open()?)?;
+        fixes.apply_to_ways(&mut w)?;
+        w.retain(|w| sidewalks::kind(w).is_some() && !seen.contains(&w.id));
+        let mut needed: FxHashSet<i64> = w.iter().flat_map(|w| w.refs.iter().copied()).collect();
+        needed.retain(|n| coords.get(n).is_none());
+        let more = pbf::read_node_coords_from(open()?, needed)?;
+        coords.extend(more.iter().copied());
+        for x in w {
+            let pts = || x.refs.iter().filter_map(|n| coords.get(n).copied());
+            let b = pts().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
+            if pts().any(|p| area.in_area(p.0, p.1)) && keep(b) {
+                seen.insert(x.id);
+                ways.push(x);
+            }
+        }
+        Ok(())
+    };
+    let (mut ways, mut coords, mut seen) = (Vec::new(), Coords::default(), FxHashSet::default());
+    read(tile, &|_| true, &mut ways, &mut coords, &mut seen)?;
+    fixes.add_new_nodes(&mut ways, &mut coords);
+    // the roads that the tile owns (the file of the tile has all their nodes)
+    let owner = union::Owner { b: area, tile };
+    let owned: FxHashSet<i64> = ways
+        .iter()
+        .filter(|w| {
+            sidewalks::kind(w) == Some(1)
+                && owner.way(w.refs.iter().filter_map(|n| coords.get(n).copied())) == duckosm_parquet::merge::MINE
+        })
+        .map(|w| w.id)
+        .collect();
+    // the boxes of the roads of the tile, 30 m more (the rule reads 12 m around a road)
+    let reach: Vec<[f64; 4]> = ways
+        .iter()
+        .filter(|w| owned.contains(&w.id))
+        .map(|w| {
+            let pts = w.refs.iter().filter_map(|n| coords.get(n).copied());
+            let b = pts.fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
+            let (dy, dx) = (30.0 / 111_320.0, 30.0 / (111_320.0 * b[3].abs().max(b[1].abs()).to_radians().cos().max(0.01)));
+            [b[0] - dx, b[1] - dy, b[2] + dx, b[3] + dy]
+        })
+        .collect();
+    let meets = |a: [f64; 4], b: [f64; 4]| a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+    // the other tiles under the boxes, with a file
+    let mut others: Vec<Tile> = Vec::new();
+    for r in &reach {
+        let (lo, hi) = (Tile::of(tile.z, r[0], r[3]), Tile::of(tile.z, r[2], r[1]));
+        for x in lo.x..=hi.x {
+            for y in lo.y..=hi.y {
+                let t = Tile { z: tile.z, x, y };
+                if t != tile && !others.contains(&t) && path(t).exists() {
+                    others.push(t);
+                }
+            }
+        }
+    }
+    others.sort_by_key(|t| (t.y, t.x));
+    for t in others {
+        // ponytail: each line against all boxes; a tree of the boxes if a tile has very many roads near its border
+        read(t, &|b| reach.iter().any(|r| meets(*r, b)), &mut ways, &mut coords, &mut seen)?;
+    }
+    // the rule reads the lines in the order of the ids, as the whole build has them
+    ways.sort_by_key(|w| w.id);
+    let found = sidewalks::separate_sidewalks(&ways, &coords, |w| owned.contains(&w.id));
+    let mut ids: Vec<i64> = found.iter().map(|&i| ways[i].id).collect();
+    ids.sort_unstable();
+    Ok(ids)
+}
+
 pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String> {
     if p.duckdb && !cfg!(feature = "duckdb") {
         return Err("this build has no DuckDB output (cargo feature 'duckdb' is off)".into());
@@ -1656,6 +1764,16 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         Some(f) => config::read_osm_fixes(f)?,
         None => OsmFixes::default(),
     };
+    if p.sidewalks_step {
+        let (Some(tile), Some(b)) = (p.tile, &p.boundary) else {
+            return Err("the sidewalk step needs --tile and --boundary".into());
+        };
+        let area = Boundary::parse(&std::fs::read_to_string(b).map_err(|e| format!("{}: {e}", b.display()))?)?;
+        let dir = pbf_path.parent().unwrap_or(Path::new("."));
+        let ids = tile_sidewalks(dir, tile, &area, &fixes)?;
+        write_ids(&out.join("sidewalks.bin"), &ids)?;
+        return Ok(Summary { sidewalk_roads: Some(ids.len()), ..Default::default() });
+    }
     let read = |path: &PathBuf| {
         std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
     };
