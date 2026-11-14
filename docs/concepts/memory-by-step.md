@@ -122,6 +122,10 @@ alone (`examples/raw_area.rs`, no build) on France:
 |---|---|---|---|---|
 | Two external sorts (`join::Merge`) | 488 s | 597 s | 0.7 GB | 37 GB |
 | Buckets (`join::BucketJoin`) | 133 s | 381 s | 1.4 GB | 13 GB |
+| Buckets, and the files written on a thread of their own | 106 s | 378 s | 1.4 GB | 13 GB |
+
+The files are written on a thread of their own (at most two parts wait), while the passes read, join and make the lines. The
+browser can start no thread, so there the writes stay on the caller's thread.
 
 The rows are the same (Kentucky: all three tables equal; `raw_ways` equal byte for byte).
 

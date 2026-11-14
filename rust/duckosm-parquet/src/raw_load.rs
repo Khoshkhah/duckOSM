@@ -546,6 +546,41 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     files: [W; 3],
     group_bytes: usize,
 ) -> Result<[usize; 3], String> {
+    let w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(NodeParts::default())))?;
+    // native: the files are written on a thread of their own, while the passes read, join and make the lines (at most two parts
+    // wait); the browser can start no thread, so there the caller's thread writes them
+    #[cfg(not(target_arch = "wasm32"))]
+    return std::thread::scope(|sc| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<RawPart>(2);
+        let writer = sc.spawn(move || -> Result<(), String> {
+            let mut w = w;
+            for part in rx {
+                w.write(part)?;
+            }
+            w.finish().map(|_| ())
+        });
+        let rows = raw_passes(open, patch, &mut |part| tx.send(part).map_err(|_| "the writer of raw.* stopped".to_string()));
+        drop(tx);
+        let written = writer.join().map_err(|_| "the writer of raw.* failed".to_string())?;
+        // an error of the writer comes first: it stops the passes too
+        written.and(rows)
+    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut w = w;
+        let rows = raw_passes(open, patch, &mut |part| w.write(part))?;
+        w.finish()?;
+        Ok(rows)
+    }
+}
+
+/// The three passes of [`write_area_raw`]: each part of the tables goes to `put`. Gives the rows of each table.
+#[cfg(feature = "pbf")]
+fn raw_passes<R: std::io::Read>(
+    open: impl Fn() -> Result<R, String>,
+    patch: &duckosm_core::raw::RawPatch,
+    put: &mut dyn FnMut(RawPart) -> Result<(), String>,
+) -> Result<[usize; 3], String> {
     use duckosm_core::cutstream::each_block;
     use duckosm_core::geom::Pt;
     use duckosm_core::pbfraw::decode_block;
@@ -626,7 +661,6 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     let io = |e: std::io::Error| format!("a temporary file of raw.*: {e}");
     let store = spill::temp_store();
     let store = &*store;
-    let mut w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(NodeParts::default())))?;
     let mut rows = [0usize; 3];
     // pass 1: the nodes of each way that is written, with the number of the way (the order of the ways) and the place in it
     let requests = |push: &mut dyn FnMut(i64, u32, u32) -> std::io::Result<()>| -> Result<(), String> {
@@ -731,7 +765,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     each_node(true, &mut |part, c, new| {
         let part = part.expect("the table");
         rows[0] += part.batches[0].num_rows();
-        w.write(part)?;
+        put(part)?;
         for &(id, (lon, lat)) in c.iter().filter(|_| !new) {
             merge.node(id, lon, lat).map_err(io)?;
         }
@@ -803,7 +837,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
         |(part, ways), _| {
             rows[1] += ways;
             rows[2] += part.batches[2].num_rows();
-            w.write(lines(part)?)?;
+            put(lines(part)?)?;
             Ok(true)
         },
     )?;
@@ -816,8 +850,7 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
         c.way(nw.id, &mut pairs(&tags).into_iter(), &mut nw.refs.iter().copied());
         rows[1] += 1;
     }
-    w.write(lines(c.finish()?)?)?;
-    w.finish()?;
+    put(lines(c.finish()?)?)?;
     duckosm_core::util::step("raw 3: the ways and the relations");
     Ok(rows)
 }
