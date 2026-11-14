@@ -1262,7 +1262,10 @@ pub struct StrSort {
 
 impl Default for StrSort {
     fn default() -> Self {
-        StrSort::new(BUDGET, ROW_GROUP).expect("quack sort: a temporary file")
+        // the browser: a quarter of the budget, because the memory of WebAssembly never shrinks (Kentucky sorted: 3.3 GiB
+        // with 512 MB, the limit is 4 GiB)
+        let budget = if cfg!(target_arch = "wasm32") { BUDGET / 4 } else { BUDGET };
+        StrSort::new(budget, ROW_GROUP).expect("quack sort: a temporary file")
     }
 }
 
