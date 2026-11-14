@@ -267,8 +267,10 @@ pub fn write_tables_owned<W: Write + Send>(
     let n = mode.name();
     let oc = pq::EdgeCols::of(mode, opts);
     let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
-    // the class of each edge at its source node (its own rows, its lanes) and at its target node (its turns)
+    // the class of each edge at its source node (its own rows, its lanes) and at its target node (its turns); the connected
+    // parts of the tile, for the filter of the largest part after the union
     let (mut classes, mut targets) = (duckosm_core::util::FxHashMap::default(), duckosm_core::util::FxHashMap::default());
+    let mut parts = union::TileParts::default();
     for private in [false, true] {
         let name = if private { format!("private_edges_{n}") } else { format!("edges_{n}") };
         let class = |e: &Edge| owner.map_or(MINE, |o| o.node(e.source, e.geometry[0]));
@@ -293,10 +295,18 @@ pub fn write_tables_owned<W: Write + Send>(
                 let e = e.map_err(err)?;
                 classes.insert(e.edge_id, class(&e));
                 if let Some(o) = owner {
-                    targets.insert(e.edge_id, o.node(e.target, *e.geometry.last().expect("a line")));
+                    let at_end = o.node(e.target, *e.geometry.last().expect("a line"));
+                    targets.insert(e.edge_id, at_end);
+                    if !private {
+                        let at_start = o.node(e.source, e.geometry[0]);
+                        parts.add(e.edge_id, [(e.source, at_start != MINE), (e.target, at_end != MINE)], at_start == MINE);
+                    }
                 }
             }
         }
+    }
+    if owner.is_some() {
+        parts.write(&mut file, n)?;
     }
     // the tables `ways` and `way_nodes` are written by the network step (`ways_out` of build_network_files)
     match owner {

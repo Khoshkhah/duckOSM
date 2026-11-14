@@ -283,9 +283,13 @@ fn tiles(args: &[String]) -> Result<(), String> {
     if let Some(i) = opts.iter().position(|a| a == "--levels") {
         opts.drain(i..(i + 2).min(opts.len()));
     }
+    // the options of the user, as given (the union reads the filter of the largest part from them)
     let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
     all.push(cli.boundary.to_string_lossy().into_owned());
-    all.extend(opts.iter().cloned());
+    all.extend(cli.build.iter().filter(|a| *a != "--no-bus-routes").cloned());
+    if let Some(i) = all.iter().position(|a| a == "--levels") {
+        all.drain(i..(i + 2).min(all.len()));
+    }
     let (_, _, p) = params(&Cli::try_parse_from(&all).map_err(|e| e.to_string())?)?;
     let t0 = std::time::Instant::now();
     let dir = cli.out.join("tiles");

@@ -14,6 +14,7 @@ use duckosm_core::filter::Mode;
 use duckosm_core::geom::Pt;
 use duckosm_core::network::Options;
 use duckosm_core::tiles::Tile;
+use duckosm_core::util::{FxHashMap, FxHashSet};
 use duckosm_parquet::merge::{concat_files, union_sorted};
 use rayon::prelude::*;
 use std::fs::File;
@@ -61,6 +62,12 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
             names.extend(p.modes.iter().map(|m| (name.replace("{m}", m.name()), key)));
         } else {
             names.push((name.to_string(), key));
+        }
+    }
+    // the largest part (an option, on by default as in the whole build): each tile drops the rows of the other parts
+    if p.options.keep_largest_component {
+        for &m in &p.modes {
+            keep_largest_part(tiles, m)?;
         }
     }
     // the tables at the same time (each one is a copy of files, and a small merge)
@@ -395,6 +402,208 @@ pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<
     // the tables of the whole area: the union writes them
     for n in ["boundary_main", "visualization_metadata_main", "transfers_mm"] {
         let _ = std::fs::remove_file(raw(n));
+    }
+    Ok(())
+}
+
+/// The connected parts of the network of one tile build, for the filter of the largest part after the union
+/// (docs/design/build_by_tiles.md, "The largest part"): a union-find on the end nodes of all edges of the tile (its own and
+/// the copies of other tiles; the private edges are not in it, as in the whole build). The tile that holds a node has all
+/// edges of the node, so the part of each node and edge that the tile owns is complete here; the parts of more tiles join
+/// at the nodes on the borders (the links).
+#[derive(Default)]
+pub struct TileParts {
+    index: FxHashMap<i64, u32>,
+    parent: Vec<u32>,
+    edges: Vec<(i64, u32)>,
+    own: Vec<(u32, bool)>, // (a node of the edge, the edge is the tile's own)
+    links: Vec<(i64, u32)>,
+}
+
+impl TileParts {
+    fn node(&mut self, n: i64) -> u32 {
+        let next = self.parent.len() as u32;
+        let i = *self.index.entry(n).or_insert(next);
+        if i == next {
+            self.parent.push(i);
+        }
+        i
+    }
+
+    fn root(&mut self, mut x: u32) -> u32 {
+        while self.parent[x as usize] != x {
+            self.parent[x as usize] = self.parent[self.parent[x as usize] as usize];
+            x = self.parent[x as usize];
+        }
+        x
+    }
+
+    /// An edge of the tile that is not private: its id, its end nodes, whether the tile owns it, and whether each end node
+    /// is held by another tile or by no tile (then it is a link to other tiles).
+    pub fn add(&mut self, edge_id: i64, ends: [(i64, bool); 2], own: bool) {
+        let (a, b) = (self.node(ends[0].0), self.node(ends[1].0));
+        let (ra, rb) = (self.root(a), self.root(b));
+        if ra != rb {
+            self.parent[ra.max(rb) as usize] = ra.min(rb);
+        }
+        self.edges.push((edge_id, a));
+        self.own.push((a, own));
+        for (n, foreign) in ends {
+            // a node that another tile holds, or an end of a copy of an edge of another tile: the parts meet there
+            if foreign || !own {
+                let i = self.index[&n];
+                self.links.push((n, i));
+            }
+        }
+    }
+
+    /// Write the side files of the parts: `parts_{m}.bin` (part, own edges, smallest node id), `edge_parts_{m}.bin` and
+    /// `node_parts_{m}.bin` (id, part), `links_{m}.bin` (node, part). Each row: little endian numbers.
+    pub fn write<W: std::io::Write>(mut self, mut file: impl FnMut(&str) -> Result<W, String>, m: &str) -> Result<(), String> {
+        let n = self.parent.len();
+        let roots: Vec<u32> = (0..n as u32).map(|i| self.root(i)).collect();
+        let (mut count, mut least) = (vec![0u64; n], vec![i64::MAX; n]);
+        for (&id, &i) in &self.index {
+            let r = roots[i as usize] as usize;
+            least[r] = least[r].min(id);
+        }
+        for &(a, own) in &self.own {
+            if own {
+                count[roots[a as usize] as usize] += 1;
+            }
+        }
+        let e = |e: std::io::Error| e.to_string();
+        let mut w = file(&format!("parts_{m}.bin"))?;
+        for r in (0..n).filter(|&r| roots[r] as usize == r) {
+            w.write_all(&(r as u32).to_le_bytes()).map_err(e)?;
+            w.write_all(&count[r].to_le_bytes()).map_err(e)?;
+            w.write_all(&least[r].to_le_bytes()).map_err(e)?;
+        }
+        let mut pairs = |name: &str, rows: &mut dyn Iterator<Item = (i64, u32)>| -> Result<(), String> {
+            let mut w = file(&format!("{name}_{m}.bin"))?;
+            for (id, p) in rows {
+                w.write_all(&id.to_le_bytes()).map_err(e)?;
+                w.write_all(&p.to_le_bytes()).map_err(e)?;
+            }
+            Ok(())
+        };
+        pairs("edge_parts", &mut self.edges.iter().map(|&(id, a)| (id, roots[a as usize])))?;
+        pairs("node_parts", &mut self.index.iter().map(|(&id, &i)| (id, roots[i as usize])))?;
+        self.links.sort_unstable();
+        self.links.dedup();
+        pairs("links", &mut self.links.iter().map(|&(id, i)| (id, roots[i as usize])))?;
+        Ok(())
+    }
+}
+
+/// The rows of a side file of [`TileParts`]: (id, part).
+fn read_pairs(path: &Path) -> Result<Vec<(i64, u32)>, String> {
+    let b = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(b.chunks_exact(12).map(|r| (i64::from_le_bytes(r[..8].try_into().unwrap()), u32::from_le_bytes(r[8..].try_into().unwrap()))).collect())
+}
+
+/// The filter of the largest part after the tile builds (docs/design/build_by_tiles.md, "The largest part"): the parts of
+/// the tiles join at their links (a union-find on the parts, not on the nodes), the largest part has the most own edges
+/// and then the smallest node id (the rule of the whole build), and each tile drops the rows of the other parts: its
+/// edges, nodes and lanes, and its turns and turn rules that use a dropped edge. Returns the edges dropped.
+pub fn keep_largest_part(tiles: &[(Tile, PathBuf)], mode: Mode) -> Result<u64, String> {
+    let m = mode.name();
+    // the parts of all tiles, one number each: the first number of tile k is base[k]
+    let (mut base, mut count, mut least, mut local): (Vec<u32>, Vec<u64>, Vec<i64>, Vec<FxHashMap<u32, u32>>) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (_, dir) in tiles {
+        base.push(count.len() as u32);
+        let b = std::fs::read(dir.join(format!("parts_{m}.bin"))).unwrap_or_default();
+        let mut map = FxHashMap::default();
+        for r in b.chunks_exact(20) {
+            map.insert(u32::from_le_bytes(r[..4].try_into().unwrap()), count.len() as u32);
+            count.push(u64::from_le_bytes(r[4..12].try_into().unwrap()));
+            least.push(i64::from_le_bytes(r[12..20].try_into().unwrap()));
+        }
+        local.push(map);
+    }
+    let mut parent: Vec<u32> = (0..count.len() as u32).collect();
+    fn root(p: &mut [u32], mut x: u32) -> u32 {
+        while p[x as usize] != x {
+            p[x as usize] = p[p[x as usize] as usize];
+            x = p[x as usize];
+        }
+        x
+    }
+    // the links of all tiles, sorted by node: the parts at one node join
+    let mut pairs: Vec<(i64, u32)> = Vec::new();
+    for (k, (_, dir)) in tiles.iter().enumerate() {
+        let path = dir.join(format!("links_{m}.bin"));
+        if path.exists() {
+            pairs.extend(read_pairs(&path)?.into_iter().map(|(n, p)| (n, local[k][&p])));
+        }
+    }
+    pairs.sort_unstable(); // ponytail: the links are the border nodes only (France: a few million); a sort on disk when they grow
+    for run in pairs.chunk_by(|a, b| a.0 == b.0) {
+        for w in run.windows(2) {
+            let (a, b) = (root(&mut parent, w[0].1), root(&mut parent, w[1].1));
+            if a != b {
+                parent[a.max(b) as usize] = a.min(b);
+            }
+        }
+    }
+    drop(pairs);
+    let n = count.len();
+    let (mut total, mut small) = (vec![0u64; n], vec![i64::MAX; n]);
+    for i in 0..n as u32 {
+        let r = root(&mut parent, i) as usize;
+        total[r] += count[i as usize];
+        small[r] = small[r].min(least[i as usize]);
+    }
+    let Some(best) = (0..n).filter(|&r| parent[r] as usize == r).max_by_key(|&r| (total[r], std::cmp::Reverse(small[r]))) else {
+        return Ok(0);
+    };
+    let dropped: u64 = (0..n).filter(|&r| parent[r] as usize == r && r != best).map(|r| total[r]).sum();
+    // each tile: the parts that stay, then the rows of the other parts go (the tiles at the same time)
+    let roots: Vec<u32> = (0..n as u32).map(|i| root(&mut parent, i)).collect();
+    let keep: Vec<FxHashSet<u32>> = (0..tiles.len())
+        .map(|k| local[k].iter().filter(|(_, &g)| roots[g as usize] as usize == best).map(|(&p, _)| p).collect())
+        .collect();
+    tiles
+        .par_iter()
+        .enumerate()
+        .map(|(k, (_, dir))| drop_other_parts(dir, m, &keep[k]))
+        .collect::<Result<Vec<()>, String>>()?;
+    Ok(dropped)
+}
+
+/// The rows of one tile of the parts that do not stay (`keep`: the parts of the tile that stay).
+fn drop_other_parts(dir: &Path, m: &str, keep: &FxHashSet<u32>) -> Result<(), String> {
+    use arrow_array::cast::AsArray;
+    use arrow_array::types::Int64Type;
+    use duckosm_parquet::merge::{split_file, MINE, OTHER};
+    let edges: FxHashMap<i64, u32> = read_pairs(&dir.join(format!("edge_parts_{m}.bin"))).unwrap_or_default().into_iter().collect();
+    let nodes: FxHashMap<i64, u32> = read_pairs(&dir.join(format!("node_parts_{m}.bin"))).unwrap_or_default().into_iter().collect();
+    // an edge goes when its part goes; a private edge (not in a part) stays
+    let gone = |map: &FxHashMap<i64, u32>, id: i64| map.get(&id).is_some_and(|p| !keep.contains(p));
+    let tables: [(&str, &[&str], &FxHashMap<i64, u32>); 7] = [
+        ("edges", &["edge_id"], &edges),
+        ("lane_profile", &["edge_id"], &edges),
+        ("edge_graph", &["from_edge", "to_edge"], &edges),
+        ("turn_permission", &["from_edge", "to_edge"], &edges),
+        ("turn_restrictions", &["from_edge_id", "to_edge_id"], &edges),
+        ("turn_path_restrictions", &["from_edge", "to_edge"], &edges),
+        ("nodes", &["node_id"], &nodes),
+    ];
+    for (name, cols, map) in tables {
+        for suffix in ["", ".border"] {
+            let path = dir.join(format!("{name}_{m}{suffix}.parquet"));
+            if !path.exists() {
+                continue;
+            }
+            split_file(&path, |r| {
+                let cs: Vec<arrow_array::Int64Array> = cols
+                    .iter()
+                    .map(|c| r.column_by_name(c).map(|a| a.as_primitive::<Int64Type>().clone()).ok_or(format!("no column {c}")))
+                    .collect::<Result<_, _>>()?;
+                Ok((0..r.num_rows()).map(|i| if cs.iter().any(|c| gone(map, c.value(i))) { OTHER } else { MINE }).collect())
+            })?;
+        }
     }
     Ok(())
 }
