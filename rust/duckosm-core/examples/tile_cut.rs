@@ -174,7 +174,7 @@ fn main() {
         }
         println!("{} tiles, {files} files, {:.1} s", list.len(), start.elapsed().as_secs_f64());
     } else {
-        let counts = cut_to_tiles(open, &boundary, &list, out).unwrap();
+        let counts = cut_to_tiles(open, &boundary, &list, out, std::env::var_os("NO_MULTIPOLYGONS").is_none()).unwrap();
         let files = counts.iter().filter(|c| c.nodes > 0).count();
         let big = counts.iter().map(|c| c.nodes).max().unwrap_or(0);
         println!("{} tiles, {files} files, the largest {big} nodes, {:.1} s", list.len(), start.elapsed().as_secs_f64());
