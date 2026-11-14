@@ -23,6 +23,7 @@ fn sidewalk_tag_edit_changes_the_walking_type() {
         global_junctions: false,
         connect_paths: false,
         snap_m: 10.0,
+        connect_near: None,
         process_speeds: false,
         calculate_costs: false,
         functional_types: true, // the walk type is a functional type

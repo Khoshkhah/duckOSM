@@ -577,10 +577,28 @@ struct Nodes<'a> {
     boundary: &'a Boundary,
     z: u8,
     index: &'a FxHashMap<(u32, u32), u32>,
+    /// the border of a tile, in metres: a node inside the area this near another tile goes to `near` with that tile
+    border_m: f64,
     runs: BlockRuns,
     inside: Vec<(u32, Elem)>,
+    near: Vec<(i64, u32)>,
     other: bool,
     span: Span,
+}
+
+/// Is the point within `m` metres of the tile `t` (in its box, or outside it, at most `m` from its sides)?
+pub fn near_tile(t: Tile, lon: f64, lat: f64, m: f64) -> bool {
+    let (w, s, e, n) = t.bounds();
+    let dy = m / 111_320.0;
+    let dx = dy / lat.to_radians().cos().abs().max(1e-9);
+    lon >= w - dx && lon <= e + dx && lat >= s - dy && lat <= n + dy
+}
+
+/// The border of the tiles of a build by tiles, in metres: the connector of the dangling paths (`snap_m`) joins a dangling
+/// end to the nearest node within `snap_m`, so a tile with all the ways within twice `snap_m` of it (and 5 m more) makes the
+/// same connectors at its nodes as the whole build.
+pub fn border_m(snap_m: f64) -> f64 {
+    2.0 * snap_m + 5.0
 }
 
 impl RawSink for Nodes<'_> {
@@ -595,6 +613,22 @@ impl RawSink for Nodes<'_> {
         if let Some(t) = tile {
             let tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
             self.inside.push((t, Elem::Node(RawNode { id, lon, lat, tags })));
+            // the other tiles whose border holds the node
+            if self.border_m > 0.0 {
+                let me = Tile::of(self.z, lon, lat);
+                for (dx, dy) in [(-1i64, -1i64), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                    let (x, y) = (me.x as i64 + dx, me.y as i64 + dy);
+                    if x < 0 || y < 0 {
+                        continue;
+                    }
+                    let other = Tile { z: self.z, x: x as u32, y: y as u32 };
+                    if let Some(&o) = self.index.get(&(other.x, other.y)) {
+                        if near_tile(other, lon, lat, self.border_m) {
+                            self.near.push((id, o));
+                        }
+                    }
+                }
+            }
         }
         self.runs.push(id, tile);
     }
@@ -615,6 +649,8 @@ impl RawSink for Nodes<'_> {
 /// outside the tile, the runs of the ways, and the relations, whole.
 struct Ways<'a> {
     nodes: &'a Book,
+    /// the nodes in the border of other tiles (sorted (node, tile)): a way with such a node goes to those tiles too
+    near: &'a [(i64, u32)],
     runs: BlockRuns,
     kept: Vec<(u32, Elem)>,
     multi: Vec<(i64, u32)>,
@@ -637,6 +673,13 @@ impl RawSink for Ways<'_> {
         self.tiles.extend(refs.iter().filter_map(|r| r.1));
         self.tiles.sort_unstable();
         self.tiles.dedup();
+        // the home tile of a node outside the area comes from the tiles of the nodes of the ways, not from the borders
+        let first = self.tiles.first().copied();
+        if !self.near.is_empty() && first.is_some() {
+            self.tiles.extend(refs.iter().flat_map(|r| tiles_in(self.near, r.0)));
+            self.tiles.sort_unstable();
+            self.tiles.dedup();
+        }
         match self.tiles.len() {
             0 => {
                 self.runs.push(id, None);
@@ -658,7 +701,8 @@ impl RawSink for Ways<'_> {
         }
         let tags = crate::model::Tags::from_pairs(way.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         JunctionUses::of_way(&tags, &way.refs, &mut self.uses);
-        self.homes.extend(refs.iter().filter(|r| r.1.is_none()).map(|r| (r.0, id, self.tiles[0])));
+        let first = first.expect("a tile");
+        self.homes.extend(refs.iter().filter(|r| r.1.is_none()).map(|r| (r.0, id, first)));
         let (last, rest) = self.tiles.split_last().expect("a tile");
         for &t in rest {
             self.kept.push((t, Elem::Way(way.clone())));
@@ -980,6 +1024,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     tiles: &[Tile],
     dir: &Path,
     multipolygons: bool,
+    border_m: f64,
 ) -> Result<Vec<CutCounts>, String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let (timestamp, sorted) = header(open()?)?;
@@ -1000,14 +1045,26 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let mut parts = Parts { dir: tmp.clone(), waiting: FxHashMap::default(), bytes: 0 };
     // 1. each node inside to the node part of its tile; the book of the nodes
     let (mut nodes, mut node_blocks, mut ways_at) = (Book::default(), Vec::new(), None);
+    let mut near: Vec<(i64, u32)> = Vec::new();
     each_block(
         &mut open()?,
         |b, buf| {
-            let mut s = Nodes { boundary, z, index: &index, runs: BlockRuns::new(), inside: Vec::new(), other: false, span: EMPTY };
+            let mut s = Nodes {
+                boundary,
+                z,
+                index: &index,
+                border_m,
+                runs: BlockRuns::new(),
+                inside: Vec::new(),
+                near: Vec::new(),
+                other: false,
+                span: EMPTY,
+            };
             decode_block(b, [true, true, true], buf, &mut s)?;
-            Ok((s.runs, by_tile(s.inside)?, s.other, s.span))
+            Ok((s.runs, by_tile(s.inside)?, s.other, s.span, s.near))
         },
-        |(runs, blobs, other, span), at| {
+        |(runs, blobs, other, span, mut n), at| {
+            near.append(&mut n);
             if span != EMPTY {
                 node_blocks.push((at, span));
             }
@@ -1022,7 +1079,8 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
         },
     )?;
     nodes.finish();
-    crate::util::step(&format!("tile cut 1: the nodes inside ({} runs, {} MB)", nodes.len(), nodes.size() >> 20));
+    tidy(&mut near);
+    crate::util::step(&format!("tile cut 1: the nodes inside ({} runs, {} MB; {} nodes in the border of another tile)", nodes.len(), nodes.size() >> 20, near.len()));
     // 2. each way with a node inside to the way part of its tiles; the nodes that a tile needs from outside it (to a
     // temporary list); the relations, whole (to a temporary file)
     let ways_at = ways_at.unwrap_or(0);
@@ -1041,6 +1099,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
         |b, buf| {
             let mut s = Ways {
                 nodes: &nodes,
+                near: &near,
                 runs: BlockRuns::new(),
                 kept: Vec::new(),
                 multi: Vec::new(),

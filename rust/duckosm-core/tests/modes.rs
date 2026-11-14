@@ -66,6 +66,7 @@ fn three_modes_equal_duckosm() {
                 || variant.ends_with("_cfcp")
                 || variant.ends_with("_ft"),
             snap_m: 10.0,
+            connect_near: None,
             process_speeds: speeds,
             calculate_costs: speeds,
             functional_types: variant.ends_with("_ft"),
