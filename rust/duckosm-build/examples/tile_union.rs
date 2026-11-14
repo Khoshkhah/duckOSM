@@ -1,6 +1,5 @@
 //! tile_union OUT BOUNDARY MODE TILE_DIR...    the union of the tile builds (output folders named z_x_y) into OUT
 
-use duckosm_build::union::union_tiles;
 use duckosm_core::boundary::Boundary;
 use duckosm_core::filter::Mode;
 use duckosm_core::network::Options;
@@ -13,7 +12,7 @@ mod heap {
     use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
     struct Counting;
-    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    static LIVE: AtomicUsize = AtomicUsize::new(0); // counts only while ON; a free of an earlier block can make it wrap
     static PEAK: AtomicUsize = AtomicUsize::new(0);
     /// count only with DUCKOSM_HEAP set (the count slows the threads down)
     pub static ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -29,7 +28,8 @@ mod heap {
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
             unsafe { System.dealloc(p, l) };
             if ON.load(Relaxed) {
-                LIVE.fetch_sub(l.size(), Relaxed);
+                // a block made before the count started can go: the count stays at 0 or more
+                let _ = LIVE.fetch_update(Relaxed, Relaxed, |v| Some(v.saturating_sub(l.size())));
             }
         }
         unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
@@ -83,6 +83,10 @@ fn main() {
         })
         .collect();
     let t = std::time::Instant::now();
-    let st = union_tiles(&tiles, &boundary, mode, &Options::default(), a[1].as_ref()).unwrap();
-    println!("{st:?} {:.1} s", t.elapsed().as_secs_f64());
+    let text = std::fs::read_to_string(&a[2]).unwrap();
+    let _ = boundary;
+    let p = duckosm_build::Params { modes: vec![mode], options: Options::default(), ..Default::default() };
+    let rows = duckosm_build::union::union_all(&tiles, &text, &p, false, a[1].as_ref()).unwrap();
+    println!("{rows:?} {:.1} s", t.elapsed().as_secs_f64());
+    heap::report("union");
 }

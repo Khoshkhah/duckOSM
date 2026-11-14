@@ -767,6 +767,7 @@ dependencies = [
 name = "duckosm-build"
 version = "0.7.0"
 dependencies = [
+ "arrow-array 60.0.0",
  "duckdb",
  "duckosm-core",
  "duckosm-duckdb",

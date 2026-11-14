@@ -33,6 +33,8 @@ sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order"] }
 # the tiles of the levels that do not wait for each other run at the same time (the same rayon as duckosm-core)
 rayon = "1.12"
+# the build of a tile keeps only its own rows (union.rs, own_rows)
+arrow-array = "=60.0.0"
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place
 roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "36f8ca9f7342b72dd64e0d945c186d9dd6bf6396" }
 
