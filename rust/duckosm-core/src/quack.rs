@@ -1292,12 +1292,13 @@ impl StrSort {
             .collect();
         drop(part);
         for (b, placed) in pieces {
+            // a run before the buffer passes the budget: so the buffer does not grow to the next size (twice the budget)
+            if !self.rows.is_empty() && self.bytes.len() + b.len() > self.budget {
+                self.flush().map_err(|e| format!("quack sort: {e}"))?;
+            }
             let base = self.bytes.len();
             self.bytes.extend_from_slice(&b);
             self.rows.extend(placed.into_iter().map(|(x, y, n, start, len)| (x, y, n, base + start, len)));
-        }
-        if self.bytes.len() + self.rows.len() * std::mem::size_of::<Placed>() >= self.budget {
-            self.flush().map_err(|e| format!("quack sort: {e}"))?;
         }
         Ok(())
     }
@@ -1306,27 +1307,30 @@ impl StrSort {
     fn flush(&mut self) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
         self.rows.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
+        // the blocks are made on all threads, 64 at a time, and written: so only 64 blocks wait in memory (the browser
+        // does not compress them)
         let bytes = &self.bytes;
-        let blocks: Vec<(Vec<u8>, usize)> = self
-            .rows
-            .par_chunks(BLOCK_ROWS)
-            .map(|rows| {
-                let mut raw = Vec::new();
-                for &(_, _, _, start, len) in rows {
-                    raw.extend_from_slice(&(len as u32).to_le_bytes());
-                    raw.extend_from_slice(&bytes[start..start + len]);
-                }
-                let n = raw.len();
-                Ok((pack(raw)?, n))
-            })
-            .collect::<std::io::Result<_>>()?;
         self.file.seek(SeekFrom::Start(self.end))?;
-        let mut run = Vec::with_capacity(blocks.len());
+        let mut run = Vec::new();
         let mut w = std::io::BufWriter::with_capacity(1 << 20, &mut self.file);
-        for (b, raw_len) in blocks {
-            w.write_all(&b)?;
-            run.push((self.end, b.len(), raw_len));
-            self.end += b.len() as u64;
+        for group in self.rows.chunks(64 * BLOCK_ROWS) {
+            let blocks: Vec<(Vec<u8>, usize)> = group
+                .par_chunks(BLOCK_ROWS)
+                .map(|rows| {
+                    let mut raw = Vec::new();
+                    for &(_, _, _, start, len) in rows {
+                        raw.extend_from_slice(&(len as u32).to_le_bytes());
+                        raw.extend_from_slice(&bytes[start..start + len]);
+                    }
+                    let n = raw.len();
+                    Ok((pack(raw)?, n))
+                })
+                .collect::<std::io::Result<_>>()?;
+            for (b, raw_len) in blocks {
+                w.write_all(&b)?;
+                run.push((self.end, b.len(), raw_len));
+                self.end += b.len() as u64;
+            }
         }
         w.flush()?;
         drop(w);
