@@ -152,6 +152,20 @@ each row. The runs of the table below were on the same day, one after the other.
 | France (5.1 GB) | one run | 105.9 s | 4.6 GB | 23.1 GB |
 | France | 324 tiles | 223.5 s | 2.0 GB | 19.9 GB |
 
+In the browser (duckOSM Studio `quack.html`, Chromium on the Mac mini, 12 threads), Île-de-France (338 MB) in one run stops
+with no memory left (more than 4 GiB). Tile by tile (28 tiles of zoom 1 to 11), it gives the same 8 833 620 rows as the
+native run (`quack_diff --large`):
+
+| Île-de-France in Chromium | Time | Peak WebAssembly memory |
+|---|---|---|
+| 28 tiles, not sorted | 41.4 s | 429 MiB |
+| 28 tiles, sorted | 45.6 s | 586 MiB |
+
+Two faults of the browser came out on the way. In the browser, pass 4 collected all relations of the file in memory
+before it made them: now it makes them in batches of 4 million points. And the allocator of Studio's WebAssembly module
+kept each freed small block with the thread that freed it, so memory grew from tile to tile up to 4 GiB; Studio's
+allocator now gives the extra free blocks to a shared pool.
+
 Natively, one run is faster: the tile mode reads the file four times (the count, two passes of the cut, and the blocks
 of the extra elements), it writes and reads each element again, and the ways at the edge of a tile are made in each
 tile. The memory of the cut (its index of the nodes: 205 MB of runs for France) and of the tiles stays small. Use the
