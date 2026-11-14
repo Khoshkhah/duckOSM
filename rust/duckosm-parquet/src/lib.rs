@@ -1489,6 +1489,14 @@ pub fn write_elevation_grid_to<W: Write + Send>(
     out: W,
     rows: &[(i32, i32, f64, f64, Option<f64>)],
 ) -> Result<(), String> {
+    write_elevation_grid_iter_to(out, rows.iter().copied())
+}
+
+/// [`write_elevation_grid_to`] from a stream of rows: one row group at a time is in memory.
+pub fn write_elevation_grid_iter_to<W: Write + Send>(
+    out: W,
+    rows: impl Iterator<Item = (i32, i32, f64, f64, Option<f64>)>,
+) -> Result<(), String> {
     let fields = vec![
         field("col", DataType::Int32),
         field("row", DataType::Int32),
@@ -1496,7 +1504,7 @@ pub fn write_elevation_grid_to<W: Write + Send>(
         field("lat", DataType::Float64),
         field("z", DataType::Float64),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows_iter(out, fields, rows, |c| {
         let (mut col, mut row) = (Int32Builder::new(), Int32Builder::new());
         let (mut lon, mut lat, mut z) = (Float64Builder::new(), Float64Builder::new(), Float64Builder::new());
         for r in c {

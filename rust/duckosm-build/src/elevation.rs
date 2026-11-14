@@ -14,7 +14,7 @@
 use duckosm_core::model::{Edge, Node};
 use std::io::{Read, Seek};
 use std::path::Path;
-use tiff::decoder::{Decoder, DecodingResult};
+use tiff::decoder::{ChunkType, Decoder, DecodingResult};
 use tiff::tags::Tag;
 
 pub struct Dem {
@@ -26,10 +26,17 @@ pub struct Dem {
     /// The pixel size in degrees.
     sx: f64,
     sy: f64,
+    /// The pixels in memory: the window of the columns `win.0` to `win.0 + win.2 - 1` and the rows `win.1` to
+    /// `win.1 + win.3 - 1` of the raster (all the raster, or a part: [`Dem::window`]). The numbers of a point are the
+    /// numbers of the whole raster, so a window gives the same values as the whole raster.
+    win: (usize, usize, usize, usize),
     data: Vec<f32>,
     nodata: Option<f64>,
     pub resolution_m: f64,
 }
+
+/// An empty range of pixels: the reader reads only the size, the place and the resolution of the raster.
+const NO_PIXELS: (usize, usize, usize, usize) = (1, 0, 1, 0);
 
 impl Dem {
     pub fn open(path: &Path) -> Result<Dem, String> {
@@ -39,6 +46,50 @@ impl Dem {
 
     /// The DEM from the bytes of a GeoTIFF (a file, or the bytes that a browser gives); `name` goes in the errors.
     pub fn from_reader<R: Read + Seek>(r: R, name: &str) -> Result<Dem, String> {
+        Dem::read(r, name, None)
+    }
+
+    /// The DEM with only the pixels over the box `[west, south, east, north]` (degrees) plus `margin` pixels on each side,
+    /// inside the raster: the reader reads only the strips or the tiles of the file over the window. Its values at the
+    /// points of the box, and its grid over the box with at most `margin` pixels, equal those of the whole raster. A tile of
+    /// a build by tiles reads the window of its nodes, so its memory does not grow with the DEM.
+    pub fn window<R: Read + Seek>(mut r: R, name: &str, bbox: [f64; 4], margin: usize) -> Result<Dem, String> {
+        let head = Dem::read(&mut r, name, Some(NO_PIXELS))?;
+        match head.pixels(bbox, margin) {
+            Some(px) => {
+                r.seek(std::io::SeekFrom::Start(0)).map_err(|e| format!("{name}: {e}"))?;
+                Dem::read(&mut r, name, Some(px))
+            }
+            None => Ok(head),
+        }
+    }
+
+    /// [`Dem::window`] of a file.
+    pub fn open_window(path: &Path, bbox: [f64; 4], margin: usize) -> Result<Dem, String> {
+        let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Dem::window(std::io::BufReader::new(f), &path.display().to_string(), bbox, margin)
+    }
+
+    /// The DEM of a file with the pixels of the columns `px.0` to `px.1` and the rows `px.2` to `px.3` only (see
+    /// [`Dem::pixels`]); with `None`, no pixels (the size, the place and the resolution of the raster only).
+    pub fn open_pixels(path: &Path, px: Option<(usize, usize, usize, usize)>) -> Result<Dem, String> {
+        let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Dem::read(std::io::BufReader::new(f), &path.display().to_string(), Some(px.unwrap_or(NO_PIXELS)))
+    }
+
+    /// The pixels over a box (degrees) plus `margin` pixels on each side, inside the raster: the first and the last
+    /// column, the first and the last row. None when the box is outside the raster.
+    pub fn pixels(&self, bbox: [f64; 4], margin: usize) -> Option<(usize, usize, usize, usize)> {
+        let col = |lon: f64| ((lon - self.x0) / self.sx).floor();
+        let row = |lat: f64| ((self.y0 - lat) / self.sy).floor();
+        let m = margin as f64;
+        let (c0, c1) = ((col(bbox[0]) - m).max(0.0), (col(bbox[2]) + m).min(self.width as f64 - 1.0));
+        let (r0, r1) = ((row(bbox[3]) - m).max(0.0), (row(bbox[1]) + m).min(self.height as f64 - 1.0));
+        (c0 <= c1 && r0 <= r1).then_some((c0 as usize, c1 as usize, r0 as usize, r1 as usize))
+    }
+
+    /// The DEM with all the pixels (`None`), or with the pixels of a range of columns and rows (an empty range: none).
+    fn read<R: Read + Seek>(r: R, name: &str, px: Option<(usize, usize, usize, usize)>) -> Result<Dem, String> {
         let err = |e: tiff::TiffError| format!("{name}: {e}");
         let mut d = Decoder::new(r).map_err(err)?;
         let (w, h) = d.dimensions().map_err(err)?;
@@ -62,12 +113,6 @@ impl Dem {
                 .ok(),
             None => None,
         };
-        let data = match d.read_image().map_err(err)? {
-            DecodingResult::F32(v) => v,
-            _ => {
-                return Err(format!("{name}: the DEM must have 32-bit float values"))
-            }
-        };
         let (sx, sy) = (scale[0], scale[1]);
         // the tie point is the corner of the first pixel; a raster of kind PixelIsPoint (GTRasterTypeGeoKey 2)
         // names its centre, so GDAL moves the corner by half a pixel, and so does this reader
@@ -76,6 +121,38 @@ impl Dem {
             x0 -= sx / 2.0;
             y0 += sy / 2.0;
         }
+        let f32s = |v: DecodingResult| match v {
+            DecodingResult::F32(v) => Ok(v),
+            _ => Err(format!("{name}: the DEM must have 32-bit float values")),
+        };
+        let (win, data) = match px {
+            None => ((0, 0, w as usize, h as usize), f32s(d.read_image().map_err(err)?)?),
+            Some((c0, c1, r0, r1)) if c0 > c1 || r0 > r1 => ((0, 0, 0, 0), Vec::new()),
+            Some((c0, c1, r0, r1)) => {
+                let (ww, wh) = (c1 - c0 + 1, r1 - r0 + 1);
+                let mut data = vec![f32::NAN; ww * wh];
+                let (cw, ch) = d.chunk_dimensions();
+                let (cw, ch) = (cw as usize, ch as usize);
+                let across = match d.get_chunk_type() {
+                    ChunkType::Strip => 1,
+                    ChunkType::Tile => (w as usize).div_ceil(cw),
+                };
+                for ty in r0 / ch..=r1 / ch {
+                    for tx in c0 / cw..=c1 / cw {
+                        let i = (ty * across + tx) as u32;
+                        let (dw, dh) = d.chunk_data_dimensions(i);
+                        let v = f32s(d.read_chunk(i).map_err(err)?)?;
+                        let (ox, oy) = (tx * cw, ty * ch);
+                        for y in r0.max(oy)..=r1.min(oy + dh as usize - 1) {
+                            for x in c0.max(ox)..=c1.min(ox + dw as usize - 1) {
+                                data[(y - r0) * ww + (x - c0)] = v[(y - oy) * dw as usize + (x - ox)];
+                            }
+                        }
+                    }
+                }
+                ((c0, r0, ww, wh), data)
+            }
+        };
         Ok(Dem {
             width: w as usize,
             height: h as usize,
@@ -83,6 +160,7 @@ impl Dem {
             y0,
             sx,
             sy,
+            win,
             data,
             nodata,
             // duckOSM's _dem_resolution_m: degrees to metres at 111,320 m a degree, 3 decimals
@@ -101,12 +179,14 @@ impl Dem {
         }
         let col = ((lon - self.x0) / self.sx).floor() as usize;
         let row = ((self.y0 - lat) / self.sy).floor() as usize;
-        let z = f64::from(
-            *self
-                .data
-                .get(row.min(self.height - 1) * self.width + col.min(self.width - 1))?,
-        );
+        let z = f64::from(self.pixel(col.min(self.width - 1), row.min(self.height - 1))?);
         (z.is_finite() && Some(z) != self.nodata).then_some(z)
+    }
+
+    /// The pixel at a column and a row of the raster, when it is in the window in memory.
+    fn pixel(&self, col: usize, row: usize) -> Option<f32> {
+        let (c, r) = (col.checked_sub(self.win.0)?, row.checked_sub(self.win.1)?);
+        (c < self.win.2 && r < self.win.3).then(|| self.data[r * self.win.2 + c])
     }
 }
 
@@ -124,22 +204,20 @@ impl Dem {
     /// The pixels over a box (degrees) plus `margin` pixels on each side, inside the raster, row by row from the
     /// north. Empty when the box is outside the raster.
     pub fn grid(&self, west: f64, south: f64, east: f64, north: f64, margin: usize) -> Vec<GridCell> {
-        let col = |lon: f64| ((lon - self.x0) / self.sx).floor();
-        let row = |lat: f64| ((self.y0 - lat) / self.sy).floor();
-        let m = margin as f64;
-        let (c0, c1) = ((col(west) - m).max(0.0), (col(east) + m).min(self.width as f64 - 1.0));
-        let (r0, r1) = ((row(north) - m).max(0.0), (row(south) + m).min(self.height as f64 - 1.0));
-        if !(c0 <= c1 && r0 <= r1) {
-            return Vec::new();
-        }
-        let (c0, c1, r0, r1) = (c0 as usize, c1 as usize, r0 as usize, r1 as usize);
+        self.pixels([west, south, east, north], margin).map_or(Vec::new(), |px| self.cells(px, (px.0, px.2)))
+    }
+
+    /// The pixels of the columns `px.0` to `px.1` and the rows `px.2` to `px.3`, row by row from the north, with their
+    /// column and row from `origin` (the first column and row of the grid). A pixel that is not in memory has no height.
+    pub fn cells(&self, px: (usize, usize, usize, usize), origin: (usize, usize)) -> Vec<GridCell> {
+        let (c0, c1, r0, r1) = px;
         let mut cells = Vec::with_capacity((c1 - c0 + 1) * (r1 - r0 + 1));
         for r in r0..=r1 {
             for c in c0..=c1 {
-                let z = f64::from(self.data[r * self.width + c]);
+                let z = self.pixel(c, r).map_or(f64::NAN, f64::from);
                 cells.push(GridCell {
-                    col: (c - c0) as i32,
-                    row: (r - r0) as i32,
+                    col: (c - origin.0) as i32,
+                    row: (r - origin.1) as i32,
                     lon: self.x0 + (c as f64 + 0.5) * self.sx,
                     lat: self.y0 - (r as f64 + 0.5) * self.sy,
                     z: (z.is_finite() && Some(z) != self.nodata).then(|| round_cm(z)),
@@ -446,8 +524,51 @@ pub fn cut_projected<R: Read + Seek>(r: R, name: &str, crs: u32, bbox: [f64; 4],
 /// Write the pixels of the DEM file `dem` over the box (degrees) plus `margin` pixels as `elevation_grid_main.parquet` rows into `out` (the same rows
 /// that a build with a DEM writes). Gives the number of pixels. Python's `duckosm studio` uses it: its build has no DEM step of the engine.
 pub fn write_grid_file(dem: &Path, out: &Path, bbox: [f64; 4], margin: usize) -> Result<usize, String> {
-    let cells = Dem::open(dem)?.grid(bbox[0], bbox[1], bbox[2], bbox[3], margin);
     let file = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    duckosm_parquet::write_elevation_grid_to(file, &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>())?;
-    Ok(cells.len())
+    write_grid(dem, bbox, margin, file)
+}
+
+/// The rows of the raster that [`write_grid`] reads at a time.
+const GRID_STRIP: usize = 256;
+
+/// The grid of [`Dem::grid`] over the box plus `margin` pixels from the DEM file `dem`, as `elevation_grid_main` rows into `out`:
+/// [`GRID_STRIP`] rows of the raster at a time, so the memory does not grow with the box (the union of a build by tiles writes the
+/// grid of the whole area). Gives the number of pixels.
+pub fn write_grid<W: std::io::Write + Send>(dem: &Path, bbox: [f64; 4], margin: usize, out: W) -> Result<usize, String> {
+    write_grid_by(dem, bbox, margin, GRID_STRIP, out)
+}
+
+fn write_grid_by<W: std::io::Write + Send>(dem: &Path, bbox: [f64; 4], margin: usize, strip: usize, out: W) -> Result<usize, String> {
+    let px = Dem::open_pixels(dem, None)?.pixels(bbox, margin);
+    let (mut n, mut failed) = (0, None);
+    let strips = px.into_iter().flat_map(|(c0, c1, r0, r1)| (r0..=r1).step_by(strip).map(move |a| (c0, c1, r0, a, (a + strip - 1).min(r1))));
+    let rows = strips.flat_map(|(c0, c1, r0, a, b)| match Dem::open_pixels(dem, Some((c0, c1, a, b))) {
+        Ok(d) => d.cells((c0, c1, a, b), (c0, r0)),
+        Err(e) => {
+            failed.get_or_insert(e);
+            Vec::new()
+        }
+    });
+    duckosm_parquet::write_elevation_grid_iter_to(out, rows.map(|c| (c.col, c.row, c.lon, c.lat, c.z)).inspect(|_| n += 1))?;
+    failed.map_or(Ok(n), Err)
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::{write_grid_by, Dem};
+    use std::path::Path;
+
+    /// The grid in strips of 3 rows is the same file as the grid of the whole box in one piece.
+    #[test]
+    fn the_grid_in_strips_equals_the_grid() {
+        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/monaco-copernicus-glo30.tif"));
+        let b = [7.415, 43.728, 7.425, 43.735];
+        let (mut strips, mut whole) = (Vec::new(), Vec::new());
+        let n = write_grid_by(path, b, 3, 3, &mut strips).unwrap();
+        let cells = Dem::open(path).unwrap().grid(b[0], b[1], b[2], b[3], 3);
+        duckosm_parquet::write_elevation_grid_to(&mut whole, &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>()).unwrap();
+        assert_eq!(n, cells.len());
+        assert!(n > 3 * 20);
+        assert_eq!(strips, whole);
+    }
 }

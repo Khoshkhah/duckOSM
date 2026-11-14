@@ -109,6 +109,22 @@ their own order, so the result does not change. France on WSL (20 cores):
 The union with the levels: 151 s (before 491 s); peak memory 1.99 GB. Before, the levels kept each tag set of the ways
 (558 MB) and the list of all edge ids (220 MB); now the memory of the levels does not grow with the area.
 
+## H3 and the heights
+
+H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or an edge needs only its own points.
+
+- Each tile computes them from all its nodes and edges, before it keeps its own rows. It writes its own rows and the
+  border rows, as for the other tables. The largest part removes their rows with the rows of their edges and nodes.
+- A tile reads only the window of the DEM over its nodes and lines, 1 pixel more (`Dem::window`): the strips or the
+  tiles of the GeoTIFF over the window. Before, each build read the whole raster. A pixel keeps the numbers of the
+  whole raster, so the heights are the same.
+- The union writes `elevation_metadata_main` (the counts of all tiles; each tile gives its nodes with no height) and
+  `elevation_grid_main`. The grid is the pixels over the box of the nodes of every mode, 3 pixels more. The union writes
+  it in strips of 256 rows of the raster, so its memory does not grow with the area.
+
+Kentucky (driving, `--h3-resolution 8`) and Monaco with FABDEM N43E007 (driving and walking, zoom 12, `--dem`):
+all tables are equal to the whole build. The whole build gives the same rows as before.
+
 ## The scheduler
 
 `--memory` (default 2 GB) is the memory of the tile builds at the same time. The tiles start largest file first, at most
