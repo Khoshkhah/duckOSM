@@ -112,6 +112,19 @@ temporary file, and the edges are in spill files on disk.
 | 7 The nodes, and the join | 181 | — |
 | 7 The ways and the relations | 192 | — |
 
+Step 7 joins the nodes of the ways with their positions on disk. Since 2026-11-14 the join uses buckets (`spill::join::BucketJoin`),
+not two external sorts: the nodes of the ways go into parts by node id (2^27 ids each), and when the nodes of the file reach
+a part, the part is sorted in memory on all threads and its file goes. The points go into parts by way (2^20 ways each), and
+the third pass reads them one part at a time, sorted in memory. Each row is written once and read once. The raw writer
+alone (`examples/raw_area.rs`, no build) on France:
+
+| Join | Time | CPU | Peak RSS | Peak temporary disk |
+|---|---|---|---|---|
+| Two external sorts (`join::Merge`) | 488 s | 597 s | 0.7 GB | 37 GB |
+| Buckets (`join::BucketJoin`) | 133 s | 381 s | 1.4 GB | 13 GB |
+
+The rows are the same (Kentucky: all three tables equal; `raw_ways` equal byte for byte).
+
 ## What is still held
 
 After step 5.5 the build holds about 90 MiB on Kentucky and 460 MiB on France: the elements that the fixes touch, the ways
@@ -130,7 +143,7 @@ These steps hold a list of the whole area:
 | 5.2 Bus routes | 10.0 GB | the route relations and the lines of their member ways |
 | 5.5 Lane profile | 7.7 GB | the lane fields of all edges |
 
-The levels (by tiles), the building faces (by bands of tiles) and `raw.*` (sorts on disk) do not hold a list of the whole
+The levels (by tiles), the building faces (by bands of tiles) and `raw.*` (buckets on disk) do not hold a list of the whole
 area.
 
 ## What changed
