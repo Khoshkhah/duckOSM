@@ -109,6 +109,26 @@ their own order, so the result does not change. France on WSL (20 cores):
 The union with the levels: 151 s (before 491 s); peak memory 1.99 GB. Before, the levels kept each tag set of the ways
 (558 MB) and the list of all edge ids (220 MB); now the memory of the levels does not grow with the area.
 
+## The sidewalks
+
+The sidewalk rule (`sidewalks.rs`) gives a road without a sidewalk tag `sidewalk=separate` when sidewalk lines (or the other
+half of a dual carriageway) cover both its sides. It reads the lines within 12 m of the road.
+
+- Each road has its own flat frame, from the mean latitude of its points (since 2026-11-14). Before, the frame came from
+  the mean latitude of all lines of the input, so a tile, with other lines, gave other distances. This changes the
+  whole build a little: Kentucky walking, 92 and 162 different edges of 2.6 million.
+- A road crosses tiles, and the rule decides the whole road from its spots. So the sidewalk step runs between the cut and
+  the tile builds (`--sidewalks-step`): each tile decides the roads that it owns (`Owner::way`) with the car roads and the
+  sidewalk lines of its file and of the files of the tiles that the boxes of its roads touch (30 m more). The ids go
+  into one sorted file, and each tile build sets the tag from it (`--sidewalks`) and does not run the rule.
+
+Kentucky walking: the step finds 2,948 roads, as the whole build; `ways_walking` and `way_nodes_walking` are equal. The step
+takes 7.1 s.
+
+Open: the dangling-path connector (`connect_paths`) is not local either. A node outside the tile can look like a dangling
+end, a target node can be in another tile, and the number of a connector (`edge_ref`) is its rank among all connectors
+with the same `osm_id`. Kentucky walking: 14 and 42 different edges.
+
 ## H3 and the heights
 
 H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or an edge needs only its own points.
