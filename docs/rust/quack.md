@@ -107,8 +107,8 @@ the design above, each measured on France (unsorted GeoParquet):
   "Malloc Large (empty)", freed large blocks that the system allocator keeps for later use. A new vector for each bucket
   (each a new size) and a copy of each Arrow batch filled that cache. With `MallocLargeCache=0` the footprint was 1.4 GB.
   `SortedParts` now fills one buffer of the caller, and the Arrow pieces go to the writer with no copy: 3.5 GB.
-- A run that is stopped (a signal) leaves its temporary files: 45 GB after some stopped runs. Open: delete them on a stop,
-  or delete the files of dead runs at the start.
+- A run that is stopped (a signal) left its temporary files: 45 GB after some stopped runs. Now, on macOS and Linux, a
+  temporary file has no name while it is open (`spill::DirStore`), so the system frees it also when the process stops.
 
 ## The sort
 
@@ -122,11 +122,34 @@ QuackOSM sorts the rows by default with Sort-Tile-Recursive packing (`rq_geo_too
 Each row group of 100 000 rows then holds the rows of a small area. A reader with a bounding box can skip the other row
 groups, and the file is smaller. On Kentucky, 2 391 567 of the 2 393 139 rows (99.93 %) are at the same position as in
 QuackOSM's file, all rows are in the same row group, and no row is more than 11 positions away (rows with equal centers
-are in another order). The sort needs all rows before it writes the first row, so the rows wait in memory.
+are in another order).
+
+The sort needs all rows before it writes the first row. `duckosm_core::quack::StrSort` keeps them on disk:
+
+1. The rows go as bytes into one buffer. When the buffer holds 512 MB, the rows are sorted by (x, y, row number) on all
+   threads and written as one run: blocks of 2 048 rows, each compressed with zstd level 1 on all threads, at the end of
+   one temporary file.
+2. At the end, a merge of the runs gives the rows in the order of x. The merge keeps one block of each run in memory.
+3. The rows go into the bytes of the current strip. When the strip is full, it is sorted by y, and its rows are decoded
+   on all threads, one row group at a time.
+
+The order is the order of `str_order` (a test compares them). On France, the 9.2 GB file needs 3.2 million rows (one
+strip) in memory, and the disk holds the rows one time. The tries before this design, on France:
+
+| Design | Time | Peak RSS | Peak disk use |
+|---|---|---|---|
+| All rows in memory as Arrow batches | not run: Kentucky needed 1.7 GB for a 0.3 GB file | | |
+| One file for each 1/16 degree of x | not possible: more than 256 open files (the limit of macOS) | | |
+| Runs with no compression | stopped at 138 s: less than 30 GB free | | 44.8 GB |
+| Compressed runs in one file, a strip as decoded rows | 156.5 s | 6.4 GB | 23.5 GB |
+| A strip as bytes, decoded a row group at a time | 150.2 s | 4.5 GB | 23.5 GB |
+
+The writer (`ParWriter::set_groups_at_once`) encodes 4 row groups at the same time: the geometry column is most of a row
+group, and one column is encoded on one thread.
 
 ## The results
 
-The tables of Kentucky (all cases of both tools) and of France (unsorted GeoParquet), the row checks and the results that
+The tables of Kentucky (all cases of both tools) and of France (GeoParquet sorted and not sorted, `.duckdb` not sorted), the row checks and the results that
 are not in favor of duckOSM are on the page of the manual, `docs/concepts/quackosm.md`. The scripts that measured them ran
 on the Mac mini: `/usr/bin/time -l` for the time, the CPU time and the macOS footprint, a sampler of the RSS of the
 process tree and of the free disk every 2 s for the large runs, and `stat` for the file sizes.

@@ -8,6 +8,8 @@ license.workspace = true
 default = ["pbf"]
 # Reading a .osm.pbf file. Off for builds that get their data from somewhere else (WebAssembly).
 pbf = ["dep:osmpbf", "dep:rayon", "dep:flate2"]
+# zstd for the temporary files of StrSort (else the blocks have no compression)
+zstd = ["dep:zstd"]
 
 [dependencies]
 rstar = "0.12"
@@ -26,3 +28,6 @@ miniz_oxide = "0.8"
 geo = { version = "0.33", default-features = false }
 # the union and the difference of quack.rs: the i_overlay of geo 0.33, called directly to keep the points on the edges
 i_overlay = { version = "4.5", default-features = false }
+# the blocks of the temporary files of the sort of quack.rs (StrSort); a C library, so not in the browser build. The
+# version of parquet's zstd.
+zstd = { version = "0.14", optional = true }

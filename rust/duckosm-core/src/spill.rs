@@ -106,6 +106,10 @@ impl Store for DirStore {
             .write(true)
             .create_new(true)
             .open(&path)?;
+        // Unix: the name goes at once and the open file stays, so the system frees the file also when the process is
+        // stopped (a stopped France run left 45 GB). Windows cannot remove an open file: there, the drop removes it.
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(&path);
         Ok(Box::new(TempFile { f, path }))
     }
 }
@@ -653,6 +657,9 @@ mod tests {
         for i in 0..100 {
             w.push(&c, &edge(i, &attrs)).unwrap();
         }
+        // Unix: no name in the folder while the file is open, so a stopped process leaves nothing
+        #[cfg(unix)]
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         let rows = sort(w.finish().unwrap(), &c, |e: &Edge| e.edge_id, 1000, &store).unwrap();
         assert_eq!(rows.read(&c).unwrap().count(), 100);
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);

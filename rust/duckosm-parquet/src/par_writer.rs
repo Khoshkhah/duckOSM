@@ -27,6 +27,9 @@ pub struct ParWriter<W: Write + Send> {
     pending: Vec<RecordBatch>,
     rows: usize,
     max_rows: usize,
+    /// the full row groups that wait to be encoded together (see [`ParWriter::set_groups_at_once`])
+    full: Vec<Vec<RecordBatch>>,
+    at_once: usize,
 }
 
 impl<W: Write + Send> ParWriter<W> {
@@ -38,7 +41,7 @@ impl<W: Write + Send> ParWriter<W> {
         let parquet_schema = ArrowSchemaConverter::new().with_coerce_types(props.coerce_types()).convert(&schema)?;
         let file = SerializedFileWriter::new(out, parquet_schema.root_schema_ptr(), Arc::new(props))?;
         let factory = ArrowRowGroupWriterFactory::new(&file, Arc::clone(&schema));
-        Ok(ParWriter { file, factory, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows })
+        Ok(ParWriter { file, factory, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
     }
 
     /// Add the rows of `batch`; each full row group is written.
@@ -56,25 +59,48 @@ impl<W: Write + Send> ParWriter<W> {
         Ok(())
     }
 
-    /// Write the open row group: each leaf column on a thread of the pool, then the chunks in order.
+    /// Encode `k` row groups at the same time (1, the default: one row group at a time). A row group has few columns,
+    /// and one large column (the geometry) is encoded on one thread; with `k` row groups, `k` of them are encoded at the
+    /// same time. The memory is `k` row groups of rows. The file is the same.
+    pub fn set_groups_at_once(&mut self, k: usize) {
+        self.at_once = k.max(1);
+    }
+
+    /// The open row group is full or the last one: it waits with the others, until `at_once` of them are there.
     fn flush(&mut self) -> Result<()> {
-        if self.rows == 0 {
-            return Ok(());
+        if self.rows > 0 {
+            self.full.push(std::mem::take(&mut self.pending));
+            self.rows = 0;
         }
-        let writers = self.factory.create_column_writers(self.groups)?;
-        let mut leaves: Vec<Vec<_>> = (0..writers.len()).map(|_| Vec::new()).collect();
-        for b in self.pending.drain(..) {
-            let mut i = 0;
-            for (field, array) in self.schema.fields().iter().zip(b.columns()) {
-                for leaf in compute_leaves(field, array)? {
-                    leaves[i].push(leaf);
-                    i += 1;
+        if self.full.len() >= self.at_once {
+            self.write_full()?;
+        }
+        Ok(())
+    }
+
+    /// Write the waiting row groups: each leaf column of each row group on a thread of the pool, then the chunks in order.
+    fn write_full(&mut self) -> Result<()> {
+        let mut jobs = Vec::new();
+        for (j, batches) in std::mem::take(&mut self.full).into_iter().enumerate() {
+            let writers = self.factory.create_column_writers(self.groups + j)?;
+            let mut leaves: Vec<Vec<_>> = (0..writers.len()).map(|_| Vec::new()).collect();
+            for b in batches {
+                let mut i = 0;
+                for (field, array) in self.schema.fields().iter().zip(b.columns()) {
+                    for leaf in compute_leaves(field, array)? {
+                        leaves[i].push(leaf);
+                        i += 1;
+                    }
                 }
             }
+            jobs.push(writers.into_iter().zip(leaves).collect::<Vec<_>>());
         }
-        let chunks: Vec<ArrowColumnChunk> = writers
+        let columns: Vec<usize> = jobs.iter().map(Vec::len).collect();
+        let chunks: Vec<ArrowColumnChunk> = jobs
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
             .into_par_iter()
-            .zip(leaves)
             .map(|(mut w, ls)| {
                 for l in &ls {
                     w.write(l)?;
@@ -82,19 +108,55 @@ impl<W: Write + Send> ParWriter<W> {
                 w.close()
             })
             .collect::<Result<_>>()?;
-        let mut group = self.file.next_row_group()?;
-        for c in chunks {
-            c.append_to_row_group(&mut group)?;
+        let mut chunks = chunks.into_iter();
+        for n in columns {
+            let mut group = self.file.next_row_group()?;
+            for c in chunks.by_ref().take(n) {
+                c.append_to_row_group(&mut group)?;
+            }
+            group.close()?;
+            self.groups += 1;
         }
-        group.close()?;
-        self.groups += 1;
-        self.rows = 0;
         Ok(())
     }
 
     /// Write the last row group and the footer, and flush (as `ArrowWriter::close`).
     pub fn close(mut self) -> Result<()> {
         self.flush()?;
+        self.write_full()?;
         self.file.close().map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::{ArrayRef, Int64Array, StringArray};
+    use arrow_schema::{DataType, Field, Schema};
+    use parquet::arrow::ArrowWriter;
+
+    /// With one or more row groups at the same time, the file is the file of `ArrowWriter`.
+    #[test]
+    fn same_file_as_arrow_writer() {
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false), Field::new("s", DataType::Utf8, false)]));
+        let batch = |from: i64, n: i64| {
+            let a: ArrayRef = Arc::new(Int64Array::from_iter_values(from..from + n));
+            let s: ArrayRef = Arc::new(StringArray::from_iter_values((from..from + n).map(|i| format!("row {i}"))));
+            RecordBatch::try_new(schema.clone(), vec![a, s]).unwrap()
+        };
+        let batches = [batch(0, 130), batch(130, 70), batch(200, 345)];
+        let props = || WriterProperties::builder().set_max_row_group_row_count(Some(100)).build();
+        let mut want = Vec::new();
+        let mut w = ArrowWriter::try_new(&mut want, schema.clone(), Some(props())).unwrap();
+        batches.iter().for_each(|b| w.write(b).unwrap());
+        w.close().unwrap();
+        for k in [1, 3, 10] {
+            let mut got = Vec::new();
+            let mut w = ParWriter::try_new(&mut got, schema.clone(), Some(props())).unwrap();
+            w.set_groups_at_once(k);
+            batches.iter().for_each(|b| w.write(b).unwrap());
+            w.close().unwrap();
+            assert!(got == want, "k = {k}");
+        }
     }
 }

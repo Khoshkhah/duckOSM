@@ -70,10 +70,10 @@ process for duckOSM. A file size is in bytes (MB = 10^6 bytes).
 
 | Case | QuackOSM | duckOSM |
 |---|---|---|
-| GeoParquet, sorted (the default) | 13.7 s, CPU 77 s, 5.9 GB, 311.5 MB | 3.9 s, CPU 13.8 s, 1.7 GB, 308.4 MB |
-| GeoParquet, not sorted | 13.0 to 13.5 s, CPU 71.5 s, 5.8 GB, 349.3 MB | 3.6 to 4.1 s, CPU 12.6 s, 1.0 GB, 320.6 MB |
-| `.duckdb`, sorted (the default) | 14.8 to 15.3 s, CPU 81 to 85 s, 5.8 GB, 670 MB | 4.8 to 5.2 s, CPU 14.5 s, 2.4 GB, 779 MB |
-| `.duckdb`, not sorted | 14.2 to 14.4 s, 5.8 GB, 702 to 739 MB | 3.9 to 4.4 s, CPU 13.2 s, 1.7 GB, 709 to 710 MB |
+| GeoParquet, sorted (the default) | 13.7 s, CPU 77 s, 5.9 GB, 311.5 MB | 4.0 s, CPU 16.8 s, 1.9 GB, 308.4 MB |
+| GeoParquet, not sorted | 13.0 to 13.5 s, CPU 71.5 s, 5.8 GB, 349.3 MB | 3.1 to 3.6 s, CPU 13.2 s, 1.2 GB, 320.7 MB |
+| `.duckdb`, sorted (the default) | 14.8 to 15.3 s, CPU 81 to 85 s, 5.8 GB, 670 MB | 5.2 to 6.2 s, CPU 17.1 s, 2.2 GB, 779 to 780 MB |
+| `.duckdb`, not sorted | 14.2 to 14.4 s, 5.8 GB, 702 to 739 MB | 4.1 to 4.6 s, CPU 13.4 s, 1.7 GB, 705 MB |
 | In the browser (Chromium, 12 threads) | not possible | 12.5 s sorted, 7.1 s not sorted |
 
 The browser row is the page of duckOSM Studio, which uses the duckOSM of PR 157 (the rows in memory, before the design
@@ -133,15 +133,27 @@ when macOS stopped the process. The footprint of duckOSM is larger because the D
 until the end; its RSS is lower. The file of duckOSM is larger because DuckDB 1.5.6 does not compress the geometry
 (DuckDB 2.0 compresses 46 million of the 99 million geometries in QuackOSM's file).
 
-QuackOSM with its sort took 1 066 s and 9.1 GB on France, in a run with less free disk. The sorted output of duckOSM keeps
-its rows in memory, so duckOSM's sorted France case is not measured yet.
+The sorted GeoParquet output (the default of both tools), with the same method:
+
+| France, GeoParquet, sorted | QuackOSM | duckOSM |
+|---|---|---|
+| Time | 998.2 s | 150.2 s |
+| CPU time | 4 694 s | 488 s |
+| Peak memory (RSS) | 10.6 GB | 4.5 GB |
+| Peak memory footprint of macOS (main process) | 14.5 GB | 3.8 GB |
+| Peak disk use | 40.0 GB | 23.5 GB |
+| Output | 9.05 GB | 9.22 GB |
+
+duckOSM keeps the rows of the sort on disk, compressed, so the sort does not add disk use to the case that is not
+sorted; it adds 21 s.
 
 ## The results that are not in favor of duckOSM
 
 - The `.duckdb` files are larger: on Kentucky 779 MB against 670 MB sorted, on France 22.3 GB against 19.7 GB. DuckDB 1.5.6 stores the geometry with no
   compression, and DuckDB 2.0 compresses it. The same data loaded from duckOSM's Parquet file into DuckDB 1.5.6 is also
   779 MB.
-- The sorted output keeps all rows in memory until the sort, so its memory grows with the area.
+- The sorted GeoParquet file of France is 9.22 GB, against 9.05 GB of QuackOSM; on Kentucky the sorted output needs 1.9
+  GB, against 1.2 GB not sorted (the rows of the sort wait in a buffer of 512 MB).
 - In the browser, Kentucky uses 3.6 to 3.8 GiB of WebAssembly memory (the limit is 4 GiB), because the GeoParquet file
   stays in memory until the download.
 

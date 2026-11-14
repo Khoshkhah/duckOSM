@@ -1052,12 +1052,21 @@ pub const ROW_GROUP: usize = 100_000;
 /// in the odd strips. So each row group of the file holds the rows of a small area, and a reader with a box can skip the
 /// others. Returns the row numbers in the new order; the order before the sort breaks the ties.
 pub fn str_order(centers: &[Pt]) -> Vec<usize> {
+    str_order_by(centers, ROW_GROUP)
+}
+
+/// The number of strips and the rows in each strip (the last strip can have fewer) of `n` rows.
+fn strips(n: usize, group: usize) -> (usize, usize) {
+    let strips = (n.div_ceil(group) as f64).sqrt().ceil().max(1.0) as usize;
+    (strips, n.div_ceil(strips))
+}
+
+fn str_order_by(centers: &[Pt], group: usize) -> Vec<usize> {
     let n = centers.len();
     if n == 0 {
         return Vec::new();
     }
-    let strips = (n.div_ceil(ROW_GROUP) as f64).sqrt().ceil().max(1.0) as usize;
-    let strip_size = n.div_ceil(strips);
+    let (_, strip_size) = strips(n, group);
     let cmp = |a: f64, b: f64| a.total_cmp(&b);
     let mut by_x: Vec<usize> = (0..n).collect();
     by_x.par_sort_by(|&a, &b| {
@@ -1081,9 +1090,330 @@ pub fn str_order(centers: &[Pt]) -> Vec<usize> {
     order
 }
 
+/// An `i64` in the order of `f64::total_cmp`.
+fn ordered(x: f64) -> i64 {
+    let b = x.to_bits() as i64;
+    b ^ (((b >> 63) as u64) >> 1) as i64
+}
+
+/// The key of a row of [`Numbered`] from its bytes: (x, y, row number), the order of the strips of [`str_order`].
+fn numbered_key(b: &[u8]) -> (i64, i64, u64) {
+    let f = |i: usize| f64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    (ordered(f(8)), ordered(f(16)), u64::from_le_bytes(b[..8].try_into().unwrap()))
+}
+
+/// A row on its way through [`StrSort`]: the number of the row (the ties of [`str_order`]) and the feature.
+struct Numbered;
+
+impl Numbered {
+    fn put_row(i: u64, f: &Feature, o: &mut Vec<u8>) {
+        let s = |o: &mut Vec<u8>, b: &[u8]| {
+            o.extend_from_slice(&(b.len() as u32).to_le_bytes());
+            o.extend_from_slice(b);
+        };
+        o.extend_from_slice(&i.to_le_bytes());
+        o.extend_from_slice(&f.center.0.to_le_bytes());
+        o.extend_from_slice(&f.center.1.to_le_bytes());
+        s(o, f.feature_id.as_bytes());
+        o.extend_from_slice(&(f.tags.len() as u32).to_le_bytes());
+        for (k, v) in &f.tags {
+            s(o, k.as_bytes());
+            s(o, v.as_bytes());
+        }
+        s(o, &f.geometry);
+    }
+}
+
+impl Codec<(u64, Feature)> for Numbered {
+    fn put(&self, (i, f): &(u64, Feature), o: &mut Vec<u8>) {
+        Numbered::put_row(*i, f, o);
+    }
+
+    fn get(&self, b: &mut &[u8]) -> (u64, Feature) {
+        use crate::spill::{get_f64, get_u32, take};
+        fn bytes<'a>(b: &mut &'a [u8]) -> &'a [u8] {
+            let n = get_u32(b) as usize;
+            let (v, rest) = b.split_at(n);
+            *b = rest;
+            v
+        }
+        let s = |b: &mut &[u8]| String::from_utf8_lossy(bytes(b)).into_owned();
+        let i = u64::from_le_bytes(take::<8>(b));
+        let center = (get_f64(b), get_f64(b));
+        let feature_id = s(b);
+        let tags = (0..get_u32(b)).map(|_| (s(b), s(b))).collect();
+        let geometry = bytes(b).to_vec();
+        (i, Feature { feature_id, tags, geometry, center })
+    }
+}
+
+/// The rows in a block of a run of [`StrSort`] (about 700 kB on France): the merge keeps one block of each run.
+const BLOCK_ROWS: usize = 2048;
+
+/// A block of a run: compressed with zstd level 1 (natively), else as it is.
+fn pack(raw: Vec<u8>) -> std::io::Result<Vec<u8>> {
+    #[cfg(feature = "zstd")]
+    return zstd::bulk::compress(&raw, 1);
+    #[cfg(not(feature = "zstd"))]
+    Ok(raw)
+}
+
+fn unpack(b: &[u8], raw_len: usize, out: &mut Vec<u8>) -> std::io::Result<()> {
+    out.clear();
+    #[cfg(feature = "zstd")]
+    {
+        *out = zstd::bulk::decompress(b, raw_len)?;
+    }
+    #[cfg(not(feature = "zstd"))]
+    {
+        let _ = raw_len;
+        out.extend_from_slice(b);
+    }
+    Ok(())
+}
+
+/// A run of [`StrSort`] in the merge: its next blocks (place, length and rows' bytes in the file) and its block in
+/// memory, with the place of the next row.
+struct Cursor {
+    blocks: std::collections::VecDeque<(u64, usize, usize)>,
+    buf: Vec<u8>,
+    pos: usize,
+    row: (usize, usize),
+}
+
+impl Cursor {
+    /// Go to the next row (read the next block when the block is done); false at the end of the run.
+    fn advance(&mut self, file: &mut dyn crate::spill::Blob, tmp: &mut Vec<u8>) -> std::io::Result<bool> {
+        use std::io::SeekFrom;
+        if self.pos == self.buf.len() {
+            let Some((at, len, raw_len)) = self.blocks.pop_front() else {
+                return Ok(false);
+            };
+            file.seek(SeekFrom::Start(at))?;
+            tmp.resize(len, 0);
+            file.read_exact(tmp)?;
+            unpack(tmp, raw_len, &mut self.buf)?;
+            self.pos = 0;
+        }
+        let n = u32::from_le_bytes(self.buf[self.pos..self.pos + 4].try_into().unwrap()) as usize;
+        self.row = (self.pos + 4, self.pos + 4 + n);
+        self.pos += 4 + n;
+        Ok(true)
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.buf[self.row.0..self.row.1]
+    }
+}
+
+/// A row in the bytes of [`StrSort`]: its sort key (two `ordered` values and the row number) and the place of its bytes.
+type Placed = (i64, i64, u64, usize, usize);
+
+/// QuackOSM's sort ([`str_order`]) with the rows on disk, for areas whose rows do not fit in memory (France: 99 million
+/// rows). [`StrSort::push`] writes the rows as bytes into one buffer until it holds `budget` bytes, then sorts them by
+/// (x, y, row number) and writes them as a run of blocks (compressed on all threads) at the end of one temporary file.
+/// [`StrSort::finish`] merges the runs, so the rows come in the order of x, into the bytes of a strip; each time a strip
+/// is full, it sorts the strip by y and gives its rows, a row group at a time. The order is the one of [`str_order`].
+/// The disk holds the rows one time, compressed. The memory is `budget` while the rows come, then the bytes of one
+/// strip (`sqrt(rows * ROW_GROUP)` rows, 3.2 million on France), one block of each run and one row group.
+pub struct StrSort {
+    file: Box<dyn crate::spill::Blob>,
+    end: u64,
+    /// the blocks of each run: place, compressed length, length
+    runs: Vec<Vec<(u64, usize, usize)>>,
+    bytes: Vec<u8>,
+    rows: Vec<Placed>,
+    written: u64,
+    budget: usize,
+    group: usize,
+}
+
+impl Default for StrSort {
+    fn default() -> Self {
+        StrSort::new(BUDGET, ROW_GROUP).expect("quack sort: a temporary file")
+    }
+}
+
+impl StrSort {
+    fn new(budget: usize, group: usize) -> std::io::Result<Self> {
+        let file = crate::spill::temp_store().create()?;
+        Ok(StrSort { file, end: 0, runs: Vec::new(), bytes: Vec::new(), rows: Vec::new(), written: 0, budget, group })
+    }
+
+    /// Add the rows of a part (written as bytes on all threads).
+    pub fn push(&mut self, part: Vec<Feature>) -> Result<(), String> {
+        const PIECE: usize = 4096;
+        let first = self.written + self.rows.len() as u64;
+        let pieces: Vec<(Vec<u8>, Vec<Placed>)> = part
+            .par_chunks(PIECE)
+            .enumerate()
+            .map(|(p, rows)| {
+                let (mut b, mut placed) = (Vec::new(), Vec::with_capacity(rows.len()));
+                for (j, f) in rows.iter().enumerate() {
+                    let n = first + (p * PIECE + j) as u64;
+                    let start = b.len();
+                    Numbered::put_row(n, f, &mut b);
+                    placed.push((ordered(f.center.0), ordered(f.center.1), n, start, b.len() - start));
+                }
+                (b, placed)
+            })
+            .collect();
+        drop(part);
+        for (b, placed) in pieces {
+            let base = self.bytes.len();
+            self.bytes.extend_from_slice(&b);
+            self.rows.extend(placed.into_iter().map(|(x, y, n, start, len)| (x, y, n, base + start, len)));
+        }
+        if self.bytes.len() + self.rows.len() * std::mem::size_of::<Placed>() >= self.budget {
+            self.flush().map_err(|e| format!("quack sort: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Write the rows of the buffer as a new run, sorted.
+    fn flush(&mut self) -> std::io::Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        self.rows.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
+        let bytes = &self.bytes;
+        let blocks: Vec<(Vec<u8>, usize)> = self
+            .rows
+            .par_chunks(BLOCK_ROWS)
+            .map(|rows| {
+                let mut raw = Vec::new();
+                for &(_, _, _, start, len) in rows {
+                    raw.extend_from_slice(&(len as u32).to_le_bytes());
+                    raw.extend_from_slice(&bytes[start..start + len]);
+                }
+                let n = raw.len();
+                Ok((pack(raw)?, n))
+            })
+            .collect::<std::io::Result<_>>()?;
+        self.file.seek(SeekFrom::Start(self.end))?;
+        let mut run = Vec::with_capacity(blocks.len());
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, &mut self.file);
+        for (b, raw_len) in blocks {
+            w.write_all(&b)?;
+            run.push((self.end, b.len(), raw_len));
+            self.end += b.len() as u64;
+        }
+        w.flush()?;
+        drop(w);
+        self.runs.push(run);
+        self.written += self.rows.len() as u64;
+        self.rows.clear();
+        self.bytes.clear();
+        Ok(())
+    }
+
+    /// Give the rows in the order of the sort, in pieces of a row group.
+    pub fn finish(mut self, mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String> {
+        use std::cmp::Reverse;
+        let io = |e: std::io::Error| format!("quack sort: {e}");
+        let group = self.group;
+        let n = (self.written + self.rows.len() as u64) as usize;
+        let (_, strip_size) = strips(n.max(1), group);
+        if !self.rows.is_empty() {
+            self.flush().map_err(io)?;
+        }
+        // the buffer of the rows is the buffer of the strips now
+        let (mut bytes, mut strip) = (std::mem::take(&mut self.bytes), std::mem::take(&mut self.rows));
+        // the merge of the runs: the smallest (x, y, row number) first
+        let mut tmp = Vec::new();
+        let mut cursors: Vec<Cursor> = Vec::with_capacity(self.runs.len());
+        let mut heap = std::collections::BinaryHeap::new();
+        for run in std::mem::take(&mut self.runs) {
+            let mut c = Cursor { blocks: run.into(), buf: Vec::new(), pos: 0, row: (0, 0) };
+            if c.advance(&mut *self.file, &mut tmp).map_err(io)? {
+                heap.push(Reverse((numbered_key(c.bytes()), cursors.len())));
+            }
+            cursors.push(c);
+        }
+        let mut out: Vec<Feature> = Vec::with_capacity(group);
+        let mut up = true;
+        loop {
+            let next = heap.pop();
+            if let Some(Reverse(((x, _, n), i))) = next {
+                // the strip: by y (up in the even strips, down in the odd strips), then x, then the row number
+                let b = cursors[i].bytes();
+                let y = f64::from_le_bytes(b[16..24].try_into().unwrap());
+                strip.push((ordered(if up { y } else { -y }), x, n, bytes.len(), b.len()));
+                bytes.extend_from_slice(b);
+                if cursors[i].advance(&mut *self.file, &mut tmp).map_err(io)? {
+                    heap.push(Reverse((numbered_key(cursors[i].bytes()), i)));
+                }
+            }
+            let more = next.is_some();
+            if strip.len() == strip_size || (!more && !strip.is_empty()) {
+                strip.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
+                // the rows of the strip are read on all threads, a row group at a time
+                let mut i = 0;
+                while i < strip.len() {
+                    let take = (group - out.len()).min(strip.len() - i);
+                    let rows: Vec<Feature> =
+                        strip[i..i + take].par_iter().map(|r| Numbered.get(&mut &bytes[r.3..r.3 + r.4]).1).collect();
+                    out.extend(rows);
+                    i += take;
+                    if out.len() == group {
+                        emit(std::mem::replace(&mut out, Vec::with_capacity(group)))?;
+                    }
+                }
+                strip.clear();
+                bytes.clear();
+                up = !up;
+            }
+            if !more {
+                break;
+            }
+        }
+        if !out.is_empty() {
+            emit(out)?;
+        }
+        crate::util::step("quack 5: the sort");
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn str_sort_on_disk_gives_the_order_of_str_order() {
+        // 5 000 rows in groups of 100: 50 groups, 8 strips; a small budget gives about 80 runs; repeated centers test the
+        // ties, and NaN the ends
+        let pts: Vec<Pt> = (0..5000u64)
+            .map(|i| match i % 97 {
+                0 => (f64::NAN, 1.0),
+                1 => (-f64::NAN, 2.0),
+                _ => (((i * 7919) % 613) as f64 / 37.0 - 8.0, ((i * 104729) % 211) as f64 / 13.0 % 5.0),
+            })
+            .collect();
+        let mut sort = StrSort::new(10_000, 100).unwrap();
+        let rows: Vec<Feature> = pts
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| Feature { feature_id: format!("node/{i}"), tags: vec![("k".into(), i.to_string())], geometry: vec![i as u8], center: c })
+            .collect();
+        // parts of other sizes, larger and smaller than a piece of push
+        let mut rest = &rows[..];
+        for size in [7, 5000, 1, 4500].iter().cycle() {
+            if rest.is_empty() {
+                break;
+            }
+            let (part, r) = rest.split_at((*size).min(rest.len()));
+            sort.push(part.to_vec()).unwrap();
+            rest = r;
+        }
+        let mut got = Vec::new();
+        sort.finish(|g| {
+            assert!(g.len() == 100 || got.len() + g.len() == 5000);
+            got.extend(g.into_iter().map(|f| f.feature_id));
+            Ok(())
+        })
+        .unwrap();
+        let want: Vec<String> = str_order_by(&pts, 100).into_iter().map(|i| format!("node/{i}")).collect();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn str_order_sorts_one_strip_by_y_then_x() {

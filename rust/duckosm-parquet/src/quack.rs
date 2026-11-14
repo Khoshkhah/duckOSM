@@ -5,7 +5,7 @@ use super::{err, map_type, ParWriter};
 use arrow_array::builder::{BinaryBuilder, MapBuilder, StringBuilder};
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use duckosm_core::quack::{str_order, Feature, Pt, ROW_GROUP};
+use duckosm_core::quack::{Feature, StrSort, ROW_GROUP};
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
@@ -49,52 +49,39 @@ pub fn batch(rows: &[Feature]) -> Result<RecordBatch, String> {
 }
 
 /// The rows on their way to the output. Without the sort, each part goes on at once. With the sort (QuackOSM's
-/// default), the parts wait as Arrow batches (one buffer for each column, not one allocation for each tag) with the
-/// center of each row, and [`Rows::sorted`] gives them in the order of `str_order`, a row group at a time.
+/// default), the rows wait on disk in `duckosm_core::quack::StrSort`, and [`Rows::sorted`] gives them in the order of
+/// `str_order`, a row group at a time.
 pub struct Rows {
-    sort: bool,
-    batches: Vec<RecordBatch>,
-    centers: Vec<Pt>,
+    sort: Option<StrSort>,
 }
 
 impl Rows {
     pub fn new(sort: bool) -> Rows {
-        Rows { sort, batches: Vec::new(), centers: Vec::new() }
+        Rows { sort: sort.then(StrSort::default) }
     }
 
     /// The batches of `rows` (pieces of 20 000 rows, made on all threads) to give on at once (no sort), or none (the
-    /// batches wait for the sort). The pieces are not joined into one batch: a copy of each part was one more large
-    /// block for the allocator to keep.
+    /// rows wait for the sort).
     pub fn push(&mut self, rows: Vec<Feature>) -> Result<Vec<RecordBatch>, String> {
         use rayon::prelude::*;
-        let parts: Vec<RecordBatch> = rows.par_chunks(20_000).map(batch).collect::<Result<_, _>>()?;
-        if !self.sort {
-            return Ok(parts);
+        if let Some(s) = self.sort.as_mut() {
+            s.push(rows)?;
+            return Ok(Vec::new());
         }
-        self.centers.extend(rows.iter().map(|f| f.center));
-        self.batches.extend(parts);
-        Ok(Vec::new())
+        rows.par_chunks(20_000).map(batch).collect()
     }
 
-    /// The waiting rows in the order of the sort, in batches of a row group.
-    pub fn sorted(self) -> impl Iterator<Item = Result<RecordBatch, String>> {
-        // the batch and the row of each row number
-        let mut at = Vec::with_capacity(self.centers.len());
-        for (b, batch) in self.batches.iter().enumerate() {
-            at.extend((0..batch.num_rows()).map(|r| (b, r)));
+    /// Give the waiting rows in the order of the sort, in batches of a row group.
+    pub fn sorted(self, mut give: impl FnMut(RecordBatch) -> Result<(), String>) -> Result<(), String> {
+        match self.sort {
+            // each row group in pieces of 20 000 rows, made on all threads (the writer joins them into one row group)
+            Some(s) => s.finish(|rows| {
+                use rayon::prelude::*;
+                let parts: Vec<RecordBatch> = rows.par_chunks(20_000).map(batch).collect::<Result<_, _>>()?;
+                parts.into_iter().try_for_each(&mut give)
+            }),
+            None => Ok(()),
         }
-        let order = str_order(&self.centers);
-        let batches = self.batches;
-        let chunks: Vec<Vec<(usize, usize)>> = order.chunks(ROW_GROUP).map(|c| c.iter().map(|&i| at[i]).collect()).collect();
-        chunks.into_iter().map(move |take| {
-            let cols = (0..3)
-                .map(|c| {
-                    let arrays: Vec<&dyn arrow_array::Array> = batches.iter().map(|b| b.column(c).as_ref()).collect();
-                    arrow_select::interleave::interleave(&arrays, &take).map_err(err)
-                })
-                .collect::<Result<Vec<ArrayRef>, String>>()?;
-            RecordBatch::try_new(schema(), cols).map_err(err)
-        })
     }
 }
 
@@ -112,7 +99,9 @@ impl<W: Write + Send> QuackWriter<W> {
             .set_max_row_group_row_count(Some(ROW_GROUP))
             .set_key_value_metadata(Some(vec![KeyValue::new("geo".to_string(), geo.to_string())]))
             .build();
-        let w = ParWriter::try_new(out, schema(), Some(props)).map_err(err)?;
+        let mut w = ParWriter::try_new(out, schema(), Some(props)).map_err(err)?;
+        // the geometry column is most of a row group: several row groups at the same time use the threads
+        w.set_groups_at_once(4);
         Ok(QuackWriter { w, count: 0 })
     }
 

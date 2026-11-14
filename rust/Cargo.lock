@@ -806,6 +806,7 @@ dependencies = [
  "rstar",
  "serde",
  "serde_json",
+ "zstd",
 ]
 
 [[package]]
