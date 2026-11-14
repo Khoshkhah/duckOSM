@@ -304,9 +304,13 @@ fn tiles(args: &[String]) -> Result<(), String> {
     // goes to the tile builds
     let global = ["--no-component-filter"];
     let mut opts: Vec<String> = cli.build.iter().filter(|a| !global.contains(&a.as_str())).cloned().collect();
-    if let Some(i) = opts.iter().position(|a| a == "--levels") {
-        opts.drain(i..(i + 2).min(opts.len()));
+    // the levels run after the union, and a tile writes only GeoParquet (the .duckdb file comes after the union)
+    for flag in ["--levels", "--format", "-f"] {
+        while let Some(i) = opts.iter().position(|a| a == flag) {
+            opts.drain(i..(i + 2).min(opts.len()));
+        }
     }
+    opts.retain(|a| !a.starts_with("--levels=") && !a.starts_with("--format="));
     // the options of the user, as given (the union reads the filter of the largest part, the bus routes and the levels from
     // them)
     let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
@@ -438,7 +442,22 @@ fn tiles(args: &[String]) -> Result<(), String> {
             eprintln!("tiles: {name}: {rows} rows");
         }
     }
-    eprintln!("tiles: union in {:.1} s; total {:.1} s", t2.elapsed().as_secs_f64(), t0.elapsed().as_secs_f64());
+    eprintln!("tiles: union in {:.1} s", t2.elapsed().as_secs_f64());
+    #[cfg(feature = "duckdb")]
+    if p.duckdb {
+        let t3 = std::time::Instant::now();
+        let db = duckosm_build::union::write_duckdb(&cli.out, &p)?;
+        eprintln!("tiles: {} in {:.1} s", db.display(), t3.elapsed().as_secs_f64());
+        if !p.geoparquet {
+            // only the .duckdb file was asked for: the files of the union go
+            for e in std::fs::read_dir(&cli.out).map_err(|e| e.to_string())?.flatten() {
+                if e.path().extension().is_some_and(|x| x == "parquet") {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+    }
+    eprintln!("tiles: total {:.1} s", t0.elapsed().as_secs_f64());
     if !cli.keep_tiles {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }

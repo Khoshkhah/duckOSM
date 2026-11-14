@@ -136,6 +136,27 @@ pub fn write_raw(
 /// duckOSM's base-map layers: run `sql` (`features.sql`, made from duckOSM's `FeaturesBuilder`) on the `.duckdb` file. It reads
 /// `raw_nodes.parquet`, `raw_ways.parquet` and `raw_relations.parquet` of `parquet_dir`, and leaves `raw.*` and `features.*`
 /// in the file. It needs DuckDB's spatial extension (the first `INSTALL` downloads it).
+/// `raw.nodes`, `raw.ways` and `raw.relations` from the raw files of a build in `parquet_dir` (`raw_nodes.parquet`, ...), with the
+/// columns of [`write_raw`] (the first statements of the SQL of the layers, `features.sql`). A build with a boundary and `--raw`
+/// writes these files; the `.duckdb` file gets the tables too.
+pub fn write_raw_from_parquet(db: &Path, parquet_dir: &Path) -> Result<(), String> {
+    let con = Connection::open(db).map_err(|e| e.to_string())?;
+    let f = |n: &str| parquet_dir.join(format!("{n}.parquet")).display().to_string().replace('\'', "''");
+    con.execute_batch(&format!(
+        "CREATE SCHEMA IF NOT EXISTS raw;
+CREATE OR REPLACE TABLE raw.nodes AS SELECT osm_id, lat, lon, tags FROM read_parquet('{}');
+CREATE OR REPLACE TABLE raw.ways AS SELECT osm_id, tags, refs FROM read_parquet('{}');
+CREATE OR REPLACE TABLE raw.relations AS
+    SELECT osm_id, tags, refs, ref_roles, ref_types::ENUM('node', 'way', 'relation')[] AS ref_types
+    FROM read_parquet('{}');
+CHECKPOINT;",
+        f("raw_nodes"),
+        f("raw_ways"),
+        f("raw_relations")
+    ))
+    .map_err(|e| format!("raw.*: {e}"))
+}
+
 pub fn write_features(db: &Path, parquet_dir: &Path, sql: &str) -> Result<(), String> {
     let con = Connection::open(db).map_err(|e| e.to_string())?;
     let mut sql = sql.to_string();

@@ -138,6 +138,19 @@ fn elevation_main(dem: &Path, p: &crate::Params, rows: &[(String, usize)], out: 
     Ok(())
 }
 
+/// The `.duckdb` file of a build by tiles (`{name}.duckdb` in `out`): the tables of the union in `out`, as the whole build loads
+/// its files (`duckosm_duckdb::write_database`), and `raw.*` when the union has the raw files. Gives the path of the file.
+#[cfg(feature = "duckdb")]
+pub fn write_duckdb(out: &Path, p: &crate::Params) -> Result<PathBuf, String> {
+    let db = out.join(format!("{}.duckdb", p.name));
+    let names: Vec<&str> = p.modes.iter().map(|m| m.name()).collect();
+    duckosm_duckdb::write_database(&db, out, &names)?;
+    if out.join("raw_nodes.parquet").exists() {
+        duckosm_duckdb::write_raw_from_parquet(&db, out)?;
+    }
+    Ok(db)
+}
+
 /// The tables of the whole area after the union of the tiles (`boundary_main`, `visualization_metadata_main`,
 /// `transfers_mm`), from the boundary of the area (GeoJSON text) and the nodes of the union in `out`. The nodes stay on disk:
 /// the point of the time zone comes from passes over the nodes file, and the transfers from a sort on disk.

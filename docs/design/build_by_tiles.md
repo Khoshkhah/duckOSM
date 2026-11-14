@@ -204,6 +204,13 @@ The tiles at the same time and the threads of each tile (France, 12 cores, befor
 
 The default is the cores / 2 tiles at a time, with 2 threads each.
 
-## Not yet in a build by tiles
+## The `.duckdb` file
 
-- The `.duckdb` output: the build by tiles writes GeoParquet files.
+The tile builds write only GeoParquet (the command takes `--format` away from their options). After the union, `tiles` loads
+the tables of the union into `{name}.duckdb`, as the whole build loads its files (`union::write_duckdb`,
+`duckosm_duckdb::write_database`), with `raw.*` when the union has the raw files (`write_raw_from_parquet`). The default is both
+formats, as in the whole build; with `--format duckdb` only, the Parquet files of the union go after the load. A whole build with
+a boundary and `--raw` now also has `raw.*` in its `.duckdb` file.
+
+Kentucky, driving, `--format duckdb --raw`: the 23 tables of the two `.duckdb` files are equal (but the two with the time of the
+build), `raw.*` too (22.4 million rows). The load takes 10.7 s.
