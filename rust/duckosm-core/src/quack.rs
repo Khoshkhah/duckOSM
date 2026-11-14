@@ -1052,12 +1052,21 @@ pub const ROW_GROUP: usize = 100_000;
 /// in the odd strips. So each row group of the file holds the rows of a small area, and a reader with a box can skip the
 /// others. Returns the row numbers in the new order; the order before the sort breaks the ties.
 pub fn str_order(centers: &[Pt]) -> Vec<usize> {
+    str_order_by(centers, ROW_GROUP)
+}
+
+/// The number of strips and the rows in each strip (the last strip can have fewer) of `n` rows.
+fn strips(n: usize, group: usize) -> (usize, usize) {
+    let strips = (n.div_ceil(group) as f64).sqrt().ceil().max(1.0) as usize;
+    (strips, n.div_ceil(strips))
+}
+
+fn str_order_by(centers: &[Pt], group: usize) -> Vec<usize> {
     let n = centers.len();
     if n == 0 {
         return Vec::new();
     }
-    let strips = (n.div_ceil(ROW_GROUP) as f64).sqrt().ceil().max(1.0) as usize;
-    let strip_size = n.div_ceil(strips);
+    let (_, strip_size) = strips(n, group);
     let cmp = |a: f64, b: f64| a.total_cmp(&b);
     let mut by_x: Vec<usize> = (0..n).collect();
     by_x.par_sort_by(|&a, &b| {
@@ -1081,9 +1090,191 @@ pub fn str_order(centers: &[Pt]) -> Vec<usize> {
     order
 }
 
+/// An `i64` in the order of `f64::total_cmp`.
+fn ordered(x: f64) -> i64 {
+    let b = x.to_bits() as i64;
+    b ^ (((b >> 63) as u64) >> 1) as i64
+}
+
+/// The key of a row of [`Numbered`] from its bytes: (x, y, row number), the order of the strips of [`str_order`].
+fn numbered_key(b: &[u8]) -> (i64, i64, u64) {
+    let f = |i: usize| f64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    (ordered(f(8)), ordered(f(16)), u64::from_le_bytes(b[..8].try_into().unwrap()))
+}
+
+/// A row on its way through [`StrSort`]: the number of the row (the ties of [`str_order`]) and the feature.
+struct Numbered;
+
+impl Codec<(u64, Feature)> for Numbered {
+    fn put(&self, (i, f): &(u64, Feature), o: &mut Vec<u8>) {
+        let s = |o: &mut Vec<u8>, b: &[u8]| {
+            o.extend_from_slice(&(b.len() as u32).to_le_bytes());
+            o.extend_from_slice(b);
+        };
+        o.extend_from_slice(&i.to_le_bytes());
+        o.extend_from_slice(&f.center.0.to_le_bytes());
+        o.extend_from_slice(&f.center.1.to_le_bytes());
+        s(o, f.feature_id.as_bytes());
+        o.extend_from_slice(&(f.tags.len() as u32).to_le_bytes());
+        for (k, v) in &f.tags {
+            s(o, k.as_bytes());
+            s(o, v.as_bytes());
+        }
+        s(o, &f.geometry);
+    }
+
+    fn get(&self, b: &mut &[u8]) -> (u64, Feature) {
+        use crate::spill::{get_f64, get_u32, take};
+        fn bytes<'a>(b: &mut &'a [u8]) -> &'a [u8] {
+            let n = get_u32(b) as usize;
+            let (v, rest) = b.split_at(n);
+            *b = rest;
+            v
+        }
+        let s = |b: &mut &[u8]| String::from_utf8_lossy(bytes(b)).into_owned();
+        let i = u64::from_le_bytes(take::<8>(b));
+        let center = (get_f64(b), get_f64(b));
+        let feature_id = s(b);
+        let tags = (0..get_u32(b)).map(|_| (s(b), s(b))).collect();
+        let geometry = bytes(b).to_vec();
+        (i, Feature { feature_id, tags, geometry, center })
+    }
+}
+
+/// QuackOSM's sort ([`str_order`]) with the rows on disk, for areas whose rows do not fit in memory (France: 99 million
+/// rows). [`StrSort::push`] keeps the rows until they hold `budget` bytes, then writes them to a temporary file sorted by
+/// (x, y, row number). [`StrSort::finish`] merges the files, so the rows come in the order of x; each time a strip is
+/// full, it sorts the strip by y and gives its rows. The order is the one of [`str_order`]. The disk holds the rows one
+/// time; the memory is `budget` while the rows come, then one strip: `sqrt(rows * ROW_GROUP)` rows, 3.2 million on France.
+pub struct StrSort {
+    store: Box<dyn crate::spill::Store>,
+    rows: Vec<(u64, Feature)>,
+    bytes: usize,
+    budget: usize,
+    runs: Vec<crate::spill::Rows>,
+    group: usize,
+}
+
+impl Default for StrSort {
+    fn default() -> Self {
+        StrSort::new(BUDGET, ROW_GROUP)
+    }
+}
+
+impl StrSort {
+    fn new(budget: usize, group: usize) -> Self {
+        StrSort { store: crate::spill::temp_store(), rows: Vec::new(), bytes: 0, budget, runs: Vec::new(), group }
+    }
+
+    fn row_number(&self) -> u64 {
+        self.runs.iter().map(|r| r.len as u64).sum::<u64>() + self.rows.len() as u64
+    }
+
+    pub fn push(&mut self, f: Feature) -> Result<(), String> {
+        // the memory of the row: its bytes, and the headers of its strings and vectors
+        self.bytes += 96 + f.feature_id.len() + f.geometry.len() + f.tags.iter().map(|(k, v)| 48 + k.len() + v.len()).sum::<usize>();
+        let n = self.row_number();
+        self.rows.push((n, f));
+        if self.bytes >= self.budget {
+            self.flush().map_err(|e| format!("quack sort: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Write the rows in memory to a new file, sorted.
+    fn flush(&mut self) -> std::io::Result<()> {
+        use crate::spill::{merge, Writer, MERGE_FAN};
+        self.rows.par_sort_unstable_by(|(ia, a), (ib, b)| {
+            (ordered(a.center.0), ordered(a.center.1), ia).cmp(&(ordered(b.center.0), ordered(b.center.1), ib))
+        });
+        let mut w = Writer::new(&*self.store)?;
+        for r in self.rows.drain(..) {
+            w.push(&Numbered, &r)?;
+        }
+        self.bytes = 0;
+        self.runs.push(w.finish()?);
+        // each file is open: at most MERGE_FAN of them
+        if self.runs.len() == MERGE_FAN {
+            let all = std::mem::take(&mut self.runs);
+            self.runs.push(merge(all, &numbered_key, &*self.store)?);
+        }
+        Ok(())
+    }
+
+    /// Give the rows in the order of the sort, in pieces of a row group.
+    pub fn finish(mut self, mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String> {
+        let io = |e: std::io::Error| format!("quack sort: {e}");
+        let (n, group) = (self.row_number() as usize, self.group);
+        let (_, strip_size) = strips(n.max(1), group);
+        if !self.rows.is_empty() {
+            self.flush().map_err(io)?;
+        }
+        let mut merged = crate::spill::Merge::new(std::mem::take(&mut self.runs), numbered_key).map_err(io)?;
+        let (mut buf, mut strip, mut out) = (Vec::new(), Vec::new(), Vec::with_capacity(group));
+        let mut up = true;
+        loop {
+            let more = merged.next_into(&mut buf).map_err(io)?;
+            if more {
+                strip.push(std::mem::take(&mut buf));
+            }
+            if strip.len() == strip_size || (!more && !strip.is_empty()) {
+                // the strip, read on all threads: by y (up in the even strips, down in the odd strips), then x, then the
+                // row number
+                let mut rows: Vec<(u64, Feature)> = strip.par_drain(..).map(|b| Numbered.get(&mut &b[..])).collect();
+                let y = |f: &Feature| if up { f.center.1 } else { -f.center.1 };
+                rows.par_sort_unstable_by(|(ia, a), (ib, b)| {
+                    y(a).total_cmp(&y(b)).then(a.center.0.total_cmp(&b.center.0)).then(ia.cmp(ib))
+                });
+                for (_, f) in rows {
+                    out.push(f);
+                    if out.len() == group {
+                        emit(std::mem::replace(&mut out, Vec::with_capacity(group)))?;
+                    }
+                }
+                up = !up;
+            }
+            if !more {
+                break;
+            }
+        }
+        if !out.is_empty() {
+            emit(out)?;
+        }
+        crate::util::step("quack 5: the sort");
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn str_sort_on_disk_gives_the_order_of_str_order() {
+        // 5 000 rows in groups of 100: 50 groups, 8 strips; a small budget gives many files (more than MERGE_FAN); repeated
+        // centers test the ties, and NaN the ends
+        let pts: Vec<Pt> = (0..5000u64)
+            .map(|i| match i % 97 {
+                0 => (f64::NAN, 1.0),
+                1 => (-f64::NAN, 2.0),
+                _ => (((i * 7919) % 613) as f64 / 37.0 - 8.0, ((i * 104729) % 211) as f64 / 13.0 % 5.0),
+            })
+            .collect();
+        let mut sort = StrSort::new(10_000, 100);
+        for (i, &c) in pts.iter().enumerate() {
+            let f = Feature { feature_id: format!("node/{i}"), tags: vec![("k".into(), i.to_string())], geometry: vec![i as u8], center: c };
+            sort.push(f).unwrap();
+        }
+        let mut got = Vec::new();
+        sort.finish(|g| {
+            assert!(g.len() == 100 || got.len() + g.len() == 5000);
+            got.extend(g.into_iter().map(|f| f.feature_id));
+            Ok(())
+        })
+        .unwrap();
+        let want: Vec<String> = str_order_by(&pts, 100).into_iter().map(|i| format!("node/{i}")).collect();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn str_order_sorts_one_strip_by_y_then_x() {

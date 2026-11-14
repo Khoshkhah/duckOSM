@@ -76,9 +76,7 @@ impl VTab for QuackFeatures {
                 duckosm_core::quack::features(open, duckosm_core::quack::BUDGET, |part| {
                     rows.push(part)?.into_iter().try_for_each(&mut give)
                 })?;
-                for b in rows.sorted() {
-                    give(b?)?;
-                }
+                rows.sorted(&mut give)?;
                 if let Some(w) = w {
                     w.close()?;
                 }

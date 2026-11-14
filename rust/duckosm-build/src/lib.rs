@@ -1561,8 +1561,8 @@ pub fn quack(
 }
 
 /// [`quack`] from a `.osm.pbf` file (`open` opens it; it is read twice) to any writer of the GeoParquet file (the browser
-/// page reads a `File` and writes into memory or OPFS). With `sort` (QuackOSM's default), the rows wait in memory (Arrow batches) for
-/// `duckosm_core::quack::str_order`; without, they go to the file while the PBF file is read.
+/// page reads a `File` and writes into memory or OPFS). With `sort` (QuackOSM's default), the rows wait in temporary files for
+/// `duckosm_core::quack::StrSort`; without, they go to the file while the PBF file is read.
 pub fn quack_to<R: Read + Send, W: Write + Send>(
     open: impl Fn() -> Result<R, String>,
     out: W,
@@ -1573,9 +1573,7 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
     let n = duckosm_core::quack::features(open, duckosm_core::quack::BUDGET, |part| {
         rows.push(part)?.iter().try_for_each(|b| w.write(b))
     })?;
-    for b in rows.sorted() {
-        w.write(&b?)?;
-    }
+    rows.sorted(|b| w.write(&b))?;
     w.close()?;
     Ok(n)
 }

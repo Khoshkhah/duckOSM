@@ -195,7 +195,7 @@ struct QuackCli {
     #[arg(long)]
     threads: Option<usize>,
     /// Do not sort the rows (QuackOSM sort_result=False). The default sorts them as QuackOSM does (Sort-Tile-Recursive
-    /// on the centers of the geometries), so each row group holds a small area; the rows then wait in memory.
+    /// on the centers of the geometries), so each row group holds a small area; the rows then wait in temporary files.
     #[arg(long)]
     no_sort: bool,
 }
