@@ -1126,11 +1126,21 @@ pub fn features_owned<R: Read + Send>(
 /// The most nodes in a tile of [`features_by_tiles`] (a default for the callers).
 pub const TILE_NODES: usize = 4_000_000;
 
+/// The tiles of [`features_by_tiles`].
+#[derive(Debug, Clone, Copy)]
+pub enum TileSize {
+    /// A quadtree: tiles of mixed zooms with at most this many nodes each (a tile of zoom 14 can have more).
+    Nodes(usize),
+    /// The tiles of one zoom (at most 14) that have a node.
+    Zoom(u8),
+}
+
 /// The features table of [`features`], made tile by tile, so that the memory follows the size of a tile, not of the area
 /// (docs/rust/quack.md, "By tiles"): the browser makes the table of a large area in its 4 GiB.
 ///
-/// 1. A pass over the nodes counts the nodes of each tile of zoom 14. A tile with more than `tile_nodes` nodes is cut into
-///    its four tiles of the next zoom (a quadtree), so the dense city has small tiles and the country around it large ones.
+/// 1. A pass over the nodes counts the nodes of each tile of zoom 14. With [`TileSize::Nodes`], a tile with more than that
+///    many nodes is cut into its four tiles of the next zoom (a quadtree), so the dense city has small tiles and the
+///    country around it large ones. With [`TileSize::Zoom`], the tiles are the tiles of that zoom with a node.
 /// 2. The tile cut (`crate::tilecut::cut_to_store`) writes the file of each tile to the temporary store, with the ways
 ///    whole, and each multipolygon and boundary with all its members in one of its tiles.
 /// 3. Each tile gives the rows that it owns ([`Owner`]) to `emit`, so each row comes one time.
@@ -1139,10 +1149,10 @@ pub const TILE_NODES: usize = 4_000_000;
 pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
-    tile_nodes: usize,
+    size: TileSize,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    let tiles = tiles_of_file(&open, tile_nodes.max(1))?;
+    let tiles = tiles_of_file(&open, size)?;
     crate::util::step(&format!(
         "quack by tiles 1: {} tiles of zoom {} to {}",
         tiles.len(),
@@ -1181,9 +1191,8 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     Ok(counts)
 }
 
-/// The tiles of [`features_by_tiles`]: tiles of mixed zooms with a node, each with at most `most` nodes (a tile of zoom 14
-/// can have more).
-fn tiles_of_file<R: Read + Send>(open: &impl Fn() -> Result<R, String>, most: usize) -> Result<Vec<Tile>, String> {
+/// The tiles of [`features_by_tiles`] with a node: the quadtree of [`TileSize::Nodes`], or the tiles of one zoom.
+fn tiles_of_file<R: Read + Send>(open: &impl Fn() -> Result<R, String>, size: TileSize) -> Result<Vec<Tile>, String> {
     const Z: u8 = 14;
     #[derive(Default)]
     struct Count(crate::util::FxHashMap<(u32, u32), u32>, bool);
@@ -1230,12 +1239,16 @@ fn tiles_of_file<R: Read + Send>(open: &impl Fn() -> Result<R, String>, most: us
         }
         m
     };
-    // a quadtree: a tile with more than `most` nodes is split in four, down to zoom 14
+    // a quadtree: a tile with more than `most` nodes (or of a zoom lower than the zoom) is split in four, down to zoom 14
+    let leaf = |t: &Tile, n: usize| match size {
+        TileSize::Nodes(most) => n <= most.max(1),
+        TileSize::Zoom(z) => t.z >= z,
+    };
     let maps: Vec<crate::util::FxHashMap<(u32, u32), usize>> = (0..=Z).map(at).collect();
     let mut tiles = Vec::new();
     let mut todo: Vec<Tile> = maps[0].keys().map(|&(x, y)| Tile { z: 0, x, y }).collect();
     while let Some(t) = todo.pop() {
-        if t.z == Z || maps[t.z as usize][&(t.x, t.y)] <= most {
+        if t.z == Z || leaf(&t, maps[t.z as usize][&(t.x, t.y)]) {
             tiles.push(t);
             continue;
         }
