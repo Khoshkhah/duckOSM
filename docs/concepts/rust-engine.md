@@ -43,10 +43,12 @@ The folder `rust/` also has a program with no Python: `duckosm-rust`. It builds 
 cargo build --release --manifest-path rust/Cargo.toml -p duckosm-cli   # makes rust/target/release/duckosm-rust
 rust/target/release/duckosm-rust --config my_area.yaml --allow-skipped
 rust/target/release/duckosm-rust edit my_area.duckdb                   # the page of Edit OSM data
+rust/target/release/duckosm-rust quack my_area.osm.pbf -o out          # the features table of QuackOSM
 ```
 
 `--allow-skipped` lets the build go on when the config asks for a step that only Python has (for example the base-map layers).
 `duckosm-rust --help` lists all the options.
+`duckosm-rust quack` makes the features table of QuackOSM, with the same rows: see [duckOSM and QuackOSM](quackosm.md).
 
 ## In the browser
 
