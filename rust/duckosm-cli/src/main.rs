@@ -193,6 +193,10 @@ struct QuackCli {
     /// The blocks of the file that are decoded at the same time (default: all the cores).
     #[arg(long)]
     threads: Option<usize>,
+    /// Do not sort the rows (QuackOSM sort_result=False). The default sorts them as QuackOSM does (Sort-Tile-Recursive
+    /// on the centers of the geometries), so each row group holds a small area; the rows then wait in memory.
+    #[arg(long)]
+    no_sort: bool,
 }
 
 fn quack(args: &[String]) -> Result<(), String> {
@@ -210,7 +214,7 @@ fn quack(args: &[String]) -> Result<(), String> {
     let db = duckdb.then(|| cli.out.join(format!("{}_quack.duckdb", cli.name)));
     let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
     let t = std::time::Instant::now();
-    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads)?;
+    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort)?;
     eprintln!(
         "quack: {} nodes, {} ways, {} relations in {:.2} s",
         n.nodes,

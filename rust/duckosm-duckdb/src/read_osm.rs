@@ -101,7 +101,7 @@ fn next_block(init: &Init) -> Result<Option<Cursor>, Box<dyn Error>> {
 
 /// Copy the rows `pos..end` of a list column into a DuckDB list vector: lists of BIGINT or of text (a NULL text item
 /// stays NULL), and maps of text to text (a NULL map stays NULL).
-fn fill_list(out: &mut ListVector, a: &ArrayRef, pos: usize, end: usize) {
+pub(crate) fn fill_list(out: &mut ListVector, a: &ArrayRef, pos: usize, end: usize) {
     let off: &[i32] = match a.data_type() {
         DataType::Map(_, _) => a.as_map().value_offsets(),
         _ => a.as_list::<i32>().value_offsets(),

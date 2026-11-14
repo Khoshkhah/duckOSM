@@ -37,6 +37,14 @@ pub struct Feature {
     pub feature_id: String,
     pub tags: RawTags,
     pub geometry: Vec<u8>,
+    /// The center of the bounding box of the geometry: the key of [`str_order`].
+    pub center: Pt,
+}
+
+impl Feature {
+    fn new(feature_id: String, tags: RawTags, g: &Geom) -> Feature {
+        Feature { feature_id, tags, geometry: g.wkb(), center: g.center() }
+    }
 }
 
 /// The numbers of a [`features`] run.
@@ -127,6 +135,20 @@ pub enum Geom {
 }
 
 impl Geom {
+    /// The center of the bounding box, as QuackOSM computes it for its sort: `(ST_XMin + ST_XMax) / 2`, and so for y.
+    pub fn center(&self) -> Pt {
+        let pts: Box<dyn Iterator<Item = &Pt>> = match self {
+            Geom::Point(p) => return *p,
+            Geom::Line(ps) => Box::new(ps.iter()),
+            Geom::Polygons(ps) => Box::new(ps.iter().flat_map(|p| p[0].iter())),
+        };
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for &(x, y) in pts {
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+        ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+    }
+
     pub fn wkb(&self) -> Vec<u8> {
         fn head(b: &mut Vec<u8>, kind: u32, n: usize) {
             b.push(1u8);
@@ -465,7 +487,7 @@ impl RawSink for Part {
         let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let tags = clean(&tags);
         if !tags.is_empty() {
-            self.features.push(Feature { feature_id: format!("node/{id}"), tags, geometry: Geom::Point(p).wkb() });
+            self.features.push(Feature::new(format!("node/{id}"), tags, &Geom::Point(p)));
         }
     }
 
@@ -538,7 +560,7 @@ fn way_feature(id: i64, raw: &RawTags, pts: &[Pt]) -> Option<Feature> {
     } else {
         Geom::Line(line)
     };
-    Some(Feature { feature_id: format!("way/{id}"), tags, geometry: geometry.wkb() })
+    Some(Feature::new(format!("way/{id}"), tags, &geometry))
 }
 
 /// The features table of the `.osm.pbf` file in `reader` (sorted by type and id). `emit` gets the features in parts,
@@ -600,7 +622,7 @@ pub fn features<R: Read + Send>(
                 members.iter().map(|(w, role)| Some((role.as_str(), store.way_points(*w)?))).collect();
             let geometry = relation_geometry(&lines?)?;
             let tags = clean(tags);
-            (!tags.is_empty()).then(|| Feature { feature_id: format!("relation/{id}"), tags, geometry: geometry.wkb() })
+            (!tags.is_empty()).then(|| Feature::new(format!("relation/{id}"), tags, &geometry))
         })
         .collect();
     counts.relations = made.len();
@@ -608,9 +630,55 @@ pub fn features<R: Read + Send>(
     Ok(counts)
 }
 
+/// The rows of a row group of the GeoParquet file, as in QuackOSM.
+pub const ROW_GROUP: usize = 100_000;
+
+/// QuackOSM's sort of the rows (`sort_result=True`, the default; `rq_geo_toolkit` `_str_index_select_sql`):
+/// Sort-Tile-Recursive packing on the centers of the rows ([`Feature::center`]). The rows sorted by x (then y) are cut
+/// into `ceil(sqrt(ceil(rows / ROW_GROUP)))` vertical strips; each strip is sorted by y, up in the even strips and down
+/// in the odd strips. So each row group of the file holds the rows of a small area, and a reader with a box can skip the
+/// others. Returns the row numbers in the new order; the order before the sort breaks the ties.
+pub fn str_order(centers: &[Pt]) -> Vec<usize> {
+    let n = centers.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let strips = (n.div_ceil(ROW_GROUP) as f64).sqrt().ceil().max(1.0) as usize;
+    let strip_size = n.div_ceil(strips);
+    let cmp = |a: f64, b: f64| a.total_cmp(&b);
+    let mut by_x: Vec<usize> = (0..n).collect();
+    by_x.par_sort_by(|&a, &b| {
+        let (pa, pb) = (centers[a], centers[b]);
+        cmp(pa.0, pb.0).then(cmp(pa.1, pb.1)).then(a.cmp(&b))
+    });
+    let mut strip = vec![0usize; n];
+    for (rank, &i) in by_x.iter().enumerate() {
+        strip[i] = rank / strip_size;
+    }
+    let mut order = by_x;
+    order.par_sort_by(|&a, &b| {
+        let (pa, pb) = (centers[a], centers[b]);
+        let y = |s: usize, y: f64| if s % 2 == 0 { y } else { -y };
+        strip[a]
+            .cmp(&strip[b])
+            .then(cmp(y(strip[a], pa.1), y(strip[b], pb.1)))
+            .then(cmp(pa.0, pb.0))
+            .then(a.cmp(&b))
+    });
+    order
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn str_order_sorts_one_strip_by_y_then_x() {
+        // 16 points: one row group, so one strip
+        let pts: Vec<Pt> = (0..16).rev().map(|i| ((i % 4) as f64, (i / 4) as f64)).collect();
+        let c: Vec<Pt> = str_order(&pts).into_iter().map(|i| pts[i]).collect();
+        assert_eq!((c[0], c[1], c[4], c[15]), ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (3.0, 3.0)));
+    }
 
     fn sq(x: f64, y: f64, s: f64) -> Vec<Pt> {
         vec![(x, y), (x + s, y), (x + s, y + s), (x, y + s), (x, y)]
