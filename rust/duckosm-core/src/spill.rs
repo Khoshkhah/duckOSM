@@ -942,6 +942,128 @@ pub mod join {
         }
     }
 
+    /// The node ids of one part of the requests of [`BucketJoin`]: 2^27 ids (France: about 100 parts).
+    #[cfg(feature = "pbf")]
+    pub const NODE_SHIFT: u32 = 27;
+    /// The ways of one part of the points of [`BucketJoin`]: 2^20 ways (France: about 70 parts of about 13 million points).
+    #[cfg(feature = "pbf")]
+    pub const WAY_SHIFT: u32 = 20;
+
+    #[cfg(feature = "pbf")]
+    type RequestParts = super::SortedParts<'static, Request, fn(&(i64, u32, u32)) -> i64>;
+    #[cfg(feature = "pbf")]
+    type PointParts = super::SortedParts<'static, Point, fn(&(u32, u32, f64, f64)) -> (u32, u32)>;
+
+    /// The join of [`Merge`] with buckets ([`super::Buckets`]): the requests are in parts by node id ([`NODE_SHIFT`]); when the
+    /// nodes of the file reach a part, the part is sorted in memory on all threads and its file goes. The points go into parts
+    /// by the number of the way ([`WAY_SHIFT`]). Each row is written once and read once, and no external sort merges on one
+    /// thread; at a time, the disk holds the requests that wait and the points so far (about one row for each node of a way).
+    #[cfg(feature = "pbf")]
+    pub struct BucketJoin<'s> {
+        store: &'s dyn Store,
+        parts: RequestParts,
+        buf: Vec<(i64, u32, u32)>,
+        at: usize,
+        done: bool,
+        points: super::Buckets,
+        extra: Vec<(i64, f64, f64)>,
+        last: i64,
+        in_order: bool,
+    }
+
+    #[cfg(feature = "pbf")]
+    impl<'s> BucketJoin<'s> {
+        /// `requests`: the parts of [`super::Buckets`] with the key `node id` and the shift [`NODE_SHIFT`]; `extra`: as in [`Merge`].
+        pub fn new(requests: Vec<Rows>, mut extra: Vec<(i64, f64, f64)>, store: &'s dyn Store) -> Self {
+            extra.sort_unstable_by_key(|n| std::cmp::Reverse(n.0));
+            BucketJoin {
+                store,
+                parts: super::SortedParts::new(requests, &Request, |r| r.0),
+                buf: Vec::new(),
+                at: 0,
+                done: false,
+                points: super::Buckets::new(WAY_SHIFT),
+                extra,
+                last: i64::MIN,
+                in_order: true,
+            }
+        }
+
+        /// The next node of the file.
+        pub fn node(&mut self, id: i64, lon: f64, lat: f64) -> io::Result<()> {
+            while self.extra.last().is_some_and(|n| n.0 < id) {
+                let n = self.extra.pop().expect("a node");
+                self.put(n.0, n.1, n.2)?;
+            }
+            self.put(id, lon, lat)
+        }
+
+        fn put(&mut self, id: i64, lon: f64, lat: f64) -> io::Result<()> {
+            if !self.in_order {
+                return Ok(());
+            }
+            if id <= self.last {
+                self.in_order = false;
+                return Ok(());
+            }
+            self.last = id;
+            loop {
+                while self.at < self.buf.len() && self.buf[self.at].0 < id {
+                    self.at += 1;
+                }
+                if self.at < self.buf.len() || self.done {
+                    break;
+                }
+                // the part is used up: the next one (its file goes when it is read)
+                self.at = 0;
+                self.done = !self.parts.next_into(&mut self.buf)?;
+            }
+            while self.at < self.buf.len() && self.buf[self.at].0 == id {
+                let (_, way, place) = self.buf[self.at];
+                self.points.push(self.store, way as i64, &Point, &(way, place, lon, lat))?;
+                self.at += 1;
+            }
+            Ok(())
+        }
+
+        /// The points in the order of the way and the place, or None when the nodes did not come in the order of their ids.
+        pub fn finish(mut self) -> io::Result<Option<BucketPoints>> {
+            while let Some(n) = self.extra.pop() {
+                self.put(n.0, n.1, n.2)?;
+            }
+            if !self.in_order {
+                return Ok(None);
+            }
+            drop(self.buf);
+            Ok(Some(BucketPoints { parts: super::SortedParts::new(self.points.finish()?, &Point, |p| (p.0, p.1)), buf: Vec::new(), at: 0 }))
+        }
+    }
+
+    /// The points of [`BucketJoin`], in the order of the way and the place: one part at a time, sorted in memory.
+    #[cfg(feature = "pbf")]
+    pub struct BucketPoints {
+        parts: PointParts,
+        buf: Vec<(u32, u32, f64, f64)>,
+        at: usize,
+    }
+
+    #[cfg(feature = "pbf")]
+    impl Iterator for BucketPoints {
+        type Item = io::Result<(u32, u32, f64, f64)>;
+        fn next(&mut self) -> Option<Self::Item> {
+            while self.at == self.buf.len() {
+                self.at = 0;
+                match self.parts.next_into(&mut self.buf) {
+                    Ok(true) => {}
+                    Ok(false) => return None,
+                    Err(e) => return Some(Err(e)),
+                }
+            }
+            self.at += 1;
+            Some(Ok(self.buf[self.at - 1]))
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -952,6 +1074,38 @@ pub mod join {
                 w.push(codec, x).unwrap();
             }
             w.finish().unwrap()
+        }
+
+        /// The join by buckets gives the points of the merge, in the same order, also over the ends of the parts.
+        #[cfg(feature = "pbf")]
+        #[test]
+        fn bucket_join_equals_merge() {
+            let store = super::super::temp_store();
+            let store = &*store;
+            // nodes 1 to 3000 apart by 2^25 (parts of 2^27 ids), ways of 3 to 6 nodes
+            let nodes: Vec<(i64, f64, f64)> = (1..3000i64).map(|i| (i << 25, 7.0 + i as f64 * 1e-4, 43.0 + i as f64 * 1e-5)).collect();
+            let mut reqs = Vec::new();
+            for w in 0..2500u32 {
+                for k in 0..(3 + w % 4) {
+                    reqs.push((((w as i64 * 7 + k as i64 * 13) % 2999 + 1) << 25, w, k));
+                }
+            }
+            let extra = vec![(5 << 25 | 1, 8.0, 44.0)];
+            reqs.push((5 << 25 | 1, 1, 9));
+            let mut m = Merge::new(rows(&Request, &reqs, store), extra.clone(), 1 << 10, store).unwrap();
+            let mut b = super::super::Buckets::new(NODE_SHIFT);
+            for r in &reqs {
+                b.push(store, r.0, &Request, r).unwrap();
+            }
+            let mut j = BucketJoin::new(b.finish().unwrap(), extra, store);
+            for n in &nodes {
+                m.node(n.0, n.1, n.2).unwrap();
+                j.node(n.0, n.1, n.2).unwrap();
+            }
+            let want: Vec<_> = m.finish(1 << 10, store).unwrap().unwrap().read(&Point).unwrap().map(|p| p.unwrap()).collect();
+            let got: Vec<_> = j.finish().unwrap().unwrap().map(|p| p.unwrap()).collect();
+            assert!(want.len() > 8000);
+            assert_eq!(got, want);
         }
 
         /// The merge gives the points of the join with a file of the positions; nodes out of order give None.
