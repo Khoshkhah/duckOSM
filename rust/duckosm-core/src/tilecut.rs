@@ -373,17 +373,33 @@ fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>) -> Result<(), String> {
 }
 
 /// Elements with their tiles to blobs for each tile (on the thread of the block): (tile, blobs). The elements move.
-fn by_tile(mut elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
+fn by_tile(elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    groups(elems).into_iter().map(tile_blobs).collect()
+}
+
+/// [`by_tile`] with the tiles on all threads (the compression of the blocks is the work), for a caller on one thread: the
+/// passes that decode the blocks on all threads call [`by_tile`].
+fn by_tile_par(elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    groups(elems).into_par_iter().map(tile_blobs).collect()
+}
+
+/// The elements of each tile, in the order of the tiles, each tile in the order of the ids.
+fn groups(mut elems: Vec<(u32, Elem)>) -> Vec<(u32, Vec<Elem>)> {
     elems.sort_by_key(|e| e.0); // stable: the order of the ids in each tile
-    let mut out = Vec::new();
-    let mut it = elems.into_iter().peekable();
-    while let Some(&(t, _)) = it.peek() {
-        let group: Vec<Elem> = std::iter::from_fn(|| it.next_if(|e| e.0 == t)).map(|e| e.1).collect();
-        let mut bytes = Vec::new();
-        blobs(group, &mut bytes)?;
-        out.push((t, bytes));
+    let mut groups: Vec<(u32, Vec<Elem>)> = Vec::new();
+    for (t, e) in elems {
+        match groups.last_mut() {
+            Some(g) if g.0 == t => g.1.push(e),
+            _ => groups.push((t, vec![e])),
+        }
     }
-    Ok(out)
+    groups
+}
+
+fn tile_blobs((t, group): (u32, Vec<Elem>)) -> Result<(u32, Vec<u8>), String> {
+    let mut bytes = Vec::new();
+    blobs(group, &mut bytes)?;
+    Ok((t, bytes))
 }
 
 /// The part files of the tiles in a temporary folder. The blobs of a part wait in memory until a limit, then go to the
@@ -1199,13 +1215,13 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
         // the waiting relations by their size: a few have tens of thousands of members (boundaries, long routes)
         if waiting_bytes >= WAITING {
             waiting_bytes = 0;
-            for (t, bytes) in by_tile(std::mem::take(&mut waiting))? {
+            for (t, bytes) in by_tile_par(std::mem::take(&mut waiting))? {
                 parts.add(t, "relations", bytes)?;
             }
         }
         Ok(())
     })?;
-    for (t, bytes) in by_tile(waiting)? {
+    for (t, bytes) in by_tile_par(waiting)? {
         parts.add(t, "relations", bytes)?;
     }
     let _ = std::fs::remove_file(&rels_path);
