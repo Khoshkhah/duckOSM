@@ -510,6 +510,125 @@ fn edges_of<'a>(
 }
 
 /// Each edge (or each private edge) of a mode, from its spill files, in the order of `edge_id`.
+/// H3 and the heights of one mode (duckOSM `options.h3_indexing` and `duckosm elevation`), from all the nodes and edges of the
+/// mode, before a tile keeps its own rows. In a tile, a row goes to `{name}.parquet` when the tile owns it (an edge at its source
+/// node), to `{name}.border.parquet` at a node outside the area (one copy after the union), and nowhere when another tile owns it.
+/// `dem`: the DEM over a box (a window of the raster). A tile also writes its nodes with no height (`elevation_nodata_{mode}`,
+/// for the count of the union). Gives the nodes with a height row and the nodes with no height (the whole build counts them).
+fn write_h3_heights<W: Write + Send>(
+    net: &mut NetworkFiles,
+    n: &str,
+    h3_resolution: Option<u8>,
+    dem: Option<&dyn Fn([f64; 4]) -> Result<elevation::Dem, String>>,
+    owner: Option<&union::Owner>,
+    mut file: impl FnMut(&str) -> Result<W, String>,
+) -> Result<(usize, usize), String> {
+    use duckosm_parquet as pq;
+    use duckosm_parquet::merge::{BORDER, MINE};
+    // ponytail: H3 and the heights take all edges of the mode in memory, for this part only (a tile in a build by tiles)
+    let mut edges = Vec::new();
+    each_edge(&mut net.files, false, |e| edges.push(e))?;
+    let nodes = &net.net.nodes;
+    let node_class: Vec<u8> = nodes.iter().map(|x| owner.map_or(MINE, |o| o.node(x.node_id, (x.lon, x.lat)))).collect();
+    let edge_class: Vec<u8> = edges.iter().map(|e| owner.map_or(MINE, |o| o.node(e.source, e.geometry[0]))).collect();
+    fn pick(class: &[u8], k: u8) -> impl Fn(usize) -> bool + '_ {
+        move |i| class[i] == k
+    }
+    fn rows<T: Clone>(all: &[T], keep: impl Fn(usize) -> bool) -> Vec<T> {
+        all.iter().enumerate().filter(|(i, _)| keep(*i)).map(|(_, r)| r.clone()).collect()
+    }
+    // the files of the classes: the own rows (always), and the border rows when there are some
+    let parts: &[(u8, &str)] = if owner.is_some() { &[(MINE, ""), (BORDER, ".border")] } else { &[(MINE, "")] };
+    let any = |class: &[u8], k: u8| k == MINE || class.contains(&k);
+    if let Some(res) = h3_resolution {
+        let (h3_nodes, h3_edges) = h3::index(nodes, &edges, res)?;
+        for &(k, suffix) in parts {
+            if any(&node_class, k) {
+                pq::write_h3_nodes_to(file(&format!("h3_nodes_{n}{suffix}.parquet"))?, &rows(&h3_nodes, pick(&node_class, k)))?;
+            }
+            if any(&edge_class, k) {
+                pq::write_h3_edges_to(file(&format!("h3_edges_{n}{suffix}.parquet"))?, &rows(&h3_edges, pick(&edge_class, k)))?;
+            }
+        }
+    }
+    let Some(dem) = dem else { return Ok((0, 0)) };
+    // the window of the nodes and the lines of the mode, 1 pixel more
+    let pts = nodes.iter().map(|x| (x.lon, x.lat)).chain(edges.iter().flat_map(|e| e.geometry.iter().copied()));
+    let bbox = pts.fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, (x, y)| [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)]);
+    let d = dem(bbox)?;
+    let (nz, ez, nodata) = elevation::sample_mode(&d, nodes, &edges, 0.0);
+    let node_rows: Vec<(i64, f64)> = nz.iter().map(|r| (r.node_id, r.ele)).collect();
+    let edge_rows: Vec<(i64, f64, f64, Vec<f64>)> = ez.into_iter().map(|r| (r.edge_id, r.z_from, r.z_to, r.z_vertices)).collect();
+    let no_height: Vec<bool> = nodes.iter().map(|x| d.sample(x.lon, x.lat).is_none()).collect();
+    for &(k, suffix) in parts {
+        if any(&node_class, k) {
+            pq::write_node_heights_to(file(&format!("elevation_nodes_{n}{suffix}.parquet"))?, &rows(&node_rows, pick(&node_class, k)))?;
+        }
+        if any(&edge_class, k) {
+            pq::write_edge_heights_to(file(&format!("elevation_edges_{n}{suffix}.parquet"))?, &rows(&edge_rows, pick(&edge_class, k)))?;
+        }
+        if owner.is_some() {
+            // only for the union (it counts the rows, then deletes the file); the height column is the fill value
+            let keep = |i: usize| node_class[i] == k && no_height[i];
+            pq::write_node_heights_to(file(&format!("elevation_nodata_{n}{suffix}.parquet"))?, &rows(&node_rows, keep))?;
+        }
+    }
+    Ok((nz.len(), nodata))
+}
+
+/// `elevation_metadata_main` (duckOSM's `main.elevation_metadata`): the DEM of `p`, its resolution, and the nodes with a height
+/// and with no height (of all modes). The build by tiles writes it after the union.
+pub fn write_elevation_metadata<W: Write + Send>(
+    p: &Params,
+    resolution_m: f64,
+    n_nodes: i64,
+    n_nodata: i64,
+    mut file: impl FnMut(&str) -> Result<W, String>,
+) -> Result<(), String> {
+    // the ground id: the SHA-256 of the bytes of the DEM file
+    let mut hash = Sha256::new();
+    let (name, uri) = match (&p.dem, &p.dem_bytes) {
+        (Some(path), _) => {
+            let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::io::copy(&mut f, &mut hash).map_err(|e| format!("{}: {e}", path.display()))?;
+            (
+                path.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned()),
+                std::fs::canonicalize(path).unwrap_or(path.clone()).to_string_lossy().into_owned(),
+            )
+        }
+        (None, Some((n, bytes))) => {
+            hash.update(bytes);
+            (n.clone(), n.clone())
+        }
+        (None, None) => unreachable!("a DEM comes from dem or dem_bytes"),
+    };
+    let sampled = area::iso_time(p.built_at.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_micros() as i64)
+    }));
+    duckosm_parquet::write_elevation_metadata_to(
+        file("elevation_metadata_main.parquet")?,
+        [
+            "ele",
+            &name,
+            "file",
+            &uri,
+            p.dem_product.as_deref().unwrap_or("unknown"),
+            "EPSG:4326",
+            p.dem_vertical_datum.as_deref().unwrap_or("unknown"),
+            p.dem_license.as_deref().unwrap_or("unknown"),
+            &sampled,
+            concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")),
+            &format!("{:x}", hash.finalize()),
+        ],
+        resolution_m,
+        0.0,
+        n_nodes,
+        n_nodata,
+    )
+}
+
 fn each_edge(files: &mut NetworkEdges, private: bool, mut f: impl FnMut(Edge)) -> Result<(), String> {
     let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
     if private {
@@ -1143,11 +1262,15 @@ pub fn run<W: Write + Send>(
                     (--dem-not-reference)"
             .into());
     }
-    let dem = match (&p.dem, &p.dem_bytes) {
-        (Some(path), _) => Some(elevation::Dem::open(path)?),
-        (None, Some((name, bytes))) => Some(elevation::Dem::from_reader(std::io::Cursor::new(bytes), name)?),
-        (None, None) => None,
+    // the DEM: a mode reads the window of its nodes and lines (a tile of a build by tiles: the window of the tile), not the
+    // whole raster
+    let dem_at = |bbox: [f64; 4], margin: usize| match (&p.dem, &p.dem_bytes) {
+        (Some(path), _) => elevation::Dem::open_window(path, bbox, margin),
+        (None, Some((name, bytes))) => elevation::Dem::window(std::io::Cursor::new(bytes), name, bbox, margin),
+        (None, None) => Err("no DEM".to_string()),
     };
+    // the size, the place and the resolution of the raster (the reader checks the file before the network step)
+    let dem = (p.dem.is_some() || p.dem_bytes.is_some()).then(|| dem_at([f64::MAX; 4], 0)).transpose()?;
     let (mut dem_nodes, mut dem_nodata) = (0i64, 0i64);
     let mut mode_nodes = Vec::new();
     // the edges of each mode stay in their spill files on disk; each step after the network reads them from there
@@ -1263,38 +1386,19 @@ pub fn run<W: Write + Send>(
             w.finish()?;
         }
         log.step(&format!("build {n}"));
+        if p.h3_resolution.is_some() || dem.is_some() {
+            let window = |b: [f64; 4]| dem_at(b, 1);
+            let window: Option<&dyn Fn([f64; 4]) -> Result<elevation::Dem, String>> = dem.as_ref().map(|_| &window as _);
+            let (nodes, nodata) = write_h3_heights(&mut net, n, p.h3_resolution, window, owner.as_ref(), &mut file)?;
+            dem_nodes += nodes as i64;
+            dem_nodata += nodata as i64;
+            log.step(&format!("h3 and elevation {n}"));
+        }
         let classes = write_tables_owned(&mut net, *mode, opts, owner.as_ref(), &mut file)?;
         if *mode == Mode::Driving {
             lane_classes = classes;
         }
         log.step(&format!("write geoparquet {n}"));
-        if p.h3_resolution.is_some() || dem.is_some() {
-            // ponytail: H3 and the heights take all edges of the mode in memory, for this part only
-            let mut edges = Vec::new();
-            each_edge(&mut net.files, false, |e| edges.push(e))?;
-            if let Some(res) = p.h3_resolution {
-                let (nodes, h3_edges) = h3::index(&net.net.nodes, &edges, res)?;
-                duckosm_parquet::write_h3_nodes_to(file(&format!("h3_nodes_{n}.parquet"))?, &nodes)?;
-                duckosm_parquet::write_h3_edges_to(file(&format!("h3_edges_{n}.parquet"))?, &h3_edges)?;
-                log.step(&format!("h3 {n}"));
-            }
-            if let Some(d) = &dem {
-                let (nz, ez, nodata) = elevation::sample_mode(d, &net.net.nodes, &edges, 0.0);
-                dem_nodes += nz.len() as i64;
-                dem_nodata += nodata as i64;
-                duckosm_parquet::write_node_heights_to(
-                    file(&format!("elevation_nodes_{n}.parquet"))?,
-                    &nz.iter().map(|r| (r.node_id, r.ele)).collect::<Vec<_>>(),
-                )?;
-                duckosm_parquet::write_edge_heights_to(
-                    file(&format!("elevation_edges_{n}.parquet"))?,
-                    &ez.into_iter()
-                        .map(|r| (r.edge_id, r.z_from, r.z_to, r.z_vertices))
-                        .collect::<Vec<_>>(),
-                )?;
-                log.step(&format!("elevation {n}"));
-            }
-        }
         let (edges, private_edges) = net.files.counts();
         sum.modes.push(ModeSummary {
             mode: *mode,
@@ -1343,49 +1447,9 @@ pub fn run<W: Write + Send>(
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as i64)
     });
-    if let Some(d) = &dem {
-        // the ground id: the SHA-256 of the bytes of the DEM file
-        let mut hash = Sha256::new();
-        let (name, uri) = match (&p.dem, &p.dem_bytes) {
-            (Some(path), _) => {
-                let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-                std::io::copy(&mut f, &mut hash).map_err(|e| format!("{}: {e}", path.display()))?;
-                (
-                    path.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned()),
-                    std::fs::canonicalize(path).unwrap_or(path.clone()).to_string_lossy().into_owned(),
-                )
-            }
-            (None, Some((n, bytes))) => {
-                hash.update(bytes);
-                (n.clone(), n.clone())
-            }
-            (None, None) => unreachable!("a DEM comes from dem or dem_bytes"),
-        };
-        let sampled = area::iso_time(p.built_at.unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_micros() as i64)
-        }));
-        duckosm_parquet::write_elevation_metadata_to(
-            file("elevation_metadata_main.parquet")?,
-            [
-                "ele",
-                &name,
-                "file",
-                &uri,
-                p.dem_product.as_deref().unwrap_or("unknown"),
-                "EPSG:4326",
-                p.dem_vertical_datum.as_deref().unwrap_or("unknown"),
-                p.dem_license.as_deref().unwrap_or("unknown"),
-                &sampled,
-                concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")),
-                &format!("{:x}", hash.finalize()),
-            ],
-            d.resolution_m,
-            0.0,
-            dem_nodes,
-            dem_nodata,
-        )?;
+    // a tile of a build by tiles writes neither the metadata nor the grid: the union writes them for the whole area
+    if let Some(d) = dem.as_ref().filter(|_| p.tile.is_none()) {
+        write_elevation_metadata(p, d.resolution_m, dem_nodes, dem_nodata, &mut file)?;
         log.step("elevation metadata");
         // the ground between the roads: the pixels over the box of the nodes of every mode, 3 pixels more on each side
         let (mut w, mut s, mut e, mut n) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -1393,7 +1457,7 @@ pub fn run<W: Write + Send>(
             (w, s, e, n) = (w.min(nd.lon), s.min(nd.lat), e.max(nd.lon), n.max(nd.lat));
         }
         if w <= e && s <= n {
-            let cells = d.grid(w, s, e, n, 3);
+            let cells = dem_at([w, s, e, n], 3)?.grid(w, s, e, n, 3);
             duckosm_parquet::write_elevation_grid_to(
                 file("elevation_grid_main.parquet")?,
                 &cells.iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>(),

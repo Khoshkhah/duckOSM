@@ -110,3 +110,23 @@ fn reference_dem_needs_datum_and_license() {
     let q = Params { dem_not_reference: true, ..p };
     build(&data.join("monaco_sample.osm.pbf"), &tmp.join("dem-not-reference"), &q).unwrap();
 }
+
+/// A window of the DEM (the pixels of a box only, as a tile of a build by tiles reads it) gives the same values at the
+/// points of the box and the same grid as the whole raster, also at the edges of the raster.
+#[test]
+fn a_window_equals_the_whole_raster() {
+    let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/monaco-copernicus-glo30.tif"));
+    let whole = Dem::open(path).unwrap();
+    // inside, over the west edge of the raster, and outside
+    for b in [[7.415, 43.728, 7.425, 43.735], [7.0, 43.70, 7.42, 43.75], [8.0, 44.0, 8.1, 44.1]] {
+        let part = Dem::open_window(path, b, 3).unwrap();
+        for i in 0..=20 {
+            for j in 0..=20 {
+                let (lon, lat) = (b[0] + (b[2] - b[0]) * i as f64 / 20.0, b[1] + (b[3] - b[1]) * j as f64 / 20.0);
+                assert_eq!(part.sample(lon, lat), whole.sample(lon, lat), "{lon} {lat}");
+            }
+        }
+        let cells = |d: &Dem| d.grid(b[0], b[1], b[2], b[3], 3).iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>();
+        assert_eq!(cells(&part), cells(&whole));
+    }
+}

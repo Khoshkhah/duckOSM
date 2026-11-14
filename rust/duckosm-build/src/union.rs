@@ -30,7 +30,7 @@ fn create(p: &Path) -> Result<BufWriter<File>, String> {
 }
 
 /// The tables of the tiles and the key of their rows (the key of the merge of the border rows). `{m}`: the name of the mode.
-const TABLES: [(&str, &[&str]); 16] = [
+const TABLES: [(&str, &[&str]); 21] = [
     ("edges_{m}", &["edge_id"]),
     ("private_edges_{m}", &["edge_id"]),
     ("nodes_{m}", &["node_id"]),
@@ -43,6 +43,12 @@ const TABLES: [(&str, &[&str]); 16] = [
     ("edge_id_map_{m}", &["new_edge_id", "seq", "old_edge_id"]),
     ("turn_restrictions_{m}", &["restriction_id", "via_node", "from_edge_id", "to_edge_id"]),
     ("turn_path_restrictions_{m}", &["restriction_id", "from_edge", "to_edge"]),
+    ("h3_nodes_{m}", &["node_id"]),
+    ("h3_edges_{m}", &["edge_id"]),
+    ("elevation_nodes_{m}", &["node_id"]),
+    ("elevation_edges_{m}", &["edge_id"]),
+    // the nodes with no height: only for the count of `elevation_metadata_main` (the union deletes the table)
+    ("elevation_nodata_{m}", &["node_id"]),
     ("global_junctions_main", &["node_id"]),
     ("raw_nodes", &["osm_id"]),
     ("raw_ways", &["osm_id"]),
@@ -100,8 +106,36 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
         levels(&p.modes, p.levels, out)?;
         duckosm_core::util::step("union: the levels");
     }
+    if let Some(dem) = &p.dem {
+        elevation_main(dem, p, &rows, out)?;
+        duckosm_core::util::step("union: the elevation metadata and grid");
+    }
     write_whole_area_tables(out, boundary, &p.modes, &p.options)?;
-    Ok(rows)
+    Ok(rows.into_iter().filter(|(name, _)| !name.starts_with("elevation_nodata_")).collect())
+}
+
+/// The elevation tables of the whole area after the union (as the whole build writes them): `elevation_metadata_main`, with the
+/// nodes with a height and with no height of all modes, and `elevation_grid_main`, the pixels over the box of the nodes of every
+/// mode with 3 pixels more on each side, in strips of rows ([`crate::elevation::write_grid`]).
+fn elevation_main(dem: &Path, p: &crate::Params, rows: &[(String, usize)], out: &Path) -> Result<(), String> {
+    let count = |prefix: &str| rows.iter().filter(|(n, _)| n.starts_with(prefix)).map(|(_, r)| *r as i64).sum::<i64>();
+    let (n_nodes, n_nodata) = (count("elevation_nodes_"), count("elevation_nodata_"));
+    for m in &p.modes {
+        let _ = std::fs::remove_file(out.join(format!("elevation_nodata_{}.parquet", m.name())));
+    }
+    let head = crate::elevation::Dem::open_pixels(dem, None)?;
+    crate::write_elevation_metadata(p, head.resolution_m, n_nodes, n_nodata, |name| create(&out.join(name)))?;
+    let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for m in &p.modes {
+        let path = out.join(format!("nodes_{}.parquet", m.name()));
+        if path.exists() {
+            duckosm_parquet::read::each_node(&path, |n| b = [b[0].min(n.lon), b[1].min(n.lat), b[2].max(n.lon), b[3].max(n.lat)])?;
+        }
+    }
+    if b[0] <= b[2] && b[1] <= b[3] {
+        crate::elevation::write_grid(dem, b, 3, create(&out.join("elevation_grid_main.parquet"))?)?;
+    }
+    Ok(())
 }
 
 /// The tables of the whole area after the union of the tiles (`boundary_main`, `visualization_metadata_main`,
@@ -589,14 +623,19 @@ fn drop_other_parts(dir: &Path, m: &str, keep: &FxHashSet<u32>) -> Result<(), St
     let nodes: FxHashMap<i64, u32> = read_pairs(&dir.join(format!("node_parts_{m}.bin"))).unwrap_or_default().into_iter().collect();
     // an edge goes when its part goes; a private edge (not in a part) stays
     let gone = |map: &FxHashMap<i64, u32>, id: i64| map.get(&id).is_some_and(|p| !keep.contains(p));
-    let tables: [(&str, &[&str], &FxHashMap<i64, u32>); 7] = [
+    let tables: [(&str, &[&str], &FxHashMap<i64, u32>); 12] = [
         ("edges", &["edge_id"], &edges),
+        ("h3_edges", &["edge_id"], &edges),
+        ("elevation_edges", &["edge_id"], &edges),
         ("lane_profile", &["edge_id"], &edges),
         ("edge_graph", &["from_edge", "to_edge"], &edges),
         ("turn_permission", &["from_edge", "to_edge"], &edges),
         ("turn_restrictions", &["from_edge_id", "to_edge_id"], &edges),
         ("turn_path_restrictions", &["from_edge", "to_edge"], &edges),
         ("nodes", &["node_id"], &nodes),
+        ("h3_nodes", &["node_id"], &nodes),
+        ("elevation_nodes", &["node_id"], &nodes),
+        ("elevation_nodata", &["node_id"], &nodes),
     ];
     for (name, cols, map) in tables {
         for suffix in ["", ".border"] {
