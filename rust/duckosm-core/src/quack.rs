@@ -17,11 +17,12 @@
 //! Geofabrik are.
 use crate::graph::MemberType;
 use crate::raw::{RawSink, RawTags};
+use crate::spill::Codec;
 use geo::orient::{Direction, Orient};
 use geo::algorithm::sweep::Intersections;
 use geo::algorithm::coordinate_position::CoordPos;
 use geo::algorithm::dimensions::Dimensions;
-use geo::{BoundingRect, Intersects, Line, LineString, MultiPolygon, Polygon, Relate};
+use geo::{BoundingRect, Line, LineString, MultiPolygon, Polygon, Relate};
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::float::overlay::{FloatOverlay, OverlayOptions};
@@ -382,16 +383,69 @@ fn run_overlay(subj: &Vec<Vec<[f64; 2]>>, clip: &Vec<Vec<[f64; 2]>>, rule: Overl
     snap(to_geo(&polys))
 }
 
-/// GEOS `ST_Union_Agg` of polygons: when no two of them meet, the polygons as they are; else the union.
+/// Do two of the boxes overlap (or touch)? A sweep over the boxes sorted by their left side.
+fn boxes_meet(boxes: &[Option<geo::Rect>]) -> bool {
+    let mut b: Vec<geo::Rect> = boxes.iter().flatten().copied().collect();
+    b.sort_by(|p, q| p.min().x.total_cmp(&q.min().x));
+    (0..b.len()).any(|i| {
+        b[i + 1..].iter().take_while(|q| q.min().x <= b[i].max().x).any(|q| q.min().y <= b[i].max().y && b[i].min().y <= q.max().y)
+    })
+}
+
+/// An edge of a ring of polygon `poly`, for the sweep of [`polygons_meet`].
+struct Edge {
+    line: Line,
+    poly: usize,
+}
+
+impl geo::algorithm::sweep::Cross for Edge {
+    type Scalar = f64;
+    fn line(&self) -> Line {
+        self.line
+    }
+}
+
+/// Do two of the polygons meet (an edge crosses or touches an edge of another polygon, or one polygon is in another)?
+/// The exact answer of `geo`'s `Intersects` for each pair, which compares each segment with each segment (a relation of
+/// France took 100 s); here one sweep over all edges (`geo::algorithm::sweep::Intersections`), and for the pairs whose
+/// boxes meet, one vertex of each in the other.
+fn polygons_meet(polys: &[&Polygon]) -> bool {
+    use geo::algorithm::coordinate_position::CoordinatePosition;
+    let boxes: Vec<Option<geo::Rect>> = polys.iter().map(|p| p.bounding_rect()).collect();
+    if !boxes_meet(&boxes) {
+        return false;
+    }
+    let edges: Vec<Edge> = polys
+        .iter()
+        .enumerate()
+        .flat_map(|(i, p)| {
+            std::iter::once(p.exterior()).chain(p.interiors()).flat_map(move |r| r.lines().map(move |line| Edge { line, poly: i }))
+        })
+        .collect();
+    if Intersections::from_iter(edges.iter()).any(|(a, b, _)| a.poly != b.poly) {
+        return true;
+    }
+    // no edges meet: a polygon is in another one only if all of it is, so one vertex tells
+    let inside = |i: usize, j: usize| {
+        polys[i].exterior().0.first().is_some_and(|c| polys[j].coordinate_position(c) != CoordPos::Outside)
+    };
+    (0..polys.len()).any(|i| {
+        (0..polys.len()).any(|j| {
+            i != j
+                && match (boxes[i], boxes[j]) {
+                    (Some(a), Some(b)) => a.min().x <= b.max().x && b.min().x <= a.max().x && a.min().y <= b.max().y && b.min().y <= a.max().y,
+                    _ => false,
+                }
+                && inside(i, j)
+        })
+    })
+}
+
+/// GEOS `ST_Union_Agg` of polygons: when no two of them meet ([`polygons_meet`]), the polygons as they are; else the
+/// union by i_overlay.
 fn union(parts: Vec<MultiPolygon>) -> MultiPolygon {
     let all: Vec<Polygon> = parts.into_iter().flat_map(|m| oriented(m).0).collect();
-    let boxes: Vec<_> = all.iter().map(|p| p.bounding_rect()).collect();
-    let meet = (0..all.len()).any(|i| {
-        (i + 1..all.len()).any(|j| match (boxes[i], boxes[j]) {
-            (Some(a), Some(b)) => a.intersects(&b) && all[i].intersects(&all[j]),
-            _ => false,
-        })
-    });
+    let meet = polygons_meet(&all.iter().collect::<Vec<_>>());
     if !meet {
         return MultiPolygon::new(all);
     }
@@ -425,13 +479,23 @@ fn relation_geometry(members: &[(&str, Vec<Pt>)]) -> Option<Geom> {
         parts.iter().filter(|p| p.0 == r).map(|p| polys(&ring_polygon(dedupe(&p.1)))).collect()
     };
     let (inner, outer) = (ring("inner"), ring("outer"));
+    // a polygon in another polygon has its box in the box of the other: the exact (slow) relate runs only for these
+    let inner_boxes: Vec<Option<geo::Rect>> = inner.iter().map(|ig| ig.bounding_rect()).collect();
     let pieces: Vec<MultiPolygon> = outer
         .into_iter()
         .map(|og| {
+            let ob = og.bounding_rect();
+            let in_box = |i: usize| match (inner_boxes[i], ob) {
+                (Some(a), Some(b)) => a.min().x >= b.min().x && a.min().y >= b.min().y && a.max().x <= b.max().x && a.max().y <= b.max().y,
+                _ => false,
+            };
             // the inner polygons in this outer polygon, and if each of them is away from its border
             let mut apart = true;
             let holes: Vec<&MultiPolygon> = inner
                 .iter()
+                .enumerate()
+                .filter(|(i, _)| in_box(*i))
+                .map(|(_, ig)| ig)
                 .filter(|ig| {
                     if ig.0.is_empty() || og.0.is_empty() {
                         return false;
@@ -450,13 +514,8 @@ fn relation_geometry(members: &[(&str, Vec<Pt>)]) -> Option<Geom> {
             let single = og.0.len() == 1
                 && og.0[0].interiors().is_empty()
                 && holes.iter().all(|h| h.0.len() == 1 && h.0[0].interiors().is_empty());
-            let boxes: Vec<_> = holes.iter().map(|h| h.bounding_rect()).collect();
-            let disjoint = (0..holes.len()).all(|i| {
-                (i + 1..holes.len()).all(|j| match (boxes[i], boxes[j]) {
-                    (Some(a), Some(b)) => !a.intersects(&b) || !holes[i].intersects(holes[j]),
-                    _ => true,
-                })
-            });
+            // the holes do not meet each other (else the exact difference below)
+            let disjoint = !polygons_meet(&holes.iter().flat_map(|h| h.0.iter()).collect::<Vec<_>>());
             if single && apart && disjoint {
                 let p = Polygon::new(og.0[0].exterior().clone(), holes.iter().map(|h| h.0[0].exterior().clone()).collect());
                 return MultiPolygon::new(vec![p]);
@@ -468,28 +527,16 @@ fn relation_geometry(members: &[(&str, Vec<Pt>)]) -> Option<Geom> {
     as_geom(&union(pieces))
 }
 
-/// The elements of one block, as the first step leaves them: the nodes (their rounded points), the features of the
-/// nodes, the ways and the relations of the types multipolygon and boundary.
+/// The ways and the relations of one block (pass 1): each way with 2 or more nodes, and each relation of the type
+/// multipolygon or boundary with its member ways.
 #[derive(Default)]
-struct Part {
-    node_ids: Vec<i64>,
-    node_pts: Vec<Pt>,
-    features: Vec<Feature>,
+struct WaysPart {
     ways: Vec<(i64, RawTags, Vec<i64>)>,
     relations: Vec<(i64, RawTags, Vec<(i64, String)>)>,
 }
 
-impl RawSink for Part {
-    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
-        let p = (round7(lon), round7(lat));
-        self.node_ids.push(id);
-        self.node_pts.push(p);
-        let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        let tags = clean(&tags);
-        if !tags.is_empty() {
-            self.features.push(Feature::new(format!("node/{id}"), tags, &Geom::Point(p)));
-        }
-    }
+impl RawSink for WaysPart {
+    fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
 
     fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
         let refs: Vec<i64> = refs.collect();
@@ -520,29 +567,161 @@ impl RawSink for Part {
     }
 }
 
-/// The points of the nodes, sorted by id, and the node lists of the valid ways (the ways with all their nodes),
-/// which the relations need.
+/// The nodes of one block (pass 2): each node for the join, and the features of the nodes with tags.
 #[derive(Default)]
-struct Store {
-    ids: Vec<i64>,
-    pts: Vec<Pt>,
-    way_ids: Vec<i64>,
-    way_at: Vec<usize>,
-    way_refs: Vec<i64>,
+struct NodesPart {
+    nodes: Vec<(i64, f64, f64)>,
+    features: Vec<Feature>,
 }
 
-impl Store {
-    fn point(&self, id: i64) -> Option<Pt> {
-        self.ids.binary_search(&id).ok().map(|i| self.pts[i])
+impl RawSink for NodesPart {
+    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+        self.nodes.push((id, lon, lat));
+        let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let tags = clean(&tags);
+        if !tags.is_empty() {
+            self.features.push(Feature::new(format!("node/{id}"), tags, &Geom::Point((round7(lon), round7(lat)))));
+        }
     }
-    fn points(&self, refs: &[i64]) -> Option<Vec<Pt>> {
-        refs.iter().map(|&r| self.point(r)).collect()
+    fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+    fn relation<'a>(
+        &mut self,
+        _: i64,
+        _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+        _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+    ) {
     }
-    fn way_points(&self, id: i64) -> Option<Vec<Pt>> {
-        let i = self.way_ids.binary_search(&id).ok()?;
-        let end = self.way_at.get(i + 1).copied().unwrap_or(self.way_refs.len());
-        self.points(&self.way_refs[self.way_at[i]..end])
+}
+
+fn put_u32(out: &mut Vec<u8>, n: usize) {
+    out.extend_from_slice(&(n as u32).to_le_bytes());
+}
+
+fn put_str(out: &mut Vec<u8>, s: &str) {
+    put_u32(out, s.len());
+    out.extend_from_slice(s.as_bytes());
+}
+
+fn put_tags(out: &mut Vec<u8>, tags: &RawTags) {
+    put_u32(out, tags.len());
+    for (k, v) in tags {
+        put_str(out, k);
+        put_str(out, v);
     }
+}
+
+fn take<'a>(b: &mut &'a [u8], n: usize) -> &'a [u8] {
+    let (x, rest) = b.split_at(n);
+    *b = rest;
+    x
+}
+
+fn get_u32(b: &mut &[u8]) -> u32 {
+    u32::from_le_bytes(take(b, 4).try_into().expect("4 bytes"))
+}
+
+fn get_i64(b: &mut &[u8]) -> i64 {
+    i64::from_le_bytes(take(b, 8).try_into().expect("8 bytes"))
+}
+
+fn get_str(b: &mut &[u8]) -> String {
+    let n = get_u32(b) as usize;
+    String::from_utf8_lossy(take(b, n)).into_owned()
+}
+
+fn get_tags(b: &mut &[u8]) -> RawTags {
+    (0..get_u32(b)).map(|_| (get_str(b), get_str(b))).collect()
+}
+
+/// The header of a way in the temporary file of pass 1: its id, its number of nodes and its tags (before [`clean`]).
+struct Header;
+
+impl Codec<(i64, u32, RawTags)> for Header {
+    fn put(&self, r: &(i64, u32, RawTags), out: &mut Vec<u8>) {
+        out.extend_from_slice(&r.0.to_le_bytes());
+        put_u32(out, r.1 as usize);
+        put_tags(out, &r.2);
+    }
+    fn get(&self, b: &mut &[u8]) -> (i64, u32, RawTags) {
+        (get_i64(b), get_u32(b), get_tags(b))
+    }
+}
+
+/// A way with no tags (pass 1) and its nodes: it needs its points only when it is a member of a relation, and the
+/// relations come after the ways in the file.
+struct WayRefs;
+
+impl Codec<(i64, Vec<i64>)> for WayRefs {
+    fn put(&self, r: &(i64, Vec<i64>), out: &mut Vec<u8>) {
+        out.extend_from_slice(&r.0.to_le_bytes());
+        put_u32(out, r.1.len());
+        r.1.iter().for_each(|n| out.extend_from_slice(&n.to_le_bytes()));
+    }
+    fn get(&self, b: &mut &[u8]) -> (i64, Vec<i64>) {
+        let id = get_i64(b);
+        let n = get_u32(b);
+        (id, (0..n).map(|_| get_i64(b)).collect())
+    }
+}
+
+/// A relation (pass 1): its id, its tags and the role of each member way, in the order of the members.
+struct RelHeader;
+
+impl Codec<(i64, RawTags, Vec<String>)> for RelHeader {
+    fn put(&self, r: &(i64, RawTags, Vec<String>), out: &mut Vec<u8>) {
+        out.extend_from_slice(&r.0.to_le_bytes());
+        put_tags(out, &r.1);
+        put_u32(out, r.2.len());
+        r.2.iter().for_each(|s| put_str(out, s));
+    }
+    fn get(&self, b: &mut &[u8]) -> (i64, RawTags, Vec<String>) {
+        let id = get_i64(b);
+        let tags = get_tags(b);
+        let n = get_u32(b);
+        (id, tags, (0..n).map(|_| get_str(b)).collect())
+    }
+}
+
+/// A line of points on the grid with a key: the id of a member way, or the relation and the place of the member
+/// (`relation << 32 | place`). The key comes first, so a sort of the bytes reads it with [`line_key`].
+struct KeyedLine;
+
+impl Codec<(i64, Vec<Grid>)> for KeyedLine {
+    fn put(&self, r: &(i64, Vec<Grid>), out: &mut Vec<u8>) {
+        out.extend_from_slice(&r.0.to_le_bytes());
+        put_u32(out, r.1.len());
+        for g in &r.1 {
+            out.extend_from_slice(&g[0].to_le_bytes());
+            out.extend_from_slice(&g[1].to_le_bytes());
+        }
+    }
+    fn get(&self, b: &mut &[u8]) -> (i64, Vec<Grid>) {
+        let key = get_i64(b);
+        let n = get_u32(b);
+        let pts = (0..n)
+            .map(|_| {
+                let x = i32::from_le_bytes(take(b, 4).try_into().expect("4 bytes"));
+                let y = i32::from_le_bytes(take(b, 4).try_into().expect("4 bytes"));
+                [x, y]
+            })
+            .collect();
+        (key, pts)
+    }
+}
+
+fn line_key(b: &[u8]) -> i64 {
+    i64::from_le_bytes(b[..8].try_into().expect("8 bytes"))
+}
+
+/// A point on the grid of 7 decimals, as two i32 (the lines of the member ways wait in memory for the relations).
+type Grid = [i32; 2];
+
+fn to_grid(p: Pt) -> Grid {
+    [(p.0 * 1e7).round() as i32, (p.1 * 1e7).round() as i32]
+}
+
+fn from_grid(g: &Grid) -> Pt {
+    (g[0] as f64 / 1e7, g[1] as f64 / 1e7)
 }
 
 /// The feature of a way that has all its nodes (`pts`), or None.
@@ -563,70 +742,304 @@ fn way_feature(id: i64, raw: &RawTags, pts: &[Pt]) -> Option<Feature> {
     Some(Feature::new(format!("way/{id}"), tags, &geometry))
 }
 
-/// The features table of the `.osm.pbf` file in `reader` (sorted by type and id). `emit` gets the features in parts,
-/// as they are made: the nodes and the ways while the file is read, the relations at the end. The blocks of the file
-/// are decoded in parallel, `threads` blocks at a time.
+/// The memory that each sort of the temporary files holds (the default of [`features`]).
+pub const BUDGET: usize = 512 << 20;
+
+/// The features table of a `.osm.pbf` file sorted by type and id (`open` opens it; it is read twice). Each table goes to
+/// a temporary file (`crate::spill`, OPFS in the browser) as soon as a pass makes it, and a pass reads only what it
+/// needs, so the memory is one bucket, one batch and the threads' work, for any size of area (France: a footprint of
+/// 3.5 GB):
+///
+/// 1. Pass 1 reads the ways and the relations. A way with tags (and 2 or more nodes) gets a number; its header goes to
+///    a file, and its nodes go into buckets by node id (`spill::Buckets`, 2^27 ids each) as requests (node, way, place).
+///    A way with no tags goes to a file of its own: it needs its points only as a member of a relation. A relation of
+///    the type multipolygon or boundary goes to a file of headers, and each member way to a file of (way, relation,
+///    place). After the pass, the member ways with no tags get numbers and requests too. In memory: the sorted ids of
+///    the member ways (an index).
+/// 2. Pass 2 reads the nodes in the order of their ids. A node with tags is a feature. The buckets of requests are read
+///    one at a time in the order of the ids, each sorted in memory on all threads, and each request gets its point; the
+///    points go into buckets by way number.
+/// 3. A reader thread reads the buckets of points (each sorted by way and place) with the headers: a way with all its
+///    points and with tags is a feature, and the line of a member way goes to a file.
+/// 4. The members sorted by way meet the lines sorted by way; the lines, sorted by relation and place, meet the
+///    relation headers. The relations with all their lines go to all threads one at a time, and each row goes to `emit`.
+///
+/// `emit` gets the features in parts: the nodes, the ways, then the relations. Each pass calls [`crate::util::step`],
+/// and a relation that takes more than 2 s is written to the error output.
 pub fn features<R: Read + Send>(
-    reader: R,
-    threads: usize,
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    let threads = threads.max(1);
-    let mut store = Store::default();
-    let mut relations = Vec::new();
+    use crate::spill::join::{Point, Request};
+    use crate::spill::{sort_bytes, temp_store, Buckets, SortedParts, Writer};
+    let io = |e: std::io::Error| format!("quack: a temporary file: {e}");
+    let store = temp_store();
+    let store = &*store;
     let mut counts = Counts::default();
-    let mut sorted = true;
-    crate::pbf::stream_raw(
-        reader,
-        |_, round| round.len() < 2 * threads,
-        Part::default,
-        |p: Part| Ok(p),
-        |part: Part, _| {
-            if let (Some(&last), Some(&first)) = (store.ids.last(), part.node_ids.first()) {
-                sorted &= last < first;
-            }
-            if !part.ways.is_empty() && !sorted {
-                return Err("quack: the .osm.pbf file is not sorted by type and id (nodes first)".into());
-            }
-            store.ids.extend_from_slice(&part.node_ids);
-            store.pts.extend_from_slice(&part.node_pts);
-            counts.nodes += part.features.len();
-            emit(part.features)?;
-            let made: Vec<(Option<Vec<i64>>, Option<Feature>)> = part
-                .ways
-                .par_iter()
-                .map(|(id, tags, refs)| match store.points(refs) {
-                    Some(pts) => (Some(refs.clone()), way_feature(*id, tags, &pts)),
-                    None => (None, None),
-                })
-                .collect();
-            let mut out = Vec::new();
-            for ((id, _, _), (refs, f)) in part.ways.iter().zip(made) {
-                if let Some(refs) = refs {
-                    store.way_ids.push(*id);
-                    store.way_at.push(store.way_refs.len());
-                    store.way_refs.extend(refs);
+    // pass 1: the ways and the relations. The requests go into buckets by node id (2^27 ids each: France about 100).
+    let mut headers = Writer::new(store).map_err(io)?;
+    let mut requests = Buckets::new(27);
+    let mut untagged = Writer::new(store).map_err(io)?;
+    let mut rel_headers = Writer::new(store).map_err(io)?;
+    let mut rel_members = Writer::new(store).map_err(io)?;
+    let mut member_ids: Vec<i64> = Vec::new();
+    let (mut ways, mut rels) = (0u32, 0u32);
+    let mut way = |id: i64, refs: &[i64], tags: RawTags, headers: &mut Writer, requests: &mut Buckets| -> Result<(), String> {
+        for (k, &n) in refs.iter().enumerate() {
+            requests.push(store, n, &Request, &(n, ways, k as u32)).map_err(io)?;
+        }
+        headers.push(&Header, &(id, refs.len() as u32, tags)).map_err(io)?;
+        ways = ways.checked_add(1).ok_or("quack: more than 4 294 967 295 ways")?;
+        Ok(())
+    };
+    crate::cutstream::each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut part = WaysPart::default();
+            crate::pbfraw::decode_block(b, [false, true, true], buf, &mut part)?;
+            Ok(part)
+        },
+        |part, _| {
+            for (id, tags, refs) in part.ways {
+                if tags.is_empty() {
+                    untagged.push(&WayRefs, &(id, refs)).map_err(io)?;
+                } else {
+                    way(id, &refs, tags, &mut headers, &mut requests)?;
                 }
-                out.extend(f);
             }
-            counts.ways += out.len();
-            emit(out)?;
-            relations.extend(part.relations);
-            Ok(())
+            for (id, tags, members) in part.relations {
+                for (place, (w, _)) in members.iter().enumerate() {
+                    rel_members.push(&Request, &(*w, rels, place as u32)).map_err(io)?;
+                    member_ids.push(*w);
+                }
+                rel_headers.push(&RelHeader, &(id, tags, members.into_iter().map(|m| m.1).collect())).map_err(io)?;
+                rels = rels.checked_add(1).ok_or("quack: more than 4 294 967 295 relations")?;
+            }
+            Ok(true)
         },
     )?;
-    let made: Vec<Feature> = relations
-        .par_iter()
-        .filter_map(|(id, tags, members)| {
-            let lines: Option<Vec<(&str, Vec<Pt>)>> =
-                members.iter().map(|(w, role)| Some((role.as_str(), store.way_points(*w)?))).collect();
-            let geometry = relation_geometry(&lines?)?;
-            let tags = clean(tags);
-            (!tags.is_empty()).then(|| Feature::new(format!("relation/{id}"), tags, &geometry))
-        })
-        .collect();
-    counts.relations = made.len();
-    emit(made)?;
+    member_ids.sort_unstable();
+    member_ids.dedup();
+    for w in untagged.finish().map_err(io)?.read(&WayRefs).map_err(io)? {
+        let (id, refs) = w.map_err(io)?;
+        if member_ids.binary_search(&id).is_ok() {
+            way(id, &refs, Vec::new(), &mut headers, &mut requests)?;
+        }
+    }
+    let ways_count = ways as u64;
+    crate::util::step("quack 1: the ways and the relations");
+    // pass 2: the nodes in the order of their ids meet the requests, one bucket at a time (sorted in memory). The points
+    // go into buckets by way number, about 64 of them.
+    let way_shift = (64 - (ways_count / 64).max(1).leading_zeros()).max(10);
+    let mut points = Buckets::new(way_shift);
+    let mut parts = SortedParts::new(requests.finish().map_err(io)?, &Request, |r: &(i64, u32, u32)| r.0);
+    let (mut part, mut at): (Vec<(i64, u32, u32)>, usize) = (Vec::new(), 0);
+    let (mut last, mut seen, mut more) = (i64::MIN, false, true);
+    crate::cutstream::each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut part = NodesPart::default();
+            crate::pbfraw::decode_block(b, [true, false, false], buf, &mut part)?;
+            Ok(part)
+        },
+        |nodes, _| {
+            if nodes.nodes.is_empty() {
+                // the nodes of a sorted file come first: a block with no nodes after them ends the pass
+                return Ok(!seen);
+            }
+            seen = true;
+            for &(id, lon, lat) in &nodes.nodes {
+                if id <= last {
+                    return Err("quack: the nodes of the .osm.pbf file are not in the order of their ids (the file must be sorted by type and id)".into());
+                }
+                last = id;
+                // the requests before this node have no node in the file
+                loop {
+                    while at < part.len() && part[at].0 < id {
+                        at += 1;
+                    }
+                    if at < part.len() || !more {
+                        break;
+                    }
+                    more = parts.next_into(&mut part).map_err(io)?;
+                    at = 0;
+                }
+                while at < part.len() && part[at].0 == id {
+                    let (_, w, place) = part[at];
+                    points.push(store, w as i64, &Point, &(w, place, lon, lat)).map_err(io)?;
+                    at += 1;
+                }
+            }
+            counts.nodes += nodes.features.len();
+            emit(nodes.features)?;
+            Ok(true)
+        },
+    )?;
+    drop((part, parts));
+    let points = points.finish().map_err(io)?;
+    crate::util::step("quack 2: the nodes and the points");
+    // pass 3: the ways. A reader thread joins the headers with their points into batches; this thread makes the features of
+    // each batch on all threads and writes them, and writes the lines of the member ways to a file.
+    type WayBatch = Vec<(i64, RawTags, Vec<Pt>)>;
+    let mut member_lines = Writer::new(store).map_err(io)?;
+    let headers = headers.finish().map_err(io)?;
+    std::thread::scope(|scope| -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<WayBatch, String>>(4);
+        scope.spawn(move || {
+            let run = || -> Result<(), String> {
+                // the points of each bucket, sorted, one bucket in memory at a time (no copy)
+                let mut parts = SortedParts::new(points, &Point, |p: &(u32, u32, f64, f64)| (p.0, p.1));
+                let (mut part, mut at): (Vec<(u32, u32, f64, f64)>, usize) = (Vec::new(), 0);
+                let mut points = std::iter::from_fn(move || loop {
+                    if at < part.len() {
+                        at += 1;
+                        return Some(Ok(part[at - 1]));
+                    }
+                    match parts.next_into(&mut part) {
+                        Ok(true) => at = 0,
+                        Ok(false) => return None,
+                        Err(e) => return Some(Err(e)),
+                    }
+                })
+                .peekable();
+                let mut batch: WayBatch = Vec::new();
+                for (number, h) in headers.read(&Header).map_err(io)?.enumerate() {
+                    let (id, refs, tags) = h.map_err(io)?;
+                    let mut pts = Vec::with_capacity(refs as usize);
+                    while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == number as u32)) {
+                        let p = p.map_err(io)?;
+                        pts.push((round7(p.2), round7(p.3)));
+                    }
+                    if let Some(Err(_)) = points.peek() {
+                        return Err(io(points.next().expect("peeked").expect_err("an error")));
+                    }
+                    // a way with a node that is not in the file is not a feature, and not a member of a relation
+                    if pts.len() == refs as usize {
+                        batch.push((id, tags, pts));
+                    }
+                    if batch.len() >= 50_000 {
+                        tx.send(Ok(std::mem::take(&mut batch))).map_err(|_| "quack: pass 3 stopped".to_string())?;
+                    }
+                }
+                tx.send(Ok(batch)).map_err(|_| "quack: pass 3 stopped".to_string())
+            };
+            if let Err(e) = run() {
+                let _ = tx.send(Err(e));
+            }
+        });
+        for batch in rx {
+            let batch = batch?;
+            for (id, _, pts) in &batch {
+                if member_ids.binary_search(id).is_ok() {
+                    member_lines.push(&KeyedLine, &(*id, pts.iter().map(|&p| to_grid(p)).collect())).map_err(io)?;
+                }
+            }
+            // the member ways with no tags are not features
+            let made: Vec<Feature> = batch
+                .par_iter()
+                .filter(|w| !w.1.is_empty())
+                .filter_map(|(id, tags, pts)| way_feature(*id, tags, pts))
+                .collect();
+            counts.ways += made.len();
+            emit(made)?;
+        }
+        Ok(())
+    })?;
+    drop(member_ids);
+    crate::util::step("quack 3: the ways");
+    // pass 4: the relations. The members and the lines, each sorted by way, give the lines of each relation; sorted by
+    // relation and place, they meet the relation headers.
+    let members = sort_bytes(rel_members.finish().map_err(io)?, crate::spill::join::node_id, budget, store).map_err(io)?;
+    let lines = sort_bytes(member_lines.finish().map_err(io)?, line_key, budget, store).map_err(io)?;
+    let mut rel_lines = Writer::new(store).map_err(io)?;
+    {
+        let mut lines = lines.read(&KeyedLine).map_err(io)?.peekable();
+        for m in members.read(&Request).map_err(io)? {
+            let (w, r, place) = m.map_err(io)?;
+            while lines.next_if(|l| l.as_ref().is_ok_and(|l| l.0 < w)).is_some() {}
+            match lines.peek() {
+                Some(Ok(l)) if l.0 == w => {
+                    rel_lines.push(&KeyedLine, &(((r as i64) << 32) | place as i64, l.1.clone())).map_err(io)?;
+                }
+                Some(Err(_)) => return Err(io(lines.next().expect("peeked").expect_err("an error"))),
+                _ => {}
+            }
+        }
+    }
+    let rel_lines = sort_bytes(rel_lines.finish().map_err(io)?, line_key, budget, store).map_err(io)?;
+    crate::util::step("quack 4a: the lines of the relations");
+    // the relations with all their lines, streamed into all threads (a slow relation delays only itself); this thread
+    // writes each part of rows that the threads make
+    type Rel = (i64, RawTags, Vec<(String, Vec<Pt>)>);
+    std::thread::scope(|scope| -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Option<Feature>, String>>(4096);
+        scope.spawn(move || {
+            let read = || -> Result<(), String> {
+                let mut lines = rel_lines.read(&KeyedLine).map_err(io)?.peekable();
+                let headers = rel_headers.finish().map_err(io)?;
+                let rels = headers.read(&RelHeader).map_err(io)?.enumerate().map(|(r, h)| -> Result<Option<Rel>, String> {
+                    let (id, tags, roles) = h.map_err(io)?;
+                    let mut got: Vec<(String, Vec<Pt>)> = Vec::with_capacity(roles.len());
+                    while let Some(l) = lines.next_if(|l| l.as_ref().is_ok_and(|l| (l.0 >> 32) as usize == r)) {
+                        let (key, pts) = l.map_err(io)?;
+                        got.push((roles[(key & 0xffff_ffff) as usize].clone(), pts.iter().map(from_grid).collect()));
+                    }
+                    if let Some(Err(_)) = lines.peek() {
+                        return Err(io(lines.next().expect("peeked").expect_err("an error")));
+                    }
+                    // a relation with a member way that is not a valid way is not a feature
+                    Ok((got.len() == roles.len()).then_some((id, tags, got)))
+                });
+                rels.par_bridge().try_for_each_with(tx.clone(), |tx, rel| {
+                    let made = rel.map(|rel| {
+                        rel.and_then(|(id, tags, members)| {
+                            let t = std::time::Instant::now();
+                            let m: Vec<(&str, Vec<Pt>)> = members.iter().map(|(role, l)| (role.as_str(), l.clone())).collect();
+                            let geometry = relation_geometry(&m);
+                            let secs = t.elapsed().as_secs_f64();
+                            if secs > 2.0 {
+                                eprintln!("quack: relation {id} ({} members) took {secs:.1} s", m.len());
+                            }
+                            let tags = clean(&tags);
+                            (geometry.is_some() && !tags.is_empty()).then(|| Feature::new(format!("relation/{id}"), tags, &geometry.unwrap()))
+                        })
+                    });
+                    // a full channel: this thread helps with the other parallel work (the writer makes its batches
+                    // on these threads too) and tries again; a plain send would wait for ever when all threads wait
+                    let mut item = made;
+                    loop {
+                        match tx.try_send(item) {
+                            Ok(()) => return Ok(()),
+                            Err(std::sync::mpsc::TrySendError::Full(back)) => {
+                                item = back;
+                                if rayon::yield_now() != Some(rayon::Yield::Executed) {
+                                    std::thread::sleep(std::time::Duration::from_micros(200));
+                                }
+                            }
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return Err("quack: pass 4 stopped".to_string()),
+                        }
+                    }
+                })
+            };
+            if let Err(e) = read() {
+                let _ = tx.send(Err(e));
+            }
+        });
+        let mut part = Vec::new();
+        for f in rx {
+            if let Some(f) = f? {
+                part.push(f);
+                if part.len() >= 10_000 {
+                    counts.relations += part.len();
+                    emit(std::mem::take(&mut part))?;
+                }
+            }
+        }
+        counts.relations += part.len();
+        emit(part)
+    })?;
+    crate::util::step("quack 4b: the relations");
     Ok(counts)
 }
 

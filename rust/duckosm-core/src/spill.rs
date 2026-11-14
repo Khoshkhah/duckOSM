@@ -663,6 +663,97 @@ mod tests {
 /// A join on disk of the nodes of ways with the coordinates of the nodes (docs/concepts/memory-by-step.md): the nodes of
 /// the ways and the coordinates, both sorted by node id, give the points of each way in the order of the ways. The memory
 /// is that of the sorts. The rows are fixed bytes with the sort key at the start.
+/// Rows partitioned by the range of an `i64` key (`key >> shift`) into temporary files: a large table is then sorted one
+/// small part at a time in memory, on all threads, instead of by an external merge on one thread. Each row is written
+/// once and read once. Write with [`Buckets::push`]; [`Buckets::finish`] gives the parts in the order of their ranges,
+/// and [`SortedParts`] reads them back, each part sorted.
+#[cfg(feature = "pbf")]
+pub struct Buckets {
+    shift: u32,
+    parts: std::collections::BTreeMap<i64, Writer>,
+}
+
+#[cfg(feature = "pbf")]
+impl Buckets {
+    pub fn new(shift: u32) -> Self {
+        Buckets { shift, parts: Default::default() }
+    }
+
+    pub fn push<T>(&mut self, store: &dyn Store, key: i64, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
+        let part = match self.parts.entry(key >> self.shift) {
+            std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::new(store)?),
+        };
+        part.push(codec, row)
+    }
+
+    /// The parts, in the order of their key ranges.
+    pub fn finish(self) -> io::Result<Vec<Rows>> {
+        self.parts.into_values().map(Writer::finish).collect()
+    }
+}
+
+/// The rows of the parts of [`Buckets::finish`], one part at a time, each sorted by `key` on all threads (not stable).
+/// [`SortedParts::next_into`] fills a buffer of the caller: the buffer is used again for each part, so the memory is one
+/// block of the largest part (a new vector for each part left the freed blocks of each size in the cache of the
+/// allocator: France, a footprint of 11 GB for 1.4 GB of rows). The file of a part is gone when it is read.
+#[cfg(feature = "pbf")]
+pub struct SortedParts<'c, C, F> {
+    parts: std::vec::IntoIter<Rows>,
+    codec: &'c C,
+    key: F,
+}
+
+#[cfg(feature = "pbf")]
+impl<'c, C, F> SortedParts<'c, C, F> {
+    pub fn new(parts: Vec<Rows>, codec: &'c C, key: F) -> Self {
+        SortedParts { parts: parts.into_iter(), codec, key }
+    }
+
+    /// The next part, sorted, in `buf` (emptied first); false when there is no more part.
+    pub fn next_into<T: Send, K: Ord + Send>(&mut self, buf: &mut Vec<T>) -> io::Result<bool>
+    where
+        C: Codec<T>,
+        F: Fn(&T) -> K + Sync,
+    {
+        use rayon::slice::ParallelSliceMut;
+        let Some(rows) = self.parts.next() else {
+            return Ok(false);
+        };
+        buf.clear();
+        buf.reserve(rows.len);
+        for r in rows.read(self.codec)? {
+            buf.push(r?);
+        }
+        let key = &self.key;
+        buf.par_sort_unstable_by(|a, b| key(a).cmp(&key(b)));
+        Ok(true)
+    }
+}
+
+#[cfg(all(test, feature = "pbf"))]
+mod bucket_tests {
+    use super::*;
+
+    #[test]
+    fn buckets_give_all_rows_in_key_order() {
+        let store = temp_store();
+        let mut b = Buckets::new(4);
+        let keys: Vec<i64> = (0..1000).map(|i| (i * 7919) % 1000 - 300).collect();
+        for &k in &keys {
+            b.push(&*store, k, &join::Request, &(k, 0, 0)).unwrap();
+        }
+        let mut parts = SortedParts::new(b.finish().unwrap(), &join::Request, |r: &(i64, u32, u32)| r.0);
+        let (mut buf, mut got) = (Vec::new(), Vec::new());
+        while parts.next_into(&mut buf).unwrap() {
+            got.extend(buf.iter().map(|r| r.0));
+        }
+        let mut want = keys.clone();
+        want.sort();
+        assert_eq!(got, want);
+    }
+}
+
 pub mod join {
     use super::{sort_bytes, Codec, Rows, Store, Writer};
     use std::io;
