@@ -192,13 +192,18 @@ struct TilesCli {
     /// The zoom of the tiles (standard z/x/y map tiles; zoom 10 is about 27 km wide in France).
     #[arg(long, default_value_t = 10)]
     zoom: u8,
-    /// The number of tiles that build at the same time (default: the cores divided by 2). More tiles at a time use more
-    /// memory. France on 12 cores: 6 tiles of 2 threads was the fastest (docs/design/build_by_tiles.md).
+    /// The memory for the tile builds at the same time, for example 4G or 2500M. A tile starts only when the estimates of
+    /// the running tiles and its own stay below it. More memory does not make the build faster (France: 2 GB and 8 GB took
+    /// the same time, docs/design/build_by_tiles.md).
+    #[arg(long, value_name = "SIZE", default_value = "2G")]
+    memory: String,
+    /// The most tiles that build at the same time (default: the cores divided by --tile-threads).
     #[arg(long)]
     jobs: Option<usize>,
-    /// The threads of each tile build (default: the cores divided by the jobs, at least 1).
-    #[arg(long)]
-    tile_threads: Option<usize>,
+    /// The threads of each tile build. France on 12 cores: 6 tiles of 2 threads was the fastest
+    /// (docs/design/build_by_tiles.md).
+    #[arg(long, default_value_t = 2)]
+    tile_threads: usize,
     /// Keep the tile files and the tables of each tile (in <out>/tiles).
     #[arg(long)]
     keep_tiles: bool,
@@ -260,50 +265,48 @@ fn tiles(args: &[String]) -> Result<(), String> {
     list.sort_by_key(|t| (std::cmp::Reverse(t.y), t.x));
     eprintln!("tiles: cut to {} tiles in {:.1} s", list.len(), t0.elapsed().as_secs_f64());
 
-    // the tile builds: `jobs` threads, each runs one tile build after the other as a process of this program, with
-    // `threads` threads of its own (the jobs share the cores)
+    // the tile builds, each in a process of this program (docs/design/build_by_tiles.md, "The scheduler")
     let t1 = std::time::Instant::now();
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let jobs = cli.jobs.unwrap_or(cores / 2).max(1);
-    let threads = cli.tile_threads.unwrap_or(cores / jobs).max(1).to_string();
-    let queue = std::sync::Mutex::new(list.clone());
+    let threads = cli.tile_threads.max(1);
+    let jobs = cli.jobs.unwrap_or(cores / threads).max(1);
+    let limit = parse_size(&cli.memory)?;
+    let build = |t: &duckosm_build::Tile| -> Result<std::process::Child, String> {
+        let name = format!("{}_{}_{}", t.z, t.x, t.y);
+        let log = std::fs::File::create(dir.join(format!("{name}.log"))).map_err(|e| e.to_string())?;
+        std::process::Command::new(&exe)
+            .arg(dir.join(format!("{name}.osm.pbf")))
+            .args(["--boundary".as_ref(), cli.boundary.as_os_str()])
+            .args(["--tile", &t.name(), "--format", "geoparquet", "--levels", "none"])
+            .args(global)
+            .arg("--outside-junctions")
+            .arg(dir.join(format!("{name}.junctions")))
+            .arg("-o")
+            .arg(dir.join(&name))
+            .args(&opts)
+            .env("RAYON_NUM_THREADS", threads.to_string())
+            .stdout(log.try_clone().map_err(|e| e.to_string())?)
+            .stderr(log)
+            .spawn()
+            .map_err(|e| e.to_string())
+    };
     let failed = std::sync::Mutex::new(Vec::new());
-    std::thread::scope(|sc| {
-        for _ in 0..jobs {
-            sc.spawn(|| loop {
-                let Some(t) = queue.lock().unwrap().pop() else { break };
-                let name = format!("{}_{}_{}", t.z, t.x, t.y);
-                let log = std::fs::File::create(dir.join(format!("{name}.log")));
-                let ok = log.is_ok_and(|log| {
-                    let err = log.try_clone();
-                    err.is_ok_and(|err| {
-                        std::process::Command::new(&exe)
-                            .arg(dir.join(format!("{name}.osm.pbf")))
-                            .args(["--boundary".as_ref(), cli.boundary.as_os_str()])
-                            .args(["--tile", &t.name(), "--format", "geoparquet", "--levels", "none"])
-                            .args(global)
-                            .arg("--outside-junctions")
-                            .arg(dir.join(format!("{name}.junctions")))
-                            .arg("-o")
-                            .arg(dir.join(&name))
-                            .args(&opts)
-                            .env("RAYON_NUM_THREADS", &threads)
-                            .stdout(log)
-                            .stderr(err)
-                            .status()
-                            .is_ok_and(|s| s.success())
-                    })
-                });
-                if !ok {
-                    failed.lock().unwrap().push(name);
-                } else if !cli.keep_tiles {
-                    // the tile file and its junctions are read: they go at once (the disk keeps less at one time)
-                    let _ = std::fs::remove_file(dir.join(format!("{name}.osm.pbf")));
-                    let _ = std::fs::remove_file(dir.join(format!("{name}.junctions")));
-                }
-            });
+    let (peak, ratio) = schedule(&list, &dir, limit, jobs, &build, |t, ok| {
+        let name = format!("{}_{}_{}", t.z, t.x, t.y);
+        if !ok {
+            failed.lock().unwrap().push(name);
+        } else if !cli.keep_tiles {
+            // the tile file and its junctions are read: they go at once (the disk keeps less at one time)
+            let _ = std::fs::remove_file(dir.join(format!("{name}.osm.pbf")));
+            let _ = std::fs::remove_file(dir.join(format!("{name}.junctions")));
         }
-    });
+    })?;
+    eprintln!(
+        "tiles: memory {} MB, at most {jobs} tiles of {threads} threads; the largest tile process {} MB; memory of a tile: {:.1} times its file and more",
+        limit >> 20,
+        peak >> 20,
+        ratio
+    );
     let failed = failed.into_inner().unwrap();
     if !failed.is_empty() {
         return Err(format!("the build of {} tiles failed (see {}/<tile>.log): {}", failed.len(), dir.display(), failed.join(", ")));
@@ -322,6 +325,120 @@ fn tiles(args: &[String]) -> Result<(), String> {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     Ok(())
+}
+
+/// A size: a number of bytes, or with K, M, G (1024 based), for example 4G.
+fn parse_size(s: &str) -> Result<u64, String> {
+    let t = s.trim().to_ascii_uppercase();
+    let (n, m) = match t.chars().last() {
+        Some('K') => (&t[..t.len() - 1], 1u64 << 10),
+        Some('M') => (&t[..t.len() - 1], 1 << 20),
+        Some('G') => (&t[..t.len() - 1], 1 << 30),
+        _ => (&t[..], 1),
+    };
+    n.trim().parse::<f64>().map(|v| (v * m as f64) as u64).map_err(|_| format!("{s}: not a size (for example 4G)"))
+}
+
+/// Wait for a child process: whether it ended well, and its peak memory in bytes (0 when it is not known).
+fn wait_peak(mut child: std::process::Child) -> (bool, u64) {
+    #[cfg(unix)]
+    {
+        let mut status = 0;
+        // SAFETY: rusage is plain data; wait4 waits for this child only (it is not waited for anywhere else)
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        let r = unsafe { libc::wait4(child.id() as libc::pid_t, &mut status, 0, &mut usage) };
+        if r > 0 {
+            let ok = libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
+            // ru_maxrss: bytes on macOS, kilobytes on Linux
+            let unit = if cfg!(target_os = "macos") { 1 } else { 1024 };
+            return (ok, usage.ru_maxrss as u64 * unit);
+        }
+    }
+    (child.wait().is_ok_and(|s| s.success()), 0)
+}
+
+/// Run the builds of `tiles` (`start` starts one) at most `jobs` at a time, largest tile file first, while the estimates of
+/// the running tiles stay below `limit` bytes; a tile that is larger than the limit runs alone. The estimate of a tile is
+/// a line of its file size, base + factor × size, plus a margin: the line fits the peaks of the finished tiles (least
+/// squares), and the margin is the largest peak above the line. Before 8 tiles have ended: 100 MB + 12 × size (France,
+/// driving: 38 MB + 10.5 × size, 70 MB margin; Kentucky with raw.*: 73 MB + 22.7 × size). `done` gets each tile when it
+/// ends. Returns the largest peak and the factor of the line.
+fn schedule(
+    tiles: &[duckosm_build::Tile],
+    dir: &std::path::Path,
+    limit: u64,
+    jobs: usize,
+    start: &(dyn Fn(&duckosm_build::Tile) -> Result<std::process::Child, String> + Sync),
+    mut done: impl FnMut(&duckosm_build::Tile, bool),
+) -> Result<(u64, f64), String> {
+    let size = |t: &duckosm_build::Tile| {
+        std::fs::metadata(dir.join(format!("{}_{}_{}.osm.pbf", t.z, t.x, t.y))).map_or(0, |m| m.len())
+    };
+    let mut all: Vec<(duckosm_build::Tile, u64)> = tiles.iter().map(|t| (*t, size(t))).collect();
+    all.sort_by_key(|q| std::cmp::Reverse(q.1)); // the largest first
+    // the line (base, factor) and the margin, in bytes; the finished tiles (size, peak)
+    let (mut line, mut peak) = ((100.0 * 1048576.0, 12.0, 0.0), 0u64);
+    let mut seen: Vec<(f64, f64)> = Vec::new();
+    let estimate = |s: u64, l: (f64, f64, f64)| (l.0 + l.1 * s as f64 + l.2).max(0.0) as u64;
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, bool, u64)>();
+    let mut running: Vec<(usize, u64)> = Vec::new(); // (place in `all`, estimate)
+    let mut next: Vec<usize> = (0..all.len()).collect();
+    let mut log = String::new();
+    std::thread::scope(|sc| -> Result<(), String> {
+        loop {
+            // start the largest tiles that fit
+            while running.len() < jobs {
+                let used: u64 = running.iter().map(|r| r.1).sum();
+                let fit = next.iter().position(|&k| running.is_empty() || used + estimate(all[k].1, line) <= limit);
+                let Some(i) = fit else { break };
+                let k = next.remove(i);
+                let child = start(&all[k].0)?;
+                running.push((k, estimate(all[k].1, line)));
+                let tx = tx.clone();
+                sc.spawn(move || {
+                    let (ok, p) = wait_peak(child);
+                    let _ = tx.send((k, ok, p));
+                });
+            }
+            if running.is_empty() {
+                break;
+            }
+            let (k, ok, p) = rx.recv().map_err(|e| e.to_string())?;
+            running.retain(|r| r.0 != k);
+            peak = peak.max(p);
+            if p > 0 {
+                seen.push((all[k].1 as f64, p as f64));
+                if let Some(l) = fit_line(&seen) {
+                    line = l;
+                }
+            }
+            log += &format!("{} {} {} {}\n", all[k].0.name(), all[k].1, p, ok);
+            done(&all[k].0, ok);
+        }
+        Ok(())
+    })?;
+    // each tile: its name, file size, peak memory (bytes) and whether it ended well; next to the folder of the tiles, which goes
+    let _ = std::fs::write(dir.with_file_name("tiles.log"), log);
+    Ok((peak, line.1))
+}
+
+/// The line base + factor × size through the points (size, peak) by least squares, and the largest peak above it; none
+/// before 8 points, or when all sizes are equal.
+fn fit_line(pts: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
+    let n = pts.len() as f64;
+    if pts.len() < 8 {
+        return None;
+    }
+    let (sx, sy) = pts.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
+    let (sxx, sxy) = pts.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0 * p.0, a.1 + p.0 * p.1));
+    let d = n * sxx - sx * sx;
+    if d <= 0.0 {
+        return None;
+    }
+    let factor = ((n * sxy - sx * sy) / d).max(0.0);
+    let base = (sy - factor * sx) / n;
+    let margin = pts.iter().map(|p| p.1 - (base + factor * p.0)).fold(0.0, f64::max);
+    Some((base, factor, margin))
 }
 
 /// duckosm-rust edit: a page on 127.0.0.1 that edits the OSM data of a database (docs/guides/edit-osm-data.md, "Edit on your computer").
@@ -585,4 +702,22 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
         p.tile = Some(duckosm_build::Tile { z: z as u8, x, y });
     }
     Ok((pbf, out, p))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_line_of_the_tiles_and_the_sizes() {
+        // points on 40 + 10 x, one of them 7 above the line
+        let mut pts: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, 40.0 + 10.0 * i as f64)).collect();
+        pts[3].1 += 7.0;
+        let (base, factor, margin) = fit_line(&pts).unwrap();
+        assert!((factor - 10.0).abs() < 0.5 && (base - 40.0).abs() < 2.0 && margin >= 6.0, "{base} {factor} {margin}");
+        assert_eq!(fit_line(&pts[..7]), None);
+        assert_eq!(parse_size("4G").unwrap(), 4 << 30);
+        assert_eq!(parse_size("2500m").unwrap(), 2500 << 20);
+        assert!(parse_size("lots").is_err());
+    }
 }

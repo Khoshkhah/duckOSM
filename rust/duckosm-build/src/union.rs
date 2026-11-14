@@ -90,29 +90,198 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
 }
 
 /// The tables of the whole area after the union of the tiles (`boundary_main`, `visualization_metadata_main`,
-/// `transfers_mm`), from the boundary of the area (GeoJSON text) and the nodes of the union in `out`.
+/// `transfers_mm`), from the boundary of the area (GeoJSON text) and the nodes of the union in `out`. The nodes stay on disk:
+/// the point of the time zone comes from passes over the nodes file, and the transfers from a sort on disk.
 pub fn write_whole_area_tables(out: &Path, boundary: &str, modes: &[Mode], opts: &Options) -> Result<(), String> {
-    let mut nodes = Vec::new();
-    for &m in modes {
-        nodes.push((m, duckosm_parquet::read::read_nodes(&out.join(format!("nodes_{}.parquet", m.name())))?));
-    }
-    let nodes_box = nodes.iter().flat_map(|(_, ns)| ns).fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |[w, s, e, n], p| {
-        [w.min(p.lon), s.min(p.lat), e.max(p.lon), n.max(p.lat)]
-    });
-    // global_junctions_main is a table of the tiles (the union merges it)
-    let opts = Options { global_junctions: false, ..opts.clone() };
+    let nodes_of = |m: Mode| out.join(format!("nodes_{}.parquet", m.name()));
+    let lookup_mode = modes.iter().copied().find(|&m| m == Mode::Driving).or(modes.first().copied());
+    let lookup = match lookup_mode {
+        Some(m) => lookup_point(&nodes_of(m))?,
+        None => None,
+    };
+    // global_junctions_main is a table of the tiles (the union puts it together)
+    let o = Options { global_junctions: false, ..opts.clone() };
     let area = crate::Area {
         boundary: Some(boundary),
         ways: &[],
-        nodes_box,
-        nodes: &nodes,
+        nodes_box: [0.0; 4], // the box of the area comes from the boundary
+        nodes: &[],
         junctions: &Default::default(),
-        opts: &opts,
+        opts: &o,
         built_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64),
         timezone_entry: None,
+        lookup,
     };
-    crate::write_area_tables(&area, |name| File::create(out.join(name)).map(BufWriter::new).map_err(io))
+    crate::write_area_tables(&area, |name| File::create(out.join(name)).map(BufWriter::new).map_err(io))?;
+    if opts.calculate_costs {
+        write_transfers(out, modes)?;
+    }
+    Ok(())
 }
+
+/// The key of an f64 in the order of `f64::total_cmp`.
+fn order_key(x: f64) -> u64 {
+    let b = x.to_bits();
+    if b >> 63 == 1 {
+        !b
+    } else {
+        b | 1 << 63
+    }
+}
+
+fn from_order_key(k: u64) -> f64 {
+    f64::from_bits(if k >> 63 == 1 { k & !(1 << 63) } else { !k })
+}
+
+/// The point of the time zone (duckOSM `utils.add_timezone`, `area::lookup_point`): the node nearest (median longitude,
+/// median latitude) of the real nodes (not the virtual ones) of the nodes file `path`; the first in the order of node_id
+/// of two at the same distance. The medians are exact, with a radix select: each pass over the file counts the next 16
+/// bits of the values (4 passes), so only small tables are in memory.
+fn lookup_point(path: &Path) -> Result<Option<(f64, f64)>, String> {
+    let each = |f: &mut dyn FnMut(f64, f64)| duckosm_parquet::read::each_node(path, |n| if n.node_id > 0 { f(n.lon, n.lat) });
+    let mut n = 0u64;
+    each(&mut |_, _| n += 1)?;
+    if n == 0 {
+        return Ok(None);
+    }
+    // the ranks to find: the middle value (an odd count), or the two middle values
+    let ranks: Vec<u64> = if n % 2 == 1 { vec![n / 2] } else { vec![n / 2 - 1, n / 2] };
+    // the selections (axis, rank left in the bucket, the prefix found so far)
+    let mut sel: Vec<(usize, u64, u64)> = (0..2).flat_map(|axis| ranks.iter().map(move |&r| (axis, r, 0u64))).collect();
+    for level in 0..4u32 {
+        let shift = 48 - 16 * level;
+        let mut hist = vec![vec![0u64; 1 << 16]; sel.len()];
+        each(&mut |x, y| {
+            for (k, &(axis, _, prefix)) in sel.iter().enumerate() {
+                let key = order_key(if axis == 0 { x } else { y });
+                if level == 0 || key >> (shift + 16) == prefix {
+                    hist[k][((key >> shift) & 0xFFFF) as usize] += 1;
+                }
+            }
+        })?;
+        for (k, s) in sel.iter_mut().enumerate() {
+            let mut d = 0;
+            while s.1 >= hist[k][d] {
+                s.1 -= hist[k][d];
+                d += 1;
+            }
+            s.2 = (s.2 << 16) | d as u64;
+        }
+    }
+    let value = |axis: usize| -> f64 {
+        let v: Vec<f64> = sel.iter().filter(|s| s.0 == axis).map(|s| from_order_key(s.2)).collect();
+        if v.len() == 1 {
+            v[0]
+        } else {
+            (v[0] + v[1]) / 2.0
+        }
+    };
+    let (mx, my) = (value(0), value(1));
+    let mut best: Option<(f64, i64, (f64, f64))> = None;
+    duckosm_parquet::read::each_node(path, |nd| {
+        if nd.node_id <= 0 {
+            return;
+        }
+        let d = (nd.lon - mx).powi(2) + (nd.lat - my).powi(2);
+        let better = match best {
+            None => true,
+            Some((bd, bid, _)) => d.total_cmp(&bd).then(nd.node_id.cmp(&bid)) == std::cmp::Ordering::Less,
+        };
+        if better {
+            best = Some((d, nd.node_id, (nd.lon, nd.lat)));
+        }
+    })?;
+    Ok(best.map(|b| b.2))
+}
+
+/// A node id in a temporary file.
+struct Id;
+
+impl duckosm_core::spill::Codec<i64> for Id {
+    fn put(&self, n: &i64, o: &mut Vec<u8>) {
+        o.extend_from_slice(&n.to_le_bytes());
+    }
+    fn get(&self, b: &mut &[u8]) -> i64 {
+        let v = i64::from_le_bytes(b[..8].try_into().unwrap());
+        *b = &b[8..];
+        v
+    }
+}
+
+/// `transfers_mm` (`area::transfers`): the nodes of walking that cycling or driving has too, each with a change of mode in
+/// both directions. The node ids of each mode are sorted on disk.
+fn write_transfers(out: &Path, modes: &[Mode]) -> Result<(), String> {
+    use duckosm_core::spill::{self, Writer};
+    use duckosm_parquet::Transfer;
+    let store = spill::temp_store();
+    let store = &*store;
+    let ids = |m: Mode| -> Result<Option<spill::Rows>, String> {
+        if !modes.contains(&m) {
+            return Ok(None);
+        }
+        let mut w = Writer::new(store).map_err(io)?;
+        let mut err = None;
+        duckosm_parquet::read::each_node(&out.join(format!("nodes_{}.parquet", m.name())), |n| {
+            if let Err(e) = w.push(&Id, &n.node_id) {
+                err.get_or_insert(e);
+            }
+        })?;
+        if let Some(e) = err {
+            return Err(io(e));
+        }
+        let rows = w.finish().map_err(io)?;
+        spill::sort_bytes(rows, |b| i64::from_le_bytes(b[..8].try_into().unwrap()), 64 << 20, store).map(Some).map_err(io)
+    };
+    let Some(mut walk) = ids(Mode::Walking)? else {
+        // no walking: an empty table, as the build writes it
+        return duckosm_parquet::write_transfers_to(create(&out.join("transfers_mm.parquet"))?, &[]);
+    };
+    let path = out.join("transfers_mm.parquet");
+    let mut parts: Vec<(Mode, &'static str, &'static str, &'static str)> = Vec::new();
+    for (m, name, to, back) in [(Mode::Cycling, "cycling", "bike_park", "bike_unpark"), (Mode::Driving, "driving", "park", "retrieve")] {
+        if modes.contains(&m) {
+            parts.push((m, name, to, back));
+        }
+    }
+    let mut chunks: Vec<PathBuf> = Vec::new();
+    for (k, (m, name, to, back)) in parts.into_iter().enumerate() {
+        let Some(other) = ids(m)? else { continue };
+        let mut a = walk.read_ref(&Id).map_err(io)?.peekable();
+        let mut b = other.read(&Id).map_err(io)?.peekable();
+        let chunk = out.join(format!("transfers_mm.{k}.part"));
+        let mut last = None;
+        let pairs = std::iter::from_fn(|| loop {
+            let x = match a.next()? {
+                Ok(x) => x,
+                Err(_) => return None,
+            };
+            if last == Some(x) {
+                continue;
+            }
+            last = Some(x);
+            while b.next_if(|y| y.as_ref().is_ok_and(|y| *y < x)).is_some() {}
+            if b.peek().is_some_and(|y| y.as_ref().is_ok_and(|y| *y == x)) {
+                return Some(x);
+            }
+        });
+        let made = pairs.flat_map(|n| {
+            [
+                Transfer { node_id: n, from_mode: "walking", to_mode: name, cost_s: TRANSFER_S, kind: to },
+                Transfer { node_id: n, from_mode: name, to_mode: "walking", cost_s: TRANSFER_S, kind: back },
+            ]
+        });
+        duckosm_parquet::write_transfers_iter_to(create(&chunk)?, made)?;
+        chunks.push(chunk);
+    }
+    if chunks.is_empty() {
+        return duckosm_parquet::write_transfers_to(create(&path)?, &[]);
+    }
+    concat_files(&chunks, true, &path)?;
+    Ok(())
+}
+
+/// duckOSM `multimodal.transfer_s` (as `area::TRANSFER_S`): the seconds of a change of mode.
+const TRANSFER_S: f64 = 60.0;
 
 /// Step 0 of a build by tiles: cut the region file to the tiles of zoom `zoom` of the boundary (GeoJSON text), with the
 /// junctions file of each tile, into `dir`. Returns the tiles that have a file.

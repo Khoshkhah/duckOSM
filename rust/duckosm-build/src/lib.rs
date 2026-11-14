@@ -1356,6 +1356,7 @@ pub fn run<W: Write + Send>(
         opts,
         built_at,
         timezone_entry: p.timezone_entry.as_deref(),
+        lookup: None,
     };
     write_area_tables(&area, &mut file)?;
     log.step("write the area tables");
@@ -1559,8 +1560,10 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         (None, None)
     };
     std::fs::create_dir_all(&pq_dir).map_err(|e| e.to_string())?;
-    // step 0: cut the region file to the area file. It is the output cut.osm.pbf when the user asks for it
+    // step 0: cut the region file to the area file. It is the output cut.osm.pbf when the user asks for it. The input of a
+    // tile build is already the cut of the area to the tile (tilecut): no second cut
     let area_file = match &cut {
+        Some(_) if p.tile.is_some() => None,
         Some(_) if p.cut_pbf => Some(out.join("cut.osm.pbf")),
         Some(_) => Some(pq_dir.join("area.osm.pbf")),
         None => None,

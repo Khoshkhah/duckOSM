@@ -28,6 +28,8 @@ pub struct Area<'a> {
     pub opts: &'a Options,
     /// The build time, microseconds since 1970 (UTC). The caller gives it: WebAssembly has no clock in Rust.
     pub built_at: i64,
+    /// The point of the time zone when `nodes` is empty (the union of a build by tiles finds it on disk: `lookup_point`).
+    pub lookup: Option<(f64, f64)>,
     /// The entry of the area's Geofabrik region in the time zone table (`www/timezones.json`, JSON text): the
     /// page gives it, because the browser build has no world map of the zones. None: the map of `tzf-rs`
     /// (the cargo feature `tzf`, natively), else no time zone.
@@ -154,7 +156,7 @@ fn metadata(a: &Area, shape: Option<&(Vec<Vec<Vec<Pt>>>, String)>) -> Metadata {
         center_lat: (s + n) / 2.0,
         center_lon: (w + e) / 2.0,
         initial_zoom,
-        timezone: lookup_point(a.nodes).and_then(|(x, y)| match a.timezone_entry {
+        timezone: lookup_point(a.nodes).or(a.lookup).and_then(|(x, y)| match a.timezone_entry {
             Some(entry) => zone_of_entry(entry, x, y),
             None => zone_of_map(x, y),
         }),

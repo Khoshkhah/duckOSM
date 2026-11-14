@@ -210,9 +210,8 @@ pub fn read_turn_permission(path: &Path) -> Result<Vec<TurnPermission>, String> 
     Ok(out)
 }
 
-/// Read a `nodes` file of the build.
-pub fn read_nodes(path: &Path) -> Result<Vec<duckosm_core::model::Node>, String> {
-    let mut out = Vec::new();
+/// Read a `nodes` file of the build, one node at a time.
+pub fn each_node(path: &Path, mut f: impl FnMut(duckosm_core::model::Node)) -> Result<(), String> {
     for b in batches(path)? {
         let b = b?;
         let id = b.column_by_name("node_id").unwrap().as_primitive::<Int64Type>();
@@ -220,11 +219,11 @@ pub fn read_nodes(path: &Path) -> Result<Vec<duckosm_core::model::Node>, String>
         for i in 0..b.num_rows() {
             // a WKB Point: the byte order, the type, x, y
             let w = g.value(i);
-            let f = |k: usize| f64::from_le_bytes(w[k..k + 8].try_into().unwrap());
-            out.push(duckosm_core::model::Node { node_id: id.value(i), lon: f(5), lat: f(13) });
+            let x = |k: usize| f64::from_le_bytes(w[k..k + 8].try_into().unwrap());
+            f(duckosm_core::model::Node { node_id: id.value(i), lon: x(5), lat: x(13) });
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 /// The id, the source and target nodes, and the two ends of the line of each edge of an `edges` file (only these columns are

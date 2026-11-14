@@ -4,7 +4,7 @@ A build of a large area (for example France) by tiles keeps the memory of each s
 union puts the tables of the tiles together.
 
 ```bash
-duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --zoom 10 --jobs 6 --tile-threads 2 -- --modes driving
+duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -- --modes driving
 ```
 
 ## The steps
@@ -20,9 +20,10 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --zoom 10 --j
    - No tile holds a node outside the area. The cut gives each such node a home tile: the first tile (in the order of
      the tiles) of the ways at the node, and the cut adds all ways of the node to the home tile. These ways have a node
      inside the area, so they are complete, and they bring no more work: their own outside nodes are in the file too.
-3. **Tile builds** (`--jobs` at a time, each in its own process with `--tile-threads` threads). `--tile z/x/y` keeps the
-   part of the area in the tile and the home nodes (`Boundary::within_tile`, `Boundary::with_points`);
-   `--outside-junctions` adds the junctions of the file. Each writer of the tile writes only its **own rows**
+3. **Tile builds** (each in its own process with `--tile-threads` threads; see "The scheduler"). `--tile z/x/y` keeps
+   the part of the area in the tile and the home nodes (`Boundary::within_tile`, `Boundary::with_points`), and the tile
+   file is the input as it is (it is already the cut: no second cut); `--outside-junctions` adds the junctions of the
+   file. Each writer of the tile writes only its **own rows**
    (`union::Owner`; the network tables in `write_tables_owned`, the edge graph, `ways`, `lane_profile` and
    `global_junctions` at once, the small tables at the end in `union::own_rows`):
    - an edge and its lanes: the tile that holds its source node; a turn, a turn permission and a turn restriction: the
@@ -35,7 +36,20 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --zoom 10 --j
    (outside the area: raw nodes, raw ways, virtual nodes; and the relations) go to a border file.
 4. **Union** (`union::union_all`): for each table, the files of the tiles one after the other, copied as blocks of bytes
    (no decode, no new compression), and the border rows, merged with one copy of each row. Then the tables of the whole
-   area (`boundary`, `visualization_metadata`, `transfers`) from the boundary and the nodes of the union.
+   area (`boundary`, `visualization_metadata`, `transfers`) from the boundary and the nodes of the union: the nodes stay
+   on disk (the point of the time zone from passes over the nodes file, the transfers from a sort on disk).
+
+## The scheduler
+
+`--memory` (default 2 GB) is the memory of the tile builds at the same time. The tiles start largest file first, at most
+`--jobs` at a time (default: the cores / `--tile-threads`), and a tile starts only when the estimates of the running
+tiles and its own stay below the limit; a tile larger than the limit runs alone. The estimate of a tile is a line of its
+file size: the command measures the peak of each finished tile process (`wait4`), fits base + factor × size to the
+finished tiles (least squares), and adds the largest peak above the line. France (driving): 38 MB + 10.5 × size, 70 MB
+above the line at most; Kentucky with `raw.*`: 73 MB + 22.7 × size. `<out>/tiles.log` has the file size and the peak of
+each tile.
+
+More memory does not make the build faster: the time is in the work of the tiles, not in waiting for memory.
 
 The rows of a table are in the order of the tiles (each tile in its own order), not in one order for the whole file.
 
@@ -43,12 +57,23 @@ The rows of a table are in the order of the tiles (each tile in its own order), 
 
 | Area | Cut | Tile builds | Union | Total |
 |---|---|---|---|---|
-| Kentucky, 142 tiles (driving, `--raw`) | 3.4 s | 7.4 s | 0.7 s | 11.6 s |
-| France, 1,311 tiles (driving, 6 × 2) | 106.0 s | 102.6 s | 14.3 s | 222.9 s |
+| Kentucky, 142 tiles (driving, `--raw`) | 3.4 s | 6.6 s | 1.6 s | 11.7 s |
+| France, 1,311 tiles (driving, 6 × 2) | 108.3 s | 76.1 s | 14.5 s | 198.9 s |
 
 - Kentucky: the 19 tables are equal to the whole build, except `built_at`.
-- France: the peak of the run is the cut (1.6 GB, in its own process); the tile builds at the same time use 1.2 GB,
-  the largest tile (Paris) 0.97 GB. The whole build of France in one process took 894 s and 7.3 GB.
+- France: the peak of the run is the cut (1.6 GB, in its own process); the largest tile (Paris) uses 0.78 GB. The whole
+  build of France in one process took 894 s and 7.3 GB.
+
+The zoom (France, 6 × 2, before the tile builds read their file without a second cut):
+
+| Zoom | Tiles | Cut | Tile builds | Union | Total | Tile builds together | Largest tile |
+|---|---|---|---|---|---|---|---|
+| 10 | 1,311 | 107.3 s | 102.0 s | 19.2 s | 228.5 s | 1.5 GB | 0.96 GB |
+| 9 | 376 | 96.5 s | 91.1 s | 13.1 s | 200.8 s | 2.8 GB | 1.52 GB |
+| 8 | 104 | 92.1 s | 99.5 s | 23.8 s | 215.4 s | 5.5 GB | 1.83 GB |
+
+The zoom changes the time a little (the work is the same, only cut into other pieces) and the memory much: zoom 10 stays
+the default.
 
 The tiles at the same time and the threads of each tile (France, 12 cores, before the writers of own rows):
 
