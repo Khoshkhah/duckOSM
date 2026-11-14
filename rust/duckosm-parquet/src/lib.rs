@@ -776,6 +776,7 @@ pub fn write_global_junctions_to<W: Write + Send>(
 }
 
 /// A row of `mm.transfers`: a change of mode at a node that walking shares with another mode.
+#[derive(Clone)]
 pub struct Transfer {
     pub node_id: i64,
     pub from_mode: &'static str,
@@ -786,6 +787,11 @@ pub struct Transfer {
 
 /// Write `mm.transfers`.
 pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer]) -> Result<(), String> {
+    write_transfers_iter_to(out, rows.iter().cloned())
+}
+
+/// [`write_transfers_to`] from a stream of rows: one row group at a time is in memory.
+pub fn write_transfers_iter_to<W: Write + Send>(out: W, rows: impl Iterator<Item = Transfer>) -> Result<(), String> {
     let fields = vec![
         field("node_id", DataType::Int64),
         field("from_mode", DataType::Utf8),
@@ -793,7 +799,7 @@ pub fn write_transfers_to<W: Write + Send>(out: W, rows: &[Transfer]) -> Result<
         field("cost_s", DataType::Float64),
         field("kind", DataType::Utf8),
     ];
-    write_rows(out, fields, rows, |c| {
+    write_rows_iter(out, fields, rows, |c| {
         let mut cost = Float64Builder::new();
         c.iter().for_each(|r| cost.append_value(r.cost_s));
         vec![
