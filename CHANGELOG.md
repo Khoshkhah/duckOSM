@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`duckosm-rust quack --tile-zoom Z`: tile by tile with the map tiles of one zoom** (`TileSize::Zoom`), in place of the quadtree of
+  `--tiles N`. Île-de-France in Chromium: zoom 8 (13 tiles) 42.5 s and 474 MiB, zoom 9 (32 tiles) 41.7 s and 467 MiB. France natively: zoom 8
+  (241 tiles) 200.4 s, zoom 9 (697 tiles) 222.5 s.
 - **`duckosm-rust quack --tiles N`: the features table of QuackOSM tile by tile** (`docs/rust/quack.md`, "By tiles"). The file is cut into a
   quadtree of tiles with at most `N` nodes, and each tile gives the rows that it owns, so the memory follows the size of a tile: the mode of the
   browser for a large file. The same rows as one run (Monaco test; Kentucky and France with `quack_diff --large`). France: 223.5 s and 2.0 GB of

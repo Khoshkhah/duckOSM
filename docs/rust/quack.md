@@ -21,6 +21,7 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
   sorted as QuackOSM sorts them (see "The sort").
 - `--tiles N` makes the table tile by tile, with at most `N` nodes in a tile (for example `4000000`), so the memory follows
   the size of a tile, not of the file (see "By tiles"). It writes GeoParquet only.
+- `--tile-zoom Z` makes the table tile by tile with the map tiles of zoom `Z` (0 to 14), in place of `--tiles`.
 
 The input must be sorted by type and id (nodes, then ways, then relations), as the files of Geofabrik are. To make the table of
 an area, cut the region file first with `duckosm-rust cut`.
@@ -123,6 +124,7 @@ same rows tile by tile:
 1. **The tiles.** A pass over the nodes counts the nodes of each map tile of zoom 14. A tile with more than `N` nodes is
    cut into its four tiles of the next zoom (a quadtree, down to zoom 14). So a city has small tiles and the country
    around it large ones: France at 4 million nodes has 324 tiles of zoom 3 to 11, Kentucky 16 tiles of zoom 6 to 9.
+   With `--tile-zoom Z`, the tiles are the map tiles of zoom `Z` with a node (`TileSize::Zoom`).
 2. **The cut.** The tile cut of the build by tiles (`tilecut::cut_to_store`) writes the file of each tile, with the ways
    whole (with their nodes from other tiles). Each multipolygon and boundary relation goes whole (all its member ways and
    their nodes) into one tile only: the first tile with a member. In the cut of the build, a multipolygon goes whole
@@ -151,6 +153,10 @@ each row. The runs of the table below were on the same day, one after the other.
 | Kentucky | 16 tiles | 7.7 s | 0.7 GB | 0.4 GB |
 | France (5.1 GB) | one run | 105.9 s | 4.6 GB | 23.1 GB |
 | France | 324 tiles | 223.5 s | 2.0 GB | 19.9 GB |
+| France | zoom 8 (241 tiles) | 200.4 s | 2.2 GB | 19.4 GB |
+| France | zoom 9 (697 tiles) | 222.5 s | 1.9 GB | 19.7 GB |
+| Île-de-France (338 MB) | zoom 8 (13 tiles) | 20.4 s | 1.1 GB | 2.0 GB |
+| Île-de-France | zoom 9 (32 tiles) | 18.3 s | 1.0 GB | 1.7 GB |
 
 In the browser (duckOSM Studio `quack.html`, Chromium on the Mac mini, 12 threads), Île-de-France (338 MB) in one run stops
 with no memory left (more than 4 GiB). Tile by tile (28 tiles of zoom 1 to 11), it gives the same 8 833 620 rows as the
@@ -160,6 +166,10 @@ native run (`quack_diff --large`):
 |---|---|---|
 | 28 tiles, not sorted | 41.4 s | 429 MiB |
 | 28 tiles, sorted | 45.6 s | 586 MiB |
+| zoom 8 (13 tiles), not sorted | 42.5 s | 474 MiB |
+| zoom 8, sorted | 47.0 s | 746 MiB |
+| zoom 9 (32 tiles), not sorted | 41.7 s | 467 MiB |
+| zoom 9, sorted | 45.9 s | 695 MiB |
 
 Two faults of the browser came out on the way. In the browser, pass 4 collected all relations of the file in memory
 before it made them: now it makes them in batches of 4 million points. And the allocator of Studio's WebAssembly module
