@@ -178,7 +178,7 @@ pub mod tiled {
             let id = (u64::from_be_bytes(b[0..8].try_into().expect("8 bytes")) ^ (1 << 63)) as i64;
             let v = |k: usize| i16::from_le_bytes(b[8 + 2 * k..10 + 2 * k].try_into().expect("2 bytes")) as i64;
             let head = f64::from_bits(u64::from_le_bytes(b[17..25].try_into().expect("8 bytes")));
-            (id, [v(0), v(1), v(2), v(3)], b[16] & 3, (b[16] & 4 != 0).then_some(head))
+            (id, [v(0), v(1), v(2), v(3)], b[16] & 0b1011, (b[16] & 4 != 0).then_some(head))
         }
     }
 
@@ -243,7 +243,7 @@ pub mod tiled {
         built_at: i64,
         file: impl FnMut(&str) -> Result<W, String>,
     ) -> Result<Option<String>, String> {
-        write_levels_tiled_from(&mut |f| each_level_edge(modes, |r, e| f(r, e)), built_at, file)
+        write_levels_tiled_from(&mut |f| each_level_edge(modes, |r, e| f(r, e)), Method::Solve, built_at, file)
     }
 
     /// A source of the level edges: it gives each edge of all modes with its rank (driving 0, walking 1, cycling 2, their
@@ -251,13 +251,17 @@ pub mod tiled {
     /// times.
     pub type EdgeSource<'a> = &'a mut dyn FnMut(&mut dyn FnMut(u8, Edge) -> Result<(), String>) -> Result<(), String>;
 
-    /// [`write_levels_tiled`] from any source of the level edges (the union of a build by tiles reads its tables).
+    /// [`write_levels_tiled`] from any source of the level edges (the union of a build by tiles reads its tables), with
+    /// `method` `solve` or `tags`. The tags rule reads only the edges at the ends of each edge (`roadstyle_levels::tags_tile`):
+    /// its tiles do not wait for earlier tiles, and its numbers need no move to the ground.
     pub fn write_levels_tiled_from<W: std::io::Write + Send>(
         each: EdgeSource,
+        method: Method,
         built_at: i64,
         mut file: impl FnMut(&str) -> Result<W, String>,
     ) -> Result<Option<String>, String> {
         use duckosm_parquet as pq;
+        let tags_rule = method == Method::Tags;
         let o = roadstyle_levels::Options { method: Method::Solve, ..Default::default() };
         let io = |e: std::io::Error| format!("a temporary file of the levels: {e}");
         let store = spill::temp_store();
@@ -315,8 +319,10 @@ pub mod tiled {
                 }
             }
             let later = others.iter().any(|t| order[t] > order[&own]);
-            for t in others.iter().filter(|t| order[t] > order[&own]) {
-                waits.entry(*t).or_default().insert(own);
+            if !tags_rule {
+                for t in others.iter().filter(|t| order[t] > order[&own]) {
+                    waits.entry(*t).or_default().insert(own);
+                }
             }
             let id = tags.id(&e.attrs);
             for t in &others {
@@ -349,12 +355,16 @@ pub mod tiled {
                 }
                 edges.add(rank, LevelEdge { edge_id: id, tags: tags.sets[t as usize].clone(), geometry: g, ..Default::default() });
             }
+            let at = |e: roadstyle_levels::Error| format!("{e} (the tile of {:.1}, {:.1})", tile_y as f64 * TILE_DEG, tile_x as f64 * TILE_DEG);
+            if tags_rule {
+                let (rows, roads) = roadstyle_levels::tags_tile(&edges, &|id| owned.contains(&id)).map_err(at)?;
+                return Ok::<_, String>((me, roadstyle_levels::TileLevels { rows, roads, ..Default::default() }, keep));
+            }
             let roles = TileRoles {
                 owned: &|id| owned.contains(&id),
                 earlier: &|id| earlier.get(&id).filter(|(o, _)| *o < me).map(|(_, v)| *v),
             };
-            let r = roadstyle_levels::levels_tile(&edges, &roles, &o)
-                .map_err(|e| format!("{e} (the tile of {:.1}, {:.1})", tile_y as f64 * TILE_DEG, tile_x as f64 * TILE_DEG))?;
+            let r = roadstyle_levels::levels_tile(&edges, &roles, &o).map_err(at)?;
             Ok::<_, String>((me, r, keep))
         };
         let mut done: FxHashSet<Tile> = FxHashSet::default();
@@ -392,7 +402,10 @@ pub mod tiled {
                     let v = [row.casing_start, row.casing_level, row.casing_end, row.fill_level];
                     *casing.entry(v[1]).or_default() += 1;
                     values.extend(v);
-                    let caps = u8::from(row.cap_start == Some("square")) | u8::from(row.cap_end == Some("square")) << 1;
+                    // the tags rule has no caps (bit 8: none; bit 4 of the stored byte says that the head has a value)
+                    let caps = u8::from(row.cap_start == Some("square"))
+                        | u8::from(row.cap_end == Some("square")) << 1
+                        | u8::from(row.cap_start.is_none()) << 3;
                     raw.push(&RawRowCodec, &(row.edge_id, v, caps, row.head_start_m)).map_err(io)?;
                     if keep.contains(&row.edge_id) {
                         earlier.insert(row.edge_id, (me, v));
@@ -411,8 +424,10 @@ pub mod tiled {
             }
         }
         drop((earlier, tags, waits, done, order));
-        // 4. one move to the ground for the whole area; the rows in the order of edge_id
-        let ground = Ground::new(&casing, &values, o.max_level).map_err(|e| e.to_string())?;
+        // 4. one move to the ground for the whole area (not for the tags rule: its numbers are final); the rows in the order of
+        // edge_id
+        let ground = if tags_rule { None } else { Some(Ground::new(&casing, &values, o.max_level).map_err(|e| e.to_string())?) };
+        let level = |v: i64| ground.as_ref().map_or(v, |g| g.level(v));
         let span = match (values.first(), values.last()) {
             (Some(lo), Some(hi)) => hi - lo,
             _ => 0,
@@ -423,14 +438,14 @@ pub mod tiled {
         let (mut ids, mut part) = (Vec::new(), Vec::new());
         for r in raw.read(&RawRowCodec).map_err(io)? {
             let (id, v, caps, head) = r.map_err(io)?;
-            let cap = |bit: u8| Some(if caps & bit != 0 { "square" } else { "round" });
+            let cap = |bit: u8| (caps & 8 == 0).then_some(if caps & bit != 0 { "square" } else { "round" });
             ids.push(id);
             part.push(Row {
                 edge_id: id,
-                casing_start: ground.level(v[0]),
-                casing_level: ground.level(v[1]),
-                casing_end: ground.level(v[2]),
-                fill_level: ground.level(v[3]),
+                casing_start: level(v[0]),
+                casing_level: level(v[1]),
+                casing_end: level(v[2]),
+                fill_level: level(v[3]),
                 head_start_m: head,
                 head_end_m: head,
                 cap_start: cap(1),
@@ -444,13 +459,16 @@ pub mod tiled {
         w.write(&part)?;
         w.close()?;
         let meta = pq::LevelsMeta {
-            source: Method::Solve.name(),
+            source: method.name(),
             n_edges: ids.len() as i64,
             edge_hash: roadstyle_levels::edge_hash(&ids),
             roadstyle_version: ROADSTYLE_VERSION,
             created: crate::area::iso_time(built_at),
         };
         pq::write_edge_levels_meta_to(file("edge_levels_meta_visualization.parquet")?, &meta)?;
+        if tags_rule {
+            return Ok(Some(format!("levels (tags): {} edges, {} roads", ids.len(), sums.roads)));
+        }
         Ok(Some(format!(
             "levels (solve): {} edges, {} roads, {} stack pairs given up, {} order wishes not kept (best values of the stages: {:?})",
             ids.len(),

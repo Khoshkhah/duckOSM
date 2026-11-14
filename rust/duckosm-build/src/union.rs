@@ -757,7 +757,7 @@ impl duckosm_core::spill::Codec<(u32, u8, duckosm_core::model::Edge)> for BatchE
 /// The drawing levels after the union (docs/design/build_by_tiles.md, "The levels"), from the edge tables of the union: each
 /// table is sorted by `edge_id` on disk first (the order of the whole build). `solve`: by tiles in their order, each with
 /// the numbers of the earlier tiles fixed (`levels::tiled`), with memory that does not grow with the area. `tags`: the rule
-/// of the whole build, with all level edges in memory (as the whole build).
+/// of the whole build by tiles too (`roadstyle_levels::tags_tile`): the rule reads only the edges at the ends of each edge.
 fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(), String> {
     use duckosm_core::spill::{self, EdgeCodec, Rows, Writer};
     let store = spill::temp_store();
@@ -788,24 +788,15 @@ fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(),
     };
     let built_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64);
     let file = |name: &str| create(&out.join(name));
-    if method == crate::LevelsMethod::Solve {
-        let mut each = |f: &mut dyn FnMut(u8, duckosm_core::model::Edge) -> Result<(), String>| -> Result<(), String> {
-            for (m, private, rows) in tables.iter_mut() {
-                let r = rank(*m, *private);
-                for e in rows.read_ref(&codec).map_err(io)? {
-                    f(r, e.map_err(io)?)?;
-                }
+    let mut each = |f: &mut dyn FnMut(u8, duckosm_core::model::Edge) -> Result<(), String>| -> Result<(), String> {
+        for (m, private, rows) in tables.iter_mut() {
+            let r = rank(*m, *private);
+            for e in rows.read_ref(&codec).map_err(io)? {
+                f(r, e.map_err(io)?)?;
             }
-            Ok(())
-        };
-        crate::levels::tiled::write_levels_tiled_from(&mut each, built_at, file)?;
-    } else {
-        let mut level_edges = crate::LevelEdges::default();
-        for (m, private, rows) in tables {
-            let edges: Vec<duckosm_core::model::Edge> = rows.read(&codec).map_err(io)?.collect::<Result<_, _>>().map_err(io)?;
-            level_edges.add(m, private, edges);
         }
-        crate::write_levels(&level_edges, method, built_at, file)?;
-    }
+        Ok(())
+    };
+    crate::levels::tiled::write_levels_tiled_from(&mut each, method, built_at, file)?;
     Ok(())
 }
