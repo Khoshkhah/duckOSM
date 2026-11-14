@@ -21,6 +21,7 @@ use crate::boundary::Boundary;
 use crate::cutfile::{file_blob, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
 use crate::cutstream::{each_block, each_block_at, header, widen, CutCounts, Span, EMPTY};
 use crate::graph::{MemberType, Relation};
+use crate::network::{global_junction, JunctionUses};
 use crate::pbfraw::{decode_block, read_block, Buffers};
 use crate::raw::{RawNode, RawSink, RawWay};
 use crate::spill::{sort_bytes, Codec, Writer};
@@ -602,6 +603,8 @@ struct Ways<'a> {
     kept: Vec<(u32, Elem)>,
     multi: Vec<(i64, u32)>,
     outside: Vec<(i64, u32)>,
+    /// the uses of the nodes by the kept ways that are built highways (node, flags of `JunctionUses::of_way`)
+    uses: Vec<(i64, u8)>,
     rels: Vec<Elem>,
     tiles: Vec<u32>,
     spans: [Span; 2],
@@ -635,6 +638,8 @@ impl RawSink for Ways<'_> {
         for &t in &self.tiles {
             self.outside.extend(refs.iter().filter(|r| r.1 != Some(t)).map(|r| (r.0, t)));
         }
+        let tags = crate::model::Tags::from_pairs(way.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        JunctionUses::of_way(&tags, &way.refs, &mut self.uses);
         let (last, rest) = self.tiles.split_last().expect("a tile");
         for &t in rest {
             self.kept.push((t, Elem::Way(way.clone())));
@@ -822,6 +827,69 @@ fn take_blocks<R: Read + Seek>(
     Ok(())
 }
 
+/// The start of a junctions file: the name and the version of the format. Then one row for each junction: the node id
+/// (i64, little endian) and 1 for a road junction or 0 (only paths meet there), in the order of the node ids.
+pub const JUNCTIONS_MAGIC: &[u8; 8] = b"DOSMJN01";
+
+/// The junctions of the nodes outside each tile: for each (node, tile) of `outside` (sorted), the junction of the node in
+/// the whole area (from `uses`, the uses of the nodes by all kept ways, sorted by node), to the part "junctions" of the
+/// tile. A tile has only some of the ways of a node outside it, so it can miss a junction there.
+fn outside_junctions(
+    outside: impl Iterator<Item = io::Result<(i64, i64)>>,
+    uses: impl Iterator<Item = io::Result<(i64, i64)>>,
+    parts: &mut Parts,
+) -> Result<(), String> {
+    let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
+    let mut uses = uses.peekable();
+    let (mut last, mut junction, mut prev) = (None, None, None);
+    for p in outside {
+        let (n, t) = p.map_err(io)?;
+        if prev == Some((n, t)) {
+            continue;
+        }
+        prev = Some((n, t));
+        if last != Some(n) {
+            last = Some(n);
+            while uses.next_if(|x| x.as_ref().is_ok_and(|x| x.0 < n)).is_some() {}
+            let mut flags = Vec::new();
+            while let Some(x) = uses.next_if(|x| x.as_ref().is_ok_and(|x| x.0 == n)) {
+                flags.push(x.map_err(io)?.1 as u8);
+            }
+            if let Some(Err(_)) = uses.peek() {
+                return Err(io(uses.next().expect("peeked").expect_err("an error")));
+            }
+            junction = global_junction(&JunctionUses::of(flags.into_iter()));
+        }
+        if let Some(road) = junction {
+            let mut row = n.to_le_bytes().to_vec();
+            row.push(road as u8);
+            parts.add(t as u32, "junctions", row)?;
+        }
+    }
+    parts.flush()
+}
+
+/// The junctions file of a tile from its part (no part: a file with no rows).
+fn write_junctions(part: &Path, out: &Path) -> Result<(), String> {
+    let e = |e: io::Error| format!("{}: {e}", out.display());
+    let mut f = io::BufWriter::new(std::fs::File::create(out).map_err(e)?);
+    f.write_all(JUNCTIONS_MAGIC).map_err(e)?;
+    if let Ok(mut p) = std::fs::File::open(part) {
+        io::copy(&mut p, &mut f).map_err(e)?;
+        let _ = std::fs::remove_file(part);
+    }
+    f.flush().map_err(e)
+}
+
+/// Read a junctions file of the tile cut: (node id, is a road junction), as in `main.global_junctions`.
+pub fn read_junctions(path: &Path) -> Result<Vec<(i64, bool)>, String> {
+    let b = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if b.len() < 8 || &b[..8] != JUNCTIONS_MAGIC || (b.len() - 8) % 9 != 0 {
+        return Err(format!("{}: not a junctions file of the tile cut", path.display()));
+    }
+    Ok(b[8..].chunks(9).map(|r| (i64::from_le_bytes(r[..8].try_into().unwrap()), r[8] != 0)).collect())
+}
+
 /// Cut the region file that `open` reads (a new reader for each pass) to the tiles of `tiles` (one zoom) inside `boundary`:
 /// the file of a tile goes into `dir` as `z_x_y.osm.pbf`; a tile with no node inside has no file. Gives the numbers of
 /// elements of each tile.
@@ -878,6 +946,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let ways_at = ways_at.unwrap_or(0);
     let (mut ways, mut multi) = (Book::default(), Vec::new());
     let mut outside = Writer::new(store).map_err(io)?;
+    let mut uses = Writer::new(store).map_err(io)?;
     let rels_path = tmp.join("relations.all");
     let (mut way_blocks, mut rel_blocks) = (Vec::new(), Vec::new());
     let mut rels_bytes = Vec::new();
@@ -892,6 +961,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
                 kept: Vec::new(),
                 multi: Vec::new(),
                 outside: Vec::new(),
+                uses: Vec::new(),
                 rels: Vec::new(),
                 tiles: Vec::new(),
                 spans: [EMPTY; 2],
@@ -899,9 +969,9 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
             blobs(s.rels, &mut rels)?;
-            Ok((s.runs, by_tile(s.kept)?, s.multi, s.outside, rels, s.spans))
+            Ok((s.runs, by_tile(s.kept)?, s.multi, (s.outside, s.uses), rels, s.spans))
         },
-        |(runs, kept, mut m, o, rels, spans), at| {
+        |(runs, kept, mut m, (o, u), rels, spans), at| {
             if spans[0] != EMPTY {
                 way_blocks.push((ways_at + at, spans[0]));
                 ways.append(runs.runs, runs.first.unwrap_or(false));
@@ -915,6 +985,9 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
             multi.append(&mut m);
             for (n, t) in o {
                 outside.push(&Pair, &(n, t as i64)).map_err(io)?;
+            }
+            for (n, f) in u {
+                uses.push(&Pair, &(n, f as i64)).map_err(io)?;
             }
             rels_bytes.extend_from_slice(&rels);
             if rels_bytes.len() > WAITING {
@@ -1091,10 +1164,12 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     drop((nodes, ways, multi));
     crate::util::step("tile cut 3: the relations and the members of the multipolygons");
     // 4. the nodes from outside the tiles and the member ways of the multipolygons, to the extra parts of their tiles
-    let outside = sort_bytes(outside.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
+    let mut outside = sort_bytes(outside.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
     crate::util::step(&format!("tile cut 4a: the nodes from outside, sorted ({} rows)", outside.len));
     let mut r = open()?;
-    take_blocks(&mut r, &node_blocks, 0, outside.read(&Pair).map_err(io)?, &mut parts, "extra-nodes")?;
+    take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &mut parts, "extra-nodes")?;
+    let uses = sort_bytes(uses.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
+    outside_junctions(outside.read(&Pair).map_err(io)?, uses.read(&Pair).map_err(io)?, &mut parts)?;
     take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &mut parts, "extra-ways")?;
     parts.flush()?;
     drop(more);
@@ -1104,13 +1179,15 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
         .into_par_iter()
         .map(|t| {
             if !parts.path(t, "nodes").exists() {
-                for part in ["ways", "extra-nodes", "extra-ways", "relations"] {
+                for part in ["ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
                     let _ = std::fs::remove_file(parts.path(t, part));
                 }
                 return Ok(CutCounts::default());
             }
             let tile = &tiles[t as usize];
-            finish_tile(&parts, t, &dir.join(format!("{}_{}_{}.osm.pbf", tile.z, tile.x, tile.y)), timestamp)
+            let name = format!("{}_{}_{}", tile.z, tile.x, tile.y);
+            write_junctions(&parts.path(t, "junctions"), &dir.join(format!("{name}.junctions")))?;
+            finish_tile(&parts, t, &dir.join(format!("{name}.osm.pbf")), timestamp)
         })
         .collect::<Result<_, String>>()?;
     let _ = std::fs::remove_dir_all(&tmp);

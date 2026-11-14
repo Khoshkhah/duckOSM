@@ -839,6 +839,7 @@ version = "0.7.0"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
+ "arrow-select 60.0.0",
  "duckosm-core",
  "parquet",
  "rayon",

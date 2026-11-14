@@ -16,6 +16,8 @@ pbf = ["duckosm-core/pbf"]
 duckosm-core = { path = "../duckosm-core", default-features = false }
 arrow-array = "=60.0.0"
 arrow-schema = "=60.0.0"
+# the union of the tables of the tiles takes rows of many files into one block (merge.rs)
+arrow-select = "=60.0.0"
 parquet = { version = "=60.0.0", default-features = false, features = ["arrow"] }
 # the writers encode the columns of a row group on all threads; load_raw_here decodes the blocks on all threads
 rayon = "1.12"
