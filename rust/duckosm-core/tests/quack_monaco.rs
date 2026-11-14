@@ -69,19 +69,21 @@ fn monaco_equals_quackosm() {
     assert!(near(kinds[&6].1, 0.00029927139816998953), "area of the multipolygons {}", kinds[&6].1);
 }
 
-/// Quack by tiles (small tiles: many ways and multipolygons cross a tile edge) gives the same rows as the whole file.
+/// Quack by tiles (small tiles: many ways and multipolygons cross a tile edge; a quadtree and one zoom) gives the same
+/// rows as the whole file.
 #[test]
 fn monaco_by_tiles_equals_the_whole_file() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
     let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
-    let rows = |by_tiles: Option<usize>| {
+    use duckosm_core::quack::TileSize;
+    let rows = |by_tiles: Option<TileSize>| {
         let mut all = Vec::new();
         let keep = |rows: Vec<duckosm_core::quack::Feature>| {
             all.extend(rows.into_iter().map(|r| (r.feature_id, r.tags, r.geometry)));
             Ok(())
         };
         let n = match by_tiles {
-            Some(most) => duckosm_core::quack::features_by_tiles(open, 1 << 20, most, keep),
+            Some(size) => duckosm_core::quack::features_by_tiles(open, 1 << 20, size, keep),
             None => duckosm_core::quack::features(open, 1 << 20, keep),
         }
         .unwrap();
@@ -89,9 +91,9 @@ fn monaco_by_tiles_equals_the_whole_file() {
         (all, (n.nodes, n.ways, n.relations))
     };
     let (whole, n) = rows(None);
-    for most in [2_000, 40_000] {
-        let (tiled, m) = rows(Some(most));
-        assert_eq!(m, n, "the numbers of rows, at most {most} nodes in a tile");
-        assert!(tiled == whole, "the rows, at most {most} nodes in a tile");
+    for size in [TileSize::Nodes(2_000), TileSize::Nodes(40_000), TileSize::Zoom(14), TileSize::Zoom(12)] {
+        let (tiled, m) = rows(Some(size));
+        assert_eq!(m, n, "the numbers of rows, {size:?}");
+        assert!(tiled == whole, "the rows, {size:?}");
     }
 }

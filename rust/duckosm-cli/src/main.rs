@@ -207,8 +207,11 @@ struct QuackCli {
     no_sort: bool,
     /// Make the table tile by tile, with at most this many nodes in a tile (for example 4000000), so that the memory
     /// follows the size of a tile, not of the area (the mode of the browser for large areas). Writes GeoParquet only.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "tile_zoom")]
     tiles: Option<usize>,
+    /// Make the table tile by tile with the map tiles of one zoom (0 to 14, for example 9) in place of --tiles.
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=14))]
+    tile_zoom: Option<u8>,
 }
 
 /// The start of `duckosm-rust quack`, for the times of its steps.
@@ -237,8 +240,10 @@ fn quack(args: &[String]) -> Result<(), String> {
     let db = duckdb.then(|| cli.out.join(format!("{}_quack.duckdb", cli.name)));
     let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
     rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
+    use duckosm_build::TileSize;
+    let tiles = cli.tile_zoom.map(TileSize::Zoom).or(cli.tiles.map(TileSize::Nodes));
     let t = std::time::Instant::now();
-    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort, cli.tiles)?;
+    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort, tiles)?;
     eprintln!(
         "quack: {} nodes, {} ways, {} relations in {:.2} s",
         n.nodes,

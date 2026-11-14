@@ -30,6 +30,7 @@ pub use duckosm_core::network::Options as NetworkOptions;
 /// The hook of the sub-steps of the network step (the memory probe).
 pub use duckosm_core::util::STEP_HOOK;
 pub use duckosm_core::tiles::Tile;
+pub use duckosm_core::quack::TileSize;
 pub use levels::Method as LevelsMethod;
 
 /// What to build and write.
@@ -1634,10 +1635,10 @@ pub fn quack(
     duckdb: Option<&Path>,
     threads: usize,
     sort: bool,
-    tile_nodes: Option<usize>,
+    tiles: Option<duckosm_core::quack::TileSize>,
 ) -> Result<duckosm_core::quack::Counts, String> {
     if let Some(db) = duckdb {
-        if tile_nodes.is_some() {
+        if tiles.is_some() {
             return Err("quack by tiles writes only GeoParquet (use --format geoparquet)".into());
         }
         #[cfg(feature = "duckdb")]
@@ -1651,8 +1652,8 @@ pub fn quack(
         let f = std::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
         Ok(std::io::BufReader::with_capacity(1 << 20, f))
     };
-    match tile_nodes {
-        Some(n) => quack_tiles_to(open, std::io::BufWriter::new(out), sort, n),
+    match tiles {
+        Some(size) => quack_tiles_to(open, std::io::BufWriter::new(out), sort, size),
         None => quack_to(open, std::io::BufWriter::new(out), sort),
     }
 }
@@ -1675,17 +1676,17 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
     Ok(n)
 }
 
-/// [`quack_to`] tile by tile (`duckosm_core::quack::features_by_tiles`, at most `tile_nodes` nodes in a tile): the memory
-/// follows the size of a tile, not of the area. The same rows; without `sort`, in another order.
+/// [`quack_to`] tile by tile (`duckosm_core::quack::features_by_tiles`, the tiles of `size`): the memory follows the size
+/// of a tile, not of the area. The same rows; without `sort`, in another order.
 pub fn quack_tiles_to<R: Read + std::io::Seek + Send, W: Write + Send>(
     open: impl Fn() -> Result<R, String>,
     out: W,
     sort: bool,
-    tile_nodes: usize,
+    size: duckosm_core::quack::TileSize,
 ) -> Result<duckosm_core::quack::Counts, String> {
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
     let mut rows = duckosm_parquet::quack::Rows::new(sort);
-    let n = duckosm_core::quack::features_by_tiles(open, duckosm_core::quack::BUDGET, tile_nodes, |part| {
+    let n = duckosm_core::quack::features_by_tiles(open, duckosm_core::quack::BUDGET, size, |part| {
         rows.push(part)?.iter().try_for_each(|b| w.write(b))
     })?;
     rows.sorted(|b| w.write(&b))?;
