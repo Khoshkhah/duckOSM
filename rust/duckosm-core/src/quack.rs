@@ -18,6 +18,7 @@
 use crate::graph::MemberType;
 use crate::raw::{RawSink, RawTags};
 use crate::spill::Codec;
+use crate::tiles::Tile;
 use geo::orient::{Direction, Orient};
 use geo::algorithm::sweep::Intersections;
 use geo::algorithm::coordinate_position::CoordPos;
@@ -572,6 +573,8 @@ impl RawSink for WaysPart {
 struct NodesPart {
     nodes: Vec<(i64, f64, f64)>,
     features: Vec<Feature>,
+    /// quack by tiles: only the nodes in this tile are features
+    tile: Option<Tile>,
 }
 
 impl RawSink for NodesPart {
@@ -579,7 +582,7 @@ impl RawSink for NodesPart {
         self.nodes.push((id, lon, lat));
         let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let tags = clean(&tags);
-        if !tags.is_empty() {
+        if !tags.is_empty() && self.tile.is_none_or(|t| Tile::of(t.z, lon, lat) == t) {
             self.features.push(Feature::new(format!("node/{id}"), tags, &Geom::Point((round7(lon), round7(lat)))));
         }
     }
@@ -769,6 +772,31 @@ pub const BUDGET: usize = 512 << 20;
 pub fn features<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
+    emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    features_owned(open, budget, None, emit)
+}
+
+/// The rows that the file of one tile gives in quack by tiles (`crate::tilecut::cut_to_store`, docs/rust/quack.md):
+/// the cut gives each tile its nodes, each way with a node in the tile (whole, with its nodes), and each multipolygon and
+/// boundary with a member there (with all its members), so a row that a tile can make is the row of the whole file. Some
+/// rows come from more than one tile; one tile owns each row:
+///
+/// - a node: the tile of its place;
+/// - a way: the tile of the place of its first node (the cut and quack decode the same coordinates, so the tile that owns
+///   the way has it);
+/// - a relation: the first tile that makes it (`relations`, the ids that the tiles before made). The cut puts it whole in
+///   one tile; another tile has it whole only when all its member ways are in that tile too.
+pub struct Owner<'a> {
+    pub tile: Tile,
+    pub relations: &'a std::sync::Mutex<crate::util::FxHashSet<i64>>,
+}
+
+/// [`features`] with only the rows that `owner` owns (all rows with `None`).
+pub fn features_owned<R: Read + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    owner: Option<&Owner>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
     use crate::spill::join::{Point, Request};
@@ -839,7 +867,7 @@ pub fn features<R: Read + Send>(
     crate::cutstream::each_block(
         &mut open()?,
         |b, buf| {
-            let mut part = NodesPart::default();
+            let mut part = NodesPart { tile: owner.map(|o| o.tile), ..Default::default() };
             crate::pbfraw::decode_block(b, [true, false, false], buf, &mut part)?;
             Ok(part)
         },
@@ -881,7 +909,9 @@ pub fn features<R: Read + Send>(
     crate::util::step("quack 2: the nodes and the points");
     // pass 3: the ways. A reader joins the headers with their points into batches; the features of each batch are made on
     // all threads and written, and the lines of the member ways go to a file.
-    type WayBatch = Vec<(i64, RawTags, Vec<Pt>)>;
+    // (id, tags, points, owned)
+    type WayBatch = Vec<(i64, RawTags, Vec<Pt>, bool)>;
+    let way_tile = owner.map(|o| o.tile);
     let mut member_lines = Writer::new(store).map_err(io)?;
     let headers = headers.finish().map_err(io)?;
     let read_ways = move |give: &mut dyn FnMut(WayBatch) -> Result<(), String>| -> Result<(), String> {
@@ -903,9 +933,12 @@ pub fn features<R: Read + Send>(
         let mut batch: WayBatch = Vec::new();
         for (number, h) in headers.read(&Header).map_err(io)?.enumerate() {
             let (id, refs, tags) = h.map_err(io)?;
-            let mut pts = Vec::with_capacity(refs as usize);
+            let (mut pts, mut owned) = (Vec::with_capacity(refs as usize), true);
             while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == number as u32)) {
                 let p = p.map_err(io)?;
+                if let (true, Some(t)) = (pts.is_empty(), way_tile) {
+                    owned = Tile::of(t.z, p.2, p.3) == t;
+                }
                 pts.push((round7(p.2), round7(p.3)));
             }
             if let Some(Err(_)) = points.peek() {
@@ -913,7 +946,7 @@ pub fn features<R: Read + Send>(
             }
             // a way with a node that is not in the file is not a feature, and not a member of a relation
             if pts.len() == refs as usize {
-                batch.push((id, tags, pts));
+                batch.push((id, tags, pts, owned));
             }
             if batch.len() >= 50_000 {
                 give(std::mem::take(&mut batch))?;
@@ -923,7 +956,7 @@ pub fn features<R: Read + Send>(
     };
     {
         let mut use_ways = |batch: WayBatch| -> Result<(), String> {
-            for (id, _, pts) in &batch {
+            for (id, _, pts, _) in &batch {
                 if member_ids.binary_search(id).is_ok() {
                     member_lines.push(&KeyedLine, &(*id, pts.iter().map(|&p| to_grid(p)).collect())).map_err(io)?;
                 }
@@ -931,8 +964,8 @@ pub fn features<R: Read + Send>(
             // the member ways with no tags are not features
             let made: Vec<Feature> = batch
                 .par_iter()
-                .filter(|w| !w.1.is_empty())
-                .filter_map(|(id, tags, pts)| way_feature(*id, tags, pts))
+                .filter(|w| !w.1.is_empty() && w.3)
+                .filter_map(|(id, tags, pts, _)| way_feature(*id, tags, pts))
                 .collect();
             counts.ways += made.len();
             emit(made)
@@ -995,8 +1028,10 @@ pub fn features<R: Read + Send>(
             if let Some(Err(_)) = lines.peek() {
                 return Err(io(lines.next().expect("peeked").expect_err("an error")));
             }
-            // a relation with a member way that is not a valid way is not a feature
-            Ok((got.len() == roles.len()).then_some((id, tags, got)))
+            // a relation with a member way that is not a valid way is not a feature; by tiles, the first tile with the
+            // relation whole makes it
+            let mine = || owner.is_none_or(|o| o.relations.lock().expect("the relations").insert(id));
+            Ok((got.len() == roles.len() && mine()).then_some((id, tags, got)))
         });
         use_rels(&mut rels)
     };
@@ -1073,6 +1108,133 @@ pub fn features<R: Read + Send>(
     }
     crate::util::step("quack 4b: the relations");
     Ok(counts)
+}
+
+/// The most nodes in a tile of [`features_by_tiles`] (a default for the callers).
+pub const TILE_NODES: usize = 4_000_000;
+
+/// The features table of [`features`], made tile by tile, so that the memory follows the size of a tile, not of the area
+/// (docs/rust/quack.md, "By tiles"): the browser makes the table of a large area in its 4 GiB.
+///
+/// 1. A pass over the nodes counts the nodes of each tile of zoom 14. A tile with more than `tile_nodes` nodes is cut into
+///    its four tiles of the next zoom (a quadtree), so the dense city has small tiles and the country around it large ones.
+/// 2. The tile cut (`crate::tilecut::cut_to_store`) writes the file of each tile to the temporary store, with the ways
+///    whole, and each multipolygon and boundary with all its members in one of its tiles.
+/// 3. Each tile gives the rows that it owns ([`Owner`]) to `emit`, so each row comes one time.
+///
+/// `open` opens the `.osm.pbf` file (sorted by type and id); it is read four times, and the cut reads some blocks again.
+pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    tile_nodes: usize,
+    mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    let tiles = tiles_of_file(&open, tile_nodes.max(1))?;
+    crate::util::step(&format!(
+        "quack by tiles 1: {} tiles of zoom {} to {}",
+        tiles.len(),
+        tiles.iter().map(|t| t.z).min().unwrap_or(0),
+        tiles.iter().map(|t| t.z).max().unwrap_or(0)
+    ));
+    // the whole world, a little more: each node is inside
+    let world = crate::boundary::Boundary::parse(
+        r#"{"type":"Polygon","coordinates":[[[-181,-91],[181,-91],[181,91],[-181,91],[-181,-91]]]}"#,
+    )?;
+    let files = crate::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"])?;
+    crate::util::step("quack by tiles 2: the tile cut");
+    let relations = std::sync::Mutex::new(crate::util::FxHashSet::default());
+    let mut counts = Counts::default();
+    let n = files.tiles.iter().filter(|t| t.1.nodes > 0).count();
+    let mut k = 0;
+    for (i, (tile, c)) in files.tiles.iter().enumerate() {
+        if c.nodes == 0 {
+            continue;
+        }
+        k += 1;
+        let owner = Owner { tile: *tile, relations: &relations };
+        let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
+        let got = features_owned(open_tile, budget, Some(&owner), &mut emit)?;
+        counts.nodes += got.nodes;
+        counts.ways += got.ways;
+        counts.relations += got.relations;
+        crate::util::step(&format!(
+            "quack by tiles 3: tile {k} of {n} ({}, {} nodes, {} ways, {} relations in the file of the tile)",
+            tile.name(),
+            c.nodes,
+            c.ways,
+            c.relations
+        ));
+    }
+    Ok(counts)
+}
+
+/// The tiles of [`features_by_tiles`]: tiles of mixed zooms with a node, each with at most `most` nodes (a tile of zoom 14
+/// can have more).
+fn tiles_of_file<R: Read + Send>(open: &impl Fn() -> Result<R, String>, most: usize) -> Result<Vec<Tile>, String> {
+    const Z: u8 = 14;
+    #[derive(Default)]
+    struct Count(crate::util::FxHashMap<(u32, u32), u32>, bool);
+    impl RawSink for Count {
+        fn node<'a>(&mut self, _: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            let t = Tile::of(Z, lon, lat);
+            *self.0.entry((t.x, t.y)).or_default() += 1;
+            self.1 = true;
+        }
+        fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+        fn relation<'a>(
+            &mut self,
+            _: i64,
+            _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+        }
+    }
+    let mut all: crate::util::FxHashMap<(u32, u32), u32> = Default::default();
+    let mut seen = false;
+    crate::cutstream::each_block(
+        &mut open()?,
+        |b, buf| {
+            let mut c = Count::default();
+            crate::pbfraw::decode_block_tags(b, [true, false, false], [false; 3], buf, &mut c)?;
+            Ok(c)
+        },
+        |c, _| {
+            if !c.1 {
+                // the nodes of a sorted file come first: a block with no nodes after them ends the pass
+                return Ok(!seen);
+            }
+            seen = true;
+            for (k, v) in c.0 {
+                *all.entry(k).or_default() += v;
+            }
+            Ok(true)
+        },
+    )?;
+    let at = |z: u8| -> crate::util::FxHashMap<(u32, u32), usize> {
+        let mut m: crate::util::FxHashMap<(u32, u32), usize> = Default::default();
+        for (&(x, y), &n) in &all {
+            *m.entry((x >> (Z - z), y >> (Z - z))).or_default() += n as usize;
+        }
+        m
+    };
+    // a quadtree: a tile with more than `most` nodes is split in four, down to zoom 14
+    let maps: Vec<crate::util::FxHashMap<(u32, u32), usize>> = (0..=Z).map(at).collect();
+    let mut tiles = Vec::new();
+    let mut todo: Vec<Tile> = maps[0].keys().map(|&(x, y)| Tile { z: 0, x, y }).collect();
+    while let Some(t) = todo.pop() {
+        if t.z == Z || maps[t.z as usize][&(t.x, t.y)] <= most {
+            tiles.push(t);
+            continue;
+        }
+        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let (x, y) = (2 * t.x + dx, 2 * t.y + dy);
+            if maps[t.z as usize + 1].contains_key(&(x, y)) {
+                todo.push(Tile { z: t.z + 1, x, y });
+            }
+        }
+    }
+    tiles.sort();
+    Ok(tiles)
 }
 
 /// The rows of a row group of the GeoParquet file, as in QuackOSM.
@@ -1238,6 +1400,45 @@ impl Cursor {
     }
 }
 
+/// Sort `rows` by their key (the first three values) and write them, with their bytes in `bytes`, as a run of blocks at
+/// `end` of `file` (compressed on all threads, 64 blocks at a time, so only 64 blocks wait in memory; the browser does not
+/// compress them). Gives the blocks of the run: place, compressed length, length.
+fn write_run(file: &mut dyn crate::spill::Blob, end: &mut u64, rows: &mut [Placed], bytes: &[u8]) -> std::io::Result<Vec<(u64, usize, usize)>> {
+    use std::io::{SeekFrom, Write};
+    rows.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
+    file.seek(SeekFrom::Start(*end))?;
+    let mut run = Vec::new();
+    let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
+    for group in rows.chunks(64 * BLOCK_ROWS) {
+        let blocks: Vec<(Vec<u8>, usize)> = group
+            .par_chunks(BLOCK_ROWS)
+            .map(|rows| {
+                let mut raw = Vec::new();
+                for &(_, _, _, start, len) in rows {
+                    raw.extend_from_slice(&(len as u32).to_le_bytes());
+                    raw.extend_from_slice(&bytes[start..start + len]);
+                }
+                let n = raw.len();
+                Ok((pack(raw)?, n))
+            })
+            .collect::<std::io::Result<_>>()?;
+        for (b, raw_len) in blocks {
+            w.write_all(&b)?;
+            run.push((*end, b.len(), raw_len));
+            *end += b.len() as u64;
+        }
+    }
+    w.flush()?;
+    Ok(run)
+}
+
+/// The key of a row of [`Numbered`] in a strip: (y, up in the even strips, down in the odd strips; x; row number).
+fn strip_key(b: &[u8], up: bool) -> (i64, i64, u64) {
+    let (x, _, n) = numbered_key(b);
+    let y = f64::from_le_bytes(b[16..24].try_into().unwrap());
+    (ordered(if up { y } else { -y }), x, n)
+}
+
 /// A row in the bytes of [`StrSort`]: its sort key (two `ordered` values and the row number) and the place of its bytes.
 type Placed = (i64, i64, u64, usize, usize);
 
@@ -1246,8 +1447,9 @@ type Placed = (i64, i64, u64, usize, usize);
 /// (x, y, row number) and writes them as a run of blocks (compressed on all threads) at the end of one temporary file.
 /// [`StrSort::finish`] merges the runs, so the rows come in the order of x, into the bytes of a strip; each time a strip
 /// is full, it sorts the strip by y and gives its rows, a row group at a time. The order is the one of [`str_order`].
-/// The disk holds the rows one time, compressed. The memory is `budget` while the rows come, then the bytes of one
-/// strip (`sqrt(rows * ROW_GROUP)` rows, 3.2 million on France), one block of each run and one row group.
+/// A strip with more than `budget` bytes goes to the end of the file in sorted pieces of `budget` bytes, and the pieces are
+/// merged by y. The disk holds the rows at most two times, compressed. The memory is `budget` while the rows come, then
+/// `budget` for the strip, one block of each run and of each piece, and one row group.
 pub struct StrSort {
     file: Box<dyn crate::spill::Blob>,
     end: u64,
@@ -1308,40 +1510,56 @@ impl StrSort {
 
     /// Write the rows of the buffer as a new run, sorted.
     fn flush(&mut self) -> std::io::Result<()> {
-        use std::io::{Seek, SeekFrom, Write};
-        self.rows.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
-        // the blocks are made on all threads, 64 at a time, and written: so only 64 blocks wait in memory (the browser
-        // does not compress them)
-        let bytes = &self.bytes;
-        self.file.seek(SeekFrom::Start(self.end))?;
-        let mut run = Vec::new();
-        let mut w = std::io::BufWriter::with_capacity(1 << 20, &mut self.file);
-        for group in self.rows.chunks(64 * BLOCK_ROWS) {
-            let blocks: Vec<(Vec<u8>, usize)> = group
-                .par_chunks(BLOCK_ROWS)
-                .map(|rows| {
-                    let mut raw = Vec::new();
-                    for &(_, _, _, start, len) in rows {
-                        raw.extend_from_slice(&(len as u32).to_le_bytes());
-                        raw.extend_from_slice(&bytes[start..start + len]);
-                    }
-                    let n = raw.len();
-                    Ok((pack(raw)?, n))
-                })
-                .collect::<std::io::Result<_>>()?;
-            for (b, raw_len) in blocks {
-                w.write_all(&b)?;
-                run.push((self.end, b.len(), raw_len));
-                self.end += b.len() as u64;
-            }
-        }
-        w.flush()?;
-        drop(w);
+        let run = write_run(&mut *self.file, &mut self.end, &mut self.rows, &self.bytes)?;
         self.runs.push(run);
         self.written += self.rows.len() as u64;
         self.rows.clear();
         self.bytes.clear();
         Ok(())
+    }
+
+    /// The rows of a strip from its sorted pieces in the file (`up`: the order of y), merged, a row group at a time.
+    fn merge_strip(
+        &mut self,
+        pieces: Vec<Vec<(u64, usize, usize)>>,
+        up: bool,
+        out: &mut Vec<Feature>,
+        emit: &mut impl FnMut(Vec<Feature>) -> Result<(), String>,
+    ) -> std::io::Result<()> {
+        use std::cmp::Reverse;
+        let mut tmp = Vec::new();
+        let mut cursors: Vec<Cursor> = Vec::with_capacity(pieces.len());
+        let mut heap = std::collections::BinaryHeap::new();
+        for run in pieces {
+            let mut c = Cursor { blocks: run.into(), buf: Vec::new(), pos: 0, row: (0, 0) };
+            if c.advance(&mut *self.file, &mut tmp)? {
+                heap.push(Reverse((strip_key(c.bytes(), up), cursors.len())));
+            }
+            cursors.push(c);
+        }
+        // the bytes of the rows of a row group, read on all threads
+        let (mut b, mut spans): (Vec<u8>, Vec<(usize, usize)>) = (Vec::new(), Vec::new());
+        loop {
+            let next = heap.pop();
+            if let Some(Reverse((_, i))) = next {
+                spans.push((b.len(), cursors[i].bytes().len()));
+                b.extend_from_slice(cursors[i].bytes());
+                if cursors[i].advance(&mut *self.file, &mut tmp)? {
+                    heap.push(Reverse((strip_key(cursors[i].bytes(), up), i)));
+                }
+            }
+            if out.len() + spans.len() == self.group || (next.is_none() && !spans.is_empty()) {
+                out.extend(spans.par_iter().map(|&(at, len)| Numbered.get(&mut &b[at..at + len]).1).collect::<Vec<_>>());
+                b.clear();
+                spans.clear();
+                if out.len() == self.group {
+                    emit(std::mem::replace(out, Vec::with_capacity(self.group))).map_err(std::io::Error::other)?;
+                }
+            }
+            if next.is_none() {
+                return Ok(());
+            }
+        }
     }
 
     /// Give the rows in the order of the sort, in pieces of a row group.
@@ -1369,6 +1587,8 @@ impl StrSort {
         }
         let mut out: Vec<Feature> = Vec::with_capacity(group);
         let mut up = true;
+        // a strip larger than the budget goes to the end of the file in sorted pieces, merged when the strip is full
+        let (mut in_strip, mut pieces) = (0usize, Vec::new());
         loop {
             let next = heap.pop();
             if let Some(Reverse(((x, _, n), i))) = next {
@@ -1377,12 +1597,21 @@ impl StrSort {
                 let y = f64::from_le_bytes(b[16..24].try_into().unwrap());
                 strip.push((ordered(if up { y } else { -y }), x, n, bytes.len(), b.len()));
                 bytes.extend_from_slice(b);
+                in_strip += 1;
                 if cursors[i].advance(&mut *self.file, &mut tmp).map_err(io)? {
                     heap.push(Reverse((numbered_key(cursors[i].bytes()), i)));
                 }
             }
             let more = next.is_some();
-            if strip.len() == strip_size || (!more && !strip.is_empty()) {
+            let full = in_strip == strip_size || (!more && in_strip > 0);
+            if bytes.len() > self.budget || (full && !pieces.is_empty()) {
+                pieces.push(write_run(&mut *self.file, &mut self.end, &mut strip, &bytes).map_err(io)?);
+                strip.clear();
+                bytes.clear();
+            }
+            if full && !pieces.is_empty() {
+                self.merge_strip(std::mem::take(&mut pieces), up, &mut out, &mut emit).map_err(io)?;
+            } else if full {
                 strip.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
                 // the rows of the strip are read on all threads, a row group at a time
                 let mut i = 0;
@@ -1398,6 +1627,9 @@ impl StrSort {
                 }
                 strip.clear();
                 bytes.clear();
+            }
+            if full {
+                in_strip = 0;
                 up = !up;
             }
             if !more {
