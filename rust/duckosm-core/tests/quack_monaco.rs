@@ -68,3 +68,30 @@ fn monaco_equals_quackosm() {
     assert!(near(kinds[&3].1, 0.0005955805303099766), "area of the polygons {}", kinds[&3].1);
     assert!(near(kinds[&6].1, 0.00029927139816998953), "area of the multipolygons {}", kinds[&6].1);
 }
+
+/// Quack by tiles (small tiles: many ways and multipolygons cross a tile edge) gives the same rows as the whole file.
+#[test]
+fn monaco_by_tiles_equals_the_whole_file() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
+    let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
+    let rows = |by_tiles: Option<usize>| {
+        let mut all = Vec::new();
+        let keep = |rows: Vec<duckosm_core::quack::Feature>| {
+            all.extend(rows.into_iter().map(|r| (r.feature_id, r.tags, r.geometry)));
+            Ok(())
+        };
+        let n = match by_tiles {
+            Some(most) => duckosm_core::quack::features_by_tiles(open, 1 << 20, most, keep),
+            None => duckosm_core::quack::features(open, 1 << 20, keep),
+        }
+        .unwrap();
+        all.sort();
+        (all, (n.nodes, n.ways, n.relations))
+    };
+    let (whole, n) = rows(None);
+    for most in [2_000, 40_000] {
+        let (tiled, m) = rows(Some(most));
+        assert_eq!(m, n, "the numbers of rows, at most {most} nodes in a tile");
+        assert!(tiled == whole, "the rows, at most {most} nodes in a tile");
+    }
+}

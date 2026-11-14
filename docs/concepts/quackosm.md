@@ -18,6 +18,7 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
 | `-f, --format LIST` | `geoparquet`, `duckdb` (the table `main.quackosm`), or both in one pass | both |
 | `--no-sort` | keep the rows in the order in which they are made (QuackOSM `sort_result=False`) | sorted |
 | `--threads N` | all the threads of the program and of DuckDB (QuackOSM `cpu_limit`) | all the cores |
+| `--tiles N` | make the table tile by tile, at most `N` nodes in a tile: the memory follows the tile, not the file (GeoParquet only) | one run |
 
 The input must be sorted by type and id, as the files of Geofabrik are. To make the table of an area, cut the region file
 first with `duckosm-rust cut`.
