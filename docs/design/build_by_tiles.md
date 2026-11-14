@@ -83,8 +83,9 @@ The drawing levels (`visualization.edge_levels`) run after the union, from its e
 
 - `--levels solve`: by tiles in their order, each with the numbers of the earlier tiles fixed (`levels::tiled`, the code
   of the whole build, with the union tables as its source): memory that does not grow with the area (France: 2.25 GB).
-- `--levels tags` (the default): the rule of the whole build, with all level edges in memory (France: 11.7 GB). The rule
-  is local (the level of a road depends on the edges at its end nodes), but roadstyle's tile function has only the solve.
+- `--levels tags` (the default): the rule of the whole build by tiles too (roadstyle `tags_tile`). The rule is local: the
+  level of a road depends only on the edges at its end nodes. Each tile gives the rule its own edges and the edges at
+  their ends, and keeps the rows of its own edges (France: 2.33 GB, before 11.7 GB with all level edges in memory).
 
 Kentucky: the level rows are equal to the whole build with both methods (2,449,396 rows); the meta row differs only in
 `created`. France: 27,789,657 level rows.
@@ -137,5 +138,4 @@ The default is the cores / 2 tiles at a time, with 2 threads each.
 
 ## Not yet in a build by tiles
 
-- The tags rule of the levels by tiles (it needs a tile function for it in roadstyle).
 - The `.duckdb` output: the build by tiles writes GeoParquet files.
