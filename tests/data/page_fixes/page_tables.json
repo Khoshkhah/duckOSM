@@ -34,7 +34,7 @@
     "cycle_type": "79d0252abc3968aac4c4088735d0896e",
     "dismount": "813c674f64e4dd48dece686f2f9646aa",
     "edge_id": "1dfe5e6ed0d7a9dfa6610cc41726bd77",
-    "edge_ref": "1fb18a20bbdf067c0692cb2cf642fcf8",
+    "edge_ref": "1d5ecacccc7f2a77b91dc907e2e11134",
     "highway": "07cdb6c33a166d40d59ac9feeaa86ee3",
     "is_reverse": "271accc26ad1ea6fd0c0fa3dc99e8ba7",
     "junction": "77b7173a5f659a752ebaf31c311b936c",
@@ -53,7 +53,7 @@
     "tunnel": "a8ac4d43ed95572f2f3fd0e76a87f3c2"
    },
    "n": 11125,
-   "rows": "d670ff25acf7eaaf5c0bd23def27dd25"
+   "rows": "86733168acc49275ba8c37d7ca0f32fe"
   },
   "cycling.nodes": {
    "columns": {
@@ -547,7 +547,7 @@
     "bridge": "7375961ecc0b3f45b12a8904c9ce73e6",
     "cost_s": "55653a9d2aacd0f91ee50da7a06aa6df",
     "edge_id": "45f9a742c92c943ae858fe8f3bc1b489",
-    "edge_ref": "cf1a3fa999782d59dfa184095ac74a95",
+    "edge_ref": "f2f3b750401afbcc3a985cfd1c5ea262",
     "highway": "c09f10d7bc97b7ba24d668f50de11370",
     "is_reverse": "05c957594f726f3133ca2ce060c03f09",
     "junction": "684438057b7af5d97a8ee377ed6d9e62",
@@ -567,7 +567,7 @@
     "walk_type": "b56fc41ffe9db5ab294980a239724f5e"
    },
    "n": 11753,
-   "rows": "59f8364bb96351f0954f7674ba94a103"
+   "rows": "eacfb545a185fdeeafaf92c4a06860cc"
   },
   "walking.nodes": {
    "columns": {

@@ -314,7 +314,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
     if cli.only_cut {
         // the multipolygons of each tile are complete only when a part of the build reads them
         let multipolygons = p.raw || p.features || p.building_faces;
-        duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, multipolygons, &dir)?;
+        duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, multipolygons, duckosm_build::union::border_m(&p), &dir)?;
         return Ok(());
     }
     // the cut, as a process of this program: its memory goes back to the system when it ends
@@ -766,6 +766,7 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
             global_junctions: !cli.no_global_junctions,
             connect_paths: !cli.no_connect_paths,
             snap_m: cli.snap_m,
+            connect_near: None,
             process_speeds: !cli.no_speeds,
             calculate_costs: !cli.no_speeds && !cli.no_costs,
             functional_types: !cli.no_functional_types,

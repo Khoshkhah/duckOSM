@@ -125,9 +125,22 @@ half of a dual carriageway) cover both its sides. It reads the lines within 12 m
 Kentucky walking: the step finds 2,948 roads, as the whole build; `ways_walking` and `way_nodes_walking` are equal. The step
 takes 7.1 s.
 
-Open: the dangling-path connector (`connect_paths`) is not local either. A node outside the tile can look like a dangling
-end, a target node can be in another tile, and the number of a connector (`edge_ref`) is its rank among all connectors
-with the same `osm_id`. Kentucky walking: 14 and 42 different edges.
+## The connectors
+
+The connector of the dangling paths (`connect_paths`) joins a dangling path end to the nearest node within `snap_m` (10 m).
+It was not local in three ways, and each one has a fix:
+
+- **A false dangling end.** A node at the edge of what a tile has can look like a dangling end (the tile lacks its other
+  ways). A tile build runs the connector only at the ends within `snap_m` of the tile (`Options::connect_near`).
+- **A missing target.** The cut gives each tile also the ways with a node in the area within `border_m` = 2 × `snap_m` +
+  5 m of the tile (`tilecut::near_tile`; 0 for driving only). At an end near the tile, the tile then has all the ways at the
+  end and all the nodes within `snap_m` of it. The tile build keeps these ways; their rows belong to other tiles.
+- **The number.** The number in `edge_ref` was the rank of the connector among all connectors with the same `osm_id`. Now
+  it is always 1 (a connector has no way; `edge_id` is the key). This changes `edge_ref` of the connectors in the whole build
+  (Kentucky walking: 1,682 edges).
+
+Kentucky walking, Kentucky driving and cycling, and Monaco with Studio edits at zoom 14 in all three modes: all tables are
+equal to the whole build.
 
 ## H3 and the heights
 

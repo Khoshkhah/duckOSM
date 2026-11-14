@@ -27,6 +27,10 @@ pub struct Options {
     /// (duckOSM `clip.connectivity_rescue`, on by default; walking and cycling only).
     pub connect_paths: bool,
     pub snap_m: f64,
+    /// A build by tiles: the connector runs only at the dangling ends within this many metres of this tile. The cut gives the
+    /// tile all the ways near its border (`tilecut::border_m`), so it has all the ways at those ends and all the nodes within
+    /// `snap_m` of them; at an end further away, the tile can lack a way, and the end is not dangling in the whole build.
+    pub connect_near: Option<(crate::tiles::Tile, f64)>,
     /// Set `maxspeed_kmh` and replace the raw `maxspeed` (duckOSM `options.process_speeds`, on by default).
     pub process_speeds: bool,
     /// Set `cost_s`, the travel time in seconds (duckOSM `options.calculate_costs`, on by default; needs the speeds).
@@ -54,6 +58,7 @@ impl Default for Options {
             global_junctions: true,
             connect_paths: true,
             snap_m: 10.0,
+            connect_near: None,
             process_speeds: true,
             calculate_costs: true,
             functional_types: true,
@@ -821,6 +826,7 @@ pub fn build_network_files(
             rows,
             &nodes,
             opts.snap_m,
+            opts.connect_near,
             mode == Mode::Cycling && opts.cycling_dismount,
             if opts.functional_types {
                 Some(mode)
@@ -1632,6 +1638,7 @@ fn connect_paths(
     edges: impl Iterator<Item = Result<Fwd, String>>,
     nodes: &[Node],
     snap_m: f64,
+    near: Option<(crate::tiles::Tile, f64)>,
     dismount: bool,
     types_for: Option<Mode>,
 ) -> Result<Vec<Edge>, String> {
@@ -1696,7 +1703,11 @@ fn connect_paths(
     let mut dangles: Vec<(i64, &Touch)> = touch
         .iter()
         .filter(|(n, t)| {
-            t.count == 1 && PATH_CLASSES.contains(&t.hw.as_str()) && by_id.contains_key(n)
+            t.count == 1
+                && PATH_CLASSES.contains(&t.hw.as_str())
+                && by_id.get(*n).is_some_and(|&i| {
+                    near.is_none_or(|(tile, m)| crate::tilecut::near_tile(tile, nodes[i].lon, nodes[i].lat, m))
+                })
         })
         .map(|(n, t)| (*n, t))
         .collect();
@@ -1753,20 +1764,11 @@ fn connect_paths(
             }
         }
     }
-    // 4. the connector edges, both directions
-    let mut rank: FxHashMap<i64, Vec<(i64, i64)>> = FxHashMap::default();
-    for p in &pairs {
-        rank.entry(p.4)
-            .or_default()
-            .push((p.0.min(p.1), p.0.max(p.1)));
-    }
-    for v in rank.values_mut() {
-        v.sort();
-        v.dedup();
-    }
+    // 4. the connector edges, both directions. The number in `edge_ref` is 1: a connector has no way, and a number from the
+    // other connectors of the same `osm_id` would need all of them (a build by tiles has only its own); `edge_id` is the key
     let mut out: Vec<Edge> = Vec::with_capacity(pairs.len() * 2);
     for (a, b, hw, dist, osm_id) in &pairs {
-        let seq = rank[osm_id].binary_search(&(*a.min(b), *a.max(b))).unwrap() + 1;
+        let seq = 1;
         let attrs = Arc::new(Attrs {
             highway: hw.clone(),
             name: None,

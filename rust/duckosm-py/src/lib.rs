@@ -72,6 +72,7 @@ fn build<'py>(
         global_junctions,
         connect_paths: connectivity_rescue,
         snap_m: connect_snap_m,
+        connect_near: None,
         process_speeds,
         // the costs need the speeds, as in the CLI
         calculate_costs: process_speeds && calculate_costs,

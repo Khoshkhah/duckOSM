@@ -351,6 +351,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         global_junctions: options.bool("global_junctions", true)?,
         connect_paths: clip.bool("connectivity_rescue", true)?,
         snap_m: clip.f64("connect_snap_m", 10.0)?,
+        connect_near: None,
         process_speeds: options.bool("process_speeds", true)?,
         calculate_costs: options.bool("calculate_costs", true)?,
         functional_types: options.bool("functional_types", true)?,

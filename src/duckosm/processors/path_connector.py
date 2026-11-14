@@ -105,10 +105,9 @@ class PathConnector(BaseProcessor):
                        tgeom AS sgeom, sgeom AS tgeom, TRUE AS is_reverse FROM base
             )
             SELECT (hash(osm_id, source, target) >> 1)::BIGINT AS edge_id,
-                   osm_id || '#'
-                       || dense_rank() OVER (PARTITION BY osm_id
-                                             ORDER BY least(source, target), greatest(source, target))
-                       || (CASE WHEN is_reverse THEN 'r' ELSE 'f' END) AS edge_ref,
+                   -- the number is 1: a connector has no way (the Rust engine, and its build by tiles, which has
+                   -- only the connectors of its own tiles); edge_id is the key
+                   osm_id || '#1' || (CASE WHEN is_reverse THEN 'r' ELSE 'f' END) AS edge_ref,
                    -- name, oneway, lanes, surface, access, junction, layer, bridge, tunnel,
                    -- service: a snap connector has none of them. Positional, so this list must
                    -- stay the same length as the column list above.

@@ -1122,7 +1122,10 @@ pub fn run<W: Write + Send>(
     log: &mut StepLog,
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<Summary, String> {
-    let opts = &p.options;
+    // a tile of a build by tiles: the connector of the dangling paths runs only at the ends near the tile
+    let mut tile_opts = p.options.clone();
+    tile_opts.connect_near = p.tile.map(|t| (t, p.options.snap_m));
+    let opts = &tile_opts;
     let driving = p.modes.contains(&Mode::Driving);
     let need_relations = opts.extract_restrictions && driving;
     // the bus routes need the route relations and the member ways of the raw cut (docs/bus.md)
@@ -1179,8 +1182,14 @@ pub fn run<W: Write + Send>(
             let mut coords = pbf::read_coords_from(open()?, &ways)?;
             // osmium's complete_ways: the network has only the ways with a node inside. The area file has more: the
             // member ways of its multipolygons (osmium's smart cut)
+            // a tile of a build by tiles also keeps the ways in its border (`union::border_m`): the connector of the
+            // dangling paths at its nodes needs them; their rows belong to other tiles
+            let border = p.tile.map(|t| (t, union::border_m(p))).filter(|b| b.1 > 0.0);
+            let near = |q: &(f64, f64)| {
+                border.is_some_and(|(t, m)| boundary.in_area(q.0, q.1) && duckosm_core::tilecut::near_tile(t, q.0, q.1, m))
+            };
             ways.retain(|w| {
-                w.refs.iter().any(|n| coords.get(n).is_some_and(|p| boundary.contains(p.0, p.1)))
+                w.refs.iter().any(|n| coords.get(n).is_some_and(|q| boundary.contains(q.0, q.1) || near(&q)))
             });
             log.step("read nodes");
             // the cut as osmium gives it: before the fixes change the ways
