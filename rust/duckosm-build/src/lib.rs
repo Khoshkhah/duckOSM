@@ -455,6 +455,44 @@ pub fn write_bus<W: Write + Send>(
     Ok(routes.len())
 }
 
+/// The input of the bus routes of the build of one tile: its route relations and their member ways, as `bus.osm.pbf`.
+fn write_bus_input<W: Write + Send>(raw: &Raw, mut file: impl FnMut(&str) -> Result<W, String>) -> Result<(), String> {
+    let route = |r: &duckosm_core::graph::Relation| {
+        r.tags.iter().any(|(k, v)| k == "route" && duckosm_core::bus::ROUTES.contains(&v.as_str()))
+    };
+    // of a route relation, the walk reads its way members only (the stops and platforms are nodes and ways with a stop
+    // role; the walk skips them, and the order of the members stays)
+    let relations: Vec<duckosm_core::graph::Relation> = raw
+        .relations
+        .iter()
+        .filter(|r| route(r))
+        .map(|r| duckosm_core::graph::Relation {
+            id: r.id,
+            tags: r.tags.clone(),
+            members: r.members.iter().filter(|m| m.1 == duckosm_core::graph::MemberType::Way).cloned().collect(),
+        })
+        .collect();
+    let members: duckosm_core::util::FxHashSet<i64> = relations
+        .iter()
+        .flat_map(|r| r.members.iter())
+        .filter(|m| m.1 == duckosm_core::graph::MemberType::Way)
+        .map(|m| m.0)
+        .collect();
+    // of a member way, the walk of the routes reads only its nodes and the tags of its direction (bus.rs, `oneway`)
+    let ways = raw
+        .ways
+        .iter()
+        .filter(|w| members.contains(&w.id))
+        .map(|w| duckosm_core::raw::RawWay {
+            id: w.id,
+            refs: w.refs.clone(),
+            tags: w.tags.iter().filter(|t| t.0 == "oneway" || t.0 == "junction").cloned().collect(),
+        })
+        .collect();
+    let part = Raw { nodes: Vec::new(), ways, relations, timestamp: None };
+    duckosm_core::cutfile::write_pbf(&part, None, &mut file("bus.osm.pbf")?)
+}
+
 /// The edges (or the private edges) of a mode from its spill files, one at a time, in the order of `edge_id`. A read error
 /// ends the edges and goes to `err`.
 fn edges_of<'a>(
@@ -1272,7 +1310,13 @@ pub fn run<W: Write + Send>(
         // duckOSM: the arrows of the fixes go into the raw tags after this mode, so the next modes see them
         fixes.set_arrows(&mut ways, &net.net.ways, *mode);
         if let Some(r) = raw.as_ref().filter(|_| *mode == Mode::Driving && bus) {
-            sum.bus_routes = Some(write_bus(r, &mut net.files, &mut file)?);
+            if p.tile.is_some() {
+                // a bus route crosses tiles: the union walks the routes (union::bus_routes); the tile gives its route
+                // relations and their member ways
+                write_bus_input(r, &mut file)?;
+            } else {
+                sum.bus_routes = Some(write_bus(r, &mut net.files, &mut file)?);
+            }
             log.step("bus routes");
         }
         // the rest of the network of this mode (its ways, its graph) goes here

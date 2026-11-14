@@ -69,6 +69,7 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
         for &m in &p.modes {
             keep_largest_part(tiles, m)?;
         }
+        duckosm_core::util::step("union: the largest part");
     }
     // the tables at the same time (each one is a copy of files, and a small merge)
     let rows: Vec<(String, usize)> = names
@@ -92,6 +93,9 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
         })
         .collect::<Result<_, _>>()?;
     let _ = std::fs::remove_dir_all(&tmp);
+    if p.bus_routes && p.modes.contains(&Mode::Driving) {
+        bus_routes(tiles, out)?;
+    }
     write_whole_area_tables(out, boundary, &p.modes, &p.options)?;
     Ok(rows)
 }
@@ -606,4 +610,142 @@ fn drop_other_parts(dir: &Path, m: &str, keep: &FxHashSet<u32>) -> Result<(), St
         }
     }
     Ok(())
+}
+
+/// The member ways of the routes of one batch of the bus step (see [`bus_routes`]).
+const BUS_BATCH_WAYS: usize = 20_000;
+
+/// `bus.routes` and `bus.route_edges` after the union (docs/design/build_by_tiles.md, "The bus routes"): a bus route crosses
+/// tiles, so the walk of the routes (`bus::routes`, the function of the whole build) runs after the union, on the route
+/// relations and their member ways of all tiles (each tile's `bus.osm.pbf`, one copy of each), and on the driving edges
+/// and bus lanes of those ways, read from the tables of the union without their lines. The routes go in batches of about
+/// [`BUS_BATCH_WAYS`] member ways, in the order of their ids (the order of the whole build): one read of the edges puts each
+/// member edge into the temporary file of each batch that needs it, and each batch holds only its own edges (France:
+/// 7.5 million route edges, 6.5 GB at once). Returns the number of routes.
+pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String> {
+    use duckosm_core::graph::MemberType;
+    use duckosm_core::raw::{read_part, Want};
+    use duckosm_core::spill::{self, EdgeCodec, Writer};
+    let (mut relations, mut ways) = (Vec::new(), Vec::new());
+    let (mut seen_rel, mut seen_way): (FxHashSet<i64>, FxHashSet<i64>) = Default::default();
+    let all = |_: i64, _: &[(&str, &str)]| true;
+    let want = Want { relation: &all, way: &all, node: &|_| false, way_nodes: false, tag: &|_, _, _| true };
+    for (_, dir) in tiles {
+        let path = dir.join("bus.osm.pbf");
+        if !path.exists() {
+            continue;
+        }
+        let open = || File::open(&path).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path.display()));
+        // one copy of each relation and way: a route is in each tile of its ways
+        let part = read_part(open, &want)?;
+        relations.extend(part.relations.into_iter().filter(|r| seen_rel.insert(r.id)));
+        ways.extend(part.ways.into_iter().filter(|w| seen_way.insert(w.id)));
+    }
+    drop((seen_rel, seen_way));
+    relations.sort_by_key(|r| r.id);
+    ways.sort_by_key(|w| w.id);
+    duckosm_core::util::step(&format!("bus 1: {} route relations, {} member ways", relations.len(), ways.len()));
+    // the batches of the routes: consecutive relations with about BUS_BATCH_WAYS member ways
+    let mut batch_of: Vec<u32> = Vec::with_capacity(relations.len());
+    let (mut batch, mut n) = (0u32, 0usize);
+    for r in &relations {
+        let k = r.members.iter().filter(|m| m.1 == MemberType::Way).count();
+        if n > 0 && n + k > BUS_BATCH_WAYS {
+            batch += 1;
+            n = 0;
+        }
+        n += k;
+        batch_of.push(batch);
+    }
+    let batches = if relations.is_empty() { 0 } else { batch as usize + 1 };
+    // the batches of each member way
+    let mut way_batches: Vec<(i64, u32)> = relations
+        .iter()
+        .zip(&batch_of)
+        .flat_map(|(r, &b)| r.members.iter().filter(|m| m.1 == MemberType::Way).map(move |m| (m.0, b)))
+        .collect();
+    way_batches.sort_unstable();
+    way_batches.dedup();
+    let batches_of = |osm: i64| {
+        let i = way_batches.partition_point(|x| x.0 < osm);
+        way_batches[i..].iter().take_while(move |x| x.0 == osm).map(|x| x.1)
+    };
+    // one read of the union edges: each member edge, without its line, to the files of its batches
+    // one temporary file, sorted by (batch, private, edge_id) after the read: one row for each batch of an edge
+    let store = spill::temp_store();
+    let store = &*store;
+    let codec = BatchEdge(EdgeCodec::default());
+    let mut w = Writer::new(store).map_err(io)?;
+    let mut attrs = FxHashSet::default();
+    for (k, name) in ["edges", "private_edges"].into_iter().enumerate() {
+        let path = out.join(format!("{name}_driving.parquet"));
+        if !path.exists() {
+            continue;
+        }
+        duckosm_parquet::read::read_edges(&path, &mut attrs, |osm| batches_of(osm).next().is_some(), |mut e| {
+            e.geometry = Vec::new(); // the walk reads the nodes of an edge, not its line
+            for b in batches_of(e.osm_id) {
+                w.push(&codec, &(b, k as u8, e.clone())).map_err(io)?;
+            }
+            Ok(())
+        })?;
+    }
+    drop(attrs);
+    let key = |b: &[u8]| (u32::from_le_bytes(b[..4].try_into().unwrap()), b[4], EdgeCodec::edge_id(&b[5..]));
+    let sorted = spill::sort_bytes(w.finish().map_err(io)?, key, 64 << 20, store).map_err(io)?;
+    let mut rows = sorted.read(&codec).map_err(io)?.peekable();
+    duckosm_core::util::step(&format!("bus 2: the member edges to {batches} batches"));
+    // each batch: its routes, its member ways and its edges (in the order of edge_id, as the whole build gives them)
+    let tmp = std::env::temp_dir().join(format!("duckosm-bus-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).map_err(io)?;
+    let (mut routes, mut parts) = (Vec::new(), Vec::new());
+    let mut start = 0;
+    for b in 0..batches as u32 {
+        let end = start + batch_of[start..].iter().take_while(|&&x| x == b).count();
+        let rels = &relations[start..end];
+        start = end;
+        // the edges of the batch come sorted by (private, edge_id)
+        let (mut edges, mut private_edges) = (Vec::new(), Vec::new());
+        while let Some(r) = rows.next_if(|r| r.as_ref().is_ok_and(|r| r.0 == b)) {
+            let (_, k, e) = r.map_err(io)?;
+            let list: &mut Vec<duckosm_core::model::Edge> = if k == 0 { &mut edges } else { &mut private_edges };
+            if list.last().is_none_or(|l| l.edge_id != e.edge_id) {
+                list.push(e);
+            }
+        }
+        let members: FxHashSet<i64> =
+            rels.iter().flat_map(|r| r.members.iter()).filter(|m| m.1 == MemberType::Way).map(|m| m.0).collect();
+        let own_ways: Vec<duckosm_core::raw::RawWay> = ways.iter().filter(|w| members.contains(&w.id)).cloned().collect();
+        let (r, rows) = duckosm_core::bus::routes(rels, &own_ways, &edges, &private_edges);
+        routes.extend(r);
+        let part = tmp.join(format!("{b}.parquet"));
+        duckosm_parquet::write_route_edges_to(create(&part)?, &rows)?;
+        parts.push(part);
+    }
+    duckosm_core::util::step("bus 3: the batches");
+    duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &routes)?;
+    if parts.is_empty() {
+        duckosm_parquet::write_route_edges_to(create(&out.join("route_edges_bus.parquet"))?, &[])?;
+    } else {
+        concat_files(&parts, true, &out.join("route_edges_bus.parquet"))?;
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(routes.len())
+}
+
+/// An edge of a batch of the bus step in a temporary file: the batch, 1 for a private edge (else 0), the edge.
+struct BatchEdge(duckosm_core::spill::EdgeCodec);
+
+impl duckosm_core::spill::Codec<(u32, u8, duckosm_core::model::Edge)> for BatchEdge {
+    fn put(&self, r: &(u32, u8, duckosm_core::model::Edge), o: &mut Vec<u8>) {
+        o.extend_from_slice(&r.0.to_le_bytes());
+        o.push(r.1);
+        self.0.put(&r.2, o);
+    }
+    fn get(&self, b: &mut &[u8]) -> (u32, u8, duckosm_core::model::Edge) {
+        let batch = u32::from_le_bytes(b[..4].try_into().unwrap());
+        let k = b[4];
+        *b = &b[5..];
+        (batch, k, self.0.get(b))
+    }
 }
