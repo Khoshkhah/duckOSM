@@ -755,30 +755,13 @@ impl duckosm_core::spill::Codec<(u32, u8, duckosm_core::model::Edge)> for BatchE
 }
 
 /// The drawing levels after the union (docs/design/build_by_tiles.md, "The levels"), from the edge tables of the union: each
-/// table is sorted by `edge_id` on disk first (the order of the whole build). `solve`: by tiles in their order, each with
-/// the numbers of the earlier tiles fixed (`levels::tiled`), with memory that does not grow with the area. `tags`: the rule
-/// of the whole build by tiles too (`roadstyle_levels::tags_tile`): the rule reads only the edges at the ends of each edge.
+/// pass reads only the columns of the levels, and each tile of the levels sorts its edges by `edge_id` (the order of the whole
+/// build). `solve`: by tiles in their order, each with the numbers of the earlier tiles fixed (`levels::tiled`), with memory
+/// that does not grow with the area. `tags`: the rule of the whole build by tiles too (`roadstyle_levels::tags_tile`): the
+/// rule reads only the edges at the ends of each edge.
 fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(), String> {
-    use duckosm_core::spill::{self, EdgeCodec, Rows, Writer};
-    let store = spill::temp_store();
-    let store = &*store;
-    let codec = EdgeCodec::default();
+    // the tags of the levels: few sets of values, one copy of each
     let mut attrs = FxHashSet::default();
-    // (mode, private, the edges of the table sorted by edge_id)
-    let mut tables: Vec<(Mode, bool, Rows)> = Vec::new();
-    for &m in modes {
-        for private in [false, true] {
-            let name = if private { "private_edges" } else { "edges" };
-            let path = out.join(format!("{name}_{}.parquet", m.name()));
-            let mut w = Writer::new(store).map_err(io)?;
-            if path.exists() {
-                duckosm_parquet::read::read_edges(&path, &mut attrs, |_| true, |e| w.push(&codec, &e).map_err(io))?;
-            }
-            let rows = spill::sort_bytes(w.finish().map_err(io)?, EdgeCodec::edge_id, 64 << 20, store).map_err(io)?;
-            tables.push((m, private, rows));
-        }
-    }
-    drop(attrs);
     let rank = |m: Mode, private: bool| {
         (match m {
             Mode::Driving => 0,
@@ -788,11 +771,16 @@ fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(),
     };
     let built_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64);
     let file = |name: &str| create(&out.join(name));
-    let mut each = |f: &mut dyn FnMut(u8, duckosm_core::model::Edge) -> Result<(), String>| -> Result<(), String> {
-        for (m, private, rows) in tables.iter_mut() {
-            let r = rank(*m, *private);
-            for e in rows.read_ref(&codec).map_err(io)? {
-                f(r, e.map_err(io)?)?;
+    // each pass of the levels reads the columns that it needs from the edge tables (no temporary copy)
+    let mut each = |f: &mut dyn FnMut(u8, i64, &std::sync::Arc<duckosm_core::model::Attrs>, Vec<(f64, f64)>) -> Result<(), String>| -> Result<(), String> {
+        for &m in modes {
+            for private in [false, true] {
+                let name = if private { "private_edges" } else { "edges" };
+                let path = out.join(format!("{name}_{}.parquet", m.name()));
+                if path.exists() {
+                    let r = rank(m, private);
+                    duckosm_parquet::read::read_level_edges(&path, &mut attrs, |id, a, g| f(r, id, a, g))?;
+                }
             }
         }
         Ok(())

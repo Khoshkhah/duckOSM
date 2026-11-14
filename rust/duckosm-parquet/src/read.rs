@@ -225,6 +225,49 @@ pub fn each_node(path: &Path, mut f: impl FnMut(duckosm_core::model::Node)) -> R
     Ok(())
 }
 
+/// The id, the tags of the drawing levels and the line of each edge of an `edges` file (only these columns are read). The tags
+/// are `highway`, `tunnel`, `bridge`, `layer` and `junction`; the other tags are empty. The edges with the same tags share one
+/// `Arc` of `attrs`.
+pub fn read_level_edges(
+    path: &Path,
+    attrs: &mut FxHashSet<Arc<Attrs>>,
+    mut f: impl FnMut(i64, &Arc<Attrs>, Vec<Pt>) -> Result<(), String>,
+) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
+    let names = ["edge_id", "geometry", "highway", "tunnel", "bridge", "layer", "junction"];
+    let cols: Vec<usize> = names.iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
+    let mask = parquet::arrow::ProjectionMask::roots(b.parquet_schema(), cols);
+    for batch in b.with_projection(mask).build().map_err(|e| e.to_string())? {
+        let batch = batch.map_err(|e| e.to_string())?;
+        let id = batch.column_by_name("edge_id").unwrap().as_primitive::<Int64Type>().clone();
+        let g = batch.column_by_name("geometry").unwrap().as_binary::<i32>();
+        for i in 0..batch.num_rows() {
+            let a = Attrs {
+                highway: text(&batch, "highway", i).unwrap_or_default(),
+                tunnel: text(&batch, "tunnel", i),
+                bridge: text(&batch, "bridge", i),
+                layer: text(&batch, "layer", i),
+                junction: text(&batch, "junction", i),
+                name: None,
+                maxspeed: None,
+                surface: None,
+                service: None,
+            };
+            let a = match attrs.get(&a) {
+                Some(x) => x.clone(),
+                None => {
+                    let x = Arc::new(a);
+                    attrs.insert(x.clone());
+                    x
+                }
+            };
+            f(id.value(i), &a, line(g.value(i)))?;
+        }
+    }
+    Ok(())
+}
+
 /// The id, the source and target nodes, and the two ends of the line of each edge of an `edges` file (only these columns are
 /// read).
 pub fn read_edge_ends(path: &Path, mut f: impl FnMut(i64, i64, i64, Pt, Pt)) -> Result<(), String> {
