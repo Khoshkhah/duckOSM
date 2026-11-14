@@ -96,6 +96,10 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
     if p.bus_routes && p.modes.contains(&Mode::Driving) {
         bus_routes(tiles, out)?;
     }
+    if p.levels != crate::LevelsMethod::None {
+        levels(&p.modes, p.levels, out)?;
+        duckosm_core::util::step("union: the levels");
+    }
     write_whole_area_tables(out, boundary, &p.modes, &p.options)?;
     Ok(rows)
 }
@@ -748,4 +752,60 @@ impl duckosm_core::spill::Codec<(u32, u8, duckosm_core::model::Edge)> for BatchE
         *b = &b[5..];
         (batch, k, self.0.get(b))
     }
+}
+
+/// The drawing levels after the union (docs/design/build_by_tiles.md, "The levels"), from the edge tables of the union: each
+/// table is sorted by `edge_id` on disk first (the order of the whole build). `solve`: by tiles in their order, each with
+/// the numbers of the earlier tiles fixed (`levels::tiled`), with memory that does not grow with the area. `tags`: the rule
+/// of the whole build, with all level edges in memory (as the whole build).
+fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(), String> {
+    use duckosm_core::spill::{self, EdgeCodec, Rows, Writer};
+    let store = spill::temp_store();
+    let store = &*store;
+    let codec = EdgeCodec::default();
+    let mut attrs = FxHashSet::default();
+    // (mode, private, the edges of the table sorted by edge_id)
+    let mut tables: Vec<(Mode, bool, Rows)> = Vec::new();
+    for &m in modes {
+        for private in [false, true] {
+            let name = if private { "private_edges" } else { "edges" };
+            let path = out.join(format!("{name}_{}.parquet", m.name()));
+            let mut w = Writer::new(store).map_err(io)?;
+            if path.exists() {
+                duckosm_parquet::read::read_edges(&path, &mut attrs, |_| true, |e| w.push(&codec, &e).map_err(io))?;
+            }
+            let rows = spill::sort_bytes(w.finish().map_err(io)?, EdgeCodec::edge_id, 64 << 20, store).map_err(io)?;
+            tables.push((m, private, rows));
+        }
+    }
+    drop(attrs);
+    let rank = |m: Mode, private: bool| {
+        (match m {
+            Mode::Driving => 0,
+            Mode::Walking => 1,
+            Mode::Cycling => 2,
+        }) + if private { 3 } else { 0 }
+    };
+    let built_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64);
+    let file = |name: &str| create(&out.join(name));
+    if method == crate::LevelsMethod::Solve {
+        let mut each = |f: &mut dyn FnMut(u8, duckosm_core::model::Edge) -> Result<(), String>| -> Result<(), String> {
+            for (m, private, rows) in tables.iter_mut() {
+                let r = rank(*m, *private);
+                for e in rows.read_ref(&codec).map_err(io)? {
+                    f(r, e.map_err(io)?)?;
+                }
+            }
+            Ok(())
+        };
+        crate::levels::tiled::write_levels_tiled_from(&mut each, built_at, file)?;
+    } else {
+        let mut level_edges = crate::LevelEdges::default();
+        for (m, private, rows) in tables {
+            let edges: Vec<duckosm_core::model::Edge> = rows.read(&codec).map_err(io)?.collect::<Result<_, _>>().map_err(io)?;
+            level_edges.add(m, private, edges);
+        }
+        crate::write_levels(&level_edges, method, built_at, file)?;
+    }
+    Ok(())
 }

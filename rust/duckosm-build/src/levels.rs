@@ -241,6 +241,20 @@ pub mod tiled {
     pub fn write_levels_tiled<W: std::io::Write + Send>(
         modes: &mut [(Mode, EdgeFiles)],
         built_at: i64,
+        file: impl FnMut(&str) -> Result<W, String>,
+    ) -> Result<Option<String>, String> {
+        write_levels_tiled_from(&mut |f| each_level_edge(modes, |r, e| f(r, e)), built_at, file)
+    }
+
+    /// A source of the level edges: it gives each edge of all modes with its rank (driving 0, walking 1, cycling 2, their
+    /// private edges 3 to 5), in the order of the build (each table in the order of `edge_id`). The levels read it two
+    /// times.
+    pub type EdgeSource<'a> = &'a mut dyn FnMut(&mut dyn FnMut(u8, Edge) -> Result<(), String>) -> Result<(), String>;
+
+    /// [`write_levels_tiled`] from any source of the level edges (the union of a build by tiles reads its tables).
+    pub fn write_levels_tiled_from<W: std::io::Write + Send>(
+        each: EdgeSource,
+        built_at: i64,
         mut file: impl FnMut(&str) -> Result<W, String>,
     ) -> Result<Option<String>, String> {
         use duckosm_parquet as pq;
@@ -250,7 +264,7 @@ pub mod tiled {
         let store = &*store;
         // 1. the box of the roads of each tile
         let mut boxes: HashMap<Tile, [f64; 4]> = HashMap::new();
-        each_level_edge(modes, |_, e| {
+        each(&mut |_, e| {
             if e.geometry.len() >= 2 {
                 let b = bbox(&e.geometry);
                 let t = boxes.entry(owner(&e.geometry)).or_insert([f64::MAX, f64::MAX, f64::MIN, f64::MIN]);
@@ -278,7 +292,7 @@ pub mod tiled {
         let mut waits: HashMap<Tile, FxHashSet<Tile>> = HashMap::new();
         let mut tags = TagTable::default();
         let mut rows = Writer::new(store).map_err(io)?;
-        each_level_edge(modes, |rank, e| {
+        each(&mut |rank, e| {
             if e.geometry.len() < 2 {
                 return Ok(());
             }
