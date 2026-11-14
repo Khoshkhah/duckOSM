@@ -879,57 +879,50 @@ pub fn features<R: Read + Send>(
     drop((part, parts));
     let points = points.finish().map_err(io)?;
     crate::util::step("quack 2: the nodes and the points");
-    // pass 3: the ways. A reader thread joins the headers with their points into batches; this thread makes the features of
-    // each batch on all threads and writes them, and writes the lines of the member ways to a file.
+    // pass 3: the ways. A reader joins the headers with their points into batches; the features of each batch are made on
+    // all threads and written, and the lines of the member ways go to a file.
     type WayBatch = Vec<(i64, RawTags, Vec<Pt>)>;
     let mut member_lines = Writer::new(store).map_err(io)?;
     let headers = headers.finish().map_err(io)?;
-    std::thread::scope(|scope| -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<WayBatch, String>>(4);
-        scope.spawn(move || {
-            let run = || -> Result<(), String> {
-                // the points of each bucket, sorted, one bucket in memory at a time (no copy)
-                let mut parts = SortedParts::new(points, &Point, |p: &(u32, u32, f64, f64)| (p.0, p.1));
-                let (mut part, mut at): (Vec<(u32, u32, f64, f64)>, usize) = (Vec::new(), 0);
-                let mut points = std::iter::from_fn(move || loop {
-                    if at < part.len() {
-                        at += 1;
-                        return Some(Ok(part[at - 1]));
-                    }
-                    match parts.next_into(&mut part) {
-                        Ok(true) => at = 0,
-                        Ok(false) => return None,
-                        Err(e) => return Some(Err(e)),
-                    }
-                })
-                .peekable();
-                let mut batch: WayBatch = Vec::new();
-                for (number, h) in headers.read(&Header).map_err(io)?.enumerate() {
-                    let (id, refs, tags) = h.map_err(io)?;
-                    let mut pts = Vec::with_capacity(refs as usize);
-                    while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == number as u32)) {
-                        let p = p.map_err(io)?;
-                        pts.push((round7(p.2), round7(p.3)));
-                    }
-                    if let Some(Err(_)) = points.peek() {
-                        return Err(io(points.next().expect("peeked").expect_err("an error")));
-                    }
-                    // a way with a node that is not in the file is not a feature, and not a member of a relation
-                    if pts.len() == refs as usize {
-                        batch.push((id, tags, pts));
-                    }
-                    if batch.len() >= 50_000 {
-                        tx.send(Ok(std::mem::take(&mut batch))).map_err(|_| "quack: pass 3 stopped".to_string())?;
-                    }
-                }
-                tx.send(Ok(batch)).map_err(|_| "quack: pass 3 stopped".to_string())
-            };
-            if let Err(e) = run() {
-                let _ = tx.send(Err(e));
+    let read_ways = move |give: &mut dyn FnMut(WayBatch) -> Result<(), String>| -> Result<(), String> {
+        // the points of each bucket, sorted, one bucket in memory at a time (no copy)
+        let mut parts = SortedParts::new(points, &Point, |p: &(u32, u32, f64, f64)| (p.0, p.1));
+        let (mut part, mut at): (Vec<(u32, u32, f64, f64)>, usize) = (Vec::new(), 0);
+        let mut points = std::iter::from_fn(move || loop {
+            if at < part.len() {
+                at += 1;
+                return Some(Ok(part[at - 1]));
             }
-        });
-        for batch in rx {
-            let batch = batch?;
+            match parts.next_into(&mut part) {
+                Ok(true) => at = 0,
+                Ok(false) => return None,
+                Err(e) => return Some(Err(e)),
+            }
+        })
+        .peekable();
+        let mut batch: WayBatch = Vec::new();
+        for (number, h) in headers.read(&Header).map_err(io)?.enumerate() {
+            let (id, refs, tags) = h.map_err(io)?;
+            let mut pts = Vec::with_capacity(refs as usize);
+            while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == number as u32)) {
+                let p = p.map_err(io)?;
+                pts.push((round7(p.2), round7(p.3)));
+            }
+            if let Some(Err(_)) = points.peek() {
+                return Err(io(points.next().expect("peeked").expect_err("an error")));
+            }
+            // a way with a node that is not in the file is not a feature, and not a member of a relation
+            if pts.len() == refs as usize {
+                batch.push((id, tags, pts));
+            }
+            if batch.len() >= 50_000 {
+                give(std::mem::take(&mut batch))?;
+            }
+        }
+        give(batch)
+    };
+    {
+        let mut use_ways = |batch: WayBatch| -> Result<(), String> {
             for (id, _, pts) in &batch {
                 if member_ids.binary_search(id).is_ok() {
                     member_lines.push(&KeyedLine, &(*id, pts.iter().map(|&p| to_grid(p)).collect())).map_err(io)?;
@@ -942,10 +935,27 @@ pub fn features<R: Read + Send>(
                 .filter_map(|(id, tags, pts)| way_feature(*id, tags, pts))
                 .collect();
             counts.ways += made.len();
-            emit(made)?;
-        }
-        Ok(())
-    })?;
+            emit(made)
+        };
+        // natively, a reader thread reads the batches while this thread makes the features. The browser has no such
+        // thread (and a file in OPFS belongs to the thread that opened it), so there this thread does both.
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::scope(|scope| -> Result<(), String> {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Result<WayBatch, String>>(4);
+            scope.spawn(move || {
+                let mut send = |b: WayBatch| tx.send(Ok(b)).map_err(|_| "quack: pass 3 stopped".to_string());
+                if let Err(e) = read_ways(&mut send) {
+                    let _ = tx.send(Err(e));
+                }
+            });
+            for batch in rx {
+                use_ways(batch?)?;
+            }
+            Ok(())
+        })?;
+        #[cfg(target_arch = "wasm32")]
+        read_ways(&mut use_ways)?;
+    }
     drop(member_ids);
     crate::util::step("quack 3: the ways");
     // pass 4: the relations. The members and the lines, each sorted by way, give the lines of each relation; sorted by
@@ -969,42 +979,52 @@ pub fn features<R: Read + Send>(
     }
     let rel_lines = sort_bytes(rel_lines.finish().map_err(io)?, line_key, budget, store).map_err(io)?;
     crate::util::step("quack 4a: the lines of the relations");
-    // the relations with all their lines, streamed into all threads (a slow relation delays only itself); this thread
-    // writes each part of rows that the threads make
+    // the relations with all their lines
     type Rel = (i64, RawTags, Vec<(String, Vec<Pt>)>);
+    type Rels<'a> = dyn Iterator<Item = Result<Option<Rel>, String>> + Send + 'a;
+    let with_rels = move |use_rels: &mut dyn FnMut(&mut Rels) -> Result<(), String>| -> Result<(), String> {
+        let mut lines = rel_lines.read(&KeyedLine).map_err(io)?.peekable();
+        let headers = rel_headers.finish().map_err(io)?;
+        let mut rels = headers.read(&RelHeader).map_err(io)?.enumerate().map(|(r, h)| -> Result<Option<Rel>, String> {
+            let (id, tags, roles) = h.map_err(io)?;
+            let mut got: Vec<(String, Vec<Pt>)> = Vec::with_capacity(roles.len());
+            while let Some(l) = lines.next_if(|l| l.as_ref().is_ok_and(|l| (l.0 >> 32) as usize == r)) {
+                let (key, pts) = l.map_err(io)?;
+                got.push((roles[(key & 0xffff_ffff) as usize].clone(), pts.iter().map(from_grid).collect()));
+            }
+            if let Some(Err(_)) = lines.peek() {
+                return Err(io(lines.next().expect("peeked").expect_err("an error")));
+            }
+            // a relation with a member way that is not a valid way is not a feature
+            Ok((got.len() == roles.len()).then_some((id, tags, got)))
+        });
+        use_rels(&mut rels)
+    };
+    let make = |(id, tags, members): Rel| -> Option<Feature> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let t = std::time::Instant::now();
+        let m: Vec<(&str, Vec<Pt>)> = members.iter().map(|(role, l)| (role.as_str(), l.clone())).collect();
+        let geometry = relation_geometry(&m);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let secs = t.elapsed().as_secs_f64();
+            if secs > 2.0 {
+                eprintln!("quack: relation {id} ({} members) took {secs:.1} s", m.len());
+            }
+        }
+        let tags = clean(&tags);
+        (geometry.is_some() && !tags.is_empty()).then(|| Feature::new(format!("relation/{id}"), tags, &geometry.unwrap()))
+    };
+    // natively, a reader thread streams the relations into all threads (a slow relation delays only itself), and this
+    // thread writes each part of rows that the threads make
+    #[cfg(not(target_arch = "wasm32"))]
     std::thread::scope(|scope| -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Option<Feature>, String>>(4096);
+        let make = &make;
         scope.spawn(move || {
-            let read = || -> Result<(), String> {
-                let mut lines = rel_lines.read(&KeyedLine).map_err(io)?.peekable();
-                let headers = rel_headers.finish().map_err(io)?;
-                let rels = headers.read(&RelHeader).map_err(io)?.enumerate().map(|(r, h)| -> Result<Option<Rel>, String> {
-                    let (id, tags, roles) = h.map_err(io)?;
-                    let mut got: Vec<(String, Vec<Pt>)> = Vec::with_capacity(roles.len());
-                    while let Some(l) = lines.next_if(|l| l.as_ref().is_ok_and(|l| (l.0 >> 32) as usize == r)) {
-                        let (key, pts) = l.map_err(io)?;
-                        got.push((roles[(key & 0xffff_ffff) as usize].clone(), pts.iter().map(from_grid).collect()));
-                    }
-                    if let Some(Err(_)) = lines.peek() {
-                        return Err(io(lines.next().expect("peeked").expect_err("an error")));
-                    }
-                    // a relation with a member way that is not a valid way is not a feature
-                    Ok((got.len() == roles.len()).then_some((id, tags, got)))
-                });
+            let read = with_rels(&mut |rels| {
                 rels.par_bridge().try_for_each_with(tx.clone(), |tx, rel| {
-                    let made = rel.map(|rel| {
-                        rel.and_then(|(id, tags, members)| {
-                            let t = std::time::Instant::now();
-                            let m: Vec<(&str, Vec<Pt>)> = members.iter().map(|(role, l)| (role.as_str(), l.clone())).collect();
-                            let geometry = relation_geometry(&m);
-                            let secs = t.elapsed().as_secs_f64();
-                            if secs > 2.0 {
-                                eprintln!("quack: relation {id} ({} members) took {secs:.1} s", m.len());
-                            }
-                            let tags = clean(&tags);
-                            (geometry.is_some() && !tags.is_empty()).then(|| Feature::new(format!("relation/{id}"), tags, &geometry.unwrap()))
-                        })
-                    });
+                    let made = rel.map(|rel| rel.and_then(make));
                     // a full channel: this thread helps with the other parallel work (the writer makes its batches
                     // on these threads too) and tries again; a plain send would wait for ever when all threads wait
                     let mut item = made;
@@ -1021,8 +1041,8 @@ pub fn features<R: Read + Send>(
                         }
                     }
                 })
-            };
-            if let Err(e) = read() {
+            });
+            if let Err(e) = read {
                 let _ = tx.send(Err(e));
             }
         });
@@ -1039,6 +1059,18 @@ pub fn features<R: Read + Send>(
         counts.relations += part.len();
         emit(part)
     })?;
+    // the browser: the relations are read on this thread (the files in OPFS), then made on all threads
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut made = Vec::new();
+        with_rels(&mut |rels| {
+            let all: Vec<Option<Rel>> = rels.collect::<Result<_, _>>()?;
+            made = all.into_par_iter().flatten().filter_map(make).collect();
+            Ok(())
+        })?;
+        counts.relations += made.len();
+        emit(made)?;
+    }
     crate::util::step("quack 4b: the relations");
     Ok(counts)
 }
@@ -1230,7 +1262,10 @@ pub struct StrSort {
 
 impl Default for StrSort {
     fn default() -> Self {
-        StrSort::new(BUDGET, ROW_GROUP).expect("quack sort: a temporary file")
+        // the browser: a quarter of the budget, because the memory of WebAssembly never shrinks (Kentucky sorted: 3.3 GiB
+        // with 512 MB, the limit is 4 GiB)
+        let budget = if cfg!(target_arch = "wasm32") { BUDGET / 4 } else { BUDGET };
+        StrSort::new(budget, ROW_GROUP).expect("quack sort: a temporary file")
     }
 }
 
@@ -1260,12 +1295,13 @@ impl StrSort {
             .collect();
         drop(part);
         for (b, placed) in pieces {
+            // a run before the buffer passes the budget: so the buffer does not grow to the next size (twice the budget)
+            if !self.rows.is_empty() && self.bytes.len() + b.len() > self.budget {
+                self.flush().map_err(|e| format!("quack sort: {e}"))?;
+            }
             let base = self.bytes.len();
             self.bytes.extend_from_slice(&b);
             self.rows.extend(placed.into_iter().map(|(x, y, n, start, len)| (x, y, n, base + start, len)));
-        }
-        if self.bytes.len() + self.rows.len() * std::mem::size_of::<Placed>() >= self.budget {
-            self.flush().map_err(|e| format!("quack sort: {e}"))?;
         }
         Ok(())
     }
@@ -1274,27 +1310,30 @@ impl StrSort {
     fn flush(&mut self) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
         self.rows.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
+        // the blocks are made on all threads, 64 at a time, and written: so only 64 blocks wait in memory (the browser
+        // does not compress them)
         let bytes = &self.bytes;
-        let blocks: Vec<(Vec<u8>, usize)> = self
-            .rows
-            .par_chunks(BLOCK_ROWS)
-            .map(|rows| {
-                let mut raw = Vec::new();
-                for &(_, _, _, start, len) in rows {
-                    raw.extend_from_slice(&(len as u32).to_le_bytes());
-                    raw.extend_from_slice(&bytes[start..start + len]);
-                }
-                let n = raw.len();
-                Ok((pack(raw)?, n))
-            })
-            .collect::<std::io::Result<_>>()?;
         self.file.seek(SeekFrom::Start(self.end))?;
-        let mut run = Vec::with_capacity(blocks.len());
+        let mut run = Vec::new();
         let mut w = std::io::BufWriter::with_capacity(1 << 20, &mut self.file);
-        for (b, raw_len) in blocks {
-            w.write_all(&b)?;
-            run.push((self.end, b.len(), raw_len));
-            self.end += b.len() as u64;
+        for group in self.rows.chunks(64 * BLOCK_ROWS) {
+            let blocks: Vec<(Vec<u8>, usize)> = group
+                .par_chunks(BLOCK_ROWS)
+                .map(|rows| {
+                    let mut raw = Vec::new();
+                    for &(_, _, _, start, len) in rows {
+                        raw.extend_from_slice(&(len as u32).to_le_bytes());
+                        raw.extend_from_slice(&bytes[start..start + len]);
+                    }
+                    let n = raw.len();
+                    Ok((pack(raw)?, n))
+                })
+                .collect::<std::io::Result<_>>()?;
+            for (b, raw_len) in blocks {
+                w.write_all(&b)?;
+                run.push((self.end, b.len(), raw_len));
+                self.end += b.len() as u64;
+            }
         }
         w.flush()?;
         drop(w);
