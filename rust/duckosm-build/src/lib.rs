@@ -21,6 +21,7 @@ pub mod config;
 pub mod elevation;
 pub mod h3;
 pub mod levels;
+pub mod union;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
 
@@ -53,6 +54,9 @@ pub struct Params {
     pub osm_fixes: Option<PathBuf>,
     /// A boundary (GeoJSON): the PBF is cut to it as osmium's `complete_ways` does. None: the PBF is the area.
     pub boundary: Option<PathBuf>,
+    /// The build of one tile of a large build: the junctions file of the tile cut (`tilecut`), the junctions of the whole
+    /// area at the nodes outside the tile. The tile does not have all ways of those nodes, so it can miss these junctions.
+    pub outside_junctions: Option<PathBuf>,
     /// Also write duckOSM's `raw.*` of the area (`raw_nodes.parquet`, ...), the input of the base-map layers
     /// (docs/features.md). Needs a boundary.
     pub raw: bool,
@@ -115,6 +119,7 @@ impl Default for Params {
             infer_sidewalks: true,
             osm_fixes: None,
             boundary: None,
+            outside_junctions: None,
             raw: false,
             cut_pbf: false,
             cut_osm: false,
@@ -998,8 +1003,15 @@ pub fn run<W: Write + Send>(
     let mut mode_files: Vec<(Mode, NetworkEdges)> = Vec::new();
     // the global junctions depend only on the ways: one time for all modes and for main.global_junctions
     let junctions = if opts.global_junctions {
-        duckosm_core::network::global_junctions(&ways)
+        let mut j = duckosm_core::network::global_junctions(&ways);
+        if let Some(path) = &p.outside_junctions {
+            j.extend(duckosm_core::tilecut::read_junctions(path)?);
+        }
+        j
     } else {
+        if p.outside_junctions.is_some() {
+            return Err("the outside junctions need the global junctions".into());
+        }
         Default::default()
     };
     log.step("global junctions");

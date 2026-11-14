@@ -29,6 +29,8 @@ const ROW_GROUP: usize = 65_536;
 
 mod par_writer;
 mod raw_load;
+pub mod read;
+pub mod merge;
 pub use par_writer::ParWriter;
 pub use raw_load::*;
 
@@ -340,6 +342,37 @@ pub fn write_nodes_to<W: Write + Send>(out: W, rows: &[Node]) -> Result<(), Stri
     }
     w.close().map_err(err)?;
     Ok(())
+}
+
+/// [`write_nodes_to`] from a stream of nodes: it keeps one row group of nodes in memory. Returns the number of nodes.
+pub fn write_nodes_iter_to<W: Write + Send>(out: W, rows: impl Iterator<Item = Result<Node, String>>) -> Result<usize, String> {
+    let schema = Arc::new(nodes_schema());
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(props("Point"))).map_err(err)?;
+    let mut chunk: Vec<Node> = Vec::with_capacity(ROW_GROUP);
+    let mut n = 0;
+    let write = |chunk: &[Node], w: &mut ParWriter<W>| -> Result<(), String> {
+        let mut id = Int64Builder::with_capacity(chunk.len());
+        let mut g = BinaryBuilder::new();
+        for x in chunk {
+            id.append_value(x.node_id);
+            g.append_value(point_wkb((x.lon, x.lat)));
+        }
+        let cols: Vec<ArrayRef> = vec![Arc::new(id.finish()), Arc::new(g.finish())];
+        w.write(&RecordBatch::try_new(schema.clone(), cols).map_err(err)?).map_err(err)
+    };
+    for r in rows {
+        chunk.push(r?);
+        n += 1;
+        if chunk.len() == ROW_GROUP {
+            write(&chunk, &mut w)?;
+            chunk.clear();
+        }
+    }
+    if !chunk.is_empty() {
+        write(&chunk, &mut w)?;
+    }
+    w.close().map_err(err)?;
+    Ok(n)
 }
 
 /// Write `edge_id_map` as a plain Parquet file (no geometry).

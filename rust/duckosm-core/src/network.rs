@@ -373,12 +373,40 @@ fn node_uses<'a>(ways: impl Iterator<Item = (&'a [i64], bool)> + Clone) -> Vec<(
 pub fn global_junctions(ways: &[Way]) -> FxHashMap<i64, bool> {
     let built = ways.iter().filter(|w| filter::is_built_highway(&w.tags));
     let uses = node_uses(built.map(|w| (&w.refs[..], filter::is_road_raw(&w.tags))));
-    junction_map(uses, |run| {
-        let road = run.iter().filter(|u| u.1 & ROAD != 0).count();
-        let road_end = run.iter().filter(|u| u.1 & ROAD_END == ROAD_END).count();
-        let ways = run.len();
-        ((road > 0 && (ways > 1 || road_end > 0)) || (road == 0 && ways > 1)).then_some(road > 0)
-    })
+    junction_map(uses, |run| global_junction(&JunctionUses::of(run.iter().map(|u| u.1))))
+}
+
+/// The uses of one node by the built highways (for the tile cut: `tilecut` writes the junctions of the nodes outside each
+/// tile). `n[k]`: the uses with the bits of `k` ROAD (1, the way is a road) and END (2, the first or the last node of the way).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct JunctionUses {
+    pub(crate) n: [u32; 4],
+}
+
+impl JunctionUses {
+    /// The uses of a node from the flags of all its uses ([`JunctionUses::of_way`]).
+    pub(crate) fn of(flags: impl Iterator<Item = u8>) -> JunctionUses {
+        let mut u = JunctionUses::default();
+        for f in flags {
+            u.n[(f & ROAD_END) as usize] += 1;
+        }
+        u
+    }
+
+    /// Add the uses of the nodes of a way (nothing when the way is not a built highway).
+    pub(crate) fn of_way(tags: &crate::model::Tags, refs: &[i64], out: &mut Vec<(i64, u8)>) {
+        if filter::is_built_highway(tags) {
+            out.extend(node_uses(std::iter::once((refs, filter::is_road_raw(tags)))));
+        }
+    }
+}
+
+/// The rule of `main.global_junctions` for one node: `None` when it is no junction, else `Some(is a road junction)`.
+pub(crate) fn global_junction(u: &JunctionUses) -> Option<bool> {
+    let road = u.n[ROAD as usize] + u.n[ROAD_END as usize];
+    let road_end = u.n[ROAD_END as usize];
+    let ways: u32 = u.n.iter().sum();
+    ((road > 0 && (ways > 1 || road_end > 0)) || (road == 0 && ways > 1)).then_some(road > 0)
 }
 
 /// `junctions`: the nodes where the ways of this mode meet, or end. The value is `is_road_junction`.
