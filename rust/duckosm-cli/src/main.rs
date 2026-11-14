@@ -192,10 +192,11 @@ struct TilesCli {
     /// The zoom of the tiles (standard z/x/y map tiles; zoom 10 is about 27 km wide in France).
     #[arg(long, default_value_t = 10)]
     zoom: u8,
-    /// The number of tiles that build at the same time. More tiles at a time use more memory.
-    #[arg(long, default_value_t = 4)]
-    jobs: usize,
-    /// The threads of each tile build (default: the cores divided by --jobs, at least 1).
+    /// The number of tiles that build at the same time (default: the cores divided by 2). More tiles at a time use more
+    /// memory. France on 12 cores: 6 tiles of 2 threads was the fastest (docs/design/build_by_tiles.md).
+    #[arg(long)]
+    jobs: Option<usize>,
+    /// The threads of each tile build (default: the cores divided by the jobs, at least 1).
     #[arg(long)]
     tile_threads: Option<usize>,
     /// Keep the tile files and the tables of each tile (in <out>/tiles).
@@ -263,11 +264,12 @@ fn tiles(args: &[String]) -> Result<(), String> {
     // `threads` threads of its own (the jobs share the cores)
     let t1 = std::time::Instant::now();
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let threads = cli.tile_threads.unwrap_or(cores / cli.jobs.max(1)).max(1).to_string();
+    let jobs = cli.jobs.unwrap_or(cores / 2).max(1);
+    let threads = cli.tile_threads.unwrap_or(cores / jobs).max(1).to_string();
     let queue = std::sync::Mutex::new(list.clone());
     let failed = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|sc| {
-        for _ in 0..cli.jobs.max(1) {
+        for _ in 0..jobs {
             sc.spawn(|| loop {
                 let Some(t) = queue.lock().unwrap().pop() else { break };
                 let name = format!("{}_{}_{}", t.z, t.x, t.y);

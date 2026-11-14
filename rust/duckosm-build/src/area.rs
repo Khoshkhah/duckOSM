@@ -331,24 +331,42 @@ pub fn write_levels<W: Write + Send>(
 
 /// `driving.lane_profile` (docs/lane_profile.md), when the driving mode was built: `lane_profile_driving.parquet`.
 /// `ways` are the ways after all modes. Returns a summary line.
+/// `classes`: the build of one tile, the class of each edge (`union::Owner`): the rows of its own edges go to the file, the
+/// border rows to `lane_profile_driving.border.parquet`.
 pub fn write_lane_profile<W: Write + Send>(
     edges: &LaneEdges,
     ways: &[Way],
     fixes: &OsmFixes,
+    classes: Option<&duckosm_core::util::FxHashMap<i64, u8>>,
     mut file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<Option<String>, String> {
+    use duckosm_parquet::merge::{BORDER, MINE};
     // the rows go to the file in parts, as they are made: all rows at once were in memory before
     let mut w: Option<pq::LaneProfileWriter<W>> = None;
+    let mut border: Option<pq::LaneProfileWriter<W>> = None;
     let n = lanes::lane_profile_each(edges, ways, fixes, |rows| {
+        let class = |r: &lanes::LaneRow| classes.map_or(MINE, |c| c.get(&r.edge_id).copied().unwrap_or(MINE));
         if w.is_none() {
             w = Some(pq::LaneProfileWriter::new(file("lane_profile_driving.parquet")?)?);
         }
-        w.as_mut().expect("made above").write(&rows)
+        let mine: Vec<lanes::LaneRow> = rows.iter().filter(|r| class(r) == MINE).cloned().collect();
+        w.as_mut().expect("made above").write(&mine)?;
+        let other: Vec<lanes::LaneRow> = rows.iter().filter(|r| class(r) == BORDER).cloned().collect();
+        if !other.is_empty() {
+            if border.is_none() {
+                border = Some(pq::LaneProfileWriter::new(file("lane_profile_driving.border.parquet")?)?);
+            }
+            border.as_mut().expect("made above").write(&other)?;
+        }
+        Ok(())
     })?;
     let Some(n) = n else {
         return Ok(None);
     };
     if let Some(w) = w {
+        w.close()?;
+    }
+    if let Some(w) = border {
         w.close()?;
     }
     Ok(Some(format!("lane profile: {n} lanes")))

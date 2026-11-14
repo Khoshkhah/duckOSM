@@ -14,7 +14,6 @@ use duckosm_core::filter::Mode;
 use duckosm_core::geom::Pt;
 use duckosm_core::network::Options;
 use duckosm_core::tiles::Tile;
-use duckosm_core::util::FxHashMap;
 use duckosm_parquet::merge::{concat_files, union_sorted};
 use rayon::prelude::*;
 use std::fs::File;
@@ -126,13 +125,6 @@ pub fn cut_tiles(region: &Path, boundary: &str, zoom: u8, dir: &Path) -> Result<
     Ok(list.into_iter().zip(counts).filter(|(_, c)| c.nodes > 0).map(|(t, _)| t).collect())
 }
 
-/// The ends of a WKB LineString.
-fn line_ends(w: &[u8]) -> (Pt, Pt) {
-    let n = u32::from_le_bytes(w[5..9].try_into().unwrap()) as usize;
-    let pt = |k: usize| (f64::from_le_bytes(w[9 + 16 * k..17 + 16 * k].try_into().unwrap()), f64::from_le_bytes(w[17 + 16 * k..25 + 16 * k].try_into().unwrap()));
-    (pt(0), pt(n.max(1) - 1))
-}
-
 /// The points of a WKB LineString.
 fn line_points(w: &[u8]) -> impl Iterator<Item = Pt> + '_ {
     let n = u32::from_le_bytes(w[5..9].try_into().unwrap()) as usize;
@@ -144,109 +136,71 @@ fn point(w: &[u8]) -> Pt {
     (f64::from_le_bytes(w[5..13].try_into().unwrap()), f64::from_le_bytes(w[13..21].try_into().unwrap()))
 }
 
-/// The last step of the build of tile `tile` (option A of docs/design/build_by_tiles.md): each table of the tile in `dir`
-/// keeps only the rows that the tile owns, and the rows that no tile alone owns go to a border file. Then the union only
-/// puts the files of the tiles together. `b`: the boundary of the tile build (the area in the tile, and the home nodes).
-/// The owners:
-/// - an edge and its lanes: the tile that holds its source node; a turn: the tile that holds the target node of its from
-///   edge; a node: the tile that holds it;
-/// - a way of the mode (`ways`, `way_nodes`): the owner of its first edge;
-/// - a raw node, a raw way, a virtual node: the tile of the node (of the first point of the way) inside the area; outside
-///   the area, a border row;
-/// - the small tables of rules and relations: border rows.
+/// The owner of the rows of the build of one tile (docs/design/build_by_tiles.md): `b` is the boundary of the tile build
+/// (the area in the tile, and the home nodes of the tile).
+pub struct Owner<'a> {
+    pub b: &'a Boundary,
+    pub tile: Tile,
+}
+
+impl Owner<'_> {
+    /// A row at a place (a raw node, a junction, the first point of a way inside the area): the tile of the place inside
+    /// the area; outside the area, a border row.
+    pub fn place(&self, p: Pt) -> u8 {
+        use duckosm_parquet::merge::{BORDER, MINE, OTHER};
+        if !self.b.in_area(p.0, p.1) {
+            BORDER
+        } else if Tile::of(self.tile.z, p.0, p.1) == self.tile {
+            MINE
+        } else {
+            OTHER
+        }
+    }
+
+    /// A row of a node of the network (an edge at its source node, a turn at the target node of its from edge, a node):
+    /// the tile that holds the node. A virtual node (a negative id: the middle of a split loop or parallel road) joins two
+    /// halves of one way, and every tile with the way has both: the tile of its place owns it.
+    pub fn node(&self, id: i64, p: Pt) -> u8 {
+        use duckosm_parquet::merge::{MINE, OTHER};
+        if id < 0 {
+            self.place(p)
+        } else if self.b.contains(p.0, p.1) {
+            MINE
+        } else {
+            OTHER
+        }
+    }
+
+    /// A way: the place of its first node inside the area (`pts`: the places of its nodes).
+    pub fn way(&self, mut pts: impl Iterator<Item = Pt>) -> u8 {
+        match pts.find(|p| self.b.in_area(p.0, p.1)) {
+            Some(p) => self.place(p),
+            None => duckosm_parquet::merge::BORDER,
+        }
+    }
+}
+
+/// The last step of the build of tile `tile`: the virtual nodes, `edge_id_map` and the raw tables keep only the rows that the
+/// tile owns, and the rows that no tile alone owns go to a border file (the network tables are written so at once:
+/// `write_tables_owned`, the edge graph, `ways`, `lane_profile`, `global_junctions`). `b`: the boundary of the tile build.
 pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<(), String> {
     use arrow_array::cast::AsArray;
     use arrow_array::Array;
-    use arrow_array::types::Int64Type;
-    use duckosm_parquet::merge::{split_file, BORDER, MINE, OTHER};
+    use duckosm_parquet::merge::{split_file, BORDER};
+    let o = Owner { b, tile };
     let col = |r: &arrow_array::RecordBatch, n: &str| r.column_by_name(n).cloned().ok_or(format!("no column {n}"));
-    let in_tile = |p: Pt| if b.in_area(p.0, p.1) { if Tile::of(tile.z, p.0, p.1) == tile { MINE } else { OTHER } } else { BORDER };
     for &mode in modes {
         let m = mode.name();
         let path = |n: &str| dir.join(format!("{n}_{m}.parquet"));
-        // the edges: owned by the holder of the source node; the turns at their target node; the first edge of each way. A
-        // virtual node (a negative id: the middle of a split loop or of a split parallel road) joins two halves of one way:
-        // every tile with the way has both, so the tile of its place owns it, and outside the area it is a border row.
-        let class = |id: i64, p: Pt| if id < 0 { in_tile(p) } else if b.contains(p.0, p.1) { MINE } else { OTHER };
-        let (mut own, mut turns): (FxHashMap<i64, u8>, FxHashMap<i64, u8>) = Default::default();
-        let mut first: FxHashMap<i64, (u32, u8)> = FxHashMap::default(); // osm_id -> (seq of the first edge, its class)
-        for name in ["edges", "private_edges"] {
-            if !path(name).exists() {
-                continue;
-            }
-            split_file(&path(name), |r| {
-                let (ids, osm) = (col(r, "edge_id")?, col(r, "osm_id")?);
-                let (ids, osm) = (ids.as_primitive::<Int64Type>(), osm.as_primitive::<Int64Type>());
-                let (g, refs) = (col(r, "geometry")?, col(r, "edge_ref")?);
-                let (g, refs) = (g.as_binary::<i32>(), refs.as_string::<i32>());
-                let (src, tgt) = (col(r, "source")?, col(r, "target")?);
-                let (src, tgt) = (src.as_primitive::<Int64Type>(), tgt.as_primitive::<Int64Type>());
-                Ok((0..r.num_rows())
-                    .map(|i| {
-                        let (a, z) = line_ends(g.value(i));
-                        let c = class(src.value(i), a);
-                        turns.insert(ids.value(i), class(tgt.value(i), z));
-                        // edge_ref: {osm_id}#{seq}{f|r}; the first edge is the forward edge with the least seq
-                        let er = refs.value(i);
-                        if er.ends_with('f') {
-                            let seq = er[er.find('#').map_or(0, |k| k + 1)..er.len() - 1].parse::<u32>().unwrap_or(u32::MAX);
-                            let e = first.entry(osm.value(i)).or_insert((u32::MAX, OTHER));
-                            if seq < e.0 {
-                                *e = (seq, c);
-                            }
-                        }
-                        own.insert(ids.value(i), c);
-                        c
-                    })
-                    .collect())
-            })?;
-        }
-        // the rows of an edge: of the class of its node (the turns and the rules of turns: the target node of the from edge)
-        let by_id = |name: &str, column: &'static str, classes: &FxHashMap<i64, u8>| -> Result<(), String> {
-            if path(name).exists() {
-                split_file(&path(name), |r| {
-                    let c = col(r, column)?;
-                    let c = c.as_primitive::<Int64Type>();
-                    Ok(c.values().iter().map(|v| classes.get(v).copied().unwrap_or(OTHER)).collect())
-                })?;
-            }
-            Ok(())
-        };
-        by_id("edge_graph", "from_edge", &turns)?;
-        by_id("turn_permission", "from_edge", &turns)?;
-        by_id("turn_restrictions", "from_edge_id", &turns)?;
-        by_id("turn_path_restrictions", "from_edge", &turns)?;
-        by_id("lane_profile", "edge_id", &own)?;
-        if path("nodes").exists() {
-            split_file(&path("nodes"), |r| {
-                let g = col(r, "geometry")?;
-                let g = g.as_binary::<i32>();
-                let ids = col(r, "node_id")?;
-                let ids = ids.as_primitive::<Int64Type>();
-                Ok((0..r.num_rows()).map(|i| class(ids.value(i), point(g.value(i)))).collect())
-            })?;
-        }
-        // a way of the mode: the owner of its first edge; a way with no edge is a border row
-        for (name, column) in [("ways", "osm_id"), ("way_nodes", "way_id")] {
-            if path(name).exists() {
-                split_file(&path(name), |r| {
-                    let c = col(r, column)?;
-                    let c = c.as_primitive::<Int64Type>();
-                    Ok(c.values().iter().map(|v| first.get(v).map_or(BORDER, |f| f.1)).collect())
-                })?;
-            }
-        }
         if path("virtual_nodes").exists() {
             split_file(&path("virtual_nodes"), |r| {
                 let g = col(r, "geometry")?;
                 let g = g.as_binary::<i32>();
-                Ok((0..r.num_rows()).map(|i| in_tile(point(g.value(i)))).collect())
+                Ok((0..r.num_rows()).map(|i| o.place(point(g.value(i)))).collect())
             })?;
         }
-        for name in ["edge_id_map"] {
-            if path(name).exists() {
-                split_file(&path(name), |r| Ok(vec![BORDER; r.num_rows()]))?;
-            }
+        if path("edge_id_map").exists() {
+            split_file(&path("edge_id_map"), |r| Ok(vec![BORDER; r.num_rows()]))?;
         }
     }
     // the raw tables of the area
@@ -255,20 +209,14 @@ pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<
         split_file(&raw("raw_nodes"), |r| {
             let (x, y) = (col(r, "lon")?, col(r, "lat")?);
             let (x, y) = (x.as_primitive::<arrow_array::types::Float64Type>(), y.as_primitive::<arrow_array::types::Float64Type>());
-            Ok((0..r.num_rows()).map(|i| in_tile((x.value(i), y.value(i)))).collect())
+            Ok((0..r.num_rows()).map(|i| o.place((x.value(i), y.value(i)))).collect())
         })?;
     }
     if raw("raw_ways").exists() {
         split_file(&raw("raw_ways"), |r| {
             let g = col(r, "line")?;
             let g = g.as_binary::<i32>();
-            Ok((0..r.num_rows())
-                .map(|i| match g.is_valid(i).then(|| line_points(g.value(i)).find(|p| b.in_area(p.0, p.1))).flatten() {
-                    Some(p) if Tile::of(tile.z, p.0, p.1) == tile => MINE,
-                    Some(_) => OTHER,
-                    None => BORDER,
-                })
-                .collect())
+            Ok((0..r.num_rows()).map(|i| if g.is_valid(i) { o.way(line_points(g.value(i))) } else { BORDER }).collect())
         })?;
     }
     if raw("raw_relations").exists() {

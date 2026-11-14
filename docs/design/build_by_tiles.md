@@ -22,11 +22,12 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --zoom 10 --j
      inside the area, so they are complete, and they bring no more work: their own outside nodes are in the file too.
 3. **Tile builds** (`--jobs` at a time, each in its own process with `--tile-threads` threads). `--tile z/x/y` keeps the
    part of the area in the tile and the home nodes (`Boundary::within_tile`, `Boundary::with_points`);
-   `--outside-junctions` adds the junctions of the file. At the end, each table of the tile keeps only its **own rows**
-   (`union::own_rows`):
+   `--outside-junctions` adds the junctions of the file. Each writer of the tile writes only its **own rows**
+   (`union::Owner`; the network tables in `write_tables_owned`, the edge graph, `ways`, `lane_profile` and
+   `global_junctions` at once, the small tables at the end in `union::own_rows`):
    - an edge and its lanes: the tile that holds its source node; a turn, a turn permission and a turn restriction: the
      tile that holds the target node of the from edge; a node: the tile that holds it;
-   - a way of the mode (`ways`, `way_nodes`): the owner of its first edge;
+   - a way of the mode (`ways`, `way_nodes`): the tile of its first node inside the area;
    - a raw node and a raw way: the tile of the node (of the first point of the way) inside the area;
    - a virtual node (the middle of a split loop or parallel road): the tile of its place.
 
@@ -40,8 +41,24 @@ The rows of a table are in the order of the tiles (each tile in its own order), 
 
 ## Result
 
-Kentucky, 142 tiles of zoom 10 (driving, `--raw`, no filter of the largest part), against the whole build: the 19 tables
-are equal, except `built_at`. Cut 3.4 s, tile builds 9.7 s, union 1.2 s.
+| Area | Cut | Tile builds | Union | Total |
+|---|---|---|---|---|
+| Kentucky, 142 tiles (driving, `--raw`) | 3.4 s | 7.4 s | 0.7 s | 11.6 s |
+| France, 1,311 tiles (driving, 6 × 2) | 106.0 s | 102.6 s | 14.3 s | 222.9 s |
+
+- Kentucky: the 19 tables are equal to the whole build, except `built_at`.
+- France: the peak of the run is the cut (1.6 GB, in its own process); the tile builds at the same time use 1.2 GB,
+  the largest tile (Paris) 0.97 GB. The whole build of France in one process took 894 s and 7.3 GB.
+
+The tiles at the same time and the threads of each tile (France, 12 cores, before the writers of own rows):
+
+| Tiles × threads | Total | Tile builds together |
+|---|---|---|
+| 4 × 3 | 262.5 s | 1.04 GB |
+| 6 × 2 | 244.3 s | 1.06 GB |
+| 12 × 1 | 251.8 s | 1.37 GB |
+
+The default is the cores / 2 tiles at a time, with 2 threads each.
 
 ## Not yet in a build by tiles
 
