@@ -181,10 +181,22 @@ Python nor GEOS, the same code builds for WebAssembly, and the table can be made
 
 ## What QuackOSM has and duckOSM does not have
 
-- The filters: tags (`tags_filter`), OSM ids, custom SQL, and a geometry (`geometry_filter`).
-- The download of an extract for a geometry, and the geocoding of a place name.
-- More than one PBF file in one call.
-- The tags as columns (`explode_tags`), the Hilbert sort, and the WKT output.
+The options of QuackOSM 0.20.0 (`convert_pbf_to_parquet` and `convert_geometry_to_parquet`):
+
+- The filters: tags (`tags_filter`, with `keep_all_tags` to keep all tags of the rows that pass), OSM ids
+  (`filter_osm_ids`), an SQL condition (`custom_sql_filter`), and a geometry (`geometry_filter`). A filter reads less
+  data, so a query such as "the buildings of a city" can be much faster than the full table. This case is not
+  measured. `duckosm-rust cut` cuts a file to a boundary before `quack`, but it keeps OSM elements, and
+  `geometry_filter` keeps rows by their geometry: the rows are not checked to be the same.
+- The download of the extracts that cover a geometry (Geofabrik, OpenStreetMap.fr, BBBike), and the geocoding of a place
+  name.
+- More than one PBF file in one call, with each feature one time.
+- Other forms of the output: the tags as columns (`explode_tags`), the Hilbert sort (`sort_algorithm="hilbert"`: one
+  key for each row, with no jumps between strips), WKT text in place of WKB (`save_as_wkt`, not GeoParquet and not
+  sorted), and a GeoDataFrame of GeoPandas.
+- The settings of the file (`compression`, `compression_level`, `row_group_size`, `parquet_version`), the metadata tags
+  (`ignore_metadata_tags=False`), and its own rules for the polygons (`osm_way_polygon_features_config`).
+- A cache of the results, a command line of its own, and progress bars.
 
 `duckosm-rust quack` makes the table of QuackOSM's default options, with or without the sort. The design and the
 measurements in full are in
