@@ -29,6 +29,8 @@ const ROW_GROUP: usize = 65_536;
 
 mod par_writer;
 mod raw_load;
+#[cfg(feature = "pbf")]
+pub mod quack;
 pub mod read;
 pub mod merge;
 pub use par_writer::ParWriter;

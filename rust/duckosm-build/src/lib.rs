@@ -1481,6 +1481,30 @@ pub fn run<W: Write + Send>(
     Ok(sum)
 }
 
+/// duckosm-rust quack: the features table of QuackOSM (feature_id, tags, geometry; docs/rust/quack.md) of the whole PBF file,
+/// made in Rust in one pass (`duckosm_core::quack`): into the table `main.quackosm` of the `.duckdb` file `duckdb`
+/// (directly, no Parquet file between), into the GeoParquet file `parquet`, or into both in the same pass.
+pub fn quack(
+    pbf: &Path,
+    parquet: Option<&Path>,
+    duckdb: Option<&Path>,
+    threads: usize,
+) -> Result<duckosm_core::quack::Counts, String> {
+    if let Some(db) = duckdb {
+        #[cfg(feature = "duckdb")]
+        return duckosm_duckdb::write_quack(db, pbf, threads, parquet);
+        #[cfg(not(feature = "duckdb"))]
+        return Err(format!("{}: the .duckdb output needs the cargo feature \"duckdb\"", db.display()));
+    }
+    let parquet = parquet.ok_or("quack: no output (use geoparquet, duckdb or both)")?;
+    let f = std::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
+    let out = std::fs::File::create(parquet).map_err(|e| format!("{}: {e}", parquet.display()))?;
+    let mut w = duckosm_parquet::quack::QuackWriter::new(std::io::BufWriter::new(out))?;
+    let n = duckosm_core::quack::features(std::io::BufReader::new(f), threads, |rows| w.push(rows))?;
+    w.close()?;
+    Ok(n)
+}
+
 /// Build from the PBF file `pbf_path` (cut to `p.boundary` when there is one) and write the files into `out`.
 pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String> {
     if p.duckdb && !cfg!(feature = "duckdb") {

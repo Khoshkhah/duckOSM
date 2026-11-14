@@ -797,6 +797,8 @@ name = "duckosm-core"
 version = "0.7.0"
 dependencies = [
  "flate2",
+ "geo",
+ "i_overlay 4.5.2",
  "miniz_oxide 0.8.9",
  "osmpbf",
  "rayon",
