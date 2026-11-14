@@ -15,7 +15,8 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
 - `-f duckdb` writes the table `main.quackosm` (the table name of QuackOSM) into `out/kentucky_quack.duckdb`. The geometry
   column has DuckDB's `GEOMETRY` type.
 - `-f duckdb,geoparquet` writes the two files in one pass.
-- `--threads` sets the number of blocks that are decoded at the same time. The default is all the cores.
+- `--threads` sets the threads, as QuackOSM's `cpu_limit`: the pool of the Rust threads, the blocks that are decoded at
+  the same time, and the threads of DuckDB. The default is all the cores.
 - `--no-sort` keeps the rows in the order in which they are made (QuackOSM `sort_result=False`). By default the rows are
   sorted as QuackOSM sorts them (see "The sort").
 
@@ -95,22 +96,44 @@ are in another order). The sort needs all rows before it writes the first row, s
 
 ## The result on Kentucky
 
-Input: `kentucky-area.osm.pbf` (141 MB). Mac mini (Apple silicon, 12 cores, 16 GB). QuackOSM 0.20.0 with DuckDB 2.0.0.
-duckOSM's `.duckdb` file has DuckDB 1.5.6. The memory is the peak RSS of the process and all its child processes
-(QuackOSM starts a worker process). The time is the wall time of the process. Each tool with its default (sorted rows)
-and without the sort:
+Input: `kentucky-area.osm.pbf` (141 MB). Mac mini (Apple silicon, 12 cores, 16 GB). QuackOSM 0.20.0 with DuckDB 2.0.0;
+duckOSM with DuckDB 1.5.6. Each case ran 3 times in an empty folder. The wall time and the CPU time (user + system) are
+from `/usr/bin/time`, the peak memory is the RSS of the process and all its child processes (QuackOSM starts a worker
+process), and the file size is in bytes (MB = 10^6 bytes).
 
-| Output | QuackOSM | duckOSM | QuackOSM, no sort | duckOSM, `--no-sort` |
-|---|---|---|---|---|
-| GeoParquet: time | 14.0 s | 4.1 s | 13.1 to 13.3 s | 3.2 s |
-| GeoParquet: peak memory | 5.7 to 5.8 GB | 2.1 GB | 5.8 GB | 1.1 to 1.4 GB |
-| GeoParquet: file | 297 MB | 304 MB | 333 MB | 320 MB |
-| `.duckdb`: time | 14.8 to 14.9 s | 4.3 s | 14.0 s | 3.4 to 3.6 s |
-| `.duckdb`: peak memory | 5.8 GB | 2.8 GB | 5.8 GB | 1.8 GB |
-| `.duckdb`: file | 1.2 GB | 752 MB | 1.3 GB | 675 MB |
+| Case | QuackOSM | duckOSM |
+|---|---|---|
+| GeoParquet, sorted (the default): time | 13.7 to 13.8 s | 3.4 s |
+| GeoParquet, sorted: CPU time | 76 to 78 s | 13.0 s |
+| GeoParquet, sorted: peak memory | 5.9 GB | 2.1 GB |
+| GeoParquet, sorted: file | 311.5 MB | 308.4 MB |
+| GeoParquet, not sorted: time | 13.0 to 13.5 s | 3.0 s |
+| GeoParquet, not sorted: CPU time | 71.5 s | 11.6 s |
+| GeoParquet, not sorted: peak memory | 5.8 GB | 1.1 GB |
+| GeoParquet, not sorted: file | 349.3 MB | 320.1 MB |
+| `.duckdb`, sorted (the default): time | 14.8 to 15.3 s | 4.2 s |
+| `.duckdb`, sorted: CPU time | 81 to 85 s | 13.5 s |
+| `.duckdb`, sorted: peak memory | 5.8 GB | 2.8 GB |
+| `.duckdb`, sorted: file | 670 MB | 779 MB |
+| `.duckdb`, not sorted: time | 14.2 to 14.4 s | 3.4 s |
+| `.duckdb`, not sorted: peak memory | 5.8 GB | 1.8 GB |
+| `.duckdb`, not sorted: file | 702 to 739 MB | 704 to 709 MB |
 
-The CPU time of the GeoParquet output without the sort: QuackOSM 71.7 s, duckOSM 11.0 s. Both outputs of duckOSM in one
-pass (sorted) take 4.5 s and 2.8 GB.
+The `.duckdb` file of duckOSM is larger when it is sorted. DuckDB 1.5.6 stores the GEOMETRY column with no compression
+(DuckDB 2.0 compresses it), and the sort mixes the `feature_id` values, which DuckDB's FSST compresses better in id order.
+A table loaded from duckOSM's sorted GeoParquet file with `CREATE TABLE ... AS SELECT * FROM read_parquet(...)`, as
+QuackOSM loads its file, is also 779 MB in DuckDB 1.5.6. The two Parquet files have the same content in other
+encodings: DuckDB 2.0 writes `DELTA_LENGTH_BYTE_ARRAY`, arrow-rs writes dictionaries.
+
+The threads (GeoParquet, sorted; QuackOSM `cpu_limit`, duckOSM `--threads`; one run each):
+
+| Threads | QuackOSM | duckOSM |
+|---|---|---|
+| 1 | 41.7 s (CPU 50.5 s) | 8.3 s (CPU 8.2 s) |
+| 4 | 18.2 s (CPU 57.3 s) | 4.0 s (CPU 9.8 s) |
+| 12 | 13.9 s (CPU 77.0 s) | 3.3 s (CPU 12.9 s) |
+
+QuackOSM with `cpu_limit=1` uses more than one core: the limit applies to its DuckDB queries only.
 
 The rows, compared with `cargo run --release --example quack_diff -p duckosm-duckdb -- out/kentucky_quack.duckdb quackosm.parquet`:
 
@@ -120,6 +143,10 @@ The rows, compared with `cargo run --release --example quack_diff -p duckosm-duc
   - 12 rows have a point where two edges cross. i_overlay and GEOS calculate this point to a different last digit.
   - 2 ways are rings that touch themselves. GEOS gives a GEOMETRYCOLLECTION of the polygon and the lines that enclose no area;
     duckOSM gives the polygon.
+- 6 333 of the equal geometries have another start point or direction of a ring (the same shape, other WKB).
+- The sums of a hash over all rows are equal in QuackOSM's Parquet file, duckOSM's Parquet file and duckOSM's `.duckdb`
+  table: `sum(hash(feature_id))` and `sum(hash(feature_id, tags))`.
+- The `.duckdb` table of duckOSM has the rows in the order of its Parquet file.
 
 On Monaco (`tests/data/monaco.osm.pbf`) all 9 586 rows are equal. `duckosm-core/tests/quack_monaco.rs` checks the rows of each
 kind, the rows of each geometry type and the area against the numbers of QuackOSM.

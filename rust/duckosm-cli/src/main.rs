@@ -190,7 +190,8 @@ struct QuackCli {
     /// Output formats, comma separated: geoparquet, duckdb (the table main.quackosm).
     #[arg(short, long, default_value = "duckdb,geoparquet")]
     format: String,
-    /// The blocks of the file that are decoded at the same time (default: all the cores).
+    /// The threads (default: all the cores), as QuackOSM's cpu_limit: the pool of the Rust threads, the blocks of the file
+    /// that are decoded at the same time, and the threads of DuckDB.
     #[arg(long)]
     threads: Option<usize>,
     /// Do not sort the rows (QuackOSM sort_result=False). The default sorts them as QuackOSM does (Sort-Tile-Recursive
@@ -213,6 +214,7 @@ fn quack(args: &[String]) -> Result<(), String> {
     let parquet = geoparquet.then(|| cli.out.join(format!("{}_quack.parquet", cli.name)));
     let db = duckdb.then(|| cli.out.join(format!("{}_quack.duckdb", cli.name)));
     let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
     let t = std::time::Instant::now();
     let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort)?;
     eprintln!(

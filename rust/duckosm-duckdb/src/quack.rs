@@ -139,7 +139,7 @@ pub fn write_quack(db: &Path, pbf: &Path, threads: usize, parquet: Option<&Path>
     con.register_table_function::<QuackFeatures>("quack_features").map_err(err)?;
     let text = |p: &Path| p.display().to_string().replace('\'', "''");
     con.execute_batch(&format!(
-        "SET preserve_insertion_order = {sort};
+        "SET preserve_insertion_order = {sort}; SET threads = {threads};
          CREATE TABLE main.quackosm AS
          SELECT feature_id, tags, ST_GeomFromWKB(geometry) AS geometry FROM quack_features('{}', {threads}, '{}', {sort});
          CHECKPOINT;",

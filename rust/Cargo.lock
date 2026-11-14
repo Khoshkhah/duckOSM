@@ -790,6 +790,7 @@ dependencies = [
  "duckosm-build",
  "duckosm-edit",
  "libc",
+ "rayon",
 ]
 
 [[package]]
