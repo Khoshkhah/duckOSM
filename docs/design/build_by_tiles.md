@@ -41,6 +41,24 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -
    area (`boundary`, `visualization_metadata`, `transfers`) from the boundary and the nodes of the union: the nodes stay
    on disk (the point of the time zone from passes over the nodes file, the transfers from a sort on disk).
 
+## The largest part
+
+The filter of the largest part (on by default, as in the whole build; `--no-component-filter` turns it off) needs the whole
+network, so it runs after the tile builds and before the union, with memory that does not grow with the area:
+
+1. Each tile build finds the connected parts of all its edges (its own and the copies of other tiles; not the private
+   edges): a union-find on their end nodes (`union::TileParts`). The tile that holds a node has all edges of the node, so
+   the part of each node and edge that it owns is complete. It writes small side files: the parts (own edges, smallest
+   node id), the part of each edge and node, and the links (the part at each node that another tile holds or shares).
+2. The links of all tiles, sorted by node, join the parts of the tiles: a union-find on the parts, not on the nodes
+   (`union::keep_largest_part`). The largest part has the most edges, then the smallest node id (the rule of the whole
+   build).
+3. Each tile (the tiles at the same time) drops the rows of the other parts: its edges, nodes and lanes, and the turns
+   and turn rules that use a dropped edge. The private edges stay, as in the whole build.
+
+Kentucky: equal to the whole build with the filter (2,224,823 of 2,261,507 edges stay). France: 25,546,974 of
+25,919,914 edges stay.
+
 ## The scheduler
 
 `--memory` (default 2 GB) is the memory of the tile builds at the same time. The tiles start largest file first, at most
@@ -89,6 +107,6 @@ The default is the cores / 2 tiles at a time, with 2 threads each.
 
 ## Not yet in a build by tiles
 
-- The steps that need the whole area: the bus routes, the drawing levels (in the order of the tiles), the filter of the
-  largest part. The tile builds run without them.
+- The steps that need the whole area: the bus routes and the drawing levels (in the order of the tiles). The tile builds
+  run without them.
 - The `.duckdb` output: the build by tiles writes GeoParquet files.
