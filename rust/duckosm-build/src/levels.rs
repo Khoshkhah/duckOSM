@@ -431,29 +431,21 @@ pub mod tiled {
         // the edges of the tiles in the window and of the running tiles
         let (mut in_memory, mut tile) = (0usize, Vec::<TileEdge>::new());
         let mut rows = rows.read(&TileEdgeCodec).map_err(io)?.peekable();
-        // a tile starts when all the tiles it waits for are done (not when the tiles before it are done): the workers take the
-        // tiles from `jobs` and give back the results
-        let (job_tx, jobs) = std::sync::mpsc::channel::<(Vec<TileEdge>, FxHashMap<i64, [i64; 4]>)>();
-        let (jobs, (res_tx, results)) = (std::sync::Mutex::new(jobs), std::sync::mpsc::channel());
+        // a tile starts when all the tiles it waits for are done (not when the tiles before it are done): `dispatch` starts the
+        // ready tiles, and `receive` gives the result of one finished tile
+        type Job = (Vec<TileEdge>, FxHashMap<i64, [i64; 4]>);
+        type Done = (Tile, usize, Result<(usize, roadstyle_levels::TileLevels, FxHashSet<i64>), String>);
         let earlier_of = |tile: &[TileEdge], earlier: &FxHashMap<i64, (usize, [i64; 4])>| {
             let me = order[&tile[0].0];
             tile.iter().filter_map(|r| earlier.get(&r.4).filter(|(o, _)| *o < me).map(|(_, v)| (r.4, *v))).collect()
         };
-        let failed = std::thread::scope(|s| -> Result<(), String> {
-            // the scope waits for the workers: they stop when `job_tx` closes, at the end of this function (also at an error)
-            let (job_tx, results) = (job_tx, results);
-            for _ in 0..rayon::current_num_threads() {
-                let (jobs, res_tx, solve) = (&jobs, res_tx.clone(), &solve);
-                s.spawn(move || loop {
-                    let job = jobs.lock().expect("the jobs of the levels").recv();
-                    let Ok((tile, earlier)) = job else { return };
-                    let (t, n) = (tile[0].0, tile.len());
-                    if res_tx.send((t, n, solve(tile, earlier))).is_err() {
-                        return;
-                    }
-                });
-            }
-            drop(res_tx);
+        let finish = |(tile, earlier): Job| -> Done {
+            let (t, n) = (tile[0].0, tile.len());
+            (t, n, solve(tile, earlier))
+        };
+        let mut run_tiles = |dispatch: &mut dyn FnMut(Vec<Job>) -> Result<(), String>,
+                             receive: &mut dyn FnMut() -> Result<Done, String>|
+         -> Result<(), String> {
             let mut running = 0usize;
             loop {
                 // the next tiles to the window, up to WINDOW_TILES tiles and WINDOW_EDGES edges in memory
@@ -472,15 +464,15 @@ pub mod tiled {
                 let ready = |t: &Tile| waits.get(t).is_none_or(|w| w.iter().all(|u| done.contains(u)));
                 let (run, wait): (Vec<_>, Vec<_>) = window.drain(..).partition(|x| ready(&x[0].0));
                 window.extend(wait);
-                for t in run {
+                running += run.len();
+                dispatch(run.into_iter().map(|t| {
                     let e = earlier_of(&t, &earlier);
-                    job_tx.send((t, e)).map_err(|_| "the workers of the levels stopped".to_string())?;
-                    running += 1;
-                }
+                    (t, e)
+                }).collect())?;
                 if running == 0 {
                     break;
                 }
-                let (t, n, r) = results.recv().map_err(|_| "the workers of the levels stopped".to_string())?;
+                let (t, n, r) = receive()?;
                 running -= 1;
                 in_memory -= n;
                 let (me, r, keep) = r?;
@@ -509,8 +501,47 @@ pub mod tiled {
                 done.insert(t);
             }
             Ok(())
-        });
-        failed?;
+        };
+        // native: worker threads take the tiles as they become ready
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (job_tx, jobs) = std::sync::mpsc::channel::<Job>();
+            let (jobs, (res_tx, results)) = (std::sync::Mutex::new(jobs), std::sync::mpsc::channel::<Done>());
+            std::thread::scope(|s| -> Result<(), String> {
+                let (job_tx, results) = (job_tx, results);
+                for _ in 0..rayon::current_num_threads() {
+                    let (jobs, res_tx, finish) = (&jobs, res_tx.clone(), &finish);
+                    s.spawn(move || loop {
+                        let job = jobs.lock().expect("the jobs of the levels").recv();
+                        let Ok(job) = job else { return };
+                        if res_tx.send(finish(job)).is_err() {
+                            return;
+                        }
+                    });
+                }
+                drop(res_tx);
+                let stopped = || "the workers of the levels stopped".to_string();
+                // the workers stop when `job_tx` closes, at the end of this closure (also at an error); the scope waits for them
+                run_tiles(
+                    &mut |run| run.into_iter().try_for_each(|j| job_tx.send(j).map_err(|_| stopped())),
+                    &mut || results.recv().map_err(|_| stopped()),
+                )
+            })?;
+        }
+        // the browser can start no threads: the ready tiles of each round run on the threads of rayon, and the next round waits
+        #[cfg(target_arch = "wasm32")]
+        {
+            use rayon::prelude::*;
+            let finished = std::cell::RefCell::new(std::collections::VecDeque::<Done>::new());
+            run_tiles(
+                &mut |run| {
+                    let r: Vec<Done> = run.into_par_iter().map(&finish).collect();
+                    finished.borrow_mut().extend(r);
+                    Ok(())
+                },
+                &mut || finished.borrow_mut().pop_front().ok_or_else(|| "no finished tile of the levels".to_string()),
+            )?;
+        }
         drop((earlier, tags, waits, done, order));
         duckosm_core::util::step("levels: the tiles");
         // 4. one move to the ground for the whole area (not for the tags rule: its numbers are final); the rows in the order of
