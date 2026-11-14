@@ -524,7 +524,8 @@ pub fn build_network_with(
 
 /// Where the rows of `edge_graph` go while the network step makes them: a file writer (docs/design/network_stream.md,
 /// part C). Then `Graph::edge_graph` is `None` and `Stats::edge_graph_rows` has the number of rows.
-pub type GraphRows<'a> = &'a mut dyn FnMut(crate::graph::GraphRow) -> Result<(), String>;
+/// The sink gets the from edge of each row too (the build of a tile writes the turns at the nodes that it holds).
+pub type GraphRows<'a> = &'a mut dyn FnMut(&Edge, crate::graph::GraphRow) -> Result<(), String>;
 
 /// [`build_network_with`] with the global junctions given: `global_junctions(all_ways)`, or an empty map when
 /// `opts.global_junctions` is off. A build of several modes computes them one time for all modes and for the table
@@ -967,10 +968,10 @@ pub fn build_network_files(
         let mut rows: Vec<crate::graph::GraphRow> = Vec::new();
         let mut n = 0;
         let mut sink = graph_rows;
-        let mut out = |r| {
+        let mut out = |e: &Edge, r| {
             n += 1;
             match sink.as_mut() {
-                Some(s) => s(r),
+                Some(s) => s(e, r),
                 None => {
                     rows.push(r);
                     Ok(())
@@ -1011,10 +1012,10 @@ pub fn build_network_files(
             };
             if take_a {
                 let e = a.next().unwrap().map_err(io)?;
-                g.moves(&e, None, &mut out)?;
+                g.moves(&e, None, &mut |r| out(&e, r))?;
             } else {
                 let (e, l) = b.next().unwrap().map_err(io)?;
-                g.moves(&e, Some(l), &mut out)?;
+                g.moves(&e, Some(l), &mut |r| out(&e, r))?;
             }
         }
         drop(out);

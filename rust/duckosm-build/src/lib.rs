@@ -6,7 +6,7 @@ use duckosm_core::filter::Mode;
 use duckosm_core::fixes::OsmFixes;
 use duckosm_core::graph::Relation;
 use duckosm_core::lanes::LaneEdges;
-use duckosm_core::model::{Edge, Network, Way};
+use duckosm_core::model::{Edge, Network, Node, Way};
 use duckosm_core::network::{build_network_files, Coords, EdgeFiles as NetworkEdges, NetworkFiles, Options};
 use duckosm_core::osmjson::OsmJson;
 use duckosm_core::raw::{Raw, RawPatch, Want};
@@ -247,18 +247,112 @@ pub fn write_tables_files<W: Write + Send>(
     net: &mut NetworkFiles,
     mode: Mode,
     opts: &Options,
-    mut file: impl FnMut(&str) -> Result<W, String>,
+    file: impl FnMut(&str) -> Result<W, String>,
 ) -> Result<(), String> {
+    write_tables_owned(net, mode, opts, None, file).map(|_| ())
+}
+
+/// [`write_tables_files`] in the build of one tile (`owner`): each table gets only the rows that the tile owns, and the
+/// rows that no tile alone owns go to `<table>.border.parquet` (docs/design/build_by_tiles.md). Returns the class of each
+/// edge (`union::Owner::node` of its source node), for the lanes.
+pub fn write_tables_owned<W: Write + Send>(
+    net: &mut NetworkFiles,
+    mode: Mode,
+    opts: &Options,
+    owner: Option<&union::Owner>,
+    mut file: impl FnMut(&str) -> Result<W, String>,
+) -> Result<duckosm_core::util::FxHashMap<i64, u8>, String> {
     use duckosm_parquet as pq;
+    use duckosm_parquet::merge::{BORDER, MINE};
     let n = mode.name();
     let oc = pq::EdgeCols::of(mode, opts);
     let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
-    let rows = net.files.edges().map_err(err)?.map(|e| e.map_err(err));
-    pq::write_edges_iter_to(file(&format!("edges_{n}.parquet"))?, rows, oc)?;
-    let rows = net.files.private_edges().map_err(err)?.map(|e| e.map_err(err));
-    pq::write_edges_iter_to(file(&format!("private_edges_{n}.parquet"))?, rows, oc)?;
+    // the class of each edge at its source node (its own rows, its lanes) and at its target node (its turns)
+    let (mut classes, mut targets) = (duckosm_core::util::FxHashMap::default(), duckosm_core::util::FxHashMap::default());
+    for private in [false, true] {
+        let name = if private { format!("private_edges_{n}") } else { format!("edges_{n}") };
+        let class = |e: &Edge| owner.map_or(MINE, |o| o.node(e.source, e.geometry[0]));
+        // one read of the temporary file of the edges for each class (the file stays; no edge is held)
+        for (k, suffix) in [(MINE, ""), (BORDER, ".border")] {
+            if k == BORDER && owner.is_none() {
+                continue;
+            }
+            let it: Box<dyn Iterator<Item = std::io::Result<Edge>>> =
+                if private { Box::new(net.files.private_edges().map_err(err)?) } else { Box::new(net.files.edges().map_err(err)?) };
+            let mut any = k == MINE;
+            let mut rows = it.map(|e| e.map_err(err)).filter(|e| e.as_ref().map_or(true, |e| class(e) == k)).peekable();
+            any |= rows.peek().is_some();
+            if any {
+                pq::write_edges_iter_to(file(&format!("{name}{suffix}.parquet"))?, rows, oc)?;
+            }
+        }
+        if owner.is_some() {
+            let it: Box<dyn Iterator<Item = std::io::Result<Edge>>> =
+                if private { Box::new(net.files.private_edges().map_err(err)?) } else { Box::new(net.files.edges().map_err(err)?) };
+            for e in it {
+                let e = e.map_err(err)?;
+                classes.insert(e.edge_id, class(&e));
+                if let Some(o) = owner {
+                    targets.insert(e.edge_id, o.node(e.target, *e.geometry.last().expect("a line")));
+                }
+            }
+        }
+    }
     // the tables `ways` and `way_nodes` are written by the network step (`ways_out` of build_network_files)
-    write_other_tables(&net.net, mode, opts, None, file)
+    match owner {
+        None => write_other_tables(&net.net, mode, opts, None, file)?,
+        Some(o) => {
+            let nodes = std::mem::take(&mut net.net.nodes);
+            let (mine, border): (Vec<Node>, Vec<Node>) = nodes
+                .into_iter()
+                .filter(|x| o.node(x.node_id, (x.lon, x.lat)) != duckosm_parquet::merge::OTHER)
+                .partition(|x| o.node(x.node_id, (x.lon, x.lat)) == MINE);
+            if !border.is_empty() {
+                pq::write_nodes_to(file(&format!("nodes_{n}.border.parquet"))?, &border)?;
+            }
+            net.net.nodes = mine;
+            // the turn permissions and the turn restrictions: at the target node of their from edge
+            let at = |from: i64| targets.get(&from).copied().unwrap_or(duckosm_parquet::merge::OTHER);
+            let g = &mut net.net.graph;
+            if let Some(rows) = g.turn_permission.take() {
+                let (mine, border) = split_rows(rows, |r| at(r.from_edge));
+                if !border.is_empty() {
+                    pq::write_turn_permission_to(file(&format!("turn_permission_{n}.border.parquet"))?, &border)?;
+                }
+                g.turn_permission = Some(mine);
+            }
+            if let Some(rows) = g.turn_restrictions.take() {
+                let (mine, border) = split_rows(rows, |r| at(r.from_edge_id));
+                if !border.is_empty() {
+                    pq::write_turn_restrictions_to(file(&format!("turn_restrictions_{n}.border.parquet"))?, &border)?;
+                }
+                g.turn_restrictions = Some(mine);
+            }
+            if let Some(rows) = g.turn_path_restrictions.take() {
+                let (mine, border) = split_rows(rows, |r| at(r.from_edge));
+                if !border.is_empty() {
+                    pq::write_turn_path_restrictions_to(file(&format!("turn_path_restrictions_{n}.border.parquet"))?, &border)?;
+                }
+                g.turn_path_restrictions = Some(mine);
+            }
+            write_other_tables(&net.net, mode, opts, None, file)?;
+        }
+    }
+    Ok(classes)
+}
+
+/// The rows of the tile ([`duckosm_parquet::merge::MINE`]) and the border rows of `rows`, by `class`; the other rows go.
+fn split_rows<T>(rows: Vec<T>, class: impl Fn(&T) -> u8) -> (Vec<T>, Vec<T>) {
+    use duckosm_parquet::merge::{BORDER, MINE};
+    let (mut mine, mut border) = (Vec::new(), Vec::new());
+    for r in rows {
+        match class(&r) {
+            MINE => mine.push(r),
+            BORDER => border.push(r),
+            _ => {}
+        }
+    }
+    (mine, border)
 }
 
 /// The tables of a network but `edges` and `private_edges`.
@@ -1027,15 +1121,19 @@ pub fn run<W: Write + Send>(
     log.step("global junctions");
     // the build of one tile writes only its own junctions: a node inside the area of the tile; a node outside the area goes to the
     // border file (option A of docs/design/build_by_tiles.md)
-    let tile_junctions = match (tile_area, p.tile) {
-        (Some(b), Some(t)) if opts.global_junctions => {
+    let owner = tile_area.zip(p.tile).map(|(b, tile)| union::Owner { b, tile });
+    let tile_junctions = match &owner {
+        Some(o) if opts.global_junctions => {
+            use duckosm_parquet::merge::{BORDER, MINE};
             let (mut mine, mut border) = (duckosm_core::util::FxHashMap::default(), Vec::new());
             for (&n, &road) in &junctions {
-                let Some(pt) = coords.get(&n) else { continue };
-                if !b.in_area(pt.0, pt.1) {
-                    border.push((n, road));
-                } else if duckosm_core::tiles::Tile::of(t.z, pt.0, pt.1) == t {
-                    mine.insert(n, road);
+                let Some(&pt) = coords.get(&n) else { continue };
+                match o.place(pt) {
+                    MINE => {
+                        mine.insert(n, road);
+                    }
+                    BORDER => border.push((n, road)),
+                    _ => {}
                 }
             }
             border.sort_unstable();
@@ -1045,6 +1143,11 @@ pub fn run<W: Write + Send>(
             Some(mine)
         }
         _ => None,
+    };
+    // the build of one tile writes only its own ways: a way is of the place of its first node inside the area
+    let way_class: duckosm_core::util::FxHashMap<i64, u8> = match &owner {
+        Some(o) => ways.iter().map(|w| (w.id, o.way(w.refs.iter().filter_map(|n| coords.get(n).copied())))).collect(),
+        None => Default::default(),
     };
     // the coordinates go to a temporary file, sorted by id: the network reads them there (a join on disk), and the area tables
     // need only their box. The coordinates of all nodes of the ways stayed in memory to the area tables (Kentucky 198 MiB).
@@ -1056,6 +1159,8 @@ pub fn run<W: Write + Send>(
         [w.min(p.0), s.min(p.1), e.max(p.0), n.max(p.1)]
     });
     drop(coords);
+    // the build of one tile: the class of each driving edge, for its lanes
+    let mut lane_classes = duckosm_core::util::FxHashMap::default();
     for mode in &p.modes {
         let n = mode.name();
         // the rows of edge_graph go to their file while the network step makes them (docs/design/network_stream.md, part C)
@@ -1064,10 +1169,33 @@ pub fn run<W: Write + Send>(
         } else {
             None
         };
-        let mut sink = |r| graph_file.as_mut().expect("a file when there is a graph").push(r);
+        // the build of one tile: the turns at the nodes that it holds (the target node of the from edge)
+        let mut graph_border = match &owner {
+            Some(_) if opts.build_graph => Some(duckosm_parquet::EdgeGraphWriter::new(file(&format!("edge_graph_{n}.border.parquet"))?)?),
+            _ => None,
+        };
+        let mut sink = |e: &Edge, r| {
+            use duckosm_parquet::merge::{BORDER, MINE};
+            match owner.as_ref().map_or(MINE, |o| o.node(e.target, *e.geometry.last().expect("a line"))) {
+                MINE => graph_file.as_mut().expect("a file when there is a graph").push(r),
+                BORDER => graph_border.as_mut().expect("a tile build has a border file").push(r),
+                _ => Ok(()),
+            }
+        };
         let mut ways_out = |mw: &[duckosm_core::filter::ModeWay]| -> Result<(), String> {
-            duckosm_parquet::write_ways_to(file(&format!("ways_{n}.parquet"))?, mw, &ways)?;
-            duckosm_parquet::write_way_nodes_to(file(&format!("way_nodes_{n}.parquet"))?, mw)
+            if owner.is_none() {
+                duckosm_parquet::write_ways_to(file(&format!("ways_{n}.parquet"))?, mw, &ways)?;
+                return duckosm_parquet::write_way_nodes_to(file(&format!("way_nodes_{n}.parquet"))?, mw);
+            }
+            use duckosm_parquet::merge::{BORDER, MINE};
+            for (k, suffix) in [(MINE, ""), (BORDER, ".border")] {
+                let rows: Vec<duckosm_core::filter::ModeWay> = mw.iter().filter(|w| way_class.get(&w.id) == Some(&k)).cloned().collect();
+                if k == MINE || !rows.is_empty() {
+                    duckosm_parquet::write_ways_to(file(&format!("ways_{n}{suffix}.parquet"))?, &rows, &ways)?;
+                    duckosm_parquet::write_way_nodes_to(file(&format!("way_nodes_{n}{suffix}.parquet"))?, &rows)?;
+                }
+            }
+            Ok(())
         };
         let mut net = build_network_files(
             &ways,
@@ -1083,8 +1211,14 @@ pub fn run<W: Write + Send>(
         if let Some(w) = graph_file {
             w.finish()?;
         }
+        if let Some(w) = graph_border {
+            w.finish()?;
+        }
         log.step(&format!("build {n}"));
-        write_tables_files(&mut net, *mode, opts, &mut file)?;
+        let classes = write_tables_owned(&mut net, *mode, opts, owner.as_ref(), &mut file)?;
+        if *mode == Mode::Driving {
+            lane_classes = classes;
+        }
         log.step(&format!("write geoparquet {n}"));
         if p.h3_resolution.is_some() || dem.is_some() {
             // ponytail: H3 and the heights take all edges of the mode in memory, for this part only
@@ -1245,7 +1379,7 @@ pub fn run<W: Write + Send>(
                 err.map_or(Ok(()), Err)?;
             }
         }
-        sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, &mut file)?;
+        sum.lanes = write_lane_profile(&lane_edges, &ways, fixes, owner.as_ref().map(|_| &lane_classes), &mut file)?;
         if sum.lanes.is_some() {
             log.step("lane profile");
         }

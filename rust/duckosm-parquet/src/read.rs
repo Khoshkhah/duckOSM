@@ -227,21 +227,23 @@ pub fn read_nodes(path: &Path) -> Result<Vec<duckosm_core::model::Node>, String>
     Ok(out)
 }
 
-/// The id and the two ends of the line of each edge of an `edges` file (only these columns are read).
-pub fn read_edge_ends(path: &Path, mut f: impl FnMut(i64, Pt, Pt)) -> Result<(), String> {
+/// The id, the source and target nodes, and the two ends of the line of each edge of an `edges` file (only these columns are
+/// read).
+pub fn read_edge_ends(path: &Path, mut f: impl FnMut(i64, i64, i64, Pt, Pt)) -> Result<(), String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
-    let cols: Vec<usize> = ["edge_id", "geometry"].iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
+    let cols: Vec<usize> = ["edge_id", "source", "target", "geometry"].iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
     let mask = parquet::arrow::ProjectionMask::roots(b.parquet_schema(), cols);
     for batch in b.with_projection(mask).build().map_err(|e| e.to_string())? {
         let batch = batch.map_err(|e| e.to_string())?;
-        let id = batch.column_by_name("edge_id").unwrap().as_primitive::<Int64Type>();
+        let i64s = |n: &str| batch.column_by_name(n).unwrap().as_primitive::<Int64Type>().clone();
+        let (id, src, tgt) = (i64s("edge_id"), i64s("source"), i64s("target"));
         let g = batch.column_by_name("geometry").unwrap().as_binary::<i32>();
         for i in 0..batch.num_rows() {
             let w = g.value(i);
             let n = u32::from_le_bytes(w[5..9].try_into().unwrap()) as usize;
             let pt = |k: usize| (f64::from_le_bytes(w[9 + 16 * k..17 + 16 * k].try_into().unwrap()), f64::from_le_bytes(w[17 + 16 * k..25 + 16 * k].try_into().unwrap()));
-            f(id.value(i), pt(0), pt(n - 1));
+            f(id.value(i), src.value(i), tgt.value(i), pt(0), pt(n - 1));
         }
     }
     Ok(())
