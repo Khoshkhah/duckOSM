@@ -62,15 +62,18 @@ impl Rows {
         Rows { sort, batches: Vec::new(), centers: Vec::new() }
     }
 
-    /// The batch of `rows` to give on at once (no sort), or None (the batch waits for the sort).
-    pub fn push(&mut self, rows: Vec<Feature>) -> Result<Option<RecordBatch>, String> {
-        let b = batch(&rows)?;
+    /// The batches of `rows` (pieces of 20 000 rows, made on all threads) to give on at once (no sort), or none (the
+    /// batches wait for the sort). The pieces are not joined into one batch: a copy of each part was one more large
+    /// block for the allocator to keep.
+    pub fn push(&mut self, rows: Vec<Feature>) -> Result<Vec<RecordBatch>, String> {
+        use rayon::prelude::*;
+        let parts: Vec<RecordBatch> = rows.par_chunks(20_000).map(batch).collect::<Result<_, _>>()?;
         if !self.sort {
-            return Ok(Some(b));
+            return Ok(parts);
         }
         self.centers.extend(rows.iter().map(|f| f.center));
-        self.batches.push(b);
-        Ok(None)
+        self.batches.extend(parts);
+        Ok(Vec::new())
     }
 
     /// The waiting rows in the order of the sort, in batches of a row group.

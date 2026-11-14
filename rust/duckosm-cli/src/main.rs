@@ -200,8 +200,19 @@ struct QuackCli {
     no_sort: bool,
 }
 
+/// The start of `duckosm-rust quack`, for the times of its steps.
+static QUACK_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// A step of `duckosm-rust quack`: the time since the start, and the step (`duckosm_core::util::step`).
+fn quack_step(name: &str) {
+    let t = QUACK_START.get().map_or(0.0, |t| t.elapsed().as_secs_f64());
+    eprintln!("{t:>8.1} s  {name}");
+}
+
 fn quack(args: &[String]) -> Result<(), String> {
     let cli = QuackCli::parse_from(args);
+    let _ = QUACK_START.set(std::time::Instant::now());
+    let _ = duckosm_build::STEP_HOOK.set(quack_step);
     let (mut duckdb, mut geoparquet) = (false, false);
     for f in cli.format.split(',') {
         match f.trim() {

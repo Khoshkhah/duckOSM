@@ -46,9 +46,9 @@ fn kind_and_area(wkb: &[u8]) -> (u32, f64) {
 #[test]
 fn monaco_equals_quackosm() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
-    let f = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+    let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
     let mut kinds: BTreeMap<u32, (usize, f64)> = BTreeMap::new();
-    let n = duckosm_core::quack::features(f, 2, |rows| {
+    let n = duckosm_core::quack::features(open, 1 << 20, |rows| {
         for r in rows {
             let (k, a) = kind_and_area(&r.geometry);
             let e = kinds.entry(k).or_default();

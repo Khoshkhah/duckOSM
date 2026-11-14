@@ -49,36 +49,66 @@ The rules are the ones of QuackOSM 0.20.0 with its default options (no filters, 
 
 ## How duckOSM makes it
 
-All of it is Rust: `duckosm_core::quack` (the rows), `duckosm_parquet::quack` (the GeoParquet file) and
-`duckosm_duckdb::quack` (the `.duckdb` table). There is no Python and no DuckDB spatial extension. The same code builds for
-WebAssembly.
+All of it is Rust: `duckosm_core::quack` (the rows), `duckosm_parquet::quack` (the Arrow batches and the GeoParquet
+file) and `duckosm_duckdb::quack` (the `.duckdb` table). There is no Python and no DuckDB spatial extension. The same
+code builds for WebAssembly.
 
-1. One pass over the file with duckOSM's block decoder (`pbf::stream_raw`, the blocks decoded in parallel). A node keeps only
-   its rounded point. A node with tags becomes a row at once. A way becomes a row as soon as it is read, because its nodes
-   came before it. The node lists of the ways stay for the relations.
-2. The relations at the end, in parallel.
-3. The rows become Arrow batches (`duckosm_parquet::quack::Rows`). With `--no-sort`, each batch goes to the writer while
-   the file is read. With the sort, the batches wait (one buffer for each column) and go out in the sorted order. For the
-   `.duckdb` file, a DuckDB table function in Rust
-   (`quack_features`) gives the rows to DuckDB's own insert, and DuckDB's core function `ST_GeomFromWKB` makes the
-   `GEOMETRY`. No Parquet file is between the two. QuackOSM writes its Parquet file first and then loads it into DuckDB.
+`features()` reads the file twice and puts each table into temporary files (`spill`, OPFS in the browser) as soon as a
+pass makes it; a pass reads only what it needs. Each pass writes its time to the error output (`util::step`).
 
-The polygon operations use the pure-Rust crates `geo` 0.33 and `i_overlay` 4.5 (both were already in duckOSM's lock file):
+1. **Pass 1, the ways and the relations.** A way with tags gets a number; its header (id, tags, number of nodes) goes to
+   a file, and its nodes go into buckets by node id (`spill::Buckets`, 2^27 ids each, France about 100) as requests
+   (node, way, place). A way with no tags goes to a file of its own: only a member of a relation needs it, and the
+   relations come after the ways. Each relation goes to a file of headers, and each member way to a file of (way,
+   relation, place). After the pass, the member ways with no tags get numbers and requests too.
+2. **Pass 2, the nodes.** The nodes come in the order of their ids. The buckets of requests come in the same order
+   (`spill::SortedParts`: each bucket read into one buffer of the caller and sorted in memory on all threads), and each
+   request gets its point. The points go into buckets by way number (about 64). A node with tags is a row.
+3. **Pass 3, the ways.** A reader thread reads the buckets of points, each sorted by way and place, with the headers;
+   this thread makes the rows of each batch of 50 000 ways on all threads. The line of a member way goes to a file.
+4. **Pass 4, the relations.** The member file sorted by way meets the member lines sorted by way; the lines, sorted by
+   relation and place, meet the relation headers. The relations with all their lines go to all threads one at a time
+   (`par_bridge`), and each row goes to the writer. A relation that takes more than 2 s is written to the error output.
 
-- **The ring check.** A ring is valid when no two of its segments meet other than at the point that they share. `geo`'s
-  `Validation` compares each segment with each other segment. A boundary ring of 50 000 points took seconds, and five large
-  relations of Kentucky took 6 s together. `quack.rs` finds the pairs that meet with a sweep
-  (`geo::algorithm::sweep::Intersections`), and the five relations now take 1 s.
-- **The repair of an invalid ring.** i_overlay with the even-odd fill rule. This gives the area of GEOS's `ST_MakeValid`.
-  `geo`'s `MakeValid` (a triangulation) gave a wrong small triangle for some self-crossing rings.
+The polygon operations use the pure-Rust crates `geo` 0.33 and `i_overlay` 4.5:
+
+- **The ring check.** A ring is valid when no two of its segments meet other than at the point that they share. A sweep
+  (`geo::algorithm::sweep::Intersections`) finds the pairs that meet. `geo`'s `Validation` compares each segment with
+  each other segment (a boundary ring of 50 000 points took seconds).
+- **The repair of an invalid ring.** i_overlay with the even-odd fill rule (the area of GEOS's `ST_MakeValid`).
 - **The union and the difference.** i_overlay, called directly with `preserve_input_collinear` and
-  `preserve_output_collinear`. GEOS keeps a point that is on a straight edge, and `geo`'s `BooleanOps` removes it. The rings are
-  oriented first (shells counterclockwise), because i_overlay takes the fill rule from the direction of the first ring and OSM
-  rings come in both directions. The result goes back on the 7-decimal grid: i_overlay calculates on integers and gives the
-  input points back with an error of about 1e-14.
-- **Fast paths.** When the outer polygons do not meet, the union is the polygons as they are. When the inner polygons are
-  single rings, away from the border of the outer polygon and from each other, the difference is the outer ring with the
-  inner rings as holes. GEOS gives the same point set in these cases.
+  `preserve_output_collinear` (GEOS keeps a point on a straight edge). The rings are oriented first, and the result goes
+  back on the 7-decimal grid.
+- **Do polygons meet?** `polygons_meet`: one sweep over the edges of all the polygons, and a point-in-polygon test for
+  the pairs whose boxes meet. `geo`'s `Intersects` of two polygons compares each segment with each segment: one relation
+  of France (16467322, 6 811 members) took 100 s. When no polygons meet, the union is the polygons as they are, and the
+  holes go into the outer polygon with no overlay, so the coordinates stay exact.
+
+## Large areas: what France showed
+
+The first design held all node points in memory: about 18 GB for France, more than the Mac mini's 16 GB. The steps to
+the design above, each measured on France (unsorted GeoParquet):
+
+| Design | Time | Peak RSS | Peak disk use |
+|---|---|---|---|
+| Spill join of the network step (`join::Merge`, two external sorts) | 405 s | 5.6 GB | 35.0 GB |
+| Each table to a file (member lines and relations too) | 501 s | 2.8 GB | 36.1 GB |
+| Buckets in place of the external sorts | 233 s | 5.5 GB | 23.1 GB |
+| The sweep in place of `geo`'s `Intersects` | 128 s | 6.2 GB | 23.2 GB |
+| One reused buffer for the buckets; no copy of the Arrow pieces | 129 s | 3.8 GB | 23.2 GB |
+
+- The two external sorts took 174 s of 300: `spill::sort_bytes` sorts each run on all threads, but it reads, writes and
+  merges on one thread. The buckets write each row once and read it once, and sort each bucket in memory on all threads.
+- The relations in batches waited for the slowest relation of each batch (203 s); `par_bridge` lets a slow relation delay
+  only itself.
+- A worker that waits on a full channel can block the writer, which uses the same thread pool for its Arrow batches
+  (Ile-de-France stopped). A full channel now makes the worker run other waiting work (`rayon::yield_now`).
+- The Rust heap never passed 2.3 GB (cargo feature `heap-probe`), but the macOS footprint was 11 GB: `vmmap` showed
+  "Malloc Large (empty)", freed large blocks that the system allocator keeps for later use. A new vector for each bucket
+  (each a new size) and a copy of each Arrow batch filled that cache. With `MallocLargeCache=0` the footprint was 1.4 GB.
+  `SortedParts` now fills one buffer of the caller, and the Arrow pieces go to the writer with no copy: 3.5 GB.
+- A run that is stopped (a signal) leaves its temporary files: 45 GB after some stopped runs. Open: delete them on a stop,
+  or delete the files of dead runs at the start.
 
 ## The sort
 
@@ -94,62 +124,12 @@ groups, and the file is smaller. On Kentucky, 2 391 567 of the 2 393 139 rows (9
 QuackOSM's file, all rows are in the same row group, and no row is more than 11 positions away (rows with equal centers
 are in another order). The sort needs all rows before it writes the first row, so the rows wait in memory.
 
-## The result on Kentucky
+## The results
 
-Input: `kentucky-area.osm.pbf` (141 MB). Mac mini (Apple silicon, 12 cores, 16 GB). QuackOSM 0.20.0 with DuckDB 2.0.0;
-duckOSM with DuckDB 1.5.6. Each case ran 3 times in an empty folder. The wall time and the CPU time (user + system) are
-from `/usr/bin/time`, the peak memory is the RSS of the process and all its child processes (QuackOSM starts a worker
-process), and the file size is in bytes (MB = 10^6 bytes).
-
-| Case | QuackOSM | duckOSM |
-|---|---|---|
-| GeoParquet, sorted (the default): time | 13.7 to 13.8 s | 3.4 s |
-| GeoParquet, sorted: CPU time | 76 to 78 s | 13.0 s |
-| GeoParquet, sorted: peak memory | 5.9 GB | 2.1 GB |
-| GeoParquet, sorted: file | 311.5 MB | 308.4 MB |
-| GeoParquet, not sorted: time | 13.0 to 13.5 s | 3.0 s |
-| GeoParquet, not sorted: CPU time | 71.5 s | 11.6 s |
-| GeoParquet, not sorted: peak memory | 5.8 GB | 1.1 GB |
-| GeoParquet, not sorted: file | 349.3 MB | 320.1 MB |
-| `.duckdb`, sorted (the default): time | 14.8 to 15.3 s | 4.2 s |
-| `.duckdb`, sorted: CPU time | 81 to 85 s | 13.5 s |
-| `.duckdb`, sorted: peak memory | 5.8 GB | 2.8 GB |
-| `.duckdb`, sorted: file | 670 MB | 779 MB |
-| `.duckdb`, not sorted: time | 14.2 to 14.4 s | 3.4 s |
-| `.duckdb`, not sorted: peak memory | 5.8 GB | 1.8 GB |
-| `.duckdb`, not sorted: file | 702 to 739 MB | 704 to 709 MB |
-
-The `.duckdb` file of duckOSM is larger when it is sorted. DuckDB 1.5.6 stores the GEOMETRY column with no compression
-(DuckDB 2.0 compresses it), and the sort mixes the `feature_id` values, which DuckDB's FSST compresses better in id order.
-A table loaded from duckOSM's sorted GeoParquet file with `CREATE TABLE ... AS SELECT * FROM read_parquet(...)`, as
-QuackOSM loads its file, is also 779 MB in DuckDB 1.5.6. The two Parquet files have the same content in other
-encodings: DuckDB 2.0 writes `DELTA_LENGTH_BYTE_ARRAY`, arrow-rs writes dictionaries.
-
-The threads (GeoParquet, sorted; QuackOSM `cpu_limit`, duckOSM `--threads`; one run each):
-
-| Threads | QuackOSM | duckOSM |
-|---|---|---|
-| 1 | 41.7 s (CPU 50.5 s) | 8.3 s (CPU 8.2 s) |
-| 4 | 18.2 s (CPU 57.3 s) | 4.0 s (CPU 9.8 s) |
-| 12 | 13.9 s (CPU 77.0 s) | 3.3 s (CPU 12.9 s) |
-
-QuackOSM with `cpu_limit=1` uses more than one core: the limit applies to its DuckDB queries only.
-
-The rows, compared with `cargo run --release --example quack_diff -p duckosm-duckdb -- out/kentucky_quack.duckdb quackosm.parquet`:
-
-- 2 393 139 rows in each table: 556 759 nodes, 1 829 301 ways and 7 079 relations. The ids are the same.
-- All rows have the same tags.
-- 2 393 125 rows (99.9994 %) have an equal geometry (`ST_Equals`). The other 14 rows have the same area to 8e-8 of it:
-  - 12 rows have a point where two edges cross. i_overlay and GEOS calculate this point to a different last digit.
-  - 2 ways are rings that touch themselves. GEOS gives a GEOMETRYCOLLECTION of the polygon and the lines that enclose no area;
-    duckOSM gives the polygon.
-- 6 333 of the equal geometries have another start point or direction of a ring (the same shape, other WKB).
-- The sums of a hash over all rows are equal in QuackOSM's Parquet file, duckOSM's Parquet file and duckOSM's `.duckdb`
-  table: `sum(hash(feature_id))` and `sum(hash(feature_id, tags))`.
-- The `.duckdb` table of duckOSM has the rows in the order of its Parquet file.
-
-On Monaco (`tests/data/monaco.osm.pbf`) all 9 586 rows are equal. `duckosm-core/tests/quack_monaco.rs` checks the rows of each
-kind, the rows of each geometry type and the area against the numbers of QuackOSM.
+The tables of Kentucky (all cases of both tools) and of France (unsorted GeoParquet), the row checks and the results that
+are not in favor of duckOSM are on the page of the manual, `docs/concepts/quackosm.md`. The scripts that measured them ran
+on the Mac mini: `/usr/bin/time -l` for the time, the CPU time and the macOS footprint, a sampler of the RSS of the
+process tree and of the free disk every 2 s for the large runs, and `stat` for the file sizes.
 
 ## What QuackOSM has and duckOSM does not have
 

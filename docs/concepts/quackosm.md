@@ -17,7 +17,7 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
 | `--name NAME` | the files are `DIR/NAME_quack.parquet` and `DIR/NAME_quack.duckdb` | `area` |
 | `-f, --format LIST` | `geoparquet`, `duckdb` (the table `main.quackosm`), or both in one pass | both |
 | `--no-sort` | keep the rows in the order in which they are made (QuackOSM `sort_result=False`) | sorted |
-| `--threads N` | the threads of the program and of DuckDB (QuackOSM `cpu_limit`) | all the cores |
+| `--threads N` | all the threads of the program and of DuckDB (QuackOSM `cpu_limit`) | all the cores |
 
 The input must be sorted by type and id, as the files of Geofabrik are. To make the table of an area, cut the region file
 first with `duckosm-rust cut`.
@@ -57,21 +57,27 @@ cargo run --release --manifest-path rust/Cargo.toml -p duckosm-duckdb --example 
 It shows the rows of each kind, the ids that are in one table only, the rows with other tags, and the rows with another
 geometry (`ST_Equals` is false), with examples.
 
+For a large area, `quack_diff --large a.parquet b.parquet` keeps only a fingerprint of each row on disk (the id, a hash of
+the tags, a hash of the normalized geometry, `ST_Normalize`) and reads again only the rows with another geometry, for
+`ST_Equals`. Its memory is DuckDB's limit of 6 GB.
+
 ## The result on Kentucky
 
 The input is `kentucky-area.osm.pbf` (141 MB). The computer is a Mac mini with 12 cores and 16 GB. QuackOSM is 0.20.0 with
-DuckDB 2.0.0; duckOSM writes with DuckDB 1.5.6. Each case ran 3 times. The memory is the peak of the process and all its
-child processes. A file size is in bytes (MB = 10^6 bytes).
+DuckDB 2.0.0; duckOSM writes with DuckDB 1.5.6. Each case ran 3 times. The time and the CPU time are from `/usr/bin/time`.
+The memory is the peak RSS: of the process and all its child processes for QuackOSM (it starts a worker process), of the
+process for duckOSM. A file size is in bytes (MB = 10^6 bytes).
 
 | Case | QuackOSM | duckOSM |
 |---|---|---|
-| GeoParquet, sorted (the default) | 13.7 s, CPU 77 s, 5.9 GB, 311.5 MB | 3.4 s, CPU 13 s, 2.1 GB, 308.4 MB |
-| GeoParquet, not sorted | 13.0 to 13.5 s, CPU 71.5 s, 5.8 GB, 349.3 MB | 3.0 s, CPU 11.6 s, 1.1 GB, 320.1 MB |
-| `.duckdb`, sorted (the default) | 14.8 to 15.3 s, CPU 81 to 85 s, 5.8 GB, 670 MB | 4.2 s, CPU 13.5 s, 2.8 GB, 779 MB |
-| `.duckdb`, not sorted | 14.2 to 14.4 s, 5.8 GB, 702 to 739 MB | 3.4 s, 1.8 GB, 704 to 709 MB |
-| GeoParquet, sorted, 1 thread | 41.7 s | 8.3 s |
-| GeoParquet, sorted, 4 threads | 18.2 s | 4.0 s |
+| GeoParquet, sorted (the default) | 13.7 s, CPU 77 s, 5.9 GB, 311.5 MB | 3.9 s, CPU 13.8 s, 1.7 GB, 308.4 MB |
+| GeoParquet, not sorted | 13.0 to 13.5 s, CPU 71.5 s, 5.8 GB, 349.3 MB | 3.6 to 4.1 s, CPU 12.6 s, 1.0 GB, 320.6 MB |
+| `.duckdb`, sorted (the default) | 14.8 to 15.3 s, CPU 81 to 85 s, 5.8 GB, 670 MB | 4.8 to 5.2 s, CPU 14.5 s, 2.4 GB, 779 MB |
+| `.duckdb`, not sorted | 14.2 to 14.4 s, 5.8 GB, 702 to 739 MB | 3.9 to 4.4 s, CPU 13.2 s, 1.7 GB, 709 to 710 MB |
 | In the browser (Chromium, 12 threads) | not possible | 12.5 s sorted, 7.1 s not sorted |
+
+The browser row is the page of duckOSM Studio, which uses the duckOSM of PR 157 (the rows in memory, before the design
+for large areas).
 
 The rows are the same:
 
@@ -85,10 +91,39 @@ The rows are the same:
 
 On Monaco, all 9 586 rows are equal.
 
-Two results are not in favor of duckOSM:
+## The result on France
 
-- The sorted `.duckdb` file is larger: 779 MB against 670 MB. DuckDB 1.5.6 stores the geometry with no compression, and
-  DuckDB 2.0 compresses it. The same data loaded from duckOSM's Parquet file into DuckDB 1.5.6 is also 779 MB.
+The input is the Geofabrik file `france-latest.osm.pbf` (5.1 GB). The computer and the versions are the ones above. The
+case is the GeoParquet output, not sorted: the first step of every pipeline of QuackOSM (its sort and its `.duckdb`
+output come after it). One run of each tool, with nothing else on the computer. Every 2 s, a script took the RSS of the
+process tree and the free disk; the peak disk use is the free disk at the start minus the lowest free disk, so it counts
+the temporary files and the output.
+
+| France, GeoParquet, not sorted | QuackOSM | duckOSM |
+|---|---|---|
+| Time | 569.5 s | 129.0 s |
+| CPU time | 3 379 s | 356 s |
+| Peak memory (RSS) | 9.8 GB | 3.8 GB |
+| Peak memory footprint of macOS (main process) | 14.6 GB | 3.5 GB |
+| Peak disk use | 39.5 GB | 23.2 GB |
+| Output | 11.62 GB | 10.29 GB |
+
+The rows, compared with `quack_diff --large` (2 x 99 million rows in 72 s):
+
+- Each table has 99 412 535 rows: 25 925 027 nodes, 73 201 509 ways and 285 999 relations, with the same ids.
+- All rows have the same tags.
+- 99 412 366 rows (99.99983 %) have an equal geometry. The other 169 rows (165 relations and 3 ways) have the same area
+  to 1.6e-7 of it: points where two edges cross differ in their last digits, and one GEOMETRYCOLLECTION of QuackOSM.
+
+QuackOSM with its sort took 1 066 s and 9.1 GB on France, in a run with less free disk. The sorted output of duckOSM keeps
+its rows in memory, so duckOSM's sorted France case is not measured yet.
+
+## The results that are not in favor of duckOSM
+
+- The `.duckdb` files are larger: on Kentucky 779 MB against 670 MB sorted. DuckDB 1.5.6 stores the geometry with no
+  compression, and DuckDB 2.0 compresses it. The same data loaded from duckOSM's Parquet file into DuckDB 1.5.6 is also
+  779 MB.
+- The sorted output keeps all rows in memory until the sort, so its memory grows with the area.
 - In the browser, Kentucky uses 3.6 to 3.8 GiB of WebAssembly memory (the limit is 4 GiB), because the GeoParquet file
   stays in memory until the download.
 
@@ -98,13 +133,16 @@ QuackOSM runs its steps as DuckDB queries that write Parquet files between the s
 DuckDB's `ST_READOSM`. Each step reads the files of the step before it. For the `.duckdb` output, it writes the whole
 Parquet file first and then loads it.
 
-duckOSM makes the rows in one pass over the file:
+duckOSM reads the file twice and keeps each table in temporary files, not in memory, so its memory does not grow with the
+area:
 
-1. Its own PBF decoder reads the blocks in parallel. A node keeps only its rounded point, and a node with tags becomes a
-   row at once.
-2. A way becomes a row as soon as it is read, because its nodes came before it in the file.
-3. The relations come at the end, in parallel.
-4. The rows go to the writer while the file is read. For the `.duckdb` output, a table function in Rust gives the rows to
+1. Its own PBF decoder reads the blocks in parallel. The ways and the relations go to temporary files; the nodes of each
+   way go into about 100 buckets by node id.
+2. On the second read, the nodes come in the order of their ids. The buckets come in the same order, each sorted in
+   memory on all threads, so each node gives its point to the ways that need it. A node with tags becomes a row at once.
+3. The points, in buckets by way and sorted in memory, make the ways. A way becomes a row at once.
+4. The relations come from a join of their member ways on disk, and they are made on all threads, one at a time.
+5. The rows go to the writer while the file is read. For the `.duckdb` output, a table function in Rust gives the rows to
    DuckDB's insert, with no Parquet file between.
 
 The polygon operations (the ring check, the repair of an invalid ring, the union and the difference) use the pure-Rust
