@@ -115,12 +115,30 @@ The rows, compared with `quack_diff --large` (2 x 99 million rows in 72 s):
 - 99 412 366 rows (99.99983 %) have an equal geometry. The other 169 rows (165 relations and 3 ways) have the same area
   to 1.6e-7 of it: points where two edges cross differ in their last digits, and one GEOMETRYCOLLECTION of QuackOSM.
 
+The `.duckdb` output, not sorted, with the same method:
+
+| France, `.duckdb`, not sorted | QuackOSM | duckOSM |
+|---|---|---|
+| Time | 678.1 s | 143.8 s |
+| CPU time | 3 748 s | 370 s |
+| Peak memory (RSS) | 7.7 GB | 4.6 GB |
+| Peak memory footprint of macOS (main process) | 13.9 GB | 15.9 GB |
+| Peak disk use | 43.6 GB | 31.7 GB |
+| Output | 19.7 GB | 22.3 GB |
+
+Both files have the same 99 412 535 rows of each kind. QuackOSM needed a DuckDB memory limit to finish on this computer
+(`duckdb_conn_kwargs={"config_kwargs": {"memory_limit": "8GB"}}`). With its defaults, two runs failed: one at 592 s,
+when DuckDB could not read the Parquet file of the step before (`TProtocolException: Invalid data`), and one at 888 s,
+when macOS stopped the process. The footprint of duckOSM is larger because the DuckDB buffer pool keeps the table pages
+until the end; its RSS is lower. The file of duckOSM is larger because DuckDB 1.5.6 does not compress the geometry
+(DuckDB 2.0 compresses 46 million of the 99 million geometries in QuackOSM's file).
+
 QuackOSM with its sort took 1 066 s and 9.1 GB on France, in a run with less free disk. The sorted output of duckOSM keeps
 its rows in memory, so duckOSM's sorted France case is not measured yet.
 
 ## The results that are not in favor of duckOSM
 
-- The `.duckdb` files are larger: on Kentucky 779 MB against 670 MB sorted. DuckDB 1.5.6 stores the geometry with no
+- The `.duckdb` files are larger: on Kentucky 779 MB against 670 MB sorted, on France 22.3 GB against 19.7 GB. DuckDB 1.5.6 stores the geometry with no
   compression, and DuckDB 2.0 compresses it. The same data loaded from duckOSM's Parquet file into DuckDB 1.5.6 is also
   779 MB.
 - The sorted output keeps all rows in memory until the sort, so its memory grows with the area.
