@@ -875,6 +875,11 @@ pub fn run<W: Write + Send>(
     let mut area_read = None;
     // with an area file and raw.*: the tags of each way as the file has them (a hash), to find the ways that the build changes
     let mut read_tags: Option<Vec<(i64, u64)>> = None;
+    // the build of one tile: its boundary (the area in the tile, and its home nodes), for its own rows of global_junctions
+    let tile_area: Option<&Boundary> = match &input {
+        Input::Area(_, b) if p.tile.is_some() => Some(*b),
+        _ => None,
+    };
     let (mut ways, mut coords, relations) = match input {
         Input::Path(path) => read_pbf(
             || pbf::read_ways(path),
@@ -1009,7 +1014,8 @@ pub fn run<W: Write + Send>(
     let junctions = if opts.global_junctions {
         let mut j = duckosm_core::network::global_junctions(&ways);
         if let Some(path) = &p.outside_junctions {
-            j.extend(duckosm_core::tilecut::read_junctions(path)?);
+            use duckosm_core::tilecut::{read_junctions, JUNCTION, ROAD};
+            j.extend(read_junctions(path)?.into_iter().filter(|r| r.1 & JUNCTION != 0).map(|r| (r.0, r.1 & ROAD != 0)));
         }
         j
     } else {
@@ -1019,6 +1025,27 @@ pub fn run<W: Write + Send>(
         Default::default()
     };
     log.step("global junctions");
+    // the build of one tile writes only its own junctions: a node inside the area of the tile; a node outside the area goes to the
+    // border file (option A of docs/design/build_by_tiles.md)
+    let tile_junctions = match (tile_area, p.tile) {
+        (Some(b), Some(t)) if opts.global_junctions => {
+            let (mut mine, mut border) = (duckosm_core::util::FxHashMap::default(), Vec::new());
+            for (&n, &road) in &junctions {
+                let Some(pt) = coords.get(&n) else { continue };
+                if !b.in_area(pt.0, pt.1) {
+                    border.push((n, road));
+                } else if duckosm_core::tiles::Tile::of(t.z, pt.0, pt.1) == t {
+                    mine.insert(n, road);
+                }
+            }
+            border.sort_unstable();
+            if !border.is_empty() {
+                duckosm_parquet::write_global_junctions_to(file("global_junctions_main.border.parquet")?, &border)?;
+            }
+            Some(mine)
+        }
+        _ => None,
+    };
     // the coordinates go to a temporary file, sorted by id: the network reads them there (a join on disk), and the area tables
     // need only their box. The coordinates of all nodes of the ways stayed in memory to the area tables (Kentucky 198 MiB).
     let mut positions = {
@@ -1191,7 +1218,7 @@ pub fn run<W: Write + Send>(
         ways: &ways,
         nodes_box,
         nodes: &mode_nodes,
-        junctions: &junctions,
+        junctions: tile_junctions.as_ref().unwrap_or(&junctions),
         opts,
         built_at,
         timezone_entry: p.timezone_entry.as_deref(),
@@ -1340,7 +1367,24 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         Some(path) => {
             let b = Boundary::parse(&read(path)?)?;
             Some(match p.tile {
-                Some(t) => b.within_tile(t),
+                Some(t) => {
+                    // the tile holds its home nodes too (nodes outside the area, see tilecut): their positions from the tile file
+                    let home: duckosm_core::util::FxHashSet<i64> = match &p.outside_junctions {
+                        Some(j) => duckosm_core::tilecut::read_junctions(j)?
+                            .into_iter()
+                            .filter(|r| r.1 & duckosm_core::tilecut::HOME != 0)
+                            .map(|r| r.0)
+                            .collect(),
+                        None => Default::default(),
+                    };
+                    let pts = if home.is_empty() {
+                        Vec::new()
+                    } else {
+                        let f = std::fs::File::open(pbf_path).map_err(|e| format!("{}: {e}", pbf_path.display()))?;
+                        duckosm_core::tilecut::node_positions(std::io::BufReader::new(f), &home)?
+                    };
+                    b.within_tile(t).with_points(pts.into_iter().map(|p| p.1))
+                }
                 None => b,
             })
         }
@@ -1429,6 +1473,11 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
             },
         )?;
         sum.files = files;
+        // the build of one tile: each table keeps only the rows of the tile (the union puts them together)
+        if let (Some(t), Some(b)) = (p.tile, &cut) {
+            union::own_rows(&pq_dir, &p.modes, b, t)?;
+            log.step("own rows of the tile");
+        }
         if let Some(f) = area_file.as_ref().filter(|f| f.starts_with(out) && f.ends_with("cut.osm.pbf")) {
             sum.files.push(("cut.osm.pbf".to_string(), f.clone()));
         }

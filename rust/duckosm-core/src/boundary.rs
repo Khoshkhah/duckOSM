@@ -10,12 +10,16 @@ pub struct Boundary {
     polygons: Vec<Vec<Ring>>,
     /// west, south, east, north
     bbox: (f64, f64, f64, f64),
+    /// The box of the whole area (`bbox` is the box of the part in the tile, with [`Boundary::within_tile`]).
+    area_bbox: (f64, f64, f64, f64),
     /// The edges by latitude band, for [`Boundary::contains`].
     bands: Bands,
     /// `properties.name` of the first Feature, if any.
     pub name: Option<String>,
     /// The build of one tile of a large build: only the part of the area in this tile ([`Boundary::within_tile`]).
     tile: Option<crate::tiles::Tile>,
+    /// The build of one tile: the positions of its home nodes, outside the area ([`Boundary::with_points`]).
+    points: crate::util::FxHashSet<(u64, u64)>,
 }
 
 /// An edge of a ring: the number of its polygon, and its two ends.
@@ -73,9 +77,11 @@ impl Boundary {
         Ok(Boundary {
             polygons,
             bbox,
+            area_bbox: bbox,
             bands,
             name,
             tile: None,
+            points: Default::default(),
         })
     }
 
@@ -89,9 +95,18 @@ impl Boundary {
         self
     }
 
+    /// Points that are inside too: the home nodes of a tile (outside the area; the tile holds them, see `tilecut`).
+    pub fn with_points(mut self, pts: impl IntoIterator<Item = (f64, f64)>) -> Boundary {
+        self.points.extend(pts.into_iter().map(|(x, y)| (x.to_bits(), y.to_bits())));
+        self
+    }
+
     /// Is the point inside? A hole of a polygon is outside (the even-odd rule over all rings of a polygon). A
     /// point on a ring counts as inside, as in osmium's cut: a border often runs through the nodes of a road.
     pub fn contains(&self, lon: f64, lat: f64) -> bool {
+        if !self.points.is_empty() && self.points.contains(&(lon.to_bits(), lat.to_bits())) {
+            return true;
+        }
         let (w, s, e, n) = self.bbox;
         if lon < w || lon > e || lat < s || lat > n {
             return false;
@@ -99,6 +114,19 @@ impl Boundary {
         if self.tile.is_some_and(|t| crate::tiles::Tile::of(t.z, lon, lat) != t) {
             return false;
         }
+        self.in_polygons(lon, lat)
+    }
+
+    /// Is the point inside the whole area (not only the part in the tile, and not the home points)?
+    pub fn in_area(&self, lon: f64, lat: f64) -> bool {
+        let (w, s, e, n) = self.area_bbox;
+        if lon < w || lon > e || lat < s || lat > n {
+            return false;
+        }
+        self.in_polygons(lon, lat)
+    }
+
+    fn in_polygons(&self, lon: f64, lat: f64) -> bool {
         if self.polygons.len() > 64 {
             return self.contains_all(lon, lat);
         }

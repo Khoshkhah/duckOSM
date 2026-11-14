@@ -605,6 +605,8 @@ struct Ways<'a> {
     outside: Vec<(i64, u32)>,
     /// the uses of the nodes by the kept ways that are built highways (node, flags of `JunctionUses::of_way`)
     uses: Vec<(i64, u8)>,
+    /// the nodes outside the area of the kept ways: (node, way, the first tile of the way), for their home tile
+    homes: Vec<(i64, i64, u32)>,
     rels: Vec<Elem>,
     tiles: Vec<u32>,
     spans: [Span; 2],
@@ -640,6 +642,7 @@ impl RawSink for Ways<'_> {
         }
         let tags = crate::model::Tags::from_pairs(way.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         JunctionUses::of_way(&tags, &way.refs, &mut self.uses);
+        self.homes.extend(refs.iter().filter(|r| r.1.is_none()).map(|r| (r.0, id, self.tiles[0])));
         let (last, rest) = self.tiles.split_last().expect("a tile");
         for &t in rest {
             self.kept.push((t, Elem::Way(way.clone())));
@@ -827,16 +830,25 @@ fn take_blocks<R: Read + Seek>(
     Ok(())
 }
 
-/// The start of a junctions file: the name and the version of the format. Then one row for each junction: the node id
-/// (i64, little endian) and 1 for a road junction or 0 (only paths meet there), in the order of the node ids.
-pub const JUNCTIONS_MAGIC: &[u8; 8] = b"DOSMJN01";
+/// The start of a junctions file: the name and the version of the format. Then one row for each node outside the tile that
+/// is a junction in the whole area or that the tile holds: the node id (i64, little endian) and its flags ([`JUNCTION`],
+/// [`ROAD`], [`HOME`]), in the order of the node ids.
+pub const JUNCTIONS_MAGIC: &[u8; 8] = b"DOSMJN02";
+/// The node is a junction in the whole area (`main.global_junctions`).
+pub const JUNCTION: u8 = 1;
+/// The junction is a road junction (`is_road_junction`).
+pub const ROAD: u8 = 2;
+/// The node is outside the area, and this tile is its home tile: the tile has all ways of the node, and holds it.
+pub const HOME: u8 = 4;
 
-/// The junctions of the nodes outside each tile: for each (node, tile) of `outside` (sorted), the junction of the node in
-/// the whole area (from `uses`, the uses of the nodes by all kept ways, sorted by node), to the part "junctions" of the
-/// tile. A tile has only some of the ways of a node outside it, so it can miss a junction there.
+/// The junctions file of each tile: for each (node, tile) of `outside` (sorted), the junction of the node in the whole area
+/// (from `uses`, the uses of the nodes by all kept ways, sorted by node), and whether the tile is the home tile of the node
+/// (`home`, sorted (node, tile)), to the part "junctions" of the tile. A tile has only some of the ways of a node outside
+/// it, so it can miss a junction there.
 fn outside_junctions(
     outside: impl Iterator<Item = io::Result<(i64, i64)>>,
     uses: impl Iterator<Item = io::Result<(i64, i64)>>,
+    home: &[(i64, u32)],
     parts: &mut Parts,
 ) -> Result<(), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
@@ -860,9 +872,17 @@ fn outside_junctions(
             }
             junction = global_junction(&JunctionUses::of(flags.into_iter()));
         }
-        if let Some(road) = junction {
+        let mut flags = match junction {
+            Some(true) => JUNCTION | ROAD,
+            Some(false) => JUNCTION,
+            None => 0,
+        };
+        if home.binary_search(&(n, t as u32)).is_ok() {
+            flags |= HOME;
+        }
+        if flags != 0 {
             let mut row = n.to_le_bytes().to_vec();
-            row.push(road as u8);
+            row.push(flags);
             parts.add(t as u32, "junctions", row)?;
         }
     }
@@ -881,13 +901,42 @@ fn write_junctions(part: &Path, out: &Path) -> Result<(), String> {
     f.flush().map_err(e)
 }
 
-/// Read a junctions file of the tile cut: (node id, is a road junction), as in `main.global_junctions`.
-pub fn read_junctions(path: &Path) -> Result<Vec<(i64, bool)>, String> {
+/// Read a junctions file of the tile cut: (node id, flags [`JUNCTION`], [`ROAD`], [`HOME`]).
+pub fn read_junctions(path: &Path) -> Result<Vec<(i64, u8)>, String> {
     let b = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if b.len() < 8 || &b[..8] != JUNCTIONS_MAGIC || (b.len() - 8) % 9 != 0 {
-        return Err(format!("{}: not a junctions file of the tile cut", path.display()));
+        return Err(format!("{}: not a junctions file of this version of the tile cut", path.display()));
     }
-    Ok(b[8..].chunks(9).map(|r| (i64::from_le_bytes(r[..8].try_into().unwrap()), r[8] != 0)).collect())
+    Ok(b[8..].chunks(9).map(|r| (i64::from_le_bytes(r[..8].try_into().unwrap()), r[8])).collect())
+}
+
+/// The positions of the nodes of `ids` in a PBF file (the home nodes of a tile: the build of the tile holds them).
+pub fn node_positions<R: Read + Send>(r: R, ids: &crate::util::FxHashSet<i64>) -> Result<Vec<(i64, (f64, f64))>, String> {
+    struct Find<'a>(&'a crate::util::FxHashSet<i64>, Vec<(i64, (f64, f64))>);
+    impl RawSink for Find<'_> {
+        fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+            if self.0.contains(&id) {
+                self.1.push((id, (lon, lat)));
+            }
+        }
+        fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+        fn relation<'a>(
+            &mut self,
+            _: i64,
+            _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+            _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+        ) {
+        }
+    }
+    let mut out = Vec::new();
+    let mut r = r;
+    let mut buf = Buffers::default();
+    while let Some(b) = read_block(&mut r)? {
+        let mut s = Find(ids, Vec::new());
+        decode_block(&b, [true, false, false], &mut buf, &mut s)?;
+        out.extend(s.1);
+    }
+    Ok(out)
 }
 
 /// Cut the region file that `open` reads (a new reader for each pass) to the tiles of `tiles` (one zoom) inside `boundary`:
@@ -947,6 +996,8 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let (mut ways, mut multi) = (Book::default(), Vec::new());
     let mut outside = Writer::new(store).map_err(io)?;
     let mut uses = Writer::new(store).map_err(io)?;
+    // the nodes outside the area are few (the border of the area): in memory
+    let mut homes: Vec<(i64, i64, u32)> = Vec::new();
     let rels_path = tmp.join("relations.all");
     let (mut way_blocks, mut rel_blocks) = (Vec::new(), Vec::new());
     let mut rels_bytes = Vec::new();
@@ -962,6 +1013,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
                 multi: Vec::new(),
                 outside: Vec::new(),
                 uses: Vec::new(),
+                homes: Vec::new(),
                 rels: Vec::new(),
                 tiles: Vec::new(),
                 spans: [EMPTY; 2],
@@ -969,9 +1021,9 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
             blobs(s.rels, &mut rels)?;
-            Ok((s.runs, by_tile(s.kept)?, s.multi, (s.outside, s.uses), rels, s.spans))
+            Ok((s.runs, by_tile(s.kept)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
         },
-        |(runs, kept, mut m, (o, u), rels, spans), at| {
+        |(runs, kept, mut m, (o, u, h), rels, spans), at| {
             if spans[0] != EMPTY {
                 way_blocks.push((ways_at + at, spans[0]));
                 ways.append(runs.runs, runs.first.unwrap_or(false));
@@ -989,6 +1041,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
             for (n, f) in u {
                 uses.push(&Pair, &(n, f as i64)).map_err(io)?;
             }
+            homes.extend(h);
             rels_bytes.extend_from_slice(&rels);
             if rels_bytes.len() > WAITING {
                 std::fs::OpenOptions::new()
@@ -1006,6 +1059,22 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     drop(rels_bytes);
     ways.finish();
     tidy(&mut multi);
+    // the home tile of each node outside the area: no tile holds it, so the first tile (in the order of the tiles) of the ways
+    // at the node gets all these ways, and holds the node (its turns, its rows)
+    homes.sort_unstable();
+    let (mut home_ways, mut home_nodes): (Vec<(i64, u32)>, Vec<(i64, u32)>) = (Vec::new(), Vec::new());
+    for run in homes.chunk_by(|a, b| a.0 == b.0) {
+        let home = run.iter().map(|h| h.2).min().expect("a run");
+        home_nodes.push((run[0].0, home));
+        for &(_, w, first) in run {
+            let multi_tiles: Vec<u32> = tiles_in(&multi, w).collect();
+            let in_home = if multi_tiles.is_empty() { first == home } else { multi_tiles.contains(&home) };
+            if !in_home {
+                home_ways.push((w, home));
+            }
+        }
+    }
+    drop(homes);
     crate::util::step(&format!(
         "tile cut 2: the ways ({} runs, {} MB; {} pairs of ways in more tiles)",
         ways.len(),
@@ -1123,6 +1192,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     }
     let _ = std::fs::remove_file(&rels_path);
     drop((direct, chosen, multipolygons));
+    more.extend(home_ways);
     tidy(&mut more);
     if !more.is_empty() {
         // the nodes of these ways: only the blocks with one of them
@@ -1169,7 +1239,8 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let mut r = open()?;
     take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &mut parts, "extra-nodes")?;
     let uses = sort_bytes(uses.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
-    outside_junctions(outside.read(&Pair).map_err(io)?, uses.read(&Pair).map_err(io)?, &mut parts)?;
+    home_nodes.sort_unstable();
+    outside_junctions(outside.read(&Pair).map_err(io)?, uses.read(&Pair).map_err(io)?, &home_nodes, &mut parts)?;
     take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &mut parts, "extra-ways")?;
     parts.flush()?;
     drop(more);

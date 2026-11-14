@@ -192,12 +192,19 @@ struct TilesCli {
     /// The zoom of the tiles (standard z/x/y map tiles; zoom 10 is about 27 km wide in France).
     #[arg(long, default_value_t = 10)]
     zoom: u8,
-    /// The number of tiles that build at the same time.
+    /// The number of tiles that build at the same time. More tiles at a time use more memory.
     #[arg(long, default_value_t = 4)]
     jobs: usize,
+    /// The threads of each tile build (default: the cores divided by --jobs, at least 1).
+    #[arg(long)]
+    tile_threads: Option<usize>,
     /// Keep the tile files and the tables of each tile (in <out>/tiles).
     #[arg(long)]
     keep_tiles: bool,
+    /// Only the cut to the tiles (the command runs the cut as its own process with this option, so the memory of the cut
+    /// goes back to the system before the tile builds).
+    #[arg(long, hide = true)]
+    only_cut: bool,
     /// The options of the build of each tile, after `--` (as for `duckosm-rust FILE`, for example `-- --modes driving --raw`).
     #[arg(last = true)]
     build: Vec<String>,
@@ -219,12 +226,44 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let (_, _, p) = params(&Cli::try_parse_from(&all).map_err(|e| e.to_string())?)?;
     let t0 = std::time::Instant::now();
     let dir = cli.out.join("tiles");
-    let list = duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, &dir)?;
+    if cli.only_cut {
+        duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, &dir)?;
+        return Ok(());
+    }
+    // the cut, as a process of this program: its memory goes back to the system when it ends
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let ok = std::process::Command::new(&exe)
+        .arg("tiles")
+        .arg(&cli.region)
+        .arg("--boundary")
+        .arg(&cli.boundary)
+        .arg("-o")
+        .arg(&cli.out)
+        .args(["--zoom", &cli.zoom.to_string(), "--only-cut"])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !ok {
+        return Err("the cut to the tiles failed".into());
+    }
+    // the tiles with a file
+    let mut list: Vec<duckosm_build::Tile> = Vec::new();
+    for e in std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let name = e.map_err(|e| e.to_string())?.file_name().to_string_lossy().into_owned();
+        if let Some(stem) = name.strip_suffix(".osm.pbf") {
+            let n: Vec<u32> = stem.split('_').filter_map(|x| x.parse().ok()).collect();
+            if let [z, x, y] = n[..] {
+                list.push(duckosm_build::Tile { z: z as u8, x, y });
+            }
+        }
+    }
+    list.sort_by_key(|t| (std::cmp::Reverse(t.y), t.x));
     eprintln!("tiles: cut to {} tiles in {:.1} s", list.len(), t0.elapsed().as_secs_f64());
 
-    // the tile builds: `jobs` threads, each runs one tile build after the other as a process of this program
+    // the tile builds: `jobs` threads, each runs one tile build after the other as a process of this program, with
+    // `threads` threads of its own (the jobs share the cores)
     let t1 = std::time::Instant::now();
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = cli.tile_threads.unwrap_or(cores / cli.jobs.max(1)).max(1).to_string();
     let queue = std::sync::Mutex::new(list.clone());
     let failed = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|sc| {
@@ -246,6 +285,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
                             .arg("-o")
                             .arg(dir.join(&name))
                             .args(&opts)
+                            .env("RAYON_NUM_THREADS", &threads)
                             .stdout(log)
                             .stderr(err)
                             .status()
@@ -254,6 +294,10 @@ fn tiles(args: &[String]) -> Result<(), String> {
                 });
                 if !ok {
                     failed.lock().unwrap().push(name);
+                } else if !cli.keep_tiles {
+                    // the tile file and its junctions are read: they go at once (the disk keeps less at one time)
+                    let _ = std::fs::remove_file(dir.join(format!("{name}.osm.pbf")));
+                    let _ = std::fs::remove_file(dir.join(format!("{name}.junctions")));
                 }
             });
         }
@@ -266,10 +310,9 @@ fn tiles(args: &[String]) -> Result<(), String> {
 
     let t2 = std::time::Instant::now();
     let built: Vec<(duckosm_build::Tile, PathBuf)> = list.iter().map(|t| (*t, dir.join(format!("{}_{}_{}", t.z, t.x, t.y)))).collect();
-    for (m, st) in p.modes.iter().zip(duckosm_build::union::union_all(&built, &text, &p, &cli.out)?) {
-        eprintln!("tiles: {}: {} edges, {} nodes, {} turns", m.name(), st.edges, st.nodes, st.edge_graph);
-        if st.not_equal > 0 {
-            return Err(format!("{}: {} edges differ between two tiles", m.name(), st.not_equal));
+    for (name, rows) in duckosm_build::union::union_all(&built, &text, &p, !cli.keep_tiles, &cli.out)? {
+        if name.starts_with("edges_") || name.starts_with("nodes_") || name.starts_with("edge_graph_") {
+            eprintln!("tiles: {name}: {rows} rows");
         }
     }
     eprintln!("tiles: union in {:.1} s; total {:.1} s", t2.elapsed().as_secs_f64(), t0.elapsed().as_secs_f64());

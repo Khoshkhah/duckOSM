@@ -44,11 +44,12 @@ fn fixed(v: &str) -> &'static str {
     }
 }
 
-/// Read an `edges` (or `private_edges`) file of the build, one edge at a time. Edges with equal tags share one `Attrs`
-/// (`attrs`: the shared values).
+/// Read the edges of an `edges` (or `private_edges`) file of the build whose line passes `want`, one edge at a time. Edges
+/// with equal tags share one `Attrs` (`attrs`: the shared values).
 pub fn read_edges(
     path: &Path,
     attrs: &mut FxHashSet<Arc<Attrs>>,
+    want: impl Fn(&[Pt]) -> bool,
     mut f: impl FnMut(Edge) -> Result<(), String>,
 ) -> Result<(), String> {
     for b in batches(path)? {
@@ -68,6 +69,10 @@ pub fn read_edges(
         let geom = b.column_by_name("geometry").unwrap().as_binary::<i32>();
         let opt_f32 = |c: &Option<arrow_array::Float32Array>, i: usize| c.as_ref().and_then(|c| c.is_valid(i).then(|| c.value(i)));
         for i in 0..b.num_rows() {
+            let geometry = line(geom.value(i));
+            if !want(&geometry) {
+                continue;
+            }
             let a = Attrs {
                 highway: text(&b, "highway", i).unwrap_or_default(),
                 name: text(&b, "name", i),
@@ -104,7 +109,7 @@ pub fn read_edges(
                 lanes: lanes.is_valid(i).then(|| lanes.value(i)),
                 access: text(&b, "access", i).map(Arc::from),
                 refs: refs.value(i).as_primitive::<Int64Type>().values().to_vec(),
-                geometry: line(geom.value(i)),
+                geometry,
                 is_reverse: is_reverse.value(i),
                 length_m: length.value(i),
                 dismount: dismount.as_ref().and_then(|c| c.is_valid(i).then(|| c.value(i))),
@@ -220,4 +225,24 @@ pub fn read_nodes(path: &Path) -> Result<Vec<duckosm_core::model::Node>, String>
         }
     }
     Ok(out)
+}
+
+/// The id and the two ends of the line of each edge of an `edges` file (only these columns are read).
+pub fn read_edge_ends(path: &Path, mut f: impl FnMut(i64, Pt, Pt)) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
+    let cols: Vec<usize> = ["edge_id", "geometry"].iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
+    let mask = parquet::arrow::ProjectionMask::roots(b.parquet_schema(), cols);
+    for batch in b.with_projection(mask).build().map_err(|e| e.to_string())? {
+        let batch = batch.map_err(|e| e.to_string())?;
+        let id = batch.column_by_name("edge_id").unwrap().as_primitive::<Int64Type>();
+        let g = batch.column_by_name("geometry").unwrap().as_binary::<i32>();
+        for i in 0..batch.num_rows() {
+            let w = g.value(i);
+            let n = u32::from_le_bytes(w[5..9].try_into().unwrap()) as usize;
+            let pt = |k: usize| (f64::from_le_bytes(w[9 + 16 * k..17 + 16 * k].try_into().unwrap()), f64::from_le_bytes(w[17 + 16 * k..25 + 16 * k].try_into().unwrap()));
+            f(id.value(i), pt(0), pt(n - 1));
+        }
+    }
+    Ok(())
 }
