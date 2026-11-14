@@ -14,6 +14,8 @@ pub struct Boundary {
     bands: Bands,
     /// `properties.name` of the first Feature, if any.
     pub name: Option<String>,
+    /// The build of one tile of a large build: only the part of the area in this tile ([`Boundary::within_tile`]).
+    tile: Option<crate::tiles::Tile>,
 }
 
 /// An edge of a ring: the number of its polygon, and its two ends.
@@ -73,7 +75,18 @@ impl Boundary {
             bbox,
             bands,
             name,
+            tile: None,
         })
+    }
+
+    /// The part of the area in tile `t`: a point is inside when it is inside the area and its tile is `t` (`Tile::of`, the
+    /// rule of the tile cut). The build of a tile takes the tile file with this boundary.
+    pub fn within_tile(mut self, t: crate::tiles::Tile) -> Boundary {
+        let (w, s, e, n) = t.bounds();
+        let b = self.bbox;
+        self.bbox = (b.0.max(w), b.1.max(s), b.2.min(e), b.3.min(n));
+        self.tile = Some(t);
+        self
     }
 
     /// Is the point inside? A hole of a polygon is outside (the even-odd rule over all rings of a polygon). A
@@ -81,6 +94,9 @@ impl Boundary {
     pub fn contains(&self, lon: f64, lat: f64) -> bool {
         let (w, s, e, n) = self.bbox;
         if lon < w || lon > e || lat < s || lat > n {
+            return false;
+        }
+        if self.tile.is_some_and(|t| crate::tiles::Tile::of(t.z, lon, lat) != t) {
             return false;
         }
         if self.polygons.len() > 64 {

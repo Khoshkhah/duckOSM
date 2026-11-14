@@ -84,6 +84,9 @@ struct Cli {
     /// whole area at the nodes outside the tile.
     #[arg(long, value_name = "FILE", conflicts_with = "config")]
     outside_junctions: Option<PathBuf>,
+    /// The build of one tile of a large build (duckosm-rust tiles): only the part of the boundary in this map tile.
+    #[arg(long, value_name = "Z/X/Y", requires = "boundary")]
+    tile: Option<String>,
     /// With --boundary: also write duckOSM's raw.* of the area (raw_nodes.parquet, raw_ways.parquet,
     /// raw_relations.parquet, as osmium's smart cut), the input of the base-map layers (docs/features.md).
     #[arg(long, requires = "boundary")]
@@ -167,6 +170,112 @@ fn cut(args: &[String]) -> Result<(), String> {
     );
     #[cfg(feature = "heap-probe")]
     heap::report("cut");
+    Ok(())
+}
+
+/// duckosm-rust tiles: build a large area by tiles. One read of the region file cuts it to the standard map tiles of the
+/// boundary (one file for each tile, with the junctions of the nodes outside the tile); each tile builds alone, `--jobs`
+/// tiles at a time, each in its own process; the union joins the tables of the tiles into the tables of the area.
+/// Not yet in a build by tiles: the steps that need the whole area (the bus routes, the drawing levels, the filter of the
+/// largest part), and the .duckdb output.
+#[derive(Parser)]
+#[command(name = "duckosm-rust tiles", version)]
+struct TilesCli {
+    /// The region file (.osm.pbf, sorted by type and id, as the files of Geofabrik).
+    region: PathBuf,
+    /// The boundary of the area (GeoJSON).
+    #[arg(long)]
+    boundary: PathBuf,
+    /// The output folder: the GeoParquet files of the area.
+    #[arg(short, long)]
+    out: PathBuf,
+    /// The zoom of the tiles (standard z/x/y map tiles; zoom 10 is about 27 km wide in France).
+    #[arg(long, default_value_t = 10)]
+    zoom: u8,
+    /// The number of tiles that build at the same time.
+    #[arg(long, default_value_t = 4)]
+    jobs: usize,
+    /// Keep the tile files and the tables of each tile (in <out>/tiles).
+    #[arg(long)]
+    keep_tiles: bool,
+    /// The options of the build of each tile, after `--` (as for `duckosm-rust FILE`, for example `-- --modes driving --raw`).
+    #[arg(last = true)]
+    build: Vec<String>,
+}
+
+fn tiles(args: &[String]) -> Result<(), String> {
+    let cli = TilesCli::parse_from(args);
+    let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
+    // the options of the tiles, as the build reads them (the union needs the modes and the options)
+    // the global steps do not run in a tile: the bus routes, the drawing levels and the largest part need the whole area
+    let global = ["--no-bus-routes", "--no-component-filter"];
+    let mut opts: Vec<String> = cli.build.iter().filter(|a| !global.contains(&a.as_str())).cloned().collect();
+    if let Some(i) = opts.iter().position(|a| a == "--levels") {
+        opts.drain(i..(i + 2).min(opts.len()));
+    }
+    let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
+    all.push(cli.boundary.to_string_lossy().into_owned());
+    all.extend(opts.iter().cloned());
+    let (_, _, p) = params(&Cli::try_parse_from(&all).map_err(|e| e.to_string())?)?;
+    let t0 = std::time::Instant::now();
+    let dir = cli.out.join("tiles");
+    let list = duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, &dir)?;
+    eprintln!("tiles: cut to {} tiles in {:.1} s", list.len(), t0.elapsed().as_secs_f64());
+
+    // the tile builds: `jobs` threads, each runs one tile build after the other as a process of this program
+    let t1 = std::time::Instant::now();
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let queue = std::sync::Mutex::new(list.clone());
+    let failed = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|sc| {
+        for _ in 0..cli.jobs.max(1) {
+            sc.spawn(|| loop {
+                let Some(t) = queue.lock().unwrap().pop() else { break };
+                let name = format!("{}_{}_{}", t.z, t.x, t.y);
+                let log = std::fs::File::create(dir.join(format!("{name}.log")));
+                let ok = log.is_ok_and(|log| {
+                    let err = log.try_clone();
+                    err.is_ok_and(|err| {
+                        std::process::Command::new(&exe)
+                            .arg(dir.join(format!("{name}.osm.pbf")))
+                            .args(["--boundary".as_ref(), cli.boundary.as_os_str()])
+                            .args(["--tile", &t.name(), "--format", "geoparquet", "--levels", "none"])
+                            .args(global)
+                            .arg("--outside-junctions")
+                            .arg(dir.join(format!("{name}.junctions")))
+                            .arg("-o")
+                            .arg(dir.join(&name))
+                            .args(&opts)
+                            .stdout(log)
+                            .stderr(err)
+                            .status()
+                            .is_ok_and(|s| s.success())
+                    })
+                });
+                if !ok {
+                    failed.lock().unwrap().push(name);
+                }
+            });
+        }
+    });
+    let failed = failed.into_inner().unwrap();
+    if !failed.is_empty() {
+        return Err(format!("the build of {} tiles failed (see {}/<tile>.log): {}", failed.len(), dir.display(), failed.join(", ")));
+    }
+    eprintln!("tiles: {} tile builds in {:.1} s", list.len(), t1.elapsed().as_secs_f64());
+
+    let t2 = std::time::Instant::now();
+    let built: Vec<(duckosm_build::Tile, PathBuf)> = list.iter().map(|t| (*t, dir.join(format!("{}_{}_{}", t.z, t.x, t.y)))).collect();
+    for (m, st) in p.modes.iter().zip(duckosm_build::union::union_all(&built, &text, &p, &cli.out)?) {
+        eprintln!("tiles: {}: {} edges, {} nodes, {} turns", m.name(), st.edges, st.nodes, st.edge_graph);
+        if st.not_equal > 0 {
+            return Err(format!("{}: {} edges differ between two tiles", m.name(), st.not_equal));
+        }
+    }
+    eprintln!("tiles: union in {:.1} s; total {:.1} s", t2.elapsed().as_secs_f64(), t0.elapsed().as_secs_f64());
+    if !cli.keep_tiles {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
     Ok(())
 }
 
@@ -319,6 +428,7 @@ fn main() {
         Some("edit") => edit(&args[1..]),
         Some("studio") => studio(&args[1..]),
         Some("cut") => cut(&args[1..]),
+        Some("tiles") => tiles(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {
@@ -329,6 +439,32 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
+    let (pbf, out, p) = params(&cli)?;
+    let sum = build(&pbf, &out, &p)?;
+    // the build's record in the database, for duckosm-rust edit (Build again): the config file and the folder of its relative paths
+    #[cfg(feature = "duckdb")]
+    if let (Some(cfg), true) = (&cli.config, p.duckdb) {
+        let text = std::fs::read_to_string(cfg).map_err(|e| format!("{}: {e}", cfg.display()))?;
+        let dir = std::env::current_dir().map_err(|e| e.to_string())?;
+        duckosm_edit::native::record(&out.join(format!("{}.duckdb", p.name)), &text, &dir)?;
+    }
+    for l in sum.lines() {
+        eprintln!("{l}");
+    }
+    if cli.timing {
+        for (what, secs) in &sum.steps {
+            eprintln!("  {what}: {secs:.3} s");
+        }
+        eprintln!(
+            "  total: {:.3} s",
+            sum.steps.iter().map(|s| s.1).sum::<f64>()
+        );
+    }
+    Ok(())
+}
+
+/// The input file, the output folder and the parameters of a build from the command line.
+fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
     let (pbf, out, mut p) = if let Some(cfg) = &cli.config {
         let c = config::read(cfg, cli.pbf_is_cut, !cli.allow_skipped)?;
         for s in &c.skipped {
@@ -396,25 +532,12 @@ fn run() -> Result<(), String> {
     if let Some(f) = &cli.format {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;
     }
-    let sum = build(&pbf, &out, &p)?;
-    // the build's record in the database, for duckosm-rust edit (Build again): the config file and the folder of its relative paths
-    #[cfg(feature = "duckdb")]
-    if let (Some(cfg), true) = (&cli.config, p.duckdb) {
-        let text = std::fs::read_to_string(cfg).map_err(|e| format!("{}: {e}", cfg.display()))?;
-        let dir = std::env::current_dir().map_err(|e| e.to_string())?;
-        duckosm_edit::native::record(&out.join(format!("{}.duckdb", p.name)), &text, &dir)?;
+    if let Some(t) = &cli.tile {
+        let n: Vec<u32> = t.split('/').map(|x| x.parse().map_err(|_| format!("--tile {t}: not z/x/y"))).collect::<Result<_, _>>()?;
+        let [z, x, y] = n[..] else {
+            return Err(format!("--tile {t}: not z/x/y"));
+        };
+        p.tile = Some(duckosm_build::Tile { z: z as u8, x, y });
     }
-    for l in sum.lines() {
-        eprintln!("{l}");
-    }
-    if cli.timing {
-        for (what, secs) in &sum.steps {
-            eprintln!("  {what}: {secs:.3} s");
-        }
-        eprintln!(
-            "  total: {:.3} s",
-            sum.steps.iter().map(|s| s.1).sum::<f64>()
-        );
-    }
-    Ok(())
+    Ok((pbf, out, p))
 }

@@ -29,6 +29,7 @@ pub use duckosm_core::filter::Mode as NetworkMode;
 pub use duckosm_core::network::Options as NetworkOptions;
 /// The hook of the sub-steps of the network step (the memory probe).
 pub use duckosm_core::util::STEP_HOOK;
+pub use duckosm_core::tiles::Tile;
 pub use levels::Method as LevelsMethod;
 
 /// What to build and write.
@@ -57,6 +58,8 @@ pub struct Params {
     /// The build of one tile of a large build: the junctions file of the tile cut (`tilecut`), the junctions of the whole
     /// area at the nodes outside the tile. The tile does not have all ways of those nodes, so it can miss these junctions.
     pub outside_junctions: Option<PathBuf>,
+    /// The build of one tile of a large build: only the part of the boundary in this tile (`Boundary::within_tile`).
+    pub tile: Option<duckosm_core::tiles::Tile>,
     /// Also write duckOSM's `raw.*` of the area (`raw_nodes.parquet`, ...), the input of the base-map layers
     /// (docs/features.md). Needs a boundary.
     pub raw: bool,
@@ -120,6 +123,7 @@ impl Default for Params {
             osm_fixes: None,
             boundary: None,
             outside_junctions: None,
+            tile: None,
             raw: false,
             cut_pbf: false,
             cut_osm: false,
@@ -1333,7 +1337,13 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
     };
     let cut = match &p.boundary {
-        Some(path) => Some(Boundary::parse(&read(path)?)?),
+        Some(path) => {
+            let b = Boundary::parse(&read(path)?)?;
+            Some(match p.tile {
+                Some(t) => b.within_tile(t),
+                None => b,
+            })
+        }
         None => None,
     };
     if p.bus_routes && p.modes.contains(&Mode::Driving) && cut.is_none() {
