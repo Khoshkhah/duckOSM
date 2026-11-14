@@ -19,6 +19,8 @@ pub mod osmjson;
 pub mod pbf;
 #[cfg(feature = "pbf")]
 pub mod pbfraw;
+#[cfg(feature = "pbf")]
+pub mod quack;
 pub mod raw;
 pub mod sidewalks;
 pub mod speeds;

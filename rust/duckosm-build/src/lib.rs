@@ -1481,6 +1481,50 @@ pub fn run<W: Write + Send>(
     Ok(sum)
 }
 
+/// duckosm-rust quack: the features table of QuackOSM (feature_id, tags, geometry; docs/rust/quack.md) of the whole PBF file,
+/// made in Rust in one pass (`duckosm_core::quack`): into the table `main.quackosm` of the `.duckdb` file `duckdb`
+/// (directly, no Parquet file between), into the GeoParquet file `parquet`, or into both in the same pass.
+pub fn quack(
+    pbf: &Path,
+    parquet: Option<&Path>,
+    duckdb: Option<&Path>,
+    threads: usize,
+    sort: bool,
+) -> Result<duckosm_core::quack::Counts, String> {
+    if let Some(db) = duckdb {
+        #[cfg(feature = "duckdb")]
+        return duckosm_duckdb::write_quack(db, pbf, threads, parquet, sort);
+        #[cfg(not(feature = "duckdb"))]
+        return Err(format!("{}: the .duckdb output needs the cargo feature \"duckdb\"", db.display()));
+    }
+    let parquet = parquet.ok_or("quack: no output (use geoparquet, duckdb or both)")?;
+    let f = std::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
+    let out = std::fs::File::create(parquet).map_err(|e| format!("{}: {e}", parquet.display()))?;
+    quack_to(std::io::BufReader::new(f), std::io::BufWriter::new(out), threads, sort)
+}
+
+/// [`quack`] from any reader of a `.osm.pbf` file to any writer of the GeoParquet file (the browser page reads a `File`
+/// and writes into memory or OPFS). With `sort` (QuackOSM's default), the rows wait in memory (Arrow batches) for
+/// `duckosm_core::quack::str_order`; without, they go to the file while the PBF file is read.
+pub fn quack_to<R: Read + Send, W: Write + Send>(
+    pbf: R,
+    out: W,
+    threads: usize,
+    sort: bool,
+) -> Result<duckosm_core::quack::Counts, String> {
+    let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
+    let mut rows = duckosm_parquet::quack::Rows::new(sort);
+    let n = duckosm_core::quack::features(pbf, threads, |part| match rows.push(part)? {
+        Some(b) => w.write(&b),
+        None => Ok(()),
+    })?;
+    for b in rows.sorted() {
+        w.write(&b?)?;
+    }
+    w.close()?;
+    Ok(n)
+}
+
 /// Build from the PBF file `pbf_path` (cut to `p.boundary` when there is one) and write the files into `out`.
 pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String> {
     if p.duckdb && !cfg!(feature = "duckdb") {

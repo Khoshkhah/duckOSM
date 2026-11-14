@@ -2,7 +2,9 @@
 //! with DuckDB itself, so the types are the types of duckOSM (BIGINT, FLOAT, BIGINT[], GEOMETRY).
 
 pub mod input;
+pub mod quack;
 pub mod read_osm;
+pub use quack::write_quack;
 pub use input::RawInput;
 
 use duckdb::Connection;

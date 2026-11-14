@@ -19,6 +19,8 @@ heap-probe = []
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
 clap = { version = "4", features = ["derive"] }
 duckosm-edit = { path = "../duckosm-edit", optional = true }   # duckosm-rust edit: the page that edits the fixes (needs DuckDB)
+# duckosm-rust quack --threads: the size of the thread pool (the rayon of duckosm-core)
+rayon = "1.12"
 
 # duckosm-rust tiles: the peak memory of each tile process (wait4)
 [target.'cfg(unix)'.dependencies]

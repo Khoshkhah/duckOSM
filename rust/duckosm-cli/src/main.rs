@@ -173,6 +173,63 @@ fn cut(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// duckosm-rust quack: the features table of QuackOSM (feature_id, tags, geometry) from an .osm.pbf file, with the rows of
+/// QuackOSM 0.20.0 with its default options (docs/rust/quack.md). To make the table of an area, cut the region file first
+/// (duckosm-rust cut).
+#[derive(Parser)]
+#[command(name = "duckosm-rust quack", version)]
+struct QuackCli {
+    /// The input .osm.pbf file.
+    pbf: PathBuf,
+    /// The output folder.
+    #[arg(short, long, default_value = ".")]
+    out: PathBuf,
+    /// The name of the area: the files are <out>/<name>_quack.duckdb and <out>/<name>_quack.parquet.
+    #[arg(long, default_value = "area")]
+    name: String,
+    /// Output formats, comma separated: geoparquet, duckdb (the table main.quackosm).
+    #[arg(short, long, default_value = "duckdb,geoparquet")]
+    format: String,
+    /// The threads (default: all the cores), as QuackOSM's cpu_limit: the pool of the Rust threads, the blocks of the file
+    /// that are decoded at the same time, and the threads of DuckDB.
+    #[arg(long)]
+    threads: Option<usize>,
+    /// Do not sort the rows (QuackOSM sort_result=False). The default sorts them as QuackOSM does (Sort-Tile-Recursive
+    /// on the centers of the geometries), so each row group holds a small area; the rows then wait in memory.
+    #[arg(long)]
+    no_sort: bool,
+}
+
+fn quack(args: &[String]) -> Result<(), String> {
+    let cli = QuackCli::parse_from(args);
+    let (mut duckdb, mut geoparquet) = (false, false);
+    for f in cli.format.split(',') {
+        match f.trim() {
+            "duckdb" => duckdb = true,
+            "geoparquet" => geoparquet = true,
+            other => return Err(format!("unknown format {other}: use geoparquet, duckdb or both")),
+        }
+    }
+    std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
+    let parquet = geoparquet.then(|| cli.out.join(format!("{}_quack.parquet", cli.name)));
+    let db = duckdb.then(|| cli.out.join(format!("{}_quack.duckdb", cli.name)));
+    let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
+    let t = std::time::Instant::now();
+    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort)?;
+    eprintln!(
+        "quack: {} nodes, {} ways, {} relations in {:.2} s",
+        n.nodes,
+        n.ways,
+        n.relations,
+        t.elapsed().as_secs_f64()
+    );
+    for p in db.iter().chain(parquet.iter()) {
+        eprintln!("  {}", p.display());
+    }
+    Ok(())
+}
+
 /// duckosm-rust tiles: build a large area by tiles. One read of the region file cuts it to the standard map tiles of the
 /// boundary (one file for each tile, with the junctions of the nodes outside the tile); each tile builds alone, `--jobs`
 /// tiles at a time, each in its own process; the union joins the tables of the tiles into the tables of the area.
@@ -594,6 +651,7 @@ fn main() {
         Some("studio") => studio(&args[1..]),
         Some("cut") => cut(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
+        Some("quack") => quack(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {
