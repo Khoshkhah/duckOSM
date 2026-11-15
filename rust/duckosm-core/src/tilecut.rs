@@ -1020,8 +1020,20 @@ fn finish_in_turn(parts: &Parts, chunks: &Chunks, n: usize, mut sink: Option<&mu
             }
         }
     }
-    order.sort_by_cached_key(|&t| std::cmp::Reverse(KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum::<u64>()));
-    let mut order = order.into_iter();
+    let size = |t: u32| KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum::<u64>() as usize;
+    order.sort_by_cached_key(|&t| std::cmp::Reverse(size(t)));
+    let mut order = order.into_iter().peekable();
+    // a small tile: its parts in one read for each chunk, and the whole tile one job on the pool (the pool also matches the
+    // extra elements); the small tiles on the pool hold at most WHOLE bytes of parts. With the pieces of each tile on this
+    // thread, many small tiles made this thread the bottleneck (Sweden, 78 tiles: part 5 8.8 -> 12.5 s on the Mac)
+    const SMALL: usize = 64 << 20;
+    const WHOLE: usize = 128 << 20;
+    let mut whole_bytes = 0usize;
+    // the tests (small files) make every second tile in pieces, so that they check both ways
+    let small = |t: u32| if cfg!(test) { t % 2 == 0 } else { size(t) <= SMALL };
+    fn src(v: &[u8]) -> Src<'_> {
+        (!v.is_empty()).then(|| Box::new(io::Cursor::new(v)) as Box<dyn Read + Send>)
+    }
     let write = |sink: &mut Option<&mut Sink>, t: u32, b: &[u8]| -> Result<(), String> {
         if b.is_empty() {
             return Ok(());
@@ -1031,7 +1043,12 @@ fn finish_in_turn(parts: &Parts, chunks: &Chunks, n: usize, mut sink: Option<&mu
             None => chunks.append((t, "tile"), b).map_err(|e| format!("a tile file of the tile cut: {e}")),
         }
     };
-    type Made = (usize, usize, Result<Vec<(Vec<u8>, CutCounts)>, String>);
+    enum Made {
+        /// a batch of pieces of the open tile `i` (its number `seq`)
+        Batch(usize, usize, Result<Vec<(Vec<u8>, CutCounts)>, String>),
+        /// a small tile made whole, with the bytes of its parts
+        Whole(u32, usize, Result<(CutCounts, Vec<u8>), String>),
+    }
     let (tx, rx) = std::sync::mpsc::channel::<Made>();
     let mut runs: Vec<Option<TileRun>> = Vec::new();
     let (mut flying, mut failed): (usize, Option<String>) = (0, None);
@@ -1046,6 +1063,41 @@ fn finish_in_turn(parts: &Parts, chunks: &Chunks, n: usize, mut sink: Option<&mu
                 });
                 let i = match pick {
                     Some(i) => i,
+                    // the next tile is small: whole, when the small tiles on the pool leave room for it
+                    None if order.peek().is_some_and(|&t| small(t)) => {
+                        let t = *order.peek().expect("peeked");
+                        let bytes = size(t);
+                        if whole_bytes > 0 && whole_bytes + bytes > WHOLE {
+                            break;
+                        }
+                        order.next();
+                        let read = |p: &'static str| chunks.read_all((t, p)).map_err(|e| format!("a part file of the tile cut: {e}"));
+                        let mut k: [(Vec<u8>, Vec<u8>); 3] = Default::default();
+                        for (j, (main, extra)) in KINDS.into_iter().enumerate() {
+                            match (read(main), read(extra)) {
+                                (Ok(a), Ok(b)) => k[j] = (a, b),
+                                (Err(e), _) | (_, Err(e)) => {
+                                    failed = Some(e);
+                                    break;
+                                }
+                            }
+                        }
+                        for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations"] {
+                            parts.remove(t, part);
+                        }
+                        if failed.is_some() {
+                            break;
+                        }
+                        whole_bytes += bytes;
+                        flying += 1;
+                        let tx = tx.clone();
+                        scope.spawn(move |_| {
+                            let mut out = Vec::new();
+                            let made = finish_from(k.each_ref().map(|(a, b)| (src(a), src(b))), &mut out, timestamp, raw).map(|n| (n, out));
+                            let _ = tx.send(Made::Whole(t, bytes, made));
+                        });
+                        continue;
+                    }
                     None if open < open_max => match order.next() {
                         Some(t) => match TileRun::open(parts, t, timestamp, raw) {
                             Ok(r) => {
@@ -1070,7 +1122,7 @@ fn finish_in_turn(parts: &Parts, chunks: &Chunks, n: usize, mut sink: Option<&mu
                         flying += 1;
                         scope.spawn(move |_| {
                             let made = pieces.into_par_iter().map_init(Buffers::default, |b, (kind, p)| make_piece(p, kind, raw, b)).collect();
-                            let _ = tx.send((i, seq, made));
+                            let _ = tx.send(Made::Batch(i, seq, made));
                         });
                     }
                     Ok(None) => {}
@@ -1105,9 +1157,26 @@ fn finish_in_turn(parts: &Parts, chunks: &Chunks, n: usize, mut sink: Option<&mu
                 }
                 continue;
             }
-            // one finished batch: written in the order of its tile (after an error the batches are only counted)
-            let Ok((i, seq, made)) = rx.recv() else { break };
+            // one finished batch: written in the order of its tile (after an error the batches are only counted); or a small
+            // tile, written at once
+            let Ok(got) = rx.recv() else { break };
             flying -= 1;
+            let (i, seq, made) = match got {
+                Made::Batch(i, seq, made) => (i, seq, made),
+                Made::Whole(t, bytes, made) => {
+                    whole_bytes -= bytes;
+                    if failed.is_none() {
+                        match made.and_then(|(n, out)| write(&mut sink, t, &out).map(|_| n)) {
+                            Ok(n) => counts[t as usize] = n,
+                            Err(e) => failed = Some(e),
+                        }
+                    }
+                    if !build {
+                        parts.remove(t, "junctions");
+                    }
+                    continue;
+                }
+            };
             let Some(r) = runs[i].as_mut() else { continue };
             match made {
                 Ok(m) => {
