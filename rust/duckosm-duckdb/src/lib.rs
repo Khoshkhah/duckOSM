@@ -17,15 +17,25 @@ CREATE OR REPLACE MACRO main.edge_id_hash_v1(osm_id, source, target, is_reverse)
     (hash(osm_id::BIGINT, source::BIGINT, target::BIGINT, is_reverse::BOOLEAN) >> 1)::BIGINT;
 ";
 
-pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(), String> {
+/// A connection to `db` with DuckDB's `memory_limit` (as DuckDB writes it, for example "2GB"; None: DuckDB's default, 80 % of
+/// the memory). A build by tiles gives its memory budget: the load of France's `raw.*` took 15 GB without a limit.
+fn open(db: &Path, memory_limit: Option<&str>) -> Result<Connection, String> {
+    let con = Connection::open(db).map_err(|e| e.to_string())?;
+    if let Some(m) = memory_limit {
+        con.execute_batch(&format!("SET memory_limit = '{}';", m.replace('\'', "''"))).map_err(|e| e.to_string())?;
+    }
+    Ok(con)
+}
+
+pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str], memory_limit: Option<&str>) -> Result<(), String> {
     let _ = std::fs::remove_file(db);
-    write_network_tables(db, parquet_dir, modes)
+    write_network_tables(db, parquet_dir, modes, memory_limit)
 }
 
 /// [`write_database`] into a file that is already there: a whole-file build writes `raw.*` first (`write_raw`), and the
 /// network tables come after it (docs/design/network_stream.md, part A1).
-pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(), String> {
-    let con = Connection::open(db).map_err(|e| e.to_string())?;
+pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memory_limit: Option<&str>) -> Result<(), String> {
+    let con = open(db, memory_limit)?;
     for mode in modes {
         write_schema(&con, parquet_dir, mode, MODE_TABLES)?;
     }
@@ -139,8 +149,8 @@ pub fn write_raw(
 /// `raw.nodes`, `raw.ways` and `raw.relations` from the raw files of a build in `parquet_dir` (`raw_nodes.parquet`, ...), with the
 /// columns of [`write_raw`] (the first statements of the SQL of the layers, `features.sql`). A build with a boundary and `--raw`
 /// writes these files; the `.duckdb` file gets the tables too.
-pub fn write_raw_from_parquet(db: &Path, parquet_dir: &Path) -> Result<(), String> {
-    let con = Connection::open(db).map_err(|e| e.to_string())?;
+pub fn write_raw_from_parquet(db: &Path, parquet_dir: &Path, memory_limit: Option<&str>) -> Result<(), String> {
+    let con = open(db, memory_limit)?;
     let f = |n: &str| parquet_dir.join(format!("{n}.parquet")).display().to_string().replace('\'', "''");
     con.execute_batch(&format!(
         "CREATE SCHEMA IF NOT EXISTS raw;

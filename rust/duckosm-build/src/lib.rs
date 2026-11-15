@@ -1945,14 +1945,14 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 if let Some(s) = &source {
                     s.close();
                 }
-                duckosm_duckdb::write_network_tables(&db, &pq_dir, &names)?;
+                duckosm_duckdb::write_network_tables(&db, &pq_dir, &names, p.memory_limit.as_deref())?;
                 sum.raw = raw_rows;
             } else {
-                duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
+                duckosm_duckdb::write_database(&db, &pq_dir, &names, p.memory_limit.as_deref())?;
                 if p.raw {
                     // a build with a boundary: raw.* of the area from its files (next to the .duckdb file)
                     let dir = sum.files.iter().find(|(k, _)| k == "raw_nodes").and_then(|(_, f)| f.parent().map(Path::to_path_buf));
-                    duckosm_duckdb::write_raw_from_parquet(&db, dir.as_deref().unwrap_or(&pq_dir))?;
+                    duckosm_duckdb::write_raw_from_parquet(&db, dir.as_deref().unwrap_or(&pq_dir), p.memory_limit.as_deref())?;
                 }
             }
             log.step("write duckdb");
