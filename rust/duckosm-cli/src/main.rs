@@ -779,25 +779,7 @@ mod heap {
     }
 }
 
-/// Raise the limit of open files of this process to 10 240 (or the hard limit). Quack by tiles makes 4 tiles at a time, each
-/// with about 170 temporary files open (the buckets of the node ids and of the points), and macOS gives a process 256.
-fn raise_open_files() {
-    #[cfg(unix)]
-    // SAFETY: getrlimit and setrlimit with a valid struct; a failure only keeps the old limit
-    unsafe {
-        let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) == 0 {
-            let want = r.rlim_max.min(10_240);
-            if r.rlim_cur < want {
-                r.rlim_cur = want;
-                let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &r);
-            }
-        }
-    }
-}
-
 fn main() {
-    raise_open_files();
     #[cfg(feature = "heap-probe")]
     heap::report("start");
     #[cfg(feature = "heap-probe")]

@@ -1153,6 +1153,11 @@ pub fn features_owned<R: Read + Send>(
 // ponytail: a fixed number, and a group waits for its slowest tile; a pool of tiles when the time matters more
 pub const TILES_AT_ONCE: usize = 4;
 
+/// The browser: a tile whose file has at most this many bytes keeps its temporary files in memory (a few times the size
+/// of the file), not in OPFS.
+#[cfg(target_arch = "wasm32")]
+const MEMORY_TILE: u64 = 64 << 20;
+
 /// The boundary of a cut of a whole file: the world, a little more, so each node is inside.
 pub const WORLD: &str = r#"{"type":"Polygon","coordinates":[[[-181,-91],[181,-91],[181,91],[-181,91],[-181,-91]]]}"#;
 
@@ -1196,6 +1201,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     size: TileSize,
     mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
+    crate::util::raise_open_files();
     let tiles = tiles_of_file(&open, size)?;
     crate::util::step(&format!(
         "quack by tiles 1: {} tiles of zoom {} to {}",
@@ -1254,9 +1260,16 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
             done(g * TILES_AT_ONCE + j + 1, t, got);
         }
     }
+    // the browser: the temporary files of a small tile in memory, not in OPFS (each read and write of OPFS goes through
+    // JavaScript: on a Windows PC, about 11 s for each tile of Sweden)
     #[cfg(target_arch = "wasm32")]
     for (k, t) in todo.iter().enumerate() {
-        let got = run(t, &mut |p| emit(t.1, p))?;
+        let got = if files.size(t.0) <= MEMORY_TILE {
+            let mem: crate::spill::StoreMaker = std::rc::Rc::new(|| Box::new(crate::spill::MemStore) as Box<dyn crate::spill::Store>);
+            crate::spill::with_temp_store(mem, || run(t, &mut |p| emit(t.1, p)))?
+        } else {
+            run(t, &mut |p| emit(t.1, p))?
+        };
         done(k + 1, t, got);
     }
     Ok(counts)

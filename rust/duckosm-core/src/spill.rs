@@ -81,6 +81,14 @@ pub fn set_temp_store(maker: Option<StoreMaker>) {
     STORE.with(|s| *s.borrow_mut() = maker);
 }
 
+/// Run `f` with the store of `maker` on this thread, then give back the store before.
+pub fn with_temp_store<T>(maker: StoreMaker, f: impl FnOnce() -> T) -> T {
+    let old = STORE.with(|s| s.borrow_mut().replace(maker));
+    let r = f();
+    STORE.with(|s| *s.borrow_mut() = old);
+    r
+}
+
 /// The store of the network step: the store that [`set_temp_store`] gave on this thread, else a folder for temporary
 /// files natively and memory in the browser.
 pub fn temp_store() -> Box<dyn Store> {

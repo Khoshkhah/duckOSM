@@ -16,6 +16,10 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
+/// The tiles that [`quack_tile_tables`] makes at the same time (each opens about 170 temporary files). 8 were slower
+/// than 4 on France (154 s against 132 s for the tiles): they share the thread pool, the allocator and the tile files.
+const WORKERS: usize = 4;
+
 /// The numbers of [`quack_tile_tables`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TileTables {
@@ -39,6 +43,7 @@ pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, Str
     if zoom > 14 {
         return Err(format!("quack tile tables: zoom {zoom}: use 0 to 14"));
     }
+    duckosm_core::util::raise_open_files();
     let (timestamp, _) = duckosm_core::cutstream::header(open()?)?;
     let tiles = quack::tiles_of_file(&open, TileSize::Zoom(zoom))?;
     duckosm_core::util::step(&format!("quack tile tables 1: {} tiles of zoom {zoom}", tiles.len()));
@@ -65,17 +70,38 @@ pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, Str
         })?;
         Ok((owned, w.close()?))
     };
-    let mut n = TileTables::default();
-    for (g, group) in todo.chunks(quack::TILES_AT_ONCE).enumerate() {
-        for r in group.par_iter().map(one).collect::<Vec<_>>() {
-            let (owned, stored) = r?;
-            n.rows += owned;
-            n.stored += stored;
-            n.tiles += 1;
+    // a queue: WORKERS threads, each takes the next tile when it is free (the quack of a tile uses the pool of rayon too)
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let n = std::sync::Mutex::new(TileTables::default());
+    let failed = std::sync::Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..WORKERS.min(todo.len()) {
+            scope.spawn(|| loop {
+                let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if k >= todo.len() || failed.lock().expect("the error").is_some() {
+                    return;
+                }
+                match one(&todo[k]) {
+                    Ok((owned, stored)) => {
+                        let mut n = n.lock().expect("the numbers");
+                        n.rows += owned;
+                        n.stored += stored;
+                        n.tiles += 1;
+                        if n.tiles % 50 == 0 || n.tiles == todo.len() {
+                            duckosm_core::util::step(&format!("quack tile tables 3: {} of {} tiles", n.tiles, todo.len()));
+                        }
+                    }
+                    Err(e) => {
+                        failed.lock().expect("the error").get_or_insert(e);
+                    }
+                }
+            });
         }
-        duckosm_core::util::step(&format!("quack tile tables 3: {} of {} tiles", (g * quack::TILES_AT_ONCE + group.len()).min(todo.len()), todo.len()));
+    });
+    if let Some(e) = failed.into_inner().expect("the error") {
+        return Err(e);
     }
-    Ok(n)
+    Ok(n.into_inner().expect("the numbers"))
 }
 
 /// The tile tables under `dir` (`<z>/<x>/<y>.parquet`), sorted by path.

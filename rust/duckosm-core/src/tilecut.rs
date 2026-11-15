@@ -414,6 +414,8 @@ struct Parts {
 /// ([`cut_to_store`]: the browser has no folders, only the store in OPFS).
 enum Files {
     Dir(PathBuf),
+    // the browser only
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     Store(Chunks),
 }
 
@@ -488,6 +490,7 @@ pub struct Chunks {
 }
 
 impl Chunks {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn new(store: &dyn crate::spill::Store) -> io::Result<Chunks> {
         Ok(Chunks { file: std::sync::Mutex::new((store.create()?, 0)), index: Default::default() })
     }
@@ -1175,6 +1178,24 @@ impl TileFiles {
     pub fn reader(&self, i: usize) -> impl Read + Send + '_ {
         self.parts.reader(i as u32, "tile").unwrap_or_else(|| Box::new(io::empty()))
     }
+
+    /// The size of the file of tile `i` in bytes.
+    pub fn size(&self, i: usize) -> u64 {
+        let key = (i as u32, "tile");
+        match &self.parts.files {
+            Files::Dir(d) => std::fs::metadata(Parts::path(d, key.0, key.1)).map_or(0, |m| m.len()),
+            Files::Store(c) => c.index.lock().expect("the index").get(&key).map_or(0, |v| v.iter().map(|c| c.1).sum()),
+        }
+    }
+}
+
+impl Drop for TileFiles {
+    /// The folder of the tile files goes (natively; the chunks of the store go with their temporary file).
+    fn drop(&mut self) {
+        if let Files::Dir(d) = &self.parts.files {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
 }
 
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
@@ -1190,8 +1211,19 @@ pub fn cut_to_store<R: Read + Seek + Send>(
     complete: &[&str],
     once: bool,
 ) -> Result<TileFiles, String> {
-    let chunks = Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?;
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, Files::Store(chunks), None, once)?;
+    // natively, a file for each part and each tile in a temporary folder, so the tiles are written at the same time with
+    // no lock (France: one file for all took 31 s for step 5); in the browser, chunks of one file of the store (OPFS)
+    #[cfg(not(target_arch = "wasm32"))]
+    let files = {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = std::env::temp_dir().join(format!("duckosm-tilefiles-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        Files::Dir(tmp)
+    };
+    #[cfg(target_arch = "wasm32")]
+    let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, once)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
 }
 
@@ -1536,7 +1568,11 @@ fn cut<R: Read + Seek + Send>(
                 finish_tile(&parts, t, file, timestamp, raw)
             }
             (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp, raw),
-            (None, Files::Dir(_)) => Err("the tile cut has no folder for the tile files".into()),
+            (None, Files::Dir(d)) => {
+                let out = Parts::path(d, t, "tile");
+                let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+                finish_tile(&parts, t, file, timestamp, raw)
+            }
         }
     };
     #[cfg(not(target_arch = "wasm32"))]
