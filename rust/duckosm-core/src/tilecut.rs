@@ -689,6 +689,88 @@ fn put<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, last: &mut Option<i64>
     }
 }
 
+/// The ids of the elements of a block, in their order, as zigzag varints of the steps between them (the first one whole):
+/// about 1.5 bytes for each id. A row of the id file of a kind (`present_ids`).
+#[derive(Default)]
+struct IdPack {
+    last: i64,
+    n: usize,
+    bytes: Vec<u8>,
+}
+
+impl IdPack {
+    fn push(&mut self, id: i64) {
+        let d = if self.n == 0 { id } else { id.wrapping_sub(self.last) };
+        let mut z = ((d << 1) ^ (d >> 63)) as u64;
+        while z >= 0x80 {
+            self.bytes.push(z as u8 | 0x80);
+            z >>= 7;
+        }
+        self.bytes.push(z as u8);
+        (self.last, self.n) = (id, self.n + 1);
+    }
+}
+
+/// The ids of one row of an id file.
+fn unpack_ids(mut b: &[u8], out: &mut Vec<i64>) {
+    let mut last = 0i64;
+    let mut first = true;
+    while !b.is_empty() {
+        let (mut z, mut shift) = (0u64, 0);
+        loop {
+            let c = b[0];
+            b = &b[1..];
+            z |= ((c & 0x7f) as u64) << shift;
+            shift += 7;
+            if c < 0x80 {
+                break;
+            }
+        }
+        let d = (z >> 1) as i64 ^ -((z & 1) as i64);
+        last = if first { d } else { last.wrapping_add(d) };
+        first = false;
+        out.push(last);
+    }
+}
+
+/// The bytes of a row as they are (the rows of an id file).
+struct RawBytes;
+impl Codec<Vec<u8>> for RawBytes {
+    fn put(&self, r: &Vec<u8>, out: &mut Vec<u8>) {
+        out.extend_from_slice(r);
+    }
+    fn get(&self, b: &mut &[u8]) -> Vec<u8> {
+        let v = b.to_vec();
+        *b = &b[b.len()..];
+        v
+    }
+}
+
+/// The ids of `wanted` (sorted) that the id file of a kind has (its rows in the order of the file, so all its ids are
+/// sorted): the rows of a batch on all threads. One read of the id file, with no block of the region file read again.
+fn present_ids(ids: crate::spill::Rows, wanted: &[i64]) -> io::Result<Vec<i64>> {
+    let mut rows = ids.read(&RawBytes)?;
+    let mut found = Vec::new();
+    loop {
+        let batch: Vec<Vec<u8>> = rows.by_ref().take(256).collect::<io::Result<_>>()?;
+        if batch.is_empty() {
+            return Ok(found);
+        }
+        let parts: Vec<Vec<i64>> = batch
+            .par_iter()
+            .map(|b| {
+                let mut all = Vec::new();
+                unpack_ids(b, &mut all);
+                all.retain(|id| wanted.binary_search(id).is_ok());
+                all
+            })
+            .collect();
+        for p in parts {
+            found.extend(p);
+        }
+    }
+}
+
 /// Pass 1: the runs of the nodes inside, the nodes inside with their tiles, and whether the block has ways or relations.
 struct Nodes<'a> {
     boundary: &'a Boundary,
@@ -697,10 +779,13 @@ struct Nodes<'a> {
     /// the border of a tile, in metres: a node inside the area this near another tile goes to `near` with that tile
     border_m: f64,
     runs: BlockRuns,
-    inside: Vec<(u32, Elem)>,
+    /// the tiles of the nodes inside (with doubles): read 1 writes no element
+    own: Vec<u32>,
     near: Vec<(i64, u32)>,
     other: bool,
     span: Span,
+    /// the ids of all nodes of the block (a row of the id file of the nodes)
+    ids: IdPack,
 }
 
 /// The tiles of a cut, of one zoom or of mixed zooms (no tile in another): the tile of a point is the tile of the finest
@@ -736,16 +821,18 @@ pub fn border_m(snap_m: f64) -> f64 {
 }
 
 impl RawSink for Nodes<'_> {
-    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
         widen(&mut self.span, id);
+        self.ids.push(id);
         let tile = if self.boundary.contains(lon, lat) {
             self.index.of(lon, lat)
         } else {
             None
         };
         if let Some(t) = tile {
-            let tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
-            self.inside.push((t, Elem::Node(RawNode { id, lon, lat, tags })));
+            if self.own.last() != Some(&t) {
+                self.own.push(t);
+            }
             // the other tiles whose border holds the node
             if self.border_m > 0.0 {
                 let me = Tile::of(self.z, lon, lat);
@@ -785,7 +872,6 @@ struct Ways<'a> {
     /// the nodes in the border of other tiles (sorted (node, tile)): a way with such a node goes to those tiles too
     near: &'a [(i64, u32)],
     runs: BlockRuns,
-    kept: Vec<(u32, Elem)>,
     multi: Vec<(i64, u32)>,
     outside: Vec<(i64, u32)>,
     /// the uses of the nodes by the kept ways that are built highways (node, flags of `JunctionUses::of_way`)
@@ -795,12 +881,15 @@ struct Ways<'a> {
     rels: Vec<Elem>,
     tiles: Vec<u32>,
     spans: [Span; 2],
+    /// the ids of all ways of the block (a row of the id file of the ways)
+    ids: IdPack,
 }
 
 impl RawSink for Ways<'_> {
     fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
     fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
         widen(&mut self.spans[0], id);
+        self.ids.push(id);
         let refs: Vec<(i64, Option<u32>)> = refs.map(|n| (n, self.nodes.get(n))).collect();
         self.tiles.clear();
         self.tiles.extend(refs.iter().filter_map(|r| r.1));
@@ -836,11 +925,6 @@ impl RawSink for Ways<'_> {
         JunctionUses::of_way(&tags, &way.refs, &mut self.uses);
         let first = first.expect("a tile");
         self.homes.extend(refs.iter().filter(|r| r.1.is_none()).map(|r| (r.0, id, first)));
-        let (last, rest) = self.tiles.split_last().expect("a tile");
-        for &t in rest {
-            self.kept.push((t, Elem::Way(way.clone())));
-        }
-        self.kept.push((*last, Elem::Way(way)));
     }
     fn relation<'a>(
         &mut self,
@@ -853,67 +937,6 @@ impl RawSink for Ways<'_> {
         let members = members.map(|(m, t, r)| (m, t, r.to_string())).collect();
         self.rels.push(Elem::Relation(Relation { id, tags, members }));
     }
-}
-
-/// The ids of `wanted` (sorted) of one kind that a block has.
-struct Present<'a> {
-    kind: usize,
-    wanted: &'a [i64],
-    found: Vec<i64>,
-}
-
-impl Present<'_> {
-    fn see(&mut self, kind: usize, id: i64) {
-        if kind == self.kind && self.wanted.binary_search(&id).is_ok() {
-            self.found.push(id);
-        }
-    }
-}
-
-impl RawSink for Present<'_> {
-    fn node<'a>(&mut self, id: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
-        self.see(0, id);
-    }
-    fn way<'a>(&mut self, id: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {
-        self.see(1, id);
-    }
-    fn relation<'a>(
-        &mut self,
-        _: i64,
-        _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
-        _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
-    ) {
-    }
-}
-
-/// The ids of `wanted` (sorted) of one kind (0 nodes, 1 ways) that the file has: only the blocks whose span holds one.
-fn present<R: Read + Seek>(r: &mut R, blocks: &[(u64, Span)], kind: usize, wanted: &[i64]) -> Result<Vec<i64>, String> {
-    let at: Vec<u64> = blocks
-        .iter()
-        .filter(|(_, (lo, hi))| {
-            let i = wanted.partition_point(|&w| w < *lo);
-            i < wanted.len() && wanted[i] <= *hi
-        })
-        .map(|b| b.0)
-        .collect();
-    let mut kinds = [false; 3];
-    kinds[kind] = true;
-    let mut found = Vec::new();
-    each_block_at(
-        r,
-        &at,
-        |b, buf| {
-            let mut s = Present { kind, wanted, found: Vec::new() };
-            decode_block(b, kinds, buf, &mut s)?;
-            Ok(s.found)
-        },
-        |mut f| {
-            found.append(&mut f);
-            Ok(())
-        },
-    )?;
-    found.sort_unstable();
-    Ok(found)
 }
 
 /// A use of a node by a way, 8 bytes: the node id with the 2 bits of its flags (`JunctionUses::of_way`) below it, so the
@@ -1193,10 +1216,10 @@ pub fn cut_to_sink<R: Read + Seek + Send>(
     }
 }
 
-/// The cut of [`cut_to_tiles`] and [`cut_to_store`]: the part files in `files`; the tile files into `dir` with their
-/// junctions files, or with no `dir` into `files` as the part "tile" of each tile. `build`: the cut of the build by tiles
-/// (each relation to complete in every tile with a member, and the junctions); else quack's cut (each one in its first
-/// tile only, no junctions).
+/// The cut of [`cut_to_tiles`] and [`cut_to_store`]: the temporary files in `files`; the tile files into `dir` with their
+/// junctions files, with no `dir` into `files` as the part "tile" of each tile, or into `sink`. Each relation of a type in
+/// `complete` is complete in every tile with a member (every tile file is complete). `build`: the cut of the build by
+/// tiles, with the junctions of each tile; else quack's cut, with no junctions.
 fn cut<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
@@ -1232,6 +1255,8 @@ fn cut<R: Read + Seek + Send>(
     // 1. the book of the nodes, and the tiles with a node inside
     let (mut nodes, mut node_blocks, mut ways_at) = (Book::default(), Vec::new(), None);
     let mut near: Vec<(i64, u32)> = Vec::new();
+    // the ids of all nodes and all ways of the file: part 3b reads them, not the blocks again
+    let (mut node_ids, mut way_ids) = (Writer::new(store).map_err(io)?, Writer::new(store).map_err(io)?);
     each_block(
         &mut open()?,
         |b, buf| {
@@ -1241,20 +1266,23 @@ fn cut<R: Read + Seek + Send>(
                 index: &index,
                 border_m,
                 runs: BlockRuns::new(),
-                inside: Vec::new(),
+                own: Vec::new(),
                 near: Vec::new(),
                 other: false,
                 span: EMPTY,
+                ids: IdPack::default(),
             };
             decode_block(b, [true, true, true], buf, &mut s)?;
-            let mut own: Vec<u32> = s.inside.iter().map(|e| e.0).collect();
-            own.sort_unstable();
-            own.dedup();
-            Ok((s.runs, s.other, s.span, (s.near, own)))
+            s.own.sort_unstable();
+            s.own.dedup();
+            Ok((s.runs, s.other, s.span, (s.near, s.own, s.ids.bytes)))
         },
-        |(runs, other, span, (mut n, own)), at| {
+        |(runs, other, span, (mut n, own, ids)), at| {
             for t in own {
                 with_file[t as usize] = true;
+            }
+            if !ids.is_empty() {
+                node_ids.push(&RawBytes, &ids).map_err(io)?;
             }
             near.append(&mut n);
             if span != EMPTY {
@@ -1292,7 +1320,6 @@ fn cut<R: Read + Seek + Send>(
                 nodes: &nodes,
                 near: &near,
                 runs: BlockRuns::new(),
-                kept: Vec::new(),
                 multi: Vec::new(),
                 outside: Vec::new(),
                 uses: Vec::new(),
@@ -1300,6 +1327,7 @@ fn cut<R: Read + Seek + Send>(
                 rels: Vec::new(),
                 tiles: Vec::new(),
                 spans: [EMPTY; 2],
+                ids: IdPack::default(),
             };
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
@@ -1307,9 +1335,12 @@ fn cut<R: Read + Seek + Send>(
             // the nodes from outside, in the bytes of their buckets (here, on all threads)
             let outside = crate::spill::Buckets::encode(BUCKET_SHIFT, &Pair, s.outside.iter().map(|&(n, t)| (n, (n, t as i64))));
             let uses = if junctions { s.uses } else { Vec::new() };
-            Ok((s.runs, s.multi, (outside, uses, s.homes), rels, s.spans))
+            Ok((s.runs, s.multi, (outside, uses, s.homes, s.ids.bytes), rels, s.spans))
         },
-        |(runs, mut m, (o, u, h), rels, spans), at| {
+        |(runs, mut m, (o, u, h, ids), rels, spans), at| {
+            if !ids.is_empty() {
+                way_ids.push(&RawBytes, &ids).map_err(io)?;
+            }
             if spans[0] != EMPTY {
                 way_blocks.push((ways_at + at, spans[0]));
                 ways.append(runs.runs, runs.first.unwrap_or(false));
@@ -1402,9 +1433,10 @@ fn cut<R: Read + Seek + Send>(
         v.dedup();
     }
     crate::util::step(&format!("tile cut 3a: the members of the relations ({} nodes, {} ways)", member_nodes.len(), member_ways.len()));
-    let node_members = present(&mut open()?, &node_blocks, 0, &member_nodes)?;
+    // which members the file has: the id files of parts 1 and 2 (one read of the ids; before, two reads of the blocks)
+    let node_members = present_ids(node_ids.finish().map_err(io)?, &member_nodes).map_err(io)?;
     drop(member_nodes);
-    let way_members = present(&mut open()?, &way_blocks, 1, &member_ways)?;
+    let way_members = present_ids(way_ids.finish().map_err(io)?, &member_ways).map_err(io)?;
     drop(member_ways);
     let way_tiles = |id: i64, out: &mut Vec<u32>| match ways.get(id) {
         Some(t) => out.push(t),
