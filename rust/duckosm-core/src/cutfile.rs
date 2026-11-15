@@ -161,6 +161,12 @@ impl<W: Write> PbfWriter<W> {
         })
     }
 
+    /// A writer of data blocks only, with no header: a piece of a file that another writer writes (the jobs of
+    /// `tilecut::merge_kind`).
+    pub(crate) fn data(w: W) -> Self {
+        PbfWriter { w, raw: false, nodes: Vec::with_capacity(BLOCK), ways: Vec::new(), relations: Vec::new() }
+    }
+
     pub fn node(&mut self, n: RawNode) -> Result<(), String> {
         self.nodes.push(n);
         if self.nodes.len() == BLOCK {

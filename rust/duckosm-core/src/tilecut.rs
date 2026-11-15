@@ -696,42 +696,74 @@ fn put<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, last: &mut Option<i64>
 
 /// One kind of the file of a tile: the blobs of the main part, merged in the order of the ids with the elements of the
 /// extra part. A blob that no extra element falls into is copied as bytes; only the others are decoded and made again.
-fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extra: Src, kind: u8) -> Result<(), String> {
-    let (mut a, mut x, mut b) = (Blobs::from(main), PartReader::from(extra), Buffers::default());
-    let mut last = None;
-    while let Some((first, end, count, blob)) = a.next()? {
-        while x.peek_id()?.is_some_and(|id| id < first) {
-            let e = x.next()?.expect("peeked");
-            put(w, n, &mut last, e)?;
-        }
-        if x.peek_id()?.is_none_or(|id| id > end) {
-            w.blocks(&blob)?;
-            match kind {
-                0 => n.nodes += count as usize,
-                1 => n.ways += count as usize,
-                _ => n.relations += count as usize,
+/// The blobs go in batches to the threads of the pool: each blob with the extra elements before it and in its range is
+/// one job, and the jobs are written in their order (one large tile on one thread was the end of the cut in the browser).
+/// The ids of the jobs do not overlap, so each job removes its doubles alone.
+fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extra: Src, kind: u8, raw: bool) -> Result<(), String> {
+    let (mut a, mut x) = (Blobs::from(main), PartReader::from(extra));
+    let batch_len = 4 * rayon::current_num_threads().max(1);
+    loop {
+        let mut batch: Vec<(Vec<Elem>, Blob, Vec<Elem>)> = Vec::with_capacity(batch_len);
+        while batch.len() < batch_len {
+            let Some(blob) = a.next()? else { break };
+            let (mut gap, mut inside) = (Vec::new(), Vec::new());
+            while x.peek_id()?.is_some_and(|id| id < blob.0) {
+                gap.push(x.next()?.expect("peeked"));
             }
-            last = Some(end);
-            continue;
-        }
-        let mut all = All::default();
-        decode_block(&blob, [true; 3], &mut b, &mut all)?;
-        for e in all.0 {
-            while x.peek_id()?.is_some_and(|id| id < e.id()) {
-                let e = x.next()?.expect("peeked");
-                put(w, n, &mut last, e)?;
+            while x.peek_id()?.is_some_and(|id| id <= blob.1) {
+                inside.push(x.next()?.expect("peeked"));
             }
-            put(w, n, &mut last, e)?;
+            batch.push((gap, blob, inside));
+        }
+        if batch.is_empty() {
+            break;
+        }
+        let made: Vec<(Vec<u8>, CutCounts)> = batch
+            .into_par_iter()
+            .map_init(Buffers::default, |b, (gap, (_, _, count, blob), inside)| {
+                let mut u = PbfWriter::data(Vec::new()).raw_blocks(raw);
+                let (mut un, mut last) = (CutCounts::default(), None);
+                for e in gap {
+                    put(&mut u, &mut un, &mut last, e)?;
+                }
+                if inside.is_empty() {
+                    u.blocks(&blob)?;
+                    match kind {
+                        0 => un.nodes += count as usize,
+                        1 => un.ways += count as usize,
+                        _ => un.relations += count as usize,
+                    }
+                } else {
+                    let mut all = All::default();
+                    decode_block(&blob, [true; 3], b, &mut all)?;
+                    let mut ins = inside.into_iter().peekable();
+                    for e in all.0 {
+                        while ins.peek().is_some_and(|i| i.id() < e.id()) {
+                            put(&mut u, &mut un, &mut last, ins.next().expect("peeked"))?;
+                        }
+                        put(&mut u, &mut un, &mut last, e)?;
+                    }
+                    for e in ins {
+                        put(&mut u, &mut un, &mut last, e)?;
+                    }
+                }
+                Ok((u.finish()?, un))
+            })
+            .collect::<Result<_, String>>()?;
+        for (bytes, un) in made {
+            w.blocks(&bytes)?;
+            n.nodes += un.nodes;
+            n.ways += un.ways;
+            n.relations += un.relations;
         }
     }
+    let mut last = None;
     while let Some(e) = x.next()? {
         put(w, n, &mut last, e)?;
     }
     Ok(())
 }
 
-/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
-/// of the ids with no doubles. Gives the numbers of elements.
 /// The output of a tile file on a thread of the pool: each write goes through the channel to the thread that writes the
 /// files (`finish_from` writes through a buffer of 1 MiB).
 #[cfg(target_arch = "wasm32")]
@@ -748,6 +780,8 @@ impl Write for Chan {
     }
 }
 
+/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
+/// of the ids with no doubles. Gives the numbers of elements.
 fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
     let srcs = KINDS.map(|(main, extra)| (parts.reader(tile, main), parts.reader(tile, extra)));
     let n = finish_from(srcs, out, timestamp, raw)?;
@@ -766,7 +800,7 @@ fn finish_from<W: Write>(srcs: [(Src, Src); 3], out: W, timestamp: Option<i64>, 
     let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?.raw_blocks(raw);
     let mut n = CutCounts::default();
     for (kind, (main, extra)) in srcs.into_iter().enumerate() {
-        merge_kind(&mut w, &mut n, main, extra, kind as u8)?;
+        merge_kind(&mut w, &mut n, main, extra, kind as u8, raw)?;
     }
     w.finish()?.flush().map_err(|e| e.to_string())?;
     Ok(n)
