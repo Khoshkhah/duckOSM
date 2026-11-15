@@ -646,9 +646,6 @@ struct PartReader<'a> {
 }
 
 impl<'a> PartReader<'a> {
-    fn open(parts: &'a Parts, tile: u32, part: &'static str) -> PartReader<'a> {
-        PartReader::from(parts.reader(tile, part))
-    }
     fn from(src: Src<'a>) -> PartReader<'a> {
         PartReader { blobs: Blobs::from(src), buf: Default::default(), b: Buffers::default() }
     }
@@ -1046,6 +1043,9 @@ impl Codec<(i64, u8)> for Use {
 }
 
 /// Two numbers, 16 bytes: (id, tile).
+/// The buckets of the nodes from outside: 2^27 ids each.
+const BUCKET_SHIFT: u32 = 27;
+
 struct Pair;
 impl Codec<(i64, i64)> for Pair {
     fn put(&self, r: &(i64, i64), out: &mut Vec<u8>) {
@@ -1420,7 +1420,9 @@ fn cut<R: Read + Seek + Send>(
     let (mut ways, mut multi) = (Book::default(), Vec::new());
     // the nodes that a tile needs from outside it, in buckets by node id (2^27 ids each): each bucket is sorted in memory
     // on all threads in step 4 (one merge on one thread took 3.3 s of the 14.8 s of the cut of Sweden)
-    let mut outside = crate::spill::Buckets::new(27);
+    let mut outside = crate::spill::Buckets::new(BUCKET_SHIFT);
+    // the uses of the nodes: only the junctions files of the build by tiles need them
+    let junctions = dir.is_some();
     let mut uses = Writer::new(store).map_err(io)?;
     // the nodes outside the area are few (the border of the area): in memory
     let mut homes: Vec<(i64, i64, u32)> = Vec::new();
@@ -1446,7 +1448,10 @@ fn cut<R: Read + Seek + Send>(
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
             blobs(s.rels, &mut rels, raw)?;
-            Ok((s.runs, by_tile(s.kept, raw)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
+            // the nodes from outside, in the bytes of their buckets (here, on all threads)
+            let outside = crate::spill::Buckets::encode(BUCKET_SHIFT, &Pair, s.outside.iter().map(|&(n, t)| (n, (n, t as i64))));
+            let uses = if junctions { s.uses } else { Vec::new() };
+            Ok((s.runs, by_tile(s.kept, raw)?, s.multi, (outside, uses, s.homes), rels, s.spans))
         },
         |(runs, kept, mut m, (o, u, h), rels, spans), at| {
             if spans[0] != EMPTY {
@@ -1460,9 +1465,7 @@ fn cut<R: Read + Seek + Send>(
                 parts.add(t, "ways", bytes)?;
             }
             multi.append(&mut m);
-            for (n, t) in o {
-                outside.push(store, n, &Pair, &(n, t as i64)).map_err(io)?;
-            }
+            outside.push_encoded(store, o).map_err(io)?;
             for (n, f) in u {
                 uses.push(&Use, &(n, f)).map_err(io)?;
             }
@@ -1499,14 +1502,36 @@ fn cut<R: Read + Seek + Send>(
     // 3. the relations with a member node inside a tile or a member way kept in a tile (only the members that the file
     // has: a run can hold the id of an element that the file does not have), their parents, and the members of the
     // multipolygons
+    // each relation of the file, in the order of the file: this thread reads the blocks, a batch of them is decoded on all
+    // threads, and `f` gets the relations here (one block at a time on this thread was most of this step)
     let each_rel = |f: &mut dyn FnMut(Relation) -> Result<(), String>| -> Result<(), String> {
-        let mut rd = PartReader::open(&parts, ALL, "relations.all");
-        while let Some(e) = rd.next()? {
-            if let Elem::Relation(r) = e {
-                f(r)?;
+        let mut blobs = Blobs::from(parts.reader(ALL, "relations.all"));
+        let n = 2 * rayon::current_num_threads();
+        loop {
+            let mut batch = Vec::with_capacity(n);
+            while batch.len() < n {
+                match blobs.next()? {
+                    Some((_, _, _, b)) => batch.push(b),
+                    None => break,
+                }
+            }
+            if batch.is_empty() {
+                return Ok(());
+            }
+            let decoded: Vec<Vec<Elem>> = batch
+                .par_iter()
+                .map_init(Buffers::default, |buf, b| {
+                    let mut all = All::default();
+                    decode_block(b, [true; 3], buf, &mut all)?;
+                    Ok(all.0)
+                })
+                .collect::<Result<_, String>>()?;
+            for e in decoded.into_iter().flatten() {
+                if let Elem::Relation(r) = e {
+                    f(r)?;
+                }
             }
         }
-        Ok(())
     };
     let (mut member_nodes, mut member_ways) = (Vec::new(), Vec::new());
     each_rel(&mut |r| {
@@ -1628,17 +1653,15 @@ fn cut<R: Read + Seek + Send>(
             |b, buf| {
                 let mut s = Wanted { wanted: &wanted, found: Vec::new() };
                 decode_block(b, [false, true, false], buf, &mut s)?;
-                Ok(s.found)
+                // the nodes of these ways for each of their tiles, in the bytes of their buckets (on all threads)
+                let rows = s.found.iter().flat_map(|(w, refs)| {
+                    tiles_in(&more, *w).flat_map(move |t| refs.iter().map(move |&n| (n, (n, t as i64))))
+                });
+                Ok(crate::spill::Buckets::encode(BUCKET_SHIFT, &Pair, rows))
             },
-            |found| {
-                for (w, refs) in found {
-                    for t in tiles_in(&more, w) {
-                        for &n in &refs {
-                            if let Err(e) = outside.push(store, n, &Pair, &(n, t as i64)) {
-                                err.get_or_insert(e);
-                            }
-                        }
-                    }
+            |encoded| {
+                if let Err(e) = outside.push_encoded(store, encoded) {
+                    err.get_or_insert(e);
                 }
                 Ok(())
             },
