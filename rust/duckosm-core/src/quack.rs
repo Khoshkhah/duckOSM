@@ -790,9 +790,9 @@ pub fn features<R: Read + Send>(
 /// - a node: the tile of its place;
 /// - a way: the tile of the place of its first node (the cut and quack decode the same coordinates, so the tile that owns
 ///   the way has it);
-/// - a relation: with `relations` (quack by tiles), the first tile that makes it (the ids that the tiles before made: the
-///   cut puts it whole in one tile; another tile has it whole only when all its member ways are in that tile too). With
-///   no `relations` (the tile tables), the tile of the first node of its first member way.
+/// - a relation: with `relations` (quack by tiles), the first tile that makes it (the ids that the tiles before made). With
+///   no `relations` (the tile tables and the workers of the browser), the tile of the first node of its first member way.
+///   The cut puts each multipolygon and boundary whole in each tile with a member, so that tile has it.
 ///
 /// With `relations`, a tile gives only the rows that it owns. With no `relations`, a tile gives all the rows of its own
 /// file, each with [`Feature::owner`], with no look at the other tiles: the nodes in the tile, the ways with a node in the
@@ -1180,7 +1180,7 @@ pub enum TileSize {
 ///    many nodes is cut into its four tiles of the next zoom (a quadtree), so the dense city has small tiles and the
 ///    country around it large ones. With [`TileSize::Zoom`], the tiles are the tiles of that zoom with a node.
 /// 2. The tile cut (`crate::tilecut::cut_to_store`) writes the file of each tile to the temporary store, with the ways
-///    whole, and each multipolygon and boundary with all its members in one of its tiles.
+///    whole, and each multipolygon and boundary with all its members in each tile with a member.
 /// 3. Each tile gives the rows that it owns ([`Owner`]) to `emit`, so each row comes one time.
 ///
 /// `open` opens the `.osm.pbf` file (sorted by type and id); it is read four times, and the cut reads some blocks again.
@@ -1210,7 +1210,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
         tiles.iter().map(|t| t.z).max().unwrap_or(0)
     ));
     let world = crate::boundary::Boundary::parse(WORLD)?;
-    let files = crate::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"], true)?;
+    let files = crate::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"])?;
     crate::util::step("quack by tiles 2: the tile cut");
     let relations = std::sync::Mutex::new(crate::util::FxHashSet::default());
     let mut counts = Counts::default();

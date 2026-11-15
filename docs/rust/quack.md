@@ -129,11 +129,11 @@ same rows tile by tile:
    around it large ones: France at 4 million nodes has 324 tiles of zoom 3 to 11, Kentucky 16 tiles of zoom 6 to 9.
    With `--tile-zoom Z`, the tiles are the map tiles of zoom `Z` with a node (`TileSize::Zoom`).
 2. **The cut.** The tile cut of the build by tiles (`tilecut::cut_to_store`) writes the file of each tile, with the ways
-   whole (with their nodes from other tiles). Each multipolygon and boundary relation goes whole (all its member ways and
-   their nodes) into one tile only: the first tile with a member. In the cut of the build, a multipolygon goes whole
-   into each tile with a member; the boundary of France has about a million nodes and touches hundreds of tiles, and that
-   cut stopped at 32 GB of temporary files. The parts and the tile files are chunks of one temporary file of the store
-   (`tilecut::Chunks`), because the browser has no folders, only OPFS.
+   whole (with their nodes from other tiles), and each multipolygon and boundary relation whole (all its member ways and
+   their nodes) in each tile with a member, as the cut of the build: each tile file is a complete, standard `.osm.pbf`
+   (Kaveh's rule). With one zoom for all of France (zoom 11, 5 883 tiles), the copies of the large boundaries filled 32 GB
+   of temporary files; the quadtree has far fewer tiles. Natively the parts and the tile files are files in a temporary
+   folder; in the browser, chunks of one temporary file of OPFS (`tilecut::Chunks`), because the browser has no folders.
 3. **The rows of each tile.** `features_owned` runs on the file of each tile and keeps only the rows that the tile owns
    (`quack::Owner`), so each row comes one time:
    - a node: the tile of its place;

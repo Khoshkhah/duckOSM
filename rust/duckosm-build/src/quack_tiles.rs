@@ -48,7 +48,7 @@ pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, Str
     let tiles = quack::tiles_of_file(&open, TileSize::Zoom(zoom))?;
     duckosm_core::util::step(&format!("quack tile tables 1: {} tiles of zoom {zoom}", tiles.len()));
     let world = duckosm_core::boundary::Boundary::parse(quack::WORLD)?;
-    let files = duckosm_core::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"], false)?;
+    let files = duckosm_core::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"])?;
     duckosm_core::util::step("quack tile tables 2: the tile cut");
     let todo: Vec<(usize, Tile)> = files.tiles.iter().enumerate().filter(|t| t.1 .1.nodes > 0).map(|(i, t)| (i, t.0)).collect();
     // one tile: its file, quack, its table

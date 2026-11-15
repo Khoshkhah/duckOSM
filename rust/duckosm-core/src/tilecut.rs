@@ -1204,7 +1204,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let tmp = std::env::temp_dir().join(format!("duckosm-tiles-{}-{}", std::process::id(), dir.as_os_str().len()));
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), false, None);
+    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), None);
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(cut?.0)
 }
@@ -1245,15 +1245,13 @@ impl Drop for TileFiles {
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
 /// junctions files and with no zlib in the tile files: quack by tiles (`crate::quack::features_by_tiles`) and the tile
 /// tables. `complete`: the types of the relations to complete with all their members (quack: `multipolygon` and
-/// `boundary`): with `once`, in one tile only, the first tile (in the order of `tiles`) with a member (quack by tiles: the
-/// boundary of a country has a million nodes and touches hundreds of tiles); else in each tile with a member (the tile
-/// tables: each tile alone makes all its rows).
+/// `boundary`), each one in each tile with a member, so each tile file is complete (as the cut of the build by tiles and
+/// osmium's smart cut).
 pub fn cut_to_store<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
     tiles: &[Tile],
     complete: &[&str],
-    once: bool,
 ) -> Result<TileFiles, String> {
     // natively, a file for each part and each tile in a temporary folder, so the tiles are written at the same time with
     // no lock (France: one file for all took 31 s for step 5); in the browser, chunks of one file of the store (OPFS)
@@ -1267,7 +1265,7 @@ pub fn cut_to_store<R: Read + Seek + Send>(
     };
     #[cfg(target_arch = "wasm32")]
     let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, once, None)?;
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, None)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
 }
 
@@ -1278,17 +1276,16 @@ pub fn cut_to_sink<R: Read + Seek + Send>(
     boundary: &Boundary,
     tiles: &[Tile],
     complete: &[&str],
-    once: bool,
     #[allow(unused_mut)] mut sink: Sink,
 ) -> Result<Vec<CutCounts>, String> {
     #[cfg(target_arch = "wasm32")]
     {
         let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
-        Ok(cut(open, boundary, tiles, complete, 0.0, files, None, once, Some(&mut sink))?.0)
+        Ok(cut(open, boundary, tiles, complete, 0.0, files, None, Some(&mut sink))?.0)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let f = cut_to_store(open, boundary, tiles, complete, once)?;
+        let f = cut_to_store(open, boundary, tiles, complete)?;
         let mut buf = vec![0u8; 1 << 20];
         for i in 0..f.tiles.len() {
             let mut r = f.reader(i);
@@ -1314,7 +1311,6 @@ fn cut<R: Read + Seek + Send>(
     border_m: f64,
     files: Files,
     dir: Option<&Path>,
-    once: bool,
     // the browser: the tile files to this sink, not to the store (`cut_to_sink`)
     #[allow(unused_mut, unused_variables)] mut sink: Option<&mut Sink>,
 ) -> Result<(Vec<CutCounts>, Parts), String> {
@@ -1533,7 +1529,7 @@ fn cut<R: Read + Seek + Send>(
     let mut waiting_bytes = 0usize;
     each_rel(&mut |r| {
         if multipolygons.binary_search(&r.id).is_ok() {
-            for t in tiles_in(&direct, r.id).take(if once { 1 } else { usize::MAX }) {
+            for t in tiles_in(&direct, r.id) {
                 for &(m, ty, _) in &r.members {
                     match ty {
                         MemberType::Node => outside.push(&Pair, &(m, t as i64)).map_err(io)?,
