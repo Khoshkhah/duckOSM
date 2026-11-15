@@ -268,8 +268,8 @@ struct QuackTilesCli {
     /// The output folder.
     #[arg(short, long, default_value = ".")]
     out: PathBuf,
-    /// The zoom of the tiles (0 to 14).
-    #[arg(long, default_value_t = 9, value_parser = clap::value_parser!(u8).range(0..=14))]
+    /// The zoom of the tiles (0 to 14). Zoom 8 is the one tile zoom of all parts.
+    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u8).range(0..=14))]
     zoom: u8,
     /// The threads (default: all the cores).
     #[arg(long)]
@@ -352,8 +352,9 @@ struct TilesCli {
     /// The output folder: the GeoParquet files of the area.
     #[arg(short, long)]
     out: PathBuf,
-    /// The zoom of the tiles (standard z/x/y map tiles; zoom 10 is about 27 km wide in France).
-    #[arg(long, default_value_t = 10)]
+    /// The zoom of the tiles (standard z/x/y map tiles; zoom 8 is about 110 km wide in France). Zoom 8 is the one tile
+    /// zoom of all parts (Kaveh, 2026-11-15; docs/design/build_by_tiles.md, "The zoom").
+    #[arg(long, default_value_t = 8)]
     zoom: u8,
     /// The memory for the tile builds at the same time, for example 4G or 2500M. A tile starts only when the estimates of
     /// the running tiles and its own stay below it. More memory does not make the build faster (France: 2 GB and 8 GB took
