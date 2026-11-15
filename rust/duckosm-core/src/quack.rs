@@ -1276,21 +1276,28 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
         ));
     };
     // natively, TILES_AT_ONCE tiles at the same time (one small tile does not use all threads: France used 4 of 12
-    // cores), and their rows go to `emit` in the order of the tiles. The browser: one tile at a time, because a file in
-    // OPFS belongs to the thread that opened it.
+    // cores), and their rows go to `emit` in the order of the tiles. Each tile has a thread of its own, not a thread of
+    // the pool: a tile waits for rows that the pool makes, so tiles on the pool with 4 threads or fewer left no thread to
+    // make them (the test stopped on the CI machine).
     #[cfg(not(target_arch = "wasm32"))]
     for (g, group) in todo.chunks(TILES_AT_ONCE).enumerate() {
-        let made: Vec<Result<(Vec<Vec<Feature>>, Counts), String>> = group
-            .par_iter()
-            .map(|t| {
-                let mut parts = Vec::new();
-                let got = run(t, &mut |p| {
-                    parts.push(p);
-                    Ok(())
-                })?;
-                Ok((parts, got))
-            })
-            .collect();
+        let run = &run;
+        let made: Vec<Result<(Vec<Vec<Feature>>, Counts), String>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = group
+                .iter()
+                .map(|t| {
+                    scope.spawn(move || {
+                        let mut parts = Vec::new();
+                        let got = run(t, &mut |p| {
+                            parts.push(p);
+                            Ok(())
+                        })?;
+                        Ok((parts, got))
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("a tile stopped (panic)".into()))).collect()
+        });
         for (j, (t, m)) in group.iter().zip(made).enumerate() {
             let (parts, got) = m?;
             for p in parts {
