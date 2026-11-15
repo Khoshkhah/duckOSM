@@ -229,6 +229,11 @@ Each table has its tile, the input file and the time of the file in its metadata
 | Tile tables, zoom 9 (Mac mini) | Tables | Time | Peak RSS | Size | Rows in the tables | Union |
 |---|---|---|---|---|---|---|
 | Kentucky | 65 | 9.5 s | | 327 MB (one table: 321 MB) | 2 400 820 | 1.0 s |
+| France | 697 | 232.6 s | 3.7 GB | 13 GB (one table: 9.7 GB) | 99 594 359 | 43.6 s |
+
+France: the count 4.1 s, the cut 96.2 s, the tiles 132.3 s, and a peak disk use of 31.0 GB (the tile files of the cut have
+no zlib, and each multipolygon and boundary is whole in each tile with a member). The union is byte for byte the table of
+one run (fingerprints of all 99 412 535 rows).
 
 `duckosm-rust` raises its limit of open files to 10 240 at the start: 4 tiles at a time keep about 700 temporary files
 open, and macOS gives a process 256.

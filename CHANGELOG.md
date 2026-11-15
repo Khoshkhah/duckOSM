@@ -4,7 +4,8 @@
 
 - **Quack tile tables: `duckosm-rust quack-tiles` and `quack-union`** (`docs/rust/quack.md`, "Tile tables"). The cut makes the file of each
   map tile of one zoom; each tile alone makes its table (the nodes in the tile, the ways with a node in it, the relations that its file has
-  whole) with a column `owner`, so nothing waits for another tile; the union keeps the rows with `owner`.
+  whole) with a column `owner`, so nothing waits for another tile; the union keeps the rows with `owner`. France at zoom 9: 697 tables in
+  232.6 s (3.7 GB RSS); the union (43.6 s) is byte for byte the table of one run.
 - **Quack by tiles is faster natively**: no zlib in the temporary tile files, and 4 tiles at a time. France: 224.9 s to 171.3 s (one run:
   104.3 s); peak RSS 1.8 GB to 3.7 GB.
 - **`duckosm-rust quack --tile-zoom Z`: tile by tile with the map tiles of one zoom** (`TileSize::Zoom`), in place of the quadtree of
