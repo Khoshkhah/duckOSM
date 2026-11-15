@@ -1260,17 +1260,53 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
             done(g * TILES_AT_ONCE + j + 1, t, got);
         }
     }
-    // the browser: the temporary files of a small tile in memory, not in OPFS (each read and write of OPFS goes through
-    // JavaScript: on a Windows PC, about 11 s for each tile of Sweden)
+    // the browser: this thread reads the files of TILES_AT_ONCE small tiles from OPFS into memory, and the tiles run at
+    // the same time on the threads of the pool, with their temporary files in memory (the store of a thread of the pool:
+    // `spill::MemStore`); their rows go to `emit` in the order of the tiles. A large tile runs alone on this thread,
+    // with its temporary files in OPFS. (One tile at a time with OPFS: about 11 s for each tile of Sweden on a Windows PC.)
     #[cfg(target_arch = "wasm32")]
-    for (k, t) in todo.iter().enumerate() {
-        let got = if files.size(t.0) <= MEMORY_TILE {
-            let mem: crate::spill::StoreMaker = std::rc::Rc::new(|| Box::new(crate::spill::MemStore) as Box<dyn crate::spill::Store>);
-            crate::spill::with_temp_store(mem, || run(t, &mut |p| emit(t.1, p)))?
-        } else {
-            run(t, &mut |p| emit(t.1, p))?
-        };
-        done(k + 1, t, got);
+    {
+        let mut k = 0;
+        while k < todo.len() {
+            let small = |t: &(usize, Tile, crate::cutstream::CutCounts)| files.size(t.0) <= MEMORY_TILE;
+            if !small(&todo[k]) {
+                let got = run(&todo[k], &mut |p| emit(todo[k].1, p))?;
+                k += 1;
+                done(k, &todo[k - 1], got);
+                continue;
+            }
+            let group: Vec<_> = todo[k..].iter().take(TILES_AT_ONCE).take_while(|t| small(t)).collect();
+            let mut bytes = Vec::with_capacity(group.len());
+            for t in &group {
+                let mut b = Vec::with_capacity(files.size(t.0) as usize);
+                files.reader(t.0).read_to_end(&mut b).map_err(|e| format!("quack: the file of a tile: {e}"))?;
+                bytes.push(b);
+            }
+            let made: Vec<Result<(Vec<Vec<Feature>>, Counts), String>> = group
+                .par_iter()
+                .zip(&bytes)
+                .map(|(&&(_, tile, _), b)| {
+                    crate::util::quiet(|| {
+                        let owner = Owner { tile, relations: Some(&relations) };
+                        let mut parts = Vec::new();
+                        let got = features_owned(|| Ok(std::io::Cursor::new(&b[..])), budget, Some(&owner), |p| {
+                            parts.push(p);
+                            Ok(())
+                        })?;
+                        Ok((parts, got))
+                    })
+                })
+                .collect();
+            drop(bytes);
+            for (t, m) in group.into_iter().zip(made) {
+                let (parts, got) = m?;
+                for p in parts {
+                    emit(t.1, p)?;
+                }
+                k += 1;
+                done(k, t, got);
+            }
+        }
     }
     Ok(counts)
 }

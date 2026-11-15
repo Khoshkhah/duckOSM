@@ -53,7 +53,23 @@ pub fn raise_open_files() {
     }
 }
 
+thread_local! {
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with no [`step`] on this thread (a tile that runs on a helper thread: in the browser the step hook posts to
+/// the page from the thread of the run only).
+pub fn quiet<T>(f: impl FnOnce() -> T) -> T {
+    let old = QUIET.with(|q| q.replace(true));
+    let r = f();
+    QUIET.with(|q| q.set(old));
+    r
+}
+
 pub fn step(name: &str) {
+    if QUIET.with(|q| q.get()) {
+        return;
+    }
     if let Some(hook) = STEP_HOOK.get() {
         hook(name);
     }

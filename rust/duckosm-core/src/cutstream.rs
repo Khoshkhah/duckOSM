@@ -98,10 +98,10 @@ impl IdSet {
 }
 
 /// Read the blocks of `r` in batches, decode each batch on all threads with `per_block`, and give the results to
-/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false. Natively,
-/// a helper thread decodes the next batch while this thread gives the results of the batch before to `done` (the work
-/// of `done`, for example the writes of the tile cut, then does not stop the decoding). `done` always runs on this
-/// thread (in the browser a file in OPFS belongs to the thread that opened it).
+/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false. The threads
+/// of the pool decode the next batch while this thread gives the results of the batch before to `done` (the work of
+/// `done`, for example the writes of the tile cut, then does not stop the decoding). `done` always runs on this thread
+/// (in the browser a file in OPFS belongs to the thread that opened it).
 pub fn each_block<R: Read, T: Send>(
     r: &mut R,
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
@@ -140,17 +140,16 @@ pub fn each_block<R: Read, T: Send>(
     let mut out = decode(&batch)?;
     loop {
         let next = read(r)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let (decoded, more) = std::thread::scope(|scope| -> Result<_, String> {
-            let helper = (!next.is_empty()).then(|| scope.spawn(|| decode(&next)));
-            let more = give(std::mem::take(&mut out), &batch)?;
-            Ok((helper.map(|h| h.join().expect("the decoding thread")), more))
+        // the next batch is decoded on the threads of the pool while this thread gives the results (`in_place_scope`
+        // keeps this closure on this thread, also in the browser)
+        let mut decoded = None;
+        let more = rayon::in_place_scope(|scope| -> Result<bool, String> {
+            if !next.is_empty() {
+                let (slot, next) = (&mut decoded, &next);
+                scope.spawn(move |_| *slot = Some(decode(next)));
+            }
+            give(std::mem::take(&mut out), &batch)
         })?;
-        #[cfg(target_arch = "wasm32")]
-        let (decoded, more) = {
-            let more = give(std::mem::take(&mut out), &batch)?;
-            ((more && !next.is_empty()).then(|| decode(&next)), more)
-        };
         match decoded {
             Some(d) if more => {
                 out = d?;
