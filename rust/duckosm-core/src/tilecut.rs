@@ -824,6 +824,8 @@ struct Ways<'a> {
     /// the nodes in the border of other tiles (sorted (node, tile)): a way with such a node goes to those tiles too
     near: &'a [(i64, u32)],
     runs: BlockRuns,
+    /// the tile of the first node of each way (the owner tile of a relation is the one of its first member way)
+    firsts: BlockRuns,
     kept: Vec<(u32, Elem)>,
     multi: Vec<(i64, u32)>,
     outside: Vec<(i64, u32)>,
@@ -841,6 +843,7 @@ impl RawSink for Ways<'_> {
     fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
         widen(&mut self.spans[0], id);
         let refs: Vec<(i64, Option<u32>)> = refs.map(|n| (n, self.nodes.get(n))).collect();
+        self.firsts.push(id, refs.first().and_then(|r| r.1));
         self.tiles.clear();
         self.tiles.extend(refs.iter().filter_map(|r| r.1));
         self.tiles.sort_unstable();
@@ -1245,9 +1248,9 @@ impl Drop for TileFiles {
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
 /// junctions files and with no zlib in the tile files: quack by tiles (`crate::quack::features_by_tiles`) and the tile
 /// tables. `complete`: the types of the relations to complete with all their members (quack: `multipolygon` and
-/// `boundary`): with `once`, in one tile only, the first tile (in the order of `tiles`) with a member (quack by tiles: the
-/// boundary of a country has a million nodes and touches hundreds of tiles); else in each tile with a member (the tile
-/// tables: each tile alone makes all its rows).
+/// `boundary`): with `once`, in one tile only, its owner tile, the tile of the first node of its first member way (the
+/// rule of `quack::Owner`: the boundary of a country has a million nodes and touches hundreds of tiles); else in each tile
+/// with a member (the tile tables: the table of a tile has all its relations).
 pub fn cut_to_store<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
@@ -1376,7 +1379,7 @@ fn cut<R: Read + Seek + Send>(
     // 2. each way with a node inside to the way part of its tiles; the nodes that a tile needs from outside it (to a
     // temporary list); the relations, whole (to a temporary file)
     let ways_at = ways_at.unwrap_or(0);
-    let (mut ways, mut multi) = (Book::default(), Vec::new());
+    let (mut ways, mut firsts, mut multi) = (Book::default(), Book::default(), Vec::new());
     let mut outside = Writer::new(store).map_err(io)?;
     let mut uses = Writer::new(store).map_err(io)?;
     // the nodes outside the area are few (the border of the area): in memory
@@ -1391,6 +1394,7 @@ fn cut<R: Read + Seek + Send>(
                 nodes: &nodes,
                 near: &near,
                 runs: BlockRuns::new(),
+                firsts: BlockRuns::new(),
                 kept: Vec::new(),
                 multi: Vec::new(),
                 outside: Vec::new(),
@@ -1403,12 +1407,14 @@ fn cut<R: Read + Seek + Send>(
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
             blobs(s.rels, &mut rels, raw)?;
-            Ok((s.runs, by_tile(s.kept, raw)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
+            Ok(((s.runs, s.firsts), by_tile(s.kept, raw)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
         },
         |(runs, kept, mut m, (o, u, h), rels, spans), at| {
+            let (runs, first_runs) = runs;
             if spans[0] != EMPTY {
                 way_blocks.push((ways_at + at, spans[0]));
                 ways.append(runs.runs, runs.first.unwrap_or(false));
+                firsts.append(first_runs.runs, first_runs.first.unwrap_or(false));
             }
             if spans[1] != EMPTY {
                 rel_blocks.push((ways_at + at, spans[1]));
@@ -1430,6 +1436,7 @@ fn cut<R: Read + Seek + Send>(
     )?;
     parts.flush()?;
     ways.finish();
+    firsts.finish();
     tidy(&mut multi);
     // the home tile of each node outside the area: no tile holds it, so the first tile (in the order of the tiles) of the ways
     // at the node gets all these ways, and holds the node (its turns, its rows)
@@ -1533,7 +1540,15 @@ fn cut<R: Read + Seek + Send>(
     let mut waiting_bytes = 0usize;
     each_rel(&mut |r| {
         if multipolygons.binary_search(&r.id).is_ok() {
-            for t in tiles_in(&direct, r.id).take(if once { 1 } else { usize::MAX }) {
+            // with `once`, its owner tile only: the tile of the first node of its first member way (the rule of
+            // `quack::Owner`), or its first tile when the file does not have that node
+            let owner = r.members.iter().find(|m| m.1 == MemberType::Way).and_then(|m| firsts.get(m.0));
+            let mine: Vec<u32> = match (once, owner) {
+                (true, Some(t)) if tiles_in(&direct, r.id).any(|d| d == t) => vec![t],
+                (true, _) => tiles_in(&direct, r.id).take(1).collect(),
+                (false, _) => tiles_in(&direct, r.id).collect(),
+            };
+            for t in mine {
                 for &(m, ty, _) in &r.members {
                     match ty {
                         MemberType::Node => outside.push(&Pair, &(m, t as i64)).map_err(io)?,
@@ -1603,7 +1618,7 @@ fn cut<R: Read + Seek + Send>(
         err.map_or(Ok(()), Err).map_err(io)?;
     }
     // the indexes go: the next parts read lists of ids and tiles
-    drop((nodes, ways, multi));
+    drop((nodes, ways, firsts, multi));
     crate::util::step("tile cut 3: the relations and the members of the multipolygons");
     // 4. the nodes from outside the tiles and the member ways of the multipolygons, to the extra parts of their tiles
     let mut outside = sort_bytes(outside.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
