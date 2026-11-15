@@ -171,6 +171,12 @@ native run (`quack_diff --large`):
 | zoom 9 (32 tiles), not sorted | 41.7 s | 467 MiB |
 | zoom 9, sorted | 45.9 s | 695 MiB |
 
+France (5.1 GB) in Chromium, 324 tiles of at most 4 million nodes, not sorted: 582.3 s (the cut 267.7 s, the tiles
+306.6 s) and 1 004 MiB of WebAssembly memory, with the same numbers of rows as the native run. The GeoParquet file is
+12.2 GB: the browser compresses it with Snappy, the native run with zstd (9.7 GB). France sorted does not fit on the disk
+of the Mac mini in the browser yet: there, the runs of the sort are not compressed (no zstd in WebAssembly), about 20 GB
+more.
+
 Two faults of the browser came out on the way. In the browser, pass 4 collected all relations of the file in memory
 before it made them: now it makes them in batches of 4 million points. And the allocator of Studio's WebAssembly module
 kept each freed small block with the thread that freed it, so memory grew from tile to tile up to 4 GiB; Studio's
