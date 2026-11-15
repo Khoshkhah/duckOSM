@@ -464,6 +464,14 @@ impl Parts {
             Files::Store(c) => c.reader((tile, part)).map(|r| Box::new(r) as Box<dyn Read + Send>),
         }
     }
+    /// The bytes of a part (after [`Parts::flush`]).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn size(&self, tile: u32, part: &'static str) -> u64 {
+        match &self.files {
+            Files::Dir(dir) => std::fs::metadata(Self::path(dir, tile, part)).map_or(0, |m| m.len()),
+            Files::Store(c) => c.index.lock().expect("the index").get(&(tile, part)).map_or(0, |v| v.iter().map(|c| c.1).sum()),
+        }
+    }
     fn has(&self, tile: u32, part: &'static str) -> bool {
         match &self.files {
             Files::Dir(dir) => Self::path(dir, tile, part).exists(),
@@ -537,7 +545,6 @@ impl Read for ChunkReader<'_> {
 }
 
 /// A writer of a file of [`Chunks`]: each write is a chunk (put a `BufWriter` in front).
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct ChunkWriter<'a>(&'a Chunks, (u32, &'static str));
 
 impl Write for ChunkWriter<'_> {
@@ -557,6 +564,23 @@ type Blob = (i64, i64, u32, Vec<u8>);
 
 /// The bytes of a part, or none.
 type Src<'a> = Option<Box<dyn Read + Send + 'a>>;
+
+/// Where [`cut_to_sink`] gives the bytes of the tile files: (tile, the next bytes of its file).
+pub type Sink<'a> = &'a mut dyn FnMut(u32, &[u8]) -> Result<(), String>;
+
+/// A writer that gives its bytes to a [`Sink`] (put a `BufWriter` in front).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+struct SinkWriter<'a, 'b>(&'a mut Sink<'b>, u32);
+
+impl Write for SinkWriter<'_, '_> {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        (self.0)(self.1, b).map_err(io::Error::other)?;
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 impl<'a> Blobs<'a> {
     fn from(src: Src<'a>) -> Blobs<'a> {
@@ -674,7 +698,6 @@ fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extr
 
 /// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
 /// of the ids with no doubles. Gives the numbers of elements.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
     let srcs = KINDS.map(|(main, extra)| (parts.reader(tile, main), parts.reader(tile, extra)));
     let n = finish_from(srcs, out, timestamp, raw)?;
@@ -1181,7 +1204,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let tmp = std::env::temp_dir().join(format!("duckosm-tiles-{}-{}", std::process::id(), dir.as_os_str().len()));
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), false);
+    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), false, None);
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(cut?.0)
 }
@@ -1244,8 +1267,41 @@ pub fn cut_to_store<R: Read + Seek + Send>(
     };
     #[cfg(target_arch = "wasm32")]
     let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, once)?;
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, once, None)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
+}
+
+/// [`cut_to_store`], with each tile file given to `sink` (in pieces, tile by tile): the browser writes each tile into a
+/// file of its own, so that a worker for each tile can read it (`crate::quack::features_owned` in each worker).
+pub fn cut_to_sink<R: Read + Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    boundary: &Boundary,
+    tiles: &[Tile],
+    complete: &[&str],
+    once: bool,
+    #[allow(unused_mut)] mut sink: Sink,
+) -> Result<Vec<CutCounts>, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
+        Ok(cut(open, boundary, tiles, complete, 0.0, files, None, once, Some(&mut sink))?.0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let f = cut_to_store(open, boundary, tiles, complete, once)?;
+        let mut buf = vec![0u8; 1 << 20];
+        for i in 0..f.tiles.len() {
+            let mut r = f.reader(i);
+            loop {
+                let n = r.read(&mut buf).map_err(|e| format!("a tile file of the tile cut: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                sink(i as u32, &buf[..n])?;
+            }
+        }
+        Ok(f.tiles.iter().map(|t| t.1).collect())
+    }
 }
 
 /// The cut of [`cut_to_tiles`] and [`cut_to_store`]: the part files in `files`; the tile files into `dir` with their
@@ -1259,6 +1315,8 @@ fn cut<R: Read + Seek + Send>(
     files: Files,
     dir: Option<&Path>,
     once: bool,
+    // the browser: the tile files to this sink, not to the store (`cut_to_sink`)
+    #[allow(unused_mut, unused_variables)] mut sink: Option<&mut Sink>,
 ) -> Result<(Vec<CutCounts>, Parts), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let (timestamp, sorted) = header(open()?)?;
@@ -1611,6 +1669,21 @@ fn cut<R: Read + Seek + Send>(
         while (t as usize) < tiles.len() {
             let (mut group, mut bytes): (Vec<(u32, [(Vec<u8>, Vec<u8>); 3])>, usize) = (Vec::new(), 0);
             while (t as usize) < tiles.len() && (group.is_empty() || bytes < GROUP) {
+                let size: u64 = KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum();
+                if size as usize > GROUP && parts.has(t, "nodes") {
+                    // a large tile (a dense city at a low zoom): made from the store on this thread, so it does not need
+                    // all its parts in memory (Île-de-France at zoom 6: 2.4 GiB)
+                    if !group.is_empty() {
+                        break;
+                    }
+                    counts[t as usize] = match sink.as_deref_mut() {
+                        Some(sink) => finish_tile(&parts, t, SinkWriter(sink, t), timestamp, raw)?,
+                        None => finish_tile(&parts, t, ChunkWriter(chunks, (t, "tile")), timestamp, raw)?,
+                    };
+                    parts.remove(t, "junctions");
+                    t += 1;
+                    continue;
+                }
                 if parts.has(t, "nodes") {
                     let read = |p: &'static str| -> Result<Vec<u8>, String> {
                         let mut v = Vec::new();
@@ -1644,7 +1717,10 @@ fn cut<R: Read + Seek + Send>(
                 .collect();
             for ((t, _), b) in group.iter().zip(built) {
                 let (n, out) = b?;
-                chunks.append((*t, "tile"), &out).map_err(|e| format!("a tile file of the tile cut: {e}"))?;
+                match sink.as_deref_mut() {
+                    Some(sink) => sink(*t, &out)?,
+                    None => chunks.append((*t, "tile"), &out).map_err(|e| format!("a tile file of the tile cut: {e}"))?,
+                }
                 counts[*t as usize] = n;
             }
         }

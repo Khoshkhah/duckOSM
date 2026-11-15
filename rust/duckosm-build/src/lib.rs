@@ -1677,6 +1677,61 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
     Ok(n)
 }
 
+/// One tile of quack by tiles, alone (a worker of the browser for each tile, `docs/rust/quack.md`): the rows that tile
+/// `tile` owns, from the file of the tile that `open` opens (a file of `tilecut::cut_to_sink`, with each multipolygon and
+/// boundary whole in each tile with a member), as a GeoParquet part through `out`. No other tile is needed; the parts of
+/// all tiles, joined ([`quack_join_to`]), are the table of the whole file.
+pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
+    open: impl Fn() -> Result<R, String>,
+    tile: duckosm_core::tiles::Tile,
+    out: W,
+) -> Result<duckosm_core::quack::Counts, String> {
+    use rayon::prelude::*;
+    let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
+    let owner = duckosm_core::quack::Owner { tile, relations: None };
+    let mut n = duckosm_core::quack::Counts::default();
+    duckosm_core::quack::features_owned(open, duckosm_core::quack::BUDGET, Some(&owner), |rows| {
+        let mine: Vec<_> = rows.into_iter().filter(|f| f.owner).collect();
+        for f in &mine {
+            match f.feature_id.as_bytes()[0] {
+                b'n' => n.nodes += 1,
+                b'w' => n.ways += 1,
+                _ => n.relations += 1,
+            }
+        }
+        for b in mine.par_chunks(20_000).map(duckosm_parquet::quack::batch).collect::<Result<Vec<_>, _>>()? {
+            w.write(&b)?;
+        }
+        Ok(())
+    })?;
+    w.close()?;
+    Ok(n)
+}
+
+/// The join of the parts of [`quack_tile_to`] (each a GeoParquet file in memory) into one GeoParquet file through `out`;
+/// with `sort`, in QuackOSM's order. Each part has only the rows that its tile owns, so the join only copies them. Gives
+/// the number of rows.
+pub fn quack_join_to<W: Write + Send>(
+    parts: impl Iterator<Item = Result<Vec<u8>, String>>,
+    out: W,
+    sort: bool,
+) -> Result<usize, String> {
+    let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
+    let mut rows = duckosm_parquet::quack::Rows::new(sort);
+    for p in parts {
+        duckosm_parquet::quack::read_quack_bytes(p?, |b| {
+            if sort {
+                rows.push(duckosm_parquet::quack::features_of(&b)?)?;
+                Ok(())
+            } else {
+                w.write(&b)
+            }
+        })?;
+    }
+    rows.sorted(|b| w.write(&b))?;
+    w.close()
+}
+
 /// [`quack_to`] tile by tile (`duckosm_core::quack::features_by_tiles`, the tiles of `size`): the memory follows the size
 /// of a tile, not of the area. The same rows; without `sort`, in another order.
 pub fn quack_tiles_to<R: Read + std::io::Seek + Send, W: Write + Send>(

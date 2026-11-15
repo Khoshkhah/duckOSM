@@ -194,3 +194,16 @@ pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
         })
         .collect()
 }
+
+/// The batches of a GeoParquet file of quack in memory (a part of the join of quack by tiles in the browser).
+pub fn read_quack_bytes(b: Vec<u8>, mut f: impl FnMut(RecordBatch) -> Result<(), String>) -> Result<(), String> {
+    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(b))
+        .map_err(err)?
+        .with_batch_size(20_000)
+        .build()
+        .map_err(err)?;
+    for x in reader {
+        f(x.map_err(err)?)?;
+    }
+    Ok(())
+}

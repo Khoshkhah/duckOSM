@@ -59,3 +59,48 @@ fn monaco_tile_tables() {
     assert!(n.stored > n.rows, "the ways at the edges are in more than one table");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The flow of the browser's tile workers on Monaco: the cut gives each tile file to a sink, each tile alone makes its
+/// part (`quack_tile_to`), and the join of the parts equals the table of the whole file.
+#[test]
+fn monaco_tile_workers() {
+    use duckosm_core::quack::{tiles_of_file, TileSize, WORLD};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
+    let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
+    let mut whole: Vec<Row> = Vec::new();
+    duckosm_core::quack::features(open, 1 << 20, |rows| {
+        whole.extend(rows.into_iter().map(row));
+        Ok(())
+    })
+    .unwrap();
+    whole.sort();
+    let tiles = tiles_of_file(&open, TileSize::Nodes(2_000)).unwrap();
+    assert!(tiles.len() > 4, "small tiles");
+    let world = duckosm_core::boundary::Boundary::parse(WORLD).unwrap();
+    let mut files: Vec<Vec<u8>> = vec![Vec::new(); tiles.len()];
+    let counts = duckosm_core::tilecut::cut_to_sink(open, &world, &tiles, &["multipolygon", "boundary"], false, &mut |t, b| {
+        files[t as usize].extend_from_slice(b);
+        Ok(())
+    })
+    .unwrap();
+    let mut parts = Vec::new();
+    for (i, f) in files.iter().enumerate() {
+        if counts[i].nodes == 0 {
+            continue;
+        }
+        let mut part = Vec::new();
+        duckosm_build::quack_tile_to(|| Ok(std::io::Cursor::new(&f[..])), tiles[i], &mut part).unwrap();
+        parts.push(part);
+    }
+    let mut joined = Vec::new();
+    let n = duckosm_build::quack_join_to(parts.into_iter().map(Ok), &mut joined, false).unwrap();
+    assert_eq!(n, whole.len());
+    let mut got: Vec<Row> = Vec::new();
+    duckosm_parquet::quack::read_quack_bytes(joined, |b| {
+        got.extend(duckosm_parquet::quack::features_of(&b)?.into_iter().map(row));
+        Ok(())
+    })
+    .unwrap();
+    got.sort();
+    assert!(got == whole, "the join of the parts equals the whole file");
+}
