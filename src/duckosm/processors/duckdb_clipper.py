@@ -9,7 +9,7 @@ with no re-key for downstream projects.
 
 Assumes: the parent db is ATTACHed as `parent`, and the boundary polygon is loaded into
 `main.boundary` (column `geom`). Writes edges / nodes / edge_graph / turn_restrictions
-into the active schema. A ComponentFilter pass afterwards removes boundary stubs.
+into the active schema.
 """
 import logging
 

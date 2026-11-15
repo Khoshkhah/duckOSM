@@ -43,21 +43,9 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -
 
 ## The largest part
 
-The filter of the largest part (on by default, as in the whole build; `--no-component-filter` turns it off) needs the whole
-network, so it runs after the tile builds and before the union, with memory that does not grow with the area:
-
-1. Each tile build finds the connected parts of all its edges (its own and the copies of other tiles; not the private
-   edges): a union-find on their end nodes (`union::TileParts`). The tile that holds a node has all edges of the node, so
-   the part of each node and edge that it owns is complete. It writes small side files: the parts (own edges, smallest
-   node id), the part of each edge and node, and the links (the part at each node that another tile holds or shares).
-2. The links of all tiles, sorted by node, join the parts of the tiles: a union-find on the parts, not on the nodes
-   (`union::keep_largest_part`). The largest part has the most edges, then the smallest node id (the rule of the whole
-   build).
-3. Each tile (the tiles at the same time) drops the rows of the other parts: its edges, nodes and lanes, and the turns
-   and turn rules that use a dropped edge. The private edges stay, as in the whole build.
-
-Kentucky: equal to the whole build with the filter (2,224,823 of 2,261,507 edges stay). France: 25,546,974 of
-25,919,914 edges stay.
+Removed on 2026-11-14, with the component filter of the whole build (Kaveh: a road that does not connect to the main
+network is a real road). There is no step for it after the tile builds any more, and the tiles write no side files of
+their connected parts. Before, France kept 25,546,974 of 25,919,914 edges; now all of them stay.
 
 ## The bus routes
 
@@ -147,7 +135,7 @@ equal to the whole build.
 H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or an edge needs only its own points.
 
 - Each tile computes them from all its nodes and edges, before it keeps its own rows. It writes its own rows and the
-  border rows, as for the other tables. The largest part removes their rows with the rows of their edges and nodes.
+  border rows, as for the other tables.
 - A tile reads only the window of the DEM over its nodes and lines, 1 pixel more (`Dem::window`): the strips or the
   tiles of the GeoTIFF over the window. Before, each build read the whole raster. A pixel keeps the numbers of the
   whole raster, so the heights are the same.
@@ -157,6 +145,17 @@ H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or
 
 Kentucky (driving, `--h3-resolution 8`) and Monaco with FABDEM N43E007 (driving and walking, zoom 12, `--dem`):
 all tables are equal to the whole build. The whole build gives the same rows as before.
+
+## The raw tables in the tiles
+
+With `--raw`, each tile writes the raw rows of its file (`write_area_raw_split`): the rows of the tile go to `raw_*.parquet`, the
+border rows to `raw_*.border.parquet`, and the rows of other tiles nowhere, as the tables are written (`union::raw_classes`: a
+node by its place, a way by the place of its first node inside the area, a relation always a border row). Before, the tile
+wrote all rows and then read the files again to split them (`own_rows`): about half of the cost of raw in the tiles.
+
+Kentucky, driving, `--raw`, the old and the new build one after the other (two runs each): the tile builds 12.6 s -> 10.9 s,
+the CPU time 214 s -> 197 s; without raw the tile builds take about 9.2 s, so raw costs about half as before. The raw tables
+are equal to the whole build.
 
 ## The scheduler
 
@@ -169,6 +168,18 @@ above the line at most; Kentucky with `raw.*`: 73 MB + 22.7 × size. `<out>/tile
 each tile.
 
 More memory does not make the build faster: the time is in the work of the tiles, not in waiting for memory.
+
+On Linux, `duckosm-rust` sets the glibc memory thresholds to 128 KB (`mallopt`, `M_MMAP_THRESHOLD` and
+`M_TRIM_THRESHOLD`): a freed block of 128 KB or more goes back to the system. Without this, each thread keeps the large
+blocks that it freed, and a step uses much more memory than its live data. France (driving, `--raw`), same time:
+
+| Step | glibc default | 128 KB |
+|---|---|---|
+| Cut | 1310 MB | 1081 MB |
+| The largest tile process | 616 MB | 599 MB |
+| Bus routes | 1032 MB | 870 MB |
+| Levels | 1597 MB | 1071 MB |
+| Total time | 615 s | 575 s |
 
 The rows of a table are in the order of the tiles (each tile in its own order), not in one order for the whole file.
 
@@ -204,6 +215,26 @@ The tiles at the same time and the threads of each tile (France, 12 cores, befor
 
 The default is the cores / 2 tiles at a time, with 2 threads each.
 
-## Not yet in a build by tiles
+## The `.duckdb` file
 
-- The `.duckdb` output: the build by tiles writes GeoParquet files.
+The tile builds write only GeoParquet (the command takes `--format` away from their options). After the union, `tiles` loads
+the tables of the union into `{name}.duckdb`, as the whole build loads its files (`union::write_duckdb`,
+`duckosm_duckdb::write_database`), with `raw.*` when the union has the raw files (`write_raw_from_parquet`). The default is both
+formats, as in the whole build; with `--format duckdb` only, the Parquet files of the union go after the load. A whole build with
+a boundary and `--raw` now also has `raw.*` in its `.duckdb` file.
+
+The `.duckdb` file is written by a process of its own (`--only-duckdb`), so it starts with empty memory. DuckDB's
+`memory_limit` is half the budget (`--memory`), with no row order and 4 threads: DuckDB takes about 1 GB more than its limit.
+France, the tables of the union with `raw.*` (27 GB of files):
+
+| DuckDB settings | Time | Peak memory |
+|---|---|---|
+| no limit | 81 s | 15.5 GB (the main process, with the union before) |
+| limit 2 GB | 160 s | 5.2 GB |
+| limit 2 GB, no row order | 78 s | 3.6 GB |
+| limit 2 GB, no row order, 4 threads | 93 s | 3.0 GB |
+| limit 1 GB, no row order, 8 threads | 105 s | 2.2 GB |
+| **limit 1 GB, no row order, 4 threads** (the build, `--only-duckdb`) | **76 s** | **1.8 GB** |
+
+Kentucky, driving, `--format duckdb --raw`: the 23 tables of the two `.duckdb` files are equal (but the two with the time of the
+build), `raw.*` too (22.4 million rows). The load takes 10.7 s.

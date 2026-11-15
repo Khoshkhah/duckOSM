@@ -47,9 +47,9 @@ affect walking or cycling. The mode's value is kept in `edges.access`.
 
 **Private roads** (a driveway, a gated street, a company road) are built like every other road,
 with the same `edge_id` formula, then moved from `edges` to `private_edges`, which has the same
-columns except the H3 ones. The component filter doesn't prune `private_edges`. So routing, the graph of legal turns and every export use only roads you may use, and a
-road you can reach only through a private one is dropped with the
-[component filter](cleanup.md#component-filter). The maps still draw private roads, marked
+columns except the H3 ones. So routing, the graph of legal turns and every export use only roads you may use. A road
+that you can reach only through a private one stays in `edges` as a separate piece of the network (there is no
+[component filter](cleanup.md#component-filter)). The maps still draw private roads, marked
 ([Draw a map](../guides/draw-map.md)).
 
 **Bus lanes and bus-only roads** are cars' private roads too: in driving they are built, then moved to

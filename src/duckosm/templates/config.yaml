@@ -37,7 +37,7 @@ boundary:                              # give one of path / place / bbox / h3_ce
 # ---- CLIP behaviour (clean-up applied after selection / extraction) ---------
 clip:
   predicate: intersects                # 'within' | 'intersects' | 'centroid'  (edge-vs-boundary test)
-  keep_largest_component: true         # drop disconnected boundary stubs -> one clean network
+  # keep_largest_component: removed (2026-11-14): every road stays
   min_component_edges: 1               # also drop weak components smaller than this
   connectivity_rescue: true            # walking/cycling: join dangling path ends to the network (connector edges)
   connect_snap_m: 10.0                 # ... to the nearest node within this many metres

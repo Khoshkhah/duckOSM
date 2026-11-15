@@ -341,11 +341,11 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         }
     }
 
+    // the component filter is removed (2026-11-14): a road that does not connect to the main network is a real road
+    if clip.bool("keep_largest_component", false)? {
+        ignored.push("clip.keep_largest_component (the component filter is removed: every road stays)".to_string());
+    }
     let opts = Options {
-        // duckOSM runs the component filter only with a boundary and with the edge graph
-        keep_largest_component: has_boundary
-            && build_graph
-            && clip.bool("keep_largest_component", true)?,
         cycling_dismount: options.bool("cycling_dismount", true)?,
         merge_segments: options.bool("merge_segments", true)?,
         global_junctions: options.bool("global_junctions", true)?,
@@ -899,7 +899,7 @@ mod tests {
         assert!(!r.params.features && !r.params.sea);
         assert_eq!(r.params.h3_resolution, Some(8));
         assert_eq!(r.params.name, "m");
-        assert!(r.params.options.merge_segments && !r.params.options.keep_largest_component);
+        assert!(r.params.options.merge_segments);
     }
 
     #[test]
@@ -938,7 +938,7 @@ mod tests {
             .unwrap_err()
             .contains("boundary file not found"));
         let r = read(&c, true, false).unwrap();
-        assert!(r.params.boundary.is_none() && r.params.options.keep_largest_component);
+        assert!(r.params.boundary.is_none());
     }
 
     #[test]

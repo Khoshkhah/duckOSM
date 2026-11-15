@@ -17,8 +17,6 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct Options {
-    /// Keep only the largest connected part of the graph (duckOSM does this when a boundary is set).
-    pub keep_largest_component: bool,
     /// Cycling also gets footways and pedestrian streets, as edges that are walked (`dismount`).
     pub cycling_dismount: bool,
     /// Cut the roads at one set of junctions for all modes (duckOSM `options.global_junctions`, on by default).
@@ -52,7 +50,6 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Options {
-            keep_largest_component: true,
             cycling_dismount: true,
             merge_segments: true,
             global_junctions: true,
@@ -193,7 +190,7 @@ struct Fwd {
 
 /// The place of a forward edge in the one list of all edges that steps 1 to 7 used before part B2
 /// (docs/design/network_stream.md). The steps now read the edges one way at a time, from files, and `Pos` keeps the old
-/// order where it decides a tie (step 3, the largest part in step 10) or the order of a result (the edges, the virtual
+/// order where it decides a tie (step 3) or the order of a result (the edges, the virtual
 /// nodes, `edge_id_map`). The fields compare in their order:
 /// - after step 2b, the merged chains in the order (first edge, start, end, order of the walk), then the other edges in
 ///   the order of the cut;
@@ -840,16 +837,13 @@ pub fn build_network_files(
         return Err("calculate_costs needs process_speeds".to_string());
     }
 
-    crate::util::step("start of steps 8b2 to 10: The cycle type, the speeds, the");
-    // 8b2, 8c, 9 and the union-find of step 10, edge by edge:
+    crate::util::step("start of steps 8b2 to 9: The cycle type, the speeds, the");
+    // 8b2, 8c and 9, edge by edge:
     // - 8b2. Edges that are walked get the cycle_type 'dismount'.
     // - 8c. Speeds and travel times.
     // - 9. Move private roads, bus-only roads and pedestrian streets to private_edges.
-    // - 10. The connected parts of the other edges: a union-find on the index of the end nodes in `nodes`. The root of
-    //   a part is its smallest index, so its smallest node_id.
-    // Step 10 runs before the turn restrictions and the edge graph (duckOSM: after them, and it removes their rows of the
-    // dropped edges): the dropped edges are in other connected parts, so they share no node with the kept edges, and the
-    // rows of the kept edges are the same. Then the graph rows can go to a file while they are made.
+    // There is no filter of the connected parts (duckOSM's component filter): a road that does not connect to the main
+    // network is a real road, and it stays (Kaveh, 2026-11-14).
     let ecodec = &codec.0;
     let moved = |e: &Edge| {
         matches!(e.access.as_deref(), Some("private") | Some("bus"))
@@ -861,9 +855,6 @@ pub fn build_network_files(
             .map(|i| i as u32)
             .map_err(|_| format!("the edge end {n} is not a node"))
     };
-    let filter = opts.keep_largest_component;
-    let mut parent: Vec<u32> = if filter { (0..nodes.len() as u32).collect() } else { Vec::new() };
-    let mut count: Vec<u32> = if filter { vec![0; nodes.len()] } else { Vec::new() }; // the edges of a root
     let mut kept = Writer::new(store).map_err(io)?;
     let mut private = Writer::new(store).map_err(io)?;
     let rows = done.read(&codec).map_err(io)?.map(|f| f.map(|f| f.e));
@@ -879,41 +870,17 @@ pub fn build_network_files(
             private.push(ecodec, &e).map_err(io)?;
             continue;
         }
-        if filter {
-            let (a, b) = (find(&mut parent, node_index(e.source)?), find(&mut parent, node_index(e.target)?));
-            let (lo, hi) = (a.min(b), a.max(b));
-            if lo != hi {
-                parent[hi as usize] = lo;
-                count[lo as usize] += count[hi as usize];
-            }
-            count[lo as usize] += 1;
-        }
         kept.push(ecodec, &e).map_err(io)?;
     }
     let (kept, private) = (kept.finish().map_err(io)?, private.finish().map_err(io)?);
     stats.private_edges = private.len;
-    // 10. The largest part: the most edges, then the smallest root.
-    let largest = (filter && kept.len > 0).then(|| {
-        (0..nodes.len() as u32)
-            .filter(|&r| parent[r as usize] == r)
-            .max_by_key(|&r| (count[r as usize], std::cmp::Reverse(r)))
-            .unwrap()
-    });
-    drop(count);
 
     crate::util::step("start of the sort of the edges by edge_id");
     // The edges in the order of their edge_id (the order of the tables): the edge graph and the writers read them in this
-    // order. The edges of the other parts stay out (step 10), and the nodes that only they or the private edges use go.
+    // order. The nodes that only the private edges use go.
     let ecodec = { codec }.0; // the codec of the edges, with the table of the shared tags of all ways
-    let root: Vec<u32> = if largest.is_some() {
-        (0..nodes.len() as u32).map(|i| find(&mut parent, i)).collect()
-    } else {
-        Vec::new()
-    };
-    drop(parent);
     let mut used: Vec<bool> = vec![false; nodes.len()];
     let mut bad_end: Option<String> = None;
-    let n_kept = kept.len;
     let keep = |b: &[u8]| {
         let (s, t) = EdgeCodec::ends(b);
         let (a, b) = match (node_index(s), node_index(t)) {
@@ -923,9 +890,6 @@ pub fn build_network_files(
                 return false;
             }
         };
-        if largest.is_some_and(|r| root[a as usize] != r) {
-            return false;
-        }
         used[a as usize] = true;
         used[b as usize] = true;
         true
@@ -934,10 +898,8 @@ pub fn build_network_files(
     if let Some(e) = bad_end {
         return Err(e);
     }
-    drop(root);
-    stats.dropped_by_component_filter = n_kept - edges.len;
     let private_edges = spill::sort_bytes(private, EdgeCodec::edge_id, SORT_BUDGET, store).map_err(io)?;
-    if stats.private_edges > 0 || stats.dropped_by_component_filter > 0 {
+    if stats.private_edges > 0 {
         let mut i = 0;
         nodes.retain(|_| {
             i += 1;
@@ -1706,7 +1668,7 @@ fn connect_paths(
             t.count == 1
                 && PATH_CLASSES.contains(&t.hw.as_str())
                 && by_id.get(*n).is_some_and(|&i| {
-                    near.is_none_or(|(tile, m)| crate::tilecut::near_tile(tile, nodes[i].lon, nodes[i].lat, m))
+                    near.is_none_or(|(tile, m)| crate::tiles::near_tile(tile, nodes[i].lon, nodes[i].lat, m))
                 })
         })
         .map(|(n, t)| (*n, t))

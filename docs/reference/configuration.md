@@ -53,7 +53,7 @@ The area to build.
 
 | Key | Default | Flag | Does |
 |---|---|---|---|
-| `boundary.path` | none | `-b` | a GeoJSON polygon. With none of the four boundary keys, the whole PBF is built and the component filter doesn't run |
+| `boundary.path` | none | `-b` | a GeoJSON polygon. With none of the four boundary keys, the whole PBF is built |
 | `boundary.buffer_m` | `0` | | grow the boundary outwards by this many metres first (measured in the local UTM zone) |
 | `boundary.place` | none | | a place name, e.g. `Monaco`: looked up in the PBF's own borders, else on Nominatim, as [`duckosm boundary`](cli.md#boundary) does |
 | `boundary.bbox` | none | | a box, `[west, south, east, north]` in degrees |
@@ -71,8 +71,8 @@ The clean-up after the area is cut. Details: [Network clean-up](../concepts/clea
 | Key | Default | Does |
 |---|---|---|
 | `clip.predicate` | `intersects` | `duckdb` source only: which edges are copied. `intersects`: every edge that touches the area; `within`: only edges completely inside; `centroid`: edges whose middle point is inside. A `pbf` build always keeps whole ways |
-| `clip.keep_largest_component` | `true` | keep only the largest connected piece of each network. Runs only with a boundary and, for a `pbf` build, with `options.build_graph` |
-| `clip.min_component_edges` | `1` | with `keep_largest_component: false`, keep every piece with at least this many edges |
+| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md#component-filter)) |
+| `clip.min_component_edges` | `1` | no effect: the component filter is removed |
 | `clip.connectivity_rescue` | `true` | walking and cycling, `pbf` build: [join dangling path ends](../concepts/cleanup.md#connect-dangling-paths) to the nearest node. Runs with or without a boundary |
 | `clip.connect_snap_m` | `10.0` | the largest gap, in metres, that `connectivity_rescue` joins |
 
@@ -83,7 +83,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 
 | Key | Default | Flag | Does |
 |---|---|---|---|
-| `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns. The component filter needs it |
+| `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns |
 | `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res`. `duckosm-rust` writes the same values (flag: `--h3-resolution`) |
 | `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` (`duckosm-rust`: for the columns only) |
 | `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
@@ -115,8 +115,8 @@ Checks each mode at the end of the build. What each check means: [Check a build]
 |---|---|---|---|
 | `validation.enabled` | `false` | `true` | run the checks |
 | `validation.fail_on_error` | `true` | `true` | stop the build when a check fails; `false` only warns |
-| `validation.assert_single_component` | `true` | `true` | one connected network. Skipped when no component clean-up runs: no boundary, no edge graph, or `clip.keep_largest_component: false` with `clip.min_component_edges: 1` |
-| `validation.assert_no_stranded_named` | `true` | `true` | no named road outside the main network. Skipped when no component clean-up runs, as above |
+| `validation.assert_single_component` | `true` | `true` | one connected network. Always skipped: there is no component filter, so a network can have separate pieces |
+| `validation.assert_no_stranded_named` | `true` | `true` | no named road outside the main network. Always skipped, as above |
 | `validation.assert_unique_node_id` | `true` | | no two nodes with the same `node_id` |
 | `validation.assert_way_length_conserved` | `true` | | no part of an OSM way lost when it was split into edges. Skipped in a `duckdb` build |
 | `validation.warn_layer_without_structure` | `true` | `true` | warn (never fail) about edges with a `layer` but no `bridge` or `tunnel` tag |

@@ -1,12 +1,11 @@
 # Network clean-up
 
 OSM data has small gaps: a footway that ends a metre short of the road it meets, a road cut in two
-by the area's border. Two steps deal with them, then an optional check.
+by the area's border. One step deals with them, then an optional check.
 
 | Step | Modes | Runs when |
 |---|---|---|
 | [Connect dangling paths](#connect-dangling-paths) | walking, cycling | `clip.connectivity_rescue` (on), in a build from a PBF |
-| [Component filter](#component-filter) | all | a boundary is set, and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
 | [Validation](#validation) | all | `validation.enabled` (off; on in the config template) |
 
 ## Connect dangling paths
@@ -14,7 +13,7 @@ by the area's border. Two steps deal with them, then an optional check.
 A **dangling end** is a node that touches only one edge, where that edge is a `cycleway`, `footway`,
 `path`, `steps`, `pedestrian` or `track`. For each one, the build adds a straight **connector edge**
 to the nearest node within `clip.connect_snap_m` metres (default 10), in both directions. Without it,
-the path would be a separate piece and the component filter would drop it.
+the path would be a separate piece of the network.
 
 A connector edge has:
 
@@ -26,10 +25,10 @@ A connector edge has:
 
 Monaco:
 
-| Mode | Dangling ends joined | Connector edges added | Left after the component filter |
-|---|---|---|---|
-| walking | 254 | 508 | 490 |
-| cycling | 512 | 1,024 | 986 |
+| Mode | Dangling ends joined | Connector edges added |
+|---|---|---|
+| walking | 254 | 508 |
+| cycling | 512 | 1,024 |
 
 Limits: it joins the nearest *node*, not the nearest point of an edge, so a connector can be longer
 than the real gap. The distance ignores levels, so it can join a path to a road on a bridge above
@@ -37,27 +36,11 @@ it. An end with no node within the distance is not joined. Driving isn't repaire
 
 ## Component filter
 
-The filter keeps the largest connected piece of each network and drops the rest: stubs cut off by
-the border and small isolated pieces. It counts pieces by edges, and ignores direction (weakly
-connected). Dropped edges also leave `edge_graph`, `turn_restrictions`, `nodes` and `edge_id_map`.
-It works on the routable `edges` only: `private_edges` are not filtered.
-
-| Key | Default | Does |
-|---|---|---|
-| `clip.keep_largest_component` | `true` | keep only the largest piece |
-| `clip.min_component_edges` | `1` | also keep every other piece with at least this many edges |
-
-It runs only when a boundary is set (a whole country has real islands) and, for a PBF build, when
-the edge graph is built. It runs in clip builds too. Monaco:
-
-| Mode | Edges dropped | Pieces dropped |
-|---|---|---|
-| driving | 79 | 15 |
-| walking | 268 | 51 |
-| cycling | 225 | 35 |
-
-Because direction is ignored, the kept network can still hold a one-way dead end: an edge you can
-reach but not leave. Monaco, driving: 25 such edges.
+Removed on 2026-11-14. The filter kept only the largest connected piece of each network and dropped the rest. But a
+road that does not connect to the main network is still a real road, for example on an island, in a closed site, or a
+road that the area's border cut off. Every road now stays. The settings `clip.keep_largest_component` and
+`clip.min_component_edges`, and the option `--no-component-filter`, are still accepted so that old configs and scripts
+work, but they do nothing.
 
 ## Where the border cuts
 
@@ -90,5 +73,5 @@ build unless `validation.fail_on_error: false`. How to switch it on and what the
 | `assert_way_length_conserved` | no stretch of a kept OSM way is missing while an edge of the same way joins its two ends |
 | `warn_layer_without_structure` | a warning only: edges with `layer` ≠ 0 but no `bridge` or `tunnel` tag |
 
-The first two run only when the component filter ran. `assert_way_length_conserved` is skipped in a
+The first two are skipped: a network can have separate pieces (see [Component filter](#component-filter)). `assert_way_length_conserved` is skipped in a
 clip build, which has no `ways` table.

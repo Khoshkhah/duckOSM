@@ -13,9 +13,9 @@ features.water_polygons	88	01de79362896d29d51415b62536cfe7b
 raw.nodes	34326	b471c6ae02c0462653d1fa7be7bab24d
 raw.ways	5653	25e0c38621f2eada765f5df823527f65
 raw.relations	336	3cb86fcc8a63137ddf73c5280fdea2e0
-driving.nodes.h3	1719	c947f4ab8e5146bb377775b8de7a2da1
-driving.edges.h3	2765	63c2d83ce586e7d7ef94ee988b4e6885
-walking.nodes.h3	4462	76062fc02cf16bce409bcd2ed9a6d8b7
-walking.edges.h3	11752	33c79e49566424544facd54ce090265e
-cycling.nodes.h3	4537	1e7b94e62efbc21a1d6adc8a57dd4db4
-cycling.edges.h3	11124	4490d2a8b74d9fbea67199bdc4aed558
+driving.nodes.h3	1769	8513b936204cbf8f0c24926aa40a0e98
+driving.edges.h3	2844	19fa2c54261b2be9d46addc1e05aa3da
+walking.nodes.h3	4579	f466df879ce85667d69c9e1e89e48d44
+walking.edges.h3	11934	850d675ed2970625cef6000ca8514620
+cycling.nodes.h3	4638	f135e371108725e771cc495b94307cd2
+cycling.edges.h3	11293	385cdeef7480323a276e7132336ba838

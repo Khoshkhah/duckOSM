@@ -58,8 +58,8 @@ struct Cli {
     /// Do not join the chains of edges that are one road (duckOSM option merge_segments).
     #[arg(long, conflicts_with = "config")]
     no_merge_segments: bool,
-    /// Do not keep only the largest connected part of the graph.
-    #[arg(long, conflicts_with = "config")]
+    /// No effect: the component filter is removed (every road stays). Kept so that old scripts work.
+    #[arg(long, hide = true, conflicts_with = "config")]
     no_component_filter: bool,
     /// Do not build edge_graph and turn_permission (duckOSM option build_graph: false).
     #[arg(long, conflicts_with = "config")]
@@ -374,6 +374,10 @@ struct TilesCli {
     /// goes back to the system before the tile builds).
     #[arg(long, hide = true)]
     only_cut: bool,
+    /// Only the .duckdb file of the tables in the output folder (the command writes it as its own process, after the union, so its
+    /// memory starts from nothing).
+    #[arg(long, hide = true)]
+    only_duckdb: bool,
     /// The options of the build of each tile, after `--` (as for `duckosm-rust FILE`, for example `-- --modes driving --raw`).
     #[arg(last = true)]
     build: Vec<String>,
@@ -388,9 +392,13 @@ fn tiles(args: &[String]) -> Result<(), String> {
     // goes to the tile builds
     let global = ["--no-component-filter"];
     let mut opts: Vec<String> = cli.build.iter().filter(|a| !global.contains(&a.as_str())).cloned().collect();
-    if let Some(i) = opts.iter().position(|a| a == "--levels") {
-        opts.drain(i..(i + 2).min(opts.len()));
+    // the levels run after the union, and a tile writes only GeoParquet (the .duckdb file comes after the union)
+    for flag in ["--levels", "--format", "-f"] {
+        while let Some(i) = opts.iter().position(|a| a == flag) {
+            opts.drain(i..(i + 2).min(opts.len()));
+        }
     }
+    opts.retain(|a| !a.starts_with("--levels=") && !a.starts_with("--format="));
     // the options of the user, as given (the union reads the filter of the largest part, the bus routes and the levels from
     // them)
     let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
@@ -399,28 +407,44 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let (_, _, p) = params(&Cli::try_parse_from(&all).map_err(|e| e.to_string())?)?;
     let t0 = std::time::Instant::now();
     let dir = cli.out.join("tiles");
+    #[cfg(feature = "duckdb")]
+    if cli.only_duckdb {
+        // DuckDB keeps to the memory budget of the build by tiles (its default is 80 % of the memory): its limit is half the
+        // budget, because it takes about 1 GB more than its limit (duckosm_duckdb::open)
+        let mut p = p.clone();
+        p.memory_limit = p.memory_limit.or(Some(format!("{}MB", parse_size(&cli.memory)? >> 21)));
+        duckosm_build::union::write_duckdb(&cli.out, &p)?;
+        return Ok(());
+    }
     if cli.only_cut {
         // the multipolygons of each tile are complete only when a part of the build reads them
         let multipolygons = p.raw || p.features || p.building_faces;
         duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, multipolygons, duckosm_build::union::border_m(&p), &dir)?;
         return Ok(());
     }
-    // the cut, as a process of this program: its memory goes back to the system when it ends
+    // the cut and the .duckdb file, each as a process of this program: its memory goes back to the system when it ends
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let ok = std::process::Command::new(&exe)
-        .arg("tiles")
-        .arg(&cli.region)
-        .arg("--boundary")
-        .arg(&cli.boundary)
-        .arg("-o")
-        .arg(&cli.out)
-        .args(["--zoom", &cli.zoom.to_string(), "--only-cut", "--"])
-        .args(&cli.build)
-        .status()
-        .is_ok_and(|s| s.success());
-    if !ok {
-        return Err("the cut to the tiles failed".into());
-    }
+    let step = |flag: &str| -> Result<(f64, u64), String> {
+        let t = std::time::Instant::now();
+        let child = std::process::Command::new(&exe)
+            .arg("tiles")
+            .arg(&cli.region)
+            .arg("--boundary")
+            .arg(&cli.boundary)
+            .arg("-o")
+            .arg(&cli.out)
+            .args(["--zoom", &cli.zoom.to_string(), "--memory", &cli.memory, flag, "--"])
+            .args(&cli.build)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let (ok, peak) = wait_peak(child);
+        if !ok {
+            return Err(format!("the step {flag} of the build by tiles failed"));
+        }
+        Ok((t.elapsed().as_secs_f64(), peak >> 20))
+    };
+    let (secs, peak) = step("--only-cut")?;
+    eprintln!("tiles: cut: {secs:.1} s, peak {peak} MB");
     // the tiles with a file
     let mut list: Vec<duckosm_build::Tile> = Vec::new();
     for e in std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
@@ -522,7 +546,21 @@ fn tiles(args: &[String]) -> Result<(), String> {
             eprintln!("tiles: {name}: {rows} rows");
         }
     }
-    eprintln!("tiles: union in {:.1} s; total {:.1} s", t2.elapsed().as_secs_f64(), t0.elapsed().as_secs_f64());
+    eprintln!("tiles: union and the steps after it: {:.1} s", t2.elapsed().as_secs_f64());
+    #[cfg(feature = "duckdb")]
+    if p.duckdb {
+        let (secs, peak) = step("--only-duckdb")?;
+        eprintln!("tiles: the .duckdb file: {secs:.1} s, peak {peak} MB");
+        if !p.geoparquet {
+            // only the .duckdb file was asked for: the files of the union go
+            for e in std::fs::read_dir(&cli.out).map_err(|e| e.to_string())?.flatten() {
+                if e.path().extension().is_some_and(|x| x == "parquet") {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+    }
+    eprintln!("tiles: total {:.1} s", t0.elapsed().as_secs_f64());
     if !cli.keep_tiles {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -780,6 +818,15 @@ mod heap {
 }
 
 fn main() {
+    // glibc: blocks of 128 KB and more go back to the system when they are freed (128 KB is the start value of glibc; this
+    // stops its increase). Without this, each thread keeps the large blocks that it freed: the levels step alone on France
+    // used 950 MB with a live heap of 520 MB. The build by tiles of France (--raw) with it, same time: levels 1597 -> 1071
+    // MB, cut 1310 -> 1081 MB, bus routes 1032 -> 870 MB, the largest tile process 616 -> 599 MB. 1 MB gave larger tiles.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 << 10);
+        libc::mallopt(libc::M_TRIM_THRESHOLD, 128 << 10);
+    }
     #[cfg(feature = "heap-probe")]
     heap::report("start");
     #[cfg(feature = "heap-probe")]
@@ -850,7 +897,6 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
         p.infer_sidewalks = !cli.no_sidewalk_inference;
         p.bus_routes = !cli.no_bus_routes;
         p.options = NetworkOptions {
-            keep_largest_component: !cli.no_component_filter,
             cycling_dismount: !cli.no_cycling_dismount,
             merge_segments: !cli.no_merge_segments,
             global_junctions: !cli.no_global_junctions,

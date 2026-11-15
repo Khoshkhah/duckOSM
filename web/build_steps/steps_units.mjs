@@ -51,7 +51,7 @@ assert.equal(slug("x".repeat(80)).length, 48);
 const yaml = settingsYaml();
 assert.ok(yaml.startsWith("modes: [driving, walking, cycling]\noptions:\n"), yaml);
 for (const o of OPTIONS) assert.ok(yaml.includes(o.key), o.key);
-assert.ok(yaml.includes("  sea: false\n") && yaml.includes("  build_features: true\n") && yaml.endsWith("clip:\n  keep_largest_component: true\n"), yaml);
+assert.ok(yaml.includes("  sea: false\n") && yaml.includes("  build_features: true\n") && !yaml.includes("clip:") && !yaml.includes("keep_largest"), yaml);
 const changed = settingsYaml({ modes: ["walking"], build_features: false, sea: true });
 assert.ok(changed.startsWith("modes: [walking]\n") && changed.includes("  build_features: false\n") && changed.includes("  sea: overture\n"), changed);
 assert.throws(() => settingsYaml({ modes: [] }), /at least one network/);

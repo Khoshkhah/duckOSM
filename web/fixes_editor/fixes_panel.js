@@ -1736,7 +1736,9 @@ export async function initFixesPanel(ctx) {
   // roadstyle picks the nearest road for a click within a few pixels of it, also when the click is on a building. The Road and Turn tabs ignore such a click
   // (a building is picked in the Building tab). The point of the press comes first: the dashboard's click handler runs before the page's own.
   let pressed = null;
-  for (const ev of ["mousedown", "touchstart"]) map.on(ev, (e) => { pressed = { p: e.lngLat, t: performance.now() }; });
+  // `dot`: the press is on a junction dot. Found at the press, not later: a slow machine can redraw the dots (chooseJunction) before the road's event comes.
+  const onDot = (e) => !!map.getLayer("fix-turn-js-pt") && map.queryRenderedFeatures(e.point, { layers: ["fix-turn-js-pt"] }).length > 0;
+  for (const ev of ["mousedown", "touchstart"]) map.on(ev, (e) => { pressed = { p: e.lngLat, t: performance.now(), dot: onDot(e) }; });
   async function onBuilding(p) {
     if (!p || performance.now() - p.t > 2000 || !built("features", "buildings")) return false;       // a press that is older is not this select
     return (await safe(`SELECT 1 FROM features.buildings WHERE ST_Intersects(geom, ST_Point(${p.p.lng}, ${p.p.lat})) LIMIT 1`)).length > 0;
@@ -1748,11 +1750,9 @@ export async function initFixesPanel(ctx) {
     if (!turns && current !== "road") return;                            // a building or a node is picked by its own click
     const id = Number(roadIdOfRow(e.detail?.id));
     if (!Number.isSafeInteger(id) || id <= 0) return;
+    // a click on a junction dot of the road chooses the junction (chooseJunction), it does not pick the road under the dot
+    if (turns && ((pressed?.dot && performance.now() - pressed.t < 2000) || performance.now() - dotAt < 500)) return;
     if (await onBuilding(pressed)) return;
-    if (turns) {                                                       // a click on a junction dot of the road chooses the junction (chooseJunction), it does not pick the road under the dot.
-      await new Promise((r) => setTimeout(r, 60));                       // The dot's click and this event come in either order: wait for the dot's click
-      if (performance.now() - dotAt < 500 || (pressed && map.queryRenderedFeatures(map.project(pressed.p), { layers: ["fix-turn-js-pt"] }).length)) return;
-    }
     if (turns) { $("fix-from").value = id; findTurns(id); }
     else select("road", "way", id);
   });

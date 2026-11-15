@@ -276,10 +276,8 @@ pub fn write_tables_owned<W: Write + Send>(
     let n = mode.name();
     let oc = pq::EdgeCols::of(mode, opts);
     let err = |e: std::io::Error| format!("temporary file of the network step: {e}");
-    // the class of each edge at its source node (its own rows, its lanes) and at its target node (its turns); the connected
-    // parts of the tile, for the filter of the largest part after the union
+    // the class of each edge at its source node (its own rows, its lanes) and at its target node (its turns)
     let (mut classes, mut targets) = (duckosm_core::util::FxHashMap::default(), duckosm_core::util::FxHashMap::default());
-    let mut parts = union::TileParts::default();
     for private in [false, true] {
         let name = if private { format!("private_edges_{n}") } else { format!("edges_{n}") };
         let class = |e: &Edge| owner.map_or(MINE, |o| o.node(e.source, e.geometry[0]));
@@ -304,18 +302,10 @@ pub fn write_tables_owned<W: Write + Send>(
                 let e = e.map_err(err)?;
                 classes.insert(e.edge_id, class(&e));
                 if let Some(o) = owner {
-                    let at_end = o.node(e.target, *e.geometry.last().expect("a line"));
-                    targets.insert(e.edge_id, at_end);
-                    if !private {
-                        let at_start = o.node(e.source, e.geometry[0]);
-                        parts.add(e.edge_id, [(e.source, at_start != MINE), (e.target, at_end != MINE)], at_start == MINE);
-                    }
+                    targets.insert(e.edge_id, o.node(e.target, *e.geometry.last().expect("a line")));
                 }
             }
         }
-    }
-    if owner.is_some() {
-        parts.write(&mut file, n)?;
     }
     // the tables `ways` and `way_nodes` are written by the network step (`ways_out` of build_network_files)
     match owner {
@@ -1188,7 +1178,7 @@ pub fn run<W: Write + Send>(
             // dangling paths at its nodes needs them; their rows belong to other tiles
             let border = p.tile.map(|t| (t, union::border_m(p))).filter(|b| b.1 > 0.0);
             let near = |q: &(f64, f64)| {
-                border.is_some_and(|(t, m)| boundary.in_area(q.0, q.1) && duckosm_core::tilecut::near_tile(t, q.0, q.1, m))
+                border.is_some_and(|(t, m)| boundary.in_area(q.0, q.1) && duckosm_core::tiles::near_tile(t, q.0, q.1, m))
             };
             ways.retain(|w| {
                 w.refs.iter().any(|n| coords.get(n).is_some_and(|q| boundary.contains(q.0, q.1) || near(&q)))
@@ -1613,7 +1603,16 @@ pub fn run<W: Write + Send>(
                 net.sort_by_key(|w| w.id);
                 let patch = RawPatch { fixed: r, read, net };
                 let files = [file("raw_nodes.parquet")?, file("raw_ways.parquet")?, file("raw_relations.parquet")?];
-                let n = duckosm_parquet::write_area_raw(open, &patch, files, 64 << 20)?;
+                // a tile of a build by tiles: its own rows, the border rows apart, the rows of other tiles nowhere (no second pass)
+                let classes = |t: usize, r: &arrow_array::RecordBatch| union::raw_classes(owner.as_ref().expect("a tile"), t, r);
+                let split = match &owner {
+                    Some(_) => Some((
+                        [file("raw_nodes.border.parquet")?, file("raw_ways.border.parquet")?, file("raw_relations.border.parquet")?],
+                        &classes as duckosm_parquet::RawClasses,
+                    )),
+                    None => None,
+                };
+                let (n, _) = duckosm_parquet::write_area_raw_split(open, &patch, files, split, 64 << 20)?;
                 sum.raw = Some((n[0], n[1], n[2]));
             }
             _ => {
@@ -2002,10 +2001,15 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 if let Some(s) = &source {
                     s.close();
                 }
-                duckosm_duckdb::write_network_tables(&db, &pq_dir, &names)?;
+                duckosm_duckdb::write_network_tables(&db, &pq_dir, &names, p.memory_limit.as_deref())?;
                 sum.raw = raw_rows;
             } else {
-                duckosm_duckdb::write_database(&db, &pq_dir, &names)?;
+                duckosm_duckdb::write_database(&db, &pq_dir, &names, p.memory_limit.as_deref())?;
+                if p.raw {
+                    // a build with a boundary: raw.* of the area from its files (next to the .duckdb file)
+                    let dir = sum.files.iter().find(|(k, _)| k == "raw_nodes").and_then(|(_, f)| f.parent().map(Path::to_path_buf));
+                    duckosm_duckdb::write_raw_from_parquet(&db, dir.as_deref().unwrap_or(&pq_dir), p.memory_limit.as_deref())?;
+                }
             }
             log.step("write duckdb");
             if p.features {

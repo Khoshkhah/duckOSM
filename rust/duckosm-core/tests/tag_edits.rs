@@ -17,7 +17,6 @@ fn sidewalk_tag_edit_changes_the_walking_type() {
     let mut ways = pbf::read_ways(&path).unwrap();
     let coords = pbf::read_coords(&path, &ways).unwrap();
     let opts = Options {
-        keep_largest_component: false,
         cycling_dismount: true,
         merge_segments: false,
         global_junctions: false,
