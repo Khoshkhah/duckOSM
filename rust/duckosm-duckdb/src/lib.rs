@@ -17,12 +17,18 @@ CREATE OR REPLACE MACRO main.edge_id_hash_v1(osm_id, source, target, is_reverse)
     (hash(osm_id::BIGINT, source::BIGINT, target::BIGINT, is_reverse::BOOLEAN) >> 1)::BIGINT;
 ";
 
-/// A connection to `db` with DuckDB's `memory_limit` (as DuckDB writes it, for example "2GB"; None: DuckDB's default, 80 % of
-/// the memory). A build by tiles gives its memory budget: the load of France's `raw.*` took 15 GB without a limit.
+/// A connection to `db` with DuckDB's `memory_limit` (as DuckDB writes it, for example "1GB"; None: DuckDB's defaults, 80 % of
+/// the memory). With a limit, the load also keeps no row order and uses 4 threads: DuckDB takes about 1 GB more than its limit
+/// for its threads and the reading of the Parquet files (France, the tables of a build by tiles with `raw.*`: limit 2 GB, 5.2 GB;
+/// no row order, 3.6 GB; and 4 threads, 3.0 GB; limit 1 GB, 1.8 GB).
 fn open(db: &Path, memory_limit: Option<&str>) -> Result<Connection, String> {
     let con = Connection::open(db).map_err(|e| e.to_string())?;
     if let Some(m) = memory_limit {
-        con.execute_batch(&format!("SET memory_limit = '{}';", m.replace('\'', "''"))).map_err(|e| e.to_string())?;
+        con.execute_batch(&format!(
+            "SET memory_limit = '{}'; SET preserve_insertion_order = false; SET threads = 4;",
+            m.replace('\'', "''")
+        ))
+        .map_err(|e| e.to_string())?;
     }
     Ok(con)
 }

@@ -212,5 +212,18 @@ the tables of the union into `{name}.duckdb`, as the whole build loads its files
 formats, as in the whole build; with `--format duckdb` only, the Parquet files of the union go after the load. A whole build with
 a boundary and `--raw` now also has `raw.*` in its `.duckdb` file.
 
+The `.duckdb` file is written by a process of its own (`--only-duckdb`), so it starts with empty memory. DuckDB's
+`memory_limit` is half the budget (`--memory`), with no row order and 4 threads: DuckDB takes about 1 GB more than its limit.
+France, the tables of the union with `raw.*` (27 GB of files):
+
+| DuckDB settings | Time | Peak memory |
+|---|---|---|
+| no limit | 81 s | 15.5 GB (the main process, with the union before) |
+| limit 2 GB | 160 s | 5.2 GB |
+| limit 2 GB, no row order | 78 s | 3.6 GB |
+| limit 2 GB, no row order, 4 threads | 93 s | 3.0 GB |
+| limit 1 GB, no row order, 8 threads | 105 s | 2.2 GB |
+| **limit 1 GB, no row order, 4 threads** (the build, `--only-duckdb`) | **76 s** | **1.8 GB** |
+
 Kentucky, driving, `--format duckdb --raw`: the 23 tables of the two `.duckdb` files are equal (but the two with the time of the
 build), `raw.*` too (22.4 million rows). The load takes 10.7 s.

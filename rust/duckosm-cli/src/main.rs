@@ -325,9 +325,10 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let dir = cli.out.join("tiles");
     #[cfg(feature = "duckdb")]
     if cli.only_duckdb {
-        // DuckDB keeps to the memory budget of the build by tiles (its default is 80 % of the memory)
+        // DuckDB keeps to the memory budget of the build by tiles (its default is 80 % of the memory): its limit is half the
+        // budget, because it takes about 1 GB more than its limit (duckosm_duckdb::open)
         let mut p = p.clone();
-        p.memory_limit = p.memory_limit.or(Some(format!("{}MB", parse_size(&cli.memory)? >> 20)));
+        p.memory_limit = p.memory_limit.or(Some(format!("{}MB", parse_size(&cli.memory)? >> 21)));
         duckosm_build::union::write_duckdb(&cli.out, &p)?;
         return Ok(());
     }
