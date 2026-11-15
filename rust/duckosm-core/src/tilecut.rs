@@ -1225,44 +1225,52 @@ fn take_blocks<R: Read + Seek>(
     kinds[kind] = true;
     let n = 2 * rayon::current_num_threads();
     let (mut i, mut pos) = (0, None);
-    while i < blocks.len() {
-        let mut batch: Vec<(Vec<u8>, Vec<(i64, u32)>)> = Vec::with_capacity(n);
-        while i < blocks.len() && batch.len() < n {
-            let (at, (lo, hi)) = blocks[i];
-            i += 1;
-            while pairs.next_if(|x| x.as_ref().is_ok_and(|x| x.0 < lo)).is_some() {}
-            let mut want = Vec::new();
-            while let Some(x) = pairs.next_if(|x| x.as_ref().is_ok_and(|x| x.0 <= hi)) {
-                let (id, t) = x.map_err(io)?;
-                want.push((id, t as u32));
+    // the reads, the decoding and the writes to the parts at the same time (cutstream::pipeline)
+    crate::cutstream::pipeline(
+        || {
+            let mut batch: Vec<(Vec<u8>, Vec<(i64, u32)>)> = Vec::with_capacity(n);
+            while i < blocks.len() && batch.len() < n {
+                let (at, (lo, hi)) = blocks[i];
+                i += 1;
+                while pairs.next_if(|x| x.as_ref().is_ok_and(|x| x.0 < lo)).is_some() {}
+                let mut want = Vec::new();
+                while let Some(x) = pairs.next_if(|x| x.as_ref().is_ok_and(|x| x.0 <= hi)) {
+                    let (id, t) = x.map_err(io)?;
+                    want.push((id, t as u32));
+                }
+                if let Some(Err(_)) = pairs.peek() {
+                    return Err(io(pairs.next().expect("peeked").expect_err("an error")));
+                }
+                want.dedup();
+                if want.is_empty() {
+                    continue;
+                }
+                if pos != Some(at) {
+                    r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
+                }
+                let b = read_block(r)?.ok_or("a block after the end of the file")?;
+                pos = Some(at + b.len() as u64);
+                batch.push((b, want));
             }
-            if let Some(Err(_)) = pairs.peek() {
-                return Err(io(pairs.next().expect("peeked").expect_err("an error")));
+            Ok((!batch.is_empty()).then_some(batch))
+        },
+        |batch: &Vec<(Vec<u8>, Vec<(i64, u32)>)>| {
+            batch
+                .par_iter()
+                .map_init(Buffers::default, |buf, (b, want)| {
+                    let mut s = Take { wanted: want, out: Vec::new(), all: All::default() };
+                    decode_block(b, kinds, buf, &mut s)?;
+                    by_tile(s.out, raw)
+                })
+                .collect::<Result<Vec<_>, _>>()
+        },
+        |out, _| {
+            for (t, bytes) in out.into_iter().flatten() {
+                parts.add(t, part, bytes)?;
             }
-            want.dedup();
-            if want.is_empty() {
-                continue;
-            }
-            if pos != Some(at) {
-                r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
-            }
-            let b = read_block(r)?.ok_or("a block after the end of the file")?;
-            pos = Some(at + b.len() as u64);
-            batch.push((b, want));
-        }
-        let out: Vec<Vec<(u32, Vec<u8>)>> = batch
-            .par_iter()
-            .map_init(Buffers::default, |buf, (b, want)| {
-                let mut s = Take { wanted: want, out: Vec::new(), all: All::default() };
-                decode_block(b, kinds, buf, &mut s)?;
-                by_tile(s.out, raw)
-            })
-            .collect::<Result<_, _>>()?;
-        for (t, bytes) in out.into_iter().flatten() {
-            parts.add(t, part, bytes)?;
-        }
-    }
-    Ok(())
+            Ok(true)
+        },
+    )
 }
 
 /// The start of a junctions file: the name and the version of the format. Then one row for each node outside the tile that
