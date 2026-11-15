@@ -6,14 +6,14 @@
  "tables": {
   "cycling.edge_graph": {
    "columns": {
-    "cost": "b45fe8d657e625fc4799d2de92186183",
-    "from_edge": "a3b46fda89160834ca1cfc5eb78d37fb",
-    "to_edge": "dabb75ca9eb1bdc8cd4ba8dfd5c38ec0",
-    "uses": "1482f80c41495e35640ecfba44f580e6",
-    "via_edge": "dabb75ca9eb1bdc8cd4ba8dfd5c38ec0"
+    "cost": "07b38448cdfc1e9ce35c86127d4b4a1b",
+    "from_edge": "dcbdc69008812ac7051ca5dcd426d011",
+    "to_edge": "d2bd5c309bc378aab4598fe1b1d456ba",
+    "uses": "1b329377c833643e1247313ac8f811f3",
+    "via_edge": "d2bd5c309bc378aab4598fe1b1d456ba"
    },
-   "n": 31024,
-   "rows": "971e1e6d3519b73caf04648f1e5e2bbb"
+   "n": 31398,
+   "rows": "f96ecc06af3e287a18298a761279ae21"
   },
   "cycling.edge_id_map": {
    "columns": {
@@ -28,39 +28,39 @@
   },
   "cycling.edges": {
    "columns": {
-    "access": "af7327259450a67fca7729293cab775b",
-    "bridge": "bdc68a8ff6495655e3ab329da8e45af0",
-    "cost_s": "f896cb002f7dcf64df00e9e6b622a9ff",
-    "cycle_type": "79d0252abc3968aac4c4088735d0896e",
-    "dismount": "813c674f64e4dd48dece686f2f9646aa",
-    "edge_id": "1dfe5e6ed0d7a9dfa6610cc41726bd77",
-    "edge_ref": "1d5ecacccc7f2a77b91dc907e2e11134",
-    "highway": "07cdb6c33a166d40d59ac9feeaa86ee3",
-    "is_reverse": "271accc26ad1ea6fd0c0fa3dc99e8ba7",
-    "junction": "77b7173a5f659a752ebaf31c311b936c",
-    "lanes": "1a70a5681738eafd58f6f3e8fcd0920b",
-    "layer": "e051ca5f5b79acf26a36480cc89fff10",
-    "length_m": "c18c4b7ba6db8aefb6415c8421107f4e",
-    "maxspeed_kmh": "4f48e7c841e6159b4f98cab695a25f57",
-    "name": "e865ad08684c166b31750344a5b5e39a",
-    "oneway": "daa40836b43770edcf5223b8d05e9d63",
-    "osm_id": "6370486d4b3ee33de685e15910f1881b",
-    "refs": "a3966371ef99bde1079f6d51741a0f03",
-    "service": "758d51648ef454b88218ef980fcf31ca",
-    "source": "41a880c21ac2c06dce9dc865b714f0ab",
-    "surface": "c7493bf55978e94a7e8dee3c0a779469",
-    "target": "d5584453787dec22bd41ec085838fb6c",
-    "tunnel": "a8ac4d43ed95572f2f3fd0e76a87f3c2"
+    "access": "a67317d3f07e2f078b00722dd48e6ba7",
+    "bridge": "3338382c9b883bbd1dad3792b33e0e5c",
+    "cost_s": "ed5dd138560b7c18adec59b39233ce0b",
+    "cycle_type": "e1e4d16b4a23e16703b3235c58d36e0d",
+    "dismount": "9de2a0c9e93c3f301e6392ccaba66c51",
+    "edge_id": "885e82315039777d0cedee9fbcef142f",
+    "edge_ref": "0cbbb2b50b004f502500901d583a8b78",
+    "highway": "2695e553cb0d1cf3d744d6cf448cbdc8",
+    "is_reverse": "02c70f3243db9ac39f709d40f7b7e2a2",
+    "junction": "dfadf56c93363f98fd06b519a4c743ea",
+    "lanes": "6ab27aeee194eac09f59ac8c61395eb9",
+    "layer": "6f158e93ea566cdfbead9b45f11e7da9",
+    "length_m": "4a2c110bbd020fef70d24dc6dd05aa6e",
+    "maxspeed_kmh": "1fb95c32c4f3ea18fc0e4a918e044dd2",
+    "name": "db862ac82b62f9156d6dd9bbdd9916f4",
+    "oneway": "dd6c003039fd14fb110539ab26f38310",
+    "osm_id": "8bbad5aa5d34260987c2c3e66bed227f",
+    "refs": "65adc9a88cf42c91692ba7aa5c39dd7a",
+    "service": "29b9bab28c72b7c6810ba9e5f1bf24d0",
+    "source": "b767bb9ca78d1115ea29359e6e149d9a",
+    "surface": "0fc5e98732f76bcbf2e6dc8ee01ceb06",
+    "target": "bdb1e52402cdb48c801f84edfb346710",
+    "tunnel": "dd624291c6b9251d095e0400e2a645ea"
    },
-   "n": 11125,
-   "rows": "86733168acc49275ba8c37d7ca0f32fe"
+   "n": 11294,
+   "rows": "7088dd5b117e0850c2a43268521c299f"
   },
   "cycling.nodes": {
    "columns": {
-    "node_id": "1a90ded3e3a0a6f5822a280d4ebdf9ee"
+    "node_id": "41f54b50ed4ed50537de46f6c0e05be0"
    },
-   "n": 4537,
-   "rows": "1a90ded3e3a0a6f5822a280d4ebdf9ee"
+   "n": 4638,
+   "rows": "41f54b50ed4ed50537de46f6c0e05be0"
   },
   "cycling.private_edges": {
    "columns": {
@@ -145,14 +145,14 @@
   },
   "driving.edge_graph": {
    "columns": {
-    "cost": "f3221b86d99cf4666a98fedff8d26ce3",
-    "from_edge": "e56945b2832b984a110478a4851660cd",
-    "to_edge": "96aa6d1db3c2be8d574144a5d31d4e19",
-    "uses": "7a52214c5f5e99e6a8913f01ccf73fc0",
-    "via_edge": "96aa6d1db3c2be8d574144a5d31d4e19"
+    "cost": "0c30eee735d638facf394333d2419b83",
+    "from_edge": "fc7c7d13a02f711f00536bbe21522b9c",
+    "to_edge": "def39142b331ebde35d5e04b38ee3cf1",
+    "uses": "55063deba05bd166c2055808cc0ebaca",
+    "via_edge": "def39142b331ebde35d5e04b38ee3cf1"
    },
-   "n": 6574,
-   "rows": "ac660955df1a21a2a4d94e2600e4f00a"
+   "n": 6772,
+   "rows": "861baac02876e23bb49693ed41f436e9"
   },
   "driving.edge_id_map": {
    "columns": {
@@ -167,50 +167,50 @@
   },
   "driving.edges": {
    "columns": {
-    "access": "27fbeabe55ecb80fa0d6215dd5760829",
-    "bridge": "b53d1e822d8dc696551cc4bae6c30c31",
-    "cost_s": "43357e457d3997caba270828da0ce095",
-    "edge_id": "fc910cdf2dd8b74b478b5131ffa65970",
-    "edge_ref": "2ec805b6f4f297c21000fab5cd238b1f",
-    "highway": "208e16d18c7c5a734f88636247f5d394",
-    "is_reverse": "d3e0749e0b3bf70ff87c1bcc0d1565c7",
-    "junction": "ef651d955163851d94c041c03cf5a3fe",
-    "lanes": "7004baa2c6820a4660ccc5f028cc9ba3",
-    "layer": "e39057e925c6a7ba4e38b2074ed33434",
-    "length_m": "7b5dbd804bb8eb11cd2a7a6917377810",
-    "maxspeed_kmh": "b643e9e6e9bc0c6fd26286b6dae8b16e",
-    "name": "4e85315c23904c89320d4cbd820b2780",
-    "oneway": "28f460f63389d6fd3f13d65b5b6ae573",
-    "osm_id": "39fbd8c766d0260bc8908a22df480cb0",
-    "refs": "535f8200f38cddcf70013cba4ba2f8a4",
-    "service": "6565e6a214237ec965c4e8af98344954",
-    "source": "a91804fa2938ca4de5ca8ccdd67d33c8",
-    "surface": "d5d6568bef446056a0aa10abed159b60",
-    "target": "00ae1cc1fcd1329feee911e5d00f64c1",
-    "tunnel": "dedce2e1c7f949e3ce17db086eddd856"
+    "access": "d0ab348dea59d2b3e75f986590345feb",
+    "bridge": "d668451586537511e62455ba680c72ef",
+    "cost_s": "4548bf69b78771b7fdec62ab69c12572",
+    "edge_id": "514cfdb4756ee07227cd19d47fe3a33d",
+    "edge_ref": "39a89a2826c97d55e0b376af83d59ed0",
+    "highway": "7ef78b032a80ae29bc85f4e28d54b37b",
+    "is_reverse": "650282d52b59ec0bdb2d7a125d557c7e",
+    "junction": "16fcccfc417b1429555e1d890410bc9b",
+    "lanes": "1f823ea63aa41be085dc321a882f5cc8",
+    "layer": "e50b4951ea2f261550de08ed6edfefea",
+    "length_m": "af71d997cde8e997950dbc04ea1789c4",
+    "maxspeed_kmh": "7eda39130667a9596cf03e6be2ca427e",
+    "name": "65bb56d3b4cf1326b6341ce8f7d0e1a2",
+    "oneway": "5073226f42a1dc6dec891cf4aeb3daa1",
+    "osm_id": "7ec665b203879b661d516f0672c7ed44",
+    "refs": "ad12fcf1e9008cf434cc6533521d37cb",
+    "service": "2ba0aa0821ce393b60f9c444eb7d0db8",
+    "source": "51ce963de598326faf42920043da2044",
+    "surface": "5d0a36c5ddf8afe5731d9a8f18bd4363",
+    "target": "5ca3fdc8543850cdad725a07a49081a0",
+    "tunnel": "cb1cfc383e45d08ef0f71795c3c75036"
    },
-   "n": 2766,
-   "rows": "54a347f7b63143e47e3c4412e02b8bcb"
+   "n": 2845,
+   "rows": "83cb1c8d8d44b62fdaae176d7b8ff434"
   },
   "driving.lane_profile": {
    "columns": {
-    "edge_id": "f6f0957e0f9c78f4195d6d2a72f93532",
-    "lane_num": "e291b56408a50a924dbf71ae9ef17b29",
-    "source": "c5d7e7d3311454cb687f5a2beece9a35",
-    "turn": "5ea5fa4496befe52e6de394bb10b0b3c",
-    "use": "211355c9285855f7d30b1b8a9d28ca2b",
-    "width_m": "6a02cd914d3cb82cc183324d4819f729",
-    "width_source": "d1053e2c2cf2b274f5ac93a7ae61a377"
+    "edge_id": "8c0e41d2c041668e9cb0037476bd81a7",
+    "lane_num": "dcd63f89f4c31b5491221108c25ec3f4",
+    "source": "25302ef14f7bc7fd568590d701606e80",
+    "turn": "f0f6fc1f84093b8ef7f5e57b91392b82",
+    "use": "bacd8705492c7aac5550701fbbfd4350",
+    "width_m": "7b68030bf13ac3da6bf225d63768d0b3",
+    "width_source": "8f2ecf9baee0215472d28ad265ea8788"
    },
-   "n": 3245,
-   "rows": "1fdfc6b5fb18f6ee0d77c63f767ce645"
+   "n": 3324,
+   "rows": "679f75394d0c6ad979233f509656b80a"
   },
   "driving.nodes": {
    "columns": {
-    "node_id": "d3e094a1b90669d8eada69e36cd8a87c"
+    "node_id": "dd76a1d3d97001b2d2563454c8da9c35"
    },
-   "n": 1719,
-   "rows": "d3e094a1b90669d8eada69e36cd8a87c"
+   "n": 1769,
+   "rows": "dd76a1d3d97001b2d2563454c8da9c35"
   },
   "driving.private_edges": {
    "columns": {
@@ -476,22 +476,22 @@
     "azimuth_deg": "9dfddcb9f39fd642ceabb4c78f980e49",
     "building_id": "366d031829055acd345a9cdf33393743",
     "building_type": "3c1248cb900a711f8920d34b998ded54",
-    "computed_type": "afeb9e39d025664ac5d832c2ea61e3aa",
-    "distance_m": "517f7222d8a6c02b6244be58748cb7c5",
+    "computed_type": "88a0bdc626cf9133b8527394f8c5b4c0",
+    "distance_m": "8f44ab5819798dacc8fa461a25276342",
     "door": "5eafd41c84bb0b86a322510981511025",
     "edited": "5d33c79ca21f78bc416870a64604c426",
     "face_index": "dc0bcdd94a7badfe43f240f68074d7b4",
-    "face_type": "606cf0597d9951bc87832b4219c9205a",
+    "face_type": "d608df539ce0e903d5761c8000231865",
     "from_node": "074938717a845196c18e245132103820",
     "length_m": "99bce54f52771932ab80857d920ed86e",
-    "street_edge_id": "fd2b4fef70bd4ecd94beb5ac01d4876a",
-    "street_name": "cacc10a2325bc10eb06578a819dd0211",
-    "street_osm_id": "3de63986987e18b68af606832a3cee76",
+    "street_edge_id": "60e046b586acaa272d70f99865c5194d",
+    "street_name": "352da1359084e819a58d3cf84277fcb4",
+    "street_osm_id": "4b1c260fed520d53b6390fa763271e1e",
     "to_node": "074938717a845196c18e245132103820",
-    "type_reason": "eaad3247532adab91055f1d0649673f6"
+    "type_reason": "5f75e40f8216e7b7367fe1b08f22dadd"
    },
    "n": 10857,
-   "rows": "84fa718dac2fc459f87a49246cd7e602"
+   "rows": "4855d3a743f9cdc82299a277e3c2c4da"
   },
   "main.building_info": {
    "columns": {
@@ -521,14 +521,14 @@
   },
   "walking.edge_graph": {
    "columns": {
-    "cost": "94086207155ac7faa9607b4c6013d154",
-    "from_edge": "9e914b82e0139b9345b3f0ed11f9f632",
-    "to_edge": "6c1e734803a17b27e4134a772a4276b0",
-    "uses": "59fc36aa9811b6153b8ffa0e838b1ffe",
-    "via_edge": "6c1e734803a17b27e4134a772a4276b0"
+    "cost": "6f72a4861cd9b0d2018926393feb27a9",
+    "from_edge": "040d7534754d724da40bf72b313d425c",
+    "to_edge": "de7b923daddcffdeb85be6adb2fd907c",
+    "uses": "2e6d7f9e63f1c48c6aec5fd99390eded",
+    "via_edge": "de7b923daddcffdeb85be6adb2fd907c"
    },
-   "n": 34769,
-   "rows": "fc465fb2d8478994e4855bf313d84eac"
+   "n": 35139,
+   "rows": "9233958b76c4d7546326628d6411e8f7"
   },
   "walking.edge_id_map": {
    "columns": {
@@ -543,38 +543,38 @@
   },
   "walking.edges": {
    "columns": {
-    "access": "dd53cfeef87cf7c410934c88bb02adb1",
-    "bridge": "7375961ecc0b3f45b12a8904c9ce73e6",
-    "cost_s": "55653a9d2aacd0f91ee50da7a06aa6df",
-    "edge_id": "45f9a742c92c943ae858fe8f3bc1b489",
-    "edge_ref": "f2f3b750401afbcc3a985cfd1c5ea262",
-    "highway": "c09f10d7bc97b7ba24d668f50de11370",
-    "is_reverse": "05c957594f726f3133ca2ce060c03f09",
-    "junction": "684438057b7af5d97a8ee377ed6d9e62",
-    "lanes": "4f3e2aabccda261143677349e913d693",
-    "layer": "9d4c0a29be3b3a6b161079dfaa06bac3",
-    "length_m": "b8cbd1a155294bcef43cd6bb5b1cbc2b",
-    "maxspeed_kmh": "85a598d6eec54d665925bd3f2836ade9",
-    "name": "18ef9a587fc4645d8b74a55df30f3979",
-    "oneway": "d0e9b1f04f2c5232d8db099aa18d4ea3",
-    "osm_id": "73ec2a155134b5c3dd0733cb08846132",
-    "refs": "a9fffb276a480b430ba91c9d4b76453c",
-    "service": "af5c321068e7612a2de5b7e2d1bc5130",
-    "source": "fdd86fbe7a0b08e0bc44ea45be3753ac",
-    "surface": "eba3f49a288a493d6deb3cec7597c3c8",
-    "target": "746e1933253cf9f2d586c4143aad3d75",
-    "tunnel": "59d3090f123f202a410674c0de864ff8",
-    "walk_type": "b56fc41ffe9db5ab294980a239724f5e"
+    "access": "40a6d87b0828406a3a311ff2e4234fad",
+    "bridge": "e17dab5f7f2d1e7190bef948afd410f0",
+    "cost_s": "42d2f4bba6e78869ed8b0c97f745c83c",
+    "edge_id": "eb5099bcc254105b9ea6cf6716764b16",
+    "edge_ref": "f770b59e750e846765f283e2b6522aa1",
+    "highway": "b6320c770367eabc8a670d23d175cee7",
+    "is_reverse": "037a224ace90205a80567849fdf1890a",
+    "junction": "b1cf3c376e532c74ee9307958db872c8",
+    "lanes": "c65b2aa851be56c4244ffa00f966ff55",
+    "layer": "dd97f50d80a250b4bf66936407fb4c71",
+    "length_m": "8e6c4355a30b87510e0dac3e9d0e0168",
+    "maxspeed_kmh": "1fcf9680545bd4bfdeafe8fc212fa1c7",
+    "name": "3bcfdb6ddb5d117a31bbc5f16268ec86",
+    "oneway": "abb7c4a0a6082cc20392560f5540e9ef",
+    "osm_id": "a81f167a3bb692797d1ca8918ddba206",
+    "refs": "6dc6cf7fe84d632e226609ef4746d7be",
+    "service": "fe8320932f255ef2843ea43b5aafbc67",
+    "source": "4f7c1207139a82af5726ca32944d4cec",
+    "surface": "1e064aaab3b1fca2b3d4cea415c2fe25",
+    "target": "3e4f0a6a60cec761a3835cc2b13c9fb1",
+    "tunnel": "fb8792a2e41402db7130b81c8be013ba",
+    "walk_type": "d23b7b23deee82196d98c3373f3b3934"
    },
-   "n": 11753,
-   "rows": "eacfb545a185fdeeafaf92c4a06860cc"
+   "n": 11935,
+   "rows": "6649a79f6495da73dc13dd2a0cb3eec3"
   },
   "walking.nodes": {
    "columns": {
-    "node_id": "bdba236f692d4b86d4a7190baeec3a5f"
+    "node_id": "f05f7b2a0fd8ddea933242d3f239d01c"
    },
-   "n": 4462,
-   "rows": "bdba236f692d4b86d4a7190baeec3a5f"
+   "n": 4579,
+   "rows": "f05f7b2a0fd8ddea933242d3f239d01c"
   },
   "walking.private_edges": {
    "columns": {

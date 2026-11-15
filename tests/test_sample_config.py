@@ -29,17 +29,17 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     for mode in ("driving", "walking", "cycling"):
         assert con.execute(f"SELECT count(*) FROM {mode}.edges").fetchone()[0] > 100
     assert con.execute("SELECT count(*) FROM driving.edge_graph").fetchone()[0] > 0
-    # the boundary makes the build drop disconnected fragments: one network per mode
-    for mode in ("driving", "walking", "cycling"):
-        rows = con.execute(f"SELECT source, target FROM {mode}.edges").fetchall()
-        parent = {}
-        def find(x):
-            while parent.setdefault(x, x) != x:
-                x = parent[x]
-            return x
-        for s_, t in rows:
-            parent[find(s_)] = find(t)
-        assert len({find(s_) for s_, _ in rows}) == 1, mode
+    # there is no component filter (removed 2026-11-14): a road that does not connect to the main network stays, so the
+    # driving network of Monaco has more than one connected piece
+    rows = con.execute("SELECT source, target FROM driving.edges").fetchall()
+    parent = {}
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            x = parent[x]
+        return x
+    for s_, t in rows:
+        parent[find(s_)] = find(t)
+    assert len({find(s_) for s_, _ in rows}) > 1
     # a crossing is cut where it crosses a road in every mode, even in walking, which doesn't have
     # that road (a secondary without sidewalks): the same pieces, so the same edge_ids (way 586268007)
     ids = {m: {r[0] for r in con.execute(f"SELECT edge_id FROM {m}.edges WHERE osm_id = 586268007").fetchall()}
