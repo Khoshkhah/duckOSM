@@ -22,6 +22,6 @@ duckosm-edit = { path = "../duckosm-edit", optional = true }   # duckosm-rust ed
 # duckosm-rust quack --threads: the size of the thread pool (the rayon of duckosm-core)
 rayon = "1.12"
 
-# duckosm-rust tiles: the peak memory of each tile process (wait4)
+# duckosm-rust tiles: the peak memory of each tile process (wait4); the glibc thresholds of the memory (mallopt)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

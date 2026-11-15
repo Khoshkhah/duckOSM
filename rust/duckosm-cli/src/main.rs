@@ -739,6 +739,15 @@ mod heap {
 }
 
 fn main() {
+    // glibc: blocks of 128 KB and more go back to the system when they are freed (128 KB is the start value of glibc; this
+    // stops its increase). Without this, each thread keeps the large blocks that it freed: the levels step alone on France
+    // used 950 MB with a live heap of 520 MB. The build by tiles of France (--raw) with it, same time: levels 1597 -> 1071
+    // MB, cut 1310 -> 1081 MB, bus routes 1032 -> 870 MB, the largest tile process 616 -> 599 MB. 1 MB gave larger tiles.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 << 10);
+        libc::mallopt(libc::M_TRIM_THRESHOLD, 128 << 10);
+    }
     #[cfg(feature = "heap-probe")]
     heap::report("start");
     #[cfg(feature = "heap-probe")]
