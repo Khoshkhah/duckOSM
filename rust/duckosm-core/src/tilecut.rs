@@ -732,6 +732,22 @@ fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extr
 
 /// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
 /// of the ids with no doubles. Gives the numbers of elements.
+/// The output of a tile file on a thread of the pool: each write goes through the channel to the thread that writes the
+/// files (`finish_from` writes through a buffer of 1 MiB).
+#[cfg(target_arch = "wasm32")]
+struct Chan(u32, std::sync::mpsc::SyncSender<(u32, Vec<u8>)>);
+
+#[cfg(target_arch = "wasm32")]
+impl Write for Chan {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        self.1.send((self.0, b.to_vec())).map_err(|_| io::Error::other("the writer of the tile files stopped"))?;
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
     let srcs = KINDS.map(|(main, extra)| (parts.reader(tile, main), parts.reader(tile, extra)));
     let n = finish_from(srcs, out, timestamp, raw)?;
@@ -1755,7 +1771,51 @@ fn cut<R: Read + Seek + Send>(
     // the pool make the files of the tiles in memory at the same time, and this thread writes them (one at a time on this
     // thread: 6 of the 12 s of the cut of Île-de-France on one core)
     #[cfg(target_arch = "wasm32")]
-    let counts: Vec<CutCounts> = {
+    let counts: Vec<CutCounts> = if let Files::Store(chunks @ Chunks { file: None, .. }) = &parts.files {
+        // all the parts in memory: each tile on a thread of the pool, all the tiles at the same time; the threads give
+        // the bytes of the tile files to this thread through a channel with a limit, and this thread writes them (a large
+        // tile on one thread took 28 of the 50 s of the cut of Sweden at zoom 6)
+        let threads = rayon::current_num_threads().max(1);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<(u32, Vec<u8>)>(2 * threads);
+        let counts: Vec<std::sync::Mutex<Result<CutCounts, String>>> =
+            (0..tiles.len()).map(|_| std::sync::Mutex::new(Ok(CutCounts::default()))).collect();
+        let mut failed: Option<String> = None;
+        rayon::in_place_scope(|scope| {
+            for t in 0..tiles.len() as u32 {
+                let (tx, parts, counts) = (tx.clone(), &parts, &counts);
+                scope.spawn(move |_| {
+                    let r = if parts.has(t, "nodes") {
+                        finish_tile(parts, t, Chan(t, tx), timestamp, raw)
+                    } else {
+                        for part in ["ways", "extra-nodes", "extra-ways", "relations"] {
+                            parts.remove(t, part);
+                        }
+                        Ok(CutCounts::default())
+                    };
+                    parts.remove(t, "junctions");
+                    *counts[t as usize].lock().expect("no panic") = r;
+                });
+            }
+            drop(tx);
+            // the bytes of all the tiles, until the last thread is done (after an error, read on, so no thread waits)
+            for (t, b) in rx {
+                if failed.is_some() {
+                    continue;
+                }
+                let r = match sink.as_deref_mut() {
+                    Some(sink) => sink(t, &b),
+                    None => chunks.append((t, "tile"), &b).map_err(|e| format!("a tile file of the tile cut: {e}")),
+                };
+                if let Err(e) = r {
+                    failed = Some(e);
+                }
+            }
+        });
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        counts.into_iter().map(|c| c.into_inner().expect("no panic")).collect::<Result<_, String>>()?
+    } else {
         const GROUP: usize = 256 << 20;
         let Files::Store(chunks) = &parts.files else { return Err("the tile cut in the browser has no store".into()) };
         let mut counts = vec![CutCounts::default(); tiles.len()];
