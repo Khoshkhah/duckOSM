@@ -197,10 +197,11 @@ pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
 
 /// The batches of a GeoParquet file of quack in memory (a part of the join of quack by tiles in the browser).
 /// The quack parts (GeoParquet files of [`QuackWriter`], each one in memory) as one file, in their order, with no sort:
-/// each row group of each part is copied as bytes ([`BigFile`]), with no decode and no new encode (the join of the
+/// each row group of each part is copied as bytes ([`crate::par_writer::BigFile`]), with no decode and no new encode (the join of the
 /// browser: 23.8 s for Sweden on a laptop when it decoded and encoded each row again). The schema and the key-value
 /// metadata (the GeoParquet `geo` and the Arrow schema) are those of the first part. Gives the number of rows.
 pub fn concat_quack<W: Write + Send>(parts: impl Iterator<Item = Result<Vec<u8>, String>>, out: W) -> Result<usize, String> {
+    use crate::par_writer::BigFile;
     let (mut out, mut file) = (Some(out), None::<BigFile<W>>);
     for p in parts {
         if file.is_none() {
@@ -210,96 +211,13 @@ pub fn concat_quack<W: Write + Send>(parts: impl Iterator<Item = Result<Vec<u8>,
     }
     match (file, out) {
         (Some(f), _) => {
-            let rows = f.rows as usize;
+            let rows = f.rows() as usize;
             f.close()?;
             Ok(rows)
         }
         // no part: an empty table
         (None, Some(out)) => QuackWriter::new(out)?.close(),
         (None, None) => unreachable!("the file takes the output"),
-    }
-}
-
-/// A Parquet file made of the row groups of other Parquet files (each one whole, in memory), copied as bytes. It counts
-/// the place in the file with 64 bits: the writer of parquet (`TrackedWrite`) counts it in a `usize`, which in the
-/// browser (wasm32) wraps at 4 GiB, so the footer of a larger file had wrong offsets (France: DuckDB said
-/// "TProtocolException: Invalid data"). The page indexes and the bloom filters are not copied. The first file gives the
-/// schema, the key-value metadata and the version.
-pub struct BigFile<W: Write> {
-    out: W,
-    at: u64,
-    file: Option<parquet::file::metadata::FileMetaData>,
-    groups: Vec<parquet::file::metadata::RowGroupMetaData>,
-    rows: i64,
-}
-
-impl<W: Write> BigFile<W> {
-    pub fn new(mut out: W) -> Result<Self, String> {
-        out.write_all(b"PAR1").map_err(err)?;
-        Ok(BigFile { out, at: 4, file: None, groups: Vec::new(), rows: 0 })
-    }
-
-    /// Copy the row groups of the Parquet file `bytes`.
-    pub fn append(&mut self, bytes: bytes::Bytes) -> Result<(), String> {
-        use parquet::file::metadata::{ParquetMetaDataReader, RowGroupMetaData};
-        let meta = ParquetMetaDataReader::new().parse_and_finish(&bytes).map_err(err)?;
-        if self.file.is_none() {
-            self.file = Some(meta.file_metadata().clone());
-        }
-        for rg in meta.row_groups() {
-            let start = self.at;
-            let mut cols = Vec::with_capacity(rg.columns().len());
-            for c in rg.columns() {
-                let (from, len) = c.byte_range();
-                self.out.write_all(&bytes[from as usize..(from + len) as usize]).map_err(err)?;
-                let shift = self.at as i64 - from as i64;
-                cols.push(
-                    c.clone()
-                        .into_builder()
-                        .set_data_page_offset(c.data_page_offset() + shift)
-                        .set_dictionary_page_offset(c.dictionary_page_offset().map(|o| o + shift))
-                        .set_index_page_offset(c.index_page_offset().map(|o| o + shift))
-                        .set_offset_index_offset(None)
-                        .set_offset_index_length(None)
-                        .set_column_index_offset(None)
-                        .set_column_index_length(None)
-                        .set_bloom_filter_offset(None)
-                        .set_bloom_filter_length(None)
-                        .build()
-                        .map_err(err)?,
-                );
-                self.at += len;
-            }
-            let g = RowGroupMetaData::builder(rg.schema_descr_ptr())
-                .set_num_rows(rg.num_rows())
-                .set_total_byte_size(rg.total_byte_size())
-                .set_column_metadata(cols)
-                .set_file_offset(start as i64)
-                .set_ordinal(self.groups.len() as i32)
-                .build()
-                .map_err(err)?;
-            self.rows += rg.num_rows();
-            self.groups.push(g);
-        }
-        Ok(())
-    }
-
-    /// Write the footer; gives the output back.
-    pub fn close(mut self) -> Result<W, String> {
-        use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataWriter};
-        let f = self.file.take().ok_or("a Parquet file with no input file")?;
-        let file = FileMetaData::new(
-            f.version(),
-            self.rows,
-            f.created_by().map(str::to_string),
-            f.key_value_metadata().cloned(),
-            f.schema_descr_ptr(),
-            f.column_orders().cloned(),
-        );
-        let meta = ParquetMetaData::new(file, std::mem::take(&mut self.groups));
-        ParquetMetaDataWriter::new(&mut self.out, &meta).finish().map_err(err)?;
-        self.out.flush().map_err(err)?;
-        Ok(self.out)
     }
 }
 
