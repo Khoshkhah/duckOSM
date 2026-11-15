@@ -1780,8 +1780,12 @@ fn cut<R: Read + Seek + Send>(
         let counts: Vec<std::sync::Mutex<Result<CutCounts, String>>> =
             (0..tiles.len()).map(|_| std::sync::Mutex::new(Ok(CutCounts::default()))).collect();
         let mut failed: Option<String> = None;
+        // the largest tiles first (a thread outside the pool gives the jobs to the pool in this order), so that no thread
+        // makes a large tile alone at the end
+        let mut order: Vec<u32> = (0..tiles.len() as u32).collect();
+        order.sort_by_cached_key(|&t| std::cmp::Reverse(KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum::<u64>()));
         rayon::in_place_scope(|scope| {
-            for t in 0..tiles.len() as u32 {
+            for t in order {
                 let (tx, parts, counts) = (tx.clone(), &parts, &counts);
                 scope.spawn(move |_| {
                     let r = if parts.has(t, "nodes") {
