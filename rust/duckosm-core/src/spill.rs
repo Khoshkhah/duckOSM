@@ -292,11 +292,66 @@ pub fn sort_bytes<K: Ord + Send>(
 /// [`sort_bytes`] of the rows for which `keep` is true. `keep` sees each row one time, in the order of the file.
 pub fn sort_bytes_where<K: Ord + Send>(
     rows: Rows,
-    mut keep: impl FnMut(&[u8]) -> bool,
+    keep: impl FnMut(&[u8]) -> bool,
     key: impl Fn(&[u8]) -> K,
     budget: usize,
     store: &dyn Store,
 ) -> io::Result<Rows> {
+    let mut runs = sorted_runs(rows, keep, &key, budget, store)?;
+    if runs.len() == 1 {
+        return Ok(runs.pop().expect("one run"));
+    }
+    merge(runs, &key, store)
+}
+
+/// [`sort_bytes`] for rows that are read one time: the rows in the order of `key` (stable), merged from the sorted runs
+/// while they are read. No merged copy is written: one write and one read of all rows less, and no time with the runs
+/// and their copy on the disk together (the cut of France: part 4c had 1.5 GB of runs and wrote 1.5 GB more). The key
+/// can borrow: the rows live as long as it does.
+pub fn sorted<'a, K: Ord + Send + 'a, T: 'a, C: Codec<T>>(
+    rows: Rows,
+    key: impl Fn(&[u8]) -> K + 'a,
+    budget: usize,
+    store: &dyn Store,
+    codec: &'a C,
+) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a> {
+    let runs = sorted_runs(rows, |_| true, &key, budget, store)?;
+    let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
+    let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
+    let mut heap = BinaryHeap::new();
+    for (i, it) in its.iter_mut().enumerate() {
+        if it.next_into(&mut heads[i])? {
+            heap.push(Reverse((key(&heads[i]), i)));
+        }
+    }
+    // the smallest (key, run) first, as in `merge`: the same order as `sort_bytes`
+    let mut failed = false;
+    Ok(std::iter::from_fn(move || {
+        if failed {
+            return None;
+        }
+        let Reverse((_, i)) = heap.pop()?;
+        let row = codec.get(&mut &heads[i][..]);
+        match its[i].next_into(&mut heads[i]) {
+            Ok(true) => heap.push(Reverse((key(&heads[i]), i))),
+            Ok(false) => {}
+            Err(e) => {
+                failed = true;
+                return Some(Err(e));
+            }
+        }
+        Some(Ok(row))
+    }))
+}
+
+/// The sorted runs of [`sort_bytes_where`] (at least one; one run needs no merge).
+fn sorted_runs<K: Ord + Send>(
+    rows: Rows,
+    mut keep: impl FnMut(&[u8]) -> bool,
+    key: &impl Fn(&[u8]) -> K,
+    budget: usize,
+    store: &dyn Store,
+) -> io::Result<Vec<Rows>> {
     let mut raw = rows.raw()?;
     let mut runs: Vec<Rows> = Vec::new();
     let mut data: Vec<u8> = Vec::new();
@@ -335,21 +390,16 @@ pub fn sort_bytes_where<K: Ord + Send>(
             // open). The runs so far are the first rows of the input, so their merge keeps the sort stable.
             if runs.len() == MERGE_FAN {
                 let all = std::mem::take(&mut runs);
-                runs.push(merge(all, &key, store)?);
+                runs.push(merge(all, key, store)?);
             }
         }
     }
     drop(raw);
-    if runs.is_empty() {
-        // one block: no merge
-        flush(&mut data, &mut index, &mut runs)?;
-        return Ok(runs.pop().unwrap());
-    }
-    if !index.is_empty() {
+    // the last block (also the only block, also when it is empty)
+    if runs.is_empty() || !index.is_empty() {
         flush(&mut data, &mut index, &mut runs)?;
     }
-    drop((data, index));
-    merge(runs, &key, store)
+    Ok(runs)
 }
 
 /// The runs that a merge of [`sort_bytes`] reads at once.
@@ -651,6 +701,27 @@ mod tests {
         let mut want: Vec<(i64, u32)> = (0..20_000u32).map(|i| ((i as i64 * 7919) % 1000, i)).collect();
         want.sort();
         assert_eq!(got, want);
+    }
+
+    /// `sorted` gives the rows of `sort_bytes` in the same order: with one run, and with more runs than MERGE_FAN (equal
+    /// keys keep the order of the input).
+    #[test]
+    fn sorted_equals_sort_bytes() {
+        let store = MemStore;
+        let make = || {
+            let mut w = Writer::new(&store).unwrap();
+            for i in 0..20_000u32 {
+                w.push(&join::Request, &((i as i64 * 7919) % 1000, i, 0)).unwrap();
+            }
+            w.finish().unwrap()
+        };
+        for budget in [4096, 64 << 20] {
+            let want: Vec<(i64, u32, u32)> =
+                sort_bytes(make(), join::node_id, budget, &store).unwrap().read(&join::Request).unwrap().map(Result::unwrap).collect();
+            let got: Vec<(i64, u32, u32)> = sorted(make(), join::node_id, budget, &store, &join::Request).unwrap().map(Result::unwrap).collect();
+            assert_eq!(got.len(), 20_000);
+            assert_eq!(got, want, "budget {budget}");
+        }
     }
 
     #[test]

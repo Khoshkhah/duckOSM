@@ -24,7 +24,7 @@ use crate::graph::{MemberType, Relation};
 use crate::network::{global_junction, JunctionUses};
 use crate::pbfraw::{decode_block, read_block, Buffers};
 use crate::raw::{RawNode, RawSink, RawWay};
-use crate::spill::{sort_bytes, Codec, Writer};
+use crate::spill::{Codec, Writer};
 use crate::tiles::Tile;
 use crate::util::FxHashMap;
 use rayon::prelude::*;
@@ -719,8 +719,8 @@ impl<'a> Blobs<'a> {
     }
 }
 
-/// The elements of a part file, one at a time, in the order of the file. The blocks are decoded on all threads, a few
-/// blocks for each thread at a time (the relations of France: three passes of about 2 s each on one thread before).
+/// The elements of a part file, one at a time, in the order of the file. The blocks are decoded on all threads, one
+/// block for each thread at a time (the relations of France: three passes of about 2 s each on one thread before).
 struct PartReader<'a> {
     blobs: Blobs<'a>,
     buf: std::collections::VecDeque<Elem>,
@@ -732,11 +732,16 @@ impl<'a> PartReader<'a> {
     }
     fn peek(&mut self) -> Result<Option<&Elem>, String> {
         if self.buf.is_empty() {
-            let mut blobs = Vec::new();
-            while blobs.len() < 4 * rayon::current_num_threads() {
+            // one block for each thread, and at most 32 MB of input: a block of relations holds thousands of member lists
+            // (4 blocks for each thread made part 3b of France peak at 1.6 GiB of heap)
+            let (mut blobs, mut bytes) = (Vec::new(), 0usize);
+            while blobs.len() < rayon::current_num_threads() && bytes < 32 << 20 {
                 match self.blobs.next()? {
                     None => break,
-                    Some((_, _, _, blob)) => blobs.push(blob),
+                    Some((_, _, _, blob)) => {
+                        bytes += blob.len();
+                        blobs.push(blob);
+                    }
                 }
             }
             let decoded: Vec<Vec<Elem>> = blobs
@@ -1905,10 +1910,11 @@ fn cut<R: Read + Seek + Send>(
     if build {
         let uses = uses.finish().map_err(io)?;
         let n_uses = uses.len;
-        let uses = sort_bytes(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store).map_err(io)?;
+        // sorted runs, merged while 4d reads them (no merged copy)
+        let uses = crate::spill::sorted(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store, &Use).map_err(io)?;
         crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
         home_nodes.sort_unstable();
-        let uses = uses.read(&Use).map_err(io)?.map(|u| u.map(|(n, f)| (n, f as i64)));
+        let uses = uses.map(|u| u.map(|(n, f)| (n, f as i64)));
         let outside = copy.take().expect("a copy for the junctions").finish().map_err(io)?;
         outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &parts)?;
         crate::util::step("tile cut 4d: the junctions files");
