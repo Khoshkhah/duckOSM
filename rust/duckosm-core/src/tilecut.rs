@@ -713,13 +713,7 @@ impl TileIndex {
     }
 }
 
-/// Is the point within `m` metres of the tile `t` (in its box, or outside it, at most `m` from its sides)?
-pub fn near_tile(t: Tile, lon: f64, lat: f64, m: f64) -> bool {
-    let (w, s, e, n) = t.bounds();
-    let dy = m / 111_320.0;
-    let dx = dy / lat.to_radians().cos().abs().max(1e-9);
-    lon >= w - dx && lon <= e + dx && lat >= s - dy && lat <= n + dy
-}
+pub use crate::tiles::near_tile;
 
 /// The border of the tiles of a build by tiles, in metres: the connector of the dangling paths (`snap_m`) joins a dangling
 /// end to the nearest node within `snap_m`, so a tile with all the ways within twice `snap_m` of it (and 5 m more) makes the

@@ -1187,7 +1187,7 @@ pub fn run<W: Write + Send>(
             // dangling paths at its nodes needs them; their rows belong to other tiles
             let border = p.tile.map(|t| (t, union::border_m(p))).filter(|b| b.1 > 0.0);
             let near = |q: &(f64, f64)| {
-                border.is_some_and(|(t, m)| boundary.in_area(q.0, q.1) && duckosm_core::tilecut::near_tile(t, q.0, q.1, m))
+                border.is_some_and(|(t, m)| boundary.in_area(q.0, q.1) && duckosm_core::tiles::near_tile(t, q.0, q.1, m))
             };
             ways.retain(|w| {
                 w.refs.iter().any(|n| coords.get(n).is_some_and(|q| boundary.contains(q.0, q.1) || near(&q)))
@@ -1612,7 +1612,16 @@ pub fn run<W: Write + Send>(
                 net.sort_by_key(|w| w.id);
                 let patch = RawPatch { fixed: r, read, net };
                 let files = [file("raw_nodes.parquet")?, file("raw_ways.parquet")?, file("raw_relations.parquet")?];
-                let n = duckosm_parquet::write_area_raw(open, &patch, files, 64 << 20)?;
+                // a tile of a build by tiles: its own rows, the border rows apart, the rows of other tiles nowhere (no second pass)
+                let classes = |t: usize, r: &arrow_array::RecordBatch| union::raw_classes(owner.as_ref().expect("a tile"), t, r);
+                let split = match &owner {
+                    Some(_) => Some((
+                        [file("raw_nodes.border.parquet")?, file("raw_ways.border.parquet")?, file("raw_relations.border.parquet")?],
+                        &classes as duckosm_parquet::RawClasses,
+                    )),
+                    None => None,
+                };
+                let (n, _) = duckosm_parquet::write_area_raw_split(open, &patch, files, split, 64 << 20)?;
                 sum.raw = Some((n[0], n[1], n[2]));
             }
             _ => {
