@@ -97,67 +97,84 @@ impl IdSet {
     }
 }
 
+/// Batches through three stages at the same time: the threads of the pool decode batch k+1, while this thread gives the
+/// results of batch k to `give` and then reads batch k+2. Before, the pool waited for each read: in the browser the reads
+/// go through `FileReaderSync` on one thread, and on a laptop with 8 threads on 4 cores the cut of Sweden waited 30 s of
+/// 165 s for the file. `read` and `give` always run on this thread (in the browser a file in OPFS, and the input file,
+/// belong to the thread that opened them); `read` gives None at the end, `give` false to stop.
+pub(crate) fn pipeline<B: Sync, T: Send>(
+    mut read: impl FnMut() -> Result<Option<B>, String>,
+    decode: impl Fn(&B) -> Result<Vec<T>, String> + Sync,
+    mut give: impl FnMut(Vec<T>, &B) -> Result<bool, String>,
+) -> Result<(), String> {
+    let Some(mut batch) = read()? else { return Ok(()) };
+    // the first batch is decoded while this thread reads the second
+    let (mut first, mut next) = (None, None);
+    rayon::in_place_scope(|scope| -> Result<(), String> {
+        let (slot, b, decode) = (&mut first, &batch, &decode);
+        scope.spawn(move |_| *slot = Some(decode(b)));
+        next = read()?;
+        Ok(())
+    })?;
+    let mut out = first.expect("the first batch is decoded")?;
+    loop {
+        let (mut decoded, mut following) = (None, None);
+        // `in_place_scope` keeps this closure on this thread, also in the browser
+        let more = rayon::in_place_scope(|scope| -> Result<bool, String> {
+            if let Some(n) = &next {
+                let (slot, decode) = (&mut decoded, &decode);
+                scope.spawn(move |_| *slot = Some(decode(n)));
+            }
+            let more = give(std::mem::take(&mut out), &batch)?;
+            if more && next.is_some() {
+                following = read()?;
+            }
+            Ok(more)
+        })?;
+        match (more, next, decoded) {
+            (true, Some(n), Some(d)) => {
+                out = d?;
+                batch = n;
+                next = following;
+            }
+            _ => return Ok(()),
+        }
+    }
+}
+
 /// Read the blocks of `r` in batches, decode each batch on all threads with `per_block`, and give the results to
-/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false. The threads
-/// of the pool decode the next batch while this thread gives the results of the batch before to `done` (the work of
-/// `done`, for example the writes of the tile cut, then does not stop the decoding). `done` always runs on this thread
-/// (in the browser a file in OPFS belongs to the thread that opened it).
+/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false. The reads,
+/// the decoding and `done` run at the same time ([`pipeline`]). `done` always runs on this thread.
 pub fn each_block<R: Read, T: Send>(
     r: &mut R,
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
     mut done: impl FnMut(T, u64) -> Result<bool, String>,
 ) -> Result<(), String> {
     let n = 2 * rayon::current_num_threads();
-    let read = |r: &mut R| -> Result<Vec<Vec<u8>>, String> {
-        let mut batch = Vec::with_capacity(n);
-        while batch.len() < n {
-            match read_block(r)? {
-                Some(b) => batch.push(b),
-                None => break,
-            }
-        }
-        Ok(batch)
-    };
-    let decode = |batch: &[Vec<u8>]| -> Result<Vec<T>, String> {
-        batch.par_iter().map_init(Buffers::default, |buf, b| per_block(b, buf)).collect()
-    };
     let mut at = 0u64;
-    // the results of a batch to `done`: false when `done` stops the reading
-    let mut give = |out: Vec<T>, batch: &[Vec<u8>]| -> Result<bool, String> {
-        for (t, b) in out.into_iter().zip(batch) {
-            let start = at;
-            at += b.len() as u64;
-            if !done(t, start)? {
-                return Ok(false);
+    pipeline(
+        || {
+            let mut batch = Vec::with_capacity(n);
+            while batch.len() < n {
+                match read_block(r)? {
+                    Some(b) => batch.push(b),
+                    None => break,
+                }
             }
-        }
-        Ok(true)
-    };
-    let mut batch = read(r)?;
-    if batch.is_empty() {
-        return Ok(());
-    }
-    let mut out = decode(&batch)?;
-    loop {
-        let next = read(r)?;
-        // the next batch is decoded on the threads of the pool while this thread gives the results (`in_place_scope`
-        // keeps this closure on this thread, also in the browser)
-        let mut decoded = None;
-        let more = rayon::in_place_scope(|scope| -> Result<bool, String> {
-            if !next.is_empty() {
-                let (slot, next) = (&mut decoded, &next);
-                scope.spawn(move |_| *slot = Some(decode(next)));
+            Ok((!batch.is_empty()).then_some(batch))
+        },
+        |batch: &Vec<Vec<u8>>| batch.par_iter().map_init(Buffers::default, |buf, b| per_block(b, buf)).collect(),
+        |out, batch| {
+            for (t, b) in out.into_iter().zip(batch) {
+                let start = at;
+                at += b.len() as u64;
+                if !done(t, start)? {
+                    return Ok(false);
+                }
             }
-            give(std::mem::take(&mut out), &batch)
-        })?;
-        match decoded {
-            Some(d) if more => {
-                out = d?;
-                batch = next;
-            }
-            _ => return Ok(()),
-        }
-    }
+            Ok(true)
+        },
+    )
 }
 
 /// The lowest and the highest id of the elements of one kind in a block (`EMPTY` when the block has none).
@@ -209,31 +226,34 @@ fn each_run_at<R: Read + Seek, T: Send>(
 ) -> Result<(), String> {
     let n = 2 * rayon::current_num_threads();
     let (mut pos, mut i) = (None, 0);
-    while i < runs.len() {
-        let (mut batch, mut bytes) = (Vec::with_capacity(n), 0);
-        while i < runs.len() && batch.len() < n && bytes < RUN_BATCH_BYTES {
-            let mut blocks = Vec::with_capacity(runs[i].len());
-            for &at in &runs[i] {
-                if pos != Some(at) {
-                    r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?; // a seek empties the buffer of the reader
+    // the reads, the decoding and `done` at the same time ([`pipeline`])
+    pipeline(
+        || {
+            let (mut batch, mut bytes) = (Vec::with_capacity(n), 0);
+            while i < runs.len() && batch.len() < n && bytes < RUN_BATCH_BYTES {
+                let mut blocks = Vec::with_capacity(runs[i].len());
+                for &at in &runs[i] {
+                    if pos != Some(at) {
+                        r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?; // a seek empties the buffer of the reader
+                    }
+                    let b = read_block(r)?.ok_or("a block after the end of the file")?;
+                    pos = Some(at + b.len() as u64);
+                    bytes += b.len();
+                    blocks.push(b);
                 }
-                let b = read_block(r)?.ok_or("a block after the end of the file")?;
-                pos = Some(at + b.len() as u64);
-                bytes += b.len();
-                blocks.push(b);
+                batch.push(blocks);
+                i += 1;
             }
-            batch.push(blocks);
-            i += 1;
-        }
-        let out: Vec<T> = batch
-            .par_iter()
-            .map_init(Buffers::default, |buf, run| per_run(run, buf))
-            .collect::<Result<_, _>>()?;
-        for t in out {
-            done(t)?;
-        }
-    }
-    Ok(())
+            Ok((!batch.is_empty()).then_some(batch))
+        },
+        |batch: &Vec<Vec<Vec<u8>>>| batch.par_iter().map_init(Buffers::default, |buf, run| per_run(run, buf)).collect(),
+        |out, _| {
+            for t in out {
+                done(t)?;
+            }
+            Ok(true)
+        },
+    )
 }
 
 /// Pass 1: the ids of the nodes inside, and whether the block has ways or relations.
