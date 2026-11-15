@@ -19,8 +19,20 @@ use std::io::Write;
 use std::sync::Arc;
 
 pub struct ParWriter<W: Write + Send> {
+    /// natively: parquet's writer of the file
+    #[cfg(not(target_arch = "wasm32"))]
     file: SerializedFileWriter<W>,
+    #[cfg(not(target_arch = "wasm32"))]
     factory: ArrowRowGroupWriterFactory,
+    /// the browser: each batch of row groups is a small Parquet file in memory, and [`BigFile`] copies its row groups
+    /// into the file (parquet's writer counts the place in a `usize`, 32 bits in the browser: a file over 4 GiB had a
+    /// wrong footer)
+    #[cfg(target_arch = "wasm32")]
+    file: BigFile<W>,
+    #[cfg(target_arch = "wasm32")]
+    parquet_schema: parquet::schema::types::TypePtr,
+    #[cfg(target_arch = "wasm32")]
+    props: Arc<WriterProperties>,
     schema: SchemaRef,
     groups: usize,
     /// the rows of the open row group (as `ArrowWriter`: it collects batches up to the limit, and cuts a batch there)
@@ -39,9 +51,18 @@ impl<W: Write + Send> ParWriter<W> {
         add_encoded_arrow_schema_to_metadata(&schema, &mut props);
         let max_rows = props.max_row_group_row_count().unwrap_or(usize::MAX);
         let parquet_schema = ArrowSchemaConverter::new().with_coerce_types(props.coerce_types()).convert(&schema)?;
-        let file = SerializedFileWriter::new(out, parquet_schema.root_schema_ptr(), Arc::new(props))?;
-        let factory = ArrowRowGroupWriterFactory::new(&file, Arc::clone(&schema));
-        Ok(ParWriter { file, factory, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let file = SerializedFileWriter::new(out, parquet_schema.root_schema_ptr(), Arc::new(props))?;
+            let factory = ArrowRowGroupWriterFactory::new(&file, Arc::clone(&schema));
+            Ok(ParWriter { file, factory, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let file = BigFile::new(out).map_err(parquet::errors::ParquetError::General)?;
+            let (parquet_schema, props) = (parquet_schema.root_schema_ptr(), Arc::new(props));
+            Ok(ParWriter { file, parquet_schema, props, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
+        }
     }
 
     /// Add the rows of `batch`; each full row group is written.
@@ -80,9 +101,18 @@ impl<W: Write + Send> ParWriter<W> {
 
     /// Write the waiting row groups: each leaf column of each row group on a thread of the pool, then the chunks in order.
     fn write_full(&mut self) -> Result<()> {
+        if self.full.is_empty() {
+            return Ok(());
+        }
+        #[cfg(target_arch = "wasm32")]
+        let mut mini = SerializedFileWriter::new(Vec::new(), self.parquet_schema.clone(), self.props.clone())?;
+        #[cfg(target_arch = "wasm32")]
+        let (factory, first) = (ArrowRowGroupWriterFactory::new(&mini, Arc::clone(&self.schema)), 0);
+        #[cfg(not(target_arch = "wasm32"))]
+        let (factory, first) = (&self.factory, self.groups);
         let mut jobs = Vec::new();
         for (j, batches) in std::mem::take(&mut self.full).into_iter().enumerate() {
-            let writers = self.factory.create_column_writers(self.groups + j)?;
+            let writers = factory.create_column_writers(first + j)?;
             let mut leaves: Vec<Vec<_>> = (0..writers.len()).map(|_| Vec::new()).collect();
             for b in batches {
                 let mut i = 0;
@@ -109,14 +139,20 @@ impl<W: Write + Send> ParWriter<W> {
             })
             .collect::<Result<_>>()?;
         let mut chunks = chunks.into_iter();
+        #[cfg(not(target_arch = "wasm32"))]
+        let file = &mut self.file;
+        #[cfg(target_arch = "wasm32")]
+        let file = &mut mini;
         for n in columns {
-            let mut group = self.file.next_row_group()?;
+            let mut group = file.next_row_group()?;
             for c in chunks.by_ref().take(n) {
                 c.append_to_row_group(&mut group)?;
             }
             group.close()?;
             self.groups += 1;
         }
+        #[cfg(target_arch = "wasm32")]
+        self.file.append(bytes::Bytes::from(mini.into_inner()?)).map_err(parquet::errors::ParquetError::General)?;
         Ok(())
     }
 
@@ -124,7 +160,105 @@ impl<W: Write + Send> ParWriter<W> {
     pub fn close(mut self) -> Result<()> {
         self.flush()?;
         self.write_full()?;
-        self.file.close().map(|_| ())
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.file.close().map(|_| ());
+        #[cfg(target_arch = "wasm32")]
+        {
+            // no row group: the schema and the metadata of an empty file
+            if self.groups == 0 {
+                let empty = SerializedFileWriter::new(Vec::new(), self.parquet_schema.clone(), self.props.clone())?;
+                self.file.append(bytes::Bytes::from(empty.into_inner()?)).map_err(parquet::errors::ParquetError::General)?;
+            }
+            self.file.close().map(|_| ()).map_err(parquet::errors::ParquetError::General)
+        }
+    }
+}
+
+/// A Parquet file made of the row groups of other Parquet files (each one whole, in memory), copied as bytes. It counts
+/// the place in the file with 64 bits: the writer of parquet (`TrackedWrite`) counts it in a `usize`, which in the
+/// browser (wasm32) wraps at 4 GiB, so the footer of a larger file had wrong offsets (France: DuckDB said
+/// "TProtocolException: Invalid data"). The page indexes and the bloom filters are not copied. The first file gives the
+/// schema, the key-value metadata and the version.
+pub struct BigFile<W: Write> {
+    out: W,
+    at: u64,
+    file: Option<parquet::file::metadata::FileMetaData>,
+    groups: Vec<parquet::file::metadata::RowGroupMetaData>,
+    rows: i64,
+}
+
+impl<W: Write> BigFile<W> {
+    pub fn new(mut out: W) -> Result<Self, String> {
+        out.write_all(b"PAR1").map_err(|e| e.to_string())?;
+        Ok(BigFile { out, at: 4, file: None, groups: Vec::new(), rows: 0 })
+    }
+
+    /// Copy the row groups of the Parquet file `bytes`.
+    pub fn append(&mut self, bytes: bytes::Bytes) -> Result<(), String> {
+        use parquet::file::metadata::{ParquetMetaDataReader, RowGroupMetaData};
+        let meta = ParquetMetaDataReader::new().parse_and_finish(&bytes).map_err(|e| e.to_string())?;
+        if self.file.is_none() {
+            self.file = Some(meta.file_metadata().clone());
+        }
+        for rg in meta.row_groups() {
+            let start = self.at;
+            let mut cols = Vec::with_capacity(rg.columns().len());
+            for c in rg.columns() {
+                let (from, len) = c.byte_range();
+                self.out.write_all(&bytes[from as usize..(from + len) as usize]).map_err(|e| e.to_string())?;
+                let shift = self.at as i64 - from as i64;
+                cols.push(
+                    c.clone()
+                        .into_builder()
+                        .set_data_page_offset(c.data_page_offset() + shift)
+                        .set_dictionary_page_offset(c.dictionary_page_offset().map(|o| o + shift))
+                        .set_index_page_offset(c.index_page_offset().map(|o| o + shift))
+                        .set_offset_index_offset(None)
+                        .set_offset_index_length(None)
+                        .set_column_index_offset(None)
+                        .set_column_index_length(None)
+                        .set_bloom_filter_offset(None)
+                        .set_bloom_filter_length(None)
+                        .build()
+                        .map_err(|e| e.to_string())?,
+                );
+                self.at += len;
+            }
+            let g = RowGroupMetaData::builder(rg.schema_descr_ptr())
+                .set_num_rows(rg.num_rows())
+                .set_total_byte_size(rg.total_byte_size())
+                .set_column_metadata(cols)
+                .set_file_offset(start as i64)
+                .set_ordinal(self.groups.len() as i32)
+                .build()
+                .map_err(|e| e.to_string())?;
+            self.rows += rg.num_rows();
+            self.groups.push(g);
+        }
+        Ok(())
+    }
+
+    /// The rows of the row groups so far.
+    pub fn rows(&self) -> i64 {
+        self.rows
+    }
+
+    /// Write the footer; gives the output back.
+    pub fn close(mut self) -> Result<W, String> {
+        use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataWriter};
+        let f = self.file.take().ok_or("a Parquet file with no input file")?;
+        let file = FileMetaData::new(
+            f.version(),
+            self.rows,
+            f.created_by().map(str::to_string),
+            f.key_value_metadata().cloned(),
+            f.schema_descr_ptr(),
+            f.column_orders().cloned(),
+        );
+        let meta = ParquetMetaData::new(file, std::mem::take(&mut self.groups));
+        ParquetMetaDataWriter::new(&mut self.out, &meta).finish().map_err(|e| e.to_string())?;
+        self.out.flush().map_err(|e| e.to_string())?;
+        Ok(self.out)
     }
 }
 
