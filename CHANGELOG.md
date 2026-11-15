@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Quack tile tables: `duckosm-rust quack-tiles` and `quack-union`** (`docs/rust/quack.md`, "Tile tables"). One table for each map tile of one
+  zoom, each with every feature whose geometry touches the tile (QuackOSM's `geometry_filter` rule) and a column `owner`; the union keeps the
+  rows with `owner`. France at zoom 9: 760 tables in 234 s; the union (48 s) is byte for byte the table of one run.
+- **Quack by tiles is faster natively**: no zlib in the temporary tile files, and 4 tiles at a time. France: 224.9 s to 171.3 s (one run:
+  104.3 s); peak RSS 1.8 GB to 3.7 GB.
 - **`duckosm-rust quack --tile-zoom Z`: tile by tile with the map tiles of one zoom** (`TileSize::Zoom`), in place of the quadtree of
   `--tiles N`. Île-de-France in Chromium: zoom 8 (13 tiles) 42.5 s and 474 MiB, zoom 9 (32 tiles) 41.7 s and 467 MiB. France natively: zoom 8
   (241 tiles) 200.4 s, zoom 9 (697 tiles) 222.5 s.
