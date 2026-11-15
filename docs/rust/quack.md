@@ -188,8 +188,32 @@ allocator now gives the extra free blocks to a shared pool.
 
 Two changes made the tile mode faster natively (France, one run measured again the same day: 104.3 s): the temporary
 tile files have no zlib (the cut 88 s to 71 s, 30 % less CPU), and 4 tiles run at the same time, with their rows given in
-the order of the tiles (the tiles 136 s to 100 s; the rows of 4 tiles wait in memory). The browser makes one tile at a
-time, because a file in OPFS belongs to the thread that opened it.
+the order of the tiles (the tiles 136 s to 100 s; the rows of 4 tiles wait in memory).
+
+In the browser, a file in OPFS belongs to the thread that opened it. Thus Studio does the tile mode in four steps, and
+each step uses all the threads:
+
+1. The count of the nodes chooses the tiles.
+2. The cut (`tilecut::cut_to_sink`) writes one complete `.osm.pbf` file for each tile. The thread that owns the files
+   only writes; the threads of the pool decode, sort and make the tile files. In a tile file, each blob of the main
+   part with the extra elements in its range is one job, so one large tile also uses all the threads.
+3. A Web Worker for each thread makes the rows of one tile at a time (`quack_tile`). Each worker has its own
+   WebAssembly module, its own memory and its own files, so the tiles do not wait for each other. A tile file is
+   removed when its rows are made.
+4. The join writes the parts into one GeoParquet file.
+
+Sweden (975 MB) in Chromium on the Mac mini, zoom 6 (21 tiles), 12 threads, not sorted: 60.9 s, with the same numbers of
+rows as the native run:
+
+| Step | Time | CPU |
+|---|---|---|
+| 1. Count the nodes and choose the tiles | 2.0 s | |
+| 2. The cut | 29.2 s | 49.5 s before the jobs in a tile file; part 5 (the tile files) on 11 to 12 cores |
+| 3. The rows of each tile | 25.0 s | 12 cores, then the largest tile alone for about 10 s |
+| 4. The join | 4.7 s | |
+
+The run used at most 7.0 GB of browser storage: the tile files and the parts of the rows, then the parts and the 2.7 GB
+output file.
 
 Natively, one run is faster: the tile mode reads the file four times (the count, two passes of the cut, and the blocks
 of the extra elements), it writes and reads each element again, and the ways at the edge of a tile are made in each
