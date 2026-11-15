@@ -1,6 +1,7 @@
 # Tile cut with two reads (proposal)
 
-Status: proposal, 2026-11-15. Not built.
+Status: built, 2026-11-15 (`duckosm_core::tilecut`, read 2 in `tilecut/write.rs`). The id files of read 1 (step 3)
+are not built yet: part 3b still reads the node and way blocks again.
 
 The tile cut (`duckosm_core::tilecut`) makes one `.osm.pbf` file for each map tile of one zoom. Each tile file is
 complete: all nodes of its ways, a border, and each multipolygon with all its members. The build by tiles
@@ -90,3 +91,34 @@ and no part 5.
    memory and disk against today.
 3. The browser (Studio's `cut.html`, quack by tiles): Sweden and France at fixed zooms.
 4. When all paths are equal or better: the new cut replaces `cut`, and the part files, part 4b and part 5 go.
+
+## Result
+
+Built as one cut: parts 1 to 3 of `cut` only plan (no part files; part 1 also finds the tiles with a node inside, the
+tiles with a file), and read 2 (`tilecut/write.rs`) puts each element into its tile files: the nodes (their own tile
+from the book of the nodes, the extra tiles from the sorted rows), the junctions (as before), the ways and the
+relations. Parts 4b, 4 and 5 and the part files of the nodes, the ways and the relations are gone.
+
+How read 2 works:
+
+- This thread reads the blocks and the extra rows of each block. The pool decodes each block, gives each element to
+  its tiles and packs the elements of each tile at once: no element waits across blocks. This thread writes the bytes
+  (in the browser the storage belongs to it). A buffer of elements for each tile across blocks took 5.4 GB on France.
+- An element for more than 8 tiles is packed one time, and its block goes to each tile. A copy for each tile held a
+  boundary of a country hundreds of times: 2 GB at the relations of France.
+- The lists of read 1 go as soon as read 2 is past them, and the allocator gives memory back between the passes.
+
+| | Old cut | Two reads |
+|---|---|---|
+| France, native (`duckosm-rust tiles`, the cut) | 107.4 s, 1,489 MB | 92.9 to 94.1 s; peak 1,308 against 1,506 MB in the same probe |
+| Sweden in Chromium, zoom 10, 8 threads | 66.0 s, 1,077 MiB | 52.1 s, 1,038 MiB |
+| Sweden in Chromium, zoom 6, 8 threads | 45.5 s, 851 MiB | 38.9 s, 856 MiB |
+| Kentucky, the cut in the build by tiles | 4.9 s, 434 MB | 4.4 s, 356 MB |
+| France, the tile files on disk | 5.3 GB | 6.4 GB (smaller blocks compress less) |
+
+Checks: the tile files have the same elements as the old cut (Kentucky 142 tiles, France 1,311 tiles); the junctions
+files are equal byte for byte; the build by tiles of Kentucky equals the whole build (41 tables, only the build times
+differ).
+
+Open: the id files of step 3 (part 3b reads the blocks again: 6 s on France natively), and the size of the tile files
+(fewer, larger blocks for each tile).
