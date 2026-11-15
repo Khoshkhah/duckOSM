@@ -537,6 +537,7 @@ impl Read for ChunkReader<'_> {
 }
 
 /// A writer of a file of [`Chunks`]: each write is a chunk (put a `BufWriter` in front).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct ChunkWriter<'a>(&'a Chunks, (u32, &'static str));
 
 impl Write for ChunkWriter<'_> {
@@ -554,9 +555,12 @@ struct Blobs<'a>(Option<io::BufReader<Box<dyn Read + Send + 'a>>>);
 
 type Blob = (i64, i64, u32, Vec<u8>);
 
+/// The bytes of a part, or none.
+type Src<'a> = Option<Box<dyn Read + Send + 'a>>;
+
 impl<'a> Blobs<'a> {
-    fn open(parts: &'a Parts, tile: u32, part: &'static str) -> Blobs<'a> {
-        Blobs(parts.reader(tile, part).map(|f| io::BufReader::with_capacity(1 << 20, f)))
+    fn from(src: Src<'a>) -> Blobs<'a> {
+        Blobs(src.map(|f| io::BufReader::with_capacity(1 << 20, f)))
     }
     fn next(&mut self) -> Result<Option<Blob>, String> {
         let Some(r) = self.0.as_mut() else { return Ok(None) };
@@ -582,7 +586,10 @@ struct PartReader<'a> {
 
 impl<'a> PartReader<'a> {
     fn open(parts: &'a Parts, tile: u32, part: &'static str) -> PartReader<'a> {
-        PartReader { blobs: Blobs::open(parts, tile, part), buf: Default::default(), b: Buffers::default() }
+        PartReader::from(parts.reader(tile, part))
+    }
+    fn from(src: Src<'a>) -> PartReader<'a> {
+        PartReader { blobs: Blobs::from(src), buf: Default::default(), b: Buffers::default() }
     }
     fn peek(&mut self) -> Result<Option<&Elem>, String> {
         while self.buf.is_empty() {
@@ -631,8 +638,8 @@ fn put<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, last: &mut Option<i64>
 
 /// One kind of the file of a tile: the blobs of the main part, merged in the order of the ids with the elements of the
 /// extra part. A blob that no extra element falls into is copied as bytes; only the others are decoded and made again.
-fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, parts: &Parts, tile: u32, main: &'static str, extra: &'static str, kind: u8) -> Result<(), String> {
-    let (mut a, mut x, mut b) = (Blobs::open(parts, tile, main), PartReader::open(parts, tile, extra), Buffers::default());
+fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extra: Src, kind: u8) -> Result<(), String> {
+    let (mut a, mut x, mut b) = (Blobs::from(main), PartReader::from(extra), Buffers::default());
     let mut last = None;
     while let Some((first, end, count, blob)) = a.next()? {
         while x.peek_id()?.is_some_and(|id| id < first) {
@@ -667,13 +674,26 @@ fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, parts: &Parts, 
 
 /// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
 /// of the ids with no doubles. Gives the numbers of elements.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
-    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?.raw_blocks(raw);
-    let mut n = CutCounts::default();
-    for (kind, main, extra) in [(0, "nodes", "extra-nodes"), (1, "ways", "extra-ways"), (2, "relations", "none")] {
-        merge_kind(&mut w, &mut n, parts, tile, main, extra, kind)?;
+    let srcs = KINDS.map(|(main, extra)| (parts.reader(tile, main), parts.reader(tile, extra)));
+    let n = finish_from(srcs, out, timestamp, raw)?;
+    for (main, extra) in KINDS {
         parts.remove(tile, main);
         parts.remove(tile, extra);
+    }
+    Ok(n)
+}
+
+/// The parts of the file of a tile: for the nodes, the ways and the relations, the main part and the extra part.
+const KINDS: [(&str, &str); 3] = [("nodes", "extra-nodes"), ("ways", "extra-ways"), ("relations", "none")];
+
+/// [`finish_tile`] from the bytes of the parts (`KINDS`).
+fn finish_from<W: Write>(srcs: [(Src, Src); 3], out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
+    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?.raw_blocks(raw);
+    let mut n = CutCounts::default();
+    for (kind, (main, extra)) in srcs.into_iter().enumerate() {
+        merge_kind(&mut w, &mut n, main, extra, kind as u8)?;
     }
     w.finish()?.flush().map_err(|e| e.to_string())?;
     Ok(n)
@@ -1094,6 +1114,7 @@ fn outside_junctions(
 }
 
 /// The junctions file of a tile from its part (no part: a file with no rows).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn write_junctions(parts: &Parts, tile: u32, out: &Path) -> Result<(), String> {
     let e = |e: io::Error| format!("{}: {e}", out.display());
     let mut f = io::BufWriter::new(std::fs::File::create(out).map_err(e)?);
@@ -1551,6 +1572,7 @@ fn cut<R: Read + Seek + Send>(
     crate::util::step("tile cut 4: the extra elements");
     // 5. each tile from its parts (the tiles at the same time; in the browser one at a time, because a file in OPFS
     // belongs to the thread that opened it)
+    #[cfg(not(target_arch = "wasm32"))]
     let finish = |t: u32| -> Result<CutCounts, String> {
         if !parts.has(t, "nodes") {
             for part in ["ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
@@ -1577,8 +1599,57 @@ fn cut<R: Read + Seek + Send>(
     };
     #[cfg(not(target_arch = "wasm32"))]
     let counts: Vec<CutCounts> = (0..tiles.len() as u32).into_par_iter().map(finish).collect::<Result<_, String>>()?;
+    // the browser: this thread reads the parts of a group of tiles (256 MB at most) from OPFS into memory, the threads of
+    // the pool make the files of the tiles in memory at the same time, and this thread writes them (one at a time on this
+    // thread: 6 of the 12 s of the cut of Île-de-France on one core)
     #[cfg(target_arch = "wasm32")]
-    let counts: Vec<CutCounts> = (0..tiles.len() as u32).map(finish).collect::<Result<_, String>>()?;
+    let counts: Vec<CutCounts> = {
+        const GROUP: usize = 256 << 20;
+        let Files::Store(chunks) = &parts.files else { return Err("the tile cut in the browser has no store".into()) };
+        let mut counts = vec![CutCounts::default(); tiles.len()];
+        let mut t = 0u32;
+        while (t as usize) < tiles.len() {
+            let (mut group, mut bytes): (Vec<(u32, [(Vec<u8>, Vec<u8>); 3])>, usize) = (Vec::new(), 0);
+            while (t as usize) < tiles.len() && (group.is_empty() || bytes < GROUP) {
+                if parts.has(t, "nodes") {
+                    let read = |p: &'static str| -> Result<Vec<u8>, String> {
+                        let mut v = Vec::new();
+                        if let Some(mut r) = parts.reader(t, p) {
+                            r.read_to_end(&mut v).map_err(|e| format!("a part file of the tile cut: {e}"))?;
+                        }
+                        Ok(v)
+                    };
+                    let mut k: [(Vec<u8>, Vec<u8>); 3] = Default::default();
+                    for (i, (main, extra)) in KINDS.into_iter().enumerate() {
+                        k[i] = (read(main)?, read(extra)?);
+                        bytes += k[i].0.len() + k[i].1.len();
+                    }
+                    group.push((t, k));
+                }
+                for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
+                    parts.remove(t, part);
+                }
+                t += 1;
+            }
+            fn src(v: &[u8]) -> Src<'_> {
+                (!v.is_empty()).then(|| Box::new(io::Cursor::new(v)) as Box<dyn Read + Send>)
+            }
+            let built: Vec<Result<(CutCounts, Vec<u8>), String>> = group
+                .par_iter()
+                .map(|(_, k)| {
+                    let mut out = Vec::new();
+                    let n = finish_from(k.each_ref().map(|(a, b)| (src(a), src(b))), &mut out, timestamp, raw)?;
+                    Ok((n, out))
+                })
+                .collect();
+            for ((t, _), b) in group.iter().zip(built) {
+                let (n, out) = b?;
+                chunks.append((*t, "tile"), &out).map_err(|e| format!("a tile file of the tile cut: {e}"))?;
+                counts[*t as usize] = n;
+            }
+        }
+        counts
+    };
     crate::util::step("tile cut 5: the tile files");
     Ok((counts, parts))
 }
