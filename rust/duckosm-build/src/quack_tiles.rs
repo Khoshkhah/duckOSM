@@ -1,22 +1,19 @@
 //! Tile tables of quack (docs/rust/quack.md, "Tile tables"): QuackOSM's features table of a `.osm.pbf` file as one table
 //! for each map tile of one zoom, `<dir>/<z>/<x>/<y>.parquet`, and the union of any set of them.
 //!
-//! The table of a tile holds every row whose geometry touches the tile (`quack::row_tiles`, the rule of QuackOSM's
-//! `geometry_filter`), whole, so a tile table is usable alone. A row that touches more tiles is in each of them; its
-//! column `owner` is true in one tile only, so the union of tile tables (the rows with `owner`) has each row one time.
-//!
-//! 1. The file is cut to the tiles of the zoom, and each tile makes the rows that it owns (`quack::features_of_tiles`).
-//!    A row that touches only its own tile goes at once to the part file of the tile. A row that touches more tiles goes
-//!    one time to a temporary file (the side rows), with a pair (tile, row) for each tile that it touches.
-//! 2. The table of each tile: its part file, then its side rows (sorted pairs), with `owner` true only in the tile that
-//!    made the row.
-use duckosm_core::quack::{self, Feature, Numbered, TileSize};
-use duckosm_core::spill::{Blob, Codec};
+//! 1. The cut makes the file of each tile (`tilecut::cut_to_store`): the nodes in the tile, each way with a node in the
+//!    tile, whole, and each relation with a member in the tile, the multipolygons and boundaries with all their members.
+//! 2. Each tile alone: quack on its file (`quack::features_owned` with no `relations`), and its table at once. The table
+//!    holds the nodes in the tile, the ways with a node in the tile and the relations that the file has whole, so it is
+//!    usable alone; nothing waits for another tile. Its column `owner` is true for the rows that the tile owns (a node by
+//!    its place, a way by its first node, a relation by the first node of its first member way).
+//! 3. The union of tile tables keeps the rows with `owner`: each row one time, with no search for doubles.
+use duckosm_core::quack::{self, Owner, TileSize};
 use duckosm_core::tiles::Tile;
 use duckosm_parquet::quack::{owned_rows, read_tile_table, tile_batch, QuackWriter};
 use rayon::prelude::*;
 use std::fs::File;
-use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 /// The numbers of [`quack_tile_tables`].
@@ -24,9 +21,9 @@ use std::path::{Path, PathBuf};
 pub struct TileTables {
     /// the tile tables
     pub tiles: usize,
-    /// the rows (each one time: the rows of the union of all tiles)
+    /// the rows that the tiles own (each row one time: the rows of the union of all tiles)
     pub rows: usize,
-    /// the rows in all tile tables (a row in each tile that it touches)
+    /// the rows in all tile tables (a row in each tile that has it)
     pub stored: usize,
 }
 
@@ -35,141 +32,49 @@ pub fn tile_table_path(dir: &Path, t: Tile) -> PathBuf {
     dir.join(format!("{}/{}/{}.parquet", t.z, t.x, t.y))
 }
 
-fn tile_key(t: Tile) -> u64 {
-    ((t.x as u64) << 32) | t.y as u64
-}
-
-/// The side rows: each row one time in a temporary file, with its place.
-struct Side {
-    file: Box<dyn Blob>,
-    end: u64,
-    /// place, length
-    rows: Vec<(u64, u32)>,
-    buf: Vec<u8>,
-}
-
-impl Side {
-    /// Add a row that tile `owner` made; gives its number.
-    fn push(&mut self, f: &Feature, owner: Tile) -> std::io::Result<u32> {
-        self.buf.clear();
-        Numbered::put_row(tile_key(owner), f, &mut self.buf);
-        self.file.seek(SeekFrom::Start(self.end))?;
-        self.file.write_all(&self.buf)?;
-        self.rows.push((self.end, self.buf.len() as u32));
-        self.end += self.buf.len() as u64;
-        Ok(self.rows.len() as u32 - 1)
-    }
-
-    /// Row `i` and the key of the tile that owns it.
-    fn get(&mut self, i: u32) -> std::io::Result<(u64, Feature)> {
-        let (at, len) = self.rows[i as usize];
-        self.buf.resize(len as usize, 0);
-        self.file.seek(SeekFrom::Start(at))?;
-        self.file.read_exact(&mut self.buf)?;
-        Ok(Numbered.get(&mut &self.buf[..]))
-    }
-}
-
 /// The tile tables of zoom `zoom` (0 to 14) of the `.osm.pbf` file that `open` opens (sorted by type and id), into `dir`.
 /// `source`: the name of the file, in the metadata of each table (`duckosm_tile`), with the tile and the time of the
 /// file. A table in `dir` with the same tile is replaced.
-// ponytail: the pairs (tile, side row) stay in memory (16 bytes each; France at zoom 9: about 10 million); on disk when a
-// larger area needs it
 pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, String>, zoom: u8, dir: &Path, source: &str) -> Result<TileTables, String> {
-    let io = |e: std::io::Error| format!("quack tile tables: {e}");
     if zoom > 14 {
         return Err(format!("quack tile tables: zoom {zoom}: use 0 to 14"));
     }
     let (timestamp, _) = duckosm_core::cutstream::header(open()?)?;
-    let meta = |t: Tile| {
-        let v = serde_json::json!({"z": t.z, "x": t.x, "y": t.y, "source": source, "timestamp": timestamp});
-        vec![("duckosm_tile".to_string(), v.to_string())]
+    let tiles = quack::tiles_of_file(&open, TileSize::Zoom(zoom))?;
+    duckosm_core::util::step(&format!("quack tile tables 1: {} tiles of zoom {zoom}", tiles.len()));
+    let world = duckosm_core::boundary::Boundary::parse(quack::WORLD)?;
+    let files = duckosm_core::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"], false)?;
+    duckosm_core::util::step("quack tile tables 2: the tile cut");
+    let todo: Vec<(usize, Tile)> = files.tiles.iter().enumerate().filter(|t| t.1 .1.nodes > 0).map(|(i, t)| (i, t.0)).collect();
+    // one tile: its file, quack, its table
+    let one = |&(i, tile): &(usize, Tile)| -> Result<(usize, usize), String> {
+        let path = tile_table_path(dir, tile);
+        std::fs::create_dir_all(path.parent().expect("a folder")).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let meta = serde_json::json!({"z": tile.z, "x": tile.x, "y": tile.y, "source": source, "timestamp": timestamp});
+        let mut w = QuackWriter::tile(BufWriter::with_capacity(1 << 20, file), vec![("duckosm_tile".to_string(), meta.to_string())])?;
+        let owner = Owner { tile, relations: None };
+        let mut owned = 0;
+        let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
+        quack::features_owned(open_tile, quack::BUDGET, Some(&owner), |rows| {
+            owned += rows.iter().filter(|f| f.owner).count();
+            for b in rows.par_chunks(20_000).map(tile_batch).collect::<Result<Vec<_>, _>>()? {
+                w.write(&b)?;
+            }
+            Ok(())
+        })?;
+        Ok((owned, w.close()?))
     };
-    let part_path = |t: Tile| dir.join(format!("{}/{}/{}.part.parquet", t.z, t.x, t.y));
-    let create = |p: &Path| -> Result<BufWriter<File>, String> {
-        std::fs::create_dir_all(p.parent().expect("a folder")).map_err(|e| format!("{}: {e}", p.display()))?;
-        Ok(BufWriter::with_capacity(1 << 20, File::create(p).map_err(|e| format!("{}: {e}", p.display()))?))
-    };
-    let store = duckosm_core::spill::temp_store();
-    let mut side = Side { file: store.create().map_err(io)?, end: 0, rows: Vec::new(), buf: Vec::new() };
-    let mut pairs: Vec<(u64, u32)> = Vec::new();
-    let mut part: Option<(Tile, QuackWriter<BufWriter<File>>)> = None;
-    let mut tiles: Vec<Tile> = Vec::new();
     let mut n = TileTables::default();
-    // 1. the rows of each tile: to its part file, or one time to the side rows
-    let counts = quack::features_of_tiles(&open, quack::BUDGET, TileSize::Zoom(zoom), |p, rows| {
-        let touched: Vec<Vec<Tile>> = rows
-            .par_iter()
-            .map(|f| {
-                let mut v = Vec::new();
-                quack::row_tiles(&f.geometry, zoom, &mut v)?;
-                // the tile that made the row has it (a point on its side can count for the next tile only)
-                if !v.contains(&p) {
-                    v.push(p);
-                }
-                Ok(v)
-            })
-            .collect::<Result<_, String>>()?;
-        let mut mine = Vec::new();
-        for (f, ts) in rows.into_iter().zip(touched) {
-            if ts.len() == 1 {
-                mine.push((f, true));
-            } else {
-                let i = side.push(&f, p).map_err(io)?;
-                pairs.extend(ts.into_iter().map(|t| (tile_key(t), i)));
-            }
+    for (g, group) in todo.chunks(quack::TILES_AT_ONCE).enumerate() {
+        for r in group.par_iter().map(one).collect::<Vec<_>>() {
+            let (owned, stored) = r?;
+            n.rows += owned;
+            n.stored += stored;
+            n.tiles += 1;
         }
-        if part.as_ref().map(|w| w.0) != Some(p) {
-            if let Some((_, w)) = part.take() {
-                w.close()?;
-            }
-            part = Some((p, QuackWriter::tile(create(&part_path(p))?, Vec::new())?));
-            tiles.push(p);
-        }
-        let w = &mut part.as_mut().expect("a part file").1;
-        for b in mine.par_chunks(20_000).map(tile_batch).collect::<Result<Vec<_>, _>>()? {
-            w.write(&b)?;
-        }
-        Ok(())
-    })?;
-    if let Some((_, w)) = part.take() {
-        w.close()?;
+        duckosm_core::util::step(&format!("quack tile tables 3: {} of {} tiles", (g * quack::TILES_AT_ONCE + group.len()).min(todo.len()), todo.len()));
     }
-    n.rows = counts.nodes + counts.ways + counts.relations;
-    duckosm_core::util::step(&format!("quack tile tables 1: {} side rows in {} pairs", side.rows.len(), pairs.len()));
-    // 2. the table of each tile: its part file and its side rows
-    pairs.par_sort_unstable();
-    let key_tile = |k: u64| Tile { z: zoom, x: (k >> 32) as u32, y: k as u32 };
-    tiles.extend(pairs.iter().map(|p| key_tile(p.0)));
-    // the order of the pairs (x, then y)
-    tiles.sort_by_key(|&t| tile_key(t));
-    tiles.dedup();
-    // the tables at the same time (each reads its part file and its side rows, a lock for the file of the side rows)
-    let side = std::sync::Mutex::new(side);
-    let write = |t: Tile| -> Result<usize, String> {
-        let path = tile_table_path(dir, t);
-        let mut w = QuackWriter::tile(create(&path)?, meta(t))?;
-        let part = part_path(t);
-        if part.exists() {
-            read_tile_table(&part, |b| w.write(&b))?;
-            std::fs::remove_file(&part).map_err(|e| format!("{}: {e}", part.display()))?;
-        }
-        let k = tile_key(t);
-        let mine = &pairs[pairs.partition_point(|p| p.0 < k)..pairs.partition_point(|p| p.0 <= k)];
-        for group in mine.chunks(20_000) {
-            let mut rows = Vec::with_capacity(group.len());
-            for &(_, i) in group {
-                let (owner, f) = side.lock().expect("the side rows").get(i).map_err(io)?;
-                rows.push((f, owner == k));
-            }
-            w.write(&tile_batch(&rows)?)?;
-        }
-        w.close()
-    };
-    let stored: Vec<usize> = tiles.par_iter().map(|&t| write(t)).collect::<Result<_, String>>()?;
-    n.stored = stored.iter().sum();
-    n.tiles = tiles.len();
-    duckosm_core::util::step(&format!("quack tile tables 2: {} tile tables", n.tiles));
     Ok(n)
 }
 

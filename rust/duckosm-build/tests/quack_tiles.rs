@@ -1,8 +1,8 @@
-//! Tile tables of quack on Monaco (docs/rust/quack.md, "Tile tables"): the union (the rows with `owner`) equals the table
-//! of the whole file, each row is owned in one tile only, and each tile table holds exactly the rows whose geometry
-//! touches the tile.
-use duckosm_core::quack::{Feature, row_tiles};
-use std::collections::{BTreeMap, BTreeSet};
+//! Tile tables of quack on Monaco (docs/rust/quack.md, "Tile tables"): each tile is made alone from its own file; the
+//! union (the rows with `owner`) equals the table of the whole file, and a node is only in the table of its tile.
+use duckosm_core::quack::Feature;
+use duckosm_core::tiles::Tile;
+use std::collections::BTreeSet;
 
 type Row = (String, Vec<(String, String)>, Vec<u8>);
 
@@ -27,19 +27,22 @@ fn monaco_tile_tables() {
     let files = duckosm_build::quack_tiles::tile_table_files(&dir).unwrap();
     assert_eq!(files.len(), n.tiles);
     assert!(n.tiles > 1, "Monaco at zoom 14 has more than one tile");
-    // the rows of each tile, and the owned rows
-    let mut owned: Vec<Row> = Vec::new();
-    let mut by_tile: BTreeMap<(u32, u32), BTreeSet<String>> = BTreeMap::new();
+    let (mut owned, mut seen): (Vec<Row>, BTreeSet<String>) = (Vec::new(), BTreeSet::new());
     for f in &files {
         let mut parts: Vec<_> = f.strip_prefix(&dir).unwrap().iter().map(|s| s.to_string_lossy().into_owned()).collect();
         let y: u32 = parts.pop().unwrap().trim_end_matches(".parquet").parse().unwrap();
         let x: u32 = parts.pop().unwrap().parse().unwrap();
+        let tile = Tile { z, x, y };
         duckosm_parquet::quack::read_tile_table(f, |b| {
             use arrow_array::cast::AsArray;
             let owner = b.column_by_name("owner").unwrap().as_boolean().clone();
             let plain = arrow_array::RecordBatch::try_new(duckosm_parquet::quack::schema(), b.columns()[..3].to_vec()).unwrap();
             for (i, f) in duckosm_parquet::quack::features_of(&plain).unwrap().into_iter().enumerate() {
-                by_tile.entry((x, y)).or_default().insert(f.feature_id.clone());
+                if f.feature_id.starts_with("node/") {
+                    assert_eq!(Tile::of(z, f.center.0, f.center.1), tile, "{} in the table of another tile", f.feature_id);
+                    assert!(owner.value(i), "{}: a node is owned by its tile", f.feature_id);
+                }
+                seen.insert(f.feature_id.clone());
                 if owner.value(i) {
                     owned.push(row(f));
                 }
@@ -52,21 +55,7 @@ fn monaco_tile_tables() {
     assert_eq!(owned.len(), whole.len(), "the owned rows");
     assert!(owned == whole, "the union equals the whole file");
     assert_eq!(n.rows, whole.len());
-    // each tile table: the rows whose geometry touches the tile
-    let mut want: BTreeMap<(u32, u32), BTreeSet<String>> = BTreeMap::new();
-    let mut ts = Vec::new();
-    for (id, _, g) in &whole {
-        row_tiles(g, z, &mut ts).unwrap();
-        for t in &ts {
-            want.entry((t.x, t.y)).or_default().insert(id.clone());
-        }
-    }
-    // a row is also in the tile that made it (its first node there, but its geometry only on the side of the tile)
-    for (t, ids) in &want {
-        let got = &by_tile[t];
-        assert!(ids.is_subset(got), "tile {t:?}: rows that touch it are missing");
-        assert!(got.len() - ids.len() <= 5, "tile {t:?}: {} rows that do not touch it", got.len() - ids.len());
-    }
-    assert_eq!(want.keys().collect::<Vec<_>>(), by_tile.keys().collect::<Vec<_>>());
+    assert_eq!(seen.len(), whole.len(), "each row is in a table");
+    assert!(n.stored > n.rows, "the ways at the edges are in more than one table");
     let _ = std::fs::remove_dir_all(&dir);
 }

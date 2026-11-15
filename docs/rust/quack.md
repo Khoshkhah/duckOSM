@@ -199,40 +199,39 @@ tile mode where the memory has a limit: the browser.
 ## Tile tables
 
 `quack --tiles` makes one table of one file. The tile tables are for a table of the world, made in parts: one table for
-each map tile of one zoom, `DIR/<z>/<x>/<y>.parquet`, that can be made at another time or on another computer, used
-alone, or joined with others (`duckosm_build::quack_tiles`).
+each map tile of one zoom, `DIR/<z>/<x>/<y>.parquet` (`duckosm_build::quack_tiles`).
 
-- **The rule (geometry):** the table of a tile holds every row whose geometry touches the tile (`quack::row_tiles`:
-  `ST_Intersects` with the closed box of the tile, as QuackOSM's `geometry_filter`), with its whole geometry. A road
-  that crosses the edge of a tile and a large polygon that covers it are in the table. So the table of one tile is
-  usable alone.
-- **The owner:** a row that touches more tiles is in each of them. A column `owner` is true in one tile only, the tile
-  that made the row (by the rules of `quack::Owner`). The union of tile tables keeps the rows with `owner`, so each row
-  comes one time with no search for doubles: `duckosm-rust quack-union`, or in DuckDB
-  `SELECT feature_id, tags, geometry FROM read_parquet('DIR/9/*/*.parquet') WHERE owner`.
-- **An area:** for the rows of an area, read the tiles that the area touches, keep the rows that intersect the area,
-  and remove the doubles with `DISTINCT ON (feature_id)`, not with `owner` (a road that comes into the area can have its
-  owner in a tile outside the list).
-- **How:** the file is cut to the tiles of the zoom (`quack --tile-zoom`). A row that touches only the tile that made
-  it goes at once to the part file of the tile. A row that touches more tiles goes one time to a temporary file, with a
-  pair (tile, row) for each tile that it touches. At the end, the table of each tile is its part file and its rows of
-  the pairs. Each table has its tile, the input file and the time of the file in its metadata (`duckosm_tile`).
+1. **The cut** makes the file of each tile, as osmium's smart cut: the nodes in the tile, each way with a node in the
+   tile (whole, with its nodes from other tiles), and each relation with a member in the tile; each multipolygon and
+   boundary with all its members, in each tile with a member.
+2. **Each tile alone:** quack on the file of the tile, and the table of the tile at once. Nothing waits for another tile,
+   so the tiles can run in any order, at the same time, or on other computers. The table holds the nodes in the tile,
+   the ways with a node in the tile and the relations that the file has whole (not the nodes and member ways that the
+   cut added from other tiles). So the table of one tile is usable alone.
+3. **The owner:** a way or a relation at the edge of a tile is in the table of each tile with a node or member of it. A
+   column `owner` is true in one tile only, and each tile decides it alone: a node by its place, a way by the place of
+   its first node, a relation by the place of the first node of its first member way. The cut and quack decode the same
+   coordinates, so the owner tile always has the row.
+4. **The union** keeps the rows with `owner`, so each row comes one time with no search for doubles:
+   `duckosm-rust quack-union DIR -o FILE.parquet`, or in DuckDB
+   `SELECT feature_id, tags, geometry FROM read_parquet('DIR/9/*/*.parquet') WHERE owner`.
 
-The checks: on Monaco (a test, zoom 14) and Kentucky (zoom 9), the union equals the table of one run, each row has one
-owner, and each table holds the rows that touch its tile. On Kentucky, each of the 65 tables equals DuckDB's
-`ST_Intersects` with the box of the tile, on QuackOSM's own table. On France, the union is byte for byte the table of one
-run (fingerprints of all rows).
+A polygon that covers a tile with no node or member in it (a country around the tile) is not in the table of that tile.
+For the rows of an area, read the tiles that the area touches, keep the rows that intersect the area
+(`ST_Intersects`), and remove the doubles with `DISTINCT ON (feature_id)`, not with `owner`: a road that comes into the
+area can have its owner in a tile outside the list.
+
+Each table has its tile, the input file and the time of the file in its metadata (`duckosm_tile`). The checks: on Monaco
+(a test, zoom 14), the union equals the table of one run and each node is in the table of its tile only. On Kentucky
+(zoom 9), the union equals one run (`quack_diff --large`), and against DuckDB's `ST_Intersects` with the box of each tile
+(on QuackOSM's own table) no table has a row that does not touch its tile; 18 rows touch a tile with no node in it.
 
 | Tile tables, zoom 9 (Mac mini) | Tables | Time | Peak RSS | Size | Rows in the tables | Union |
 |---|---|---|---|---|---|---|
-| Kentucky | 65 | 9.8 s | 0.8 GB | 327 MB (one table: 321 MB) | 2 400 838 (+0.3 %) | 1.0 s |
-| France | 760 | 209.0 s | 5.3 GB | 13 GB (one table: 9.7 GB) | 99 595 690 (+0.18 %) | 48.1 s |
+| Kentucky | 65 | 9.5 s | | 327 MB (one table: 321 MB) | 2 400 820 | 1.0 s |
 
-The tables of France are 34 % larger than one table, although only 0.18 % more rows: the large polygons (the country,
-the regions, the departments) are in each tile that they touch. Of the 209 s of France, the cut and the rows of the 697
-tiles of zoom 9 take 182 s, and the 760 tables, written at the same time, 26 s (one after the other: 56 s). Open: the
-first step (it makes more, smaller tiles than `--tiles 4000000`), the peak memory (4 tiles at a time), and the tiles of a
-dense city (12 tables of France are larger than 100 MB).
+`duckosm-rust` raises its limit of open files to 10 240 at the start: 4 tiles at a time keep about 700 temporary files
+open, and macOS gives a process 256.
 
 ## The sort
 

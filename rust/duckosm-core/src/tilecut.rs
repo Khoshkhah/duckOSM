@@ -1157,7 +1157,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let tmp = std::env::temp_dir().join(format!("duckosm-tiles-{}-{}", std::process::id(), dir.as_os_str().len()));
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir));
+    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), false);
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(cut?.0)
 }
@@ -1178,17 +1178,20 @@ impl TileFiles {
 }
 
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
-/// junctions files: quack by tiles (`crate::quack::features_by_tiles`). `complete`: the types of the relations to complete
-/// with all their members (quack: `multipolygon` and `boundary`), each one in one tile only: the first tile (in the order
-/// of `tiles`) with a member.
+/// junctions files and with no zlib in the tile files: quack by tiles (`crate::quack::features_by_tiles`) and the tile
+/// tables. `complete`: the types of the relations to complete with all their members (quack: `multipolygon` and
+/// `boundary`): with `once`, in one tile only, the first tile (in the order of `tiles`) with a member (quack by tiles: the
+/// boundary of a country has a million nodes and touches hundreds of tiles); else in each tile with a member (the tile
+/// tables: each tile alone makes all its rows).
 pub fn cut_to_store<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
     tiles: &[Tile],
     complete: &[&str],
+    once: bool,
 ) -> Result<TileFiles, String> {
     let chunks = Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?;
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, Files::Store(chunks), None)?;
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, Files::Store(chunks), None, once)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
 }
 
@@ -1202,6 +1205,7 @@ fn cut<R: Read + Seek + Send>(
     border_m: f64,
     files: Files,
     dir: Option<&Path>,
+    once: bool,
 ) -> Result<(Vec<CutCounts>, Parts), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let (timestamp, sorted) = header(open()?)?;
@@ -1418,9 +1422,7 @@ fn cut<R: Read + Seek + Send>(
     let mut waiting_bytes = 0usize;
     each_rel(&mut |r| {
         if multipolygons.binary_search(&r.id).is_ok() {
-            // quack (no folder) needs each one whole in one tile only, its first: a boundary of a country has a million
-            // nodes and is in hundreds of tiles
-            for t in tiles_in(&direct, r.id).take(if dir.is_some() { usize::MAX } else { 1 }) {
+            for t in tiles_in(&direct, r.id).take(if once { 1 } else { usize::MAX }) {
                 for &(m, ty, _) in &r.members {
                     match ty {
                         MemberType::Node => outside.push(&Pair, &(m, t as i64)).map_err(io)?,

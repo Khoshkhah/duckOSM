@@ -38,10 +38,10 @@ pub fn tile_schema() -> SchemaRef {
     Arc::new(Schema::new(f))
 }
 
-/// The rows of a tile table as one Arrow batch: each row with its `owner`.
-pub fn tile_batch(rows: &[(Feature, bool)]) -> Result<RecordBatch, String> {
-    let b = batch_of(rows.iter().map(|r| &r.0))?;
-    let owner = arrow_array::BooleanArray::from(rows.iter().map(|r| r.1).collect::<Vec<bool>>());
+/// The rows of a tile table as one Arrow batch: each row with its `owner` (`Feature::owner`).
+pub fn tile_batch(rows: &[Feature]) -> Result<RecordBatch, String> {
+    let b = batch_of(rows.iter())?;
+    let owner = arrow_array::BooleanArray::from(rows.iter().map(|r| r.owner).collect::<Vec<bool>>());
     let mut cols = b.columns().to_vec();
     cols.push(Arc::new(owner));
     RecordBatch::try_new(tile_schema(), cols).map_err(err)
@@ -190,7 +190,7 @@ pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
             let tags = (0..m.len()).map(|j| (k.value(j).to_string(), v.value(j).to_string())).collect();
             let geometry = geom.value(i).to_vec();
             let center = duckosm_core::quack::wkb_center(&geometry).ok_or("a geometry that is not the WKB of quack")?;
-            Ok(Feature { feature_id: id.value(i).to_string(), tags, geometry, center })
+            Ok(Feature { feature_id: id.value(i).to_string(), tags, geometry, center, owner: true })
         })
         .collect()
 }
