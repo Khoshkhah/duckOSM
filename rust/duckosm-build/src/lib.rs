@@ -1679,7 +1679,7 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
 
 /// One tile of quack by tiles, alone (a worker of the browser for each tile, `docs/rust/quack.md`): the rows that tile
 /// `tile` owns, from the file of the tile that `open` opens (a file of `tilecut::cut_to_sink`, with each multipolygon and
-/// boundary whole in its owner tile, `once`), as a GeoParquet part through `out`. No other tile is needed; the parts of
+/// boundary whole in each tile with a member), as a GeoParquet part through `out`. No other tile is needed; the parts of
 /// all tiles, joined ([`quack_join_to`]), are the table of the whole file.
 pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
     open: impl Fn() -> Result<R, String>,
