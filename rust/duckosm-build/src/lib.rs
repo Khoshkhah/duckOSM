@@ -1715,6 +1715,10 @@ pub fn quack_join_to<W: Write + Send>(
     out: W,
     sort: bool,
 ) -> Result<usize, String> {
+    // with no sort, the row groups of the parts are copied as bytes
+    if !sort {
+        return duckosm_parquet::quack::concat_quack(parts, out);
+    }
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
     let mut rows = duckosm_parquet::quack::Rows::new(sort);
     for p in parts {

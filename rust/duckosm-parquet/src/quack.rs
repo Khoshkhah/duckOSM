@@ -196,6 +196,54 @@ pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
 }
 
 /// The batches of a GeoParquet file of quack in memory (a part of the join of quack by tiles in the browser).
+/// The quack parts (GeoParquet files of [`QuackWriter`], each one in memory) as one file, in their order, with no sort:
+/// each row group of each part is copied as bytes (`append_column`), with no decode and no new encode (the join of the
+/// browser: 23.8 s for Sweden on a laptop when it decoded and encoded each row again). The schema and the key-value
+/// metadata (the GeoParquet `geo` and the Arrow schema) are those of the first part. Gives the number of rows.
+pub fn concat_quack<W: Write + Send>(parts: impl Iterator<Item = Result<Vec<u8>, String>>, out: W) -> Result<usize, String> {
+    use parquet::column::writer::ColumnCloseResult;
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    use parquet::file::writer::SerializedFileWriter;
+    let (mut out, mut w, mut rows) = (Some(out), None::<SerializedFileWriter<W>>, 0usize);
+    for p in parts {
+        let bytes = bytes::Bytes::from(p?);
+        let reader = SerializedFileReader::new(bytes.clone()).map_err(err)?;
+        let meta = reader.metadata();
+        if w.is_none() {
+            let file = meta.file_metadata();
+            let props = WriterProperties::builder().set_key_value_metadata(file.key_value_metadata().cloned()).build();
+            let out = out.take().expect("one writer");
+            w = Some(SerializedFileWriter::new(out, file.schema_descr().root_schema_ptr(), Arc::new(props)).map_err(err)?);
+        }
+        let w = w.as_mut().expect("the writer");
+        for rg in meta.row_groups() {
+            let mut g = w.next_row_group().map_err(err)?;
+            for col in rg.columns() {
+                let close = ColumnCloseResult {
+                    bytes_written: col.compressed_size() as u64,
+                    rows_written: rg.num_rows() as u64,
+                    metadata: col.clone(),
+                    bloom_filter: None,
+                    column_index: None,
+                    offset_index: None,
+                };
+                g.append_column(&bytes, close).map_err(err)?;
+            }
+            g.close().map_err(err)?;
+            rows += rg.num_rows() as usize;
+        }
+    }
+    match (w, out) {
+        (Some(w), _) => {
+            w.close().map_err(err)?;
+            Ok(rows)
+        }
+        // no part: an empty table
+        (None, Some(out)) => QuackWriter::new(out)?.close(),
+        (None, None) => unreachable!("the writer takes the output"),
+    }
+}
+
 pub fn read_quack_bytes(b: Vec<u8>, mut f: impl FnMut(RecordBatch) -> Result<(), String>) -> Result<(), String> {
     let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(b))
         .map_err(err)?
