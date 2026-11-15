@@ -23,6 +23,9 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
   the size of a tile, not of the file (see "By tiles"). It writes GeoParquet only.
 - `--tile-zoom Z` makes the table tile by tile with the map tiles of zoom `Z` (0 to 14), in place of `--tiles`.
 
+`duckosm-rust quack-tiles FILE --zoom 9 -o DIR` writes one table for each map tile (see "Tile tables"), and
+`duckosm-rust quack-union DIR -o FILE.parquet` joins tile tables into one table.
+
 The input must be sorted by type and id (nodes, then ways, then relations), as the files of Geofabrik are. To make the table of
 an area, cut the region file first with `duckosm-rust cut`.
 
@@ -126,11 +129,11 @@ same rows tile by tile:
    around it large ones: France at 4 million nodes has 324 tiles of zoom 3 to 11, Kentucky 16 tiles of zoom 6 to 9.
    With `--tile-zoom Z`, the tiles are the map tiles of zoom `Z` with a node (`TileSize::Zoom`).
 2. **The cut.** The tile cut of the build by tiles (`tilecut::cut_to_store`) writes the file of each tile, with the ways
-   whole (with their nodes from other tiles). Each multipolygon and boundary relation goes whole (all its member ways and
-   their nodes) into one tile only: the first tile with a member. In the cut of the build, a multipolygon goes whole
-   into each tile with a member; the boundary of France has about a million nodes and touches hundreds of tiles, and that
-   cut stopped at 32 GB of temporary files. The parts and the tile files are chunks of one temporary file of the store
-   (`tilecut::Chunks`), because the browser has no folders, only OPFS.
+   whole (with their nodes from other tiles), and each multipolygon and boundary relation whole (all its member ways and
+   their nodes) in each tile with a member, as the cut of the build: each tile file is a complete, standard `.osm.pbf`
+   (Kaveh's rule). With one zoom for all of France (zoom 11, 5 883 tiles), the copies of the large boundaries filled 32 GB
+   of temporary files; the quadtree has far fewer tiles. Natively the parts and the tile files are files in a temporary
+   folder; in the browser, chunks of one temporary file of OPFS (`tilecut::Chunks`), because the browser has no folders.
 3. **The rows of each tile.** `features_owned` runs on the file of each tile and keeps only the rows that the tile owns
    (`quack::Owner`), so each row comes one time:
    - a node: the tile of its place;
@@ -153,6 +156,7 @@ each row. The runs of the table below were on the same day, one after the other.
 | Kentucky | 16 tiles | 7.7 s | 0.7 GB | 0.4 GB |
 | France (5.1 GB) | one run | 105.9 s | 4.6 GB | 23.1 GB |
 | France | 324 tiles | 223.5 s | 2.0 GB | 19.9 GB |
+| France | 324 tiles, no zlib in the tile files, 4 tiles at a time | 171.3 s | 3.7 GB | 24.9 GB |
 | France | zoom 8 (241 tiles) | 200.4 s | 2.2 GB | 19.4 GB |
 | France | zoom 9 (697 tiles) | 222.5 s | 1.9 GB | 19.7 GB |
 | Île-de-France (338 MB) | zoom 8 (13 tiles) | 20.4 s | 1.1 GB | 2.0 GB |
@@ -182,10 +186,81 @@ before it made them: now it makes them in batches of 4 million points. And the a
 kept each freed small block with the thread that freed it, so memory grew from tile to tile up to 4 GiB; Studio's
 allocator now gives the extra free blocks to a shared pool.
 
+Two changes made the tile mode faster natively (France, one run measured again the same day: 104.3 s): the temporary
+tile files have no zlib (the cut 88 s to 71 s, 30 % less CPU), and 4 tiles run at the same time, with their rows given in
+the order of the tiles (the tiles 136 s to 100 s; the rows of 4 tiles wait in memory).
+
+In the browser, a file in OPFS belongs to the thread that opened it. Thus Studio does the tile mode in four steps, and
+each step uses all the threads:
+
+1. The count of the nodes chooses the tiles.
+2. The cut (`tilecut::cut_to_sink`) writes one complete `.osm.pbf` file for each tile. The thread that owns the files
+   only writes; the threads of the pool decode, sort and make the tile files. In a tile file, each blob of the main
+   part with the extra elements in its range is one job, so one large tile also uses all the threads.
+3. A Web Worker for each thread makes the rows of one tile at a time (`quack_tile`). Each worker has its own
+   WebAssembly module, its own memory and its own files, so the tiles do not wait for each other. A tile file is
+   removed when its rows are made.
+4. The join writes the parts into one GeoParquet file.
+
+Sweden (975 MB) in Chromium on the Mac mini, zoom 6 (21 tiles), 12 threads, not sorted: 60.9 s, with the same numbers of
+rows as the native run:
+
+| Step | Time | CPU |
+|---|---|---|
+| 1. Count the nodes and choose the tiles | 2.0 s | |
+| 2. The cut | 29.2 s | 49.5 s before the jobs in a tile file; part 5 (the tile files) on 11 to 12 cores |
+| 3. The rows of each tile | 25.0 s | 12 cores, then the largest tile alone for about 10 s |
+| 4. The join | 4.7 s | |
+
+The run used at most 7.0 GB of browser storage: the tile files and the parts of the rows, then the parts and the 2.7 GB
+output file.
+
 Natively, one run is faster: the tile mode reads the file four times (the count, two passes of the cut, and the blocks
 of the extra elements), it writes and reads each element again, and the ways at the edge of a tile are made in each
 tile. The memory of the cut (its index of the nodes: 205 MB of runs for France) and of the tiles stays small. Use the
 tile mode where the memory has a limit: the browser.
+
+## Tile tables
+
+`quack --tiles` makes one table of one file. The tile tables are for a table of the world, made in parts: one table for
+each map tile of one zoom, `DIR/<z>/<x>/<y>.parquet` (`duckosm_build::quack_tiles`).
+
+1. **The cut** makes the file of each tile, as osmium's smart cut: the nodes in the tile, each way with a node in the
+   tile (whole, with its nodes from other tiles), and each relation with a member in the tile; each multipolygon and
+   boundary with all its members, in each tile with a member.
+2. **Each tile alone:** quack on the file of the tile, and the table of the tile at once. Nothing waits for another tile,
+   so the tiles can run in any order, at the same time, or on other computers. The table holds the nodes in the tile,
+   the ways with a node in the tile and the relations that the file has whole (not the nodes and member ways that the
+   cut added from other tiles). So the table of one tile is usable alone.
+3. **The owner:** a way or a relation at the edge of a tile is in the table of each tile with a node or member of it. A
+   column `owner` is true in one tile only, and each tile decides it alone: a node by its place, a way by the place of
+   its first node, a relation by the place of the first node of its first member way. The cut and quack decode the same
+   coordinates, so the owner tile always has the row.
+4. **The union** keeps the rows with `owner`, so each row comes one time with no search for doubles:
+   `duckosm-rust quack-union DIR -o FILE.parquet`, or in DuckDB
+   `SELECT feature_id, tags, geometry FROM read_parquet('DIR/9/*/*.parquet') WHERE owner`.
+
+A polygon that covers a tile with no node or member in it (a country around the tile) is not in the table of that tile.
+For the rows of an area, read the tiles that the area touches, keep the rows that intersect the area
+(`ST_Intersects`), and remove the doubles with `DISTINCT ON (feature_id)`, not with `owner`: a road that comes into the
+area can have its owner in a tile outside the list.
+
+Each table has its tile, the input file and the time of the file in its metadata (`duckosm_tile`). The checks: on Monaco
+(a test, zoom 14), the union equals the table of one run and each node is in the table of its tile only. On Kentucky
+(zoom 9), the union equals one run (`quack_diff --large`), and against DuckDB's `ST_Intersects` with the box of each tile
+(on QuackOSM's own table) no table has a row that does not touch its tile; 18 rows touch a tile with no node in it.
+
+| Tile tables, zoom 9 (Mac mini) | Tables | Time | Peak RSS | Size | Rows in the tables | Union |
+|---|---|---|---|---|---|---|
+| Kentucky | 65 | 9.5 s | | 327 MB (one table: 321 MB) | 2 400 820 | 1.0 s |
+| France | 697 | 232.6 s | 3.7 GB | 13 GB (one table: 9.7 GB) | 99 594 359 | 43.6 s |
+
+France: the count 4.1 s, the cut 96.2 s, the tiles 132.3 s, and a peak disk use of 31.0 GB (the tile files of the cut have
+no zlib, and each multipolygon and boundary is whole in each tile with a member). The union is byte for byte the table of
+one run (fingerprints of all 99 412 535 rows).
+
+`duckosm-rust` raises its limit of open files to 10 240 at the start: 4 tiles at a time keep about 700 temporary files
+open, and macOS gives a process 256.
 
 ## The sort
 

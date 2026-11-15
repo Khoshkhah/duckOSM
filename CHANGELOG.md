@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The tile cut uses all threads in each part** (`tilecut.rs`): the relation blocks are decoded on all threads, the
+  outside rows are encoded on the pool, and in part 5 each blob of a tile file with its extra elements is one job, so one
+  large tile also uses all the threads. In the browser, part 5 makes all the tiles on the pool at the same time. Sweden at
+  zoom 6 in Chromium: the cut 49.5 s to 29.2 s. Kentucky at zoom 9 natively: part 5 0.93 s to 0.55 s, peak 497 MB to
+  523 MB, the same elements in all 44 tile files. The quack cut and the cut of the build by tiles are again one cut.
+- **Quack tile tables: `duckosm-rust quack-tiles` and `quack-union`** (`docs/rust/quack.md`, "Tile tables"). The cut makes the file of each
+  map tile of one zoom; each tile alone makes its table (the nodes in the tile, the ways with a node in it, the relations that its file has
+  whole) with a column `owner`, so nothing waits for another tile; the union keeps the rows with `owner`. France at zoom 9: 697 tables in
+  232.6 s (3.7 GB RSS); the union (43.6 s) is byte for byte the table of one run.
+- **Quack by tiles is faster natively**: no zlib in the temporary tile files, and 4 tiles at a time. France: 224.9 s to 171.3 s (one run:
+  104.3 s); peak RSS 1.8 GB to 3.7 GB.
 - **`duckosm-rust quack --tile-zoom Z`: tile by tile with the map tiles of one zoom** (`TileSize::Zoom`), in place of the quadtree of
   `--tiles N`. Île-de-France in Chromium: zoom 8 (13 tiles) 42.5 s and 474 MiB, zoom 9 (32 tiles) 41.7 s and 467 MiB. France natively: zoom 8
   (241 tiles) 200.4 s, zoom 9 (697 tiles) 222.5 s.

@@ -257,6 +257,85 @@ fn quack(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// duckosm-rust quack-tiles: QuackOSM's features table as one table for each map tile of one zoom,
+/// <out>/<z>/<x>/<y>.parquet (docs/rust/quack.md, "Tile tables"). The table of a tile holds every feature whose geometry
+/// touches the tile, so it is usable alone; its column `owner` is true in one tile only, for the union (quack-union).
+#[derive(Parser)]
+#[command(name = "duckosm-rust quack-tiles", version)]
+struct QuackTilesCli {
+    /// The input .osm.pbf file.
+    pbf: PathBuf,
+    /// The output folder.
+    #[arg(short, long, default_value = ".")]
+    out: PathBuf,
+    /// The zoom of the tiles (0 to 14).
+    #[arg(long, default_value_t = 9, value_parser = clap::value_parser!(u8).range(0..=14))]
+    zoom: u8,
+    /// The threads (default: all the cores).
+    #[arg(long)]
+    threads: Option<usize>,
+}
+
+fn quack_tiles(args: &[String]) -> Result<(), String> {
+    let cli = QuackTilesCli::parse_from(args);
+    let _ = QUACK_START.set(std::time::Instant::now());
+    let _ = duckosm_build::STEP_HOOK.set(quack_step);
+    let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
+    let t = std::time::Instant::now();
+    let open = || {
+        let f = std::fs::File::open(&cli.pbf).map_err(|e| format!("{}: {e}", cli.pbf.display()))?;
+        Ok(std::io::BufReader::with_capacity(1 << 20, f))
+    };
+    let name = cli.pbf.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+    let n = duckosm_build::quack_tiles::quack_tile_tables(open, cli.zoom, &cli.out, &name)?;
+    eprintln!(
+        "quack-tiles: {} tile tables of zoom {} in {}, {} rows ({} in the tables) in {:.2} s",
+        n.tiles,
+        cli.zoom,
+        cli.out.display(),
+        n.rows,
+        n.stored,
+        t.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
+
+/// duckosm-rust quack-union: the union of tile tables of quack-tiles (the rows with `owner`) as one GeoParquet file with
+/// QuackOSM's columns. Give a folder (all its tile tables) or tile tables.
+#[derive(Parser)]
+#[command(name = "duckosm-rust quack-union", version)]
+struct QuackUnionCli {
+    /// Tile tables (<z>/<x>/<y>.parquet), or folders with them.
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+    /// The output GeoParquet file.
+    #[arg(short, long)]
+    out: PathBuf,
+    /// Do not sort the rows (QuackOSM sort_result=False).
+    #[arg(long)]
+    no_sort: bool,
+}
+
+fn quack_union(args: &[String]) -> Result<(), String> {
+    let cli = QuackUnionCli::parse_from(args);
+    let _ = QUACK_START.set(std::time::Instant::now());
+    let _ = duckosm_build::STEP_HOOK.set(quack_step);
+    let t = std::time::Instant::now();
+    let mut files = Vec::new();
+    for p in &cli.inputs {
+        if p.is_dir() {
+            files.extend(duckosm_build::quack_tiles::tile_table_files(p)?);
+        } else {
+            files.push(p.clone());
+        }
+    }
+    let out = std::fs::File::create(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
+    let n = duckosm_build::quack_tiles::quack_union(&files, std::io::BufWriter::new(out), !cli.no_sort)?;
+    eprintln!("quack-union: {} rows of {} tile tables in {:.2} s: {}", n, files.len(), t.elapsed().as_secs_f64(), cli.out.display());
+    Ok(())
+}
+
 /// duckosm-rust tiles: build a large area by tiles. One read of the region file cuts it to the standard map tiles of the
 /// boundary (one file for each tile, with the junctions of the nodes outside the tile); each tile builds alone, `--jobs`
 /// tiles at a time, each in its own process; the union joins the tables of the tiles into the tables of the area.
@@ -762,6 +841,8 @@ fn main() {
         Some("cut") => cut(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),
+        Some("quack-tiles") => quack_tiles(&args[1..]),
+        Some("quack-union") => quack_union(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {

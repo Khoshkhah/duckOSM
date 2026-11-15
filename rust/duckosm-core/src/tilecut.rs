@@ -18,7 +18,7 @@
 //! 5. Each tile: its parts, merged in the order of the ids, give its file; the parts go.
 
 use crate::boundary::Boundary;
-use crate::cutfile::{file_blob, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
+use crate::cutfile::{file_blob_as, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
 use crate::cutstream::{each_block, each_block_at, header, widen, CutCounts, Span, EMPTY};
 use crate::graph::{MemberType, Relation};
 use crate::network::{global_junction, JunctionUses};
@@ -377,7 +377,7 @@ impl RawSink for All {
 
 /// The blobs of elements of one kind (sorted by id), BLOCK elements in each, as in a `.osm.pbf` file, each after a record
 /// (first id, last id, number of elements: 20 bytes). The elements move into the blocks (no copy).
-fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>) -> Result<(), String> {
+fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>, raw: bool) -> Result<(), String> {
     let mut it = elems.into_iter().peekable();
     while it.peek().is_some() {
         let chunk: Vec<Elem> = it.by_ref().take(BLOCK).collect();
@@ -392,20 +392,20 @@ fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>) -> Result<(), String> {
                 &chunk.into_iter().filter_map(|e| if let Elem::Relation(r) = e { Some(r) } else { None }).collect::<Vec<_>>(),
             ),
         };
-        file_blob(out, "OSMData", &block)?;
+        file_blob_as(out, "OSMData", &block, raw)?;
     }
     Ok(())
 }
 
 /// Elements with their tiles to blobs for each tile (on the thread of the block): (tile, blobs). The elements move.
-fn by_tile(elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
-    groups(elems).into_iter().map(tile_blobs).collect()
+fn by_tile(elems: Vec<(u32, Elem)>, raw: bool) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    groups(elems).into_iter().map(|g| tile_blobs(g, raw)).collect()
 }
 
 /// [`by_tile`] with the tiles on all threads (the compression of the blocks is the work), for a caller on one thread: the
 /// passes that decode the blocks on all threads call [`by_tile`].
-fn by_tile_par(elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
-    groups(elems).into_par_iter().map(tile_blobs).collect()
+fn by_tile_par(elems: Vec<(u32, Elem)>, raw: bool) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    groups(elems).into_par_iter().map(|g| tile_blobs(g, raw)).collect()
 }
 
 /// The elements of each tile, in the order of the tiles, each tile in the order of the ids.
@@ -421,9 +421,9 @@ fn groups(mut elems: Vec<(u32, Elem)>) -> Vec<(u32, Vec<Elem>)> {
     groups
 }
 
-fn tile_blobs((t, group): (u32, Vec<Elem>)) -> Result<(u32, Vec<u8>), String> {
+fn tile_blobs((t, group): (u32, Vec<Elem>), raw: bool) -> Result<(u32, Vec<u8>), String> {
     let mut bytes = Vec::new();
-    blobs(group, &mut bytes)?;
+    blobs(group, &mut bytes, raw)?;
     Ok((t, bytes))
 }
 
@@ -440,8 +440,9 @@ struct Parts {
 /// tiles, read on the thread that owns the OPFS file, so that the other threads can make their tile files).
 enum Files {
     Dir(PathBuf),
+    // the browser only
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     Store(Chunks),
-    Mem(std::sync::Mutex<FxHashMap<(u32, &'static str), std::sync::Arc<[u8]>>>),
 }
 
 /// The bytes of blobs that wait in memory before they go to the part files.
@@ -478,11 +479,6 @@ impl Parts {
                     .and_then(|mut f| f.write_all(&bytes))
                     .map_err(e)?,
                 Files::Store(c) => c.append((tile, part), &bytes).map_err(e)?,
-                Files::Mem(m) => {
-                    let mut m = m.lock().expect("the parts");
-                    let old = m.remove(&(tile, part)).unwrap_or_else(|| std::sync::Arc::from(&[][..]));
-                    m.insert((tile, part), [&old[..], &bytes[..]].concat().into());
-                }
             }
         }
         Ok(())
@@ -492,14 +488,20 @@ impl Parts {
         match &self.files {
             Files::Dir(dir) => std::fs::File::open(Self::path(dir, tile, part)).ok().map(|f| Box::new(f) as Box<dyn Read + Send>),
             Files::Store(c) => c.reader((tile, part)).map(|r| Box::new(r) as Box<dyn Read + Send>),
-            Files::Mem(m) => m.lock().expect("the parts").get(&(tile, part)).map(|b| Box::new(io::Cursor::new(b.clone())) as Box<dyn Read + Send>),
+        }
+    }
+    /// The bytes of a part (after [`Parts::flush`]).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn size(&self, tile: u32, part: &'static str) -> u64 {
+        match &self.files {
+            Files::Dir(dir) => std::fs::metadata(Self::path(dir, tile, part)).map_or(0, |m| m.len()),
+            Files::Store(c) => c.index.lock().expect("the index").get(&(tile, part)).map_or(0, |v| v.iter().map(|c| c.1).sum()),
         }
     }
     fn has(&self, tile: u32, part: &'static str) -> bool {
         match &self.files {
             Files::Dir(dir) => Self::path(dir, tile, part).exists(),
             Files::Store(c) => c.index.lock().expect("the index").contains_key(&(tile, part)),
-            Files::Mem(m) => m.lock().expect("the parts").contains_key(&(tile, part)),
         }
     }
     fn remove(&self, tile: u32, part: &'static str) {
@@ -507,12 +509,7 @@ impl Parts {
             Files::Dir(dir) => {
                 let _ = std::fs::remove_file(Self::path(dir, tile, part));
             }
-            Files::Store(c) => {
-                c.index.lock().expect("the index").remove(&(tile, part));
-            }
-            Files::Mem(m) => {
-                m.lock().expect("the parts").remove(&(tile, part));
-            }
+            Files::Store(c) => c.remove((tile, part)),
         }
     }
 }
@@ -520,47 +517,66 @@ impl Parts {
 /// Files as chunks of one temporary file of the store: each file is the list of its chunks (place, length). A removed
 /// file keeps its bytes in the temporary file until the end.
 pub struct Chunks {
-    file: std::sync::Mutex<(Box<dyn crate::spill::Blob>, u64)>,
+    /// the temporary file and its end; none: each chunk in memory by itself (`mem`)
+    file: Option<std::sync::Mutex<(Box<dyn crate::spill::Blob>, u64)>>,
+    /// the chunks in memory (`Chunks::memory`): no large block that grows (a block that doubles needs up to three times
+    /// the data at a time: Sweden ran out of the 4 GiB of the browser)
+    mem: std::sync::Mutex<Vec<Vec<u8>>>,
+    /// each file: its chunks (place in the file or number in `mem`, length)
     index: std::sync::Mutex<FxHashMap<(u32, &'static str), Vec<(u64, u64)>>>,
 }
 
 impl Chunks {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn new(store: &dyn crate::spill::Store) -> io::Result<Chunks> {
-        Ok(Chunks { file: std::sync::Mutex::new((store.create()?, 0)), index: Default::default() })
+        Ok(Chunks { file: Some(std::sync::Mutex::new((store.create()?, 0))), mem: Default::default(), index: Default::default() })
+    }
+    /// The chunks in memory, each by itself.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn memory() -> Chunks {
+        Chunks { file: None, mem: Default::default(), index: Default::default() }
     }
     fn append(&self, key: (u32, &'static str), bytes: &[u8]) -> io::Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
-        let mut f = self.file.lock().expect("the file");
-        let at = f.1;
-        f.0.seek(SeekFrom::Start(at))?;
-        f.0.write_all(bytes)?;
-        f.1 += bytes.len() as u64;
+        let at = match &self.file {
+            Some(file) => {
+                let mut f = file.lock().expect("the file");
+                let at = f.1;
+                f.0.seek(SeekFrom::Start(at))?;
+                f.0.write_all(bytes)?;
+                f.1 += bytes.len() as u64;
+                at
+            }
+            None => {
+                let mut m = self.mem.lock().expect("the chunks");
+                m.push(bytes.to_vec());
+                (m.len() - 1) as u64
+            }
+        };
         self.index.lock().expect("the index").entry(key).or_default().push((at, bytes.len() as u64));
         Ok(())
     }
-    /// All the bytes of a file: one read for each chunk.
-    fn read_all(&self, key: (u32, &'static str)) -> io::Result<Option<Vec<u8>>> {
-        let Some(chunks) = self.index.lock().expect("the index").get(&key).cloned() else { return Ok(None) };
-        let mut b = vec![0u8; chunks.iter().map(|c| c.1 as usize).sum()];
-        let (mut f, mut at) = (self.file.lock().expect("the file"), 0);
-        for (pos, len) in chunks {
-            f.0.seek(SeekFrom::Start(pos))?;
-            f.0.read_exact(&mut b[at..at + len as usize])?;
-            at += len as usize;
-        }
-        Ok(Some(b))
-    }
     fn reader(&self, key: (u32, &'static str)) -> Option<ChunkReader<'_>> {
         let chunks = self.index.lock().expect("the index").get(&key)?.clone();
-        Some(ChunkReader { file: &self.file, chunks, i: 0, off: 0 })
+        Some(ChunkReader { c: self, chunks, i: 0, off: 0 })
+    }
+    /// A file goes; in memory its chunks go too.
+    fn remove(&self, key: (u32, &'static str)) {
+        let gone = self.index.lock().expect("the index").remove(&key);
+        if let (None, Some(chunks)) = (&self.file, gone) {
+            let mut m = self.mem.lock().expect("the chunks");
+            for (at, _) in chunks {
+                m[at as usize] = Vec::new();
+            }
+        }
     }
 }
 
 /// The bytes of a file of [`Chunks`], in order.
 pub struct ChunkReader<'a> {
-    file: &'a std::sync::Mutex<(Box<dyn crate::spill::Blob>, u64)>,
+    c: &'a Chunks,
     chunks: Vec<(u64, u64)>,
     i: usize,
     off: u64,
@@ -574,9 +590,18 @@ impl Read for ChunkReader<'_> {
         }
         let Some(&(at, len)) = self.chunks.get(self.i) else { return Ok(0) };
         let n = (len - self.off).min(b.len() as u64) as usize;
-        let mut f = self.file.lock().expect("the file");
-        f.0.seek(SeekFrom::Start(at + self.off))?;
-        f.0.read_exact(&mut b[..n])?;
+        match &self.c.file {
+            Some(file) => {
+                let mut f = file.lock().expect("the file");
+                f.0.seek(SeekFrom::Start(at + self.off))?;
+                f.0.read_exact(&mut b[..n])?;
+            }
+            None => {
+                let m = self.c.mem.lock().expect("the chunks");
+                let o = self.off as usize;
+                b[..n].copy_from_slice(&m[at as usize][o..o + n]);
+            }
+        }
         self.off += n as u64;
         Ok(n)
     }
@@ -600,9 +625,29 @@ struct Blobs<'a>(Option<io::BufReader<Box<dyn Read + Send + 'a>>>);
 
 type Blob = (i64, i64, u32, Vec<u8>);
 
+/// The bytes of a part, or none.
+type Src<'a> = Option<Box<dyn Read + Send + 'a>>;
+
+/// Where [`cut_to_sink`] gives the bytes of the tile files: (tile, the next bytes of its file).
+pub type Sink<'a> = &'a mut dyn FnMut(u32, &[u8]) -> Result<(), String>;
+
+/// A writer that gives its bytes to a [`Sink`] (put a `BufWriter` in front).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+struct SinkWriter<'a, 'b>(&'a mut Sink<'b>, u32);
+
+impl Write for SinkWriter<'_, '_> {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        (self.0)(self.1, b).map_err(io::Error::other)?;
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 impl<'a> Blobs<'a> {
-    fn open(parts: &'a Parts, tile: u32, part: &'static str) -> Blobs<'a> {
-        Blobs(parts.reader(tile, part).map(|f| io::BufReader::with_capacity(1 << 20, f)))
+    fn from(src: Src<'a>) -> Blobs<'a> {
+        Blobs(src.map(|f| io::BufReader::with_capacity(1 << 20, f)))
     }
     fn next(&mut self) -> Result<Option<Blob>, String> {
         let Some(r) = self.0.as_mut() else { return Ok(None) };
@@ -627,8 +672,8 @@ struct PartReader<'a> {
 }
 
 impl<'a> PartReader<'a> {
-    fn open(parts: &'a Parts, tile: u32, part: &'static str) -> PartReader<'a> {
-        PartReader { blobs: Blobs::open(parts, tile, part), buf: Default::default() }
+    fn from(src: Src<'a>) -> PartReader<'a> {
+        PartReader { blobs: Blobs::from(src), buf: Default::default() }
     }
     fn peek(&mut self) -> Result<Option<&Elem>, String> {
         if self.buf.is_empty() {
@@ -690,100 +735,124 @@ fn put<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, last: &mut Option<i64>
 
 /// One kind of the file of a tile: the blobs of the main part, merged in the order of the ids with the elements of the
 /// extra part. A blob that no extra element falls into is copied as bytes; only the others are decoded and made again.
-fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, parts: &Parts, tile: u32, main: &'static str, extra: &'static str, kind: u8) -> Result<(), String> {
-    let (mut a, mut x, mut b) = (Blobs::open(parts, tile, main), PartReader::open(parts, tile, extra), Buffers::default());
-    let mut last = None;
-    while let Some((first, end, count, blob)) = a.next()? {
-        while x.peek_id()?.is_some_and(|id| id < first) {
-            let e = x.next()?.expect("peeked");
-            put(w, n, &mut last, e)?;
-        }
-        if x.peek_id()?.is_none_or(|id| id > end) {
-            w.blocks(&blob)?;
-            match kind {
-                0 => n.nodes += count as usize,
-                1 => n.ways += count as usize,
-                _ => n.relations += count as usize,
+/// The blobs go in batches to the threads of the pool: each blob with the extra elements before it and in its range is
+/// one job, and the jobs are written in their order (one large tile on one thread was the end of the cut in the browser).
+/// The ids of the jobs do not overlap, so each job removes its doubles alone.
+fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extra: Src, kind: u8, raw: bool) -> Result<(), String> {
+    let (mut a, mut x) = (Blobs::from(main), PartReader::from(extra));
+    loop {
+        // the free threads for this tile: the threads over the tiles that run now, so the tiles at the same time hold no
+        // more blobs in memory than one tile alone (a fixed batch for each tile: Kentucky 594 -> 882 MB with 20 tiles)
+        let batch_len = (2 * rayon::current_num_threads() / RUNNING.load(std::sync::atomic::Ordering::Relaxed).max(1)).max(2);
+        let mut batch: Vec<(Vec<Elem>, Blob, Vec<Elem>)> = Vec::with_capacity(batch_len);
+        while batch.len() < batch_len {
+            let Some(blob) = a.next()? else { break };
+            let (mut gap, mut inside) = (Vec::new(), Vec::new());
+            while x.peek_id()?.is_some_and(|id| id < blob.0) {
+                gap.push(x.next()?.expect("peeked"));
             }
-            last = Some(end);
-            continue;
-        }
-        let mut all = All::default();
-        decode_block(&blob, [true; 3], &mut b, &mut all)?;
-        for e in all.0 {
-            while x.peek_id()?.is_some_and(|id| id < e.id()) {
-                let e = x.next()?.expect("peeked");
-                put(w, n, &mut last, e)?;
+            while x.peek_id()?.is_some_and(|id| id <= blob.1) {
+                inside.push(x.next()?.expect("peeked"));
             }
-            put(w, n, &mut last, e)?;
+            batch.push((gap, blob, inside));
+        }
+        if batch.is_empty() {
+            break;
+        }
+        let made: Vec<(Vec<u8>, CutCounts)> = batch
+            .into_par_iter()
+            .map_init(Buffers::default, |b, (gap, (_, _, count, blob), inside)| {
+                let mut u = PbfWriter::data(Vec::new()).raw_blocks(raw);
+                let (mut un, mut last) = (CutCounts::default(), None);
+                for e in gap {
+                    put(&mut u, &mut un, &mut last, e)?;
+                }
+                if inside.is_empty() {
+                    u.blocks(&blob)?;
+                    match kind {
+                        0 => un.nodes += count as usize,
+                        1 => un.ways += count as usize,
+                        _ => un.relations += count as usize,
+                    }
+                } else {
+                    let mut all = All::default();
+                    decode_block(&blob, [true; 3], b, &mut all)?;
+                    let mut ins = inside.into_iter().peekable();
+                    for e in all.0 {
+                        while ins.peek().is_some_and(|i| i.id() < e.id()) {
+                            put(&mut u, &mut un, &mut last, ins.next().expect("peeked"))?;
+                        }
+                        put(&mut u, &mut un, &mut last, e)?;
+                    }
+                    for e in ins {
+                        put(&mut u, &mut un, &mut last, e)?;
+                    }
+                }
+                Ok((u.finish()?, un))
+            })
+            .collect::<Result<_, String>>()?;
+        for (bytes, un) in made {
+            w.blocks(&bytes)?;
+            n.nodes += un.nodes;
+            n.ways += un.ways;
+            n.relations += un.relations;
         }
     }
+    let mut last = None;
     while let Some(e) = x.next()? {
         put(w, n, &mut last, e)?;
     }
     Ok(())
 }
 
-/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
-/// of the ids with no doubles. Gives the numbers of elements.
-/// Step 5 of the cut in the browser: this thread reads the parts of the next tiles (about [`MEMORY_TILES`] bytes) from
-/// the store in OPFS (its file belongs to this thread), all threads make their tile files in memory, and this thread
-/// writes them to the store as the part "tile". Kentucky (16 threads): 8.0 s one tile at a time before.
-fn finish_tiles_in_memory(parts: &Parts, n: usize, timestamp: Option<i64>) -> Result<Vec<CutCounts>, String> {
-    let Files::Store(chunks) = &parts.files else { return Err("the tile cut in memory needs the store".into()) };
-    let e = |e: io::Error| format!("a part file of the tile cut: {e}");
-    let mut counts = vec![CutCounts::default(); n];
-    let mut next = 0;
-    while next < n {
-        let mem = Parts { files: Files::Mem(Default::default()), waiting: Default::default() };
-        let (mut batch, mut bytes) = (Vec::new(), 0usize);
-        while next < n && (batch.is_empty() || bytes < MEMORY_TILES) {
-            let t = next as u32;
-            next += 1;
-            let (has, at) = (parts.has(t, "nodes"), bytes);
-            for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations"] {
-                if let (true, Some(b)) = (has, chunks.read_all((t, part)).map_err(e)?) {
-                    bytes += b.len();
-                    let Files::Mem(m) = &mem.files else { unreachable!() };
-                    m.lock().expect("the parts").insert((t, part), b.into());
-                }
-                parts.remove(t, part);
-            }
-            if has {
-                batch.push((bytes - at, t));
-            } else {
-                parts.remove(t, "junctions");
-            }
-        }
-        // the largest tiles first, each tile its own task: a large tile does not end the batch alone
-        batch.sort_unstable_by(|a, b| b.cmp(a));
-        let made: Vec<(u32, Vec<u8>, CutCounts)> = batch
-            .par_iter()
-            .with_max_len(1)
-            .map(|&(_, t)| {
-                let mut out = Vec::new();
-                let c = finish_tile(&mem, t, &mut out, timestamp)?;
-                Ok((t, out, c))
-            })
-            .collect::<Result<_, String>>()?;
-        for (t, out, c) in made {
-            chunks.append((t, "tile"), &out).map_err(e)?;
-            counts[t as usize] = c;
-        }
+/// The output of a tile file on a thread of the pool: each write goes through the channel to the thread that writes the
+/// files (`finish_from` writes through a buffer of 1 MiB).
+#[cfg(target_arch = "wasm32")]
+struct Chan(u32, std::sync::mpsc::SyncSender<(u32, Vec<u8>)>);
+
+#[cfg(target_arch = "wasm32")]
+impl Write for Chan {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        self.1.send((self.0, b.to_vec())).map_err(|_| io::Error::other("the writer of the tile files stopped"))?;
+        Ok(b.len())
     }
-    Ok(counts)
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
-/// The bytes of the parts of the tiles that [`finish_tiles_in_memory`] reads at once.
-const MEMORY_TILES: usize = 128 << 20;
-
-fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>) -> Result<CutCounts, String> {
-    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?;
-    let mut n = CutCounts::default();
-    for (kind, main, extra) in [(0, "nodes", "extra-nodes"), (1, "ways", "extra-ways"), (2, "relations", "none")] {
-        merge_kind(&mut w, &mut n, parts, tile, main, extra, kind)?;
+/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
+/// of the ids with no doubles. Gives the numbers of elements.
+fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
+    let srcs = KINDS.map(|(main, extra)| (parts.reader(tile, main), parts.reader(tile, extra)));
+    let n = finish_from(srcs, out, timestamp, raw)?;
+    for (main, extra) in KINDS {
         parts.remove(tile, main);
         parts.remove(tile, extra);
+    }
+    Ok(n)
+}
+
+/// The tile files that are made now ([`finish_from`]): the batch of each of them in [`merge_kind`].
+static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The parts of the file of a tile: for the nodes, the ways and the relations, the main part and the extra part.
+const KINDS: [(&str, &str); 3] = [("nodes", "extra-nodes"), ("ways", "extra-ways"), ("relations", "none")];
+
+/// [`finish_tile`] from the bytes of the parts (`KINDS`).
+fn finish_from<W: Write>(srcs: [(Src, Src); 3], out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
+    struct Running;
+    impl Drop for Running {
+        fn drop(&mut self) {
+            RUNNING.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    RUNNING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _running = Running;
+    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?.raw_blocks(raw);
+    let mut n = CutCounts::default();
+    for (kind, (main, extra)) in srcs.into_iter().enumerate() {
+        merge_kind(&mut w, &mut n, main, extra, kind as u8, raw)?;
     }
     w.finish()?.flush().map_err(|e| e.to_string())?;
     Ok(n)
@@ -1070,6 +1139,9 @@ impl Codec<(i64, u8)> for Use {
 }
 
 /// Two numbers, 16 bytes: (id, tile).
+/// The buckets of the nodes from outside: 2^27 ids each.
+const BUCKET_SHIFT: u32 = 27;
+
 struct Pair;
 impl Codec<(i64, i64)> for Pair {
     fn put(&self, r: &(i64, i64), out: &mut Vec<u8>) {
@@ -1090,6 +1162,7 @@ fn take_blocks<R: Read + Seek>(
     pairs: impl Iterator<Item = io::Result<(i64, i64)>>,
     parts: &Parts,
     part: &'static str,
+    raw: bool,
 ) -> Result<(), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let mut pairs = pairs.peekable();
@@ -1127,7 +1200,7 @@ fn take_blocks<R: Read + Seek>(
             .map_init(Buffers::default, |buf, (b, want)| {
                 let mut s = Take { wanted: want, out: Vec::new(), all: All::default() };
                 decode_block(b, kinds, buf, &mut s)?;
-                by_tile(s.out)
+                by_tile(s.out, raw)
             })
             .collect::<Result<_, _>>()?;
         for (t, bytes) in out.into_iter().flatten() {
@@ -1197,6 +1270,7 @@ fn outside_junctions(
 }
 
 /// The junctions file of a tile from its part (no part: a file with no rows).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn write_junctions(parts: &Parts, tile: u32, out: &Path) -> Result<(), String> {
     let e = |e: io::Error| format!("{}: {e}", out.display());
     let mut f = io::BufWriter::new(std::fs::File::create(out).map_err(e)?);
@@ -1263,7 +1337,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let tmp = std::env::temp_dir().join(format!("duckosm-tiles-{}-{}", std::process::id(), dir.as_os_str().len()));
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), true);
+    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), None, false, true);
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(cut?.0)
 }
@@ -1281,25 +1355,56 @@ impl TileFiles {
     pub fn reader(&self, i: usize) -> impl Read + Send + '_ {
         self.parts.reader(i as u32, "tile").unwrap_or_else(|| Box::new(io::empty()))
     }
+
+    /// The size of the file of tile `i` in bytes.
+    pub fn size(&self, i: usize) -> u64 {
+        let key = (i as u32, "tile");
+        match &self.parts.files {
+            Files::Dir(d) => std::fs::metadata(Parts::path(d, key.0, key.1)).map_or(0, |m| m.len()),
+            Files::Store(c) => c.index.lock().expect("the index").get(&key).map_or(0, |v| v.iter().map(|c| c.1).sum()),
+        }
+    }
+}
+
+impl Drop for TileFiles {
+    /// The folder of the tile files goes (natively; the chunks of the store go with their temporary file).
+    fn drop(&mut self) {
+        if let Files::Dir(d) = &self.parts.files {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
 }
 
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
-/// junctions files: quack by tiles (`crate::quack::features_by_tiles`). `complete`: the types of the relations to complete
-/// with all their members (quack: `multipolygon` and `boundary`), each one in one tile only: the first tile (in the order
-/// of `tiles`) with a member.
+/// junctions files and with no zlib in the tile files: quack by tiles (`crate::quack::features_by_tiles`) and the tile
+/// tables. `complete`: the types of the relations to complete with all their members (quack: `multipolygon` and
+/// `boundary`), each one in each tile with a member, so each tile file is complete (as the cut of the build by tiles and
+/// osmium's smart cut).
 pub fn cut_to_store<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
     tiles: &[Tile],
     complete: &[&str],
 ) -> Result<TileFiles, String> {
-    let chunks = Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?;
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, Files::Store(chunks), None, false)?;
+    // natively, a file for each part and each tile in a temporary folder, so the tiles are written at the same time with
+    // no lock (France: one file for all took 31 s for step 5); in the browser, chunks of one file of the store (OPFS)
+    #[cfg(not(target_arch = "wasm32"))]
+    let files = {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = std::env::temp_dir().join(format!("duckosm-tilefiles-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        Files::Dir(tmp)
+    };
+    #[cfg(target_arch = "wasm32")]
+    let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, None, true, false)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
 }
 
 /// The cut of the build by tiles ([`cut_to_tiles`]: each multipolygon complete in every tile with a member, the junctions)
-/// into the temporary store: the cut where no folder is (the browser). The tile files are the part "tile" of each tile.
+/// into the temporary store: the cut where no folder is (the browser). The tile files are the part "tile" of each tile,
+/// the junctions the part "junctions".
 pub fn cut_to_store_build<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
@@ -1309,8 +1414,48 @@ pub fn cut_to_store_build<R: Read + Seek + Send>(
 ) -> Result<TileFiles, String> {
     let chunks = Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let (counts, parts) = cut(open, boundary, tiles, complete, border_m, Files::Store(chunks), None, true)?;
+    let (counts, parts) = cut(open, boundary, tiles, complete, border_m, Files::Store(chunks), None, None, false, true)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
+}
+
+/// [`cut_to_store`], with each tile file given to `sink` (in pieces, tile by tile): the browser writes each tile into a
+/// file of its own, so that a worker for each tile can read it (`crate::quack::features_owned` in each worker). With
+/// `memory`, the browser keeps the parts of the tiles in memory, compressed with zlib, not in OPFS: the cut writes many
+/// small pieces of parts, and each write to OPFS goes through JavaScript (slow on some PCs).
+pub fn cut_to_sink<R: Read + Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    boundary: &Boundary,
+    tiles: &[Tile],
+    complete: &[&str],
+    #[allow(unused_variables)] memory: bool,
+    #[allow(unused_mut)] mut sink: Sink,
+) -> Result<Vec<CutCounts>, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let chunks = if memory {
+            Chunks::memory()
+        } else {
+            Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?
+        };
+        let files = Files::Store(chunks);
+        Ok(cut(open, boundary, tiles, complete, 0.0, files, None, Some(&mut sink), !memory, false)?.0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let f = cut_to_store(open, boundary, tiles, complete)?;
+        let mut buf = vec![0u8; 1 << 20];
+        for i in 0..f.tiles.len() {
+            let mut r = f.reader(i);
+            loop {
+                let n = r.read(&mut buf).map_err(|e| format!("a tile file of the tile cut: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                sink(i as u32, &buf[..n])?;
+            }
+        }
+        Ok(f.tiles.iter().map(|t| t.1).collect())
+    }
 }
 
 /// The cut of [`cut_to_tiles`] and [`cut_to_store`]: the part files in `files`; the tile files into `dir` with their
@@ -1325,6 +1470,11 @@ fn cut<R: Read + Seek + Send>(
     border_m: f64,
     files: Files,
     dir: Option<&Path>,
+    // the browser: the tile files to this sink, not to the store (`cut_to_sink`)
+    #[allow(unused_mut, unused_variables)] mut sink: Option<&mut Sink>,
+    // the parts and the tile files with no zlib (a temporary file read one time soon after); the build by tiles keeps zlib
+    raw: bool,
+    // the cut of the build by tiles: the junctions of each tile (in `dir`, or in `files` as the part "junctions")
     build: bool,
 ) -> Result<(Vec<CutCounts>, Parts), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
@@ -1360,7 +1510,7 @@ fn cut<R: Read + Seek + Send>(
                 span: EMPTY,
             };
             decode_block(b, [true, true, true], buf, &mut s)?;
-            Ok((s.runs, by_tile(s.inside)?, s.other, s.span, s.near))
+            Ok((s.runs, by_tile(s.inside, raw)?, s.other, s.span, s.near))
         },
         |(runs, blobs, other, span, mut n), at| {
             near.append(&mut n);
@@ -1384,7 +1534,11 @@ fn cut<R: Read + Seek + Send>(
     // temporary list); the relations, whole (to a temporary file)
     let ways_at = ways_at.unwrap_or(0);
     let (mut ways, mut multi) = (Book::default(), Vec::new());
-    let mut outside = Writer::new(store).map_err(io)?;
+    // the nodes that a tile needs from outside it, in buckets by node id (2^27 ids each): each bucket is sorted in memory
+    // on all threads in step 4 (one merge on one thread took 3.3 s of the 14.8 s of the cut of Sweden)
+    let mut outside = crate::spill::Buckets::new(BUCKET_SHIFT);
+    // the uses of the nodes: only the junctions files of the build by tiles need them
+    let junctions = build;
     let mut uses = Writer::new(store).map_err(io)?;
     // the nodes outside the area are few (the border of the area): in memory
     let mut homes: Vec<(i64, i64, u32)> = Vec::new();
@@ -1409,8 +1563,11 @@ fn cut<R: Read + Seek + Send>(
             };
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
-            blobs(s.rels, &mut rels)?;
-            Ok((s.runs, by_tile(s.kept)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
+            blobs(s.rels, &mut rels, raw)?;
+            // the nodes from outside, in the bytes of their buckets (here, on all threads)
+            let outside = crate::spill::Buckets::encode(BUCKET_SHIFT, &Pair, s.outside.iter().map(|&(n, t)| (n, (n, t as i64))));
+            let uses = if junctions { s.uses } else { Vec::new() };
+            Ok((s.runs, by_tile(s.kept, raw)?, s.multi, (outside, uses, s.homes), rels, s.spans))
         },
         |(runs, kept, mut m, (o, u, h), rels, spans), at| {
             if spans[0] != EMPTY {
@@ -1424,9 +1581,7 @@ fn cut<R: Read + Seek + Send>(
                 parts.add(t, "ways", bytes)?;
             }
             multi.append(&mut m);
-            for (n, t) in o {
-                outside.push(&Pair, &(n, t as i64)).map_err(io)?;
-            }
+            outside.push_encoded(store, o).map_err(io)?;
             for (n, f) in u {
                 uses.push(&Use, &(n, f)).map_err(io)?;
             }
@@ -1463,14 +1618,36 @@ fn cut<R: Read + Seek + Send>(
     // 3. the relations with a member node inside a tile or a member way kept in a tile (only the members that the file
     // has: a run can hold the id of an element that the file does not have), their parents, and the members of the
     // multipolygons
+    // each relation of the file, in the order of the file: this thread reads the blocks, a batch of them is decoded on all
+    // threads, and `f` gets the relations here (one block at a time on this thread was most of this step)
     let each_rel = |f: &mut dyn FnMut(Relation) -> Result<(), String>| -> Result<(), String> {
-        let mut rd = PartReader::open(&parts, ALL, "relations.all");
-        while let Some(e) = rd.next()? {
-            if let Elem::Relation(r) = e {
-                f(r)?;
+        let mut blobs = Blobs::from(parts.reader(ALL, "relations.all"));
+        let n = 2 * rayon::current_num_threads();
+        loop {
+            let mut batch = Vec::with_capacity(n);
+            while batch.len() < n {
+                match blobs.next()? {
+                    Some((_, _, _, b)) => batch.push(b),
+                    None => break,
+                }
+            }
+            if batch.is_empty() {
+                return Ok(());
+            }
+            let decoded: Vec<Vec<Elem>> = batch
+                .par_iter()
+                .map_init(Buffers::default, |buf, b| {
+                    let mut all = All::default();
+                    decode_block(b, [true; 3], buf, &mut all)?;
+                    Ok(all.0)
+                })
+                .collect::<Result<_, String>>()?;
+            for e in decoded.into_iter().flatten() {
+                if let Elem::Relation(r) = e {
+                    f(r)?;
+                }
             }
         }
-        Ok(())
     };
     let (mut member_nodes, mut member_ways) = (Vec::new(), Vec::new());
     each_rel(&mut |r| {
@@ -1498,7 +1675,7 @@ fn cut<R: Read + Seek + Send>(
     };
     let (mut direct, mut parents, mut multipolygons) = (Vec::new(), Vec::new(), Vec::new());
     // the relations of each batch on all threads (France: 3.5 s on one thread before), the results in the order of the file
-    let mut rd = PartReader::open(&parts, ALL, "relations.all");
+    let mut rd = PartReader::from(parts.reader(ALL, "relations.all"));
     while let Some(batch) = rd.next_batch()? {
         let found: Vec<(bool, Vec<u32>, Vec<i64>)> = batch
             .par_iter()
@@ -1558,12 +1735,10 @@ fn cut<R: Read + Seek + Send>(
     let mut waiting_bytes = 0usize;
     each_rel(&mut |r| {
         if multipolygons.binary_search(&r.id).is_ok() {
-            // quack needs each one whole in one tile only, its first: a boundary of a country has a million nodes and is
-            // in hundreds of tiles
-            for t in tiles_in(&direct, r.id).take(if build { usize::MAX } else { 1 }) {
+            for t in tiles_in(&direct, r.id) {
                 for &(m, ty, _) in &r.members {
                     match ty {
-                        MemberType::Node => outside.push(&Pair, &(m, t as i64)).map_err(io)?,
+                        MemberType::Node => outside.push(store, m, &Pair, &(m, t as i64)).map_err(io)?,
                         MemberType::Way => more.push((m, t)),
                         MemberType::Relation => {}
                     }
@@ -1580,13 +1755,13 @@ fn cut<R: Read + Seek + Send>(
         // the waiting relations by their size: a few have tens of thousands of members (boundaries, long routes)
         if waiting_bytes >= WAITING {
             waiting_bytes = 0;
-            for (t, bytes) in by_tile_par(std::mem::take(&mut waiting))? {
+            for (t, bytes) in by_tile_par(std::mem::take(&mut waiting), raw)? {
                 parts.add(t, "relations", bytes)?;
             }
         }
         Ok(())
     })?;
-    for (t, bytes) in by_tile_par(waiting)? {
+    for (t, bytes) in by_tile_par(waiting, raw)? {
         parts.add(t, "relations", bytes)?;
     }
     parts.remove(ALL, "relations.all");
@@ -1612,17 +1787,15 @@ fn cut<R: Read + Seek + Send>(
             |b, buf| {
                 let mut s = Wanted { wanted: &wanted, found: Vec::new() };
                 decode_block(b, [false, true, false], buf, &mut s)?;
-                Ok(s.found)
+                // the nodes of these ways for each of their tiles, in the bytes of their buckets (on all threads)
+                let rows = s.found.iter().flat_map(|(w, refs)| {
+                    tiles_in(&more, *w).flat_map(move |t| refs.iter().map(move |&n| (n, (n, t as i64))))
+                });
+                Ok(crate::spill::Buckets::encode(BUCKET_SHIFT, &Pair, rows))
             },
-            |found| {
-                for (w, refs) in found {
-                    for t in tiles_in(&more, w) {
-                        for &n in &refs {
-                            if let Err(e) = outside.push(&Pair, &(n, t as i64)) {
-                                err.get_or_insert(e);
-                            }
-                        }
-                    }
+            |encoded| {
+                if let Err(e) = outside.push_encoded(store, encoded) {
+                    err.get_or_insert(e);
                 }
                 Ok(())
             },
@@ -1633,10 +1806,37 @@ fn cut<R: Read + Seek + Send>(
     drop((nodes, ways, multi));
     crate::util::step("tile cut 3: the relations and the members of the multipolygons");
     // 4. the nodes from outside the tiles and the member ways of the multipolygons, to the extra parts of their tiles
-    let mut outside = sort_bytes(outside.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
-    crate::util::step(&format!("tile cut 4a: the nodes from outside, sorted ({} rows)", outside.len));
+    let buckets = outside.finish().map_err(io)?;
+    let rows: usize = buckets.iter().map(|b| b.len).sum();
+    crate::util::step(&format!("tile cut 4a: the nodes from outside ({rows} rows, {} buckets)", buckets.len()));
+    let mut sorted_parts = crate::spill::SortedParts::new(buckets, &Pair, |p: &(i64, i64)| *p);
+    let (mut buf, mut at): (Vec<(i64, i64)>, usize) = (Vec::new(), 0);
+    let mut sorted = std::iter::from_fn(move || loop {
+        if at < buf.len() {
+            at += 1;
+            return Some(Ok(buf[at - 1]));
+        }
+        match sorted_parts.next_into(&mut buf) {
+            Ok(true) => at = 0,
+            Ok(false) => return None,
+            Err(e) => return Some(Err(e)),
+        }
+    });
+    // the build by tiles reads the sorted rows again for its junctions files: a copy on disk while they go by
+    let mut copy = if build { Some(Writer::new(store).map_err(io)?) } else { None };
+    let mut copy_err = None;
+    let pairs = std::iter::from_fn(|| {
+        let p = sorted.next()?;
+        if let (Ok(p), Some(c)) = (&p, copy.as_mut()) {
+            if let Err(e) = c.push(&Pair, p) {
+                copy_err.get_or_insert(e);
+            }
+        }
+        Some(p)
+    });
     let mut r = open()?;
-    take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &parts, "extra-nodes")?;
+    take_blocks(&mut r, &node_blocks, 0, pairs, &parts, "extra-nodes", raw)?;
+    copy_err.map_or(Ok(()), Err).map_err(io)?;
     crate::util::step("tile cut 4b: the extra nodes");
     // the junctions files: only the build by tiles reads them
     if build {
@@ -1646,17 +1846,19 @@ fn cut<R: Read + Seek + Send>(
         crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
         home_nodes.sort_unstable();
         let uses = uses.read(&Use).map_err(io)?.map(|u| u.map(|(n, f)| (n, f as i64)));
+        let outside = copy.take().expect("a copy for the junctions").finish().map_err(io)?;
         outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &parts)?;
         crate::util::step("tile cut 4d: the junctions files");
     } else {
         drop(uses);
     }
-    take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &parts, "extra-ways")?;
+    take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &parts, "extra-ways", raw)?;
     parts.flush()?;
     drop(more);
     crate::util::step("tile cut 4: the extra elements");
     // 5. each tile from its parts (the tiles at the same time; in the browser one at a time, because a file in OPFS
     // belongs to the thread that opened it)
+    #[cfg(not(target_arch = "wasm32"))]
     let finish = |t: u32| -> Result<CutCounts, String> {
         if !parts.has(t, "nodes") {
             for part in ["ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
@@ -1671,17 +1873,141 @@ fn cut<R: Read + Seek + Send>(
                 write_junctions(&parts, t, &dir.join(format!("{name}.junctions")))?;
                 let out = dir.join(format!("{name}.osm.pbf"));
                 let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-                finish_tile(&parts, t, file, timestamp)
+                finish_tile(&parts, t, file, timestamp, raw)
             }
-            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp),
-            (None, _) => Err("the tile cut has no folder for the tile files".into()),
+            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp, raw),
+            (None, Files::Dir(d)) => {
+                let out = Parts::path(d, t, "tile");
+                let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+                finish_tile(&parts, t, file, timestamp, raw)
+            }
         }
     };
-    // the store with no folder: in memory in the browser, and in the tests (the test of the browser's way)
-    let counts: Vec<CutCounts> = if dir.is_none() && (cfg!(target_arch = "wasm32") || cfg!(test)) {
-        finish_tiles_in_memory(&parts, tiles.len(), timestamp)?
+    #[cfg(not(target_arch = "wasm32"))]
+    let counts: Vec<CutCounts> = (0..tiles.len() as u32).into_par_iter().map(finish).collect::<Result<_, String>>()?;
+    // the browser: this thread reads the parts of a group of tiles (256 MB at most) from OPFS into memory, the threads of
+    // the pool make the files of the tiles in memory at the same time, and this thread writes them (one at a time on this
+    // thread: 6 of the 12 s of the cut of Île-de-France on one core)
+    #[cfg(target_arch = "wasm32")]
+    let counts: Vec<CutCounts> = if let Files::Store(chunks @ Chunks { file: None, .. }) = &parts.files {
+        // all the parts in memory: each tile on a thread of the pool, all the tiles at the same time; the threads give
+        // the bytes of the tile files to this thread through a channel with a limit, and this thread writes them (a large
+        // tile on one thread took 28 of the 50 s of the cut of Sweden at zoom 6)
+        let threads = rayon::current_num_threads().max(1);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<(u32, Vec<u8>)>(2 * threads);
+        let counts: Vec<std::sync::Mutex<Result<CutCounts, String>>> =
+            (0..tiles.len()).map(|_| std::sync::Mutex::new(Ok(CutCounts::default()))).collect();
+        let mut failed: Option<String> = None;
+        // the largest tiles first (a thread outside the pool gives the jobs to the pool in this order), so that no thread
+        // makes a large tile alone at the end
+        let mut order: Vec<u32> = (0..tiles.len() as u32).collect();
+        order.sort_by_cached_key(|&t| std::cmp::Reverse(KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum::<u64>()));
+        rayon::in_place_scope(|scope| {
+            for t in order {
+                let (tx, parts, counts) = (tx.clone(), &parts, &counts);
+                scope.spawn(move |_| {
+                    let r = if parts.has(t, "nodes") {
+                        finish_tile(parts, t, Chan(t, tx), timestamp, raw)
+                    } else {
+                        for part in ["ways", "extra-nodes", "extra-ways", "relations"] {
+                            parts.remove(t, part);
+                        }
+                        Ok(CutCounts::default())
+                    };
+                    if !build {
+                        parts.remove(t, "junctions");
+                    }
+                    *counts[t as usize].lock().expect("no panic") = r;
+                });
+            }
+            drop(tx);
+            // the bytes of all the tiles, until the last thread is done (after an error, read on, so no thread waits)
+            for (t, b) in rx {
+                if failed.is_some() {
+                    continue;
+                }
+                let r = match sink.as_deref_mut() {
+                    Some(sink) => sink(t, &b),
+                    None => chunks.append((t, "tile"), &b).map_err(|e| format!("a tile file of the tile cut: {e}")),
+                };
+                if let Err(e) = r {
+                    failed = Some(e);
+                }
+            }
+        });
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        counts.into_iter().map(|c| c.into_inner().expect("no panic")).collect::<Result<_, String>>()?
     } else {
-        (0..tiles.len() as u32).into_par_iter().map(finish).collect::<Result<_, String>>()?
+        const GROUP: usize = 256 << 20;
+        let Files::Store(chunks) = &parts.files else { return Err("the tile cut in the browser has no store".into()) };
+        let mut counts = vec![CutCounts::default(); tiles.len()];
+        let mut t = 0u32;
+        while (t as usize) < tiles.len() {
+            let (mut group, mut bytes): (Vec<(u32, [(Vec<u8>, Vec<u8>); 3])>, usize) = (Vec::new(), 0);
+            while (t as usize) < tiles.len() && (group.is_empty() || bytes < GROUP) {
+                let size: u64 = KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum();
+                if size as usize > GROUP && parts.has(t, "nodes") {
+                    // a large tile (a dense city at a low zoom): made from the store on this thread, so it does not need
+                    // all its parts in memory (Île-de-France at zoom 6: 2.4 GiB)
+                    if !group.is_empty() {
+                        break;
+                    }
+                    counts[t as usize] = match sink.as_deref_mut() {
+                        Some(sink) => finish_tile(&parts, t, SinkWriter(sink, t), timestamp, raw)?,
+                        None => finish_tile(&parts, t, ChunkWriter(chunks, (t, "tile")), timestamp, raw)?,
+                    };
+                    if !build {
+                        parts.remove(t, "junctions");
+                    }
+                    t += 1;
+                    continue;
+                }
+                if parts.has(t, "nodes") {
+                    let read = |p: &'static str| -> Result<Vec<u8>, String> {
+                        let mut v = Vec::new();
+                        if let Some(mut r) = parts.reader(t, p) {
+                            r.read_to_end(&mut v).map_err(|e| format!("a part file of the tile cut: {e}"))?;
+                        }
+                        Ok(v)
+                    };
+                    let mut k: [(Vec<u8>, Vec<u8>); 3] = Default::default();
+                    for (i, (main, extra)) in KINDS.into_iter().enumerate() {
+                        k[i] = (read(main)?, read(extra)?);
+                        bytes += k[i].0.len() + k[i].1.len();
+                    }
+                    group.push((t, k));
+                }
+                for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations"] {
+                    parts.remove(t, part);
+                }
+                if !build || group.last().is_none_or(|g| g.0 != t) {
+                    parts.remove(t, "junctions");
+                }
+                t += 1;
+            }
+            fn src(v: &[u8]) -> Src<'_> {
+                (!v.is_empty()).then(|| Box::new(io::Cursor::new(v)) as Box<dyn Read + Send>)
+            }
+            let built: Vec<Result<(CutCounts, Vec<u8>), String>> = group
+                .par_iter()
+                .map(|(_, k)| {
+                    let mut out = Vec::new();
+                    let n = finish_from(k.each_ref().map(|(a, b)| (src(a), src(b))), &mut out, timestamp, raw)?;
+                    Ok((n, out))
+                })
+                .collect();
+            for ((t, _), b) in group.iter().zip(built) {
+                let (n, out) = b?;
+                match sink.as_deref_mut() {
+                    Some(sink) => sink(*t, &out)?,
+                    None => chunks.append((*t, "tile"), &out).map_err(|e| format!("a tile file of the tile cut: {e}"))?,
+                }
+                counts[*t as usize] = n;
+            }
+        }
+        counts
     };
     crate::util::step("tile cut 5: the tile files");
     Ok((counts, parts))

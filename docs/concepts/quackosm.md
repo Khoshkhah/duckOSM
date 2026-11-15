@@ -21,6 +21,10 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
 | `--tiles N` | make the table tile by tile, at most `N` nodes in a tile: the memory follows the tile, not the file (GeoParquet only) | one run |
 | `--tile-zoom Z` | tile by tile with the map tiles of zoom `Z` (0 to 14), in place of `--tiles` | one run |
 
+`duckosm-rust quack-tiles FILE --zoom 9 -o DIR` writes one table for each map tile (each made alone from the file of the
+tile, with a column `owner`), and `duckosm-rust quack-union DIR -o FILE.parquet` joins them
+(`docs/rust/quack.md`, "Tile tables").
+
 The input must be sorted by type and id, as the files of Geofabrik are. To make the table of an area, cut the region file
 first with `duckosm-rust cut`.
 

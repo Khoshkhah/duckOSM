@@ -81,6 +81,14 @@ pub fn set_temp_store(maker: Option<StoreMaker>) {
     STORE.with(|s| *s.borrow_mut() = maker);
 }
 
+/// Run `f` with the store of `maker` on this thread, then give back the store before.
+pub fn with_temp_store<T>(maker: StoreMaker, f: impl FnOnce() -> T) -> T {
+    let old = STORE.with(|s| s.borrow_mut().replace(maker));
+    let r = f();
+    STORE.with(|s| *s.borrow_mut() = old);
+    r
+}
+
 /// The store of the network step: the store that [`set_temp_store`] gave on this thread, else a folder for temporary
 /// files natively and memory in the browser.
 pub fn temp_store() -> Box<dyn Store> {
@@ -160,6 +168,15 @@ impl Writer {
         self.w.write_all(b)?;
         self.len += 1;
         self.bytes += 4 + b.len() as u64;
+        Ok(())
+    }
+
+    /// Add `rows` rows that are already in the bytes of a file: each its length (4 bytes, little endian) and its bytes
+    /// (made on other threads, for example by [`encode_rows`]).
+    pub fn push_encoded(&mut self, encoded: &[u8], rows: usize) -> io::Result<()> {
+        self.w.write_all(encoded)?;
+        self.len += rows;
+        self.bytes += encoded.len() as u64;
         Ok(())
     }
 
@@ -695,6 +712,34 @@ impl Buckets {
     }
 
     /// The parts, in the order of their key ranges.
+    /// Add rows that [`Buckets::encode`] made (on any thread): (bucket, the bytes of its rows, the number of rows).
+    pub fn push_encoded(&mut self, store: &dyn Store, encoded: Vec<(i64, Vec<u8>, usize)>) -> io::Result<()> {
+        for (bucket, bytes, rows) in encoded {
+            let part = match self.parts.entry(bucket) {
+                std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::new(store)?),
+            };
+            part.push_encoded(&bytes, rows)?;
+        }
+        Ok(())
+    }
+
+    /// The rows (key, row) in the bytes of their buckets, for [`Buckets::push_encoded`]: the work of `push` that can run on
+    /// any thread (the thread that owns the files only appends the bytes).
+    pub fn encode<T>(shift: u32, codec: &impl Codec<T>, rows: impl Iterator<Item = (i64, T)>) -> Vec<(i64, Vec<u8>, usize)> {
+        let mut out: std::collections::BTreeMap<i64, (Vec<u8>, usize)> = Default::default();
+        let mut row = Vec::new();
+        for (key, r) in rows {
+            row.clear();
+            codec.put(&r, &mut row);
+            let e = out.entry(key >> shift).or_default();
+            e.0.extend_from_slice(&(row.len() as u32).to_le_bytes());
+            e.0.extend_from_slice(&row);
+            e.1 += 1;
+        }
+        out.into_iter().map(|(b, (bytes, n))| (b, bytes, n)).collect()
+    }
+
     pub fn finish(self) -> io::Result<Vec<Rows>> {
         self.parts.into_values().map(Writer::finish).collect()
     }

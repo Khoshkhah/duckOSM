@@ -98,15 +98,17 @@ impl IdSet {
 }
 
 /// Read the blocks of `r` in batches, decode each batch on all threads with `per_block`, and give the results to
-/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false.
+/// `done` in the order of the file, with the place of each block; the reading ends when `done` gives false. The threads
+/// of the pool decode the next batch while this thread gives the results of the batch before to `done` (the work of
+/// `done`, for example the writes of the tile cut, then does not stop the decoding). `done` always runs on this thread
+/// (in the browser a file in OPFS belongs to the thread that opened it).
 pub fn each_block<R: Read, T: Send>(
     r: &mut R,
     per_block: impl Fn(&[u8], &mut Buffers) -> Result<T, String> + Sync,
     mut done: impl FnMut(T, u64) -> Result<bool, String>,
 ) -> Result<(), String> {
     let n = 2 * rayon::current_num_threads();
-    let mut at = 0u64;
-    loop {
+    let read = |r: &mut R| -> Result<Vec<Vec<u8>>, String> {
         let mut batch = Vec::with_capacity(n);
         while batch.len() < n {
             match read_block(r)? {
@@ -114,19 +116,46 @@ pub fn each_block<R: Read, T: Send>(
                 None => break,
             }
         }
-        if batch.is_empty() {
-            return Ok(());
-        }
-        let out: Vec<T> = batch
-            .par_iter()
-            .map_init(Buffers::default, |buf, b| per_block(b, buf))
-            .collect::<Result<_, _>>()?;
-        for (t, b) in out.into_iter().zip(&batch) {
+        Ok(batch)
+    };
+    let decode = |batch: &[Vec<u8>]| -> Result<Vec<T>, String> {
+        batch.par_iter().map_init(Buffers::default, |buf, b| per_block(b, buf)).collect()
+    };
+    let mut at = 0u64;
+    // the results of a batch to `done`: false when `done` stops the reading
+    let mut give = |out: Vec<T>, batch: &[Vec<u8>]| -> Result<bool, String> {
+        for (t, b) in out.into_iter().zip(batch) {
             let start = at;
             at += b.len() as u64;
             if !done(t, start)? {
-                return Ok(());
+                return Ok(false);
             }
+        }
+        Ok(true)
+    };
+    let mut batch = read(r)?;
+    if batch.is_empty() {
+        return Ok(());
+    }
+    let mut out = decode(&batch)?;
+    loop {
+        let next = read(r)?;
+        // the next batch is decoded on the threads of the pool while this thread gives the results (`in_place_scope`
+        // keeps this closure on this thread, also in the browser)
+        let mut decoded = None;
+        let more = rayon::in_place_scope(|scope| -> Result<bool, String> {
+            if !next.is_empty() {
+                let (slot, next) = (&mut decoded, &next);
+                scope.spawn(move |_| *slot = Some(decode(next)));
+            }
+            give(std::mem::take(&mut out), &batch)
+        })?;
+        match decoded {
+            Some(d) if more => {
+                out = d?;
+                batch = next;
+            }
+            _ => return Ok(()),
         }
     }
 }
@@ -340,7 +369,7 @@ impl RawSink for Out<'_> {
 }
 
 /// The replication time of the region file's header, and whether the file is sorted by type, then id.
-pub(crate) fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
+pub fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
     let err = |e: osmpbf::Error| e.to_string();
     let mut blobs = osmpbf::BlobReader::new(r);
     match blobs.next().transpose().map_err(err)? {

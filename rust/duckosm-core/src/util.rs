@@ -32,7 +32,44 @@ pub type FxHashSet<K> = std::collections::HashSet<K, BuildHasherDefault<FxHasher
 /// probe it costs one read of a static.
 pub static STEP_HOOK: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
 
+/// Raise the limit of open files of this process to 10 240 (or the hard limit), one time. The tiles of quack run at the
+/// same time, each with about 170 temporary files open (the buckets of the node ids and of the points), and macOS gives a
+/// process 256. Elsewhere it does nothing.
+pub fn raise_open_files() {
+    #[cfg(unix)]
+    {
+        static DONE: std::sync::Once = std::sync::Once::new();
+        // SAFETY: getrlimit and setrlimit with a valid struct; a failure only keeps the old limit
+        DONE.call_once(|| unsafe {
+            let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) == 0 {
+                let want = r.rlim_max.min(10_240);
+                if r.rlim_cur < want {
+                    r.rlim_cur = want;
+                    let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &r);
+                }
+            }
+        });
+    }
+}
+
+thread_local! {
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with no [`step`] on this thread (a tile that runs on a helper thread: in the browser the step hook posts to
+/// the page from the thread of the run only).
+pub fn quiet<T>(f: impl FnOnce() -> T) -> T {
+    let old = QUIET.with(|q| q.replace(true));
+    let r = f();
+    QUIET.with(|q| q.set(old));
+    r
+}
+
 pub fn step(name: &str) {
+    if QUIET.with(|q| q.get()) {
+        return;
+    }
     if let Some(hook) = STEP_HOOK.get() {
         hook(name);
     }
