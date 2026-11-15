@@ -144,8 +144,9 @@ pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, Str
     // the order of the pairs (x, then y)
     tiles.sort_by_key(|&t| tile_key(t));
     tiles.dedup();
-    let mut at = 0;
-    for &t in &tiles {
+    // the tables at the same time (each reads its part file and its side rows, a lock for the file of the side rows)
+    let side = std::sync::Mutex::new(side);
+    let write = |t: Tile| -> Result<usize, String> {
         let path = tile_table_path(dir, t);
         let mut w = QuackWriter::tile(create(&path)?, meta(t))?;
         let part = part_path(t);
@@ -153,18 +154,21 @@ pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, Str
             read_tile_table(&part, |b| w.write(&b))?;
             std::fs::remove_file(&part).map_err(|e| format!("{}: {e}", part.display()))?;
         }
-        let mut rows = Vec::new();
-        while at < pairs.len() && pairs[at].0 == tile_key(t) {
-            let (owner, f) = side.get(pairs[at].1).map_err(io)?;
-            rows.push((f, owner == tile_key(t)));
-            at += 1;
-            if rows.len() == 20_000 || at == pairs.len() || pairs[at].0 != tile_key(t) {
-                w.write(&tile_batch(&std::mem::take(&mut rows))?)?;
+        let k = tile_key(t);
+        let mine = &pairs[pairs.partition_point(|p| p.0 < k)..pairs.partition_point(|p| p.0 <= k)];
+        for group in mine.chunks(20_000) {
+            let mut rows = Vec::with_capacity(group.len());
+            for &(_, i) in group {
+                let (owner, f) = side.lock().expect("the side rows").get(i).map_err(io)?;
+                rows.push((f, owner == k));
             }
+            w.write(&tile_batch(&rows)?)?;
         }
-        n.stored += w.close()?;
-        n.tiles += 1;
-    }
+        w.close()
+    };
+    let stored: Vec<usize> = tiles.par_iter().map(|&t| write(t)).collect::<Result<_, String>>()?;
+    n.stored = stored.iter().sum();
+    n.tiles = tiles.len();
     duckosm_core::util::step(&format!("quack tile tables 2: {} tile tables", n.tiles));
     Ok(n)
 }

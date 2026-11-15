@@ -226,11 +226,13 @@ run (fingerprints of all rows).
 | Tile tables, zoom 9 (Mac mini) | Tables | Time | Peak RSS | Size | Rows in the tables | Union |
 |---|---|---|---|---|---|---|
 | Kentucky | 65 | 9.8 s | 0.8 GB | 327 MB (one table: 321 MB) | 2 400 838 (+0.3 %) | 1.0 s |
-| France | 760 | 234.0 s | 5.1 GB | 13 GB (one table: 9.7 GB) | 99 595 690 (+0.18 %) | 48.1 s |
+| France | 760 | 209.0 s | 5.3 GB | 13 GB (one table: 9.7 GB) | 99 595 690 (+0.18 %) | 48.1 s |
 
 The tables of France are 34 % larger than one table, although only 0.18 % more rows: the large polygons (the country,
-the regions, the departments) are in each tile that they touch. Open: the peak memory (4 tiles at a time), and the tiles
-of a dense city (12 tables of France are larger than 100 MB).
+the regions, the departments) are in each tile that they touch. Of the 209 s of France, the cut and the rows of the 697
+tiles of zoom 9 take 182 s, and the 760 tables, written at the same time, 26 s (one after the other: 56 s). Open: the
+first step (it makes more, smaller tiles than `--tiles 4000000`), the peak memory (4 tiles at a time), and the tiles of a
+dense city (12 tables of France are larger than 100 MB).
 
 ## The sort
 
