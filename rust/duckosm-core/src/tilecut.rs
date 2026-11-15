@@ -524,17 +524,24 @@ pub struct Chunks {
     mem: std::sync::Mutex<Vec<Vec<u8>>>,
     /// each file: its chunks (place in the file or number in `mem`, length)
     index: std::sync::Mutex<FxHashMap<(u32, &'static str), Vec<(u64, u64)>>>,
+    /// the places in the file of removed chunks (place, length), used again before the file grows: the parts of a tile
+    /// go when its tile file is made, and the tile files take their place (France: the file had all parts and all tile
+    /// files, more than 10 GB, and the 5 GiB of a fresh browser profile were full in part 1 of a second cut)
+    free: std::sync::Mutex<Vec<(u64, u64)>>,
 }
+
+/// A removed chunk shorter than this is not used again: a file in many small pieces needs many reads.
+const SMALLEST_FREE: u64 = 64 << 10;
 
 impl Chunks {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn new(store: &dyn crate::spill::Store) -> io::Result<Chunks> {
-        Ok(Chunks { file: Some(std::sync::Mutex::new((store.create()?, 0))), mem: Default::default(), index: Default::default() })
+        Ok(Chunks { file: Some(std::sync::Mutex::new((store.create()?, 0))), mem: Default::default(), index: Default::default(), free: Default::default() })
     }
     /// The chunks in memory, each by itself.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn memory() -> Chunks {
-        Chunks { file: None, mem: Default::default(), index: Default::default() }
+        Chunks { file: None, mem: Default::default(), index: Default::default(), free: Default::default() }
     }
     fn append(&self, key: (u32, &'static str), bytes: &[u8]) -> io::Result<()> {
         if bytes.is_empty() {
@@ -543,11 +550,29 @@ impl Chunks {
         let at = match &self.file {
             Some(file) => {
                 let mut f = file.lock().expect("the file");
-                let at = f.1;
-                f.0.seek(SeekFrom::Start(at))?;
-                f.0.write_all(bytes)?;
-                f.1 += bytes.len() as u64;
-                at
+                // first the places of removed chunks, then the end of the file
+                let mut rest = bytes;
+                let mut placed = Vec::new();
+                while !rest.is_empty() {
+                    let Some((pos, len)) = self.free.lock().expect("the free places").pop() else { break };
+                    let n = len.min(rest.len() as u64);
+                    f.0.seek(SeekFrom::Start(pos))?;
+                    f.0.write_all(&rest[..n as usize])?;
+                    placed.push((pos, n));
+                    if len - n >= SMALLEST_FREE {
+                        self.free.lock().expect("the free places").push((pos + n, len - n));
+                    }
+                    rest = &rest[n as usize..];
+                }
+                if !rest.is_empty() {
+                    let at = f.1;
+                    f.0.seek(SeekFrom::Start(at))?;
+                    f.0.write_all(rest)?;
+                    f.1 += rest.len() as u64;
+                    placed.push((at, rest.len() as u64));
+                }
+                self.index.lock().expect("the index").entry(key).or_default().extend(placed);
+                return Ok(());
             }
             None => {
                 let mut m = self.mem.lock().expect("the chunks");
@@ -562,14 +587,44 @@ impl Chunks {
         let chunks = self.index.lock().expect("the index").get(&key)?.clone();
         Some(ChunkReader { c: self, chunks, i: 0, off: 0 })
     }
-    /// A file goes; in memory its chunks go too.
+    /// All the bytes of a file (empty when it has none): one read for each chunk. A `ChunkReader` behind `read_to_end`
+    /// reads in small pieces, and each piece is a call into OPFS (Kentucky in Chromium: 2.4 s of part 5 against 0.6 s).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn read_all(&self, key: (u32, &'static str)) -> io::Result<Vec<u8>> {
+        let Some(chunks) = self.index.lock().expect("the index").get(&key).cloned() else { return Ok(Vec::new()) };
+        let mut b = vec![0u8; chunks.iter().map(|c| c.1 as usize).sum()];
+        let mut at = 0;
+        match &self.file {
+            Some(file) => {
+                let mut f = file.lock().expect("the file");
+                for (pos, len) in chunks {
+                    f.0.seek(SeekFrom::Start(pos))?;
+                    f.0.read_exact(&mut b[at..at + len as usize])?;
+                    at += len as usize;
+                }
+            }
+            None => {
+                let m = self.mem.lock().expect("the chunks");
+                for (i, len) in chunks {
+                    b[at..at + len as usize].copy_from_slice(&m[i as usize]);
+                    at += len as usize;
+                }
+            }
+        }
+        Ok(b)
+    }
+    /// A file goes: in memory its chunks go too; in the file its places are used again (`free`).
     fn remove(&self, key: (u32, &'static str)) {
         let gone = self.index.lock().expect("the index").remove(&key);
-        if let (None, Some(chunks)) = (&self.file, gone) {
-            let mut m = self.mem.lock().expect("the chunks");
-            for (at, _) in chunks {
-                m[at as usize] = Vec::new();
+        match (&self.file, gone) {
+            (None, Some(chunks)) => {
+                let mut m = self.mem.lock().expect("the chunks");
+                for (at, _) in chunks {
+                    m[at as usize] = Vec::new();
+                }
             }
+            (Some(_), Some(chunks)) => self.free.lock().expect("the free places").extend(chunks.into_iter().filter(|c| c.1 >= SMALLEST_FREE)),
+            _ => {}
         }
     }
 }
@@ -1940,7 +1995,8 @@ fn cut<R: Read + Seek + Send>(
         }
         counts.into_iter().map(|c| c.into_inner().expect("no panic")).collect::<Result<_, String>>()?
     } else {
-        const GROUP: usize = 256 << 20;
+        // the bytes of the parts of a group in memory (with their tile files: about twice this)
+        const GROUP: usize = 128 << 20;
         let Files::Store(chunks) = &parts.files else { return Err("the tile cut in the browser has no store".into()) };
         let mut counts = vec![CutCounts::default(); tiles.len()];
         let mut t = 0u32;
@@ -1965,13 +2021,7 @@ fn cut<R: Read + Seek + Send>(
                     continue;
                 }
                 if parts.has(t, "nodes") {
-                    let read = |p: &'static str| -> Result<Vec<u8>, String> {
-                        let mut v = Vec::new();
-                        if let Some(mut r) = parts.reader(t, p) {
-                            r.read_to_end(&mut v).map_err(|e| format!("a part file of the tile cut: {e}"))?;
-                        }
-                        Ok(v)
-                    };
+                    let read = |p: &'static str| chunks.read_all((t, p)).map_err(|e| format!("a part file of the tile cut: {e}"));
                     let mut k: [(Vec<u8>, Vec<u8>); 3] = Default::default();
                     for (i, (main, extra)) in KINDS.into_iter().enumerate() {
                         k[i] = (read(main)?, read(extra)?);
@@ -1990,8 +2040,11 @@ fn cut<R: Read + Seek + Send>(
             fn src(v: &[u8]) -> Src<'_> {
                 (!v.is_empty()).then(|| Box::new(io::Cursor::new(v)) as Box<dyn Read + Send>)
             }
+            // the largest tiles first, each tile its own task: a large tile does not end the group alone
+            group.sort_by_cached_key(|(_, k)| std::cmp::Reverse(k.iter().map(|(a, b)| a.len() + b.len()).sum::<usize>()));
             let built: Vec<Result<(CutCounts, Vec<u8>), String>> = group
                 .par_iter()
+                .with_max_len(1)
                 .map(|(_, k)| {
                     let mut out = Vec::new();
                     let n = finish_from(k.each_ref().map(|(a, b)| (src(a), src(b))), &mut out, timestamp, raw)?;
