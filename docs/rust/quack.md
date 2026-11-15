@@ -207,7 +207,7 @@ alone, or joined with others (`duckosm_build::quack_tiles`).
   that crosses the edge of a tile and a large polygon that covers it are in the table. So the table of one tile is
   usable alone.
 - **The owner:** a row that touches more tiles is in each of them. A column `owner` is true in one tile only, the tile
-  that made the row (by the rules of [`quack::Owner`]). The union of tile tables keeps the rows with `owner`, so each row
+  that made the row (by the rules of `quack::Owner`). The union of tile tables keeps the rows with `owner`, so each row
   comes one time with no search for doubles: `duckosm-rust quack-union`, or in DuckDB
   `SELECT feature_id, tags, geometry FROM read_parquet('DIR/9/*/*.parquet') WHERE owner`.
 - **An area:** for the rows of an area, read the tiles that the area touches, keep the rows that intersect the area,
