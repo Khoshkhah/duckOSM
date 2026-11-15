@@ -483,9 +483,7 @@ impl Parts {
             Files::Dir(dir) => {
                 let _ = std::fs::remove_file(Self::path(dir, tile, part));
             }
-            Files::Store(c) => {
-                c.index.lock().expect("the index").remove(&(tile, part));
-            }
+            Files::Store(c) => c.remove((tile, part)),
         }
     }
 }
@@ -493,36 +491,66 @@ impl Parts {
 /// Files as chunks of one temporary file of the store: each file is the list of its chunks (place, length). A removed
 /// file keeps its bytes in the temporary file until the end.
 pub struct Chunks {
-    file: std::sync::Mutex<(Box<dyn crate::spill::Blob>, u64)>,
+    /// the temporary file and its end; none: each chunk in memory by itself (`mem`)
+    file: Option<std::sync::Mutex<(Box<dyn crate::spill::Blob>, u64)>>,
+    /// the chunks in memory (`Chunks::memory`): no large block that grows (a block that doubles needs up to three times
+    /// the data at a time: Sweden ran out of the 4 GiB of the browser)
+    mem: std::sync::Mutex<Vec<Vec<u8>>>,
+    /// each file: its chunks (place in the file or number in `mem`, length)
     index: std::sync::Mutex<FxHashMap<(u32, &'static str), Vec<(u64, u64)>>>,
 }
 
 impl Chunks {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn new(store: &dyn crate::spill::Store) -> io::Result<Chunks> {
-        Ok(Chunks { file: std::sync::Mutex::new((store.create()?, 0)), index: Default::default() })
+        Ok(Chunks { file: Some(std::sync::Mutex::new((store.create()?, 0))), mem: Default::default(), index: Default::default() })
+    }
+    /// The chunks in memory, each by itself.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn memory() -> Chunks {
+        Chunks { file: None, mem: Default::default(), index: Default::default() }
     }
     fn append(&self, key: (u32, &'static str), bytes: &[u8]) -> io::Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
-        let mut f = self.file.lock().expect("the file");
-        let at = f.1;
-        f.0.seek(SeekFrom::Start(at))?;
-        f.0.write_all(bytes)?;
-        f.1 += bytes.len() as u64;
+        let at = match &self.file {
+            Some(file) => {
+                let mut f = file.lock().expect("the file");
+                let at = f.1;
+                f.0.seek(SeekFrom::Start(at))?;
+                f.0.write_all(bytes)?;
+                f.1 += bytes.len() as u64;
+                at
+            }
+            None => {
+                let mut m = self.mem.lock().expect("the chunks");
+                m.push(bytes.to_vec());
+                (m.len() - 1) as u64
+            }
+        };
         self.index.lock().expect("the index").entry(key).or_default().push((at, bytes.len() as u64));
         Ok(())
     }
     fn reader(&self, key: (u32, &'static str)) -> Option<ChunkReader<'_>> {
         let chunks = self.index.lock().expect("the index").get(&key)?.clone();
-        Some(ChunkReader { file: &self.file, chunks, i: 0, off: 0 })
+        Some(ChunkReader { c: self, chunks, i: 0, off: 0 })
+    }
+    /// A file goes; in memory its chunks go too.
+    fn remove(&self, key: (u32, &'static str)) {
+        let gone = self.index.lock().expect("the index").remove(&key);
+        if let (None, Some(chunks)) = (&self.file, gone) {
+            let mut m = self.mem.lock().expect("the chunks");
+            for (at, _) in chunks {
+                m[at as usize] = Vec::new();
+            }
+        }
     }
 }
 
 /// The bytes of a file of [`Chunks`], in order.
 pub struct ChunkReader<'a> {
-    file: &'a std::sync::Mutex<(Box<dyn crate::spill::Blob>, u64)>,
+    c: &'a Chunks,
     chunks: Vec<(u64, u64)>,
     i: usize,
     off: u64,
@@ -536,9 +564,18 @@ impl Read for ChunkReader<'_> {
         }
         let Some(&(at, len)) = self.chunks.get(self.i) else { return Ok(0) };
         let n = (len - self.off).min(b.len() as u64) as usize;
-        let mut f = self.file.lock().expect("the file");
-        f.0.seek(SeekFrom::Start(at + self.off))?;
-        f.0.read_exact(&mut b[..n])?;
+        match &self.c.file {
+            Some(file) => {
+                let mut f = file.lock().expect("the file");
+                f.0.seek(SeekFrom::Start(at + self.off))?;
+                f.0.read_exact(&mut b[..n])?;
+            }
+            None => {
+                let m = self.c.mem.lock().expect("the chunks");
+                let o = self.off as usize;
+                b[..n].copy_from_slice(&m[at as usize][o..o + n]);
+            }
+        }
         self.off += n as u64;
         Ok(n)
     }
@@ -1283,8 +1320,12 @@ pub fn cut_to_sink<R: Read + Seek + Send>(
 ) -> Result<Vec<CutCounts>, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let store: Box<dyn crate::spill::Store> = if memory { Box::new(crate::spill::MemStore) } else { crate::spill::temp_store() };
-        let files = Files::Store(Chunks::new(&*store).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
+        let chunks = if memory {
+            Chunks::memory()
+        } else {
+            Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?
+        };
+        let files = Files::Store(chunks);
         Ok(cut(open, boundary, tiles, complete, 0.0, files, None, Some(&mut sink), !memory)?.0)
     }
     #[cfg(not(target_arch = "wasm32"))]
