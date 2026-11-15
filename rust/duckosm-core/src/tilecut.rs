@@ -1204,7 +1204,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let tmp = std::env::temp_dir().join(format!("duckosm-tiles-{}-{}", std::process::id(), dir.as_os_str().len()));
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), None);
+    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), None, false);
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(cut?.0)
 }
@@ -1265,23 +1265,27 @@ pub fn cut_to_store<R: Read + Seek + Send>(
     };
     #[cfg(target_arch = "wasm32")]
     let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, None)?;
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, files, None, None, true)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
 }
 
 /// [`cut_to_store`], with each tile file given to `sink` (in pieces, tile by tile): the browser writes each tile into a
-/// file of its own, so that a worker for each tile can read it (`crate::quack::features_owned` in each worker).
+/// file of its own, so that a worker for each tile can read it (`crate::quack::features_owned` in each worker). With
+/// `memory`, the browser keeps the parts of the tiles in memory, compressed with zlib, not in OPFS: the cut writes many
+/// small pieces of parts, and each write to OPFS goes through JavaScript (slow on some PCs).
 pub fn cut_to_sink<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
     tiles: &[Tile],
     complete: &[&str],
+    #[allow(unused_variables)] memory: bool,
     #[allow(unused_mut)] mut sink: Sink,
 ) -> Result<Vec<CutCounts>, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let files = Files::Store(Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
-        Ok(cut(open, boundary, tiles, complete, 0.0, files, None, Some(&mut sink))?.0)
+        let store: Box<dyn crate::spill::Store> = if memory { Box::new(crate::spill::MemStore) } else { crate::spill::temp_store() };
+        let files = Files::Store(Chunks::new(&*store).map_err(|e| format!("a temporary file of the tile cut: {e}"))?);
+        Ok(cut(open, boundary, tiles, complete, 0.0, files, None, Some(&mut sink), !memory)?.0)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1313,6 +1317,8 @@ fn cut<R: Read + Seek + Send>(
     dir: Option<&Path>,
     // the browser: the tile files to this sink, not to the store (`cut_to_sink`)
     #[allow(unused_mut, unused_variables)] mut sink: Option<&mut Sink>,
+    // the parts and the tile files with no zlib (a temporary file read one time soon after); the build by tiles keeps zlib
+    raw: bool,
 ) -> Result<(Vec<CutCounts>, Parts), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let (timestamp, sorted) = header(open()?)?;
@@ -1320,8 +1326,6 @@ fn cut<R: Read + Seek + Send>(
         return Err("the region file is not sorted by type and id (Sort.Type_then_ID)".into());
     }
     let parts = Parts { files, waiting: Default::default() };
-    // the temporary tile files of the store (quack) have no compression; the files of the build by tiles have zlib
-    let raw = dir.is_none();
     let Some(z) = tiles.first().map(|t| t.z) else {
         return Ok((Vec::new(), parts));
     };
@@ -1373,7 +1377,9 @@ fn cut<R: Read + Seek + Send>(
     // temporary list); the relations, whole (to a temporary file)
     let ways_at = ways_at.unwrap_or(0);
     let (mut ways, mut multi) = (Book::default(), Vec::new());
-    let mut outside = Writer::new(store).map_err(io)?;
+    // the nodes that a tile needs from outside it, in buckets by node id (2^27 ids each): each bucket is sorted in memory
+    // on all threads in step 4 (one merge on one thread took 3.3 s of the 14.8 s of the cut of Sweden)
+    let mut outside = crate::spill::Buckets::new(27);
     let mut uses = Writer::new(store).map_err(io)?;
     // the nodes outside the area are few (the border of the area): in memory
     let mut homes: Vec<(i64, i64, u32)> = Vec::new();
@@ -1414,7 +1420,7 @@ fn cut<R: Read + Seek + Send>(
             }
             multi.append(&mut m);
             for (n, t) in o {
-                outside.push(&Pair, &(n, t as i64)).map_err(io)?;
+                outside.push(store, n, &Pair, &(n, t as i64)).map_err(io)?;
             }
             for (n, f) in u {
                 uses.push(&Use, &(n, f)).map_err(io)?;
@@ -1532,7 +1538,7 @@ fn cut<R: Read + Seek + Send>(
             for t in tiles_in(&direct, r.id) {
                 for &(m, ty, _) in &r.members {
                     match ty {
-                        MemberType::Node => outside.push(&Pair, &(m, t as i64)).map_err(io)?,
+                        MemberType::Node => outside.push(store, m, &Pair, &(m, t as i64)).map_err(io)?,
                         MemberType::Way => more.push((m, t)),
                         MemberType::Relation => {}
                     }
@@ -1587,7 +1593,7 @@ fn cut<R: Read + Seek + Send>(
                 for (w, refs) in found {
                     for t in tiles_in(&more, w) {
                         for &n in &refs {
-                            if let Err(e) = outside.push(&Pair, &(n, t as i64)) {
+                            if let Err(e) = outside.push(store, n, &Pair, &(n, t as i64)) {
                                 err.get_or_insert(e);
                             }
                         }
@@ -1602,10 +1608,37 @@ fn cut<R: Read + Seek + Send>(
     drop((nodes, ways, multi));
     crate::util::step("tile cut 3: the relations and the members of the multipolygons");
     // 4. the nodes from outside the tiles and the member ways of the multipolygons, to the extra parts of their tiles
-    let mut outside = sort_bytes(outside.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
-    crate::util::step(&format!("tile cut 4a: the nodes from outside, sorted ({} rows)", outside.len));
+    let buckets = outside.finish().map_err(io)?;
+    let rows: usize = buckets.iter().map(|b| b.len).sum();
+    crate::util::step(&format!("tile cut 4a: the nodes from outside ({rows} rows, {} buckets)", buckets.len()));
+    let mut sorted_parts = crate::spill::SortedParts::new(buckets, &Pair, |p: &(i64, i64)| *p);
+    let (mut buf, mut at): (Vec<(i64, i64)>, usize) = (Vec::new(), 0);
+    let mut sorted = std::iter::from_fn(move || loop {
+        if at < buf.len() {
+            at += 1;
+            return Some(Ok(buf[at - 1]));
+        }
+        match sorted_parts.next_into(&mut buf) {
+            Ok(true) => at = 0,
+            Ok(false) => return None,
+            Err(e) => return Some(Err(e)),
+        }
+    });
+    // the build by tiles reads the sorted rows again for its junctions files: a copy on disk while they go by
+    let mut copy = if dir.is_some() { Some(Writer::new(store).map_err(io)?) } else { None };
+    let mut copy_err = None;
+    let pairs = std::iter::from_fn(|| {
+        let p = sorted.next()?;
+        if let (Ok(p), Some(c)) = (&p, copy.as_mut()) {
+            if let Err(e) = c.push(&Pair, p) {
+                copy_err.get_or_insert(e);
+            }
+        }
+        Some(p)
+    });
     let mut r = open()?;
-    take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &parts, "extra-nodes", raw)?;
+    take_blocks(&mut r, &node_blocks, 0, pairs, &parts, "extra-nodes", raw)?;
+    copy_err.map_or(Ok(()), Err).map_err(io)?;
     crate::util::step("tile cut 4b: the extra nodes");
     // the junctions files: only the build by tiles reads them
     if dir.is_some() {
@@ -1615,6 +1648,7 @@ fn cut<R: Read + Seek + Send>(
         crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
         home_nodes.sort_unstable();
         let uses = uses.read(&Use).map_err(io)?.map(|u| u.map(|(n, f)| (n, f as i64)));
+        let outside = copy.take().expect("a copy for the junctions").finish().map_err(io)?;
         outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &parts)?;
         crate::util::step("tile cut 4d: the junctions files");
     } else {

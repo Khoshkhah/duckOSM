@@ -78,7 +78,7 @@ fn monaco_tile_workers() {
     assert!(tiles.len() > 4, "small tiles");
     let world = duckosm_core::boundary::Boundary::parse(WORLD).unwrap();
     let mut files: Vec<Vec<u8>> = vec![Vec::new(); tiles.len()];
-    let counts = duckosm_core::tilecut::cut_to_sink(open, &world, &tiles, &["multipolygon", "boundary"], &mut |t, b| {
+    let counts = duckosm_core::tilecut::cut_to_sink(open, &world, &tiles, &["multipolygon", "boundary"], false, &mut |t, b| {
         files[t as usize].extend_from_slice(b);
         Ok(())
     })
