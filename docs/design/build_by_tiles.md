@@ -169,6 +169,18 @@ each tile.
 
 More memory does not make the build faster: the time is in the work of the tiles, not in waiting for memory.
 
+On Linux, `duckosm-rust` sets the glibc memory thresholds to 128 KB (`mallopt`, `M_MMAP_THRESHOLD` and
+`M_TRIM_THRESHOLD`): a freed block of 128 KB or more goes back to the system. Without this, each thread keeps the large
+blocks that it freed, and a step uses much more memory than its live data. France (driving, `--raw`), same time:
+
+| Step | glibc default | 128 KB |
+|---|---|---|
+| Cut | 1310 MB | 1081 MB |
+| The largest tile process | 616 MB | 599 MB |
+| Bus routes | 1032 MB | 870 MB |
+| Levels | 1597 MB | 1071 MB |
+| Total time | 615 s | 575 s |
+
 The rows of a table are in the order of the tiles (each tile in its own order), not in one order for the whole file.
 
 ## Result
