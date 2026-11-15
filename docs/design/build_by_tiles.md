@@ -202,8 +202,22 @@ The zoom (France, 6 × 2, before the tile builds read their file without a secon
 | 9 | 376 | 96.5 s | 91.1 s | 13.1 s | 200.8 s | 2.8 GB | 1.52 GB |
 | 8 | 104 | 92.1 s | 99.5 s | 23.8 s | 215.4 s | 5.5 GB | 1.83 GB |
 
-The zoom changes the time a little (the work is the same, only cut into other pieces) and the memory much: zoom 10 stays
-the default.
+The zoom changes the time a little (the work is the same, only cut into other pieces) and the memory much.
+
+The zoom again, with the cut with two reads (PRs 196 and 197; France, driving, GeoParquet with the levels, 20 cores,
+`--memory 2G`, 2026-11-15):
+
+| Zoom | Tiles | Cut | Tile builds | The steps after the union | Total | Largest tile |
+|---|---|---|---|---|---|---|
+| 10 | 1,311 | 78.7 s, 1,285 MB | 133.2 s | 87.6 s | 299.5 s | 461 MB |
+| 9 | 376 | 80.6 s, 1,233 MB | 145.4 s | 85.4 s | 311.5 s | 695 MB |
+| 8 | 104 | 73.4 s, 1,110 MB | 208.7 s | 87.2 s | 369.3 s | 902 MB |
+
+In the browser, quack by tiles is fastest at zoom 8 (Sweden in Chromium on the Mac, 12 threads: 37.0 s; zoom 10: 72.7 s).
+**Zoom 8 is the default and the one tile zoom of all parts** (Kaveh, 2026-11-15): `duckosm-rust tiles`,
+`duckosm-rust quack-tiles` and the quack page. At zoom 8 the build by tiles of France takes 23 % more time than at zoom
+10, all in the tile builds: the 104 large tiles fit fewer at a time in the memory, and the largest finish last. The
+largest tile (902 MB) stays in the budget of 2 GB.
 
 The tiles at the same time and the threads of each tile (France, 12 cores, before the writers of own rows):
 
