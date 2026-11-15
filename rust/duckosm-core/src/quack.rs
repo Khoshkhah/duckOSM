@@ -444,6 +444,46 @@ fn polygons_meet(polys: &[&Polygon]) -> bool {
     })
 }
 
+/// For each polygon of `inner`: is it within `outer`, and is its border away from the border of `outer`? The answers of
+/// `geo`'s `relate` that [`relation_geometry`] needs. `relate` of each inner ring against a long outer ring took 57.6 s for
+/// relation 1239458 of Sweden (3 000 inner rings, an outer ring of 213 056 points); here one sweep over all edges finds the
+/// polygons whose border meets the border of `outer`, and only these get the exact `relate`. Any other polygon is all
+/// inside or all outside `outer`, so one vertex of each of its parts tells.
+fn within_many(outer: &MultiPolygon, inner: &[&MultiPolygon]) -> Vec<(bool, bool)> {
+    use geo::algorithm::coordinate_position::CoordinatePosition;
+    let rings = |m: &MultiPolygon, poly: usize| -> Vec<Edge> {
+        m.0.iter()
+            .flat_map(|p| std::iter::once(p.exterior()).chain(p.interiors()))
+            .flat_map(|r| r.lines().map(move |line| Edge { line, poly }))
+            .collect()
+    };
+    let mut edges = rings(outer, 0);
+    for (k, m) in inner.iter().enumerate() {
+        edges.extend(rings(m, k + 1));
+    }
+    let mut meets = vec![false; inner.len()];
+    for (a, b, _) in Intersections::from_iter(edges.iter()) {
+        match (a.poly, b.poly) {
+            (0, k) | (k, 0) if k > 0 => meets[k - 1] = true,
+            _ => {}
+        }
+    }
+    inner
+        .iter()
+        .zip(meets)
+        .map(|(m, meets)| {
+            if meets {
+                let r = m.relate(outer);
+                let within = r.is_within();
+                (within, !within || r.get(CoordPos::OnBoundary, CoordPos::OnBoundary) == Dimensions::Empty)
+            } else {
+                let inside = m.0.iter().all(|p| p.exterior().0.first().is_some_and(|c| outer.coordinate_position(c) == CoordPos::Inside));
+                (inside, true)
+            }
+        })
+        .collect()
+}
+
 /// GEOS `ST_Union_Agg` of polygons: when no two of them meet ([`polygons_meet`]), the polygons as they are; else the
 /// union by i_overlay.
 fn union(parts: Vec<MultiPolygon>) -> MultiPolygon {
@@ -493,20 +533,19 @@ fn relation_geometry(members: &[(&str, Vec<Pt>)]) -> Option<Geom> {
                 _ => false,
             };
             // the inner polygons in this outer polygon, and if each of them is away from its border
-            let mut apart = true;
-            let holes: Vec<&MultiPolygon> = inner
+            let candidates: Vec<&MultiPolygon> = inner
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| in_box(*i))
+                .filter(|(i, ig)| in_box(*i) && !ig.0.is_empty() && !og.0.is_empty())
                 .map(|(_, ig)| ig)
-                .filter(|ig| {
-                    if ig.0.is_empty() || og.0.is_empty() {
-                        return false;
-                    }
-                    let m = ig.relate(&og);
-                    let within = m.is_within();
-                    apart &= !within || m.get(CoordPos::OnBoundary, CoordPos::OnBoundary) == Dimensions::Empty;
-                    within
+                .collect();
+            let mut apart = true;
+            let holes: Vec<&MultiPolygon> = candidates
+                .iter()
+                .zip(within_many(&og, &candidates))
+                .filter_map(|(ig, (within, away))| {
+                    apart &= !within || away;
+                    within.then_some(*ig)
                 })
                 .collect();
             if holes.is_empty() {
