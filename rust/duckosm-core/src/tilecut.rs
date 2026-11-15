@@ -220,6 +220,31 @@ impl Book {
 mod tests {
     use super::*;
 
+    /// The cut into the store (the browser's way: the tile files made in memory, a few tiles at a time) gives the same
+    /// tile files as the cut into a folder.
+    #[test]
+    fn the_cut_into_the_store_equals_the_cut_into_a_folder() {
+        let data = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+        let pbf = data.join("monaco.osm.pbf");
+        let b = Boundary::parse(&std::fs::read_to_string(data.join("monaco.geojson")).unwrap()).unwrap();
+        let tiles = crate::tiles::tiles(&b, 15);
+        let open = || std::fs::File::open(&pbf).map_err(|e| e.to_string());
+        let dir = std::env::temp_dir().join(format!("duckosm-cut-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        cut_to_tiles(open, &b, &tiles, &dir, true, 25.0).unwrap();
+        let store = cut_to_store_build(open, &b, &tiles, true, 25.0).unwrap();
+        let mut n = 0;
+        for (i, (t, _)) in store.tiles.iter().enumerate() {
+            let mut got = Vec::new();
+            store.reader(i).read_to_end(&mut got).unwrap();
+            let want = std::fs::read(dir.join(format!("{}_{}_{}.osm.pbf", t.z, t.x, t.y))).unwrap_or_default();
+            assert!(got == want, "tile {t:?}: {} bytes in the store, {} in the folder", got.len(), want.len());
+            n += usize::from(!got.is_empty());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(n > 4, "the cut gave {n} tile files");
+    }
+
     /// The book gives the tile of each id as the list of runs does, also across pages and blocks.
     #[test]
     fn the_book_finds_the_runs() {
@@ -411,10 +436,12 @@ struct Parts {
 
 /// Where the part files are: files in a temporary folder (the build by tiles: a file is open only while it is written,
 /// because the tiles are more than a process can keep open), or chunks of one temporary file of the store
-/// ([`cut_to_store`]: the browser has no folders, only the store in OPFS).
+/// ([`cut_to_store`]: the browser has no folders, only the store in OPFS), or in memory (the browser: the parts of a few
+/// tiles, read on the thread that owns the OPFS file, so that the other threads can make their tile files).
 enum Files {
     Dir(PathBuf),
     Store(Chunks),
+    Mem(std::sync::Mutex<FxHashMap<(u32, &'static str), std::sync::Arc<[u8]>>>),
 }
 
 /// The bytes of blobs that wait in memory before they go to the part files.
@@ -451,6 +478,11 @@ impl Parts {
                     .and_then(|mut f| f.write_all(&bytes))
                     .map_err(e)?,
                 Files::Store(c) => c.append((tile, part), &bytes).map_err(e)?,
+                Files::Mem(m) => {
+                    let mut m = m.lock().expect("the parts");
+                    let old = m.remove(&(tile, part)).unwrap_or_else(|| std::sync::Arc::from(&[][..]));
+                    m.insert((tile, part), [&old[..], &bytes[..]].concat().into());
+                }
             }
         }
         Ok(())
@@ -460,12 +492,14 @@ impl Parts {
         match &self.files {
             Files::Dir(dir) => std::fs::File::open(Self::path(dir, tile, part)).ok().map(|f| Box::new(f) as Box<dyn Read + Send>),
             Files::Store(c) => c.reader((tile, part)).map(|r| Box::new(r) as Box<dyn Read + Send>),
+            Files::Mem(m) => m.lock().expect("the parts").get(&(tile, part)).map(|b| Box::new(io::Cursor::new(b.clone())) as Box<dyn Read + Send>),
         }
     }
     fn has(&self, tile: u32, part: &'static str) -> bool {
         match &self.files {
             Files::Dir(dir) => Self::path(dir, tile, part).exists(),
             Files::Store(c) => c.index.lock().expect("the index").contains_key(&(tile, part)),
+            Files::Mem(m) => m.lock().expect("the parts").contains_key(&(tile, part)),
         }
     }
     fn remove(&self, tile: u32, part: &'static str) {
@@ -475,6 +509,9 @@ impl Parts {
             }
             Files::Store(c) => {
                 c.index.lock().expect("the index").remove(&(tile, part));
+            }
+            Files::Mem(m) => {
+                m.lock().expect("the parts").remove(&(tile, part));
             }
         }
     }
@@ -502,6 +539,18 @@ impl Chunks {
         f.1 += bytes.len() as u64;
         self.index.lock().expect("the index").entry(key).or_default().push((at, bytes.len() as u64));
         Ok(())
+    }
+    /// All the bytes of a file: one read for each chunk.
+    fn read_all(&self, key: (u32, &'static str)) -> io::Result<Option<Vec<u8>>> {
+        let Some(chunks) = self.index.lock().expect("the index").get(&key).cloned() else { return Ok(None) };
+        let mut b = vec![0u8; chunks.iter().map(|c| c.1 as usize).sum()];
+        let (mut f, mut at) = (self.file.lock().expect("the file"), 0);
+        for (pos, len) in chunks {
+            f.0.seek(SeekFrom::Start(pos))?;
+            f.0.read_exact(&mut b[at..at + len as usize])?;
+            at += len as usize;
+        }
+        Ok(Some(b))
     }
     fn reader(&self, key: (u32, &'static str)) -> Option<ChunkReader<'_>> {
         let chunks = self.index.lock().expect("the index").get(&key)?.clone();
@@ -677,6 +726,57 @@ fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, parts: &Parts, 
 
 /// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
 /// of the ids with no doubles. Gives the numbers of elements.
+/// Step 5 of the cut in the browser: this thread reads the parts of the next tiles (about [`MEMORY_TILES`] bytes) from
+/// the store in OPFS (its file belongs to this thread), all threads make their tile files in memory, and this thread
+/// writes them to the store as the part "tile". Kentucky (16 threads): 8.0 s one tile at a time before.
+fn finish_tiles_in_memory(parts: &Parts, n: usize, timestamp: Option<i64>) -> Result<Vec<CutCounts>, String> {
+    let Files::Store(chunks) = &parts.files else { return Err("the tile cut in memory needs the store".into()) };
+    let e = |e: io::Error| format!("a part file of the tile cut: {e}");
+    let mut counts = vec![CutCounts::default(); n];
+    let mut next = 0;
+    while next < n {
+        let mem = Parts { files: Files::Mem(Default::default()), waiting: Default::default() };
+        let (mut batch, mut bytes) = (Vec::new(), 0usize);
+        while next < n && (batch.is_empty() || bytes < MEMORY_TILES) {
+            let t = next as u32;
+            next += 1;
+            let (has, at) = (parts.has(t, "nodes"), bytes);
+            for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations"] {
+                if let (true, Some(b)) = (has, chunks.read_all((t, part)).map_err(e)?) {
+                    bytes += b.len();
+                    let Files::Mem(m) = &mem.files else { unreachable!() };
+                    m.lock().expect("the parts").insert((t, part), b.into());
+                }
+                parts.remove(t, part);
+            }
+            if has {
+                batch.push((bytes - at, t));
+            } else {
+                parts.remove(t, "junctions");
+            }
+        }
+        // the largest tiles first, each tile its own task: a large tile does not end the batch alone
+        batch.sort_unstable_by(|a, b| b.cmp(a));
+        let made: Vec<(u32, Vec<u8>, CutCounts)> = batch
+            .par_iter()
+            .with_max_len(1)
+            .map(|&(_, t)| {
+                let mut out = Vec::new();
+                let c = finish_tile(&mem, t, &mut out, timestamp)?;
+                Ok((t, out, c))
+            })
+            .collect::<Result<_, String>>()?;
+        for (t, out, c) in made {
+            chunks.append((t, "tile"), &out).map_err(e)?;
+            counts[t as usize] = c;
+        }
+    }
+    Ok(counts)
+}
+
+/// The bytes of the parts of the tiles that [`finish_tiles_in_memory`] reads at once.
+const MEMORY_TILES: usize = 128 << 20;
+
 fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>) -> Result<CutCounts, String> {
     let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?;
     let mut n = CutCounts::default();
@@ -1163,7 +1263,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     let tmp = std::env::temp_dir().join(format!("duckosm-tiles-{}-{}", std::process::id(), dir.as_os_str().len()));
     std::fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir));
+    let cut = cut(open, boundary, tiles, complete, border_m, Files::Dir(tmp.clone()), Some(dir), true);
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(cut?.0)
 }
@@ -1194,12 +1294,29 @@ pub fn cut_to_store<R: Read + Seek + Send>(
     complete: &[&str],
 ) -> Result<TileFiles, String> {
     let chunks = Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?;
-    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, Files::Store(chunks), None)?;
+    let (counts, parts) = cut(open, boundary, tiles, complete, 0.0, Files::Store(chunks), None, false)?;
+    Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
+}
+
+/// The cut of the build by tiles ([`cut_to_tiles`]: each multipolygon complete in every tile with a member, the junctions)
+/// into the temporary store: the cut where no folder is (the browser). The tile files are the part "tile" of each tile.
+pub fn cut_to_store_build<R: Read + Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    boundary: &Boundary,
+    tiles: &[Tile],
+    multipolygons: bool,
+    border_m: f64,
+) -> Result<TileFiles, String> {
+    let chunks = Chunks::new(&*crate::spill::temp_store()).map_err(|e| format!("a temporary file of the tile cut: {e}"))?;
+    let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
+    let (counts, parts) = cut(open, boundary, tiles, complete, border_m, Files::Store(chunks), None, true)?;
     Ok(TileFiles { parts, tiles: tiles.iter().copied().zip(counts).collect() })
 }
 
 /// The cut of [`cut_to_tiles`] and [`cut_to_store`]: the part files in `files`; the tile files into `dir` with their
-/// junctions files, or with no `dir` into `files` as the part "tile" of each tile.
+/// junctions files, or with no `dir` into `files` as the part "tile" of each tile. `build`: the cut of the build by tiles
+/// (each relation to complete in every tile with a member, and the junctions); else quack's cut (each one in its first
+/// tile only, no junctions).
 fn cut<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
@@ -1208,6 +1325,7 @@ fn cut<R: Read + Seek + Send>(
     border_m: f64,
     files: Files,
     dir: Option<&Path>,
+    build: bool,
 ) -> Result<(Vec<CutCounts>, Parts), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let (timestamp, sorted) = header(open()?)?;
@@ -1440,9 +1558,9 @@ fn cut<R: Read + Seek + Send>(
     let mut waiting_bytes = 0usize;
     each_rel(&mut |r| {
         if multipolygons.binary_search(&r.id).is_ok() {
-            // quack (no folder) needs each one whole in one tile only, its first: a boundary of a country has a million
-            // nodes and is in hundreds of tiles
-            for t in tiles_in(&direct, r.id).take(if dir.is_some() { usize::MAX } else { 1 }) {
+            // quack needs each one whole in one tile only, its first: a boundary of a country has a million nodes and is
+            // in hundreds of tiles
+            for t in tiles_in(&direct, r.id).take(if build { usize::MAX } else { 1 }) {
                 for &(m, ty, _) in &r.members {
                     match ty {
                         MemberType::Node => outside.push(&Pair, &(m, t as i64)).map_err(io)?,
@@ -1521,7 +1639,7 @@ fn cut<R: Read + Seek + Send>(
     take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &parts, "extra-nodes")?;
     crate::util::step("tile cut 4b: the extra nodes");
     // the junctions files: only the build by tiles reads them
-    if dir.is_some() {
+    if build {
         let uses = uses.finish().map_err(io)?;
         let n_uses = uses.len;
         let uses = sort_bytes(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store).map_err(io)?;
@@ -1556,13 +1674,15 @@ fn cut<R: Read + Seek + Send>(
                 finish_tile(&parts, t, file, timestamp)
             }
             (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp),
-            (None, Files::Dir(_)) => Err("the tile cut has no folder for the tile files".into()),
+            (None, _) => Err("the tile cut has no folder for the tile files".into()),
         }
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    let counts: Vec<CutCounts> = (0..tiles.len() as u32).into_par_iter().map(finish).collect::<Result<_, String>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let counts: Vec<CutCounts> = (0..tiles.len() as u32).map(finish).collect::<Result<_, String>>()?;
+    // the store with no folder: in memory in the browser, and in the tests (the test of the browser's way)
+    let counts: Vec<CutCounts> = if dir.is_none() && (cfg!(target_arch = "wasm32") || cfg!(test)) {
+        finish_tiles_in_memory(&parts, tiles.len(), timestamp)?
+    } else {
+        (0..tiles.len() as u32).into_par_iter().map(finish).collect::<Result<_, String>>()?
+    };
     crate::util::step("tile cut 5: the tile files");
     Ok((counts, parts))
 }
