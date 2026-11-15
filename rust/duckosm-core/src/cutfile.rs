@@ -118,6 +118,14 @@ pub(crate) fn file_blob_as<W: Write>(w: &mut W, kind: &str, data: &[u8], raw: bo
     w.write_all(&blob).map_err(e)
 }
 
+impl PbfWriter<Vec<u8>> {
+    /// The bytes written so far (the elements of a block that is not full stay for later): a file that is made in pieces
+    /// and written somewhere else (`tilecut::finish_in_turn`).
+    pub(crate) fn take_bytes(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.w)
+    }
+}
+
 /// Writes a `.osm.pbf` file from elements given one at a time, in the order of the file (all nodes, then all ways,
 /// then all relations, each sorted by id): a block for each [`BLOCK`] elements of a kind. Only one block is in memory,
 /// so a cut can write its file while it reads the region file ([`crate::cutstream`]).
