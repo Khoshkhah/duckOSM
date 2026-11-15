@@ -120,6 +120,32 @@ pub struct PbfWriter<W: Write> {
     nodes: Vec<RawNode>,
     ways: Vec<RawWay>,
     relations: Vec<Relation>,
+    /// [`PbfWriter::parallel`]: the blocks to write, in the order of the file, and the number of files that are written
+    /// at the same time
+    waiting: Vec<Waiting>,
+    running: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+}
+
+/// A block of [`PbfWriter::parallel`] that waits: ready bytes, or elements to encode.
+enum Waiting {
+    Ready(Vec<u8>),
+    Nodes(Vec<RawNode>),
+    Ways(Vec<RawWay>),
+    Relations(Vec<Relation>),
+}
+
+impl Waiting {
+    /// The bytes of the block in the file (as [`file_blob`] writes them).
+    fn bytes(&self) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+        let mut out = Vec::new();
+        match self {
+            Waiting::Ready(b) => return Ok(std::borrow::Cow::Borrowed(b)),
+            Waiting::Nodes(n) => file_blob(&mut out, "OSMData", &nodes_block(n))?,
+            Waiting::Ways(w) => file_blob(&mut out, "OSMData", &ways_block(w))?,
+            Waiting::Relations(r) => file_blob(&mut out, "OSMData", &relations_block(r))?,
+        }
+        Ok(std::borrow::Cow::Owned(out))
+    }
 }
 
 impl<W: Write> PbfWriter<W> {
@@ -143,7 +169,52 @@ impl<W: Write> PbfWriter<W> {
             nodes: Vec::with_capacity(BLOCK),
             ways: Vec::new(),
             relations: Vec::new(),
+            waiting: Vec::new(),
+            running: None,
         })
+    }
+
+    /// As [`PbfWriter::new`], for one of several files that are written at the same time: `running` is their number. When
+    /// fewer files than threads run, the blocks of this file are encoded (and compressed) on the free threads, (threads /
+    /// running) blocks at a time, and written in their order: the same bytes. So the last large files are not made by one
+    /// thread alone (the tile files of the cut: Louisville, 21.6 MB, took 2 s of part 5 in the browser), and while many
+    /// files run, no blocks wait in memory.
+    pub fn parallel(w: W, timestamp: Option<i64>, running: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Result<Self, String> {
+        Ok(PbfWriter { running: Some(running), ..Self::new(w, timestamp)? })
+    }
+
+    /// A block to write: at once, or to the waiting blocks (written when enough of them wait for the free threads).
+    fn put_block(&mut self, b: Waiting) -> Result<(), String> {
+        let batch = match &self.running {
+            #[cfg(feature = "pbf")]
+            Some(r) => rayon::current_num_threads() / r.load(std::sync::atomic::Ordering::Relaxed).max(1),
+            _ => 0,
+        };
+        if batch <= 1 && self.waiting.is_empty() {
+            let r = b.bytes()?;
+            return self.w.write_all(&r).map_err(|e| e.to_string());
+        }
+        self.waiting.push(b);
+        if self.waiting.len() >= batch {
+            self.write_waiting()?;
+        }
+        Ok(())
+    }
+
+    /// Encode the waiting blocks (on all threads with rayon) and write them in their order.
+    fn write_waiting(&mut self) -> Result<(), String> {
+        let waiting = std::mem::take(&mut self.waiting);
+        #[cfg(feature = "pbf")]
+        let made: Vec<std::borrow::Cow<[u8]>> = {
+            use rayon::prelude::*;
+            waiting.par_iter().with_max_len(1).map(Waiting::bytes).collect::<Result<_, String>>()?
+        };
+        #[cfg(not(feature = "pbf"))]
+        let made: Vec<std::borrow::Cow<[u8]>> = waiting.iter().map(Waiting::bytes).collect::<Result<_, String>>()?;
+        for b in made {
+            self.w.write_all(&b).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     pub fn node(&mut self, n: RawNode) -> Result<(), String> {
@@ -178,7 +249,10 @@ impl<W: Write> PbfWriter<W> {
         self.flush_nodes()?;
         self.flush_ways()?;
         self.flush_relations()?;
-        self.w.write_all(bytes).map_err(|e| e.to_string())
+        if self.waiting.is_empty() {
+            return self.w.write_all(bytes).map_err(|e| e.to_string());
+        }
+        self.put_block(Waiting::Ready(bytes.to_vec()))
     }
 
     /// Write the last blocks; gives the writer back.
@@ -186,29 +260,30 @@ impl<W: Write> PbfWriter<W> {
         self.flush_nodes()?;
         self.flush_ways()?;
         self.flush_relations()?;
+        self.write_waiting()?;
         Ok(self.w)
     }
 
     fn flush_nodes(&mut self) -> Result<(), String> {
         if !self.nodes.is_empty() {
-            file_blob(&mut self.w, "OSMData", &nodes_block(&self.nodes))?;
-            self.nodes.clear();
+            let b = std::mem::replace(&mut self.nodes, Vec::with_capacity(BLOCK));
+            self.put_block(Waiting::Nodes(b))?;
         }
         Ok(())
     }
 
     fn flush_ways(&mut self) -> Result<(), String> {
         if !self.ways.is_empty() {
-            file_blob(&mut self.w, "OSMData", &ways_block(&self.ways))?;
-            self.ways.clear();
+            let b = std::mem::take(&mut self.ways);
+            self.put_block(Waiting::Ways(b))?;
         }
         Ok(())
     }
 
     fn flush_relations(&mut self) -> Result<(), String> {
         if !self.relations.is_empty() {
-            file_blob(&mut self.w, "OSMData", &relations_block(&self.relations))?;
-            self.relations.clear();
+            let b = std::mem::take(&mut self.relations);
+            self.put_block(Waiting::Relations(b))?;
         }
         Ok(())
     }

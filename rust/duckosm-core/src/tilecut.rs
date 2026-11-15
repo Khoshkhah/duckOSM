@@ -724,8 +724,24 @@ fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, parts: &Parts, 
     Ok(())
 }
 
-/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
-/// of the ids with no doubles. Gives the numbers of elements.
+/// The number of tile files that are made at the same time (step 5).
+#[derive(Default)]
+struct Running(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl Running {
+    /// One more tile until the guard goes.
+    fn one(&self) -> impl Drop + '_ {
+        struct Guard<'a>(&'a Running);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0 .0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Guard(self)
+    }
+}
+
 /// Step 5 of the cut in the browser: this thread reads the parts of the next tiles (about [`MEMORY_TILES`] bytes) from
 /// the store in OPFS (its file belongs to this thread), all threads make their tile files in memory, and this thread
 /// writes them to the store as the part "tile". Kentucky (16 threads): 8.0 s one tile at a time before.
@@ -757,12 +773,13 @@ fn finish_tiles_in_memory(parts: &Parts, n: usize, timestamp: Option<i64>) -> Re
         }
         // the largest tiles first, each tile its own task: a large tile does not end the batch alone
         batch.sort_unstable_by(|a, b| b.cmp(a));
+        let running = Running::default();
         let made: Vec<(u32, Vec<u8>, CutCounts)> = batch
             .par_iter()
             .with_max_len(1)
             .map(|&(_, t)| {
                 let mut out = Vec::new();
-                let c = finish_tile(&mem, t, &mut out, timestamp)?;
+                let c = finish_tile(&mem, t, &mut out, timestamp, &running)?;
                 Ok((t, out, c))
             })
             .collect::<Result<_, String>>()?;
@@ -777,8 +794,13 @@ fn finish_tiles_in_memory(parts: &Parts, n: usize, timestamp: Option<i64>) -> Re
 /// The bytes of the parts of the tiles that [`finish_tiles_in_memory`] reads at once.
 const MEMORY_TILES: usize = 128 << 20;
 
-fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>) -> Result<CutCounts, String> {
-    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?;
+/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
+/// of the ids with no doubles. Gives the numbers of elements. `running`: the number of tiles that are made at the same
+/// time (with this one): when it is less than the threads, the free threads encode the blocks of this tile, so the last
+/// large tiles do not run on one thread alone ([`PbfWriter::parallel`]).
+fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, running: &Running) -> Result<CutCounts, String> {
+    let _one = running.one();
+    let mut w = PbfWriter::parallel(io::BufWriter::with_capacity(1 << 20, out), timestamp, running.0.clone())?;
     let mut n = CutCounts::default();
     for (kind, main, extra) in [(0, "nodes", "extra-nodes"), (1, "ways", "extra-ways"), (2, "relations", "none")] {
         merge_kind(&mut w, &mut n, parts, tile, main, extra, kind)?;
@@ -1657,6 +1679,7 @@ fn cut<R: Read + Seek + Send>(
     crate::util::step("tile cut 4: the extra elements");
     // 5. each tile from its parts (the tiles at the same time; in the browser one at a time, because a file in OPFS
     // belongs to the thread that opened it)
+    let running = Running::default();
     let finish = |t: u32| -> Result<CutCounts, String> {
         if !parts.has(t, "nodes") {
             for part in ["ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
@@ -1671,9 +1694,9 @@ fn cut<R: Read + Seek + Send>(
                 write_junctions(&parts, t, &dir.join(format!("{name}.junctions")))?;
                 let out = dir.join(format!("{name}.osm.pbf"));
                 let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-                finish_tile(&parts, t, file, timestamp)
+                finish_tile(&parts, t, file, timestamp, &running)
             }
-            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp),
+            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp, &running),
             (None, _) => Err("the tile cut has no folder for the tile files".into()),
         }
     };
