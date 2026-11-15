@@ -74,3 +74,15 @@ pub fn step(name: &str) {
         hook(name);
     }
 }
+
+/// Give the memory that the allocator keeps back to the system (glibc: `malloc_trim`, all arenas): between the passes of a
+/// step, after many threads made and freed many small blocks (read 2 of the tile cut). Nothing elsewhere.
+pub fn trim_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        unsafe { malloc_trim(0) };
+    }
+}

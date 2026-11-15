@@ -5,17 +5,21 @@
 //!
 //! A node has its place, so its tile is known when it is read. A way and a relation have only the ids of their members,
 //! and they come after the nodes in the file: the cut keeps the tile of each node in memory, as runs of ids, compressed
-//! ([`Book`]: nodes with near ids are usually made together, in one place). The ways get a book too. Each element goes
-//! into a part file of its tile when it is read; nothing else of the elements stays in memory.
+//! ([`Book`]: nodes with near ids are usually made together, in one place). The ways get a book too. The cut reads the
+//! file two times (docs/design/tile_cut_two_reads.md): read 1 only plans, read 2 writes each element straight into the
+//! files of its tiles, once.
 //!
-//! 1. The nodes: each node inside goes to the node part of its tile; the book of the nodes.
-//! 2. The ways and relations: each way with a node inside goes to the way part of each of its tiles; the nodes that a
-//!    tile needs from outside it go to a temporary list; the relations go whole to a temporary file.
-//! 3. The relations: their tiles (a member there, their parents), each to the relation part of each of its tiles; the
-//!    members of the multipolygons.
-//! 4. The blocks with a node from outside a tile or a member way of a multipolygon: each such element goes to the extra
-//!    part of its tile.
-//! 5. Each tile: its parts, merged in the order of the ids, give its file; the parts go.
+//! Read 1:
+//! 1. The nodes: the book of the nodes (the tile of each node inside), and the tiles with a node inside (only these have
+//!    a file).
+//! 2. The ways and relations: the book of the ways (the tiles of each way with a node inside); the nodes that a tile
+//!    needs from outside it go to a temporary list; the relations go whole to a temporary file.
+//! 3. The relations: their tiles (a member there, their parents); the members of the multipolygons go to the lists of
+//!    the extra nodes and the extra ways.
+//! 4. The extra nodes, sorted; the junctions files of the build by tiles.
+//!
+//! Read 2 (`write`): the nodes, the ways and the relations, in the order of the file, each to its own tiles and to the
+//! tiles that have it as an extra element.
 
 use crate::boundary::Boundary;
 use crate::cutfile::{file_blob_as, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
@@ -31,6 +35,8 @@ use rayon::prelude::*;
 use std::collections::BTreeSet;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+
+mod write;
 
 /// Ids with a tile, as runs (first id, last id, tile): ids that follow each other in the file, with no element of the
 /// kind between them that is not in the tile. Ids in no run have no tile.
@@ -304,12 +310,6 @@ fn tiles_in(pairs: &[(i64, u32)], id: i64) -> impl Iterator<Item = u32> + '_ {
     pairs[i..].iter().take_while(move |p| p.0 == id).map(|p| p.1)
 }
 
-/// Is an id of the sorted pairs in `lo..=hi`?
-fn pairs_in(pairs: &[(i64, u32)], lo: i64, hi: i64) -> bool {
-    let i = pairs.partition_point(|p| p.0 < lo);
-    i < pairs.len() && pairs[i].0 <= hi
-}
-
 /// The ways of `wanted` (sorted) with their nodes.
 struct Wanted<'a> {
     wanted: &'a [i64],
@@ -397,36 +397,6 @@ fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>, raw: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Elements with their tiles to blobs for each tile (on the thread of the block): (tile, blobs). The elements move.
-fn by_tile(elems: Vec<(u32, Elem)>, raw: bool) -> Result<Vec<(u32, Vec<u8>)>, String> {
-    groups(elems).into_iter().map(|g| tile_blobs(g, raw)).collect()
-}
-
-/// [`by_tile`] with the tiles on all threads (the compression of the blocks is the work), for a caller on one thread: the
-/// passes that decode the blocks on all threads call [`by_tile`].
-fn by_tile_par(elems: Vec<(u32, Elem)>, raw: bool) -> Result<Vec<(u32, Vec<u8>)>, String> {
-    groups(elems).into_par_iter().map(|g| tile_blobs(g, raw)).collect()
-}
-
-/// The elements of each tile, in the order of the tiles, each tile in the order of the ids.
-fn groups(mut elems: Vec<(u32, Elem)>) -> Vec<(u32, Vec<Elem>)> {
-    elems.sort_by_key(|e| e.0); // stable: the order of the ids in each tile
-    let mut groups: Vec<(u32, Vec<Elem>)> = Vec::new();
-    for (t, e) in elems {
-        match groups.last_mut() {
-            Some(g) if g.0 == t => g.1.push(e),
-            _ => groups.push((t, vec![e])),
-        }
-    }
-    groups
-}
-
-fn tile_blobs((t, group): (u32, Vec<Elem>), raw: bool) -> Result<(u32, Vec<u8>), String> {
-    let mut bytes = Vec::new();
-    blobs(group, &mut bytes, raw)?;
-    Ok((t, bytes))
-}
-
 /// The part files of the tiles. The blobs of a part wait in memory until a limit, then go to the end of their files.
 struct Parts {
     files: Files,
@@ -488,20 +458,6 @@ impl Parts {
         match &self.files {
             Files::Dir(dir) => std::fs::File::open(Self::path(dir, tile, part)).ok().map(|f| Box::new(f) as Box<dyn Read + Send>),
             Files::Store(c) => c.reader((tile, part)).map(|r| Box::new(r) as Box<dyn Read + Send>),
-        }
-    }
-    /// The bytes of a part (after [`Parts::flush`]).
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    fn size(&self, tile: u32, part: &'static str) -> u64 {
-        match &self.files {
-            Files::Dir(dir) => std::fs::metadata(Self::path(dir, tile, part)).map_or(0, |m| m.len()),
-            Files::Store(c) => c.index.lock().expect("the index").get(&(tile, part)).map_or(0, |v| v.iter().map(|c| c.1).sum()),
-        }
-    }
-    fn has(&self, tile: u32, part: &'static str) -> bool {
-        match &self.files {
-            Files::Dir(dir) => Self::path(dir, tile, part).exists(),
-            Files::Store(c) => c.index.lock().expect("the index").contains_key(&(tile, part)),
         }
     }
     fn remove(&self, tile: u32, part: &'static str) {
@@ -587,32 +543,6 @@ impl Chunks {
         let chunks = self.index.lock().expect("the index").get(&key)?.clone();
         Some(ChunkReader { c: self, chunks, i: 0, off: 0 })
     }
-    /// All the bytes of a file (empty when it has none): one read for each chunk. A `ChunkReader` behind `read_to_end`
-    /// reads in small pieces, and each piece is a call into OPFS (Kentucky in Chromium: 2.4 s of part 5 against 0.6 s).
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    fn read_all(&self, key: (u32, &'static str)) -> io::Result<Vec<u8>> {
-        let Some(chunks) = self.index.lock().expect("the index").get(&key).cloned() else { return Ok(Vec::new()) };
-        let mut b = vec![0u8; chunks.iter().map(|c| c.1 as usize).sum()];
-        let mut at = 0;
-        match &self.file {
-            Some(file) => {
-                let mut f = file.lock().expect("the file");
-                for (pos, len) in chunks {
-                    f.0.seek(SeekFrom::Start(pos))?;
-                    f.0.read_exact(&mut b[at..at + len as usize])?;
-                    at += len as usize;
-                }
-            }
-            None => {
-                let m = self.mem.lock().expect("the chunks");
-                for (i, len) in chunks {
-                    b[at..at + len as usize].copy_from_slice(&m[i as usize]);
-                    at += len as usize;
-                }
-            }
-        }
-        Ok(b)
-    }
     /// A file goes: in memory its chunks go too; in the file its places are used again (`free`).
     fn remove(&self, key: (u32, &'static str)) {
         let gone = self.index.lock().expect("the index").remove(&key);
@@ -662,19 +592,6 @@ impl Read for ChunkReader<'_> {
     }
 }
 
-/// A writer of a file of [`Chunks`]: each write is a chunk (put a `BufWriter` in front).
-struct ChunkWriter<'a>(&'a Chunks, (u32, &'static str));
-
-impl Write for ChunkWriter<'_> {
-    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
-        self.0.append(self.1, b)?;
-        Ok(b.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 /// The blobs of a part file, with their records: (first id, last id, number of elements, the blob as in a `.osm.pbf`).
 struct Blobs<'a>(Option<io::BufReader<Box<dyn Read + Send + 'a>>>);
 
@@ -685,20 +602,6 @@ type Src<'a> = Option<Box<dyn Read + Send + 'a>>;
 
 /// Where [`cut_to_sink`] gives the bytes of the tile files: (tile, the next bytes of its file).
 pub type Sink<'a> = &'a mut dyn FnMut(u32, &[u8]) -> Result<(), String>;
-
-/// A writer that gives its bytes to a [`Sink`] (put a `BufWriter` in front).
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-struct SinkWriter<'a, 'b>(&'a mut Sink<'b>, u32);
-
-impl Write for SinkWriter<'_, '_> {
-    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
-        (self.0)(self.1, b).map_err(io::Error::other)?;
-        Ok(b.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
 
 impl<'a> Blobs<'a> {
     fn from(src: Src<'a>) -> Blobs<'a> {
@@ -756,13 +659,6 @@ impl<'a> PartReader<'a> {
         }
         Ok(self.buf.front())
     }
-    fn peek_id(&mut self) -> Result<Option<i64>, String> {
-        Ok(self.peek()?.map(Elem::id))
-    }
-    fn next(&mut self) -> Result<Option<Elem>, String> {
-        self.peek()?;
-        Ok(self.buf.pop_front())
-    }
     /// The next elements as one batch (the blocks of one decode), in the order of the file.
     fn next_batch(&mut self) -> Result<Option<Vec<Elem>>, String> {
         self.peek()?;
@@ -791,464 +687,6 @@ fn put<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, last: &mut Option<i64>
             w.relation(x)
         }
     }
-}
-
-/// One kind of the file of a tile: the blobs of the main part, merged in the order of the ids with the elements of the
-/// extra part. A blob that no extra element falls into is copied as bytes; only the others are decoded and made again.
-/// The blobs go in batches to the threads of the pool: each blob with the extra elements before it and in its range is
-/// one job, and the jobs are written in their order (one large tile on one thread was the end of the cut in the browser).
-/// The ids of the jobs do not overlap, so each job removes its doubles alone.
-fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, main: Src, extra: Src, kind: u8, raw: bool) -> Result<(), String> {
-    let (mut a, mut x) = (Blobs::from(main), PartReader::from(extra));
-    loop {
-        // the free threads for this tile: the threads over the tiles that run now, so the tiles at the same time hold no
-        // more blobs in memory than one tile alone (a fixed batch for each tile: Kentucky 594 -> 882 MB with 20 tiles)
-        let batch_len = (2 * rayon::current_num_threads() / RUNNING.load(std::sync::atomic::Ordering::Relaxed).max(1)).max(2);
-        let mut batch: Vec<(Vec<Elem>, Blob, Vec<Elem>)> = Vec::with_capacity(batch_len);
-        while batch.len() < batch_len {
-            let Some(blob) = a.next()? else { break };
-            let (mut gap, mut inside) = (Vec::new(), Vec::new());
-            while x.peek_id()?.is_some_and(|id| id < blob.0) {
-                gap.push(x.next()?.expect("peeked"));
-            }
-            while x.peek_id()?.is_some_and(|id| id <= blob.1) {
-                inside.push(x.next()?.expect("peeked"));
-            }
-            batch.push((gap, blob, inside));
-        }
-        if batch.is_empty() {
-            break;
-        }
-        let made: Vec<(Vec<u8>, CutCounts)> = batch
-            .into_par_iter()
-            .map_init(Buffers::default, |b, (gap, (_, _, count, blob), inside)| {
-                let mut u = PbfWriter::data(Vec::new()).raw_blocks(raw);
-                let (mut un, mut last) = (CutCounts::default(), None);
-                for e in gap {
-                    put(&mut u, &mut un, &mut last, e)?;
-                }
-                if inside.is_empty() {
-                    u.blocks(&blob)?;
-                    match kind {
-                        0 => un.nodes += count as usize,
-                        1 => un.ways += count as usize,
-                        _ => un.relations += count as usize,
-                    }
-                } else {
-                    let mut all = All::default();
-                    decode_block(&blob, [true; 3], b, &mut all)?;
-                    let mut ins = inside.into_iter().peekable();
-                    for e in all.0 {
-                        while ins.peek().is_some_and(|i| i.id() < e.id()) {
-                            put(&mut u, &mut un, &mut last, ins.next().expect("peeked"))?;
-                        }
-                        put(&mut u, &mut un, &mut last, e)?;
-                    }
-                    for e in ins {
-                        put(&mut u, &mut un, &mut last, e)?;
-                    }
-                }
-                Ok((u.finish()?, un))
-            })
-            .collect::<Result<_, String>>()?;
-        for (bytes, un) in made {
-            w.blocks(&bytes)?;
-            n.nodes += un.nodes;
-            n.ways += un.ways;
-            n.relations += un.relations;
-        }
-    }
-    let mut last = None;
-    while let Some(e) = x.next()? {
-        put(w, n, &mut last, e)?;
-    }
-    Ok(())
-}
-
-/// The output of a tile file on a thread of the pool: each write goes through the channel to the thread that writes the
-/// files (`finish_from` writes through a buffer of 1 MiB).
-#[cfg(target_arch = "wasm32")]
-struct Chan(u32, std::sync::mpsc::SyncSender<(u32, Vec<u8>)>);
-
-#[cfg(target_arch = "wasm32")]
-impl Write for Chan {
-    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
-        self.1.send((self.0, b.to_vec())).map_err(|_| io::Error::other("the writer of the tile files stopped"))?;
-        Ok(b.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// A piece of a tile file for a thread of the pool: a main blob with the extra elements before it and inside its ids, or
-/// the extra elements after the last main blob of a kind.
-enum Piece {
-    Blob(Vec<Elem>, Blob, Vec<Elem>),
-    Tail(Vec<Elem>),
-}
-
-/// The bytes of a piece (data blocks) and the numbers of its elements, as `merge_kind` makes them.
-fn make_piece(p: Piece, kind: u8, raw: bool, b: &mut Buffers) -> Result<(Vec<u8>, CutCounts), String> {
-    let mut u = PbfWriter::data(Vec::new()).raw_blocks(raw);
-    let (mut un, mut last) = (CutCounts::default(), None);
-    match p {
-        Piece::Tail(es) => {
-            for e in es {
-                put(&mut u, &mut un, &mut last, e)?;
-            }
-        }
-        Piece::Blob(gap, (_, _, count, blob), inside) => {
-            for e in gap {
-                put(&mut u, &mut un, &mut last, e)?;
-            }
-            if inside.is_empty() {
-                u.blocks(&blob)?;
-                match kind {
-                    0 => un.nodes += count as usize,
-                    1 => un.ways += count as usize,
-                    _ => un.relations += count as usize,
-                }
-            } else {
-                let mut all = All::default();
-                decode_block(&blob, [true; 3], b, &mut all)?;
-                let mut ins = inside.into_iter().peekable();
-                for e in all.0 {
-                    while ins.peek().is_some_and(|i| i.id() < e.id()) {
-                        put(&mut u, &mut un, &mut last, ins.next().expect("peeked"))?;
-                    }
-                    put(&mut u, &mut un, &mut last, e)?;
-                }
-                for e in ins {
-                    put(&mut u, &mut un, &mut last, e)?;
-                }
-            }
-        }
-    }
-    Ok((u.finish()?, un))
-}
-
-/// A tile file of part 5 that is made in turn with other tiles ([`finish_in_turn`]): its readers of the parts (on the
-/// thread that owns the store), its file so far, and its batches on the pool.
-struct TileRun<'a> {
-    t: u32,
-    /// the kind that is read now (0 nodes, 1 ways, 2 relations; 3: all read)
-    kind: usize,
-    a: Blobs<'a>,
-    x: PartReader<'a>,
-    w: PbfWriter<Vec<u8>>,
-    n: CutCounts,
-    /// batches given to the pool, batches written, and the finished batches that wait for an earlier one
-    sent: usize,
-    given: usize,
-    done: std::collections::BTreeMap<usize, Vec<(Vec<u8>, CutCounts)>>,
-}
-
-impl<'a> TileRun<'a> {
-    fn open(parts: &'a Parts, t: u32, timestamp: Option<i64>, raw: bool) -> Result<TileRun<'a>, String> {
-        Ok(TileRun {
-            t,
-            kind: 0,
-            a: Blobs::from(parts.reader(t, KINDS[0].0)),
-            x: PartReader::from(parts.reader(t, KINDS[0].1)),
-            w: PbfWriter::new(Vec::new(), timestamp)?.raw_blocks(raw),
-            n: CutCounts::default(),
-            sent: 0,
-            given: 0,
-            done: Default::default(),
-        })
-    }
-
-    /// The next pieces, at most `len` main blobs (in the order of the file, across the kinds), with their kind; None when
-    /// all the parts of the tile are read.
-    fn next(&mut self, parts: &'a Parts, len: usize) -> Result<Option<Vec<(u8, Piece)>>, String> {
-        let mut out = Vec::new();
-        while self.kind < 3 && out.len() < len {
-            match self.a.next()? {
-                Some(blob) => {
-                    let (mut gap, mut inside) = (Vec::new(), Vec::new());
-                    while self.x.peek_id()?.is_some_and(|id| id < blob.0) {
-                        gap.push(self.x.next()?.expect("peeked"));
-                    }
-                    while self.x.peek_id()?.is_some_and(|id| id <= blob.1) {
-                        inside.push(self.x.next()?.expect("peeked"));
-                    }
-                    out.push((self.kind as u8, Piece::Blob(gap, blob, inside)));
-                }
-                None => {
-                    // the extra elements after the last main blob of this kind, then the next kind
-                    let mut tail = Vec::new();
-                    while let Some(e) = self.x.next()? {
-                        tail.push(e);
-                    }
-                    if !tail.is_empty() {
-                        out.push((self.kind as u8, Piece::Tail(tail)));
-                    }
-                    self.kind += 1;
-                    if self.kind < 3 {
-                        self.a = Blobs::from(parts.reader(self.t, KINDS[self.kind].0));
-                        self.x = PartReader::from(parts.reader(self.t, KINDS[self.kind].1));
-                    } else {
-                        (self.a, self.x) = (Blobs::from(None), PartReader::from(None));
-                    }
-                }
-            }
-        }
-        Ok((!out.is_empty()).then_some(out))
-    }
-}
-
-/// Part 5 in the browser, the parts in the OPFS-file store: the tiles are made in turn, several at the same time, the
-/// largest first. This thread (the owner of the store) reads the next pieces of the open tiles in turn and gives them to
-/// the pool in batches, and writes the finished pieces of each tile in their order; a tile closes when its last batch is
-/// written, and the next tile opens. The memory follows the batches on the pool, not the size of a tile. Before, a tile
-/// over 128 MB was made alone, after the tiles before it and before the tiles after it (Sweden at zoom 6, 4 CPUs: 3 large
-/// tiles took 11.9 of the 18.7 s of part 5). The bytes do not change: each piece gives the same bytes in any batch.
-fn finish_in_turn(parts: &Parts, chunks: &Chunks, n: usize, mut sink: Option<&mut Sink>, timestamp: Option<i64>, raw: bool, build: bool) -> Result<Vec<CutCounts>, String> {
-    let threads = rayon::current_num_threads().max(1);
-    // the pieces of one batch, the batches on the pool at most, the batches of one tile on the pool at most, the tiles open
-    const BATCH: usize = 8;
-    let (in_flight, per_tile, open_max) = (2 * threads, 4, 2 * threads);
-    let mut counts = vec![CutCounts::default(); n];
-    let mut order: Vec<u32> = Vec::new();
-    for t in 0..n as u32 {
-        if parts.has(t, "nodes") {
-            order.push(t);
-        } else {
-            for part in ["ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
-                parts.remove(t, part);
-            }
-        }
-    }
-    let size = |t: u32| KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum::<u64>() as usize;
-    order.sort_by_cached_key(|&t| std::cmp::Reverse(size(t)));
-    let mut order = order.into_iter().peekable();
-    // a small tile: its parts in one read for each chunk, and the whole tile one job on the pool (the pool also matches the
-    // extra elements); the small tiles on the pool hold at most WHOLE bytes of parts. With the pieces of each tile on this
-    // thread, many small tiles made this thread the bottleneck (Sweden, 78 tiles: part 5 8.8 -> 12.5 s on the Mac)
-    const SMALL: usize = 64 << 20;
-    const WHOLE: usize = 128 << 20;
-    let mut whole_bytes = 0usize;
-    // the tests (small files) make every second tile in pieces, so that they check both ways
-    let small = |t: u32| if cfg!(test) { t % 2 == 0 } else { size(t) <= SMALL };
-    fn src(v: &[u8]) -> Src<'_> {
-        (!v.is_empty()).then(|| Box::new(io::Cursor::new(v)) as Box<dyn Read + Send>)
-    }
-    let write = |sink: &mut Option<&mut Sink>, t: u32, b: &[u8]| -> Result<(), String> {
-        if b.is_empty() {
-            return Ok(());
-        }
-        match sink.as_deref_mut() {
-            Some(sink) => sink(t, b),
-            None => chunks.append((t, "tile"), b).map_err(|e| format!("a tile file of the tile cut: {e}")),
-        }
-    };
-    enum Made {
-        /// a batch of pieces of the open tile `i` (its number `seq`)
-        Batch(usize, usize, Result<Vec<(Vec<u8>, CutCounts)>, String>),
-        /// a small tile made whole, with the bytes of its parts
-        Whole(u32, usize, Result<(CutCounts, Vec<u8>), String>),
-    }
-    let (tx, rx) = std::sync::mpsc::channel::<Made>();
-    let mut runs: Vec<Option<TileRun>> = Vec::new();
-    let (mut flying, mut failed): (usize, Option<String>) = (0, None);
-    let mut turn = 0usize;
-    rayon::in_place_scope(|scope| {
-        loop {
-            // give batches to the pool: the open tiles in turn, a new tile when no open tile can give one
-            while failed.is_none() && flying < in_flight {
-                let open = runs.iter().filter(|r| r.is_some()).count();
-                let pick = (0..runs.len()).map(|k| (turn + k) % runs.len()).find(|&i| {
-                    runs[i].as_ref().is_some_and(|r| r.kind < 3 && r.sent - r.given < per_tile)
-                });
-                let i = match pick {
-                    Some(i) => i,
-                    // the next tile is small: whole, when the small tiles on the pool leave room for it
-                    None if order.peek().is_some_and(|&t| small(t)) => {
-                        let t = *order.peek().expect("peeked");
-                        let bytes = size(t);
-                        if whole_bytes > 0 && whole_bytes + bytes > WHOLE {
-                            break;
-                        }
-                        order.next();
-                        let read = |p: &'static str| chunks.read_all((t, p)).map_err(|e| format!("a part file of the tile cut: {e}"));
-                        let mut k: [(Vec<u8>, Vec<u8>); 3] = Default::default();
-                        for (j, (main, extra)) in KINDS.into_iter().enumerate() {
-                            match (read(main), read(extra)) {
-                                (Ok(a), Ok(b)) => k[j] = (a, b),
-                                (Err(e), _) | (_, Err(e)) => {
-                                    failed = Some(e);
-                                    break;
-                                }
-                            }
-                        }
-                        for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations"] {
-                            parts.remove(t, part);
-                        }
-                        if failed.is_some() {
-                            break;
-                        }
-                        whole_bytes += bytes;
-                        flying += 1;
-                        let tx = tx.clone();
-                        scope.spawn(move |_| {
-                            let mut out = Vec::new();
-                            let made = finish_from(k.each_ref().map(|(a, b)| (src(a), src(b))), &mut out, timestamp, raw).map(|n| (n, out));
-                            let _ = tx.send(Made::Whole(t, bytes, made));
-                        });
-                        continue;
-                    }
-                    None if open < open_max => match order.next() {
-                        Some(t) => match TileRun::open(parts, t, timestamp, raw) {
-                            Ok(r) => {
-                                runs.push(Some(r));
-                                runs.len() - 1
-                            }
-                            Err(e) => {
-                                failed = Some(e);
-                                break;
-                            }
-                        },
-                        None => break,
-                    },
-                    None => break,
-                };
-                turn = i + 1;
-                let r = runs[i].as_mut().expect("open");
-                match r.next(parts, BATCH) {
-                    Ok(Some(pieces)) => {
-                        let (seq, tx) = (r.sent, tx.clone());
-                        r.sent += 1;
-                        flying += 1;
-                        scope.spawn(move |_| {
-                            let made = pieces.into_par_iter().map_init(Buffers::default, |b, (kind, p)| make_piece(p, kind, raw, b)).collect();
-                            let _ = tx.send(Made::Batch(i, seq, made));
-                        });
-                    }
-                    Ok(None) => {}
-                    Err(e) => failed = Some(e),
-                }
-                // all read: the parts of the tile go (their places in the store are used again)
-                if r.kind == 3 {
-                    for part in ["nodes", "ways", "extra-nodes", "extra-ways", "relations"] {
-                        parts.remove(r.t, part);
-                    }
-                }
-            }
-            // the tiles that are all read and all written close: the end of the file, its numbers
-            for slot in runs.iter_mut() {
-                if slot.as_ref().is_some_and(|r| r.kind == 3 && r.sent == r.given) {
-                    let r = slot.take().expect("open");
-                    if failed.is_none() {
-                        match r.w.finish().and_then(|b| write(&mut sink, r.t, &b)) {
-                            Ok(()) => counts[r.t as usize] = r.n,
-                            Err(e) => failed = Some(e),
-                        }
-                    }
-                    if !build {
-                        parts.remove(r.t, "junctions");
-                    }
-                }
-            }
-            if flying == 0 {
-                // nothing on the pool: the end (all tiles made), or an error; else give the next batches
-                if failed.is_some() || (order.len() == 0 && runs.iter().all(|r| r.is_none())) {
-                    break;
-                }
-                continue;
-            }
-            // one finished batch: written in the order of its tile (after an error the batches are only counted); or a small
-            // tile, written at once
-            let Ok(got) = rx.recv() else { break };
-            flying -= 1;
-            let (i, seq, made) = match got {
-                Made::Batch(i, seq, made) => (i, seq, made),
-                Made::Whole(t, bytes, made) => {
-                    whole_bytes -= bytes;
-                    if failed.is_none() {
-                        match made.and_then(|(n, out)| write(&mut sink, t, &out).map(|_| n)) {
-                            Ok(n) => counts[t as usize] = n,
-                            Err(e) => failed = Some(e),
-                        }
-                    }
-                    if !build {
-                        parts.remove(t, "junctions");
-                    }
-                    continue;
-                }
-            };
-            let Some(r) = runs[i].as_mut() else { continue };
-            match made {
-                Ok(m) => {
-                    r.done.insert(seq, m);
-                }
-                Err(e) => {
-                    failed.get_or_insert(e);
-                    r.given += 1;
-                    continue;
-                }
-            }
-            while let Some(m) = r.done.remove(&r.given) {
-                r.given += 1;
-                if failed.is_some() {
-                    continue;
-                }
-                let res = m
-                    .into_iter()
-                    .try_for_each(|(bytes, un)| {
-                        r.n.nodes += un.nodes;
-                        r.n.ways += un.ways;
-                        r.n.relations += un.relations;
-                        r.w.blocks(&bytes)
-                    })
-                    .and_then(|_| write(&mut sink, r.t, &r.w.take_bytes()));
-                if let Err(e) = res {
-                    failed = Some(e);
-                }
-            }
-        }
-    });
-    if let Some(e) = failed {
-        return Err(e);
-    }
-    Ok(counts)
-}
-
-/// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
-/// of the ids with no doubles. Gives the numbers of elements.
-fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
-    let srcs = KINDS.map(|(main, extra)| (parts.reader(tile, main), parts.reader(tile, extra)));
-    let n = finish_from(srcs, out, timestamp, raw)?;
-    for (main, extra) in KINDS {
-        parts.remove(tile, main);
-        parts.remove(tile, extra);
-    }
-    Ok(n)
-}
-
-/// The tile files that are made now ([`finish_from`]): the batch of each of them in [`merge_kind`].
-static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// The parts of the file of a tile: for the nodes, the ways and the relations, the main part and the extra part.
-const KINDS: [(&str, &str); 3] = [("nodes", "extra-nodes"), ("ways", "extra-ways"), ("relations", "none")];
-
-/// [`finish_tile`] from the bytes of the parts (`KINDS`).
-fn finish_from<W: Write>(srcs: [(Src, Src); 3], out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
-    struct Running;
-    impl Drop for Running {
-        fn drop(&mut self) {
-            RUNNING.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-    RUNNING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let _running = Running;
-    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?.raw_blocks(raw);
-    let mut n = CutCounts::default();
-    for (kind, (main, extra)) in srcs.into_iter().enumerate() {
-        merge_kind(&mut w, &mut n, main, extra, kind as u8, raw)?;
-    }
-    w.finish()?.flush().map_err(|e| e.to_string())?;
-    Ok(n)
 }
 
 /// Pass 1: the runs of the nodes inside, the nodes inside with their tiles, and whether the block has ways or relations.
@@ -1478,45 +916,6 @@ fn present<R: Read + Seek>(r: &mut R, blocks: &[(u64, Span)], kind: usize, wante
     Ok(found)
 }
 
-/// The elements of a block whose ids are in `wanted` (sorted pairs (id, tile)), each with its tiles.
-struct Take<'a> {
-    wanted: &'a [(i64, u32)],
-    out: Vec<(u32, Elem)>,
-    all: All,
-}
-
-impl Take<'_> {
-    fn take(&mut self) {
-        for e in std::mem::take(&mut self.all.0) {
-            for t in tiles_in(self.wanted, e.id()) {
-                self.out.push((t, e.clone()));
-            }
-        }
-    }
-}
-
-impl RawSink for Take<'_> {
-    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
-        if pairs_in(self.wanted, id, id) {
-            self.all.node(id, lat, lon, tags);
-            self.take();
-        }
-    }
-    fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
-        if pairs_in(self.wanted, id, id) {
-            self.all.way(id, tags, refs);
-            self.take();
-        }
-    }
-    fn relation<'a>(
-        &mut self,
-        _: i64,
-        _: &mut dyn Iterator<Item = (&'a str, &'a str)>,
-        _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
-    ) {
-    }
-}
-
 /// A use of a node by a way, 8 bytes: the node id with the 2 bits of its flags (`JunctionUses::of_way`) below it, so the
 /// rows sort by the node.
 struct Use;
@@ -1544,71 +943,6 @@ impl Codec<(i64, i64)> for Pair {
     fn get(&self, b: &mut &[u8]) -> (i64, i64) {
         (i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), i64::from_le_bytes(b[8..16].try_into().expect("8 bytes")))
     }
-}
-
-/// Pass 4: the blocks with an element of `pairs` (a sorted file of (id, tile)), read and decoded a batch at a time on all
-/// threads; each such element goes to the part `part` of each of its tiles.
-fn take_blocks<R: Read + Seek>(
-    r: &mut R,
-    blocks: &[(u64, Span)],
-    kind: usize,
-    pairs: impl Iterator<Item = io::Result<(i64, i64)>>,
-    parts: &Parts,
-    part: &'static str,
-    raw: bool,
-) -> Result<(), String> {
-    let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
-    let mut pairs = pairs.peekable();
-    let mut kinds = [false; 3];
-    kinds[kind] = true;
-    let n = 2 * rayon::current_num_threads();
-    let (mut i, mut pos) = (0, None);
-    // the reads, the decoding and the writes to the parts at the same time (cutstream::pipeline)
-    crate::cutstream::pipeline(
-        || {
-            let mut batch: Vec<(Vec<u8>, Vec<(i64, u32)>)> = Vec::with_capacity(n);
-            while i < blocks.len() && batch.len() < n {
-                let (at, (lo, hi)) = blocks[i];
-                i += 1;
-                while pairs.next_if(|x| x.as_ref().is_ok_and(|x| x.0 < lo)).is_some() {}
-                let mut want = Vec::new();
-                while let Some(x) = pairs.next_if(|x| x.as_ref().is_ok_and(|x| x.0 <= hi)) {
-                    let (id, t) = x.map_err(io)?;
-                    want.push((id, t as u32));
-                }
-                if let Some(Err(_)) = pairs.peek() {
-                    return Err(io(pairs.next().expect("peeked").expect_err("an error")));
-                }
-                want.dedup();
-                if want.is_empty() {
-                    continue;
-                }
-                if pos != Some(at) {
-                    r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
-                }
-                let b = read_block(r)?.ok_or("a block after the end of the file")?;
-                pos = Some(at + b.len() as u64);
-                batch.push((b, want));
-            }
-            Ok((!batch.is_empty()).then_some(batch))
-        },
-        |batch: &Vec<(Vec<u8>, Vec<(i64, u32)>)>| {
-            batch
-                .par_iter()
-                .map_init(Buffers::default, |buf, (b, want)| {
-                    let mut s = Take { wanted: want, out: Vec::new(), all: All::default() };
-                    decode_block(b, kinds, buf, &mut s)?;
-                    by_tile(s.out, raw)
-                })
-                .collect::<Result<Vec<_>, _>>()
-        },
-        |out, _| {
-            for (t, bytes) in out.into_iter().flatten() {
-                parts.add(t, part, bytes)?;
-            }
-            Ok(true)
-        },
-    )
 }
 
 /// The start of a junctions file: the name and the version of the format. Then one row for each node outside the tile that
@@ -1893,7 +1227,9 @@ fn cut<R: Read + Seek + Send>(
     let index = TileIndex::new(tiles);
     let store = crate::spill::temp_store();
     let store = &*store;
-    // 1. each node inside to the node part of its tile; the book of the nodes
+    // the tiles with a node inside: only these have a file
+    let mut with_file = vec![false; tiles.len()];
+    // 1. the book of the nodes, and the tiles with a node inside
     let (mut nodes, mut node_blocks, mut ways_at) = (Book::default(), Vec::new(), None);
     let mut near: Vec<(i64, u32)> = Vec::new();
     each_block(
@@ -1911,17 +1247,20 @@ fn cut<R: Read + Seek + Send>(
                 span: EMPTY,
             };
             decode_block(b, [true, true, true], buf, &mut s)?;
-            Ok((s.runs, by_tile(s.inside, raw)?, s.other, s.span, s.near))
+            let mut own: Vec<u32> = s.inside.iter().map(|e| e.0).collect();
+            own.sort_unstable();
+            own.dedup();
+            Ok((s.runs, s.other, s.span, (s.near, own)))
         },
-        |(runs, blobs, other, span, mut n), at| {
+        |(runs, other, span, (mut n, own)), at| {
+            for t in own {
+                with_file[t as usize] = true;
+            }
             near.append(&mut n);
             if span != EMPTY {
                 node_blocks.push((at, span));
             }
             nodes.append(runs.runs, runs.first.unwrap_or(false));
-            for (t, bytes) in blobs {
-                parts.add(t, "nodes", bytes)?;
-            }
             if other {
                 ways_at = Some(at);
             }
@@ -1931,7 +1270,7 @@ fn cut<R: Read + Seek + Send>(
     nodes.finish();
     tidy(&mut near);
     crate::util::step(&format!("tile cut 1: the nodes inside ({} runs, {} MB; {} nodes in the border of another tile)", nodes.len(), nodes.size() >> 20, near.len()));
-    // 2. each way with a node inside to the way part of its tiles; the nodes that a tile needs from outside it (to a
+    // 2. the book of the ways (each way with a node inside); the nodes that a tile needs from outside it (to a
     // temporary list); the relations, whole (to a temporary file)
     let ways_at = ways_at.unwrap_or(0);
     let (mut ways, mut multi) = (Book::default(), Vec::new());
@@ -1968,18 +1307,15 @@ fn cut<R: Read + Seek + Send>(
             // the nodes from outside, in the bytes of their buckets (here, on all threads)
             let outside = crate::spill::Buckets::encode(BUCKET_SHIFT, &Pair, s.outside.iter().map(|&(n, t)| (n, (n, t as i64))));
             let uses = if junctions { s.uses } else { Vec::new() };
-            Ok((s.runs, by_tile(s.kept, raw)?, s.multi, (outside, uses, s.homes), rels, s.spans))
+            Ok((s.runs, s.multi, (outside, uses, s.homes), rels, s.spans))
         },
-        |(runs, kept, mut m, (o, u, h), rels, spans), at| {
+        |(runs, mut m, (o, u, h), rels, spans), at| {
             if spans[0] != EMPTY {
                 way_blocks.push((ways_at + at, spans[0]));
                 ways.append(runs.runs, runs.first.unwrap_or(false));
             }
             if spans[1] != EMPTY {
                 rel_blocks.push((ways_at + at, spans[1]));
-            }
-            for (t, bytes) in kept {
-                parts.add(t, "ways", bytes)?;
             }
             multi.append(&mut m);
             outside.push_encoded(store, o).map_err(io)?;
@@ -2132,8 +1468,6 @@ fn cut<R: Read + Seek + Send>(
     crate::util::step(&format!("tile cut 3c: the tiles of the relations ({} pairs)", chosen.len()));
     // each chosen relation to its tiles; the members of the multipolygons with a member in a tile
     let mut more: Vec<(i64, u32)> = Vec::new();
-    let mut waiting: Vec<(u32, Elem)> = Vec::new();
-    let mut waiting_bytes = 0usize;
     each_rel(&mut |r| {
         if multipolygons.binary_search(&r.id).is_ok() {
             for t in tiles_in(&direct, r.id) {
@@ -2146,27 +1480,10 @@ fn cut<R: Read + Seek + Send>(
                 }
             }
         }
-        let id = r.id;
-        let size = 64 + 40 * r.members.len() + 48 * r.tags.len();
-        let e = Elem::Relation(r);
-        for t in tiles_in(&chosen, id) {
-            waiting.push((t, e.clone()));
-            waiting_bytes += size;
-        }
-        // the waiting relations by their size: a few have tens of thousands of members (boundaries, long routes)
-        if waiting_bytes >= WAITING {
-            waiting_bytes = 0;
-            for (t, bytes) in by_tile_par(std::mem::take(&mut waiting), raw)? {
-                parts.add(t, "relations", bytes)?;
-            }
-        }
         Ok(())
     })?;
-    for (t, bytes) in by_tile_par(waiting, raw)? {
-        parts.add(t, "relations", bytes)?;
-    }
     parts.remove(ALL, "relations.all");
-    drop((direct, chosen, multipolygons));
+    drop((direct, multipolygons));
     more.extend(home_ways);
     tidy(&mut more);
     if !more.is_empty() {
@@ -2203,10 +1520,8 @@ fn cut<R: Read + Seek + Send>(
         )?;
         err.map_or(Ok(()), Err).map_err(io)?;
     }
-    // the indexes go: the next parts read lists of ids and tiles
-    drop((nodes, ways, multi));
     crate::util::step("tile cut 3: the relations and the members of the multipolygons");
-    // 4. the nodes from outside the tiles and the member ways of the multipolygons, to the extra parts of their tiles
+    // 4. the nodes from outside the tiles, sorted; then read 2
     let buckets = outside.finish().map_err(io)?;
     let rows: usize = buckets.iter().map(|b| b.len).sum();
     crate::util::step(&format!("tile cut 4a: the nodes from outside ({rows} rows, {} buckets)", buckets.len()));
@@ -2236,121 +1551,80 @@ fn cut<R: Read + Seek + Send>(
         Some(p)
     });
     let mut r = open()?;
-    take_blocks(&mut r, &node_blocks, 0, pairs, &parts, "extra-nodes", raw)?;
-    copy_err.map_or(Ok(()), Err).map_err(io)?;
-    crate::util::step("tile cut 4b: the extra nodes");
-    // the junctions files: only the build by tiles reads them
-    if build {
-        let uses = uses.finish().map_err(io)?;
-        let n_uses = uses.len;
-        // sorted runs, merged while 4d reads them (no merged copy)
-        let uses = crate::spill::sorted(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store, &Use).map_err(io)?;
-        crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
-        home_nodes.sort_unstable();
-        let uses = uses.map(|u| u.map(|(n, f)| (n, f as i64)));
-        let outside = copy.take().expect("a copy for the junctions").finish().map_err(io)?;
-        outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &parts)?;
-        crate::util::step("tile cut 4d: the junctions files");
-    } else {
-        drop(uses);
+    {
+        // read 2 (docs/design/tile_cut_two_reads.md): each element straight into its tile files, once: the nodes, the
+        // junctions (the build by tiles), the ways, the relations
+        let with_file = &with_file;
+        let mut writers = write::Writers::new(tiles.len(), timestamp, raw, write::outputs(tiles, dir, &parts, sink)?)?;
+        let mut rows = pairs.peekable();
+        write::route_blocks(
+            &mut r,
+            &node_blocks,
+            0,
+            |(lo, hi)| {
+                // the rows of this block (the rows before it are of nodes that the file does not have)
+                while rows.next_if(|x| x.as_ref().is_ok_and(|x| x.0 < lo)).is_some() {}
+                let mut want = Vec::new();
+                while let Some(x) = rows.next_if(|x| x.as_ref().is_ok_and(|x| x.0 <= hi)) {
+                    let (id, t) = x.map_err(io)?;
+                    want.push((id, t as u32));
+                }
+                if let Some(Err(_)) = rows.peek() {
+                    return Err(io(rows.next().expect("peeked").expect_err("an error")));
+                }
+                want.dedup();
+                Ok(want)
+            },
+            &|id, v: &mut Vec<u32>| v.extend(nodes.get(id)),
+            with_file,
+            &mut writers,
+        )?;
+        drop(rows);
+        // the lists of read 1 go as soon as read 2 is past them
+        drop(nodes);
+        crate::util::trim_memory();
+        copy_err.map_or(Ok(()), Err).map_err(io)?;
+        crate::util::step("tile cut 5a: the nodes to the tiles");
+        if build {
+            let uses = uses.finish().map_err(io)?;
+            let n_uses = uses.len;
+            let uses = crate::spill::sorted(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store, &Use).map_err(io)?;
+            crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
+            home_nodes.sort_unstable();
+            let uses = uses.map(|u| u.map(|(n, f)| (n, f as i64)));
+            let outside = copy.take().expect("a copy for the junctions").finish().map_err(io)?;
+            outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &parts)?;
+            crate::util::step("tile cut 4d: the junctions files");
+        }
+        crate::util::trim_memory();
+        let more_ref = &more;
+        write::route_blocks(
+            &mut r,
+            &way_blocks,
+            1,
+            |(lo, hi)| {
+                let i = more_ref.partition_point(|m| m.0 < lo);
+                Ok(more_ref[i..].iter().take_while(|m| m.0 <= hi).copied().collect())
+            },
+            &|id, v: &mut Vec<u32>| way_tiles(id, v),
+            with_file,
+            &mut writers,
+        )?;
+        drop((ways, multi, more));
+        crate::util::trim_memory();
+        crate::util::step("tile cut 5b: the ways to the tiles");
+        let chosen = &chosen;
+        write::route_blocks(&mut r, &rel_blocks, 2, |_| Ok(Vec::new()), &|id, v: &mut Vec<u32>| v.extend(tiles_in(chosen, id)), with_file, &mut writers)?;
+        let counts = writers.into_counts();
+        // the junctions files next to the tile files (the build by tiles into a folder)
+        if let (Some(dir), true) = (dir, build) {
+            for (t, tile) in tiles.iter().enumerate() {
+                if with_file[t] {
+                    write_junctions(&parts, t as u32, &dir.join(format!("{}_{}_{}.junctions", tile.z, tile.x, tile.y)))?;
+                }
+            }
+        }
+        crate::util::step("tile cut 5: the tile files");
+        return Ok((counts, parts));
     }
-    take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &parts, "extra-ways", raw)?;
-    parts.flush()?;
-    drop(more);
-    crate::util::step("tile cut 4: the extra elements");
-    // 5. each tile from its parts (the tiles at the same time; in the browser one at a time, because a file in OPFS
-    // belongs to the thread that opened it)
-    #[cfg(not(target_arch = "wasm32"))]
-    let finish = |t: u32| -> Result<CutCounts, String> {
-        if !parts.has(t, "nodes") {
-            for part in ["ways", "extra-nodes", "extra-ways", "relations", "junctions"] {
-                parts.remove(t, part);
-            }
-            return Ok(CutCounts::default());
-        }
-        let tile = &tiles[t as usize];
-        match (dir, &parts.files) {
-            (Some(dir), _) => {
-                let name = format!("{}_{}_{}", tile.z, tile.x, tile.y);
-                write_junctions(&parts, t, &dir.join(format!("{name}.junctions")))?;
-                let out = dir.join(format!("{name}.osm.pbf"));
-                let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-                finish_tile(&parts, t, file, timestamp, raw)
-            }
-            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp, raw),
-            (None, Files::Dir(d)) => {
-                let out = Parts::path(d, t, "tile");
-                let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-                finish_tile(&parts, t, file, timestamp, raw)
-            }
-        }
-    };
-    // the store of a file with no folder, in the tests: the way of the browser (finish_in_turn), so that the tests check it
-    #[cfg(not(target_arch = "wasm32"))]
-    let counts: Vec<CutCounts> = match &parts.files {
-        Files::Store(chunks @ Chunks { file: Some(_), .. }) if cfg!(test) && dir.is_none() => {
-            finish_in_turn(&parts, chunks, tiles.len(), sink.as_deref_mut(), timestamp, raw, build)?
-        }
-        _ => (0..tiles.len() as u32).into_par_iter().map(finish).collect::<Result<_, String>>()?,
-    };
-    // the browser: this thread reads the parts of a group of tiles (256 MB at most) from OPFS into memory, the threads of
-    // the pool make the files of the tiles in memory at the same time, and this thread writes them (one at a time on this
-    // thread: 6 of the 12 s of the cut of Île-de-France on one core)
-    #[cfg(target_arch = "wasm32")]
-    let counts: Vec<CutCounts> = if let Files::Store(chunks @ Chunks { file: None, .. }) = &parts.files {
-        // all the parts in memory: each tile on a thread of the pool, all the tiles at the same time; the threads give
-        // the bytes of the tile files to this thread through a channel with a limit, and this thread writes them (a large
-        // tile on one thread took 28 of the 50 s of the cut of Sweden at zoom 6)
-        let threads = rayon::current_num_threads().max(1);
-        let (tx, rx) = std::sync::mpsc::sync_channel::<(u32, Vec<u8>)>(2 * threads);
-        let counts: Vec<std::sync::Mutex<Result<CutCounts, String>>> =
-            (0..tiles.len()).map(|_| std::sync::Mutex::new(Ok(CutCounts::default()))).collect();
-        let mut failed: Option<String> = None;
-        // the largest tiles first (a thread outside the pool gives the jobs to the pool in this order), so that no thread
-        // makes a large tile alone at the end
-        let mut order: Vec<u32> = (0..tiles.len() as u32).collect();
-        order.sort_by_cached_key(|&t| std::cmp::Reverse(KINDS.iter().map(|(a, b)| parts.size(t, a) + parts.size(t, b)).sum::<u64>()));
-        rayon::in_place_scope(|scope| {
-            for t in order {
-                let (tx, parts, counts) = (tx.clone(), &parts, &counts);
-                scope.spawn(move |_| {
-                    let r = if parts.has(t, "nodes") {
-                        finish_tile(parts, t, Chan(t, tx), timestamp, raw)
-                    } else {
-                        for part in ["ways", "extra-nodes", "extra-ways", "relations"] {
-                            parts.remove(t, part);
-                        }
-                        Ok(CutCounts::default())
-                    };
-                    if !build {
-                        parts.remove(t, "junctions");
-                    }
-                    *counts[t as usize].lock().expect("no panic") = r;
-                });
-            }
-            drop(tx);
-            // the bytes of all the tiles, until the last thread is done (after an error, read on, so no thread waits)
-            for (t, b) in rx {
-                if failed.is_some() {
-                    continue;
-                }
-                let r = match sink.as_deref_mut() {
-                    Some(sink) => sink(t, &b),
-                    None => chunks.append((t, "tile"), &b).map_err(|e| format!("a tile file of the tile cut: {e}")),
-                };
-                if let Err(e) = r {
-                    failed = Some(e);
-                }
-            }
-        });
-        if let Some(e) = failed {
-            return Err(e);
-        }
-        counts.into_iter().map(|c| c.into_inner().expect("no panic")).collect::<Result<_, String>>()?
-    } else {
-        let Files::Store(chunks) = &parts.files else { return Err("the tile cut in the browser has no store".into()) };
-        finish_in_turn(&parts, chunks, tiles.len(), sink.as_deref_mut(), timestamp, raw, build)?
-    };
-    crate::util::step("tile cut 5: the tile files");
-    Ok((counts, parts))
 }
