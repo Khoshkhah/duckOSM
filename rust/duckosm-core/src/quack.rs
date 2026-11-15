@@ -1152,6 +1152,17 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     size: TileSize,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
+    features_of_tiles(open, budget, size, |_, part| emit(part))
+}
+
+/// [`features_by_tiles`], and `emit` gets the tile that made each part too (the tiles one after the other: a part of a
+/// new tile means that the tile before is done).
+pub fn features_of_tiles<R: Read + std::io::Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    size: TileSize,
+    mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
     let tiles = tiles_of_file(&open, size)?;
     crate::util::step(&format!(
         "quack by tiles 1: {} tiles of zoom {} to {}",
@@ -1176,7 +1187,7 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
         k += 1;
         let owner = Owner { tile: *tile, relations: &relations };
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        let got = features_owned(open_tile, budget, Some(&owner), &mut emit)?;
+        let got = features_owned(open_tile, budget, Some(&owner), |part| emit(*tile, part))?;
         counts.nodes += got.nodes;
         counts.ways += got.ways;
         counts.relations += got.relations;
@@ -1263,6 +1274,88 @@ fn tiles_of_file<R: Read + Send>(open: &impl Fn() -> Result<R, String>, size: Ti
     Ok(tiles)
 }
 
+/// The geometry of a row from its WKB (the WKB of [`Geom::wkb`]: little endian, points, lines, polygons and
+/// multipolygons).
+pub fn read_wkb(b: &[u8]) -> Option<geo::Geometry> {
+    fn u32_at(b: &[u8], at: &mut usize) -> Option<u32> {
+        let v = u32::from_le_bytes(b.get(*at..*at + 4)?.try_into().ok()?);
+        *at += 4;
+        Some(v)
+    }
+    fn coord(b: &[u8], at: &mut usize) -> Option<geo::Coord> {
+        let f = |i: usize| b.get(i..i + 8).map(|s| f64::from_le_bytes(s.try_into().unwrap()));
+        let c = geo::coord! { x: f(*at)?, y: f(*at + 8)? };
+        *at += 16;
+        Some(c)
+    }
+    fn line(b: &[u8], at: &mut usize) -> Option<LineString> {
+        let n = u32_at(b, at)?;
+        (0..n).map(|_| coord(b, at)).collect::<Option<Vec<_>>>().map(LineString::new)
+    }
+    fn polygon(b: &[u8], at: &mut usize) -> Option<Polygon> {
+        *at += 5;
+        let mut rings = (0..u32_at(b, at)?).map(|_| line(b, at)).collect::<Option<Vec<_>>>()?;
+        let exterior = if rings.is_empty() { LineString::new(Vec::new()) } else { rings.remove(0) };
+        Some(Polygon::new(exterior, rings))
+    }
+    let mut at = 5;
+    match u32::from_le_bytes(b.get(1..5)?.try_into().ok()?) {
+        1 => coord(b, &mut at).map(|c| geo::Geometry::Point(c.into())),
+        2 => line(b, &mut at).map(geo::Geometry::LineString),
+        3 => polygon(b, &mut { 0 }).map(geo::Geometry::Polygon),
+        6 => {
+            let n = u32_at(b, &mut at)?;
+            (0..n).map(|_| polygon(b, &mut at)).collect::<Option<Vec<_>>>().map(|p| geo::Geometry::MultiPolygon(MultiPolygon(p)))
+        }
+        _ => None,
+    }
+}
+
+/// [`Feature::center`] of a row from its WKB (the same numbers: the middle of the box of its points).
+pub fn wkb_center(b: &[u8]) -> Option<Pt> {
+    use geo::CoordsIter;
+    let g = read_wkb(b)?;
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for c in g.coords_iter() {
+        (x0, y0, x1, y1) = (x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y));
+    }
+    Some(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+}
+
+/// The tiles of zoom `z` whose box the geometry of a row (its WKB) touches, into `out`, in the order of (y, x): the
+/// geometry rule of the tile tables (QuackOSM's `geometry_filter`, `ST_Intersects` with the box of the tile). The box of
+/// a tile is closed, so a geometry that only touches the side of a tile is in that tile too.
+pub fn row_tiles(wkb: &[u8], z: u8, out: &mut Vec<Tile>) -> Result<(), String> {
+    use geo::Intersects;
+    out.clear();
+    let g = read_wkb(wkb).ok_or("quack: a geometry that is not the WKB of quack")?;
+    let Some(r) = g.bounding_rect() else { return Ok(()) };
+    let (mut a, b) = (Tile::of(z, r.min().x, r.max().y), Tile::of(z, r.max().x, r.min().y));
+    // `Tile::of` puts a point on a side into the tile east or south of it: a box that starts on the west or the north
+    // side of a tile touches the tile on the other side too
+    let (w, _, _, n) = a.bounds();
+    if r.min().x <= w && a.x > 0 {
+        a.x -= 1;
+    }
+    if r.max().y >= n && a.y > 0 {
+        a.y -= 1;
+    }
+    if a == b {
+        out.push(a);
+        return Ok(());
+    }
+    for y in a.y..=b.y {
+        for x in a.x..=b.x {
+            let t = Tile { z, x, y };
+            let (w, s, e, n) = t.bounds();
+            if geo::Rect::new(geo::coord! { x: w, y: s }, geo::coord! { x: e, y: n }).intersects(&g) {
+                out.push(t);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The rows of a row group of the GeoParquet file, as in QuackOSM.
 pub const ROW_GROUP: usize = 100_000;
 
@@ -1323,10 +1416,11 @@ fn numbered_key(b: &[u8]) -> (i64, i64, u64) {
 }
 
 /// A row on its way through [`StrSort`]: the number of the row (the ties of [`str_order`]) and the feature.
-struct Numbered;
+pub struct Numbered;
 
 impl Numbered {
-    fn put_row(i: u64, f: &Feature, o: &mut Vec<u8>) {
+    /// The bytes of a row with the number `i` (the codec of `(u64, Feature)`).
+    pub fn put_row(i: u64, f: &Feature, o: &mut Vec<u8>) {
         let s = |o: &mut Vec<u8>, b: &[u8]| {
             o.extend_from_slice(&(b.len() as u32).to_le_bytes());
             o.extend_from_slice(b);

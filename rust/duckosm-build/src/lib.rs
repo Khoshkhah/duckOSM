@@ -21,6 +21,7 @@ pub mod config;
 pub mod elevation;
 pub mod h3;
 pub mod levels;
+pub mod quack_tiles;
 pub mod union;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};

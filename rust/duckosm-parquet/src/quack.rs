@@ -30,8 +30,29 @@ pub fn schema() -> SchemaRef {
     ]))
 }
 
+/// The columns of a tile table: QuackOSM's, and `owner` (true in the one tile that owns the row: the union of tile
+/// tables keeps the rows with `owner`).
+pub fn tile_schema() -> SchemaRef {
+    let mut f: Vec<Field> = schema().fields().iter().map(|f| f.as_ref().clone()).collect();
+    f.push(Field::new("owner", DataType::Boolean, false));
+    Arc::new(Schema::new(f))
+}
+
+/// The rows of a tile table as one Arrow batch: each row with its `owner`.
+pub fn tile_batch(rows: &[(Feature, bool)]) -> Result<RecordBatch, String> {
+    let b = batch_of(rows.iter().map(|r| &r.0))?;
+    let owner = arrow_array::BooleanArray::from(rows.iter().map(|r| r.1).collect::<Vec<bool>>());
+    let mut cols = b.columns().to_vec();
+    cols.push(Arc::new(owner));
+    RecordBatch::try_new(tile_schema(), cols).map_err(err)
+}
+
 /// The rows as one Arrow batch.
 pub fn batch(rows: &[Feature]) -> Result<RecordBatch, String> {
+    batch_of(rows.iter())
+}
+
+fn batch_of<'a>(rows: impl Iterator<Item = &'a Feature>) -> Result<RecordBatch, String> {
     let mut id = StringBuilder::new();
     let mut tags = MapBuilder::new(None, StringBuilder::new(), StringBuilder::new());
     let mut geom = BinaryBuilder::new();
@@ -93,13 +114,24 @@ pub struct QuackWriter<W: Write + Send> {
 
 impl<W: Write + Send> QuackWriter<W> {
     pub fn new(out: W) -> Result<Self, String> {
+        Self::with(out, schema(), Vec::new())
+    }
+
+    /// The writer of a tile table ([`tile_schema`]), with more key-value metadata (the tile and the input file).
+    pub fn tile(out: W, meta: Vec<(String, String)>) -> Result<Self, String> {
+        Self::with(out, tile_schema(), meta)
+    }
+
+    fn with(out: W, schema: SchemaRef, meta: Vec<(String, String)>) -> Result<Self, String> {
         let geo = r#"{"version":"1.0.0","primary_column":"geometry","columns":{"geometry":{"encoding":"WKB","geometry_types":[]}}}"#;
+        let mut kv = vec![KeyValue::new("geo".to_string(), geo.to_string())];
+        kv.extend(meta.into_iter().map(|(k, v)| KeyValue::new(k, v)));
         let props = WriterProperties::builder()
             .set_compression(compression())
             .set_max_row_group_row_count(Some(ROW_GROUP))
-            .set_key_value_metadata(Some(vec![KeyValue::new("geo".to_string(), geo.to_string())]))
+            .set_key_value_metadata(Some(kv))
             .build();
-        let mut w = ParWriter::try_new(out, schema(), Some(props)).map_err(err)?;
+        let mut w = ParWriter::try_new(out, schema, Some(props)).map_err(err)?;
         // the geometry column is most of a row group: several row groups at the same time use the threads
         w.set_groups_at_once(4);
         Ok(QuackWriter { w, count: 0 })
@@ -115,4 +147,50 @@ impl<W: Write + Send> QuackWriter<W> {
         self.w.close().map_err(err)?;
         Ok(self.count)
     }
+}
+
+/// Read a tile table (a file of [`QuackWriter::tile`]): its batches, each with the columns of [`tile_schema`].
+pub fn read_tile_table(path: &std::path::Path, mut f: impl FnMut(RecordBatch) -> Result<(), String>) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .with_batch_size(20_000)
+        .build()
+        .map_err(err)?;
+    for b in reader {
+        let b = b.map_err(err)?;
+        if b.schema().field_with_name("owner").is_err() {
+            return Err(format!("{}: not a tile table of quack (no column owner)", path.display()));
+        }
+        f(b)?;
+    }
+    Ok(())
+}
+
+/// The rows of a batch of a tile table that `owner` marks, with QuackOSM's columns only (the union of tile tables).
+pub fn owned_rows(b: &RecordBatch) -> Result<RecordBatch, String> {
+    use arrow_array::cast::AsArray;
+    let owner = b.column_by_name("owner").ok_or("a tile table with no column owner")?.as_boolean().clone();
+    let kept = arrow_select::filter::filter_record_batch(b, &owner).map_err(err)?;
+    RecordBatch::try_new(schema(), kept.columns()[..3].to_vec()).map_err(err)
+}
+
+/// The rows of a batch with QuackOSM's columns as [`Feature`]s (for the sort): the center is the center of the box of
+/// the geometry, as [`Feature::center`].
+pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
+    use arrow_array::cast::AsArray;
+    use arrow_array::Array;
+    let id = b.column(0).as_string::<i32>();
+    let tags = b.column(1).as_map();
+    let geom = b.column(2).as_binary::<i32>();
+    (0..b.num_rows())
+        .map(|i| {
+            let m = tags.value(i);
+            let (k, v) = (m.column(0).as_string::<i32>(), m.column(1).as_string::<i32>());
+            let tags = (0..m.len()).map(|j| (k.value(j).to_string(), v.value(j).to_string())).collect();
+            let geometry = geom.value(i).to_vec();
+            let center = duckosm_core::quack::wkb_center(&geometry).ok_or("a geometry that is not the WKB of quack")?;
+            Ok(Feature { feature_id: id.value(i).to_string(), tags, geometry, center })
+        })
+        .collect()
 }

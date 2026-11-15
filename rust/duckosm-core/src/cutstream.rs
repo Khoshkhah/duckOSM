@@ -340,7 +340,7 @@ impl RawSink for Out<'_> {
 }
 
 /// The replication time of the region file's header, and whether the file is sorted by type, then id.
-pub(crate) fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
+pub fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
     let err = |e: osmpbf::Error| e.to_string();
     let mut blobs = osmpbf::BlobReader::new(r);
     match blobs.next().transpose().map_err(err)? {
