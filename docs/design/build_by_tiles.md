@@ -158,6 +158,17 @@ H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or
 Kentucky (driving, `--h3-resolution 8`) and Monaco with FABDEM N43E007 (driving and walking, zoom 12, `--dem`):
 all tables are equal to the whole build. The whole build gives the same rows as before.
 
+## The raw tables in the tiles
+
+With `--raw`, each tile writes the raw rows of its file (`write_area_raw_split`): the rows of the tile go to `raw_*.parquet`, the
+border rows to `raw_*.border.parquet`, and the rows of other tiles nowhere, as the tables are written (`union::raw_classes`: a
+node by its place, a way by the place of its first node inside the area, a relation always a border row). Before, the tile
+wrote all rows and then read the files again to split them (`own_rows`): about half of the cost of raw in the tiles.
+
+Kentucky, driving, `--raw`, the old and the new build one after the other (two runs each): the tile builds 12.6 s -> 10.9 s,
+the CPU time 214 s -> 197 s; without raw the tile builds take about 9.2 s, so raw costs about half as before. The raw tables
+are equal to the whole build.
+
 ## The scheduler
 
 `--memory` (default 2 GB) is the memory of the tile builds at the same time. The tiles start largest file first, at most

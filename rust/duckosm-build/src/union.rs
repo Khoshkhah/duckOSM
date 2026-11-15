@@ -409,12 +409,34 @@ impl Owner<'_> {
     }
 }
 
+/// The class of each row of a part of a raw table of a tile build (0 `raw_nodes`, 1 `raw_ways`, 2 `raw_relations`;
+/// `duckosm_parquet::write_area_raw_split`): a node by its place, a way by the place of its first node inside the area (a way with
+/// no line: a border row), a relation always a border row (one copy after the union).
+pub fn raw_classes(o: &Owner, table: usize, r: &arrow_array::RecordBatch) -> Result<Vec<u8>, String> {
+    use arrow_array::cast::AsArray;
+    use arrow_array::Array;
+    use duckosm_parquet::merge::BORDER;
+    let col = |n: &str| r.column_by_name(n).cloned().ok_or(format!("no column {n}"));
+    match table {
+        0 => {
+            let (x, y) = (col("lon")?, col("lat")?);
+            let (x, y) = (x.as_primitive::<arrow_array::types::Float64Type>(), y.as_primitive::<arrow_array::types::Float64Type>());
+            Ok((0..r.num_rows()).map(|i| o.place((x.value(i), y.value(i)))).collect())
+        }
+        1 => {
+            let g = col("line")?;
+            let g = g.as_binary::<i32>();
+            Ok((0..r.num_rows()).map(|i| if g.is_valid(i) { o.way(line_points(g.value(i))) } else { BORDER }).collect())
+        }
+        _ => Ok(vec![BORDER; r.num_rows()]),
+    }
+}
+
 /// The last step of the build of tile `tile`: the virtual nodes, `edge_id_map` and the raw tables keep only the rows that the
 /// tile owns, and the rows that no tile alone owns go to a border file (the network tables are written so at once:
 /// `write_tables_owned`, the edge graph, `ways`, `lane_profile`, `global_junctions`). `b`: the boundary of the tile build.
 pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<(), String> {
     use arrow_array::cast::AsArray;
-    use arrow_array::Array;
     use duckosm_parquet::merge::{split_file, BORDER};
     let o = Owner { b, tile };
     let col = |r: &arrow_array::RecordBatch, n: &str| r.column_by_name(n).cloned().ok_or(format!("no column {n}"));
@@ -432,26 +454,8 @@ pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<
             split_file(&path("edge_id_map"), |r| Ok(vec![BORDER; r.num_rows()]))?;
         }
     }
-    // the raw tables of the area
+    // the raw tables are split as they are written (raw_classes); the tables of the whole area: the union writes them
     let raw = |n: &str| dir.join(format!("{n}.parquet"));
-    if raw("raw_nodes").exists() {
-        split_file(&raw("raw_nodes"), |r| {
-            let (x, y) = (col(r, "lon")?, col(r, "lat")?);
-            let (x, y) = (x.as_primitive::<arrow_array::types::Float64Type>(), y.as_primitive::<arrow_array::types::Float64Type>());
-            Ok((0..r.num_rows()).map(|i| o.place((x.value(i), y.value(i)))).collect())
-        })?;
-    }
-    if raw("raw_ways").exists() {
-        split_file(&raw("raw_ways"), |r| {
-            let g = col(r, "line")?;
-            let g = g.as_binary::<i32>();
-            Ok((0..r.num_rows()).map(|i| if g.is_valid(i) { o.way(line_points(g.value(i))) } else { BORDER }).collect())
-        })?;
-    }
-    if raw("raw_relations").exists() {
-        split_file(&raw("raw_relations"), |r| Ok(vec![BORDER; r.num_rows()]))?;
-    }
-    // the tables of the whole area: the union writes them
     for n in ["boundary_main", "visualization_metadata_main", "transfers_mm"] {
         let _ = std::fs::remove_file(raw(n));
     }

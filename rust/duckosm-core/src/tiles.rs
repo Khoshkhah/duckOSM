@@ -80,3 +80,11 @@ mod tests {
         }
     }
 }
+
+/// Is the point within `m` metres of the tile `t` (in its box, or outside it, at most `m` from its sides)?
+pub fn near_tile(t: Tile, lon: f64, lat: f64, m: f64) -> bool {
+    let (w, s, e, n) = t.bounds();
+    let dy = m / 111_320.0;
+    let dx = dy / lat.to_radians().cos().abs().max(1e-9);
+    lon >= w - dx && lon <= e + dx && lat >= s - dy && lat <= n + dy
+}

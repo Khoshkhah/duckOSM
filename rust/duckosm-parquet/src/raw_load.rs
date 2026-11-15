@@ -546,31 +546,99 @@ pub fn write_area_raw<R: std::io::Read, W: Write + Send>(
     files: [W; 3],
     group_bytes: usize,
 ) -> Result<[usize; 3], String> {
-    let w = RawWriter::with_columns(files, group_bytes, RawColumns::lines(Arc::new(NodeParts::default())))?;
+    write_area_raw_split::<R, W>(open, patch, files, None, group_bytes).map(|(rows, _)| rows)
+}
+
+/// The class of each row of a part of a table (0 `raw_nodes`, 1 `raw_ways` with its `line`, 2 `raw_relations`): `merge::MINE`,
+/// `merge::BORDER`, or `merge::OTHER` (the row goes).
+#[cfg(feature = "pbf")]
+pub type RawClasses<'a> = &'a (dyn Fn(usize, &RecordBatch) -> Result<Vec<u8>, String> + Sync);
+
+/// [`write_area_raw`] for a tile of a build by tiles: with `split` (the border files and the classes), the rows of the tile go to
+/// `files`, the border rows to the border files, and the rows of other tiles nowhere, as the tables are written (no second pass
+/// over the files). Gives the rows written to `files` and to the border files.
+#[cfg(feature = "pbf")]
+pub fn write_area_raw_split<R: std::io::Read, W: Write + Send>(
+    open: impl Fn() -> Result<R, String>,
+    patch: &duckosm_core::raw::RawPatch,
+    files: [W; 3],
+    split: Option<([W; 3], RawClasses)>,
+    group_bytes: usize,
+) -> Result<([usize; 3], [usize; 3]), String> {
+    let columns = || RawColumns::lines(Arc::new(NodeParts::default()));
+    let main = RawWriter::with_columns(files, group_bytes, columns())?;
+    let border = match split {
+        Some((b, c)) => Some((RawWriter::with_columns(b, group_bytes, columns())?, c)),
+        None => None,
+    };
+    let w = SplitWriter { main, border };
     // native: the files are written on a thread of their own, while the passes read, join and make the lines (at most two parts
     // wait); the browser can start no thread, so there the caller's thread writes them
     #[cfg(not(target_arch = "wasm32"))]
     return std::thread::scope(|sc| {
         let (tx, rx) = std::sync::mpsc::sync_channel::<RawPart>(2);
-        let writer = sc.spawn(move || -> Result<(), String> {
+        let writer = sc.spawn(move || -> Result<([usize; 3], [usize; 3]), String> {
             let mut w = w;
             for part in rx {
                 w.write(part)?;
             }
-            w.finish().map(|_| ())
+            w.finish()
         });
         let rows = raw_passes(open, patch, &mut |part| tx.send(part).map_err(|_| "the writer of raw.* stopped".to_string()));
         drop(tx);
         let written = writer.join().map_err(|_| "the writer of raw.* failed".to_string())?;
         // an error of the writer comes first: it stops the passes too
-        written.and(rows)
+        written.and_then(|w| rows.map(|_| w))
     });
     #[cfg(target_arch = "wasm32")]
     {
         let mut w = w;
-        let rows = raw_passes(open, patch, &mut |part| w.write(part))?;
-        w.finish()?;
-        Ok(rows)
+        raw_passes(open, patch, &mut |part| w.write(part))?;
+        w.finish()
+    }
+}
+
+/// The writers of [`write_area_raw_split`]: the files, and the border files with the classes of the rows.
+#[cfg(feature = "pbf")]
+struct SplitWriter<'c, W: Write + Send> {
+    main: RawWriter<W>,
+    border: Option<(RawWriter<W>, RawClasses<'c>)>,
+}
+
+#[cfg(feature = "pbf")]
+impl<W: Write + Send> SplitWriter<'_, W> {
+    /// A part to the files: all of it, or by the classes of its rows.
+    fn write(&mut self, part: RawPart) -> Result<(), String> {
+        use crate::merge::{BORDER, MINE};
+        let Some((border, classes)) = self.border.as_mut() else { return self.main.write(part) };
+        let (mut mine, mut edge) = (Vec::with_capacity(3), Vec::with_capacity(3));
+        for (i, b) in part.batches.into_iter().enumerate() {
+            if b.num_rows() == 0 {
+                // a part of the nodes has empty tables of the ways and the relations (with no column `line`)
+                mine.push(b.clone());
+                edge.push(b);
+                continue;
+            }
+            let c = classes(i, &b)?;
+            let keep = |k: u8| {
+                let mask = arrow_array::BooleanArray::from(c.iter().map(|&x| x == k).collect::<Vec<bool>>());
+                arrow_select::filter::filter_record_batch(&b, &mask).map_err(err)
+            };
+            mine.push(keep(MINE)?);
+            edge.push(keep(BORDER)?);
+        }
+        let three = |v: Vec<RecordBatch>| -> [RecordBatch; 3] { v.try_into().expect("three tables") };
+        self.main.write(RawPart { batches: three(mine) })?;
+        border.write(RawPart { batches: three(edge) })
+    }
+
+    /// Close the files: the rows of the files and of the border files.
+    fn finish(self) -> Result<([usize; 3], [usize; 3]), String> {
+        let border = match self.border {
+            Some((b, _)) => b.finish()?,
+            None => [0; 3],
+        };
+        Ok((self.main.finish()?, border))
     }
 }
 

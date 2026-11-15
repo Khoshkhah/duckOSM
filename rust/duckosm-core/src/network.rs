@@ -1706,7 +1706,7 @@ fn connect_paths(
             t.count == 1
                 && PATH_CLASSES.contains(&t.hw.as_str())
                 && by_id.get(*n).is_some_and(|&i| {
-                    near.is_none_or(|(tile, m)| crate::tilecut::near_tile(tile, nodes[i].lon, nodes[i].lat, m))
+                    near.is_none_or(|(tile, m)| crate::tiles::near_tile(tile, nodes[i].lon, nodes[i].lat, m))
                 })
         })
         .map(|(n, t)| (*n, t))
