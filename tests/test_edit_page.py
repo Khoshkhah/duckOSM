@@ -198,23 +198,31 @@ def test_the_turn_tab_shows_every_junction_of_the_road_and_a_click_on_a_dot_choo
         browser = p.chromium.launch()
         page, errors = _open(browser, page_url)
         page.evaluate("fixesPanel.tab('turns')")
-        page.fill("#fix-from", str(frm))
-        page.click("#fix-turn-find")
-        page.wait_for_function("document.querySelectorAll('#fix-via option').length > 1", timeout=30_000)
-        listed = page.evaluate("[...document.querySelectorAll('#fix-via option')].map((o) => o.value)")
-        page.wait_for_function(f"fixesPanel.drawn().turnJs === {len(listed)}", timeout=20_000)
         dots = """() => { const m = window.map; return m.queryRenderedFeatures({layers: ['fix-turn-js-pt']})
             .map((f) => { const q = m.project(f.geometry.coordinates); return {n: f.properties.n, x: q.x, y: q.y}; }); }"""
-        page.wait_for_function(f"({dots})().length > 1", timeout=20_000)            # the map has moved to the road
-        first = page.input_value("#fix-via")
-        # a click chooses the junction: the map must stand still, else the dot moves from under the pointer (a slow machine). The click is tried again when it missed.
+
+        def pick_road():
+            page.fill("#fix-from", str(frm))
+            page.click("#fix-turn-find")
+            page.wait_for_function(f"document.getElementById('fix-from').value === '{frm}' && document.querySelectorAll('#fix-via option').length > 1", timeout=30_000)
+            n = page.evaluate("document.querySelectorAll('#fix-via option').length")
+            page.wait_for_function(f"fixesPanel.drawn().turnJs === {n}", timeout=20_000)
+            page.wait_for_function(f"({dots})().length > 1", timeout=20_000)        # the map has moved to the road
+
+        pick_road()
+        listed = page.evaluate("[...document.querySelectorAll('#fix-via option')].map((o) => o.value)")
+        # a click chooses the junction: the map must stand still, else the dot moves from under the pointer (a slow machine). A click that missed
+        # the dot picks the road under it (right), and then the road is picked again before the next try; a click on a dot must keep the road
         for attempt in range(3):
+            if page.input_value("#fix-from") != str(frm):
+                pick_road()
             page.wait_for_function("!window.map.isMoving() && window.map.areTilesLoaded()", timeout=20_000)
             page.wait_for_timeout(300)
+            first = page.input_value("#fix-via")
             target = next(d for d in page.evaluate(dots) if d["n"] != first and d["x"] > 450 and 60 < d["y"] < 780)
             page.mouse.click(target["x"], target["y"])
             try:
-                page.wait_for_function(f"document.getElementById('fix-via').value === '{target['n']}'", timeout=6_000)
+                page.wait_for_function(f"document.getElementById('fix-via').value === '{target['n']}' && document.getElementById('fix-from').value === '{frm}'", timeout=6_000)
                 break
             except pw.TimeoutError:
                 if attempt == 2:
