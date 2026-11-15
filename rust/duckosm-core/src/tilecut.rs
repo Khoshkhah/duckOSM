@@ -18,7 +18,7 @@
 //! 5. Each tile: its parts, merged in the order of the ids, give its file; the parts go.
 
 use crate::boundary::Boundary;
-use crate::cutfile::{file_blob, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
+use crate::cutfile::{file_blob_as, nodes_block, relations_block, ways_block, PbfWriter, BLOCK};
 use crate::cutstream::{each_block, each_block_at, header, widen, CutCounts, Span, EMPTY};
 use crate::graph::{MemberType, Relation};
 use crate::network::{global_junction, JunctionUses};
@@ -352,7 +352,7 @@ impl RawSink for All {
 
 /// The blobs of elements of one kind (sorted by id), BLOCK elements in each, as in a `.osm.pbf` file, each after a record
 /// (first id, last id, number of elements: 20 bytes). The elements move into the blocks (no copy).
-fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>) -> Result<(), String> {
+fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>, raw: bool) -> Result<(), String> {
     let mut it = elems.into_iter().peekable();
     while it.peek().is_some() {
         let chunk: Vec<Elem> = it.by_ref().take(BLOCK).collect();
@@ -367,20 +367,20 @@ fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>) -> Result<(), String> {
                 &chunk.into_iter().filter_map(|e| if let Elem::Relation(r) = e { Some(r) } else { None }).collect::<Vec<_>>(),
             ),
         };
-        file_blob(out, "OSMData", &block)?;
+        file_blob_as(out, "OSMData", &block, raw)?;
     }
     Ok(())
 }
 
 /// Elements with their tiles to blobs for each tile (on the thread of the block): (tile, blobs). The elements move.
-fn by_tile(elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
-    groups(elems).into_iter().map(tile_blobs).collect()
+fn by_tile(elems: Vec<(u32, Elem)>, raw: bool) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    groups(elems).into_iter().map(|g| tile_blobs(g, raw)).collect()
 }
 
 /// [`by_tile`] with the tiles on all threads (the compression of the blocks is the work), for a caller on one thread: the
 /// passes that decode the blocks on all threads call [`by_tile`].
-fn by_tile_par(elems: Vec<(u32, Elem)>) -> Result<Vec<(u32, Vec<u8>)>, String> {
-    groups(elems).into_par_iter().map(tile_blobs).collect()
+fn by_tile_par(elems: Vec<(u32, Elem)>, raw: bool) -> Result<Vec<(u32, Vec<u8>)>, String> {
+    groups(elems).into_par_iter().map(|g| tile_blobs(g, raw)).collect()
 }
 
 /// The elements of each tile, in the order of the tiles, each tile in the order of the ids.
@@ -396,9 +396,9 @@ fn groups(mut elems: Vec<(u32, Elem)>) -> Vec<(u32, Vec<Elem>)> {
     groups
 }
 
-fn tile_blobs((t, group): (u32, Vec<Elem>)) -> Result<(u32, Vec<u8>), String> {
+fn tile_blobs((t, group): (u32, Vec<Elem>), raw: bool) -> Result<(u32, Vec<u8>), String> {
     let mut bytes = Vec::new();
-    blobs(group, &mut bytes)?;
+    blobs(group, &mut bytes, raw)?;
     Ok((t, bytes))
 }
 
@@ -664,8 +664,8 @@ fn merge_kind<W: Write>(w: &mut PbfWriter<W>, n: &mut CutCounts, parts: &Parts, 
 
 /// The file of a tile from its parts, written to `out`: the nodes, the ways, the relations, each kind merged in the order
 /// of the ids with no doubles. Gives the numbers of elements.
-fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>) -> Result<CutCounts, String> {
-    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?;
+fn finish_tile<W: Write>(parts: &Parts, tile: u32, out: W, timestamp: Option<i64>, raw: bool) -> Result<CutCounts, String> {
+    let mut w = PbfWriter::new(io::BufWriter::with_capacity(1 << 20, out), timestamp)?.raw_blocks(raw);
     let mut n = CutCounts::default();
     for (kind, main, extra) in [(0, "nodes", "extra-nodes"), (1, "ways", "extra-ways"), (2, "relations", "none")] {
         merge_kind(&mut w, &mut n, parts, tile, main, extra, kind)?;
@@ -983,6 +983,7 @@ fn take_blocks<R: Read + Seek>(
     pairs: impl Iterator<Item = io::Result<(i64, i64)>>,
     parts: &Parts,
     part: &'static str,
+    raw: bool,
 ) -> Result<(), String> {
     let io = |e: io::Error| format!("a temporary file of the tile cut: {e}");
     let mut pairs = pairs.peekable();
@@ -1020,7 +1021,7 @@ fn take_blocks<R: Read + Seek>(
             .map_init(Buffers::default, |buf, (b, want)| {
                 let mut s = Take { wanted: want, out: Vec::new(), all: All::default() };
                 decode_block(b, kinds, buf, &mut s)?;
-                by_tile(s.out)
+                by_tile(s.out, raw)
             })
             .collect::<Result<_, _>>()?;
         for (t, bytes) in out.into_iter().flatten() {
@@ -1208,6 +1209,8 @@ fn cut<R: Read + Seek + Send>(
         return Err("the region file is not sorted by type and id (Sort.Type_then_ID)".into());
     }
     let parts = Parts { files, waiting: Default::default() };
+    // the temporary tile files of the store (quack) have no compression; the files of the build by tiles have zlib
+    let raw = dir.is_none();
     let Some(z) = tiles.first().map(|t| t.z) else {
         return Ok((Vec::new(), parts));
     };
@@ -1235,7 +1238,7 @@ fn cut<R: Read + Seek + Send>(
                 span: EMPTY,
             };
             decode_block(b, [true, true, true], buf, &mut s)?;
-            Ok((s.runs, by_tile(s.inside)?, s.other, s.span, s.near))
+            Ok((s.runs, by_tile(s.inside, raw)?, s.other, s.span, s.near))
         },
         |(runs, blobs, other, span, mut n), at| {
             near.append(&mut n);
@@ -1284,8 +1287,8 @@ fn cut<R: Read + Seek + Send>(
             };
             decode_block(b, [false, true, true], buf, &mut s)?;
             let mut rels = Vec::new();
-            blobs(s.rels, &mut rels)?;
-            Ok((s.runs, by_tile(s.kept)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
+            blobs(s.rels, &mut rels, raw)?;
+            Ok((s.runs, by_tile(s.kept, raw)?, s.multi, (s.outside, s.uses, s.homes), rels, s.spans))
         },
         |(runs, kept, mut m, (o, u, h), rels, spans), at| {
             if spans[0] != EMPTY {
@@ -1437,13 +1440,13 @@ fn cut<R: Read + Seek + Send>(
         // the waiting relations by their size: a few have tens of thousands of members (boundaries, long routes)
         if waiting_bytes >= WAITING {
             waiting_bytes = 0;
-            for (t, bytes) in by_tile_par(std::mem::take(&mut waiting))? {
+            for (t, bytes) in by_tile_par(std::mem::take(&mut waiting), raw)? {
                 parts.add(t, "relations", bytes)?;
             }
         }
         Ok(())
     })?;
-    for (t, bytes) in by_tile_par(waiting)? {
+    for (t, bytes) in by_tile_par(waiting, raw)? {
         parts.add(t, "relations", bytes)?;
     }
     parts.remove(ALL, "relations.all");
@@ -1493,7 +1496,7 @@ fn cut<R: Read + Seek + Send>(
     let mut outside = sort_bytes(outside.finish().map_err(io)?, |b| Pair.get(&mut &b[..]), 64 << 20, store).map_err(io)?;
     crate::util::step(&format!("tile cut 4a: the nodes from outside, sorted ({} rows)", outside.len));
     let mut r = open()?;
-    take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &parts, "extra-nodes")?;
+    take_blocks(&mut r, &node_blocks, 0, outside.read_ref(&Pair).map_err(io)?, &parts, "extra-nodes", raw)?;
     crate::util::step("tile cut 4b: the extra nodes");
     // the junctions files: only the build by tiles reads them
     if dir.is_some() {
@@ -1508,7 +1511,7 @@ fn cut<R: Read + Seek + Send>(
     } else {
         drop(uses);
     }
-    take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &parts, "extra-ways")?;
+    take_blocks(&mut r, &way_blocks, 1, more.iter().map(|&(w, t)| Ok((w, t as i64))), &parts, "extra-ways", raw)?;
     parts.flush()?;
     drop(more);
     crate::util::step("tile cut 4: the extra elements");
@@ -1528,9 +1531,9 @@ fn cut<R: Read + Seek + Send>(
                 write_junctions(&parts, t, &dir.join(format!("{name}.junctions")))?;
                 let out = dir.join(format!("{name}.osm.pbf"));
                 let file = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
-                finish_tile(&parts, t, file, timestamp)
+                finish_tile(&parts, t, file, timestamp, raw)
             }
-            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp),
+            (None, Files::Store(c)) => finish_tile(&parts, t, ChunkWriter(c, (t, "tile")), timestamp, raw),
             (None, Files::Dir(_)) => Err("the tile cut has no folder for the tile files".into()),
         }
     };

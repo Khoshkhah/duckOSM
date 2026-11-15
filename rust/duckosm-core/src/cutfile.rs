@@ -96,13 +96,19 @@ impl<'a> Strings<'a> {
 }
 
 pub(crate) fn file_blob<W: Write>(w: &mut W, kind: &str, data: &[u8]) -> Result<(), String> {
+    file_blob_as(w, kind, data, false)
+}
+
+/// [`file_blob`], with the data as it is (`raw`, the field 1 of a blob) or compressed with zlib. A temporary file that is
+/// read one time soon after does not need the compression (quack by tiles: 30 % less CPU on France).
+pub(crate) fn file_blob_as<W: Write>(w: &mut W, kind: &str, data: &[u8], raw: bool) -> Result<(), String> {
     let mut blob = Vec::new();
-    int(&mut blob, 2, data.len() as i64);
-    bytes(
-        &mut blob,
-        3,
-        &miniz_oxide::deflate::compress_to_vec_zlib(data, 6),
-    );
+    if raw {
+        bytes(&mut blob, 1, data);
+    } else {
+        int(&mut blob, 2, data.len() as i64);
+        bytes(&mut blob, 3, &miniz_oxide::deflate::compress_to_vec_zlib(data, 6));
+    }
     let mut head = Vec::new();
     bytes(&mut head, 1, kind.as_bytes());
     int(&mut head, 3, blob.len() as i64);
@@ -117,12 +123,20 @@ pub(crate) fn file_blob<W: Write>(w: &mut W, kind: &str, data: &[u8]) -> Result<
 /// so a cut can write its file while it reads the region file ([`crate::cutstream`]).
 pub struct PbfWriter<W: Write> {
     w: W,
+    /// the data blocks with no compression ([`PbfWriter::raw_blocks`])
+    raw: bool,
     nodes: Vec<RawNode>,
     ways: Vec<RawWay>,
     relations: Vec<Relation>,
 }
 
 impl<W: Write> PbfWriter<W> {
+    /// Write the data blocks with no compression (a temporary file).
+    pub(crate) fn raw_blocks(mut self, raw: bool) -> Self {
+        self.raw = raw;
+        self
+    }
+
     /// Write the header. `timestamp` (seconds since 1970) is the replication time of the region file's header.
     pub fn new(mut w: W, timestamp: Option<i64>) -> Result<Self, String> {
         let mut head = Vec::new();
@@ -140,6 +154,7 @@ impl<W: Write> PbfWriter<W> {
         file_blob(&mut w, "OSMHeader", &head)?;
         Ok(PbfWriter {
             w,
+            raw: false,
             nodes: Vec::with_capacity(BLOCK),
             ways: Vec::new(),
             relations: Vec::new(),
@@ -191,7 +206,7 @@ impl<W: Write> PbfWriter<W> {
 
     fn flush_nodes(&mut self) -> Result<(), String> {
         if !self.nodes.is_empty() {
-            file_blob(&mut self.w, "OSMData", &nodes_block(&self.nodes))?;
+            file_blob_as(&mut self.w, "OSMData", &nodes_block(&self.nodes), self.raw)?;
             self.nodes.clear();
         }
         Ok(())
@@ -199,7 +214,7 @@ impl<W: Write> PbfWriter<W> {
 
     fn flush_ways(&mut self) -> Result<(), String> {
         if !self.ways.is_empty() {
-            file_blob(&mut self.w, "OSMData", &ways_block(&self.ways))?;
+            file_blob_as(&mut self.w, "OSMData", &ways_block(&self.ways), self.raw)?;
             self.ways.clear();
         }
         Ok(())
@@ -207,7 +222,7 @@ impl<W: Write> PbfWriter<W> {
 
     fn flush_relations(&mut self) -> Result<(), String> {
         if !self.relations.is_empty() {
-            file_blob(&mut self.w, "OSMData", &relations_block(&self.relations))?;
+            file_blob_as(&mut self.w, "OSMData", &relations_block(&self.relations), self.raw)?;
             self.relations.clear();
         }
         Ok(())

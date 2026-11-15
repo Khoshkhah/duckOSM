@@ -1123,6 +1123,10 @@ pub fn features_owned<R: Read + Send>(
     Ok(counts)
 }
 
+/// The tiles that [`features_by_tiles`] makes at the same time natively (their rows wait in memory).
+// ponytail: a fixed number, and a group waits for its slowest tile; a pool of tiles when the time matters more
+const TILES_AT_ONCE: usize = 4;
+
 /// The most nodes in a tile of [`features_by_tiles`] (a default for the callers).
 pub const TILE_NODES: usize = 4_000_000;
 
@@ -1178,16 +1182,17 @@ pub fn features_of_tiles<R: Read + std::io::Seek + Send>(
     crate::util::step("quack by tiles 2: the tile cut");
     let relations = std::sync::Mutex::new(crate::util::FxHashSet::default());
     let mut counts = Counts::default();
-    let n = files.tiles.iter().filter(|t| t.1.nodes > 0).count();
-    let mut k = 0;
-    for (i, (tile, c)) in files.tiles.iter().enumerate() {
-        if c.nodes == 0 {
-            continue;
-        }
-        k += 1;
-        let owner = Owner { tile: *tile, relations: &relations };
+    let todo: Vec<(usize, Tile, crate::cutstream::CutCounts)> =
+        files.tiles.iter().enumerate().filter(|t| t.1 .1.nodes > 0).map(|(i, (t, c))| (i, *t, *c)).collect();
+    let n = todo.len();
+    let run = |&(i, tile, _): &(usize, Tile, crate::cutstream::CutCounts),
+               give: &mut dyn FnMut(Vec<Feature>) -> Result<(), String>|
+     -> Result<Counts, String> {
+        let owner = Owner { tile, relations: &relations };
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        let got = features_owned(open_tile, budget, Some(&owner), |part| emit(*tile, part))?;
+        features_owned(open_tile, budget, Some(&owner), give)
+    };
+    let mut done = |k: usize, (_, tile, c): &(usize, Tile, crate::cutstream::CutCounts), got: Counts| {
         counts.nodes += got.nodes;
         counts.ways += got.ways;
         counts.relations += got.relations;
@@ -1198,6 +1203,35 @@ pub fn features_of_tiles<R: Read + std::io::Seek + Send>(
             c.ways,
             c.relations
         ));
+    };
+    // natively, TILES_AT_ONCE tiles at the same time (one small tile does not use all threads: France used 4 of 12
+    // cores), and their rows go to `emit` in the order of the tiles. The browser: one tile at a time, because a file in
+    // OPFS belongs to the thread that opened it.
+    #[cfg(not(target_arch = "wasm32"))]
+    for (g, group) in todo.chunks(TILES_AT_ONCE).enumerate() {
+        let made: Vec<Result<(Vec<Vec<Feature>>, Counts), String>> = group
+            .par_iter()
+            .map(|t| {
+                let mut parts = Vec::new();
+                let got = run(t, &mut |p| {
+                    parts.push(p);
+                    Ok(())
+                })?;
+                Ok((parts, got))
+            })
+            .collect();
+        for (j, (t, m)) in group.iter().zip(made).enumerate() {
+            let (parts, got) = m?;
+            for p in parts {
+                emit(t.1, p)?;
+            }
+            done(g * TILES_AT_ONCE + j + 1, t, got);
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    for (k, t) in todo.iter().enumerate() {
+        let got = run(t, &mut |p| emit(t.1, p))?;
+        done(k + 1, t, got);
     }
     Ok(counts)
 }
