@@ -1,6 +1,6 @@
-//! Golden test for the three modes. Input: the sample file of Monaco (no cut, no component filter).
+//! Golden test for the three modes. Input: the sample file of Monaco (no cut).
 //! The expected counts and checksums come from duckOSM 0.6.0 (DuckDB 1.5.3): tools/make_golden_summary.py.
-//! The variants switch `merge_segments` and `global_junctions`; `_cf` also runs the component filter, and `_sw` the sidewalk rule, `_cp` the dangling-path connector, `_sp` the speeds and costs (the `_cf` variants have them too), `_ft` everything: sidewalk rule, connector, speeds and walk and cycle types. With `global_junctions` on, Monaco has no
+//! The variants switch `merge_segments` and `global_junctions`; `_cf` uses the cut file (the component filter is removed since 2026-11-14), and `_sw` the sidewalk rule, `_cp` the dangling-path connector, `_sp` the speeds and costs (the `_cf` variants have them too), `_ft` everything: sidewalk rule, connector, speeds and walk and cycle types. With `global_junctions` on, Monaco has no
 //! chains to merge, so the variants with it off test the merge.
 
 use duckosm_core::filter::Mode;
@@ -58,7 +58,6 @@ fn three_modes_equal_duckosm() {
         // the databases of the _cf, _cfcp and _sp variants have speeds and costs
         let speeds = cf || variant.ends_with("_sp") || variant.ends_with("_ft");
         let opts = Options {
-            keep_largest_component: cf,
             cycling_dismount: true,
             merge_segments: variant.starts_with("merge"),
             global_junctions: variant.contains("_gj"),

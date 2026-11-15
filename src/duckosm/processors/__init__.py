@@ -15,7 +15,6 @@ from duckosm.processors.global_junctions import GlobalJunctions
 from duckosm.processors.dismount import DismountMarker
 from duckosm.processors.functional_type import FunctionalType
 from duckosm.processors.path_connector import PathConnector
-from duckosm.processors.component_filter import ComponentFilter
 from duckosm.processors.duckdb_clipper import DuckdbClipper
 from duckosm.processors.osm_overrides import OsmOverrides
 from duckosm.processors.separate_sidewalks import SeparateSidewalks
@@ -39,7 +38,6 @@ __all__ = [
     "DismountMarker",
     "FunctionalType",
     "PathConnector",
-    "ComponentFilter",
     "DuckdbClipper",
     "MultimodalBuilder",
     "TransferPointExtractor",

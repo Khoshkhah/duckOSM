@@ -2,9 +2,8 @@
 
     python tools/make_golden_graph.py tests/data/monaco_graph_summary.tsv NAME=DB [NAME=DB ...]
 
-NAME is the variant: `sample` (tests/data/monaco_sample.osm.pbf, no boundary, so no component filter) or
-`cut` (the same file with the Monaco boundary: duckOSM cuts it to tests/data/monaco.osm.pbf and runs the
-component filter). Build each database with duckOSM, everything of the network step on, `build_graph` and
+NAME is the variant: `sample` (tests/data/monaco_sample.osm.pbf, no boundary) or `cut` (the same file with the
+Monaco boundary: duckOSM cuts it to tests/data/monaco.osm.pbf). There is no component filter (removed 2026-11-14). Build each database with duckOSM, everything of the network step on, `build_graph` and
 `extract_restrictions` on, and `bench/python_steps.py <yaml> --no-lane-profile` (docs/edge_graph.md).
 
 For each mode and table (edge_graph, turn_permission, turn_restrictions, turn_path_restrictions) the file

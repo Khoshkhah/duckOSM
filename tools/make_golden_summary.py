@@ -3,7 +3,7 @@
     python tools/make_golden_summary.py tests/data/monaco_modes_summary.tsv NAME=DB [NAME=DB ...]
 
 NAME is the variant: merge_gj, nomerge_gj, merge_nogj or nomerge_nogj (merge_segments and
-global_junctions on or off), merge_gj_cf (the cut file of Monaco with a boundary, so the component filter runs) merge_gj_sw (the sidewalk rule on), merge_gj_cp (the dangling-path connector on) and merge_gj_cfcp (connector and component filter, on the cut file) and merge_gj_sp (speeds and costs on; the _cf and _cfcp databases have them too). Build each database with tests/data/golden_monaco_modes.yaml (see the
+global_junctions on or off), merge_gj_cf (the cut file of Monaco with a boundary; no component filter since 2026-11-14) merge_gj_sw (the sidewalk rule on), merge_gj_cp (the dangling-path connector on) and merge_gj_cfcp (connector and component filter, on the cut file) and merge_gj_sp (speeds and costs on; the _cf and _cfcp databases have them too). Build each database with tests/data/golden_monaco_modes.yaml (see the
 comments there) and `bench/python_steps.py <yaml> --no-lane-profile`. For each mode the file has the
 number of edges, private edges, nodes and edge_id_map rows, and one checksum for the edges and one for
 the private edges. The checksum is the XOR over the rows of the edge_id hash of

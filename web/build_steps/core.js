@@ -85,7 +85,6 @@ export const OPTIONS = [
   { key: "building_faces", at: "options", on: true, name: "Wall labels", note: "main.building_faces: each wall of a building with its type (front, back, side, party, court), and the wall rules of the fixes file." },
   { key: "levels", at: "options", on: true, name: "Drawing order", note: "visualization.edge_levels: which road is on top at a bridge or a tunnel." },
   { key: "sea", at: "options", on: false, name: "Sea from Overture Maps", note: "Needs the internet. Off: the build stays offline." },
-  { key: "keep_largest_component", at: "clip", on: true, name: "Keep the largest connected part", note: "Roads that do not connect to the main network are removed." },
 ];
 export const MODES = ["driving", "walking", "cycling"];
 
@@ -94,15 +93,15 @@ export const MODES = ["driving", "walking", "cycling"];
 export function settingsYaml(values = {}) {
   const modes = (values.modes ?? MODES).filter((m) => MODES.includes(m));
   if (!modes.length) throw new Error("choose at least one network");
-  const sections = { options: [], clip: [] };
+  const lines = [];
   for (const o of OPTIONS) {
     const v = values[o.key] ?? o.on;
     // `sea: overture` is the default of the build; `sea: false` is no sea
-    sections[o.at].push(o.key === "sea" ? `  sea: ${v ? "overture" : "false"}` : `  ${o.key}: ${v}`);
+    lines.push(o.key === "sea" ? `  sea: ${v ? "overture" : "false"}` : `  ${o.key}: ${v}`);
   }
   // `fixes`: the path of a fixes file on this computer (the key osm_overrides of the config)
   const fixes = values.fixes ? `osm_overrides: ${JSON.stringify(String(values.fixes))}\n` : "";
-  return `${fixes}modes: [${modes.join(", ")}]\noptions:\n${sections.options.join("\n")}\nclip:\n${sections.clip.join("\n")}\n`;
+  return `${fixes}modes: [${modes.join(", ")}]\noptions:\n${lines.join("\n")}\n`;
 }
 
 /** The text of one line of progress, for the state of the build job (`{state, steps, bytes, total, seconds}`). */

@@ -32,9 +32,6 @@ def build_parquet(config, pbf_path, out_dir) -> dict:
     res = module().build(
         str(pbf_path), str(out_dir), modes=list(config.modes), formats=["geoparquet"], name=config.name,
         merge_segments=o.merge_segments, global_junctions=o.global_junctions,
-        # ComponentFilter runs in Python after the edge graph, as before. With the walls, the Rust step also keeps only the largest
-        # component (as on the page), so that a wall does not face a street piece that ComponentFilter removes later
-        keep_largest_component=o.building_faces and c.keep_largest_component,
         cycling_dismount=o.cycling_dismount, infer_separate_sidewalks=o.infer_separate_sidewalks,
         connectivity_rescue=c.connectivity_rescue, connect_snap_m=c.connect_snap_m,
         process_speeds=o.process_speeds, calculate_costs=o.calculate_costs,

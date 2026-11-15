@@ -7,11 +7,11 @@ sample	walking	edge_graph	36850	66ef0acffedf8e05
 sample	walking	turn_permission	0	0
 sample	cycling	edge_graph	32750	550f4d6c9571ece
 sample	cycling	turn_permission	0	0
-cut	driving	edge_graph	6567	da6f447106ae3895
+cut	driving	edge_graph	6765	6d29e7295d6c8e88
 cut	driving	turn_permission	0	0
 cut	driving	turn_restrictions	38	234919293260c7f0
 cut	driving	turn_path_restrictions	0	0
-cut	walking	edge_graph	34764	fb5412a0ea8b8e7c
+cut	walking	edge_graph	35134	68bc08cc9713b318
 cut	walking	turn_permission	0	0
-cut	cycling	edge_graph	31013	1eb0e4b33a7e9767
+cut	cycling	edge_graph	31387	9c99969a553f99b6
 cut	cycling	turn_permission	0	0

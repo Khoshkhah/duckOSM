@@ -56,6 +56,6 @@ fn monaco_driving_equals_duckosm() {
         bad.len(),
         &bad[..bad.len().min(5)]
     );
-    assert_eq!(net.nodes.len(), 1719);
-    assert_eq!(net.nodes.iter().filter(|n| n.node_id < 0).count(), 1);
+    assert_eq!(net.nodes.len(), 1769);
+    assert_eq!(net.nodes.iter().filter(|n| n.node_id < 0).count(), 5);
 }

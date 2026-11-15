@@ -75,8 +75,7 @@ edge it maps to always run the same way.
 | `is_reverse` | whether the piece (`old_edge_id`) runs against its way's drawing |
 | `osm_id` | the piece's own OSM way |
 
-An edge that is not in the table was not merged. Rows of edges removed by the
-[component filter](cleanup.md#component-filter) are removed too. Monaco, walking: 796 rows for
+An edge that is not in the table was not merged. Monaco, walking: 796 rows for
 372 merged edges. The OSM ways of one merged edge, in order:
 
 ```sql

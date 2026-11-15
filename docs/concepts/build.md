@@ -65,17 +65,15 @@ flowchart LR
     PARENT[("parent build<br/>e.g. sweden.duckdb")]
     BOUND["boundary<br/>GeoJSON"]
     CLIP["<b>DuckdbClipper</b><br/>per mode: copy edges, nodes,<br/>edge graph, restrictions"]
-    COMP["<b>Component filter</b><br/>drop boundary stubs"]
     DONE["indexes · validate<br/>metadata · report"]
     DB[("area.duckdb")]
 
     PARENT --> CLIP
     BOUND --> CLIP
-    CLIP --> COMP --> DONE --> DB
+    CLIP --> DONE --> DB
 
     classDef optional stroke-dasharray: 5 4
     classDef file stroke:#ffd43b,stroke-width:3px
-    class COMP optional
     class PARENT,DB file
 ```
 
@@ -105,7 +103,6 @@ Config keys are shown with their default.
 | ② | Move private roads (and, in driving, bus-only roads and bus lanes) to `private_edges` | always; see [Access](networks.md#access-private-and-forbidden-roads) |
 | ② | Turn restrictions | driving only; `options.extract_restrictions` (on) |
 | ② | Edge graph | `options.build_graph` (on) |
-| ② | Component filter | a boundary is set, `build_graph` is on, and `clip.keep_largest_component` (on) or `clip.min_component_edges` > 1 |
 | ② | H3 cells | `options.h3_indexing` (on) |
 | ② | Indexes | always |
 | ② | Validate | `validation.enabled` (off; on in the config template). See [Check a build](../guides/check-build.md) |
@@ -122,7 +119,7 @@ zone and the bus routes are the exceptions).
 Each mode runs in its own schema (`driving`, `walking`, `cycling`), so the same tables exist once
 per mode. The steps in ② are explained in [Stable edge ids](edge-ids.md) (build, simplify, merge),
 [What each network contains](networks.md) (filter, speeds, costs, types, restrictions) and
-[Network clean-up](cleanup.md) (connect, component filter, validate).
+[Network clean-up](cleanup.md) (connect, validate; the component filter is removed).
 
 ## One mode, step by step
 
@@ -135,7 +132,6 @@ Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build lo
 | Simplify and merge | 3,040 edges: ways split at junctions |
 | Private roads | 214 edges moved to `private_edges` (18 of them for buses only) |
 | Turn restrictions | 38 restrictions mapped to edges |
-| Component filter | 2,765 edges: 79 edges in 15 small pieces dropped |
 
 ## What stays in the database
 

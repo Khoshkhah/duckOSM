@@ -34,7 +34,7 @@ fn monaco_lane_profile_equals_duckosm() {
         ..Params::default()
     };
     let sum = build(&data.join("monaco_sample.osm.pbf"), &out, &p).unwrap();
-    assert_eq!(sum.lanes.as_deref(), Some("lane profile: 3176 lanes"));
+    assert_eq!(sum.lanes.as_deref(), Some("lane profile: 3255 lanes"));
 
     let con = duckdb::Connection::open(out.join("monaco.duckdb")).unwrap();
     let mut stmt = con

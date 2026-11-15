@@ -58,8 +58,8 @@ struct Cli {
     /// Do not join the chains of edges that are one road (duckOSM option merge_segments).
     #[arg(long, conflicts_with = "config")]
     no_merge_segments: bool,
-    /// Do not keep only the largest connected part of the graph.
-    #[arg(long, conflicts_with = "config")]
+    /// No effect: the component filter is removed (every road stays). Kept so that old scripts work.
+    #[arg(long, hide = true, conflicts_with = "config")]
     no_component_filter: bool,
     /// Do not build edge_graph and turn_permission (duckOSM option build_graph: false).
     #[arg(long, conflicts_with = "config")]
@@ -807,7 +807,6 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
         p.infer_sidewalks = !cli.no_sidewalk_inference;
         p.bus_routes = !cli.no_bus_routes;
         p.options = NetworkOptions {
-            keep_largest_component: !cli.no_component_filter,
             cycling_dismount: !cli.no_cycling_dismount,
             merge_segments: !cli.no_merge_segments,
             global_junctions: !cli.no_global_junctions,
