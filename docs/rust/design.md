@@ -167,7 +167,7 @@ writes this part of what duckOSM writes today (checked in `monaco.duckdb` of 202
 | `<mode>.edge_graph`, `<mode>.turn_permission`, `driving.turn_restrictions`, `driving.turn_path_restrictions` | Yes (with `build_graph` and `extract_restrictions`, both on by default). |
 | `lane_profile`, `virtual_nodes`, `way_nodes`, `ways` | Yes. `virtual_nodes` is empty, as in duckOSM (the virtual nodes are in `nodes`). `--no-ways-tables` removes `ways` and `way_nodes`. |
 | `main.global_junctions`, `main.boundary`, `main.visualization_metadata`, `bus.*`, `mm.*`, `visualization.*` | Yes. `main.boundary` and `bus.*` need a boundary. `mm.*` is `mm.transfers` and the view `mm.edges`. |
-| `raw.*`, `features.*` | Yes, with a boundary (`options.build_features`, `--features`, 2026-11-10): duckOSM's SQL (`sql/features.sql`) runs on the DuckDB in the program, and `raw.*` stays in the file. `features.ocean` with `--sea`. `--raw` also writes `raw.*` as Parquet files. |
+| `raw.*`, `features.*` | Yes, with a boundary (`options.build_features`, `--features`, 2026-11-10): duckOSM's SQL (`sql/features.sql`) runs on the DuckDB in the program, and `raw.*` stays in the file. `features.ocean` with `--sea`. `--raw` also writes `raw.*` as Parquet files, and (since 2026-11-14) puts `raw.*` into the `.duckdb` file. |
 
 Python duckOSM can read the file and continue with the steps that are not ported. The DuckDB in the
 program can be newer than the DuckDB in the Python environment of the user. Today the program has

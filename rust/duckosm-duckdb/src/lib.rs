@@ -17,15 +17,31 @@ CREATE OR REPLACE MACRO main.edge_id_hash_v1(osm_id, source, target, is_reverse)
     (hash(osm_id::BIGINT, source::BIGINT, target::BIGINT, is_reverse::BOOLEAN) >> 1)::BIGINT;
 ";
 
-pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(), String> {
+/// A connection to `db` with DuckDB's `memory_limit` (as DuckDB writes it, for example "1GB"; None: DuckDB's defaults, 80 % of
+/// the memory). With a limit, the load also keeps no row order and uses 4 threads: DuckDB takes about 1 GB more than its limit
+/// for its threads and the reading of the Parquet files (France, the tables of a build by tiles with `raw.*`: limit 2 GB, 5.2 GB;
+/// no row order, 3.6 GB; and 4 threads, 3.0 GB; limit 1 GB, 1.8 GB).
+fn open(db: &Path, memory_limit: Option<&str>) -> Result<Connection, String> {
+    let con = Connection::open(db).map_err(|e| e.to_string())?;
+    if let Some(m) = memory_limit {
+        con.execute_batch(&format!(
+            "SET memory_limit = '{}'; SET preserve_insertion_order = false; SET threads = 4;",
+            m.replace('\'', "''")
+        ))
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(con)
+}
+
+pub fn write_database(db: &Path, parquet_dir: &Path, modes: &[&str], memory_limit: Option<&str>) -> Result<(), String> {
     let _ = std::fs::remove_file(db);
-    write_network_tables(db, parquet_dir, modes)
+    write_network_tables(db, parquet_dir, modes, memory_limit)
 }
 
 /// [`write_database`] into a file that is already there: a whole-file build writes `raw.*` first (`write_raw`), and the
 /// network tables come after it (docs/design/network_stream.md, part A1).
-pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str]) -> Result<(), String> {
-    let con = Connection::open(db).map_err(|e| e.to_string())?;
+pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memory_limit: Option<&str>) -> Result<(), String> {
+    let con = open(db, memory_limit)?;
     for mode in modes {
         write_schema(&con, parquet_dir, mode, MODE_TABLES)?;
     }
@@ -136,6 +152,27 @@ pub fn write_raw(
 /// duckOSM's base-map layers: run `sql` (`features.sql`, made from duckOSM's `FeaturesBuilder`) on the `.duckdb` file. It reads
 /// `raw_nodes.parquet`, `raw_ways.parquet` and `raw_relations.parquet` of `parquet_dir`, and leaves `raw.*` and `features.*`
 /// in the file. It needs DuckDB's spatial extension (the first `INSTALL` downloads it).
+/// `raw.nodes`, `raw.ways` and `raw.relations` from the raw files of a build in `parquet_dir` (`raw_nodes.parquet`, ...), with the
+/// columns of [`write_raw`] (the first statements of the SQL of the layers, `features.sql`). A build with a boundary and `--raw`
+/// writes these files; the `.duckdb` file gets the tables too.
+pub fn write_raw_from_parquet(db: &Path, parquet_dir: &Path, memory_limit: Option<&str>) -> Result<(), String> {
+    let con = open(db, memory_limit)?;
+    let f = |n: &str| parquet_dir.join(format!("{n}.parquet")).display().to_string().replace('\'', "''");
+    con.execute_batch(&format!(
+        "CREATE SCHEMA IF NOT EXISTS raw;
+CREATE OR REPLACE TABLE raw.nodes AS SELECT osm_id, lat, lon, tags FROM read_parquet('{}');
+CREATE OR REPLACE TABLE raw.ways AS SELECT osm_id, tags, refs FROM read_parquet('{}');
+CREATE OR REPLACE TABLE raw.relations AS
+    SELECT osm_id, tags, refs, ref_roles, ref_types::ENUM('node', 'way', 'relation')[] AS ref_types
+    FROM read_parquet('{}');
+CHECKPOINT;",
+        f("raw_nodes"),
+        f("raw_ways"),
+        f("raw_relations")
+    ))
+    .map_err(|e| format!("raw.*: {e}"))
+}
+
 pub fn write_features(db: &Path, parquet_dir: &Path, sql: &str) -> Result<(), String> {
     let con = Connection::open(db).map_err(|e| e.to_string())?;
     let mut sql = sql.to_string();

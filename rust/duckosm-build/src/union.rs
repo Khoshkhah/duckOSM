@@ -58,6 +58,22 @@ const TABLES: [(&str, &[&str]); 21] = [
 /// The last step of a build by tiles: the union of the tile builds (each tile with its output folder, in the order of the
 /// tiles) into `out`, for the modes of `p`, and the tables of the whole area. `boundary`: the GeoJSON text of the area.
 /// `consume`: each file of a tile goes when the union has read it. Returns the rows of each table.
+/// One step of a build by tiles with its own line: `tiles: {name}: {time} s, peak {memory} MB`. The peak is that of this
+/// process during the step (Linux: `/proc/self/clear_refs` resets the peak, `VmHWM` reads it; elsewhere no peak).
+pub fn timed<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let _ = std::fs::write("/proc/self/clear_refs", "5");
+    let t = std::time::Instant::now();
+    let r = f()?;
+    let peak = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("VmHWM:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()));
+    match peak {
+        Some(kb) => eprintln!("tiles: {name}: {:.1} s, peak {} MB", t.elapsed().as_secs_f64(), kb >> 10),
+        None => eprintln!("tiles: {name}: {:.1} s", t.elapsed().as_secs_f64()),
+    }
+    Ok(r)
+}
+
 pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, consume: bool, out: &Path) -> Result<Vec<(String, usize)>, String> {
     std::fs::create_dir_all(out).map_err(io)?;
     let tmp = std::env::temp_dir().join(format!("duckosm-union-{}", std::process::id()));
@@ -72,13 +88,15 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
     }
     // the largest part (an option, on by default as in the whole build): each tile drops the rows of the other parts
     if p.options.keep_largest_component {
-        for &m in &p.modes {
-            keep_largest_part(tiles, m)?;
-        }
-        duckosm_core::util::step("union: the largest part");
+        timed("the largest part", || {
+            for &m in &p.modes {
+                keep_largest_part(tiles, m)?;
+            }
+            Ok(())
+        })?;
     }
     // the tables at the same time (each one is a copy of files, and a small merge)
-    let rows: Vec<(String, usize)> = names
+    let rows: Vec<(String, usize)> = timed("union", || names
         .par_iter()
         .map(|(name, key)| -> Result<(String, usize), String> {
             let of_tiles = |suffix: &str| -> Vec<PathBuf> {
@@ -97,20 +115,18 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
             let n = concat_files(&parts, consume || parts.last().is_some_and(|p| p.starts_with(&tmp)), &out.join(format!("{name}.parquet")))?;
             Ok((name.clone(), n))
         })
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, _>>())?;
     let _ = std::fs::remove_dir_all(&tmp);
     if p.bus_routes && p.modes.contains(&Mode::Driving) {
-        bus_routes(tiles, out)?;
+        timed("bus routes", || bus_routes(tiles, out))?;
     }
     if p.levels != crate::LevelsMethod::None {
-        levels(&p.modes, p.levels, out)?;
-        duckosm_core::util::step("union: the levels");
+        timed("levels", || levels(&p.modes, p.levels, out))?;
     }
     if let Some(dem) = &p.dem {
-        elevation_main(dem, p, &rows, out)?;
-        duckosm_core::util::step("union: the elevation metadata and grid");
+        timed("elevation metadata and grid", || elevation_main(dem, p, &rows, out))?;
     }
-    write_whole_area_tables(out, boundary, &p.modes, &p.options)?;
+    timed("area tables", || write_whole_area_tables(out, boundary, &p.modes, &p.options))?;
     Ok(rows.into_iter().filter(|(name, _)| !name.starts_with("elevation_nodata_")).collect())
 }
 
@@ -136,6 +152,19 @@ fn elevation_main(dem: &Path, p: &crate::Params, rows: &[(String, usize)], out: 
         crate::elevation::write_grid(dem, b, 3, create(&out.join("elevation_grid_main.parquet"))?)?;
     }
     Ok(())
+}
+
+/// The `.duckdb` file of a build by tiles (`{name}.duckdb` in `out`): the tables of the union in `out`, as the whole build loads
+/// its files (`duckosm_duckdb::write_database`), and `raw.*` when the union has the raw files. Gives the path of the file.
+#[cfg(feature = "duckdb")]
+pub fn write_duckdb(out: &Path, p: &crate::Params) -> Result<PathBuf, String> {
+    let db = out.join(format!("{}.duckdb", p.name));
+    let names: Vec<&str> = p.modes.iter().map(|m| m.name()).collect();
+    duckosm_duckdb::write_database(&db, out, &names, p.memory_limit.as_deref())?;
+    if out.join("raw_nodes.parquet").exists() {
+        duckosm_duckdb::write_raw_from_parquet(&db, out, p.memory_limit.as_deref())?;
+    }
+    Ok(db)
 }
 
 /// The tables of the whole area after the union of the tiles (`boundary_main`, `visualization_metadata_main`,
