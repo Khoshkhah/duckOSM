@@ -43,21 +43,9 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -
 
 ## The largest part
 
-The filter of the largest part (on by default, as in the whole build; `--no-component-filter` turns it off) needs the whole
-network, so it runs after the tile builds and before the union, with memory that does not grow with the area:
-
-1. Each tile build finds the connected parts of all its edges (its own and the copies of other tiles; not the private
-   edges): a union-find on their end nodes (`union::TileParts`). The tile that holds a node has all edges of the node, so
-   the part of each node and edge that it owns is complete. It writes small side files: the parts (own edges, smallest
-   node id), the part of each edge and node, and the links (the part at each node that another tile holds or shares).
-2. The links of all tiles, sorted by node, join the parts of the tiles: a union-find on the parts, not on the nodes
-   (`union::keep_largest_part`). The largest part has the most edges, then the smallest node id (the rule of the whole
-   build).
-3. Each tile (the tiles at the same time) drops the rows of the other parts: its edges, nodes and lanes, and the turns
-   and turn rules that use a dropped edge. The private edges stay, as in the whole build.
-
-Kentucky: equal to the whole build with the filter (2,224,823 of 2,261,507 edges stay). France: 25,546,974 of
-25,919,914 edges stay.
+Removed on 2026-11-14, with the component filter of the whole build (Kaveh: a road that does not connect to the main
+network is a real road). There is no step for it after the tile builds any more, and the tiles write no side files of
+their connected parts. Before, France kept 25,546,974 of 25,919,914 edges; now all of them stay.
 
 ## The bus routes
 
@@ -147,7 +135,7 @@ equal to the whole build.
 H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or an edge needs only its own points.
 
 - Each tile computes them from all its nodes and edges, before it keeps its own rows. It writes its own rows and the
-  border rows, as for the other tables. The largest part removes their rows with the rows of their edges and nodes.
+  border rows, as for the other tables.
 - A tile reads only the window of the DEM over its nodes and lines, 1 pixel more (`Dem::window`): the strips or the
   tiles of the GeoTIFF over the window. Before, each build read the whole raster. A pixel keeps the numbers of the
   whole raster, so the heights are the same.

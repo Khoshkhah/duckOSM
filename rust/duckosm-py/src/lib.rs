@@ -23,7 +23,7 @@ use std::path::PathBuf;
 #[pyfunction]
 #[pyo3(signature = (
     pbf, out, *, modes = vec!["driving".to_string()], formats = None, name = "area".to_string(),
-    merge_segments = true, global_junctions = true, keep_largest_component = true,
+    merge_segments = true, global_junctions = true,
     cycling_dismount = true, infer_separate_sidewalks = true, connectivity_rescue = true,
     connect_snap_m = 10.0, process_speeds = true, calculate_costs = true, functional_types = true,
     osm_overrides = None, build_graph = true, extract_restrictions = true, boundary = None, ways_tables = true,
@@ -39,7 +39,6 @@ fn build<'py>(
     name: String,
     merge_segments: bool,
     global_junctions: bool,
-    keep_largest_component: bool,
     cycling_dismount: bool,
     infer_separate_sidewalks: bool,
     connectivity_rescue: bool,
@@ -66,7 +65,6 @@ fn build<'py>(
     p.osm_fixes = osm_overrides;
     p.boundary = boundary;
     p.options = NetworkOptions {
-        keep_largest_component,
         cycling_dismount,
         merge_segments,
         global_junctions,

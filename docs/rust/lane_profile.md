@@ -11,7 +11,7 @@ duckOSM's design is `docs/design/gmns_lane_profile.md`, and its reference is the
 ## The short version
 
 - The table has one row for each lane of each driving edge (`driving.edges`) and each bus-only edge
-  (`driving.private_edges` with `access = 'bus'`), from left to right. Monaco: 3,176 rows on 2,783 edges.
+  (`driving.private_edges` with `access = 'bus'`), from left to right. Monaco: 3,255 rows (3,176 before the component filter was removed on 2026-11-14).
 - The rules are pure functions of the edge, the OSM tags of its way and four small sets. The port is one new
   module, `duckosm-core/src/lanes.rs`, with no new crate.
 - The build calls it after all modes, as duckOSM does, and writes `lane_profile_driving.parquet`. The CLI, the
@@ -109,7 +109,7 @@ build are sorted by id, so a binary search finds the way of an edge.
 - A test in `duckosm-build/tests/lanes.rs` builds Monaco from `tests/data/monaco_sample.osm.pbf` and
   `monaco.geojson` (the same files as duckOSM's `data/sample/`) with three modes and duckOSM's fixes file, and
   compares every row with `tests/data/monaco_lane_profile.tsv`. The TSV is an export of `driving.lane_profile`
-  of `/home/kaveh/projects/duckOSM/monaco.duckdb` (3,176 rows), and `tests/data/osm_fixes.yaml` is a copy of
+  of duckOSM's Monaco database (3,255 rows since the component filter is removed; 3,176 before), and `tests/data/osm_fixes.yaml` is a copy of
   duckOSM's `osm_overrides/osm_overrides.yaml`. So `cargo test` needs no file outside this repository. The rows
   have no order in duckOSM, so the test compares them as sorted lists.
 - `tools/compare_tables.py` gets a line for `driving.lane_profile` (`EXCEPT ALL` in both directions), for
@@ -137,12 +137,12 @@ build are sorted by id, so a binary search finds the way of an edge.
 
 ## The result (2026-10-22)
 
-- Monaco: `cargo test -p duckosm-build --test lanes` passes. All 3,176 rows are equal to duckOSM's.
+- Monaco: `cargo test -p duckosm-build --test lanes` passes. All rows (3,255 since the component filter is removed) are equal to duckOSM's.
 - Tartu (the Estonia file cut to `data/boundaries/tartu.geojson`, three modes, no merge, duckOSM's fixes file):
   `tools/compare_tables.py` gives `ok driving.lane_profile: 30075 rows` against a build of duckOSM at commit
   `2044c4f`. The rule for the lane count gives `inherited` to 2 edges in each area.
 - The page (`e2e.py` on Monaco with the boundary and the fixes file): "lane profile: 3176 lanes". Its
-  `lane_profile_driving.parquet` has the same 3,176 rows as duckOSM's table. The file is in the zip, with its
+  `lane_profile_driving.parquet` had the same rows as duckOSM's table (3,176 then). The file is in the zip, with its
   line in `README.txt` and in `load.sql`.
 - `cargo test --workspace` passes. The browser build writes `lane_profile_driving.parquet` byte for byte as the
   native build does.

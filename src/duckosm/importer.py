@@ -31,7 +31,6 @@ from duckosm.processors import (
     GlobalJunctions,
     FunctionalType,
     PathConnector,
-    ComponentFilter,
     DuckdbClipper,
 )
 
@@ -116,12 +115,6 @@ class DuckOSM:
         rust = self.config.options.engine == "rust" and not is_clip
         if rust:
             rust_engine.module()          # fail now, not after the PBF is read
-        # Component clean-up only makes sense when clipping to an AREA. A whole-region /
-        # whole-country build (no boundary) legitimately has separate components (islands)
-        # and 2.35M-edge union-find would be slow — so require a boundary.
-        self._do_components = do_components = (self.config.effective_boundary_path is not None) and (
-            self.config.clip.keep_largest_component
-            or self.config.clip.min_component_edges > 1)
         console.print(f"[bold blue]duckOSM {'Clip' if is_clip else 'Import'}[/bold blue]")
         console.print(f"  Source: {self.source_db if is_clip else self.pbf_path}")
         console.print(f"  Output: {self.output_path}")
@@ -163,9 +156,6 @@ class DuckOSM:
         def get_mode_steps(mode):
             if is_clip:
                 steps = [("clip_mode", f"[{mode}] Clipping from parent", lambda: self._clip_mode(mode))]
-                if do_components:
-                    steps.append(("component_filter", f"[{mode}] Component clean-up",
-                                  lambda: self._component_filter(mode)))
                 steps.append(("create_indexes", f"[{mode}] Creating indexes", self._create_indexes))
                 if self.config.validation.enabled:
                     steps.append(("validate", f"[{mode}] Validating", lambda: self._validate(mode)))
@@ -224,10 +214,6 @@ class DuckOSM:
             if self.config.options.build_graph:
                 if not rust:          # rust: duckosm-rust made edge_graph and turn_permission (_rust_network loads them)
                     steps.append(("build_edge_graph", f"[{mode}] Building edge graph", lambda: self._build_edge_graph(mode)))
-                # Drop boundary-crossing stubs / fragments right after the graph is built (A3).
-                if do_components:
-                    steps.append(("component_filter", f"[{mode}] Component clean-up",
-                                  lambda: self._component_filter(mode)))
 
             if self.config.options.h3_indexing:
                 steps.append(("add_h3_indexing", f"[{mode}] Adding H3 indexing", self._add_h3_indexing))
@@ -677,44 +663,16 @@ class DuckOSM:
             self.stats['edge_graph_count'] = 0
         logger.info(f"  [{mode}] clipped in {time.time() - start:.2f}s")
 
-    # ---- ComponentFilter — drop boundary stubs / fragments (A3) -----------------------
-    def _component_filter(self, mode: str) -> None:
-        c = self.config.clip
-        ComponentFilter(self.con, keep_largest=c.keep_largest_component,
-                        min_component_edges=c.min_component_edges,
-                        connectivity_rescue=c.connectivity_rescue).run()
-        self.stats['edge_count'] = self.con.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
-        self.stats['node_count'] = self.con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-        try:
-            self.stats['edge_graph_count'] = self.con.execute(
-                "SELECT COUNT(*) FROM edge_graph").fetchone()[0]
-        except Exception:
-            pass
-        # If this mode produced an edge_id_map (merge_segments on a pbf build), prune rows
-        # whose merged edge was just removed, so the table only references live edges. A
-        # duckdb clip has no local edge_id_map (the unqualified name doesn't resolve to the
-        # attached parent's), so the query raises and we simply skip.
-        if self.config.options.merge_segments:
-            live = "(SELECT edge_id FROM edges UNION ALL SELECT edge_id FROM private_edges)"
-            try:
-                stale = self.con.execute(
-                    f"SELECT COUNT(*) FROM edge_id_map WHERE new_edge_id NOT IN {live}").fetchone()[0]
-            except Exception:
-                stale = 0
-            if stale:
-                self.con.execute(f"DELETE FROM edge_id_map WHERE new_edge_id NOT IN {live}")
-                logger.info(f"  edge_id_map: pruned {stale:,} row(s) for component-dropped edges")
-
     # ---- validation (C) ---------------------------------------------------------------
     def _validate(self, mode: str) -> None:
         from dataclasses import replace
 
         from duckosm.validate import Validator
         vcfg = self.config.validation
-        # "One connected network" only holds after ComponentFilter, which needs a boundary. A plain
-        # extract legitimately has islands and fragments, so don't fail it on them.
-        if not self._do_components and (vcfg.assert_single_component or vcfg.assert_no_stranded_named):
-            logger.info("  no component clean-up ran: skipping the single-component checks")
+        # There is no component filter (removed 2026-11-14: a road that does not connect to the main network is a real
+        # road), so a network can have separate parts: the single-component checks do not hold.
+        if vcfg.assert_single_component or vcfg.assert_no_stranded_named:
+            logger.info("  no component filter: skipping the single-component checks")
             vcfg = replace(vcfg, assert_single_component=False, assert_no_stranded_named=False)
         self.validation_results[mode] = Validator(self.con, mode, vcfg).run()
 

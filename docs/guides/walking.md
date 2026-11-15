@@ -56,7 +56,7 @@ The full rule: [`walk_type` and `cycle_type`](../concepts/networks.md#walk_type-
 ## Connector footways
 
 A footway that stops a few metres short of the street it leads to (common in OSM) would be a separate
-piece, and the [component filter](../concepts/cleanup.md#component-filter) would drop it. So the build
+piece of the network. So the build
 joins each dangling path end to the nearest node within `clip.connect_snap_m` (10 m) by a straight
 two-way **connector** edge: it has a negative `osm_id`, the path's `highway`, and no name. Its `edge_ref` is
 `{osm_id}#1f` or `{osm_id}#1r` (a connector has no way; since 2026-11-14 the number is always 1). Use `edge_id` as the key.

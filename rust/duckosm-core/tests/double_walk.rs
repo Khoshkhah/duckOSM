@@ -16,7 +16,6 @@ fn double_walk_gives_unique_keys_and_keeps_every_arc() {
     let ways = pbf::read_ways(&path).unwrap();
     let coords = pbf::read_coords(&path, &ways).unwrap();
     let opts = Options {
-        keep_largest_component: false,
         connect_paths: false,
         build_graph: false,
         extract_restrictions: false,

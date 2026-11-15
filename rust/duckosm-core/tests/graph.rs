@@ -1,7 +1,7 @@
 //! Golden test of the edge graph and the turn restrictions: every row of `edge_graph`, `turn_permission`,
 //! `turn_restrictions` and `turn_path_restrictions` must equal duckOSM (tests/data/monaco_graph_summary.tsv,
-//! made by tools/make_golden_graph.py). Variants: `sample` (no component filter) and `cut` (the cut file,
-//! with the component filter, which also prunes the graph tables).
+//! made by tools/make_golden_graph.py). Variants: `sample` (the sample file) and `cut` (the cut file). There is no
+//! component filter (removed 2026-11-14).
 
 use duckosm_core::filter::Mode;
 use duckosm_core::fixes::OsmFixes;
@@ -131,7 +131,6 @@ fn edge_graph_equals_duckosm() {
         let relations = pbf::read_restrictions(&path).unwrap();
         sidewalks::infer_separate_sidewalks(&mut ways, &coords);
         let opts = Options {
-            keep_largest_component: variant == "cut",
             ..Options::default()
         };
         for mode in [Mode::Driving, Mode::Walking, Mode::Cycling] {

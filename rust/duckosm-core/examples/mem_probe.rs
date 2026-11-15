@@ -109,7 +109,6 @@ fn main() {
             "ways" => opts.ways_tables = false,
             "connect" => opts.connect_paths = false,
             "speeds" => opts.process_speeds = false,
-            "component" => opts.keep_largest_component = false,
             _ => panic!("unknown step {s}"),
         }
     }

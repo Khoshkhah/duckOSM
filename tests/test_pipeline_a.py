@@ -1,5 +1,5 @@
 """
-Tests for the Workstream-A pipeline: config schema, ComponentFilter, the duckdb clip,
+Tests for the Workstream-A pipeline: config schema, the duckdb clip,
 and the Validator. Run: pytest tests/ -q
 """
 from pathlib import Path
@@ -8,7 +8,6 @@ import duckdb
 import pytest
 
 from duckosm import DuckOSM, Config
-from duckosm.processors import ComponentFilter
 from duckosm.validate import Validator, ValidationError
 
 # Clip a sub-area (Sodermalm) out of the country parent (Sweden); both must be built.
@@ -43,7 +42,7 @@ def test_config_backcompat_flat(tmp_path):
     assert c.effective_boundary_path == "/x/bnd.geojson"
 
 
-# ---- ComponentFilter unit ----------------------------------------------------------
+# ---- a toy graph: a triangle and one fragment ---------------------------------------
 def _toy_graph():
     con = duckdb.connect()
     con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT)")
@@ -54,23 +53,6 @@ def _toy_graph():
     con.executemany("INSERT INTO nodes VALUES (?)", [(1,), (2,), (3,), (10,), (11,)])
     con.executemany("INSERT INTO edge_graph VALUES (?,?)", [(1, 2), (2, 3), (3, 1)])
     return con
-
-
-def test_component_filter_keeps_largest():
-    con = _toy_graph()
-    ComponentFilter(con, keep_largest=True).run()
-    assert {r[0] for r in con.execute("SELECT edge_id FROM edges").fetchall()} == {1, 2, 3}
-    assert {r[0] for r in con.execute("SELECT node_id FROM nodes").fetchall()} == {1, 2, 3}
-
-
-def test_component_filter_noop_when_connected():
-    con = duckdb.connect()
-    con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT)")
-    con.execute("CREATE TABLE nodes(node_id BIGINT)")
-    con.executemany("INSERT INTO edges VALUES (?,?,?)", [(1, 1, 2), (2, 2, 3)])
-    con.executemany("INSERT INTO nodes VALUES (?)", [(1,), (2,), (3,)])
-    ComponentFilter(con, keep_largest=True).run()
-    assert con.execute("SELECT count(*) FROM edges").fetchone()[0] == 2
 
 
 # ---- Validator ---------------------------------------------------------------------

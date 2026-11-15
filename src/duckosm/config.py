@@ -87,8 +87,8 @@ class Boundary:
 class Clip:
     """Clip / clean-up behaviour."""
     predicate: str = "intersects"                  # 'within' | 'intersects' | 'centroid'
-    keep_largest_component: bool = True
-    min_component_edges: int = 1
+    keep_largest_component: bool = False          # no effect: the component filter is removed (2026-11-14); kept so
+    min_component_edges: int = 1                   #   that old config files load
     connectivity_rescue: bool = True               # reconnect dangling path ends (PathConnector,
     connect_snap_m: float = 10.0                   #   cycling/walking) within this many metres,
                                                    #   BEFORE the component filter. See docs/design/connectivity_repair.md

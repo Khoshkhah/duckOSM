@@ -22,8 +22,7 @@ def write_report(con, config, mode_stats, validation_results, out_dir="reports",
     L = [f"# duckOSM build report — {config.name}", "", f"_{ts}_", "",
          f"- **source:** {src}",
          f"- **boundary:** {config.effective_boundary_path or '(none)'}",
-         f"- **clip:** predicate={config.clip.predicate}, "
-         f"keep_largest={config.clip.keep_largest_component}",
+         f"- **clip:** predicate={config.clip.predicate}",
          f"- **output:** {config.get_db_path()}", ""]
 
     L += ["## Network", "", "| mode | nodes | edges | edge pairs |", "|---|---:|---:|---:|"]

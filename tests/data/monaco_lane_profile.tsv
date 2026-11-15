@@ -37,6 +37,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 117961209473327056	1	auto	3.25		lanes	default
 117961209473327056	2	auto	3.25		lanes	default
 117961209473327056	3	bus	3.25		bus:lanes	default
+118935547717866648	1	auto	2.5		default	default
 121967286512654816	1	auto	2.5		default	default
 123001168275082924	1	auto	3.25		lanes	default
 123001168275082924	2	auto	3.25		lanes	default
@@ -52,6 +53,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 142288263202139585	1	auto	2.5		default	default
 149344796554861879	1	auto	3.25		lanes	default
 154946805657390231	1	auto	2.5		default	default
+158115249890192757	1	auto	2.5		default	default
 159755135399679978	1	auto	3.0		default	default
 159996110915735691	1	auto	3.0		default	default
 160963475902278946	1	auto	3.25		lanes	default
@@ -137,6 +139,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 385840396625547864	2	auto	3.25	through;right	lanes	default
 385840396625547864	3	bus	3.25	right	bus:lanes	default
 387090547271984607	1	auto	2.5		default	default
+388717650819614537	1	auto	2.5		default	default
 392610531282331155	1	auto	3.25		lanes	default
 392610531282331155	2	auto	3.25		lanes	default
 396681478323367818	1	auto	2.5		default	default
@@ -251,12 +254,15 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 705869763492293757	2	auto	3.25		lanes	default
 708980966291442750	1	auto	3.25		default	default
 709754014091764063	1	auto	3.0		lanes	default
+713973644507520814	1	auto	2.5		lanes	default
 714141257573061206	1	auto	2.5		default	default
 714704296299533454	1	auto	3.25		lanes	default
 714704296299533454	2	auto	3.25		lanes	default
 719705155807117982	1	auto	3.25		lanes:forward	default
+724021601859958309	1	auto	2.5		default	default
 724721265073687287	1	auto	3.0		lanes	default
 724721265073687287	2	auto	3.0		lanes	default
+731254258735318832	1	auto	2.5		default	default
 734117257823766951	1	auto	2.5		default	default
 737267992927588470	1	auto	3.25		lanes	default
 741437380043375480	1	auto	2.5		default	default
@@ -307,11 +313,13 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 858818552680309172	2	auto	3.25		lanes	default
 864402735781277751	1	auto	2.5		default	default
 865820961103919638	1	auto	3.0		default	default
+868437141085101346	1	auto	2.5		default	default
 869298085223925875	1	auto	3.25		lanes	default
 870158222257259803	1	auto	3.0		default	default
 873124390920155704	1	auto	2.5		default	default
 880504162296525472	1	auto	3.25		lanes	default
 881254046189034953	1	auto	2.5		default	default
+882355720340356019	1	auto	2.5		default	default
 888491865088132172	1	auto	3.25		lanes	default
 888672248487049152	1	auto	3.0		lanes	default
 891974906457255037	1	auto	3.0		default	default
@@ -321,6 +329,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 904160407632897302	1	auto	3.0		default	default
 908826265278346607	1	auto	3.0		default	default
 911070484909725616	1	auto	3.25		default	default
+911791338311029017	1	auto	2.5		default	default
 914366600428968307	1	auto	3.0		default	default
 919814602536534482	1	auto	3.25		lanes	default
 919814602536534482	2	auto	3.25		lanes	default
@@ -343,6 +352,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 944138256546634740	1	auto	3.25		override	default
 947188845332131029	1	auto	3.0		default	default
 950078014165377197	1	auto	3.0		default	default
+956523696295017801	1	auto	2.5		default	default
 965441055896525791	1	auto	3.25		lanes	default
 966069190262710085	1	auto	3.25		lanes	default
 966069190262710085	2	auto	3.25		lanes	default
@@ -353,6 +363,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 998110968200733705	1	auto	2.5		default	default
 999690813046867954	1	auto	3.0		lanes	default
 999690813046867954	2	auto	3.0		lanes	default
+1003228148726728921	1	auto	2.5		default	default
 1014480835261600237	1	auto	2.5		default	default
 1015158544797938083	1	auto	3.0		default	default
 1016153299111353750	1	auto	3.25		lanes	default
@@ -442,6 +453,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1225218326172941109	1	auto	3.25		lanes	default
 1226718640989823383	1	auto	3.0		default	default
 1228292290400431732	1	auto	2.5		default	default
+1229152905131091589	1	auto	2.5		default	default
 1229460512471427821	1	auto	3.0		default	default
 1235334656631388024	1	auto	2.5		default	default
 1243113300905186350	1	auto	3.25		lanes	default
@@ -466,7 +478,9 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1321068486133258586	1	auto	3.25		lanes	default
 1321068486133258586	2	auto	3.25		lanes	default
 1321980391777030142	1	auto	3.25		lanes	default
+1322947156203963912	1	auto	2.5		default	default
 1325385454549137232	1	auto	2.5		default	default
+1329320727625939270	1	auto	2.5		default	default
 1330341413513048194	1	auto	3.25		lanes	default
 1330341413513048194	2	auto	3.25		lanes	default
 1333518427639274080	1	auto	3.0		default	default
@@ -481,6 +495,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1359267638904152430	1	auto	3.25		default	default
 1362434455375101910	1	auto	3.25		lanes	default
 1364816882230881988	1	auto	3.25		lanes	default
+1372061155207307157	1	auto	2.5		default	default
 1377413030288395690	1	auto	3.0		default	default
 1381900251770791456	1	auto	2.5		default	default
 1387848089544431036	1	auto	3.25		lanes	default
@@ -492,6 +507,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1408565068511621187	1	auto	3.25		lanes	default
 1409316893074793647	1	auto	2.5		default	default
 1414160931764889089	1	auto	3.25		lanes	default
+1415561014147558127	1	auto	2.5		default	default
 1419227462687756812	1	auto	3.25		lanes	default
 1422411122491537750	1	auto	3.0		default	default
 1422491509025301331	1	auto	2.5		default	default
@@ -533,12 +549,14 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1527582703904960819	1	auto	2.5		default	default
 1528673047989748295	1	auto	3.25		override	default
 1528673047989748295	2	auto	3.25		override	default
+1532741657374439235	1	auto	2.5		default	default
 1535954662373539450	1	auto	3.0		default	default
 1537130505807587284	1	auto	3.25		lanes	default
 1537962949460150608	1	auto	2.5		default	default
 1538428868168293671	1	auto	3.25		lanes	default
 1538428868168293671	2	auto	3.25		lanes	default
 1543206763704845843	1	auto	2.5		default	default
+1543610792770928757	1	auto	2.5		default	default
 1555280472872749652	1	auto	3.0		lanes	default
 1555931538770669019	1	auto	2.5		default	default
 1558850726329413629	1	bus,bike	3.25		access=bus	default
@@ -554,6 +572,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1581799883348443200	1	auto	2.5		default	default
 1582749754894075238	1	auto	3.0		lanes	default
 1584276371201569354	1	auto	2.5		default	default
+1592301377305037461	1	auto	2.5		default	default
 1598042004452774380	1	auto	3.25		lanes	default
 1608086005483754316	1	auto	3.0		default	default
 1612291915774872761	1	auto	3.25		lanes	default
@@ -644,6 +663,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1799958404106702646	2	auto	3.25		lanes	default
 1802375909071273993	1	auto	3.25		lanes	default
 1802375909071273993	2	auto	3.25		lanes	default
+1807922325428779987	1	auto	2.5		default	default
 1811232703591965861	1	auto	3.25		lanes	default
 1815970158996162474	1	auto	3.25		lanes	default
 1818757101784623649	1	auto	3.0		default	default
@@ -664,6 +684,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 1865599174209475141	1	auto	2.5		default	default
 1873918904400324117	1	auto	3.25		lanes	default
 1873918904400324117	2	auto	3.25		lanes	default
+1883299163845281902	1	auto	2.5		default	default
 1888480388218424267	1	auto	2.5		default	default
 1894154431404285583	1	auto	3.25		lanes	default
 1894154431404285583	2	auto	3.25		lanes	default
@@ -755,6 +776,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 2167298777750056771	1	auto	3.25		lanes	default
 2167453172655868788	1	auto	3.25		lanes	default
 2167698414107183954	1	auto	3.0		default	default
+2168920538790691660	1	auto	2.5		default	default
 2174434333461739237	1	auto	2.5		default	default
 2179780264819535765	1	auto	3.25		lanes	default
 2179780264819535765	2	bike	1.5		cycleway:left	default
@@ -858,6 +880,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 2469051189201888948	1	auto	3.25		lanes	default
 2469995853844811504	1	auto	3.25		lanes	default
 2469995853844811504	2	auto	3.25		lanes	default
+2470033665152579067	1	auto	2.5		default	default
 2471199761783104312	1	auto	3.25		lanes	default
 2474945659324246571	1	auto	3.25		default	default
 2475825239216953090	1	auto	3.25		lanes	default
@@ -882,7 +905,9 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 2535938243224741406	1	auto	3.25		default	default
 2538263188883542458	1	auto	2.5		default	default
 2541132207998222502	1	auto	3.25		lanes	default
+2541936865922704034	1	auto	2.5		default	default
 2542556389137454325	1	auto	3.0		default	default
+2543208435588567420	1	auto	2.5		default	default
 2543676326357542724	-1	bike	1.5		cycleway:left	default
 2543676326357542724	1	auto	3.25		override	default
 2546482901426675175	1	auto	3.0		default	default
@@ -890,9 +915,11 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 2552036231891965456	1	auto	2.5		default	default
 2569262511564654469	1	auto	3.25		override	default
 2575161502807982374	1	auto	3.0		default	default
+2577015424502726760	1	auto	2.5		default	default
 2580966967463885720	1	auto	3.0		default	default
 2581480092914313545	1	auto	3.25		lanes	default
 2581480092914313545	2	auto	3.25		lanes	default
+2582634340004875532	1	auto	2.5		default	default
 2582762173455593077	1	auto	2.5		default	default
 2590032737740753692	1	auto	2.5		default	default
 2590589090300032944	1	auto	2.5		default	default
@@ -1090,12 +1117,14 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3067634112700981612	1	auto	2.5		default	default
 3068316137670653917	1	auto	3.25		default	default
 3068557851347005206	1	auto	3.25		lanes	default
+3071442044997013300	1	auto	2.5		default	default
 3074861800604167979	1	auto	3.25		lanes	default
 3082223388288450367	1	auto	2.5		default	default
 3083733875249809118	1	auto	2.5		default	default
 3093664370798973039	1	auto	3.0		default	default
 3093731103555305308	1	auto	3.25		lanes	default
 3093731103555305308	2	auto	3.25		lanes	default
+3098229462847446218	1	auto	2.5		default	default
 3098607441654334746	1	auto	3.25		lanes	default
 3110413557578004952	1	auto	3.0		default	default
 3112057802772123029	1	auto	3.25		lanes	default
@@ -1125,6 +1154,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3188778506000426711	3	bus	3.25		bus:lanes	default
 3190567957391905090	1	auto	3.25		lanes	default
 3191147725841165314	1	auto	2.5		default	default
+3193102718446085390	1	auto	2.5		default	default
 3205295656055807425	1	auto	3.0		default	default
 3218657034163814070	1	auto	3.0		lanes	default
 3222472146265113367	1	auto	3.0		default	default
@@ -1194,6 +1224,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3399585615515935991	1	auto	3.0		default	default
 3402395417023900043	1	auto	3.0		default	default
 3412836942502034748	1	auto	3.0		default	default
+3414765930203749984	1	auto	2.5		default	default
 3414895065701028174	1	auto	3.0		default	default
 3422339530177534828	1	auto	3.25		default	default
 3423236874875376462	1	auto	3.0		default	default
@@ -1210,6 +1241,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3459788725061378812	1	auto	3.25		default	default
 3460809591179959329	1	auto	3.0		default	default
 3463003333066150830	1	auto	2.5		default	default
+3466284877961524006	1	auto	2.5		default	default
 3475904831742587585	-1	bike	1.5		cycleway:left	default
 3475904831742587585	1	auto	3.25		override	default
 3480868637772318977	1	auto	2.5		default	default
@@ -1299,6 +1331,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3674303117146091155	1	auto	3.25		lanes	default
 3674517061770703929	1	auto	3.0		lanes	default
 3676075566240499804	1	auto	2.5		default	default
+3678056443458726994	1	auto	2.5		default	default
 3681326347154723783	1	auto	3.0		lanes	default
 3690723472409782837	1	auto	3.0		default	default
 3693808359729079398	1	auto	3.0		default	default
@@ -1333,6 +1366,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3760634796994329314	1	auto	2.5		default	default
 3767783756924150458	1	auto	3.25		lanes	default
 3768834752050468355	1	auto	3.0		default	default
+3772415601017208072	1	auto	2.5		default	default
 3780408839713551492	1	auto	3.0		default	default
 3786867684105789333	1	auto	3.25		lanes	default
 3797392012450201256	1	auto	3.25		lanes	default
@@ -1390,8 +1424,10 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 3913629453411611233	2	auto	3.25		lanes	default
 3919409525166529991	1	auto	2.5		default	default
 3920805085146007772	1	auto	3.25		lanes	default
+3921359541093260601	1	auto	2.5		default	default
 3931608164352244913	1	auto	3.0		default	default
 3931993807544992114	1	auto	3.0		lanes	default
+3933357833940034199	1	auto	2.5		default	default
 3938845236502514300	1	auto	3.0		lanes	default
 3941187020397414765	1	auto	3.25		lanes	default
 3950001602810098236	1	auto	3.0		lanes	default
@@ -1454,9 +1490,11 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 4120674329184441281	1	auto	3.25		default	default
 4120758310456569551	1	auto	2.5		default	default
 4122062307773922383	1	auto	3.0		default	default
+4122800707123693085	1	auto	2.5		default	default
 4127218076324425743	1	auto	3.0		default	default
 4129441075697991258	1	auto	3.0		lanes	default
 4129868488753102446	1	auto	3.25		lanes	default
+4140675647788425484	1	auto	2.5		default	default
 4141553007490075358	1	auto	3.25		lanes	default
 4144528417581708804	1	auto	3.0		default	default
 4144780640515587036	1	auto	3.25		lanes	default
@@ -1532,6 +1570,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 4324461234045234277	2	auto	3.25		lanes	default
 4324893672096913088	1	auto	3.25		override	default
 4327361076952526657	1	auto	2.5		default	default
+4330711619382088012	1	auto	2.5		default	default
 4333364581405642127	1	auto	2.5		default	default
 4336894411156346251	1	auto	2.5		default	default
 4337440300683923957	1	auto	2.5		default	default
@@ -1557,6 +1596,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 4389651990194196532	1	auto	2.5		default	default
 4391905948768841137	-1	bike	1.5		cycleway:left	default
 4391905948768841137	1	auto	3.25		override	default
+4392244882855682264	1	auto	2.5		lanes	default
 4393267751415630996	1	auto	2.5		default	default
 4394827224625659348	1	auto	3.25		lanes	default
 4394827224625659348	2	auto	3.25		lanes	default
@@ -1579,6 +1619,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 4446531876724590798	1	auto	3.0		default	default
 4448599589166736185	1	auto	2.5		default	default
 4450017307412276292	1	auto	3.0		default	default
+4450977820084763191	1	auto	2.5		lanes	default
 4454987030486000106	1	auto	3.25		lanes	default
 4463208848038874759	1	auto	2.5		default	default
 4466960039917994567	1	auto	3.25		lanes	default
@@ -1700,6 +1741,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 4838832388047692273	1	auto	2.5		default	default
 4843612920002873773	1	auto	3.25		lanes	default
 4843612920002873773	2	auto	3.25		lanes	default
+4845350798251589378	1	auto	2.5		default	default
 4848907146573860505	1	auto	3.0		lanes	default
 4850130669052664592	1	auto	2.5		default	default
 4855004859987481377	1	auto	3.25		lanes	default
@@ -1753,6 +1795,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5016983444523391287	1	auto	3.0		lanes	default
 5017066609697625033	1	auto	2.5		default	default
 5017099476687054587	1	auto	2.5		default	default
+5017916442540349168	1	auto	2.5		default	default
 5019004804864670815	1	auto	2.5		default	default
 5023149404269492538	1	auto	3.0		lanes	default
 5024492528417430381	1	auto	3.25		default	default
@@ -1780,6 +1823,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5079107131206819024	2	auto	3.25		lanes	default
 5083055091365113006	1	auto	3.25		lanes	default
 5088399821437382308	1	auto	3.25		lanes	default
+5088997924353509607	1	auto	2.5		default	default
 5089237901774195521	1	auto	3.0		lanes	default
 5098925513654704276	1	auto	3.0		lanes	default
 5102307391493114951	1	auto	3.0		default	default
@@ -1801,6 +1845,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5175988465603681277	1	auto	3.25		lanes	default
 5175988465603681277	2	auto	3.25		lanes	default
 5176138583147887964	1	auto	3.0		lanes	default
+5179951773291948369	1	auto	2.5		default	default
 5180165389971495534	1	auto	2.5		default	default
 5186330589162632146	1	auto	3.25		lanes	default
 5189973269757150113	1	auto	3.25		lanes	default
@@ -1862,6 +1907,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5340398338975384639	1	auto	3.25		lanes	default
 5340398338975384639	2	auto	3.25		lanes	default
 5354665228199551258	1	auto	3.25		default	default
+5359137525415830248	1	auto	2.5		default	default
 5363193731633826163	1	auto	3.25		default	default
 5365047928821448717	1	auto	2.5		default	default
 5370967753545416495	1	auto	3.0		default	default
@@ -1935,6 +1981,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5555710363772627837	1	auto	3.0		default	default
 5556370620125868311	1	auto	2.5		default	default
 5557379715683012195	1	auto	3.25		lanes	default
+5561237187938468114	1	auto	2.5		default	default
 5561540451226229054	1	auto	2.5		default	default
 5562532128580679770	1	auto	3.25		lanes	default
 5562532128580679770	2	auto	3.25		lanes	default
@@ -2033,6 +2080,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5808244124459071078	1	auto	3.25		override	default
 5813992597564516063	1	auto	3.25		lanes	default
 5815696063697969641	1	auto	3.25		default	default
+5816593962646345559	1	auto	2.5		default	default
 5817021528118239363	1	auto	2.5		default	default
 5818342098081711304	1	auto	2.5		default	default
 5820772196102406213	1	auto	3.25		lanes	default
@@ -2076,6 +2124,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 5912145558485363266	2	auto	3.25		lanes	default
 5913147175817944632	1	auto	2.5		default	default
 5913427393055657666	1	auto	3.25		lanes	default
+5917551308752260687	1	auto	2.5		default	default
 5919841756031285917	1	auto	3.0		default	default
 5919936455939795787	1	auto	3.25		lanes	default
 5919936455939795787	2	auto	3.25		lanes	default
@@ -2110,6 +2159,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6027988514804199168	1	auto	2.5		default	default
 6038307046036893815	1	auto	3.25		lanes	default
 6038307046036893815	2	auto	3.25		lanes	default
+6038583751181547651	1	auto	2.5		default	default
 6040162945516136338	1	auto	3.0		lanes	default
 6040663642922123282	1	auto	2.5		default	default
 6042909771432702808	1	auto	2.5		default	default
@@ -2118,6 +2168,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6054795497362268102	1	auto	3.0		default	default
 6060733575719360271	1	auto	2.5		default	default
 6064217066215023778	1	auto	3.25		lanes	default
+6065385805695691052	1	auto	2.5		default	default
 6067987436051134790	-1	bike	1.5		cycleway:left	default
 6067987436051134790	1	auto	3.25		override	default
 6070542156354699189	1	auto	3.25		lanes	default
@@ -2153,11 +2204,13 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6151538631481475973	2	auto	3.25		lanes	default
 6152951255905628610	1	auto	3.25		lanes	default
 6153585189744180019	1	auto	2.5		default	default
+6154582516579999553	1	auto	2.5		default	default
 6161882622399081115	1	auto	3.0		default	default
 6162020628948431720	1	auto	3.25		lanes	default
 6162604291002855074	1	auto	3.25		lanes	default
 6162604291002855074	2	auto	3.25		lanes	default
 6163611581108870124	1	auto	2.5		default	default
+6168215571287501083	1	auto	2.5		default	default
 6175152869917260039	1	auto	3.25		lanes	default
 6179690766578184959	1	auto	3.25		lanes	default
 6183560506546505286	1	auto	3.25		lanes	default
@@ -2229,6 +2282,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6376053049418602994	1	auto	3.0		default	default
 6383643885887187607	1	auto	3.0		lanes	default
 6383838906579890272	1	auto	2.5		default	default
+6388159133746971991	1	auto	2.5		default	default
 6388189146100631683	1	auto	3.25		lanes	default
 6391139385112808331	1	auto	2.5		default	default
 6393101235245995104	1	auto	3.25		lanes	default
@@ -2249,6 +2303,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6461119145843727970	2	auto	3.25		lanes	default
 6461382838375370175	1	auto	2.5		default	default
 6464074193471371673	1	auto	2.5		default	default
+6464295572873660876	1	auto	2.5		default	default
 6465460889732664523	1	auto	3.25		lanes	default
 6467283554817943757	1	auto	3.25		lanes	default
 6471016024852816111	1	auto	3.0		lanes	default
@@ -2266,6 +2321,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6508648219454156655	1	auto	2.5		default	default
 6510378309703379727	1	auto	2.5		default	default
 6516247213304360547	1	auto	3.0		default	default
+6517145951945955505	1	auto	2.5		default	default
 6519077651312810624	1	auto	2.5		default	default
 6519325634902292705	1	bus,bike	3.25		access=bus	default
 6523180545609769502	1	auto	3.25		lanes	default
@@ -2315,6 +2371,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6695345905987404336	1	auto	2.5		default	default
 6698695809701357709	1	auto	3.0		default	default
 6700899584328286281	1	auto	3.25		lanes	default
+6701526382565930677	1	auto	2.5		default	default
 6701568710986270754	1	auto	3.25		lanes	default
 6701649005665231793	1	auto	3.25		lanes	default
 6706099820686405057	1	auto	2.5		default	default
@@ -2345,6 +2402,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6781222991584066620	1	auto	3.0		default	default
 6787870950695128883	1	auto	2.5		default	default
 6790468269529975099	1	auto	3.0		lanes	default
+6794938986885760391	1	auto	2.5		default	default
 6798481385593782808	1	auto	3.0		default	default
 6806535002958081959	1	auto	3.0		default	default
 6821518808383281247	1	auto	3.0		lanes	default
@@ -2363,6 +2421,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6840290356186749631	1	auto	3.25		override	default
 6840312105885860345	1	auto	3.25		turn:lanes	default
 6840312105885860345	2	auto	3.25		turn:lanes	default
+6844210252193723980	1	auto	2.5		default	default
 6845469329708596713	1	auto	2.5		default	default
 6849933335443340470	1	auto	2.5		default	default
 6853900689097371531	1	auto	2.5		default	default
@@ -2392,6 +2451,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 6937287093761992026	1	auto	3.0		lanes	default
 6940955918215331420	1	auto	3.0		default	default
 6943241378217367917	1	auto	3.0		lanes	default
+6944344967131339135	1	auto	2.5		default	default
 6944630067522518270	1	auto	2.5		default	default
 6945763477289400940	1	auto	3.25		default	default
 6958271442328299384	1	auto	2.5		default	default
@@ -2519,8 +2579,10 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 7273866584570309072	2	auto	3.25		lanes	default
 7275602958724860083	1	auto	3.25		lanes	default
 7280659046007168560	1	auto	2.5		default	default
+7287286783423687430	1	auto	2.5		default	default
 7289925443221819750	1	auto	3.0		lanes	default
 7289925443221819750	2	auto	3.0		lanes	default
+7291624173774995999	1	auto	2.5		default	default
 7292782317778957051	1	auto	3.0		default	default
 7295809653156366565	1	auto	3.25		lanes	default
 7300590346478903108	1	auto	3.25		lanes	default
@@ -2626,10 +2688,12 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 7614118802011337611	1	auto	3.0		default	default
 7616449695479495053	1	auto	3.25		lanes	default
 7618291773608956742	1	auto	2.5		default	default
+7623399721839246154	1	auto	2.5		default	default
 7628269788062719379	1	auto	3.0		lanes	default
 7631432005107543199	1	auto	2.5		default	default
 7632305058072581017	1	auto	3.25		lanes	default
 7632305058072581017	2	auto	3.25		lanes	default
+7635910646095699703	1	auto	2.5		default	default
 7637314395658553118	1	auto	3.25		lanes	default
 7638696142611586095	1	auto	3.0		default	default
 7641995826965147242	1	auto	3.0		lanes	default
@@ -2660,6 +2724,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 7695822510571346366	1	auto	2.5		default	default
 7698677324075453262	1	auto	2.5		default	default
 7701046226050569267	1	auto	2.5		default	default
+7706125935421020662	1	auto	2.5		default	default
 7706448958915874094	1	auto	3.0		lanes	default
 7708157182500422130	1	auto	3.25		lanes	default
 7711275638675367567	1	auto	3.0		lanes	default
@@ -2677,6 +2742,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 7769363170000806689	1	auto	2.5		default	default
 7771304124735034330	1	auto	3.25		lanes	default
 7774464944035231608	1	auto	3.0		default	default
+7777883395719990356	1	auto	2.5		default	default
 7780146155337283120	1	auto	3.25		lanes	default
 7780146155337283120	2	auto	3.25		lanes	default
 7788090607315947068	1	auto	3.25		lanes	default
@@ -2692,9 +2758,11 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 7822754974826947892	1	auto	3.0		lanes	default
 7823884330984973683	1	auto	3.25		lanes	default
 7824206785867943306	1	auto	3.0		default	default
+7829343528314546528	1	auto	2.5		lanes	default
 7830700882565362572	1	auto	3.0		lanes	default
 7835644015436298637	1	auto	2.5		default	default
 7840571072453823698	1	auto	3.0		default	default
+7845309509972021825	1	auto	2.5		default	default
 7845627592874373271	-1	bike	1.5		cycleway:left	default
 7845627592874373271	1	auto	3.25		override	default
 7857027310365362320	1	auto	2.5		default	default
@@ -2803,6 +2871,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8171152212052548045	2	auto	3.0		lanes	default
 8171963938793000669	1	auto	3.25		lanes	default
 8171963938793000669	2	auto	3.25		lanes	default
+8179923851411703625	1	auto	2.5		default	default
 8183245581790836528	1	auto	3.0		default	default
 8184630861726909272	1	auto	3.25		lanes	default
 8188845426224355667	1	auto	3.0		default	default
@@ -2845,6 +2914,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8300748526121474434	1	auto	3.0		default	default
 8314271038957821713	1	auto	2.5		default	default
 8315515182314187580	1	auto	3.25		lanes	default
+8317489802593839640	1	auto	2.5		default	default
 8325660732378124703	1	auto	3.25		default	default
 8330565246168888159	1	auto	2.5		default	default
 8331207236535283817	1	auto	3.0		default	default
@@ -2900,6 +2970,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8476358670469786838	1	auto	3.0		lanes	default
 8482586512085788712	1	auto	3.25		lanes	default
 8485133280722386811	1	auto	3.0		lanes	default
+8486633900392998636	1	auto	2.5		default	default
 8488654285087631610	1	auto	3.0		default	default
 8490008389062041083	1	auto	2.5		default	default
 8492544903544557585	1	auto	2.5		default	default
@@ -2910,6 +2981,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8503051478251022153	1	auto	3.25		lanes	default
 8503051478251022153	2	auto	3.25		lanes	default
 8504088024793476054	1	auto	2.5		default	default
+8508687976165259145	1	auto	2.5		default	default
 8509059931903630213	1	auto	3.0		default	default
 8511077704723192952	1	auto	3.25		lanes	default
 8511077704723192952	2	auto	3.25		lanes	default
@@ -3001,6 +3073,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8711468769333658946	1	auto	3.25		lanes	default
 8712072849873764081	1	auto	3.25		lanes	default
 8712819475740301807	1	auto	3.25		lanes	default
+8714967502144572528	1	auto	2.5		default	default
 8718266770123413429	1	auto	2.5		default	default
 8719781614524832000	1	auto	3.25		lanes	default
 8721717541947290005	1	auto	2.5		default	default
@@ -3011,6 +3084,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8736022299981707350	2	auto	3.0		lanes	default
 8741390742674121829	1	auto	3.0		default	default
 8746531075291633429	1	auto	2.5		default	default
+8755541392098999068	1	auto	2.5		default	default
 8760145545694236918	1	auto	2.5		default	default
 8762501756222688004	1	auto	3.25		default	default
 8765397283272432671	1	auto	3.25		override	default
@@ -3061,11 +3135,13 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8906576265362245977	1	auto	3.25		lanes	default
 8906576265362245977	2	auto	3.25		lanes	default
 8907271146738462822	1	auto	3.25		lanes	default
+8913197057833025474	1	auto	2.5		default	default
 8916659657627132871	1	auto	2.5		default	default
 8921886895987488554	1	auto	3.0		lanes	default
 8923861493234852412	1	auto	3.25		lanes	default
 8926363891897659009	1	auto	3.0		default	default
 8929524003438190649	1	auto	3.25		lanes	default
+8935820797990286015	1	auto	2.5		default	default
 8937460329981532926	-1	bike	1.5		cycleway:left	default
 8937460329981532926	1	auto	3.25		override	default
 8937472862412323508	1	auto	3.0		lanes	default
@@ -3102,10 +3178,12 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 8993529546903131248	1	auto	3.0		default	default
 8993795822535601294	1	auto	2.5		default	default
 8999811361802400555	1	auto	2.5		default	default
+9000571941736279728	1	auto	2.5		default	default
 9016406960254433115	1	auto	3.25		lanes	default
 9016406960254433115	2	auto	3.25		lanes	default
 9017901862526524083	1	auto	3.25		default	default
 9019969860153746593	1	auto	3.0		default	default
+9023065249849055477	1	auto	2.5		default	default
 9023827125338804578	1	auto	3.25		override	default
 9024736619607552890	1	auto	2.5		default	default
 9032603091700938334	1	auto	2.5		default	default
@@ -3148,6 +3226,7 @@ edge_id	lane_num	use	width_m	turn	source	width_source
 9147445596111506759	1	auto	3.0		default	default
 9150213122707059396	1	auto	3.0		default	default
 9153636109831415122	1	auto	3.0		default	default
+9157048450982847552	1	auto	2.5		default	default
 9163892447235779246	1	auto	3.0		default	default
 9164240563030343962	-1	bike	1.5		cycleway:left	default
 9164240563030343962	1	auto	3.25		override	default
