@@ -135,4 +135,11 @@ Checks: the tile files have the same elements as the old cut (Kentucky 142 tiles
 files are equal byte for byte; the build by tiles of Kentucky equals the whole build (41 tables, only the build times
 differ).
 
+Part 3 reads the relations three times. Each pass decodes only the ids, the member ids, the member types and whether
+the type is in the list of complete relations, into flat lists: no strings for the roles and the tags. With strings
+(France: 12 million roles in each pass, on all threads), part 3 in the browser took 128 s on a Windows laptop against
+15 s in headless Chromium on Linux (in WebAssembly one allocator serves all threads), and the WebAssembly memory grew
+to 2.6 GiB. With flat lists: France in headless Chromium, part 3 11.9 s, the cut 211.7 s against 233.7 s, the memory
+984 MiB against 2,659 MiB. The tile files and the junctions files do not change.
+
 The id files of step 3 are done (PR 197). The size of the tile files is done: full blocks for each tile.

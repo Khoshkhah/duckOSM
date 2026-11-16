@@ -350,31 +350,6 @@ impl Elem {
     }
 }
 
-/// The elements of a block, whole (all kinds that `decode_block` keeps).
-#[derive(Default)]
-struct All(Vec<Elem>);
-
-impl RawSink for All {
-    fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
-        let tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        self.0.push(Elem::Node(RawNode { id, lon, lat, tags }));
-    }
-    fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
-        let tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        self.0.push(Elem::Way(RawWay { id, tags, refs: refs.collect() }));
-    }
-    fn relation<'a>(
-        &mut self,
-        id: i64,
-        tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
-        members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
-    ) {
-        let tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        let members = members.map(|(m, t, r)| (m, t, r.to_string())).collect();
-        self.0.push(Elem::Relation(Relation { id, tags, members }));
-    }
-}
-
 /// The blobs of elements of one kind (sorted by id), BLOCK elements in each, as in a `.osm.pbf` file, each after a record
 /// (first id, last id, number of elements: 20 bytes). The elements move into the blocks (no copy).
 fn blobs(elems: Vec<Elem>, out: &mut Vec<u8>, raw: bool) -> Result<(), String> {
@@ -622,47 +597,72 @@ impl<'a> Blobs<'a> {
     }
 }
 
-/// The elements of a part file, one at a time, in the order of the file. The blocks are decoded on all threads, one
-/// block for each thread at a time (the relations of France: three passes of about 2 s each on one thread before).
-struct PartReader<'a> {
-    blobs: Blobs<'a>,
-    buf: std::collections::VecDeque<Elem>,
+/// The relations of a block with only what part 3 needs: the id, whether its type is in `complete`, and the members (id
+/// and type). No strings: the roles and the tags as strings (France: 12 million, in three passes on all threads) made
+/// part 3 in the browser 9 times slower on Windows (one allocator for all threads), with 500 MiB more memory each pass.
+struct RelMembers<'c> {
+    complete: &'c [&'c str],
+    /// id, type in `complete`, the end of its members in `members`
+    rels: Vec<(i64, bool, usize)>,
+    members: Vec<(i64, MemberType)>,
 }
 
-impl<'a> PartReader<'a> {
-    fn from(src: Src<'a>) -> PartReader<'a> {
-        PartReader { blobs: Blobs::from(src), buf: Default::default() }
+impl RelMembers<'_> {
+    fn iter(&self) -> impl Iterator<Item = (i64, bool, &[(i64, MemberType)])> + '_ {
+        let mut start = 0;
+        self.rels.iter().map(move |&(id, complete, end)| {
+            let m = &self.members[start..end];
+            start = end;
+            (id, complete, m)
+        })
     }
-    fn peek(&mut self) -> Result<Option<&Elem>, String> {
-        if self.buf.is_empty() {
-            // one block for each thread, and at most 32 MB of input: a block of relations holds thousands of member lists
-            // (4 blocks for each thread made part 3b of France peak at 1.6 GiB of heap)
-            let (mut blobs, mut bytes) = (Vec::new(), 0usize);
-            while blobs.len() < rayon::current_num_threads() && bytes < 32 << 20 {
-                match self.blobs.next()? {
-                    None => break,
-                    Some((_, _, _, blob)) => {
-                        bytes += blob.len();
-                        blobs.push(blob);
-                    }
+}
+
+impl RawSink for RelMembers<'_> {
+    fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
+    fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
+    fn relation<'a>(
+        &mut self,
+        id: i64,
+        tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
+        members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
+    ) {
+        let mut complete = false;
+        for (k, v) in tags {
+            complete |= k == "type" && self.complete.contains(&v);
+        }
+        self.members.extend(members.map(|(m, t, _)| (m, t)));
+        self.rels.push((id, complete, self.members.len()));
+    }
+}
+
+/// The relations of a part file in batches, in the order of the file: one block for each thread, and at most 32 MB of
+/// input (a block of relations holds thousands of member lists). The pool decodes a batch; `f` gets its blocks.
+fn rel_batches(src: Src<'_>, complete: &[&str], f: &mut dyn FnMut(&[RelMembers]) -> Result<(), String>) -> Result<(), String> {
+    let mut blobs = Blobs::from(src);
+    loop {
+        let (mut batch, mut bytes) = (Vec::new(), 0usize);
+        while batch.len() < rayon::current_num_threads() && bytes < 32 << 20 {
+            match blobs.next()? {
+                None => break,
+                Some((_, _, _, blob)) => {
+                    bytes += blob.len();
+                    batch.push(blob);
                 }
             }
-            let decoded: Vec<Vec<Elem>> = blobs
-                .par_iter()
-                .map_init(Buffers::default, |b, blob| {
-                    let mut all = All::default();
-                    decode_block(blob, [true; 3], b, &mut all)?;
-                    Ok(all.0)
-                })
-                .collect::<Result<_, String>>()?;
-            self.buf.extend(decoded.into_iter().flatten());
         }
-        Ok(self.buf.front())
-    }
-    /// The next elements as one batch (the blocks of one decode), in the order of the file.
-    fn next_batch(&mut self) -> Result<Option<Vec<Elem>>, String> {
-        self.peek()?;
-        Ok((!self.buf.is_empty()).then(|| self.buf.drain(..).collect()))
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let decoded: Vec<RelMembers> = batch
+            .par_iter()
+            .map_init(Buffers::default, |b, blob| {
+                let mut s = RelMembers { complete, rels: Vec::new(), members: Vec::new() };
+                decode_block(blob, [false, false, true], b, &mut s)?;
+                Ok(s)
+            })
+            .collect::<Result<_, String>>()?;
+        f(&decoded)?;
     }
 }
 
@@ -1386,43 +1386,12 @@ fn cut<R: Read + Seek + Send>(
     // 3. the relations with a member node inside a tile or a member way kept in a tile (only the members that the file
     // has: a run can hold the id of an element that the file does not have), their parents, and the members of the
     // multipolygons
-    // each relation of the file, in the order of the file: this thread reads the blocks, a batch of them is decoded on all
-    // threads, and `f` gets the relations here (one block at a time on this thread was most of this step)
-    let each_rel = |f: &mut dyn FnMut(Relation) -> Result<(), String>| -> Result<(), String> {
-        let mut blobs = Blobs::from(parts.reader(ALL, "relations.all"));
-        let n = 2 * rayon::current_num_threads();
-        loop {
-            let mut batch = Vec::with_capacity(n);
-            while batch.len() < n {
-                match blobs.next()? {
-                    Some((_, _, _, b)) => batch.push(b),
-                    None => break,
-                }
-            }
-            if batch.is_empty() {
-                return Ok(());
-            }
-            let decoded: Vec<Vec<Elem>> = batch
-                .par_iter()
-                .map_init(Buffers::default, |buf, b| {
-                    let mut all = All::default();
-                    decode_block(b, [true; 3], buf, &mut all)?;
-                    Ok(all.0)
-                })
-                .collect::<Result<_, String>>()?;
-            for e in decoded.into_iter().flatten() {
-                if let Elem::Relation(r) = e {
-                    f(r)?;
-                }
-            }
-        }
-    };
     let (mut member_nodes, mut member_ways) = (Vec::new(), Vec::new());
-    each_rel(&mut |r| {
-        for &(m, t, _) in &r.members {
+    rel_batches(parts.reader(ALL, "relations.all"), complete, &mut |batch| {
+        for (m, t) in batch.iter().flat_map(|b| b.members.iter()) {
             match t {
-                MemberType::Node => member_nodes.push(m),
-                MemberType::Way => member_ways.push(m),
+                MemberType::Node => member_nodes.push(*m),
+                MemberType::Way => member_ways.push(*m),
                 MemberType::Relation => {}
             }
         }
@@ -1444,43 +1413,40 @@ fn cut<R: Read + Seek + Send>(
     };
     let (mut direct, mut parents, mut multipolygons) = (Vec::new(), Vec::new(), Vec::new());
     // the relations of each batch on all threads (France: 3.5 s on one thread before), the results in the order of the file
-    let mut rd = PartReader::from(parts.reader(ALL, "relations.all"));
-    while let Some(batch) = rd.next_batch()? {
-        let found: Vec<(bool, Vec<u32>, Vec<i64>)> = batch
+    rel_batches(parts.reader(ALL, "relations.all"), complete, &mut |batch| {
+        let found: Vec<Vec<(Vec<u32>, Vec<i64>)>> = batch
             .par_iter()
-            .filter_map(|e| match e {
-                Elem::Relation(r) => Some(r),
-                _ => None,
-            })
-            .map(|r| {
-                // the tiles of this relation, with no doubles (a route has thousands of members in a few tiles)
-                let (mut tiles, mut children) = (Vec::new(), Vec::new());
-                for &(m, t, _) in &r.members {
-                    match t {
-                        MemberType::Node if node_members.binary_search(&m).is_ok() => tiles.extend(nodes.get(m)),
-                        MemberType::Way if way_members.binary_search(&m).is_ok() => way_tiles(m, &mut tiles),
-                        MemberType::Relation => children.push(m),
-                        _ => {}
-                    }
-                }
-                tiles.sort_unstable();
-                tiles.dedup();
-                (r.tags.iter().any(|(k, v)| k == "type" && complete.contains(&v.as_str())), tiles, children)
+            .map(|b| {
+                b.iter()
+                    .map(|(_, _, members)| {
+                        // the tiles of this relation, with no doubles (a route has thousands of members in a few tiles)
+                        let (mut tiles, mut children) = (Vec::new(), Vec::new());
+                        for &(m, t) in members {
+                            match t {
+                                MemberType::Node if node_members.binary_search(&m).is_ok() => tiles.extend(nodes.get(m)),
+                                MemberType::Way if way_members.binary_search(&m).is_ok() => way_tiles(m, &mut tiles),
+                                MemberType::Relation => children.push(m),
+                                _ => {}
+                            }
+                        }
+                        tiles.sort_unstable();
+                        tiles.dedup();
+                        (tiles, children)
+                    })
+                    .collect()
             })
             .collect();
-        let rels = batch.iter().filter_map(|e| match e {
-            Elem::Relation(r) => Some(r.id),
-            _ => None,
-        });
-        for (id, (multipolygon, tiles, children)) in rels.zip(found) {
-            if multipolygon {
-                multipolygons.push(id);
+        for (b, found) in batch.iter().zip(found) {
+            for ((id, multipolygon, _), (tiles, children)) in b.iter().zip(found) {
+                if multipolygon {
+                    multipolygons.push(id);
+                }
+                parents.extend(children.into_iter().map(|m| (m, id)));
+                direct.extend(tiles.into_iter().map(|t| (id, t)));
             }
-            parents.extend(children.into_iter().map(|m| (m, id)));
-            direct.extend(tiles.into_iter().map(|t| (id, t)));
         }
-    }
-    drop(rd);
+        Ok(())
+    })?;
     crate::util::step(&format!("tile cut 3b: the members in the file ({} nodes, {} ways)", node_members.len(), way_members.len()));
     drop((node_members, way_members));
     tidy(&mut direct);
@@ -1500,14 +1466,16 @@ fn cut<R: Read + Seek + Send>(
     crate::util::step(&format!("tile cut 3c: the tiles of the relations ({} pairs)", chosen.len()));
     // each chosen relation to its tiles; the members of the multipolygons with a member in a tile
     let mut more: Vec<(i64, u32)> = Vec::new();
-    each_rel(&mut |r| {
-        if multipolygons.binary_search(&r.id).is_ok() {
-            for t in tiles_in(&direct, r.id) {
-                for &(m, ty, _) in &r.members {
-                    match ty {
-                        MemberType::Node => outside.push(store, m, &Pair, &(m, t as i64)).map_err(io)?,
-                        MemberType::Way => more.push((m, t)),
-                        MemberType::Relation => {}
+    rel_batches(parts.reader(ALL, "relations.all"), complete, &mut |batch| {
+        for (id, multipolygon, members) in batch.iter().flat_map(|b| b.iter()) {
+            if multipolygon {
+                for t in tiles_in(&direct, id) {
+                    for &(m, ty) in members {
+                        match ty {
+                            MemberType::Node => outside.push(store, m, &Pair, &(m, t as i64)).map_err(io)?,
+                            MemberType::Way => more.push((m, t)),
+                            MemberType::Relation => {}
+                        }
                     }
                 }
             }
