@@ -101,11 +101,17 @@ relations. Parts 4b, 4 and 5 and the part files of the nodes, the ways and the r
 
 How read 2 works:
 
-- This thread reads the blocks and the extra rows of each block. The pool decodes each block, gives each element to
-  its tiles and packs the elements of each tile at once: no element waits across blocks. This thread writes the bytes
-  (in the browser the storage belongs to it). A buffer of elements for each tile across blocks took 5.4 GB on France.
-- An element for more than 8 tiles is packed one time, and its block goes to each tile. A copy for each tile held a
-  boundary of a country hundreds of times: 2 GB at the relations of France.
+- This thread reads the blocks and the extra rows of each block. The pool decodes each block and gives each element
+  to its tiles. The elements of a tile from one block go into one buffer of bytes (a chunk), not into an object with
+  strings and lists for each element. This thread collects the chunks of each tile until they hold a full block of
+  8,000 elements. The pool packs the full blocks while it decodes the next batch, and this thread writes them in the
+  order of the file (in the browser the storage belongs to it).
+- The collected chunks of all tiles hold 128 MB at most. Above it, the tiles that hold the most write their blocks
+  before they are full. Thus the memory does not grow with the number of tiles. (A buffer of element objects for each
+  tile, with no limit, took 5.4 GB on France.)
+- Before, each block of the input gave each tile its own block: France at zoom 8 had 4 million blocks of 1.3 KB on
+  average, and an element for more than 8 tiles had a block of its own (160,000 blocks of 4 nodes in one tile). The
+  files were 11.7% larger.
 - The lists of read 1 go as soon as read 2 is past them, and the allocator gives memory back between the passes.
 
 | | Old cut | Two reads |
@@ -116,9 +122,17 @@ How read 2 works:
 | Kentucky, the cut in the build by tiles | 4.9 s, 434 MB | 4.4 s, 356 MB |
 | France, the tile files on disk | 5.3 GB | 6.4 GB (smaller blocks compress less) |
 
+Full blocks for each tile (France, zoom 8, `tile_cut` example, native, two runs of each):
+
+| | Block for each input block | Full blocks |
+|---|---|---|
+| The cut | 85.8 s, 104.8 s; 1.25 to 1.30 GB | 77.4 s, 77.5 s; 1.25 to 1.32 GB |
+| The tile files | 5,133 MB, 4,023,977 blocks | 4,532 MB, 76,780 blocks |
+
+The tile files have the same elements (France 104 tiles, Kentucky 17 tiles).
+
 Checks: the tile files have the same elements as the old cut (Kentucky 142 tiles, France 1,311 tiles); the junctions
 files are equal byte for byte; the build by tiles of Kentucky equals the whole build (41 tables, only the build times
 differ).
 
-Open: the id files of step 3 (part 3b reads the blocks again: 6 s on France natively), and the size of the tile files
-(fewer, larger blocks for each tile).
+The id files of step 3 are done (PR 197). The size of the tile files is done: full blocks for each tile.
