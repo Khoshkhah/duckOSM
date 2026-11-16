@@ -142,4 +142,8 @@ the type is in the list of complete relations, into flat lists: no strings for t
 to 2.6 GiB. With flat lists: France in headless Chromium, part 3 11.9 s, the cut 211.7 s against 233.7 s, the memory
 984 MiB against 2,659 MiB. The tile files and the junctions files do not change.
 
+The steps of the cut, in the order that they run (the names that the cut prints): 1 the nodes inside, 2 the ways, 3a
+to 3d the relations, 4 the nodes from outside (read 1); 5a the nodes to the tiles, 5b and 5c the junctions files (the
+build by tiles only), 5d the ways, 5e the relations and the tile files (read 2).
+
 The id files of step 3 are done (PR 197). The size of the tile files is done: full blocks for each tile.

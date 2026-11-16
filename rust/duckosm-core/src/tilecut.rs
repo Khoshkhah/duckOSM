@@ -1520,11 +1520,11 @@ fn cut<R: Read + Seek + Send>(
         )?;
         err.map_or(Ok(()), Err).map_err(io)?;
     }
-    crate::util::step("tile cut 3: the relations and the members of the multipolygons");
+    crate::util::step("tile cut 3d: the members of the multipolygons");
     // 4. the nodes from outside the tiles, sorted; then read 2
     let buckets = outside.finish().map_err(io)?;
     let rows: usize = buckets.iter().map(|b| b.len).sum();
-    crate::util::step(&format!("tile cut 4a: the nodes from outside ({rows} rows, {} buckets)", buckets.len()));
+    crate::util::step(&format!("tile cut 4: the nodes from outside ({rows} rows, {} buckets)", buckets.len()));
     let mut sorted_parts = crate::spill::SortedParts::new(buckets, &Pair, |p: &(i64, i64)| *p);
     let (mut buf, mut at): (Vec<(i64, i64)>, usize) = (Vec::new(), 0);
     let mut sorted = std::iter::from_fn(move || loop {
@@ -1589,12 +1589,12 @@ fn cut<R: Read + Seek + Send>(
             let uses = uses.finish().map_err(io)?;
             let n_uses = uses.len;
             let uses = crate::spill::sorted(uses, |b| i64::from_le_bytes(b[..8].try_into().expect("8 bytes")), 64 << 20, store, &Use).map_err(io)?;
-            crate::util::step(&format!("tile cut 4c: the uses of the nodes, sorted ({n_uses} rows)"));
+            crate::util::step(&format!("tile cut 5b: the uses of the nodes, sorted ({n_uses} rows)"));
             home_nodes.sort_unstable();
             let uses = uses.map(|u| u.map(|(n, f)| (n, f as i64)));
             let outside = copy.take().expect("a copy for the junctions").finish().map_err(io)?;
             outside_junctions(outside.read(&Pair).map_err(io)?, uses, &home_nodes, &parts)?;
-            crate::util::step("tile cut 4d: the junctions files");
+            crate::util::step("tile cut 5c: the junctions files");
         }
         crate::util::trim_memory();
         let more_ref = &more;
@@ -1612,7 +1612,7 @@ fn cut<R: Read + Seek + Send>(
         )?;
         drop((ways, multi, more));
         crate::util::trim_memory();
-        crate::util::step("tile cut 5b: the ways to the tiles");
+        crate::util::step("tile cut 5d: the ways to the tiles");
         let chosen = &chosen;
         write::route_blocks(&mut r, &rel_blocks, 2, |_| Ok(Vec::new()), &|id, v: &mut Vec<u32>| v.extend(tiles_in(chosen, id)), with_file, &mut writers)?;
         let counts = writers.into_counts();
@@ -1624,7 +1624,7 @@ fn cut<R: Read + Seek + Send>(
                 }
             }
         }
-        crate::util::step("tile cut 5: the tile files");
+        crate::util::step("tile cut 5e: the relations, and the tile files");
         return Ok((counts, parts));
     }
 }
