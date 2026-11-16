@@ -1,7 +1,10 @@
 # Tile cut with two reads (proposal)
 
-Status: built, 2026-11-15 (`duckosm_core::tilecut`, read 2 in `tilecut/write.rs`). The id files of read 1 (step 3)
-are not built yet: part 3b still reads the node and way blocks again.
+Status: built, 2026-11-15. On 2026-11-16 the cut moved to the pbfcut library (`Khoshkhah/pbfcut`, its `tilecut`
+module). duckOSM depends on pbfcut by one pinned git `rev` (`rust/duckosm-core/Cargo.toml`), and `duckosm_core::tilecut`
+is a thin module: it keeps the names that duckOSM and Studio call and gives pbfcut duckOSM's rule of the junctions
+(`NodeUses`). The tile cut exists only in pbfcut. This document records the design and the measurements of the cut before
+the move. The section "Moved to pbfcut" at the end gives the check of the move.
 
 The tile cut (`duckosm_core::tilecut`) makes one `.osm.pbf` file for each map tile of one zoom. Each tile file is
 complete: all nodes of its ways, a border, and each multipolygon with all its members. The build by tiles

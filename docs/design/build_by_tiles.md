@@ -9,7 +9,9 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -
 
 ## The steps
 
-1. **Cut** (`tilecut::cut_to_tiles`, in its own process). One read of the region file gives one file for each standard map
+1. **Cut** (`tilecut::cut_to_tiles`, in its own process). The cut is the pbfcut library (`Khoshkhah/pbfcut`, pinned by a
+   git `rev` in `rust/duckosm-core/Cargo.toml`); `duckosm_core::tilecut` only keeps the names and gives pbfcut the rule of
+   the junctions (the `NodeUses` hook). One read of the region file gives one file for each standard map
    tile (`z_x_y.osm.pbf`) of the boundary. A tile file has the elements of the cut of the area to the tile: the nodes
    inside the area and in the tile, the ways with such a node (whole), and their relations. The list of tiles comes from
    one function, `tiles::tiles`. The cut completes the multipolygons of a tile with all their members (osmium's smart

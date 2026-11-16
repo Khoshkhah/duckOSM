@@ -132,8 +132,9 @@ same rows tile by tile:
    whole (with their nodes from other tiles), and each multipolygon and boundary relation whole (all its member ways and
    their nodes) in each tile with a member, as the cut of the build: each tile file is a complete, standard `.osm.pbf`
    (Kaveh's rule). With one zoom for all of France (zoom 11, 5 883 tiles), the copies of the large boundaries filled 32 GB
-   of temporary files; the quadtree has far fewer tiles. Natively the parts and the tile files are files in a temporary
-   folder; in the browser, chunks of one temporary file of OPFS (`tilecut::Chunks`), because the browser has no folders.
+   of temporary files; the quadtree has far fewer tiles. Natively the tile files are files in a temporary folder; in the
+   browser, chunks of one temporary file of OPFS, because the browser has no folders. The cut is the pbfcut library
+   (`docs/design/build_by_tiles.md`).
 3. **The rows of each tile.** `features_owned` runs on the file of each tile and keeps only the rows that the tile owns
    (`quack::Owner`), so each row comes one time:
    - a node: the tile of its place;
@@ -194,9 +195,8 @@ In the browser, a file in OPFS belongs to the thread that opened it. Thus Studio
 each step uses all the threads:
 
 1. The count of the nodes chooses the tiles.
-2. The cut (`tilecut::cut_to_sink`) writes one complete `.osm.pbf` file for each tile. The thread that owns the files
-   only writes; the threads of the pool decode, sort and make the tile files. In a tile file, each blob of the main
-   part with the extra elements in its range is one job, so one large tile also uses all the threads.
+2. The cut (`tilecut::cut_to_sink`, the pbfcut library) writes one complete `.osm.pbf` file for each tile. The thread
+   that owns the files only writes; the threads of the pool decode the blocks and pack the blocks of the tile files.
 3. A Web Worker for each thread makes the rows of one tile at a time (`quack_tile`). Each worker has its own
    WebAssembly module, its own memory and its own files, so the tiles do not wait for each other. A tile file is
    removed when its rows are made.
