@@ -19,19 +19,11 @@ use std::io::Write;
 use std::sync::Arc;
 
 pub struct ParWriter<W: Write + Send> {
-    /// natively: parquet's writer of the file
-    #[cfg(not(target_arch = "wasm32"))]
-    file: SerializedFileWriter<W>,
-    #[cfg(not(target_arch = "wasm32"))]
-    factory: ArrowRowGroupWriterFactory,
-    /// the browser: each batch of row groups is a small Parquet file in memory, and [`BigFile`] copies its row groups
-    /// into the file (parquet's writer counts the place in a `usize`, 32 bits in the browser: a file over 4 GiB had a
-    /// wrong footer)
-    #[cfg(target_arch = "wasm32")]
+    /// each batch of row groups is a small Parquet file in memory, and [`BigFile`] copies its row groups into the file:
+    /// parquet's writer counts the place in a `usize`, 32 bits in the browser, so a file over 4 GiB had a wrong footer.
+    /// The same path natively, so the browser and the computer write the same bytes.
     file: BigFile<W>,
-    #[cfg(target_arch = "wasm32")]
     parquet_schema: parquet::schema::types::TypePtr,
-    #[cfg(target_arch = "wasm32")]
     props: Arc<WriterProperties>,
     schema: SchemaRef,
     groups: usize,
@@ -51,18 +43,9 @@ impl<W: Write + Send> ParWriter<W> {
         add_encoded_arrow_schema_to_metadata(&schema, &mut props);
         let max_rows = props.max_row_group_row_count().unwrap_or(usize::MAX);
         let parquet_schema = ArrowSchemaConverter::new().with_coerce_types(props.coerce_types()).convert(&schema)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let file = SerializedFileWriter::new(out, parquet_schema.root_schema_ptr(), Arc::new(props))?;
-            let factory = ArrowRowGroupWriterFactory::new(&file, Arc::clone(&schema));
-            Ok(ParWriter { file, factory, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let file = BigFile::new(out).map_err(parquet::errors::ParquetError::General)?;
-            let (parquet_schema, props) = (parquet_schema.root_schema_ptr(), Arc::new(props));
-            Ok(ParWriter { file, parquet_schema, props, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
-        }
+        let file = BigFile::new(out).map_err(parquet::errors::ParquetError::General)?;
+        let (parquet_schema, props) = (parquet_schema.root_schema_ptr(), Arc::new(props));
+        Ok(ParWriter { file, parquet_schema, props, schema, groups: 0, pending: Vec::new(), rows: 0, max_rows, full: Vec::new(), at_once: 1 })
     }
 
     /// Add the rows of `batch`; each full row group is written.
@@ -104,12 +87,8 @@ impl<W: Write + Send> ParWriter<W> {
         if self.full.is_empty() {
             return Ok(());
         }
-        #[cfg(target_arch = "wasm32")]
         let mut mini = SerializedFileWriter::new(Vec::new(), self.parquet_schema.clone(), self.props.clone())?;
-        #[cfg(target_arch = "wasm32")]
         let (factory, first) = (ArrowRowGroupWriterFactory::new(&mini, Arc::clone(&self.schema)), 0);
-        #[cfg(not(target_arch = "wasm32"))]
-        let (factory, first) = (&self.factory, self.groups);
         let mut jobs = Vec::new();
         for (j, batches) in std::mem::take(&mut self.full).into_iter().enumerate() {
             let writers = factory.create_column_writers(first + j)?;
@@ -139,9 +118,6 @@ impl<W: Write + Send> ParWriter<W> {
             })
             .collect::<Result<_>>()?;
         let mut chunks = chunks.into_iter();
-        #[cfg(not(target_arch = "wasm32"))]
-        let file = &mut self.file;
-        #[cfg(target_arch = "wasm32")]
         let file = &mut mini;
         for n in columns {
             let mut group = file.next_row_group()?;
@@ -151,7 +127,6 @@ impl<W: Write + Send> ParWriter<W> {
             group.close()?;
             self.groups += 1;
         }
-        #[cfg(target_arch = "wasm32")]
         self.file.append(bytes::Bytes::from(mini.into_inner()?)).map_err(parquet::errors::ParquetError::General)?;
         Ok(())
     }
@@ -160,17 +135,12 @@ impl<W: Write + Send> ParWriter<W> {
     pub fn close(mut self) -> Result<()> {
         self.flush()?;
         self.write_full()?;
-        #[cfg(not(target_arch = "wasm32"))]
-        return self.file.close().map(|_| ());
-        #[cfg(target_arch = "wasm32")]
-        {
-            // no row group: the schema and the metadata of an empty file
-            if self.groups == 0 {
-                let empty = SerializedFileWriter::new(Vec::new(), self.parquet_schema.clone(), self.props.clone())?;
-                self.file.append(bytes::Bytes::from(empty.into_inner()?)).map_err(parquet::errors::ParquetError::General)?;
-            }
-            self.file.close().map(|_| ()).map_err(parquet::errors::ParquetError::General)
+        // no row group: the schema and the metadata of an empty file
+        if self.groups == 0 {
+            let empty = SerializedFileWriter::new(Vec::new(), self.parquet_schema.clone(), self.props.clone())?;
+            self.file.append(bytes::Bytes::from(empty.into_inner()?)).map_err(parquet::errors::ParquetError::General)?;
         }
+        self.file.close().map(|_| ()).map_err(parquet::errors::ParquetError::General)
     }
 }
 
@@ -269,9 +239,11 @@ mod tests {
     use arrow_schema::{DataType, Field, Schema};
     use parquet::arrow::ArrowWriter;
 
-    /// With one or more row groups at the same time, the file is the file of `ArrowWriter`.
+    /// With one or more row groups at the same time, the file is the same, and it has the rows, the row groups and the
+    /// key-value metadata of the file of `ArrowWriter` (not its bytes: the page indexes are not copied, see [`BigFile`]).
     #[test]
-    fn same_file_as_arrow_writer() {
+    fn same_rows_as_arrow_writer() {
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
         let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false), Field::new("s", DataType::Utf8, false)]));
         let batch = |from: i64, n: i64| {
             let a: ArrayRef = Arc::new(Int64Array::from_iter_values(from..from + n));
@@ -284,13 +256,23 @@ mod tests {
         let mut w = ArrowWriter::try_new(&mut want, schema.clone(), Some(props())).unwrap();
         batches.iter().for_each(|b| w.write(b).unwrap());
         w.close().unwrap();
+        let read = |b: &[u8]| {
+            let r = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::copy_from_slice(b)).unwrap();
+            let meta = r.metadata().clone();
+            let rows: Vec<RecordBatch> = r.build().unwrap().map(|x| x.unwrap()).collect();
+            let groups: Vec<i64> = meta.row_groups().iter().map(|g| g.num_rows()).collect();
+            (arrow_select::concat::concat_batches(&schema, &rows).unwrap(), groups, meta.file_metadata().key_value_metadata().cloned())
+        };
+        let want = read(&want);
+        let mut first: Option<Vec<u8>> = None;
         for k in [1, 3, 10] {
             let mut got = Vec::new();
             let mut w = ParWriter::try_new(&mut got, schema.clone(), Some(props())).unwrap();
             w.set_groups_at_once(k);
             batches.iter().for_each(|b| w.write(b).unwrap());
             w.close().unwrap();
-            assert!(got == want, "k = {k}");
+            assert!(read(&got) == want, "k = {k}: the rows, row groups or metadata differ from ArrowWriter");
+            assert!(first.get_or_insert_with(|| got.clone()) == &got, "k = {k}: another file than with k = 1");
         }
     }
 }
