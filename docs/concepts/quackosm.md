@@ -1,118 +1,65 @@
 # duckOSM and QuackOSM
 
-[QuackOSM](https://github.com/kraina-ai/quackosm) is a Python library that converts an `.osm.pbf` file into one table of
-features (GeoParquet or DuckDB). `duckosm-rust quack` writes the same table, with the same rows, from duckOSM's Rust
-engine: with no Python, faster, with less memory, and also in the browser.
-
-## Make the table
+[QuackOSM](https://github.com/kraina-ai/quackosm) turns an `.osm.pbf` file into one table of OSM features.
+`duckosm-rust quack` makes the **same table, with the same rows**: faster, with less memory, and also in the browser.
 
 ```bash
 duckosm-rust quack france.osm.pbf -o out --name france -f geoparquet,duckdb
 ```
 
-| Option | Does | Default |
-|---|---|---|
-| `-f, --format LIST` | `geoparquet`, `duckdb` (the table `main.quackosm`), or both in one pass | both |
-| `--no-sort` | keep the rows in the order in which they are made (QuackOSM `sort_result=False`) | sorted |
-| `--threads N` | the threads of the program and of DuckDB (QuackOSM `cpu_limit`) | all the cores |
-| `--tile-zoom Z` | make the table tile by tile, with the map tiles of zoom `Z` (zoom 8 for a country) | one run |
-
-The input must be sorted by type and id, as the files of Geofabrik are. In the browser, the
-[quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio makes the same table from a file on
-your computer; the file does not leave your computer.
-
-## How the approach differs
-
-| | QuackOSM | duckOSM |
-|---|---|---|
-| Engine | Python; each step is a DuckDB query that writes Parquet files for the next step | Rust; one pass of each step, with no files between the steps |
-| Read of the PBF file | DuckDB's `ST_READOSM` | its own decoder, all blocks in parallel, the file read two times |
-| The nodes of the ways | joins in DuckDB | buckets by node id on disk, each sorted in memory, so memory does not grow with the area |
-| Polygons | GEOS (DuckDB's spatial extension) | the pure-Rust libraries `geo` and `i_overlay` |
-| `.duckdb` output | writes the Parquet file first, then loads it | gives the rows to DuckDB's insert directly |
-| Large areas | one run | also tile by tile: the cut is the [pbfcut](https://github.com/Khoshkhah/pbfcut) library (one read gives one complete `.osm.pbf` for each map tile), each tile makes its rows alone, and the parts are joined |
-| Browser | not possible | the same Rust code as WebAssembly |
-
-Because duckOSM needs neither Python nor GEOS, the same code runs on a computer and in a browser. Tile by tile, the memory
-of each part follows the size of a tile, not of the area: in the browser, each tile has its own worker with its own
-4 GiB of memory.
-
-## What the table holds
-
-The same table as QuackOSM 0.20.0 with its default options: **one row for each OSM element with tags**.
-
-| Column | Type | Example |
-|---|---|---|
-| `feature_id` | text | `way/23614520` |
-| `tags` | `MAP(VARCHAR, VARCHAR)` | `{building=yes, name=Mairie}` |
-| `geometry` | GEOMETRY | the shape (rounded to 7 decimals) |
-
-| OSM element | Geometry |
+| Option | Does |
 |---|---|
-| node | POINT |
-| way | LINESTRING, or POLYGON when it is closed and is an area (for example `building`, `landuse`) |
-| relation `multipolygon` or `boundary` | POLYGON or MULTIPOLYGON |
+| `--no-sort` | do not sort the rows (faster) |
+| `--tile-zoom 8` | make the table tile by tile (for a country) |
 
-!!! note "Good to know"
-    - The metadata tags (`source`, `note`, `fixme`, `created_by` and some more) are left out. An element with no other
-      tag is not in the table.
-    - Sorted (the default), each part of the file holds one small area, so a query for a bounding box reads less.
-    - The table is for the analysis of OSM features (buildings, land use, points of interest). For a routable road
-      network, use `duckosm build`.
+In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio.
 
 ## Results
 
-**In short:** duckOSM makes the same table **3 to 7 times faster** than QuackOSM, with **2 to 5 times less memory**.
-In the browser, France takes **less than 5 minutes**, which QuackOSM cannot do at all.
+Mac mini (12 cores, 16 GB). duckOSM is **3 to 7 times faster** and needs **2 to 5 times less memory**.
 
-All runs: a Mac mini (12 cores, 16 GB), QuackOSM 0.20.0, Geofabrik files. Memory is the peak memory of all processes of
-the tool. "Browser" is Chromium on the same Mac mini, with Studio's
-[quack page](https://khoshkhah.github.io/duckosm-studio/quack.html).
-
-### France (5.1 GB, 99 million rows)
+### France (5.1 GB)
 
 | | QuackOSM | duckOSM | duckOSM in the browser |
 |---|---|---|---|
-| **Time**, GeoParquet | 9 min 30 s | **2 min 9 s** (4.4× faster) | 4 min 54 s |
-| **Time**, GeoParquet, sorted | 16 min 38 s | **2 min 30 s** (6.6× faster) | – |
-| **Time**, `.duckdb` | 11 min 18 s ¹ | **2 min 24 s** (4.7× faster) | – |
-| **Memory**, GeoParquet | 9.8 GB | **3.8 GB** | 6.9 GB ² |
+| Time | 9 min 30 s | **2 min 9 s** | 4 min 54 s |
+| Time, sorted | 16 min 38 s | **2 min 30 s** | – |
+| Memory | 9.8 GB | **3.8 GB** | 6.9 GB |
 
-### Kentucky (141 MB, 2.4 million rows)
+### Kentucky (141 MB)
 
 | | QuackOSM | duckOSM | duckOSM in the browser |
 |---|---|---|---|
-| **Time**, GeoParquet | 13.0 s | **3.1 s** (4.2× faster) | 7.1 s |
-| **Time**, GeoParquet, sorted | 13.7 s | **4.0 s** (3.4× faster) | 12.5 s |
-| **Memory**, GeoParquet | 5.8 GB | **1.2 GB** | – |
+| Time | 13.0 s | **3.1 s** | 7.1 s |
+| Time, sorted | 13.7 s | **4.0 s** | 12.5 s |
+| Memory | 5.8 GB | **1.2 GB** | – |
 
-"GeoParquet" is the output not sorted; "–" is not measured.
+The rows are the same: 99.9998 % of the 99 million France rows have an equal geometry, and the rest differ only in the
+last digits.
 
-1. QuackOSM finished only with a DuckDB memory limit of 8 GB; with its defaults, it failed on this computer.
-2. France in the browser goes tile by tile (zoom 8, 241 tiles): 1.2 GB in the page and 5.7 GB in 12 tile workers, each
-   with its own limit of 4 GB. The browser storage needs about 8 times the input file (39.8 GB).
+## How it differs
 
-**The rows are the same.** Kentucky: 2 393 139 rows in both, with the same ids and tags; 99.9994 % with an equal
-geometry. France: 99 412 535 rows in both, with the same ids and tags; 99.99983 % with an equal geometry. The other rows
-have the same area to 1.6e-7: points where two edges cross differ in their last digits.
+| | QuackOSM | duckOSM |
+|---|---|---|
+| Language | Python + DuckDB | Rust |
+| Steps | Parquet files between the steps | no files between the steps |
+| Polygons | GEOS | `geo`, `i_overlay` |
+| Large areas | one run | tile by tile, cut by [pbfcut](https://github.com/Khoshkhah/pbfcut) |
+| Browser | no | yes (WebAssembly) |
 
-## Where duckOSM is not better
+## The table
 
-- The `.duckdb` files are larger (France 22.3 GB against 19.7 GB): DuckDB 1.5.6 does not compress the geometry, and
-  DuckDB 2.0 does.
-- The sorted GeoParquet file of France is a little larger: 9.22 GB against 9.05 GB.
-- QuackOSM has options that duckOSM does not have: filters (tags, ids, SQL, a geometry), the download of extracts and the
-  geocoding of a place name, more than one input file, the tags as columns, the Hilbert sort, WKT output, the file
-  settings, its own polygon rules, a cache, and progress bars.
+| Column | Example |
+|---|---|
+| `feature_id` | `way/23614520` |
+| `tags` | `{building=yes, name=Mairie}` |
+| `geometry` | POINT, LINESTRING, POLYGON or MULTIPOLYGON |
 
-## Compare two tables
+One row for each OSM element with tags, as QuackOSM 0.20.0 with its default options.
 
-The example `quack_diff` compares two tables of this form row by row (GeoParquet, or a `.duckdb` file with
-`main.quackosm`); `--large` keeps only a fingerprint of each row, for files of a country:
+## Where QuackOSM is better
 
-```bash
-cargo run --release --manifest-path rust/Cargo.toml -p duckosm-duckdb --example quack_diff -- out/kentucky_quack.duckdb quackosm.parquet
-```
+- Its `.duckdb` file is smaller (France: 19.7 GB against 22.3 GB).
+- It has filters (tags, ids, a geometry) and more output options.
 
-The design and the measurements in full are in
-[docs/rust/quack.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/rust/quack.md).
+More details: [docs/rust/quack.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/rust/quack.md).
