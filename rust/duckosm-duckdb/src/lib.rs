@@ -212,9 +212,17 @@ pub fn write_ocean(db: &Path) -> Result<usize, String> {
     )
     .map_err(|e| format!("features.ocean: {e}"))?;
     let fetch = || -> Result<(String, Vec<Vec<u8>>), String> {
+        // the box of the boundary, or, in a build without one, of the nodes of the file (duckOSM ocean.area_box)
+        let has: i64 = con
+            .query_row("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = 'boundary'", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
         let (x0, y0, x1, y1): (f64, f64, f64, f64) = con
             .query_row(
-                "SELECT min(ST_XMin(geom)), min(ST_YMin(geom)), max(ST_XMax(geom)), max(ST_YMax(geom)) FROM main.boundary",
+                if has > 0 {
+                    "SELECT min(ST_XMin(geom)), min(ST_YMin(geom)), max(ST_XMax(geom)), max(ST_YMax(geom)) FROM main.boundary"
+                } else {
+                    "SELECT min(lon)::DOUBLE, min(lat)::DOUBLE, max(lon)::DOUBLE, max(lat)::DOUBLE FROM raw.nodes"
+                },
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )

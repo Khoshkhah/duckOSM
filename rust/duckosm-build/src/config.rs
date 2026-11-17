@@ -347,16 +347,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     } else {
         None
     };
-    // the base-map layers (features.*) run on raw.*, which this program has only for an area with a boundary
-    // a clip copies the tables of its parent: no base-map layers, bus routes, walls, H3 columns or DEM of its own (as in duckOSM)
-    let mut features = options.bool("build_features", true)? && !clip_src;
-    if features && !has_boundary {
-        skip(format!(
-            "options.build_features is on{}, but this program makes the base-map layers (features.*) only with a boundary (boundary.path)",
-            if options.get("build_features").is_none() { " by default" } else { "" }
-        ))?;
-        features = false;
-    }
+    // a clip copies the tables of its parent: no base-map layers, bus routes, walls, H3 columns or DEM of its own (as in duckOSM).
+    // Without a boundary the layers run on the raw.* of the whole file (the .duckdb output)
+    let features = options.bool("build_features", true)? && !clip_src;
     let sea = match options.get("sea") {
         None => Some("overture".to_string()),
         Some(Yaml::Boolean(false)) => None,
@@ -976,14 +969,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_need_strict_off() {
+    fn defaults_run_in_strict_mode() {
         let c = write(&format!("name: m\noutput_path: out\npbf_path: {}\n", pbf()));
-        let e = read(&c, false, true).unwrap_err();
-        // the base-map layers need a boundary: without one they are skipped (the H3 columns need nothing)
-        assert!(e.contains("build_features"), "{e}");
-        let r = read(&c, false, false).unwrap();
-        assert!(r.skipped.iter().any(|s| s.contains("build_features")));
-        assert!(!r.params.features && !r.params.sea);
+        // nothing is skipped: without a boundary the base-map layers run on the raw.* of the whole file
+        let r = read(&c, false, true).unwrap();
+        assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+        assert!(r.params.features && r.params.sea);
         assert_eq!(r.params.h3_resolution, Some(8));
         assert_eq!(r.params.name, "m");
         assert!(r.params.options.merge_segments);

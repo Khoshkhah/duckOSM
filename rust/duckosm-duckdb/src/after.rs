@@ -193,3 +193,104 @@ pub fn drop_multimodal(db: &Path) -> Result<(), String> {
     let con = Connection::open(db).map_err(err)?;
     con.execute_batch("DROP SCHEMA IF EXISTS mm CASCADE; CHECKPOINT;").map_err(err)
 }
+
+/// duckOSM `importer._raw_way_fixes`: the OSM fixes on the `raw.*` of the file (a build with no boundary: `read_osm` wrote
+/// them as the PBF has them). In duckOSM's order: `remove`, `keep_nodes` and `tags` of each rule, `extra.tag_edits`, then
+/// `new_ways` (only when all their OSM nodes are in the file). Run it after the network step has read `raw.*`: that step
+/// applies the fixes itself. Then the roads of the sidewalk rule (`sidewalks`, duckOSM `SeparateSidewalks`) get
+/// `sidewalk=separate` and `duckosm:sidewalk=inferred`. Last, duckOSM's `OSMOverrides` (per mode): the arrows of a rule (`turn_lanes_*`) as the tags
+/// `turn:lanes:*` of the raw way, once for each mode whose `ways` has it.
+pub fn raw_fixes(db: &Path, f: &duckosm_core::fixes::OsmFixes, sidewalks: &[i64], modes: &[&str]) -> Result<(), String> {
+    use duckosm_core::fixes::{Elem, NewNode};
+    let s = |x: &str| format!("'{}'", x.replace('\'', "''"));
+    let map = |kv: &[(String, String)]| {
+        format!(
+            "MAP([{}]::VARCHAR[], [{}]::VARCHAR[])",
+            kv.iter().map(|(k, _)| s(k)).collect::<Vec<_>>().join(", "),
+            kv.iter().map(|(_, v)| s(v)).collect::<Vec<_>>().join(", ")
+        )
+    };
+    let con = Connection::open(db).map_err(err)?;
+    let mut sql = String::new();
+    // tags_from: a way's OSM tags before any fix changes them
+    sql += "CREATE OR REPLACE TEMP TABLE fix_tags_from AS SELECT osm_id, tags FROM raw.ways WHERE osm_id IN (";
+    sql += &f.new_ways.iter().filter_map(|n| n.tags_from).map(|i| i.to_string()).chain(["NULL".to_string()]).collect::<Vec<_>>().join(", ");
+    sql += ");\n";
+    let removed: Vec<String> = f.ways.iter().filter(|r| r.remove).map(|r| r.osm_id.to_string()).collect();
+    if !removed.is_empty() {
+        sql += &format!("DELETE FROM raw.ways WHERE osm_id IN ({});\n", removed.join(", "));
+    }
+    for r in f.ways.iter().filter(|r| !r.remove) {
+        let id = r.osm_id;
+        if let Some((a, b)) = r.keep_nodes {
+            sql += &format!(
+                "UPDATE raw.ways SET refs = refs[list_position(refs, {a}):list_position(refs, {b})] WHERE osm_id = {id} AND list_position(refs, {a}) < list_position(refs, {b});\n"
+            );
+        }
+        if !r.tags.is_empty() {
+            sql += &format!("UPDATE raw.ways SET tags = map_concat(tags, {}) WHERE osm_id = {id};\n", map(&r.tags));
+        }
+    }
+    for e in &f.tag_edits {
+        let table = match e.elem {
+            Elem::Way => "ways",
+            Elem::Node => "nodes",
+            Elem::Relation => "relations",
+        };
+        let del = e.delete.iter().map(|k| s(k)).collect::<Vec<_>>().join(", ");
+        sql += &format!(
+            "UPDATE raw.{table} SET tags = map_from_entries(list_filter(map_entries(map_concat(coalesce(tags, MAP {{}}), {})), x -> NOT list_contains([{del}]::VARCHAR[], x.key))) WHERE osm_id = {};\n",
+            map(&e.set),
+            e.id
+        );
+    }
+    con.execute_batch(&sql).map_err(|e| format!("raw.* fixes: {e}"))?;
+    for n in &f.new_ways {
+        let osm: Vec<i64> = n.nodes.iter().filter_map(|x| if let NewNode::Osm(i) = x { Some(*i) } else { None }).collect();
+        let mut distinct = osm.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        let list = distinct.iter().map(i64::to_string).chain(["NULL".to_string()]).collect::<Vec<_>>().join(", ");
+        if count(&con, &format!("SELECT count(DISTINCT osm_id) FROM raw.nodes WHERE osm_id IN ({list})"))? < distinct.len() as i64 {
+            continue; // not in this area: nothing to add
+        }
+        let mut refs = Vec::new();
+        let mut sql = String::new();
+        for (pos, node) in n.nodes.iter().enumerate() {
+            match node {
+                NewNode::At((lon, lat)) => {
+                    let nid = n.id * 1000 + pos as i64 + 1;
+                    sql += &format!("INSERT INTO raw.nodes (osm_id, lat, lon) VALUES ({nid}, {lat:?}, {lon:?});\n");
+                    refs.push(nid);
+                }
+                NewNode::Osm(i) => refs.push(*i),
+            }
+        }
+        let from = n.tags_from.map_or("NULL".to_string(), |i| i.to_string());
+        let refs = refs.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
+        sql += &format!(
+            "INSERT INTO raw.ways SELECT {}, map_concat(coalesce((SELECT tags FROM fix_tags_from WHERE osm_id = {from}), MAP {{}}), {}), [{refs}]::BIGINT[];\n",
+            n.id,
+            map(&n.tags)
+        );
+        con.execute_batch(&sql).map_err(|e| format!("raw.* fixes, new way {}: {e}", n.id))?;
+    }
+    let mut sql = String::new();
+    if !sidewalks.is_empty() {
+        sql += &format!(
+            "UPDATE raw.ways SET tags = map_concat(tags, MAP {{'sidewalk': 'separate', 'duckosm:sidewalk': 'inferred'}}) WHERE osm_id IN ({});\n",
+            sidewalks.iter().map(i64::to_string).collect::<Vec<_>>().join(", ")
+        );
+    }
+    for m in modes {
+        for r in f.ways.iter().filter(|r| !r.arrows.is_empty() && !r.exclude_modes.iter().any(|x| x.name() == *m)) {
+            let id = r.osm_id;
+            sql += &format!(
+                "UPDATE raw.ways SET tags = map_concat(tags, {}) WHERE osm_id = {id} AND EXISTS (SELECT 1 FROM {m}.ways WHERE osm_id = {id});\n",
+                map(&r.arrows)
+            );
+        }
+    }
+    con.execute_batch(&sql).map_err(|e| format!("raw.* arrows: {e}"))?;
+    con.execute_batch("CHECKPOINT").map_err(err)
+}

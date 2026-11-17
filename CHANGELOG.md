@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`duckosm-rust --config`: the base-map layers without a boundary, and `duckosm-rust features-check`, are in Rust**
+  (`docs/design/all_in_rust.md`, group A). Without a boundary, the layers run on the `raw.*` of the whole file with duckOSM's
+  own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. The OSM fixes change `raw.*` first, as
+  duckOSM's `_raw_way_fixes` and the arrows of `OSMOverrides` do (`after::raw_fixes`). `features-check` (`rust/duckosm-build/src/
+  features_check.rs`) prints duckOSM's report; groups with equal keys come in the order of their names. On Monaco's whole sample
+  file, the 11 layers and the lines of the report equal the Python build (`tests/features_no_boundary.rs`). With this, every
+  key of a `duckosm build` config runs in `duckosm-rust --config` with no skip, except `viz.enabled` (the maps, group F).
+
+
 - **`duckosm-rust --config`: `source.type: duckdb` is in Rust** (`rust/duckosm-build/src/clip.rs`, `docs/design/all_in_rust.md`,
   group A). The build copies the rows of the parent database in the boundary, with `clip.predicate`, and then makes
   `main.boundary`, `main.visualization_metadata`, the drawing order, the indexes, the checks and the report. On Monaco
@@ -24,6 +33,7 @@
   effect on a build from a PBF, so they are no longer errors. On Monaco the tables, the indexes, `mm.transfers` and the results
   of the checks are equal to the Python build (`tests/after.rs`). The report counts the rows of the tables; the Python engine
   counts the edges before the private roads move to `private_edges`.
+
 
 - **The check page of a GIS export is in Rust**: `duckosm-rust gis-debug` writes the same page and the same `--json` as
   `duckosm gis-debug`. It reads the export through GDAL (DuckDB's `ST_Read`), not geopandas. The page template moved to
