@@ -53,7 +53,7 @@ Python CLI. The golden test (`rust/duckosm-export/tests/golden.rs`) compares eac
 | OpenDRIVE | `duckosm-rust opendrive` | Done. The same bytes as Python on Monaco and Tartu, with and without `--junctions`. A CRS that is not UTM or EPSG:3006 gets its proj4 text from PROJ's `projinfo` (pyproj uses the same PROJ function). |
 | MATSim lanes | `duckosm-rust matsim-lanes` | Done. The same bytes as Python on Monaco and Tartu. |
 | Lanelet2 | | Not started. It needs the offset line of shapely (GEOS): see group C. |
-| SUMO | | Not started. |
+| SUMO | `duckosm-rust sumo` | Done for the command. The plain XML and the `.netccfg`: the same bytes as Python on Monaco (three modes) and Tartu; the `.net.xml` of netconvert: the same but its header comment. Also the second netconvert pass of the turn permissions. The parts of the Python API for GMNS (`gmns_sumo`: the join of nodes, the turn arrows, `bus_edges`, `edge_attrs`, `lanes`) move with group C. |
 
 The exports of a GMNS db read the test tables of `tests/data/exports/gmns_driving/` (the columns that they read, as
 Parquet), until group C makes the GMNS db in Rust.

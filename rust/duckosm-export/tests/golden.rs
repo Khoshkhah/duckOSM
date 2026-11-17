@@ -169,3 +169,15 @@ fn matsim_lanes_equals_python() {
         same(&d.join(format!("{f}.xml")), &format!("matsim_lanes_{f}.xml.gz"));
     }
 }
+
+#[test]
+fn sumo_equals_python() {
+    for m in ["driving", "walking"] {
+        let d = out(&format!("sumo_{m}"));
+        let s = duckosm_export::sumo::to_sumo(db(), &d, m, "monaco", true, None, false).unwrap();
+        assert!(s.net.is_none() && s.con.is_some());
+        for f in ["nod", "edg", "con"] {
+            same(&d.join(format!("monaco.{f}.xml")), &format!("sumo_{m}.{f}.xml.gz"));
+        }
+    }
+}
