@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 7] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo"];
+pub const COMMANDS: [&str; 8] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -141,6 +141,19 @@ enum Cmd {
         #[arg(long)]
         no_netconvert: bool,
     },
+    /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
+    /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
+    /// the lanelet2 library, not a survey-grade HD map.
+    Lanelet2 {
+        /// The GMNS database.
+        gmns_db: PathBuf,
+        /// The GMNS mode schema.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// The output .osm (default: <name>.lanelet2.osm).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
     /// Export a railML 2.4 rail infrastructure file from a built duckOSM db: the railway ways of the raw OSM, cut into
     /// tracks with their topology, switches, signals and stations (OCPs).
     Railml {
@@ -252,6 +265,14 @@ pub fn run(args: &[String]) -> Result<()> {
             } else {
                 println!("wrote {} — open in a browser", out.display());
             }
+        }
+        Cmd::Lanelet2 { gmns_db, mode, out } => {
+            if !gmns_db.exists() {
+                return Err(format!("{}: no such file", gmns_db.display()));
+            }
+            let out = out.unwrap_or_else(|| format!("{}.lanelet2.osm", stem(&gmns_db)).into());
+            let s = crate::lanelet2::to_lanelet2(&gmns_db, &out, &mode, 0.01)?;
+            println!("wrote {} — {} lanelets, {} boundary ways, {} nodes", out.display(), s.lanelets, s.ways, s.nodes);
         }
         Cmd::Railml { db, out } => {
             check_db(&db)?;

@@ -18,6 +18,7 @@ import duckdb
 
 from duckosm.gis import to_gis
 from duckosm.gis_debug import write_debug
+from duckosm.lanelet2 import to_lanelet2
 from duckosm.matsim import to_matsim
 from duckosm.matsim_lanes import to_matsim_lanes
 from duckosm.opendrive import to_opendrive
@@ -112,6 +113,8 @@ def main(db, out, gmns=None):
         gmns_db(out, g)
         to_opendrive(g, tmp / "monaco_junctions.xodr", junctions=True)
         to_matsim_lanes(g, tmp / "ml")
+        to_lanelet2(g, tmp / "monaco.lanelet2.osm")
+        gz(tmp / "monaco.lanelet2.osm", out / "monaco.lanelet2.osm.gz")
         to_opendrive(db, tmp / "monaco.xodr")
         for f in ("monaco_junctions.xodr", "monaco.xodr"):
             gz(tmp / f, out / f"{f}.gz")
