@@ -16,6 +16,7 @@ use levels::LevelEdges;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+pub mod after;
 pub mod area;
 pub mod config;
 pub mod elevation;
@@ -114,6 +115,9 @@ pub struct Params {
     /// (docs/design/streaming_load.md). None: DuckDB's defaults (80% of the RAM, all cores).
     pub memory_limit: Option<String>,
     pub threads: Option<usize>,
+    /// The steps on the `.duckdb` file after the tables (after.rs): the multimodal costs, the build checks, the report.
+    /// The indexes are always made.
+    pub after: after::After,
 }
 
 impl Default for Params {
@@ -151,6 +155,7 @@ impl Default for Params {
             h3_resolution: None,
             features: false,
             sea: false,
+            after: after::After::default(),
         }
     }
 }
@@ -2088,6 +2093,8 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                     sum.files.retain(|(k, _)| !k.starts_with("raw_"));
                 }
             }
+            after::run(&db, &p.name, &names, &p.after)?;
+            log.step("indexes and checks");
             sum.files.push(("duckdb".to_string(), db));
         }
         Ok(sum)

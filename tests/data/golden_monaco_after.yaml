@@ -1,0 +1,28 @@
+# The build of the golden files of rust/duckosm-build/tests/after.rs (duckOSM, the Python engine, 2026-11-17):
+# tests/data/monaco_validation.md is the section "## Validation" of the report, and the test has the MD5 of mm.transfers.
+# Run from the repository root: duckosm build --config tests/data/golden_monaco_after.yaml
+name: monaco
+output_path: /tmp/golden_after
+source:
+  type: pbf
+  pbf_path: data/sample/monaco.osm.pbf
+boundary:
+  path: data/sample/monaco.geojson
+modes: [driving, walking, cycling]
+options:
+  sea: false
+  engine: python
+  levels: false
+  build_features: false
+  bus_routes: false
+clip:
+  min_component_edges: 5
+validation:
+  enabled: true
+report:
+  enabled: true
+multimodal:
+  enabled: true
+  transfer_s: 45
+  transfer_costs:
+    walking->driving: 90

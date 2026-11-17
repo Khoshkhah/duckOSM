@@ -46,7 +46,7 @@ rust/target/release/duckosm-rust edit my_area.duckdb                   # the pag
 rust/target/release/duckosm-rust quack my_area.osm.pbf -o out          # the features table of QuackOSM
 ```
 
-`--allow-skipped` lets the build go on when the config asks for a step that only Python has (for example the base-map layers).
+`--allow-skipped` lets the build go on when the config asks for a step that only Python has (for example the maps, `viz.enabled`).
 `duckosm-rust --help` lists all the options.
 `duckosm-rust quack` makes the features table of QuackOSM, with the same rows: see [duckOSM and QuackOSM](quackosm.md).
 
