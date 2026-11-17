@@ -129,10 +129,12 @@ pub fn missing_polygons(db: &std::path::Path) -> Result<Vec<Group>, String> {
             }
         }
     }
+    // duckOSM's order; the groups with equal keys come in the order of DuckDB's GROUP BY there (no fixed order), here by name
     out.sort_by(|a, b| {
         (a.reason.is_some(), -a.area_m2, -(a.ways + a.relations))
             .partial_cmp(&(b.reason.is_some(), -b.area_m2, -(b.ways + b.relations)))
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.group.cmp(&b.group))
     });
     Ok(out)
 }

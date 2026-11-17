@@ -227,8 +227,9 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
     up in the borders of the PBF (GDAL in DuckDB's spatial extension, as `ogr2ogr` does), then on Nominatim.
     `options.boundary_cells` makes `main.boundary_cells`. The H3 cells come from `h3o`: their outlines differ from
     those of the H3 C library by about 1e-14 degrees.
-  - A duckOSM step that the program does not have (the maps; the base-map layers when there is no boundary) is an
-    error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
+  - Without a boundary, the base-map layers run on the `raw.*` of the whole file (`read_osm`), with duckOSM's own
+    `geom.way_line` (`features_sql_from_raw`). `duckosm-rust features-check <db>` is duckOSM's `features-check`.
+  - A duckOSM step that the program does not have (the maps, `viz.enabled`) is an error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
     (CLI `--allow-skipped`). The result then lists them under `skipped`.
   - Keys that only tune DuckDB in duckOSM (`memory_limit`, `threads`, `simplify_batches`, `clip_strategy`) have no effect. The result lists them under `ignored`.
 - Python duckOSM can later call this API with a config option `engine: rust`. Rust then builds the
