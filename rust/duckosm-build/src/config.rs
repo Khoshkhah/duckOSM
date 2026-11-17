@@ -166,7 +166,7 @@ fn section<'a>(root: &'a yaml_rust2::yaml::Hash, name: &'a str) -> Result<Sectio
 /// Read the config file. `pbf_is_cut`: the PBF is already cut to the boundary of the config (this
 /// program does not cut). `strict`: a duckOSM step that this program does not have is an error.
 pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = duckosm_core::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let docs = YamlLoader::load_from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let empty = yaml_rust2::yaml::Hash::new();
     let root = match docs.first() {
@@ -472,7 +472,7 @@ const TURN_TYPES: [&str; 10] = [
 /// Read a duckOSM OSM fixes file (`osm_overrides`). The rules for the arrows of the lanes and the
 /// `turn_restrictions` give extra turn restrictions (the driving mode).
 pub fn read_osm_fixes(path: &Path) -> Result<OsmFixes, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = duckosm_core::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     parse_osm_fixes(&text, &path.display().to_string())
 }
 

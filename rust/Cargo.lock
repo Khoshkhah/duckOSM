@@ -1828,8 +1828,8 @@ dependencies = [
 
 [[package]]
 name = "pbfcut"
-version = "0.1.0"
-source = "git+https://github.com/Khoshkhah/pbfcut.git?rev=8e565be800fac2ef6e1422cece95e766ba866516#8e565be800fac2ef6e1422cece95e766ba866516"
+version = "0.2.2"
+source = "git+https://github.com/Khoshkhah/pbfcut.git?rev=b844e630a8dbe59e9853d92cffac7cac3d111a79#0c43647cee6702d8ad9d5b7dc1d4fb4308cdfcd4"
 dependencies = [
  "flate2",
  "h3o",
