@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The sorted join of quack by tiles keeps less on the disk.** `quack_join_to` drops each part when it has read all its rows,
+  so the caller can delete the file of the part before the join ends (the browser does). The sort writes the pieces of each
+  strip over the pieces of the strip before, so its temporary file holds one strip, not all of them. Sweden in Chromium: the
+  temporary file of the join went to 3.8 GB before.
+
 - **The sorted quack by tiles: each tile sorts its rows, and the join merges the sorted parts** (`docs/rust/quack.md`, "The
   sort tile by tile"). `quack_tile_to` gets `sort`: the part has its rows in the order (x, y, row number), in row groups of 2 048
   rows. `quack_join_to` merges the parts with a heap and makes QuackOSM's strips with no runs on disk, and it gives its progress.

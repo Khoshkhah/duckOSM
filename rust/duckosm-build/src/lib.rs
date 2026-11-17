@@ -1733,7 +1733,8 @@ pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
 /// the parts are copied as bytes, one part at a time. With `sort` (parts made with `sort`), the parts are merged in the
 /// order (x, y, part), which is the order (x, y, row number) of all rows, with one small row group of each part in memory;
 /// then `duckosm_core::quack::StrSort::merged` makes QuackOSM's strips. `progress(merged rows, all rows)` comes after each
-/// 100 000 rows of the merge. Gives the number of rows.
+/// 100 000 rows of the merge. Each part is dropped when the join has read all its rows, so a caller can then delete
+/// its file. Gives the number of rows.
 pub fn quack_join_to<R: Read + std::io::Seek, W: Write + Send>(
     parts: Vec<R>,
     out: W,
@@ -1753,21 +1754,26 @@ pub fn quack_join_to<R: Read + std::io::Seek, W: Write + Send>(
     }
     let mut parts = parts
         .into_iter()
-        .map(SortedPart::open)
+        .map(|p| SortedPart::open(p).map(Some))
         .collect::<Result<Vec<_>, _>>()?;
-    let total: usize = parts.iter().map(|p| p.rows()).sum();
-    let mut heap: std::collections::BinaryHeap<_> = parts
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| p.key().map(|k| Reverse((k, i))))
-        .collect();
+    let total: usize = parts.iter().flatten().map(|p| p.rows()).sum();
+    let mut heap = std::collections::BinaryHeap::new();
+    for (i, p) in parts.iter_mut().enumerate() {
+        match p.as_ref().and_then(|p| p.key()) {
+            Some(k) => heap.push(Reverse((k, i))),
+            None => *p = None,
+        }
+    }
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
     let mut merged = 0;
     let next = |seq: u64, row: &mut Vec<u8>| {
         let Some(Reverse((_, i))) = heap.pop() else { return Ok(false) };
-        parts[i].put(seq, row)?;
-        if let Some(k) = parts[i].key() {
-            heap.push(Reverse((k, i)));
+        let p = parts[i].as_mut().expect("a part in the heap is open");
+        p.put(seq, row)?;
+        match p.key() {
+            Some(k) => heap.push(Reverse((k, i))),
+            // all rows of the part are read: drop it (its reader)
+            None => parts[i] = None,
         }
         merged += 1;
         if merged % 100_000 == 0 || merged == total {
