@@ -1466,15 +1466,49 @@ pub fn read_wkb(b: &[u8]) -> Option<geo::Geometry> {
     }
 }
 
-/// [`Feature::center`] of a row from its WKB (the same numbers: the middle of the box of its points).
+/// [`Feature::center`] of a row from its WKB (the same numbers: the middle of the box of its points). It reads the
+/// points in place, with no geometry in memory (the merge of the sorted parts gets the center of each row).
 pub fn wkb_center(b: &[u8]) -> Option<Pt> {
-    use geo::CoordsIter;
-    let g = read_wkb(b)?;
-    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for c in g.coords_iter() {
-        (x0, y0, x1, y1) = (x0.min(c.x), y0.min(c.y), x1.max(c.x), y1.max(c.y));
+    struct Bx(f64, f64, f64, f64);
+    fn u32_at(b: &[u8], at: &mut usize) -> Option<u32> {
+        let v = u32::from_le_bytes(b.get(*at..*at + 4)?.try_into().ok()?);
+        *at += 4;
+        Some(v)
     }
-    Some(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+    fn points(b: &[u8], at: &mut usize, n: u32, bx: &mut Bx) -> Option<()> {
+        let end = *at + 16 * n as usize;
+        for c in b.get(*at..end)?.chunks_exact(16) {
+            let (x, y) = (f64::from_le_bytes(c[..8].try_into().unwrap()), f64::from_le_bytes(c[8..].try_into().unwrap()));
+            *bx = Bx(bx.0.min(x), bx.1.min(y), bx.2.max(x), bx.3.max(y));
+        }
+        *at = end;
+        Some(())
+    }
+    fn polygon(b: &[u8], at: &mut usize, bx: &mut Bx) -> Option<()> {
+        *at += 5;
+        for _ in 0..u32_at(b, at)? {
+            let n = u32_at(b, at)?;
+            points(b, at, n, bx)?;
+        }
+        Some(())
+    }
+    let mut bx = Bx(f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    let mut at = 5;
+    match u32::from_le_bytes(b.get(1..5)?.try_into().ok()?) {
+        1 => points(b, &mut at, 1, &mut bx)?,
+        2 => {
+            let n = u32_at(b, &mut at)?;
+            points(b, &mut at, n, &mut bx)?
+        }
+        3 => polygon(b, &mut 0, &mut bx)?,
+        6 => {
+            for _ in 0..u32_at(b, &mut at)? {
+                polygon(b, &mut at, &mut bx)?;
+            }
+        }
+        _ => return None,
+    }
+    Some(((bx.0 + bx.2) / 2.0, (bx.1 + bx.3) / 2.0))
 }
 
 /// The rows of a row group of the GeoParquet file, as in QuackOSM.
@@ -1541,21 +1575,34 @@ struct Numbered;
 
 impl Numbered {
     fn put_row(i: u64, f: &Feature, o: &mut Vec<u8>) {
-        let s = |o: &mut Vec<u8>, b: &[u8]| {
-            o.extend_from_slice(&(b.len() as u32).to_le_bytes());
-            o.extend_from_slice(b);
-        };
-        o.extend_from_slice(&i.to_le_bytes());
-        o.extend_from_slice(&f.center.0.to_le_bytes());
-        o.extend_from_slice(&f.center.1.to_le_bytes());
-        s(o, f.feature_id.as_bytes());
-        o.extend_from_slice(&(f.tags.len() as u32).to_le_bytes());
-        for (k, v) in &f.tags {
-            s(o, k.as_bytes());
-            s(o, v.as_bytes());
-        }
-        s(o, &f.geometry);
+        put_sorted_row(i, f.center, &f.feature_id, f.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())), &f.geometry, o);
     }
+}
+
+/// Write a row for [`StrSort::merged`] into `o` from its parts (no [`Feature`] in memory): its number in the merge, its
+/// center, id, tags and WKB.
+pub fn put_sorted_row<'a>(
+    i: u64,
+    center: Pt,
+    id: &str,
+    tags: impl ExactSizeIterator<Item = (&'a str, &'a str)>,
+    geometry: &[u8],
+    o: &mut Vec<u8>,
+) {
+    let s = |o: &mut Vec<u8>, b: &[u8]| {
+        o.extend_from_slice(&(b.len() as u32).to_le_bytes());
+        o.extend_from_slice(b);
+    };
+    o.extend_from_slice(&i.to_le_bytes());
+    o.extend_from_slice(&center.0.to_le_bytes());
+    o.extend_from_slice(&center.1.to_le_bytes());
+    s(o, id.as_bytes());
+    o.extend_from_slice(&(tags.len() as u32).to_le_bytes());
+    for (k, v) in tags {
+        s(o, k.as_bytes());
+        s(o, v.as_bytes());
+    }
+    s(o, geometry);
 }
 
 impl Codec<(u64, Feature)> for Numbered {
@@ -1758,12 +1805,68 @@ pub struct StrSort {
     group: usize,
 }
 
+/// The sort of the rows of one tile of quack by tiles into the order (x, y, row number) of [`StrSort`] (a sorted part
+/// for [`StrSort::merged`]). While the rows fit in the budget of [`StrSort`], they wait as they are and are sorted in
+/// memory; more rows go to a [`StrSort`] (runs on disk).
+pub struct PartSort {
+    held: Vec<Feature>,
+    bytes: usize,
+    spill: Option<StrSort>,
+    budget: usize,
+}
+
+impl Default for PartSort {
+    fn default() -> Self {
+        PartSort { held: Vec::new(), bytes: 0, spill: None, budget: sort_budget() }
+    }
+}
+
+impl PartSort {
+    pub fn push(&mut self, rows: Vec<Feature>) -> Result<(), String> {
+        if let Some(s) = self.spill.as_mut() {
+            return s.push(rows);
+        }
+        self.bytes += rows.iter().map(|f| 64 + f.feature_id.len() + f.geometry.len() + f.tags.iter().map(|(k, v)| 48 + k.len() + v.len()).sum::<usize>()).sum::<usize>();
+        self.held.extend(rows);
+        if self.bytes > self.budget {
+            let mut s = StrSort::new(self.budget, ROW_GROUP).map_err(|e| format!("quack sort: {e}"))?;
+            s.push(std::mem::take(&mut self.held))?;
+            self.spill = Some(s);
+        }
+        Ok(())
+    }
+
+    /// Give the rows in the order (x, y, row number), in pieces of `group` rows.
+    pub fn finish(mut self, group: usize, mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String> {
+        if let Some(s) = self.spill {
+            return s.sorted_by_x(group, emit);
+        }
+        // a stable sort: the order before the sort (the row number) breaks the ties
+        self.held.par_sort_by_key(|f| (ordered(f.center.0), ordered(f.center.1)));
+        let mut rows = self.held.into_iter();
+        loop {
+            let piece: Vec<Feature> = rows.by_ref().take(group).collect();
+            if piece.is_empty() {
+                return Ok(());
+            }
+            emit(piece)?;
+        }
+    }
+}
+
+/// The memory of the sort of [`StrSort`]: in the browser a quarter of [`BUDGET`], because the memory of WebAssembly never
+/// shrinks (Kentucky sorted: 3.3 GiB with 512 MB, the limit is 4 GiB).
+fn sort_budget() -> usize {
+    if cfg!(target_arch = "wasm32") {
+        BUDGET / 4
+    } else {
+        BUDGET
+    }
+}
+
 impl Default for StrSort {
     fn default() -> Self {
-        // the browser: a quarter of the budget, because the memory of WebAssembly never shrinks (Kentucky sorted: 3.3 GiB
-        // with 512 MB, the limit is 4 GiB)
-        let budget = if cfg!(target_arch = "wasm32") { BUDGET / 4 } else { BUDGET };
-        StrSort::new(budget, ROW_GROUP).expect("quack sort: a temporary file")
+        StrSort::new(sort_budget(), ROW_GROUP).expect("quack sort: a temporary file")
     }
 }
 
@@ -1895,24 +1998,33 @@ impl StrSort {
             self.flush().map_err(io)?;
         }
         let mut src = ByX::new(std::mem::take(&mut self.runs), &mut *self.file).map_err(io)?;
-        let (mut row, mut out) = (Vec::new(), Vec::with_capacity(group));
-        while src.next(&mut *self.file, &mut row).map_err(io)? {
-            out.push(Numbered.get(&mut &row[..]).1);
-            if out.len() == group {
-                emit(std::mem::replace(&mut out, Vec::with_capacity(group)))?;
+        let mut row = Vec::new();
+        // the bytes of `group` rows, then the rows read on all threads
+        let (mut b, mut spans): (Vec<u8>, Vec<(usize, usize)>) = (Vec::new(), Vec::with_capacity(group));
+        loop {
+            let more = src.next(&mut *self.file, &mut row).map_err(io)?;
+            if more {
+                spans.push((b.len(), row.len()));
+                b.extend_from_slice(&row);
             }
-        }
-        if !out.is_empty() {
-            emit(out)?;
+            if spans.len() == group || (!more && !spans.is_empty()) {
+                emit(spans.par_iter().map(|&(at, len)| Numbered.get(&mut &b[at..at + len]).1).collect())?;
+                b.clear();
+                spans.clear();
+            }
+            if !more {
+                break;
+            }
         }
         Ok(())
     }
 
-    /// QuackOSM's sort ([`str_order`]) of `n` rows that `next` gives in the order (x, y, row number), for example the
-    /// sorted parts of quack by tiles merged: only the strips, with no runs. The memory is the one of [`StrSort::finish`].
+    /// QuackOSM's sort ([`str_order`]) of `n` rows that `next` writes ([`put_sorted_row`], with the number it gets) in
+    /// the order (x, y, row number), for example the sorted parts of quack by tiles merged: only the strips, with no runs.
+    /// `next` gives false at the end. The memory is the one of [`StrSort::finish`].
     pub fn merged(
         n: usize,
-        next: impl FnMut() -> Result<Option<Feature>, String>,
+        next: impl FnMut(u64, &mut Vec<u8>) -> Result<bool, String>,
         emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
     ) -> Result<(), String> {
         StrSort::default().merged_rows(n, next, emit)
@@ -1921,21 +2033,18 @@ impl StrSort {
     fn merged_rows(
         self,
         n: usize,
-        mut next: impl FnMut() -> Result<Option<Feature>, String>,
+        mut next: impl FnMut(u64, &mut Vec<u8>) -> Result<bool, String>,
         emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
     ) -> Result<(), String> {
         // the number of the row in the merge: in the order of x and y, the same order as the row numbers of the parts
         let mut seq = 0u64;
         self.strips(
             n,
-            |_, row| match next().map_err(std::io::Error::other)? {
-                Some(f) => {
-                    row.clear();
-                    Numbered::put_row(seq, &f, row);
-                    seq += 1;
-                    Ok(true)
-                }
-                None => Ok(false),
+            |_, row| {
+                row.clear();
+                let more = next(seq, row).map_err(std::io::Error::other)?;
+                seq += 1;
+                Ok(more)
             },
             emit,
         )
@@ -2090,11 +2199,14 @@ mod tests {
         };
         let mut parts: Vec<std::collections::VecDeque<Feature>> = Vec::new();
         let mut at = 0;
+        // the parts larger than 1000 rows pass the budget (in two pushes) and go to a StrSort with runs on disk
         for size in [700, 1, 2299, 2000] {
-            let mut s = StrSort::new(if size > 1000 { 10_000 } else { 1 << 20 }, 100).unwrap();
-            s.push((at..at + size).map(feature).collect()).unwrap();
+            let mut s = PartSort { budget: if size > 1000 { 10_000 } else { 1 << 20 }, ..PartSort::default() };
+            s.push((at..at + size / 2).map(feature).collect()).unwrap();
+            s.push((at + size / 2..at + size).map(feature).collect()).unwrap();
+            assert_eq!(s.spill.is_some(), size > 1000);
             let mut part = std::collections::VecDeque::new();
-            s.sorted_by_x(64, |g| {
+            s.finish(64, |g| {
                 part.extend(g);
                 Ok(())
             })
@@ -2113,15 +2225,16 @@ mod tests {
             .unwrap()
             .merged_rows(
                 5000,
-                || {
+                |seq, row| {
                     let Some(std::cmp::Reverse((_, i))) = heap.pop() else {
-                        return Ok(None);
+                        return Ok(false);
                     };
                     let f = parts[i].pop_front().unwrap();
                     if let Some(g) = parts[i].front() {
                         heap.push(std::cmp::Reverse((key(g), i)));
                     }
-                    Ok(Some(f))
+                    Numbered::put_row(seq, &f, row);
+                    Ok(true)
                 },
                 |g| {
                     got.extend(g.into_iter().map(|f| f.feature_id));

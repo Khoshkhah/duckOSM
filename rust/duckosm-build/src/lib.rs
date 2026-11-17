@@ -1693,7 +1693,7 @@ pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
     } else {
         duckosm_parquet::quack::QuackWriter::new(out)?
     };
-    let mut sorted = sort.then(duckosm_core::quack::StrSort::default);
+    let mut sorted = sort.then(duckosm_core::quack::PartSort::default);
     let owner = duckosm_core::quack::Owner {
         tile,
         relations: None,
@@ -1721,7 +1721,7 @@ pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
         Ok(())
     })?;
     if let Some(s) = sorted {
-        s.sorted_by_x(duckosm_parquet::quack::PART_GROUP, |rows| {
+        s.finish(duckosm_parquet::quack::PART_GROUP, |rows| {
             w.write(&duckosm_parquet::quack::batch(&rows)?)
         })?;
     }
@@ -1763,11 +1763,9 @@ pub fn quack_join_to<R: Read + std::io::Seek, W: Write + Send>(
         .collect();
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
     let mut merged = 0;
-    let next = || {
-        let Some(Reverse((_, i))) = heap.pop() else {
-            return Ok(None);
-        };
-        let f = parts[i].take()?;
+    let next = |seq: u64, row: &mut Vec<u8>| {
+        let Some(Reverse((_, i))) = heap.pop() else { return Ok(false) };
+        parts[i].put(seq, row)?;
         if let Some(k) = parts[i].key() {
             heap.push(Reverse((k, i)));
         }
@@ -1775,7 +1773,7 @@ pub fn quack_join_to<R: Read + std::io::Seek, W: Write + Send>(
         if merged % 100_000 == 0 || merged == total {
             progress(merged, total);
         }
-        Ok(Some(f))
+        Ok(true)
     };
     duckosm_core::quack::StrSort::merged(total, next, |rows| {
         use rayon::prelude::*;

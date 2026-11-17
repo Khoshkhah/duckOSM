@@ -184,38 +184,21 @@ pub fn owned_rows(b: &RecordBatch) -> Result<RecordBatch, String> {
 /// The rows of a batch with QuackOSM's columns as [`Feature`]s (for the sort): the center is the center of the box of
 /// the geometry, as [`Feature::center`].
 pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
-    (0..b.num_rows()).map(|i| feature_at(b, i, None)).collect()
-}
-
-/// Row `i` of `b`; `center`: its center when it is known.
-fn feature_at(
-    b: &RecordBatch,
-    i: usize,
-    center: Option<duckosm_core::geom::Pt>,
-) -> Result<Feature, String> {
     use arrow_array::cast::AsArray;
     use arrow_array::Array;
-    let m = b.column(1).as_map().value(i);
-    let (k, v) = (
-        m.column(0).as_string::<i32>(),
-        m.column(1).as_string::<i32>(),
-    );
-    let tags = (0..m.len())
-        .map(|j| (k.value(j).to_string(), v.value(j).to_string()))
-        .collect();
-    let geometry = b.column(2).as_binary::<i32>().value(i).to_vec();
-    let center = match center {
-        Some(c) => c,
-        None => duckosm_core::quack::wkb_center(&geometry)
-            .ok_or("a geometry that is not the WKB of quack")?,
-    };
-    Ok(Feature {
-        feature_id: b.column(0).as_string::<i32>().value(i).to_string(),
-        tags,
-        geometry,
-        center,
-        owner: true,
-    })
+    let id = b.column(0).as_string::<i32>();
+    let tags = b.column(1).as_map();
+    let geom = b.column(2).as_binary::<i32>();
+    (0..b.num_rows())
+        .map(|i| {
+            let m = tags.value(i);
+            let (k, v) = (m.column(0).as_string::<i32>(), m.column(1).as_string::<i32>());
+            let tags = (0..m.len()).map(|j| (k.value(j).to_string(), v.value(j).to_string())).collect();
+            let geometry = geom.value(i).to_vec();
+            let center = duckosm_core::quack::wkb_center(&geometry).ok_or("a geometry that is not the WKB of quack")?;
+            Ok(Feature { feature_id: id.value(i).to_string(), tags, geometry, center, owner: true })
+        })
+        .collect()
 }
 
 /// The rows in a row group of a sorted part of quack by tiles ([`QuackWriter::part`]).
@@ -258,8 +241,10 @@ impl parquet::file::reader::ChunkReader for Window {
     }
 }
 
-/// A sorted part of quack by tiles (a file of [`QuackWriter::part`]) in the merge of the join: its rows one at a time,
-/// with one row group in memory (read from `r` when the row group before is done).
+/// A sorted part of quack by tiles (a file of [`QuackWriter::part`]) in the merge of the join: its rows one at a time.
+/// At the start it holds one row group. When its row group is done, it reads the next row groups, one for each thread,
+/// and decodes them on all threads (the merge takes the rows of the tiles of one column of tiles at a time, so only those
+/// parts read more).
 pub struct SortedPart<R> {
     r: R,
     len: u64,
@@ -267,8 +252,10 @@ pub struct SortedPart<R> {
     next_group: usize,
     batch: Option<RecordBatch>,
     row: usize,
-    /// the center of the row now
-    center: duckosm_core::geom::Pt,
+    /// the centers of the rows of the row group
+    centers: Vec<duckosm_core::geom::Pt>,
+    /// the next row groups, decoded, with their centers
+    ahead: std::collections::VecDeque<(RecordBatch, Vec<duckosm_core::geom::Pt>)>,
 }
 
 impl<R: std::io::Read + std::io::Seek> SortedPart<R> {
@@ -308,7 +295,8 @@ impl<R: std::io::Read + std::io::Seek> SortedPart<R> {
             next_group: 0,
             batch: None,
             row: 0,
-            center: (0.0, 0.0),
+            centers: Vec::new(),
+            ahead: Default::default(),
         };
         p.load()?;
         Ok(p)
@@ -321,80 +309,88 @@ impl<R: std::io::Read + std::io::Seek> SortedPart<R> {
 
     /// Read the next row group that has rows (none at the end of the part).
     fn load(&mut self) -> Result<(), String> {
+        let first = self.next_group == 0;
+        self.load_groups(if first { 1 } else { rayon::current_num_threads() })
+    }
+
+    /// The next row group: from the decoded ones, else read the next `n` row groups and decode them on all threads.
+    fn load_groups(&mut self, n: usize) -> Result<(), String> {
+        use arrow_array::cast::AsArray;
+        use rayon::prelude::*;
         use std::io::SeekFrom;
         self.batch = None;
         self.row = 0;
-        while self.next_group < self.meta.metadata().num_row_groups() {
-            let g = self.next_group;
-            self.next_group += 1;
-            let rg = self.meta.metadata().row_group(g);
-            if rg.num_rows() == 0 {
-                continue;
+        if self.ahead.is_empty() {
+            // the bytes of the row groups, read on this thread (in the browser, a file belongs to its thread)
+            let mut read = Vec::new();
+            while read.len() < n && self.next_group < self.meta.metadata().num_row_groups() {
+                let g = self.next_group;
+                self.next_group += 1;
+                let rg = self.meta.metadata().row_group(g);
+                if rg.num_rows() == 0 {
+                    continue;
+                }
+                let (mut at, mut end) = (u64::MAX, 0);
+                for c in rg.columns() {
+                    let (s, n) = c.byte_range();
+                    (at, end) = (at.min(s), end.max(s + n));
+                }
+                let mut b = vec![0u8; (end - at) as usize];
+                self.r.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
+                self.r.read_exact(&mut b).map_err(|e| e.to_string())?;
+                read.push((g, Window { at, bytes: b.into(), len: self.len }));
             }
-            let (mut at, mut end) = (u64::MAX, 0);
-            for c in rg.columns() {
-                let (s, n) = c.byte_range();
-                (at, end) = (at.min(s), end.max(s + n));
-            }
-            let mut b = vec![0u8; (end - at) as usize];
-            self.r
-                .seek(SeekFrom::Start(at))
-                .map_err(|e| e.to_string())?;
-            self.r.read_exact(&mut b).map_err(|e| e.to_string())?;
-            let w = Window {
-                at,
-                bytes: b.into(),
-                len: self.len,
-            };
-            let reader =
-                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::new_with_metadata(
-                    w,
-                    self.meta.clone(),
-                )
-                .with_row_groups(vec![g])
-                .with_batch_size(rg.num_rows() as usize)
-                .build()
-                .map_err(err)?;
-            let batches = reader.collect::<Result<Vec<_>, _>>().map_err(err)?;
-            self.batch = Some(
-                arrow_select::concat::concat_batches(&batches[0].schema(), &batches)
-                    .map_err(err)?,
-            );
-            return self.find_center();
+            let meta = &self.meta;
+            let decoded: Vec<_> = read
+                .into_par_iter()
+                .map(|(g, w)| {
+                    let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::new_with_metadata(w, meta.clone())
+                        .with_row_groups(vec![g])
+                        .with_batch_size(meta.metadata().row_group(g).num_rows() as usize)
+                        .build()
+                        .map_err(err)?;
+                    let batches = reader.collect::<Result<Vec<_>, _>>().map_err(err)?;
+                    let b = arrow_select::concat::concat_batches(&batches[0].schema(), &batches).map_err(err)?;
+                    let geom = b.column(2).as_binary::<i32>();
+                    let centers = (0..b.num_rows())
+                        .map(|i| duckosm_core::quack::wkb_center(geom.value(i)).ok_or_else(|| "a geometry that is not the WKB of quack".to_string()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok((b, centers))
+                })
+                .collect::<Result<_, String>>()?;
+            self.ahead = decoded.into();
         }
-        Ok(())
-    }
-
-    fn find_center(&mut self) -> Result<(), String> {
-        use arrow_array::cast::AsArray;
-        let b = self.batch.as_ref().expect("a row group");
-        self.center =
-            duckosm_core::quack::wkb_center(b.column(2).as_binary::<i32>().value(self.row))
-                .ok_or("a geometry that is not the WKB of quack")?;
+        if let Some((b, centers)) = self.ahead.pop_front() {
+            self.batch = Some(b);
+            self.centers = centers;
+        }
         Ok(())
     }
 
     /// The key of the merge of the row now ([`duckosm_core::quack::ordered`] x and y of its center), none at the end.
     pub fn key(&self) -> Option<(i64, i64)> {
         self.batch.as_ref().map(|_| {
-            (
-                duckosm_core::quack::ordered(self.center.0),
-                duckosm_core::quack::ordered(self.center.1),
-            )
+            let c = self.centers[self.row];
+            (duckosm_core::quack::ordered(c.0), duckosm_core::quack::ordered(c.1))
         })
     }
 
-    /// The row now, and go to the next row.
-    pub fn take(&mut self) -> Result<Feature, String> {
+    /// Write the row now for the merge (`duckosm_core::quack::put_sorted_row`, number `seq`) into `out`, and go to the
+    /// next row.
+    pub fn put(&mut self, seq: u64, out: &mut Vec<u8>) -> Result<(), String> {
+        use arrow_array::cast::AsArray;
         let b = self.batch.as_ref().ok_or("the end of a part of quack")?;
-        let f = feature_at(b, self.row, Some(self.center))?;
+        let (i, map) = (self.row, b.column(1).as_map());
+        let (k, v) = (map.keys().as_string::<i32>(), map.values().as_string::<i32>());
+        let o = map.value_offsets();
+        let tags = (o[i] as usize..o[i + 1] as usize).map(|j| (k.value(j), v.value(j)));
+        let id = b.column(0).as_string::<i32>().value(i);
+        duckosm_core::quack::put_sorted_row(seq, self.centers[i], id, tags, b.column(2).as_binary::<i32>().value(i), out);
         self.row += 1;
         if self.row == b.num_rows() {
             self.load()?;
-        } else {
-            self.find_center()?;
         }
-        Ok(f)
+        Ok(())
     }
 }
 

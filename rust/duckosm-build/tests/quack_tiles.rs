@@ -74,6 +74,11 @@ fn monaco_tile_workers() {
     };
     let mut whole: Vec<Row> = Vec::new();
     duckosm_core::quack::features(open, 1 << 20, |rows| {
+        // the center from the WKB (the key of the merge) is the center of the row (the key of the sort in the tile)
+        for f in &rows {
+            let c = duckosm_core::quack::wkb_center(&f.geometry).unwrap();
+            assert_eq!((c.0.to_bits(), c.1.to_bits()), (f.center.0.to_bits(), f.center.1.to_bits()), "{}", f.feature_id);
+        }
         whole.extend(rows.into_iter().map(row));
         Ok(())
     })
