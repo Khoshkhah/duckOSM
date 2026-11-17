@@ -7,6 +7,7 @@ pub mod matsim;
 pub mod matsim_lanes;
 pub mod opendrive;
 pub mod railml;
+pub mod sumo;
 
 use duckdb::{AccessMode, Config, Connection};
 use std::path::Path;

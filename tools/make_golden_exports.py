@@ -21,6 +21,7 @@ from duckosm.matsim import to_matsim
 from duckosm.matsim_lanes import to_matsim_lanes
 from duckosm.opendrive import to_opendrive
 from duckosm.railml import to_railml
+from duckosm.sumo import to_sumo
 
 
 def summary(src):
@@ -101,6 +102,12 @@ def main(db, out, gmns=None):
             gz(tmp / f, out / f"{f}.gz")
         for f in ("lanes", "signalSystems", "signalGroups", "signalControl"):
             gz(tmp / "ml" / f"{f}.xml", out / f"matsim_lanes_{f}.xml.gz")
+        src = duckdb.connect(db, read_only=True)
+        for m in ("driving", "walking"):                 # the plain XML: the CI has no netconvert
+            to_sumo(src, tmp / m, mode=m, net_name="monaco", run_netconvert=False)
+            for f in ("nod", "edg", "con"):
+                gz(tmp / m / f"monaco.{f}.xml", out / f"sumo_{m}.{f}.xml.gz")
+        src.close()
     to_matsim(db, out / "monaco_network.xml.gz", mode="driving")
     to_matsim(db, out / "monaco_all_network.xml.gz", mode="all", crs="EPSG:3035")
     to_railml(db, out / "monaco.railml.xml")

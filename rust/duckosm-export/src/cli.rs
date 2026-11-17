@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 5] = ["matsim", "railml", "export-gis", "opendrive", "matsim-lanes"];
+pub const COMMANDS: [&str; 6] = ["matsim", "railml", "export-gis", "opendrive", "matsim-lanes", "sumo"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -97,6 +97,31 @@ enum Cmd {
         #[arg(short, long = "out", default_value = ".")]
         out_dir: PathBuf,
     },
+    /// Export a built network to a SUMO net, with the duckOSM edge_id as the SUMO edge id. Writes <out-dir>/<name>.{nod,edg,con}.xml,
+    /// a .netccfg and the .net.xml (not with --no-netconvert). The connections come from edge_graph, so the turn restrictions
+    /// stay. netconvert comes with SUMO (`pip install duckosm[sumo]` or a system package).
+    Sumo {
+        /// The duckOSM database.
+        db: PathBuf,
+        /// The mode schema to export.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// The output folder of <name>.{nod,edg,net}.xml.
+        #[arg(long, default_value = "sumo")]
+        out_dir: PathBuf,
+        /// The base name of the files (default: the file name of the db).
+        #[arg(long)]
+        name: Option<String>,
+        /// Do not write the connections of edge_graph (netconvert makes its own: the turn restrictions are lost).
+        #[arg(long)]
+        no_connections: bool,
+        /// A netconvert config (.netccfg) to use in place of the built-in options.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+        /// Do not run netconvert: write only the plain XML.
+        #[arg(long)]
+        no_netconvert: bool,
+    },
     /// Export a railML 2.4 rail infrastructure file from a built duckOSM db: the railway ways of the raw OSM, cut into
     /// tracks with their topology, switches, signals and stations (OCPs).
     Railml {
@@ -173,6 +198,21 @@ pub fn run(args: &[String]) -> Result<()> {
                 msg.push_str(&format!(" + signals ({n} systems)"));
             }
             println!("{msg} -> {}", out_dir.display());
+        }
+        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, no_netconvert } => {
+            check_db(&db)?;
+            if let Some(c) = config.as_ref().filter(|c| !c.exists()) {
+                return Err(format!("{}: no such file", c.display()));
+            }
+            let name = name.unwrap_or_else(|| stem(&db));
+            let s = crate::sumo::to_sumo(&db, &out_dir, &mode, &name, !no_connections, config.as_deref(), !no_netconvert)?;
+            println!("wrote {} ({} edges) and {} ({} nodes)", s.edg.display(), s.n_edges, s.nod.display(), s.n_nodes);
+            if let Some(c) = &s.con {
+                println!("wrote {} ({} connections)", c.display(), s.n_connections);
+            }
+            if let Some(n) = &s.net {
+                println!("wrote {}", n.display());
+            }
         }
         Cmd::Railml { db, out } => {
             check_db(&db)?;
