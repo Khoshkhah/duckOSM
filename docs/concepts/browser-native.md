@@ -1,8 +1,8 @@
-# Offline and online builds
+# Browser and native builds
 
 duckOSM builds an area in two versions, with the same Rust engine and the same rows.
 
-| | Offline | Online |
+| | Native | Browser |
 |---|---|---|
 | Program | `duckosm-rust` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) in the browser (WebAssembly) |
 | Storage | the disk | the browser's storage (OPFS) |
@@ -21,7 +21,7 @@ duckOSM builds an area in two versions, with the same Rust engine and the same r
 | 5. More tables | area tables, levels, bus routes, building faces, `raw.*` |
 
 Each step reads its data in blocks and writes its result to storage. Diagrams and the memory of each step:
-[each step in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/offline_online_steps.md).
+[each step in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/browser_native_steps.md).
 
 ## Results
 
@@ -29,7 +29,7 @@ Mac mini (12 cores, 16 GB), driving mode.
 
 ### Kentucky (one build)
 
-| | Offline | Online |
+| | Native | Browser |
 |---|---|---|
 | Time | 28.4 s | 42.4 s |
 | Memory | 3.2 GB | 3.3 GB |
@@ -38,7 +38,7 @@ With the raw tables, the base-map layers and the building faces.
 
 ### France (by tiles)
 
-| | Offline | Online |
+| | Native | Browser |
 |---|---|---|
 | Time | 3 min 48 s | – ¹ |
 | Memory | 1.6 GB | – ¹ |
@@ -56,5 +56,5 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out -- --modes dr
 
 ## The limits
 
-- **Offline:** none for the area: France by tiles needs less than 2 GB.
-- **Online:** one build must fit in 4 GB, so the largest area is about the size of Kentucky.
+- **Native:** none for the area: France by tiles needs less than 2 GB.
+- **Browser:** one build must fit in 4 GB, so the largest area is about the size of Kentucky.
