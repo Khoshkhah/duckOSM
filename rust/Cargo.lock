@@ -803,6 +803,7 @@ dependencies = [
  "libc",
  "miniz_oxide 0.8.9",
  "osmpbf",
+ "pbfcut",
  "rayon",
  "rstar",
  "serde",
@@ -1823,6 +1824,18 @@ dependencies = [
  "snap",
  "twox-hash",
  "zstd",
+]
+
+[[package]]
+name = "pbfcut"
+version = "0.1.0"
+source = "git+https://github.com/Khoshkhah/pbfcut.git?rev=d8351d4472c150c4c82c0c55c9ab1e3c2be6d0b4#d8351d4472c150c4c82c0c55c9ab1e3c2be6d0b4"
+dependencies = [
+ "flate2",
+ "h3o",
+ "miniz_oxide 0.8.9",
+ "rayon",
+ "serde_json",
 ]
 
 [[package]]

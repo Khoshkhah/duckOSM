@@ -27,13 +27,8 @@ use crate::util::FxHashSet;
 use rayon::prelude::*;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-/// The numbers of elements in the area file.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct CutCounts {
-    pub nodes: usize,
-    pub ways: usize,
-    pub relations: usize,
-}
+/// The numbers of elements that a cut wrote (the type of pbfcut, so the tile cut and this cut give one type).
+pub use pbfcut::extract::CutCounts;
 
 /// Sorted ids with a directory, as `network::Coords`: a look-up reads one entry of the directory (about one for
 /// each 64 ids, so it stays in the cache of the processor) and searches the ids of one range. 8 bytes for each id.

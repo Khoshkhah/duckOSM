@@ -1,29 +1,10 @@
 //! A small fast hasher for integer keys (the "Fx" hash). Node ids are not under attack, so this is safe here.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
+use std::hash::BuildHasherDefault;
 
-#[derive(Default, Clone, Copy)]
-pub struct FxHasher(u64);
-
-const K: u64 = 0x517c_c1b7_2722_0a95;
-
-impl Hasher for FxHasher {
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = (self.0.rotate_left(5) ^ b as u64).wrapping_mul(K);
-        }
-    }
-    fn write_i64(&mut self, i: i64) {
-        self.0 = (self.0.rotate_left(5) ^ i as u64).wrapping_mul(K);
-    }
-    fn write_u64(&mut self, i: u64) {
-        self.0 = (self.0.rotate_left(5) ^ i).wrapping_mul(K);
-    }
-    fn finish(&self) -> u64 {
-        self.0
-    }
-}
+/// The hasher of pbfcut, so the hash sets of the tile cut and of the build are one type.
+pub use pbfcut::util::FxHasher;
 
 pub type FxHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type FxHashSet<K> = std::collections::HashSet<K, BuildHasherDefault<FxHasher>>;
@@ -72,17 +53,5 @@ pub fn step(name: &str) {
     }
     if let Some(hook) = STEP_HOOK.get() {
         hook(name);
-    }
-}
-
-/// Give the memory that the allocator keeps back to the system (glibc: `malloc_trim`, all arenas): between the passes of a
-/// step, after many threads made and freed many small blocks (read 2 of the tile cut). Nothing elsewhere.
-pub fn trim_memory() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        extern "C" {
-            fn malloc_trim(pad: usize) -> i32;
-        }
-        unsafe { malloc_trim(0) };
     }
 }

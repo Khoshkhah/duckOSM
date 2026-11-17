@@ -12,6 +12,8 @@ pbf = ["dep:osmpbf", "dep:rayon", "dep:flate2"]
 zstd = ["dep:zstd"]
 
 [dependencies]
+# the tile cut (`tilecut`), the boundary, the map tiles and the temporary store: the pbfcut library, at one pinned commit
+pbfcut = { git = "https://github.com/Khoshkhah/pbfcut.git", rev = "d8351d4472c150c4c82c0c55c9ab1e3c2be6d0b4" }
 rstar = "0.12"
 osmpbf = { version = "0.3.8", optional = true }
 # pbfraw inflates the blocks with flate2; zlib-rs is a pure-Rust zlib that also builds for WebAssembly

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The tile cut is the pbfcut library** (`Khoshkhah/pbfcut`, one pinned git `rev` in `rust/duckosm-core/Cargo.toml`). duckOSM's own
+  cut (`tilecut.rs`, `tilecut/write.rs`) is gone; `duckosm_core::tilecut` keeps its names and gives pbfcut the rule of the junctions
+  (`NodeUses`). `boundary`, `tiles`, the temporary store of `spill`, `util::FxHasher` and `cutstream::CutCounts` are now the types
+  of pbfcut (re-exports), so the cut and the build share them. Before the move, the two cuts gave the same elements in every tile file
+  (Kentucky zoom 8: 20 files, France zoom 8: 104 files, `pbfcut compare`).
 - **The tile cut uses all threads in each part** (`tilecut.rs`): the relation blocks are decoded on all threads, the
   outside rows are encoded on the pool, and in part 5 each blob of a tile file with its extra elements is one job, so one
   large tile also uses all the threads. In the browser, part 5 makes all the tiles on the pool at the same time. Sweden at
@@ -39,6 +44,9 @@
 
 For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each entry says what the host must do.
 
+- **The tile cut is pbfcut** (duckOSM: the pbfcut move). `tilecut::cut_to_sink` keeps its arguments and its tile files (no zlib; with `memory`,
+  zlib, in place of the parts in memory). `spill::set_temp_store` also sets the store of the cut (one store). *Host: nothing is
+  needed; Studio moves its pin.*
 - **The editor reads the map's road table itself** (duckOSM #43). `roadIdOfRow` and `roadRows` are now optional. Without them the editor reads `window.RS_SIDE.props`
   (then `rsGetProps` and `rsQuery`) and builds the index of the roads by OSM way. A row of the table is an object, or an array when the host gives the new option
   `roadKeys` (the column names). `roadRows: false` keeps the editor's own line layers. *Host: nothing is needed. Studio can drop its own `roadIdOfRow` and `roadRows` and give `roadKeys`.*

@@ -11,116 +11,12 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// A temporary file: it is read from the start after it is written.
-pub trait Blob: Read + Write + Seek + Send {}
-impl<T: Read + Write + Seek + Send> Blob for T {}
-
-/// Where the temporary files are made.
-pub trait Store {
-    fn create(&self) -> io::Result<Box<dyn Blob>>;
-}
-
-/// The files in memory (the tests, and the browser until it has a store in OPFS).
-pub struct MemStore;
-
-impl Store for MemStore {
-    fn create(&self) -> io::Result<Box<dyn Blob>> {
-        Ok(Box::new(io::Cursor::new(Vec::new())))
-    }
-}
-
-/// The files in a folder. Each file is removed when it is dropped.
-pub struct DirStore(pub PathBuf);
-
-struct TempFile {
-    f: std::fs::File,
-    path: PathBuf,
-}
-
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-impl Read for TempFile {
-    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
-        self.f.read(b)
-    }
-}
-
-impl Write for TempFile {
-    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
-        self.f.write(b)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        self.f.flush()
-    }
-}
-
-impl Seek for TempFile {
-    fn seek(&mut self, p: SeekFrom) -> io::Result<u64> {
-        self.f.seek(p)
-    }
-}
-
-/// A maker of the store that [`temp_store`] gives on this thread.
-pub type StoreMaker = std::rc::Rc<dyn Fn() -> Box<dyn Store>>;
-
-thread_local! {
-    static STORE: std::cell::RefCell<Option<StoreMaker>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Set the store of the temporary files of the steps that run on this thread, or `None` for the default of
-/// [`temp_store`]. The browser gives a store in OPFS, so that the temporary files are not in the memory of the tab.
-pub fn set_temp_store(maker: Option<StoreMaker>) {
-    STORE.with(|s| *s.borrow_mut() = maker);
-}
-
-/// Run `f` with the store of `maker` on this thread, then give back the store before.
-pub fn with_temp_store<T>(maker: StoreMaker, f: impl FnOnce() -> T) -> T {
-    let old = STORE.with(|s| s.borrow_mut().replace(maker));
-    let r = f();
-    STORE.with(|s| *s.borrow_mut() = old);
-    r
-}
-
-/// The store of the network step: the store that [`set_temp_store`] gave on this thread, else a folder for temporary
-/// files natively and memory in the browser.
-pub fn temp_store() -> Box<dyn Store> {
-    if let Some(maker) = STORE.with(|s| s.borrow().clone()) {
-        return maker();
-    }
-    #[cfg(target_arch = "wasm32")]
-    return Box::new(MemStore);
-    #[cfg(not(target_arch = "wasm32"))]
-    Box::new(DirStore(std::env::temp_dir()))
-}
-
-impl Store for DirStore {
-    fn create(&self) -> io::Result<Box<dyn Blob>> {
-        static N: AtomicU64 = AtomicU64::new(0);
-        let path = self.0.join(format!(
-            "duckosm-spill-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        let f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        // Unix: the name goes at once and the open file stays, so the system frees the file also when the process is
-        // stopped (a stopped France run left 45 GB). Windows cannot remove an open file: there, the drop removes it.
-        #[cfg(unix)]
-        let _ = std::fs::remove_file(&path);
-        Ok(Box::new(TempFile { f, path }))
-    }
-}
+/// The temporary store is the store of pbfcut: one store for the tile cut and the build, so a page sets it one time
+/// ([`set_temp_store`], for example a store in OPFS). Natively, the files go into the temporary folder of the system
+/// (pbfcut `store::set_temp_dir` changes it).
+pub use pbfcut::store::{set_temp_store, temp_store, with_temp_store, Blob, DirStore, MemStore, Store, StoreMaker};
 
 /// How a row is written as bytes and read back. `put` can add to the codec (for example a new shared value), `get`
 /// only reads it. A pass reads one file and writes the next with the same codec, so `put` takes `&self`.
@@ -168,15 +64,6 @@ impl Writer {
         self.w.write_all(b)?;
         self.len += 1;
         self.bytes += 4 + b.len() as u64;
-        Ok(())
-    }
-
-    /// Add `rows` rows that are already in the bytes of a file: each its length (4 bytes, little endian) and its bytes
-    /// (made on other threads, for example by [`encode_rows`]).
-    pub fn push_encoded(&mut self, encoded: &[u8], rows: usize) -> io::Result<()> {
-        self.w.write_all(encoded)?;
-        self.len += rows;
-        self.bytes += encoded.len() as u64;
         Ok(())
     }
 
@@ -783,34 +670,6 @@ impl Buckets {
     }
 
     /// The parts, in the order of their key ranges.
-    /// Add rows that [`Buckets::encode`] made (on any thread): (bucket, the bytes of its rows, the number of rows).
-    pub fn push_encoded(&mut self, store: &dyn Store, encoded: Vec<(i64, Vec<u8>, usize)>) -> io::Result<()> {
-        for (bucket, bytes, rows) in encoded {
-            let part = match self.parts.entry(bucket) {
-                std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
-                std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::new(store)?),
-            };
-            part.push_encoded(&bytes, rows)?;
-        }
-        Ok(())
-    }
-
-    /// The rows (key, row) in the bytes of their buckets, for [`Buckets::push_encoded`]: the work of `push` that can run on
-    /// any thread (the thread that owns the files only appends the bytes).
-    pub fn encode<T>(shift: u32, codec: &impl Codec<T>, rows: impl Iterator<Item = (i64, T)>) -> Vec<(i64, Vec<u8>, usize)> {
-        let mut out: std::collections::BTreeMap<i64, (Vec<u8>, usize)> = Default::default();
-        let mut row = Vec::new();
-        for (key, r) in rows {
-            row.clear();
-            codec.put(&r, &mut row);
-            let e = out.entry(key >> shift).or_default();
-            e.0.extend_from_slice(&(row.len() as u32).to_le_bytes());
-            e.0.extend_from_slice(&row);
-            e.1 += 1;
-        }
-        out.into_iter().map(|(b, (bytes, n))| (b, bytes, n)).collect()
-    }
-
     pub fn finish(self) -> io::Result<Vec<Rows>> {
         self.parts.into_values().map(Writer::finish).collect()
     }
