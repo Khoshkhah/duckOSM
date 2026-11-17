@@ -126,10 +126,10 @@ nav:
       - Install: install.md
       - Your first network: first_network.md
   - Guides:
+      - duckOSM Studio: guides/studio.md
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
       - Fix OSM errors: guides/fix-osm-errors.md
-      - Make the data of an area: guides/studio.md
       - Edit OSM data: guides/edit-osm-data.md
       - Query the database: guides/query.md
       - Questions to ask the AI agent: guides/ask-questions.md
