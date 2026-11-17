@@ -789,6 +789,7 @@ dependencies = [
  "clap",
  "duckosm-build",
  "duckosm-edit",
+ "duckosm-export",
  "libc",
  "rayon",
 ]
@@ -840,6 +841,16 @@ dependencies = [
 [[package]]
 name = "duckosm-editor"
 version = "0.7.0"
+
+[[package]]
+name = "duckosm-export"
+version = "0.7.0"
+dependencies = [
+ "clap",
+ "duckdb",
+ "duckosm-build",
+ "flate2",
+]
 
 [[package]]
 name = "duckosm-parquet"
