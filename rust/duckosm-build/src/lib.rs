@@ -21,6 +21,7 @@ pub mod area;
 pub mod clip;
 pub mod config;
 pub mod elevation;
+#[cfg(feature = "duckdb")]
 pub mod features_check;
 pub mod h3;
 pub mod levels;
@@ -2048,6 +2049,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         None => input,
     };
     // run() writes no cut.osm.pbf: step 0 has written it. With no boundary, the layers run on the raw.* of the file (after run)
+    #[cfg_attr(not(feature = "duckdb"), allow(unused_variables))]
     let features = p.features;
     let p = &Params { cut_pbf: false, features: p.features && cut.is_some(), ..p.clone() };
     let res = (|| -> Result<Summary, String> {
