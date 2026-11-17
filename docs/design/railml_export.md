@@ -93,3 +93,8 @@ Reads the built db's `raw` schema (railway ways/nodes), so no re-parse of the PB
 **v1 = full infrastructure** (tracks + topology + switches + signals + OCPs + buffer stops), railML
 2.4 — `to_railml(source_db, out_path)` / `duckosm railml`. `tests/test_railml.py` covers the counts,
 topology cross-refs, switch/signal placement, and the empty/missing-raw cases.
+
+## Rust
+
+`duckosm-rust railml` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
+The golden test `rust/duckosm-export/tests/golden.rs` compares the two on Monaco.

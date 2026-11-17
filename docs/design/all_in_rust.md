@@ -38,6 +38,20 @@ rows, or the same file bytes where the format allows. A golden file holds the Py
    - The docs say `duckosm` everywhere.
    - Release 1.0.0. Then move the pins in Studio, sensor-matching, SonoFlow and the other projects.
 
+## Group D: the state
+
+The exports are in the crate `rust/duckosm-export`. The commands are `duckosm-rust <export> ...`, with the options of the
+Python CLI. The golden test (`rust/duckosm-export/tests/golden.rs`) compares each Rust export with the Python output on Monaco;
+`tools/make_golden_exports.py` makes the golden files.
+
+| Export | Rust command | State |
+|---|---|---|
+| MATSim | `duckosm-rust matsim` | Done. The same bytes as Python on Monaco and Tartu (gzip: the same text). |
+| railML | `duckosm-rust railml` | Done. The same bytes as Python on Monaco and Tartu. |
+| SUMO, GIS, MATSim lanes, OpenDRIVE, Lanelet2 | | Not started. |
+
+GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
+
 ## Not changed
 
 - The tables and `edge_id` stay the same: other projects join on them.

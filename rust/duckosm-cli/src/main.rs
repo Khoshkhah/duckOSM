@@ -844,12 +844,37 @@ fn main() {
         Some("quack") => quack(&args[1..]),
         Some("quack-tiles") => quack_tiles(&args[1..]),
         Some("quack-union") => quack_union(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some("features-check") => features_check(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some(c) if duckosm_export::cli::COMMANDS.contains(&c) => duckosm_export::cli::run(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
+}
+
+/// duckosm-rust features-check: list the OSM polygons that no features.* table holds, grouped by tag (duckOSM
+/// `duckosm features-check`). A group with no reason is a possible miss. Needs raw.* and features.* in the database.
+#[cfg(feature = "duckdb")]
+#[derive(Parser)]
+#[command(name = "duckosm-rust features-check", version)]
+struct FeaturesCheckCli {
+    /// The .duckdb file of a build.
+    db: PathBuf,
+    /// How many groups to list.
+    #[arg(long, default_value_t = 40)]
+    limit: usize,
+}
+
+#[cfg(feature = "duckdb")]
+fn features_check(args: &[String]) -> Result<(), String> {
+    let cli = FeaturesCheckCli::parse_from(args);
+    let groups = duckosm_build::features_check::missing_polygons(&cli.db)?;
+    print!("{}", duckosm_build::features_check::report(&groups, cli.limit));
+    Ok(())
 }
 
 fn run() -> Result<(), String> {

@@ -159,3 +159,8 @@ assignment/agent-based runs, and improvable later from the same enrichment paths
   `modes`; coordinates are metric (large projected values, not degrees); referenced nodes all exist;
   `.xml.gz` round-trips. Reuse the tiny in-memory source fixture pattern from `test_gmns_map.py`.
 - Docs: this file + `docs/README.md` index + a README command entry.
+
+## Rust
+
+`duckosm-rust matsim` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
+The golden test `rust/duckosm-export/tests/golden.rs` compares the two on Monaco.
