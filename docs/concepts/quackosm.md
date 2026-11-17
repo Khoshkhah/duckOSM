@@ -158,34 +158,28 @@ sorted; it adds 21 s.
 Studio's quack page makes the same table in the browser, tile by tile with the map tiles of zoom 8 (QuackOSM cannot run in
 a browser). The tile cut is the pbfcut library; then a WebAssembly worker for each tile makes the rows of the tile, and
 the page joins the parts. Each worker is a WebAssembly module with its own 4 GiB of memory, so the memory of one module
-follows the size of a tile, not of France. The input is the Geofabrik file `france-261113.osm.pbf` (4.9 GB), GeoParquet,
-not sorted, 8 threads for the cut, 8 tile workers and 8 threads for the join (2026-11-17).
+follows the size of a tile, not of France. The computer is the Mac mini above, with headless Chromium; the input is the
+same `france-latest.osm.pbf`; GeoParquet, not sorted; 12 threads for the cut, 12 tile workers and 12 threads for the
+join (2026-11-17).
 
-| France in the browser | Headless Chromium on the Mac mini (12 cores, 12 workers) | Edge on a Windows laptop (8 cores, 8 workers) | Headless Chromium on WSL (20 cores, 8 workers) |
-|---|---|---|---|
-| 1. Count the nodes and choose the 241 tiles | 7.5 s | 14.8 s | 15.1 s |
-| 2. The cut (one file for each tile) | 72.9 s | 163.6 s (45.3 s of it waiting for the file or the browser storage) | 129.7 s |
-| 3. The rows of each tile | 168.0 s (11.9 of 12 workers busy; the Paris tile 105.8 s, 83.1 s of it waiting for the file and the storage) | 165.0 s (7.9 of 8 workers busy) | 118.0 s |
-| 4. The join of the parts | 44.2 s | 35.2 s | 47.5 s |
-| **Time** | **294.4 s** | **378.6 s** | **310.4 s** |
-| WebAssembly memory of the page | 1,154 MiB of 4,096 MiB | 1,132 MiB | 1,130 MiB |
-| WebAssembly memory of the tile workers | 5,706 MiB in total | 4,034 MiB in total (the largest tile, Paris: 587 MiB) | 4,025 MiB in total |
-| Peak browser storage | 39.8 GB | 34.1 GB | 34.0 GB |
-| Output (GeoParquet) | 12.29 GB | 12.29 GB | 12.29 GB |
+| France in the browser (Mac mini) | Time | |
+|---|---|---|
+| 1. Count the nodes and choose the 241 tiles | 7.5 s | |
+| 2. The cut (one file for each tile) | 72.9 s | |
+| 3. The rows of each tile (12 workers) | 168.0 s | on average 11.9 of 12 workers busy |
+| 4. The join of the parts | 44.2 s | |
+| **Time** | **294.4 s** | |
+| WebAssembly memory of the page | 1,154 MiB | of 4,096 MiB |
+| WebAssembly memory of the 12 tile workers | 5,706 MiB | in total |
+| Peak browser storage | 39.8 GB | |
+| Output (GeoParquet) | 12.29 GB | |
 
-On the Mac mini (the computer of the native results above), the browser takes 294.4 s: 2.3 times the native duckOSM
-(129.0 s) and about half of QuackOSM natively (569.5 s). There, step 3 waits for the browser storage: the Paris tile spent
-83.1 s of its 105.8 s waiting for its file and the storage.
-
-- The browser on the laptop takes 2.9 times as long as the native duckOSM on the Mac mini (129.0 s), and less than
-  QuackOSM natively (569.5 s).
-- The browser storage must have room for about 7 times the input file: the input, the tile files, the parts of the
+- The browser takes 2.3 times as long as the native duckOSM (129.0 s) and about half the time of QuackOSM natively
+  (569.5 s).
+- The browser storage must have room for about 8 times the input file: the input, the tile files, the parts of the
   tiles and the output.
-- The limit is the memory of the whole tab, not 4 GiB of one module: at zoom 6 (larger tiles) the same run stopped with
-  "Array buffer allocation failed" at about 5 GB in all modules together. Use zoom 8.
-- A tile with 2 threads is 1.55 times faster than with 1 thread, with the same memory (Paris, natively: 19.8 s, 12.7 s
-  with 2 threads, 10.3 s with 4). So with less memory, fewer tiles at the same time with 2 threads each keep the cores
-  busy.
+- Step 3 waits for the browser storage: the largest tile (Paris, 8/129/88) took 105.8 s, and 83.1 s of it was waiting
+  for its file and the storage.
 
 ## The results that are not in favor of duckOSM
 
