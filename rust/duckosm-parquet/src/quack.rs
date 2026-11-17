@@ -114,21 +114,27 @@ pub struct QuackWriter<W: Write + Send> {
 
 impl<W: Write + Send> QuackWriter<W> {
     pub fn new(out: W) -> Result<Self, String> {
-        Self::with(out, schema(), Vec::new())
+        Self::with(out, schema(), Vec::new(), ROW_GROUP)
+    }
+
+    /// The writer of a sorted part of quack by tiles: row groups of [`PART_GROUP`] rows, so the merge of the parts
+    /// ([`SortedPart`]) holds only one small row group of each part.
+    pub fn part(out: W) -> Result<Self, String> {
+        Self::with(out, schema(), Vec::new(), PART_GROUP)
     }
 
     /// The writer of a tile table ([`tile_schema`]), with more key-value metadata (the tile and the input file).
     pub fn tile(out: W, meta: Vec<(String, String)>) -> Result<Self, String> {
-        Self::with(out, tile_schema(), meta)
+        Self::with(out, tile_schema(), meta, ROW_GROUP)
     }
 
-    fn with(out: W, schema: SchemaRef, meta: Vec<(String, String)>) -> Result<Self, String> {
+    fn with(out: W, schema: SchemaRef, meta: Vec<(String, String)>, group: usize) -> Result<Self, String> {
         let geo = r#"{"version":"1.0.0","primary_column":"geometry","columns":{"geometry":{"encoding":"WKB","geometry_types":[]}}}"#;
         let mut kv = vec![KeyValue::new("geo".to_string(), geo.to_string())];
         kv.extend(meta.into_iter().map(|(k, v)| KeyValue::new(k, v)));
         let props = WriterProperties::builder()
             .set_compression(compression())
-            .set_max_row_group_row_count(Some(ROW_GROUP))
+            .set_max_row_group_row_count(Some(group))
             .set_key_value_metadata(Some(kv))
             .build();
         let mut w = ParWriter::try_new(out, schema, Some(props)).map_err(err)?;
@@ -178,21 +184,218 @@ pub fn owned_rows(b: &RecordBatch) -> Result<RecordBatch, String> {
 /// The rows of a batch with QuackOSM's columns as [`Feature`]s (for the sort): the center is the center of the box of
 /// the geometry, as [`Feature::center`].
 pub fn features_of(b: &RecordBatch) -> Result<Vec<Feature>, String> {
+    (0..b.num_rows()).map(|i| feature_at(b, i, None)).collect()
+}
+
+/// Row `i` of `b`; `center`: its center when it is known.
+fn feature_at(
+    b: &RecordBatch,
+    i: usize,
+    center: Option<duckosm_core::geom::Pt>,
+) -> Result<Feature, String> {
     use arrow_array::cast::AsArray;
     use arrow_array::Array;
-    let id = b.column(0).as_string::<i32>();
-    let tags = b.column(1).as_map();
-    let geom = b.column(2).as_binary::<i32>();
-    (0..b.num_rows())
-        .map(|i| {
-            let m = tags.value(i);
-            let (k, v) = (m.column(0).as_string::<i32>(), m.column(1).as_string::<i32>());
-            let tags = (0..m.len()).map(|j| (k.value(j).to_string(), v.value(j).to_string())).collect();
-            let geometry = geom.value(i).to_vec();
-            let center = duckosm_core::quack::wkb_center(&geometry).ok_or("a geometry that is not the WKB of quack")?;
-            Ok(Feature { feature_id: id.value(i).to_string(), tags, geometry, center, owner: true })
+    let m = b.column(1).as_map().value(i);
+    let (k, v) = (
+        m.column(0).as_string::<i32>(),
+        m.column(1).as_string::<i32>(),
+    );
+    let tags = (0..m.len())
+        .map(|j| (k.value(j).to_string(), v.value(j).to_string()))
+        .collect();
+    let geometry = b.column(2).as_binary::<i32>().value(i).to_vec();
+    let center = match center {
+        Some(c) => c,
+        None => duckosm_core::quack::wkb_center(&geometry)
+            .ok_or("a geometry that is not the WKB of quack")?,
+    };
+    Ok(Feature {
+        feature_id: b.column(0).as_string::<i32>().value(i).to_string(),
+        tags,
+        geometry,
+        center,
+        owner: true,
+    })
+}
+
+/// The rows in a row group of a sorted part of quack by tiles ([`QuackWriter::part`]).
+pub const PART_GROUP: usize = 2048;
+
+/// The bytes of one row group of a Parquet file in memory, at their place in the file (the reader asks only for the
+/// pages of that row group).
+struct Window {
+    at: u64,
+    bytes: bytes::Bytes,
+    len: u64,
+}
+
+impl parquet::file::reader::Length for Window {
+    fn len(&self) -> u64 {
+        self.len
+    }
+}
+
+impl parquet::file::reader::ChunkReader for Window {
+    type T = bytes::buf::Reader<bytes::Bytes>;
+
+    fn get_read(&self, start: u64) -> parquet::errors::Result<Self::T> {
+        use bytes::Buf;
+        let len = (self.at + self.bytes.len() as u64).saturating_sub(start) as usize;
+        Ok(self.get_bytes(start, len)?.reader())
+    }
+
+    fn get_bytes(&self, start: u64, length: usize) -> parquet::errors::Result<bytes::Bytes> {
+        let s = start
+            .checked_sub(self.at)
+            .map(|s| s as usize)
+            .filter(|s| s + length <= self.bytes.len());
+        let s = s.ok_or_else(|| {
+            parquet::errors::ParquetError::General(format!(
+                "bytes {start}+{length} not in the row group"
+            ))
+        })?;
+        Ok(self.bytes.slice(s..s + length))
+    }
+}
+
+/// A sorted part of quack by tiles (a file of [`QuackWriter::part`]) in the merge of the join: its rows one at a time,
+/// with one row group in memory (read from `r` when the row group before is done).
+pub struct SortedPart<R> {
+    r: R,
+    len: u64,
+    meta: parquet::arrow::arrow_reader::ArrowReaderMetadata,
+    next_group: usize,
+    batch: Option<RecordBatch>,
+    row: usize,
+    /// the center of the row now
+    center: duckosm_core::geom::Pt,
+}
+
+impl<R: std::io::Read + std::io::Seek> SortedPart<R> {
+    pub fn open(mut r: R) -> Result<Self, String> {
+        use std::io::SeekFrom;
+        let io = |e: std::io::Error| format!("a part of quack: {e}");
+        let len = r.seek(SeekFrom::End(0)).map_err(io)?;
+        let mut tail = [0u8; 8];
+        r.seek(SeekFrom::Start(
+            len.checked_sub(8)
+                .ok_or("a part of quack that is not Parquet")?,
+        ))
+        .map_err(io)?;
+        r.read_exact(&mut tail).map_err(io)?;
+        if &tail[4..] != b"PAR1" {
+            return Err("a part of quack that is not Parquet".into());
+        }
+        let n = u32::from_le_bytes(tail[..4].try_into().unwrap()) as u64;
+        let mut footer = vec![0u8; n as usize];
+        r.seek(SeekFrom::Start(
+            len.checked_sub(8 + n)
+                .ok_or("a part of quack with a bad footer")?,
+        ))
+        .map_err(io)?;
+        r.read_exact(&mut footer).map_err(io)?;
+        let meta = parquet::file::metadata::ParquetMetaDataReader::decode_metadata(&footer)
+            .map_err(err)?;
+        let meta = parquet::arrow::arrow_reader::ArrowReaderMetadata::try_new(
+            Arc::new(meta),
+            Default::default(),
+        )
+        .map_err(err)?;
+        let mut p = SortedPart {
+            r,
+            len,
+            meta,
+            next_group: 0,
+            batch: None,
+            row: 0,
+            center: (0.0, 0.0),
+        };
+        p.load()?;
+        Ok(p)
+    }
+
+    /// The number of rows of the part.
+    pub fn rows(&self) -> usize {
+        self.meta.metadata().file_metadata().num_rows() as usize
+    }
+
+    /// Read the next row group that has rows (none at the end of the part).
+    fn load(&mut self) -> Result<(), String> {
+        use std::io::SeekFrom;
+        self.batch = None;
+        self.row = 0;
+        while self.next_group < self.meta.metadata().num_row_groups() {
+            let g = self.next_group;
+            self.next_group += 1;
+            let rg = self.meta.metadata().row_group(g);
+            if rg.num_rows() == 0 {
+                continue;
+            }
+            let (mut at, mut end) = (u64::MAX, 0);
+            for c in rg.columns() {
+                let (s, n) = c.byte_range();
+                (at, end) = (at.min(s), end.max(s + n));
+            }
+            let mut b = vec![0u8; (end - at) as usize];
+            self.r
+                .seek(SeekFrom::Start(at))
+                .map_err(|e| e.to_string())?;
+            self.r.read_exact(&mut b).map_err(|e| e.to_string())?;
+            let w = Window {
+                at,
+                bytes: b.into(),
+                len: self.len,
+            };
+            let reader =
+                parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::new_with_metadata(
+                    w,
+                    self.meta.clone(),
+                )
+                .with_row_groups(vec![g])
+                .with_batch_size(rg.num_rows() as usize)
+                .build()
+                .map_err(err)?;
+            let batches = reader.collect::<Result<Vec<_>, _>>().map_err(err)?;
+            self.batch = Some(
+                arrow_select::concat::concat_batches(&batches[0].schema(), &batches)
+                    .map_err(err)?,
+            );
+            return self.find_center();
+        }
+        Ok(())
+    }
+
+    fn find_center(&mut self) -> Result<(), String> {
+        use arrow_array::cast::AsArray;
+        let b = self.batch.as_ref().expect("a row group");
+        self.center =
+            duckosm_core::quack::wkb_center(b.column(2).as_binary::<i32>().value(self.row))
+                .ok_or("a geometry that is not the WKB of quack")?;
+        Ok(())
+    }
+
+    /// The key of the merge of the row now ([`duckosm_core::quack::ordered`] x and y of its center), none at the end.
+    pub fn key(&self) -> Option<(i64, i64)> {
+        self.batch.as_ref().map(|_| {
+            (
+                duckosm_core::quack::ordered(self.center.0),
+                duckosm_core::quack::ordered(self.center.1),
+            )
         })
-        .collect()
+    }
+
+    /// The row now, and go to the next row.
+    pub fn take(&mut self) -> Result<Feature, String> {
+        let b = self.batch.as_ref().ok_or("the end of a part of quack")?;
+        let f = feature_at(b, self.row, Some(self.center))?;
+        self.row += 1;
+        if self.row == b.num_rows() {
+            self.load()?;
+        } else {
+            self.find_center()?;
+        }
+        Ok(f)
+    }
 }
 
 /// The batches of a GeoParquet file of quack in memory (a part of the join of quack by tiles in the browser).

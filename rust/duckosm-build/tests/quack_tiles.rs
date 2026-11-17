@@ -65,8 +65,13 @@ fn monaco_tile_tables() {
 #[test]
 fn monaco_tile_workers() {
     use duckosm_core::quack::{tiles_of_file, TileSize, WORLD};
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
-    let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
+    let open = || {
+        Ok(std::io::BufReader::new(
+            std::fs::File::open(&path).map_err(|e| e.to_string())?,
+        ))
+    };
     let mut whole: Vec<Row> = Vec::new();
     duckosm_core::quack::features(open, 1 << 20, |rows| {
         whole.extend(rows.into_iter().map(row));
@@ -78,29 +83,63 @@ fn monaco_tile_workers() {
     assert!(tiles.len() > 4, "small tiles");
     let world = duckosm_core::boundary::Boundary::parse(WORLD).unwrap();
     let mut files: Vec<Vec<u8>> = vec![Vec::new(); tiles.len()];
-    let counts = duckosm_core::tilecut::cut_to_sink(open, &world, &tiles, &["multipolygon", "boundary"], false, &mut |t, b| {
-        files[t as usize].extend_from_slice(b);
-        Ok(())
-    })
+    let counts = duckosm_core::tilecut::cut_to_sink(
+        open,
+        &world,
+        &tiles,
+        &["multipolygon", "boundary"],
+        false,
+        &mut |t, b| {
+            files[t as usize].extend_from_slice(b);
+            Ok(())
+        },
+    )
     .unwrap();
-    let mut parts = Vec::new();
+    let (mut parts, mut sorted) = (Vec::new(), Vec::new());
     for (i, f) in files.iter().enumerate() {
         if counts[i].nodes == 0 {
             continue;
         }
-        let mut part = Vec::new();
-        duckosm_build::quack_tile_to(|| Ok(std::io::Cursor::new(&f[..])), tiles[i], &mut part).unwrap();
-        parts.push(part);
+        for (sort, list) in [(false, &mut parts), (true, &mut sorted)] {
+            let mut part = Vec::new();
+            duckosm_build::quack_tile_to(
+                || Ok(std::io::Cursor::new(&f[..])),
+                tiles[i],
+                &mut part,
+                sort,
+            )
+            .unwrap();
+            list.push(std::io::Cursor::new(part));
+        }
     }
+    let read = |file: Vec<u8>| {
+        let mut rows = Vec::new();
+        duckosm_parquet::quack::read_quack_bytes(file, |b| {
+            rows.extend(duckosm_parquet::quack::features_of(&b)?);
+            Ok(())
+        })
+        .unwrap();
+        rows
+    };
     let mut joined = Vec::new();
-    let n = duckosm_build::quack_join_to(parts.into_iter().map(Ok), &mut joined, false).unwrap();
+    let n = duckosm_build::quack_join_to(parts, &mut joined, false, &mut |_, _| {}).unwrap();
     assert_eq!(n, whole.len());
-    let mut got: Vec<Row> = Vec::new();
-    duckosm_parquet::quack::read_quack_bytes(joined, |b| {
-        got.extend(duckosm_parquet::quack::features_of(&b)?.into_iter().map(row));
-        Ok(())
-    })
-    .unwrap();
+    // the rows in the order of the parts: the row numbers of the sort
+    let unsorted = read(joined);
+    let mut got: Vec<Row> = unsorted.iter().cloned().map(row).collect();
     got.sort();
     assert!(got == whole, "the join of the parts equals the whole file");
+    // with the sort: the sorted parts merged give the order of str_order on the rows in the order of the parts
+    let mut joined = Vec::new();
+    let mut last = (0, 0);
+    let n =
+        duckosm_build::quack_join_to(sorted, &mut joined, true, &mut |m, t| last = (m, t)).unwrap();
+    assert_eq!((n, last), (whole.len(), (n, n)));
+    let centers: Vec<_> = unsorted.iter().map(|f| f.center).collect();
+    let want: Vec<String> = duckosm_core::quack::str_order(&centers)
+        .into_iter()
+        .map(|i| unsorted[i].feature_id.clone())
+        .collect();
+    let got: Vec<String> = read(joined).into_iter().map(|f| f.feature_id).collect();
+    assert!(got == want, "the sorted join has the order of str_order");
 }
