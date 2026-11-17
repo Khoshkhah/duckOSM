@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The sorted quack by tiles: each tile sorts its rows, and the join merges the sorted parts** (`docs/rust/quack.md`, "The
+  sort tile by tile"). `quack_tile_to` gets `sort`: the part has its rows in the order (x, y, row number), in row groups of 2 048
+  rows. `quack_join_to` merges the parts with a heap and makes QuackOSM's strips with no runs on disk, and it gives its progress.
+  The order is the order of `str_order`, as before. `wkb_center` reads the points in place. Chromium on the Mac mini, sorted:
+  the join of Île-de-France 8.9 s to 5.8 s and 965 MiB to 626 MiB; the tiles 14.1 s to 17.7 s (one large tile sorts alone).
+
 - **The bus routes and the levels after the union of a build by tiles: memory that does not grow with the area**
   (`docs/design/tail_steps_by_tiles.md`). The bus step puts the route relations and the member ways into temporary files sorted
   by batch, and each batch reads only its own data; the read of the union edges decodes only the columns of the walk. The levels
