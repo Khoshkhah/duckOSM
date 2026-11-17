@@ -135,11 +135,37 @@ fn monaco_tile_workers() {
     got.sort();
     assert!(got == whole, "the join of the parts equals the whole file");
     // with the sort: the sorted parts merged give the order of str_order on the rows in the order of the parts
+    // each part is dropped when the merge has read all its rows, before the merge ends (the browser then deletes its file)
+    struct Part(std::io::Cursor<Vec<u8>>, std::rc::Rc<std::cell::Cell<bool>>, std::rc::Rc<std::cell::Cell<usize>>);
+    impl std::io::Read for Part {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(b)
+        }
+    }
+    impl std::io::Seek for Part {
+        fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.0.seek(to)
+        }
+    }
+    impl Drop for Part {
+        fn drop(&mut self) {
+            if !self.1.get() {
+                self.2.set(self.2.get() + 1);
+            }
+        }
+    }
+    let (ended, early) = (std::rc::Rc::new(std::cell::Cell::new(false)), std::rc::Rc::new(std::cell::Cell::new(0)));
+    let count = sorted.len();
+    let sorted: Vec<Part> = sorted.into_iter().map(|c| Part(c, ended.clone(), early.clone())).collect();
     let mut joined = Vec::new();
     let mut last = (0, 0);
-    let n =
-        duckosm_build::quack_join_to(sorted, &mut joined, true, &mut |m, t| last = (m, t)).unwrap();
+    let n = duckosm_build::quack_join_to(sorted, &mut joined, true, &mut |m, t| {
+        last = (m, t);
+        ended.set(m == t);
+    })
+    .unwrap();
     assert_eq!((n, last), (whole.len(), (n, n)));
+    assert_eq!(early.get(), count, "each part is dropped before the merge ends");
     let centers: Vec<_> = unsorted.iter().map(|f| f.center).collect();
     let want: Vec<String> = duckosm_core::quack::str_order(&centers)
         .into_iter()

@@ -23,7 +23,7 @@ Mac mini (12 cores, 16 GB). duckOSM is **3 to 7 times faster** and needs **2 to 
 | | QuackOSM | duckOSM | duckOSM in the browser |
 |---|---|---|---|
 | Time | 9 min 30 s | **2 min 9 s** | 4 min 54 s |
-| Time, sorted | 16 min 38 s | **2 min 30 s** | – ¹ |
+| Time, sorted | 16 min 38 s | **2 min 30 s** | 5 min 40 s |
 | Memory | 9.8 GB | **3.8 GB** | 6.9 GB |
 
 ### Kentucky (141 MB)
@@ -34,8 +34,7 @@ Mac mini (12 cores, 16 GB). duckOSM is **3 to 7 times faster** and needs **2 to 
 | Time, sorted | 13.7 s | **4.0 s** | 9.6 s |
 | Memory | 5.8 GB | **1.2 GB** | 1.0 GB |
 
-¹ Not measured: the sorted run needs more browser storage than this Mac can give. With the sort in the tiles (2026-11-17),
-the run used 37.6 GB of browser storage before it was stopped, so that the Mac kept 30 GB free.
+France sorted in the browser used at most 17.9 GB of browser storage on the disk, for a GeoParquet file of 11.7 GB.
 
 The rows are the same: 99.9998 % of the 99 million France rows have an equal geometry, and the rest differ only in the
 last digits.

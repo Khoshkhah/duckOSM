@@ -2061,6 +2061,9 @@ impl StrSort {
         let io = |e: std::io::Error| format!("quack sort: {e}");
         let group = self.group;
         let (_, strip_size) = strips(n.max(1), group);
+        // the pieces of a strip go after the runs; the pieces of the next strip go over them, so the file holds the runs
+        // and the pieces of one strip
+        let base = self.end;
         // the buffer of the rows is the buffer of the strips now
         let (mut bytes, mut strip) = (
             std::mem::take(&mut self.bytes),
@@ -2100,6 +2103,7 @@ impl StrSort {
             if full && !pieces.is_empty() {
                 self.merge_strip(std::mem::take(&mut pieces), up, &mut out, &mut emit)
                     .map_err(io)?;
+                self.end = base;
             } else if full {
                 strip.par_sort_unstable_by_key(|r| (r.0, r.1, r.2));
                 // the rows of the strip are read on all threads, a row group at a time
