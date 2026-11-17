@@ -1679,15 +1679,25 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
 /// One tile of quack by tiles, alone (a worker of the browser for each tile, `docs/rust/quack.md`): the rows that tile
 /// `tile` owns, from the file of the tile that `open` opens (a file of `tilecut::cut_to_sink`, with each multipolygon and
 /// boundary whole in each tile with a member), as a GeoParquet part through `out`. No other tile is needed; the parts of
-/// all tiles, joined ([`quack_join_to`]), are the table of the whole file.
+/// all tiles, joined ([`quack_join_to`]), are the table of the whole file. With `sort`, the part has the rows in the order
+/// (x, y, row number) of `duckosm_core::quack::StrSort`, in small row groups, so the join only merges the parts.
 pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
     open: impl Fn() -> Result<R, String>,
     tile: duckosm_core::tiles::Tile,
     out: W,
+    sort: bool,
 ) -> Result<duckosm_core::quack::Counts, String> {
     use rayon::prelude::*;
-    let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
-    let owner = duckosm_core::quack::Owner { tile, relations: None };
+    let mut w = if sort {
+        duckosm_parquet::quack::QuackWriter::part(out)?
+    } else {
+        duckosm_parquet::quack::QuackWriter::new(out)?
+    };
+    let mut sorted = sort.then(duckosm_core::quack::PartSort::default);
+    let owner = duckosm_core::quack::Owner {
+        tile,
+        relations: None,
+    };
     let mut n = duckosm_core::quack::Counts::default();
     duckosm_core::quack::features_owned(open, duckosm_core::quack::BUDGET, Some(&owner), |rows| {
         let mine: Vec<_> = rows.into_iter().filter(|f| f.owner).collect();
@@ -1698,40 +1708,81 @@ pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
                 _ => n.relations += 1,
             }
         }
-        for b in mine.par_chunks(20_000).map(duckosm_parquet::quack::batch).collect::<Result<Vec<_>, _>>()? {
+        if let Some(s) = sorted.as_mut() {
+            return s.push(mine);
+        }
+        for b in mine
+            .par_chunks(20_000)
+            .map(duckosm_parquet::quack::batch)
+            .collect::<Result<Vec<_>, _>>()?
+        {
             w.write(&b)?;
         }
         Ok(())
     })?;
+    if let Some(s) = sorted {
+        s.finish(duckosm_parquet::quack::PART_GROUP, |rows| {
+            w.write(&duckosm_parquet::quack::batch(&rows)?)
+        })?;
+    }
     w.close()?;
     Ok(n)
 }
 
-/// The join of the parts of [`quack_tile_to`] (each a GeoParquet file in memory) into one GeoParquet file through `out`;
-/// with `sort`, in QuackOSM's order. Each part has only the rows that its tile owns, so the join only copies them. Gives
-/// the number of rows.
-pub fn quack_join_to<W: Write + Send>(
-    parts: impl Iterator<Item = Result<Vec<u8>, String>>,
+/// The join of the parts of [`quack_tile_to`] into one GeoParquet file through `out`. Without `sort`, the row groups of
+/// the parts are copied as bytes, one part at a time. With `sort` (parts made with `sort`), the parts are merged in the
+/// order (x, y, part), which is the order (x, y, row number) of all rows, with one small row group of each part in memory;
+/// then `duckosm_core::quack::StrSort::merged` makes QuackOSM's strips. `progress(merged rows, all rows)` comes after each
+/// 100 000 rows of the merge. Gives the number of rows.
+pub fn quack_join_to<R: Read + std::io::Seek, W: Write + Send>(
+    parts: Vec<R>,
     out: W,
     sort: bool,
+    progress: &mut dyn FnMut(usize, usize),
 ) -> Result<usize, String> {
-    // with no sort, the row groups of the parts are copied as bytes
+    use duckosm_parquet::quack::SortedPart;
+    use std::cmp::Reverse;
     if !sort {
-        return duckosm_parquet::quack::concat_quack(parts, out);
+        let bytes = parts.into_iter().map(|mut p| {
+            let mut v = Vec::new();
+            p.read_to_end(&mut v)
+                .map_err(|e| format!("a part of quack: {e}"))?;
+            Ok(v)
+        });
+        return duckosm_parquet::quack::concat_quack(bytes, out);
     }
+    let mut parts = parts
+        .into_iter()
+        .map(SortedPart::open)
+        .collect::<Result<Vec<_>, _>>()?;
+    let total: usize = parts.iter().map(|p| p.rows()).sum();
+    let mut heap: std::collections::BinaryHeap<_> = parts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| p.key().map(|k| Reverse((k, i))))
+        .collect();
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
-    let mut rows = duckosm_parquet::quack::Rows::new(sort);
-    for p in parts {
-        duckosm_parquet::quack::read_quack_bytes(p?, |b| {
-            if sort {
-                rows.push(duckosm_parquet::quack::features_of(&b)?)?;
-                Ok(())
-            } else {
-                w.write(&b)
-            }
-        })?;
-    }
-    rows.sorted(|b| w.write(&b))?;
+    let mut merged = 0;
+    let next = |seq: u64, row: &mut Vec<u8>| {
+        let Some(Reverse((_, i))) = heap.pop() else { return Ok(false) };
+        parts[i].put(seq, row)?;
+        if let Some(k) = parts[i].key() {
+            heap.push(Reverse((k, i)));
+        }
+        merged += 1;
+        if merged % 100_000 == 0 || merged == total {
+            progress(merged, total);
+        }
+        Ok(true)
+    };
+    duckosm_core::quack::StrSort::merged(total, next, |rows| {
+        use rayon::prelude::*;
+        let parts: Vec<_> = rows
+            .par_chunks(20_000)
+            .map(duckosm_parquet::quack::batch)
+            .collect::<Result<_, _>>()?;
+        parts.iter().try_for_each(|b| w.write(b))
+    })?;
     w.close()
 }
 

@@ -199,8 +199,10 @@ each step uses all the threads:
    that owns the files only writes; the threads of the pool decode the blocks and pack the blocks of the tile files.
 3. A Web Worker for each thread makes the rows of one tile at a time (`quack_tile`). Each worker has its own
    WebAssembly module, its own memory and its own files, so the tiles do not wait for each other. A tile file is
-   removed when its rows are made.
-4. The join writes the parts into one GeoParquet file.
+   removed when its rows are made. With the sort, each worker also sorts the rows of its tile (see "The sort tile by
+   tile").
+4. The join writes the parts into one GeoParquet file. Without the sort, it copies the row groups of the parts. With the
+   sort, it merges the sorted parts.
 
 Sweden (975 MB) in Chromium on the Mac mini, zoom 6 (21 tiles), 12 threads, not sorted: 60.9 s, with the same numbers of
 rows as the native run:
@@ -214,6 +216,37 @@ rows as the native run:
 
 The run used at most 7.0 GB of browser storage: the tile files and the parts of the rows, then the parts and the 2.7 GB
 output file.
+
+### The sort tile by tile
+
+QuackOSM's sort (`str_order`) cuts the rows, in the order of x, into strips, and sorts each strip by y. Tile by
+tile, the order of x of all rows is the merge of the order of x of each tile:
+
+1. Each tile worker sorts its own rows by (x, y, row number) of the center (`PartSort`: in memory while the rows fit in
+   the budget of the sort, else `StrSort` with runs on disk) and writes its part with row groups of 2 048 rows.
+2. The join (`quack_join_to`) merges the parts with a heap, by (x, y, part). This is the order (x, y, row number) of all
+   rows, because the row numbers of a part come after those of the parts before it. The merge holds one row group of each
+   part; when a part needs more, it reads one row group for each thread and decodes them on all threads.
+3. The strips of `StrSort` come from the merged rows, as before. The join writes no runs, and it sends its progress
+   (rows merged of all rows) to the page.
+
+Before, the join pushed all rows into `StrSort` (runs of 128 MB to OPFS, then a merge) on one worker, and the page showed
+no progress. In Chromium on the Mac mini (zoom 8, 8 tile workers, join with 8 threads), sorted, before and after:
+
+| Sorted, in Chromium | Tiles | The join | Join worker memory | Total |
+|---|---|---|---|---|
+| Kentucky (148 MB), before | 3.7 s | 2.9 s | 815 MiB | 9.1 s |
+| Kentucky, after | 4.5 s | 1.9 s | 827 MiB | 8.9 s |
+| Île-de-France (355 MB), before | 14.1 s | 8.9 s | 965 MiB | 29.2 s |
+| Île-de-France, after | 17.7 s | 5.8 s | 626 MiB | 29.7 s |
+
+The join is faster, and the work of the sort moves to the tile workers. Île-de-France has one large tile (Paris, 8/129/88):
+its worker sorts alone for about 3.5 s more, and the other workers have no tiles then, so the total stays the same. A
+file with many tiles of similar size divides this work between all workers. The memory of all tile workers on
+Île-de-France went from 1 471 MiB to 2 459 MiB (the rows of a tile wait in memory for the sort, up to 128 MB).
+
+Natively (`examples/quack_join_bench.rs`, Île-de-France, zoom 8), the sorted join takes 2.6 s, against 6.9 s with all
+rows into `StrSort`.
 
 Natively, one run is faster: the tile mode reads the file four times (the count, two passes of the cut, and the blocks
 of the extra elements), it writes and reads each element again, and the ways at the edge of a tile are made in each
