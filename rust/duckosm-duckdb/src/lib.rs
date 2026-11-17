@@ -118,6 +118,20 @@ pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memor
     con.execute_batch(MACROS).map_err(|e| e.to_string())
 }
 
+/// `main.boundary`, `main.visualization_metadata` and duckOSM's macros from the files of the area tables in `parquet_dir`, into
+/// a file that is already there (a clip: `duckosm_build::clip`).
+pub fn write_area_tables(db: &Path, parquet_dir: &Path) -> Result<(), String> {
+    let con = open(db, None)?;
+    write_schema(&con, parquet_dir, "main", &["boundary", "visualization_metadata"])?;
+    con.execute_batch(MACROS).map_err(|e| e.to_string())
+}
+
+/// `visualization.edge_levels` and `edge_levels_meta` from their files in `parquet_dir`, into a file that is already there.
+pub fn write_levels(db: &Path, parquet_dir: &Path) -> Result<(), String> {
+    let con = open(db, None)?;
+    write_schema(&con, parquet_dir, "visualization", &["edge_levels", "edge_levels_meta"])
+}
+
 /// duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole `.osm.pbf` file `pbf`, in the `.duckdb` file `db`, with
 /// the table function `read_osm` (docs/design/streaming_load.md): the same tables as `ST_READOSM` gives duckOSM.
 /// `memory_limit` (as DuckDB writes it, for example "4GB") and `threads` set DuckDB; None: DuckDB's defaults. Returns the

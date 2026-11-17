@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`duckosm-rust --config`: `source.type: duckdb` is in Rust** (`rust/duckosm-build/src/clip.rs`, `docs/design/all_in_rust.md`,
+  group A). The build copies the rows of the parent database in the boundary, with `clip.predicate`, and then makes
+  `main.boundary`, `main.visualization_metadata`, the drawing order, the indexes, the checks and the report. On Monaco
+  (`intersects` and `within`) every table of the clip, `main.boundary`, the metadata and the indexes equal the Python clip
+  (`tests/clip.rs`). Two differences: the Rust clip has `turn_path_restrictions` (the SQL of duckOSM fails in DuckDB, and
+  duckOSM drops the error), and the drawing order has the numbers of the Rust solve, as in a Rust build from a PBF.
+
 - **`duckosm-rust --config`: `boundary.place`, `bbox`, `h3_cell`, `buffer_m` and `options.boundary_cells` are in Rust**
   (`rust/duckosm-build/src/place.rs`, `docs/design/all_in_rust.md`, group A). The box, the cell and the place become
   `<name>.boundary.geojson` next to the database, as in duckOSM. A place is looked up in the borders of the PBF with GDAL in
