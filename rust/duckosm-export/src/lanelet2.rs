@@ -50,10 +50,11 @@ fn coords(wkt: &str) -> Vec<P> {
 }
 
 /// The lon/lat line offset sideways by `off_m` metres (left: positive), as `_offset_wkt` of src/duckosm/gmns.py: in a
-/// local metre frame at the first point, the longest part. The line unchanged when there is no offset.
-pub fn offset_lonlat(line: &[P], off_m: f64) -> Vec<P> {
+/// local metre frame at the first point, the longest part. The line unchanged when there is no offset. An error where the
+/// Rust offset curve does not follow GEOS (`offset::offset_curve`).
+pub fn offset_lonlat(line: &[P], off_m: f64) -> Result<Vec<P>> {
     if off_m.abs() < 1e-6 || line.len() < 2 {
-        return line.to_vec();
+        return Ok(line.to_vec());
     }
     let (x0, y0) = line[0];
     let kx = match y0.to_radians().cos() {
@@ -62,7 +63,7 @@ pub fn offset_lonlat(line: &[P], off_m: f64) -> Vec<P> {
     };
     let m = 111320.0;
     let local: Vec<P> = line.iter().map(|(x, y)| ((x - x0) * kx * m, (y - y0) * m)).collect();
-    let parts = offset_curve(&local, off_m);
+    let parts = offset_curve(&local, off_m).map_err(|e| format!("the offset curve of {line:?} by {off_m} m: {e}"))?;
     let len = |p: &Vec<P>| p.windows(2).map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1)).sum::<f64>();
     // the first of the longest parts, as Python's max()
     let mut best: Option<&Vec<P>> = None;
@@ -71,10 +72,10 @@ pub fn offset_lonlat(line: &[P], off_m: f64) -> Vec<P> {
             best = Some(p);
         }
     }
-    match best {
+    Ok(match best {
         Some(b) if b.len() >= 2 => b.iter().map(|(x, y)| (x / (kx * m) + x0, y / m + y0)).collect(),
         _ => line.to_vec(),
-    }
+    })
 }
 
 pub struct Summary {
@@ -134,7 +135,7 @@ pub fn to_lanelet2(gmns_db: &Path, out: &Path, mode: &str, snap_m: f64) -> Resul
     };
     for (link_id, use_, width, wkt, free_speed) in lanes {
         let line = coords(&wkt);
-        let (left, right) = (offset_lonlat(&line, width / 2.0), offset_lonlat(&line, -width / 2.0));
+        let (left, right) = (offset_lonlat(&line, width / 2.0)?, offset_lonlat(&line, -width / 2.0)?);
         if left.len() < 2 || right.len() < 2 {
             continue;
         }

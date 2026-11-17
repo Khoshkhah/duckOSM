@@ -254,8 +254,8 @@ fn hausdorff_m(a: &[(f64, f64)], b: &[(f64, f64)]) -> f64 {
     one(a, b).max(one(b, a))
 }
 
-/// Lanelet2: the same lanelets, tags and boundaries as Python. A boundary point may move by 1 mm (the offset curve is
-/// pure Rust, not GEOS) and by the rounding of the 8 decimals of the file (1.1 mm); the node and way ids are counters.
+/// Lanelet2: the same lanelets and tags as Python, and each boundary within 1 mm of Python's (Hausdorff). The offset curve
+/// is the pure Rust port of GEOS (`src/offset.rs`, `src/geos.rs`); on Monaco and Tartu the file has the same bytes.
 #[test]
 fn lanelet2_equals_python() {
     let o = out("monaco.lanelet2.osm");
@@ -267,7 +267,7 @@ fn lanelet2_equals_python() {
         assert_eq!(g.0, w.0);
         for (side, x, y) in [("left", &g.1, &w.1), ("right", &g.2, &w.2)] {
             let h = hausdorff_m(x, y);
-            if h > 1e-3 + 1.2e-3 {
+            if h > 1e-3 {
                 bad.push(format!("{} {side}: {h:.4} m", g.0.iter().find(|t| t.starts_with("duckosm:edge_id")).unwrap()));
             }
         }

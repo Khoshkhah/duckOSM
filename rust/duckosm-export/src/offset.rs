@@ -1,15 +1,15 @@
 //! The offset curve of a line, in pure Rust: the port of GEOS's `OffsetCurve` (shapely's `offset_curve(d)` with its
 //! defaults: 16 segments for a quarter circle, round joins). A positive distance is on the left.
 //!
-//! GEOS makes the raw offset curve (`OffsetCurveBuilder::getOffsetCurve`), then keeps the parts of it that are on the
-//! ring of the buffer polygon of the line. Here the raw curve and the raw ring of the buffer (`computeLineBufferCurve`)
-//! are made with the same steps; the raw curve is cut where it crosses the ring, and a piece stays when it is not inside
-//! the buffer (the winding number of the ring). The points of the raw curve are the same as in GEOS; a point where the
-//! curve is cut agrees with GEOS's noding to much less than 1 mm.
+//! GEOS makes the raw offset curve (`OffsetCurveBuilder::getOffsetCurve`) and the buffer polygon of the line, then keeps
+//! the parts of the buffer's rings that lie on the raw curve (`OffsetCurve::computeSections`). Here the raw curve and the
+//! raw ring of the buffer (`computeLineBufferCurve`) are made with the same steps, and `geos::buffer_polygons` makes
+//! the buffer polygon from the raw ring as GEOS's `BufferBuilder` does.
 
+use crate::geos::{dist, intersection_count, orient, point_to_segment, segment_intersection};
 use std::f64::consts::{FRAC_PI_2, PI};
 
-pub type P = (f64, f64);
+pub use crate::geos::P;
 
 /// shapely's default `quad_segs` of `offset_curve`.
 const QUADRANT_SEGMENTS: f64 = 16.0;
@@ -20,85 +20,6 @@ const SIMPLIFY_FACTOR: f64 = 100.0;
 const CLOSING_SEG_LEN_FACTOR: f64 = 80.0;
 const CW: i32 = -1;
 const CCW: i32 = 1;
-
-/// The orientation of (p0, p1, p2): CCW 1, CW -1, collinear 0, as GEOS `CGAlgorithmsDD::orientationIndex`: a fast
-/// filter, then double-double arithmetic.
-fn orient(p0: P, p1: P, p2: P) -> i32 {
-    // GEOS orientationIndexFilter
-    let detleft = (p0.0 - p2.0) * (p1.1 - p2.1);
-    let detright = (p0.1 - p2.1) * (p1.0 - p2.0);
-    let det = detleft - detright;
-    let detsum = if detleft > 0.0 {
-        (detright <= 0.0).then_some(0.0).unwrap_or(detleft + detright)
-    } else if detleft < 0.0 {
-        (detright >= 0.0).then_some(0.0).unwrap_or(-detleft - detright)
-    } else {
-        0.0
-    };
-    let sign = |d: f64| if d > 0.0 { CCW } else if d < 0.0 { CW } else { 0 };
-    if detleft == 0.0 || (detleft > 0.0 && detright <= 0.0) || (detleft < 0.0 && detright >= 0.0) {
-        return sign(det);
-    }
-    if det.abs() >= 1e-15 * detsum {
-        return sign(det);
-    }
-    // (p1 - p0) x (p2 - p1) in double-double: the differences are exact, the products carry their error terms
-    let two_diff = |a: f64, b: f64| {
-        let s = a - b;
-        let bb = s - a;
-        (s, (a - (s - bb)) - (b + bb))
-    };
-    let mul = |a: (f64, f64), b: (f64, f64)| {
-        let p = a.0 * b.0;
-        let e = a.0.mul_add(b.0, -p);
-        (p, e + a.0 * b.1 + a.1 * b.0 + a.1 * b.1)
-    };
-    let (dx1, dy1, dx2, dy2) = (two_diff(p1.0, p0.0), two_diff(p1.1, p0.1), two_diff(p2.0, p1.0), two_diff(p2.1, p1.1));
-    let (m1, m2) = (mul(dx1, dy2), mul(dy1, dx2));
-    sign((m1.0 - m2.0) + (m1.1 - m2.1))
-}
-
-fn dist(a: P, b: P) -> f64 {
-    (a.0 - b.0).hypot(a.1 - b.1)
-}
-
-/// The distance from p to the segment a-b (GEOS `Distance::pointToSegment`).
-fn point_to_segment(p: P, a: P, b: P) -> f64 {
-    if a == b {
-        return dist(p, a);
-    }
-    let len2 = (b.0 - a.0) * (b.0 - a.0) + (b.1 - a.1) * (b.1 - a.1);
-    let r = ((p.0 - a.0) * (b.0 - a.0) + (p.1 - a.1) * (b.1 - a.1)) / len2;
-    if r <= 0.0 {
-        return dist(p, a);
-    }
-    if r >= 1.0 {
-        return dist(p, b);
-    }
-    let s = ((a.1 - p.1) * (b.0 - a.0) - (a.0 - p.0) * (b.1 - a.1)) / len2;
-    s.abs() * len2.sqrt()
-}
-
-/// The point where the segments a0-a1 and b0-b1 meet, if they meet (an end point when they only touch).
-fn intersection(a0: P, a1: P, b0: P, b1: P) -> Option<P> {
-    let (o1, o2, o3, o4) = (orient(a0, a1, b0), orient(a0, a1, b1), orient(b0, b1, a0), orient(b0, b1, a1));
-    if (o1 > 0 && o2 > 0) || (o1 < 0 && o2 < 0) || (o3 > 0 && o4 > 0) || (o3 < 0 && o4 < 0) {
-        return None;
-    }
-    if o1 == 0 && o2 == 0 && o3 == 0 && o4 == 0 {
-        // collinear: an end point in the other segment
-        let within = |p: P, s: P, e: P| p.0 >= s.0.min(e.0) && p.0 <= s.0.max(e.0) && p.1 >= s.1.min(e.1) && p.1 <= s.1.max(e.1);
-        return [b0, b1].into_iter().find(|p| within(*p, a0, a1)).or([a0, a1].into_iter().find(|p| within(*p, b0, b1)));
-    }
-    for (o, p) in [(o1, b0), (o2, b1), (o3, a0), (o4, a1)] {
-        if o == 0 {
-            return Some(p);
-        }
-    }
-    let d = (a1.0 - a0.0) * (b1.1 - b0.1) - (a1.1 - a0.1) * (b1.0 - b0.0);
-    let t = ((b0.0 - a0.0) * (b1.1 - b0.1) - (b0.1 - a0.1) * (b1.0 - b0.0)) / d;
-    Some((a0.0 + t * (a1.0 - a0.0), a0.1 + t * (a1.1 - a0.1)))
-}
 
 /// GEOS `BufferInputLineSimplifier`: drop the vertices of shallow concavities on one side (tol > 0: the left side).
 fn simplify(pts: &[P], tol: f64) -> Vec<P> {
@@ -208,7 +129,9 @@ impl Gen {
         let inc = total / n as f64;
         for i in 0..n {
             let a = start + f * i as f64 * inc;
-            let (mut s, mut c) = a.sin_cos();
+            // separate sin and cos as GEOS (Angle::sinCosSnap): glibc's sincos, which sin_cos (or LLVM, from sin and
+            // cos of the same angle) calls, can differ from sin in the last bit. black_box keeps the two calls apart.
+            let (mut s, mut c) = (a.sin(), std::hint::black_box(a).cos());
             if s.abs() < 5e-16 {
                 s = 0.0;
             }
@@ -245,9 +168,8 @@ impl Gen {
         let (s1, d) = (self.s1, self.d);
         let (o0, o1) = (self.off0, self.off1);
         if o == 0 {
-            // collinear: a fillet only when the line goes back on itself
-            let back = (self.s2.0 - s1.0) * (s1.0 - self.s0.0) + (self.s2.1 - s1.1) * (s1.1 - self.s0.1) < 0.0;
-            if back {
+            // collinear (GEOS addCollinear): a fillet only when the segments overlap (the line goes back on itself)
+            if intersection_count(self.s0, s1, s1, self.s2) >= 2 {
                 self.fillet(s1, o0.1, o1.0, CW, d);
             }
         } else if o == CW {
@@ -259,7 +181,7 @@ impl Gen {
             self.add(o0.1);
             self.fillet(s1, o0.1, o1.0, o, d);
             self.add(o1.0);
-        } else if let Some(x) = intersection(o0.0, o0.1, o1.0, o1.1) {
+        } else if let Some(x) = segment_intersection(o0.0, o0.1, o1.0, o1.1) {
             self.add(x);
         } else if dist(o0.1, o1.0) < d * INSIDE_TURN_VERTEX_SNAP_DISTANCE_FACTOR {
             self.add(o0.1);
@@ -271,11 +193,13 @@ impl Gen {
             self.add(o1.0);
         }
     }
-    fn end_cap(&mut self, p0: P, p1: P, p2: P) {
+    /// GEOS `addLineEndCap`, round: the fillet from the angle of p0-p1 plus 90 degrees to the angle minus 90 degrees.
+    fn end_cap(&mut self, p0: P, p1: P) {
         let l = Gen::offset(p0, p1, 1.0, self.d);
-        let r = Gen::offset(p2, p1, -1.0, self.d);
+        let r = Gen::offset(p0, p1, -1.0, self.d);
+        let angle = (p1.1 - p0.1).atan2(p1.0 - p0.0);
         self.add(l.1);
-        self.fillet(p1, l.1, r.1, CW, self.d);
+        self.fillet_angles(p1, angle + FRAC_PI_2, angle - FRAC_PI_2, CW, self.d);
         self.add(r.1);
     }
 }
@@ -332,14 +256,14 @@ pub fn buffer_ring(pts: &[P], d: f64) -> Vec<P> {
     g.add(last);
     let s2 = simplify(pts, -tol);
     let n2 = s2.len() - 1;
-    g.end_cap(s1[n1 - 1], s1[n1], s2[n2 - 1]);
+    g.end_cap(s1[n1 - 1], s1[n1]);
     g.init_side(s2[n2], s2[n2 - 1]);
     for i in (1..n2).rev() {
         g.next_segment(s2[i - 1]);
     }
     let last = g.off1.1;
     g.add(last);
-    g.end_cap(s2[1], s2[0], s1[1]);
+    g.end_cap(s2[1], s2[0]);
     if g.pts.first() != g.pts.last() {
         let f = g.pts[0];
         g.pts.push(f);
@@ -347,108 +271,102 @@ pub fn buffer_ring(pts: &[P], d: f64) -> Vec<P> {
     g.pts
 }
 
-/// The clockwise winding number of the closed ring around p.
-fn winding_cw(ring: &[P], p: P) -> i32 {
-    let mut w = 0;
-    for s in ring.windows(2) {
-        let (a, b) = (s[0], s[1]);
-        if a.1 <= p.1 {
-            if b.1 > p.1 && orient(a, b, p) == CCW {
-                w -= 1;
-            }
-        } else if b.1 <= p.1 && orient(a, b, p) == CW {
-            w += 1;
-        }
-    }
-    w
-}
-
 const MATCH_DISTANCE_FACTOR: f64 = 10000.0;
 
 /// GEOS `LineSegment::segmentFraction`: the projection factor of p on a-b, in 0..1.
 fn segment_fraction(p: P, a: P, b: P) -> f64 {
-    let len2 = (b.0 - a.0) * (b.0 - a.0) + (b.1 - a.1) * (b.1 - a.1);
-    let f = ((p.0 - a.0) * (b.0 - a.0) + (p.1 - a.1) * (b.1 - a.1)) / len2;
-    if f < 0.0 {
+    let f = if p == a {
         0.0
-    } else if f > 1.0 || f.is_nan() {
-        1.0
+    } else if p == b || a == b {
+        if p == b { 1.0 } else { 0.0 }
     } else {
-        f
-    }
+        let len2 = (b.0 - a.0) * (b.0 - a.0) + (b.1 - a.1) * (b.1 - a.1);
+        ((p.0 - a.0) * (b.0 - a.0) + (p.1 - a.1) * (b.1 - a.1)) / len2
+    };
+    f.clamp(0.0, 1.0)
 }
 
-/// The sections as GEOS `computeCurveSections` and `extractSections` make them from the runs of the ring that lie on
-/// the raw curve. Each segment of a run gets the location of the last raw segment that matches it (both ends within
-/// `md`), the closing chord too. The walk starts at the segment of the smallest location (raw segment by raw segment),
-/// so the run that holds it is cut there. The sections are sorted by the location of their first segment.
-fn geos_sections(runs: Vec<Vec<P>>, raw: &[P], md: f64) -> Vec<Vec<P>> {
-    let mut loc: Vec<Vec<f64>> = runs.iter().map(|r| vec![-1.0; r.len() - 1]).collect();
-    let mut first: Option<(usize, usize)> = None;
+/// GEOS `OffsetCurve::computeCurveSections` and `extractSections`: the runs of the buffer ring `ring` (closed) whose
+/// segments lie on a segment of the raw curve (both ends within `md`), as (location on the raw curve, points).
+fn curve_sections(ring: &[P], raw: &[P], md: f64, sections: &mut Vec<(f64, Vec<P>)>) {
+    const NOT_IN_CURVE: f64 = -1.0;
+    let n = ring.len() - 1;
+    let mut loc = vec![NOT_IN_CURVE; n];
+    let mut first: Option<usize> = None;
     let mut min_pos = -1.0;
     for (i, w) in raw.windows(2).enumerate() {
         let (a, b) = (w[0], w[1]);
-        if a == b {
-            continue;
-        }
-        let mut best: Option<((usize, usize), f64)> = None;
-        for (r, run) in runs.iter().enumerate() {
-            for j in 0..run.len() - 1 {
-                if point_to_segment(run[j], a, b) > md || point_to_segment(run[j + 1], a, b) > md {
-                    continue;
-                }
-                let l = i as f64 + segment_fraction(run[j], a, b);
-                loc[r][j] = l;
-                if best.is_none_or(|x| l < x.1) {
-                    best = Some(((r, j), l));
-                }
+        let mut best: Option<usize> = None;
+        let mut best_loc = -1.0;
+        for j in 0..n {
+            if md < point_to_segment(ring[j], a, b) || md < point_to_segment(ring[j + 1], a, b) {
+                continue;
+            }
+            let l = i as f64 + segment_fraction(ring[j], a, b);
+            loc[j] = l;
+            if best_loc < 0.0 || l < best_loc {
+                best_loc = l;
+                best = Some(j);
             }
         }
-        if let Some((k, pos)) = best {
+        if let Some(j) = best {
+            let pos = loc[j];
             if first.is_none() || pos < min_pos {
-                first = Some(k);
                 min_pos = pos;
+                first = Some(j);
             }
         }
     }
-    let mut out: Vec<(f64, Vec<P>)> = Vec::new();
-    for (r, run) in runs.into_iter().enumerate() {
-        // a segment that no raw segment matches ends a section
-        let mut cuts: Vec<usize> = vec![0];
-        for j in 0..run.len() - 1 {
-            if loc[r][j] < 0.0 {
-                cuts.push(j);
-                cuts.push(j + 1);
+    let Some(start) = first else { return };
+    let next = |i: usize| if i >= n - 1 { 0 } else { i + 1 };
+    let prev = |i: usize| if i == 0 { n - 1 } else { i - 1 };
+    let mut sec_start = start;
+    loop {
+        // findSectionEnd
+        let mut end = sec_start;
+        loop {
+            let nx = next(end);
+            if loc[nx] == NOT_IN_CURVE {
+                end = nx;
+                break;
+            }
+            end = nx;
+            if end == sec_start || end == start {
+                break;
             }
         }
-        if let Some((fr, fj)) = first {
-            if fr == r && fj > 0 {
-                cuts.push(fj);
+        // OffsetCurveSection::create
+        let len = if end <= sec_start { n + 1 - sec_start + end } else { end - sec_start + 1 };
+        sections.push((loc[sec_start], (0..len).map(|i| ring[(sec_start + i) % n]).collect()));
+        // findSectionStart
+        let mut s = end;
+        loop {
+            let nx = next(s);
+            if loc[s] != NOT_IN_CURVE && loc[prev(s)] == NOT_IN_CURVE {
+                break;
+            }
+            s = nx;
+            if s == end {
+                break;
             }
         }
-        cuts.push(run.len() - 1);
-        cuts.sort_unstable();
-        cuts.dedup();
-        for c in cuts.windows(2) {
-            let (s, e) = (c[0], c[1]);
-            if e > s && loc[r][s] >= 0.0 {
-                out.push((loc[r][s], run[s..=e].to_vec()));
-            }
+        sec_start = s;
+        if sec_start == start || end == start {
+            break;
         }
     }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
-    out.into_iter().map(|s| s.1).collect()
 }
 
 /// The offset curve of the line `pts` at the distance `d` (left: positive), as shapely's `offset_curve(d)`: the
-/// sections of the curve (more than one: a MultiLineString). Empty: GEOS gives an empty line.
-pub fn offset_curve(pts: &[P], d: f64) -> Vec<Vec<P>> {
+/// sections of the curve (more than one: a MultiLineString). Empty: GEOS gives an empty line. An error: GEOS's buffer
+/// with the full precision fails (GEOS then uses less precision; not ported).
+pub fn offset_curve(pts: &[P], d: f64) -> Result<Vec<Vec<P>>, String> {
     let length: f64 = pts.windows(2).map(|w| dist(w[0], w[1])).sum();
     if pts.len() < 2 || length == 0.0 {
-        return vec![];
+        return Ok(vec![]);
     }
     if d == 0.0 {
-        return vec![pts.to_vec()];
+        return Ok(vec![pts.to_vec()]);
     }
     if pts.len() == 2 {
         // GEOS LineSegment::offset
@@ -456,7 +374,7 @@ pub fn offset_curve(pts: &[P], d: f64) -> Vec<Vec<P>> {
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
         let len = (dx * dx + dy * dy).sqrt();
         let (ux, uy) = (d * dx / len, d * dy / len);
-        return vec![vec![(a.0 - uy, a.1 + ux), (b.0 - uy, b.1 + ux)]];
+        return Ok(vec![vec![(a.0 - uy, a.1 + ux), (b.0 - uy, b.1 + ux)]]);
     }
     let mut clean: Vec<P> = Vec::with_capacity(pts.len());
     for p in pts {
@@ -464,85 +382,34 @@ pub fn offset_curve(pts: &[P], d: f64) -> Vec<Vec<P>> {
             clean.push(*p);
         }
     }
-    let raw_closed = raw_curve(&clean, d);
-    if raw_closed.len() < 2 {
-        return vec![];
+    let raw = raw_curve(&clean, d);
+    if raw.is_empty() {
+        return Ok(vec![]);
     }
-    // the curve itself, without the closing chord (the first segment on the right side, else the last)
-    let raw: &[P] = if raw_closed.len() < 3 {
-        &raw_closed
-    } else if d < 0.0 {
-        &raw_closed[1..]
-    } else {
-        &raw_closed[..raw_closed.len() - 1]
-    };
-    let ring = buffer_ring(&clean, d.abs());
-    // a piece of the raw curve stays when a point just outside it (away from the line) is outside the buffer
-    let eps = 1e-6 * d.abs().max(1e-9);
+    if clean.first() == clean.last() {
+        return Err("a closed line (GEOS buffers both sides of the ring: not ported)".into());
+    }
+    let polys = crate::geos::buffer_polygons(&buffer_ring(&clean, d.abs()))?;
+    // extractMaxAreaPolygon (the first of the largest)
+    let mut best: Option<(f64, &crate::geos::Polygon)> = None;
+    for p in &polys {
+        let a = p.area();
+        if best.is_none_or(|b| a > b.0) {
+            best = Some((a, p));
+        }
+    }
+    let Some((_, poly)) = best else { return Ok(vec![]) };
     let md = d.abs() / MATCH_DISTANCE_FACTOR;
-    let side = if d > 0.0 { 1.0 } else { -1.0 };
-    // the sections: (location of the start on the raw curve, points). A section follows the ring of the buffer: where the
-    // raw curve leaves the ring at a point and comes back to the same point later (a loop inside the buffer), the
-    // section goes on through that point.
-    let mut sections: Vec<(f64, Vec<P>)> = Vec::new();
-    let mut cur: Vec<P> = Vec::new();
-    let mut cur_loc = 0.0;
-    let close = |cur: &mut Vec<P>, cur_loc: f64, sections: &mut Vec<(f64, Vec<P>)>| {
-        if cur.is_empty() {
-            return;
-        }
-        let end = *cur.last().unwrap();
-        let mut run = std::mem::take(cur);
-        // the run ends where an earlier section starts: the ring goes on into that section
-        if let Some(i) = sections.iter().position(|s| dist(s.1[0], end) <= eps) {
-            let (_, tail) = sections.remove(i);
-            run.extend_from_slice(&tail[1..]);
-        }
-        sections.push((cur_loc, run));
-    };
-    for (i, w) in raw.windows(2).enumerate() {
-        let (a, b) = (w[0], w[1]);
-        let len = dist(a, b);
-        if len == 0.0 {
-            continue;
-        }
-        let mut ts: Vec<f64> = ring
-            .windows(2)
-            .filter_map(|r| {
-                let x = intersection(a, b, r[0], r[1])?;
-                let t = ((x.0 - a.0) * (b.0 - a.0) + (x.1 - a.1) * (b.1 - a.1)) / (len * len);
-                (t * len > eps && (1.0 - t) * len > eps).then_some(t)
-            })
-            .collect();
-        ts.sort_by(f64::total_cmp);
-        ts.dedup_by(|x, y| (*x - *y) * len <= eps);
-        let at = |t: f64| if t == 0.0 { a } else if t == 1.0 { b } else { (a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)) };
-        let (nx, ny) = (-(b.1 - a.1) / len * side, (b.0 - a.0) / len * side);
-        let mut t0 = 0.0;
-        for t1 in ts.into_iter().chain([1.0]) {
-            let m = at((t0 + t1) / 2.0);
-            let outside = winding_cw(&ring, (m.0 + nx * eps, m.1 + ny * eps)) <= 0;
-            if outside {
-                if cur.is_empty() {
-                    // the run starts where an earlier section ends: that section goes on
-                    match sections.iter().position(|s| dist(*s.1.last().unwrap(), at(t0)) <= eps) {
-                        Some(k) => (cur_loc, cur) = sections.remove(k),
-                        None => {
-                            cur_loc = i as f64 + t0;
-                            cur.push(at(t0));
-                        }
-                    }
-                }
-                cur.push(at(t1));
-            } else {
-                close(&mut cur, cur_loc, &mut sections);
-            }
-            t0 = t1;
-        }
+    let orient_ring = |r: &Vec<P>| if d < 0.0 { r.iter().rev().copied().collect() } else { r.clone() };
+    let mut sections = Vec::new();
+    curve_sections(&orient_ring(&poly.shell), &raw, md, &mut sections);
+    for h in &poly.holes {
+        curve_sections(&orient_ring(h), &raw, md, &mut sections);
     }
-    close(&mut cur, cur_loc, &mut sections);
-    sections.retain(|s| s.1.len() >= 2);
-    geos_sections(sections.into_iter().map(|s| s.1).collect(), &raw_closed, md)
+    if sections.len() > 1 {
+        sections.sort_by(|a, b| a.0.total_cmp(&b.0));
+    }
+    Ok(sections.into_iter().map(|s| s.1).collect())
 }
 
 #[cfg(test)]
@@ -566,7 +433,7 @@ mod tests {
     #[test]
     fn as_shapely() {
         for (pts, d, want) in CASES {
-            let got = offset_curve(pts, *d);
+            let got = offset_curve(pts, *d).unwrap();
             let ok = got.len() == want.len()
                 && got.iter().zip(want.iter()).all(|(g, w)| g.len() == w.len() && g.iter().zip(w.iter()).all(|(p, q)| dist(*p, *q) < 1e-3));
             assert!(ok, "d = {d}, line {pts:?}\n rust:    {got:?}\n shapely: {want:?}");
