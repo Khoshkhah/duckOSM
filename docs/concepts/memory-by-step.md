@@ -3,7 +3,7 @@
 Each table goes to storage when a step makes it. A later step reads only what it needs. This page shows the memory of each step.
 
 Driving, `--building-faces --levels solve`, on the Mac mini (12 cores, 16 GB). Kentucky also with `--raw`.
-Step numbers: [Offline and online builds](offline-online.md).
+Step numbers: [Browser and native builds](browser-native.md).
 
 ## Heap peak of each step
 

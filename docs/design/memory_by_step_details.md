@@ -26,7 +26,7 @@ exceptions are in [What is still held](#what-is-still-held) and [What still grow
 
 ## The step numbers
 
-The numbers are the numbers of [Offline and online builds](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/offline_online_steps.md#each-step-where-the-data-is-and-how-it-is-handled).
+The numbers are the numbers of [Offline and online builds](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/browser_native_steps.md#each-step-where-the-data-is-and-how-it-is-handled).
 The steps after the network run in this order: 5.2, 5.3, 5.5, 5.4, 5.6, 7.
 
 | Number | Step |
@@ -37,7 +37,7 @@ The steps after the network run in this order: 5.2, 5.3, 5.5, 5.4, 5.6, 7.
 | 1.3 | Read the turn restrictions |
 | 1.4 | Read the raw part: the elements that the fixes touch, the route relations and their member ways |
 | 2 | Global junctions |
-| 3.1 to 3.13 | The network of the mode (the numbers of [step 3 in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/offline_online_steps.md#step-3-in-detail-the-network-of-a-mode)) |
+| 3.1 to 3.13 | The network of the mode (the numbers of [step 3 in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/browser_native_steps.md#step-3-in-detail-the-network-of-a-mode)) |
 | 4 | Write the network files |
 | 5.2 | Bus routes |
 | 5.3 | Area tables |
