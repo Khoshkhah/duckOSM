@@ -207,7 +207,6 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     }
 
     let mut skipped: Vec<String> = Vec::new();
-    let mut ignored: Vec<String> = Vec::new();
     let mut skip = |what: String| -> Result<(), String> {
         if strict {
             Err(format!("config: {what}. Switch it off (or remove it) in the config, or build with strict=false (CLI: --allow-skipped)"))
@@ -255,15 +254,14 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     if let Some(b) = cut_to.as_ref().filter(|b| !b.exists()) {
         return Err(format!("boundary file not found: {}", b.display()));
     }
-    if let Some(p) = clip.str("predicate")? {
-        if p != "intersects" {
-            return Err(format!(
-                "config: clip.predicate: {p} is not supported (only intersects)"
-            ));
-        }
+    // clip.predicate selects the edges of a clip from a database (source.type: duckdb); a PBF build has no use for it
+    let predicate = clip.str("predicate")?.unwrap_or_else(|| "intersects".into());
+    if !["intersects", "within", "centroid"].contains(&predicate.as_str()) {
+        return Err(format!("clip.predicate: {predicate} is not one of centroid, intersects, within"));
     }
-    if clip.f64("min_component_edges", 1.0)? > 1.0 {
-        return Err("config: clip.min_component_edges > 1 is not supported".into());
+    let mut ignored: Vec<String> = Vec::new();
+    if predicate != "intersects" {
+        ignored.push("clip.predicate (no effect on a build from a PBF)".to_string());
     }
     let osm_fixes = top.str("osm_overrides")?.map(PathBuf::from);
     if let Some(f) = osm_fixes.as_ref().filter(|f| !f.exists()) {
@@ -318,19 +316,38 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     };
     // the sea (features.ocean) is a layer of features.*: it needs them
     let sea = sea.is_some() && features;
-    for (sec, what) in [
-        (&validation, "the build checks"),
-        (&report, "the build report"),
-        (&viz, "the maps"),
-        (&multimodal, "the multimodal graph"),
-    ] {
-        if sec.bool("enabled", false)? {
-            skip(format!(
-                "{}.enabled is on, but this program does not make {what}",
-                sec.name
-            ))?;
-        }
+    if viz.bool("enabled", false)? {
+        skip("viz.enabled is on, but this program does not make the maps".into())?;
     }
+    // the steps on the .duckdb file after the tables (after.rs)
+    let validation = if validation.bool("enabled", false)? {
+        // assert_single_component and assert_no_stranded_named: no effect, as in duckOSM (there is no component filter)
+        Some(crate::after::Validation {
+            fail_on_error: validation.bool("fail_on_error", true)?,
+            unique_node_id: validation.bool("assert_unique_node_id", true)?,
+            way_length_conserved: validation.bool("assert_way_length_conserved", true)?,
+            layer_without_structure: validation.bool("warn_layer_without_structure", true)?,
+        })
+    } else {
+        None
+    };
+    let mut transfer_costs = Vec::new();
+    match multimodal.get("transfer_costs") {
+        None => {}
+        Some(Yaml::Hash(h)) => {
+            for (k, v) in h {
+                let k = k.as_str().ok_or("multimodal.transfer_costs: the keys are texts such as walking->driving")?;
+                let v = match v {
+                    Yaml::Integer(i) => *i as f64,
+                    Yaml::Real(r) => r.parse().map_err(|_| format!("multimodal.transfer_costs.{k}: not a number"))?,
+                    _ => return Err(format!("multimodal.transfer_costs.{k}: must be a number")),
+                };
+                transfer_costs.push((k.to_string(), v));
+            }
+        }
+        Some(_) => return Err("multimodal.transfer_costs: must be a map (walking->driving: 60)".into()),
+    }
+    let multimodal_on = multimodal.bool("enabled", false)?;
     for k in [
         "simplify_batches",
         "clip_strategy",
@@ -344,6 +361,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     // the component filter is removed (2026-11-14): a road that does not connect to the main network is a real road
     if clip.bool("keep_largest_component", false)? {
         ignored.push("clip.keep_largest_component (the component filter is removed: every road stays)".to_string());
+    }
+    if clip.f64("min_component_edges", 1.0)? > 1.0 {
+        ignored.push("clip.min_component_edges (the component filter is removed: every road stays)".to_string());
     }
     let opts = Options {
         cycling_dismount: options.bool("cycling_dismount", true)?,
@@ -365,10 +385,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the output: like duckOSM, a path that ends in .duckdb is the file, else it is the folder
     let name = top.str("name")?.unwrap_or_else(|| "default".into());
-    let out_path = PathBuf::from(
-        top.str("output_path")?
-            .unwrap_or_else(|| "output.duckdb".into()),
-    );
+    let out_text = top.str("output_path")?.unwrap_or_else(|| "output.duckdb".into());
+    let out_path = PathBuf::from(&out_text);
     let (out, name) = if out_path.extension().is_some_and(|e| e == "duckdb") {
         let stem = out_path
             .file_stem()
@@ -388,7 +406,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     };
     let params = Params {
         modes,
-        name,
+        name: name.clone(),
         options: opts,
         bus_routes: options.bool("bus_routes", true)?,
         // the walls of the buildings (duckOSM options.building_faces, off by default): main.building_faces, with the wall rules of the fixes file; they need the area's boundary
@@ -406,7 +424,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         sea,
         boundary: cut_to,
         // main.boundary and the metadata, also when the PBF is cut already (a missing file is an error there)
-        area_boundary: boundary_path.map(PathBuf::from).filter(|b| b.exists()),
+        area_boundary: boundary_path.clone().map(PathBuf::from).filter(|b| b.exists()),
         dem,
         dem_product: elevation.str("product")?,
         dem_vertical_datum: elevation.str("vertical_datum")?,
@@ -418,6 +436,24 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
             t if t >= 1.0 && t.fract() == 0.0 => Some(t as usize),
             0.0 => None,
             t => return Err(format!("config: options.threads: {t} is not a whole number of 1 or more")),
+        },
+        after: crate::after::After {
+            validation,
+            report: if report.bool("enabled", false)? {
+                // the head lines as duckOSM writes them (its paths as the config gives them)
+                let db = Path::new(&out_text).join(format!("{name}.duckdb"));
+                Some(crate::after::Report {
+                    source: format!("pbf ({})", pbf.display()),
+                    boundary: boundary_path.clone(),
+                    predicate: predicate.clone(),
+                    output: if out_text.ends_with(".duckdb") { out_text.clone() } else { db.strip_prefix(".").unwrap_or(&db).display().to_string() },
+                })
+            } else {
+                None
+            },
+            multimodal: multimodal_on,
+            transfer_s: multimodal.f64("transfer_s", 60.0)?,
+            transfer_costs,
         },
         ..Params::default()
     };

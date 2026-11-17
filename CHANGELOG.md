@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`duckosm-rust --config`: the indexes, the checks, the report and the multimodal graph are in Rust**
+  (`rust/duckosm-build/src/after.rs`, `docs/design/all_in_rust.md`, group A). The `.duckdb` file gets duckOSM's indexes,
+  `validation:` runs duckOSM's checks (a failed check stops the build with `fail_on_error`), `report:` writes
+  `reports/<name>_<time>.md` and `.html`, and `multimodal:` keeps `mm.*` with the costs of `transfer_s` and `transfer_costs`
+  (without `multimodal.enabled`, the file has no `mm.*`, as in duckOSM). `clip.predicate` and `clip.min_component_edges` have no
+  effect on a build from a PBF, so they are no longer errors. On Monaco the tables, the indexes, `mm.transfers` and the results
+  of the checks are equal to the Python build (`tests/after.rs`). The report counts the rows of the tables; the Python engine
+  counts the edges before the private roads move to `private_edges`.
+
 - **The check page of a GIS export is in Rust**: `duckosm-rust gis-debug` writes the same page and the same `--json` as
   `duckosm gis-debug`. It reads the export through GDAL (DuckDB's `ST_Read`), not geopandas. The page template moved to
   `src/duckosm/templates/gis_debug.html`, and Python and Rust both use it.
