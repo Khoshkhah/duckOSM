@@ -16,11 +16,16 @@ use levels::LevelEdges;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+pub mod after;
 pub mod area;
+pub mod clip;
 pub mod config;
 pub mod elevation;
+#[cfg(feature = "duckdb")]
+pub mod features_check;
 pub mod h3;
 pub mod levels;
+pub mod place;
 pub mod quack_tiles;
 pub mod union;
 
@@ -114,6 +119,12 @@ pub struct Params {
     /// (docs/design/streaming_load.md). None: DuckDB's defaults (80% of the RAM, all cores).
     pub memory_limit: Option<String>,
     pub threads: Option<usize>,
+    /// The steps on the `.duckdb` file after the tables (after.rs): the multimodal costs, the build checks, the report.
+    /// The indexes are always made.
+    pub after: after::After,
+    /// `source.type: duckdb` (clip.rs): the input file is a parent database, and the build copies the rows of its tables in
+    /// the boundary `area_boundary`, with this `clip.predicate` (`intersects`, `within` or `centroid`).
+    pub clip: Option<String>,
 }
 
 impl Default for Params {
@@ -151,6 +162,8 @@ impl Default for Params {
             h3_resolution: None,
             features: false,
             sea: false,
+            after: after::After::default(),
+            clip: None,
         }
     }
 }
@@ -179,6 +192,8 @@ pub struct Summary {
     pub steps: Vec<(String, f64)>,
     /// Roads that got `sidewalk=separate`, when the sidewalk rule ran.
     pub sidewalk_roads: Option<usize>,
+    /// Their way ids (a build of the whole file: `raw.*` gets their tags, `duckosm_duckdb::after::raw_fixes`).
+    pub sidewalk_ids: Vec<i64>,
     /// The number of bus routes, when they were made.
     pub bus_routes: Option<usize>,
     /// The rows of `raw.nodes`, `raw.ways` and `raw.relations`, when they were written.
@@ -657,6 +672,26 @@ pub fn write_raw<W: Write + Send>(
 /// duckOSM's SQL of the base-map layers (`features.*`), from the `raw.*` files of [`write_raw`]: made by
 /// tools/make_features_sql.py from duckOSM's `FeaturesBuilder`. It needs DuckDB's spatial extension.
 pub const FEATURES_SQL: &str = include_str!("../sql/features.sql");
+
+/// [`FEATURES_SQL`] for a file that has `raw.*` already (a build with no boundary: `read_osm` wrote it), with duckOSM's own
+/// `geom.way_pt` and `geom.way_line` (`features/geometry.py`) in place of the lines of the raw files.
+pub fn features_sql_from_raw() -> String {
+    const WAY_LINE: &str = "CREATE OR REPLACE TABLE geom.way_line AS
+    SELECT osm_id, tags, (refs[1] = refs[len(refs)]) AS is_closed, ST_GeomFromWKB(line) AS geom
+    FROM read_parquet('raw_ways.parquet') WHERE line IS NOT NULL;";
+    const DUCKOSM: &str = "CREATE OR REPLACE TABLE geom.way_pt AS
+    SELECT w.osm_id, u.ord, ST_Point(n.lon, n.lat) AS pt
+    FROM raw.ways w, UNNEST(w.refs) WITH ORDINALITY AS u(node_id, ord)
+    JOIN raw.nodes n ON n.osm_id = u.node_id;
+CREATE OR REPLACE TABLE geom.way_line AS
+    SELECT w.osm_id, w.tags, (w.refs[1] = w.refs[len(w.refs)]) AS is_closed, ST_MakeLine(list(p.pt ORDER BY p.ord)) AS geom
+    FROM raw.ways w JOIN geom.way_pt p USING (osm_id)
+    GROUP BY w.osm_id, w.tags, w.refs;";
+    let start = FEATURES_SQL.find("INSTALL spatial;").expect("features.sql loads spatial");
+    let sql = FEATURES_SQL[start..].replace(WAY_LINE, DUCKOSM);
+    assert!(sql.contains("geom.way_pt AS"), "features.sql changed: geom.way_line is not the line of the raw files");
+    sql
+}
 
 /// `layers.json`: the list of the edge and node files with their counts, as `duckosm export-gis`
 /// writes it, so the roadstyle GeoLibre plugin opens the folder in one step.
@@ -1267,7 +1302,12 @@ pub fn run<W: Write + Send>(
                 sidewalks::mark(&mut ways, &found);
                 found.len()
             }
-            None => sidewalks::infer_separate_sidewalks(&mut ways, &coords),
+            None => {
+                let found = sidewalks::separate_sidewalks(&ways, &coords, |_| true);
+                sidewalks::mark(&mut ways, &found);
+                sum.sidewalk_ids = found.iter().map(|&i| ways[i].id).collect();
+                found.len()
+            }
         });
         log.step("sidewalk rule");
     }
@@ -1929,6 +1969,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         return Err("no output format: use geoparquet, duckdb or both".into());
     }
     duckosm_core::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    if let Some(predicate) = &p.clip {
+        return clip::build(pbf_path, out, p, predicate);
+    }
     let mut log = StepLog::system();
     let fixes = match &p.osm_fixes {
         Some(f) => config::read_osm_fixes(f)?,
@@ -2031,8 +2074,10 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         Some(s) => Input::Source(s),
         None => input,
     };
-    // run() writes no cut.osm.pbf: step 0 has written it
-    let p = &Params { cut_pbf: false, ..p.clone() };
+    // run() writes no cut.osm.pbf: step 0 has written it. With no boundary, the layers run on the raw.* of the file (after run)
+    #[cfg_attr(not(feature = "duckdb"), allow(unused_variables))]
+    let features = p.features;
+    let p = &Params { cut_pbf: false, features: p.features && cut.is_some(), ..p.clone() };
     let res = (|| -> Result<Summary, String> {
         if let (Some(b), Some(f)) = (&cut, &area_file) {
             cut_to_file(pbf_path, b, f)?;
@@ -2092,8 +2137,14 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 }
             }
             log.step("write duckdb");
-            if p.features {
-                duckosm_duckdb::write_features(&db, &pq_dir, FEATURES_SQL)?;
+            if raw_first && (!fixes.is_empty() || !sum.sidewalk_ids.is_empty()) {
+                // duckOSM applies the fixes and the sidewalk rule to raw.* too: the base-map layers read it (the network has read it already)
+                duckosm_duckdb::after::raw_fixes(&db, &fixes, &sum.sidewalk_ids, &names)?;
+                log.step("raw.* fixes");
+            }
+            if features {
+                let sql = if raw_first { features_sql_from_raw() } else { FEATURES_SQL.to_string() };
+                duckosm_duckdb::write_features(&db, &pq_dir, &sql)?;
                 log.step("features");
                 if p.sea {
                     sum.ocean = Some(duckosm_duckdb::write_ocean(&db)?);
@@ -2107,6 +2158,8 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                     sum.files.retain(|(k, _)| !k.starts_with("raw_"));
                 }
             }
+            after::run(&db, &p.name, &names, &p.after)?;
+            log.step("indexes and checks");
             sum.files.push(("duckdb".to_string(), db));
         }
         Ok(sum)

@@ -43,8 +43,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      # ogr2ogr: the GeoPackage of one file of duckosm-rust export-gis and the golden of gis-debug
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin
       # duckosm-edit too: the CLI and the wheel link it, so the golden tests run with the features that it adds (roadstyle's serde_json)
-      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit --features duckosm-edit/duckdb
+      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit -p duckosm-export --features duckosm-edit/duckdb
         working-directory: rust
 
   # duckosm edit in a browser (tests/test_edit_page.py, docs/design/edit_page.md): the page of a Monaco build, a change, the box, Build again

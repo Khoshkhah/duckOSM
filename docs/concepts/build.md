@@ -1,142 +1,37 @@
 # How a build works
 
-A build (`duckosm build`, or `DuckOSM(config).run()` in Python) runs a list of steps chosen from the
-config. There are two ways in: **build from a PBF**, or **clip from a parent build**. Each step is SQL
-that runs inside the output DuckDB file.
+A build (`duckosm build`, or `DuckOSM(config).run()` in Python) runs a list of steps chosen from the config. Each step is SQL
+in the output DuckDB file. For the Rust build, see [Browser and native builds](browser-native.md).
 
-This page is the Python `duckosm build`. For the Rust build, offline and in the browser, and where each step keeps
-its data (in memory or in storage), see [Offline and online builds](offline-online.md).
+## Two ways in
 
-## Build from a PBF
-
-Dashed boxes only run under a condition (see the table below).
-
-```mermaid
-flowchart TB
-    PBF[(".osm.pbf")]
-
-    subgraph ONCE["① Once per build"]
-        direction TB
-        PRE["<b>Pre-clip</b><br/>osmium extract to the boundary"]
-        LOAD["<b>Parse OSM</b><br/>ST_READOSM → raw.nodes · raw.ways · raw.relations"]
-        GJ["<b>Global junctions</b><br/>one set of split points shared by every mode"]
-        PRE --> LOAD --> GJ
-    end
-
-    subgraph MODE["② Per mode: driving · walking · cycling, each in its own schema"]
-        direction TB
-        NET["<b>Network</b><br/>filter roads · OSM fixes · build edges · simplify and merge"]
-        FIX["<b>Repair</b><br/>connect dangling paths · mark dismount edges"]
-        ATTR["<b>Attributes</b><br/>speeds · travel-time costs · walk / cycle type · private and bus-only roads apart"]
-        ROUTE["<b>Routing</b><br/>turn restrictions · edge graph of legal turns"]
-        CHECK["<b>Clean and check</b><br/>drop disconnected pieces · H3 · indexes · validate"]
-        NET --> FIX --> ATTR --> ROUTE --> CHECK
-    end
-
-    subgraph AFTER["③ Once, after all modes"]
-        direction TB
-        MM["<b>Intermodal graph</b> mm.*"]
-        FEAT["<b>Base-map layers</b> features.*"]
-        FIN["<b>Finish</b><br/>edge_id_hash macros · metadata · report · map"]
-    end
-
-    DB[("network.duckdb")]
-
-    PBF --> ONCE
-    ONCE --> MODE
-    MODE --> AFTER
-    AFTER --> DB
-
-    classDef optional stroke-dasharray: 5 4
-    classDef file stroke:#ffd43b,stroke-width:3px
-    class PRE,FIX,MM optional
-    class PBF,DB file
-```
-
-## Clip from a parent build
-
-`source.type: duckdb` in a config (or `duckosm build --source-db`) reads no OSM. It copies every edge
-that touches the boundary, whole (`clip.predicate`, default `intersects`), out of an existing build,
-so every `edge_id` is the parent's.
-How to use it: [Several areas from one region](../guides/prepare-area.md#several-areas-from-one-region).
-
-```mermaid
-flowchart LR
-    PARENT[("parent build<br/>e.g. sweden.duckdb")]
-    BOUND["boundary<br/>GeoJSON"]
-    CLIP["<b>DuckdbClipper</b><br/>per mode: copy edges, nodes,<br/>edge graph, restrictions"]
-    DONE["indexes · validate<br/>metadata · report"]
-    DB[("area.duckdb")]
-
-    PARENT --> CLIP
-    BOUND --> CLIP
-    CLIP --> DONE --> DB
-
-    classDef optional stroke-dasharray: 5 4
-    classDef file stroke:#ffd43b,stroke-width:3px
-    class PARENT,DB file
-```
-
-A clip build needs a boundary. It copies `edges`, `private_edges`, `nodes`, `edge_graph` and
-`turn_restrictions` only: no `raw.*`, `ways`, `edge_id_map`, `global_junctions` or `features.*`.
-
-## Every step, in order
-
-Config keys are shown with their default.
-
-| Stage | Step | Runs when |
+| | Build from a PBF | Clip from a parent build |
 |---|---|---|
-| ① | Pre-clip the PBF (`osmium extract`) | a boundary is set and `osmium` is installed (else the whole PBF is read, with a warning); the result is cached in `pbf/` in the current folder, and cut again when the boundary or the PBF changes |
-| ① | Parse OSM into `raw.*` (`ST_READOSM`) | always |
-| ① | Load the boundary into `main.boundary` | a boundary is set; `boundary.buffer_m` (0) grows it |
-| ① | Boundary cells (`main.boundary_cells`) | a boundary is set and `options.boundary_cells` (off) |
-| ① | Global junctions (`main.global_junctions`) | `options.global_junctions` (on) |
-| ② | Filter roads | always; the rules per mode: [What each network contains](networks.md) |
-| ② | OSM fixes | a fixes file is named: `osm_overrides:` in the config, or `build --fixes`. There is no default file. See [Fix OSM errors](../guides/fix-osm-errors.md) |
-| ② | Build edges | always |
-| ② | Simplify and merge | always (cut ways into edges where they meet); merging: `options.merge_segments` (on) |
-| ② | Connect dangling paths | walking and cycling; `clip.connectivity_rescue` (on) |
-| ② | Mark dismount edges | cycling; `options.cycling_dismount` (on) |
-| ② | Speeds | `options.process_speeds` (on) |
-| ② | Travel-time costs | `options.calculate_costs` (on) |
-| ② | Walk / cycle type | walking and cycling; `options.functional_types` (on) |
-| ② | Move private roads (and, in driving, bus-only roads and bus lanes) to `private_edges` | always; see [Access](networks.md#access-private-and-forbidden-roads) |
-| ② | Turn restrictions | driving only; `options.extract_restrictions` (on) |
-| ② | Edge graph | `options.build_graph` (on) |
-| ② | H3 cells | `options.h3_indexing` (on) |
-| ② | Indexes | always |
-| ② | Validate | `validation.enabled` (off; on in the config template). See [Check a build](../guides/check-build.md) |
-| ③ | Intermodal graph `mm.*` | `multimodal.enabled` (off); needs walking plus another mode. See [Routing across modes](multimodal.md) |
-| ③ | Base-map layers `features.*` | a build from a PBF and `options.build_features` (on); `build --no-features` turns it off |
-| ③ | Bus routes `bus.*` | a build from a PBF with driving and `options.bus_routes` (on); it stops the build if it fails. See [Bus routes](networks.md#bus-routes) |
-| ③ | `edge_id_hash` macros | always |
-| ③ | `main.visualization_metadata` and the time zone | always; a build fails if the area's time zone can't be found |
-| ③ | Report / map | `report.enabled` / `viz.enabled` (both off; the config template turns the report on) |
+| Input | an `.osm.pbf` file | an existing `.duckdb` and a boundary |
+| Config | `source.type: pbf` | `source.type: duckdb`, or `duckosm build --source-db` |
+| `edge_id` | made from OSM | the parent's |
+| Tables | all | `edges`, `private_edges`, `nodes`, `edge_graph`, `turn_restrictions` |
 
-The steps in ③ never stop a build: if one fails, the build logs a warning and goes on (the time
-zone and the bus routes are the exceptions).
+How to clip: [Several areas from one region](../guides/prepare-area.md#several-areas-from-one-region).
 
-Each mode runs in its own schema (`driving`, `walking`, `cycling`), so the same tables exist once
-per mode. The steps in ② are explained in [Stable edge ids](edge-ids.md) (build, simplify, merge),
-[What each network contains](networks.md) (filter, speeds, costs, types, restrictions) and
-[Network clean-up](cleanup.md) (connect, validate; the component filter is removed).
+## The steps of a PBF build
 
-## One mode, step by step
-
-Monaco, driving (`duckosm build -c config/sample_monaco.yaml`, from the build log):
-
-| After | Result |
+| Stage | Steps |
 |---|---|
-| Filter roads | 1,126 OSM ways |
-| Build edges | 1,588 edges (one per way, plus the reverse of two-way ways; a closed way waits for the next step) |
-| Simplify and merge | 3,040 edges: ways split at junctions |
-| Private roads | 214 edges moved to `private_edges` (18 of them for buses only) |
-| Turn restrictions | 38 restrictions mapped to edges |
+| ① Once | cut the PBF to the boundary (`osmium`), parse OSM into `raw.*`, global junctions |
+| ② Each mode | filter roads ([What each network contains](networks.md)), OSM fixes, build edges, simplify and merge, connect dangling paths, speeds, costs, walk / cycle type, private roads apart, turn restrictions, edge graph, H3, indexes, validate |
+| ③ Once, at the end | intermodal graph `mm.*`, base-map layers `features.*`, bus routes `bus.*`, `edge_id_hash` macros, metadata and time zone, report and map |
+
+A step in ③ that fails writes a warning, and the build continues. The time zone and the bus routes stop the build.
+
+Each mode has its own schema (`driving`, `walking`, `cycling`). More about ②: [Stable edge ids](edge-ids.md),
+[Network clean-up](cleanup.md).
 
 ## What stays in the database
 
-Besides the routing tables (`edges`, `nodes`, `edge_graph`, `turn_restrictions`), a PBF build keeps
-the parsed OSM data (`raw.*`), each mode's `private_edges`, filtered `ways` and `way_nodes` and
-`edge_id_map`, and `main.global_junctions`, `main.boundary` and the base-map layers `features.*`.
-Virtual nodes are in `nodes` (`node_id < 0`). Every table and column:
-[Database schema](../reference/database.md).
+- The routing tables: `edges`, `nodes`, `edge_graph`, `turn_restrictions`.
+- For each mode: `private_edges`, `ways`, `way_nodes`, `edge_id_map`.
+- `raw.*`, `main.global_junctions`, `main.boundary` and `features.*`.
+
+Every table and column: [Database schema](../reference/database.md). Diagrams, the config key and condition of each step, and the
+Monaco numbers: [build in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/build_details.md).

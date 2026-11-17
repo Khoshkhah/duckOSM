@@ -1,9 +1,11 @@
 //! Write the network as a DuckDB file. The Parquet files that `duckosm-parquet` wrote are loaded
 //! with DuckDB itself, so the types are the types of duckOSM (BIGINT, FLOAT, BIGINT[], GEOMETRY).
 
+pub mod after;
 pub mod input;
 pub mod quack;
 pub mod read_osm;
+pub use duckdb;
 pub use quack::write_quack;
 pub use input::RawInput;
 
@@ -116,6 +118,20 @@ pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memor
     con.execute_batch(MACROS).map_err(|e| e.to_string())
 }
 
+/// `main.boundary`, `main.visualization_metadata` and duckOSM's macros from the files of the area tables in `parquet_dir`, into
+/// a file that is already there (a clip: `duckosm_build::clip`).
+pub fn write_area_tables(db: &Path, parquet_dir: &Path) -> Result<(), String> {
+    let con = open(db, None)?;
+    write_schema(&con, parquet_dir, "main", &["boundary", "visualization_metadata"])?;
+    con.execute_batch(MACROS).map_err(|e| e.to_string())
+}
+
+/// `visualization.edge_levels` and `edge_levels_meta` from their files in `parquet_dir`, into a file that is already there.
+pub fn write_levels(db: &Path, parquet_dir: &Path) -> Result<(), String> {
+    let con = open(db, None)?;
+    write_schema(&con, parquet_dir, "visualization", &["edge_levels", "edge_levels_meta"])
+}
+
 /// duckOSM's `raw.nodes`, `raw.ways` and `raw.relations` of the whole `.osm.pbf` file `pbf`, in the `.duckdb` file `db`, with
 /// the table function `read_osm` (docs/design/streaming_load.md): the same tables as `ST_READOSM` gives duckOSM.
 /// `memory_limit` (as DuckDB writes it, for example "4GB") and `threads` set DuckDB; None: DuckDB's defaults. Returns the
@@ -196,9 +212,17 @@ pub fn write_ocean(db: &Path) -> Result<usize, String> {
     )
     .map_err(|e| format!("features.ocean: {e}"))?;
     let fetch = || -> Result<(String, Vec<Vec<u8>>), String> {
+        // the box of the boundary, or, in a build without one, of the nodes of the file (duckOSM ocean.area_box)
+        let has: i64 = con
+            .query_row("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = 'boundary'", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
         let (x0, y0, x1, y1): (f64, f64, f64, f64) = con
             .query_row(
-                "SELECT min(ST_XMin(geom)), min(ST_YMin(geom)), max(ST_XMax(geom)), max(ST_YMax(geom)) FROM main.boundary",
+                if has > 0 {
+                    "SELECT min(ST_XMin(geom)), min(ST_YMin(geom)), max(ST_XMax(geom)), max(ST_YMax(geom)) FROM main.boundary"
+                } else {
+                    "SELECT min(lon)::DOUBLE, min(lat)::DOUBLE, max(lon)::DOUBLE, max(lat)::DOUBLE FROM raw.nodes"
+                },
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )

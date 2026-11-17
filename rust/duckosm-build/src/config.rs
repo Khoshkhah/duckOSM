@@ -207,7 +207,6 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     }
 
     let mut skipped: Vec<String> = Vec::new();
-    let mut ignored: Vec<String> = Vec::new();
     let mut skip = |what: String| -> Result<(), String> {
         if strict {
             Err(format!("config: {what}. Switch it off (or remove it) in the config, or build with strict=false (CLI: --allow-skipped)"))
@@ -219,51 +218,87 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the input
     let stype = source.str("type")?.unwrap_or_else(|| "pbf".into());
-    if stype != "pbf" {
-        return Err(format!(
-            "config: source.type: {stype} is not supported (only pbf)"
-        ));
-    }
-    let pbf = source
-        .str("pbf_path")?
-        .or(top.str("pbf_path")?)
-        .filter(|s| !s.is_empty())
-        .ok_or("config: pbf_path (or source.pbf_path) is required")?;
+    // source.type: duckdb: a clip of the tables of a parent database (clip.rs); `pbf` is then the parent database
+    let clip_src = match stype.as_str() {
+        "pbf" => false,
+        "duckdb" => true,
+        _ => return Err(format!("config: source.type: {stype} is not one of pbf, duckdb")),
+    };
+    let pbf = if clip_src {
+        source.str("source_db")?.filter(|s| !s.is_empty()).ok_or("config: source.source_db is required for source.type: duckdb")?
+    } else {
+        source
+            .str("pbf_path")?
+            .or(top.str("pbf_path")?)
+            .filter(|s| !s.is_empty())
+            .ok_or("config: pbf_path (or source.pbf_path) is required")?
+    };
     let pbf = PathBuf::from(pbf);
     if !pbf.exists() {
-        return Err(format!("PBF file not found: {}", pbf.display()));
+        return Err(format!("{} not found: {}", if clip_src { "source_db" } else { "PBF file" }, pbf.display()));
     }
 
-    // the area: this program does not cut the PBF
-    for k in ["place", "bbox", "h3_cell", "buffer_m"] {
-        if boundary.get(k).is_some() {
-            return Err(format!(
-                "config: boundary.{k} is not supported (cut the PBF first and use boundary.path)"
-            ));
-        }
+    // the area: a boundary file, or a box, an H3 cell or a place name written as <name>.boundary.geojson next to the
+    // database (duckOSM Config.materialize_boundary); then grown by buffer_m (place.rs)
+    let mut boundary_path = boundary.str("path")?.or(top.str("boundary_path")?);
+    let cell = boundary.str("h3_cell")?.or(top.str("h3_cell")?);
+    let place = boundary.str("place")?;
+    let bbox = match boundary.get("bbox") {
+        None => None,
+        Some(Yaml::Array(a)) => Some(
+            a.iter()
+                .map(|v| match v {
+                    Yaml::Integer(i) => Ok(*i as f64),
+                    Yaml::Real(r) => r.parse::<f64>().map_err(|_| ()),
+                    _ => Err(()),
+                })
+                .collect::<Result<Vec<f64>, ()>>()
+                .map_err(|_| format!("boundary.bbox must be [west, south, east, north], got {a:?}"))?,
+        ),
+        Some(v) => return Err(format!("boundary.bbox must be [west, south, east, north], got {v:?}")),
+    };
+    if boundary_path.is_none() && (bbox.is_some() || cell.is_some() || place.is_some()) {
+        let cfg_name = top.str("name")?.unwrap_or_else(|| "default".into());
+        let o = top.str("output_path")?.unwrap_or_else(|| "output.duckdb".into());
+        let o = Path::new(&o);
+        let dir = if o.extension().is_some_and(|e| e == "duckdb") { o.parent().unwrap_or(Path::new("")) } else { o };
+        let (geom, info) = if let Some(b) = &bbox {
+            (crate::place::bbox_geojson(b)?, serde_json::json!({"name": cfg_name, "source": "bbox"}))
+        } else if let Some(c) = &cell {
+            (crate::place::h3_geojson(c)?, serde_json::json!({"name": cfg_name, "source": format!("h3 {c}")}))
+        } else {
+            crate::place::find(place.as_deref().unwrap_or_default(), (!clip_src).then_some(pbf.as_path()))?
+        };
+        let file = dir.join(format!("{cfg_name}.boundary.geojson"));
+        crate::place::write_boundary(geom, info, &file)?;
+        boundary_path = Some(file.display().to_string());
     }
-    if top.get("h3_cell").is_some() {
-        return Err("config: h3_cell is not supported (cut the PBF first)".into());
+    let buffer_m = boundary.f64("buffer_m", 0.0)?;
+    if let (Some(b), true) = (&boundary_path, buffer_m > 0.0) {
+        boundary_path = Some(crate::place::buffered(Path::new(b), buffer_m)?.display().to_string());
     }
-    let boundary_path = boundary.str("path")?.or(top.str("boundary_path")?);
     let has_boundary = boundary_path.is_some();
+    if clip_src && !has_boundary {
+        return Err("config: a boundary is required to clip from a duckdb source".into());
+    }
     // with a boundary, the program cuts the PBF to it (as osmium complete_ways), unless it is cut already
     let cut_to = boundary_path
         .clone()
-        .filter(|_| !pbf_is_cut)
+        .filter(|_| !pbf_is_cut && !clip_src)
         .map(PathBuf::from);
     if let Some(b) = cut_to.as_ref().filter(|b| !b.exists()) {
         return Err(format!("boundary file not found: {}", b.display()));
     }
-    if let Some(p) = clip.str("predicate")? {
-        if p != "intersects" {
-            return Err(format!(
-                "config: clip.predicate: {p} is not supported (only intersects)"
-            ));
-        }
+    // clip.predicate selects the edges of a clip from a database (source.type: duckdb); a PBF build has no use for it
+    let predicate = clip.str("predicate")?.unwrap_or_else(|| "intersects".into());
+    if !["intersects", "within", "centroid"].contains(&predicate.as_str()) {
+        return Err(format!("clip.predicate: {predicate} is not one of centroid, intersects, within"));
     }
-    if clip.f64("min_component_edges", 1.0)? > 1.0 {
-        return Err("config: clip.min_component_edges > 1 is not supported".into());
+    let mut ignored: Vec<String> = Vec::new();
+    if predicate != "intersects" {
+        if !clip_src {
+            ignored.push("clip.predicate (no effect on a build from a PBF)".to_string());
+        }
     }
     let osm_fixes = top.str("osm_overrides")?.map(PathBuf::from);
     if let Some(f) = osm_fixes.as_ref().filter(|f| !f.exists()) {
@@ -287,9 +322,21 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the steps of duckOSM that are not here (on by default in duckOSM)
     let build_graph = options.bool("build_graph", true)?;
-    if options.bool("boundary_cells", false)? {
-        skip("options.boundary_cells is on, but this program does not make the boundary cells".into())?;
-    }
+    // main.boundary_cells (place.rs): with a boundary, at options.boundary_cell_resolutions or else at h3_resolution
+    let boundary_cells = if options.bool("boundary_cells", false)? && has_boundary && !clip_src {
+        let rs: Vec<u8> = match options.get("boundary_cell_resolutions") {
+            Some(Yaml::Array(a)) => a
+                .iter()
+                .map(|v| v.as_i64().filter(|r| (0..=15).contains(r)).map(|r| r as u8))
+                .collect::<Option<_>>()
+                .ok_or("options.boundary_cell_resolutions: a list of whole numbers from 0 to 15")?,
+            None => vec![options.f64("h3_resolution", crate::h3::DEFAULT_RESOLUTION as f64)? as u8],
+            Some(v) => return Err(format!("options.boundary_cell_resolutions: {v:?} is not a list")),
+        };
+        boundary_path.clone().map(|b| (PathBuf::from(b), rs))
+    } else {
+        None
+    };
     // the H3 columns (h3.rs): on by default, at options.h3_resolution (default 8)
     let h3_resolution = if options.bool("h3_indexing", true)? {
         let r = options.f64("h3_resolution", crate::h3::DEFAULT_RESOLUTION as f64)?;
@@ -300,15 +347,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     } else {
         None
     };
-    // the base-map layers (features.*) run on raw.*, which this program has only for an area with a boundary
-    let mut features = options.bool("build_features", true)?;
-    if features && !has_boundary {
-        skip(format!(
-            "options.build_features is on{}, but this program makes the base-map layers (features.*) only with a boundary (boundary.path)",
-            if options.get("build_features").is_none() { " by default" } else { "" }
-        ))?;
-        features = false;
-    }
+    // a clip copies the tables of its parent: no base-map layers, bus routes, walls, H3 columns or DEM of its own (as in duckOSM).
+    // Without a boundary the layers run on the raw.* of the whole file (the .duckdb output)
+    let features = options.bool("build_features", true)? && !clip_src;
     let sea = match options.get("sea") {
         None => Some("overture".to_string()),
         Some(Yaml::Boolean(false)) => None,
@@ -318,23 +359,41 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     };
     // the sea (features.ocean) is a layer of features.*: it needs them
     let sea = sea.is_some() && features;
-    for (sec, what) in [
-        (&validation, "the build checks"),
-        (&report, "the build report"),
-        (&viz, "the maps"),
-        (&multimodal, "the multimodal graph"),
-    ] {
-        if sec.bool("enabled", false)? {
-            skip(format!(
-                "{}.enabled is on, but this program does not make {what}",
-                sec.name
-            ))?;
-        }
+    if viz.bool("enabled", false)? {
+        skip("viz.enabled is on, but this program does not make the maps".into())?;
     }
+    // the steps on the .duckdb file after the tables (after.rs)
+    let validation = if validation.bool("enabled", false)? {
+        // assert_single_component and assert_no_stranded_named: no effect, as in duckOSM (there is no component filter)
+        Some(crate::after::Validation {
+            fail_on_error: validation.bool("fail_on_error", true)?,
+            unique_node_id: validation.bool("assert_unique_node_id", true)?,
+            way_length_conserved: validation.bool("assert_way_length_conserved", true)?,
+            layer_without_structure: validation.bool("warn_layer_without_structure", true)?,
+        })
+    } else {
+        None
+    };
+    let mut transfer_costs = Vec::new();
+    match multimodal.get("transfer_costs") {
+        None => {}
+        Some(Yaml::Hash(h)) => {
+            for (k, v) in h {
+                let k = k.as_str().ok_or("multimodal.transfer_costs: the keys are texts such as walking->driving")?;
+                let v = match v {
+                    Yaml::Integer(i) => *i as f64,
+                    Yaml::Real(r) => r.parse().map_err(|_| format!("multimodal.transfer_costs.{k}: not a number"))?,
+                    _ => return Err(format!("multimodal.transfer_costs.{k}: must be a number")),
+                };
+                transfer_costs.push((k.to_string(), v));
+            }
+        }
+        Some(_) => return Err("multimodal.transfer_costs: must be a map (walking->driving: 60)".into()),
+    }
+    let multimodal_on = multimodal.bool("enabled", false)?;
     for k in [
         "simplify_batches",
         "clip_strategy",
-        "boundary_cell_resolutions",
     ] {
         if options.get(k).is_some() {
             ignored.push(format!("options.{k} (no effect in this program)"));
@@ -344,6 +403,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     // the component filter is removed (2026-11-14): a road that does not connect to the main network is a real road
     if clip.bool("keep_largest_component", false)? {
         ignored.push("clip.keep_largest_component (the component filter is removed: every road stays)".to_string());
+    }
+    if clip.f64("min_component_edges", 1.0)? > 1.0 {
+        ignored.push("clip.min_component_edges (the component filter is removed: every road stays)".to_string());
     }
     let opts = Options {
         cycling_dismount: options.bool("cycling_dismount", true)?,
@@ -365,10 +427,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the output: like duckOSM, a path that ends in .duckdb is the file, else it is the folder
     let name = top.str("name")?.unwrap_or_else(|| "default".into());
-    let out_path = PathBuf::from(
-        top.str("output_path")?
-            .unwrap_or_else(|| "output.duckdb".into()),
-    );
+    let out_text = top.str("output_path")?.unwrap_or_else(|| "output.duckdb".into());
+    let out_path = PathBuf::from(&out_text);
     let (out, name) = if out_path.extension().is_some_and(|e| e == "duckdb") {
         let stem = out_path
             .file_stem()
@@ -388,11 +448,11 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     };
     let params = Params {
         modes,
-        name,
+        name: name.clone(),
         options: opts,
-        bus_routes: options.bool("bus_routes", true)?,
+        bus_routes: options.bool("bus_routes", true)? && !clip_src,
         // the walls of the buildings (duckOSM options.building_faces, off by default): main.building_faces, with the wall rules of the fixes file; they need the area's boundary
-        building_faces: options.bool("building_faces", false)? && has_boundary,
+        building_faces: options.bool("building_faces", false)? && has_boundary && !clip_src,
         // duckOSM: options.levels (on by default) solves the drawing order; off writes no table
         levels: if options.bool("levels", true)? {
             Method::Solve
@@ -401,13 +461,14 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         },
         infer_sidewalks: options.bool("infer_separate_sidewalks", true)?,
         osm_fixes,
-        h3_resolution,
         features,
         sea,
         boundary: cut_to,
         // main.boundary and the metadata, also when the PBF is cut already (a missing file is an error there)
-        area_boundary: boundary_path.map(PathBuf::from).filter(|b| b.exists()),
-        dem,
+        area_boundary: boundary_path.clone().map(PathBuf::from).filter(|b| b.exists()),
+        dem: dem.filter(|_| !clip_src),
+        clip: clip_src.then(|| predicate.clone()),
+        h3_resolution: h3_resolution.filter(|_| !clip_src),
         dem_product: elevation.str("product")?,
         dem_vertical_datum: elevation.str("vertical_datum")?,
         dem_license: elevation.str("license")?,
@@ -418,6 +479,25 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
             t if t >= 1.0 && t.fract() == 0.0 => Some(t as usize),
             0.0 => None,
             t => return Err(format!("config: options.threads: {t} is not a whole number of 1 or more")),
+        },
+        after: crate::after::After {
+            validation,
+            report: if report.bool("enabled", false)? {
+                // the head lines as duckOSM writes them (its paths as the config gives them)
+                let db = Path::new(&out_text).join(format!("{name}.duckdb"));
+                Some(crate::after::Report {
+                    source: format!("{} ({})", if clip_src { "duckdb" } else { "pbf" }, pbf.display()),
+                    boundary: boundary_path.clone(),
+                    predicate: predicate.clone(),
+                    output: if out_text.ends_with(".duckdb") { out_text.clone() } else { db.strip_prefix(".").unwrap_or(&db).display().to_string() },
+                })
+            } else {
+                None
+            },
+            multimodal: multimodal_on,
+            boundary_cells,
+            transfer_s: multimodal.f64("transfer_s", 60.0)?,
+            transfer_costs,
         },
         ..Params::default()
     };
@@ -889,14 +969,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_need_strict_off() {
+    fn defaults_run_in_strict_mode() {
         let c = write(&format!("name: m\noutput_path: out\npbf_path: {}\n", pbf()));
-        let e = read(&c, false, true).unwrap_err();
-        // the base-map layers need a boundary: without one they are skipped (the H3 columns need nothing)
-        assert!(e.contains("build_features"), "{e}");
-        let r = read(&c, false, false).unwrap();
-        assert!(r.skipped.iter().any(|s| s.contains("build_features")));
-        assert!(!r.params.features && !r.params.sea);
+        // nothing is skipped: without a boundary the base-map layers run on the raw.* of the whole file
+        let r = read(&c, false, true).unwrap();
+        assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+        assert!(r.params.features && r.params.sea);
         assert_eq!(r.params.h3_resolution, Some(8));
         assert_eq!(r.params.name, "m");
         assert!(r.params.options.merge_segments);

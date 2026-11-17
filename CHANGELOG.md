@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- **`duckosm-rust --config`: the base-map layers without a boundary, and `duckosm-rust features-check`, are in Rust**
+  (`docs/design/all_in_rust.md`, group A). Without a boundary, the layers run on the `raw.*` of the whole file with duckOSM's
+  own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. The OSM fixes change `raw.*` first, as
+  duckOSM's `_raw_way_fixes` and the arrows of `OSMOverrides` do (`after::raw_fixes`). `features-check` (`rust/duckosm-build/src/
+  features_check.rs`) prints duckOSM's report; groups with equal keys come in the order of their names. On Monaco's whole sample
+  file, the 11 layers and the lines of the report equal the Python build (`tests/features_no_boundary.rs`). With this, every
+  key of a `duckosm build` config runs in `duckosm-rust --config` with no skip, except `viz.enabled` (the maps, group F).
+
+
+- **`duckosm-rust --config`: `source.type: duckdb` is in Rust** (`rust/duckosm-build/src/clip.rs`, `docs/design/all_in_rust.md`,
+  group A). The build copies the rows of the parent database in the boundary, with `clip.predicate`, and then makes
+  `main.boundary`, `main.visualization_metadata`, the drawing order, the indexes, the checks and the report. On Monaco
+  (`intersects` and `within`) every table of the clip, `main.boundary`, the metadata and the indexes equal the Python clip
+  (`tests/clip.rs`). Two differences: the Rust clip has `turn_path_restrictions` (the SQL of duckOSM fails in DuckDB, and
+  duckOSM drops the error), and the drawing order has the numbers of the Rust solve, as in a Rust build from a PBF.
+
+- **`duckosm-rust --config`: `boundary.place`, `bbox`, `h3_cell`, `buffer_m` and `options.boundary_cells` are in Rust**
+  (`rust/duckosm-build/src/place.rs`, `docs/design/all_in_rust.md`, group A). The box, the cell and the place become
+  `<name>.boundary.geojson` next to the database, as in duckOSM. A place is looked up in the borders of the PBF with GDAL in
+  DuckDB's spatial extension (the polygon equals the one of `ogr2ogr`), then on Nominatim. On Monaco the cut networks,
+  `main.boundary` and the ids of `main.boundary_cells` equal the Python build (`tests/boundary_kinds.rs`). The outline of an H3
+  cell (`h3_cell`, the cells) comes from `h3o` and differs from the H3 C library by about 1e-14 degrees.
+
+- **`duckosm-rust --config`: the indexes, the checks, the report and the multimodal graph are in Rust**
+  (`rust/duckosm-build/src/after.rs`, `docs/design/all_in_rust.md`, group A). The `.duckdb` file gets duckOSM's indexes,
+  `validation:` runs duckOSM's checks (a failed check stops the build with `fail_on_error`), `report:` writes
+  `reports/<name>_<time>.md` and `.html`, and `multimodal:` keeps `mm.*` with the costs of `transfer_s` and `transfer_costs`
+  (without `multimodal.enabled`, the file has no `mm.*`, as in duckOSM). `clip.predicate` and `clip.min_component_edges` have no
+  effect on a build from a PBF, so they are no longer errors. On Monaco the tables, the indexes, `mm.transfers` and the results
+  of the checks are equal to the Python build (`tests/after.rs`). The report counts the rows of the tables; the Python engine
+  counts the edges before the private roads move to `private_edges`.
+
+
+- **The check page of a GIS export is in Rust**: `duckosm-rust gis-debug` writes the same page and the same `--json` as
+  `duckosm gis-debug`. It reads the export through GDAL (DuckDB's `ST_Read`), not geopandas. The page template moved to
+  `src/duckosm/templates/gis_debug.html`, and Python and Rust both use it.
+
+- **The SUMO export is in Rust**: `duckosm-rust sumo` writes the same plain XML and `.netccfg` as `duckosm sumo` and
+  runs netconvert in the same way (`SUMO_HOME`, the PATH, or the `eclipse-sumo` package of the active Python environment).
+
+- **The OpenDRIVE and MATSim lanes exports are in Rust**: `duckosm-rust opendrive` (also `--junctions`) and
+  `duckosm-rust matsim-lanes` write the same files as the Python exports (Monaco and Tartu).
+
+- **The GIS export is in Rust**: `duckosm-rust export-gis` (GeoPackage, GeoParquet, shapefile) writes the same
+  columns and rows as `duckosm export-gis` (Monaco and Tartu). It uses `ogr2ogr` for one GeoPackage file, as the Python export.
+
+- **The MATSim and railML exports are in Rust** (`docs/design/all_in_rust.md`, group D): `duckosm-rust matsim` and
+  `duckosm-rust railml`, in the new crate `rust/duckosm-export`. They write the same file as `duckosm matsim` and
+  `duckosm railml` (Monaco and Tartu). A golden test holds the Python output on Monaco.
+
 - **The sorted join of quack by tiles keeps less on the disk.** `quack_join_to` drops each part when it has read all its rows,
   so the caller can delete the file of the part before the join ends (the browser does). The sort writes the pieces of each
   strip over the pieces of the strip before, so its temporary file holds one strip, not all of them. Chromium on the Mac mini,

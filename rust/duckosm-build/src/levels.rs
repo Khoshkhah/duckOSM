@@ -6,7 +6,7 @@
 use duckosm_core::filter::Mode;
 use duckosm_core::model::{Attrs, Edge};
 use duckosm_core::util::{FxHashMap, FxHashSet};
-use roadstyle_levels::LevelTags;
+pub use roadstyle_levels::LevelTags;
 use std::sync::Arc;
 pub use roadstyle_levels::{Levels, Method, Row, ROADSTYLE_VERSION};
 
@@ -67,6 +67,22 @@ impl LevelEdges {
                 roadstyle_levels::LevelEdge { edge_id: e.edge_id, tags, geometry: e.geometry, ..Default::default() },
             );
         }
+    }
+}
+
+impl LevelEdges {
+    /// One edge read from a table (a clip, clip.rs): `rank` as in [`LevelEdges::add`] (driving 0, walking 1, cycling 2, their
+    /// private edges 3 to 5).
+    pub fn add_row(&mut self, rank: u8, edge_id: i64, tags: LevelTags, geometry: Vec<duckosm_core::geom::Pt>) {
+        let tags = match self.tag_sets.get(&tags) {
+            Some(t) => t.clone(),
+            None => {
+                let t = Arc::new(tags);
+                self.tag_sets.insert(t.clone());
+                t
+            }
+        };
+        self.edges.add(rank, roadstyle_levels::LevelEdge { edge_id, tags, geometry, ..Default::default() });
     }
 }
 
