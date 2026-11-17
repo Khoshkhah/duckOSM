@@ -48,7 +48,15 @@ Python CLI. The golden test (`rust/duckosm-export/tests/golden.rs`) compares eac
 |---|---|---|
 | MATSim | `duckosm-rust matsim` | Done. The same bytes as Python on Monaco and Tartu (gzip: the same text). |
 | railML | `duckosm-rust railml` | Done. The same bytes as Python on Monaco and Tartu. |
-| SUMO, GIS, MATSim lanes, OpenDRIVE, Lanelet2 | | Not started. |
+| GIS | `duckosm-rust export-gis` | Done. GeoPackage, GeoParquet, shapefile: the same columns and rows as Python on Monaco and Tartu; `layers.json`: the same bytes. |
+| GIS check | `gis-debug` | Not started. |
+| OpenDRIVE | `duckosm-rust opendrive` | Done. The same bytes as Python on Monaco and Tartu, with and without `--junctions`. A CRS that is not UTM or EPSG:3006 gets its proj4 text from PROJ's `projinfo` (pyproj uses the same PROJ function). |
+| MATSim lanes | `duckosm-rust matsim-lanes` | Done. The same bytes as Python on Monaco and Tartu. |
+| Lanelet2 | | Not started. It needs the offset line of shapely (GEOS): see group C. |
+| SUMO | | Not started. |
+
+The exports of a GMNS db read the test tables of `tests/data/exports/gmns_driving/` (the columns that they read, as
+Parquet), until group C makes the GMNS db in Rust.
 
 GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
 
