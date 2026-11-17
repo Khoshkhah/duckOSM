@@ -121,6 +121,66 @@ pub fn read_edges(
     Ok(())
 }
 
+/// [`read_edges`] for the walk of the bus routes: only the columns that the walk reads (`edge_id`, `source`, `target`,
+/// `osm_id`, `edge_ref`, `is_reverse`, `access`, `refs`). The other fields of each edge are empty: no line, no tags. The
+/// lines are most of the bytes of the file (France: 26 million edges, of which 7.5 million are route edges).
+pub fn read_route_edges(path: &Path, want: impl Fn(i64) -> bool, mut f: impl FnMut(Edge) -> Result<(), String>) -> Result<(), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
+    let names = ["edge_id", "source", "target", "osm_id", "edge_ref", "is_reverse", "access", "refs"];
+    let cols: Vec<usize> = names.iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
+    let mask = parquet::arrow::ProjectionMask::roots(b.parquet_schema(), cols);
+    let attrs = Arc::new(Attrs {
+        highway: String::new(),
+        name: None,
+        maxspeed: None,
+        surface: None,
+        junction: None,
+        layer: None,
+        bridge: None,
+        tunnel: None,
+        service: None,
+    });
+    for b in b.with_projection(mask).build().map_err(|e| e.to_string())? {
+        let b = b.map_err(|e| e.to_string())?;
+        let i64s = |n: &str| b.column_by_name(n).unwrap().as_primitive::<Int64Type>().clone();
+        let (edge_id, source, target, osm_id) = (i64s("edge_id"), i64s("source"), i64s("target"), i64s("osm_id"));
+        let edge_ref = b.column_by_name("edge_ref").unwrap().as_string::<i32>();
+        let is_reverse = b.column_by_name("is_reverse").unwrap().as_boolean();
+        let refs = b.column_by_name("refs").unwrap().as_list::<i32>();
+        for i in 0..b.num_rows() {
+            if !want(osm_id.value(i)) {
+                continue;
+            }
+            // edge_ref: {osm_id}#{seq}{f|r}
+            let seq = edge_ref.is_valid(i).then(|| {
+                let r = edge_ref.value(i);
+                r[r.find('#').map_or(0, |k| k + 1)..r.len() - 1].parse::<u32>().ok()
+            });
+            f(Edge {
+                edge_id: edge_id.value(i),
+                seq: seq.flatten(),
+                source: source.value(i),
+                target: target.value(i),
+                osm_id: osm_id.value(i),
+                attrs: attrs.clone(),
+                oneway: false,
+                lanes: None,
+                access: text(&b, "access", i).map(Arc::from),
+                refs: refs.value(i).as_primitive::<Int64Type>().values().to_vec(),
+                geometry: Vec::new(),
+                is_reverse: is_reverse.value(i),
+                length_m: 0.0,
+                dismount: None,
+                maxspeed_kmh: None,
+                cost_s: None,
+                ftype: None,
+            })?;
+        }
+    }
+    Ok(())
+}
+
 /// Read an `edge_graph` file of the build, one row at a time.
 pub fn read_edge_graph(path: &Path, mut f: impl FnMut(GraphRow) -> Result<(), String>) -> Result<(), String> {
     for b in batches(path)? {

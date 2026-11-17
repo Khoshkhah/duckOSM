@@ -56,15 +56,18 @@ the whole build) runs once, after the union (`union::bus_routes`):
 
 1. Each tile build writes `bus.osm.pbf`: its route relations (`route=bus`, `trolleybus`, `share_taxi`) with their way
    members only, and those member ways with their nodes and only the tags of their direction (`oneway`, `junction`).
-2. The union reads these files with one copy of each relation and way, and puts the routes into batches of about 20,000
-   member ways, in the order of their ids (the order of the whole build).
-3. One read of the union edges and bus lanes puts each edge of a member way, without its line, into one temporary file,
-   with a row for each batch that needs it; the file is sorted by batch.
-4. Each batch walks its routes on its own edges only, and writes its rows to a part file; the part files are joined as
-   blocks.
+2. The union writes the relations and the member ways of these files to two temporary files sorted by id, with one copy of
+   each, and puts the routes into batches of about 20,000 member ways, in the order of their ids (the order of the whole
+   build). Only the list of (member way, batch) stays in memory: 16 bytes for each.
+3. The member ways go to a temporary file sorted by batch. One read of the union edges and bus lanes puts each edge of a
+   member way, without its line, into one more temporary file, with a row for each batch that needs it, sorted by batch.
+4. Each batch reads its relations, its member ways and its edges from the three files, walks its routes, and writes its
+   rows of both tables to part files; the part files are joined as blocks.
 
-Kentucky: equal to the whole build (149 routes, 46,892 route edges). France: 25,985 routes, 7,479,730 route edges; the
-bus step uses a heap of 586 MB (all edges at once were 6.5 GB).
+The read of the edges decodes only the columns of the walk, not the lines. Kentucky: equal to the whole build (154 routes,
+37,893 route edges). France: 25,985 routes, 7,501,173 route edges; the bus step takes 9.3 s with a heap of 171 MB (before:
+14 s and 609 MB, with all relations and member ways in memory; all edges at once were 6.5 GB). Details:
+`tail_steps_by_tiles.md`.
 
 ## The levels
 
@@ -78,6 +81,10 @@ table, then `edge_id`):
 - `--levels tags` (the default): the rule of the whole build by tiles too (roadstyle `tags_tile`). The rule is local: the
   level of a road depends only on the edges at its end nodes. Each tile gives the rule its own edges and the edges at
   their ends, and keeps the rows of its own edges (France: 2.33 GB, before 11.7 GB with all level edges in memory).
+
+The numbers of an edge that later tiles read stay in memory only until the last of these tiles starts (each entry counts its
+tiles; the `tags` rule keeps none): France, the tiles 187 -> 67 MB of heap (`tags`), 207 -> 94 MB (`solve`)
+(`tail_steps_by_tiles.md`).
 
 Kentucky: the level rows are equal to the whole build with both methods (2,449,396 rows); the meta row differs only in
 `created`. France: 27,789,657 level rows.

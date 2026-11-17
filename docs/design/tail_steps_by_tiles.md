@@ -1,6 +1,6 @@
-# The bus routes and the levels with bounded memory (proposal)
+# The bus routes and the levels with bounded memory
 
-Status: proposal, 2026-11-16. It waits for Kaveh's yes.
+Status: built, 2026-11-17 (Kaveh's yes on 2026-11-16). The section "Result" at the end gives the numbers after the change.
 
 In a build by tiles, two steps run on the whole area after the union: the bus routes (`union::bus_routes`) and the
 drawing levels (`union::levels`, which calls `levels::tiled`). This document gives their time and memory on three areas,
@@ -67,13 +67,16 @@ The batches stay as they are: consecutive relations in the order of their ids, w
 the place of the data changes: the relations and the member ways go to temporary files sorted by batch, as the member
 edges do now.
 
-1. Read the `bus.osm.pbf` file of each tile. Write each relation to a temporary file and each member way to another
+1. Read the `bus.osm.pbf` file of each tile (one file for each thread at a time). Write each relation to a temporary file and each member way to another
    temporary file. Sort the two files by id, and keep one copy of each id (a route is in each tile of its ways).
 2. Read the relations in the order of their ids. Give each one its batch (the rule of today). Write the pairs
    (member way id, batch) to a list in memory, sorted by way id. This list is the only structure that grows with the
-   area: 12 bytes for each member way and batch (France: about 10 MB).
+   area: 16 bytes for each member way and batch (France: about 13 MB).
 3. Read the member ways in the order of their ids. Write each way, with its batch, to a temporary file sorted by batch.
-4. Read the union edges once, as now: each member edge goes to the temporary file of its batches.
+4. Read the union edges once, as now: each member edge goes to the temporary file of its batches. The read decodes only
+   the columns that the walk reads (`edge_id`, `source`, `target`, `osm_id`, `edge_ref`, `is_reverse`, `access`, `refs`;
+   `read::read_route_edges`), not the lines and the tags. This was added during the work: before, the step decoded all
+   columns of all edges (France: 26 million) and then dropped the line.
 5. For each batch, read its relations, its member ways and its edges from the three sorted files. Walk the routes
    (`bus::routes`, not changed). Write the rows of `route_edges_bus` and of `routes_bus` to part files. Join the part
    files as blocks at the end.
@@ -125,3 +128,38 @@ change makes it smaller there too.
 With `--keep-tiles`, the union deleted the files of the tiles for each table that has border rows: it gave the delete
 flag of the temporary border file to all files. The union now deletes the files of the tiles only without
 `--keep-tiles`. The change has this fix.
+
+## Result
+
+Mac mini (Apple M6, 12 cores, 16 GB), native. The equal checks:
+
+| Area | Bus batches | Check | Result |
+|---|---|---|---|
+| Kentucky | 1 | by tiles against the whole build, `tags` and `solve` | `routes_bus`, `route_edges_bus`, `edge_levels_visualization` and its meta row (without `created`) equal, row by row in order |
+| Kentucky | 1 | new against old build by tiles, all 20 files | equal, but the two time stamps |
+| Sweden | 24 | new against old, `tags` and `solve` | the four tables equal, row by row in order (4,307 routes, 967,760 route edges, 5,391,413 level rows) |
+| France | 201 | new against old, `tags` and `solve` | the four tables equal, row by row in order (25,985 routes, 7,501,173 route edges, 28,162,597 level rows) |
+
+France, the union alone on the kept tiles (`examples/tile_union.rs`), old and new in turn, three times each, levels `tags`:
+
+| Step | Old | New |
+|---|---|---|
+| Bus routes | 13.7 s, 13.9 s, 14.5 s | 9.3 s, 9.3 s, 9.2 s |
+| Of these, the read of the union edges | 9.5–10.0 s | 5.3–5.4 s |
+| Of these, the batches | 3.6 s | 3.0 s |
+| Levels | 26.9 s, 27.5 s, 26.5 s | 25.6 s, 25.7 s, 25.6 s |
+
+The peak of the Rust heap (France, the heap probe):
+
+| Part | Old | New |
+|---|---|---|
+| Bus routes, the largest part | 609 MB | 171 MB |
+| Bus routes, live after the read of the relations and ways | 377 MB | 34 MB (the list of member way and batch) |
+| Levels, the tiles (`tags`) | 187 MB | 67 MB |
+| Levels, the tiles (`solve`) | 207 MB | 94 MB |
+| Levels, the two sorts | 409 MB, 520 MB | 409 MB, 520 MB |
+
+The largest heap of the steps after the union is now the sort of the level rows (520 MB, a fixed budget), the same in Sweden
+and France. Before, it was the bus step (609 MB), which grew with the routes. The bus step now holds the files of the tiles
+that the threads read at one time, one batch, and the sort buffers: the files of the largest tiles give its peak of 171 MB.
+
