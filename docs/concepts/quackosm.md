@@ -58,22 +58,21 @@ that, use `duckosm build`.
 A Mac mini with 12 cores and 16 GB; QuackOSM 0.20.0; Geofabrik files (`kentucky-area.osm.pbf`, 141 MB;
 `france-latest.osm.pbf`, 5.1 GB). The memory is the peak RSS of all processes of the tool.
 
-| Case | QuackOSM | duckOSM |
-|---|---|---|
-| Kentucky, GeoParquet, sorted | 13.7 s, 5.9 GB | 4.0 s, 1.9 GB |
-| Kentucky, GeoParquet, not sorted | 13.0 s, 5.8 GB | 3.1 s, 1.2 GB |
-| France, GeoParquet, not sorted | 569.5 s, 9.8 GB | 129.0 s, 3.8 GB |
-| France, GeoParquet, sorted | 998.2 s, 10.6 GB | 150.2 s, 4.5 GB |
-| France, `.duckdb`, not sorted | 678.1 s, 7.7 GB (only with a DuckDB memory limit of 8 GB) | 143.8 s, 4.6 GB |
-| France in the browser, tile by tile, not sorted | not possible | 294.4 s, 1.2 GB in the page and 5.7 GB in 12 tile workers |
+| Case | QuackOSM | duckOSM | duckOSM in the browser |
+|---|---|---|---|
+| Kentucky, GeoParquet, sorted | 13.7 s, 5.9 GB | 4.0 s, 1.9 GB | 12.5 s |
+| Kentucky, GeoParquet, not sorted | 13.0 s, 5.8 GB | 3.1 s, 1.2 GB | 7.1 s |
+| France, GeoParquet, not sorted | 569.5 s, 9.8 GB | 129.0 s, 3.8 GB | 294.4 s, 6.9 GB (tile by tile) |
+| France, GeoParquet, sorted | 998.2 s, 10.6 GB | 150.2 s, 4.5 GB | not measured |
+| France, `.duckdb`, not sorted | 678.1 s, 7.7 GB (only with a DuckDB memory limit of 8 GB) | 143.8 s, 4.6 GB | not measured |
+
+The browser is Chromium on the same Mac mini (12 threads), with Studio's [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html).
+France goes tile by tile at zoom 8; its memory is the page (1.2 GB) and 12 tile workers (5.7 GB in total), and the
+browser storage needs about 8 times the input file (39.8 GB).
 
 **The rows are the same.** Kentucky: 2 393 139 rows in both, with the same ids and tags; 99.9994 % with an equal
 geometry. France: 99 412 535 rows in both, with the same ids and tags; 99.99983 % with an equal geometry. The other rows
 have the same area to 1.6e-7: points where two edges cross differ in their last digits.
-
-**In the browser** (headless Chromium on the same Mac mini, zoom 8, 241 tiles): the cut 72.9 s, the rows of the tiles
-168.0 s (11.9 of 12 workers busy), the join 44.2 s. The browser storage needs about 8 times the input file (39.8 GB for
-France).
 
 ## Where duckOSM is not better
 
