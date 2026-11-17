@@ -39,19 +39,26 @@ of each part follows the size of a tile, not of the area: in the browser, each t
 
 ## What the table holds
 
-QuackOSM 0.20.0's table with its default options, with three columns: `feature_id` (`node/<id>`, `way/<id>` or
-`relation/<id>`), `tags` (`MAP(VARCHAR, VARCHAR)`) and `geometry`.
+The same table as QuackOSM 0.20.0 with its default options: **one row for each OSM element with tags**.
 
-- A node with tags is a POINT. A way with tags and all its nodes is a LINESTRING, or a POLYGON when it is closed and its
-  tags match QuackOSM's polygon rules. A `multipolygon` or `boundary` relation with all its member ways is a POLYGON or a
-  MULTIPOLYGON.
-- The metadata tags (`source`, `note`, `fixme`, `created_by` and some more) are not in `tags`; an element with no other tag
-  is not in the table. The coordinates are rounded to 7 decimals.
-- Sorted (the default), each row group of 100 000 rows holds a small area, so a reader with a bounding box can skip the
-  other row groups.
+| Column | Type | Example |
+|---|---|---|
+| `feature_id` | text | `way/23614520` |
+| `tags` | `MAP(VARCHAR, VARCHAR)` | `{building=yes, name=Mairie}` |
+| `geometry` | GEOMETRY | the shape (rounded to 7 decimals) |
 
-The table is for the analysis of OSM features (buildings, land use, points of interest). It is not a road network; for
-that, use `duckosm build`.
+| OSM element | Geometry |
+|---|---|
+| node | POINT |
+| way | LINESTRING, or POLYGON when it is closed and is an area (for example `building`, `landuse`) |
+| relation `multipolygon` or `boundary` | POLYGON or MULTIPOLYGON |
+
+!!! note "Good to know"
+    - The metadata tags (`source`, `note`, `fixme`, `created_by` and some more) are left out. An element with no other
+      tag is not in the table.
+    - Sorted (the default), each part of the file holds one small area, so a query for a bounding box reads less.
+    - The table is for the analysis of OSM features (buildings, land use, points of interest). For a routable road
+      network, use `duckosm build`.
 
 ## Results
 
