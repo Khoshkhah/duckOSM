@@ -218,19 +218,24 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the input
     let stype = source.str("type")?.unwrap_or_else(|| "pbf".into());
-    if stype != "pbf" {
-        return Err(format!(
-            "config: source.type: {stype} is not supported (only pbf)"
-        ));
-    }
-    let pbf = source
-        .str("pbf_path")?
-        .or(top.str("pbf_path")?)
-        .filter(|s| !s.is_empty())
-        .ok_or("config: pbf_path (or source.pbf_path) is required")?;
+    // source.type: duckdb: a clip of the tables of a parent database (clip.rs); `pbf` is then the parent database
+    let clip_src = match stype.as_str() {
+        "pbf" => false,
+        "duckdb" => true,
+        _ => return Err(format!("config: source.type: {stype} is not one of pbf, duckdb")),
+    };
+    let pbf = if clip_src {
+        source.str("source_db")?.filter(|s| !s.is_empty()).ok_or("config: source.source_db is required for source.type: duckdb")?
+    } else {
+        source
+            .str("pbf_path")?
+            .or(top.str("pbf_path")?)
+            .filter(|s| !s.is_empty())
+            .ok_or("config: pbf_path (or source.pbf_path) is required")?
+    };
     let pbf = PathBuf::from(pbf);
     if !pbf.exists() {
-        return Err(format!("PBF file not found: {}", pbf.display()));
+        return Err(format!("{} not found: {}", if clip_src { "source_db" } else { "PBF file" }, pbf.display()));
     }
 
     // the area: a boundary file, or a box, an H3 cell or a place name written as <name>.boundary.geojson next to the
@@ -262,7 +267,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         } else if let Some(c) = &cell {
             (crate::place::h3_geojson(c)?, serde_json::json!({"name": cfg_name, "source": format!("h3 {c}")}))
         } else {
-            crate::place::find(place.as_deref().unwrap_or_default(), &pbf)?
+            crate::place::find(place.as_deref().unwrap_or_default(), (!clip_src).then_some(pbf.as_path()))?
         };
         let file = dir.join(format!("{cfg_name}.boundary.geojson"));
         crate::place::write_boundary(geom, info, &file)?;
@@ -273,10 +278,13 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         boundary_path = Some(crate::place::buffered(Path::new(b), buffer_m)?.display().to_string());
     }
     let has_boundary = boundary_path.is_some();
+    if clip_src && !has_boundary {
+        return Err("config: a boundary is required to clip from a duckdb source".into());
+    }
     // with a boundary, the program cuts the PBF to it (as osmium complete_ways), unless it is cut already
     let cut_to = boundary_path
         .clone()
-        .filter(|_| !pbf_is_cut)
+        .filter(|_| !pbf_is_cut && !clip_src)
         .map(PathBuf::from);
     if let Some(b) = cut_to.as_ref().filter(|b| !b.exists()) {
         return Err(format!("boundary file not found: {}", b.display()));
@@ -288,7 +296,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     }
     let mut ignored: Vec<String> = Vec::new();
     if predicate != "intersects" {
-        ignored.push("clip.predicate (no effect on a build from a PBF)".to_string());
+        if !clip_src {
+            ignored.push("clip.predicate (no effect on a build from a PBF)".to_string());
+        }
     }
     let osm_fixes = top.str("osm_overrides")?.map(PathBuf::from);
     if let Some(f) = osm_fixes.as_ref().filter(|f| !f.exists()) {
@@ -313,7 +323,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     // the steps of duckOSM that are not here (on by default in duckOSM)
     let build_graph = options.bool("build_graph", true)?;
     // main.boundary_cells (place.rs): with a boundary, at options.boundary_cell_resolutions or else at h3_resolution
-    let boundary_cells = if options.bool("boundary_cells", false)? && has_boundary {
+    let boundary_cells = if options.bool("boundary_cells", false)? && has_boundary && !clip_src {
         let rs: Vec<u8> = match options.get("boundary_cell_resolutions") {
             Some(Yaml::Array(a)) => a
                 .iter()
@@ -338,7 +348,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         None
     };
     // the base-map layers (features.*) run on raw.*, which this program has only for an area with a boundary
-    let mut features = options.bool("build_features", true)?;
+    // a clip copies the tables of its parent: no base-map layers, bus routes, walls, H3 columns or DEM of its own (as in duckOSM)
+    let mut features = options.bool("build_features", true)? && !clip_src;
     if features && !has_boundary {
         skip(format!(
             "options.build_features is on{}, but this program makes the base-map layers (features.*) only with a boundary (boundary.path)",
@@ -446,9 +457,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         modes,
         name: name.clone(),
         options: opts,
-        bus_routes: options.bool("bus_routes", true)?,
+        bus_routes: options.bool("bus_routes", true)? && !clip_src,
         // the walls of the buildings (duckOSM options.building_faces, off by default): main.building_faces, with the wall rules of the fixes file; they need the area's boundary
-        building_faces: options.bool("building_faces", false)? && has_boundary,
+        building_faces: options.bool("building_faces", false)? && has_boundary && !clip_src,
         // duckOSM: options.levels (on by default) solves the drawing order; off writes no table
         levels: if options.bool("levels", true)? {
             Method::Solve
@@ -457,13 +468,14 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         },
         infer_sidewalks: options.bool("infer_separate_sidewalks", true)?,
         osm_fixes,
-        h3_resolution,
         features,
         sea,
         boundary: cut_to,
         // main.boundary and the metadata, also when the PBF is cut already (a missing file is an error there)
         area_boundary: boundary_path.clone().map(PathBuf::from).filter(|b| b.exists()),
-        dem,
+        dem: dem.filter(|_| !clip_src),
+        clip: clip_src.then(|| predicate.clone()),
+        h3_resolution: h3_resolution.filter(|_| !clip_src),
         dem_product: elevation.str("product")?,
         dem_vertical_datum: elevation.str("vertical_datum")?,
         dem_license: elevation.str("license")?,
@@ -481,7 +493,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
                 // the head lines as duckOSM writes them (its paths as the config gives them)
                 let db = Path::new(&out_text).join(format!("{name}.duckdb"));
                 Some(crate::after::Report {
-                    source: format!("pbf ({})", pbf.display()),
+                    source: format!("{} ({})", if clip_src { "duckdb" } else { "pbf" }, pbf.display()),
                     boundary: boundary_path.clone(),
                     predicate: predicate.clone(),
                     output: if out_text.ends_with(".duckdb") { out_text.clone() } else { db.strip_prefix(".").unwrap_or(&db).display().to_string() },

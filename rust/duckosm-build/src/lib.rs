@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 pub mod after;
 pub mod area;
+pub mod clip;
 pub mod config;
 pub mod elevation;
 pub mod h3;
@@ -119,6 +120,9 @@ pub struct Params {
     /// The steps on the `.duckdb` file after the tables (after.rs): the multimodal costs, the build checks, the report.
     /// The indexes are always made.
     pub after: after::After,
+    /// `source.type: duckdb` (clip.rs): the input file is a parent database, and the build copies the rows of its tables in
+    /// the boundary `area_boundary`, with this `clip.predicate` (`intersects`, `within` or `centroid`).
+    pub clip: Option<String>,
 }
 
 impl Default for Params {
@@ -157,6 +161,7 @@ impl Default for Params {
             features: false,
             sea: false,
             after: after::After::default(),
+            clip: None,
         }
     }
 }
@@ -1916,6 +1921,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         return Err("no output format: use geoparquet, duckdb or both".into());
     }
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    if let Some(predicate) = &p.clip {
+        return clip::build(pbf_path, out, p, predicate);
+    }
     let mut log = StepLog::system();
     let fixes = match &p.osm_fixes {
         Some(f) => config::read_osm_fixes(f)?,

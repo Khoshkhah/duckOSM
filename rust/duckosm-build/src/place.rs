@@ -144,16 +144,18 @@ mod sql {
         Ok(None)
     }
 
-    /// The boundary of the place `name` (duckOSM `area.find_boundary`): the borders of `pbf` first, then Nominatim.
-    pub fn find(name: &str, pbf: &Path) -> Result<(Value, Value), String> {
-        if let Some(hit) = from_pbf(pbf, name)? {
-            return Ok(hit);
+    /// The boundary of the place `name` (duckOSM `area.find_boundary`): the borders of `pbf` first (a clip has none), then
+    /// Nominatim.
+    pub fn find(name: &str, pbf: Option<&Path>) -> Result<(Value, Value), String> {
+        if let Some(pbf) = pbf {
+            if let Some(hit) = from_pbf(pbf, name)? {
+                return Ok(hit);
+            }
+            eprintln!("  no border matching {name:?} in {}", pbf.display());
         }
-        eprintln!("  no border matching {name:?} in {}", pbf.display());
-        from_nominatim(name)?.ok_or(format!(
-            "no boundary found for {name:?} in {} or on Nominatim. Try a more specific name (e.g. 'Södermalm, Stockholm').",
-            pbf.display()
-        ))
+        let place = pbf.map(|p| format!("in {} or ", p.display())).unwrap_or_default();
+        from_nominatim(name)?
+            .ok_or(format!("no boundary found for {name:?} {place}on Nominatim. Try a more specific name (e.g. 'Södermalm, Stockholm')."))
     }
 
     /// The boundary grown by `m` metres in the UTM zone of its centroid, as `<stem>.buffer<m>m.geojson` next to it (duckOSM
@@ -250,7 +252,7 @@ mod sql {
 pub use sql::{boundary_cells, buffered, find};
 
 #[cfg(not(feature = "duckdb"))]
-pub fn find(_: &str, _: &Path) -> Result<(Value, Value), String> {
+pub fn find(_: &str, _: Option<&Path>) -> Result<(Value, Value), String> {
     Err("boundary.place needs the cargo feature duckdb".into())
 }
 #[cfg(not(feature = "duckdb"))]

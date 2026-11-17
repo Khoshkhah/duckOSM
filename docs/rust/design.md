@@ -210,7 +210,11 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
   `--config` read a duckOSM config file (`duckosm-build/src/config.rs`). The keys and defaults are those of
   duckOSM. Relative paths resolve against the current folder, as in duckOSM. The rules:
   - A key that duckOSM does not know is an error (duckOSM only warns; it is almost always a typo).
-  - A key that changes the result and is not supported is an error: `source.type: duckdb`. `clip.predicate` (one of `intersects`, `within`, `centroid`) and
+  - `source.type: duckdb` clips the tables of `source.source_db` to the boundary (`duckosm-build/src/clip.rs`, the SQL
+    of duckOSM's `DuckdbClipper`, with `clip.predicate`). The rows are copied as they are, so `edge_id` does not change.
+    `turn_path_restrictions` is copied too (the SQL of duckOSM fails in DuckDB and duckOSM drops the error, so its clip
+    has no such table). The drawing order is solved again on the clipped edges, as in a PBF build.
+  - On a build from a PBF, `clip.predicate` (one of `intersects`, `within`, `centroid`) and
     `clip.min_component_edges` have no effect on a build from a PBF, as in duckOSM.
   - With a boundary, the program cuts the PBF to it, as osmium's `complete_ways` does (no `osmium` is
     necessary). When the PBF is already cut, say so (`pbf_is_cut=True`, CLI `--pbf-is-cut`): then the program
