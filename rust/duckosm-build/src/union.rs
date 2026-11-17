@@ -103,7 +103,8 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
             if parts.is_empty() {
                 return Ok((name.clone(), 0));
             }
-            let n = concat_files(&parts, consume || parts.last().is_some_and(|p| p.starts_with(&tmp)), &out.join(format!("{name}.parquet")))?;
+            // the merged border file is temporary; the files of the tiles stay unless `consume` (--keep-tiles keeps them)
+            let n = concat_files(&parts, consume, &out.join(format!("{name}.parquet")))?;
             Ok((name.clone(), n))
         })
         .collect::<Result<_, _>>())?;
@@ -485,122 +486,280 @@ pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<
 /// The member ways of the routes of one batch of the bus step (see [`bus_routes`]).
 const BUS_BATCH_WAYS: usize = 20_000;
 
-/// `bus.routes` and `bus.route_edges` after the union (docs/design/build_by_tiles.md, "The bus routes"): a bus route crosses
-/// tiles, so the walk of the routes (`bus::routes`, the function of the whole build) runs after the union, on the route
-/// relations and their member ways of all tiles (each tile's `bus.osm.pbf`, one copy of each), and on the driving edges
-/// and bus lanes of those ways, read from the tables of the union without their lines. The routes go in batches of about
-/// [`BUS_BATCH_WAYS`] member ways, in the order of their ids (the order of the whole build): one read of the edges puts each
-/// member edge into the temporary file of each batch that needs it, and each batch holds only its own edges (France:
-/// 7.5 million route edges, 6.5 GB at once). Returns the number of routes.
+/// `bus.routes` and `bus.route_edges` after the union (docs/design/build_by_tiles.md, "The bus routes", and
+/// docs/design/tail_steps_by_tiles.md): a bus route crosses tiles, so the walk of the routes (`bus::routes`, the function of
+/// the whole build) runs after the union, on the route relations and their member ways of all tiles (each tile's
+/// `bus.osm.pbf`, one copy of each), and on the driving edges and bus lanes of those ways, read from the tables of the union
+/// without their lines. The routes go in batches of about [`BUS_BATCH_WAYS`] member ways, in the order of their ids (the
+/// order of the whole build). The relations, the member ways and the member edges go to temporary files sorted by batch,
+/// and each batch holds only its own data: only the list of (member way, batch) stays in memory (16 bytes for each).
+/// Returns the number of routes.
 pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String> {
     use duckosm_core::graph::MemberType;
     use duckosm_core::raw::{read_part, Want};
     use duckosm_core::spill::{self, EdgeCodec, Writer};
-    let (mut relations, mut ways) = (Vec::new(), Vec::new());
-    let (mut seen_rel, mut seen_way): (FxHashSet<i64>, FxHashSet<i64>) = Default::default();
-    let all = |_: i64, _: &[(&str, &str)]| true;
-    let want = Want { relation: &all, way: &all, node: &|_| false, way_nodes: false, tag: &|_, _, _| true };
-    for (_, dir) in tiles {
-        let path = dir.join("bus.osm.pbf");
-        if !path.exists() {
+    let store = spill::temp_store();
+    let store = &*store;
+    // 1. the relations and the member ways of all tiles to two temporary files, sorted by id (a route is in each tile of its
+    // ways: the sorted files keep one copy of each id)
+    let (mut rel_w, mut way_w) = (Writer::new(store).map_err(io)?, Writer::new(store).map_err(io)?);
+    // the files of one tile for each thread at a time (the files of all tiles at once can be large)
+    for group in tiles.chunks(rayon::current_num_threads().max(1)) {
+        let parts = group
+            .par_iter()
+            .map(|(_, dir)| {
+                let path = dir.join("bus.osm.pbf");
+                if !path.exists() {
+                    return Ok(None);
+                }
+                let open = || File::open(&path).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path.display()));
+                let all = |_: i64, _: &[(&str, &str)]| true;
+                let want = Want { relation: &all, way: &all, node: &|_| false, way_nodes: false, tag: &|_, _, _| true };
+                read_part(open, &want).map(Some)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        for part in parts.into_iter().flatten() {
+            for r in &part.relations {
+                rel_w.push(&RelationCodec, r).map_err(io)?;
+            }
+            for w in part.ways {
+                way_w.push(&WayCodec, &(0, w)).map_err(io)?;
+            }
+        }
+    }
+    duckosm_core::util::step("bus 1a: the files of the tiles");
+    let id_at = |b: &[u8], at: usize| i64::from_le_bytes(b[at..at + 8].try_into().unwrap());
+    let mut rels = spill::sort_bytes(rel_w.finish().map_err(io)?, |b| id_at(b, 0), 64 << 20, store).map_err(io)?;
+    let ways = spill::sort_bytes(way_w.finish().map_err(io)?, |b| id_at(b, 4), 64 << 20, store).map_err(io)?;
+    duckosm_core::util::step("bus 1b: sorted by id");
+    // 2. the batch of each relation (consecutive relations with about BUS_BATCH_WAYS member ways), and the batches of each
+    // member way. The relations stay in the file, in the order of their ids (the order of the batches)
+    let (mut batch, mut n, mut n_rel) = (0u32, 0usize, 0usize);
+    let mut way_batches: Vec<(i64, u32)> = Vec::new();
+    let mut last = None;
+    for r in rels.read_ref(&RelationCodec).map_err(io)? {
+        let r = r.map_err(io)?;
+        if last.replace(r.id) == Some(r.id) {
             continue;
         }
-        let open = || File::open(&path).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path.display()));
-        // one copy of each relation and way: a route is in each tile of its ways
-        let part = read_part(open, &want)?;
-        relations.extend(part.relations.into_iter().filter(|r| seen_rel.insert(r.id)));
-        ways.extend(part.ways.into_iter().filter(|w| seen_way.insert(w.id)));
-    }
-    drop((seen_rel, seen_way));
-    relations.sort_by_key(|r| r.id);
-    ways.sort_by_key(|w| w.id);
-    duckosm_core::util::step(&format!("bus 1: {} route relations, {} member ways", relations.len(), ways.len()));
-    // the batches of the routes: consecutive relations with about BUS_BATCH_WAYS member ways
-    let mut batch_of: Vec<u32> = Vec::with_capacity(relations.len());
-    let (mut batch, mut n) = (0u32, 0usize);
-    for r in &relations {
         let k = r.members.iter().filter(|m| m.1 == MemberType::Way).count();
         if n > 0 && n + k > BUS_BATCH_WAYS {
             batch += 1;
             n = 0;
         }
         n += k;
-        batch_of.push(batch);
+        n_rel += 1;
+        way_batches.extend(r.members.iter().filter(|m| m.1 == MemberType::Way).map(|m| (m.0, batch)));
     }
-    let batches = if relations.is_empty() { 0 } else { batch as usize + 1 };
-    // the batches of each member way
-    let mut way_batches: Vec<(i64, u32)> = relations
-        .iter()
-        .zip(&batch_of)
-        .flat_map(|(r, &b)| r.members.iter().filter(|m| m.1 == MemberType::Way).map(move |m| (m.0, b)))
-        .collect();
+    let batches = if n_rel == 0 { 0 } else { batch as usize + 1 };
     way_batches.sort_unstable();
     way_batches.dedup();
+    way_batches.shrink_to_fit();
     let batches_of = |osm: i64| {
         let i = way_batches.partition_point(|x| x.0 < osm);
         way_batches[i..].iter().take_while(move |x| x.0 == osm).map(|x| x.1)
     };
-    // one read of the union edges: each member edge, without its line, to the files of its batches
-    // one temporary file, sorted by (batch, private, edge_id) after the read: one row for each batch of an edge
-    let store = spill::temp_store();
-    let store = &*store;
+    duckosm_core::util::step("bus 1c: the batches");
+    // 3. each member way (one copy) to the file of its batches, sorted by batch, then id
+    let mut w = Writer::new(store).map_err(io)?;
+    let (mut n_way, mut last) = (0usize, None);
+    for r in ways.read(&WayCodec).map_err(io)? {
+        let (_, way) = r.map_err(io)?;
+        if last.replace(way.id) == Some(way.id) {
+            continue;
+        }
+        n_way += 1;
+        for b in batches_of(way.id) {
+            w.push(&WayCodec, &(b, way.clone())).map_err(io)?;
+        }
+    }
+    let ways = spill::sort_bytes(w.finish().map_err(io)?, |b| (u32::from_le_bytes(b[..4].try_into().unwrap()), id_at(b, 4)), 64 << 20, store)
+        .map_err(io)?;
+    duckosm_core::util::step(&format!("bus 1: {n_rel} route relations, {n_way} member ways"));
+    // 4. one read of the union edges: each member edge, without its line, to the file of its batches, sorted by
+    // (batch, private, edge_id): one row for each batch of an edge
     let codec = BatchEdge(EdgeCodec::default());
     let mut w = Writer::new(store).map_err(io)?;
-    let mut attrs = FxHashSet::default();
     for (k, name) in ["edges", "private_edges"].into_iter().enumerate() {
         let path = out.join(format!("{name}_driving.parquet"));
         if !path.exists() {
             continue;
         }
-        duckosm_parquet::read::read_edges(&path, &mut attrs, |osm| batches_of(osm).next().is_some(), |mut e| {
-            e.geometry = Vec::new(); // the walk reads the nodes of an edge, not its line
+        // only the columns of the walk (it reads the nodes of an edge, not its line or its tags)
+        duckosm_parquet::read::read_route_edges(&path, |osm| batches_of(osm).next().is_some(), |e| {
             for b in batches_of(e.osm_id) {
                 w.push(&codec, &(b, k as u8, e.clone())).map_err(io)?;
             }
             Ok(())
         })?;
     }
-    drop(attrs);
     let key = |b: &[u8]| (u32::from_le_bytes(b[..4].try_into().unwrap()), b[4], EdgeCodec::edge_id(&b[5..]));
     let sorted = spill::sort_bytes(w.finish().map_err(io)?, key, 64 << 20, store).map_err(io)?;
-    let mut rows = sorted.read(&codec).map_err(io)?.peekable();
+    drop(way_batches);
     duckosm_core::util::step(&format!("bus 2: the member edges to {batches} batches"));
-    // each batch: its routes, its member ways and its edges (in the order of edge_id, as the whole build gives them)
+    // 5. each batch: its relations, its member ways and its edges, from the three sorted files (in the order of the ids, and
+    // the edges in the order of edge_id, as the whole build gives them). The rows of each batch go to part files
+    let mut edge_rows = sorted.read(&codec).map_err(io)?.peekable();
+    let mut way_rows = ways.read(&WayCodec).map_err(io)?.peekable();
+    let mut rel_rows = rels.read(&RelationCodec).map_err(io)?;
+    let mut pending = None;
     let tmp = std::env::temp_dir().join(format!("duckosm-bus-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).map_err(io)?;
-    let (mut routes, mut parts) = (Vec::new(), Vec::new());
-    let mut start = 0;
+    let (mut n_routes, mut route_parts, mut parts) = (0usize, Vec::new(), Vec::new());
+    let (mut n, mut last) = (0usize, None);
     for b in 0..batches as u32 {
-        let end = start + batch_of[start..].iter().take_while(|&&x| x == b).count();
-        let rels = &relations[start..end];
-        start = end;
+        // the relations of the batch: the next relations up to about BUS_BATCH_WAYS member ways (the rule of step 2)
+        let mut rels = Vec::new();
+        loop {
+            let r = match pending.take() {
+                Some(r) => r,
+                None => match rel_rows.next() {
+                    Some(r) => r.map_err(io)?,
+                    None => break,
+                },
+            };
+            if last == Some(r.id) {
+                continue;
+            }
+            let k = r.members.iter().filter(|m| m.1 == MemberType::Way).count();
+            if n > 0 && n + k > BUS_BATCH_WAYS {
+                n = 0;
+                pending = Some(r);
+                break;
+            }
+            n += k;
+            last = Some(r.id);
+            rels.push(r);
+        }
+        let mut own_ways = Vec::new();
+        while let Some(r) = way_rows.next_if(|r| r.as_ref().is_ok_and(|r| r.0 == b)) {
+            own_ways.push(r.map_err(io)?.1);
+        }
         // the edges of the batch come sorted by (private, edge_id)
         let (mut edges, mut private_edges) = (Vec::new(), Vec::new());
-        while let Some(r) = rows.next_if(|r| r.as_ref().is_ok_and(|r| r.0 == b)) {
+        while let Some(r) = edge_rows.next_if(|r| r.as_ref().is_ok_and(|r| r.0 == b)) {
             let (_, k, e) = r.map_err(io)?;
             let list: &mut Vec<duckosm_core::model::Edge> = if k == 0 { &mut edges } else { &mut private_edges };
             if list.last().is_none_or(|l| l.edge_id != e.edge_id) {
                 list.push(e);
             }
         }
-        let members: FxHashSet<i64> =
-            rels.iter().flat_map(|r| r.members.iter()).filter(|m| m.1 == MemberType::Way).map(|m| m.0).collect();
-        let own_ways: Vec<duckosm_core::raw::RawWay> = ways.iter().filter(|w| members.contains(&w.id)).cloned().collect();
-        let (r, rows) = duckosm_core::bus::routes(rels, &own_ways, &edges, &private_edges);
-        routes.extend(r);
+        let (routes, rows) = duckosm_core::bus::routes(&rels, &own_ways, &edges, &private_edges);
+        n_routes += routes.len();
+        let part = tmp.join(format!("{b}.routes.parquet"));
+        duckosm_parquet::write_routes_to(create(&part)?, &routes)?;
+        route_parts.push(part);
         let part = tmp.join(format!("{b}.parquet"));
         duckosm_parquet::write_route_edges_to(create(&part)?, &rows)?;
         parts.push(part);
     }
     duckosm_core::util::step("bus 3: the batches");
-    duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &routes)?;
     if parts.is_empty() {
+        duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &[])?;
         duckosm_parquet::write_route_edges_to(create(&out.join("route_edges_bus.parquet"))?, &[])?;
     } else {
+        concat_files(&route_parts, true, &out.join("routes_bus.parquet"))?;
         concat_files(&parts, true, &out.join("route_edges_bus.parquet"))?;
     }
     let _ = std::fs::remove_dir_all(&tmp);
-    Ok(routes.len())
+    Ok(n_routes)
+}
+
+fn put_str(s: &str, o: &mut Vec<u8>) {
+    o.extend_from_slice(&(s.len() as u32).to_le_bytes());
+    o.extend_from_slice(s.as_bytes());
+}
+
+fn get_u32(b: &mut &[u8]) -> u32 {
+    let v = u32::from_le_bytes(b[..4].try_into().unwrap());
+    *b = &b[4..];
+    v
+}
+
+fn get_i64(b: &mut &[u8]) -> i64 {
+    let v = i64::from_le_bytes(b[..8].try_into().unwrap());
+    *b = &b[8..];
+    v
+}
+
+fn get_str(b: &mut &[u8]) -> String {
+    let n = get_u32(b) as usize;
+    let s = String::from_utf8_lossy(&b[..n]).into_owned();
+    *b = &b[n..];
+    s
+}
+
+fn put_tags(tags: &[(String, String)], o: &mut Vec<u8>) {
+    o.extend_from_slice(&(tags.len() as u32).to_le_bytes());
+    for (k, v) in tags {
+        put_str(k, o);
+        put_str(v, o);
+    }
+}
+
+fn get_tags(b: &mut &[u8]) -> Vec<(String, String)> {
+    (0..get_u32(b)).map(|_| (get_str(b), get_str(b))).collect()
+}
+
+/// A route relation of the bus step in a temporary file: its id first (the sort key), its tags, its members.
+struct RelationCodec;
+
+impl duckosm_core::spill::Codec<duckosm_core::graph::Relation> for RelationCodec {
+    fn put(&self, r: &duckosm_core::graph::Relation, o: &mut Vec<u8>) {
+        use duckosm_core::graph::MemberType;
+        o.extend_from_slice(&r.id.to_le_bytes());
+        put_tags(&r.tags, o);
+        o.extend_from_slice(&(r.members.len() as u32).to_le_bytes());
+        for (id, t, role) in &r.members {
+            o.extend_from_slice(&id.to_le_bytes());
+            o.push(match t {
+                MemberType::Node => 0,
+                MemberType::Way => 1,
+                MemberType::Relation => 2,
+            });
+            put_str(role, o);
+        }
+    }
+    fn get(&self, b: &mut &[u8]) -> duckosm_core::graph::Relation {
+        use duckosm_core::graph::MemberType;
+        let id = get_i64(b);
+        let tags = get_tags(b);
+        let members = (0..get_u32(b))
+            .map(|_| {
+                let id = get_i64(b);
+                let t = match b[0] {
+                    0 => MemberType::Node,
+                    1 => MemberType::Way,
+                    _ => MemberType::Relation,
+                };
+                *b = &b[1..];
+                (id, t, get_str(b))
+            })
+            .collect();
+        duckosm_core::graph::Relation { id, tags, members }
+    }
+}
+
+/// A member way of the bus step in a temporary file: its batch and its id first (the sort keys), its tags, its nodes.
+struct WayCodec;
+
+impl duckosm_core::spill::Codec<(u32, duckosm_core::raw::RawWay)> for WayCodec {
+    fn put(&self, (batch, w): &(u32, duckosm_core::raw::RawWay), o: &mut Vec<u8>) {
+        o.extend_from_slice(&batch.to_le_bytes());
+        o.extend_from_slice(&w.id.to_le_bytes());
+        put_tags(&w.tags, o);
+        o.extend_from_slice(&(w.refs.len() as u32).to_le_bytes());
+        for r in &w.refs {
+            o.extend_from_slice(&r.to_le_bytes());
+        }
+    }
+    fn get(&self, b: &mut &[u8]) -> (u32, duckosm_core::raw::RawWay) {
+        let batch = get_u32(b);
+        let id = get_i64(b);
+        let tags = get_tags(b);
+        let refs = (0..get_u32(b)).map(|_| get_i64(b)).collect();
+        (batch, duckosm_core::raw::RawWay { id, tags, refs })
+    }
 }
 
 /// An edge of a batch of the bus step in a temporary file: the batch, 1 for a private edge (else 0), the edge.

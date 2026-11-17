@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The bus routes and the levels after the union of a build by tiles: memory that does not grow with the area**
+  (`docs/design/tail_steps_by_tiles.md`). The bus step puts the route relations and the member ways into temporary files sorted
+  by batch, and each batch reads only its own data; the read of the union edges decodes only the columns of the walk. The levels
+  keep the numbers of an edge only until the last tile that reads them starts. France (Mac mini, native): the bus step 14 s to
+  9.3 s and 609 MB to 171 MB of heap; the tiles of the levels 187 MB to 67 MB. The bus tables and `edge_levels` are equal to
+  before, row by row (Kentucky, Sweden, France, both level methods), and Kentucky by tiles equals the whole build.
+- **`duckosm-rust tiles --keep-tiles` keeps the tables of the tiles.** The union deleted them for each table with border rows.
 - **The tile cut is the pbfcut library** (`Khoshkhah/pbfcut`, one pinned git `rev` in `rust/duckosm-core/Cargo.toml`). duckOSM's own
   cut (`tilecut.rs`, `tilecut/write.rs`) is gone; `duckosm_core::tilecut` keeps its names and gives pbfcut the rule of the junctions
   (`NodeUses`). `boundary`, `tiles`, the temporary store of `spill`, `util::FxHasher` and `cutstream::CutCounts` are now the types

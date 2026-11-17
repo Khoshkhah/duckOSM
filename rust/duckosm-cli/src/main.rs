@@ -338,9 +338,9 @@ fn quack_union(args: &[String]) -> Result<(), String> {
 
 /// duckosm-rust tiles: build a large area by tiles. One read of the region file cuts it to the standard map tiles of the
 /// boundary (one file for each tile, with the junctions of the nodes outside the tile); each tile builds alone, `--jobs`
-/// tiles at a time, each in its own process; the union joins the tables of the tiles into the tables of the area.
-/// Not yet in a build by tiles: the steps that need the whole area (the bus routes, the drawing levels, the filter of the
-/// largest part), and the .duckdb output.
+/// tiles at a time, each in its own process; the union joins the tables of the tiles into the tables of the area. The bus
+/// routes and the drawing levels run after the union, in batches and in tiles, so their memory does not grow with the area
+/// (docs/design/tail_steps_by_tiles.md). The .duckdb file comes from the tables of the union.
 #[derive(Parser)]
 #[command(name = "duckosm-rust tiles", version)]
 struct TilesCli {
@@ -388,7 +388,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let cli = TilesCli::parse_from(args);
     let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
     // the options of the tiles, as the build reads them (the union needs the modes and the options)
-    // the global steps do not run in a tile: the bus routes, the drawing levels and the largest part need the whole area
+    // the bus routes and the drawing levels do not run in a tile: they run after the union
     // the bus routes run after the union too, but the tiles give their route relations: only the user's --no-bus-routes
     // goes to the tile builds
     let global = ["--no-component-filter"];
@@ -400,7 +400,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
         }
     }
     opts.retain(|a| !a.starts_with("--levels=") && !a.starts_with("--format="));
-    // the options of the user, as given (the union reads the filter of the largest part, the bus routes and the levels from
+    // the options of the user, as given (the union reads the bus routes and the levels from
     // them)
     let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
     all.push(cli.boundary.to_string_lossy().into_owned());

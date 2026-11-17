@@ -132,8 +132,9 @@ pub mod tiled {
         g.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |[w, s, e, n], p| [w.min(p.0), s.min(p.1), e.max(p.0), n.max(p.1)])
     }
 
-    /// One level edge in a tile: (tile, owned, needed by a later tile, rank, edge id, tag set, line). The tile is first: the sort key.
-    type TileEdge = (Tile, bool, bool, u8, i64, u32, Vec<(f64, f64)>);
+    /// One level edge in a tile: (tile, owned, the later tiles that read its numbers, rank, edge id, tag set, line). The tile
+    /// is first: the sort key.
+    type TileEdge = (Tile, bool, u16, u8, i64, u32, Vec<(f64, f64)>);
     /// [`roadstyle_levels::edge_hash`] of the ids in their order (they come sorted), without a list of the ids.
     #[derive(Default)]
     struct EdgeHash(sha2::Sha256, usize);
@@ -168,7 +169,9 @@ pub mod tiled {
         fn put(&self, r: &TileEdge, out: &mut Vec<u8>) {
             out.extend_from_slice(&(r.0 .0 as i64 - i32::MIN as i64).to_be_bytes()[4..]);
             out.extend_from_slice(&(r.0 .1 as i64 - i32::MIN as i64).to_be_bytes()[4..]);
-            out.extend_from_slice(&[r.1 as u8, r.2 as u8, r.3]);
+            out.push(r.1 as u8);
+            out.extend_from_slice(&r.2.to_le_bytes());
+            out.push(r.3);
             out.extend_from_slice(&r.4.to_le_bytes());
             out.extend_from_slice(&r.5.to_le_bytes());
             for p in &r.6 {
@@ -178,16 +181,16 @@ pub mod tiled {
         }
         fn get(&self, b: &mut &[u8]) -> TileEdge {
             let tile = tile_at(b);
-            let id = i64::from_le_bytes(b[11..19].try_into().expect("8 bytes"));
-            let tags = u32::from_le_bytes(b[19..23].try_into().expect("4 bytes"));
-            let pts = b[23..]
+            let id = i64::from_le_bytes(b[12..20].try_into().expect("8 bytes"));
+            let tags = u32::from_le_bytes(b[20..24].try_into().expect("4 bytes"));
+            let pts = b[24..]
                 .chunks_exact(16)
                 .map(|c| {
                     let f = |c: &[u8]| f64::from_bits(u64::from_le_bytes(c.try_into().expect("8 bytes")));
                     (f(&c[..8]), f(&c[8..]))
                 })
                 .collect();
-            (tile, b[8] != 0, b[9] != 0, b[10], id, tags, pts)
+            (tile, b[8] != 0, u16::from_le_bytes([b[9], b[10]]), b[11], id, tags, pts)
         }
     }
 
@@ -356,7 +359,8 @@ pub mod tiled {
                     }
                 }
             }
-            let later = others.iter().any(|t| order[t] > order[&own]);
+            // the later tiles read the numbers of the edge (the tags rule reads no numbers of other tiles)
+            let later = if tags_rule { 0 } else { others.iter().filter(|t| order[t] > order[&own]).count() as u16 };
             if !tags_rule {
                 for t in others.iter().filter(|t| order[t] > order[&own]) {
                     waits.entry(*t).or_default().insert(own);
@@ -364,7 +368,7 @@ pub mod tiled {
             }
             let id = tags.id(attrs);
             for t in &others {
-                rows.push(&TileEdgeCodec, &(*t, false, false, rank, edge_id, id, geometry.clone())).map_err(io)?;
+                rows.push(&TileEdgeCodec, &(*t, false, 0, rank, edge_id, id, geometry.clone())).map_err(io)?;
             }
             rows.push(&TileEdgeCodec, &(own, true, later, rank, edge_id, id, geometry)).map_err(io)?;
             Ok(())
@@ -387,15 +391,16 @@ pub mod tiled {
         // in a tile: the edges in the order of the tables, then of edge_id (the order of the whole build)
         let key = |b: &[u8]| {
             let t = tile_at(b);
-            (depth[&t], order[&t], table_of[b[10] as usize], i64::from_le_bytes(b[11..19].try_into().expect("8 bytes")))
+            (depth[&t], order[&t], table_of[b[11] as usize], i64::from_le_bytes(b[12..20].try_into().expect("8 bytes")))
         };
         let rows = spill::sort_bytes(rows.finish().map_err(io)?, key, BUDGET, store).map_err(io)?;
         drop(depth);
         duckosm_core::util::step("levels: the sort by tile");
-        // 3. the tiles: the numbers of an edge that a later tile needs are kept, with the order of its tile. A tile reads only the
+        // 3. the tiles: the numbers of an edge that a later tile needs are kept, with the order of its tile and the count of the
+        // later tiles that still read them (an entry goes when the count is 0). A tile reads only the
         // numbers of earlier tiles, as when the tiles run one after the other; the tiles that wait for no tile still running run at
         // the same time (a window of the next tiles in their order: the first one never waits)
-        let mut earlier: FxHashMap<i64, (usize, [i64; 4])> = FxHashMap::default();
+        let mut earlier: FxHashMap<i64, (usize, [i64; 4], u32)> = FxHashMap::default();
         let mut raw = Writer::new(store).map_err(io)?;
         let (mut casing, mut values) = (HashMap::<i64, usize>::new(), BTreeSet::<i64>::new());
         let mut sums = roadstyle_levels::TileLevels::default();
@@ -404,12 +409,12 @@ pub mod tiled {
             let (tile_y, tile_x) = tile[0].0;
             let mut edges = roadstyle_levels::LevelEdges::default();
             edges.reserve(tile.len());
-            let (mut owned, mut keep) = (FxHashSet::default(), FxHashSet::default());
+            let (mut owned, mut keep) = (FxHashSet::default(), FxHashMap::default());
             for (_, own, later, rank, id, t, g) in tile {
                 if own {
                     owned.insert(id);
-                    if later {
-                        keep.insert(id);
+                    if later > 0 {
+                        *keep.entry(id).or_insert(0u32) += later as u32;
                     }
                 }
                 edges.add(rank, LevelEdge { edge_id: id, tags: tags.sets[t as usize].clone(), geometry: g, ..Default::default() });
@@ -434,10 +439,26 @@ pub mod tiled {
         // a tile starts when all the tiles it waits for are done (not when the tiles before it are done): `dispatch` starts the
         // ready tiles, and `receive` gives the result of one finished tile
         type Job = (Vec<TileEdge>, FxHashMap<i64, [i64; 4]>);
-        type Done = (Tile, usize, Result<(usize, roadstyle_levels::TileLevels, FxHashSet<i64>), String>);
-        let earlier_of = |tile: &[TileEdge], earlier: &FxHashMap<i64, (usize, [i64; 4])>| {
+        type Done = (Tile, usize, Result<(usize, roadstyle_levels::TileLevels, FxHashMap<i64, u32>), String>);
+        // the numbers of the earlier tiles for the edges of a tile; each edge that the tile does not own takes one from the count
+        // of its entry, and the entry goes at 0 (the step counted these tiles: each reads the entry one time for each copy)
+        let earlier_of = |tile: &[TileEdge], earlier: &mut FxHashMap<i64, (usize, [i64; 4], u32)>| {
             let me = order[&tile[0].0];
-            tile.iter().filter_map(|r| earlier.get(&r.4).filter(|(o, _)| *o < me).map(|(_, v)| (r.4, *v))).collect()
+            let mut got = FxHashMap::default();
+            for r in tile {
+                let Some(e) = earlier.get_mut(&r.4) else { continue };
+                if e.0 >= me {
+                    continue;
+                }
+                got.insert(r.4, e.1);
+                if !r.1 {
+                    e.2 = e.2.saturating_sub(1);
+                    if e.2 == 0 {
+                        earlier.remove(&r.4);
+                    }
+                }
+            }
+            got
         };
         let finish = |(tile, earlier): Job| -> Done {
             let (t, n) = (tile[0].0, tile.len());
@@ -466,7 +487,7 @@ pub mod tiled {
                 window.extend(wait);
                 running += run.len();
                 dispatch(run.into_iter().map(|t| {
-                    let e = earlier_of(&t, &earlier);
+                    let e = earlier_of(&t, &mut earlier);
                     (t, e)
                 }).collect())?;
                 if running == 0 {
@@ -485,8 +506,10 @@ pub mod tiled {
                         | u8::from(row.cap_end == Some("square")) << 1
                         | u8::from(row.cap_start.is_none()) << 3;
                     raw.push(&RawRowCodec, &(row.edge_id, v, caps, row.head_start_m)).map_err(io)?;
-                    if keep.contains(&row.edge_id) {
-                        earlier.insert(row.edge_id, (me, v));
+                    if let Some(&n) = keep.get(&row.edge_id) {
+                        // an edge id of two tables (or two tiles): the later numbers win, as before; the counts add
+                        let n = n + earlier.get(&row.edge_id).map_or(0, |e| e.2);
+                        earlier.insert(row.edge_id, (me, v, n));
                     }
                 }
                 sums.roads += r.roads;
