@@ -153,7 +153,7 @@ The id files of step 3 are done (PR 197). The size of the tile files is done: fu
 
 ## Moved to pbfcut
 
-On 2026-11-16 the cut moved to the pbfcut library (pbfcut PR 36 added `cut_raw_to_sink`; the pin is `d8351d4`).
+On 2026-11-16 the cut moved to the pbfcut library. The pin is `918960d` (pbfcut PR 38: every cut takes `compress`).
 
 | Check | Result |
 |---|---|
@@ -164,5 +164,6 @@ On 2026-11-16 the cut moved to the pbfcut library (pbfcut PR 36 added `cut_raw_t
 
 `duckosm_core::tilecut` keeps the names that Studio calls (`cut_to_tiles`, `cut_to_store`, `cut_to_store_build`,
 `cut_to_sink`, `read_junctions`, `node_positions`, `border_m`, `near_tile`, `JUNCTION`, `ROAD`, `HOME`, `TileFiles`,
-`Sink`). `cut_to_sink` writes the tile files with no zlib (`cut_raw_to_sink`), as the old cut did; with `memory`, with
-zlib. Sweden in Chromium at zoom 8 (8 threads): a sink with zlib took 24.0 s, the old cut 17.8 s.
+`Sink`). As before the move, `cut_to_sink` and `cut_to_store` write the tile files with no zlib (`compress` false; with
+`memory`, `cut_to_sink` uses zlib), and the cut of the build by tiles keeps zlib. Sweden in Chromium at zoom 8 (8 threads, Studio's quack page, Mac mini): the old cut 17.8 s and 861 MiB; the new cut
+with zlib in the sink 24.0 s; with no zlib 18.3 s and 625 MiB. The rows of quack are equal.
