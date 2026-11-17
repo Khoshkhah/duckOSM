@@ -1,0 +1,16 @@
+[package]
+name = "duckosm-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The exports of a built duckOSM database (docs/design/all_in_rust.md, group D). Each export reads the .duckdb file
+# with DuckDB and writes the same file as the Python export of src/duckosm/.
+
+[dependencies]
+duckdb = { version = "=1.10506.1", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+
+[dev-dependencies]
+duckosm-build = { path = "../duckosm-build" }

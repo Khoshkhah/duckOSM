@@ -844,6 +844,8 @@ fn main() {
         Some("quack") => quack(&args[1..]),
         Some("quack-tiles") => quack_tiles(&args[1..]),
         Some("quack-union") => quack_union(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some(c) if duckosm_export::cli::COMMANDS.contains(&c) => duckosm_export::cli::run(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {
