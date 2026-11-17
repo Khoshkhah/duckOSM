@@ -260,7 +260,7 @@ only this build tests the merge of chains (Kentucky: 51,450 rows of `edge_id_map
 ### Stage B3 (done): sub-steps 3.8 to 3.11 as passes
 
 Sub-steps 3.8 to 3.11 (code steps 8 to 10) read the file of edges. The B2 bridge to step 8 is gone. The step numbers
-3.1 to 3.13 are the numbers of [offline and online](../concepts/offline-online.md).
+3.1 to 3.13 are the numbers of [offline and online](offline_online_steps.md).
 
 1. **3.8 Nodes.** Sub-steps 3.4 to 3.7 also write the two end nodes of each edge to a file. Its sort gives each node
    one time; the nodes with their coordinates and the virtual nodes are sorted by `node_id`.
