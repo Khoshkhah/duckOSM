@@ -178,9 +178,8 @@ native run (`quack_diff --large`):
 
 France (5.1 GB) in Chromium, 324 tiles of at most 4 million nodes, not sorted: 582.3 s (the cut 267.7 s, the tiles
 306.6 s) and 1 004 MiB of WebAssembly memory, with the same numbers of rows as the native run. The GeoParquet file is
-12.2 GB: the browser compresses it with Snappy, the native run with zstd (9.7 GB). France sorted does not fit on the disk
-of the Mac mini in the browser yet: there, the runs of the sort are not compressed (no zstd in WebAssembly), about 20 GB
-more.
+12.2 GB: the browser compresses it with Snappy, the native run with zstd (9.7 GB). France sorted: see "The sort tile by
+tile" below.
 
 Two faults of the browser came out on the way. In the browser, pass 4 collected all relations of the file in memory
 before it made them: now it makes them in batches of 4 million points. And the allocator of Studio's WebAssembly module
@@ -241,14 +240,21 @@ no progress. In Chromium on the Mac mini (zoom 8, 8 tile workers, join with 8 th
 | Île-de-France, after | 17.7 s | 5.8 s | 626 MiB | 29.7 s |
 | Sweden (975 MB), 12 workers, before | 13.6 s | 26.3 s | 2 240 MiB | 58.9 s |
 | Sweden, after | 14.6 s | 12.2 s | 2 182 MiB | 45.8 s |
+| France (5.1 GB), 12 workers, after | 145.5 s | 114.9 s | 1 168 MiB | 340.2 s |
 
 The join is faster, and the work of the sort moves to the tile workers. Sweden has 206 tiles, and on average 11.8 of the
 12 workers are busy: the run is 13.1 s shorter, and it used at most 9.4 GB of browser storage, not 13.2 GB (no runs of
-the sort in the join). France sorted used 37.6 GB of browser storage before it was stopped, so that the Mac kept 30 GB
-free; it is not measured. Île-de-France has one large tile (Paris, 8/129/88):
+the sort in the join). Île-de-France has one large tile (Paris, 8/129/88):
 its worker sorts alone for about 3.5 s more, and the other workers have no tiles then, so the total stays the same. A
 file with many tiles of similar size divides this work between all workers. The memory of all tile workers on
 Île-de-France went from 1 471 MiB to 2 459 MiB (the rows of a tile wait in memory for the sort, up to 128 MB).
+
+The disk holds the output and only a few other files at the same time. The join drops each part when it has read all its
+rows, and the page then deletes the file of the part. The sort writes the pieces of each strip over the pieces of the
+strip before. Before these two changes, Sweden used at most 9.4 GB of browser storage on the disk (the parts 2.7 GB, the
+temporary file of the join 3.8 GB, the output 2.6 GB), and France stopped at 37.6 GB, so that the Mac kept 30 GB free.
+After them, Sweden uses at most 3.3 GB, and France at most 17.9 GB for a GeoParquet file of 11.7 GB (241 tiles, 99 412 535
+rows).
 
 Natively (`examples/quack_join_bench.rs`, Île-de-France, zoom 8), the sorted join takes 2.6 s, against 6.9 s with all
 rows into `StrSort`.
