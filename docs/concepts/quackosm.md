@@ -153,6 +153,36 @@ The sorted GeoParquet output (the default of both tools), with the same method:
 duckOSM keeps the rows of the sort on disk, compressed, so the sort does not add disk use to the case that is not
 sorted; it adds 21 s.
 
+## The result on France in the browser
+
+Studio's quack page makes the same table in the browser, tile by tile with the map tiles of zoom 8 (QuackOSM cannot run in
+a browser). The tile cut is the pbfcut library; then a WebAssembly worker for each tile makes the rows of the tile, and
+the page joins the parts. Each worker is a WebAssembly module with its own 4 GiB of memory, so the memory of one module
+follows the size of a tile, not of France. The input is the Geofabrik file `france-261113.osm.pbf` (4.9 GB), GeoParquet,
+not sorted, 8 threads for the cut, 8 tile workers and 8 threads for the join (2026-11-17).
+
+| France in the browser | Edge on a Windows laptop (8 cores) | Headless Chromium on WSL (20 cores) |
+|---|---|---|
+| 1. Count the nodes and choose the 241 tiles | 14.8 s | 15.1 s |
+| 2. The cut (one file for each tile) | 163.6 s (45.3 s of it waiting for the file or the browser storage) | 129.7 s |
+| 3. The rows of each tile (8 workers) | 165.0 s (on average 7.9 of 8 workers busy) | 118.0 s |
+| 4. The join of the parts | 35.2 s | 47.5 s |
+| **Time** | **378.6 s** | **310.4 s** |
+| WebAssembly memory of the page | 1,132 MiB of 4,096 MiB | 1,130 MiB |
+| WebAssembly memory of the 8 tile workers | 4,034 MiB in total (the largest tile, Paris: 587 MiB) | 4,025 MiB in total |
+| Peak browser storage | 34.1 GB | 34.0 GB |
+| Output (GeoParquet) | 12.29 GB | 12.29 GB |
+
+- The browser on the laptop takes 2.9 times as long as the native duckOSM (129.0 s on the Mac mini) and 1.5 times less
+  than QuackOSM natively (569.5 s).
+- The browser storage must have room for about 7 times the input file: the input, the tile files, the parts of the
+  tiles and the output.
+- The limit is the memory of the whole tab, not 4 GiB of one module: at zoom 6 (larger tiles) the same run stopped with
+  "Array buffer allocation failed" at about 5 GB in all modules together. Use zoom 8.
+- A tile with 2 threads is 1.55 times faster than with 1 thread, with the same memory (Paris, natively: 19.8 s, 12.7 s
+  with 2 threads, 10.3 s with 4). So with less memory, fewer tiles at the same time with 2 threads each keep the cores
+  busy.
+
 ## The results that are not in favor of duckOSM
 
 - The `.duckdb` files are larger: on Kentucky 779 MB against 670 MB sorted, on France 22.3 GB against 19.7 GB. DuckDB 1.5.6 stores the geometry with no
@@ -160,8 +190,9 @@ sorted; it adds 21 s.
   779 MB.
 - The sorted GeoParquet file of France is 9.22 GB, against 9.05 GB of QuackOSM; on Kentucky the sorted output needs 1.9
   GB, against 1.2 GB not sorted (the rows of the sort wait in a buffer of 512 MB).
-- In the browser, Kentucky uses 3.6 to 3.8 GiB of WebAssembly memory (the limit is 4 GiB), because the GeoParquet file
-  stays in memory until the download.
+- In the browser in one run (not tile by tile), Kentucky uses 3.6 to 3.8 GiB of WebAssembly memory (the limit is
+  4 GiB), because the GeoParquet file stays in memory until the download. Tile by tile, the memory follows the tile (see
+  "The result on France in the browser").
 
 ## Why duckOSM is faster
 
