@@ -163,4 +163,5 @@ assignment/agent-based runs, and improvable later from the same enrichment paths
 ## Rust
 
 `duckosm-rust matsim` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
+`duckosm-rust matsim-lanes` does the same for `duckosm matsim-lanes` (lanes and signals).
 The golden test `rust/duckosm-export/tests/golden.rs` compares the two on Monaco.

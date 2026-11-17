@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The OpenDRIVE and MATSim lanes exports are in Rust**: `duckosm-rust opendrive` (also `--junctions`) and
+  `duckosm-rust matsim-lanes` write the same files as the Python exports (Monaco and Tartu).
+
 - **The GIS export is in Rust**: `duckosm-rust export-gis` (GeoPackage, GeoParquet, shapefile) writes the same
   columns and rows as `duckosm export-gis` (Monaco and Tartu). It uses `ogr2ogr` for one GeoPackage file, as the Python export.
 

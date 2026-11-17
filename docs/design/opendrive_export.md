@@ -160,3 +160,9 @@ markings, and signals are out of scope.
 - Tests (`tests/test_opendrive.py`): a road per edge; `planView` segment count = polyline segments;
   per-road `length` = Σ segment lengths; N right `driving` lanes with width and decreasing negative
   ids; center lane id 0; `junction="-1"`; metric coords; an exact `geoReference` (UTM or SWEREF99 TM).
+
+## Rust
+
+`duckosm-rust opendrive` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
+The golden test `rust/duckosm-export/tests/golden.rs` compares the two on Monaco (with `--junctions`: on the GMNS tables of
+`tests/data/exports/gmns_driving/`).
