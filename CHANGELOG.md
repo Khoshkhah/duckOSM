@@ -18,6 +18,13 @@
   of the checks are equal to the Python build (`tests/after.rs`). The report counts the rows of the tables; the Python engine
   counts the edges before the private roads move to `private_edges`.
 
+- **The check page of a GIS export is in Rust**: `duckosm-rust gis-debug` writes the same page and the same `--json` as
+  `duckosm gis-debug`. It reads the export through GDAL (DuckDB's `ST_Read`), not geopandas. The page template moved to
+  `src/duckosm/templates/gis_debug.html`, and Python and Rust both use it.
+
+- **The SUMO export is in Rust**: `duckosm-rust sumo` writes the same plain XML and `.netccfg` as `duckosm sumo` and
+  runs netconvert in the same way (`SUMO_HOME`, the PATH, or the `eclipse-sumo` package of the active Python environment).
+
 - **The OpenDRIVE and MATSim lanes exports are in Rust**: `duckosm-rust opendrive` (also `--junctions`) and
   `duckosm-rust matsim-lanes` write the same files as the Python exports (Monaco and Tartu).
 
