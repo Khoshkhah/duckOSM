@@ -239,8 +239,13 @@ no progress. In Chromium on the Mac mini (zoom 8, 8 tile workers, join with 8 th
 | Kentucky, after | 4.5 s | 1.9 s | 827 MiB | 8.9 s |
 | Île-de-France (355 MB), before | 14.1 s | 8.9 s | 965 MiB | 29.2 s |
 | Île-de-France, after | 17.7 s | 5.8 s | 626 MiB | 29.7 s |
+| Sweden (975 MB), 12 workers, before | 13.6 s | 26.3 s | 2 240 MiB | 58.9 s |
+| Sweden, after | 14.6 s | 12.2 s | 2 182 MiB | 45.8 s |
 
-The join is faster, and the work of the sort moves to the tile workers. Île-de-France has one large tile (Paris, 8/129/88):
+The join is faster, and the work of the sort moves to the tile workers. Sweden has 206 tiles, and on average 11.8 of the
+12 workers are busy: the run is 13.1 s shorter, and it used at most 9.4 GB of browser storage, not 13.2 GB (no runs of
+the sort in the join). France sorted used 37.6 GB of browser storage before it was stopped, so that the Mac kept 30 GB
+free; it is not measured. Île-de-France has one large tile (Paris, 8/129/88):
 its worker sorts alone for about 3.5 s more, and the other workers have no tiles then, so the total stays the same. A
 file with many tiles of similar size divides this work between all workers. The memory of all tile workers on
 Île-de-France went from 1 471 MiB to 2 459 MiB (the rows of a tile wait in memory for the sort, up to 128 MB).
