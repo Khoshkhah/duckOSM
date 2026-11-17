@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The GIS export is in Rust**: `duckosm-rust export-gis` (GeoPackage, GeoParquet, shapefile) writes the same
+  columns and rows as `duckosm export-gis` (Monaco and Tartu). It uses `ogr2ogr` for one GeoPackage file, as the Python export.
+
 - **The MATSim and railML exports are in Rust** (`docs/design/all_in_rust.md`, group D): `duckosm-rust matsim` and
   `duckosm-rust railml`, in the new crate `rust/duckosm-export`. They write the same file as `duckosm matsim` and
   `duckosm railml` (Monaco and Tartu). A golden test holds the Python output on Monaco.
