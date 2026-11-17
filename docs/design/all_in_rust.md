@@ -48,7 +48,9 @@ Python CLI. The golden test (`rust/duckosm-export/tests/golden.rs`) compares eac
 |---|---|---|
 | MATSim | `duckosm-rust matsim` | Done. The same bytes as Python on Monaco and Tartu (gzip: the same text). |
 | railML | `duckosm-rust railml` | Done. The same bytes as Python on Monaco and Tartu. |
-| SUMO, GIS, MATSim lanes, OpenDRIVE, Lanelet2 | | Not started. |
+| GIS | `duckosm-rust export-gis` | Done. GeoPackage, GeoParquet, shapefile: the same columns and rows as Python on Monaco and Tartu; `layers.json`: the same bytes. |
+| GIS check | `gis-debug` | Not started. |
+| SUMO, MATSim lanes, OpenDRIVE, Lanelet2 | | Not started. |
 
 GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
 
