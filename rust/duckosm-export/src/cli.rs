@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 6] = ["matsim", "railml", "export-gis", "opendrive", "matsim-lanes", "sumo"];
+pub const COMMANDS: [&str; 7] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -40,6 +40,25 @@ enum Cmd {
         /// The base name of the layers and files (default: the file name of the db).
         #[arg(long)]
         name: Option<String>,
+    },
+    /// Check an export: read the GeoPackage or the shapefiles again through GDAL and write one HTML page: a map of each layer
+    /// and the checks (the number of features, the CRS, edge_id exact, and the edge_id against --source-db).
+    #[command(name = "gis-debug")]
+    GisDebug {
+        /// A .gpkg file or a folder of shapefiles.
+        export_path: PathBuf,
+        /// The built duckOSM db to compare with (each exported edge_id must be in it).
+        #[arg(long)]
+        source_db: Option<PathBuf>,
+        /// The output HTML (default: <name>_gis_debug.html).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// The name on the page (default: the file name of the export).
+        #[arg(long)]
+        name: Option<String>,
+        /// Also print the checks as JSON: the verdict, the summary, the checks of each layer.
+        #[arg(long)]
+        json: bool,
     },
     /// Export a MATSim network.xml from a built duckOSM db: each edge is one directed link (edge_id is the link id), with
     /// length, freespeed, capacity, permlanes and modes; the node coordinates are in a metric CRS.
@@ -212,6 +231,26 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             if let Some(n) = &s.net {
                 println!("wrote {}", n.display());
+            }
+        }
+        Cmd::GisDebug { export_path, source_db, out, name, json } => {
+            for p in std::iter::once(&export_path).chain(source_db.as_ref()) {
+                if !p.exists() {
+                    return Err(format!("{}: no such file", p.display()));
+                }
+            }
+            let out = out.unwrap_or_else(|| {
+                let s = export_path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.is_empty());
+                format!("{}_gis_debug.html", s.unwrap_or_else(|| "export".into())).into()
+            });
+            let p = crate::gis_debug::write_debug(&export_path, source_db.as_deref(), &out, name.as_deref())?;
+            if json {
+                use crate::gis_debug::J;
+                let pick = |k: &str| (k.to_string(), p.get(k).cloned().unwrap_or(J::Null));
+                let j = J::Obj(vec![("out".into(), J::Str(out.display().to_string())), pick("verdict"), pick("summary"), pick("layers")]);
+                println!("{}", j.dump(Some(1)));
+            } else {
+                println!("wrote {} — open in a browser", out.display());
             }
         }
         Cmd::Railml { db, out } => {

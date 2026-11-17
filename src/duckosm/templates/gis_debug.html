@@ -1,0 +1,286 @@
+<style>
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --panel-2:#f6f8fa; --ink:#0f1720; --muted:#5b6b7a;
+  --line:#dce2e8; --accent:#0d7d8c; --accent-ink:#0a5b66;
+  --ok:#1a7f37; --warn:#9a6700; --crit:#cf222e;
+  --map-bg:#0b1017; --map-grid:rgba(255,255,255,.05); --map-frame:#1c2530;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0c1116; --panel:#121a22; --panel-2:#0e151c; --ink:#e6edf3; --muted:#8b9aa8;
+    --line:#222c37; --accent:#35c4d4; --accent-ink:#7fe3ee;
+    --ok:#3fb950; --warn:#d29922; --crit:#f85149;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef1f4; --panel:#ffffff; --panel-2:#f6f8fa; --ink:#0f1720; --muted:#5b6b7a;
+  --line:#dce2e8; --accent:#0d7d8c; --accent-ink:#0a5b66;
+  --ok:#1a7f37; --warn:#9a6700; --crit:#cf222e;
+}
+:root[data-theme="dark"]{
+  --bg:#0c1116; --panel:#121a22; --panel-2:#0e151c; --ink:#e6edf3; --muted:#8b9aa8;
+  --line:#222c37; --accent:#35c4d4; --accent-ink:#7fe3ee;
+  --ok:#3fb950; --warn:#d29922; --crit:#f85149;
+}
+*{box-sizing:border-box}
+.gxd{font-family:var(--sans);color:var(--ink);background:var(--bg);min-height:100vh;
+  padding:20px;display:flex;flex-direction:column;gap:16px;line-height:1.45}
+.gxd h1,.gxd h2,.gxd p{margin:0}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.gxd-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;justify-content:space-between}
+.gxd-title h1{font-size:20px;font-weight:650;letter-spacing:-.01em;text-wrap:balance}
+.gxd-file{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:3px}
+.gxd-file b{color:var(--ink);font-weight:600}
+.verdict{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;
+  font-weight:650;font-size:13px;letter-spacing:.02em;border:1px solid transparent}
+.verdict .dot{width:9px;height:9px;border-radius:50%}
+.v-pass{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+.v-pass .dot{background:var(--ok)}
+.v-warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 38%,transparent)}
+.v-warn .dot{background:var(--warn)}
+.v-fail{background:color-mix(in srgb,var(--crit) 15%,transparent);color:var(--crit);border-color:color-mix(in srgb,var(--crit) 40%,transparent)}
+.v-fail .dot{background:var(--crit)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:5px}
+.tile .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.tile .v{font-family:var(--mono);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile .v.sm{font-size:15px}
+.tile .v.ok{color:var(--ok)} .tile .v.warn{color:var(--warn)} .tile .v.crit{color:var(--crit)}
+.body{display:grid;grid-template-columns:1fr 380px;gap:16px;align-items:stretch;min-height:0}
+@media (max-width:900px){.body{grid-template-columns:1fr}}
+.mapwrap{position:relative;background:var(--map-bg);border:1px solid var(--map-frame);border-radius:14px;
+  overflow:hidden;min-height:460px;display:flex}
+.mapwrap canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+.mapwrap canvas:active{cursor:grabbing}
+.map-ui{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:8px;
+  max-width:calc(100% - 24px)}
+.seg{display:inline-flex;background:rgba(10,15,22,.72);border:1px solid rgba(255,255,255,.12);
+  border-radius:9px;padding:3px;backdrop-filter:blur(6px);flex-wrap:wrap}
+.seg button{font-family:var(--sans);font-size:12px;font-weight:600;color:#c4d0da;background:transparent;
+  border:0;padding:5px 11px;border-radius:6px;cursor:pointer;letter-spacing:.01em}
+.seg button:hover{color:#fff}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#04222a}
+.seg button:focus-visible{outline:2px solid var(--accent-ink);outline-offset:1px}
+.map-foot{position:absolute;right:12px;bottom:11px;display:flex;gap:10px;align-items:center;
+  font-family:var(--mono);font-size:11px;color:#8ea0ad;background:rgba(10,15,22,.66);
+  border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:5px 9px;backdrop-filter:blur(6px)}
+.map-foot b{color:#d7e2ea;font-weight:600}
+.legend{position:absolute;right:12px;top:12px;background:rgba(10,15,22,.72);
+  border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px 11px;backdrop-filter:blur(6px);
+  display:flex;flex-direction:column;gap:5px;max-height:60%;overflow:auto}
+.legend .lg-h{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8ea0ad;font-weight:700;margin-bottom:2px}
+.legend .row{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#c9d5de}
+.legend .sw{width:16px;height:3px;border-radius:2px;flex:none}
+.legend .sw.dot{width:8px;height:8px;border-radius:50%}
+.legend .sw.dash{height:0;border-top:2px dashed #ff6ec7;background:none;border-radius:0}
+.side{display:flex;flex-direction:column;gap:12px;min-height:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 15px}
+.card h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-weight:700;margin-bottom:10px}
+.layer{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:9px;background:var(--panel-2)}
+.layer:last-child{margin-bottom:0}
+.layer .lh{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.layer .ln{font-family:var(--mono);font-size:13px;font-weight:600}
+.layer .cnt{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.layer .meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;font-family:var(--mono);
+  font-size:11px;color:var(--muted)}
+.layer .meta b{color:var(--ink);font-weight:600}
+.notes{list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:4px}
+.notes li{display:flex;gap:7px;align-items:flex-start;font-size:12px}
+.chip{flex:none;margin-top:1px;width:7px;height:7px;border-radius:50%}
+.chip.ok{background:var(--ok)} .chip.warn{background:var(--warn)} .chip.crit{background:var(--crit)}
+.notes li.ok{color:var(--muted)} .notes li.warn{color:var(--warn)} .notes li.crit{color:var(--crit)}
+.foot{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+.foot code{color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="gxd" id="gxd">
+  <header class="gxd-head">
+    <div class="gxd-title">
+      <div class="eyebrow">GIS export · debug</div>
+      <h1>Exported network — read back through GDAL</h1>
+      <div class="gxd-file">reading <b id="mfile">—</b> · <span id="mfmt">—</span><span id="msrc"></span></div>
+    </div>
+    <div id="verdict" class="verdict v-pass"><span class="dot"></span><span id="verdict-t">PASS</span></div>
+  </header>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="body">
+    <div class="mapwrap">
+      <canvas id="map"></canvas>
+      <div class="map-ui">
+        <div class="seg" id="modeseg" role="group" aria-label="Mode"></div>
+        <div class="seg" id="layerseg" role="group" aria-label="Layers">
+          <button data-lyr="edges" aria-pressed="true">Edges</button>
+          <button data-lyr="nodes" aria-pressed="false">Nodes</button>
+          <button data-lyr="boundary" aria-pressed="true">Boundary</button>
+          <button data-lyr="reset" aria-pressed="false" title="Reset view">Reset</button>
+        </div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="map-foot"><span id="cur">—</span> · <b id="zoom">1.0×</b></div>
+    </div>
+
+    <aside class="side">
+      <div class="card" style="flex:1;overflow:auto;min-height:0">
+        <h2>Layer audit</h2>
+        <div id="layers"></div>
+      </div>
+      <div class="card foot">
+        Reads the exported file with GDAL — the same path QGIS / ArcGIS / FME take — so this verifies
+        the file on disk, not the duckOSM database. Geometry drawn client-side, no tiles.
+      </div>
+    </aside>
+  </section>
+</div>
+
+<script>
+const DATA = /*__PAYLOAD__*/null;
+(function(){
+  const $=id=>document.getElementById(id);
+  const fmtN=n=>n.toLocaleString('en-US');
+
+  // ---- header + tiles ---------------------------------------------------------------------------
+  $('mfile').textContent=DATA.meta.file;
+  $('mfmt').textContent=DATA.meta.format;
+  $('msrc').textContent=DATA.meta.source_db?(' · vs '+DATA.meta.source_db):'';
+  const V={pass:['v-pass','PASS'],warn:['v-warn','CHECK'],fail:['v-fail','FAIL']}[DATA.verdict];
+  $('verdict').className='verdict '+V[0]; $('verdict-t').textContent=V[1];
+
+  const S=DATA.summary;
+  const rtCls=S.roundtrip==='pass'?'ok':S.roundtrip==='fail'?'crit':'';
+  const eidCls=S.edge_id==='exact'?'ok':'crit';
+  const tiles=[
+    ['Layers',fmtN(S.layers),''],
+    ['Features',fmtN(S.features),''],
+    ['CRS',S.crs,S.crs==='EPSG:4326'?'ok sm':'crit sm'],
+    ['edge_id',S.edge_id,eidCls+' sm'],
+    ['Round-trip',S.roundtrip==='n/a'?'not run':S.roundtrip,rtCls+' sm'],
+    ['Modes',S.modes.join(' · ')||'—','sm'],
+  ];
+  $('tiles').innerHTML=tiles.map(([k,v,c])=>
+    `<div class="tile"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`).join('');
+
+  // ---- layer audit ------------------------------------------------------------------------------
+  $('layers').innerHTML=DATA.layers.map(L=>{
+    const meta=[`<span>geom <b>${L.geom}</b></span>`,`<span>crs <b>${L.crs}</b></span>`];
+    if(L.eid_dtype)meta.push(`<span>edge_id <b>${L.eid_dtype}</b></span>`);
+    if(L.eid_sample)meta.push(`<span>e.g. <b>${L.eid_sample}</b></span>`);
+    const notes=L.notes.map(n=>`<li class="${n.sev}"><span class="chip ${n.sev}"></span>${n.text}</li>`).join('');
+    return `<div class="layer"><div class="lh"><span class="ln">${L.name}</span>
+      <span class="cnt">${fmtN(L.features)} feat</span></div>
+      <div class="meta">${meta.join('')}</div>
+      ${notes?`<ul class="notes">${notes}</ul>`:''}</div>`;
+  }).join('');
+
+  // ---- legend -----------------------------------------------------------------------------------
+  const usedClasses=new Set();
+  for(const m in DATA.geo)for(const e of DATA.geo[m].edges)usedClasses.add(e[0]);
+  let lg='<div class="lg-h">Highway class</div>';
+  DATA.classes.forEach((c,i)=>{ if(usedClasses.has(i))
+    lg+=`<div class="row"><span class="sw" style="background:${c.color}"></span>${c.label}</div>`; });
+  lg+='<div class="row" style="margin-top:5px"><span class="sw dot" style="background:'+
+      getComputedStyle(document.documentElement).getPropertyValue('--accent')+'"></span>Nodes</div>';
+  if(DATA.boundary.length)lg+='<div class="row"><span class="sw dash"></span>Boundary</div>';
+  $('legend').innerHTML=lg;
+
+  // ---- mode toggles -----------------------------------------------------------------------------
+  const modes=DATA.summary.modes;
+  let curMode='ALL';
+  const show={edges:true,nodes:false,boundary:true};
+  const mseg=$('modeseg');
+  const mkBtn=(label,val,pressed)=>{const b=document.createElement('button');b.textContent=label;
+    b.dataset.mode=val;b.setAttribute('aria-pressed',pressed);return b;};
+  if(modes.length>1)mseg.appendChild(mkBtn('All','ALL',true));
+  modes.forEach(m=>mseg.appendChild(mkBtn(m,m,modes.length===1)));
+  if(modes.length===1)curMode=modes[0];
+  mseg.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    curMode=b.dataset.mode;[...mseg.children].forEach(x=>x.setAttribute('aria-pressed',x===b));draw();});
+
+  $('layerseg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    const l=b.dataset.lyr;
+    if(l==='reset'){fit();return;}
+    show[l]=!show[l];b.setAttribute('aria-pressed',show[l]);draw();});
+
+  // ---- canvas renderer --------------------------------------------------------------------------
+  const cv=$('map'),ctx=cv.getContext('2d');
+  const GW=DATA.grid.w,GH=DATA.grid.h,P=DATA.proj,CLS=DATA.classes;
+  let view={s:1,tx:0,ty:0},dpr=Math.min(window.devicePixelRatio||1,2);
+
+  function resize(){const r=cv.getBoundingClientRect();cv.width=Math.max(1,r.width*dpr);
+    cv.height=Math.max(1,r.height*dpr);fit();}
+  function fit(){const r=cv.getBoundingClientRect();const pad=24;
+    const s=Math.min((r.width-2*pad)/GW,(r.height-2*pad)/GH);
+    view.s=s;view.tx=(r.width-GW*s)/2;view.ty=(r.height-GH*s)/2;draw();}
+  const X=gx=>(gx*view.s+view.tx)*dpr, Y=gy=>(gy*view.s+view.ty)*dpr;
+
+  function modesToDraw(){return curMode==='ALL'?modes:[curMode];}
+
+  function draw(){
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--map-bg')||'#0b1017';
+    ctx.fillRect(0,0,cv.width,cv.height);
+    // subtle frame of the data extent
+    ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=1;
+    ctx.strokeRect(X(0),Y(0),GW*view.s*dpr,GH*view.s*dpr);
+
+    const dl=modesToDraw();
+    if(show.edges){
+      // bucket by class so strokeStyle/width is set once per class (z-order = class order)
+      const byClass=CLS.map(()=>[]);
+      for(const m of dl){const g=DATA.geo[m];if(!g)continue;
+        for(const e of g.edges)byClass[e[0]].push(e);}
+      ctx.lineCap='round';ctx.lineJoin='round';
+      byClass.forEach((arr,ci)=>{if(!arr.length)return;
+        ctx.strokeStyle=CLS[ci].color;
+        ctx.lineWidth=Math.max(.6,CLS[ci].width*Math.min(1.7,Math.max(.5,view.s*GW/2600)))*dpr;
+        ctx.beginPath();
+        for(const e of arr){ctx.moveTo(X(e[1]),Y(e[2]));
+          for(let i=3;i<e.length;i+=2)ctx.lineTo(X(e[i]),Y(e[i+1]));}
+        ctx.stroke();});
+    }
+    if(show.boundary&&DATA.boundary.length){
+      ctx.strokeStyle='#ff6ec7';ctx.lineWidth=1.6*dpr;ctx.setLineDash([7*dpr,5*dpr]);
+      ctx.beginPath();
+      for(const r of DATA.boundary){ctx.moveTo(X(r[0]),Y(r[1]));
+        for(let i=2;i<r.length;i+=2)ctx.lineTo(X(r[i]),Y(r[i+1]));}
+      ctx.stroke();ctx.setLineDash([]);
+    }
+    if(show.nodes){
+      ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent')||'#35c4d4';
+      const rad=Math.max(.7,Math.min(2.6,view.s*GW/2200))*dpr;
+      for(const m of dl){const g=DATA.geo[m];if(!g)continue;
+        for(let i=0;i<g.nodes.length;i+=2){
+          ctx.beginPath();ctx.arc(X(g.nodes[i]),Y(g.nodes[i+1]),rad,0,6.2832);ctx.fill();}}
+    }
+    $('zoom').textContent=view.s.toFixed(2).replace(/0$/,'')+'×';
+  }
+
+  // pan / zoom
+  let drag=null;
+  cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,tx:view.tx,ty:view.ty};
+    cv.setPointerCapture(e.pointerId);});
+  cv.addEventListener('pointermove',e=>{
+    const r=cv.getBoundingClientRect();
+    const gx=(e.clientX-r.left-view.tx)/view.s, gy=(e.clientY-r.top-view.ty)/view.s;
+    const lon=P.minx+(gx/P.scale)/P.kx, lat=P.maxy-(gy/P.scale);
+    if(gx>=0&&gx<=GW&&gy>=0&&gy<=GH)$('cur').textContent=lat.toFixed(5)+', '+lon.toFixed(5);
+    if(drag){view.tx=drag.tx+(e.clientX-drag.x);view.ty=drag.ty+(e.clientY-drag.y);draw();}
+  });
+  const endDrag=()=>drag=null;
+  cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
+  cv.addEventListener('wheel',e=>{e.preventDefault();
+    const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+    const k=Math.exp(-e.deltaY*0.0016),ns=Math.min(400,Math.max(.05,view.s*k));
+    view.tx=mx-(mx-view.tx)*(ns/view.s);view.ty=my-(my-view.ty)*(ns/view.s);view.s=ns;draw();
+  },{passive:false});
+
+  new ResizeObserver(resize).observe(cv);
+  resize();
+})();
+</script>

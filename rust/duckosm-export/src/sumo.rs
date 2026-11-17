@@ -102,7 +102,7 @@ pub fn apply_permissions(cs: &[(i64, i64)], perm: &[Perm]) -> Vec<Conn> {
 }
 
 /// A float as Python's `str(float)`: the shortest text that reads back the same, with `.0` or an exponent as Python writes it.
-fn py_float(x: f64) -> String {
+pub fn py_float(x: f64) -> String {
     if x == 0.0 || !x.is_finite() {
         return format!("{x:?}");
     }
