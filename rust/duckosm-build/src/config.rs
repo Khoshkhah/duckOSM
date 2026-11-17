@@ -233,18 +233,45 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         return Err(format!("PBF file not found: {}", pbf.display()));
     }
 
-    // the area: this program does not cut the PBF
-    for k in ["place", "bbox", "h3_cell", "buffer_m"] {
-        if boundary.get(k).is_some() {
-            return Err(format!(
-                "config: boundary.{k} is not supported (cut the PBF first and use boundary.path)"
-            ));
-        }
+    // the area: a boundary file, or a box, an H3 cell or a place name written as <name>.boundary.geojson next to the
+    // database (duckOSM Config.materialize_boundary); then grown by buffer_m (place.rs)
+    let mut boundary_path = boundary.str("path")?.or(top.str("boundary_path")?);
+    let cell = boundary.str("h3_cell")?.or(top.str("h3_cell")?);
+    let place = boundary.str("place")?;
+    let bbox = match boundary.get("bbox") {
+        None => None,
+        Some(Yaml::Array(a)) => Some(
+            a.iter()
+                .map(|v| match v {
+                    Yaml::Integer(i) => Ok(*i as f64),
+                    Yaml::Real(r) => r.parse::<f64>().map_err(|_| ()),
+                    _ => Err(()),
+                })
+                .collect::<Result<Vec<f64>, ()>>()
+                .map_err(|_| format!("boundary.bbox must be [west, south, east, north], got {a:?}"))?,
+        ),
+        Some(v) => return Err(format!("boundary.bbox must be [west, south, east, north], got {v:?}")),
+    };
+    if boundary_path.is_none() && (bbox.is_some() || cell.is_some() || place.is_some()) {
+        let cfg_name = top.str("name")?.unwrap_or_else(|| "default".into());
+        let o = top.str("output_path")?.unwrap_or_else(|| "output.duckdb".into());
+        let o = Path::new(&o);
+        let dir = if o.extension().is_some_and(|e| e == "duckdb") { o.parent().unwrap_or(Path::new("")) } else { o };
+        let (geom, info) = if let Some(b) = &bbox {
+            (crate::place::bbox_geojson(b)?, serde_json::json!({"name": cfg_name, "source": "bbox"}))
+        } else if let Some(c) = &cell {
+            (crate::place::h3_geojson(c)?, serde_json::json!({"name": cfg_name, "source": format!("h3 {c}")}))
+        } else {
+            crate::place::find(place.as_deref().unwrap_or_default(), &pbf)?
+        };
+        let file = dir.join(format!("{cfg_name}.boundary.geojson"));
+        crate::place::write_boundary(geom, info, &file)?;
+        boundary_path = Some(file.display().to_string());
     }
-    if top.get("h3_cell").is_some() {
-        return Err("config: h3_cell is not supported (cut the PBF first)".into());
+    let buffer_m = boundary.f64("buffer_m", 0.0)?;
+    if let (Some(b), true) = (&boundary_path, buffer_m > 0.0) {
+        boundary_path = Some(crate::place::buffered(Path::new(b), buffer_m)?.display().to_string());
     }
-    let boundary_path = boundary.str("path")?.or(top.str("boundary_path")?);
     let has_boundary = boundary_path.is_some();
     // with a boundary, the program cuts the PBF to it (as osmium complete_ways), unless it is cut already
     let cut_to = boundary_path
@@ -285,9 +312,21 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
 
     // the steps of duckOSM that are not here (on by default in duckOSM)
     let build_graph = options.bool("build_graph", true)?;
-    if options.bool("boundary_cells", false)? {
-        skip("options.boundary_cells is on, but this program does not make the boundary cells".into())?;
-    }
+    // main.boundary_cells (place.rs): with a boundary, at options.boundary_cell_resolutions or else at h3_resolution
+    let boundary_cells = if options.bool("boundary_cells", false)? && has_boundary {
+        let rs: Vec<u8> = match options.get("boundary_cell_resolutions") {
+            Some(Yaml::Array(a)) => a
+                .iter()
+                .map(|v| v.as_i64().filter(|r| (0..=15).contains(r)).map(|r| r as u8))
+                .collect::<Option<_>>()
+                .ok_or("options.boundary_cell_resolutions: a list of whole numbers from 0 to 15")?,
+            None => vec![options.f64("h3_resolution", crate::h3::DEFAULT_RESOLUTION as f64)? as u8],
+            Some(v) => return Err(format!("options.boundary_cell_resolutions: {v:?} is not a list")),
+        };
+        boundary_path.clone().map(|b| (PathBuf::from(b), rs))
+    } else {
+        None
+    };
     // the H3 columns (h3.rs): on by default, at options.h3_resolution (default 8)
     let h3_resolution = if options.bool("h3_indexing", true)? {
         let r = options.f64("h3_resolution", crate::h3::DEFAULT_RESOLUTION as f64)?;
@@ -351,7 +390,6 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     for k in [
         "simplify_batches",
         "clip_strategy",
-        "boundary_cell_resolutions",
     ] {
         if options.get(k).is_some() {
             ignored.push(format!("options.{k} (no effect in this program)"));
@@ -452,6 +490,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
                 None
             },
             multimodal: multimodal_on,
+            boundary_cells,
             transfer_s: multimodal.f64("transfer_s", 60.0)?,
             transfer_costs,
         },

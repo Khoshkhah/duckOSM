@@ -21,7 +21,9 @@ duckosm-parquet = { path = "../duckosm-parquet", default-features = false, featu
 duckosm-duckdb = { path = "../duckosm-duckdb", optional = true }
 yaml-rust2 = "0.13"
 # the H3 columns (h3.rs): pure Rust, its cells equal those of the C library that the Python package h3 wraps
-h3o = "0.11"
+h3o = { version = "0.11", features = ["geo"] }
+# the polygons of the boundary cells (h3o's tiler takes geo's types)
+geo = { version = "0.33", default-features = false }
 # the area's time zone in main.visualization_metadata, from the coordinates (duckOSM uses timezonefinder);
 # without the command-line program of the crate
 tzf-rs = { version = "2.1", default-features = false, features = ["bundled"], optional = true }

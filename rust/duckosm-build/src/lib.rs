@@ -22,6 +22,7 @@ pub mod config;
 pub mod elevation;
 pub mod h3;
 pub mod levels;
+pub mod place;
 pub mod quack_tiles;
 pub mod union;
 
