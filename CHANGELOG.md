@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm-rust`: the bus routes of a build with no boundary.** A build of the whole file (the `.duckdb` output) reads the
+  route relations, their member ways and the elements of the fixes from `raw.*` (`RawInput::raw_part`), applies the fixes, and
+  makes `bus.routes` and `bus.route_edges`, as duckOSM does. Before, it made no bus tables. Monaco (`tests/bus_whole_file.rs`)
+  and Tartu (the cut file as a whole file) equal the Python build row by row.
+
 - **`duckosm-rust --config`: the base-map layers without a boundary, and `duckosm-rust features-check`, are in Rust**
   (`docs/design/all_in_rust.md`, group A). Without a boundary, the layers run on the `raw.*` of the whole file with duckOSM's
   own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. The OSM fixes change `raw.*` first, as
