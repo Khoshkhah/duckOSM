@@ -109,6 +109,11 @@ pub fn split_file(path: &Path, mut class: impl FnMut(&RecordBatch) -> Result<Vec
 /// no new compression; as the tool parquet-concat of the parquet crate). The file has the metadata (GeoParquet) of the
 /// first input. `consume`: each input goes when it is copied. Returns the number of rows.
 pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usize, String> {
+    // the writer of the parquet crate counts the bytes of the file in a usize: in WebAssembly (32 bits) the offsets of a file of
+    // more than 4 GiB wrap (France: edges_driving, 4.5 GB with snap)
+    if cfg!(target_pointer_width = "32") {
+        return concat_files_u64(inputs, consume, out);
+    }
     use parquet::column::writer::ColumnCloseResult;
     use parquet::file::metadata::ParquetMetaDataReader;
     use parquet::file::writer::SerializedFileWriter;
@@ -154,6 +159,83 @@ pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usi
     }
     w.close().map_err(err)?;
     Ok(n)
+}
+
+/// [`concat_files`] with the offsets of the file counted in a u64: the column chunks are copied as bytes, and this function writes
+/// the footer with their new offsets (the writer of the parquet crate counts in a usize, 32 bits in WebAssembly). The file has
+/// the same rows and blocks; no page indexes and no bloom filters (the inputs of the union have none).
+pub fn concat_files_u64(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usize, String> {
+    use parquet::file::metadata::{FileMetaData, ParquetMetaDataBuilder, ParquetMetaDataReader, ParquetMetaDataWriter, RowGroupMetaData};
+    use std::io::{Read, Seek, SeekFrom};
+    let Some(first) = inputs.first() else {
+        return Ok(0);
+    };
+    let meta = |p: &Path| -> Result<parquet::file::metadata::ParquetMetaData, String> {
+        ParquetMetaDataReader::new().parse_and_finish(&crate::source(p)?).map_err(err)
+    };
+    let m0 = meta(first)?;
+    let schema = m0.file_metadata().schema_descr_ptr();
+    let mut w = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?);
+    w.write_all(b"PAR1").map_err(err)?;
+    let mut at: u64 = 4;
+    let (mut groups, mut n) = (Vec::new(), 0i64);
+    let mut buf = Vec::new();
+    for p in inputs {
+        let m = meta(p)?;
+        if m.file_metadata().schema_descr().root_schema_ptr() != schema.root_schema_ptr() {
+            return Err(format!("{}: another schema than {}", p.display(), first.display()));
+        }
+        let mut input = fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        for rg in m.row_groups() {
+            let mut cols = Vec::new();
+            let start = at;
+            for c in rg.columns() {
+                let (from, len) = c.byte_range();
+                input.seek(SeekFrom::Start(from)).map_err(err)?;
+                buf.resize(len as usize, 0);
+                input.read_exact(&mut buf).map_err(err)?;
+                w.write_all(&buf).map_err(err)?;
+                let shift = |o: i64| o - from as i64 + at as i64;
+                cols.push(
+                    c.clone()
+                        .into_builder()
+                        .set_data_page_offset(shift(c.data_page_offset()))
+                        .set_dictionary_page_offset(c.dictionary_page_offset().map(shift))
+                        .set_index_page_offset(c.index_page_offset().map(shift))
+                        .set_offset_index_offset(None)
+                        .set_offset_index_length(None)
+                        .set_column_index_offset(None)
+                        .set_column_index_length(None)
+                        .set_bloom_filter_offset(None)
+                        .set_bloom_filter_length(None)
+                        .build()
+                        .map_err(err)?,
+                );
+                at += len;
+            }
+            groups.push(
+                RowGroupMetaData::builder(schema.clone())
+                    .set_num_rows(rg.num_rows())
+                    .set_total_byte_size(rg.total_byte_size())
+                    .set_column_metadata(cols)
+                    .set_file_offset(start as i64)
+                    .set_ordinal(groups.len() as i16 as i32)
+                    .build()
+                    .map_err(err)?,
+            );
+            n += rg.num_rows();
+        }
+        drop(input);
+        if consume {
+            let _ = fs::remove_file(p);
+        }
+    }
+    let f = m0.file_metadata();
+    let file = FileMetaData::new(f.version(), n, f.created_by().map(str::to_string), f.key_value_metadata().cloned(), schema, f.column_orders().cloned());
+    let md = ParquetMetaDataBuilder::new(file).set_row_groups(groups).build();
+    ParquetMetaDataWriter::new(&mut w, &md).finish().map_err(err)?;
+    w.flush().map_err(err)?;
+    Ok(n as usize)
 }
 
 /// The key of each row of a batch: the values of the columns `key` (BIGINT or INTEGER; NULL is the smallest).
@@ -330,5 +412,36 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         let want: Vec<i64> = (0..=FAN as i64 + 3).chain([100]).collect();
         assert_eq!((n, got), (want.len(), want));
+    }
+
+    /// The join with the offsets in a u64 (WebAssembly) gives the rows and the blocks of the join of the parquet crate.
+    #[test]
+    fn the_u64_join_equals_the_join() {
+        use duckosm_core::raw::RawNode;
+        let dir = std::env::temp_dir().join(format!("duckosm-concat-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let inputs: Vec<PathBuf> = (0..3)
+            .map(|k| {
+                let rows: Vec<RawNode> = (0..1000 * (k + 1))
+                    .map(|i| RawNode { id: k * 10_000 + i, lon: i as f64, lat: k as f64, tags: vec![("highway".into(), ["crossing", "stop"][(i % 2) as usize].into())] })
+                    .collect();
+                let p = dir.join(format!("{k}.parquet"));
+                crate::write_raw_nodes_to(std::fs::File::create(&p).unwrap(), &rows).unwrap();
+                p
+            })
+            .collect();
+        let rows = |p: &Path| -> (usize, Vec<String>) {
+            let b = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(p).unwrap()).unwrap();
+            let groups = b.metadata().num_row_groups();
+            let text = b.build().unwrap().map(|b| format!("{:?}", b.unwrap())).collect();
+            (groups, text)
+        };
+        let (a, b) = (dir.join("a.parquet"), dir.join("b.parquet"));
+        assert_eq!(concat_files(&inputs, false, &a).unwrap(), 6000);
+        assert_eq!(concat_files_u64(&inputs, false, &b).unwrap(), 6000);
+        let (ra, rb) = (rows(&a), rows(&b));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(ra.0, 3);
+        assert!(ra == rb, "the two joins differ");
     }
 }
