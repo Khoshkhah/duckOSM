@@ -34,7 +34,8 @@ Mac mini (12 cores, 16 GB). duckOSM is **3 to 7 times faster** and needs **2 to 
 | Time, sorted | 13.7 s | **4.0 s** | 9.6 s |
 | Memory | 5.8 GB | **1.2 GB** | 1.0 GB |
 
-¹ Not measured: the sort needs more browser storage than this Mac has free (more than 40 GB).
+¹ Not measured: the sorted run needs more browser storage than this Mac can give. With the sort in the tiles (2026-11-17),
+the run used 37.6 GB of browser storage before it was stopped, so that the Mac kept 30 GB free.
 
 The rows are the same: 99.9998 % of the 99 million France rows have an equal geometry, and the rest differ only in the
 last digits.
