@@ -1893,9 +1893,25 @@ pub fn tile_sidewalks(dir: &Path, tile: duckosm_core::tiles::Tile, area: &Bounda
         }
     }
     others.sort_by_key(|t| (t.y, t.x));
+    // the boxes in cells of a grid (about 1 km), so a line of another tile is checked only against the boxes of its cells (each
+    // line against all boxes took most of the step: Kentucky, the tile of Louisville has about 100,000 roads)
+    const CELL: f64 = 0.01;
+    let cell = |x: f64, y: f64| ((x / CELL).floor() as i64, (y / CELL).floor() as i64);
+    let mut grid: duckosm_core::util::FxHashMap<(i64, i64), Vec<u32>> = Default::default();
+    for (i, r) in reach.iter().enumerate() {
+        let (lo, hi) = (cell(r[0], r[1]), cell(r[2], r[3]));
+        for cx in lo.0..=hi.0 {
+            for cy in lo.1..=hi.1 {
+                grid.entry((cx, cy)).or_default().push(i as u32);
+            }
+        }
+    }
+    let near = |b: [f64; 4]| {
+        let (lo, hi) = (cell(b[0], b[1]), cell(b[2], b[3]));
+        (lo.0..=hi.0).any(|cx| (lo.1..=hi.1).any(|cy| grid.get(&(cx, cy)).is_some_and(|v| v.iter().any(|&i| meets(reach[i as usize], b)))))
+    };
     for t in others {
-        // ponytail: each line against all boxes; a tree of the boxes if a tile has very many roads near its border
-        read(t, &|b| reach.iter().any(|r| meets(*r, b)), &mut ways, &mut coords, &mut seen)?;
+        read(t, &near, &mut ways, &mut coords, &mut seen)?;
     }
     // the rule reads the lines in the order of the ids, as the whole build has them
     ways.sort_by_key(|w| w.id);
