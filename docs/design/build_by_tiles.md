@@ -254,3 +254,45 @@ France, the tables of the union with `raw.*` (27 GB of files):
 
 Kentucky, driving, `--format duckdb --raw`: the 23 tables of the two `.duckdb` files are equal (but the two with the time of the
 build), `raw.*` too (22.4 million rows). The load takes 10.7 s.
+
+## After the switch to pbfcut (2026-11-17)
+
+The cut is the pbfcut library since duckOSM PRs 202 to 204 (pbfcut `8e565be`). Checks, natively on WSL (20 cores):
+
+- **Kentucky by tiles:** the tables before the switch (duckOSM `7e9b423`) and after it (`e6425bc`) are equal row by row,
+  in 18 of 20 files; in the other two, only the time of the build differs (`created`, `built_at`).
+- **France at zoom 8 by tiles (driving):**
+
+| | Before the switch | After the switch |
+|---|---|---|
+| The cut | 73.2 s, peak 900 MB | 80.7 s, peak 968 MB |
+| 104 tile builds | 130.0 s | 131.6 s |
+| The largest tile process | 698 MB | 677 MB |
+| Total | 302.0 s | 301.5 s |
+
+- **The cut alone** (`tile_cut` example, France, zoom 8, with the junctions files): 75.4 to 76.5 s before the switch,
+  76.4 to 80.8 s after it, and **72.2 s** with pbfcut `8e565be`. Step 3d was the difference: pbfcut kept every way of the
+  blocks that it read for the member ways (France: 9,193 blocks, about 73 million ways, for about one million); now a
+  block gives only the needed ways, with no tags (pbfcut PR 46). Step 3d: 4.3 s, now 2.0 s.
+- The times of one France run vary by about 5 % from run to run: compare two runs of each, one after the other.
+- `pbfcut --steps` counts each allocation and makes the threads slower: its step times are not the times of the cut.
+
+**Quack by tiles in the browser (Studio's quack page, zoom 8, not sorted, France `france-261113.osm.pbf`):**
+
+| | Headless Chromium on WSL | Edge on a Windows laptop (8 cores) |
+|---|---|---|
+| 1. Count the nodes, choose the tiles | 15.1 s | 14.8 s |
+| 2. The cut | 129.7 s | 163.6 s (45.3 s of it waiting for the file or the storage) |
+| 3. The rows of each tile (8 workers) | 118.0 s | 165.0 s (7.9 of 8 workers busy) |
+| 4. The join | 47.5 s | 35.2 s |
+| Total | 310.4 s | 378.6 s |
+| WebAssembly memory | 1,130 MiB + 4,025 MiB (workers) | 1,132 MiB + 4,034 MiB (workers) |
+| Browser storage, at most | 34,020 MB | 34,143 MB |
+
+The output is 12.3 GB of GeoParquet. Each tile worker is a WebAssembly module with its own 4 GiB; the largest France tile
+(Paris, 8/129/88) used 587 MiB, so the limit is the memory of the whole tab, not of one module. At zoom 6 the same run
+stopped with "Array buffer allocation failed" at about 5 GB in all modules together. One tile with 2 threads is 1.55 times
+faster than with 1 thread (Paris, natively: 19.8 s, 12.7 s with 2, 10.3 s with 4, 9.6 s with 8) with the same memory.
+
+Not yet by tiles: the bus routes and the drawing levels (France: about 30 s and 50 s, peak about 0.7 and 0.9 GB) run on
+the whole area after the union, so their memory grows with the area.
