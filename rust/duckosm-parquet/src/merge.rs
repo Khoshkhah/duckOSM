@@ -109,6 +109,9 @@ pub fn split_file(path: &Path, mut class: impl FnMut(&RecordBatch) -> Result<Vec
 /// no new compression; as the tool parquet-concat of the parquet crate). The file has the metadata (GeoParquet) of the
 /// first input. `consume`: each input goes when it is copied. Returns the number of rows.
 pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usize, String> {
+    if inputs.is_empty() {
+        return Ok(0);
+    }
     // the writer of the parquet crate counts the bytes of the file in a usize: in WebAssembly (32 bits) the offsets of a file of
     // more than 4 GiB wrap (France: edges_driving, 4.5 GB with snap)
     if cfg!(target_pointer_width = "32") {
@@ -161,40 +164,57 @@ pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usi
     Ok(n)
 }
 
-/// [`concat_files`] with the offsets of the file counted in a u64: the column chunks are copied as bytes, and this function writes
-/// the footer with their new offsets (the writer of the parquet crate counts in a usize, 32 bits in WebAssembly). The file has
-/// the same rows and blocks; no page indexes and no bloom filters (the inputs of the union have none).
+/// [`concat_files`] with the offsets of the file counted in a u64 ([`Concat`]): the writer of the parquet crate counts in a
+/// usize, 32 bits in WebAssembly.
 pub fn concat_files_u64(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usize, String> {
-    use parquet::file::metadata::{FileMetaData, ParquetMetaDataBuilder, ParquetMetaDataReader, ParquetMetaDataWriter, RowGroupMetaData};
-    use std::io::{Read, Seek, SeekFrom};
-    let Some(first) = inputs.first() else {
-        return Ok(0);
-    };
-    let meta = |p: &Path| -> Result<parquet::file::metadata::ParquetMetaData, String> {
-        ParquetMetaDataReader::new().parse_and_finish(&crate::source(p)?).map_err(err)
-    };
-    let m0 = meta(first)?;
-    let schema = m0.file_metadata().schema_descr_ptr();
-    let mut w = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?);
-    w.write_all(b"PAR1").map_err(err)?;
-    let mut at: u64 = 4;
-    let (mut groups, mut n) = (Vec::new(), 0i64);
-    let mut buf = Vec::new();
+    let mut c = Concat::new(out)?;
     for p in inputs {
-        let m = meta(p)?;
+        c.add(p, consume)?;
+    }
+    c.finish()
+}
+
+/// A join of Parquet files (one schema) into `out` that takes one file at a time ([`Concat::add`]): their blocks of rows one
+/// after the other, copied as bytes, and at the end ([`Concat::finish`]) the footer with their new offsets, counted in a u64.
+/// The file has the metadata (GeoParquet) of the first input; no page indexes and no bloom filters (the inputs have none). A
+/// step that makes its rows in parts adds each part when it is made: one part file at a time, for any number of parts.
+pub struct Concat {
+    w: std::io::BufWriter<fs::File>,
+    out: PathBuf,
+    at: u64,
+    groups: Vec<parquet::file::metadata::RowGroupMetaData>,
+    rows: i64,
+    first: Option<parquet::file::metadata::ParquetMetaData>,
+    buf: Vec<u8>,
+}
+
+impl Concat {
+    pub fn new(out: &Path) -> Result<Concat, String> {
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?);
+        w.write_all(b"PAR1").map_err(err)?;
+        Ok(Concat { w, out: out.to_path_buf(), at: 4, groups: Vec::new(), rows: 0, first: None, buf: Vec::new() })
+    }
+
+    /// Add the blocks of the file `p`; `consume`: the file goes after.
+    pub fn add(&mut self, p: &Path, consume: bool) -> Result<(), String> {
+        use parquet::file::metadata::{ParquetMetaDataReader, RowGroupMetaData};
+        use std::io::{Read, Seek, SeekFrom};
+        let m = ParquetMetaDataReader::new().parse_and_finish(&crate::source(p)?).map_err(err)?;
+        let schema = self.first.get_or_insert_with(|| m.clone()).file_metadata().schema_descr_ptr();
         if m.file_metadata().schema_descr().root_schema_ptr() != schema.root_schema_ptr() {
-            return Err(format!("{}: another schema than {}", p.display(), first.display()));
+            return Err(format!("{}: another schema than the first file of {}", p.display(), self.out.display()));
         }
         let mut input = fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
         for rg in m.row_groups() {
             let mut cols = Vec::new();
-            let start = at;
+            let start = self.at;
             for c in rg.columns() {
                 let (from, len) = c.byte_range();
                 input.seek(SeekFrom::Start(from)).map_err(err)?;
-                buf.resize(len as usize, 0);
-                input.read_exact(&mut buf).map_err(err)?;
-                w.write_all(&buf).map_err(err)?;
+                self.buf.resize(len as usize, 0);
+                input.read_exact(&mut self.buf).map_err(err)?;
+                self.w.write_all(&self.buf).map_err(err)?;
+                let at = self.at;
                 let shift = |o: i64| o - from as i64 + at as i64;
                 cols.push(
                     c.clone()
@@ -211,31 +231,40 @@ pub fn concat_files_u64(inputs: &[PathBuf], consume: bool, out: &Path) -> Result
                         .build()
                         .map_err(err)?,
                 );
-                at += len;
+                self.at += len;
             }
-            groups.push(
+            self.groups.push(
                 RowGroupMetaData::builder(schema.clone())
                     .set_num_rows(rg.num_rows())
                     .set_total_byte_size(rg.total_byte_size())
                     .set_column_metadata(cols)
                     .set_file_offset(start as i64)
-                    .set_ordinal(groups.len() as i16 as i32)
+                    .set_ordinal(self.groups.len() as i16 as i32)
                     .build()
                     .map_err(err)?,
             );
-            n += rg.num_rows();
+            self.rows += rg.num_rows();
         }
         drop(input);
         if consume {
             let _ = fs::remove_file(p);
         }
+        Ok(())
     }
-    let f = m0.file_metadata();
-    let file = FileMetaData::new(f.version(), n, f.created_by().map(str::to_string), f.key_value_metadata().cloned(), schema, f.column_orders().cloned());
-    let md = ParquetMetaDataBuilder::new(file).set_row_groups(groups).build();
-    ParquetMetaDataWriter::new(&mut w, &md).finish().map_err(err)?;
-    w.flush().map_err(err)?;
-    Ok(n as usize)
+
+    /// Write the footer. Gives the number of rows. With no file added, an error.
+    pub fn finish(mut self) -> Result<usize, String> {
+        use parquet::file::metadata::{FileMetaData, ParquetMetaDataBuilder, ParquetMetaDataWriter};
+        let Some(m0) = self.first.take() else {
+            return Err(format!("{}: no file to join", self.out.display()));
+        };
+        let f = m0.file_metadata();
+        let file = FileMetaData::new(f.version(), self.rows, f.created_by().map(str::to_string), f.key_value_metadata().cloned(), f.schema_descr_ptr(), f.column_orders().cloned());
+        let md = ParquetMetaDataBuilder::new(file).set_row_groups(std::mem::take(&mut self.groups)).build();
+        ParquetMetaDataWriter::new(&mut self.w, &md).finish().map_err(err)?;
+        self.w.flush().map_err(err)?;
+        Ok(self.rows as usize)
+    }
 }
 
 /// The key of each row of a batch: the values of the columns `key` (BIGINT or INTEGER; NULL is the smallest).

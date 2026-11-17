@@ -15,7 +15,7 @@ use duckosm_core::geom::Pt;
 use duckosm_core::network::Options;
 use duckosm_core::tiles::Tile;
 use duckosm_core::util::FxHashSet;
-use duckosm_parquet::merge::{concat_files, union_sorted};
+use duckosm_parquet::merge::{concat_files, union_sorted, Concat};
 use rayon::prelude::*;
 use duckosm_core::fs::{self, File};
 use std::io::BufWriter;
@@ -642,7 +642,8 @@ pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String
     let mut pending = None;
     let tmp = fs::temp_dir("duckosm-bus");
     fs::create_dir_all(&tmp).map_err(io)?;
-    let (mut n_routes, mut route_parts, mut parts) = (0usize, Vec::new(), Vec::new());
+    // each batch adds its rows to the two tables at once (`Concat`): two part files at a time, for any number of batches
+    let (mut n_routes, mut tables) = (0usize, None);
     let (mut n, mut last) = (0usize, None);
     for b in 0..batches as u32 {
         // the relations of the batch: the next relations up to about BUS_BATCH_WAYS member ways (the rule of step 2)
@@ -683,20 +684,27 @@ pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String
         }
         let (routes, rows) = duckosm_core::bus::routes(&rels, &own_ways, &edges, &private_edges);
         n_routes += routes.len();
-        let part = tmp.join(format!("{b}.routes.parquet"));
+        if tables.is_none() {
+            tables = Some((Concat::new(&out.join("routes_bus.parquet"))?, Concat::new(&out.join("route_edges_bus.parquet"))?));
+        }
+        let (r, e) = tables.as_mut().expect("made");
+        let part = tmp.join("routes.parquet");
         duckosm_parquet::write_routes_to(create(&part)?, &routes)?;
-        route_parts.push(part);
-        let part = tmp.join(format!("{b}.parquet"));
+        r.add(&part, true)?;
+        let part = tmp.join("route_edges.parquet");
         duckosm_parquet::write_route_edges_to(create(&part)?, &rows)?;
-        parts.push(part);
+        e.add(&part, true)?;
     }
     duckosm_core::util::step("bus 3: the batches");
-    if parts.is_empty() {
-        duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &[])?;
-        duckosm_parquet::write_route_edges_to(create(&out.join("route_edges_bus.parquet"))?, &[])?;
-    } else {
-        concat_files(&route_parts, true, &out.join("routes_bus.parquet"))?;
-        concat_files(&parts, true, &out.join("route_edges_bus.parquet"))?;
+    match tables {
+        Some((r, e)) => {
+            r.finish()?;
+            e.finish()?;
+        }
+        None => {
+            duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &[])?;
+            duckosm_parquet::write_route_edges_to(create(&out.join("route_edges_bus.parquet"))?, &[])?;
+        }
     }
     let _ = fs::remove_dir_all(&tmp);
     Ok(n_routes)

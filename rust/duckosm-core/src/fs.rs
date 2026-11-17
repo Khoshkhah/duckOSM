@@ -211,6 +211,167 @@ pub fn temp_dir(name: &str) -> PathBuf {
     }
 }
 
+/// The storage under a [`Blocks`] store: one file that reads and writes at an offset (in the browser, one open file of OPFS).
+pub trait Backing {
+    fn read_at(&self, b: &mut [u8], at: u64) -> io::Result<usize>;
+    fn write_at(&self, b: &[u8], at: u64) -> io::Result<()>;
+}
+
+/// The size of a block of a [`Blocks`] store.
+const BLOCK: u64 = 1 << 20;
+
+/// Many files in one file of a [`Backing`]: each file is a list of blocks of 1 MiB. A freed block is used again, and the file
+/// grows when no block is free. The page has a fixed number of open files (a file of OPFS opens only asynchronously, and the
+/// steps are synchronous), so the temporary files of a step, whose number grows with the area (the parts of the bus routes,
+/// the runs of the sorts), go here: [`Blocks::named`] for the named files of [`Fs`], and the store of `spill` (unnamed).
+pub struct Blocks<B: Backing> {
+    back: B,
+    free: RefCell<Vec<u64>>,
+    next: std::cell::Cell<u64>,
+    named: RefCell<std::collections::HashMap<PathBuf, Rc<RefCell<Extent>>>>,
+}
+
+/// The blocks of one file and its length.
+#[derive(Default)]
+struct Extent {
+    blocks: Vec<u64>,
+    len: u64,
+}
+
+/// A file of a [`Blocks`] store. An unnamed file frees its blocks when it is dropped; a named file when it is removed.
+pub struct BlockFile<B: Backing> {
+    store: Rc<Blocks<B>>,
+    e: Rc<RefCell<Extent>>,
+    pos: u64,
+    named: bool,
+}
+
+// SAFETY: a store is set for one thread (`set`, `spill::set_temp_store`): its files stay on that thread.
+unsafe impl<B: Backing> Send for BlockFile<B> {}
+
+impl<B: Backing> Blocks<B> {
+    pub fn new(back: B) -> Rc<Blocks<B>> {
+        Rc::new(Blocks { back, free: RefCell::new(Vec::new()), next: std::cell::Cell::new(0), named: RefCell::new(Default::default()) })
+    }
+
+    fn block(&self) -> u64 {
+        self.free.borrow_mut().pop().unwrap_or_else(|| {
+            let b = self.next.get();
+            self.next.set(b + 1);
+            b
+        })
+    }
+
+    fn release(&self, e: &mut Extent) {
+        self.free.borrow_mut().append(&mut e.blocks);
+        e.len = 0;
+    }
+
+    /// A new unnamed file (a temporary file of `spill`).
+    pub fn temp(self: &Rc<Self>) -> BlockFile<B> {
+        BlockFile { store: self.clone(), e: Default::default(), pos: 0, named: false }
+    }
+
+    /// The named file `p`: a new empty one (`create`), or the one that is there.
+    pub fn named(self: &Rc<Self>, p: &Path, create: bool) -> io::Result<BlockFile<B>> {
+        let mut named = self.named.borrow_mut();
+        let e = if create {
+            let e = named.entry(p.to_path_buf()).or_default().clone();
+            self.release(&mut e.borrow_mut());
+            e
+        } else {
+            named.get(p).cloned().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{}: no such file", p.display())))?
+        };
+        Ok(BlockFile { store: self.clone(), e, pos: 0, named: true })
+    }
+
+    pub fn len(&self, p: &Path) -> Option<u64> {
+        self.named.borrow().get(p).map(|e| e.borrow().len)
+    }
+
+    pub fn remove(&self, p: &Path) -> bool {
+        let e = self.named.borrow_mut().remove(p);
+        e.map(|e| self.release(&mut e.borrow_mut())).is_some()
+    }
+
+    pub fn rename(&self, from: &Path, to: &Path) -> bool {
+        let Some(e) = self.named.borrow_mut().remove(from) else { return false };
+        if let Some(old) = self.named.borrow_mut().insert(to.to_path_buf(), e) {
+            self.release(&mut old.borrow_mut());
+        }
+        true
+    }
+
+    pub fn files(&self, dir: &Path) -> Vec<PathBuf> {
+        self.named.borrow().keys().filter(|k| k.starts_with(dir)).cloned().collect()
+    }
+}
+
+impl<B: Backing> Drop for BlockFile<B> {
+    fn drop(&mut self) {
+        if !self.named {
+            self.store.release(&mut self.e.borrow_mut());
+        }
+    }
+}
+
+impl<B: Backing> Read for BlockFile<B> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let e = self.e.borrow();
+        if self.pos >= e.len || out.is_empty() {
+            return Ok(0);
+        }
+        let (k, off) = ((self.pos / BLOCK) as usize, self.pos % BLOCK);
+        let n = (out.len() as u64).min(BLOCK - off).min(e.len - self.pos) as usize;
+        let got = self.store.back.read_at(&mut out[..n], e.blocks[k] * BLOCK + off)?;
+        self.pos += got as u64;
+        Ok(got)
+    }
+}
+
+impl<B: Backing> Write for BlockFile<B> {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        if b.is_empty() {
+            return Ok(0);
+        }
+        let mut e = self.e.borrow_mut();
+        let (k, off) = ((self.pos / BLOCK) as usize, self.pos % BLOCK);
+        while e.blocks.len() <= k {
+            let blk = self.store.block();
+            e.blocks.push(blk);
+        }
+        let n = (b.len() as u64).min(BLOCK - off) as usize;
+        self.store.back.write_at(&b[..n], e.blocks[k] * BLOCK + off)?;
+        self.pos += n as u64;
+        e.len = e.len.max(self.pos);
+        Ok(n)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<B: Backing> Seek for BlockFile<B> {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        let len = self.e.borrow().len;
+        self.pos = match to {
+            SeekFrom::Start(x) => x,
+            SeekFrom::End(x) => len.saturating_add_signed(x),
+            SeekFrom::Current(x) => self.pos.saturating_add_signed(x),
+        };
+        Ok(self.pos)
+    }
+}
+
+/// The unnamed files of a [`Blocks`] store as the temporary store of `spill`.
+pub struct BlockStore<B: Backing + 'static>(pub Rc<Blocks<B>>);
+
+impl<B: Backing + 'static> crate::spill::Store for BlockStore<B> {
+    fn create(&self) -> io::Result<Box<dyn Blob>> {
+        Ok(Box::new(self.0.temp()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +439,63 @@ mod tests {
         fn files(&self, dir: &Path) -> Vec<PathBuf> {
             self.0 .0.borrow().keys().filter(|k| k.starts_with(dir)).cloned().collect()
         }
+    }
+
+    /// Bytes in memory as the backing of a block store.
+    #[derive(Default)]
+    struct MemBack(RefCell<Vec<u8>>);
+
+    impl Backing for MemBack {
+        fn read_at(&self, b: &mut [u8], at: u64) -> io::Result<usize> {
+            let v = self.0.borrow();
+            let n = b.len().min(v.len().saturating_sub(at as usize));
+            b[..n].copy_from_slice(&v[at as usize..at as usize + n]);
+            Ok(n)
+        }
+        fn write_at(&self, b: &[u8], at: u64) -> io::Result<()> {
+            let mut v = self.0.borrow_mut();
+            if v.len() < at as usize + b.len() {
+                v.resize(at as usize + b.len(), 0);
+            }
+            v[at as usize..at as usize + b.len()].copy_from_slice(b);
+            Ok(())
+        }
+    }
+
+    /// Many more files than a pool of open files (the parts of the bus routes of France: 402), in one backing: each file reads
+    /// back its own bytes, also across blocks, and a removed or dropped file gives its blocks back.
+    #[test]
+    fn many_files_in_one_backing() {
+        let store = Blocks::new(MemBack::default());
+        let bytes = |k: usize| -> Vec<u8> { (0..(k * 7919) % (3 << 20)).map(|i| (i * 31 + k) as u8).collect() };
+        for k in 0..1000 {
+            let mut f = store.named(&PathBuf::from(format!("tmp/{k}")), true).unwrap();
+            f.write_all(&bytes(k)).unwrap();
+            if k % 2 == 1 {
+                // the odd files go at once: their blocks are used again
+                assert!(store.remove(&PathBuf::from(format!("tmp/{}", k))));
+            }
+        }
+        for k in (0..1000).step_by(2) {
+            let mut f = store.named(&PathBuf::from(format!("tmp/{k}")), false).unwrap();
+            let mut got = Vec::new();
+            f.read_to_end(&mut got).unwrap();
+            assert!(got == bytes(k), "file {k}");
+            f.seek(SeekFrom::Start(3)).unwrap();
+        }
+        let used = store.next.get();
+        let free = store.free.borrow().len();
+        assert!(free > 0, "the removed files gave blocks back");
+        {
+            let mut t = store.temp();
+            t.write_all(&vec![1; free << 20]).unwrap();
+        }
+        assert_eq!(store.next.get(), used, "a temporary file takes free blocks first");
+        assert_eq!(store.files(Path::new("tmp")).len(), 500);
+        for k in (0..1000).step_by(2) {
+            store.remove(&PathBuf::from(format!("tmp/{k}")));
+        }
+        assert_eq!(store.free.borrow().len() as u64, store.next.get(), "all blocks are free");
     }
 
     /// The page's files replace `std::fs` on the thread that set them, and `std::fs` comes back after `set(None)`.
