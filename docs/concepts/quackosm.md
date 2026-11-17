@@ -55,7 +55,7 @@ that, use `duckosm build`.
 
 ## Results
 
-**In short:** duckOSM makes the same table **4 to 7 times faster** than QuackOSM, with **2 to 3 times less memory**.
+**In short:** duckOSM makes the same table **3 to 7 times faster** than QuackOSM, with **2 to 5 times less memory**.
 In the browser, France takes **less than 5 minutes**, which QuackOSM cannot do at all.
 
 All runs: a Mac mini (12 cores, 16 GB), QuackOSM 0.20.0, Geofabrik files. Memory is the peak memory of all processes of
