@@ -4,6 +4,8 @@
 pub mod cli;
 pub mod gis;
 pub mod matsim;
+pub mod matsim_lanes;
+pub mod opendrive;
 pub mod railml;
 
 use duckdb::{AccessMode, Config, Connection};

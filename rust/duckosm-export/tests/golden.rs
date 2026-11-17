@@ -131,3 +131,41 @@ fn gis_equals_python() {
     let bad: Vec<String> = got.lines().zip(golden.lines()).filter(|(a, b)| a != b).map(|(a, b)| format!(" rust:   {a}\n python: {b}")).collect();
     assert!(bad.is_empty() && got.lines().count() == golden.lines().count(), "differs from the Python export:\n{}", bad.join("\n"));
 }
+
+/// A GMNS db from the Parquet files of tests/data/exports/gmns_driving/ (the columns that the exports read), made once. The
+/// same SQL as `gmns_db` in tools/make_golden_exports.py.
+fn gmns() -> &'static Path {
+    static DB: OnceLock<PathBuf> = OnceLock::new();
+    DB.get_or_init(|| {
+        let p = out("monaco_gmns.duckdb");
+        let _ = std::fs::remove_file(&p);
+        let con = duckdb::Connection::open(&p).unwrap();
+        con.execute_batch("INSTALL spatial; LOAD spatial; CREATE SCHEMA gmns_driving").unwrap();
+        for t in ["link", "movement", "node", "lane"] {
+            let f = data().join(format!("exports/gmns_driving/{t}.parquet"));
+            con.execute_batch(&format!("CREATE TABLE gmns_driving.{t} AS SELECT * FROM read_parquet('{}')", f.display())).unwrap();
+        }
+        p
+    })
+}
+
+#[test]
+fn opendrive_equals_python() {
+    use duckosm_export::opendrive::to_opendrive;
+    let o = out("monaco.xodr");
+    to_opendrive(db(), &o, "driving", None, false).unwrap();
+    same(&o, "monaco.xodr.gz");
+    let o = out("monaco_junctions.xodr");
+    to_opendrive(gmns(), &o, "driving", None, true).unwrap();
+    same(&o, "monaco_junctions.xodr.gz");
+}
+
+#[test]
+fn matsim_lanes_equals_python() {
+    let d = out("matsim_lanes");
+    let s = duckosm_export::matsim_lanes::to_matsim_lanes(gmns(), &d, "driving", true, 90).unwrap();
+    assert!(s.lanes_links > 0 && s.signal_systems.unwrap() > 0);
+    for f in ["lanes", "signalSystems", "signalGroups", "signalControl"] {
+        same(&d.join(format!("{f}.xml")), &format!("matsim_lanes_{f}.xml.gz"));
+    }
+}
