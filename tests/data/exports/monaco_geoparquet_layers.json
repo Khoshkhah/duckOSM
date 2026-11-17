@@ -1,0 +1,111 @@
+{
+ "layers": [
+  {
+   "file": "edges_cycling.parquet",
+   "kind": "edges",
+   "mode": "cycling",
+   "count": 11293
+  },
+  {
+   "file": "nodes_cycling.parquet",
+   "kind": "nodes",
+   "mode": "cycling",
+   "count": 4638
+  },
+  {
+   "file": "edges_driving.parquet",
+   "kind": "edges",
+   "mode": "driving",
+   "count": 2844
+  },
+  {
+   "file": "nodes_driving.parquet",
+   "kind": "nodes",
+   "mode": "driving",
+   "count": 1769
+  },
+  {
+   "file": "edges_walking.parquet",
+   "kind": "edges",
+   "mode": "walking",
+   "count": 11934
+  },
+  {
+   "file": "nodes_walking.parquet",
+   "kind": "nodes",
+   "mode": "walking",
+   "count": 4579
+  },
+  {
+   "file": "boundary.parquet",
+   "kind": "boundary",
+   "count": 1
+  },
+  {
+   "file": "features_buildings.parquet",
+   "kind": "features",
+   "table": "buildings",
+   "count": 1262
+  },
+  {
+   "file": "features_land.parquet",
+   "kind": "features",
+   "table": "land",
+   "count": 241
+  },
+  {
+   "file": "features_paved.parquet",
+   "kind": "features",
+   "table": "paved",
+   "count": 83
+  },
+  {
+   "file": "features_place_labels.parquet",
+   "kind": "features",
+   "table": "place_labels",
+   "count": 10
+  },
+  {
+   "file": "features_pois.parquet",
+   "kind": "features",
+   "table": "pois",
+   "count": 1645
+  },
+  {
+   "file": "features_public_transport.parquet",
+   "kind": "features",
+   "table": "public_transport",
+   "count": 107
+  },
+  {
+   "file": "features_sites.parquet",
+   "kind": "features",
+   "table": "sites",
+   "count": 80
+  },
+  {
+   "file": "features_streets.parquet",
+   "kind": "features",
+   "table": "streets",
+   "count": 3496
+  },
+  {
+   "file": "features_traffic.parquet",
+   "kind": "features",
+   "table": "traffic",
+   "count": 575
+  },
+  {
+   "file": "features_water_lines.parquet",
+   "kind": "features",
+   "table": "water_lines",
+   "count": 4
+  },
+  {
+   "file": "features_water_polygons.parquet",
+   "kind": "features",
+   "table": "water_polygons",
+   "count": 88
+  }
+ ]
+}

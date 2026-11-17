@@ -10,6 +10,7 @@
   file, the 11 layers and the lines of the report equal the Python build (`tests/features_no_boundary.rs`). With this, every
   key of a `duckosm build` config runs in `duckosm-rust --config` with no skip, except `viz.enabled` (the maps, group F).
 
+
 - **`duckosm-rust --config`: `source.type: duckdb` is in Rust** (`rust/duckosm-build/src/clip.rs`, `docs/design/all_in_rust.md`,
   group A). The build copies the rows of the parent database in the boundary, with `clip.predicate`, and then makes
   `main.boundary`, `main.visualization_metadata`, the drawing order, the indexes, the checks and the report. On Monaco
@@ -32,6 +33,13 @@
   effect on a build from a PBF, so they are no longer errors. On Monaco the tables, the indexes, `mm.transfers` and the results
   of the checks are equal to the Python build (`tests/after.rs`). The report counts the rows of the tables; the Python engine
   counts the edges before the private roads move to `private_edges`.
+
+
+- **The OpenDRIVE and MATSim lanes exports are in Rust**: `duckosm-rust opendrive` (also `--junctions`) and
+  `duckosm-rust matsim-lanes` write the same files as the Python exports (Monaco and Tartu).
+
+- **The GIS export is in Rust**: `duckosm-rust export-gis` (GeoPackage, GeoParquet, shapefile) writes the same
+  columns and rows as `duckosm export-gis` (Monaco and Tartu). It uses `ogr2ogr` for one GeoPackage file, as the Python export.
 
 - **The MATSim and railML exports are in Rust** (`docs/design/all_in_rust.md`, group D): `duckosm-rust matsim` and
   `duckosm-rust railml`, in the new crate `rust/duckosm-export`. They write the same file as `duckosm matsim` and

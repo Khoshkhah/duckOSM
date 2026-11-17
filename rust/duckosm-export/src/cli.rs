@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 2] = ["matsim", "railml"];
+pub const COMMANDS: [&str; 5] = ["matsim", "railml", "export-gis", "opendrive", "matsim-lanes"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -17,6 +17,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Export a built network to GeoPackage, GeoParquet or shapefile, with edge_id as an attribute: the layers edges_<mode>,
+    /// nodes_<mode> and boundary, in EPSG:4326. GeoPackage: one file (ogr2ogr of GDAL puts the layers together). Shapefile:
+    /// one set of files for each layer. GeoParquet: one .parquet file for each layer and for each features.* table, and
+    /// layers.json; the edges files also get the columns of visualization.edge_levels.
+    #[command(name = "export-gis")]
+    ExportGis {
+        /// The duckOSM database.
+        db: PathBuf,
+        /// Mode schema(s) to export (default: each mode of the db).
+        #[arg(short, long = "mode")]
+        modes: Vec<String>,
+        /// gpkg, shp or geoparquet.
+        #[arg(short, long = "format", default_value = "gpkg", value_parser = ["gpkg", "shp", "geoparquet"])]
+        fmt: String,
+        /// gpkg: the .gpkg file; shp, geoparquet: the folder (default: <name>.gpkg, <name>_gis/, <name>_geoparquet/).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Do not export main.boundary as a boundary layer.
+        #[arg(long)]
+        no_boundary: bool,
+        /// The base name of the layers and files (default: the file name of the db).
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Export a MATSim network.xml from a built duckOSM db: each edge is one directed link (edge_id is the link id), with
     /// length, freespeed, capacity, permlanes and modes; the node coordinates are in a metric CRS.
     Matsim {
@@ -34,6 +58,44 @@ enum Cmd {
         /// The output file (default: <name>_network.xml[.gz]).
         #[arg(short, long)]
         out: Option<PathBuf>,
+    },
+    /// Export an ASAM OpenDRIVE .xodr from a built duckOSM db: roads with a reference line in a metric CRS and the driving
+    /// lanes. Phase 1 (default): geometry and lanes. --junctions adds the junctions and their connecting roads (a GMNS db).
+    Opendrive {
+        /// The duckOSM database (with --junctions: a GMNS db).
+        db: PathBuf,
+        /// The mode schema to export.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// The projected metric CRS of the reference line (default: the UTM zone of the data).
+        #[arg(long)]
+        crs: Option<String>,
+        /// Phase 2: the junctions and the connecting roads of the turns (needs a GMNS db, not the core db).
+        #[arg(long)]
+        junctions: bool,
+        /// The output .xodr (default: <name>.xodr).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
+    /// Export MATSim lanes.xml (and signalSystems, signalGroups, signalControl.xml) from a GMNS db: the turn lanes from the
+    /// movement table, the signals of the signal nodes with a default fixed-time plan. The link ids are the edge_id of
+    /// duckosm-rust matsim.
+    #[command(name = "matsim-lanes")]
+    MatsimLanes {
+        /// The GMNS database.
+        gmns_db: PathBuf,
+        /// The GMNS mode schema.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// Do not write the signal files.
+        #[arg(long)]
+        no_signals: bool,
+        /// The default signal cycle time (seconds).
+        #[arg(long, default_value_t = 90)]
+        cycle: i64,
+        /// The output folder.
+        #[arg(short, long = "out", default_value = ".")]
+        out_dir: PathBuf,
     },
     /// Export a railML 2.4 rail infrastructure file from a built duckOSM db: the railway ways of the raw OSM, cut into
     /// tracks with their topology, switches, signals and stations (OCPs).
@@ -74,6 +136,43 @@ pub fn run(args: &[String]) -> Result<()> {
             let out = out.unwrap_or_else(|| format!("{}_network.xml{}", stem(&db), if no_gzip { "" } else { ".gz" }).into());
             let s = crate::matsim::to_matsim(&db, &out, &mode, crs.as_deref(), !no_gzip)?;
             println!("wrote {} — {} nodes, {} links (CRS {})", out.display(), s.nodes, s.links, s.crs);
+        }
+        Cmd::ExportGis { db, modes, fmt, out, no_boundary, name } => {
+            check_db(&db)?;
+            let base = name.unwrap_or_else(|| stem(&db));
+            let out = out.unwrap_or_else(|| {
+                match fmt.as_str() {
+                    "gpkg" => format!("{base}.gpkg"),
+                    "shp" => format!("{base}_gis"),
+                    _ => format!("{base}_geoparquet"),
+                }
+                .into()
+            });
+            let s = crate::gis::to_gis(&db, &out, &modes, &fmt, !no_boundary, Some(&base), "EPSG:4326")?;
+            let layers = s.layers.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(", ");
+            let dest = s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "None".into());
+            println!("wrote {dest} ({}: {} layers — {layers})", s.fmt, s.layers.len());
+            if s.fmt == "gpkg" && s.path.is_none() {
+                println!("  (ogr2ogr not found — wrote {} single-layer files instead)", s.files.len());
+            }
+        }
+        Cmd::Opendrive { db, mode, crs, junctions, out } => {
+            check_db(&db)?;
+            let out = out.unwrap_or_else(|| format!("{}.xodr", stem(&db)).into());
+            let s = crate::opendrive::to_opendrive(&db, &out, &mode, crs.as_deref(), junctions)?;
+            let extra = if junctions { format!(" + {} connecting roads, {} junctions", s.connecting_roads, s.junctions) } else { String::new() };
+            println!("wrote {} — {} roads{extra} (CRS {})", out.display(), s.roads, s.crs);
+        }
+        Cmd::MatsimLanes { gmns_db, mode, no_signals, cycle, out_dir } => {
+            if !gmns_db.exists() {
+                return Err(format!("{}: no such file", gmns_db.display()));
+            }
+            let s = crate::matsim_lanes::to_matsim_lanes(&gmns_db, &out_dir, &mode, !no_signals, cycle)?;
+            let mut msg = format!("wrote lanes.xml ({} assignments)", s.lanes_links);
+            if let Some(n) = s.signal_systems {
+                msg.push_str(&format!(" + signals ({n} systems)"));
+            }
+            println!("{msg} -> {}", out_dir.display());
         }
         Cmd::Railml { db, out } => {
             check_db(&db)?;
