@@ -103,7 +103,8 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
             if parts.is_empty() {
                 return Ok((name.clone(), 0));
             }
-            let n = concat_files(&parts, consume || parts.last().is_some_and(|p| p.starts_with(&tmp)), &out.join(format!("{name}.parquet")))?;
+            // the merged border file is temporary; the files of the tiles stay unless `consume` (--keep-tiles keeps them)
+            let n = concat_files(&parts, consume, &out.join(format!("{name}.parquet")))?;
             Ok((name.clone(), n))
         })
         .collect::<Result<_, _>>())?;

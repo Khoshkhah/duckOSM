@@ -86,7 +86,11 @@ fn main() {
     let t = std::time::Instant::now();
     let text = std::fs::read_to_string(&a[2]).unwrap();
     let _ = boundary;
-    let p = duckosm_build::Params { modes: vec![mode], options: Options::default(), ..Default::default() };
+    let levels = match std::env::var("DUCKOSM_LEVELS").as_deref() {
+        Ok("solve") => duckosm_build::LevelsMethod::Solve,
+        _ => duckosm_build::LevelsMethod::Tags,
+    };
+    let p = duckosm_build::Params { modes: vec![mode], options: Options::default(), levels, ..Default::default() };
     let rows = duckosm_build::union::union_all(&tiles, &text, &p, false, a[1].as_ref()).unwrap();
     println!("{rows:?} {:.1} s", t.elapsed().as_secs_f64());
     heap::report("union");
