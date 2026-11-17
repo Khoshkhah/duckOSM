@@ -210,8 +210,7 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
   `--config` read a duckOSM config file (`duckosm-build/src/config.rs`). The keys and defaults are those of
   duckOSM. Relative paths resolve against the current folder, as in duckOSM. The rules:
   - A key that duckOSM does not know is an error (duckOSM only warns; it is almost always a typo).
-  - A key that changes the result and is not supported is an error: `source.type: duckdb`, `boundary.place`,
-    `bbox`, `h3_cell`, `buffer_m`. `clip.predicate` (one of `intersects`, `within`, `centroid`) and
+  - A key that changes the result and is not supported is an error: `source.type: duckdb`. `clip.predicate` (one of `intersects`, `within`, `centroid`) and
     `clip.min_component_edges` have no effect on a build from a PBF, as in duckOSM.
   - With a boundary, the program cuts the PBF to it, as osmium's `complete_ways` does (no `osmium` is
     necessary). When the PBF is already cut, say so (`pbf_is_cut=True`, CLI `--pbf-is-cut`): then the program
@@ -219,8 +218,13 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
   - The steps on the `.duckdb` file after the tables are in Rust (`duckosm-build/src/after.rs`): the indexes (always), the
     multimodal graph (`mm.*` only with `multimodal.enabled`, with `transfer_s` and `transfer_costs`), the checks
     (`validation`) and the report (`report`, into `reports/`). The report counts the rows of the tables.
-  - A duckOSM step that the program does not have (`boundary_cells`, the maps; the base-map layers when there is
-    no boundary) is an error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
+  - `boundary.bbox`, `h3_cell` and `place` become `<name>.boundary.geojson` next to the database, and `buffer_m`
+    grows the boundary into `<stem>.buffer<m>m.geojson`, as in duckOSM (`duckosm-build/src/place.rs`). A place is looked
+    up in the borders of the PBF (GDAL in DuckDB's spatial extension, as `ogr2ogr` does), then on Nominatim.
+    `options.boundary_cells` makes `main.boundary_cells`. The H3 cells come from `h3o`: their outlines differ from
+    those of the H3 C library by about 1e-14 degrees.
+  - A duckOSM step that the program does not have (the maps; the base-map layers when there is no boundary) is an
+    error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
     (CLI `--allow-skipped`). The result then lists them under `skipped`.
   - Keys that only tune DuckDB in duckOSM (`memory_limit`, `threads`, `simplify_batches`, `clip_strategy`) have no effect. The result lists them under `ignored`.
 - Python duckOSM can later call this API with a config option `engine: rust`. Rust then builds the

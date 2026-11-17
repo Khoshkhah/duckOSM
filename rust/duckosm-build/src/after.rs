@@ -10,6 +10,8 @@ pub struct After {
     pub report: Option<Report>,
     /// duckOSM `multimodal.enabled`: keep `mm.transfers` and the view `mm.edges` (a config build: off by default).
     pub multimodal: bool,
+    /// duckOSM `options.boundary_cells`: `main.boundary_cells` of this boundary file at these resolutions.
+    pub boundary_cells: Option<(std::path::PathBuf, Vec<u8>)>,
     /// duckOSM `multimodal.transfer_s` and `transfer_costs` (`"walking->driving": 60`): the seconds of the transfers.
     pub transfer_s: f64,
     pub transfer_costs: Vec<(String, f64)>,
@@ -17,7 +19,7 @@ pub struct After {
 
 impl Default for After {
     fn default() -> Self {
-        After { validation: None, report: None, multimodal: true, transfer_s: 60.0, transfer_costs: Vec::new() }
+        After { validation: None, report: None, multimodal: true, boundary_cells: None, transfer_s: 60.0, transfer_costs: Vec::new() }
     }
 }
 
@@ -46,6 +48,9 @@ pub fn run(db: &std::path::Path, name: &str, modes: &[&str], a: &After) -> Resul
         sql::transfer_costs(db, a.transfer_s, &a.transfer_costs)?;
     } else {
         sql::drop_multimodal(db)?;
+    }
+    if let Some((b, rs)) = &a.boundary_cells {
+        crate::place::boundary_cells(db, b, rs)?;
     }
     sql::create_indexes(db, modes)?;
     let mut results: Vec<(String, Vec<sql::Check>)> = Vec::new();

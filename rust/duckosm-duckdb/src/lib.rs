@@ -5,6 +5,7 @@ pub mod after;
 pub mod input;
 pub mod quack;
 pub mod read_osm;
+pub use duckdb;
 pub use quack::write_quack;
 pub use input::RawInput;
 

@@ -772,6 +772,7 @@ dependencies = [
  "duckosm-core",
  "duckosm-duckdb",
  "duckosm-parquet",
+ "geo",
  "h3o",
  "rayon",
  "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=39696602fac3a6e200fd324526022bc88239b95f)",
@@ -1094,6 +1095,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "geo-traits"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e7c353d12a704ccfab1ba8bfb1a7fe6cb18b665bf89d37f4f7890edcd260206"
+
+[[package]]
 name = "geo-types"
 version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1167,6 +1174,8 @@ dependencies = [
  "ahash",
  "either",
  "float_eq",
+ "geo",
+ "geo-traits",
  "h3o-bit",
  "libm",
  "ordered-float",

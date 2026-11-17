@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`duckosm-rust --config`: `boundary.place`, `bbox`, `h3_cell`, `buffer_m` and `options.boundary_cells` are in Rust**
+  (`rust/duckosm-build/src/place.rs`, `docs/design/all_in_rust.md`, group A). The box, the cell and the place become
+  `<name>.boundary.geojson` next to the database, as in duckOSM. A place is looked up in the borders of the PBF with GDAL in
+  DuckDB's spatial extension (the polygon equals the one of `ogr2ogr`), then on Nominatim. On Monaco the cut networks,
+  `main.boundary` and the ids of `main.boundary_cells` equal the Python build (`tests/boundary_kinds.rs`). The outline of an H3
+  cell (`h3_cell`, the cells) comes from `h3o` and differs from the H3 C library by about 1e-14 degrees.
+
 - **`duckosm-rust --config`: the indexes, the checks, the report and the multimodal graph are in Rust**
   (`rust/duckosm-build/src/after.rs`, `docs/design/all_in_rust.md`, group A). The `.duckdb` file gets duckOSM's indexes,
   `validation:` runs duckOSM's checks (a failed check stops the build with `fail_on_error`), `report:` writes
