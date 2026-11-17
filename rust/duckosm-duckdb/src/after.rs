@@ -197,9 +197,10 @@ pub fn drop_multimodal(db: &Path) -> Result<(), String> {
 /// duckOSM `importer._raw_way_fixes`: the OSM fixes on the `raw.*` of the file (a build with no boundary: `read_osm` wrote
 /// them as the PBF has them). In duckOSM's order: `remove`, `keep_nodes` and `tags` of each rule, `extra.tag_edits`, then
 /// `new_ways` (only when all their OSM nodes are in the file). Run it after the network step has read `raw.*`: that step
-/// applies the fixes itself. Last, duckOSM's `OSMOverrides` (per mode): the arrows of a rule (`turn_lanes_*`) as the tags
+/// applies the fixes itself. Then the roads of the sidewalk rule (`sidewalks`, duckOSM `SeparateSidewalks`) get
+/// `sidewalk=separate` and `duckosm:sidewalk=inferred`. Last, duckOSM's `OSMOverrides` (per mode): the arrows of a rule (`turn_lanes_*`) as the tags
 /// `turn:lanes:*` of the raw way, once for each mode whose `ways` has it.
-pub fn raw_fixes(db: &Path, f: &duckosm_core::fixes::OsmFixes, modes: &[&str]) -> Result<(), String> {
+pub fn raw_fixes(db: &Path, f: &duckosm_core::fixes::OsmFixes, sidewalks: &[i64], modes: &[&str]) -> Result<(), String> {
     use duckosm_core::fixes::{Elem, NewNode};
     let s = |x: &str| format!("'{}'", x.replace('\'', "''"));
     let map = |kv: &[(String, String)]| {
@@ -275,6 +276,12 @@ pub fn raw_fixes(db: &Path, f: &duckosm_core::fixes::OsmFixes, modes: &[&str]) -
         con.execute_batch(&sql).map_err(|e| format!("raw.* fixes, new way {}: {e}", n.id))?;
     }
     let mut sql = String::new();
+    if !sidewalks.is_empty() {
+        sql += &format!(
+            "UPDATE raw.ways SET tags = map_concat(tags, MAP {{'sidewalk': 'separate', 'duckosm:sidewalk': 'inferred'}}) WHERE osm_id IN ({});\n",
+            sidewalks.iter().map(i64::to_string).collect::<Vec<_>>().join(", ")
+        );
+    }
     for m in modes {
         for r in f.ways.iter().filter(|r| !r.arrows.is_empty() && !r.exclude_modes.iter().any(|x| x.name() == *m)) {
             let id = r.osm_id;

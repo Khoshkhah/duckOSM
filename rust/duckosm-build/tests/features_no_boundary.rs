@@ -67,8 +67,9 @@ fn the_layers_without_a_boundary_equal_duckosm() {
     let _ = std::fs::remove_dir_all(&out);
 }
 
-/// The same build with the fixes of `tests/data/osm_fixes_raw.yaml` (a rule of each kind that changes `raw.*`): duckOSM applies
-/// them to `raw.*` before the layers. The expected values come from the Python build with the same file.
+/// The same build with the walking mode (its sidewalk rule) and the fixes of `tests/data/osm_fixes_raw.yaml` (a rule of each
+/// kind that changes `raw.*`): duckOSM applies both to `raw.*` before the layers. The expected values come from the Python build
+/// with the same file.
 #[test]
 fn the_fixes_change_raw_as_in_duckosm() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
@@ -76,7 +77,7 @@ fn the_fixes_change_raw_as_in_duckosm() {
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).unwrap();
     let cfg = format!(
-        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}}}\nosm_overrides: {}\nmodes: [driving]\noptions:\n  sea: false\n  levels: false\n  bus_routes: false\n",
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}}}\nosm_overrides: {}\nmodes: [driving, walking]\noptions:\n  sea: false\n  levels: false\n  bus_routes: false\n",
         out.display(),
         root.join("data/sample/monaco.osm.pbf").display(),
         root.join("tests/data/osm_fixes_raw.yaml").display()
@@ -91,9 +92,9 @@ fn the_fixes_change_raw_as_in_duckosm() {
     let layer = "concat_ws('|', osm_id, osm_type, kind, name, tags::VARCHAR, hex(ST_AsWKB(geom)))";
     for (t, sql, n, md5) in [
         ("raw.nodes", "concat_ws('|', osm_id, lat, lon, tags::VARCHAR)", 41710, "129f6e8522b1a56a32eac7b95eebf013"),
-        ("raw.ways", "concat_ws('|', osm_id, tags::VARCHAR, refs::VARCHAR)", 6249, "7e3b28bd80b34b73dc254ae206b56fa7"),
+        ("raw.ways", "concat_ws('|', osm_id, tags::VARCHAR, refs::VARCHAR)", 6249, "928333fc50d13e1675be2bfd65cc00b4"),
         ("features.buildings", layer, 1623, "3ac5cbaebf236732557711a606f07769"),
-        ("features.streets", layer, 3667, "60f50c79340478edf9167510d437df45"),
+        ("features.streets", layer, 3667, "f09924d037759c3462d79b8b9329f119"),
     ] {
         let got: (i64, String) = con
             .query_row(&format!("SELECT count(*), md5(string_agg(x, ',' ORDER BY x)) FROM (SELECT {sql} x FROM {t})"), [], |r| {

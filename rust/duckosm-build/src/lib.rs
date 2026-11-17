@@ -192,6 +192,8 @@ pub struct Summary {
     pub steps: Vec<(String, f64)>,
     /// Roads that got `sidewalk=separate`, when the sidewalk rule ran.
     pub sidewalk_roads: Option<usize>,
+    /// Their way ids (a build of the whole file: `raw.*` gets their tags, `duckosm_duckdb::after::raw_fixes`).
+    pub sidewalk_ids: Vec<i64>,
     /// The number of bus routes, when they were made.
     pub bus_routes: Option<usize>,
     /// The rows of `raw.nodes`, `raw.ways` and `raw.relations`, when they were written.
@@ -1297,7 +1299,12 @@ pub fn run<W: Write + Send>(
                 sidewalks::mark(&mut ways, &found);
                 found.len()
             }
-            None => sidewalks::infer_separate_sidewalks(&mut ways, &coords),
+            None => {
+                let found = sidewalks::separate_sidewalks(&ways, &coords, |_| true);
+                sidewalks::mark(&mut ways, &found);
+                sum.sidewalk_ids = found.iter().map(|&i| ways[i].id).collect();
+                found.len()
+            }
         });
         log.step("sidewalk rule");
     }
@@ -2111,9 +2118,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 }
             }
             log.step("write duckdb");
-            if raw_first && !fixes.is_empty() {
-                // duckOSM applies the fixes to raw.* too: the base-map layers read it (the network has read it already)
-                duckosm_duckdb::after::raw_fixes(&db, &fixes, &names)?;
+            if raw_first && (!fixes.is_empty() || !sum.sidewalk_ids.is_empty()) {
+                // duckOSM applies the fixes and the sidewalk rule to raw.* too: the base-map layers read it (the network has read it already)
+                duckosm_duckdb::after::raw_fixes(&db, &fixes, &sum.sidewalk_ids, &names)?;
                 log.step("raw.* fixes");
             }
             if features {
