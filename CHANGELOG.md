@@ -44,8 +44,8 @@
 
 For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each entry says what the host must do.
 
-- **The tile cut is pbfcut** (duckOSM: the pbfcut move). `tilecut::cut_to_sink` keeps its arguments, but `memory` has no effect, and the tile files
-  from the sink now have zlib (as the files of the build by tiles). `spill::set_temp_store` also sets the store of the cut (one store). *Host: nothing is
+- **The tile cut is pbfcut** (duckOSM: the pbfcut move). `tilecut::cut_to_sink` keeps its arguments and its tile files (no zlib; with `memory`,
+  zlib, in place of the parts in memory). `spill::set_temp_store` also sets the store of the cut (one store). *Host: nothing is
   needed; Studio moves its pin.*
 - **The editor reads the map's road table itself** (duckOSM #43). `roadIdOfRow` and `roadRows` are now optional. Without them the editor reads `window.RS_SIDE.props`
   (then `rsGetProps` and `rsQuery`) and builds the index of the roads by OSM way. A row of the table is an object, or an array when the host gives the new option

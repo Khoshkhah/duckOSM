@@ -89,17 +89,21 @@ pub fn cut_to_store_build<R: Read + Seek + Send>(
 }
 
 /// [`cut_to_store`], with each tile file given to `sink` (in pieces, tile by tile): the browser writes each tile into a
-/// file of its own, so that a worker for each tile can read it. The tile files have zlib (as the files of
-/// [`cut_to_tiles`]). `memory` has no effect: pbfcut keeps its temporary files in the store (OPFS in the browser) and
-/// its lists within its memory budget (`pbfcut::store::set_memory`).
+/// file of its own, so that a worker for each tile can read it. The tile files have no zlib (less CPU; Sweden in
+/// Chromium at zoom 8: the cut 17.8 s, with zlib 24.0 s). `memory`: the tile files with zlib, so they take less space
+/// where the page keeps them in memory. pbfcut keeps its temporary files in the store (OPFS in the browser).
 pub fn cut_to_sink<R: Read + Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     boundary: &Boundary,
     tiles: &[Tile],
     complete: &[&str],
-    _memory: bool,
+    memory: bool,
     sink: Sink,
 ) -> Result<Vec<CutCounts>, String> {
     steps();
-    pbfcut::tilecut::cut_to_sink(open, boundary, tiles, complete, 0.0, sink)
+    if memory {
+        pbfcut::tilecut::cut_to_sink(open, boundary, tiles, complete, 0.0, sink)
+    } else {
+        pbfcut::tilecut::cut_raw_to_sink(open, boundary, tiles, complete, sink)
+    }
 }
