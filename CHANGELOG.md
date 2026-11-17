@@ -11,6 +11,10 @@
   of the checks are equal to the Python build (`tests/after.rs`). The report counts the rows of the tables; the Python engine
   counts the edges before the private roads move to `private_edges`.
 
+- **The MATSim and railML exports are in Rust** (`docs/design/all_in_rust.md`, group D): `duckosm-rust matsim` and
+  `duckosm-rust railml`, in the new crate `rust/duckosm-export`. They write the same file as `duckosm matsim` and
+  `duckosm railml` (Monaco and Tartu). A golden test holds the Python output on Monaco.
+
 - **The sorted join of quack by tiles keeps less on the disk.** `quack_join_to` drops each part when it has read all its rows,
   so the caller can delete the file of the part before the join ends (the browser does). The sort writes the pieces of each
   strip over the pieces of the strip before, so its temporary file holds one strip, not all of them. Chromium on the Mac mini,
