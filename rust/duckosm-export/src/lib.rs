@@ -4,8 +4,10 @@
 pub mod cli;
 pub mod gis;
 pub mod gis_debug;
+pub mod lanelet2;
 pub mod matsim;
 pub mod matsim_lanes;
+pub mod offset;
 pub mod opendrive;
 pub mod railml;
 pub mod sumo;
