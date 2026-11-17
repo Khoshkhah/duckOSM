@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<railml xmlns="https://www.railml.org/schemas/2013" version="2.4">
+	<infrastructure id="is_1">
+		<operationControlPoints>
+			<ocp id="ocp_9952646938" name="Monaco - Monte Carlo">
+				<geoCoord coord="7.419498 43.738262" epsgCode="4326"/>
+			</ocp>
+		</operationControlPoints>
+		<tracks>
+			<track id="tr_4978262_4424273194_33014412" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_0" pos="0.0"><connection id="cn0" ref="cn1"/></trackBegin>
+					<trackEnd id="te_0" pos="2783.602"><openEnd id="oe_33014412"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_156780356_3416090599_2440530720" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_1" pos="0.0"><connection id="cn2" ref="cn3"/></trackBegin>
+					<trackEnd id="te_1" pos="2781.303"><openEnd id="oe_2440530720"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_182695883_1930545590_1690189849" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_2" pos="0.0"><connection id="cn4" ref="cn5"/></trackBegin>
+					<trackEnd id="te_2" pos="69.347"><connection id="cn6" ref="cn7"/></trackEnd>
+				</trackTopology>
+				<trackElements>
+					<switches>
+						<switch id="sw_1930545590" pos="0.000" name="sw_1930545590"/>
+						<switch id="sw_1690189849" pos="69.347" name="sw_1690189849"/>
+					</switches>
+				</trackElements>
+			</track>
+			<track id="tr_182695885_245981493_1930545580" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_3" pos="0.0"><openEnd id="oe_245981493"/></trackBegin>
+					<trackEnd id="te_3" pos="1998.402"><connection id="cn8" ref="cn9"/></trackEnd>
+				</trackTopology>
+				<trackElements>
+					<switches>
+						<switch id="sw_1930545580" pos="1998.402" name="sw_1930545580"/>
+					</switches>
+				</trackElements>
+			</track>
+			<track id="tr_182695886_1930545580_1930545584" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_4" pos="0.0"><connection id="cn9" ref="cn8"/></trackBegin>
+					<trackEnd id="te_4" pos="682.374"><connection id="cn10" ref="cn11"/></trackEnd>
+				</trackTopology>
+				<trackElements>
+					<switches>
+						<switch id="sw_1930545584" pos="682.374" name="sw_1930545584"/>
+					</switches>
+				</trackElements>
+			</track>
+			<track id="tr_235692674_2440513258_1690189833" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_5" pos="0.0"><openEnd id="oe_2440513258"/></trackBegin>
+					<trackEnd id="te_5" pos="1998.172"><connection id="cn12" ref="cn13"/></trackEnd>
+				</trackTopology>
+				<trackElements>
+					<switches>
+						<switch id="sw_1690189833" pos="1998.172" name="sw_1690189833"/>
+					</switches>
+				</trackElements>
+			</track>
+			<track id="tr_235977378_1930545584_1930545590" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_6" pos="0.0"><connection id="cn11" ref="cn10"/></trackBegin>
+					<trackEnd id="te_6" pos="69.547"><connection id="cn5" ref="cn4"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_235977378_1930545590_4424273190" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_7" pos="0.0"><openEnd id="oe_1930545590_7"/></trackBegin>
+					<trackEnd id="te_7" pos="553.892"><connection id="cn14" ref="cn15"/></trackEnd>
+				</trackTopology>
+				<trackElements>
+					<switches>
+						<switch id="sw_4424273190" pos="553.892" name="sw_4424273190"/>
+					</switches>
+				</trackElements>
+			</track>
+			<track id="tr_235977378_4424273190_1690189833" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_8" pos="0.0"><connection id="cn15" ref="cn14"/></trackBegin>
+					<trackEnd id="te_8" pos="63.226"><connection id="cn13" ref="cn12"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_444971006_1690189849_3416090599" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_9" pos="0.0"><connection id="cn7" ref="cn6"/></trackBegin>
+					<trackEnd id="te_9" pos="61.178"><connection id="cn3" ref="cn2"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_444971009_1930545584_4424273194" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_10" pos="0.0"><openEnd id="oe_1930545584_10"/></trackBegin>
+					<trackEnd id="te_10" pos="61.096"><connection id="cn1" ref="cn0"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_444971011_1930545580_4424273190" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_11" pos="0.0"><openEnd id="oe_1930545580_11"/></trackBegin>
+					<trackEnd id="te_11" pos="63.041"><openEnd id="oe_4424273190_11"/></trackEnd>
+				</trackTopology>
+			</track>
+			<track id="tr_444971012_1690189833_1690189849" type="mainTrack">
+				<trackTopology>
+					<trackBegin id="tb_12" pos="0.0"><openEnd id="oe_1690189833_12"/></trackBegin>
+					<trackEnd id="te_12" pos="688.108"><openEnd id="oe_1690189849_12"/></trackEnd>
+				</trackTopology>
+			</track>
+		</tracks>
+	</infrastructure>
+</railml>

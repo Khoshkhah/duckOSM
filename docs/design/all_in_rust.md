@@ -38,6 +38,28 @@ rows, or the same file bytes where the format allows. A golden file holds the Py
    - The docs say `duckosm` everywhere.
    - Release 1.0.0. Then move the pins in Studio, sensor-matching, SonoFlow and the other projects.
 
+## Group D: the state
+
+The exports are in the crate `rust/duckosm-export`. The commands are `duckosm-rust <export> ...`, with the options of the
+Python CLI. The golden test (`rust/duckosm-export/tests/golden.rs`) compares each Rust export with the Python output on Monaco;
+`tools/make_golden_exports.py` makes the golden files.
+
+| Export | Rust command | State |
+|---|---|---|
+| MATSim | `duckosm-rust matsim` | Done. The same bytes as Python on Monaco and Tartu (gzip: the same text). |
+| railML | `duckosm-rust railml` | Done. The same bytes as Python on Monaco and Tartu. |
+| GIS | `duckosm-rust export-gis` | Done. GeoPackage, GeoParquet, shapefile: the same columns and rows as Python on Monaco and Tartu; `layers.json`: the same bytes. |
+| GIS check | `gis-debug` | Not started. |
+| OpenDRIVE | `duckosm-rust opendrive` | Done. The same bytes as Python on Monaco and Tartu, with and without `--junctions`. A CRS that is not UTM or EPSG:3006 gets its proj4 text from PROJ's `projinfo` (pyproj uses the same PROJ function). |
+| MATSim lanes | `duckosm-rust matsim-lanes` | Done. The same bytes as Python on Monaco and Tartu. |
+| Lanelet2 | | Not started. It needs the offset line of shapely (GEOS): see group C. |
+| SUMO | | Not started. |
+
+The exports of a GMNS db read the test tables of `tests/data/exports/gmns_driving/` (the columns that they read, as
+Parquet), until group C makes the GMNS db in Rust.
+
+GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
+
 ## Not changed
 
 - The tables and `edge_id` stay the same: other projects join on them.
