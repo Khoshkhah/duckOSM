@@ -153,3 +153,9 @@ to_gis(con, out, modes=None, fmt="gpkg", boundary=True, name=None,
 | `ogr2ogr_bin` | explicit `ogr2ogr` path (else auto-located; GeoPackage assembly only) |
 
 Returns `{"fmt", "path"|"dir", "layers": {name: feature_count}, "files": [...]}`.
+
+## Rust
+
+`duckosm-rust export-gis` (crate `rust/duckosm-export`) has the same options and writes the same layers as the Python export.
+A GeoPackage or Parquet file holds times and versions, so the golden test `rust/duckosm-export/tests/golden.rs` compares
+the columns and the rows of each layer (`tests/data/exports/monaco_gis_summary.tsv`) and `layers.json` byte for byte.
