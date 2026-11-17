@@ -59,7 +59,8 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
 ) -> Result<Vec<CutCounts>, String> {
     steps();
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
-    pbfcut::tilecut::cut_to_tiles(open, boundary, tiles, dir, complete, border_m, Some(&Junctions))
+    // zlib: the tile files can stay (--keep-tiles), and the cut of France keeps its peak memory
+    pbfcut::tilecut::cut_to_tiles(open, boundary, tiles, dir, complete, border_m, Some(&Junctions), true)
 }
 
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
@@ -72,7 +73,7 @@ pub fn cut_to_store<R: Read + Seek + Send>(
     complete: &[&str],
 ) -> Result<TileFiles, String> {
     steps();
-    pbfcut::tilecut::cut_to_store(open, boundary, tiles, complete)
+    pbfcut::tilecut::cut_to_store(open, boundary, tiles, complete, false)
 }
 
 /// The cut of the build by tiles ([`cut_to_tiles`]) into the temporary store: the cut where no folder is (the browser).
@@ -85,7 +86,7 @@ pub fn cut_to_store_build<R: Read + Seek + Send>(
     border_m: f64,
 ) -> Result<TileFiles, String> {
     steps();
-    pbfcut::tilecut::cut_to_store_build(open, boundary, tiles, multipolygons, border_m, Some(&Junctions))
+    pbfcut::tilecut::cut_to_store_build(open, boundary, tiles, multipolygons, border_m, Some(&Junctions), true)
 }
 
 /// [`cut_to_store`], with each tile file given to `sink` (in pieces, tile by tile): the browser writes each tile into a
@@ -101,9 +102,5 @@ pub fn cut_to_sink<R: Read + Seek + Send>(
     sink: Sink,
 ) -> Result<Vec<CutCounts>, String> {
     steps();
-    if memory {
-        pbfcut::tilecut::cut_to_sink(open, boundary, tiles, complete, 0.0, sink)
-    } else {
-        pbfcut::tilecut::cut_raw_to_sink(open, boundary, tiles, complete, sink)
-    }
+    pbfcut::tilecut::cut_to_sink(open, boundary, tiles, complete, 0.0, memory, sink)
 }
