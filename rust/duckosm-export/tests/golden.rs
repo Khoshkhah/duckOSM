@@ -98,6 +98,20 @@ fn summary(src: &str) -> String {
     format!("{cols}\t{n}\t{h}")
 }
 
+/// Shapefiles that gis-debug must fail: the same SQL as `bad_files` in tools/make_golden_exports.py.
+fn bad_files(d: &Path) {
+    std::fs::create_dir_all(d).unwrap();
+    let con = duckosm_export::open(db()).unwrap();
+    let d = d.display();
+    con.execute_batch(&format!(
+        "COPY (SELECT edge_id::DOUBLE AS edge_id, highway, geometry FROM driving.edges) TO '{d}/m_edges_driving.shp' \
+         (FORMAT gdal, DRIVER 'ESRI Shapefile', SRS 'EPSG:4326');
+         COPY (SELECT CASE WHEN edge_id % 7 = 0 THEN NULL ELSE edge_id END AS edge_id, highway, geometry FROM walking.edges) \
+         TO '{d}/m_edges_walking.shp' (FORMAT gdal, DRIVER 'ESRI Shapefile', SRS 'EPSG:3857')"
+    ))
+    .unwrap();
+}
+
 #[test]
 fn gis_equals_python() {
     use duckosm_export::gis::to_gis;
@@ -126,6 +140,14 @@ fn gis_equals_python() {
         got.push(format!("shp\t{lyr}\t{}", summary(&format!("ST_Read('{}/monaco_{lyr}.shp')", shp.display()))));
         let prj = std::fs::read_to_string(shp.join(format!("monaco_{lyr}.prj"))).unwrap();
         got.push(format!("shp\t{lyr}.prj\t{}\t\t", prj.trim()));
+    }
+    // gis-debug on these files (the GeoPackage of one file needs ogr2ogr, as in the golden), and on bad shapefiles
+    assert!(d.join("monaco.gpkg").is_file(), "the gis-debug golden needs the GeoPackage of ogr2ogr (GDAL)");
+    bad_files(&d.join("bad"));
+    for (x, golden) in [("monaco.gpkg", "gpkg"), ("shp", "shp"), ("bad", "bad")] {
+        let page = d.join(format!("{x}.html"));
+        duckosm_export::gis_debug::write_debug(&d.join(x), Some(db()), &page, None).unwrap();
+        same(&page, &format!("gis_debug_{golden}.html.gz"));
     }
     let got = got.join("\n") + "\n";
     let bad: Vec<String> = got.lines().zip(golden.lines()).filter(|(a, b)| a != b).map(|(a, b)| format!(" rust:   {a}\n python: {b}")).collect();
@@ -167,5 +189,17 @@ fn matsim_lanes_equals_python() {
     assert!(s.lanes_links > 0 && s.signal_systems.unwrap() > 0);
     for f in ["lanes", "signalSystems", "signalGroups", "signalControl"] {
         same(&d.join(format!("{f}.xml")), &format!("matsim_lanes_{f}.xml.gz"));
+    }
+}
+
+#[test]
+fn sumo_equals_python() {
+    for m in ["driving", "walking"] {
+        let d = out(&format!("sumo_{m}"));
+        let s = duckosm_export::sumo::to_sumo(db(), &d, m, "monaco", true, None, false).unwrap();
+        assert!(s.net.is_none() && s.con.is_some());
+        for f in ["nod", "edg", "con"] {
+            same(&d.join(format!("monaco.{f}.xml")), &format!("sumo_{m}.{f}.xml.gz"));
+        }
     }
 }
