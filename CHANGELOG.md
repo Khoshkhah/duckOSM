@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The check page of a GIS export is in Rust**: `duckosm-rust gis-debug` writes the same page and the same `--json` as
+  `duckosm gis-debug`. It reads the export through GDAL (DuckDB's `ST_Read`), not geopandas. The page template moved to
+  `src/duckosm/templates/gis_debug.html`, and Python and Rust both use it.
+
 - **The SUMO export is in Rust**: `duckosm-rust sumo` writes the same plain XML and `.netccfg` as `duckosm sumo` and
   runs netconvert in the same way (`SUMO_HOME`, the PATH, or the `eclipse-sumo` package of the active Python environment).
 
