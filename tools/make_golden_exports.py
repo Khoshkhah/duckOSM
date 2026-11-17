@@ -17,10 +17,12 @@ from pathlib import Path
 import duckdb
 
 from duckosm.gis import to_gis
+from duckosm.gis_debug import write_debug
 from duckosm.matsim import to_matsim
 from duckosm.matsim_lanes import to_matsim_lanes
 from duckosm.opendrive import to_opendrive
 from duckosm.railml import to_railml
+from duckosm.sumo import to_sumo
 
 
 def summary(src):
@@ -58,6 +60,15 @@ def gmns_db(fixture, path):
     con.close()
 
 
+def bad_files(con, d):
+    """Shapefiles that gis-debug must fail: the same SQL as `bad_files` in golden.rs."""
+    Path(d).mkdir()
+    con.execute(f"COPY (SELECT edge_id::DOUBLE AS edge_id, highway, geometry FROM driving.edges) TO '{d}/m_edges_driving.shp' "
+                f"(FORMAT gdal, DRIVER 'ESRI Shapefile', SRS 'EPSG:4326')")
+    con.execute(f"COPY (SELECT CASE WHEN edge_id % 7 = 0 THEN NULL ELSE edge_id END AS edge_id, highway, geometry FROM walking.edges) "
+                f"TO '{d}/m_edges_walking.shp' (FORMAT gdal, DRIVER 'ESRI Shapefile', SRS 'EPSG:3857')")
+
+
 def gis(db, out):
     """export-gis on Monaco: GeoParquet, GeoPackage (one file, with ogr2ogr) and shapefile -> a summary of each layer."""
     lines = ["export\tlayer\tcolumns\trows\tmd5"]
@@ -75,6 +86,11 @@ def gis(db, out):
         for lyr in res["layers"]:
             lines.append(f"shp\t{lyr}\t" + summary(f"ST_Read('{tmp}/shp/monaco_{lyr}.shp')"))
             lines.append(f"shp\t{lyr}.prj\t" + Path(f"{tmp}/shp/monaco_{lyr}.prj").read_text().strip() + "\t\t")
+        # gis-debug: the GeoPackage, the shapefiles, and shapefiles with a float edge_id, NULLs and another CRS
+        bad_files(src, f"{tmp}/bad")
+        for x in ("monaco.gpkg", "shp", "bad"):
+            write_debug(f"{tmp}/{x}", source_db=db, out=f"{tmp}/{x}.html")
+            gz(Path(f"{tmp}/{x}.html"), out / f"gis_debug_{x.split('.')[-1]}.html.gz")
         src.close()
     (out / "monaco_gis_summary.tsv").write_text("\n".join(lines) + "\n")
 
@@ -101,6 +117,12 @@ def main(db, out, gmns=None):
             gz(tmp / f, out / f"{f}.gz")
         for f in ("lanes", "signalSystems", "signalGroups", "signalControl"):
             gz(tmp / "ml" / f"{f}.xml", out / f"matsim_lanes_{f}.xml.gz")
+        src = duckdb.connect(db, read_only=True)
+        for m in ("driving", "walking"):                 # the plain XML: the CI has no netconvert
+            to_sumo(src, tmp / m, mode=m, net_name="monaco", run_netconvert=False)
+            for f in ("nod", "edg", "con"):
+                gz(tmp / m / f"monaco.{f}.xml", out / f"sumo_{m}.{f}.xml.gz")
+        src.close()
     to_matsim(db, out / "monaco_network.xml.gz", mode="driving")
     to_matsim(db, out / "monaco_all_network.xml.gz", mode="all", crs="EPSG:3035")
     to_railml(db, out / "monaco.railml.xml")

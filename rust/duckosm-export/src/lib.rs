@@ -3,10 +3,12 @@
 
 pub mod cli;
 pub mod gis;
+pub mod gis_debug;
 pub mod matsim;
 pub mod matsim_lanes;
 pub mod opendrive;
 pub mod railml;
+pub mod sumo;
 
 use duckdb::{AccessMode, Config, Connection};
 use std::path::Path;
