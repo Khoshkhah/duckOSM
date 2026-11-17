@@ -7,7 +7,7 @@ config. There are two ways in: **build from a PBF**, or **clip from a parent bui
 that runs inside the output DuckDB file.
 
 This page is the Python `duckosm build`. For the Rust build, offline and in the browser, and where each step keeps
-its data (in memory or in storage), see [Offline and online builds](../concepts/offline-online.md).
+its data (in memory or in storage), see [Browser and native builds](../concepts/browser-native.md).
 
 ## Build from a PBF
 

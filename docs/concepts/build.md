@@ -1,7 +1,7 @@
 # How a build works
 
 A build (`duckosm build`, or `DuckOSM(config).run()` in Python) runs a list of steps chosen from the config. Each step is SQL
-in the output DuckDB file. For the Rust build, see [Offline and online builds](offline-online.md).
+in the output DuckDB file. For the Rust build, see [Browser and native builds](browser-native.md).
 
 ## Two ways in
 
