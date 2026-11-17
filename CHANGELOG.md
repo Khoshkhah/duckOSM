@@ -4,7 +4,8 @@
 
 - **`duckosm-rust --config`: the base-map layers without a boundary, and `duckosm-rust features-check`, are in Rust**
   (`docs/design/all_in_rust.md`, group A). Without a boundary, the layers run on the `raw.*` of the whole file with duckOSM's
-  own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. `features-check` (`rust/duckosm-build/src/
+  own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. The OSM fixes change `raw.*` first, as
+  duckOSM's `_raw_way_fixes` and the arrows of `OSMOverrides` do (`after::raw_fixes`). `features-check` (`rust/duckosm-build/src/
   features_check.rs`) prints duckOSM's report; groups with equal keys come in the order of their names. On Monaco's whole sample
   file, the 11 layers and the lines of the report equal the Python build (`tests/features_no_boundary.rs`). With this, every
   key of a `duckosm build` config runs in `duckosm-rust --config` with no skip, except `viz.enabled` (the maps, group F).

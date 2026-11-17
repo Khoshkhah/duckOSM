@@ -1,0 +1,19 @@
+# The OSM fixes of rust/duckosm-build/tests/features_no_boundary.rs: one rule of each kind that changes raw.* (Monaco ids,
+# not real fixes). duckOSM applies them to raw.* before the base-map layers.
+overrides:
+  - osm_id: 23715051            # a building: removed
+    remove: true
+  - osm_id: 25722685            # a building: only a part of its ring stays, and a tag
+    keep_nodes: [280486998, 1209309217]
+    tags: {roof:shape: flat}
+  - osm_id: 4227277             # Rue de la Colle: its arrows
+    turn_lanes_forward: "none|none"
+new_ways:
+  - id: 9000000000001           # a footway: the tags of way 4227277 and its own, an OSM node and a new node
+    tags_from: 4227277
+    tags: {highway: footway, name: Test}
+    nodes: [1918966551, [7.4201, 43.7321]]
+extra:
+  tag_edits:
+    - {type: node, id: 21911886, set: {crossing: marked}, delete: [crossing_ref]}
+    - {type: way, id: 4227277, set: {surface: paving_stones}, delete: [lit]}

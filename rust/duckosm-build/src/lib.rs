@@ -2111,6 +2111,11 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 }
             }
             log.step("write duckdb");
+            if raw_first && !fixes.is_empty() {
+                // duckOSM applies the fixes to raw.* too: the base-map layers read it (the network has read it already)
+                duckosm_duckdb::after::raw_fixes(&db, &fixes, &names)?;
+                log.step("raw.* fixes");
+            }
             if features {
                 let sql = if raw_first { features_sql_from_raw() } else { FEATURES_SQL.to_string() };
                 duckosm_duckdb::write_features(&db, &pq_dir, &sql)?;
