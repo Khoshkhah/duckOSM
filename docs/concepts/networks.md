@@ -1,217 +1,69 @@
 # What each network contains
 
-Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. Monaco:
+Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. All rules and tag lists:
+[networks in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/networks_details.md).
 
-| Mode | Edges | Nodes | Speed |
-|---|---|---|---|
-| `driving` | 2,765 | 1,719 | the speed limit, or a default per road class |
-| `walking` | 10,952 | 4,116 | 5 km/h |
-| `cycling` | 10,274 | 4,151 | 15 km/h; 5 km/h on dismount edges |
+| Mode | Monaco edges | Monaco nodes | Keeps | Speed |
+|---|---|---|---|---|
+| `driving` | 2,765 | 1,719 | roads from `motorway` to `service`, `living_street`, `road` | the speed limit, or a default for the road class |
+| `walking` | 10,952 | 4,116 | footways, paths, steps and roads people can walk on; never `motorway` ([Walking](../guides/walking.md)) | 5 km/h |
+| `cycling` | 10,274 | 4,151 | cycleways, paths, tracks and roads; plus dismount edges | 15 km/h; 5 km/h on dismount edges |
 
-## Which OSM ways each mode keeps
-
-| Mode | Keeps |
-|---|---|
-| `driving` | `highway` = `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`s), `unclassified`, `residential`, `service`, `living_street`, `road`. Also `highway=pedestrian` when `motorcar` or `motor_vehicle` is `yes` / `designated` / `permissive`, or `access` is `delivery` / `destination`: these become `living_street` |
-| `walking` | every way people may walk on: `highway` = `footway`, `path`, `pedestrian`, `steps`, `living_street`, `residential`, `service`, `platform`, `corridor`, `track`, `bridleway`, `road`, `unclassified`, `tertiary`, `secondary`, `primary`, `trunk` (and their `_link`s). Not a road tagged `motorroad=yes`, `foot=use_sidepath`, or `sidewalk` (or `sidewalk:both`, or both `sidewalk:left` and `sidewalk:right`) = `separate`: people walk on its separately mapped sidewalk. Any way tagged `foot` = `yes` / `designated` / `permissive` or `sidewalk` = `yes` / `both` / `left` / `right` is kept. Never `motorway` or `motorway_link`. [Walking](../guides/walking.md) |
-| `cycling` | `highway` = `cycleway`, `path`, `track`, `bridleway`, `living_street`, `residential`, `service`, `unclassified`, `tertiary`, `secondary`, `primary` (and their `_link`s); any way tagged `bicycle` = `yes` / `designated` / `permissive`, or with a `cycleway` tag other than `no` / `none` / `separate`. Plus [dismount edges](#dismount-edges) |
-
-Then the [access tags](#access-private-and-forbidden-roads) decide, per mode.
-
-Every mode needs a `highway` tag: a way with only `foot`, `bicycle` or `sidewalk` tags, or with only
-`area:highway` (the outline of a pedestrian area), is not a road and is in no network. The one exception is the
-ferry line (`route=ferry`, with `foot=yes` for walking or `bicycle=yes` for cycling): in Monaco it comes into
-walking, where it is walked at 5 km/h like a footpath, and its `highway` is `ferry` (its `walk_type` is `footpath`, its `cycle_type` `mixed_traffic`).
-
-`highway=service` (driveways, parking aisles, alleys) is part of the network like any other road.
+A way with no `highway` tag is in no network. The exception is a ferry line. A way that a mode does not keep stays in `raw.ways`.
 
 ## Access: private and forbidden roads
 
-For each mode, the most specific access tag decides:
+The most specific access tag of the mode decides: driving `motorcar`, `motor_vehicle`, `vehicle`, `access`; walking `foot`,
+`access`; cycling `bicycle`, `vehicle`, `access`.
 
-| Mode | Tags, most specific first |
+| Value | The road |
 |---|---|
-| `driving` | `motorcar`, `motor_vehicle`, `vehicle`, `access` |
-| `walking` | `foot`, `access` |
-| `cycling` | `bicycle`, `vehicle`, `access`; on a [dismount edge](#dismount-edges): `foot`, `access` |
-
-| Its value | The road in that mode |
-|---|---|
-| `no` (driving also `agricultural`, `forestry`, `emergency`) | **not there.** It stays in the other modes that may use it: a road tagged `motor_vehicle=no` is still walkable |
-| `private` | **visible, never routable**: in `<mode>.private_edges`, not in `edges` |
-| driving only: for buses only (below) | **visible, never routable**, like a private road: in `driving.private_edges` with `access = 'bus'` |
-| anything else (`yes`, `destination`, `delivery`, …) or none | a normal road |
-
-So `access=private` + `motor_vehicle=yes` is a normal road for driving, and `motor_vehicle=no` doesn't
-affect walking or cycling. The mode's value is kept in `edges.access`.
-
-**Private roads** (a driveway, a gated street, a company road) are built like every other road,
-with the same `edge_id` formula, then moved from `edges` to `private_edges`, which has the same
-columns except the H3 ones. So routing, the graph of legal turns and every export use only roads you may use. A road
-that you can reach only through a private one stays in `edges` as a separate piece of the network (there is no
-[component filter](cleanup.md#component-filter)). The maps still draw private roads, marked
-([Draw a map](../guides/draw-map.md)).
-
-**Bus lanes and bus-only roads** are cars' private roads too: in driving they are built, then moved to
-`private_edges` with `access = 'bus'`. A bus-only road is one with `highway=busway`, or whose driving
-access is `psv`, or `no` / `private` while `bus` or `psv` is `yes` / `designated` (`psv` means buses
-and taxis; both count as `bus`). A **bus lane against a one-way street** (`oneway=yes` with
-`oneway:bus=no` or `oneway:psv=no`) adds the reverse edge, as a bus lane: its `edge_id` is the same as
-that direction in cycling and walking. Monaco: 18 bus edges, among them the contraflow bus lane of
-Boulevard des Moulins.
+| `no` (driving also `agricultural`, `forestry`, `emergency`) | not in this mode |
+| `private` | in `<mode>.private_edges`: drawn, never routed |
+| bus-only road or bus lane (driving) | in `driving.private_edges` with `access = 'bus'` |
+| other or none | a normal road |
 
 ### Pedestrian streets in driving
 
-A `highway=pedestrian` way that cars may use (`motorcar` or `motor_vehicle` is `yes`, `designated` or
-`permissive`, or `access` is `delivery`, `destination` or `agricultural`) is a `living_street` in
-`driving.edges`. Every other pedestrian way is built in driving too (cut at the same points, with the
-same `edge_id` as in walking), then moved to `driving.private_edges` with `highway = 'pedestrian'`.
-`access` tells why cars cannot use it:
-
-| The most specific car tag (`motorcar`, `motor_vehicle`, `vehicle`, `access`) | `access` |
-|---|---|
-| `delivery` (from `motorcar` or `motor_vehicle`) | `delivery` |
-| `private` | `private` |
-| none, `no`, or any other value | `pedestrian` |
-
-These ways are never routed or exported. The maps draw them. Other path classes (`footway`, `path`,
-`steps`, `cycleway`) are not in driving. Norrmalm: 831 edges (783 `pedestrian`, 32 `delivery`, 16
-`private`); `driving.edges` is unchanged. Design: `docs/design/pedestrian_private_edges.md`.
-
-Monaco:
-
-| Mode | Routable edges | In `private_edges` |
-|---|---|---|
-| `driving` | 2,765 | 689 (473 pedestrian, 198 private, 18 for buses) |
-| `walking` | 10,952 | 154 |
-| `cycling` | 10,274 | 133 |
-
-A way a mode leaves out is still in `raw.ways`, with all its tags. To remove or keep one road
-yourself, use a [fix](../guides/fix-osm-errors.md).
+A pedestrian street that cars can use is a `living_street` in `driving.edges`. All other pedestrian streets go to
+`driving.private_edges` with `highway = 'pedestrian'`. Their `access` is `delivery`, `private` or `pedestrian`.
 
 ## One-way roads
 
-A one-way edge has no reverse twin, so the road can only be used from `source` to `target`.
-
 | Mode | One-way when |
 |---|---|
-| `driving` | `oneway` = `yes` / `1` / `true` / `-1`; `junction` = `roundabout` / `circular`; `motorway` and `motorway_link` unless `oneway=no` |
-| `cycling` | as driving (without the motorway rule), but `oneway:bicycle=no` makes it two-way and `oneway:bicycle=yes` one-way. Dismount edges are always two-way |
-| `walking` | only `oneway:foot` = `yes` / `1` / `true` / `-1` |
-
-`oneway=-1` (one-way against the way's drawing direction) is turned round, so its edge runs the
-legal way.
+| `driving` | `oneway` = `yes` / `1` / `true` / `-1`; a roundabout; `motorway` unless `oneway=no` |
+| `cycling` | as driving, but `oneway:bicycle` wins. Dismount edges are two-way |
+| `walking` | only `oneway:foot` |
 
 ## Speeds and travel time
 
-`maxspeed_kmh` is never empty. For driving it is the `maxspeed` tag when it is a number, converted
-when it ends in `mph`, and otherwise (untagged, or a value like `RU:urban` or `walk`) a default:
-
-| Road class | km/h |
-|---|---|
-| `motorway`, `motorway_link` | 110 |
-| `trunk`, `trunk_link` | 90 |
-| `primary`, `primary_link` | 70 |
-| `secondary`, `secondary_link` | 60 |
-| `tertiary`, `tertiary_link` | 50 |
-| `unclassified`, `road` | 40 |
-| `residential` | 30 |
-| `living_street`, `service` | 20 |
-| any other class | 50 |
-
-Monaco: 899 of the 2,765 driving edges have a `maxspeed` tag.
-
-`cost_s`, the travel time in seconds, is `length_m / (maxspeed_kmh / 3.6)`. It uses the speed limit:
-no traffic, no delay at junctions. Routing and the edge graph use it.
+`maxspeed_kmh` is the `maxspeed` tag, or a default from 110 km/h (`motorway`) to 20 km/h (`living_street`, `service`).
+`cost_s = length_m / (maxspeed_kmh / 3.6)`: no traffic, no delay at junctions.
 
 ## Lanes
 
-`lanes` is the number of lanes in the edge's own direction, never empty, except on
-[connector edges](cleanup.md#connect-dangling-paths) (walking, cycling), where it is NULL:
-
-1. `lanes:forward` / `lanes:backward`, when tagged.
-2. A one-way road: all of `lanes`.
-3. A two-way road: `lanes` split in two, at least 1 each way; the drawing direction gets the larger half.
-4. Nothing tagged: 2 for `motorway` and `trunk`, otherwise 1.
-
-A `lanes:reversible` lane is added to both directions. Monaco: 1,165 of the 2,765 driving edges are on
-a way with a lanes tag.
+`lanes` is the number of lanes in the edge's direction: from `lanes:forward` / `lanes:backward`, else from `lanes`, else 2 for
+`motorway` and `trunk` and 1 for other roads. It is NULL on connector edges.
 
 ## Dismount edges
 
-Cycling also gets footways and pedestrian streets, so that cycleways joined only by them stay
-connected. On those where riding isn't allowed (`bicycle` isn't `yes` / `designated` /
-`permissive`), `dismount` is `TRUE`: the bike is pushed, at 5 km/h, in both directions, and
-`cycle_type` is `dismount`. Their access is the walking one (`foot`, then `access`): `no` leaves
-them out, `private` moves them to `private_edges`. A [connector edge](cleanup.md#connect-dangling-paths)
-that extends a dismount path is dismount too. Monaco: 7,240 of the 10,274 cycling edges. For a ride-only network, use `WHERE NOT dismount`;
-`options.cycling_dismount: false` leaves them out of the build.
+Cycling also gets footways and pedestrian streets, so that the cycleways stay connected. Where riding is not allowed, `dismount`
+is TRUE: you push the bike at 5 km/h. For a ride-only network, use `WHERE NOT dismount`. `options.cycling_dismount: false`
+removes them.
 
 ## `walk_type` and `cycle_type`
 
-Walking and cycling edges get a type from OSM sub-tags. The first rule that matches wins.
-
-| `walk_type` | From |
-|---|---|
-| `escalator` / `steps` | `highway=steps`, with / without `conveying` |
-| `sidewalk` / `crossing` / `footpath` | `highway=footway` with `footway=sidewalk` / `footway=crossing` / anything else |
-| `plaza` / `pedestrian_street` | `highway=pedestrian`, with / without `area=yes` |
-| `shared_street` | `living_street` |
-| `sidewalk` | any other road with a `sidewalk` tag (not `no` / `none` / `separate`): you walk its sidewalk |
-| `shared_road` | `residential`, `service`, `unclassified`, `road`, `tertiary`, `secondary`, `primary`, `trunk` (and their `_link`s): walked on the carriageway |
-| `corridor` | `highway=corridor`, or `indoor=yes` |
-| `platform` | `highway=platform` |
-| `path` | `path`, `track`, `bridleway` |
-| `footpath` | anything else |
-
-| `cycle_type` | From |
-|---|---|
-| `dismount` | a [dismount edge](#dismount-edges) |
-| `cycleway` | `highway=cycleway` |
-| `cycle_track` / `cycle_lane` / `shared_lane` / `bus_cycle_lane` | the cycleway tag on the edge's side: `track` / `lane` / `shared_lane` / `share_busway` |
-| `segregated_path` / `shared_path` | `path`, `track`, `bridleway`, with / without `segregated=yes` |
-| `mixed_traffic` | anything else, including a footway or pedestrian street you may ride (`bicycle=yes`) |
-
-The side is `cycleway:right` for an edge in the drawing direction and `cycleway:left` for its
-reverse, then `cycleway:both`, then `cycleway`.
+Walking and cycling edges get a type from OSM sub-tags, for example `sidewalk`, `crossing`, `steps` (walking) and `cycleway`,
+`cycle_lane`, `dismount`, `mixed_traffic` (cycling).
 
 ## Turn restrictions
 
-Only the driving network has them. They come from OSM relations `type=restriction` with a `from`
-way, a `via` node and a `to` way, and from the turn rules of a [fixes file](../guides/fix-osm-errors.md).
-A `no_*` restriction removes that one turn from `edge_graph`; an `only_*` restriction removes every
-other turn from the `from` edge. Monaco: 38 of the 43 restriction relations map onto edges.
-
-Not used: restrictions through a via way, the `except` tag, and tags like `restriction:hgv` or
-`restriction:conditional`. Any turn not removed is allowed, including a U-turn onto the reverse
-twin of a two-way road.
+Only driving has them, from OSM `type=restriction` relations (via a node) and from a [fixes file](../guides/fix-osm-errors.md).
+A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction removes all other turns. Monaco: 38 of 43.
 
 ## Bus routes
 
-Buses have no network of their own: the OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) are matched to the driving edges they travel,
-and stored in schema [`bus`](../reference/database.md#bus-schema) (`bus.routes`, `bus.route_edges`). A build from a PBF with driving does it
-(`options.bus_routes`, on); [`duckosm bus DB`](../reference/cli.md#bus) adds it to a file built before.
-
-A route relation lists its ways in travel order; its stops and platforms are left out. Each way is travelled from the node it shares with the way before
-to the node it shares with the way after, so its direction comes from its neighbours, and on a two-way street that picks the `#nf` or the `#nr` edge.
-The first or last way of a stretch, where only one neighbour is known, is travelled from or to its far end; when it is joined in its middle (or is a
-stretch alone), the role `forward` / `backward` decides, else the way's one-way. A roundabout is followed from where the route enters to where it leaves. The edges come from `driving.edges` and, for bus lanes and
-bus-only roads, `driving.private_edges` with `access = 'bus'`: a bus against a one-way street runs on its contraflow bus lane.
-
-Nothing is left out silently. `bus.routes.outside` counts the member ways outside the area; `bus.routes.gaps` lists every other way the route could not be
-followed on, as `'<way_id> <kind>'`:
-
-| Kind | The way |
-|---|---|
-| `no_connection` | shares no node with the next member way: the route breaks there |
-| `no_edge` | has no driving edge (nor bus lane) in the direction travelled |
-| `private` | is a private road (in `driving.private_edges`, not for buses) |
-| `role_conflict` | has a role (`forward` / `backward`) its neighbours contradict; the neighbours are followed |
-| `ambiguous` | the first or last way of a stretch, two-way, joined in its middle, no role: its direction can't be told |
-| `role` | has a role other than `''`, `forward`, `backward` |
-
-Monaco: 56 bus routes, none with gaps (38 run partly outside the area), 5,609 route edges on 1,034 driving edges, 14 of them bus lanes. The contraflow bus
-lane of Boulevard Charles III (`1449981121#1r`) carries lines 3, 607 and X1.
-
-The [level area](../guides/drawing-order.md) marks these edges: `bus` is in their `modes` and `bus_lines` lists the lines, e.g. `1, 2, 5`.
-
+OSM bus route relations are matched to the driving edges, in schema [`bus`](../reference/database.md#bus-schema)
+(`bus.routes`, `bus.route_edges`). A PBF build with driving makes them; [`duckosm bus DB`](../reference/cli.md#bus) adds them later.
+`bus.routes.gaps` lists each way that the route cannot follow. Monaco: 56 routes, no gaps.
