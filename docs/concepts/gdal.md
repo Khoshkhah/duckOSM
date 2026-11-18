@@ -13,26 +13,27 @@ In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quac
 
 ## Results
 
-Mac mini (12 cores, 16 GB), GDAL 3.13.3, GeoParquet.
+Mac mini (12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the memory is the peak footprint.
 
 ### France (5.1 GB)
 
 | | `ogr2ogr` | duckOSM | duckOSM in the browser |
 |---|---|---|---|
 | Time | 14 min 18 s¹ | **3 min 37 s** | 5 min 23 s |
-| Memory | 1.6 GB | **0.9 GB** | 1.3 GB + 4.1 GB² |
-| Files | 15.6 GB | **11.3 GB** | 13.7 GB |
+| Memory | 1.7 GB | **1.0 GB** | 1.3 GB + 4.3 GB² |
+| Files | 16.7 GB | **12.1 GB** | 14.4 GB³ |
 
-### Kentucky (141 MB)
+### Kentucky (148 MB)
 
 | | `ogr2ogr` | duckOSM | duckOSM in the browser |
 |---|---|---|---|
-| Time | 12.5 s¹ | **3.7 s** | –³ |
-| Memory | 0.58 GB | **0.27 GB** | –³ |
-| Files | 0.43 GB | **0.37 GB** | –³ |
+| Time | 12.5 s¹ | **3.7 s** | –⁴ |
+| Memory | 0.62 GB | **0.29 GB** | –⁴ |
+| Files | 0.46 GB | **0.39 GB** | –⁴ |
 
 ¹ Five runs, one for each layer: GDAL's Parquet driver writes one layer to a file. One read takes about 0.43 of this (Kentucky, measured); France one read: about 6 min 10 s (an estimate).
-² In the 12 tile workers. ³ Not measured on the Mac mini. As a GeoPackage, Kentucky takes 8.8 s with `ogr2ogr` and 4.5 s with duckOSM.
+² In the 12 tile workers. ³ Snappy: the browser has no zstd. ⁴ Not measured on the Mac mini.
+As a GeoPackage, Kentucky takes 8.8 s with `ogr2ogr` and 4.5 s with duckOSM.
 
 ## The layers
 
@@ -48,9 +49,9 @@ The rules and the columns are those of GDAL's default `osmconf.ini`; the other t
 
 ## The rows are the same
 
-On Monaco (all layers, also in the browser) and Kentucky (2 240 511 rows), each row equals GDAL's.⁴
+On Monaco (all layers, also in the browser) and Kentucky (2 240 511 rows), each row equals GDAL's.⁵
 
-⁴ GDAL on Linux. GDAL on the Mac mini (arm64) gives one other polygon on Kentucky.
+⁵ GDAL on Linux. GDAL on the Mac mini (arm64) gives one other polygon on Kentucky.
 
 ## Why the files are smaller
 
