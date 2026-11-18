@@ -2,3 +2,5 @@ schema	lanes	length_m	not_simple	crossing_pairs	constant_offset	connectors	conne
 gmns_cycling	11707	262181.385	3	0	9285	-	-
 gmns_driving	3321	110212.701	4	0	2540	4129	0
 gmns_walking	11934	262612.011	0	0	11578	-	-
+schema	crossings	lane_rows	stretch_outside	across_outside	width_outside
+gmns_driving	492	2118	0	0	0

@@ -271,6 +271,17 @@ pub fn intersection_count(p1: P, p2: P, q1: P, q2: P) -> usize {
     line_intersection(p1, p2, q1, q2).n
 }
 
+/// The points of `LineIntersector::computeIntersection` of the segments p1-p2 and q1-q2 (none, one, or two where they overlap).
+pub fn intersection_points(p1: P, p2: P, q1: P, q2: P) -> Vec<P> {
+    let li = line_intersection(p1, p2, q1, q2);
+    li.pts[..li.n].to_vec()
+}
+
+/// The point p is inside the ring or on it (`RayCrossingCounter`, not EXTERIOR).
+pub fn in_or_on_ring(p: P, ring: &[P]) -> bool {
+    in_ring(p, ring)
+}
+
 /// The first point of `LineIntersector::computeIntersection` of the segments p1-p2 and q1-q2, if they meet.
 pub fn segment_intersection(p1: P, p2: P, q1: P, q2: P) -> Option<P> {
     let li = line_intersection(p1, p2, q1, q2);

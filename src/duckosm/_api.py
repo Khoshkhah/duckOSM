@@ -10,8 +10,8 @@ TODO (step 6, before the Python engine code goes):
   other tables with a fixes file of the page (tests/test_page_fixes.py), and ``main.visualization_metadata`` gives
   ``duckosm 0.7.0`` as the version. tests/test_engine_rust.py, test_levels_in_build.py, test_ask_schema.py,
   test_editor_changes.py and test_page_fixes.py fail with it.
-- GMNS (group C): ``to_gmns``, ``to_meso``, ``to_micro``, ``check_gmns``, and ``to_sumo`` with ``bus_edges``,
-  ``edge_attrs`` or ``lanes`` (the GMNS parts of the SUMO export).
+- GMNS (group C): the command ``duckosm gmns`` is Rust; the functions ``to_gmns``, ``to_meso``, ``to_micro``,
+  ``check_gmns`` and ``to_sumo`` with ``bus_edges``, ``edge_attrs`` or ``lanes`` still call the Python code.
 - The maps (group F): ``gmns-viz``, ``gmns-map``.
 - The commands with no Rust port yet: ``levels``, ``bus``, ``multimodal``, ``clip-pbf`` (see ``duckosm/_main.py``).
 - ``to_networkx``, ``to_networkx_nodes`` and ``write_graph`` give networkx graphs: they stay Python.

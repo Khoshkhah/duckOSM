@@ -638,5 +638,30 @@ pub fn lane_report(gmns_db: &std::path::Path) -> crate::Result<Vec<String>> {
         };
         out.push(format!("{s}\t{}\t{:.3}\t{not_simple}\t{crossing}\t{constant}\t{conns}\t{off}", rows.len(), total));
     }
+    // the crossings: each lane stretch inside its lane (5 cm and 0.5 %: the stretch is in the flat metre frame of the crossings, the
+    // lane length on the ellipsoid), each part across inside the zebra (1 mm), the width the tag's or
+    // 2.5-4 m
+    let xs = q("SELECT DISTINCT table_schema FROM information_schema.tables WHERE table_name = 'lane_crossing' AND table_schema LIKE 'gmns\\_%' ESCAPE '\\' ORDER BY 1")?;
+    if !xs.is_empty() {
+        out.push("schema\tcrossings\tlane_rows\tstretch_outside\tacross_outside\twidth_outside".to_string());
+    }
+    for s in xs {
+        let n = |sql: String| -> crate::Result<i64> { con.query_row(&sql, [], |r| r.get(0)).map_err(|e| format!("{e}\n{sql}")) };
+        let len = "ST_Length_Spheroid(ST_FlipCoordinates(g))";
+        let row = |what: &str| format!("(SELECT lane_id, geom AS g FROM {s}.lane UNION ALL SELECT connector_id, geom FROM {s}.lane_connector) {what}");
+        out.push(format!(
+            "{s}\t{}\t{}\t{}\t{}\t{}",
+            n(format!("SELECT count(*) FROM {s}.crossing"))?,
+            n(format!("SELECT count(*) FROM {s}.lane_crossing"))?,
+            n(format!(
+                "SELECT count(*) FROM {s}.lane_crossing x JOIN {} USING (lane_id) WHERE x.start_lr < -0.05 OR x.end_lr > 1.005 * {len} + 0.05 OR x.start_lr >= x.end_lr",
+                row("r(lane_id, g)")
+            ))?,
+            n(format!(
+                "SELECT count(*) FROM {s}.lane_crossing x JOIN {s}.crossing c USING (crossing_id) WHERE x.across_from < -0.001 OR x.across_to > c.length + 0.001 OR x.across_from >= x.across_to"
+            ))?,
+            n(format!("SELECT count(*) FROM {s}.crossing WHERE width < 0.5 OR width > 20 OR (width NOT BETWEEN 2.5 AND 4.0 AND source = 'node')"))?,
+        ));
+    }
     Ok(out)
 }

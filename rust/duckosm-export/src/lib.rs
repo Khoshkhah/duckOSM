@@ -2,13 +2,17 @@
 //! Python export in src/duckosm/ and writes the same file. `cli` has the commands of `duckosm`.
 
 pub mod cli;
+pub mod crossings;
 pub mod gis;
 pub mod gis_debug;
 pub mod geos;
 pub mod lanelet2;
 pub mod gmns;
+pub mod gmns_check;
 pub mod gmns_lanes;
+pub mod gmns_meso;
 pub mod gmns_sumo;
+pub mod gtfs;
 pub mod matsim;
 pub mod matsim_lanes;
 pub mod offset;
