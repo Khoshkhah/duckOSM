@@ -1,14 +1,9 @@
----
-hide:
-  - toc
----
-
 # duckOSM
 
-**OpenStreetMap → road networks, map layers and GIS files. One Rust program, on your computer and in the browser.**
+**Turn OpenStreetMap into routable networks, map layers and GIS files. One Rust engine, for your computer and your browser.**
 
 duckOSM reads an `.osm.pbf` file and makes the routable network of an area, its map layers, and files for GIS,
-traffic simulation and routing. You can fix the OSM data on a map first, and every output uses your fixes.
+traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go into one file, `osm_fixes.yaml`, and every step of duckOSM reads it: the OSM file, the OSM data tables, the network and every export. So all outputs show the same corrected data.
 
 <div class="hero-actions" markdown>
 
@@ -114,24 +109,13 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
 ## One edge id for each direction
 
-Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. Many also keep a two-way street as one
-edge. duckOSM gives each edge a hash of three OSM ids:
-
 ```text
 edge_id = hash(osm_id, source, target)
 ```
 
-| | |
-|---|---|
-| `osm_id` | the OSM way of the road |
-| `source`, `target` | the OSM nodes where the edge starts and ends; their order is the **direction** |
-
-So **each direction of a road has its own `edge_id`**: a two-way street is two edges, A → B and B → A. Traffic counts,
-speeds and sensor data are per direction, and they join to the right edge.
-
-None of the three is a number that duckOSM makes, so the id stays the same after a rebuild, in a city cut from a country,
-and in every export (the SUMO edge id, the MATSim link id, the GMNS `link_id`). Other projects join on it
-([how the id is built](concepts/edge-ids.md)).
+**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
+to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
+a cut and every export ([how](concepts/edge-ids.md)).
 
 ## What duckOSM makes
 
@@ -203,7 +187,7 @@ France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB). Both versions b
 ```bash
 pip install duckosm
 
-duckosm get "Monaco"                     # -> monaco.osm.pbf, monaco.geojson
+duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
 duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
 duckosm quack monaco.osm.pbf --gdal -o out --name monaco
 ```
@@ -211,12 +195,12 @@ duckosm quack monaco.osm.pbf --gdal -o out --name monaco
 ```python
 import duckosm
 
-area = duckosm.get("Monaco")                                    # as duckosm get
-db = duckosm.build(pbf=area.pbf, boundary=area.boundary)          # as duckosm build
+area = duckosm.get("Monaco")  # as duckosm get
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
-r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and the ordered edge_ids
-duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
+r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
+duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
 ```
 
 Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
