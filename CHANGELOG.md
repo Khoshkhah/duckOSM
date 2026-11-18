@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`duckosm-rust elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
+  `duckosm elevation` (`--dem`, `--source`, `--mode`, `--nodata-fill`, `--suffix`, `--product`, `--vertical-datum`, `--license`,
+  `--not-reference`). It writes the same heights and the same `main.elevation_metadata` as Python on Monaco (a DEM file, a crop
+  with nodata, `--source copernicus`) and Tartu (`--source copernicus`, 60 s in place of 4 min 17 s). The DEM is a GeoTIFF in
+  EPSG:4326 with 32-bit floats; the downloads use DuckDB's httpfs. The DEM catalog (`dem_sources.json`) has a Rust reader too.
+  The DEM reader of the build now finds the pixel of a point as rasterio does, so a point on a pixel edge gets the same
+  height as in Python.
+
 - **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
   database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of
   `/api/info`, `/api/query`, `/api/sql`, `/ask/*.js` are the same bytes as Python's on Monaco. With this, every command of group B

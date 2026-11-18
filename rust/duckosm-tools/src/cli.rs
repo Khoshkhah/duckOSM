@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 6] = ["info", "way", "init-config", "boundary", "extract", "admin"];
+pub const COMMANDS: [&str; 7] = ["info", "way", "init-config", "boundary", "extract", "admin", "elevation"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -97,6 +97,41 @@ enum Cmd {
         #[arg(long)]
         gpkg: Option<PathBuf>,
     },
+    /// Sample a DEM at every node and add elevation to a built db, in place. Adds <mode>.nodes.ele and
+    /// <mode>.edges.z_from/z_to/z_vertices, and records provenance in main.elevation_metadata. Either point --dem at a
+    /// GeoTIFF in EPSG:4326 (32-bit floats), or let --source download a global DEM. A --dem file in `ele` is the area's
+    /// reference ground: give --product, --vertical-datum and --license, or --not-reference.
+    Elevation {
+        db: PathBuf,
+        /// A GeoTIFF in EPSG:4326 with 32-bit float values: a file or an HTTP address. Takes precedence over --source.
+        #[arg(long)]
+        dem: Option<String>,
+        /// Global DEM to download if no --dem: 'auto' (best for the db's area), 'copernicus' (GLO-30, anonymous), or
+        /// 'eudtm' (Europe bare-earth, needs OPENTOPOGRAPHY_API_KEY).
+        #[arg(long, default_value = "auto")]
+        source: String,
+        /// Mode schema(s) to enrich (default: every mode present in the db).
+        #[arg(short = 'm', long = "mode")]
+        modes: Vec<String>,
+        /// Elevation written where the DEM has a void / does not cover the node.
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        nodata_fill: f64,
+        /// Store as a SECOND surface instead of overwriting: --suffix dsm writes ele_dsm / z_from_dsm / z_to_dsm.
+        #[arg(long, default_value = "", value_name = "NAME")]
+        suffix: String,
+        /// The product of the --dem file: DTM (bare earth) or DSM (surface).
+        #[arg(long, value_parser = ["DTM", "DSM"])]
+        product: Option<String>,
+        /// The vertical datum of the --dem file (for example EGM2008).
+        #[arg(long, value_name = "DATUM")]
+        vertical_datum: Option<String>,
+        /// The license of the --dem file.
+        #[arg(long, value_name = "TEXT")]
+        license: Option<String>,
+        /// The --dem file is not the area's reference ground (a test or a surface model).
+        #[arg(long)]
+        not_reference: bool,
+    },
     /// Write the fully commented config template to PATH (default: duckosm.yaml). Edit it, then run
     /// `duckosm build --config PATH`.
     #[command(name = "init-config")]
@@ -172,6 +207,19 @@ pub fn run(args: &[String]) -> Result<()> {
                 _ => return Err("one of the arguments --name --osm-id --boundary is required".into()),
             };
             crate::extract::extract(&source, &db, area)?;
+        }
+        Cmd::Elevation { db, dem, source, modes, nodata_fill, suffix, product, vertical_datum, license, not_reference } => {
+            need_db(&db)?;
+            let o = crate::elevation::Options { dem, source, modes, nodata_fill, suffix, product, vertical_datum, license, reference: !not_reference };
+            let r = crate::elevation::to_elevation(&db, &o)?;
+            println!(
+                "elevation added from {} — {} nodes ({} nodata/fill) across {} mode(s) -> {}",
+                r.source,
+                r.n_nodes,
+                r.n_nodata,
+                r.modes.len(),
+                r.column
+            );
         }
         Cmd::Admin { pbf, db, gpkg } => crate::admin::admin(&pbf, &db, gpkg.as_deref())?,
         Cmd::InitConfig { path, force } => {
