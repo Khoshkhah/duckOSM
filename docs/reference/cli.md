@@ -5,7 +5,7 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 
 | Group | Commands |
 |---|---|
-| [Build and areas](#build-and-areas) | `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
+| [Build and areas](#build-and-areas) | `get`, `cut`, `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
 | [Query and inspect](#query-and-inspect) | `way`, `features-check` |
 | [Maps and routing](#maps-and-routing) | `viz`, `route-map` |
 | [Exports](#exports) | `sumo`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
@@ -16,6 +16,44 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 enrich a database (`elevation`, `admin`, `multimodal`) change it in place.
 
 ## Build and areas
+
+### `get`
+
+Finds the boundary of an area, downloads the smallest Geofabrik extract that holds it (to a cache folder), and cuts
+the extract to the boundary. Writes `<name>.osm.pbf` and `<name>.geojson`. Guide: [The OSM file](../exports/osm-file.md).
+
+```text
+duckosm get [OPTIONS] [PLACE]
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `PLACE` | the name of the area, for Nominatim | give one of `PLACE`, `--osm-id`, `--bbox`, `--h3-cell`, `--boundary` |
+| `--osm-id ID` | one OSM boundary relation | |
+| `--bbox W,S,E,N` | a box in degrees | |
+| `--h3-cell CELL` | an H3 cell | |
+| `--boundary FILE` | a GeoJSON [boundary file](boundary.md) | |
+| `-o`, `--out DIR` | the output folder | `.` |
+| `--name NAME` | the name of the two files | from the place, the file or the cell; `area` for a box |
+| `--fixes FILE` | an [OSM fixes file](../guides/fix-osm-errors.md): the cut file has the fixes in it | |
+| `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
+| `--refresh` | download the extract and the list of extracts again | the cached files |
+
+### `cut`
+
+Cuts a region file to a boundary and writes the area as a `.osm.pbf` file. Only lists of ids stay in memory.
+Guide: [The OSM file](../exports/osm-file.md#duckosm-cut).
+
+```text
+duckosm cut [OPTIONS] --boundary FILE -o FILE REGION
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `REGION` | the region file, sorted by type and id (as the files of Geofabrik) | required |
+| `--boundary FILE` | the [boundary](boundary.md): GeoJSON, `.poly`, WKT or `W,S,E,N` | required |
+| `-o`, `--out FILE` | the area file to write | required |
+| `--fixes FILE` | an [OSM fixes file](../guides/fix-osm-errors.md): the area file has the fixes in it ([what goes in](../exports/osm-file.md#the-fixes-in-the-file)) | |
 
 ### `build`
 
@@ -30,7 +68,7 @@ duckosm build [OPTIONS]
 | `-c`, `--config PATH` | a [config file](configuration.md). An option below that you type overrides the file | |
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
 | `-o`, `--output PATH` | output file | `<name>.duckdb`, named after the boundary file, else the PBF, else the `--source-db` file |
-| `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
+| `-b`, `--boundary PATH` | GeoJSON area to build ([the boundary file](boundary.md)) | none: the whole PBF |
 | `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#several-areas-from-one-region)) | |
 | `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
@@ -72,7 +110,7 @@ duckosm boundary [OPTIONS] [NAME]
 | `--pbf PATH` | search the borders in this PBF first; needs GDAL's `ogr2ogr` | |
 | `--osm-id INTEGER` | take this OSM boundary relation (when a name matches several) | |
 | `--offline` | never ask Nominatim | |
-| `-o`, `--out FILE` | output GeoJSON | `<name>.geojson` |
+| `-o`, `--out FILE` | output GeoJSON ([the boundary file](boundary.md)) | `<name>.geojson` |
 
 ### `clip-pbf`
 

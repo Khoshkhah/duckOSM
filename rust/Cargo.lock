@@ -786,6 +786,7 @@ dependencies = [
  "flate2",
  "geo",
  "h3o",
+ "md-5",
  "rayon",
  "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=39696602fac3a6e200fd324526022bc88239b95f)",
  "rusqlite",
@@ -794,6 +795,7 @@ dependencies = [
  "snap",
  "tiff",
  "tzf-rs",
+ "ureq",
  "yaml-rust2",
 ]
 

@@ -6,6 +6,15 @@ has the details.
 
 ## Get the map data
 
+The short way: `duckosm get` finds the boundary, downloads the extract and cuts it in one command
+([The OSM file](../exports/osm-file.md)).
+
+```bash
+duckosm get "Monaco"                  # -> monaco.osm.pbf and monaco.geojson
+```
+
+To do the steps one at a time, read on.
+
 [Geofabrik](https://download.geofabrik.de) offers free `.osm.pbf` extracts of every continent,
 country and many regions, updated daily. Download the **smallest region that contains your area**:
 
@@ -57,7 +66,8 @@ also matched (pick one with --osm-id):
 | `--offline` | never go online |
 | `-o FILE` | output file (default `<name>.geojson`) |
 
-Any GeoJSON polygon you already have works as a boundary too.
+Any GeoJSON polygon you already have works as a boundary too. [The boundary file](../reference/boundary.md) gives
+the format, how to make one, and the errors.
 
 ### Or let the build make it
 

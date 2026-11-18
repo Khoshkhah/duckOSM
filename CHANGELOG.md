@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Level 0 of the outputs: the OSM file** (`docs/exports/osm-file.md`). `duckosm get "Monaco"` finds the boundary
+  (a name, an OSM id, a box, an H3 cell or a GeoJSON file), the smallest Geofabrik extract that holds it (the rule of
+  Studio's page, now in Rust: `duckosm_build::get::covering`), downloads it to `~/.cache/duckosm` (resume, progress, MD5
+  check) and cuts it. `duckosm cut --fixes FILE` writes the OSM fixes into the `.osm.pbf` file with the rules of
+  `quack --fixes`, and each turn rule as a restriction relation. Python: `duckosm.get()`. The new page
+  `docs/reference/boundary.md` gives the format of a boundary file. `get` and `cut` stop a boundary that is not in WGS 84
+  longitude and latitude, and a ring that is not closed.
+
 ## 0.8.0 (2026-11-18)
 
 The program is `duckosm`, in Rust, and `pip install duckosm` installs it (wheels for 5 systems). The exports, the routers, the maps, the editors and GMNS run in Rust. The Python API keeps its names and calls Rust. The commands `levels`, `bus`, `multimodal` and `clip-pbf`, and the build steps of `DuckOSM.run()`, still run the Python code.
