@@ -22,6 +22,8 @@ duckosm-core = { path = "../duckosm-core" }
 duckosm-parquet = { path = "../duckosm-parquet", default-features = false, features = ["pbf"] }
 duckosm-duckdb = { path = "../duckosm-duckdb", optional = true }
 rusqlite = { version = "0.39", features = ["bundled"], optional = true }
+# the files of the tiles of quack --gdal in the browser (Snappy frames, pure Rust; the name "snap" is a feature here)
+snappy = { package = "snap", version = "1" }
 yaml-rust2 = "0.13"
 # the H3 columns (h3.rs): pure Rust, its cells equal those of the C library that the Python package h3 wraps
 h3o = { version = "0.11", features = ["geo"] }

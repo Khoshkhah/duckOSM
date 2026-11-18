@@ -74,15 +74,34 @@ values and geometries in each layer. A test checks this on Monaco. On Kentucky, 
 of GDAL on Linux (x86-64). GDAL on the Mac mini (arm64) gives one other polygon: two rings of relation 13011728 touch at a
 point, and GDAL's arm64 build puts one ring outside, not in a hole (a rounding difference of that build).
 
-Kentucky (141 MB), Mac mini:
+Mac mini (12 cores, 16 GB). GDAL 3.13.3 of Homebrew. The memory is the peak footprint.
 
-| | `ogr2ogr` (GDAL 3.13.3) | `quack --gdal` |
+Kentucky (141 MB):
+
+| | `ogr2ogr` | `quack --gdal` |
 |---|---|---|
-| Time, GeoPackage | 8.9 s | **4.2 s** |
-| Time, GeoPackage, `--tile-zoom 8` | | 6.4 s |
-| Time, GeoParquet | | 3.2 s |
-| Memory | 0.44 GB | **0.25 GB** |
-| Memory, `--tile-zoom 8` | | 0.35 GB |
+| GeoPackage, time | 8.8 s | **4.2 s** |
+| GeoPackage, time, `--tile-zoom 8` | | 6.4 s |
+| GeoPackage, memory | 0.44 GB | **0.25 GB** |
+| GeoParquet, time | 12.5 s (5 runs) | **3.2 s** |
+| GeoParquet, time, `--tile-zoom 8` | | 5.3 s |
+| GeoParquet, memory | 0.58 GB | **0.25 GB** |
+| GeoParquet, size | 0.43 GB | **0.37 GB** |
+
+France (5.1 GB), GeoParquet, `--tile-zoom 8`:
+
+| | `ogr2ogr` | `quack --gdal` |
+|---|---|---|
+| Time | 14 min 18 s (5 runs) | **3 min 24 s** |
+| Memory | **1.6 GB** | 5.0 GB |
+| Size | 15.6 GB | **11.3 GB** |
+
+GDAL's Parquet driver writes one layer to one file, so `ogr2ogr -f Parquet` gives one layer in each run:
+`ogr2ogr -f Parquet points.parquet france.osm.pbf points`, and so on for the five layers. Each run reads the whole file, so
+the time of the five runs is more than the time of one GDAL read. One read to the five layers (`ogr2ogr -f FlatGeobuf`, one
+file for each layer) took 5.4 s on Kentucky, 0.43 of the 12.5 s of the five runs. France as FlatGeobuf (about 27 GB) and as
+a GeoPackage (about 31 GB) did not fit on the disk of the Mac mini with 30 GB free. The memory of `ogr2ogr` is the largest
+of the five runs.
 
 ## Where QuackOSM is better
 
