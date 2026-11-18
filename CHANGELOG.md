@@ -7,7 +7,7 @@
   DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust
   (`src/duckosm/_api.py`): `to_sumo`, `to_gis`, `to_matsim`,
   `to_matsim_lanes`, `to_opendrive`, `to_railml`, `to_lanelet2`, `to_elevation`, `route`, `Router`, `route_multimodal`,
-  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. the GMNS functions, the GMNS maps and the
+  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. The GMNS functions, the GMNS maps and the
   commands `levels`, `bus`, `multimodal` and `clip-pbf` still run the Python code. `Router` has no `.graph` (the graph is
   in Rust). A connection to an in-memory database runs the Python code. `DuckOSM.run()` is as before (the Python steps
   with the Rust network step): the whole build in Rust is not yet equal to it (`docs/design/all_in_rust.md`, step 6).
