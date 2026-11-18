@@ -396,10 +396,15 @@ By tiles, the cut completes only the multipolygons and boundaries in each tile (
 `multilinestrings` or `other_relations` can have its members in many tiles: each tile gives the members that it owns
 (`Feature::part`), and `gdal::Parts` joins the members of each relation, in their order, into one row.
 
+In the browser (duckOSM Studio's quack page, output **GDAL layers**), each tile runs alone in a worker of its own, with no
+set of the relations that other tiles made. `quack_gdal_tile_to` writes the rows that the tile owns (`gdal::put_row`): the
+tile of the first node of the first member way owns a multipolygon, as in the tile tables. `quack_gdal_join_to` reads the
+files of all tiles, joins the parts of the relations, and writes the five layers.
+
 The check: `duckosm-build/tests/quack_gdal_monaco.rs` compares the output with `tests/data/monaco_gdal.jsonl.gz`, the
 rows of `ogr2ogr -f GPKG out.gpkg tests/data/monaco.osm.pbf` (GDAL 3.13.3), made before the code: the same rows in each
 layer, the same ids and column values, the same geometries (in 1e-7 degrees). The whole file and the file by tiles of
-zoom 12 are equal. The GeoPackage passes GDAL's `validate_gpkg.py`. Kentucky (2 240 511 rows) is equal to `ogr2ogr` on
+zoom 12 and each tile alone with the join (the browser's way) are equal. The GeoPackage passes GDAL's `validate_gpkg.py`. Kentucky (2 240 511 rows) is equal to `ogr2ogr` on
 Linux x86-64; against GDAL 3.13.3 of Homebrew on the Mac mini (arm64), one multipolygon (relation 13011728) is different:
 a ring that touches another ring at a vertex is a hole there and a polygon here. GDAL's test of a point on a ring
 (`dx1 * dy2 - dx2 * dy1 == 0`) gives another result on that build; the x86-64 build agrees with duckOSM.

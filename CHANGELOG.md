@@ -299,6 +299,11 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
   on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
 
+- **quack --gdal tile by tile in the browser** (`docs/rust/quack.md`, "GDAL layers"): `quack_gdal_tile_to` gives the rows that one
+  tile owns, alone (the tile of the first node of the first member way owns a multipolygon), and `quack_gdal_join_to` joins the files
+  of all tiles into the five layers; duckOSM Studio's quack page uses them. On Monaco, each tile alone with the join equals
+  `ogr2ogr` (`duckosm-build/tests/quack_gdal_monaco.rs`).
+
 ## 0.7.0 (2026-11-06)
 
 The Rust engine is the default and is in the wheel (wheels for 5 systems). `duckosm edit` opens the fixes editor on a page on your computer. The fixes editor shows a box for an object that is already in your changes.

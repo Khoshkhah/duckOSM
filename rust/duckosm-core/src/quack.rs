@@ -914,7 +914,9 @@ fn gdal_relation(
             t
         };
         let center = polys[0][0][0];
-        return vec![Feature::gdal(format!("relation/{id}"), MULTIPOLYGONS, tags, wkb_multipolygon(&polys), center)];
+        // a tile alone (no `relations`): the tile of the first node of the first member way owns the relation
+        let owner = have.first().is_some_and(|l| l.1 & OWNED != 0);
+        return vec![Feature { owner, ..Feature::gdal(format!("relation/{id}"), MULTIPOLYGONS, tags, wkb_multipolygon(&polys), center) }];
     }
     let mut parts: Vec<(usize, Part)> = Vec::new();
     for (place, flags, pts, _) in got {
@@ -1018,6 +1020,18 @@ pub fn gdal_features<R: Read + Send>(
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
     run(open, budget, None, true, emit)
+}
+
+/// [`gdal_features`] of the file of one tile alone (a worker of the browser for each tile): the rows that `owner` owns
+/// have `Feature::owner`; with no `relations`, the tile of the first node of the first member way owns a multipolygon, and
+/// the other relations come in parts (`Feature::part`, the members that the tile owns).
+pub fn gdal_features_owned<R: Read + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    owner: &Owner,
+    emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    run(open, budget, Some(owner), true, emit)
 }
 
 /// The engine of [`features_owned`] and [`gdal_features`]: `gdal` chooses the rules of GDAL's layers.
@@ -1237,7 +1251,8 @@ fn run<R: Read + Send>(
             // the member ways with no tags are not features
             let mut made: Vec<Feature> = batch
                 .par_iter()
-                .filter(|w| !w.1.is_empty() && if mark { w.4 } else { w.3 })
+                // quack --gdal: only the ways that the tile owns, also in a tile alone (the polygons that wait lose the mark)
+                .filter(|w| !w.1.is_empty() && if mark && !gdal { w.4 } else { w.3 })
                 .filter_map(|(id, tags, pts, owned, _, area)| {
                     let f = if gdal { gdal_way(*id, tags, pts, *area) } else { way_feature(*id, tags, pts) };
                     f.map(|mut f| {
