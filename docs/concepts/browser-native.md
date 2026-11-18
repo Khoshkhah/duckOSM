@@ -42,20 +42,23 @@ and the output.
 | Monaco (3) | 0.3 s, 71 MB, 4 MB disk, 4 MB output | 2.7 s, 65 MB, 41 MB storage |
 | Tartu (3) | 1.4 s, 127 MB, 37 MB disk, 24 MB output | 4.0 s, 168 MB, 112 MB storage |
 | Kentucky (driving) | 12.3 s, 0.8 GB, 1.2 GB disk, 0.7 GB output | 24.6 s, 1.5 GB, 2.1 GB storage |
-| Kentucky (3) | 32.9 s, 1.4 GB, 3.6 GB disk, 2.1 GB output | 55.2 s, 2.0 GB, 4.8 GB storage |
+| Kentucky (3) | 32.9 s, 1.4 GB, 3.6 GB disk, 2.1 GB output | 55.8 s, 2.0 GB, 4.6 GB storage, 2.5 GB after the build |
 | France (driving) | 3 min 36 s, 1.6 GB, 11.2 GB disk, 7.2 GB output | 5 min 16 s, 5.7 GB, 14.9 GB storage |
-| France (3), **estimate from Kentucky** | about 10 min, 2.6 GB, 35 GB disk, 23 GB output | about 12 min, 7.5 GB, 35 GB storage |
+| France (3), **estimate from Kentucky** | about 10 min, 2.6 GB, 35 GB disk, 23 GB output | about 12 min, 7.5 GB, 33 GB storage, 27 GB after the build |
 
 - The three modes are driving, walking and cycling. France with the three modes was not built: the Mac mini has too little free
   disk. Its row is France with driving times the ratio of Kentucky with three modes to Kentucky with driving (native: time 2.7,
-  memory 1.65, disk 3.1, output 3.1; browser: time 2.2, memory 1.3, storage 2.4).
+  memory 1.65, disk 3.1, output 3.1; browser: time 2.2, memory 1.3, storage 2.2). After the build, the browser keeps the output
+  times 1.2.
 - France: 25.9 million edges (driving), 104 tiles. The memory of the browser is the WebAssembly memory of all workers at the
   same time.
 - The browser's Parquet files are about 1.2 times those of the native program: they are compressed with snap, because zstd is
-  a C library (Kentucky, driving, one build: 851 MB in WebAssembly, 704 MB natively). After a build, Studio also saves the area
-  in the browser (its saved areas) with a copy of each table, so the storage then holds the tables twice.
-- The largest temporary file is the sort of the levels after the union: the rows go straight into sorted runs, so one copy is
-  on the disk at one time (Kentucky with three modes in the browser: 6.0 GB of storage before, 4.8 GB now).
+  a C library (Kentucky, driving, one build: 851 MB in WebAssembly, 704 MB natively). After a build, Studio saves the area in the
+  browser (its saved areas): the files of the build move there, so the storage holds one copy of the tables.
+- The peak of the disk is the sort of the levels, after the union. Kentucky with three modes: the tile files (2.1 GB natively)
+  go while the union reads them, so the union ends at the output (2.1 GB). Then the sorted runs of the levels add 1.5 GB, and
+  the peak is 3.6 GB (the browser: 2.5 GB of tables and 1.5 GB of runs, 4.6 GB of storage). The rows go straight into sorted
+  runs, so one copy is on the disk at one time (the browser: 6.0 GB of storage before this change).
 - One build, for comparison: Kentucky (3) 35.7 s and 3.2 GB natively, 64.5 s in the browser; France (driving) 4 min 31 s and
   8.1 GB natively, and it does not fit in the 4 GB of the browser. On a small area one build is faster by less than 1 s (Tartu:
   0.9 s natively, 3.3 s in the browser).
