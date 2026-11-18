@@ -15,9 +15,9 @@ use duckosm_core::geom::Pt;
 use duckosm_core::network::Options;
 use duckosm_core::tiles::Tile;
 use duckosm_core::util::FxHashSet;
-use duckosm_parquet::merge::{concat_files, union_sorted};
+use duckosm_parquet::merge::{concat_files, union_sorted, Concat};
 use rayon::prelude::*;
-use std::fs::File;
+use duckosm_core::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
@@ -61,6 +61,11 @@ const TABLES: [(&str, &[&str]); 21] = [
 /// One step of a build by tiles with its own line: `tiles: {name}: {time} s, peak {memory} MB`. The peak is that of this
 /// process during the step (Linux: `/proc/self/clear_refs` resets the peak, `VmHWM` reads it; elsewhere no peak).
 pub fn timed<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    // the browser has no clock in std: only the step
+    if cfg!(target_arch = "wasm32") {
+        duckosm_core::util::step(name);
+        return f();
+    }
     let _ = std::fs::write("/proc/self/clear_refs", "5");
     let t = std::time::Instant::now();
     let r = f()?;
@@ -75,9 +80,9 @@ pub fn timed<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, 
 }
 
 pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, consume: bool, out: &Path) -> Result<Vec<(String, usize)>, String> {
-    std::fs::create_dir_all(out).map_err(io)?;
-    let tmp = std::env::temp_dir().join(format!("duckosm-union-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp).map_err(io)?;
+    fs::create_dir_all(out).map_err(io)?;
+    let tmp = fs::temp_dir("duckosm-union");
+    fs::create_dir_all(&tmp).map_err(io)?;
     let mut names: Vec<(String, &[&str])> = Vec::new();
     for (name, key) in TABLES {
         if name.contains("{m}") {
@@ -91,7 +96,7 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
         .par_iter()
         .map(|(name, key)| -> Result<(String, usize), String> {
             let of_tiles = |suffix: &str| -> Vec<PathBuf> {
-                tiles.iter().map(|t| t.1.join(format!("{name}{suffix}"))).filter(|p| p.exists()).collect()
+                tiles.iter().map(|t| t.1.join(format!("{name}{suffix}"))).filter(|p| fs::exists(p)).collect()
             };
             let mut parts = of_tiles(".parquet");
             let border = of_tiles(".border.parquet");
@@ -108,17 +113,17 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
             Ok((name.clone(), n))
         })
         .collect::<Result<_, _>>())?;
-    let _ = std::fs::remove_dir_all(&tmp);
+    let _ = fs::remove_dir_all(&tmp);
     if p.bus_routes && p.modes.contains(&Mode::Driving) {
         timed("bus routes", || bus_routes(tiles, out))?;
     }
     if p.levels != crate::LevelsMethod::None {
-        timed("levels", || levels(&p.modes, p.levels, out))?;
+        timed("levels", || levels(&p.modes, p.levels, built_at(p), out))?;
     }
     if let Some(dem) = &p.dem {
         timed("elevation metadata and grid", || elevation_main(dem, p, &rows, out))?;
     }
-    timed("area tables", || write_whole_area_tables(out, boundary, &p.modes, &p.options))?;
+    timed("area tables", || write_whole_area_tables(out, boundary, p))?;
     Ok(rows.into_iter().filter(|(name, _)| !name.starts_with("elevation_nodata_")).collect())
 }
 
@@ -129,14 +134,14 @@ fn elevation_main(dem: &Path, p: &crate::Params, rows: &[(String, usize)], out: 
     let count = |prefix: &str| rows.iter().filter(|(n, _)| n.starts_with(prefix)).map(|(_, r)| *r as i64).sum::<i64>();
     let (n_nodes, n_nodata) = (count("elevation_nodes_"), count("elevation_nodata_"));
     for m in &p.modes {
-        let _ = std::fs::remove_file(out.join(format!("elevation_nodata_{}.parquet", m.name())));
+        let _ = fs::remove_file(out.join(format!("elevation_nodata_{}.parquet", m.name())));
     }
     let head = crate::elevation::Dem::open_pixels(dem, None)?;
     crate::write_elevation_metadata(p, head.resolution_m, n_nodes, n_nodata, |name| create(&out.join(name)))?;
     let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
     for m in &p.modes {
         let path = out.join(format!("nodes_{}.parquet", m.name()));
-        if path.exists() {
+        if fs::exists(&path) {
             duckosm_parquet::read::each_node(&path, |n| b = [b[0].min(n.lon), b[1].min(n.lat), b[2].max(n.lon), b[3].max(n.lat)])?;
         }
     }
@@ -153,7 +158,7 @@ pub fn write_duckdb(out: &Path, p: &crate::Params) -> Result<PathBuf, String> {
     let db = out.join(format!("{}.duckdb", p.name));
     let names: Vec<&str> = p.modes.iter().map(|m| m.name()).collect();
     duckosm_duckdb::write_database(&db, out, &names, p.memory_limit.as_deref())?;
-    if out.join("raw_nodes.parquet").exists() {
+    if fs::exists(out.join("raw_nodes.parquet")) {
         duckosm_duckdb::write_raw_from_parquet(&db, out, p.memory_limit.as_deref())?;
     }
     Ok(db)
@@ -162,7 +167,14 @@ pub fn write_duckdb(out: &Path, p: &crate::Params) -> Result<PathBuf, String> {
 /// The tables of the whole area after the union of the tiles (`boundary_main`, `visualization_metadata_main`,
 /// `transfers_mm`), from the boundary of the area (GeoJSON text) and the nodes of the union in `out`. The nodes stay on disk:
 /// the point of the time zone comes from passes over the nodes file, and the transfers from a sort on disk.
-pub fn write_whole_area_tables(out: &Path, boundary: &str, modes: &[Mode], opts: &Options) -> Result<(), String> {
+/// The time of the build (`Params::built_at`, or now), in microseconds.
+fn built_at(p: &crate::Params) -> i64 {
+    p.built_at.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64))
+}
+
+/// `p`: the modes, the options, the time of the build and the time zone table entry (`Params::timezone_entry`).
+pub fn write_whole_area_tables(out: &Path, boundary: &str, p: &crate::Params) -> Result<(), String> {
+    let (modes, opts) = (&p.modes[..], &p.options);
     let nodes_of = |m: Mode| out.join(format!("nodes_{}.parquet", m.name()));
     let lookup_mode = modes.iter().copied().find(|&m| m == Mode::Driving).or(modes.first().copied());
     let lookup = match lookup_mode {
@@ -178,8 +190,8 @@ pub fn write_whole_area_tables(out: &Path, boundary: &str, modes: &[Mode], opts:
         nodes: &[],
         junctions: &Default::default(),
         opts: &o,
-        built_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64),
-        timezone_entry: None,
+        built_at: built_at(p),
+        timezone_entry: p.timezone_entry.as_deref(),
         lookup,
     };
     crate::write_area_tables(&area, |name| File::create(out.join(name)).map(BufWriter::new).map_err(io))?;
@@ -369,9 +381,34 @@ pub fn border_m(p: &crate::Params) -> f64 {
 pub fn cut_tiles(region: &Path, boundary: &str, zoom: u8, multipolygons: bool, border_m: f64, dir: &Path) -> Result<Vec<Tile>, String> {
     let b = Boundary::parse(boundary)?;
     let list = duckosm_core::tiles::tiles(&b, zoom);
-    std::fs::create_dir_all(dir).map_err(io)?;
+    fs::create_dir_all(dir).map_err(io)?;
     let open = || File::open(region).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", region.display()));
+    #[cfg(not(target_arch = "wasm32"))]
     let counts = duckosm_core::tilecut::cut_to_tiles(open, &b, &list, dir, multipolygons, border_m)?;
+    // the browser has no folders: the cut gives the tile files to a sink, and they go through `duckosm_core::fs` (the files of
+    // the page), with no zlib (a faster cut; the elements are the same)
+    #[cfg(target_arch = "wasm32")]
+    let counts = {
+        use std::io::Write;
+        let name = |t: &Tile| dir.join(format!("{}_{}_{}", t.z, t.x, t.y));
+        let mut files: Vec<Option<BufWriter<File>>> = list.iter().map(|_| None).collect();
+        let (counts, junctions) = duckosm_core::tilecut::cut_to_sink_build(open, &b, &list, multipolygons, border_m, false, &mut |t, bytes| {
+            let f = match &mut files[t as usize] {
+                Some(f) => f,
+                f => f.insert(create(&name(&list[t as usize]).with_extension("osm.pbf"))?),
+            };
+            f.write_all(bytes).map_err(io)
+        })?;
+        for f in files.into_iter().flatten() {
+            f.into_inner().map_err(|e| e.to_string())?.flush().map_err(io)?;
+        }
+        for (i, (t, c)) in list.iter().zip(&counts).enumerate() {
+            if c.nodes > 0 {
+                fs::write(name(t).with_extension("junctions"), junctions.file(i)?).map_err(io)?;
+            }
+        }
+        counts
+    };
     Ok(list.into_iter().zip(counts).filter(|(_, c)| c.nodes > 0).map(|(t, _)| t).collect())
 }
 
@@ -464,21 +501,21 @@ pub fn own_rows(dir: &Path, modes: &[Mode], b: &Boundary, tile: Tile) -> Result<
     for &mode in modes {
         let m = mode.name();
         let path = |n: &str| dir.join(format!("{n}_{m}.parquet"));
-        if path("virtual_nodes").exists() {
+        if fs::exists(path("virtual_nodes")) {
             split_file(&path("virtual_nodes"), |r| {
                 let g = col(r, "geometry")?;
                 let g = g.as_binary::<i32>();
                 Ok((0..r.num_rows()).map(|i| o.place(point(g.value(i)))).collect())
             })?;
         }
-        if path("edge_id_map").exists() {
+        if fs::exists(path("edge_id_map")) {
             split_file(&path("edge_id_map"), |r| Ok(vec![BORDER; r.num_rows()]))?;
         }
     }
     // the raw tables are split as they are written (raw_classes); the tables of the whole area: the union writes them
     let raw = |n: &str| dir.join(format!("{n}.parquet"));
     for n in ["boundary_main", "visualization_metadata_main", "transfers_mm"] {
-        let _ = std::fs::remove_file(raw(n));
+        let _ = fs::remove_file(raw(n));
     }
     Ok(())
 }
@@ -509,7 +546,7 @@ pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String
             .par_iter()
             .map(|(_, dir)| {
                 let path = dir.join("bus.osm.pbf");
-                if !path.exists() {
+                if !fs::exists(&path) {
                     return Ok(None);
                 }
                 let open = || File::open(&path).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path.display()));
@@ -582,7 +619,7 @@ pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String
     let mut w = Writer::new(store).map_err(io)?;
     for (k, name) in ["edges", "private_edges"].into_iter().enumerate() {
         let path = out.join(format!("{name}_driving.parquet"));
-        if !path.exists() {
+        if !fs::exists(&path) {
             continue;
         }
         // only the columns of the walk (it reads the nodes of an edge, not its line or its tags)
@@ -603,9 +640,10 @@ pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String
     let mut way_rows = ways.read(&WayCodec).map_err(io)?.peekable();
     let mut rel_rows = rels.read(&RelationCodec).map_err(io)?;
     let mut pending = None;
-    let tmp = std::env::temp_dir().join(format!("duckosm-bus-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp).map_err(io)?;
-    let (mut n_routes, mut route_parts, mut parts) = (0usize, Vec::new(), Vec::new());
+    let tmp = fs::temp_dir("duckosm-bus");
+    fs::create_dir_all(&tmp).map_err(io)?;
+    // each batch adds its rows to the two tables at once (`Concat`): two part files at a time, for any number of batches
+    let (mut n_routes, mut tables) = (0usize, None);
     let (mut n, mut last) = (0usize, None);
     for b in 0..batches as u32 {
         // the relations of the batch: the next relations up to about BUS_BATCH_WAYS member ways (the rule of step 2)
@@ -646,22 +684,29 @@ pub fn bus_routes(tiles: &[(Tile, PathBuf)], out: &Path) -> Result<usize, String
         }
         let (routes, rows) = duckosm_core::bus::routes(&rels, &own_ways, &edges, &private_edges);
         n_routes += routes.len();
-        let part = tmp.join(format!("{b}.routes.parquet"));
+        if tables.is_none() {
+            tables = Some((Concat::new(&out.join("routes_bus.parquet"))?, Concat::new(&out.join("route_edges_bus.parquet"))?));
+        }
+        let (r, e) = tables.as_mut().expect("made");
+        let part = tmp.join("routes.parquet");
         duckosm_parquet::write_routes_to(create(&part)?, &routes)?;
-        route_parts.push(part);
-        let part = tmp.join(format!("{b}.parquet"));
+        r.add(&part, true)?;
+        let part = tmp.join("route_edges.parquet");
         duckosm_parquet::write_route_edges_to(create(&part)?, &rows)?;
-        parts.push(part);
+        e.add(&part, true)?;
     }
     duckosm_core::util::step("bus 3: the batches");
-    if parts.is_empty() {
-        duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &[])?;
-        duckosm_parquet::write_route_edges_to(create(&out.join("route_edges_bus.parquet"))?, &[])?;
-    } else {
-        concat_files(&route_parts, true, &out.join("routes_bus.parquet"))?;
-        concat_files(&parts, true, &out.join("route_edges_bus.parquet"))?;
+    match tables {
+        Some((r, e)) => {
+            r.finish()?;
+            e.finish()?;
+        }
+        None => {
+            duckosm_parquet::write_routes_to(create(&out.join("routes_bus.parquet"))?, &[])?;
+            duckosm_parquet::write_route_edges_to(create(&out.join("route_edges_bus.parquet"))?, &[])?;
+        }
     }
-    let _ = std::fs::remove_dir_all(&tmp);
+    let _ = fs::remove_dir_all(&tmp);
     Ok(n_routes)
 }
 
@@ -784,7 +829,7 @@ impl duckosm_core::spill::Codec<(u32, u8, duckosm_core::model::Edge)> for BatchE
 /// build). `solve`: by tiles in their order, each with the numbers of the earlier tiles fixed (`levels::tiled`), with memory
 /// that does not grow with the area. `tags`: the rule of the whole build by tiles too (`roadstyle_levels::tags_tile`): the
 /// rule reads only the edges at the ends of each edge.
-fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(), String> {
+fn levels(modes: &[Mode], method: crate::LevelsMethod, built_at: i64, out: &Path) -> Result<(), String> {
     // the tags of the levels: few sets of values, one copy of each
     let mut attrs = FxHashSet::default();
     let rank = |m: Mode, private: bool| {
@@ -794,7 +839,6 @@ fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(),
             Mode::Cycling => 2,
         }) + if private { 3 } else { 0 }
     };
-    let built_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64);
     let file = |name: &str| create(&out.join(name));
     // each pass of the levels reads the columns that it needs from the edge tables (no temporary copy)
     let mut each = |f: &mut dyn FnMut(u8, i64, &std::sync::Arc<duckosm_core::model::Attrs>, Vec<(f64, f64)>) -> Result<(), String>| -> Result<(), String> {
@@ -802,7 +846,7 @@ fn levels(modes: &[Mode], method: crate::LevelsMethod, out: &Path) -> Result<(),
             for private in [false, true] {
                 let name = if private { "private_edges" } else { "edges" };
                 let path = out.join(format!("{name}_{}.parquet", m.name()));
-                if path.exists() {
+                if fs::exists(&path) {
                     let r = rank(m, private);
                     duckosm_parquet::read::read_level_edges(&path, &mut attrs, |id, a, g| f(r, id, a, g))?;
                 }
