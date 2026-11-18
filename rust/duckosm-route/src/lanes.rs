@@ -1,7 +1,6 @@
 //! duckOSM `lane_routing.py`: the lane graph of a GMNS database (lane to lane turns from `movement`, lane changes between
 //! adjacent lanes) as `lane_<mode>.lane_edges`, and the shortest lane route (networkx `dijkstra_path`).
 
-use crate::graph::Graph;
 use crate::{err, Result};
 use duckdb::Connection;
 use serde_json::{json, Value as J};
@@ -110,7 +109,7 @@ pub fn route_lanes(db: &Path, from: &str, to: &str, mode: &str) -> Result<J> {
             names.len() as i64 - 1
         })
     };
-    let mut graph = Graph::default();
+    let mut graph = duckosm_router::graph::GraphBuilder::default();
     let mut kind: HashMap<(i64, i64), Option<String>> = HashMap::new();
     let mut st = con.prepare(&sql).map_err(err)?;
     let mut rows = st.query([]).map_err(err)?;
@@ -121,6 +120,7 @@ pub fn route_lanes(db: &Path, from: &str, to: &str, mode: &str) -> Result<J> {
         graph.add_arc(a, b, c.unwrap_or(f64::NAN));
         kind.insert((a, b), r.get(2).map_err(err)?);
     }
+    let graph = graph.finish();
     let lanes: std::collections::HashSet<String> = {
         let mut st = con.prepare(&format!("SELECT lane_id FROM {g}.lane")).map_err(err)?;
         st.query_map([], |r| r.get(0)).map_err(err)?.collect::<std::result::Result<_, _>>().map_err(err)?

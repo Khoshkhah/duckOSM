@@ -70,7 +70,7 @@ enum Cmd {
     RoutePoints {
         db: PathBuf,
         /// LON LAT LON LAT.
-        #[arg(num_args = 4, allow_hyphen_values = true, required_unless_present = "batch")]
+        #[arg(num_args = 4, allow_negative_numbers = true, required_unless_present = "batch")]
         coords: Vec<f64>,
         #[arg(long, conflicts_with = "coords")]
         batch: Option<PathBuf>,
@@ -89,7 +89,7 @@ enum Cmd {
     RouteMultimodalPoints {
         db: PathBuf,
         /// LON LAT LON LAT.
-        #[arg(num_args = 4, allow_hyphen_values = true, required_unless_present = "batch")]
+        #[arg(num_args = 4, allow_negative_numbers = true, required_unless_present = "batch")]
         coords: Vec<f64>,
         #[arg(long, conflicts_with = "coords")]
         batch: Option<PathBuf>,
@@ -178,8 +178,15 @@ fn need_db(db: &Path) -> Result<()> {
     if db.exists() { Ok(()) } else { Err(format!("database not found: {}", db.display())) }
 }
 
-fn mode_set(modes: Option<&str>) -> Option<std::collections::HashSet<String>> {
-    modes.map(|m| m.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+/// The modes of a comma list, each once (None: all modes; an empty list: all modes, as duckOSM's `allowed_modes=[]`).
+fn mode_set(modes: Option<&str>) -> Option<Vec<String>> {
+    let mut v: Vec<String> = Vec::new();
+    for m in modes?.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()) {
+        if !v.contains(&m) {
+            v.push(m);
+        }
+    }
+    (!v.is_empty()).then_some(v)
 }
 
 /// One query (its words) as one JSON value, or each line of `batch` (`n` words) as a JSON list; an error of a line is
@@ -216,9 +223,19 @@ pub fn run(args: &[String]) -> Result<()> {
         Cmd::Route { db, from_edge, to_edge, pairs, mode, weight } => {
             need_db(&db)?;
             let con = crate::route::open(&db)?;
+            let t0 = std::time::Instant::now();
             let g = crate::route::routing_graph(&con, &mode, &weight, &[])?;
+            eprintln!(
+                "routing graph[{mode}]: {} edges, {} arcs, weight={weight}, {:.1} s",
+                duckosm_tools::info::thousands(g.n_nodes() as i64),
+                duckosm_tools::info::thousands(g.n_arcs() as i64),
+                t0.elapsed().as_secs_f64()
+            );
             let one = |a: i64, b: i64| -> Result<serde_json::Value> {
-                Ok(crate::route::route(&con, &g, a, b, &mode)?.unwrap_or(serde_json::Value::Null))
+                let t = std::time::Instant::now();
+                let r = crate::route::route(&con, &g, a, b, &mode)?.unwrap_or(serde_json::Value::Null);
+                eprintln!("route {a} -> {b}: {} edges, {:.2} s", r["edges"].as_array().map_or(0, Vec::len), t.elapsed().as_secs_f64());
+                Ok(r)
             };
             let v = match (from_edge, to_edge, pairs) {
                 (Some(a), Some(b), None) => one(a, b)?,
@@ -239,11 +256,16 @@ pub fn run(args: &[String]) -> Result<()> {
         Cmd::RouteMultimodal { db, src, dst, batch, schema, start_mode, end_mode, no_enforce_sequence, modes } => {
             need_db(&db)?;
             let con = crate::route::open(&db)?;
-            let net = crate::points::network(&con, &schema)?;
             let allowed = mode_set(modes.as_deref());
+            let t0 = std::time::Instant::now();
+            let net = crate::points::network(&con, &schema, allowed.as_deref())?;
+            eprintln!("multimodal network ({}): {:.1} s", allowed.as_ref().map_or("all modes".to_string(), |m| m.join(", ")), t0.elapsed().as_secs_f64());
             let one = |w: &[String]| {
                 let v: Vec<i64> = nums(w)?;
-                crate::points::route_multimodal(&con, &net, Some(v[0]), Some(v[1]), &schema, &start_mode, &end_mode, !no_enforce_sequence, allowed.as_ref(), None)
+                let t = std::time::Instant::now();
+                let r = crate::points::route_multimodal(&con, &net, Some(v[0]), Some(v[1]), &schema, &start_mode, &end_mode, !no_enforce_sequence, None);
+                eprintln!("trip {} -> {}: {:.2} s", v[0], v[1], t.elapsed().as_secs_f64());
+                r
             };
             print_one_or_batch(batch.as_deref(), 2, src.zip(dst).map(|(a, b)| vec![a.to_string(), b.to_string()]), one)?;
         }
@@ -252,18 +274,29 @@ pub fn run(args: &[String]) -> Result<()> {
             let con = crate::route::open(&db)?;
             let one = |w: &[String]| {
                 let v: Vec<f64> = nums(w)?;
-                crate::points::route_points(&con, (v[0], v[1]), (v[2], v[3]), &mode, &weight, radius, access_kmh)
+                let t = std::time::Instant::now();
+                let r = crate::points::route_points(&con, (v[0], v[1]), (v[2], v[3]), &mode, &weight, radius, access_kmh);
+                eprintln!("route_points: {:.2} s", t.elapsed().as_secs_f64());
+                r
             };
             print_one_or_batch(batch.as_deref(), 4, (!coords.is_empty()).then(|| coords.iter().map(|x| x.to_string()).collect()), one)?;
         }
         Cmd::RouteMultimodalPoints { db, coords, batch, radius, access_kmh, schema, modes, no_enforce_sequence } => {
             need_db(&db)?;
             let con = crate::route::open(&db)?;
-            let net = crate::points::network(&con, &schema)?;
             let allowed = mode_set(modes.as_deref());
+            if allowed.as_ref().is_some_and(|m| !m.is_empty() && !m.iter().any(|x| x == "walking")) {
+                return Err("a trip between two points starts and ends walking: allowed_modes needs 'walking'".into());
+            }
+            let t0 = std::time::Instant::now();
+            let net = crate::points::network(&con, &schema, allowed.as_deref())?;
+            eprintln!("multimodal network ({}): {:.1} s", allowed.as_ref().map_or("all modes".to_string(), |m| m.join(", ")), t0.elapsed().as_secs_f64());
             let one = |w: &[String]| {
                 let v: Vec<f64> = nums(w)?;
-                crate::points::route_multimodal_points(&con, &net, (v[0], v[1]), (v[2], v[3]), radius, access_kmh, &schema, allowed.as_ref(), !no_enforce_sequence)
+                let t = std::time::Instant::now();
+                let r = crate::points::route_multimodal_points(&con, &net, (v[0], v[1]), (v[2], v[3]), radius, access_kmh, &schema, allowed.as_deref(), !no_enforce_sequence);
+                eprintln!("trip between points: {:.2} s", t.elapsed().as_secs_f64());
+                r
             };
             print_one_or_batch(batch.as_deref(), 4, (!coords.is_empty()).then(|| coords.iter().map(|x| x.to_string()).collect()), one)?;
         }
