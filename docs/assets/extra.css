@@ -25,8 +25,9 @@
 [data-md-color-scheme="default"] .md-typeset a:not(.md-button) {
   text-decoration: underline;
   text-decoration-color: var(--dk-yellow);
-  text-decoration-thickness: 0.18em;
-  text-underline-offset: 0.18em;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.25em;
+  text-decoration-skip-ink: none;   /* one unbroken line, also under p, g and y */
 }
 [data-md-color-scheme="default"] .md-typeset a:not(.md-button):hover { background: var(--dk-yellow); }
 [data-md-color-scheme="default"] .md-nav__link--active,
