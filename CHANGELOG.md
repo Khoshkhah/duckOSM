@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Seven faults of the command line, found by the review of the docs.** On Monaco:
+- **Eight faults of the command line, found by the review of the docs.** On Monaco:
   - `duckosm gmns --check` failed 4 of 48 checks. The checks were wrong, not the data: a lane left of lane 1 (a bike lane on
     the left of a one-way road) has the number -1, as the GMNS spec says, and the walking network has only the walking lane,
     not the motor lanes that `link.lanes` counts. Now 48 of 48 pass (Python's `check_gmns` too).
@@ -17,6 +17,8 @@
   - The checks `validation.assert_single_component` and `assert_no_stranded_named` are removed: they did nothing, because
     every road stays. A config that has them gets a warning.
   - `docs/reference/cli.md`: the options of `gmns-map` and `levels-edit` are those of the program.
+  - `duckosm gmns` does not need SUMO: without netconvert it says so and writes the movements with no lanes and no
+    `lane_connector`. Before, it stopped with "netconvert not found".
 
 - **The switch, step 6 of `docs/design/all_in_rust.md`.** The Rust program is `duckosm`. `duckosm-rust` stays for one release:
   it prints "use duckosm" and runs the same command. The wheel has the whole program in the module `duckosm._rust` (with

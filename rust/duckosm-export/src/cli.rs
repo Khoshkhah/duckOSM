@@ -175,8 +175,8 @@ enum Cmd {
     },
     /// Extract a built network to a standalone GMNS DuckDB: every GMNS table OSM can support (config, node, link, geometry,
     /// lane, movement, use_definition/use_group, signal_controller, curb_seg), with native geometry and lane detail, keeping
-    /// duckOSM edge_id as link_id. Units: length metres, free_speed km/h, coordinates EPSG:4326. Needs netconvert (SUMO) for
-    /// the lanes of the movements.
+    /// duckOSM edge_id as link_id. Units: length metres, free_speed km/h, coordinates EPSG:4326. SUMO's netconvert gives
+    /// the lanes of the movements; without it they have no lanes, and the rest is the same.
     Gmns {
         /// The duckOSM database.
         db: PathBuf,

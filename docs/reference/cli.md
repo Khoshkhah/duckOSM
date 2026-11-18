@@ -354,7 +354,8 @@ duckosm matsim-lanes [OPTIONS] GMNS_DB
 ### `gmns`
 
 Writes a GMNS database: nodes, links, lanes, movements, signals; `link_id` is the `edge_id`.
-Page: [GMNS](../exports/gmns.md).
+SUMO's `netconvert` gives which lanes each movement uses; without it, the movements have no lanes and
+there is no `lane_connector` (the command says so). Page: [GMNS](../exports/gmns.md).
 
 ```text
 duckosm gmns [OPTIONS] DB
