@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 5] = ["route", "export-graph", "route-multimodal", "route-points", "route-multimodal-points"];
+pub const COMMANDS: [&str; 6] = ["route", "export-graph", "route-multimodal", "route-points", "route-multimodal-points", "directions"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -103,6 +103,15 @@ enum Cmd {
         modes: Option<String>,
         #[arg(long)]
         no_enforce_sequence: bool,
+    },
+    /// Turn-by-turn steps for a route (duckOSM `directions.directions`): ROUTE is a JSON file with a route result, as the route
+    /// commands print it (or a list of them; "-" reads it from the standard input). One JSON list of steps, or a list of lists.
+    Directions {
+        db: PathBuf,
+        route: PathBuf,
+        /// The mode of a route of one mode (route, route-points); a route across modes has its modes in its legs.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
     },
     /// Export a built network as a graph file (GraphML). By default the geographic node-based MultiDiGraph (OSM junctions as
     /// nodes, road segments keyed by edge_id carrying their full attribute set); --graph edge for the edge-based routing
@@ -228,6 +237,25 @@ pub fn run(args: &[String]) -> Result<()> {
                 crate::points::route_multimodal_points(&con, &net, (v[0], v[1]), (v[2], v[3]), radius, access_kmh, &schema, allowed.as_ref(), !no_enforce_sequence)
             };
             print_one_or_batch(batch.as_deref(), 4, (!coords.is_empty()).then(|| coords.iter().map(|x| x.to_string()).collect()), one)?;
+        }
+        Cmd::Directions { db, route, mode } => {
+            need_db(&db)?;
+            let text = if route.as_os_str() == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| e.to_string())?;
+                s
+            } else {
+                std::fs::read_to_string(&route).map_err(|e| format!("{}: {e}", route.display()))?
+            };
+            let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", route.display()))?;
+            let con = crate::route::open(&db)?;
+            let out = match &v {
+                serde_json::Value::Array(list) => serde_json::Value::Array(
+                    list.iter().map(|r| crate::directions::directions(&con, r, &mode).unwrap_or_else(|e| serde_json::json!({"error": e}))).collect(),
+                ),
+                r => crate::directions::directions(&con, r, &mode)?,
+            };
+            println!("{}", duckosm_tools::json::dumps(&out));
         }
         Cmd::ExportGraph { db, mode, out, graph_kind, fmt, weight, geometry, uses } => {
             need_db(&db)?;
