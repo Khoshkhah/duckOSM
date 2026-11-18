@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The Rust router holds less for a large area** (France on a Mac mini, `docs/guides/route.md`, "Large areas"). The graph is
+  flat arrays of arcs in both directions (12 bytes for each turn), the searches keep dense labels, and a trip across modes
+  reads only the modes of `--modes` and makes its indexes one time. France driving (25.9 million edges): the route Paris to
+  Marseille took 7.0 s with a peak of 8.7 GB, now 3.7 s and 6.4 GB. Île-de-France, Versailles to Bastille on foot and by car:
+  2.6 GB with the two modes, 4.4 GB with all. The routes are the same as before (and as Python's).
+
 - **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
   commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
   networkx's `dijkstra_path`). On Monaco and Tartu, `lane_<mode>.lane_edges` and 126 lane routes (with and without the stored
