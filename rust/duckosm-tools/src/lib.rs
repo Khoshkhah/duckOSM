@@ -1,7 +1,9 @@
 //! The database tools of duckOSM in Rust (docs/design/all_in_rust.md, group B). `duckosm-rust <tool> ...` goes to
 //! [`cli::run`]; [`cli::COMMANDS`] has the names.
 
+pub mod admin;
 pub mod cli;
+pub mod extract;
 pub mod info;
 pub mod json;
 pub mod way;

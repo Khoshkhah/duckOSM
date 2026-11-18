@@ -12,7 +12,8 @@ pub use input::RawInput;
 use duckdb::Connection;
 use std::path::Path;
 
-const MACROS: &str = "
+/// duckOSM's two `edge_id` macros (`edge_id.create_edge_id_macro`), as each database has them.
+pub const MACROS: &str = "
 CREATE OR REPLACE MACRO main.edge_id_hash(osm_id, source, target) AS
     (hash(osm_id::BIGINT, source::BIGINT, target::BIGINT) >> 1)::BIGINT;
 CREATE OR REPLACE MACRO main.edge_id_hash_v1(osm_id, source, target, is_reverse) AS

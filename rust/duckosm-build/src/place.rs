@@ -123,6 +123,36 @@ mod sql {
     /// GDAL's `osmconf.ini` (GDAL 3.4): the OSM driver of GDAL needs a config file, and the DuckDB build has none.
     const OSMCONF: &str = include_str!("osmconf.ini");
 
+    /// The `ST_Read` of the multipolygons of a PBF with `boundary=administrative`, as `ogr2ogr ... multipolygons -where
+    /// "boundary='administrative'"` reads them (duckOSM `admin.extract_boundaries`), with GDAL's columns. `conf` is a file
+    /// with [`OSMCONF`] (see [`write_osmconf`]).
+    pub fn admin_multipolygons(pbf: &Path, conf: &Path) -> String {
+        format!(
+            "SELECT * FROM ST_Read('{}', layer = 'multipolygons', open_options = ['CONFIG_FILE={}']) WHERE boundary = 'administrative'",
+            quote(pbf),
+            quote(conf)
+        )
+    }
+
+    /// The columns of duckOSM's `admin_boundaries` (`admin.load_boundaries`) from `source`, a SELECT of GDAL's multipolygons.
+    pub fn admin_select(source: &str) -> String {
+        format!(
+            "SELECT TRY_CAST(COALESCE(osm_id, osm_way_id) AS BIGINT) AS osm_id, name,
+                    NULLIF(regexp_extract(other_tags, '\"name:en\"=>\"([^\"]*)\"', 1), '') AS name_en,
+                    TRY_CAST(admin_level AS INTEGER) AS admin_level, geom::GEOMETRY AS geometry
+             FROM ({source})"
+        )
+    }
+
+    /// Write GDAL's `osmconf.ini` to a temporary file; the caller removes it.
+    pub fn write_osmconf() -> Result<PathBuf, String> {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let conf = std::env::temp_dir().join(format!("duckosm-osmconf-{}-{n}.ini", std::process::id()));
+        std::fs::write(&conf, OSMCONF).map_err(|e| e.to_string())?;
+        Ok(conf)
+    }
+
     /// What to look for: a name (case, accents and hyphens ignored, `name:en` too) or one OSM relation id.
     #[derive(Clone, Copy, Debug)]
     pub enum Wanted<'a> {
@@ -134,19 +164,9 @@ mod sql {
     /// as `ogr2ogr ... multipolygons` does), best first (duckOSM `area._from_pbf` and `admin_match_sql`): an exact name
     /// first, then the largest area; at most 6.
     fn from_pbf(pbf: &Path, want: Wanted) -> Result<Vec<(Value, Value)>, String> {
-        let conf = std::env::temp_dir().join(format!("duckosm-osmconf-{}.ini", std::process::id()));
-        std::fs::write(&conf, OSMCONF).map_err(|e| e.to_string())?;
+        let conf = write_osmconf()?;
         let con = spatial()?;
-        let read = con.execute_batch(&format!(
-            "CREATE TEMP TABLE admin_boundaries AS
-             SELECT TRY_CAST(COALESCE(osm_id, osm_way_id) AS BIGINT) AS osm_id, name,
-                    NULLIF(regexp_extract(other_tags, '\"name:en\"=>\"([^\"]*)\"', 1), '') AS name_en,
-                    TRY_CAST(admin_level AS INTEGER) AS admin_level, geom::GEOMETRY AS geometry
-             FROM ST_Read('{}', layer = 'multipolygons', open_options = ['CONFIG_FILE={}'])
-             WHERE boundary = 'administrative'",
-            quote(pbf),
-            quote(&conf)
-        ));
+        let read = con.execute_batch(&format!("CREATE TEMP TABLE admin_boundaries AS {}", admin_select(&admin_multipolygons(pbf, &conf))));
         let _ = std::fs::remove_file(&conf);
         read.map_err(|e| format!("the borders of {}: {e}", pbf.display()))?;
         let pick = "SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM ";
@@ -387,7 +407,7 @@ mod sql {
 }
 
 #[cfg(feature = "duckdb")]
-pub use sql::{boundary_cells, buffered, find, find_boundary, Wanted};
+pub use sql::{admin_multipolygons, admin_select, boundary_cells, buffered, find, find_boundary, write_osmconf, Wanted};
 
 #[cfg(not(feature = "duckdb"))]
 pub fn find(_: &str, _: Option<&Path>) -> Result<(Value, Value), String> {

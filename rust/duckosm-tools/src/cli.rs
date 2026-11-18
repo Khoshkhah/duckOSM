@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 4] = ["info", "way", "init-config", "boundary"];
+pub const COMMANDS: [&str; 6] = ["info", "way", "init-config", "boundary", "extract", "admin"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -63,6 +63,39 @@ enum Cmd {
         /// Output GeoJSON (default: <name>.geojson).
         #[arg(short, long)]
         out: Option<PathBuf>,
+    },
+    /// Slice a sub-area out of an existing build into a new, self-contained db: an edge is kept whole if it intersects the
+    /// area; main.boundary, a new main.visualization_metadata (with the time zone) and the admin boundaries inside the area
+    /// are added; raw.* is not copied.
+    Extract {
+        /// Source duckOSM .duckdb.
+        #[arg(long, required = true)]
+        source: PathBuf,
+        /// Output .duckdb (overwritten).
+        #[arg(long, required = true)]
+        db: PathBuf,
+        /// Area name, matched in the source admin_boundaries.
+        #[arg(long, group = "area")]
+        name: Option<String>,
+        /// Admin boundary osm_id to use as the area.
+        #[arg(long, group = "area")]
+        osm_id: Option<i64>,
+        /// GeoJSON boundary file.
+        #[arg(long, group = "area")]
+        boundary: Option<PathBuf>,
+    },
+    /// Add an admin_boundaries table (all OSM administrative levels, with each one's parent) to a duckOSM db, from the
+    /// boundary relations of a PBF.
+    Admin {
+        /// Source OSM PBF file.
+        #[arg(long, required = true)]
+        pbf: PathBuf,
+        /// Target duckOSM .duckdb file.
+        #[arg(long, required = true)]
+        db: PathBuf,
+        /// GeoPackage path; reused if it already exists, else written here (default: none).
+        #[arg(long)]
+        gpkg: Option<PathBuf>,
     },
     /// Write the fully commented config template to PATH (default: duckosm.yaml). Edit it, then run
     /// `duckosm build --config PATH`.
@@ -131,6 +164,16 @@ pub fn run(args: &[String]) -> Result<()> {
                 }
             }
         }
+        Cmd::Extract { source, db, name, osm_id, boundary } => {
+            let area = match (&name, osm_id, &boundary) {
+                (Some(n), None, None) => crate::extract::Area::Name(n),
+                (None, Some(id), None) => crate::extract::Area::OsmId(id),
+                (None, None, Some(b)) => crate::extract::Area::Boundary(b),
+                _ => return Err("one of the arguments --name --osm-id --boundary is required".into()),
+            };
+            crate::extract::extract(&source, &db, area)?;
+        }
+        Cmd::Admin { pbf, db, gpkg } => crate::admin::admin(&pbf, &db, gpkg.as_deref())?,
         Cmd::InitConfig { path, force } => {
             if path.exists() && !force {
                 return Err(format!("{} already exists (use --force to overwrite)", path.display()));
