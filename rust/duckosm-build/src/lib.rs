@@ -1709,7 +1709,8 @@ pub fn run<W: Write + Send>(
 
 /// duckosm quack: the features table of QuackOSM (feature_id, tags, geometry; docs/rust/quack.md) of the whole PBF file,
 /// made in Rust in one pass (`duckosm_core::quack`): into the table `main.quackosm` of the `.duckdb` file `duckdb`
-/// (directly, no Parquet file between), into the GeoParquet file `parquet`, or into both in the same pass.
+/// (directly, no Parquet file between), into the GeoParquet file `parquet`, or into both in the same pass. `fixes`: the
+/// OSM fixes of `duckosm build --fixes` (`duckosm_core::quack::QuackFixes`).
 pub fn quack(
     pbf: &Path,
     parquet: Option<&Path>,
@@ -1717,39 +1718,42 @@ pub fn quack(
     threads: usize,
     sort: bool,
     tiles: Option<duckosm_core::quack::TileSize>,
+    fixes: Option<&OsmFixes>,
 ) -> Result<duckosm_core::quack::Counts, String> {
+    let open = || {
+        let f = duckosm_core::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
+        Ok(std::io::BufReader::with_capacity(1 << 20, f))
+    };
+    let fixes = fixes.map(|f| duckosm_core::quack::QuackFixes::new(f, open)).transpose()?;
     if let Some(db) = duckdb {
         if tiles.is_some() {
             return Err("quack by tiles writes only GeoParquet (use --format geoparquet)".into());
         }
         #[cfg(feature = "duckdb")]
-        return duckosm_duckdb::write_quack(db, pbf, threads, parquet, sort);
+        return duckosm_duckdb::write_quack(db, pbf, threads, parquet, sort, fixes.as_ref());
         #[cfg(not(feature = "duckdb"))]
         return Err(format!("{}: the .duckdb output needs the cargo feature \"duckdb\"", db.display()));
     }
     let parquet = parquet.ok_or("quack: no output (use geoparquet, duckdb or both)")?;
     let out = duckosm_core::fs::File::create(parquet).map_err(|e| format!("{}: {e}", parquet.display()))?;
-    let open = || {
-        let f = duckosm_core::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
-        Ok(std::io::BufReader::with_capacity(1 << 20, f))
-    };
     match tiles {
-        Some(size) => quack_tiles_to(open, std::io::BufWriter::new(out), sort, size),
-        None => quack_to(open, std::io::BufWriter::new(out), sort),
+        Some(size) => quack_tiles_to(open, std::io::BufWriter::new(out), sort, size, fixes),
+        None => quack_to(open, std::io::BufWriter::new(out), sort, fixes.as_ref()),
     }
 }
 
 /// [`quack`] from a `.osm.pbf` file (`open` opens it; it is read twice) to any writer of the GeoParquet file (the browser
 /// page reads a `File` and writes into memory or OPFS). With `sort` (QuackOSM's default), the rows wait in temporary files for
-/// `duckosm_core::quack::StrSort`; without, they go to the file while the PBF file is read.
+/// `duckosm_core::quack::StrSort`; without, they go to the file while the PBF file is read. `fixes`: the OSM fixes.
 pub fn quack_to<R: Read + Send, W: Write + Send>(
     open: impl Fn() -> Result<R, String>,
     out: W,
     sort: bool,
+    fixes: Option<&duckosm_core::quack::QuackFixes>,
 ) -> Result<duckosm_core::quack::Counts, String> {
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
     let mut rows = duckosm_parquet::quack::Rows::new(sort);
-    let n = duckosm_core::quack::features(open, duckosm_core::quack::BUDGET, |part| {
+    let n = duckosm_core::quack::features(open, duckosm_core::quack::BUDGET, fixes, |part| {
         rows.push(part)?.iter().try_for_each(|b| w.write(b))
     })?;
     rows.sorted(|b| w.write(&b))?;
@@ -1762,11 +1766,13 @@ pub fn quack_to<R: Read + Send, W: Write + Send>(
 /// boundary whole in each tile with a member), as a GeoParquet part through `out`. No other tile is needed; the parts of
 /// all tiles, joined ([`quack_join_to`]), are the table of the whole file. With `sort`, the part has the rows in the order
 /// (x, y, row number) of `duckosm_core::quack::StrSort`, in small row groups, so the join only merges the parts.
+/// `fixes`: the OSM fixes, placed on the tiles (`QuackFixes::place`) so that one tile makes each new way.
 pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
     open: impl Fn() -> Result<R, String>,
     tile: duckosm_core::tiles::Tile,
     out: W,
     sort: bool,
+    fixes: Option<&duckosm_core::quack::QuackFixes>,
 ) -> Result<duckosm_core::quack::Counts, String> {
     use rayon::prelude::*;
     let mut w = if sort {
@@ -1780,7 +1786,7 @@ pub fn quack_tile_to<R: Read + Send, W: Write + Send>(
         relations: None,
     };
     let mut n = duckosm_core::quack::Counts::default();
-    duckosm_core::quack::features_owned(open, duckosm_core::quack::BUDGET, Some(&owner), |rows| {
+    duckosm_core::quack::features_owned(open, duckosm_core::quack::BUDGET, Some(&owner), fixes, |rows| {
         let mine: Vec<_> = rows.into_iter().filter(|f| f.owner).collect();
         for f in &mine {
             match f.feature_id.as_bytes()[0] {
@@ -1880,10 +1886,11 @@ pub fn quack_tiles_to<R: Read + std::io::Seek + Send, W: Write + Send>(
     out: W,
     sort: bool,
     size: duckosm_core::quack::TileSize,
+    fixes: Option<duckosm_core::quack::QuackFixes>,
 ) -> Result<duckosm_core::quack::Counts, String> {
     let mut w = duckosm_parquet::quack::QuackWriter::new(out)?;
     let mut rows = duckosm_parquet::quack::Rows::new(sort);
-    let n = duckosm_core::quack::features_by_tiles(open, duckosm_core::quack::BUDGET, size, |part| {
+    let n = duckosm_core::quack::features_by_tiles(open, duckosm_core::quack::BUDGET, size, fixes, |part| {
         rows.push(part)?.iter().try_for_each(|b| w.write(b))
     })?;
     rows.sorted(|b| w.write(&b))?;

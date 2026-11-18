@@ -148,7 +148,7 @@ fn tiles_alone(pbf: &std::path::Path, gpkg: &std::path::Path) {
         }
         let mut out = Vec::new();
         let open_tile = || Ok(std::io::BufReader::new(files.reader(i)));
-        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, &mut out).unwrap();
+        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, &mut out, None).unwrap();
         parts.push(std::io::Cursor::new(out));
     }
     assert!(parts.len() > 1, "more than one tile");
@@ -166,8 +166,8 @@ fn check(mode: Mode) {
     std::fs::create_dir_all(&dir).unwrap();
     let gpkg = dir.join("monaco_gdal.gpkg");
     match mode {
-        Mode::Whole => drop(duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, None).unwrap()),
-        Mode::Tiles => drop(duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, Some(duckosm_build::TileSize::Zoom(12))).unwrap()),
+        Mode::Whole => drop(duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, None, None).unwrap()),
+        Mode::Tiles => drop(duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, Some(duckosm_build::TileSize::Zoom(12)), None).unwrap()),
         Mode::TilesAlone => tiles_alone(&pbf, &gpkg),
     }
     let (want, got) = (golden(), ours(&gpkg));
@@ -208,4 +208,63 @@ fn monaco_by_tiles_equals_ogr2ogr() {
 #[test]
 fn monaco_tiles_alone_equal_ogr2ogr() {
     check(Mode::TilesAlone);
+}
+
+/// quack --gdal with the OSM fixes (`tests/data/osm_fixes_quack.yaml`): the whole file, by tiles, and each tile alone
+/// with the join (the browser: the fixes as JSON, placed on the tiles) give the same rows, with the fixes in them.
+#[test]
+fn monaco_fixes() {
+    use duckosm_core::quack::{self, QuackFixes};
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+    let pbf = data.join("monaco.osm.pbf");
+    let osm = duckosm_build::config::read_osm_fixes(&data.join("osm_fixes_quack.yaml")).unwrap();
+    let dir = std::env::temp_dir().join(format!("quack_gdal_fixes_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let make = |name: &str, tiles: Option<duckosm_build::TileSize>| {
+        let gpkg = dir.join(format!("{name}.gpkg"));
+        duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, tiles, Some(&osm)).unwrap();
+        ours(&gpkg)
+    };
+    let whole = make("whole", None);
+    let row = |layer: &str, id: &str, way: &str| whole.get(&(layer.to_string(), id.to_string(), way.to_string())).map(|r| &r.0);
+    let col = |layer: &str, id: &str, way: &str, c: &str| row(layer, id, way).and_then(|r| r.get(c)).and_then(|v| v.as_str()).map(String::from);
+    assert!(row("multipolygons", "", "23715051").is_none(), "removed");
+    let colle = col("lines", "4227277", "", "other_tags").expect("the other tags of a line");
+    for t in [r#""surface"=>"cobblestone""#, r#""sidewalk"=>"both""#] {
+        assert!(colle.contains(t), "{t} in {colle}");
+    }
+    let rule = col("lines", "503462470", "", "other_tags").expect("the other tags of a line");
+    for t in [r#""oneway"=>"yes""#, r#""lanes"=>"3""#] {
+        assert!(rule.contains(t), "{t} in {rule}");
+    }
+    assert_eq!(col("lines", "9000000000001", "", "name").as_deref(), Some("Test"));
+    assert_eq!(col("lines", "9000000000002", "", "highway").as_deref(), Some("service"));
+    assert_eq!(col("multipolygons", "393226", "", "name").as_deref(), Some("Test relation"));
+    assert!(row("points", "21911886", "").expect("a point").to_string().contains("marked"));
+    assert!(whole != golden(), "the fixes change the rows");
+    assert!(make("tiles", Some(duckosm_build::TileSize::Zoom(12))) == whole, "by tiles");
+    // each tile alone, as the browser's workers
+    let open = || Ok(std::io::BufReader::new(std::fs::File::open(&pbf).map_err(|e| e.to_string())?));
+    let tiles = quack::tiles_of_file(&open, quack::TileSize::Zoom(14)).unwrap();
+    let mut placed = QuackFixes::new(&osm, open).unwrap();
+    placed.place(&tiles);
+    let json = placed.to_json();
+    let world = duckosm_core::boundary::Boundary::parse(quack::WORLD).unwrap();
+    let files = duckosm_core::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"]).unwrap();
+    let mut parts = Vec::new();
+    for (i, (tile, c)) in files.tiles.iter().enumerate() {
+        if c.nodes == 0 {
+            continue;
+        }
+        let mut out = Vec::new();
+        let open_tile = || Ok(std::io::BufReader::new(files.reader(i)));
+        let worker = QuackFixes::from_json(&json).unwrap();
+        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, &mut out, Some(&worker)).unwrap();
+        parts.push(std::io::Cursor::new(out));
+    }
+    let gpkg = dir.join("alone.gpkg");
+    duckosm_build::quack_gdal::quack_gdal_join_to::<_, Vec<u8>>(parts, Some(&gpkg), None).unwrap();
+    let alone = ours(&gpkg);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(alone == whole, "each tile alone");
 }

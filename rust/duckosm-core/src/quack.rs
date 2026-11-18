@@ -69,6 +69,221 @@ pub struct Counts {
     pub relations: usize,
 }
 
+/// The OSM fixes (`crate::fixes::OsmFixes`, the file of `duckosm build --fixes`) as changes of the OSM data, for quack and
+/// quack --gdal (docs/concepts/quackosm.md, "OSM fixes"). The reader applies them to each node, way and relation of the
+/// file, in each pass and in each tile, so quack by tiles gives the same rows:
+///
+/// - `remove`, `keep_nodes` and `tags` of a rule, and the tag edits (`extra.tag_edits`) of nodes, ways and relations;
+/// - the network rules as OSM tags: `oneway` (`oneway=yes` / `no`), `lanes`, `lanes_forward` (`lanes:forward`),
+///   `lanes_backward` (`lanes:backward`) and `layer`, with the value of the rule;
+/// - the new ways, with the ids of the network, from the points that [`QuackFixes::new`] finds in the file.
+///
+/// `exclude_modes`, the arrows of the lanes and the turn restrictions are not OSM data of a way, and quack leaves them out.
+/// The type goes to the workers of the browser as JSON.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct QuackFixes {
+    ways: crate::util::FxHashMap<i64, Change>,
+    nodes: crate::util::FxHashMap<i64, Change>,
+    relations: crate::util::FxHashMap<i64, Change>,
+    new_ways: Vec<NewLine>,
+}
+
+/// The changes of one element. `tags`: in this order, set a tag (`Some`) or delete it (`None`).
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Change {
+    remove: bool,
+    keep: Option<(i64, i64)>,
+    tags: Vec<(String, Option<String>)>,
+}
+
+impl Change {
+    fn tags(&self, tags: &mut RawTags) {
+        for (k, v) in &self.tags {
+            match v {
+                Some(v) => match tags.iter_mut().find(|t| &t.0 == k) {
+                    Some(t) => t.1.clone_from(v),
+                    None => tags.push((k.clone(), v.clone())),
+                },
+                None => tags.retain(|t| &t.0 != k),
+            }
+        }
+    }
+}
+
+/// A new way: its points (rounded) and tags; `tile`: the tile (z, x, y) that owns it in quack by tiles.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct NewLine {
+    id: i64,
+    tags: RawTags,
+    pts: Vec<Pt>,
+    closed: bool,
+    tile: Option<(u8, u32, u32)>,
+}
+
+impl QuackFixes {
+    /// The fixes of `fixes` for the `.osm.pbf` file that `open` opens. With new ways, one pass over the file finds the
+    /// points of their OSM nodes and the tags of their `tags_from` ways. A new way with an OSM node that is not in the file
+    /// is left out (the file of fixes is global), as in the build.
+    pub fn new<R: Read + Send>(fixes: &crate::fixes::OsmFixes, open: impl Fn() -> Result<R, String>) -> Result<QuackFixes, String> {
+        use crate::fixes::{Elem, NewNode, NEW_WAY_ID_MIN};
+        let mut q = QuackFixes::default();
+        for r in &fixes.ways {
+            let c = q.ways.entry(r.osm_id).or_default();
+            c.remove |= r.remove;
+            c.keep = r.keep_nodes.or(c.keep);
+            c.tags.extend(r.tags.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
+        }
+        for e in &fixes.tag_edits {
+            let map = match e.elem {
+                Elem::Node => &mut q.nodes,
+                Elem::Way => &mut q.ways,
+                Elem::Relation => &mut q.relations,
+            };
+            let c = map.entry(e.id).or_default();
+            c.tags.extend(e.set.iter().map(|(k, v)| (k.clone(), Some(v.clone()))));
+            c.tags.extend(e.delete.iter().map(|k| (k.clone(), None)));
+        }
+        // the network rules last: in the build they act after the tags
+        for r in &fixes.ways {
+            let num = |k: &str, v: Option<i32>| v.map(|v| (k.to_string(), Some(v.to_string())));
+            let oneway = r.oneway.map(|b| ("oneway".to_string(), Some(if b { "yes" } else { "no" }.to_string())));
+            let tags = [oneway, num("lanes", r.lanes), num("lanes:forward", r.lanes_forward), num("lanes:backward", r.lanes_backward), num("layer", r.layer)];
+            q.ways.entry(r.osm_id).or_default().tags.extend(tags.into_iter().flatten());
+        }
+        if fixes.new_ways.is_empty() {
+            return Ok(q);
+        }
+        // the points of the OSM nodes and the tags of the `tags_from` ways
+        struct Find<'a> {
+            nodes: &'a crate::util::FxHashSet<i64>,
+            ways: &'a crate::util::FxHashSet<i64>,
+            pts: Vec<(i64, Pt)>,
+            tags: Vec<(i64, RawTags)>,
+        }
+        impl RawSink for Find<'_> {
+            fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+                if self.nodes.contains(&id) {
+                    self.pts.push((id, (round7(lon), round7(lat))));
+                }
+            }
+            fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {
+                if self.ways.contains(&id) {
+                    self.tags.push((id, tags.map(|(k, v)| (k.to_string(), v.to_string())).collect()));
+                }
+            }
+            fn relation<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>) {}
+        }
+        let mut ids: (crate::util::FxHashSet<i64>, crate::util::FxHashSet<i64>) = Default::default();
+        for n in &fixes.new_ways {
+            ids.0.extend(n.nodes.iter().filter_map(|x| if let NewNode::Osm(id) = x { Some(*id) } else { None }));
+            ids.1.extend(n.tags_from);
+        }
+        let (mut pts, mut from): (crate::util::FxHashMap<i64, Pt>, crate::util::FxHashMap<i64, RawTags>) = Default::default();
+        crate::cutstream::each_block(
+            &mut open()?,
+            |b, buf| {
+                let mut f = Find { nodes: &ids.0, ways: &ids.1, pts: Vec::new(), tags: Vec::new() };
+                crate::pbfraw::decode_block(b, [!ids.0.is_empty(), !ids.1.is_empty(), false], buf, &mut f)?;
+                Ok((f.pts, f.tags))
+            },
+            |(p, t), _| {
+                pts.extend(p);
+                from.extend(t);
+                Ok(true)
+            },
+        )?;
+        let mut seen = Vec::new();
+        for n in &fixes.new_ways {
+            if n.id < NEW_WAY_ID_MIN || seen.contains(&n.id) {
+                return Err(format!("osm_overrides new_ways: id {} is below {NEW_WAY_ID_MIN} or used two times", n.id));
+            }
+            seen.push(n.id);
+            let line = n.nodes.iter().map(|x| match x {
+                NewNode::Osm(id) => pts.get(id).copied(),
+                NewNode::At((lon, lat)) => Some((round7(*lon), round7(*lat))),
+            });
+            let Some(line) = line.collect::<Option<Vec<Pt>>>() else {
+                continue;
+            };
+            // the own tags first: they have priority over the tags of `tags_from`
+            let mut tags: RawTags = n.tags.clone();
+            for (k, v) in n.tags_from.and_then(|id| from.get(&id)).into_iter().flatten() {
+                if !tags.iter().any(|t| &t.0 == k) {
+                    tags.push((k.clone(), v.clone()));
+                }
+            }
+            if let Some(c) = q.ways.get(&n.id) {
+                c.tags(&mut tags);
+            }
+            let closed = match (n.nodes.first(), n.nodes.last()) {
+                (Some(NewNode::Osm(a)), Some(NewNode::Osm(b))) => a == b,
+                _ => n.nodes.len() > 1 && line.first() == line.last(),
+            };
+            q.new_ways.push(NewLine { id: n.id, tags, pts: line, closed, tile: None });
+        }
+        Ok(q)
+    }
+
+    /// The fixes as JSON, for the workers of the browser and the DuckDB table function.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("the fixes as JSON")
+    }
+
+    pub fn from_json(text: &str) -> Result<QuackFixes, String> {
+        serde_json::from_str(text).map_err(|e| format!("the OSM fixes of quack: {e}"))
+    }
+
+    /// quack by tiles: each new way goes to the tile of `tiles` with its first point, or else to the first tile (a tile
+    /// with no OSM node has no run), so one tile makes it.
+    pub fn place(&mut self, tiles: &[Tile]) {
+        for l in &mut self.new_ways {
+            let Some(&(lon, lat)) = l.pts.first() else { continue };
+            l.tile = tiles.iter().find(|t| Tile::of(t.z, lon, lat) == **t).or(tiles.first()).map(|t| (t.z, t.x, t.y));
+        }
+    }
+
+    /// Change the tags and the nodes of way `id`; false: the way is removed.
+    fn way(&self, id: i64, tags: &mut RawTags, refs: &mut Vec<i64>) -> bool {
+        let Some(c) = self.ways.get(&id) else { return true };
+        if c.remove {
+            return false;
+        }
+        // DuckDB refs[list_position(a) : list_position(b)], as `OsmFixes::apply_to_ways`
+        if let Some((a, b)) = c.keep {
+            if let (Some(pa), Some(pb)) = (refs.iter().position(|&n| n == a), refs.iter().position(|&n| n == b)) {
+                if pa < pb {
+                    refs.truncate(pb + 1);
+                    refs.drain(..pa);
+                }
+            }
+        }
+        c.tags(tags);
+        true
+    }
+
+    /// The rows of the new ways that `owner` owns (all with no owner).
+    fn new_rows(&self, owner: Option<&Owner>, gdal: bool) -> Vec<Feature> {
+        let mine = |l: &NewLine| {
+            owner.is_none_or(|o| match l.tile {
+                Some((z, x, y)) => (o.tile.z, o.tile.x, o.tile.y) == (z, x, y),
+                None => l.pts.first().is_some_and(|p| Tile::of(o.tile.z, p.0, p.1) == o.tile),
+            })
+        };
+        let row = |l: &NewLine| match gdal {
+            true => (l.pts.len() >= 2).then(|| gdal_way(l.id, &l.tags, &l.pts, l.closed && crate::gdal::is_area(&l.tags))).flatten(),
+            false => way_feature(l.id, &l.tags, &l.pts),
+        };
+        self.new_ways.iter().filter(|l| mine(l)).filter_map(row).collect()
+    }
+}
+
+/// The tags of element `id` of `map` after its changes.
+fn fix_tags(map: Option<&crate::util::FxHashMap<i64, Change>>, id: i64, tags: &mut RawTags) {
+    if let Some(c) = map.and_then(|m| m.get(&id)) {
+        c.tags(tags);
+    }
+}
+
 /// The tags that QuackOSM leaves out (`METADATA_TAGS_TO_IGNORE`, the list of GDAL), and the keys that start with
 /// `openGeoDB:`.
 const METADATA: &[&str] = &["area", "created_by", "converted_by", "source", "time", "ele", "note", "todo", "fixme", "FIXME"];
@@ -583,8 +798,9 @@ fn relation_geometry(members: &[(&str, Vec<Pt>)]) -> Option<Geom> {
 /// multipolygon or boundary with its member ways (quack --gdal: each relation with its member nodes and ways, and the
 /// roles as they are).
 #[derive(Default)]
-struct WaysPart {
+struct WaysPart<'f> {
     gdal: bool,
+    fixes: Option<&'f QuackFixes>,
     ways: Vec<(i64, RawTags, Vec<i64>)>,
     relations: Vec<(i64, RawTags, Vec<Member>)>,
 }
@@ -608,13 +824,17 @@ fn member_of(b: u8) -> MemberType {
     }
 }
 
-impl RawSink for WaysPart {
+impl RawSink for WaysPart<'_> {
     fn node<'a>(&mut self, _: i64, _: f64, _: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {}
 
     fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
-        let refs: Vec<i64> = refs.collect();
+        let mut refs: Vec<i64> = refs.collect();
+        let mut tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        if self.fixes.is_some_and(|f| !f.way(id, &mut tags, &mut refs)) {
+            return;
+        }
         if refs.len() >= 2 {
-            self.ways.push((id, tags.map(|(k, v)| (k.to_string(), v.to_string())).collect(), refs));
+            self.ways.push((id, tags, refs));
         }
     }
 
@@ -624,7 +844,8 @@ impl RawSink for WaysPart {
         tags: &mut dyn Iterator<Item = (&'a str, &'a str)>,
         members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
     ) {
-        let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let mut tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        fix_tags(self.fixes.map(|f| &f.relations), id, &mut tags);
         if self.gdal {
             // GDAL: each relation, with its member nodes and ways
             let m: Vec<Member> = members.filter(|m| m.1 != MemberType::Relation).map(|m| (m.0, m.1, m.2.to_string())).collect();
@@ -650,7 +871,8 @@ impl RawSink for WaysPart {
 
 /// The nodes of one block (pass 2): each node for the join, and the features of the nodes with tags.
 #[derive(Default)]
-struct NodesPart {
+struct NodesPart<'f> {
+    fixes: Option<&'f QuackFixes>,
     nodes: Vec<(i64, f64, f64)>,
     features: Vec<Feature>,
     /// quack by tiles and the tile tables: only the nodes in this tile are features
@@ -658,10 +880,11 @@ struct NodesPart {
     gdal: bool,
 }
 
-impl RawSink for NodesPart {
+impl RawSink for NodesPart<'_> {
     fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
         self.nodes.push((id, lon, lat));
-        let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let mut tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        fix_tags(self.fixes.map(|f| &f.nodes), id, &mut tags);
         if self.gdal {
             if crate::gdal::is_point(&tags) && self.tile.is_none_or(|t| Tile::of(t.z, lon, lat) == t) {
                 let geometry = crate::gdal::wkb_point((lon, lat));
@@ -976,9 +1199,10 @@ pub const BUDGET: usize = 512 << 20;
 pub fn features<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
+    fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_owned(open, budget, None, emit)
+    features_owned(open, budget, None, fixes, emit)
 }
 
 /// The rows that the file of one tile gives in quack by tiles (`crate::tilecut::cut_to_store`, docs/rust/quack.md):
@@ -1006,9 +1230,10 @@ pub fn features_owned<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: Option<&Owner>,
+    fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, owner, false, emit)
+    run(open, budget, owner, false, fixes, emit)
 }
 
 /// quack --gdal: the rows of GDAL's five layers ([`crate::gdal`], each row with its `layer`) from one read of the file, as
@@ -1017,9 +1242,10 @@ pub fn features_owned<R: Read + Send>(
 pub fn gdal_features<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
+    fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, None, true, emit)
+    run(open, budget, None, true, fixes, emit)
 }
 
 /// [`gdal_features`] of the file of one tile alone (a worker of the browser for each tile): the rows that `owner` owns
@@ -1029,9 +1255,10 @@ pub fn gdal_features_owned<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: &Owner,
+    fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, Some(owner), true, emit)
+    run(open, budget, Some(owner), true, fixes, emit)
 }
 
 /// The engine of [`features_owned`] and [`gdal_features`]: `gdal` chooses the rules of GDAL's layers.
@@ -1040,6 +1267,7 @@ fn run<R: Read + Send>(
     budget: usize,
     owner: Option<&Owner>,
     gdal: bool,
+    fixes: Option<&QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
     use crate::spill::join::{Point, Request};
@@ -1071,7 +1299,7 @@ fn run<R: Read + Send>(
     crate::cutstream::each_block(
         &mut open()?,
         |b, buf| {
-            let mut part = WaysPart { gdal, ..Default::default() };
+            let mut part = WaysPart { gdal, fixes, ..Default::default() };
             crate::pbfraw::decode_block(b, [false, true, true], buf, &mut part)?;
             Ok(part)
         },
@@ -1126,7 +1354,7 @@ fn run<R: Read + Send>(
     crate::cutstream::each_block(
         &mut open()?,
         |b, buf| {
-            let mut part = NodesPart { tile: owner.map(|o| o.tile), gdal, ..Default::default() };
+            let mut part = NodesPart { tile: owner.map(|o| o.tile), gdal, fixes, ..Default::default() };
             crate::pbfraw::decode_block(b, [true, false, false], buf, &mut part)?;
             Ok(part)
         },
@@ -1292,6 +1520,11 @@ fn run<R: Read + Send>(
         })?;
         #[cfg(target_arch = "wasm32")]
         read_ways(&mut use_ways)?;
+    }
+    if let Some(f) = fixes {
+        let made = f.new_rows(owner, gdal);
+        counts.ways += made.len();
+        emit(made)?;
     }
     drop((member_ids, outer_ids));
     crate::util::step("quack 3: the ways");
@@ -1494,9 +1727,10 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
+    fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, false, |_, part| emit(part))
+    features_of_tiles(open, budget, size, false, fixes, |_, part| emit(part))
 }
 
 /// [`gdal_features`] made tile by tile, as [`features_by_tiles`] makes the table of quack. A relation of
@@ -1506,9 +1740,10 @@ pub fn gdal_features_by_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
+    fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, true, |_, part| emit(part))
+    features_of_tiles(open, budget, size, true, fixes, |_, part| emit(part))
 }
 
 /// [`features_by_tiles`], and `emit` gets the tile that made each part too (the tiles one after the other: a part of a
@@ -1518,10 +1753,15 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     budget: usize,
     size: TileSize,
     gdal: bool,
+    mut fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
     crate::util::raise_open_files();
     let tiles = tiles_of_file(&open, size)?;
+    if let Some(f) = fixes.as_mut() {
+        f.place(&tiles);
+    }
+    let fixes = fixes.as_ref();
     crate::util::step(&format!(
         "quack by tiles 1: {} tiles of zoom {} to {}",
         tiles.len(),
@@ -1541,7 +1781,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
      -> Result<Counts, String> {
         let owner = Owner { tile, relations: Some(&relations) };
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        run(open_tile, budget, Some(&owner), gdal, give)
+        run(open_tile, budget, Some(&owner), gdal, fixes, give)
     };
     let mut done = |k: usize, (_, tile, c): &(usize, Tile, crate::cutstream::CutCounts), got: Counts| {
         counts.nodes += got.nodes;
@@ -1658,7 +1898,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
                     crate::util::quiet(|| {
                         let owner = Owner { tile, relations: Some(&relations) };
                         let mut parts = Vec::new();
-                        let got = features_owned(|| Ok(std::io::Cursor::new(&b[..])), budget, Some(&owner), |p| {
+                        let got = features_owned(|| Ok(std::io::Cursor::new(&b[..])), budget, Some(&owner), fixes, |p| {
                             parts.push(p);
                             Ok(())
                         })?;

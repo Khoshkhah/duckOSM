@@ -1,4 +1,4 @@
-//! `quack_features(path, parquet, sort)`: a DuckDB table function in Rust that gives the rows of QuackOSM's
+//! `quack_features(path, parquet, sort, fixes)`: a DuckDB table function in Rust that gives the rows of QuackOSM's
 //! features table, made by `duckosm_core::quack` (docs/rust/quack.md): `feature_id`, `tags` and `geometry` (WKB as BLOB;
 //! DuckDB's own `ST_GeomFromWKB` makes the GEOMETRY). A thread makes the rows while DuckDB's insert writes them, so the
 //! `.duckdb` file is written with no Parquet file between (QuackOSM writes its Parquet file first and loads it).
@@ -21,6 +21,8 @@ pub struct Bind {
     path: String,
     parquet: String,
     sort: bool,
+    /// `duckosm_core::quack::QuackFixes` as JSON; empty: no fixes
+    fixes: String,
 }
 
 /// The batches from the thread, the batch that DuckDB reads now, and its next row.
@@ -43,6 +45,7 @@ impl VTab for QuackFeatures {
             path: bind.get_parameter(0).to_string(),
             parquet: bind.get_parameter(1).to_string(),
             sort: bind.get_parameter(2).to_string() == "true",
+            fixes: bind.get_parameter(3).to_string(),
         })
     }
 
@@ -50,6 +53,10 @@ impl VTab for QuackFeatures {
         let bind = unsafe { &*init.get_bind_data::<Bind>() };
         init.set_max_threads(1);
         let (path, parquet, sort) = (bind.path.clone(), bind.parquet.clone(), bind.sort);
+        let fixes = match bind.fixes.is_empty() {
+            true => None,
+            false => Some(duckosm_core::quack::QuackFixes::from_json(&bind.fixes)?),
+        };
         // a few batches wait in the channel: the memory stays small when DuckDB writes slower than the thread makes rows
         let (tx, rx) = sync_channel::<Part>(4);
         std::thread::spawn(move || {
@@ -73,7 +80,7 @@ impl VTab for QuackFeatures {
                     let f = std::fs::File::open(&path).map_err(|e| format!("{path}: {e}"))?;
                     Ok(std::io::BufReader::with_capacity(1 << 20, f))
                 };
-                duckosm_core::quack::features(open, duckosm_core::quack::BUDGET, |part| {
+                duckosm_core::quack::features(open, duckosm_core::quack::BUDGET, fixes.as_ref(), |part| {
                     rows.push(part)?.into_iter().try_for_each(&mut give)
                 })?;
                 rows.sorted(&mut give)?;
@@ -122,15 +129,22 @@ impl VTab for QuackFeatures {
 
     fn parameters() -> Option<Vec<LogicalTypeHandle>> {
         let text = || LogicalTypeHandle::from(LogicalTypeId::Varchar);
-        Some(vec![text(), text(), LogicalTypeHandle::from(LogicalTypeId::Boolean)])
+        Some(vec![text(), text(), LogicalTypeHandle::from(LogicalTypeId::Boolean), text()])
     }
 }
 
 /// duckosm quack with the `.duckdb` output: the table `main.quackosm` (QuackOSM's table name) of a new file `db`,
 /// from the `.osm.pbf` file `pbf`, with DuckDB's GEOMETRY type (`ST_GeomFromWKB` of DuckDB's core, no extension). With
 /// `parquet`, the same rows also go to that GeoParquet file. With `sort`, the rows are in the order of
-/// `duckosm_core::quack::str_order` (QuackOSM's default). Returns the rows of each kind.
-pub fn write_quack(db: &Path, pbf: &Path, threads: usize, parquet: Option<&Path>, sort: bool) -> Result<Counts, String> {
+/// `duckosm_core::quack::str_order` (QuackOSM's default). `fixes`: the OSM fixes. Returns the rows of each kind.
+pub fn write_quack(
+    db: &Path,
+    pbf: &Path,
+    threads: usize,
+    parquet: Option<&Path>,
+    sort: bool,
+    fixes: Option<&duckosm_core::quack::QuackFixes>,
+) -> Result<Counts, String> {
     let err = |e: duckdb::Error| format!("main.quackosm: {e}");
     let _ = std::fs::remove_file(db);
     let con = Connection::open(db).map_err(err)?;
@@ -139,10 +153,11 @@ pub fn write_quack(db: &Path, pbf: &Path, threads: usize, parquet: Option<&Path>
     con.execute_batch(&format!(
         "SET preserve_insertion_order = {sort}; SET threads = {threads};
          CREATE TABLE main.quackosm AS
-         SELECT feature_id, tags, ST_GeomFromWKB(geometry) AS geometry FROM quack_features('{}', '{}', {sort});
+         SELECT feature_id, tags, ST_GeomFromWKB(geometry) AS geometry FROM quack_features('{}', '{}', {sort}, '{}');
          CHECKPOINT;",
         text(pbf),
-        parquet.map(text).unwrap_or_default()
+        parquet.map(text).unwrap_or_default(),
+        fixes.map(|f| f.to_json().replace('\'', "''")).unwrap_or_default()
     ))
     .map_err(err)?;
     con.query_row(

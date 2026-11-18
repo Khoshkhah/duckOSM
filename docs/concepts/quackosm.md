@@ -11,6 +11,7 @@ duckosm quack france.osm.pbf -o out --name france -f geoparquet,duckdb
 |---|---|
 | `--no-sort` | do not sort the rows (faster) |
 | `--tile-zoom 8` | make the table tile by tile (for a country) |
+| `--fixes osm_fixes.yaml` | apply the OSM fixes of [Edit OSM data](#osm-fixes) |
 
 In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio.
 
@@ -86,6 +87,20 @@ again on 2026-11-18 and are the same as before.
 | `geometry` | POINT, LINESTRING, POLYGON or MULTIPOLYGON |
 
 One row for each OSM element with tags, as QuackOSM 0.20.0 with its default options.
+
+## OSM fixes
+
+`--fixes FILE` applies the OSM fixes file of `duckosm build --fixes` (the file of Edit OSM data) to the OSM data before
+the table is made. Then the table has the same edits as the network. The result is the same with and without
+`--tile-zoom`. The quack page of duckOSM Studio uses the fixes file of the area when the area has one.
+
+| Rule of the fixes file | In the output |
+|---|---|
+| `remove`, `keep_nodes`, `tags` | applied to the way |
+| `extra.tag_edits` | applied to the node, the way or the relation |
+| `new_ways` | a new way, with the same id as in the network (from 9 000 000 000 000) |
+| `oneway`, `lanes`, `lanes_forward`, `lanes_backward`, `layer` | OSM tags with the value of the rule: `oneway=yes` or `no`, `lanes`, `lanes:forward`, `lanes:backward`, `layer` |
+| `exclude_modes`, `turn_lanes_*`, `turn_restrictions` | not applied: they have no OSM tag of a way |
 
 ## GDAL layers
 
