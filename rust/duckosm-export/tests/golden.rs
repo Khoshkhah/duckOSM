@@ -306,7 +306,7 @@ fn gmns_columns(db: &Path) -> Vec<String> {
 }
 
 /// The columns that a later step of `to_gmns` changes or adds, not ported yet: the test skips them.
-const GMNS_PENDING: [&str; 7] = ["node.node_type", "node.ctrl_type", "link.parent_link_id", "link.along_link_id", "link.along_mode", "link.along_gap_m", "link.along_kind"];
+const GMNS_PENDING: [&str; 2] = ["node.node_type", "node.ctrl_type"];
 
 /// GMNS: each column of each table that the Rust export makes so far equals the Python export (the same type, rows and values).
 #[test]

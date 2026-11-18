@@ -12,6 +12,7 @@ pub mod matsim_lanes;
 pub mod offset;
 pub mod opendrive;
 pub mod railml;
+pub mod shapely;
 pub mod sumo;
 
 use duckdb::{AccessMode, Config, Connection};
