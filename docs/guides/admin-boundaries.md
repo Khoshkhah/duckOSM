@@ -32,16 +32,16 @@ Use the table to find the district of a road, or to cut an area by name with
 4 is a county in Sweden and a state in the USA. The table of each country is in the
 [OSM wiki](https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative).
 
-| Sweden | `admin_level` |
-|---|---|
-| Country (Sverige) | 2 |
-| County (län), 21 | 4 |
-| Sami reindeer-herding district (sameby) | 6 |
-| Municipality (kommun), 290 | 7 |
-| District, borough, neighborhood (distrikt, stadsdel); not complete in OSM | 8 to 11 |
+| Sweden | `admin_level` | Number |
+|---|---|---|
+| Country (Sverige) | 2 | 1 |
+| County (län) | 4 | 21 |
+| Sami reindeer-herding district (sameby) | 6 | |
+| Municipality (kommun) | 7 | 290 |
+| District, borough, neighborhood (distrikt, stadsdel) | 8 to 11 | not complete in OSM |
 
-The parent is found from the geometry: the boundary with a lower `admin_level` that contains a point inside the child.
-A border artifact can have no parent. On Sweden, 1,456 of 1,472 boundaries have a parent.
+The parent is the boundary with a lower `admin_level` that contains a point inside the child. A boundary with a drawing
+fault at its border can have no parent.
 
 ## Example queries
 
