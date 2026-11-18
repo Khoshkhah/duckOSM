@@ -27,8 +27,8 @@ All outputs come from one `.osm.pbf` file.
 | **Road networks**: driving, walking and cycling, and the graph of legal turns | `duckosm build` | DuckDB | [Build a network](guides/build.md) |
 | **Base-map layers**: water, land use, buildings, POIs | `duckosm build` | DuckDB (`features.*`) | [Base-map layers](reference/features.md) |
 | **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB | [Drawing order](guides/drawing-order.md), [walls](concepts/building-walls.md) |
-| **The OSM features table** of QuackOSM | `duckosm quack` | GeoParquet, DuckDB | [duckOSM and QuackOSM](concepts/quackosm.md) |
-| **GDAL's five OSM layers**, as QGIS reads them | `duckosm quack --gdal` | GeoPackage, GeoParquet | [duckOSM and GDAL](concepts/gdal.md) |
+| **The OSM features table** of QuackOSM | `duckosm quack`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoParquet, DuckDB | [duckOSM and QuackOSM](concepts/quackosm.md) |
+| **GDAL's five OSM layers**, as QGIS reads them | `duckosm quack --gdal`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoPackage, GeoParquet | [duckOSM and GDAL](concepts/gdal.md) |
 | **Traffic simulation networks** | `duckosm sumo`, `matsim`, `gmns` | SUMO, MATSim, GMNS | [Exports](exports/index.md) |
 | **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx | [GIS](exports/gis.md), [networkx](exports/networkx.md) |
 | **Heights**: the ground height of each node | `duckosm elevation` | DuckDB | [Add elevation](guides/elevation.md) |
@@ -65,6 +65,11 @@ The network and all its exports use your fixes. More: [Edit OSM data](guides/edi
 | Install | `pip install duckosm` | none |
 | Storage | the disk | the browser's storage (OPFS) |
 | Rows | the same | the same |
+
+In the browser, open:
+
+- [**duckOSM Studio**](https://khoshkhah.github.io/duckosm-studio/): choose an area, build its network, edit the OSM data, and export.
+- [**The quack page**](https://khoshkhah.github.io/duckosm-studio/quack.html): the OSM features table of QuackOSM and GDAL's five layers.
 
 Both build every area by map tiles, so the memory does not grow with the area
 ([Browser and native builds](concepts/browser-native.md)).
