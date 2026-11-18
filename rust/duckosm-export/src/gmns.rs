@@ -188,6 +188,9 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
         }
         summary.push(ModeSummary { mode: mode.clone(), counts });
     }
+    if chosen.iter().any(|m| m == "driving") && chosen.iter().any(|m| m == "walking") {
+        build_walk_joins(&c)?; // after both modes: the road lane ends come from gmns_driving
+    }
     c.exec("DETACH s")?;
     Ok(summary)
 }
@@ -1108,6 +1111,96 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
     }
     eprintln!("GMNS[{}]: {} lane ends moved to meet the lane they continue", &sch[5..], moved.len());
     Ok(moved.len())
+}
+
+/// `_build_walk_joins`: where a footway meets a road at a node both links share, one straight connector from the nearest road
+/// lane's end to the footway lane's end, when they are 0.3-6 m apart (`gmns_walking.lane_connector`).
+fn build_walk_joins(c: &Ctx) -> Result<()> {
+    const MAX_GAP_M: f64 = 6.0;
+    const MIN_GAP_M: f64 = 0.3;
+    c.exec("CREATE TABLE gmns_walking.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY)")?;
+    let rows5 = |sql: &str| -> Result<Vec<(String, i64, i64, String, i64)>> {
+        let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+        let v = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string());
+        v
+    };
+    let roads = rows5(
+        "SELECT l.lane_id, k.from_node_id, k.to_node_id, ST_AsText(l.geom), l.link_id
+         FROM gmns_driving.lane l JOIN gmns_driving.link k ON k.link_id = l.link_id WHERE l.geom IS NOT NULL",
+    )?;
+    let sql = format!(
+        "SELECT l.lane_id, k.from_node_id, k.to_node_id, ST_AsText(l.geom), l.link_id, COALESCE(l.width, {DEFAULT_WALK_W})::DOUBLE
+         FROM gmns_walking.lane l JOIN gmns_walking.link k ON k.link_id = l.link_id
+         WHERE l.geom IS NOT NULL AND l.allowed_uses = 'walk'
+           AND k.link_id NOT IN (SELECT link_id FROM gmns_driving.link)
+           AND k.osm_id NOT IN (SELECT osm_id FROM s.driving.edges WHERE osm_id IS NOT NULL)"
+    );
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let foots: Vec<(String, i64, i64, String, i64, f64)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(st);
+    if roads.is_empty() || foots.is_empty() {
+        return Ok(());
+    }
+    let sql = "SELECT mvmt_id, ib_link_id, ob_link_id FROM gmns_walking.movement";
+    let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let mut mvmt: HashMap<(i64, i64), String> = HashMap::new();
+    for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))).map_err(|e| e.to_string())? {
+        let (m, ib, ob) = r.map_err(|e| e.to_string())?;
+        mvmt.insert((ib, ob), m);
+    }
+    drop(st);
+    let y0 = shp::wkt_points(&roads[0].3)[0].1;
+    let (kx, m) = (lanes::kx_of(y0), 111320.0);
+    let dist = |p: P, q: P| ((p.0 - q.0) * kx * m).hypot((p.1 - q.1) * m);
+    let mut ends: HashMap<i64, Vec<(String, i64, P)>> = HashMap::new();
+    for (lid, a, b, wkt, lk) in &roads {
+        let cs = shp::wkt_points(wkt);
+        for (node, pt) in [(*a, cs[0]), (*b, *cs.last().unwrap())] {
+            ends.entry(node).or_default().push((lid.clone(), *lk, pt));
+        }
+    }
+    let mut seen: HashSet<(String, String, String, String)> = HashSet::new();
+    c.exec("CREATE OR REPLACE TEMP TABLE _joins(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, wkt VARCHAR)")?;
+    let mut app = c.con.appender("_joins").map_err(|e| e.to_string())?;
+    let mut n = 0;
+    for (lid, a, b, wkt, lk, w) in &foots {
+        let cs = shp::wkt_points(wkt);
+        for (node, pt) in [(*a, cs[0]), (*b, *cs.last().unwrap())] {
+            let Some(near) = ends.get(&node).filter(|v| !v.is_empty()) else { continue };
+            // the first of the nearest, as Python's min()
+            let mut best = &near[0];
+            let mut bd = dist(pt, best.2);
+            for e in &near[1..] {
+                let d = dist(pt, e.2);
+                if d < bd {
+                    bd = d;
+                    best = e;
+                }
+            }
+            let (rl, rk, q) = (&best.0, best.1, best.2);
+            let r7 = |v: f64| format!("{:?}", shp::py_round(v, 7));
+            let key = (r7(pt.0), r7(pt.1), r7(q.0), r7(q.1));
+            if MIN_GAP_M < bd && bd <= MAX_GAP_M && !seen.contains(&key) {
+                seen.insert(key);
+                let mv = mvmt.get(&(*lk, rk)).or_else(|| mvmt.get(&(rk, *lk))).cloned();
+                app.append_row(duckdb::params![format!("{rl}>{lid}"), mv, rl, lid, w, lanes::wkt(&[q, pt])]).map_err(|e| e.to_string())?;
+                n += 1;
+            }
+        }
+    }
+    app.flush().map_err(|e| e.to_string())?;
+    drop(app);
+    c.exec("INSERT INTO gmns_walking.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, ST_GeomFromText(wkt) FROM _joins; DROP TABLE _joins")?;
+    eprintln!("GMNS[walking]: {n} footway joins (a road lane's end to a footway's, at a shared node)");
+    Ok(())
 }
 
 /// `_bezier_line_sql`: a SQL expression of a cubic Bézier line sampled at 11 points.
