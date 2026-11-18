@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`duckosm-rust gmns-map`: the lane map of a GMNS file is in Rust** (`rust/duckosm-edit/src/gmns_map.rs`,
+  `docs/design/all_in_rust.md`, group C), with the options of `duckosm gmns-map` (`--source-db`, `--area`, `-o`). It calls
+  lanestyle's Rust engine (the crate `lanestyle` 0.4, a Git dependency): the roads of the level area as roadstyle draws them, each
+  as wide as its lanes, with the lanes, lane lines, arrows, zebras and sidewalks. lanestyle's items equal those of the Python
+  lanestyle 0.3.1 on Monaco and Tartu (lanestyle's golden check). The level area is still made by `duckosm levels`. Monaco: the
+  page in 3 s.
+
 - **`duckosm-rust levels-edit DB`: the level editor in the Rust program** (`docs/design/all_in_rust.md`, group F). It is the page of
   `duckosm-rust studio` on the one file, with card 8 (Edit levels) open: roadstyle's level editor over the area's map. "← Steps"
   writes the drawing order into the file. Options: `--port` (default 8000) and `--no-open`.

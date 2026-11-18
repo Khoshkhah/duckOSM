@@ -25,6 +25,8 @@ pub mod cli;
 pub mod maps;
 pub mod page;
 #[cfg(feature = "duckdb")]
+pub mod gmns_map;
+#[cfg(feature = "duckdb")]
 pub mod route_map;
 pub mod studio;
 
