@@ -6,8 +6,9 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "duckosm-rust", version, after_help = "To edit the OSM data of a database on a page: duckosm-rust edit <AREA>.duckdb (duckosm-rust edit --help). To make the data of an area on a page: duckosm-rust studio (duckosm-rust studio --help)")]
 struct Cli {
-    /// The input .osm.pbf file (already cut to the area). Not with --config.
-    #[arg(required_unless_present = "config", conflicts_with = "config")]
+    /// The input .osm.pbf file (already cut to the area). With --config: this file, not the input of the config (the build of
+    /// one tile of `duckosm-rust tiles --config`).
+    #[arg(required_unless_present = "config")]
     pbf: Option<PathBuf>,
     /// A duckOSM config file (YAML). It gives the input, the output, the modes and the options.
     #[arg(short, long)]
@@ -82,10 +83,11 @@ struct Cli {
     boundary: Option<PathBuf>,
     /// The build of one tile of a large build: the junctions file of the tile cut (z_x_y.junctions), the junctions of the
     /// whole area at the nodes outside the tile.
-    #[arg(long, value_name = "FILE", conflicts_with = "config")]
+    #[arg(long, value_name = "FILE")]
     outside_junctions: Option<PathBuf>,
-    /// The build of one tile of a large build (duckosm-rust tiles): only the part of the boundary in this map tile.
-    #[arg(long, value_name = "Z/X/Y", requires = "boundary")]
+    /// The build of one tile of a large build (duckosm-rust tiles): only the part of the boundary (of --boundary or of the
+    /// config) in this map tile.
+    #[arg(long, value_name = "Z/X/Y")]
     tile: Option<String>,
     /// The build of one tile of a large build: the roads that get sidewalk=separate in the whole area (the sidewalk step of
     /// duckosm-rust tiles); the build does not run the sidewalk rule.
@@ -344,14 +346,20 @@ fn quack_union(args: &[String]) -> Result<(), String> {
 #[derive(Parser)]
 #[command(name = "duckosm-rust tiles", version)]
 struct TilesCli {
-    /// The region file (.osm.pbf, sorted by type and id, as the files of Geofabrik).
-    region: PathBuf,
-    /// The boundary of the area (GeoJSON).
-    #[arg(long)]
-    boundary: PathBuf,
-    /// The output folder: the GeoParquet files of the area.
-    #[arg(short, long)]
-    out: PathBuf,
+    /// The region file (.osm.pbf, sorted by type and id, as the files of Geofabrik). Not with --config.
+    #[arg(required_unless_present = "config", conflicts_with = "config")]
+    region: Option<PathBuf>,
+    /// The boundary of the area (GeoJSON). Not with --config.
+    #[arg(long, required_unless_present = "config", conflicts_with = "config")]
+    boundary: Option<PathBuf>,
+    /// A duckOSM config file (YAML): the region file, the boundary, the output folder and the options of the build (as
+    /// `duckosm-rust --config`; the options after `--` come after it). The local dashboard (`duckosm-rust studio`) builds
+    /// this way. Its relative paths are for the current folder; each tile build reads the same config.
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
+    /// The output folder: the GeoParquet files of the area (default with --config: its output_path).
+    #[arg(short, long, required_unless_present = "config")]
+    out: Option<PathBuf>,
     /// The zoom of the tiles (standard z/x/y map tiles; zoom 8 is about 110 km wide in France). Zoom 8 is the one tile
     /// zoom of all parts (Kaveh, 2026-11-15; docs/design/build_by_tiles.md, "The zoom").
     #[arg(long, default_value_t = 8)]
@@ -386,7 +394,6 @@ struct TilesCli {
 
 fn tiles(args: &[String]) -> Result<(), String> {
     let cli = TilesCli::parse_from(args);
-    let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
     // the options of the tiles, as the build reads them (the union needs the modes and the options)
     // the bus routes and the drawing levels do not run in a tile: they run after the union
     // the bus routes run after the union too, but the tiles give their route relations: only the user's --no-bus-routes
@@ -401,39 +408,63 @@ fn tiles(args: &[String]) -> Result<(), String> {
     }
     opts.retain(|a| !a.starts_with("--levels=") && !a.starts_with("--format="));
     // the options of the user, as given (the union reads the bus routes and the levels from
-    // them)
-    let mut all = vec!["duckosm-rust".to_string(), "tile.osm.pbf".to_string(), "--boundary".to_string()];
-    all.push(cli.boundary.to_string_lossy().into_owned());
+    // them); with --config, the config gives the region file, the boundary and the output folder too, and each tile build
+    // reads it (an absolute path: the tile builds run in the same folder)
+    let config = cli.config.as_ref().map(|c| std::path::absolute(c).map_err(|e| format!("{}: {e}", c.display()))).transpose()?;
+    let mut all = vec!["duckosm-rust".to_string()];
+    match (&config, &cli.boundary) {
+        (Some(c), _) => all.extend(["--config".to_string(), c.to_string_lossy().into_owned()]),
+        (None, Some(b)) => all.extend(["tile.osm.pbf".to_string(), "--boundary".to_string(), b.to_string_lossy().into_owned()]),
+        (None, None) => return Err("tiles: --boundary or --config".into()),
+    }
     all.extend(cli.build.iter().cloned());
-    let (_, _, p) = params(&Cli::try_parse_from(&all).map_err(|e| e.to_string())?)?;
+    let (config_pbf, config_out, p) = params(&Cli::try_parse_from(&all).map_err(|e| e.to_string())?)?;
+    let region = cli.region.clone().unwrap_or(config_pbf);
+    let out = cli.out.clone().unwrap_or(config_out);
+    let boundary = cli.boundary.clone().or(p.boundary.clone()).ok_or("tiles: the config has no boundary")?;
+    let text = std::fs::read_to_string(&boundary).map_err(|e| format!("{}: {e}", boundary.display()))?;
+    // the area: the boundary file, or the config (which has it)
+    let area: Vec<std::ffi::OsString> = match &config {
+        Some(c) => vec!["--config".into(), c.clone().into()],
+        None => vec!["--boundary".into(), boundary.clone().into()],
+    };
     let t0 = std::time::Instant::now();
-    let dir = cli.out.join("tiles");
+    let dir = out.join("tiles");
+    // the tables of the union: the output folder, or (only the .duckdb file asked for) a folder of their own in it, which goes after the
+    // .duckdb file is made: the output folder can have other files (the folder of an area of the local dashboard)
+    let union_dir = if p.geoparquet { out.clone() } else { out.join("union.tmp") };
     #[cfg(feature = "duckdb")]
     if cli.only_duckdb {
         // DuckDB keeps to the memory budget of the build by tiles (its default is 80 % of the memory): its limit is half the
         // budget, because it takes about 1 GB more than its limit (duckosm_duckdb::open)
         let mut p = p.clone();
         p.memory_limit = p.memory_limit.or(Some(format!("{}MB", parse_size(&cli.memory)? >> 21)));
-        duckosm_build::union::write_duckdb(&cli.out, &p)?;
+        let db = duckosm_build::union::write_duckdb(&union_dir, &p)?;
+        if union_dir != out {
+            let to = out.join(db.file_name().ok_or("the .duckdb file has no name")?);
+            std::fs::rename(&db, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+        }
         return Ok(());
     }
     if cli.only_cut {
         // the multipolygons of each tile are complete only when a part of the build reads them
         let multipolygons = p.raw || p.features || p.building_faces;
-        duckosm_build::union::cut_tiles(&cli.region, &text, cli.zoom, multipolygons, duckosm_build::union::border_m(&p), &dir)?;
+        duckosm_build::union::cut_tiles(&region, &text, cli.zoom, multipolygons, duckosm_build::union::border_m(&p), &dir)?;
         return Ok(());
     }
     // the cut and the .duckdb file, each as a process of this program: its memory goes back to the system when it ends
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let step = |flag: &str| -> Result<(f64, u64), String> {
         let t = std::time::Instant::now();
-        let child = std::process::Command::new(&exe)
-            .arg("tiles")
-            .arg(&cli.region)
-            .arg("--boundary")
-            .arg(&cli.boundary)
+        let mut c = std::process::Command::new(&exe);
+        c.arg("tiles");
+        if config.is_none() {
+            c.arg(&region);
+        }
+        let child = c
+            .args(&area)
             .arg("-o")
-            .arg(&cli.out)
+            .arg(&out)
             .args(["--zoom", &cli.zoom.to_string(), "--memory", &cli.memory, flag, "--"])
             .args(&cli.build)
             .spawn()
@@ -474,9 +505,8 @@ fn tiles(args: &[String]) -> Result<(), String> {
         let log = std::fs::File::create(dir.join(format!("{name}{}.log", if step { ".sidewalks" } else { "" }))).map_err(|e| e.to_string())?;
         let mut c = std::process::Command::new(&exe);
         c.arg(dir.join(format!("{name}.osm.pbf")))
-            .args(["--boundary".as_ref(), cli.boundary.as_os_str()])
+            .args(&area)
             .args(["--tile", &t.name(), "--format", "geoparquet", "--levels", "none"])
-            .args(global)
             .arg("--outside-junctions")
             .arg(dir.join(format!("{name}.junctions")))
             .arg("-o")
@@ -542,7 +572,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
 
     let t2 = std::time::Instant::now();
     let built: Vec<(duckosm_build::Tile, PathBuf)> = list.iter().map(|t| (*t, dir.join(format!("{}_{}_{}", t.z, t.x, t.y)))).collect();
-    for (name, rows) in duckosm_build::union::union_all(&built, &text, &p, !cli.keep_tiles, &cli.out)? {
+    for (name, rows) in duckosm_build::union::union_all(&built, &text, &p, !cli.keep_tiles, &union_dir)? {
         if name.starts_with("edges_") || name.starts_with("nodes_") || name.starts_with("edge_graph_") {
             eprintln!("tiles: {name}: {rows} rows");
         }
@@ -552,13 +582,9 @@ fn tiles(args: &[String]) -> Result<(), String> {
     if p.duckdb {
         let (secs, peak) = step("--only-duckdb")?;
         eprintln!("tiles: the .duckdb file: {secs:.1} s, peak {peak} MB");
-        if !p.geoparquet {
+        if union_dir != out {
             // only the .duckdb file was asked for: the files of the union go
-            for e in std::fs::read_dir(&cli.out).map_err(|e| e.to_string())?.flatten() {
-                if e.path().extension().is_some_and(|x| x == "parquet") {
-                    let _ = std::fs::remove_file(e.path());
-                }
-            }
+            std::fs::remove_dir_all(&union_dir).map_err(|e| format!("{}: {e}", union_dir.display()))?;
         }
     }
     eprintln!("tiles: total {:.1} s", t0.elapsed().as_secs_f64());
@@ -913,7 +939,7 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
         for s in &c.ignored {
             eprintln!("ignored: {s}");
         }
-        (c.pbf, cli.out.clone().unwrap_or(c.out), c.params)
+        (cli.pbf.clone().unwrap_or(c.pbf), cli.out.clone().unwrap_or(c.out), c.params)
     } else {
         let mut p = Params {
             name: cli.name.clone(),
@@ -956,9 +982,11 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
     if let Some(f) = &cli.fixes {
         p.osm_fixes = Some(f.clone());
     }
+    if cli.outside_junctions.is_some() {
+        p.outside_junctions = cli.outside_junctions.clone();
+    }
     if cli.boundary.is_some() {
         p.boundary = cli.boundary.clone();
-        p.outside_junctions = cli.outside_junctions.clone();
         p.raw = cli.raw;
         p.cut_pbf = cli.cut_pbf;
         p.cut_osm = cli.cut_osm;
@@ -973,6 +1001,9 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;
     }
     if let Some(t) = &cli.tile {
+        if p.boundary.is_none() {
+            return Err(format!("--tile {t} needs a boundary (--boundary or the config's)"));
+        }
         let n: Vec<u32> = t.split('/').map(|x| x.parse().map_err(|_| format!("--tile {t}: not z/x/y"))).collect::<Result<_, _>>()?;
         let [z, x, y] = n[..] else {
             return Err(format!("--tile {t}: not z/x/y"));
