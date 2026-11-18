@@ -8,7 +8,7 @@ the move. The section "Moved to pbfcut" at the end gives the check of the move.
 
 The tile cut (`duckosm_core::tilecut`) makes one `.osm.pbf` file for each map tile of one zoom. Each tile file is
 complete: all nodes of its ways, a border, and each multipolygon with all its members. The build by tiles
-(`duckosm-rust tiles`), quack by tiles and the browser use this cut.
+(`duckosm tiles`), quack by tiles and the browser use this cut.
 
 This document shows the work that the cut does more than one time, and proposes a cut with two reads of the input
 file and one write of each element.
@@ -119,7 +119,7 @@ How read 2 works:
 
 | | Old cut | Two reads |
 |---|---|---|
-| France, native (`duckosm-rust tiles`, the cut) | 107.4 s, 1,489 MB | 92.9 to 94.1 s; peak 1,308 against 1,506 MB in the same probe |
+| France, native (`duckosm tiles`, the cut) | 107.4 s, 1,489 MB | 92.9 to 94.1 s; peak 1,308 against 1,506 MB in the same probe |
 | Sweden in Chromium, zoom 10, 8 threads | 66.0 s, 1,077 MiB | 52.1 s, 1,038 MiB |
 | Sweden in Chromium, zoom 6, 8 threads | 45.5 s, 851 MiB | 38.9 s, 856 MiB |
 | Kentucky, the cut in the build by tiles | 4.9 s, 434 MB | 4.4 s, 356 MB |

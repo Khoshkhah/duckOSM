@@ -1,9 +1,9 @@
-# Design of duckosm-rust
+# Design of duckosm
 
 Status: started as a draft for review by Kaveh on 2026-10-21. The Rust code exists. The tables of sections 2 and 3
 give the state of each part.
 
-The repository is `duckosm-rust`. It is a Cargo workspace. Its first crate is `duckosm-core`.
+The repository is `duckosm`. It is a Cargo workspace. Its first crate is `duckosm-core`.
 
 This document is based on duckOSM 0.6.0 (git tag `v0.6.0`) and DuckDB 1.5.3. The numbers come from
 `monaco.duckdb` in the duckOSM folder, built on 2026-10-21. The experiments in section 5 are in
@@ -17,7 +17,7 @@ installed DuckDB to run. The long-term goal is
 larger: move every part of duckOSM that suits Rust to Rust, one part at a time (sections 10 to 12).
 Give people three ways to run it:
 
-1. `pip install duckosm-rust` (a wheel with a Python API).
+1. `pip install duckosm` (a wheel with a Python API).
 2. One CLI program.
 3. A WebAssembly package for the browser.
 
@@ -228,7 +228,7 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
     `options.boundary_cells` makes `main.boundary_cells`. The H3 cells come from `h3o`: their outlines differ from
     those of the H3 C library by about 1e-14 degrees.
   - Without a boundary, the base-map layers run on the `raw.*` of the whole file (`read_osm`), with duckOSM's own
-    `geom.way_line` (`features_sql_from_raw`). `duckosm-rust features-check <db>` is duckOSM's `features-check`.
+    `geom.way_line` (`features_sql_from_raw`). `duckosm features-check <db>` is duckOSM's `features-check`.
   - A duckOSM step that the program does not have (the maps, `viz.enabled`) is an error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
     (CLI `--allow-skipped`). The result then lists them under `skipped`.
   - Keys that only tune DuckDB in duckOSM (`memory_limit`, `threads`, `simplify_batches`, `clip_strategy`) have no effect. The result lists them under `ignored`.
@@ -314,14 +314,14 @@ Rule: a skipped test is not a pass.
    gives 0 rows in `edge_id_map`), so the variants with it off give the real test of the merge: 114, 265
    and 291 chains in driving, walking and cycling, and 361, 1,124 and 1,159 rows in `edge_id_map`.
 3c. **Connector direction (closed on 2026-10-23).** duckOSM `123910c` takes the dangling ends in the order of the
-   node id and uses `min(highway)`, as duckosm-rust does. On Monaco with the connector on, the two programs are now
+   node id and uses `min(highway)`, as duckosm does. On Monaco with the connector on, the two programs are now
    equal on every edge row in the three modes. The text below describes the difference before that change.
    The dangling-path connector finds the same connectors, the same `edge_id` values, the
    same nodes and the same component filter result as duckOSM (24 test cases). One thing is not equal, and it
    cannot be: when two dangling ends face each other, the pair is one connector, and the end that is processed
    first decides which edge is "forward" (`is_reverse`, `edge_ref`) and, if the two ends are different path
    classes, the `highway`. duckOSM processes the ends in the order of a SQL result, which is not defined.
-   Two builds of duckOSM on the same file already differ in 20 cycling rows. duckosm-rust processes the ends
+   Two builds of duckOSM on the same file already differ in 20 cycling rows. duckosm processes the ends
    in the order of the node id, so its result is always the same. The tests and `tools/compare_with_duckosm.py`
    (columns `edge_ref`, `is_reverse`, `highway` of connectors) show this difference; the test checksum does
    not include these three columns.
@@ -362,7 +362,7 @@ Rule: a skipped test is not a pass.
    Limits: the reader keeps only highway ways and ferry lines, so a `tags` rule or `tags_from` on another
    way has no effect. A tag value that YAML reads as true or false is an error, so write it in quotes. The
    WebAssembly page does not take a fixes file yet.
-6c2. **Tag edits, `extra.tag_edits` (2026-11-03).** An extension of duckosm-rust for the page's fixes panel ([osm-editing.md](osm-editing.md)). The key `extra`
+6c2. **Tag edits, `extra.tag_edits` (2026-11-03).** An extension of duckosm for the page's fixes panel ([osm-editing.md](osm-editing.md)). The key `extra`
    is new, so a file with only duckOSM keys has no change in its output, and duckOSM (Python) ignores the key: it reads only `overrides`. Each rule
    sets and deletes tags of one way, node or relation: `{type: way|node|relation, id, set: {key: value}, delete: [key], note}`. The tags are set first, then
    deleted. The rule acts at the same point as `tags` of a rule in `overrides`: on the ways as read (so the network sees them) and on `raw.*` (so the
@@ -375,7 +375,7 @@ Rule: a skipped test is not a pass.
    costs, the walk and cycle types), the OSM fixes of duckOSM, no boundary. The golden comes from duckOSM
    with `bench/python_steps.py` and the same settings.
 
-   | | duckosm-rust | duckOSM |
+   | | duckosm | duckOSM |
    |---|---|---|
    | Time, three modes | 19.2 s (all threads), 23.5 s (one thread) | 1,545 s (the lane profile off) |
    | Peak memory (RSS) | 1.53 GB (all threads), 1.31 GB (one thread) | 10.2 GB |
@@ -596,7 +596,7 @@ The method is the strangler pattern: the new code grows around the old code and 
 
 ## 13. Repository name
 
-Decision (Kaveh, 2026-10-21): the repository is `duckosm-rust`.
+Decision (Kaveh, 2026-10-21): the repository is `duckosm`.
 
 - The repository is a workspace that holds many crates (section 12). Its name must not be the name of one crate.
 - The first crate keeps the name `duckosm-core`.
@@ -607,7 +607,7 @@ Decision (Kaveh, 2026-10-21): the repository is `duckosm-rust`.
 
 1. ~~Can I install Rust?~~ Decided by Kaveh on 2026-10-21: yes, with `rustup` at user level. Done (Rust 1.99.1). See [development.md](development.md).
 2. What are the names of the PyPI package, the Python module and the CLI program? The proposal is
-   `duckosm-rust` for the package and the CLI, and `duckosm_rust` for the module. The name has
+   `duckosm` for the package and the CLI, and `duckosm_rust` for the module. The name has
    "duck" in it. The PyPI release of duckOSM waits for the DuckDB trademark reply, so this can apply.
 3. ~~Do you accept option A for `edge_id` (section 5)?~~ Option A is in use since M0, and every golden
    test passes with it (closed on 2026-10-22). Open: are there databases, used by sensor-matching,

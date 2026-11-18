@@ -96,5 +96,5 @@ topology cross-refs, switch/signal placement, and the empty/missing-raw cases.
 
 ## Rust
 
-`duckosm-rust railml` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
+`duckosm railml` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
 The golden test `rust/duckosm-export/tests/golden.rs` compares the two on Monaco.

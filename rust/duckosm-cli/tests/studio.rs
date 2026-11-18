@@ -1,5 +1,5 @@
-//! The local dashboard (`duckosm-rust studio`, duckosm-edit/src/studio.rs) builds an area by tiles with this program
-//! (`duckosm-rust tiles --config`): Monaco from a request of the page, with the DEM of the engine's tests. The database has the
+//! The local dashboard (`duckosm studio`, duckosm-edit/src/studio.rs) builds an area by tiles with this program
+//! (`duckosm tiles --config`): Monaco from a request of the page, with the DEM of the engine's tests. The database has the
 //! heights, the grid and the metadata, and the record of the build.
 #![cfg(feature = "duckdb")]
 
@@ -24,13 +24,13 @@ fn the_dashboard_builds_monaco_by_tiles_with_a_dem() {
     let out = std::env::temp_dir().join(format!("duckosm-studio-tiles-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).unwrap();
-    let mut server = std::process::Command::new(env!("CARGO_BIN_EXE_duckosm-rust"))
+    let mut server = std::process::Command::new(env!("CARGO_BIN_EXE_duckosm"))
         .args(["studio", "--port", "0", "--no-open"])
         .arg(&out)
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    // the first line has the address of the page: "duckosm-rust studio: http://127.0.0.1:<port>/ ..."
+    // the first line has the address of the page: "duckosm studio: http://127.0.0.1:<port>/ ..."
     let mut err = BufReader::new(server.stderr.take().unwrap());
     let mut line = String::new();
     err.read_line(&mut line).unwrap();

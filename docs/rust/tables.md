@@ -1,10 +1,10 @@
-# The tables that duckOSM makes and duckosm-rust does not make yet
+# The tables that duckOSM makes and duckosm does not make yet
 
 Status: group 1 done on 2026-10-22 (the result is at the end). Kaveh: "there are many tables is missed yet. we
 should first try to create them".
 
 The list comes from duckOSM's Monaco database (`/home/kaveh/projects/duckOSM/monaco.duckdb`, a build with the
-default options) and from duckOSM's reference `docs/reference/database.md`. duckosm-rust makes today, for each
+default options) and from duckOSM's reference `docs/reference/database.md`. duckosm makes today, for each
 mode: `edges`, `nodes`, `private_edges`, `edge_graph`, `edge_id_map`, `turn_permission`, and for driving
 `turn_restrictions` and `turn_path_restrictions`.
 
@@ -25,7 +25,7 @@ mode: `edges`, `nodes`, `private_edges`, `edge_graph`, `edge_id_map`, `turn_perm
 | 2 | `visualization.edge_levels`, `edge_levels_meta` | The drawing order of the roads (bridges over roads). | 13,298 / 1 | Done: [levels.md](levels.md). The tags rule (the default) and roadstyle's solver (`--levels solve`). |
 | 2 | `driving.lane_profile` | Each lane of each driving edge and bus-only edge, left to right. | 3,176 | Done: [lane_profile.md](lane_profile.md). Equal to duckOSM's on Monaco and Tartu. |
 | 2 | `bus.routes`, `bus.route_edges` | The bus routes (OSM relations) as the driving edges they travel, in order. | 56 / 5,609 | Medium: the relations, and a walk along the edges (as the turn restrictions through a way). |
-| 3 | `raw.nodes`, `raw.ways`, `raw.relations` | The OSM data of the area as read from the PBF. | 34,326 / 5,715 / 336 | Done (2026-11-10): `duckosm-rust` keeps them in the `.duckdb` file with `features.*`. Equal to duckOSM's, tested on Monaco. |
+| 3 | `raw.nodes`, `raw.ways`, `raw.relations` | The OSM data of the area as read from the PBF. | 34,326 / 5,715 / 336 | Done (2026-11-10): `duckosm` keeps them in the `.duckdb` file with `features.*`. Equal to duckOSM's, tested on Monaco. |
 | 3 | `features.*` (12 tables) | The base map: buildings, land, water, POIs, place labels, … | 1 to 3,496 each | Done (2026-11-10): [features.md](features.md), the SQL runs in the program. `features.ocean` with `--sea`. |
 
 Not in this list: `visualization.level_edits`, `level_heads`, `level_caps` and `level_unmatched` (the manual
@@ -81,12 +81,12 @@ What it needed:
   mode, so the `ways` of the later modes show them and driving does not. The build does the same
   (`OsmFixes::set_arrows`).
 - `built_at` is the build time (`Params::built_at` can fix it, for a build that is the same each time);
-  `duckosm_version` is `duckosm-rust <version>`.
+  `duckosm_version` is `duckosm <version>`.
 - `--no-ways-tables` (Python `ways_tables=False`) leaves out `ways` and `way_nodes` in a large area.
 
 Checks:
 - `python tools/compare_tables.py monaco.duckdb <out>/monaco.duckdb` after
-  `duckosm-rust --config config/sample_monaco.yaml --allow-skipped -o <out>` in the duckOSM folder.
+  `duckosm --config config/sample_monaco.yaml --allow-skipped -o <out>` in the duckOSM folder.
 - `cargo test -p duckosm-wasm`: the browser build writes the same 33 files as the native build, byte for byte
   (Monaco, an area and a fixes file).
 - The page (`e2e.py`): the same files as the native CLI, on every row (`built_at` apart). The zip has them all.

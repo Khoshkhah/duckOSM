@@ -112,7 +112,7 @@ agree at each stage: 0, 46 and 7,382,499, with no fractional number.
 ### Where it runs
 
 Since 2026-10-23 the files below are in roadstyle's repository (`rust/roadstyle-rs/src/levels/`), as one part of
-roadstyle's Rust engine; duckosm-rust takes them at a fixed commit (`roadstyle-rs` in `duckosm-build/Cargo.toml`
+roadstyle's Rust engine; duckosm takes them at a fixed commit (`roadstyle-rs` in `duckosm-build/Cargo.toml`
 and `duckosm-parquet/Cargo.toml`; `duckosm-core` has no roadstyle dependency since 2026-10-24).
 The rows did not change (Monaco and Tartu, every row).
 
@@ -199,7 +199,7 @@ These parts of roadstyle are off in duckOSM, or only roadstyle's level editor ha
 Rust build, when a user needs it:
 
 - the edits, heads and caps (`level_edits`, `level_heads`, `level_caps`) in a build. The page's editor (card 8) now
-  makes them and solves with them, with roadstyle's own solver (roadstyle-wasm), but `duckosm-rust` does not read them in
+  makes them and solves with them, with roadstyle's own solver (roadstyle-wasm), but `duckosm` does not read them in
   a build;
 - `auto_ends` (heads and caps from the geometry; duckOSM uses the fixed 5 m and the round caps);
 - `near_rules`, `band_col` and an `order` other than `priority`;
@@ -226,15 +226,15 @@ defaults, no edits) and compares the rows. Then it checks both results against r
 hard rules, the stack parts that are not lifted and the order wishes that are not kept. With `source` = `tags`, it
 compares the rows with `compute_levels(method="tags")`.
 
-The results (2026-10-22). Monaco: `duckosm-rust --config config/sample_monaco.yaml --allow-skipped` in the duckOSM
+The results (2026-10-22). Monaco: `duckosm --config config/sample_monaco.yaml --allow-skipped` in the duckOSM
 folder. Tartu: the cut file `pbf/tartu.smart.b433d09b44.osm.pbf` with `data/boundaries/tartu.geojson` and duckOSM's
 OSM fixes.
 
 | Area | Method | Rows equal to roadstyle's | Rules of roadstyle (hard broken / stack parts not lifted / wishes not kept) |
 |---|---|---|---|
 | Monaco | `tags` | 13,298 of 13,298 | |
-| Monaco | `solve` | 13,288 of 13,298 | roadstyle 0 / 0 / 16, duckosm-rust 0 / 0 / 16 |
-| Tartu | `solve` | 64,828 of 64,828 | roadstyle 0 / 0 / 0, duckosm-rust 0 / 0 / 0 |
+| Monaco | `solve` | 13,288 of 13,298 | roadstyle 0 / 0 / 16, duckosm 0 / 0 / 16 |
+| Tartu | `solve` | 64,828 of 64,828 | roadstyle 0 / 0 / 0, duckosm 0 / 0 / 0 |
 
 On Monaco, the values of the stages are the values of roadstyle's MILP: `[0, 37, 6562870]` (the CLI prints them).
 The 10 edges that differ have other numbers of the same quality: many answers have the same best value, and
@@ -257,7 +257,7 @@ roadstyle (this machine, 2026-10-22, the whole Python process):
 | Monaco | 13,298 | 6,830 | 2.3 s | 14.3 s | stages (4 HiGHS solves) | 630 MB |
 | Tartu | 63,965 | 32,741 | 11.1 s | 9.7 s | flow (OR-tools, then a slow relaxation in numpy) | 670 MB |
 
-duckosm-rust (2026-10-22, release build, three modes; other sessions used the machine, load average about 25, so
+duckosm (2026-10-22, release build, three modes; other sessions used the machine, load average about 25, so
 each time is the best of three runs). Native: the step `levels` of `--timing`. WebAssembly: the whole build in Node
 (`run_node.mjs`, one thread), so the time of the levels is the difference to the build with `tags`.
 

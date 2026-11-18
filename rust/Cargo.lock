@@ -878,10 +878,18 @@ dependencies = [
 name = "duckosm-py"
 version = "0.7.0"
 dependencies = [
+ "clap",
+ "duckdb",
  "duckosm-build",
  "duckosm-core",
  "duckosm-edit",
+ "duckosm-export",
+ "duckosm-route",
+ "duckosm-tools",
+ "libc",
  "pyo3",
+ "rayon",
+ "serde_json",
 ]
 
 [[package]]

@@ -546,7 +546,7 @@ fn write_metadata(con: &Connection, m: &Meta, fill: f64, n_nodes: usize, n_nodat
             n_nodes as i64,
             n_nodata as i64,
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64),
-            concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")),
+            concat!("duckosm ", env!("CARGO_PKG_VERSION")),
             m.sha256,
         ],
     )

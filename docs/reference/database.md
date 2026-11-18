@@ -238,7 +238,7 @@ One row: where to open a map, and the area's time zone.
 | `timezone` | VARCHAR | the area's IANA time zone, e.g. `Europe/Monaco`, found at the network node nearest the middle of all nodes. Always set: the build fails without it |
 | `built_at` | TIMESTAMP | when the database was built (or extracted); NULL in a database built before duckOSM recorded it |
 | `duckosm_version` | VARCHAR | the duckOSM version that built it; NULL like `built_at` |
-| `build_config` | VARCHAR | the config of the build as YAML (all keys, with the options of the command line). [`duckosm edit`](cli.md#edit) builds the database again from it. NULL in a database from an older duckOSM, from `duckosm extract`, or from `duckosm-rust` without `--config` |
+| `build_config` | VARCHAR | the config of the build as YAML (all keys, with the options of the command line). [`duckosm edit`](cli.md#edit) builds the database again from it. NULL in a database from an older duckOSM, from `duckosm extract`, or from `duckosm` without `--config` |
 | `build_dir` | VARCHAR | the folder in which the build ran: the relative paths of `build_config` are for this folder; NULL like `build_config` |
 
 ### `boundary`
@@ -283,9 +283,9 @@ Where the heights came from: one row per height column (`ele`, `ele_dsm`, …). 
 | `source_type` | VARCHAR | `download` (from `--source`) or `file` (from `--dem`) |
 | `uri` | VARCHAR | where it was read from |
 | `resolution_m` | DOUBLE | the model's resolution in metres |
-| `product` | VARCHAR | `DTM` (bare earth), `DSM` (surface) or `unknown`. For a `--dem` file, the value of `--product` (`--dem-product` in `duckosm-rust`); `unknown` like `vertical_datum` |
+| `product` | VARCHAR | `DTM` (bare earth), `DSM` (surface) or `unknown`. For a `--dem` file, the value of `--product` (`--dem-product` in `duckosm`); `unknown` like `vertical_datum` |
 | `dem_crs` | VARCHAR | the model's CRS, e.g. `EPSG:4326` |
-| `vertical_datum` | VARCHAR | e.g. `EGM2008`. For a `--dem` file, the value of `--vertical-datum` (`--dem-vertical-datum` in `duckosm-rust`); `unknown` only with `--not-reference` or `--suffix` |
+| `vertical_datum` | VARCHAR | e.g. `EGM2008`. For a `--dem` file, the value of `--vertical-datum` (`--dem-vertical-datum` in `duckosm`); `unknown` only with `--not-reference` or `--suffix` |
 | `license` | VARCHAR | the model's licence. For a `--dem` file, the value of `--license` (`--dem-license`); `unknown` like `vertical_datum` |
 | `nodata_fill` | DOUBLE | the height written where the model had no value |
 | `n_nodes` | BIGINT | nodes sampled, over all modes |
@@ -298,7 +298,7 @@ Where the heights came from: one row per height column (`ele`, `ele_dsm`, …). 
 
 The pixels of the DEM over the network: the ground between the roads, for a reader that makes a terrain (SimReady's
 `gltf` adapter). The rows are the raster's own pixels, with no resampling, over the bounding box of the nodes of
-every mode, plus 3 pixels on each side. Only the Rust build writes it: `duckosm-rust --dem`, or `Params.dem_bytes` (the bytes of the GeoTIFF) in a build with no file system, as the browser. Monaco (`tests/data/monaco.osm.pbf`, the modes driving,
+every mode, plus 3 pixels on each side. Only the Rust build writes it: `duckosm --dem`, or `Params.dem_bytes` (the bytes of the GeoTIFF) in a build with no file system, as the browser. Monaco (`tests/data/monaco.osm.pbf`, the modes driving,
 walking and cycling) with the FABDEM crop: 140 × 103 pixels (14,420 rows), 45 KB of Parquet.
 
 | Column | Type | Description |

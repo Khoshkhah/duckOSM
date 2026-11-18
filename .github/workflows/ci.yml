@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30      # a hung test must not hold the runner for GitHub's 6 hours
+    timeout-minutes: 60      # a hung test must not hold the runner for GitHub's 6 hours (the module compiles DuckDB)
     strategy:
       fail-fast: false
       matrix:
@@ -19,6 +19,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       # GDAL (ogr2ogr) and osmium: duckosm boundary / clip-pbf and the sample build's pre-clip.
       - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool
       # Tests that need local PBFs / built dbs / netconvert skip themselves.
@@ -48,7 +51,7 @@ jobs:
       # the router has no DuckDB and no threads: it builds for the pages too (WebAssembly)
       - run: cargo check --release -p duckosm-router --target wasm32-unknown-unknown
         working-directory: rust
-      # ogr2ogr: the GeoPackage of one file of duckosm-rust export-gis and the golden of gis-debug
+      # ogr2ogr: the GeoPackage of one file of duckosm export-gis and the golden of gis-debug
       - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin
       # duckosm-edit too: the CLI and the wheel link it, so the golden tests run with the features that it adds (roadstyle's serde_json)
       - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit -p duckosm-export -p duckosm-tools -p duckosm-route -p duckosm-router --features duckosm-edit/duckdb

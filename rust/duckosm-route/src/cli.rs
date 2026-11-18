@@ -1,15 +1,15 @@
-//! The routing commands of `duckosm-rust`, with the options of the Python CLI (src/duckosm/cli.py) where it has the command.
+//! The routing commands of `duckosm`, with the options of the Python CLI (src/duckosm/cli.py) where it has the command.
 
 use crate::Result;
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
-/// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
+/// The command names of this crate: `duckosm <name> ...` goes to [`run`].
 pub const COMMANDS: [&str; 8] =
     ["route", "export-graph", "route-multimodal", "route-points", "route-multimodal-points", "directions", "lane-graph", "route-lanes"];
 
 #[derive(Parser)]
-#[command(name = "duckosm-rust")]
+#[command(name = "duckosm")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -218,7 +218,7 @@ fn nums<T: std::str::FromStr>(w: &[String]) -> Result<Vec<T>> {
 
 /// Run one command; `args` starts with the command name.
 pub fn run(args: &[String]) -> Result<()> {
-    let cli = Cli::parse_from(std::iter::once("duckosm-rust".to_string()).chain(args.iter().cloned()));
+    let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
         Cmd::Route { db, from_edge, to_edge, pairs, mode, weight } => {
             need_db(&db)?;

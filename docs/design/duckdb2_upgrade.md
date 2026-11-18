@@ -6,7 +6,7 @@ lists the 2.0 changes that touch duckOSM, what is fixed now, and what the upgrad
 ## `edge_id` does not change
 
 `hash()` gives the same values in 2.0.0 and 1.5.3. A test on 3,000 `edge_id` and virtual node ids gave
-equal values. A Monaco build on 2.0 gives the same `driving.edges` as the duckosm-rust golden file
+equal values. A Monaco build on 2.0 gives the same `driving.edges` as the duckosm golden file
 (`tests/data/monaco_driving_edges.tsv`).
 
 ## Fixed: the code works on 1.5.3 and on 2.0
@@ -25,7 +25,7 @@ does `//` or `%` with a divisor that can be zero.
 ## Not fixed: the upgrade needs these
 
 1. **The file format.** By default, DuckDB 2.0 writes a file that DuckDB 1.5 cannot open. Until every
-   tool that reads a duckOSM file uses 2.0 (sensor-matching, SonoFlow, fetching-sweden-data, duckosm-rust),
+   tool that reads a duckOSM file uses 2.0 (sensor-matching, SonoFlow, fetching-sweden-data, duckosm),
    open each output file with `config={"storage_compatibility_version": "v1.5.0"}`, or use
    `ATTACH ... (STORAGE_VERSION 'v1.5.0')`. A file made this way opens in 1.5.3 (tested).
 2. **Python 3.11 or later.** The Python package of DuckDB 2.0 does not install on Python 3.10.
@@ -36,7 +36,7 @@ does `//` or `%` with a divisor that can be zero.
    **Fixed (Kaveh's decision, 2026-10-23):** the dangling ends are taken in the order of the node id
    (`ORDER BY deg.node`), and the highway is `min(highway)`. The 1.5.3 output changes only in connector
    rows (Monaco with the connector on: 68 walking and 32 cycling rows, in `edge_ref`, `is_reverse` and
-   `highway`; all other tables are equal). duckosm-rust takes the ends in the same order, so the two
+   `highway`; all other tables are equal). duckosm takes the ends in the same order, so the two
    programs are now equal on every edge row (their design item 3c is closed).
 4. **The GMNS export.** On the same input database, the 2.0 export is not equal to the 1.5.3 export.
    Most differences are in lane geometry at about 1e-12 degrees. Some are larger: `any_value()` ties
@@ -50,6 +50,6 @@ does `//` or `%` with a divisor that can be zero.
 
 - The test suite on 1.5.3, with `lambda_syntax = 'DISABLE_SINGLE_ARROW'` on every connection (the
   2.0 rule), and on 2.0.0 (Python 3.12).
-- Monaco builds (`config/sample_monaco.yaml` and the duckosm-rust golden config), the GMNS export
+- Monaco builds (`config/sample_monaco.yaml` and the duckosm golden config), the GMNS export
   with `--meso --micro --combined` and `features-check`, with one thread, compared table by table
   with a build of the code before this change.

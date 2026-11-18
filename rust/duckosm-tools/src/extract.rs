@@ -221,7 +221,7 @@ pub fn extract(source: &Path, db: &Path, area: Area) -> Result<()> {
     .map_err(err)?;
     con.execute(
         "UPDATE main.visualization_metadata SET built_at = now()::TIMESTAMP, duckosm_version = ?",
-        [format!("duckosm-rust {}", env!("CARGO_PKG_VERSION"))],
+        [format!("duckosm {}", env!("CARGO_PKG_VERSION"))],
     )
     .map_err(err)?;
     con.execute_batch(&format!("DROP TABLE _clip; DETACH src; {} CHECKPOINT;", duckosm_duckdb::MACROS)).map_err(err)?;

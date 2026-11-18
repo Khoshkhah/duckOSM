@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
+name = "duckosm"
+path = "src/main.rs"
+
+# the old name, for one release: it prints "use duckosm" and runs the same command
+[[bin]]
 name = "duckosm-rust"
 path = "src/main.rs"
 
@@ -21,11 +26,11 @@ clap = { version = "4", features = ["derive"] }
 duckosm-edit = { path = "../duckosm-edit", optional = true }
 duckosm-tools = { path = "../duckosm-tools", optional = true }   # the database tools (info, way, init-config, ...)
 duckosm-route = { path = "../duckosm-route", optional = true }   # the routing commands (route, export-graph, ...)
-duckosm-export = { path = "../duckosm-export", optional = true }   # the exports of a database (matsim, railml, ...)   # duckosm-rust edit: the page that edits the fixes (needs DuckDB)
-# duckosm-rust quack --threads: the size of the thread pool (the rayon of duckosm-core)
+duckosm-export = { path = "../duckosm-export", optional = true }   # the exports of a database (matsim, railml, ...)   # duckosm edit: the page that edits the fixes (needs DuckDB)
+# duckosm quack --threads: the size of the thread pool (the rayon of duckosm-core)
 rayon = "1.12"
 
-# duckosm-rust tiles: the peak memory of each tile process (wait4); the glibc thresholds of the memory (mallopt)
+# duckosm tiles: the peak memory of each tile process (wait4); the glibc thresholds of the memory (mallopt)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

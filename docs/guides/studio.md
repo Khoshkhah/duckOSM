@@ -25,7 +25,7 @@ export the result.
 
 | | Browser | Native (on your computer) |
 |---|---|---|
-| Start | open [the page](https://khoshkhah.github.io/duckosm-studio/) | `duckosm-rust studio areas`, then open `http://127.0.0.1:8792/` |
+| Start | open [the page](https://khoshkhah.github.io/duckosm-studio/) | `duckosm studio areas`, then open `http://127.0.0.1:8792/` |
 | The build runs | in the browser (WebAssembly) | in the native program |
 | The areas are | in the browser's storage | in folders on your disk |
 | Largest area | a country, by tiles (France: 4 min 56 s) | a country, by tiles (France: 3 min 34 s) |

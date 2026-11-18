@@ -163,6 +163,6 @@ markings, and signals are out of scope.
 
 ## Rust
 
-`duckosm-rust opendrive` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
+`duckosm opendrive` (crate `rust/duckosm-export`) has the same options and writes the same file as the Python export.
 The golden test `rust/duckosm-export/tests/golden.rs` compares the two on Monaco (with `--junctions`: on the GMNS tables of
 `tests/data/exports/gmns_driving/`).

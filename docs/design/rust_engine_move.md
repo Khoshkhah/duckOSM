@@ -12,7 +12,7 @@ Decision of Kaveh (2026-11-04): the Rust engine of the repository `duckosm-rust`
 | Python module of the engine | `duckosm_rust` (a separate wheel) | `duckosm._rust` (inside the `duckosm` wheel) |
 | PyPI package | `duckosm` 0.6.1 (pure Python) | `duckosm` (wheels for 5 systems, with the Rust module) |
 | Python CLI | `duckosm` | `duckosm` (no change) |
-| Standalone Rust program | `duckosm-rust` | `duckosm-build` (decision D4) |
+| Standalone Rust program | `duckosm` | `duckosm-build` (decision D4) |
 | `options.engine` | `python` | `rust` |
 | Page crate `duckosm-wasm` | `duckosm-rust/crates/duckosm-wasm` | no move; it takes the engine crates from duckOSM as a Git dependency |
 | Repository `duckosm-rust` | engine and page | page, `docs/`, Pages workflow |
@@ -32,7 +32,7 @@ What this plan copies:
 - The Rust code lives in the same repository as the Python code, in `rust/`.
 - A tag marks the last commit of the old line, before the default changes.
 - One module in the package (`duckosm._rust`), built with `maturin`, abi3, wheels for 5 systems.
-- The Python code stays the reference until the next release after the default changes (design of duckosm-rust, section 12, item 7).
+- The Python code stays the reference until the next release after the default changes (design of duckosm, section 12, item 7).
 
 What this plan does differently:
 
@@ -60,11 +60,11 @@ duckOSM/
 ```
 
 - **Why `rust/<crate>`.** It is the layout of roadstyle (`rust/roadstyle-*`) and SimReady already uses `../roadstyle/rust/...`. The depth is the same as `crates/<crate>`, so the paths `CARGO_MANIFEST_DIR/../../tests/data` in the Rust tests find `duckOSM/tests/data` with no change. The folder `tests/data` of duckOSM has one entry (`gmns_spec`), so the golden files have no name clash.
-- **Module and package.** The module is `duckosm._rust`. There is no new PyPI package. The name `duckosm` exists on PyPI (0.6.1, Kaveh), and the package `duckosm-rust` was never published (the last version is the GitHub release v0.3.0). The code `import duckosm_rust` has one user, `rust_engine.py`, so no alias module is necessary.
+- **Module and package.** The module is `duckosm._rust`. There is no new PyPI package. The name `duckosm` exists on PyPI (0.6.1, Kaveh), and the package `duckosm` was never published (the last version is the GitHub release v0.3.0). The code `import duckosm_rust` has one user, `rust_engine.py`, so no alias module is necessary.
 - **The version check goes away.** `rust_engine.MIN_VERSION` compared two packages. Now the module and the package are one wheel. A test checks `duckosm._rust.__version__ == duckosm.__version__`.
 - **No DuckDB in the wheel.** `duckosm-py` has the default feature `duckdb`, which compiles DuckDB 1.5.6 into the module. The Python side imports its own `duckdb` package. Two copies of DuckDB in one process are a risk, and the build takes minutes longer. The wheel builds with `--no-default-features` (the importer asks for `formats=["geoparquet"]` only). The standalone program keeps the bundled DuckDB 1.5.6.
 - **Developer build.** `pip install -e .` runs maturin and builds the module in the debug profile. A change of a Rust file needs a new build. Add `rust/duckosm-py/build.py`, as `rust/roadstyle-py/build.py` in roadstyle, for a quick release build into `src/duckosm/`.
-- **The program name (D4).** The pip script `duckosm` and a program `duckosm` from a CLI archive would hide each other on `PATH`. roadstyle has this clash. The proposal is `duckosm-build`, with the arguments of today's `duckosm-rust` (`duckosm-build area.osm.pbf -o out`).
+- **The program name (D4).** The pip script `duckosm` and a program `duckosm` from a CLI archive would hide each other on `PATH`. roadstyle has this clash. The proposal is `duckosm-build`, with the arguments of today's `duckosm` (`duckosm-build area.osm.pbf -o out`).
 
 ## 4. Rust as the default
 
@@ -76,12 +76,12 @@ duckOSM/
 
 ### Steps that stay in Python for now
 
-This move changes one thing: the network step and its tables (section "The test" below). The other steps keep their Python code. Rust code exists for some of them (`bus.rs`, `levels.rs` in `duckosm-build`, the layers of the page). The notes `docs/bus.md`, `docs/levels.md` and `docs/features.md` from duckosm-rust have the results of their equality checks. Each step switches later, alone, with its own comparison on Monaco and Tartu.
+This move changes one thing: the network step and its tables (section "The test" below). The other steps keep their Python code. Rust code exists for some of them (`bus.rs`, `levels.rs` in `duckosm-build`, the layers of the page). The notes `docs/bus.md`, `docs/levels.md` and `docs/features.md` from duckosm have the results of their equality checks. Each step switches later, alone, with its own comparison on Monaco and Tartu.
 
 | Step | Why it stays | Rust state |
 |---|---|---|
 | osmium cut of the PBF (`pbf/` cache) | The build cuts with the osmium strategy `smart` when features are on. The Rust cut (`--boundary`) equals `complete_ways` and `smart` needs a check. | `cutfile.rs` and the boundary cut exist |
-| `raw.*` (`ST_READOSM`) | Features, bus routes and the fixes read it. | The Rust build can write `raw` tables (`Params.raw`). A whole-file build of `duckosm-rust` makes them with the table function `read_osm` (2026-11-11, [streaming_load.md](streaming_load.md)). |
+| `raw.*` (`ST_READOSM`) | Features, bus routes and the fixes read it. | The Rust build can write `raw` tables (`Params.raw`). A whole-file build of `duckosm` makes them with the table function `read_osm` (2026-11-11, [streaming_load.md](streaming_load.md)). |
 | Features (`features.*`) | A step that has a large output and its own golden test. | Layers exist for the page |
 | Bus routes (`bus.py`) | As above. | `bus.rs` |
 | Levels (`visualization.edge_levels`) | Python calls roadstyle. | `levels.rs` calls `roadstyle-levels` |
@@ -96,7 +96,7 @@ Kaveh wants every part on the Rust engine by default. The plan does this in stag
 
 | Stage | Part | Why this order |
 |---|---|---|
-| R1 | Bus routes | Small. `bus.rs` is done and was checked in duckosm-rust. |
+| R1 | Bus routes | Small. `bus.rs` is done and was checked in duckosm. |
 | R2 | Levels | `levels.rs` is done and was checked. It uses `roadstyle-levels`, so Python no longer calls roadstyle for the build. |
 | R3 | Features (`features.*`) | Large output. It needs `raw.*` or the Rust raw tables. |
 | R4 | `raw.*` and the cut (osmium) | Last. The Rust cut equals osmium on Monaco and Tartu for `complete_ways`. The strategy `smart` needs a check. Then osmium and `ST_READOSM` are not necessary. |
@@ -109,13 +109,13 @@ Kaveh wants every part on the Rust engine by default. The plan does this in stag
 2. The test sets `engine="python"` and `engine="rust"` by name, because the default is now `rust`.
 3. Tartu is a manual check with `tools/compare_with_duckosm.py` against `data/db/tartu.duckdb` (built by duckOSM 0.6.x). Estonia is a manual check too (decision D8).
 
-The Rust tests (`cargo test`) keep the golden files from duckosm-rust: the Monaco TSV summaries, `golden_monaco_modes.yaml`, the lane profile and the graph summary.
+The Rust tests (`cargo test`) keep the golden files from duckosm: the Monaco TSV summaries, `golden_monaco_modes.yaml`, the lane profile and the graph summary.
 
 ### The known difference
 
-The note in `tests/test_engine_rust.py` says that connector rows (`osm_id < 0`) can have another direction label in the two engines. The commit `123910c` ("PathConnector: a fixed order of the dangling ends, and min(highway)") says that duckosm-rust uses the same order, "so the two programs are equal on every edge row". The mask `LABELS` is possibly not necessary any more.
+The note in `tests/test_engine_rust.py` says that connector rows (`osm_id < 0`) can have another direction label in the two engines. The commit `123910c` ("PathConnector: a fixed order of the dangling ends, and min(highway)") says that duckosm uses the same order, "so the two programs are equal on every edge row". The mask `LABELS` is possibly not necessary any more.
 
-- **Result of the M1 check (2026-11-04).** The test with `LABELS = ()` (no mask) passes on Monaco: the module of duckosm-rust 0.3.0 (built from the copy in `rust/`, without DuckDB) and the Python engine give equal rows for all 20 tables. The known difference is gone. The mask is deleted in M4, with the rewrite of the test.
+- **Result of the M1 check (2026-11-04).** The test with `LABELS = ()` (no mask) passes on Monaco: the module of duckosm 0.3.0 (built from the copy in `rust/`, without DuckDB) and the Python engine give equal rows for all 20 tables. The known difference is gone. The mask is deleted in M4, with the rewrite of the test.
 - **The edge rows of connectors are the only rows that changed after 0.6.0.** The commit `123910c` changed 68 walking and 32 cycling connector rows (`edge_ref`, `is_reverse`, `highway`). No other row changed.
 
 ### What must not change
@@ -124,7 +124,7 @@ The note in `tests/test_engine_rust.py` says that connector rows (`osm_id < 0`) 
 - **Byte-equal output.** The tables of duckOSM 0.6.0 (Monaco, Tartu) equal the Rust output row by row, except the connector rows above. The golden test is the guard. A golden file must never change to make a test pass.
 - **DuckDB 1.5.6** for the Rust crate (`duckdb = "=1.10506.1"`, `parquet`/`arrow` `=60.0.0`). The Python pin `duckdb>=1.0.0,<2` stays. Files keep `STORAGE_VERSION 'v1.5.0'`, so that DuckDB 1.5.3 opens them. The upgrade to DuckDB 2 is a separate task (`docs/design/duckdb2_upgrade.md`).
 
-## 5. What duckosm-rust keeps
+## 5. What duckosm keeps
 
 - `crates/duckosm-wasm/` (the page crate and `www/`), `docs/` (app, dashboard, browser, osm-editing, relay), `tests/data` (the Monaco files for the page tests), `.github/workflows/pages.yml` and a `ci.yml` with the page jobs only.
 - The page crate builds the same core crates to WebAssembly. It needs them as a dependency from duckOSM:
@@ -136,8 +136,8 @@ The note in `tests/test_engine_rust.py` says that connector rows (`osm_id < 0`) 
 
   This is the way the repository takes roadstyle today (`ROADSTYLE_COMMIT` in `build.sh`, `rev` in `Cargo.toml`). Both repositories are public, so CI needs no token.
 - **The work loop.** A change of the engine goes to duckOSM first. Then the page moves its `rev`. For a local test, the page uses `[patch."https://github.com/Khoshkhah/duckOSM"]` with a path to a duckOSM checkout. `docs/development.md` of the page describes this.
-- **No dependency cycle.** `duckosm-build` takes `roadstyle-levels` from roadstyle (Git `rev`). roadstyle takes nothing from duckOSM or duckosm-rust at build time. The page takes duckOSM and roadstyle.
-- **The name of the page repository** is a separate decision (`docs/proposals/name.md` in duckosm-rust). The move does not rename it.
+- **No dependency cycle.** `duckosm-build` takes `roadstyle-levels` from roadstyle (Git `rev`). roadstyle takes nothing from duckOSM or duckosm at build time. The page takes duckOSM and roadstyle.
+- **The name of the page repository** is a separate decision (`docs/proposals/name.md` in duckosm). The move does not rename it.
 
 ## 6. The order of the steps
 
@@ -156,7 +156,7 @@ Each step is one pull request or one small set of pull requests. Each step ends 
 
 The order is M0, M1, M2, M3, M4, M5, M6, M7. M1 to M4 touch only duckOSM, so they cannot collide with page work. A pull request that changes `rust/` and Python files together is split in two.
 
-## 7. Open branches in duckosm-rust
+## 7. Open branches in duckosm
 
 State at `origin/main` = `53b3196` (2026-11-03):
 
@@ -168,8 +168,8 @@ State at `origin/main` = `53b3196` (2026-11-03):
 | `claude/all-test` | 4 | 16 files | 9 (old test branch, many merge bases) |
 
 - Neither page branch changes an engine file, a `Cargo.toml` or a workflow. M1 to M4 are in another repository. They cannot collide.
-- M5 is the only step that edits `duckosm-rust`. It changes `Cargo.toml`, `crates/duckosm-wasm/Cargo.toml`, `build.sh`, the workflows, `README.md`, `CHANGELOG.md` and the docs. `claude/design-step` and `claude/great-tesla-151906` also edit `CHANGELOG.md`, `README.md` and `docs/`. **M5 starts after `claude/fixes-tabs`, `claude/design-step` and `claude/great-tesla-151906` are merged.** If Kaveh wants M5 earlier, the two branches rebase on it. The rebase of page files is clean, and the conflicts are only in `CHANGELOG.md` and `docs/`.
-- **Freeze.** From the merge of M1 to the merge of M5, no engine change goes into duckosm-rust. Today no open branch has one. A page task that needs an engine change in this window goes to duckOSM (`rust/`) first, and M5 takes it. Keep the window short.
+- M5 is the only step that edits `duckosm`. It changes `Cargo.toml`, `crates/duckosm-wasm/Cargo.toml`, `build.sh`, the workflows, `README.md`, `CHANGELOG.md` and the docs. `claude/design-step` and `claude/great-tesla-151906` also edit `CHANGELOG.md`, `README.md` and `docs/`. **M5 starts after `claude/fixes-tabs`, `claude/design-step` and `claude/great-tesla-151906` are merged.** If Kaveh wants M5 earlier, the two branches rebase on it. The rebase of page files is clean, and the conflicts are only in `CHANGELOG.md` and `docs/`.
+- **Freeze.** From the merge of M1 to the merge of M5, no engine change goes into duckosm. Today no open branch has one. A page task that needs an engine change in this window goes to duckOSM (`rust/`) first, and M5 takes it. Keep the window short.
 - `claude/all-test` has engine files. It needs a decision from Kaveh: delete it, or merge it before M1.
 - The page sessions need a message at M1 (the freeze starts) and at M5 (the new dependency and the work loop of section 5).
 
@@ -178,10 +178,10 @@ State at `origin/main` = `53b3196` (2026-11-03):
 | User | What changes | When |
 |---|---|---|
 | **simready** | `rust/duckosm-sim/Cargo.toml` and `rust/duckosm-sim-cli/Cargo.toml` have path dependencies `../../../duckosm-rust/crates/duckosm-{core,build}`. They become `../../../duckOSM/rust/duckosm-{core,build}`. `rust/Cargo.toml` and the docs (`docs/7-plan/crates.md`, `docs/1-system/architecture.md`) name the new path. `page/build.sh` copies the page from `duckosm-rust/crates/duckosm-wasm/www`: this path does not change. | M6, after M4 |
-| **roadstyle** | No code change. `tests/data` has its own copies of the golden levels (`level_edges.parquet`, `roads.parquet`), so the "duckosm-rust's own Parquet files" in `rust/roadstyle-rs/Cargo.toml` are a comment. The script `rust/roadstyle-assets/sync_old_paths.py` writes the old paths for the page of duckosm-rust. The page stays there, so the script stays until the page takes the new paths (task T6 in roadstyle). The Python extra `levels` (`roadstyle>=0.24.2`) in duckOSM stays. | Comments only, with T6 |
+| **roadstyle** | No code change. `tests/data` has its own copies of the golden levels (`level_edges.parquet`, `roads.parquet`), so the "duckosm's own Parquet files" in `rust/roadstyle-rs/Cargo.toml` are a comment. The script `rust/roadstyle-assets/sync_old_paths.py` writes the old paths for the page of duckosm. The page stays there, so the script stays until the page takes the new paths (task T6 in roadstyle). The Python extra `levels` (`roadstyle>=0.24.2`) in duckOSM stays. | Comments only, with T6 |
 | **sensor-matching, SonoFlow, fetching-sweden-data** | They join on `edge_id` and do not use `duckosm_rust` (no match in their trees). They read `.duckdb` files that duckOSM Python writes. The tables and the `edge_id` values do not change. | A check at M4: their join keys are equal on the Monaco file |
 | **duckOSM docs and skill** | `docs/design/rust_engine.md`, `skills/duckosm/SKILL.md`, `AGENTS.md`, `mkdocs.yml` (the engine pages), `docs/install.md` | M4 |
-| **Release workflow** | `release.yml` of duckOSM gets the matrix of `ci.yml` of duckosm-rust (wheels, CLI archives, sdist). The release of the files to GitHub (`gh release create`) is dropped or kept as a second job. The old releases v0.1.0 to v0.3.0 of duckosm-rust stay. | M3 |
+| **Release workflow** | `release.yml` of duckOSM gets the matrix of `ci.yml` of duckosm (wheels, CLI archives, sdist). The release of the files to GitHub (`gh release create`) is dropped or kept as a second job. The old releases v0.1.0 to v0.3.0 of duckosm stay. | M3 |
 | **Build helper** | `tools/cargo` (the shared build folder) lists the repositories in `REPOS`. Add `$HOME/projects/duckOSM`. The target link is `rust/target`. | M1 |
 | **Notes of Kaveh's sessions** (memory) | `shared-build-folder`, `duckosm-golden-databases`, `build-test-pitfalls`: update the paths | M4 |
 
@@ -192,12 +192,12 @@ Each repository is changed by a pull request of its own, after Kaveh says yes. T
 | Check | Value at `S` = `53b3196` |
 |---|---|
 | `cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build` | 65 passed, 0 failed, 1 ignored (21 test groups). The copy in `rust/` (commit `caadf1d`) gives the same numbers. |
-| Monaco sample, CLI counts | driving 3092 edges / 1904 nodes / 724 private; walking 12238 / 4818 / 166; cycling 10670 / 4867 / 141 (the lines that `ci.yml` of duckosm-rust checks) |
+| Monaco sample, CLI counts | driving 3092 edges / 1904 nodes / 724 private; walking 12238 / 4818 / 166; cycling 10670 / 4867 / 141 (the lines that `ci.yml` of duckosm checks) |
 | `tests/test_engine_rust.py` without the mask | 1 passed (56 s) |
 | Wheel size, no DuckDB | 5.9 MB (`duckosm_rust-0.3.0-cp39-abi3-manylinux_2_35_x86_64.whl`) |
 | `tests/test_wheel.py` | runs in M2 (it needs the renamed module) |
 
-The Monaco counts are the lines that `ci.yml` of duckosm-rust checks today.
+The Monaco counts are the lines that `ci.yml` of duckosm checks today.
 
 Results of M4 (2026-11-04), with the default `engine: rust`:
 
@@ -215,7 +215,7 @@ Results of M4 (2026-11-04), with the default `engine: rust`:
 | Risk | What helps |
 |---|---|
 | **The wheel is not pure Python any more.** A user with no wheel for the system needs a Rust toolchain. | 5 systems, abi3 (Python 3.9 and newer). The README says it. The sdist builds with `maturin`. |
-| **PyPI.** `duckosm` is on PyPI. A bad wheel there is hard to undo. The DuckDB trademark question of duckosm-rust is open. | The wheels build on the release branch and by hand first. The tag is Kaveh's decision (M7). |
+| **PyPI.** `duckosm` is on PyPI. A bad wheel there is hard to undo. The DuckDB trademark question of duckosm is open. | The wheels build on the release branch and by hand first. The tag is Kaveh's decision (M7). |
 | **Two DuckDB copies in one process.** | The wheel has no DuckDB (section 3). |
 | **`edge_id` changes by mistake.** | The files with the hash are not touched. The DuckDB hash test, the goldens and the `edge_id` set check at M4 fail at once. |
 | **A silent skip.** `importorskip` hides a missing module. | The skip is removed. A test fails when the module is missing. |
@@ -229,9 +229,9 @@ Results of M4 (2026-11-04), with the default `engine: rust`:
 
 | # | Question | Proposal |
 |---|---|---|
-| D1 | How does the code come in? **(a)** Copy the files and name the source commit in the message. **(b)** Merge the history of duckosm-rust (`--allow-unrelated-histories`), which gives `git log` of every Rust file but puts the history of the page (`www/` is 20 MB today) into duckOSM. | (a). The repository `duckosm-rust` stays public with all history, tags and releases. |
+| D1 | How does the code come in? **(a)** Copy the files and name the source commit in the message. **(b)** Merge the history of duckosm (`--allow-unrelated-histories`), which gives `git log` of every Rust file but puts the history of the page (`www/` is 20 MB today) into duckOSM. | (a). The repository `duckosm-rust` stays public with all history, tags and releases. |
 | D2 | Folder `rust/duckosm-*` (as roadstyle) | Yes |
-| D3 | Module `duckosm._rust` in the `duckosm` wheel. No new PyPI package. The wheel `duckosm-rust` ends at v0.3.0. | Yes |
+| D3 | Module `duckosm._rust` in the `duckosm` wheel. No new PyPI package. The wheel `duckosm` ends at v0.3.0. | Yes |
 | D4 | Name of the standalone program | `duckosm-build` |
 | D5 | The wheel has no bundled DuckDB. The program keeps DuckDB 1.5.6. | Yes |
 | D6 | Version 0.7.0 for the release with the new default | Yes |
@@ -242,7 +242,7 @@ Results of M4 (2026-11-04), with the default `engine: rust`:
 
 ## 12. Not in this plan
 
-- The new name of the page repository (`docs/proposals/name.md` in duckosm-rust).
+- The new name of the page repository (`docs/proposals/name.md` in duckosm).
 - The next parts of the design (features, bus, levels, GMNS) in Rust.
 - The upgrade to DuckDB 2.
 - A change of any other repository without a pull request that Kaveh sees.

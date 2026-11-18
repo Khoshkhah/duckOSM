@@ -1,6 +1,6 @@
 # The load step in Rust: `read_osm` and a fast PBF decoder
 
-Status: 2026-11-11. A whole-file build of `duckosm-rust` (way D) makes `raw.*` with `read_osm`. `duckosm build`
+Status: 2026-11-11. A whole-file build of `duckosm` (way D) makes `raw.*` with `read_osm`. `duckosm build`
 (Python) keeps `ST_READOSM`: its wheel has no DuckDB inside, so it cannot load a function of the Rust module. The
 browser (way C) is a later stage: see "The stages".
 
@@ -27,7 +27,7 @@ roadstyle's guide "How a dashboard holds its data" names four ways to run a dash
 | Way | duckOSM program | Where DuckDB is | Load step |
 |---|---|---|---|
 | C. Made in the browser (online) | duckOSM Studio | DuckDB-Wasm, a separate WebAssembly module | Rust writes Parquet files to the browser disk (OPFS); DuckDB-Wasm reads them |
-| D. Made by a local program (offline) | `duckosm-rust studio` | built into the Rust program (`duckdb` crate) | `read_osm` in the program's DuckDB |
+| D. Made by a local program (offline) | `duckosm studio` | built into the Rust program (`duckdb` crate) | `read_osm` in the program's DuckDB |
 
 In way C, the Rust module and DuckDB-Wasm have separate memories, and they can only share files. So the browser
 needs the Parquet hand-over. In way D, DuckDB is in the same program, so the rows go into DuckDB directly.
@@ -210,8 +210,8 @@ them into tables: a query reads the files. A copy into a `.duckdb` file is only 
 
 | Setting | Effect |
 |---|---|
-| `options.threads` | DuckDB's threads. In `duckosm-rust`, also the threads of `read_osm` (DuckDB calls it from its threads). Not set: all cores. |
-| `options.memory_limit` | DuckDB's `memory_limit`. In `duckosm-rust`, the setting is read for the load of `raw.*` (before this work, the program ignored it). Not set: DuckDB's default, 80% of the RAM. |
+| `options.threads` | DuckDB's threads. In `duckosm`, also the threads of `read_osm` (DuckDB calls it from its threads). Not set: all cores. |
+| `options.memory_limit` | DuckDB's `memory_limit`. In `duckosm`, the setting is read for the load of `raw.*` (before this work, the program ignored it). Not set: DuckDB's default, 80% of the RAM. |
 
 The Parquet load (way C) takes its budget as an argument; the page sets it when stage 3 connects it.
 

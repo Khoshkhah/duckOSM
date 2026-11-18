@@ -12,7 +12,7 @@ duckOSM builds the road networks with an engine in Rust. It is the default since
 | Step | Engine |
 |---|---|
 | The network: `edges`, `private_edges`, `nodes`, `edge_id_map`, `edge_graph`, turn restrictions | Rust |
-| `raw.*` of a whole file in the program `duckosm-rust`: the table function `read_osm`, about 30% less CPU than `ST_READOSM` ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/streaming_load.md)) | Rust |
+| `raw.*` of a whole file in the program `duckosm`: the table function `read_osm`, about 30% less CPU than `ST_READOSM` ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/streaming_load.md)) | Rust |
 | The osmium cut, `raw.*` of `duckosm build`, the base-map layers (`features.*`), the bus routes, the drawing levels | Python, for now |
 
 The Python steps move to Rust one at a time. Each move has a test that the tables stay equal.
@@ -35,20 +35,20 @@ The Rust engine is the module `duckosm._rust`, inside the `duckosm` wheel. You d
 (x86_64 and aarch64), macOS (x86_64 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that
 needs a [Rust toolchain](https://rustup.rs).
 
-## The program duckosm-rust
+## The program duckosm
 
-The folder `rust/` also has a program with no Python: `duckosm-rust`. It builds an area from a config or from a cut `.osm.pbf` file.
+The folder `rust/` also has a program with no Python: `duckosm`. It builds an area from a config or from a cut `.osm.pbf` file.
 
 ```bash
-cargo build --release --manifest-path rust/Cargo.toml -p duckosm-cli   # makes rust/target/release/duckosm-rust
-rust/target/release/duckosm-rust --config my_area.yaml --allow-skipped
-rust/target/release/duckosm-rust edit my_area.duckdb                   # the page of Edit OSM data
-rust/target/release/duckosm-rust quack my_area.osm.pbf -o out          # the features table of QuackOSM
+cargo build --release --manifest-path rust/Cargo.toml -p duckosm-cli   # makes rust/target/release/duckosm
+rust/target/release/duckosm --config my_area.yaml --allow-skipped
+rust/target/release/duckosm edit my_area.duckdb                   # the page of Edit OSM data
+rust/target/release/duckosm quack my_area.osm.pbf -o out          # the features table of QuackOSM
 ```
 
 `--allow-skipped` lets the build go on when the config asks for a step that only Python has (for example the maps, `viz.enabled`).
-`duckosm-rust --help` lists all the options.
-`duckosm-rust quack` makes the features table of QuackOSM, with the same rows: see [duckOSM and QuackOSM](quackosm.md).
+`duckosm --help` lists all the options.
+`duckosm quack` makes the features table of QuackOSM, with the same rows: see [duckOSM and QuackOSM](quackosm.md).
 
 ## In the browser
 

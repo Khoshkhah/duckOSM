@@ -126,7 +126,7 @@ impl VTab for QuackFeatures {
     }
 }
 
-/// duckosm-rust quack with the `.duckdb` output: the table `main.quackosm` (QuackOSM's table name) of a new file `db`,
+/// duckosm quack with the `.duckdb` output: the table `main.quackosm` (QuackOSM's table name) of a new file `db`,
 /// from the `.osm.pbf` file `pbf`, with DuckDB's GEOMETRY type (`ST_GeomFromWKB` of DuckDB's core, no extension). With
 /// `parquet`, the same rows also go to that GeoParquet file. With `sort`, the rows are in the order of
 /// `duckosm_core::quack::str_order` (QuackOSM's default). Returns the rows of each kind.

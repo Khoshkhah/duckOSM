@@ -142,7 +142,7 @@ export function clearClosed(rules, fields, before, d) {
   return out;
 }
 
-// the height and the color of a building from its tags, for the 3D preview of the edited buildings (the same reading as main.building_info in app/duck.js of duckosm-rust)
+// the height and the color of a building from its tags, for the 3D preview of the edited buildings (the same reading as main.building_info in app/duck.js of duckosm)
 const NAMED = { white: "#ffffff", black: "#000000", red: "#ff0000", green: "#008000", blue: "#0000ff", yellow: "#ffff00", orange: "#ffa500", brown: "#a52a2a", grey: "#808080", gray: "#808080",
   silver: "#c0c0c0", beige: "#f5f5dc", pink: "#ffc0cb", purple: "#800080", cyan: "#00ffff", tan: "#d2b48c", maroon: "#800000", olive: "#808000", navy: "#000080", teal: "#008080",
   lightgray: "#d3d3d3", lightgrey: "#d3d3d3", darkgray: "#a9a9a9", darkgrey: "#a9a9a9", ivory: "#fffff0", khaki: "#f0e68c", salmon: "#fa8072", gold: "#ffd700", cream: "#fffdd0" };

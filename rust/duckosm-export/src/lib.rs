@@ -1,5 +1,5 @@
 //! The exports of a built duckOSM database (docs/design/all_in_rust.md, group D). Each module is the port of one
-//! Python export in src/duckosm/ and writes the same file. `cli` has the commands of `duckosm-rust`.
+//! Python export in src/duckosm/ and writes the same file. `cli` has the commands of `duckosm`.
 
 pub mod cli;
 pub mod gis;

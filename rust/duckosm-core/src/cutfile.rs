@@ -128,7 +128,7 @@ impl<W: Write> PbfWriter<W> {
         bytes(
             &mut head,
             16,
-            concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")).as_bytes(),
+            concat!("duckosm ", env!("CARGO_PKG_VERSION")).as_bytes(),
         );
         if let Some(t) = timestamp {
             int(&mut head, 32, t);
@@ -346,7 +346,7 @@ pub fn write_xml<W: Write>(raw: &Raw, w: &mut W) -> Result<(), String> {
     writeln!(w, "<?xml version='1.0' encoding='UTF-8'?>").map_err(e)?;
     writeln!(
         w,
-        "<osm version=\"0.6\" generator=\"duckosm-rust {}\">",
+        "<osm version=\"0.6\" generator=\"duckosm {}\">",
         env!("CARGO_PKG_VERSION")
     )
     .map_err(e)?;

@@ -1,4 +1,4 @@
-//! duckosm-rust quack: the features table of QuackOSM 0.20.0 (`feature_id`, `tags`, `geometry`), made in Rust from one
+//! duckosm quack: the features table of QuackOSM 0.20.0 (`feature_id`, `tags`, `geometry`), made in Rust from one
 //! pass over a `.osm.pbf` file (docs/rust/quack.md). The rules are the ones of QuackOSM's `pbf_file_reader.py` with its
 //! default options (no filters, `ignore_metadata_tags`, compact tags):
 //!

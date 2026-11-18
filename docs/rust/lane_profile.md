@@ -77,7 +77,7 @@ same `edge_id`. Else it is `bus`.
 
 ## The inputs, and where the Rust build has them
 
-| Input | duckOSM | duckosm-rust |
+| Input | duckOSM | duckosm |
 |---|---|---|
 | The driving edges: `edge_id`, `osm_id`, `is_reverse`, `oneway`, `highway`, `lanes`, `source`, `target` | `driving.edges` | `Network::edges` of the driving mode (`Edge`) |
 | The bus-only edges: `edge_id`, `is_reverse`, `highway` | `driving.private_edges` | `Network::private_edges`, `access == "bus"` |

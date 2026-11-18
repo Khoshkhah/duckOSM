@@ -1,4 +1,4 @@
-//! The rows of `duckosm-rust quack` (docs/rust/quack.md) as Arrow batches with the columns of QuackOSM, `feature_id`
+//! The rows of `duckosm quack` (docs/rust/quack.md) as Arrow batches with the columns of QuackOSM, `feature_id`
 //! (VARCHAR), `tags` (MAP(VARCHAR, VARCHAR)) and `geometry` (WKB), and the GeoParquet file of them, with QuackOSM's
 //! file options (zstd level 3, row groups of 100 000 rows).
 use super::{err, map_type, ParWriter};

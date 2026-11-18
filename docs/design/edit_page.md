@@ -13,10 +13,10 @@ computer, you had to open Studio, build the area again in the browser, and downl
 
 ```bash
 duckosm edit <area>.duckdb [--fixes osm_fixes.yaml] [--port 8790]
-duckosm-rust edit <area>.duckdb [--fixes osm_fixes.yaml] [--port 8790]
+duckosm edit <area>.duckdb [--fixes osm_fixes.yaml] [--port 8790]
 ```
 
-The two commands run the same Rust code (`rust/duckosm-edit`). `duckosm-rust edit` is a subcommand of duckOSM's Rust program.
+The two commands run the same Rust code (`rust/duckosm-edit`). `duckosm edit` is a subcommand of duckOSM's Rust program.
 `duckosm edit` calls `duckosm._rust.edit()`. There is no Python web server. The command prints the address of the page
 (`http://127.0.0.1:8790/`) and runs until Ctrl+C.
 
@@ -77,7 +77,7 @@ The query route must not open a way to the files of the computer. After the serv
 The Python module `duckosm._rust` has no DuckDB inside (`pyproject.toml`: `no-default-features`). The Python package brings its own
 `duckdb`. So the server takes the database as a trait, `Db` (`open`, `close`, `execute`, `texts`, `build`):
 
-- `duckosm-rust edit`: `native::NativeDb`, the bundled DuckDB 1.5.6 of `duckosm-duckdb`.
+- `duckosm edit`: `native::NativeDb`, the bundled DuckDB 1.5.6 of `duckosm-duckdb`.
 - `duckosm edit`: `src/duckosm/edit.py`, Python's `duckdb`. The Rust binding calls its methods.
 
 The server, the page and the safety rules are the same Rust code for the two.
@@ -89,19 +89,19 @@ build writes two columns in `main.visualization_metadata`:
 
 | Column | Has |
 |---|---|
-| `build_config` | the config of the build as YAML: `duckosm build` writes all of its `Config` (with the options of the command line); `duckosm-rust --config` writes the text of the config file |
+| `build_config` | the config of the build as YAML: `duckosm build` writes all of its `Config` (with the options of the command line); `duckosm --config` writes the text of the config file |
 | `build_dir` | the folder in which the build ran, for the relative paths of the config |
 
 Build again then runs the build again, with the fixes file as `osm_overrides`, into the same database file:
 
 - `duckosm edit`: `duckosm build` (`DuckOSM(config).run()`), the same steps that made the database.
-- `duckosm-rust edit`: the native build of `duckosm-build`, from the config text. A step that the native build does not have shows as
+- `duckosm edit`: the native build of `duckosm-build`, from the config text. A step that the native build does not have shows as
   "skipped" in the result. Only the `.duckdb` file is written again (no GeoParquet files).
 
 The server closes the database before the build and opens it again after. Then the page loads again, and the server gives the page of
 the new network. The rules come back from the fixes file.
 
-If the database has no record (a database from an older duckOSM, from `duckosm-rust` without `--config`, or from Studio), or the native
+If the database has no record (a database from an older duckOSM, from `duckosm` without `--config`, or from Studio), or the native
 config reader cannot read the record, Build again is off, and the reason is under the button (the new optional hook `ctx.buildOff` of
 the editor).
 

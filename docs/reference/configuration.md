@@ -84,8 +84,8 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | Key | Default | Flag | Does |
 |---|---|---|---|
 | `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns |
-| `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res`. `duckosm-rust` writes the same values (flag: `--h3-resolution`) |
-| `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` (`duckosm-rust`: for the columns only) |
+| `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res`. `duckosm` writes the same values (flag: `--h3-resolution`) |
+| `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` (`duckosm`: for the columns only) |
 | `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
 | `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
 | `options.engine` | `rust` | `--engine` | who builds the network step (edges, private edges, nodes, `edge_id_map`): `rust`, the Rust engine in the module `duckosm._rust` (about 50 times faster, the same tables and ids), or `python`, the SQL steps in DuckDB (the reference). The other steps run in Python in both cases. A clip build (`source.type: duckdb`) has no PBF and ignores the option. [The Rust engine](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/rust_engine.md) |
@@ -95,16 +95,16 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.process_speeds` | `true` | | add `maxspeed_kmh` to edges. [Speeds and travel time](../concepts/networks.md#speeds-and-travel-time) |
 | `options.calculate_costs` | `true` | | add `cost_s`, the travel time in seconds. Routing and `multimodal` need it |
 | `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. [Turn restrictions](../concepts/networks.md#turn-restrictions) |
-| `options.boundary_cells` | `false` | | write `main.boundary_cells`, the H3 cells that cover the boundary. Needs a boundary. `duckosm-rust` does not make it: it skips the option |
+| `options.boundary_cells` | `false` | | write `main.boundary_cells`, the H3 cells that cover the boundary. Needs a boundary. `duckosm` does not make it: it skips the option |
 | `options.boundary_cell_resolutions` | none | | resolutions for `boundary_cells`, e.g. `[6, 7, 8]`; none means `[h3_resolution]` |
-| `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it. `duckosm-rust` makes the same tables (flag: `--features`, with `--boundary`) and keeps `raw.*` in the file, as `duckosm build` does; without a boundary it skips the option |
-| `options.sea` | `overture` | | the sea, [`features.ocean`](features.md), from Overture Maps (needs the network; skipped offline); `false` = none. `duckosm-rust` makes it with `build_features` (flag: `--sea`) |
+| `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it. `duckosm` makes the same tables (flag: `--features`, with `--boundary`) and keeps `raw.*` in the file, as `duckosm build` does; without a boundary it skips the option |
+| `options.sea` | `overture` | | the sea, [`features.ocean`](features.md), from Overture Maps (needs the network; skipped offline); `false` = none. `duckosm` makes it with `build_features` (flag: `--sea`) |
 | `options.levels` | `true` | | the last step: the drawing order of the roads, [`visualization.edge_levels`](database.md#visualization-schema), solved with your edits kept in `visualization.level_*` (`build --no-levels` turns it off). Needs the `levels` extra. A clip takes the edits of its parent for the roads it has. [Guide](../guides/drawing-order.md) |
 | `options.building_faces` | `false` (`true` in the config templates) | | write [`main.building_faces`](database.md#building_faces), the walls of the buildings with a type each ([The walls of the buildings](../concepts/building-walls.md)), and apply the wall rules (`extra.building_faces`) of the [fixes file](../guides/edit-osm-data.md). Needs the Rust engine, a PBF and a boundary: another build writes a warning and makes no walls |
 | `options.bus_routes` | `true` | | match the OSM bus routes to the driving edges: schema [`bus`](database.md#bus-schema). Needs driving and `raw.*`, so a `duckdb` build skips it |
 | `options.clip_strategy` | none | | how `osmium` cuts the PBF: `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
-| `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default. The program `duckosm-rust` uses it for the load of `raw.*` |
-| `options.threads` | none | | number of DuckDB threads; none is DuckDB's default. The program `duckosm-rust` uses it for the load of `raw.*` |
+| `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default. The program `duckosm` uses it for the load of `raw.*` |
+| `options.threads` | none | | number of DuckDB threads; none is DuckDB's default. The program `duckosm` uses it for the load of `raw.*` |
 | `options.simplify_batches` | `0` | | split the simplify step into this many batches to save memory; `0` sizes them from the node count, `1` is one pass |
 
 ## `validation`
@@ -136,7 +136,7 @@ Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
 ## `elevation`
 
 The area's DEM: its [ground reference](../concepts/ground-reference.md). Set it one time for each area here, not on each
-command line. Only the Rust build (`duckosm-rust --config`) reads this section: it samples the DEM and writes the heights,
+command line. Only the Rust build (`duckosm --config`) reads this section: it samples the DEM and writes the heights,
 `main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
 `duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
 [`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit) do that

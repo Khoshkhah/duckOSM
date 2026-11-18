@@ -1,5 +1,5 @@
 """``duckosm studio``: the build page. The page, its server and its safety rules are Rust (rust/duckosm-edit/src/studio.rs, in ``duckosm._rust``), the
-same code as ``duckosm-rust studio``. This module gives the server what the module has no DuckDB for: the build is ``duckosm build`` (the Rust engine
+same code as ``duckosm studio``. This module gives the server what the module has no DuckDB for: the build is ``duckosm build`` (the Rust engine
 and the SQL steps), and the page of the result opens the file with the duckdb package of Python."""
 from __future__ import annotations
 

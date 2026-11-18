@@ -1,15 +1,15 @@
-//! The export commands of `duckosm-rust` (`duckosm-rust matsim ...`), with the options of the Python CLI
+//! The export commands of `duckosm` (`duckosm matsim ...`), with the options of the Python CLI
 //! (src/duckosm/cli.py).
 
 use crate::Result;
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
-/// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
+/// The command names of this crate: `duckosm <name> ...` goes to [`run`].
 pub const COMMANDS: [&str; 8] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2"];
 
 #[derive(Parser)]
-#[command(name = "duckosm-rust")]
+#[command(name = "duckosm")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -98,7 +98,7 @@ enum Cmd {
     },
     /// Export MATSim lanes.xml (and signalSystems, signalGroups, signalControl.xml) from a GMNS db: the turn lanes from the
     /// movement table, the signals of the signal nodes with a default fixed-time plan. The link ids are the edge_id of
-    /// duckosm-rust matsim.
+    /// duckosm matsim.
     #[command(name = "matsim-lanes")]
     MatsimLanes {
         /// The GMNS database.
@@ -186,7 +186,7 @@ fn stem(db: &Path) -> String {
 
 /// Run one export command. `args[0]` is the command name.
 pub fn run(args: &[String]) -> Result<()> {
-    let cli = Cli::parse_from(std::iter::once("duckosm-rust".to_string()).chain(args.iter().cloned()));
+    let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
         Cmd::Matsim { db, mode, crs, no_gzip, out } => {
             check_db(&db)?;

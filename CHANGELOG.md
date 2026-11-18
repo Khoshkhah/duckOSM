@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-- **`duckosm-rust lanelet2`: the Lanelet2 export is in Rust** (`rust/duckosm-export/src/lanelet2.rs`,
+- **The switch, step 6 of `docs/design/all_in_rust.md`.** The Rust program is `duckosm`. `duckosm-rust` stays for one release:
+  it prints "use duckosm" and runs the same command. The wheel has the whole program in the module `duckosm._rust` (with
+  DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust
+  (`src/duckosm/_api.py`): `DuckOSM.run()` (with `options.engine: rust`), `to_sumo`, `to_gis`, `to_matsim`,
+  `to_matsim_lanes`, `to_opendrive`, `to_railml`, `to_lanelet2`, `to_elevation`, `route`, `Router`, `route_multimodal`,
+  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. GMNS, the maps and the
+  commands `levels`, `bus`, `multimodal` and `clip-pbf` still run the Python code. `Router` has no `.graph` (the graph is
+  in Rust). `import duckosm` loads the names when they are first used.
+
+- **`duckosm lanelet2`: the Lanelet2 export is in Rust** (`rust/duckosm-export/src/lanelet2.rs`,
   `docs/design/all_in_rust.md`, group D). The offset line of shapely (`offset_curve`) is a pure Rust port of GEOS 3.13.1, with
   no GEOS library: the raw offset curve, and the buffer polygon of the line (GEOS's noder, planar graph, depths and polygon
   builder, `src/geos.rs`). On Monaco and Tartu the `.osm` file has the same bytes as the Python export.
@@ -13,7 +22,7 @@
   Marseille took 7.0 s with a peak of 8.7 GB, now 3.7 s and 6.4 GB. Île-de-France, Versailles to Bastille on foot and by car:
   2.6 GB with the two modes, 4.4 GB with all. The routes are the same as before (and as Python's).
 
-- **`duckosm-rust elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
+- **`duckosm elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
   `duckosm elevation` (`--dem`, `--source`, `--mode`, `--nodata-fill`, `--suffix`, `--product`, `--vertical-datum`, `--license`,
   `--not-reference`). It writes the same heights and the same `main.elevation_metadata` as Python on Monaco (a DEM file, a crop
   with nodata, `--source copernicus`) and Tartu (`--source copernicus`, 6 s in place of 4 min 17 s). The DEM is a GeoTIFF in
@@ -23,24 +32,24 @@
   It writes `edges` again in one step (not a row-by-row UPDATE) and loads one Copernicus tile at a time, so it runs on
   France driving (12.3 M nodes) in 7 min on a Mac mini with 16 GB ([Add elevation](docs/guides/elevation.md#in-rust)).
 
-- **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
+- **`duckosm lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
   commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
   networkx's `dijkstra_path`). On Monaco and Tartu, `lane_<mode>.lane_edges` and 126 lane routes (with and without the stored
   graph) equal Python's, with the text, `--json` and the `-o` GeoJSON (`duckosm-route/tests/lanes.rs`). With this, every part of
   group E is in Rust.
 
-- **`duckosm-rust directions`** (`docs/design/all_in_rust.md`, group E): the turn-by-turn steps of `directions.py` for any route
+- **`duckosm directions`** (`docs/design/all_in_rust.md`, group E): the turn-by-turn steps of `directions.py` for any route
   result (one mode, across modes, between points), in `duckosm-router` (no DuckDB). On Monaco and Tartu, the steps of 1,423
   routes (about 23,000 steps) equal Python's, with their texts (`duckosm-route/tests/multimodal_points.rs`).
 
-- **`duckosm-rust route-multimodal`, `route-points` and `route-multimodal-points`** (`docs/design/all_in_rust.md`, group E): the
+- **`duckosm route-multimodal`, `route-points` and `route-multimodal-points`** (`docs/design/all_in_rust.md`, group E): the
   trip across modes (`route_multimodal`, every part on the edge graph of its mode, walk* vehicle* walk*), and the routes between
   two points (`route_points`, `route_multimodal_points`), in `duckosm-router` (no DuckDB). A point joins its roads with GEOS's
   own formulas (distance, project, interpolate, length), so `fraction`, `access_m` and `road_point` are the same floats as
   shapely gives. Each command prints duckOSM's dict as JSON, and `--batch FILE` answers many queries on one graph. On Monaco and
   Tartu, 1,500 queries give the same JSON as Python, floats and error texts too (`duckosm-route/tests/multimodal_points.rs`).
 
-- **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
+- **`duckosm route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
   algorithms: no DuckDB, no threads, it builds for WebAssembly) and `rust/duckosm-route` (the database, GraphML, the CLI). The
   routing graph is in memory with the order of networkx's graph, and the route is a port of networkx's bidirectional Dijkstra
   (the same heap keys), so a tie gives the path of duckOSM's `routing.route`. `route DB FROM TO` prints `route()` as JSON;
@@ -51,58 +60,58 @@
   change from run to run; the Rust graph keeps the order of the edge graph. Python's text of a float (`place::py_float`) and
   the JSON of the tools now round a tie of the shortest digits to the even digit, as Python does.
 
-- **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
+- **`duckosm ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
   database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of
   `/api/info`, `/api/query`, `/api/sql`, `/ask/*.js` are the same bytes as Python's on Monaco. With this, every command of group B
   is in Rust.
 
-- **`duckosm-rust extract` and `admin`** (`docs/design/all_in_rust.md`, group B), with the options of the Python commands. `admin`
+- **`duckosm extract` and `admin`** (`docs/design/all_in_rust.md`, group B), with the options of the Python commands. `admin`
   reads the boundary relations of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), and `--gpkg` writes or reuses
   a GeoPackage; `extract` cuts a database to an area by name, OSM id or GeoJSON file, with the time zone of the Rust build. On
   Monaco (all three kinds of area, both `--gpkg` cases) and with the Tartu PBF, every table equals the Python output
   (`duckosm-tools/tests/golden.rs`).
 
-- **`duckosm-rust boundary`** (`docs/design/all_in_rust.md`, group B): the options of `duckosm boundary` (`NAME`, `--pbf`,
+- **`duckosm boundary`** (`docs/design/all_in_rust.md`, group B): the options of `duckosm boundary` (`NAME`, `--pbf`,
   `--osm-id`, `--offline`, `-o`). It looks in the borders of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), then
   on Nominatim, and writes the same GeoJSON file, byte for byte, with the same lines (the other matches too). A boundary that a
   build makes from `boundary.place`, `bbox` or `h3_cell` is now written in the same format as Python's.
 
-- **`duckosm-rust info`, `way` and `init-config`** (`docs/design/all_in_rust.md`, group B), in the new crate `rust/duckosm-tools`.
+- **`duckosm info`, `way` and `init-config`** (`docs/design/all_in_rust.md`, group B), in the new crate `rust/duckosm-tools`.
   They have the options of the Python commands and give the same output: the text and `--json` of `info`, and the text (DuckDB's
   table print), `--json` and the `--out` files (.csv, .json, .parquet) of `way`; `init-config` writes the same template. Checked on
   Monaco (both builds, a clip) and Tartu; a golden test keeps the Python output (`tests/data/golden_tools/`). Two differences:
   a `.parquet` file of `way --out` names DuckDB 1.5.6 in its metadata (its rows are equal), and `way` takes a negative id with no
   `--` before it.
 
-- **`duckosm-rust`: the bus routes of a build with no boundary.** A build of the whole file (the `.duckdb` output) reads the
+- **`duckosm`: the bus routes of a build with no boundary.** A build of the whole file (the `.duckdb` output) reads the
   route relations, their member ways and the elements of the fixes from `raw.*` (`RawInput::raw_part`), applies the fixes, and
   makes `bus.routes` and `bus.route_edges`, as duckOSM does. Before, it made no bus tables. Monaco (`tests/bus_whole_file.rs`)
   and Tartu (the cut file as a whole file) equal the Python build row by row.
 
-- **`duckosm-rust --config`: the base-map layers without a boundary, and `duckosm-rust features-check`, are in Rust**
+- **`duckosm --config`: the base-map layers without a boundary, and `duckosm features-check`, are in Rust**
   (`docs/design/all_in_rust.md`, group A). Without a boundary, the layers run on the `raw.*` of the whole file with duckOSM's
   own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. The OSM fixes change `raw.*` first, as
   duckOSM's `_raw_way_fixes` and the arrows of `OSMOverrides` do (`after::raw_fixes`). `features-check` (`rust/duckosm-build/src/
   features_check.rs`) prints duckOSM's report; groups with equal keys come in the order of their names. On Monaco's whole sample
   file, the 11 layers and the lines of the report equal the Python build (`tests/features_no_boundary.rs`). With this, every
-  key of a `duckosm build` config runs in `duckosm-rust --config` with no skip, except `viz.enabled` (the maps, group F).
+  key of a `duckosm build` config runs in `duckosm --config` with no skip, except `viz.enabled` (the maps, group F).
 
 
-- **`duckosm-rust --config`: `source.type: duckdb` is in Rust** (`rust/duckosm-build/src/clip.rs`, `docs/design/all_in_rust.md`,
+- **`duckosm --config`: `source.type: duckdb` is in Rust** (`rust/duckosm-build/src/clip.rs`, `docs/design/all_in_rust.md`,
   group A). The build copies the rows of the parent database in the boundary, with `clip.predicate`, and then makes
   `main.boundary`, `main.visualization_metadata`, the drawing order, the indexes, the checks and the report. On Monaco
   (`intersects` and `within`) every table of the clip, `main.boundary`, the metadata and the indexes equal the Python clip
   (`tests/clip.rs`). Two differences: the Rust clip has `turn_path_restrictions` (the SQL of duckOSM fails in DuckDB, and
   duckOSM drops the error), and the drawing order has the numbers of the Rust solve, as in a Rust build from a PBF.
 
-- **`duckosm-rust --config`: `boundary.place`, `bbox`, `h3_cell`, `buffer_m` and `options.boundary_cells` are in Rust**
+- **`duckosm --config`: `boundary.place`, `bbox`, `h3_cell`, `buffer_m` and `options.boundary_cells` are in Rust**
   (`rust/duckosm-build/src/place.rs`, `docs/design/all_in_rust.md`, group A). The box, the cell and the place become
   `<name>.boundary.geojson` next to the database, as in duckOSM. A place is looked up in the borders of the PBF with GDAL in
   DuckDB's spatial extension (the polygon equals the one of `ogr2ogr`), then on Nominatim. On Monaco the cut networks,
   `main.boundary` and the ids of `main.boundary_cells` equal the Python build (`tests/boundary_kinds.rs`). The outline of an H3
   cell (`h3_cell`, the cells) comes from `h3o` and differs from the H3 C library by about 1e-14 degrees.
 
-- **`duckosm-rust --config`: the indexes, the checks, the report and the multimodal graph are in Rust**
+- **`duckosm --config`: the indexes, the checks, the report and the multimodal graph are in Rust**
   (`rust/duckosm-build/src/after.rs`, `docs/design/all_in_rust.md`, group A). The `.duckdb` file gets duckOSM's indexes,
   `validation:` runs duckOSM's checks (a failed check stops the build with `fail_on_error`), `report:` writes
   `reports/<name>_<time>.md` and `.html`, and `multimodal:` keeps `mm.*` with the costs of `transfer_s` and `transfer_costs`
@@ -112,21 +121,21 @@
   counts the edges before the private roads move to `private_edges`.
 
 
-- **The check page of a GIS export is in Rust**: `duckosm-rust gis-debug` writes the same page and the same `--json` as
+- **The check page of a GIS export is in Rust**: `duckosm gis-debug` writes the same page and the same `--json` as
   `duckosm gis-debug`. It reads the export through GDAL (DuckDB's `ST_Read`), not geopandas. The page template moved to
   `src/duckosm/templates/gis_debug.html`, and Python and Rust both use it.
 
-- **The SUMO export is in Rust**: `duckosm-rust sumo` writes the same plain XML and `.netccfg` as `duckosm sumo` and
+- **The SUMO export is in Rust**: `duckosm sumo` writes the same plain XML and `.netccfg` as `duckosm sumo` and
   runs netconvert in the same way (`SUMO_HOME`, the PATH, or the `eclipse-sumo` package of the active Python environment).
 
-- **The OpenDRIVE and MATSim lanes exports are in Rust**: `duckosm-rust opendrive` (also `--junctions`) and
-  `duckosm-rust matsim-lanes` write the same files as the Python exports (Monaco and Tartu).
+- **The OpenDRIVE and MATSim lanes exports are in Rust**: `duckosm opendrive` (also `--junctions`) and
+  `duckosm matsim-lanes` write the same files as the Python exports (Monaco and Tartu).
 
-- **The GIS export is in Rust**: `duckosm-rust export-gis` (GeoPackage, GeoParquet, shapefile) writes the same
+- **The GIS export is in Rust**: `duckosm export-gis` (GeoPackage, GeoParquet, shapefile) writes the same
   columns and rows as `duckosm export-gis` (Monaco and Tartu). It uses `ogr2ogr` for one GeoPackage file, as the Python export.
 
-- **The MATSim and railML exports are in Rust** (`docs/design/all_in_rust.md`, group D): `duckosm-rust matsim` and
-  `duckosm-rust railml`, in the new crate `rust/duckosm-export`. They write the same file as `duckosm matsim` and
+- **The MATSim and railML exports are in Rust** (`docs/design/all_in_rust.md`, group D): `duckosm matsim` and
+  `duckosm railml`, in the new crate `rust/duckosm-export`. They write the same file as `duckosm matsim` and
   `duckosm railml` (Monaco and Tartu). A golden test holds the Python output on Monaco.
 
 - **The sorted join of quack by tiles keeps less on the disk.** `quack_join_to` drops each part when it has read all its rows,
@@ -147,7 +156,7 @@
   keep the numbers of an edge only until the last tile that reads them starts. France (Mac mini, native): the bus step 14 s to
   9.3 s and 609 MB to 171 MB of heap; the tiles of the levels 187 MB to 67 MB. The bus tables and `edge_levels` are equal to
   before, row by row (Kentucky, Sweden, France, both level methods), and Kentucky by tiles equals the whole build.
-- **`duckosm-rust tiles --keep-tiles` keeps the tables of the tiles.** The union deleted them for each table with border rows.
+- **`duckosm tiles --keep-tiles` keeps the tables of the tiles.** The union deleted them for each table with border rows.
 - **The tile cut is the pbfcut library** (`Khoshkhah/pbfcut`, one pinned git `rev` in `rust/duckosm-core/Cargo.toml`). duckOSM's own
   cut (`tilecut.rs`, `tilecut/write.rs`) is gone; `duckosm_core::tilecut` keeps its names and gives pbfcut the rule of the junctions
   (`NodeUses`). `boundary`, `tiles`, the temporary store of `spill`, `util::FxHasher` and `cutstream::CutCounts` are now the types
@@ -158,16 +167,16 @@
   large tile also uses all the threads. In the browser, part 5 makes all the tiles on the pool at the same time. Sweden at
   zoom 6 in Chromium: the cut 49.5 s to 29.2 s. Kentucky at zoom 9 natively: part 5 0.93 s to 0.55 s, peak 497 MB to
   523 MB, the same elements in all 44 tile files. The quack cut and the cut of the build by tiles are again one cut.
-- **Quack tile tables: `duckosm-rust quack-tiles` and `quack-union`** (`docs/rust/quack.md`, "Tile tables"). The cut makes the file of each
+- **Quack tile tables: `duckosm quack-tiles` and `quack-union`** (`docs/rust/quack.md`, "Tile tables"). The cut makes the file of each
   map tile of one zoom; each tile alone makes its table (the nodes in the tile, the ways with a node in it, the relations that its file has
   whole) with a column `owner`, so nothing waits for another tile; the union keeps the rows with `owner`. France at zoom 9: 697 tables in
   232.6 s (3.7 GB RSS); the union (43.6 s) is byte for byte the table of one run.
 - **Quack by tiles is faster natively**: no zlib in the temporary tile files, and 4 tiles at a time. France: 224.9 s to 171.3 s (one run:
   104.3 s); peak RSS 1.8 GB to 3.7 GB.
-- **`duckosm-rust quack --tile-zoom Z`: tile by tile with the map tiles of one zoom** (`TileSize::Zoom`), in place of the quadtree of
+- **`duckosm quack --tile-zoom Z`: tile by tile with the map tiles of one zoom** (`TileSize::Zoom`), in place of the quadtree of
   `--tiles N`. Île-de-France in Chromium: zoom 8 (13 tiles) 42.5 s and 474 MiB, zoom 9 (32 tiles) 41.7 s and 467 MiB. France natively: zoom 8
   (241 tiles) 200.4 s, zoom 9 (697 tiles) 222.5 s.
-- **`duckosm-rust quack --tiles N`: the features table of QuackOSM tile by tile** (`docs/rust/quack.md`, "By tiles"). The file is cut into a
+- **`duckosm quack --tiles N`: the features table of QuackOSM tile by tile** (`docs/rust/quack.md`, "By tiles"). The file is cut into a
   quadtree of tiles with at most `N` nodes, and each tile gives the rows that it owns, so the memory follows the size of a tile: the mode of the
   browser for a large file. The same rows as one run (Monaco test; Kentucky and France with `quack_diff --large`). France: 223.5 s and 2.0 GB of
   RSS (one run: 105.9 s, 4.6 GB). The tile cut can now keep its files in the temporary store (`tilecut::cut_to_store`, OPFS in the browser) and
@@ -179,7 +188,7 @@
 
 - **`read_osm`, the load of `raw.*` in Rust** (`duckosm-duckdb`, `docs/design/streaming_load.md`). A DuckDB table function, `read_osm(path, kind)`, gives the
   nodes, the ways or the relations of a `.osm.pbf` file with the columns and the types of `ST_READOSM`, and DuckDB calls it from all its threads. A whole-file
-  build of `duckosm-rust` now has `raw.nodes`, `raw.ways` and `raw.relations` (before: none), and it reads `options.memory_limit` and `options.threads` for this
+  build of `duckosm` now has `raw.nodes`, `raw.ways` and `raw.relations` (before: none), and it reads `options.memory_limit` and `options.threads` for this
   step. France, all of `raw.*`: about 30% less CPU than `ST_READOSM`. A test compares it with `ST_READOSM` on Monaco. `duckosm build` (Python) keeps `ST_READOSM`.
 - **A fast PBF decoder, `pbfraw`** (`duckosm-core`). It reads the protobuf bytes in place: 5 times faster than the `osmpbf` crate on the way blocks of France,
   and faster than libosmium (`osmium fileinfo -e --no-crc`) for the data of `raw.*`. A test compares it with `osmpbf` on Monaco.
@@ -219,7 +228,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 - **`duckosm studio`: the map of an area is roadstyle's way D** (roadstyle PR 168; `rust/duckosm-edit/src/studio.rs`, `page/studio.js`). The server keeps a
   `roadstyle_local::Local` for each open area (the last 3) and answers its addresses at `/areas/<name>/`: `style.json`, the tiles, the rows and the lines of the
-  roads, and, in the program `duckosm-rust`, the queries and the schema over the area's `.duckdb` file (read only). The page gives the dashboard
+  roads, and, in the program `duckosm`, the queries and the schema over the area's `.duckdb` file (read only). The page gives the dashboard
   `rsHttpAdapter`, so a click on a road asks the server for its fields and its line. `GET /api/style/<name>` and `GET /tiles/<name>/...` are removed.
   The Python module has no DuckDB inside: there the map has no queries.
 - **`duckosm studio`: step 1 and step 3 compared with Studio, action by action.** The page was run next to Studio in headless Chromium with the same actions (type "burnaby", hover each result, click one, each Draw tool and its key, the File and H3 tabs); the differences were fixed: the text "a point" of a place with no boundary, the File tab text and a file dropped on the map, the boxes of the Draw hint and of the H3 note, the gap between the search field and the list, the size of a tab icon, the panel "?", and no extract is chosen at the start (the person picks the file, as in Studio). *Host: nothing is needed.*
@@ -237,11 +246,11 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   package in the roadstyle checkout of the pin; the CI job studio-page runs it. The Python `_Db` opens the file in an instance of its own (an attached
   database), so a second reader does not get the locked settings of the page of `/edit/`. Tests: `test_card_8_edits_the_levels_of_an_area`,
   `the_level_editor_save_writes_the_tables_and_stops_on_other_edges`.
-- **`duckosm-rust` makes the H3 columns and the base-map layers** (`rust/duckosm-build`). `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res` (`options.h3_indexing`, `options.h3_resolution`; the Rust crate `h3o`), `features.*` with `raw.*` (`options.build_features`, with a boundary; the SQL of `features.sql` on the DuckDB of the program) and `features.ocean` (`options.sea`, flag `--sea`; needs the network). The `.duckdb` file now equals the file of `duckosm build` for these tables; `rust/duckosm-build/tests/features_h3.rs` compares them on Monaco. `options.boundary_cells` is still skipped. New flags of `duckosm-rust`: `--features`, `--sea`, `--h3-resolution`. *Host: nothing is needed.*
-- **`duckosm studio [OUT_DIR]`: a page on your computer that makes the data of an area** ([guide](docs/guides/studio.md)). Six steps as in duckOSM Studio: the area (a place name, a box on the map or a GeoJSON file), the OSM data (a Geofabrik extract, or a local `.osm.pbf`), the settings, the ground (the Ground step), the build with its progress, and the result, which is the page of `duckosm edit` served at `/edit/`. The server is the Rust server of `duckosm edit` (`rust/duckosm-edit/src/studio.rs`); `duckosm-rust studio` is the program (all steps in Rust, with no base-map layers or H3 columns yet); `duckosm studio` is the same page with the Python build, for the cross-check. The page is roadstyle's dashboard (the pin of `duckosm-edit` moves to roadstyle `34e21f30`), and each step is a card as in Studio. The card **Your areas** lists the areas on the disk, with Open (the map and the editor) and Load (the area and the settings back into the steps). The steps are the new parts `web/build_steps/` (`initAreaStep`, `initDataStep`, `initSettingsStep`, `initBuildStep`, `initResultStep`). `duckosm edit` now writes the record of the build also after a Python build, so Build again works on an area that `duckosm studio` made. *Host: duckOSM Studio moves its pin and can use the parts `initAreaStep`, `initSettingsStep`, `initBuildStep` and `initResultStep`, and `core.js` (`covering`, `settingsYaml`); `initDataStep` needs a path on disk, so it is for a local host only. Other hosts: nothing is needed.*
+- **`duckosm` makes the H3 columns and the base-map layers** (`rust/duckosm-build`). `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res` (`options.h3_indexing`, `options.h3_resolution`; the Rust crate `h3o`), `features.*` with `raw.*` (`options.build_features`, with a boundary; the SQL of `features.sql` on the DuckDB of the program) and `features.ocean` (`options.sea`, flag `--sea`; needs the network). The `.duckdb` file now equals the file of `duckosm build` for these tables; `rust/duckosm-build/tests/features_h3.rs` compares them on Monaco. `options.boundary_cells` is still skipped. New flags of `duckosm`: `--features`, `--sea`, `--h3-resolution`. *Host: nothing is needed.*
+- **`duckosm studio [OUT_DIR]`: a page on your computer that makes the data of an area** ([guide](docs/guides/studio.md)). Six steps as in duckOSM Studio: the area (a place name, a box on the map or a GeoJSON file), the OSM data (a Geofabrik extract, or a local `.osm.pbf`), the settings, the ground (the Ground step), the build with its progress, and the result, which is the page of `duckosm edit` served at `/edit/`. The server is the Rust server of `duckosm edit` (`rust/duckosm-edit/src/studio.rs`); `duckosm studio` is the program (all steps in Rust, with no base-map layers or H3 columns yet); `duckosm studio` is the same page with the Python build, for the cross-check. The page is roadstyle's dashboard (the pin of `duckosm-edit` moves to roadstyle `34e21f30`), and each step is a card as in Studio. The card **Your areas** lists the areas on the disk, with Open (the map and the editor) and Load (the area and the settings back into the steps). The steps are the new parts `web/build_steps/` (`initAreaStep`, `initDataStep`, `initSettingsStep`, `initBuildStep`, `initResultStep`). `duckosm edit` now writes the record of the build also after a Python build, so Build again works on an area that `duckosm studio` made. *Host: duckOSM Studio moves its pin and can use the parts `initAreaStep`, `initSettingsStep`, `initBuildStep` and `initResultStep`, and `core.js` (`covering`, `settingsYaml`); `initDataStep` needs a path on disk, so it is for a local host only. Other hosts: nothing is needed.*
 - **The catalog of DEM sources** (`src/duckosm/data/dem_sources.json`, `duckosm.dem_sources.sources_for_bbox(bbox)`). One entry for each source of [Elevation sources](docs/reference/elevation-sources.md): coverage, resolution, product, CRS, vertical datum, licence, commercial use, access and `cors`. The function gives the sources that cover a box: a national 1 m DTM, EU-DTM, FABDEM, Copernicus GLO-30, then the others. Two tables of the docs page are made from the file (`scripts/update_elevation_sources_doc.py`); a test checks them. Tests: Monaco, Tartu, Stockholm.
 - **The ground id: `main.elevation_metadata.sha256`** ([The ground reference](docs/concepts/ground-reference.md)). The SHA-256 of the bytes of the DEM file, the same value as `sha256sum`. `duckosm elevation` and the Rust build (`--dem` and `Params.dem_bytes`) write it. It is NULL when no whole file was read: Copernicus tiles streamed from AWS, or a `--dem` URL. A database from an older duckOSM gets the column on the next `duckosm elevation`.
-- **The config names the area's DEM** (section `elevation`: `dem`, `product`, `vertical_datum`, `license`, `reference`; [Configuration](docs/reference/configuration.md#elevation)). The Rust build reads it, so the DEM is set one time for each area, and `duckosm-rust edit` (Build again) keeps it. A `--dem` on the command line wins over the section. The Python `duckosm build` keeps the key and does not sample.
+- **The config names the area's DEM** (section `elevation`: `dem`, `product`, `vertical_datum`, `license`, `reference`; [Configuration](docs/reference/configuration.md#elevation)). The Rust build reads it, so the DEM is set one time for each area, and `duckosm edit` (Build again) keeps it. A `--dem` on the command line wins over the section. The Python `duckosm build` keeps the key and does not sample.
 - **A reference DEM needs its product, its vertical datum and its license.** `duckosm elevation --dem FILE` stops without `--product` (`DTM` or `DSM`), `--vertical-datum` and `--license`, unless `--not-reference` (or `--suffix`) is given. The Rust build has the same rule (`--dem-product`, `--dem-vertical-datum`, `--dem-license`, `--dem-not-reference`; `Params.dem_product`, `dem_vertical_datum`, `dem_license`, `dem_not_reference`), and it now writes them instead of `unknown`. A build with no DEM does not change. *Host: a host that builds with `Params.dem_bytes` (duckOSM Studio) gives the product, the datum and the license of the file, or sets `dem_not_reference`, when it moves its duckOSM pin.*
 - **`aboutText({ kinds: true })` tells Ask that results of ids are drawn** (`web/ask/schema.js`). A page whose data dock has the kinds of `web/ask/views.js` passes `kinds: true`, and the agent then knows that it can show junctions, turns, ways, buildings, bus routes and H3 cells by their ids. `duckosm ask` does this. *Host: duckOSM Studio passes `kinds: true` to `aboutText`.*
 - **The kinds work on the tables of the Rust engine** (`web/ask/views.js`, found on duckOSM Studio). Their `nodes` have no `h3_cell` column, so the node kind failed with a binder error and drew no node (`turn_restrictions`, `nodes`, `way_nodes`). The column is optional now. The card of a turn took `cost` and `uses` from any network that has the same pair of edges, so it could differ from the row: it has facts of its own only when one table gives them (`turn_restrictions`, `turn_path_restrictions`); for `edge_graph` and `turn_permission` the section Row has them. *Host: nothing is needed.*
@@ -295,7 +304,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   at the road's width. Without it, the editor's own line layers stay. `duckosm edit` gives the hook. The roadstyle pin of
   `duckosm-edit` moves to `e1b0617a` (roadstyle #58, #59, #60).
 
-- **`duckosm-rust quack --gdal`** (`docs/rust/quack.md`, "GDAL layers"): the five layers of GDAL's OSM driver (`points`,
+- **`duckosm quack --gdal`** (`docs/rust/quack.md`, "GDAL layers"): the five layers of GDAL's OSM driver (`points`,
   `lines`, `multilinestrings`, `multipolygons`, `other_relations`, GDAL's default `osmconf.ini`), made by the quack engine in one
   pass, as a GeoPackage (default) or one GeoParquet file for each layer (`-f geoparquet`), also by tiles (`--tile-zoom`). On
   Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
@@ -348,7 +357,7 @@ The Rust engine is the default and is in the wheel (wheels for 5 systems). `duck
   127.0.0.1: roadstyle's dashboard of the database with the panel **Edit OSM data**. Each change goes into `osm_fixes.yaml` beside the
   database (or `--fixes`) at once, and **Build again** runs the build of the database again with the file. The server is Rust
   (`rust/duckosm-edit`), with the safety rules of roadstyle-serve (127.0.0.1 only, `Host` and `Origin` checks, only the fixes file is
-  written). `duckosm-rust edit` is the same page in the Rust program. A build writes its record for this in
+  written). `duckosm edit` is the same page in the Rust program. A build writes its record for this in
   `main.visualization_metadata` (`build_config`, `build_dir`). The editor has a new optional hook, `ctx.buildOff`: Build again is off,
   with the reason under it.
 - **The fixes editor: the box "This road is in your changes"** (Kaveh's design). When you pick an object that is in your changes, a box

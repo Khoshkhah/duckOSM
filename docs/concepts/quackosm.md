@@ -1,10 +1,10 @@
 # duckOSM and QuackOSM
 
 [QuackOSM](https://github.com/kraina-ai/quackosm) turns an `.osm.pbf` file into one table of OSM features.
-`duckosm-rust quack` makes the **same table, with the same rows**: faster, with less memory, and also in the browser.
+`duckosm quack` makes the **same table, with the same rows**: faster, with less memory, and also in the browser.
 
 ```bash
-duckosm-rust quack france.osm.pbf -o out --name france -f geoparquet,duckdb
+duckosm quack france.osm.pbf -o out --name france -f geoparquet,duckdb
 ```
 
 | Option | Does |
@@ -66,7 +66,7 @@ One row for each OSM element with tags, as QuackOSM 0.20.0 with its default opti
 engine makes them in one pass. The output is a GeoPackage, or one GeoParquet file for each layer with `-f geoparquet`.
 
 ```bash
-duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky    # out/kentucky_gdal.gpkg
+duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky    # out/kentucky_gdal.gpkg
 ```
 
 The rows are the same as the rows of `ogr2ogr -f GPKG out.gpkg kentucky.osm.pbf` (GDAL 3.13.3): the same ids, column
