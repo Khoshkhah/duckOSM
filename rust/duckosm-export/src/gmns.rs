@@ -3,8 +3,10 @@
 //! The export writes a new DuckDB file with one `gmns_<mode>` schema for each mode, with the source db attached as `s`. The
 //! steps are those of `to_gmns` in the same order, with the same SQL; the Python loops are Rust loops over the same rows.
 //! Ported so far: the fixed tables (`config`, `use_definition`, `use_group`), `node`, the lanes that a one-way road takes
-//! from the road it continues, `link` and `geometry`.
+//! from the road it continues, `link`, `geometry`, and the roads that a footpath runs along (`link_along`, `link.along_*`,
+//! `link.parent_link_id`).
 
+use crate::shapely::{self as shp, P};
 use crate::Result;
 use duckdb::Connection;
 use std::collections::{HashMap, HashSet};
@@ -149,6 +151,15 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
         infer_lanes(&c, mode, has_raw)?;
         build_link(&c, &sch, mode, uses, has_raw)?;
         build_geometry(&c, &sch)?;
+        for (col, typ) in [("along_link_id", "BIGINT"), ("along_mode", "VARCHAR"), ("along_gap_m", "DOUBLE"), ("along_kind", "VARCHAR")] {
+            c.exec(&format!("ALTER TABLE {sch}.link ADD COLUMN {col} {typ}"))?;
+        }
+        c.exec(&format!(
+            "CREATE TABLE {sch}.link_along(link_id BIGINT, along_link_id BIGINT, along_mode VARCHAR, covered_m DOUBLE, gap_m DOUBLE)"
+        ))?;
+        if mode != "driving" {
+            sidewalk_parents(&c, &sch, has_raw, "right")?;
+        }
         let mut counts = Vec::new();
         for t in ["node", "link", "geometry"] {
             counts.push((t, c.count(&format!("SELECT count(*) FROM {sch}.{t}"))?));
@@ -394,6 +405,254 @@ fn build_link(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool) -> Resu
 fn build_geometry(c: &Ctx, sch: &str) -> Result<()> {
     c.exec(&format!("CREATE TABLE {sch}.geometry AS SELECT edge_id AS geometry_id, ST_AsText(geometry) AS geometry, geometry AS geom FROM _edges_car"))?;
     c.exec(&format!("INSERT INTO {sch}.geometry SELECT edge_id, ST_AsText(geometry), geometry FROM _edges_bus"))
+}
+
+/// `crossings._level`: the OSM `layer` if it is a number other than 0, else 1 for a bridge, -1 for a tunnel, else 0.
+fn level(layer: &Option<String>, bridge: &Option<String>, tunnel: &Option<String>) -> i64 {
+    let ly = layer.as_deref().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite()).map(|v| v.trunc() as i64).unwrap_or(0);
+    if ly != 0 {
+        return ly;
+    }
+    let yes = |v: &Option<String>| v.as_deref().is_some_and(|s| !s.is_empty() && s != "no");
+    if yes(bridge) {
+        1
+    } else if yes(tunnel) {
+        -1
+    } else {
+        0
+    }
+}
+
+/// `_default_lane_w`: the lane width of a road class.
+fn default_lane_w(highway: Option<&str>) -> f64 {
+    let h = highway.unwrap_or("").split(';').next().unwrap_or("");
+    match h.strip_suffix("_link").unwrap_or(h) {
+        "service" => 2.5,
+        "residential" | "living_street" | "unclassified" => 3.0,
+        _ => DEFAULT_LANE_W,
+    }
+}
+
+const DEFAULT_LANE_W: f64 = 3.25;
+const DEFAULT_WALK_W: f64 = 2.0;
+const CROSSING_ALONG: f64 = 0.6;
+const CROSSING_MIN_M: f64 = 10.0;
+const ALONG_NEAR_M: f64 = 8.0;
+
+struct Road {
+    id: i64,
+    line: Vec<P>,
+    level: i64,
+    env: (f64, f64, f64, f64),
+}
+
+fn envelope(l: &[P]) -> (f64, f64, f64, f64) {
+    l.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |e, p| (e.0.min(p.0), e.1.min(p.1), e.2.max(p.0), e.3.max(p.1)))
+}
+
+/// The direction of the line at the distance t along it, radians.
+fn heading(g: &[P], len: f64, t: f64) -> f64 {
+    let (a, b) = (shp::interpolate(g, (t - 1.0).max(0.0)), shp::interpolate(g, (t + 1.0).min(len)));
+    (b.1 - a.1).atan2(b.0 - a.0)
+}
+
+/// `_sidewalk_parents`: for each footpath (a mapped sidewalk, or a footpath right beside a road), the road it runs along
+/// (`link.along_*`, and `parent_link_id` of a sidewalk where the road is a link of this schema) and every road it runs along
+/// for 4 m or more (`link_along`). The roads are those of `gmns_driving` when it is there, else the schema's own roads.
+fn sidewalk_parents(c: &Ctx, sch: &str, has_raw: bool, drive_side: &str) -> Result<()> {
+    const MAX_GAP_M: f64 = 30.0;
+    const MAX_TURN_DEG: f64 = 30.0;
+    const ADJACENT_M: f64 = 5.0;
+    if !has_raw {
+        return Ok(());
+    }
+    let near_classes = NON_MOTOR.iter().filter(|h| !["steps", "platform", "corridor"].contains(h)).map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
+    type Sw = (i64, String, Option<String>, Option<String>, Option<String>, String, Option<bool>, i64, i64);
+    let sql = format!(
+        "SELECT k.link_id, ST_AsText(k.geom), k.layer::VARCHAR, k.bridge::VARCHAR, k.tunnel::VARCHAR,
+           CASE WHEN w.tags['footway'] = 'sidewalk' THEN 'sidewalk' ELSE 'adjacent' END, w.tags['footway'] = 'crossing', k.from_node_id, k.to_node_id
+         FROM {sch}.link k JOIN s.raw.ways w ON w.osm_id = abs(k.osm_id)
+         WHERE w.tags['footway'] = 'sidewalk' OR (COALESCE(w.tags['footway'], '') NOT IN ('link', 'sidewalk')
+           AND regexp_replace(split_part(k.facility_type, ';', 1), '_link$', '') IN ({near_classes}))"
+    );
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let sw: Vec<Sw> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(st);
+    if sw.is_empty() {
+        return Ok(());
+    }
+    let nonroad = NON_MOTOR.iter().map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
+    let has_link = |s: &str| c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{s}' AND table_name = 'link'")).map(|n| n > 0);
+    let have_drive = sch != "gmns_driving" && has_link("gmns_driving")?;
+    let road_schema = if have_drive { "gmns_driving" } else { sch };
+    let sql = format!(
+        "SELECT link_id, ST_AsText(geom), layer::VARCHAR, bridge::VARCHAR, tunnel::VARCHAR FROM {road_schema}.link WHERE
+            regexp_replace(split_part(facility_type, ';', 1), '_link$', '') NOT IN ({nonroad})"
+    );
+    type RoadRow = (i64, String, Option<String>, Option<String>, Option<String>);
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let rows: Vec<RoadRow> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(st);
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let own: HashSet<i64> = if have_drive {
+        let mine: HashSet<i64> = c.strings(&format!("SELECT link_id::VARCHAR FROM {sch}.link"))?.iter().map(|s| s.parse().unwrap()).collect();
+        rows.iter().map(|r| r.0).filter(|id| mine.contains(id)).collect()
+    } else {
+        rows.iter().map(|r| r.0).collect()
+    };
+    let first = shp::wkt_points(&sw[0].1)[0];
+    let scale = (first.1.to_radians().cos() * 111320.0, 111320.0);
+    let to_m = |w: &str| -> Vec<P> { shp::wkt_points(w).into_iter().map(|(x, y)| (x * scale.0, y * scale.1)).collect() };
+    let roads: Vec<Road> = rows
+        .iter()
+        .map(|r| {
+            let line = to_m(&r.1);
+            let env = envelope(&line);
+            Road { id: r.0, line, level: level(&r.2, &r.3, &r.4), env }
+        })
+        .collect();
+    let tree = shp::strtree_order(&roads.iter().map(|r| r.env).collect::<Vec<_>>());
+    // a road's edge is far from its centre line: half its lanes (a twin pair: one direction's lanes)
+    let mut half: HashMap<i64, f64> = HashMap::new();
+    for g in [sch, "gmns_driving"] {
+        if !has_link(g)? {
+            continue;
+        }
+        let sql = format!("SELECT link_id, COALESCE(lanes, 1)::BIGINT, facility_type, edge_ref FROM {g}.link");
+        let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+        let links: Vec<(i64, i64, Option<String>, Option<String>)> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        let stem = |e: &str| e[..e.char_indices().last().map(|x| x.0).unwrap_or(0)].to_string();
+        let mut pair: HashMap<String, usize> = HashMap::new();
+        for (_, _, _, e) in &links {
+            if let Some(e) = e.as_deref().filter(|e| !e.is_empty()) {
+                *pair.entry(stem(e)).or_default() += 1;
+            }
+        }
+        for (k, n, ft, e) in &links {
+            let twin = e.as_deref().is_some_and(|e| !e.is_empty() && pair[&stem(e)] > 1);
+            half.entry(*k).or_insert(*n as f64 * default_lane_w(ft.as_deref()) * if twin { 1.0 } else { 0.5 });
+        }
+    }
+    let kerb = if drive_side == "right" { -1.0 } else { 1.0 };
+    let mode_of = |rid: i64| if own.contains(&rid) { sch.trim_start_matches("gmns_").to_string() } else { "driving".to_string() };
+    let mut parents: Vec<(i64, i64, f64, String)> = Vec::new(); // (road, link, distance, kind)
+    let mut along_rows: Vec<(i64, i64, String, f64, f64)> = Vec::new();
+    let mut match_one = |link_id: i64, g: &[P], lv: i64, kind: &str, crossing: bool, allowed: Option<&HashSet<i64>>| -> HashSet<i64> {
+        let glen = shp::length(g);
+        let mid = shp::interpolate(g, 0.5 * glen);
+        let mut ds: Vec<f64> = (0..glen as i64).step_by(2).map(|d| d as f64).collect();
+        ds.push(glen);
+        let samples: Vec<P> = ds.iter().map(|d| shp::interpolate(g, *d)).collect();
+        let genv = envelope(g);
+        let mut best: Option<((i64, f64, i32), i64, f64, f64)> = None;
+        let mut route: Vec<(i64, f64, f64)> = Vec::new();
+        for r in tree.iter().map(|&i| &roads[i]) {
+            let e = r.env;
+            let env_gap = (e.0 - genv.2).max(genv.0 - e.2).max(0.0).hypot((e.1 - genv.3).max(genv.1 - e.3).max(0.0));
+            if env_gap > MAX_GAP_M {
+                continue;
+            }
+            let gd = shp::line_distance(g, &r.line);
+            if gd > MAX_GAP_M || r.level != lv || allowed.is_some_and(|a| !a.contains(&r.id)) {
+                continue;
+            }
+            let rl = &r.line;
+            let rlen = shp::length(rl);
+            let hw = half.get(&r.id).copied().unwrap_or(0.0);
+            let mut cov = 0i64;
+            for sp in &samples {
+                let t = shp::project(rl, *sp);
+                if shp::dist(*sp, shp::interpolate(rl, t)) - hw > ALONG_NEAR_M {
+                    continue;
+                }
+                let turn = (((heading(rl, rlen, t) - heading(g, glen, shp::project(g, *sp)) + std::f64::consts::PI / 2.0)
+                    .rem_euclid(std::f64::consts::PI))
+                    - std::f64::consts::PI / 2.0)
+                    .abs();
+                cov += (turn.to_degrees() <= MAX_TURN_DEG) as i64;
+            }
+            if cov == 0 || (crossing && (cov as f64) < CROSSING_ALONG * samples.len() as f64) {
+                continue;
+            }
+            let t = shp::project(rl, mid);
+            let p = shp::interpolate(rl, t);
+            let (a, b) = (shp::interpolate(rl, (t - 1.0).max(0.0)), shp::interpolate(rl, (t + 1.0).min(rlen)));
+            let side = (b.0 - a.0) * (mid.1 - p.1) - (b.1 - a.1) * (mid.0 - p.0);
+            let key = (-cov, ((gd - hw).max(0.0) * 2.0).round_ties_even() / 2.0, if side * kerb > 0.0 { 0 } else { 1 });
+            if cov >= 2 && (kind == "sidewalk" || gd - hw - DEFAULT_WALK_W / 2.0 <= ADJACENT_M) {
+                route.push((r.id, cov as f64 * 2.0, gd));
+            }
+            let less = |k: &(i64, f64, i32), b: &(i64, f64, i32)| k.partial_cmp(b) == Some(std::cmp::Ordering::Less);
+            if best.as_ref().is_none_or(|b| less(&key, &b.0)) {
+                best = Some((key, r.id, gd, gd - hw - DEFAULT_WALK_W / 2.0));
+            }
+        }
+        let Some(best) = best.filter(|b| kind == "sidewalk" || b.3 <= ADJACENT_M) else {
+            return HashSet::new();
+        };
+        parents.push((best.1, link_id, best.2, kind.to_string()));
+        for (rid, cov_m, d) in &route {
+            along_rows.push((link_id, *rid, mode_of(*rid), *cov_m, shp::py_round(*d, 2)));
+        }
+        route.iter().map(|r| r.0).chain([best.1]).collect()
+    };
+    let mut at_node: HashMap<i64, HashSet<i64>> = HashMap::new();
+    let mut deferred = Vec::new();
+    for (link_id, w, layer, bridge, tunnel, kind, crossing, n0, n1) in &sw {
+        let g = to_m(w);
+        if shp::length(&g) < 1.0 {
+            continue;
+        }
+        let lv = level(layer, bridge, tunnel);
+        let crossing = crossing.unwrap_or(false);
+        if crossing && shp::length(&g) < CROSSING_MIN_M {
+            deferred.push((*link_id, g, lv, kind.clone(), *n0, *n1));
+            continue;
+        }
+        let got = match_one(*link_id, &g, lv, kind, crossing, None);
+        at_node.entry(*n0).or_default().extend(got.iter().copied());
+        at_node.entry(*n1).or_default().extend(got);
+    }
+    for (link_id, g, lv, kind, n0, n1) in &deferred {
+        let allowed: HashSet<i64> = at_node.get(n0).into_iter().chain(at_node.get(n1)).flatten().copied().collect();
+        if !allowed.is_empty() {
+            match_one(*link_id, g, *lv, kind, true, Some(&allowed));
+        }
+    }
+    c.exec("CREATE OR REPLACE TEMP TABLE _parents(road BIGINT, link BIGINT, mode VARCHAR, gap DOUBLE, kind VARCHAR)")?;
+    {
+        let mut app = c.con.appender("_parents").map_err(|e| e.to_string())?;
+        for (r, k, d, kd) in &parents {
+            app.append_row(duckdb::params![r, k, mode_of(*r), shp::py_round(*d, 2), kd]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+    }
+    let mut app = c.con.appender_to_db("link_along", sch).map_err(|e| e.to_string())?;
+    for (k, r, m, cov, gap) in &along_rows {
+        app.append_row(duckdb::params![k, r, m, cov, gap]).map_err(|e| e.to_string())?;
+    }
+    app.flush().map_err(|e| e.to_string())?;
+    drop(app);
+    let own_list = if own.is_empty() { "NULL".to_string() } else { own.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",") };
+    c.exec(&format!(
+        "UPDATE {sch}.link SET parent_link_id = p.road FROM _parents p WHERE p.link = {sch}.link.link_id AND p.kind = 'sidewalk' AND p.road IN ({own_list});
+         UPDATE {sch}.link SET along_link_id = p.road, along_mode = p.mode, along_gap_m = p.gap, along_kind = p.kind FROM _parents p WHERE p.link = {sch}.link.link_id;
+         DROP TABLE _parents"
+    ))
 }
 
 #[cfg(test)]
