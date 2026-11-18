@@ -93,17 +93,8 @@ r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 
 Next: [Your first network](first_network.md).
 
-## How each output is checked
-
-| Output | Check |
-|---|---|
-| OSM features table | each row equals QuackOSM's |
-| GDAL's layers | each row equals GDAL's (Monaco, Kentucky) |
-| SUMO | SUMO's `netconvert` |
-| MATSim | MATSim's DTD and XSD schemas |
-| GMNS | the GMNS table specification |
-| GeoPackage, shapefile | `duckosm gis-debug` compares each `edge_id` through GDAL |
-| Browser build | the tables equal the native build's |
+Each output is compared with a reference tool: QuackOSM, GDAL, SUMO, MATSim and the GMNS specification
+([how each output is checked](concepts/checks.md)).
 
 Experimental exports: OpenDRIVE, Lanelet2, railML, lane-level routing ([Exports](exports/index.md)).
 
