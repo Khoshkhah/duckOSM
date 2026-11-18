@@ -61,7 +61,7 @@ Any GeoJSON polygon you already have works as a boundary too.
 
 ### Or let the build make it
 
-In a [config file](build.md#with-a-config-file), give the area instead of a file:
+In a [config file](build.md#the-config-file), give the area instead of a file:
 
 ```yaml
 boundary:

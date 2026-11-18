@@ -47,7 +47,7 @@ With none of `-c`, `-p` and `--source-db`, it uses `config/default.yaml` if that
 ### `init-config`
 
 Writes the commented config template, to edit and build from. Guide:
-[With a config file](../guides/build.md#with-a-config-file).
+[The config file](../guides/build.md#the-config-file).
 
 ```text
 duckosm init-config [OPTIONS] [PATH]
