@@ -46,6 +46,12 @@ Needs `pip install "duckosm[viz]"`. Everything is inside the page, so keep it to
 100,000 edges the command warns. `-m driving` puts that mode in front and picks it first;
 `-m walk+drive` shows every mode and opens on Walk + drive, as the map above does.
 
+The Rust program writes the same page: `duckosm route-map monaco.duckdb -m walk+drive`. Its map is drawn by roadstyle's
+Rust engine, and the page routes with the program's own router, built as WebAssembly into the page. So the page gives the routes
+and the directions of `duckosm route-points`, `route-multimodal-points` and `directions`. One difference is possible: when
+two routes have the same time and length, the page and the command can take different roads. The database gives the roads near
+a point in the order of its spatial index, and the page in the order of the table.
+
 ## Find the edges to route between
 
 **By street name:**

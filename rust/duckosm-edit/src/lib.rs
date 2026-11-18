@@ -20,7 +20,12 @@ use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "duckdb")]
 pub mod native;
+#[cfg(feature = "duckdb")]
+pub mod cli;
+pub mod maps;
 pub mod page;
+#[cfg(feature = "duckdb")]
+pub mod route_map;
 pub mod studio;
 
 /// The largest body of a request (a fixes file, a query), and of the request line and the headers.

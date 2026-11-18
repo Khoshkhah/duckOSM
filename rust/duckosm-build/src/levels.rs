@@ -190,22 +190,13 @@ pub mod tiled {
             out.push(r.3);
             out.extend_from_slice(&r.4.to_le_bytes());
             out.extend_from_slice(&r.5.to_le_bytes());
-            for p in &r.6 {
-                out.extend_from_slice(&p.0.to_bits().to_le_bytes());
-                out.extend_from_slice(&p.1.to_bits().to_le_bytes());
-            }
+            spill::put_line(&r.6, out); // about 3 bytes for each point, not 16
         }
         fn get(&self, b: &mut &[u8]) -> TileEdge {
             let tile = tile_at(b);
             let id = i64::from_le_bytes(b[12..20].try_into().expect("8 bytes"));
             let tags = u32::from_le_bytes(b[20..24].try_into().expect("4 bytes"));
-            let pts = b[24..]
-                .chunks_exact(16)
-                .map(|c| {
-                    let f = |c: &[u8]| f64::from_bits(u64::from_le_bytes(c.try_into().expect("8 bytes")));
-                    (f(&c[..8]), f(&c[8..]))
-                })
-                .collect();
+            let pts = spill::line_at(&b[24..]);
             (tile, b[8] != 0, u16::from_le_bytes([b[9], b[10]]), b[11], id, tags, pts)
         }
     }

@@ -229,8 +229,8 @@ dr.edge_id_hash(osm_id, source, target)             # same name and result as du
     those of the H3 C library by about 1e-14 degrees.
   - Without a boundary, the base-map layers run on the `raw.*` of the whole file (`read_osm`), with duckOSM's own
     `geom.way_line` (`features_sql_from_raw`). `duckosm features-check <db>` is duckOSM's `features-check`.
-  - A duckOSM step that the program does not have (the maps, `viz.enabled`) is an error. Most of them are on by default in duckOSM, so a usual config needs `strict=False`
-    (CLI `--allow-skipped`). The result then lists them under `skipped`.
+  - Every step of duckOSM runs: `viz.enabled` draws the maps after the build (`duckosm viz`, into `reports/`). The list
+    `skipped` stays empty, and `strict` (CLI `--allow-skipped`) has no effect now.
   - Keys that only tune DuckDB in duckOSM (`memory_limit`, `threads`, `simplify_batches`, `clip_strategy`) have no effect. The result lists them under `ignored`.
 - Python duckOSM can later call this API with a config option `engine: rust`. Rust then builds the
   network and Python continues the other steps in DuckDB (section 12).

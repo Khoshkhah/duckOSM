@@ -3,9 +3,8 @@
 //! The keys and their defaults are those of duckOSM (`src/duckosm/config.py`). The rules:
 //! - A key that duckOSM does not know is an error (duckOSM only warns, but it is almost always a typo).
 //! - A key that changes the result and that this program does not support is an error.
-//! - A step that duckOSM runs and that this program does not have (for example H3, the edge graph, the
-//!   base-map layers) is an error in strict mode. With `strict = false` the build goes on, and the step
-//!   is in the list `skipped`.
+//! - Every step that duckOSM runs, this program runs too (the maps of `viz.enabled` with duckosm-edit's maps.rs), so the
+//!   list `skipped` stays empty.
 //! - A key that only tunes duckOSM's DuckDB (batches) has no effect here. It is in the list `ignored`.
 //!   `memory_limit` and `threads` set the DuckDB of the load of `raw.*` (`read_osm`).
 
@@ -164,8 +163,8 @@ fn section<'a>(root: &'a yaml_rust2::yaml::Hash, name: &'a str) -> Result<Sectio
 }
 
 /// Read the config file. `pbf_is_cut`: the PBF is already cut to the boundary of the config (this
-/// program does not cut). `strict`: a duckOSM step that this program does not have is an error.
-pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, String> {
+/// program does not cut). `_strict`: no effect now (every step of duckOSM runs here); it stays for the callers.
+pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, String> {
     let text = duckosm_core::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let docs = YamlLoader::load_from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let empty = yaml_rust2::yaml::Hash::new();
@@ -206,15 +205,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
         return Err(format!("DEM file not found: {}", d.display()));
     }
 
-    let mut skipped: Vec<String> = Vec::new();
-    let mut skip = |what: String| -> Result<(), String> {
-        if strict {
-            Err(format!("config: {what}. Switch it off (or remove it) in the config, or build with strict=false (CLI: --allow-skipped)"))
-        } else {
-            skipped.push(what);
-            Ok(())
-        }
-    };
+    // every step of duckOSM's config runs in this program: nothing is skipped (the field stays for the callers)
+    let skipped: Vec<String> = Vec::new();
 
     // the input
     let stype = source.str("type")?.unwrap_or_else(|| "pbf".into());
@@ -359,9 +351,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
     };
     // the sea (features.ocean) is a layer of features.*: it needs them
     let sea = sea.is_some() && features;
-    if viz.bool("enabled", false)? {
-        skip("viz.enabled is on, but this program does not make the maps".into())?;
-    }
+    let viz_on = if viz.bool("enabled", false)? { Some(viz.str("basemap")?) } else { None };
     // the steps on the .duckdb file after the tables (after.rs)
     let validation = if validation.bool("enabled", false)? {
         // assert_single_component and assert_no_stranded_named: no effect, as in duckOSM (there is no component filter)
@@ -499,6 +489,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, strict: bool) -> Result<FromConfig, S
             transfer_s: multimodal.f64("transfer_s", 60.0)?,
             transfer_costs,
         },
+        viz: viz_on,
         ..Params::default()
     };
     Ok(FromConfig {

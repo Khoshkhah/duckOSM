@@ -105,6 +105,35 @@ pub fn project(l: &[P], p: P) -> f64 {
     measure
 }
 
+/// `project`, but where several segments are within `tol` of the least distance, the middle of them (`_project_tol` of
+/// src/duckosm/gmns.py): at a round corner every point of the arc is the same distance from its centre, to the last bit, and the
+/// cut goes on the corner's bisector.
+pub fn project_tol(l: &[P], p: P, tol: f64) -> f64 {
+    let (mut best, mut start) = (f64::INFINITY, 0.0);
+    let mut rows = Vec::new();
+    for w in l.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let len = dist(a, b);
+        let f = projection_factor(p, a, b);
+        let d = point_to_segment(p, a, b);
+        let m = if f <= 0.0 {
+            start
+        } else if f <= 1.0 {
+            start + f * len
+        } else {
+            start + len
+        };
+        rows.push((d, m));
+        best = best.min(d);
+        start += len;
+    }
+    let tied: Vec<f64> = rows.iter().filter(|r| r.0 <= best + tol).map(|r| r.1).collect();
+    match (tied.first(), tied.last()) {
+        (Some(a), Some(b)) => (a + b) / 2.0,
+        _ => 0.0,
+    }
+}
+
 /// The distance of the point p to the line.
 pub fn point_line_distance(p: P, l: &[P]) -> f64 {
     if l.len() == 1 {
@@ -333,6 +362,137 @@ fn make_heap<T: Copy>(v: &mut [T], first: usize, last: usize, less: &dyn Fn(&T, 
     }
 }
 
+/// `shapely.ops.substring(line, start, end)` (not normalized): the part of the line between two distances along it; one point
+/// when they are at the same place, reversed when `start` is past `end`.
+pub fn substring(l: &[P], start: f64, end: f64) -> Vec<P> {
+    let len = length(l);
+    if start == end {
+        return vec![interpolate(l, start)];
+    }
+    if start >= len && end >= len {
+        return vec![interpolate(l, len)];
+    }
+    if -start >= len && -end >= len {
+        return vec![interpolate(l, 0.0)];
+    }
+    if start < 0.0 && 0.0 < end && start.abs() + end == len {
+        return vec![interpolate(l, end)];
+    }
+    if end < 0.0 && 0.0 < start && end.abs() + start == len {
+        return vec![interpolate(l, start)];
+    }
+    let (sp, ep) = (interpolate(l, start), interpolate(l, end));
+    let mut s0 = if start < 0.0 { len + start } else { start };
+    let mut e0 = if end < 0.0 { len + end } else { end };
+    let reverse = s0 > e0;
+    if reverse {
+        std::mem::swap(&mut s0, &mut e0);
+    }
+    s0 = s0.max(0.0);
+    let mut out = vec![if reverse { ep } else { sp }];
+    let mut cur = 0.0;
+    for w in l.windows(2) {
+        if s0 < cur && cur < e0 {
+            out.push(w[0]);
+        } else if cur >= e0 {
+            break;
+        }
+        cur += ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+    }
+    out.push(if reverse { sp } else { ep });
+    if reverse {
+        out.reverse();
+    }
+    out
+}
+
+/// `shapely.segmentize(line, tol)` (GEOS `Densifier`): points put on each segment longer than `tol`, evenly.
+pub fn segmentize(l: &[P], tol: f64) -> Vec<P> {
+    let mut out: Vec<P> = Vec::new();
+    let add = |p: P, out: &mut Vec<P>| {
+        if out.last() != Some(&p) {
+            out.push(p);
+        }
+    };
+    for w in l.windows(2) {
+        let (p0, p1) = (w[0], w[1]);
+        add(p0, &mut out);
+        let len = dist(p0, p1);
+        let n = (len / tol).ceil() as i64;
+        if n > 1 {
+            let seg_len = len / n as f64;
+            for j in 1..n {
+                let f = (j as f64 * seg_len) / len;
+                add((p0.0 + f * (p1.0 - p0.0), p0.1 + f * (p1.1 - p0.1)), &mut out);
+            }
+        } else {
+            add(p1, &mut out);
+        }
+    }
+    if let Some(&last) = l.last() {
+        add(last, &mut out);
+    }
+    if l.len() <= 1 {
+        out.clear();
+    }
+    out
+}
+
+/// `numpy.gradient(pts, axis=0)`: central differences inside, one-sided at the ends.
+pub fn gradient(pts: &[P]) -> Vec<P> {
+    let n = pts.len();
+    (0..n)
+        .map(|i| {
+            if n < 2 {
+                (0.0, 0.0)
+            } else if i == 0 {
+                (pts[1].0 - pts[0].0, pts[1].1 - pts[0].1)
+            } else if i == n - 1 {
+                (pts[n - 1].0 - pts[n - 2].0, pts[n - 1].1 - pts[n - 2].1)
+            } else {
+                ((pts[i + 1].0 - pts[i - 1].0) / 2.0, (pts[i + 1].1 - pts[i - 1].1) / 2.0)
+            }
+        })
+        .collect()
+}
+
+/// `numpy.interp(x, xp, fp)` for one x (xp increasing).
+pub fn interp(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
+    let n = xp.len();
+    if x.is_nan() {
+        return x;
+    }
+    if x < xp[0] {
+        return fp[0];
+    }
+    if x >= xp[n - 1] {
+        return fp[n - 1];
+    }
+    // the j with xp[j] <= x < xp[j + 1]
+    let j = xp.partition_point(|v| *v <= x) - 1;
+    let slope = (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]);
+    let mut r = slope * (x - xp[j]) + fp[j];
+    if r.is_nan() {
+        r = slope * (x - xp[j + 1]) + fp[j + 1];
+        if r.is_nan() && fp[j] == fp[j + 1] {
+            r = fp[j];
+        }
+    }
+    r
+}
+
+/// `statistics.median`.
+pub fn median(v: &[f64]) -> f64 {
+    let mut s = v.to_vec();
+    s.sort_by(f64::total_cmp);
+    let n = s.len();
+    if n % 2 == 1 {
+        s[n / 2]
+    } else {
+        (s[n / 2 - 1] + s[n / 2]) / 2.0
+    }
+}
+
 /// Python's `round(x, n)`: the decimal rounding of the binary value, half to even.
 pub fn py_round(x: f64, n: usize) -> f64 {
     format!("{x:.n$}").parse().unwrap_or(x)
@@ -353,6 +513,13 @@ mod tests {
         assert_eq!(wkt_points("LINESTRING (1 2, 3.5 -4)"), vec![(1.0, 2.0), (3.5, -4.0)]);
         assert_eq!(py_round(2.675, 2), 2.67);
         assert_eq!(py_round(0.125, 2), 0.12);
+        let l2 = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0), (5.0, 0.0)];
+        assert_eq!(substring(&l2, 1.0, 3.0), vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)]);
+        assert_eq!(substring(&l2, 3.0, 1.0), vec![(3.0, 0.0), (2.0, 0.0), (1.0, 0.0)]);
+        assert_eq!(substring(&l2, 1.0, -3.0), vec![(1.0, 0.0), (2.0, 0.0)]);
+        assert_eq!(segmentize(&[(0.0, 0.0), (3.0, 0.0)], 1.0), vec![(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)]);
+        assert_eq!(interp(2.5, &[0.0, 2.0, 4.0], &[0.0, 1.0, 3.0]), 1.5);
+        assert_eq!(median(&[3.0, 1.0, 4.0, 2.0]), 2.5);
         let mut v: Vec<i32> = (0..100).map(|i| (i * 37) % 23).collect();
         cpp_sort(&mut v, &|a, b| a < b);
         assert!(v.windows(2).all(|w| w[0] <= w[1]));

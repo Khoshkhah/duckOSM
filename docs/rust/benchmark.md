@@ -1,4 +1,4 @@
-# Benchmark: network step, duckOSM and duckosm
+# Benchmark: network step, duckOSM (Python) and duckosm (Rust)
 
 Date: 2026-10-21. **Only Monaco is tested.** Large areas are not tested yet.
 

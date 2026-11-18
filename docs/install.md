@@ -12,8 +12,7 @@ API (`to_sumo`, `route`, `to_elevation`, ...) run the Rust code. There is a whee
 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that needs a
 [Rust toolchain](https://rustup.rs).
 
-These commands still run duckOSM's Python code: `gmns`, `gmns-viz`, `gmns-map`, `viz`, `route-map`, `levels`,
-`levels-edit`, `bus`, `multimodal` and `clip-pbf`. The same for the functions `to_gmns`, `to_meso`, `to_micro` and
+These commands still run duckOSM's Python code: `gmns`, `gmns-viz`, `gmns-map`, `levels`, `levels-edit`, `bus`, `multimodal` and `clip-pbf`. The same for the functions `to_gmns`, `to_meso`, `to_micro` and
 `check_gmns`.
 
 ## Extras

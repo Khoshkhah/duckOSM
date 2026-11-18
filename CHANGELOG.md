@@ -13,6 +13,18 @@
   with the Rust network step): the whole build in Rust is not yet equal to it (`docs/design/all_in_rust.md`, step 6).
   `import duckosm` loads the names when they are first used.
 
+- **`duckosm route-map`: the route planner page is in Rust** (`rust/duckosm-edit/src/route_map.rs`,
+  `docs/design/all_in_rust.md`, group F), with the options of `duckosm route-map`. The page routes with the program's own
+  router: the new crate `duckosm-planner`, built as WebAssembly into the page, in place of the page's JavaScript copy of the
+  router. The routes and the directions are those of `duckosm route-points`, `route-multimodal-points` and `directions`
+  (Monaco: 420 questions; a tie of equal cost can take another road). The multimodal router has a length weight
+  (`Weight::Length`) for the page's Shortest walk + drive. A new CI job checks the page in Chromium, also at phone width.
+
+- **`duckosm viz`: the maps are in Rust** (`rust/duckosm-edit/src/maps.rs`, `docs/design/all_in_rust.md`, group F), with
+  the options of `duckosm viz`: one page with every mode and one page for each mode with only its roads, drawn by roadstyle's
+  Rust engine (the engine of the `duckosm edit` page). The build's `viz.enabled` now draws them too, so the config of
+  `duckosm` has no skipped step. Monaco: the four pages in 3 s.
+
 - **`duckosm lanelet2`: the Lanelet2 export is in Rust** (`rust/duckosm-export/src/lanelet2.rs`,
   `docs/design/all_in_rust.md`, group D). The offset line of shapely (`offset_curve`) is a pure Rust port of GEOS 3.13.1, with
   no GEOS library: the raw offset curve, and the buffer polygon of the line (GEOS's noder, planar graph, depths and polygon

@@ -1,0 +1,15 @@
+[package]
+name = "duckosm-planner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The route planner of `duckosm route-map` (docs/design/all_in_rust.md, group F): duckOSM's point routes over an area held in
+# memory. The planner page runs it as WebAssembly (no wasm-bindgen: the page calls the exports of src/wasm.rs).
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+duckosm-router = { path = "../duckosm-router" }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }

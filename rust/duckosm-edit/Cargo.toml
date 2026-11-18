@@ -7,7 +7,7 @@ description = "duckosm edit: a page on 127.0.0.1 that edits the OSM fixes of a d
 
 [features]
 # the native database and the native build (the CLI). The Python module gives its own database (duckosm/edit.py) and has no DuckDB inside
-duckdb = ["dep:duckdb", "duckosm-build/duckdb", "roadstyle-local/duckdb"]
+duckdb = ["dep:duckdb", "duckosm-build/duckdb", "roadstyle-local/duckdb", "dep:duckosm-route"]
 
 [dependencies]
 duckosm-editor = { path = "../duckosm-editor" }   # the files of the fixes editor
@@ -19,5 +19,11 @@ roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ced
 roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa", default-features = false }
 roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa" }   # the request and the answer of way D (Api)
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }   # the progress hook of the build (set_progress)
+clap = { version = "4", features = ["derive"] }
 ureq = "3"                     # duckosm studio: the download of a Geofabrik extract and of its index
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }
+# duckosm route-map: the edge graph a mode routes on, the lines of the roads (the planner's data)
+duckosm-route = { path = "../duckosm-route", optional = true }
+
+[dev-dependencies]
+duckosm-planner = { path = "../duckosm-planner" }   # tests/route_map.rs: the page's router against the program's

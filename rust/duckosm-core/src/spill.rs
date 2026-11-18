@@ -842,6 +842,83 @@ mod bucket_tests {
     }
 }
 
+/// A line in few bytes, with the same bits again: when each point is on the grid of an OSM file (1e-7 degrees, [`join::e7`]),
+/// a byte 1 and the steps from point to point as zigzag varints (about 3 bytes for each point, not 16); otherwise a byte 0
+/// and the f64 values. [`line_at`] reads it.
+pub fn put_line(g: &[(f64, f64)], out: &mut Vec<u8>) {
+    let grid: Option<Vec<(i32, i32)>> = g.iter().map(|p| Some((join::e7(p.0)?, join::e7(p.1)?))).collect();
+    let Some(grid) = grid else {
+        out.push(0);
+        for p in g {
+            out.extend_from_slice(&p.0.to_bits().to_le_bytes());
+            out.extend_from_slice(&p.1.to_bits().to_le_bytes());
+        }
+        return;
+    };
+    out.push(1);
+    let mut put = |v: i64| {
+        let mut v = ((v << 1) ^ (v >> 63)) as u64;
+        while v >= 0x80 {
+            out.push(v as u8 | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    };
+    let mut last = (0i64, 0i64);
+    for (x, y) in grid {
+        put(x as i64 - last.0);
+        put(y as i64 - last.1);
+        last = (x as i64, y as i64);
+    }
+}
+
+/// The line of [`put_line`]: `b` is all of its bytes.
+pub fn line_at(b: &[u8]) -> Vec<(f64, f64)> {
+    let f = |c: &[u8]| f64::from_bits(u64::from_le_bytes(c.try_into().expect("8 bytes")));
+    if b[0] == 0 {
+        return b[1..].chunks_exact(16).map(|c| (f(&c[..8]), f(&c[8..]))).collect();
+    }
+    let (mut at, mut out, mut last) = (1, Vec::new(), (0i64, 0i64));
+    let get = |at: &mut usize| {
+        let (mut v, mut shift) = (0u64, 0);
+        loop {
+            let c = b[*at];
+            *at += 1;
+            v |= ((c & 0x7f) as u64) << shift;
+            if c < 0x80 {
+                break;
+            }
+            shift += 7;
+        }
+        (v >> 1) as i64 ^ -((v & 1) as i64)
+    };
+    let n = |v: i64| 1e-9 * (100 * v) as f64;
+    while at < b.len() {
+        last.0 += get(&mut at);
+        last.1 += get(&mut at);
+        out.push((n(last.0), n(last.1)));
+    }
+    out
+}
+
+#[cfg(test)]
+mod line_tests {
+    #[test]
+    fn a_line_gives_the_same_bits_again() {
+        let osm = |n: i64| 1e-9 * (100 * n) as f64;
+        for g in [
+            vec![(osm(74_123_456), osm(437_380_000)), (osm(74_123_999), osm(437_379_000)), (osm(-1_799_999_999), osm(899_999_999))],
+            vec![(7.41234561, 43.738), (7.5, 43.7)],
+            vec![(osm(1), osm(2)), (0.1 + 0.2, osm(3))],
+        ] {
+            let mut b = Vec::new();
+            super::put_line(&g, &mut b);
+            let back = super::line_at(&b);
+            assert_eq!(back.iter().map(|p| (p.0.to_bits(), p.1.to_bits())).collect::<Vec<_>>(), g.iter().map(|p| (p.0.to_bits(), p.1.to_bits())).collect::<Vec<_>>());
+        }
+    }
+}
+
 pub mod join {
     use super::{sort_bytes, Codec, Rows, Store, Writer};
     use std::io;
@@ -871,7 +948,7 @@ pub mod join {
 
     /// The coordinate in units of 1e-7 degrees, when it gives the same bits again: the coordinates of an OSM file are
     /// `1e-9 * (100 * n)` (granularity 100, `pbfraw`).
-    fn e7(x: f64) -> Option<i32> {
+    pub fn e7(x: f64) -> Option<i32> {
         let n = (x * 1e7).round();
         if !(n.abs() < 2_147_483_648.0) {
             return None;

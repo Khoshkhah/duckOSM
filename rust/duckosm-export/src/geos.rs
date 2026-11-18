@@ -448,46 +448,58 @@ fn chain_ids(pts: &[P]) -> Vec<usize> {
     ids
 }
 
-/// The noded edges of one closed curve: `MCIndexNoder` with an `IntersectionAdder`, then the split edges.
-fn node_curve(pts: &[P]) -> Vec<Vec<P>> {
-    let nseg = pts.len() - 1;
-    let chain = chain_ids(pts);
-    let mut ss = Noded { pts, nodes: Vec::new() };
-    // the segment pairs whose envelopes meet, by a sweep in x
-    let xmin = |i: usize| pts[i].0.min(pts[i + 1].0);
-    let xmax = |i: usize| pts[i].0.max(pts[i + 1].0);
-    let mut order: Vec<usize> = (0..nseg).collect();
+/// The noded edges of the curves (`MCIndexNoder` with an `IntersectionAdder`, then the split edges of each curve, in order):
+/// (curve index, points).
+fn node_curves(curves: &[&[P]]) -> Vec<(usize, Vec<P>)> {
+    // every segment: (curve, segment index, chain)
+    let mut segs: Vec<(usize, usize, usize)> = Vec::new();
+    for (c, pts) in curves.iter().enumerate() {
+        for (i, ch) in chain_ids(pts).into_iter().enumerate() {
+            segs.push((c, i, ch));
+        }
+    }
+    let seg = |k: usize| {
+        let (c, i, _) = segs[k];
+        (curves[c][i], curves[c][i + 1])
+    };
+    let xmin = |k: usize| seg(k).0 .0.min(seg(k).1 .0);
+    let xmax = |k: usize| seg(k).0 .0.max(seg(k).1 .0);
+    let mut order: Vec<usize> = (0..segs.len()).collect();
     order.sort_by(|a, b| xmin(*a).total_cmp(&xmin(*b)));
     let mut pairs = Vec::new();
-    for (k, &i) in order.iter().enumerate() {
-        for &j in &order[k + 1..] {
-            if xmin(j) > xmax(i) {
+    for (k, &a) in order.iter().enumerate() {
+        for &b in &order[k + 1..] {
+            if xmin(b) > xmax(a) {
                 break;
             }
-            if chain[i] != chain[j] {
-                pairs.push((i.min(j), i.max(j)));
+            let (sa, sb) = (segs[a], segs[b]);
+            if sa.0 != sb.0 || sa.2 != sb.2 {
+                pairs.push((a.min(b), a.max(b)));
             }
         }
     }
     pairs.sort_unstable();
-    for (i, j) in pairs {
-        let li = line_intersection(pts[i], pts[i + 1], pts[j], pts[j + 1]);
+    let mut noded: Vec<Noded> = curves.iter().map(|pts| Noded { pts, nodes: Vec::new() }).collect();
+    for (a, b) in pairs {
+        let ((ca, i, _), (cb, j, _)) = (segs[a], segs[b]);
+        let (p, q) = (seg(a), seg(b));
+        let li = line_intersection(p.0, p.1, q.0, q.1);
         if li.n == 0 {
             continue;
         }
-        // IntersectionAdder::isTrivialIntersection (one segment string; GEOS compares the last point index, not the
-        // last segment index, for a closed string, so the first and last segments are never "adjacent")
-        if li.n == 1 && j - i == 1 {
+        // IntersectionAdder::isTrivialIntersection (GEOS compares the last point index, not the last segment index, for a
+        // closed string, so the first and last segments of a curve are never "adjacent")
+        if ca == cb && li.n == 1 && j.abs_diff(i) == 1 {
             continue;
         }
         for k in 0..li.n {
-            ss.add_intersection(li.pts[k], i);
+            noded[ca].add_intersection(li.pts[k], i);
         }
         for k in 0..li.n {
-            ss.add_intersection(li.pts[k], j);
+            noded[cb].add_intersection(li.pts[k], j);
         }
     }
-    ss.split_edges()
+    noded.into_iter().enumerate().flat_map(|(c, n)| n.split_edges().into_iter().map(move |e| (c, e))).collect()
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -680,7 +692,7 @@ impl Graph {
         }
     }
     /// `RightmostEdgeFinder::findEdge`: the directed edge with the outside of the buffer on its right.
-    fn rightmost(&self, de_list: &[usize]) -> Result<usize, Err> {
+    fn rightmost(&self, de_list: &[usize]) -> Result<(usize, P), Err> {
         let mut min: Option<(usize, usize, P)> = None; // (de, index, coord)
         let check = |de: usize, min: &mut Option<(usize, usize, P)>| {
             let pts = &self.edges[self.des[de].edge].pts;
@@ -736,7 +748,14 @@ impl Graph {
         if side < 0 {
             side = side_of(min_de, min_index as isize - 1);
         }
-        Ok(if side == LEFT as i32 { Graph::sym(min_de) } else { min_de })
+        let mut coord = min_coord;
+        if side < 0 {
+            // GEOS resets the rightmost coordinate to that of this edge
+            let mut m: Option<(usize, usize, P)> = None;
+            check(min_de, &mut m);
+            coord = m.map(|x| x.2).unwrap_or(coord);
+        }
+        Ok((if side == LEFT as i32 { Graph::sym(min_de) } else { min_de }, coord))
     }
     /// `BufferSubgraph::create` (`addReachable`): the nodes and directed edges reached from `start`, in GEOS's order
     /// (a node pushed twice on the stack is added twice, as in GEOS).
@@ -891,7 +910,7 @@ impl Graph {
 }
 
 /// `Orientation::isCCW`.
-fn is_ccw(ring: &[P]) -> bool {
+pub fn is_ccw(ring: &[P]) -> bool {
     if ring.len() < 4 {
         return false;
     }
@@ -934,7 +953,7 @@ fn is_ccw(ring: &[P]) -> bool {
 }
 
 /// `Area::ofRingSigned`.
-fn signed_area(ring: &[P]) -> f64 {
+pub fn signed_area(ring: &[P]) -> f64 {
     let n = ring.len();
     if n < 3 {
         return 0.0;
@@ -1004,14 +1023,96 @@ impl Polygon {
     }
 }
 
-/// The polygons of the buffer of a line whose raw buffer curve is `curve` (closed; its left side is outside):
-/// GEOS's `BufferBuilder::buffer` with no precision model.
-pub fn buffer_polygons(curve: &[P]) -> Result<Vec<Polygon>, Err> {
-    // computeNodedEdges and insertUniqueEdge (the curve's label: left EXTERIOR, right INTERIOR, depth delta -1)
+/// The rightmost coordinate of a subgraph and the depth outside it (`SubgraphDepthLocater::getDepth`): the left depth of the
+/// lowest segment of the processed subgraphs that a ray from p to the right crosses, 0 when none.
+fn outside_depth(g: &Graph, processed: &[Vec<usize>], p: P) -> i32 {
+    // (low, high, depth)
+    let mut stabbed: Vec<(P, P, i32)> = Vec::new();
+    for des in processed {
+        // BufferSubgraph::getEnvelope: the points of its edges, the last point of each left out
+        let mut env = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for &de in des {
+            let pts = &g.edges[g.des[de].edge].pts;
+            for q in &pts[..pts.len() - 1] {
+                env = (env.0.min(q.0), env.1.min(q.1), env.2.max(q.0), env.3.max(q.1));
+            }
+        }
+        if p.1 < env.1 || p.1 > env.3 || p.0 > env.2 {
+            continue;
+        }
+        for &de in des {
+            if !g.des[de].fwd {
+                continue;
+            }
+            let pts = &g.edges[g.des[de].edge].pts;
+            let e = envelope(pts);
+            if p.1 < e.1 || p.1 > e.3 || p.0 > e.2 {
+                continue;
+            }
+            for w in pts.windows(2) {
+                let (mut low, mut high) = (w[0], w[1]);
+                let swap = low.1 > high.1;
+                if swap {
+                    std::mem::swap(&mut low, &mut high);
+                }
+                if low.0.max(high.0) < p.0 || low.1 == high.1 || p.1 < low.1 || p.1 > high.1 || orient(low, high, p) == -1 {
+                    continue;
+                }
+                let depth = if swap { g.des[de].depth[RIGHT] } else { g.des[de].depth[LEFT] };
+                stabbed.push((low, high, depth));
+            }
+        }
+    }
+    // DepthSegment::compareTo
+    let cmp_pt = |a: P, b: P| a.0.partial_cmp(&b.0).unwrap().then(a.1.partial_cmp(&b.1).unwrap());
+    let seg_orient = |s: (P, P), t: (P, P)| {
+        let (o0, o1) = (orient(s.0, s.1, t.0), orient(s.0, s.1, t.1));
+        if o0 >= 0 && o1 >= 0 {
+            o0.max(o1)
+        } else if o0 <= 0 && o1 <= 0 {
+            o0.min(o1)
+        } else {
+            0
+        }
+    };
+    let less = |a: &(P, P, i32), b: &(P, P, i32)| {
+        let (s, t) = ((a.0, a.1), (b.0, b.1));
+        let (sminx, smaxx, sminy, smaxy) = (s.0 .0.min(s.1 .0), s.0 .0.max(s.1 .0), s.0 .1.min(s.1 .1), s.0 .1.max(s.1 .1));
+        let (tminx, tmaxx, tminy, tmaxy) = (t.0 .0.min(t.1 .0), t.0 .0.max(t.1 .0), t.0 .1.min(t.1 .1), t.0 .1.max(t.1 .1));
+        let c = if sminx >= tmaxx || smaxx <= tminx || sminy >= tmaxy || smaxy <= tminy {
+            match cmp_pt(s.0, t.0) {
+                std::cmp::Ordering::Equal => cmp_pt(s.1, t.1) as i32,
+                o => o as i32,
+            }
+        } else {
+            let o = seg_orient(s, t);
+            if o != 0 {
+                o
+            } else {
+                -seg_orient(t, s)
+            }
+        };
+        c < 0
+    };
+    let mut best: Option<&(P, P, i32)> = None;
+    for x in &stabbed {
+        if best.is_none_or(|b| less(x, b)) {
+            best = Some(x);
+        }
+    }
+    best.map(|b| b.2).unwrap_or(0)
+}
+
+/// The polygons of the buffer whose raw curves are `curves` (closed), each with its depth delta (-1: the left side is outside,
+/// +1: the right side is outside): GEOS's `BufferBuilder::buffer` with no precision model.
+pub fn buffer_polygons(curves: &[(Vec<P>, i32)]) -> Result<Vec<Polygon>, Err> {
+    // computeNodedEdges and insertUniqueEdge
     let mut edges: Vec<Edge> = Vec::new();
     let mut index: HashMap<Vec<(u64, u64)>, usize> = HashMap::new();
     let bits = |p: &P| ((p.0 + 0.0).to_bits(), (p.1 + 0.0).to_bits());
-    for mut pts in node_curve(curve) {
+    let refs: Vec<&[P]> = curves.iter().map(|c| c.0.as_slice()).collect();
+    for (c, mut pts) in node_curves(&refs) {
+        let d = curves[c].1;
         pts.dedup();
         if pts.len() < 2 {
             continue;
@@ -1022,11 +1123,11 @@ pub fn buffer_polygons(curve: &[P]) -> Result<Vec<Polygon>, Err> {
         match index.get(&key) {
             Some(&e) => {
                 let same_way = edges[e].pts.iter().map(bits).eq(fwd.iter().copied());
-                edges[e].delta += if same_way { -1 } else { 1 };
+                edges[e].delta += if same_way { d } else { -d };
             }
             None => {
                 index.insert(key, edges.len());
-                edges.push(Edge { pts, delta: -1 });
+                edges.push(Edge { pts, delta: d });
             }
         }
     }
@@ -1034,125 +1135,134 @@ pub fn buffer_polygons(curve: &[P]) -> Result<Vec<Polygon>, Err> {
         return Ok(vec![]);
     }
     let mut g = Graph::new(edges);
-    // createSubgraphs: the curve is one closed line, so its noded edges make one connected graph
+    // createSubgraphs, sorted by their rightmost x, largest first
     let mut visited = vec![false; g.nodes.len()];
-    let (nodes, des) = g.subgraph(0, &mut visited);
-    if visited.iter().any(|v| !v) {
-        return Err("the noded buffer curve is not connected".into());
-    }
-    let start = g.rightmost(&des)?;
-    g.compute_depth(&des, start, 0)?;
-    for &de in &des {
-        let d = &g.des[de];
-        if d.depth[RIGHT] >= 1 && d.depth[LEFT] <= 0 {
-            g.des[de].in_result = true;
+    let mut subgraphs: Vec<(Vec<usize>, Vec<usize>, usize, P)> = Vec::new();
+    for n in 0..g.nodes.len() {
+        if !visited[n] {
+            let (nodes, des) = g.subgraph(n, &mut visited);
+            let (start, coord) = g.rightmost(&des)?;
+            subgraphs.push((nodes, des, start, coord));
         }
     }
-    // PolygonBuilder::add
-    for &n in &nodes {
-        g.link_result(n)?;
-    }
-    let mut max_rings: Vec<(usize, Vec<usize>, Vec<P>)> = Vec::new(); // (start, des, pts)
-    for &de in &des {
-        if g.des[de].in_result && g.des[de].ring.is_none() {
-            let id = max_rings.len();
-            let (rd, pts) = g.ring(de, id, false)?;
-            max_rings.push((de, rd, pts));
-        }
-    }
+    let mut idx: Vec<usize> = (0..subgraphs.len()).collect();
+    crate::shapely::cpp_sort(&mut idx, &|a, b| subgraphs[*a].3 .0 > subgraphs[*b].3 .0);
+    let mut slots: Vec<Option<(Vec<usize>, Vec<usize>, usize, P)>> = subgraphs.into_iter().map(Some).collect();
+    let subgraphs: Vec<(Vec<usize>, Vec<usize>, usize, P)> = idx.iter().map(|&i| slots[i].take().unwrap()).collect();
     struct Ring {
         pts: Vec<P>,
         hole: bool,
         shell: Option<usize>,
     }
     let mut rings: Vec<Ring> = Vec::new();
-    let (mut shells, mut free_holes): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
-    let mut min_id = 0;
-    let mut plain: Vec<usize> = Vec::new();
-    for (id, (_, rd, pts)) in max_rings.iter().enumerate() {
-        let degree = rd
-            .iter()
-            .map(|&de| g.nodes[g.des[de].node].star.iter().filter(|&&x| g.des[x].ring == Some(id)).count())
-            .max()
-            .unwrap_or(0);
-        if degree > 2 {
-            for &de in rd {
-                let n = g.des[de].node;
-                g.link_minimal(n, id);
+    let mut shells: Vec<usize> = Vec::new();
+    let mut hole_order: Vec<usize> = Vec::new(); // the holes, in the order GEOS gives them to a shell
+    let (mut max_id, mut min_id) = (0, 0);
+    let mut processed: Vec<Vec<usize>> = Vec::new();
+    for (nodes, des, start, coord) in subgraphs {
+        let outside = outside_depth(&g, &processed, coord);
+        g.compute_depth(&des, start, outside)?;
+        for &de in &des {
+            let d = &g.des[de];
+            if d.depth[RIGHT] >= 1 && d.depth[LEFT] <= 0 {
+                g.des[de].in_result = true;
             }
-            let mut mins = Vec::new();
-            for &de in rd {
-                if g.des[de].min_ring.is_none() {
-                    let (_, mp) = g.ring(de, min_id, true)?;
-                    min_id += 1;
-                    let hole = is_ccw(&mp);
-                    rings.push(Ring { pts: mp, hole, shell: None });
-                    mins.push(rings.len() - 1);
+        }
+        processed.push(des.clone());
+        // PolygonBuilder::add
+        for &n in &nodes {
+            g.link_result(n)?;
+        }
+        let mut max_rings: Vec<(usize, Vec<usize>, Vec<P>)> = Vec::new(); // (id, des, pts)
+        for &de in &des {
+            if g.des[de].in_result && g.des[de].ring.is_none() {
+                let (rd, pts) = g.ring(de, max_id, false)?;
+                max_rings.push((max_id, rd, pts));
+                max_id += 1;
+            }
+        }
+        let mut free_holes: Vec<usize> = Vec::new();
+        let mut plain: Vec<usize> = Vec::new();
+        for (id, rd, pts) in &max_rings {
+            let id = *id;
+            let degree = rd
+                .iter()
+                .map(|&de| g.nodes[g.des[de].node].star.iter().filter(|&&x| g.des[x].ring == Some(id)).count())
+                .max()
+                .unwrap_or(0);
+            if degree > 2 {
+                for &de in rd {
+                    let n = g.des[de].node;
+                    g.link_minimal(n, id);
                 }
-            }
-            let shell_list: Vec<usize> = mins.iter().copied().filter(|&r| !rings[r].hole).collect();
-            if shell_list.len() > 1 {
-                return topo("found two shells in MinimalEdgeRing list", rings[shell_list[1]].pts[0]);
-            }
-            if let Some(&s) = shell_list.first() {
-                for &r in &mins {
-                    if rings[r].hole {
-                        rings[r].shell = Some(s);
+                let mut mins = Vec::new();
+                for &de in rd {
+                    if g.des[de].min_ring.is_none() {
+                        let (_, mp) = g.ring(de, min_id, true)?;
+                        min_id += 1;
+                        let hole = is_ccw(&mp);
+                        rings.push(Ring { pts: mp, hole, shell: None });
+                        mins.push(rings.len() - 1);
                     }
                 }
-                shells.push(s);
+                let shell_list: Vec<usize> = mins.iter().copied().filter(|&r| !rings[r].hole).collect();
+                if shell_list.len() > 1 {
+                    return topo("found two shells in MinimalEdgeRing list", rings[shell_list[1]].pts[0]);
+                }
+                if let Some(&s) = shell_list.first() {
+                    for &r in &mins {
+                        if rings[r].hole {
+                            rings[r].shell = Some(s);
+                            hole_order.push(r);
+                        }
+                    }
+                    shells.push(s);
+                } else {
+                    free_holes.extend(mins);
+                }
             } else {
-                free_holes.extend(mins);
+                rings.push(Ring { pts: pts.clone(), hole: is_ccw(pts), shell: None });
+                plain.push(rings.len() - 1);
             }
-        } else {
-            rings.push(Ring { pts: pts.clone(), hole: is_ccw(pts), shell: None });
-            plain.push(rings.len() - 1);
         }
-    }
-    // sortShellsAndHoles
-    for r in plain {
-        if rings[r].hole {
-            free_holes.push(r);
-        } else {
-            shells.push(r);
+        // sortShellsAndHoles
+        for r in plain {
+            if rings[r].hole {
+                free_holes.push(r);
+            } else {
+                shells.push(r);
+            }
         }
-    }
-    // placeFreeHoles (findEdgeRingContaining)
-    for &h in &free_holes {
-        if rings[h].shell.is_some() {
-            continue;
-        }
-        let test_env = envelope(&rings[h].pts);
-        let mut min_shell: Option<usize> = None;
-        for &s in &shells {
-            let env = envelope(&rings[s].pts);
-            if env == test_env || !env_contains(env, test_env) {
+        // placeFreeHoles (findEdgeRingContaining)
+        for &h in &free_holes {
+            if rings[h].shell.is_some() {
                 continue;
             }
-            let shell_pts = &rings[s].pts;
-            let test_pt = rings[h].pts.iter().find(|p| !shell_pts.contains(p)).copied();
-            let contained = test_pt.is_some_and(|p| in_ring(p, shell_pts));
-            if contained && min_shell.is_none_or(|m| env_contains(envelope(&rings[m].pts), env)) {
-                min_shell = Some(s);
+            let test_env = envelope(&rings[h].pts);
+            let mut min_shell: Option<usize> = None;
+            for &s in &shells {
+                let env = envelope(&rings[s].pts);
+                if env == test_env || !env_contains(env, test_env) {
+                    continue;
+                }
+                let shell_pts = &rings[s].pts;
+                let test_pt = rings[h].pts.iter().find(|p| !shell_pts.contains(p)).copied();
+                let contained = test_pt.is_some_and(|p| in_ring(p, shell_pts));
+                if contained && min_shell.is_none_or(|m| env_contains(envelope(&rings[m].pts), env)) {
+                    min_shell = Some(s);
+                }
+            }
+            if min_shell.is_some() {
+                rings[h].shell = min_shell;
+                hole_order.push(h);
             }
         }
-        rings[h].shell = min_shell;
     }
-    // computePolygons: the holes of a shell in the order they were given to it
-    let mut order: Vec<usize> = Vec::new();
-    for (i, r) in rings.iter().enumerate() {
-        if r.hole && r.shell.is_some() {
-            order.push(i);
-        }
-    }
-    // GEOS calls setShell for minimal-ring holes first (in buildMinimalEdgeRings), then for free holes
-    let min_holes: Vec<usize> = order.iter().copied().filter(|i| !free_holes.contains(i)).collect();
-    let free: Vec<usize> = free_holes.iter().copied().filter(|i| rings[*i].shell.is_some()).collect();
     Ok(shells
         .iter()
         .map(|&s| Polygon {
             shell: rings[s].pts.clone(),
-            holes: min_holes.iter().chain(&free).filter(|&&h| rings[h].shell == Some(s)).map(|&h| rings[h].pts.clone()).collect(),
+            holes: hole_order.iter().filter(|&&h| rings[h].shell == Some(s)).map(|&h| rings[h].pts.clone()).collect(),
         })
         .collect())
 }
@@ -1173,7 +1283,7 @@ mod tests {
     #[test]
     fn square_with_a_loop() {
         let ring = [(-1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)];
-        let p = buffer_polygons(&ring).unwrap();
+        let p = buffer_polygons(&[(ring.to_vec(), -1)]).unwrap();
         assert_eq!(p.len(), 1);
         assert!((p[0].area() - 4.0).abs() < 1e-12);
         assert!(p[0].holes.is_empty());

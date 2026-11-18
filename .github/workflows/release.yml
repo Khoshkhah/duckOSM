@@ -89,7 +89,7 @@ jobs:
           python -c "import duckosm; print(duckosm.to_matsim('build-test/monaco.duckdb', 'build-test/network.xml.gz'))"
 
   # The Rust program (rust/duckosm-cli) as one archive for each system. The Linux program needs glibc 2.35 or newer
-  # (the runner's glibc). The program is `duckosm`; `duckosm` is the old name, for one release (it prints
+  # (the runner's glibc). The program is `duckosm`; `duckosm-rust` is the old name, for one release (it prints
   # "use duckosm" and runs the same command).
   cli:
     name: CLI ${{ matrix.name }}
