@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`duckosm-rust route-map`: the route planner page is in Rust** (`rust/duckosm-edit/src/route_map.rs`,
+  `docs/design/all_in_rust.md`, group F), with the options of `duckosm route-map`. The page routes with the program's own
+  router: the new crate `duckosm-planner`, built as WebAssembly into the page, in place of the page's JavaScript copy of the
+  router. The routes and the directions are those of `duckosm-rust route-points`, `route-multimodal-points` and `directions`
+  (Monaco: 420 questions; a tie of equal cost can take another road). The multimodal router has a length weight
+  (`Weight::Length`) for the page's Shortest walk + drive. A new CI job checks the page in Chromium, also at phone width.
+
 - **`duckosm-rust viz`: the maps are in Rust** (`rust/duckosm-edit/src/maps.rs`, `docs/design/all_in_rust.md`, group F), with
   the options of `duckosm viz`: one page with every mode and one page for each mode with only its roads, drawn by roadstyle's
   Rust engine (the engine of the `duckosm edit` page). The build's `viz.enabled` now draws them too, so the config of

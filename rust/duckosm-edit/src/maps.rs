@@ -60,11 +60,14 @@ pub(crate) fn env_keys() -> Map<String, Value> {
 }
 
 /// The page of the map of `mode` (with `only`: that mode's roads alone) of the open database, roadstyle's `duckosm.page(db, mode, only=...)`.
+/// `args` over the defaults (the dashboard with no panel).
 pub fn map_page(db: &mut dyn Db, place: &str, mode: &str, only: bool, mut args: Value) -> Result<String, String> {
     let base = json!({"mode": mode, "theme": "liberty", "paths": "google", "place": place});
     // duckosm.page(dashboard=False): the dashboard without a panel, the map and the toolbox
     for (k, v) in [("template", json!("dashboard")), ("dashboard", json!({"panel": null})), ("state", json!("live"))] {
-        args[k] = v;
+        if args.get(k).is_none() {
+            args[k] = v;
+        }
     }
     // the stored levels when the file has them, else the engine solves them (render_map's rule)
     let p = prepare_map(db, mode, only.then_some(mode), base, args, Value::Null, false)?;
