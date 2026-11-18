@@ -7,9 +7,8 @@ duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson -m driving -m walkin
 ```
 
 The output `monaco.duckdb` has one schema for each mode (edges, nodes, the graph of legal turns) and the
-[base-map layers](../reference/features.md). With a boundary, the build first cuts the PBF to it with osmium and keeps the
-cut in `./pbf/`. The next build of the same area uses that cut again, until the boundary or the PBF changes.
-Without osmium, the build uses the whole PBF.
+[base-map layers](../reference/features.md). With a boundary, the build first cuts the PBF to the area
+([way 1](prepare-area.md#1-cut-the-osm-file)).
 
 | Option | Does | Default |
 |---|---|---|
@@ -56,5 +55,8 @@ A key that is not in the file has its default. A relative path starts from the f
 that you type overrides the file, for example `duckosm build -c monaco.yaml -m driving`.
 Every key: [Configuration](../reference/configuration.md).
 
-For a country, build the region one time and [cut the areas from it](prepare-area.md#2-cut-a-built-region).
-To build a large area tile by tile, give the same config file to `duckosm tiles --config monaco.yaml`.
+| Area | How |
+|---|---|
+| a city or a district | `duckosm build` (this page) |
+| many areas of one region | build the region once, then [cut each area from it](prepare-area.md#2-cut-a-built-region) |
+| a country | [build by tiles](prepare-area.md#3-build-by-tiles): `duckosm tiles --config monaco.yaml` takes the same config file |
