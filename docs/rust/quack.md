@@ -435,6 +435,43 @@ France by tiles now: 3 min 37 s and 0.9 GB (Mac mini).
 Not done: GDAL's own `osmconf.ini` (only the default one), the open options of the driver, and GDAL's repair of a
 self-touching ring with GEOS in `organizePolygons` (Monaco has none).
 
+## Geofabrik layers (`--geofabrik`)
+
+Status: done, 2026-11-18. `duckosm quack --geofabrik` writes the 20 layers of Geofabrik's free files
+(`<area>-latest-free.shp.zip` and `-free.gpkg.zip`) from any `.osm.pbf` file. The user page is
+[duckOSM and Geofabrik](../concepts/geofabrik.md).
+
+```bash
+duckosm quack monaco.osm.pbf --geofabrik -o out --name monaco                         # out/monaco_geofabrik.gpkg
+duckosm quack monaco.osm.pbf --geofabrik -o out --name monaco -f shp                  # out/monaco_geofabrik.shp.zip
+duckosm quack monaco.osm.pbf --geofabrik -o out --name monaco -f gpkg,shp,geoparquet  # all three in one read
+```
+
+The engine is the engine of `--gdal` in the mode `quack::Mode::Geofabrik`. The mode has two differences from GDAL: a
+multipolygon with no tags of its own does not take the tags of its outer member, and the polygon of an outer member way
+is a row also when a complete multipolygon uses it. `duckosm_core::geofabrik::rows` then makes the Geofabrik rows of each
+GDAL row:
+
+| GDAL row | Geofabrik layers |
+|---|---|
+| a point (a node) | the point layers: `places`, `pois`, `pofw`, `natural`, `traffic`, `transport` |
+| a line (a way) | the line layers `roads`, `railways`, `waterways`; a closed line with no `area=no` also the area layers |
+| a polygon of a way | the area layers (`_a`); its ring also the line layers |
+| a polygon of a relation (complete, all rings closed) | the area layers |
+
+The rules are in `duckosm-core/src/geofabrik_rules.txt`, one line for each rule: `<class> <code> <fclass> <conditions>`.
+Each key of the rules gives one row: a cafe with `shop=bakery` is a `bakery` row and a `cafe` row in `pois`, as in
+Geofabrik's files. The file lists where Geofabrik's PDF and its files do not agree; the rules follow the files.
+
+The writers are those of `--gdal` with a `gdal::Schema` (the tables, the geometry types, the columns and their widths),
+and one more: `duckosm-build/src/shp.rs` writes a shapefile for each layer (crates `shapefile` and `dbase`, pure Rust)
+into one zip file (crate `zip`). The files of a layer grow in temporary files, and a complete layer goes into the zip file.
+A layer of more than 2 GB continues in `_2`, `_3` (Geofabrik's spillover).
+
+`duckosm-build/tests/quack_geofabrik_monaco.rs` compares the output with Geofabrik's GeoPackage of the same day
+(`tests/data/monaco_geofabrik.jsonl.gz`, made by `tools/geofabrik_golden.py` from Geofabrik's file): the whole file, by
+tiles of zoom 12, each tile alone with the join (the browser), and the shapefiles.
+
 ## What QuackOSM has and duckOSM does not have
 
 The filters: tags (`tags_filter`), OSM ids, custom SQL, and a geometry (`geometry_filter`, features that touch it). The

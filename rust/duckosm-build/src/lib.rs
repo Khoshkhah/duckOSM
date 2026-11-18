@@ -28,6 +28,7 @@ pub mod levels;
 pub mod place;
 pub mod quack_gdal;
 pub mod quack_tiles;
+pub mod shp;
 pub mod union;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
