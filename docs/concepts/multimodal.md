@@ -3,12 +3,12 @@
 `duckosm multimodal` joins the walking, cycling and driving networks of a database into one graph,
 so that a trip can change mode: walk to the car, drive, walk from the car. How to run it
 and route with `route_multimodal`: [Route across modes](../guides/route.md#across-modes-walk--drive--walk).
-*Experimental.* The command `duckosm multimodal` is not ported to Rust yet. The build makes the same tables.
+*Experimental.* The command `duckosm multimodal` and the build make the same tables.
 
 ## What it adds
 
 It writes a schema `mm` into the database (or the build does, with `multimodal.enabled: true`). It
-needs walking and at least one other mode. Without them, it only warns and writes an empty
+needs walking and at least one other mode. Without them, it writes an empty
 `mm.transfers`. `mm.edges` is a view, but `mm.transfers` is a table: after you build a mode again, run
 `duckosm multimodal` again.
 
