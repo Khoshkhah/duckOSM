@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm-rust lanelet2`: the Lanelet2 export is in Rust** (`rust/duckosm-export/src/lanelet2.rs`,
+  `docs/design/all_in_rust.md`, group D). The offset line of shapely (`offset_curve`) is a pure Rust port of GEOS 3.13.1, with
+  no GEOS library: the raw offset curve, and the buffer polygon of the line (GEOS's noder, planar graph, depths and polygon
+  builder, `src/geos.rs`). On Monaco and Tartu the `.osm` file has the same bytes as the Python export.
+
 - **The Rust router holds less for a large area** (France on a Mac mini, `docs/guides/route.md`, "Large areas"). The graph is
   flat arrays of arcs in both directions (12 bytes for each turn), the searches keep dense labels, and a trip across modes
   reads only the modes of `--modes` and makes its indexes one time. France driving (25.9 million edges): the route Paris to

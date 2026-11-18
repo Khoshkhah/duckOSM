@@ -203,3 +203,74 @@ fn sumo_equals_python() {
         }
     }
 }
+
+/// The lanelets of a Lanelet2 file: (tags, left boundary, right boundary), in the order of the file.
+fn lanelets(text: &str) -> Vec<(Vec<String>, Vec<(f64, f64)>, Vec<(f64, f64)>)> {
+    let attr = |l: &str, k: &str| -> String {
+        let key = format!(" {k}=\"");
+        l.find(&key).map(|i| l[i + key.len()..].split('"').next().unwrap().to_string()).unwrap_or_default()
+    };
+    let mut nodes = std::collections::HashMap::new();
+    let mut ways: std::collections::HashMap<String, Vec<(f64, f64)>> = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    let (mut way, mut rel): (Option<String>, Option<(Vec<String>, String, String)>) = (None, None);
+    for l in text.lines().map(str::trim) {
+        if l.starts_with("<node ") {
+            nodes.insert(attr(l, "id"), (attr(l, "lon").parse::<f64>().unwrap(), attr(l, "lat").parse::<f64>().unwrap()));
+        } else if l.starts_with("<way ") {
+            way = Some(attr(l, "id"));
+            ways.insert(attr(l, "id"), vec![]);
+        } else if l.starts_with("<nd ") {
+            ways.get_mut(way.as_ref().unwrap()).unwrap().push(nodes[&attr(l, "ref")]);
+        } else if l.starts_with("<relation ") {
+            rel = Some((vec![], String::new(), String::new()));
+        } else if l.starts_with("<member ") {
+            let r = rel.as_mut().unwrap();
+            if attr(l, "role") == "left" { r.1 = attr(l, "ref") } else { r.2 = attr(l, "ref") }
+        } else if l.starts_with("<tag ") && rel.is_some() {
+            rel.as_mut().unwrap().0.push(format!("{}={}", attr(l, "k"), attr(l, "v")));
+        } else if l.starts_with("</relation>") {
+            let (t, a, b) = rel.take().unwrap();
+            out.push((t, ways[&a].clone(), ways[&b].clone()));
+        }
+    }
+    out
+}
+
+/// The Hausdorff distance in metres of two lon/lat lines (each point to the other line, both ways).
+fn hausdorff_m(a: &[(f64, f64)], b: &[(f64, f64)]) -> f64 {
+    let k = a[0].1.to_radians().cos() * 111320.0;
+    let m = |p: (f64, f64)| (p.0 * k, p.1 * 111320.0);
+    let seg = |p: (f64, f64), s: (f64, f64), e: (f64, f64)| {
+        let (p, s, e) = (m(p), m(s), m(e));
+        let (dx, dy) = (e.0 - s.0, e.1 - s.1);
+        let l2 = dx * dx + dy * dy;
+        let t = if l2 == 0.0 { 0.0 } else { (((p.0 - s.0) * dx + (p.1 - s.1) * dy) / l2).clamp(0.0, 1.0) };
+        (p.0 - s.0 - t * dx).hypot(p.1 - s.1 - t * dy)
+    };
+    let one = |x: &[(f64, f64)], y: &[(f64, f64)]| {
+        x.iter().map(|p| y.windows(2).map(|w| seg(*p, w[0], w[1])).fold(f64::INFINITY, f64::min)).fold(0.0, f64::max)
+    };
+    one(a, b).max(one(b, a))
+}
+
+/// Lanelet2: the same lanelets and tags as Python, and each boundary within 1 mm of Python's (Hausdorff). The offset curve
+/// is the pure Rust port of GEOS (`src/offset.rs`, `src/geos.rs`); on Monaco and Tartu the file has the same bytes.
+#[test]
+fn lanelet2_equals_python() {
+    let o = out("monaco.lanelet2.osm");
+    duckosm_export::lanelet2::to_lanelet2(gmns(), &o, "driving", 0.01).unwrap();
+    let (got, want) = (lanelets(&text(&o)), lanelets(&text(&data().join("exports/monaco.lanelet2.osm.gz"))));
+    assert_eq!(got.len(), want.len());
+    let mut bad = Vec::new();
+    for (g, w) in got.iter().zip(&want) {
+        assert_eq!(g.0, w.0);
+        for (side, x, y) in [("left", &g.1, &w.1), ("right", &g.2, &w.2)] {
+            let h = hausdorff_m(x, y);
+            if h > 1e-3 {
+                bad.push(format!("{} {side}: {h:.4} m", g.0.iter().find(|t| t.starts_with("duckosm:edge_id")).unwrap()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} boundaries differ from Python:\n{}", bad.len(), bad.join("\n"));
+}
