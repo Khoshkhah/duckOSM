@@ -22,6 +22,24 @@ fn open_rw(db: &Path) -> Result<Connection, String> {
     Ok(con)
 }
 
+/// The schemas of duckOSM (Python `utils.RESERVED_DB_NAMES`): DuckDB names a database after its file, so a file
+/// `mm.duckdb` makes each `mm.edges` ambiguous.
+const RESERVED_DB_NAMES: [&str; 7] = ["driving", "walking", "cycling", "mm", "raw", "features", "main"];
+
+/// An error when `db` has the name of a duckOSM schema.
+pub fn check_db_name(db: &Path) -> Result<(), String> {
+    let stem = db.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if RESERVED_DB_NAMES.contains(&stem.as_str()) {
+        let (name, stem) = (db.file_name().unwrap_or_default().to_string_lossy(), db.file_stem().unwrap_or_default().to_string_lossy());
+        return Err(format!(
+            "a database can't be called {name}: DuckDB names a database after its file, and '{stem}' is also one of duckOSM's \
+             schemas ({}). Rename it, e.g. {stem}_network.duckdb",
+            RESERVED_DB_NAMES.join(", ")
+        ));
+    }
+    Ok(())
+}
+
 fn has_table(con: &Connection, schema: &str, table: &str) -> Result<bool, String> {
     let n: i64 = con
         .query_row(
@@ -98,6 +116,7 @@ pub struct BusCounts {
 /// `bus.routes` and `bus.route_edges` of `db` from its `raw.relations`, `raw.ways` and driving network, in place of the
 /// tables that are there (docs/concepts/networks.md#bus-routes).
 pub fn bus_routes(db: &Path) -> Result<BusCounts, String> {
+    check_db_name(db)?;
     {
         let con = Connection::open(db).map_err(err)?;
         for (s, t) in [("raw", "relations"), ("raw", "ways"), ("driving", "edges"), ("driving", "private_edges")] {
@@ -147,6 +166,7 @@ pub fn multimodal(db: &Path, transfer_s: f64, per_pair: &[(String, f64)], schema
     if !schema.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') || schema.is_empty() {
         return Err(format!("not a schema name: {schema}"));
     }
+    check_db_name(db)?;
     let con = open_rw(db)?;
     let mut st = con
         .prepare("SELECT DISTINCT schema_name FROM duckdb_tables() WHERE table_name = 'edges' ORDER BY schema_name")
