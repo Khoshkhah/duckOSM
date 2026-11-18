@@ -960,6 +960,8 @@ fn main() {
         Some(c) if duckosm_tools::cli::COMMANDS.contains(&c) => duckosm_tools::cli::run(&args[1..]),
         #[cfg(feature = "duckdb")]
         Some(c) if duckosm_route::cli::COMMANDS.contains(&c) => duckosm_route::cli::run(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some(c) if duckosm_edit::cli::COMMANDS.contains(&c) => duckosm_edit::cli::run(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {
@@ -999,6 +1001,15 @@ fn run() -> Result<(), String> {
         let text = std::fs::read_to_string(cfg).map_err(|e| format!("{}: {e}", cfg.display()))?;
         let dir = std::env::current_dir().map_err(|e| e.to_string())?;
         duckosm_edit::native::record(&out.join(format!("{}.duckdb", p.name)), &text, &dir)?;
+    }
+    // viz.enabled: the maps once the database is closed; a failure is a warning, as in duckOSM
+    #[cfg(feature = "duckdb")]
+    if let (Some(basemap), true) = (&p.viz, p.duckdb) {
+        let db = out.join(format!("{}.duckdb", p.name));
+        let v = duckosm_edit::maps::Viz { name: Some(p.name.clone()), basemap: basemap.clone(), ..duckosm_edit::maps::Viz::new("reports") };
+        if let Err(e) = duckosm_edit::maps::render_maps(&mut duckosm_edit::native::NativeDb::new(&db), &db, &v) {
+            eprintln!("warning: viz: {e}");
+        }
     }
     for l in sum.lines() {
         eprintln!("{l}");

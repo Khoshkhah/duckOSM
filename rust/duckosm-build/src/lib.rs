@@ -126,6 +126,9 @@ pub struct Params {
     /// `source.type: duckdb` (clip.rs): the input file is a parent database, and the build copies the rows of its tables in
     /// the boundary `area_boundary`, with this `clip.predicate` (`intersects`, `within` or `centroid`).
     pub clip: Option<String>,
+    /// `viz.enabled`: the program draws the maps of the database after the build (duckosm-edit's maps.rs, into `reports/`), with this
+    /// first background (`viz.basemap`; None: the database's own layers).
+    pub viz: Option<Option<String>>,
 }
 
 impl Default for Params {
@@ -165,6 +168,7 @@ impl Default for Params {
             sea: false,
             after: after::After::default(),
             clip: None,
+            viz: None,
         }
     }
 }

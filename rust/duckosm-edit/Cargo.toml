@@ -19,5 +19,6 @@ roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ced
 roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa", default-features = false }
 roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa" }   # the request and the answer of way D (Api)
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }   # the progress hook of the build (set_progress)
+clap = { version = "4", features = ["derive"] }
 ureq = "3"                     # duckosm studio: the download of a Geofabrik extract and of its index
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }

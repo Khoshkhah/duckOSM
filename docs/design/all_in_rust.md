@@ -82,6 +82,23 @@ Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata
 - DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. The command drops the R-tree
   index of `edges` for the update of `z_vertices` and makes it again (64 s to 10 s for the cycling edges of Tartu).
 
+## Group F: the state
+
+The maps use roadstyle's Rust engine: its reader of a duckOSM file (`roadstyle_io::duckosm`, the port of mapstyle's `render_map`)
+and its page writer (`page_options::page_from`). The code is in `rust/duckosm-edit` next to the page of `duckosm edit`, which uses
+the same engine.
+
+| Part | State |
+|---|---|
+| `viz` and the build's `viz.enabled` | Done: `duckosm-rust viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
+| `route-map` and the planner page (the router in WebAssembly) | Not started. |
+| `levels-edit` | Not started. |
+
+- The pages are roadstyle's `duckosm.page(db, mode, only=...)`: the "liberty" theme and the "google" paths of roadstyle's port.
+  mapstyle's own `render_map` (the "osm" theme) does not run with the current roadstyle (`palette_to_dict` is gone), so
+  `duckosm viz` in Python fails today.
+- A file with no stored levels: the engine solves them while it draws (mapstyle's rule).
+
 ## Group C: the state
 
 The GMNS export is ported step by step into `rust/duckosm-export/src/gmns.rs`, in the order of `to_gmns`, with the same SQL.
