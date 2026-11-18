@@ -28,6 +28,7 @@ SimReady, roadstyle and urbanstyle read the terrain from there. The rules: [The 
 |---|---|
 | SimReady | the road heights for the graded road profile, and the grid for the conformed ground in the GLB |
 | roadstyle | the grid for one terrain file (PMTiles) for each area: 3D terrain, hillshade, bridge decks |
+| `duckosm edit`, `ask`, `viz`, `studio` | the same terrain file in the map. With no grid, the map uses the AWS Terrain Tiles, its attribution says "Ground: AWS Terrain Tiles", and the command says it on the terminal |
 | urbanstyle | not yet: it uses the AWS Terrain Tiles |
 
 ## Choose the DEM
