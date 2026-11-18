@@ -744,6 +744,11 @@ pub trait NetworkSource {
     fn ways(&self) -> Result<Vec<duckosm_core::model::Way>, String>;
     fn coords(&self, ways: &[duckosm_core::model::Way]) -> Result<Coords, String>;
     fn restrictions(&self) -> Result<Vec<duckosm_core::graph::Relation>, String>;
+    /// The part of `raw.*` for the bus routes and the fixes (`ids`: the nodes, ways and relations that the fixes touch;
+    /// `routes`: the values of `route`). None: this source has no relations (no bus routes).
+    fn raw_part(&self, _ids: &[Vec<i64>; 3], _routes: &[&str]) -> Result<Option<Raw>, String> {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "duckdb")]
@@ -756,6 +761,9 @@ impl NetworkSource for duckosm_duckdb::RawInput {
     }
     fn restrictions(&self) -> Result<Vec<duckosm_core::graph::Relation>, String> {
         duckosm_duckdb::RawInput::restrictions(self)
+    }
+    fn raw_part(&self, ids: &[Vec<i64>; 3], routes: &[&str]) -> Result<Option<Raw>, String> {
+        duckosm_duckdb::RawInput::raw_part(self, ids, routes).map(Some)
     }
 }
 
@@ -1159,7 +1167,8 @@ pub fn run<W: Write + Send>(
     let driving = p.modes.contains(&Mode::Driving);
     let need_relations = opts.extract_restrictions && driving;
     // the bus routes need the route relations and the member ways of the raw cut (docs/bus.md)
-    let bus = p.bus_routes && driving && matches!(input, Input::Area(..)); // OSM JSON has no route relations
+    // OSM JSON has no route relations; a whole-file build reads them from raw.* in the .duckdb file (Input::Source)
+    let bus = p.bus_routes && driving && matches!(input, Input::Area(..) | Input::Source(..));
     let cut_file = p.cut_pbf || p.cut_osm;
     // the base-map layers run on raw.*, so they need it, but write it to a file only with p.raw (see `build`)
     let want_raw = p.raw || p.features;
@@ -1190,14 +1199,24 @@ pub fn run<W: Write + Send>(
             fixes,
             log,
         )?,
-        Input::Source(s) => read_pbf(
-            || s.ways(),
-            |w| s.coords(w),
-            || s.restrictions(),
-            need_relations,
-            fixes,
-            log,
-        )?,
+        Input::Source(s) => {
+            if bus {
+                // the route relations and their member ways, and the elements that the fixes touch, with the fixes (as an
+                // area file gives them, `read_raw_part`)
+                let touched = fix_ids(fixes);
+                let sorted = |i: usize| {
+                    let mut v: Vec<i64> = touched[i].iter().copied().collect();
+                    v.sort_unstable();
+                    v
+                };
+                if let Some(mut part) = s.raw_part(&[sorted(0), sorted(1), sorted(2)], &duckosm_core::bus::ROUTES)? {
+                    part.apply_fixes(fixes);
+                    raw = Some(part);
+                    log.step("read the raw part");
+                }
+            }
+            read_pbf(|| s.ways(), |w| s.coords(w), || s.restrictions(), need_relations, fixes, log)?
+        }
         Input::Pbf(bytes) => read_pbf(
             || pbf::read_ways_bytes(bytes),
             |w| pbf::read_coords_bytes(bytes, w),
@@ -2017,8 +2036,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         }
         None => None,
     };
-    if p.bus_routes && p.modes.contains(&Mode::Driving) && cut.is_none() {
-        eprintln!("no bus tables: the build has no area outline (--boundary)");
+    // a whole-file build with the .duckdb output reads the route relations from raw.* (Input::Source)
+    if p.bus_routes && p.modes.contains(&Mode::Driving) && cut.is_none() && !p.duckdb {
+        eprintln!("no bus tables: the build has no area outline (--boundary) and no .duckdb output");
     }
     let area_boundary = match p.area_boundary.as_ref().or(p.boundary.as_ref()) {
         Some(path) => Some(read(path)?),

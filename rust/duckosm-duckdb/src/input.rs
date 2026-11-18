@@ -158,8 +158,64 @@ impl RawInput {
 
     /// The `type=restriction` relations, sorted by id, as `pbf::read_restrictions`.
     pub fn restrictions(&self) -> Result<Vec<Relation>, String> {
-        let sql = "SELECT osm_id, map_keys(tags), map_values(tags), refs, CAST(ref_types AS VARCHAR[]), ref_roles
-                   FROM raw.relations WHERE tags['type'] = 'restriction' ORDER BY osm_id";
+        self.relations("tags['type'] = 'restriction'")
+    }
+
+    /// The part of `raw.*` that the build keeps in memory (the `read_raw_part` of an area file): the nodes (`ids[0]`), ways
+    /// (`ids[1]`) and relations (`ids[2]`) that the fixes touch, and with `bus` the route relations of the bus routes
+    /// (`routes`, the values of `route`) and their member ways. All tags; each list sorted by id.
+    pub fn raw_part(&self, ids: &[Vec<i64>; 3], routes: &[&str]) -> Result<duckosm_core::raw::Raw, String> {
+        use duckosm_core::raw::{Raw, RawNode, RawWay};
+        let list = |v: &[i64]| v.iter().map(i64::to_string).chain(["NULL".to_string()]).collect::<Vec<_>>().join(",");
+        let route = routes.iter().map(|r| format!("'{}'", r.replace('\'', "''"))).chain(["NULL".to_string()]).collect::<Vec<_>>().join(",");
+        let rel_where = format!("osm_id IN ({}) OR tags['route'] IN ({route})", list(&ids[2]));
+        let relations = self.relations(&rel_where)?;
+        let sql = format!(
+            "SELECT osm_id, map_keys(tags), map_values(tags), refs FROM raw.ways WHERE osm_id IN ({})
+               OR osm_id IN (SELECT r.ref FROM (SELECT unnest(refs) AS ref, unnest(CAST(ref_types AS VARCHAR[])) AS t
+                                                FROM raw.relations WHERE tags['route'] IN ({route})) r WHERE r.t = 'way')
+             ORDER BY osm_id",
+            list(&ids[1])
+        );
+        let mut ways = Vec::new();
+        self.with(|con| batches(con, &sql, |b| {
+            let id = col(b, 0, &DataType::Int64)?;
+            let (k, v, refs) = (col(b, 1, &text_list())?, col(b, 2, &text_list())?, col(b, 3, &id_list())?);
+            let refs = refs.as_list::<i32>();
+            for row in 0..b.num_rows() {
+                let tags = with_pairs(&k, &v, row, |t| t.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect());
+                let r = refs.value(row);
+                ways.push(RawWay { id: id.as_primitive::<Int64Type>().value(row), tags, refs: r.as_primitive::<Int64Type>().values().to_vec() });
+            }
+            Ok(())
+        }))?;
+        let sql = format!("SELECT osm_id, lat, lon, map_keys(tags), map_values(tags) FROM raw.nodes WHERE osm_id IN ({}) ORDER BY osm_id", list(&ids[0]));
+        let mut nodes = Vec::new();
+        self.with(|con| batches(con, &sql, |b| {
+            let id = col(b, 0, &DataType::Int64)?;
+            let (lat, lon) = (col(b, 1, &DataType::Float64)?, col(b, 2, &DataType::Float64)?);
+            let (k, v) = (col(b, 3, &text_list())?, col(b, 4, &text_list())?);
+            for row in 0..b.num_rows() {
+                let tags = with_pairs(&k, &v, row, |t| t.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect());
+                nodes.push(RawNode {
+                    id: id.as_primitive::<Int64Type>().value(row),
+                    lat: lat.as_primitive::<Float64Type>().value(row),
+                    lon: lon.as_primitive::<Float64Type>().value(row),
+                    tags,
+                });
+            }
+            Ok(())
+        }))?;
+        Ok(Raw { nodes, ways, relations, timestamp: None })
+    }
+
+    /// The relations of `raw.relations` that `filter` (a SQL condition) keeps, sorted by id.
+    fn relations(&self, filter: &str) -> Result<Vec<Relation>, String> {
+        let sql = format!(
+            "SELECT osm_id, map_keys(tags), map_values(tags), refs, CAST(ref_types AS VARCHAR[]), ref_roles
+                   FROM raw.relations WHERE {filter} ORDER BY osm_id"
+        );
+        let sql = sql.as_str();
         let mut rels = Vec::new();
         self.with(|con| batches(con, sql, |b| {
             let id = col(b, 0, &DataType::Int64)?;
