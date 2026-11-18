@@ -439,7 +439,7 @@ self-touching ring with GEOS in `organizePolygons` (Monaco has none).
 
 Status: done, 2026-11-18. `duckosm quack --geofabrik` writes the 20 layers of Geofabrik's free files
 (`<area>-latest-free.shp.zip` and `-free.gpkg.zip`) from any `.osm.pbf` file. The user page is
-[duckOSM and Geofabrik](../concepts/geofabrik.md).
+[duckOSM and Geofabrik](../exports/geofabrik.md).
 
 ```bash
 duckosm quack monaco.osm.pbf --geofabrik -o out --name monaco                         # out/monaco_geofabrik.gpkg

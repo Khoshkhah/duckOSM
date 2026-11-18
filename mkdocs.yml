@@ -108,6 +108,7 @@ plugins:
           - concepts/osmnx.md
           - concepts/quackosm.md
           - concepts/gdal.md
+          - exports/geofabrik.md
         Reference:
           - reference/cli.md
           - reference/configuration.md
@@ -148,7 +149,7 @@ nav:
       - 1. OSM data:
           - QuackOSM table: concepts/quackosm.md
           - GDAL's OSM layers: concepts/gdal.md
-          # - Geofabrik layers: exports/geofabrik.md (added by its session)
+          - Geofabrik layers: exports/geofabrik.md
           # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
           # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
       - 2. The network:
