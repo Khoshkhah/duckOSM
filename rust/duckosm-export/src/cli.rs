@@ -160,7 +160,7 @@ enum Cmd {
         /// No per-lane offset geometry.
         #[arg(long)]
         no_lane_geometry: bool,
-        /// Also build a mesoscopic (lane-level) network (not ported yet).
+        /// Also build a mesoscopic (lane-level) network: meso_<mode> schemas.
         #[arg(long)]
         meso: bool,
         /// Modes to build meso for (default: driving).
@@ -181,7 +181,7 @@ enum Cmd {
         /// Gap in metres between the kerb and a footpath placed by --walk-frame.
         #[arg(long, default_value_t = 0.0)]
         walk_clearance: f64,
-        /// Also build a microscopic (cell-based) network (not ported yet).
+        /// Also build a microscopic (cell-based) network: micro_<mode> schemas.
         #[arg(long)]
         micro: bool,
         /// Modes to build micro for (default: driving).
@@ -349,21 +349,21 @@ pub fn run(args: &[String]) -> Result<()> {
             to_csv,
             no_lane_geometry,
             meso,
-            meso_modes: _,
+            meso_modes,
             combined,
             drive_side,
             no_pair_carriageways,
             walk_frame,
             walk_clearance: _,
             micro,
-            micro_modes: _,
+            micro_modes,
             gtfs,
             gtfs_max_m: _,
             csv_extensions,
             check,
         } => {
             check_db(&db)?;
-            for (on, name) in [(meso, "--meso"), (micro, "--micro"), (walk_frame, "--walk-frame"), (!gtfs.is_empty(), "--gtfs")] {
+            for (on, name) in [(walk_frame, "--walk-frame"), (!gtfs.is_empty(), "--gtfs")] {
                 if on {
                     return Err(format!("{name} is not ported to Rust yet (docs/design/all_in_rust.md, group C): use `duckosm gmns`"));
                 }
@@ -394,6 +394,16 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             if let Some((nodes, links)) = res.combined {
                 println!("  combined: gmns_all — {links} links, {nodes} nodes (mode-tagged)");
+            }
+            if meso {
+                for (mode, nodes, normal, movement) in crate::gmns_meso::to_meso(&out, &meso_modes, 6.0)? {
+                    println!("  meso[{mode}]: {} meso links ({normal} section + {movement} connector), {nodes} nodes", normal + movement);
+                }
+            }
+            if micro {
+                for (mode, nodes, cell, change, turn) in crate::gmns_meso::to_micro(&out, &micro_modes, 7.0)? {
+                    println!("  micro[{mode}]: {} micro links ({cell} cell + {change} lane-change + {turn} turn), {nodes} nodes", cell + change + turn);
+                }
             }
             if let Some(d) = &to_csv {
                 println!("  + GMNS CSVs -> {}", d.display());
