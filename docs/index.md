@@ -15,7 +15,7 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 [Try it in your browser](https://khoshkhah.github.io/duckosm-studio/){ .md-button .md-button--primary }
 [Install](install.md){ .md-button }
 [Get started](first_network.md){ .md-button }
-[GitHub](https://github.com/Khoshkhah/duckOSM){ .md-button }
+[Compare](compare/index.md){ .md-button }
 
 </div>
 
