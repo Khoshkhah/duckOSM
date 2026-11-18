@@ -20,6 +20,10 @@ PYTHON_COMMANDS = {
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in PYTHON_COMMANDS:
+        # a console that cannot show a character (Windows: cp1252 has no "✓") shows "?" in its place, not an error
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(errors="replace")
         from duckosm.cli import main as python_main
         return python_main()
     from duckosm import _rust
