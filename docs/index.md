@@ -16,7 +16,7 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 
 <figure markdown="span">
   ![duckOSM Studio: the Build card in the panel, and the road network of Monaco on the map](images/tour-studio.png)
-  <figcaption>duckOSM Studio in the browser: Monaco built with three modes in 2.2 s. Choose an area, build, edit and export.</figcaption>
+  <figcaption>duckOSM Studio in the browser: choose an area, build its network, edit the OSM data and export.</figcaption>
 </figure>
 
 ## Highlights
