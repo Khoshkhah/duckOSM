@@ -92,17 +92,13 @@ France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB).
 
 ## One edge id for each direction
 
-Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. Many also keep a two-way street as one
-edge. duckOSM's `edge_id` is a hash of three OSM ids: the way (`osm_id`) and the nodes where the edge starts and ends
-(`source`, `target`). The order of `source` and `target` is the direction.
-
 ```text
 edge_id = hash(osm_id, source, target)
 ```
 
-So **each direction of a road has its own `edge_id`**: a two-way street is two edges, and data per direction (traffic
-counts, speeds, sensors) joins to the right edge. The same OSM data gives the same ids after a rebuild, in a city cut from
-a country, and in every export ([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
+to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
+a cut and every export ([how](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
 
 ## Quick start
 
