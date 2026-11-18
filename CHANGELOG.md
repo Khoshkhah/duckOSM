@@ -288,6 +288,12 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   at the road's width. Without it, the editor's own line layers stay. `duckosm edit` gives the hook. The roadstyle pin of
   `duckosm-edit` moves to `e1b0617a` (roadstyle #58, #59, #60).
 
+- **`duckosm-rust quack --gdal`** (`docs/rust/quack.md`, "GDAL layers"): the five layers of GDAL's OSM driver (`points`,
+  `lines`, `multilinestrings`, `multipolygons`, `other_relations`, GDAL's default `osmconf.ini`), made by the quack engine in one
+  pass, as a GeoPackage (default) or one GeoParquet file for each layer (`-f geoparquet`), also by tiles (`--tile-zoom`). On
+  Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
+  on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
+
 ## 0.7.0 (2026-11-06)
 
 The Rust engine is the default and is in the wheel (wheels for 5 systems). `duckosm edit` opens the fixes editor on a page on your computer. The fixes editor shows a box for an object that is already in your changes.

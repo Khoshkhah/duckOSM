@@ -9,6 +9,8 @@ pub mod cutstream;
 pub mod filter;
 pub mod fs;
 pub mod fixes;
+#[cfg(feature = "pbf")]
+pub mod gdal;
 pub mod geom;
 pub mod graph;
 pub mod hash;

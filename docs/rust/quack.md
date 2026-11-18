@@ -352,6 +352,72 @@ are not in favor of duckOSM are on the page of the manual, `docs/concepts/quacko
 on the Mac mini: `/usr/bin/time -l` for the time, the CPU time and the macOS footprint, a sampler of the RSS of the
 process tree and of the free disk every 2 s for the large runs, and `stat` for the file sizes.
 
+## GDAL layers (`--gdal`)
+
+Status: done, 2026-11-17. `duckosm-rust quack --gdal` writes the five layers of GDAL's OSM driver, as `ogr2ogr` and QGIS
+give them for an `.osm.pbf` file with GDAL's default `osmconf.ini` (GDAL 3.13): `points`, `lines`, `multilinestrings`,
+`multipolygons` and `other_relations`.
+
+```bash
+duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky                  # out/kentucky_gdal.gpkg
+duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet    # out/kentucky_gdal_<layer>.parquet
+duckosm-rust quack france.osm.pbf --gdal -o out --name france --tile-zoom 8         # tile by tile
+```
+
+The engine is the engine of quack. It has three parts: read, decide and write. `--gdal` changes only "decide" and
+"write":
+
+- **Read** (unchanged): the four passes of "How duckOSM makes it". With `--gdal`, pass 1 also keeps each relation (not
+  only the multipolygons) with its member nodes, and pass 2 also gives the points of the member nodes.
+- **Decide** (`duckosm-core/src/gdal.rs`, the rules of GDAL's `ogrosmdatasource.cpp` and `ogrosmlayer.cpp`):
+  - `points`: a node with a tag that is not `created_by`, `converted_by`, `source`, `time`, `ele` or `attribution`.
+  - `lines`: a way with a tag that is not an area. The line has the nodes that the file has (2 or more).
+  - An area: a closed way (its first node is its last node) with `area=yes`, or with a key or a key and value of
+    `closed_ways_are_polygons`, and not `area=no`. Its polygon is a row of `multipolygons` with `osm_way_id`, except when
+    it is an outer member of a complete multipolygon or boundary. These polygons wait in a temporary file until the
+    relations are done.
+  - A relation of the type `multipolygon` or `boundary` with all its member ways (not the role `subarea`): the closed
+    member ways are rings, the other member ways are joined into rings (`OGRBuildPolygonFromEdges`), and the holes go into
+    their polygons (`organizePolygons`, the fast test of one point). A relation with no tag other than `type` and
+    `created_by` takes the tags of its first outer member area.
+  - `multilinestrings`: a relation of the type `multilinestring` or `route`, its member ways.
+    `other_relations`: each other relation, its member nodes as points and its member ways as lines (an area as a
+    polygon).
+  - The columns: each tag that is a column of the layer goes into the column. The other tags go into `other_tags`
+    (`"key"=>"value"`, with `\` before `"` and `\`), except the tags that the layer ignores. `lines` has the `z_order` of
+    `osmconf.ini`.
+- **Write** (`duckosm-build/src/quack_gdal.rs`, on a thread of its own, so the engine does not wait): a GeoPackage with the
+  tables of GDAL's GeoPackage driver (a table, an R-tree index and its triggers for each layer, `gpkg_ogr_contents`), or one
+  GeoParquet file for each layer. The rows are encoded on all threads. The R-tree is written in one go at the end (the
+  boxes in the order of a Hilbert curve, full nodes, straight into SQLite's shadow tables), as GDAL does: an insert into
+  the R-tree for each row took 10 s for each million rows.
+
+By tiles, the cut completes only the multipolygons and boundaries in each tile (as for quack). A relation of
+`multilinestrings` or `other_relations` can have its members in many tiles: each tile gives the members that it owns
+(`Feature::part`), and `gdal::Parts` joins the members of each relation, in their order, into one row.
+
+The check: `duckosm-build/tests/quack_gdal_monaco.rs` compares the output with `tests/data/monaco_gdal.jsonl.gz`, the
+rows of `ogr2ogr -f GPKG out.gpkg tests/data/monaco.osm.pbf` (GDAL 3.13.3), made before the code: the same rows in each
+layer, the same ids and column values, the same geometries (in 1e-7 degrees). The whole file and the file by tiles of
+zoom 12 are equal. The GeoPackage passes GDAL's `validate_gpkg.py`. Kentucky (2 240 511 rows) is equal to `ogr2ogr` on
+Linux x86-64; against GDAL 3.13.3 of Homebrew on the Mac mini (arm64), one multipolygon (relation 13011728) is different:
+a ring that touches another ring at a vertex is a hole there and a polygon here. GDAL's test of a point on a ring
+(`dx1 * dy2 - dx2 * dy1 == 0`) gives another result on that build; the x86-64 build agrees with duckOSM.
+
+The memory (Kentucky, Mac mini, peak footprint): 1.1 GB at first, 0.25 GB now (`ogr2ogr`: 0.44 GB). Three causes:
+
+- The rows that wait for the writer: a channel of 8 batches of up to 50 000 rows held 200 MB. Now one batch waits; the
+  engine waits for the writer.
+- The buffers of the temporary files of `spill::Buckets`: about 100 files of requests on Kentucky, with 1 MB each. Now
+  256 KB each.
+- macOS keeps the memory that a program frees: the heap was at most 0.37 GB, the footprint 0.89 GB. The memory of macOS
+  is space-efficient when `MallocSpaceEfficient` is set at the start of the program, so `duckosm-rust quack --gdal` starts
+  again with it on macOS (0.25 GB; the time goes from 3.9 s to 4.3 s). Linux returns the memory with the `mallopt` of
+  `main`.
+
+Not done: GDAL's own `osmconf.ini` (only the default one), the open options of the driver, and GDAL's repair of a
+self-touching ring with GEOS in `organizePolygons` (Monaco has none).
+
 ## What QuackOSM has and duckOSM does not have
 
 The filters: tags (`tags_filter`), OSM ids, custom SQL, and a geometry (`geometry_filter`, features that touch it). The
