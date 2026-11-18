@@ -386,8 +386,11 @@ The engine is the engine of quack. It has three parts: read, decide and write. `
   - The columns: each tag that is a column of the layer goes into the column. The other tags go into `other_tags`
     (`"key"=>"value"`, with `\` before `"` and `\`), except the tags that the layer ignores. `lines` has the `z_order` of
     `osmconf.ini`.
-- **Write** (`duckosm-build/src/quack_gdal.rs`): a GeoPackage with the tables of GDAL's GeoPackage driver (a table, an
-  R-tree index and its triggers for each layer, `gpkg_ogr_contents`), or one GeoParquet file for each layer.
+- **Write** (`duckosm-build/src/quack_gdal.rs`, on a thread of its own, so the engine does not wait): a GeoPackage with the
+  tables of GDAL's GeoPackage driver (a table, an R-tree index and its triggers for each layer, `gpkg_ogr_contents`), or one
+  GeoParquet file for each layer. The rows are encoded on all threads. The R-tree is written in one go at the end (the
+  boxes in the order of a Hilbert curve, full nodes, straight into SQLite's shadow tables), as GDAL does: an insert into
+  the R-tree for each row took 10 s for each million rows.
 
 By tiles, the cut completes only the multipolygons and boundaries in each tile (as for quack). A relation of
 `multilinestrings` or `other_relations` can have its members in many tiles: each tile gives the members that it owns
@@ -396,7 +399,10 @@ By tiles, the cut completes only the multipolygons and boundaries in each tile (
 The check: `duckosm-build/tests/quack_gdal_monaco.rs` compares the output with `tests/data/monaco_gdal.jsonl.gz`, the
 rows of `ogr2ogr -f GPKG out.gpkg tests/data/monaco.osm.pbf` (GDAL 3.13.3), made before the code: the same rows in each
 layer, the same ids and column values, the same geometries (in 1e-7 degrees). The whole file and the file by tiles of
-zoom 12 are equal. The GeoPackage passes GDAL's `validate_gpkg.py`.
+zoom 12 are equal. The GeoPackage passes GDAL's `validate_gpkg.py`. Kentucky (2 240 511 rows) is equal to `ogr2ogr` on
+Linux x86-64; against GDAL 3.13.3 of Homebrew on the Mac mini (arm64), one multipolygon (relation 13011728) is different:
+a ring that touches another ring at a vertex is a hole there and a polygon here. GDAL's test of a point on a ring
+(`dx1 * dy2 - dx2 * dy1 == 0`) gives another result on that build; the x86-64 build agrees with duckOSM.
 
 Not done: GDAL's own `osmconf.ini` (only the default one), the open options of the driver, and GDAL's repair of a
 self-touching ring with GEOS in `organizePolygons` (Monaco has none).

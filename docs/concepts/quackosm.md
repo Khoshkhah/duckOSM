@@ -70,7 +70,9 @@ duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky    # out/kentu
 ```
 
 The rows are the same as the rows of `ogr2ogr -f GPKG out.gpkg kentucky.osm.pbf` (GDAL 3.13.3): the same ids, column
-values and geometries in each layer. A test checks this on Monaco.
+values and geometries in each layer. A test checks this on Monaco. On Kentucky, all 2 240 511 rows are equal to the output
+of GDAL on Linux (x86-64). GDAL on the Mac mini (arm64) gives one other polygon: two rings of relation 13011728 touch at a
+point, and GDAL's arm64 build puts one ring outside, not in a hole (a rounding difference of that build).
 
 Kentucky (141 MB), Mac mini:
 
