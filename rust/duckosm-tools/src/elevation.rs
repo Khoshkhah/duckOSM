@@ -298,6 +298,20 @@ fn make_sampler(con: &Connection, o: &Options, provider: Option<&Provider>, node
     Ok((Sampler::Tiles { bbox: window, got: (0, 0) }, meta(None)))
 }
 
+/// A size of DuckDB's settings (`12.7 GiB`, `500.0 MiB`) in MiB.
+fn size_mib(text: &str) -> Option<u64> {
+    let (n, unit) = text.trim().split_once(' ')?;
+    let n: f64 = n.parse().ok()?;
+    let f = match unit {
+        "KiB" | "KB" => 1.0 / 1024.0,
+        "MiB" | "MB" => 1.0,
+        "GiB" | "GB" => 1024.0,
+        "TiB" | "TB" => 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((n * f) as u64)
+}
+
 /// Add the heights to the database `db` in place (duckOSM `to_elevation`).
 pub fn to_elevation(db: &Path, o: &Options) -> Result<Stats> {
     if let Some(p) = o.product.as_deref().filter(|p| !matches!(*p, "DTM" | "DSM")) {
@@ -320,6 +334,12 @@ pub fn to_elevation(db: &Path, o: &Options) -> Result<Stats> {
 
     let con = Connection::open(db).map_err(|e| format!("{}: {e}", db.display()))?;
     con.execute_batch("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;").map_err(|e| format!("the spatial extension of DuckDB: {e}"))?;
+    // the command keeps the points of a mode in its own memory (France driving: about 4 GB), so DuckDB gets half of its default
+    // limit (80 % of the memory); it writes the rest to its temp folder
+    let limit: String = con.query_row("SELECT current_setting('memory_limit')", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if let Some(mib) = size_mib(&limit) {
+        con.execute_batch(&format!("SET memory_limit = '{}MiB'", mib / 2)).map_err(|e| e.to_string())?;
+    }
     let chosen = mode_schemas(&con, &o.modes)?;
     let mut geo = HashMap::new();
     for m in &chosen {
@@ -367,18 +387,21 @@ pub fn to_elevation(db: &Path, o: &Options) -> Result<Stats> {
         }
         let n_nodes = ids.len();
         let g = &geo[m];
-        let mut edges: Vec<(i64, usize)> = Vec::new(); // the edge and the index of its first vertex
+        // every row of the edges, in the order of the table: its source, its target and the index of its first vertex (None:
+        // no geometry)
+        let mut edges: Vec<(Option<i64>, Option<i64>, Option<usize>)> = Vec::new();
         {
-            let mut st = con.prepare(&format!("SELECT edge_id, ST_AsText({g}) FROM {m}.edges WHERE {g} IS NOT NULL")).map_err(err)?;
+            let mut st = con.prepare(&format!("SELECT edge_id, source, target, ST_AsText({g}) FROM {m}.edges")).map_err(err)?;
             let mut rows = st.query([]).map_err(err)?;
             while let Some(r) = rows.next().map_err(err)? {
-                let (id, wkt): (i64, String) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
-                edges.push((id, xs.len()));
+                let (id, wkt): (Option<i64>, Option<String>) = (r.get(0).map_err(err)?, r.get(3).map_err(err)?);
+                edges.push((r.get(1).map_err(err)?, r.get(2).map_err(err)?, wkt.as_ref().map(|_| xs.len())));
+                let Some(wkt) = wkt else { continue };
                 let (a, b) = (wkt.find('(').map_or(0, |i| i + 1), wkt.rfind(')').unwrap_or(wkt.len()));
                 for pair in wkt[a..b].split(',') {
                     let mut xy = pair.split_whitespace().map(|v| v.parse::<f64>());
                     let (Some(Ok(x)), Some(Ok(y))) = (xy.next(), xy.next()) else {
-                        return Err(format!("{m}.edges {id}: a vertex that is not 'x y': {pair}"));
+                        return Err(format!("{m}.edges {id:?}: a vertex that is not 'x y': {pair}"));
                     };
                     xs.push(x);
                     ys.push(y);
@@ -404,24 +427,29 @@ pub fn to_elevation(db: &Path, o: &Options) -> Result<Stats> {
         // ADD IF NOT EXISTS: DuckDB stops a DROP or an ALTER of a column of a table with an index, but allows ADD
         con.execute_batch(&format!("UPDATE {m}.nodes n SET {ele} = (SELECT ele FROM _ele t WHERE t.node_id = n.node_id); DROP TABLE _ele;"))
             .map_err(err)?;
+        // the height of each node, for z_from and z_to: duckOSM reads them from nodes.ele (no value for a node with no geometry)
+        let mut node_ele: Vec<(i64, f64)> = ids.iter().enumerate().map(|(i, &id)| (id, cm(z[i]))).collect();
         drop(ids);
-        con.execute_batch("CREATE OR REPLACE TEMP TABLE _zv_flat(edge_id BIGINT, i INTEGER, z DOUBLE);").map_err(err)?;
+        node_ele.sort_unstable_by_key(|e| e.0);
+        let ele_of = |n: Option<i64>| n.and_then(|n| node_ele.binary_search_by_key(&n, |e| e.0).ok()).map(|i| node_ele[i].1);
+        // the list as text (the appender of duckdb-rs takes no list value), cast to DOUBLE[] in write_edges: Rust writes the
+        // shortest text that reads back as the same double
+        con.execute_batch("CREATE OR REPLACE TEMP TABLE _zv(zf DOUBLE, zt DOUBLE, z VARCHAR);").map_err(err)?;
         {
-            let mut app = con.appender_to_catalog_and_db("_zv_flat", "temp", "main").map_err(err)?;
-            for (k, &(id, first)) in edges.iter().enumerate() {
-                let last = edges.get(k + 1).map_or(z.len(), |e| e.1);
-                for (i, &v) in z[first..last].iter().enumerate() {
-                    app.append_row(duckdb::params![id, i as i32, cm(v)]).map_err(err)?;
-                }
+            let mut app = con.appender_to_catalog_and_db("_zv", "temp", "main").map_err(err)?;
+            for (k, &(source, target, first)) in edges.iter().enumerate() {
+                let list = first.map(|first| {
+                    let last = edges[k + 1..].iter().find_map(|e| e.2).unwrap_or(z.len());
+                    format!("[{}]", z[first..last].iter().map(|&v| format!("{:?}", cm(v))).collect::<Vec<_>>().join(", "))
+                });
+                app.append_row(duckdb::params![ele_of(source), ele_of(target), list]).map_err(err)?;
             }
         }
-        drop(z);
-        con.execute_batch("CREATE OR REPLACE TEMP TABLE _zv AS SELECT edge_id, list(z ORDER BY i) AS z FROM _zv_flat GROUP BY edge_id; DROP TABLE _zv_flat;")
-            .map_err(err)?;
+        drop((z, node_ele));
         // z_vertices only when the mode has an edge with a geometry, as duckOSM
-        let mut new = vec![(zf.as_str(), format!("a.{ele}")), (zt.as_str(), format!("b.{ele}"))];
-        if !edges.is_empty() {
-            new.push((zv.as_str(), "t.z".to_string()));
+        let mut new = vec![(zf.as_str(), "t.zf".to_string()), (zt.as_str(), "t.zt".to_string())];
+        if edges.iter().any(|e| e.2.is_some()) {
+            new.push((zv.as_str(), "t.z::DOUBLE[]".to_string()));
         }
         drop(edges);
         write_edges(&con, m, &new)?;
@@ -439,10 +467,10 @@ pub fn to_elevation(db: &Path, o: &Options) -> Result<Stats> {
     Ok(stats)
 }
 
-/// Write `z_from`, `z_to` and `z_vertices` of the edges of mode `m` (`new`: each column and its value): the same values as the
-/// UPDATE of duckOSM (the height of the source and the target node, the list of `_zv`). DuckDB updates a list column as a delete
+/// Write `z_from`, `z_to` and `z_vertices` of the edges of mode `m` (`new`: each column and its value in `_zv`): the same values
+/// as the UPDATE of duckOSM (the height of the source and the target node, the heights at the vertices). DuckDB updates a list column as a delete
 /// and an insert, which took 64 s for the cycling edges of Tartu (France has 26 million edges), so the table is made again in
-/// the order of its rows, in 0.3 s: a column that is there keeps its place, a new column goes at the end, as ALTER TABLE ADD
+/// the order of its rows, in 0.3 s, with no sort: a column that is there keeps its place, a new column goes at the end, as ALTER TABLE ADD
 /// puts it. The indexes, the column defaults and the comments are made again from their own SQL, in the same transaction.
 fn write_edges(con: &Connection, m: &str, new: &[(&str, String)]) -> Result<()> {
     let err = |e: duckdb::Error| e.to_string();
@@ -461,11 +489,8 @@ fn write_edges(con: &Connection, m: &str, new: &[(&str, String)]) -> Result<()> 
     for (c, v) in new.iter().filter(|(c, _)| !have(c)) {
         select += &format!(", {v}::{} AS {}", if c.starts_with("z_vertices") { "DOUBLE[]" } else { "DOUBLE" }, q(c));
     }
-    let mut sql = format!(
-        "BEGIN; CREATE OR REPLACE TABLE {m}.edges AS SELECT {select} FROM {m}.edges e \
-         LEFT JOIN {m}.nodes a ON a.node_id = e.source LEFT JOIN {m}.nodes b ON b.node_id = e.target \
-         LEFT JOIN _zv t ON t.edge_id = e.edge_id ORDER BY e.rowid;"
-    );
+    // `_zv` has one row for each row of the edges, in the same order: a positional join (no sort, no hash join)
+    let mut sql = format!("BEGIN; CREATE OR REPLACE TABLE {m}.edges AS SELECT {select} FROM {m}.edges e POSITIONAL JOIN _zv t;");
     for (c, default, comment) in &cols {
         if let Some(d) = default {
             sql += &format!("ALTER TABLE {m}.edges ALTER COLUMN {} SET DEFAULT {d};", q(c));
