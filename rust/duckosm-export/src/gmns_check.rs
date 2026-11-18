@@ -13,7 +13,11 @@ const LEN_TOL: f64 = 0.01;
 /// (name, bad-count SQL, total-count SQL) of the checks of schema `s` (`_checks`).
 fn checks(s: &str) -> Vec<(&'static str, String, String)> {
     let (l, n, k, m) = (format!("{s}.link"), format!("{s}.node"), format!("{s}.lane"), format!("{s}.movement"));
-    let cnt = format!("(SELECT link_id, count(*) n, min(lane_num) lo, max(lane_num) hi FROM {k} GROUP BY link_id)");
+    let cnt = format!(
+        "(SELECT link_id, count(*) n, min(lane_num) lo, max(lane_num) hi, count(*) FILTER (lane_num > 0) np, \
+         min(lane_num) FILTER (lane_num > 0) plo, count(*) FILTER (lane_num < 0) nn, count(*) FILTER (lane_num = 0) nz, \
+         count(*) FILTER (allowed_uses = 'walk') nw FROM {k} GROUP BY link_id)"
+    );
     let all = |t: &str| format!("SELECT count(*) FROM {t}");
     vec![
         ("link starts at its from_node", format!("SELECT count(*) FROM {l} l JOIN {n} n ON n.node_id = l.from_node_id
@@ -30,9 +34,14 @@ fn checks(s: &str) -> Vec<(&'static str, String, String)> {
         ("node has a link", format!("SELECT count(*) FROM {n} WHERE node_id NOT IN
             (SELECT from_node_id FROM {l} UNION SELECT to_node_id FROM {l})"), all(&n)),
         ("link has lane rows", format!("SELECT count(*) FROM {l} WHERE link_id NOT IN (SELECT link_id FROM {k})"), all(&l)),
-        ("lane_num is 1..n", format!("SELECT count(*) FROM {cnt} WHERE lo <> 1 OR hi <> n"), format!("SELECT count(*) FROM {cnt}")),
+        // a lane left of lane 1 (a bike lane on the left of a one-way road) is -1, -2, ...: the spec numbers them negative
+        ("lane_num is 1..n, and -1..-k left of lane 1", format!("SELECT count(*) FROM {cnt}
+            WHERE nz > 0 OR (np > 0 AND (plo <> 1 OR hi <> np)) OR (nn > 0 AND lo <> -nn)"), format!("SELECT count(*) FROM {cnt}")),
+        // `lanes` counts motor lanes only, so it can be less than the lane rows, never more. A link whose lane rows are only the
+        // walking lane (the walking network) has no rows for its motor lanes: it is not checked
         ("link.lanes is not more than the lane rows", format!("SELECT count(*) FROM {l} l JOIN {cnt} c USING (link_id)
-            WHERE l.lanes > c.n"), format!("SELECT count(*) FROM {l} WHERE lanes IS NOT NULL")),
+            WHERE l.lanes > c.n AND c.nw < c.n"), format!("SELECT count(*) FROM {l} l JOIN {cnt} c USING (link_id)
+            WHERE l.lanes IS NOT NULL AND c.nw < c.n")),
         ("location lies on its link", format!("SELECT count(*) FROM {s}.location x LEFT JOIN {l} l USING (link_id)
             WHERE l.link_id IS NULL OR x.lr < 0 OR x.lr > l.length + 0.01"), format!("SELECT count(*) FROM {s}.location")),
         ("movement turns where its inbound link ends", format!("SELECT count(*) FROM {m} m JOIN {l} l ON l.link_id = m.ib_link_id
@@ -41,10 +50,12 @@ fn checks(s: &str) -> Vec<(&'static str, String, String)> {
             WHERE l.from_node_id <> m.node_id"), all(&m)),
         ("movement ib and ob links differ", format!("SELECT count(*) FROM {m} WHERE ib_link_id = ob_link_id"), all(&m)),
         ("movement inbound lanes exist", format!("SELECT count(*) FROM {m} m JOIN {cnt} c ON c.link_id = m.ib_link_id
-            WHERE m.start_ib_lane IS NOT NULL AND (m.start_ib_lane < 1 OR m.end_ib_lane > c.n
+            WHERE m.start_ib_lane IS NOT NULL AND (m.start_ib_lane < c.lo OR m.end_ib_lane > c.hi
+                                                   OR m.start_ib_lane = 0 OR m.end_ib_lane = 0
                                                    OR m.start_ib_lane > m.end_ib_lane)"), all(&m)),
         ("movement outbound lanes exist", format!("SELECT count(*) FROM {m} m JOIN {cnt} c ON c.link_id = m.ob_link_id
-            WHERE m.start_ob_lane IS NOT NULL AND (m.start_ob_lane < 1 OR m.end_ob_lane > c.n
+            WHERE m.start_ob_lane IS NOT NULL AND (m.start_ob_lane < c.lo OR m.end_ob_lane > c.hi
+                                                   OR m.start_ob_lane = 0 OR m.end_ob_lane = 0
                                                    OR m.start_ob_lane > m.end_ob_lane)"), all(&m)),
         ("movement lane ranges are as long on both sides", format!("SELECT count(*) FROM {m}
             WHERE start_ib_lane IS NOT NULL AND start_ob_lane IS NOT NULL

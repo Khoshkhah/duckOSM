@@ -72,7 +72,7 @@ python scripts/route_map_stress.py reports/monaco_route_map.html   # random trip
 
 ## Checking a build
 
-Every build can check its own invariants (single dominant component, no stranded named edge) and
+Every build can check its own invariants (unique node ids, no part of a way lost) and
 fail on a breach: `enabled: true` in the config's `validation:` section (on in the config
 template, off by default in code).
 

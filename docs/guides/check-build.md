@@ -14,8 +14,6 @@ It's off by default (and a build from the command line alone can't switch it on)
 [config template](build.md#the-config-file) turns it on. On Monaco it prints, per mode:
 
 ```text
-validate[driving] single_component: OK — 1 component(s), largest 2,765/2,765 (100.0%)
-validate[driving] no_stranded_named: OK — 0 named edge(s) outside the largest component
 validate[driving] unique_node_id: OK — 0 duplicate node_id(s) in nodes
 validate[driving] way_length_conserved: OK — 0 deleted parallel arc(s) (way stretch missing while a kept edge bridges its endpoints)
 validate[driving] layer_without_structure: WARN — 11 edge(s) with layer≠0 but no bridge/tunnel tag (OSM tagging; drawn grade-separated, no 3D deck)
@@ -23,14 +21,12 @@ validate[driving] layer_without_structure: WARN — 11 edge(s) with layer≠0 bu
 
 | Check | Fails the build when |
 |---|---|
-| `single_component` | the network isn't one connected piece |
-| `no_stranded_named` | a named road sits outside the main network |
 | `unique_node_id` | two nodes share an id |
 | `way_length_conserved` | part of an OSM way went missing when it was split into edges |
 | `layer_without_structure` | never: a warning about OSM tagging (a road on another level with no bridge or tunnel tag) |
 
-The first two only run when the build has a boundary: a whole region can legitimately have separate
-pieces (islands, for example). Each check can be switched off; see [Configuration](../reference/configuration.md).
+The build does not check that the network is one connected piece: every road stays, so a network can have
+separate pieces (islands, for example). Each check can be switched off; see [Configuration](../reference/configuration.md).
 Set `fail_on_error: false` to be warned instead of stopped.
 
 ## A report of the build

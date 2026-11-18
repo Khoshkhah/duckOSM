@@ -5,7 +5,7 @@ gmns_cycling	link is not a loop	0	11293
 gmns_cycling	link.length is its geometry's length	0	11293
 gmns_cycling	node has a link	0	4638
 gmns_cycling	link has lane rows	0	11293
-gmns_cycling	lane_num is 1..n	0	11293
+gmns_cycling	lane_num is 1..n, and -1..-k left of lane 1	0	11293
 gmns_cycling	link.lanes is not more than the lane rows	0	2933
 gmns_cycling	location lies on its link	0	3469
 gmns_cycling	movement turns where its inbound link ends	0	21426
@@ -22,14 +22,14 @@ gmns_driving	link is not a loop	0	2862
 gmns_driving	link.length is its geometry's length	0	2862
 gmns_driving	node has a link	0	1773
 gmns_driving	link has lane rows	0	2862
-gmns_driving	lane_num is 1..n	42	2862
+gmns_driving	lane_num is 1..n, and -1..-k left of lane 1	0	2862
 gmns_driving	link.lanes is not more than the lane rows	0	2862
 gmns_driving	location lies on its link	0	1628
 gmns_driving	movement turns where its inbound link ends	0	3762
 gmns_driving	movement turns where its outbound link starts	0	3762
 gmns_driving	movement ib and ob links differ	0	3762
-gmns_driving	movement inbound lanes exist	43	3762
-gmns_driving	movement outbound lanes exist	52	3762
+gmns_driving	movement inbound lanes exist	0	3762
+gmns_driving	movement outbound lanes exist	0	3762
 gmns_driving	movement lane ranges are as long on both sides	0	3762
 gmns_driving	movement has both lane ranges or neither	0	3762
 gmns_walking	link starts at its from_node	0	11934
@@ -39,8 +39,8 @@ gmns_walking	link is not a loop	0	11934
 gmns_walking	link.length is its geometry's length	0	11934
 gmns_walking	node has a link	0	4579
 gmns_walking	link has lane rows	0	11934
-gmns_walking	lane_num is 1..n	0	11934
-gmns_walking	link.lanes is not more than the lane rows	200	2320
+gmns_walking	lane_num is 1..n, and -1..-k left of lane 1	0	11934
+gmns_walking	link.lanes is not more than the lane rows	0	0
 gmns_walking	location lies on its link	0	3590
 gmns_walking	movement turns where its inbound link ends	0	23273
 gmns_walking	movement turns where its outbound link starts	0	23273

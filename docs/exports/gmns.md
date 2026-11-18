@@ -93,11 +93,12 @@ being one link with `allowed_uses = 'auto,bike,walk'`. Monaco: 12,789 links.
 
 ```bash
 duckosm gmns-viz monaco_gmns.duckdb                 # inspect: lanes (+ meso / micro if built), hover for ids
-duckosm gmns-map monaco_gmns.duckdb                 # present: every lane at its width, on a base map
+duckosm levels monaco.duckdb                         # once: the level area that gmns-map draws on
+duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb   # present: every lane at its width, on a base map
 ```
 
-Each writes one HTML file. `-m` picks the mode. `gmns-map` draws with
-[lanestyle](https://github.com/Khoshkhah/lanestyle) (`pip install "duckosm[viz]"`).
+Each writes one HTML file. In `gmns-viz`, `-m` picks the mode. `gmns-map` draws the driving lanes with
+[lanestyle](https://github.com/Khoshkhah/lanestyle).
 
 Monaco's lanes, as `gmns-map` draws them (scroll to zoom, drag to move): each lane is a strip of
 road with its lane lines and an arrow for its direction, and bridges and tunnels keep their order.
@@ -149,8 +150,9 @@ frictionless validate datapackage.json
 
 The spec's validators check the shape of the tables, not what the values say about each other.
 `duckosm gmns ... --check` does (`duckosm.check_gmns(path)` from Python): a link starts and ends on its
-nodes; `link.length` is its geometry's length; `lane_num` runs 1..n and `link.lanes` is the number of
-lane rows; a movement turns at the node where its inbound link ends, and its lane ranges exist and are
+nodes; `link.length` is its geometry's length; `lane_num` runs 1..n (a lane left of lane 1, such as a
+bike lane on the left of a one-way road, is -1); `link.lanes` is not more than the lane rows (not checked in the walking
+network, which has only the walking lane); a movement turns at the node where its inbound link ends, and its lane ranges exist and are
 as long on both sides. Run on Monaco, Södermalm, Tartu and Granville Island, in every mode: all pass.
 
 What differs from the spec, on purpose: the DuckDB file has extra columns (`geom` on `node`, `link`,

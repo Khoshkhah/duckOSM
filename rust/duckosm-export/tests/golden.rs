@@ -487,6 +487,18 @@ fn columns_differ(got: &[String], golden: &str) -> Vec<String> {
     bad
 }
 
+/// `junctions.join` (`duckosm sumo --join-junctions`; needs netconvert): the nodes that netconvert joins are merged, and the plain
+/// XML of that equals Python's (`_merge_joined`, made with netconvert 1.27.0).
+#[test]
+fn sumo_join_equals_python() {
+    let d = out("sumo_join");
+    let o = duckosm_export::sumo::SumoOptions { config: vec![("junctions.join".into(), "true".into())], ..Default::default() };
+    duckosm_export::sumo::to_sumo_with(db(), &d, "driving", "monaco", true, None, true, &o).unwrap();
+    for f in ["nod", "edg", "con"] {
+        same(&d.join(format!("monaco.{f}.xml")), &format!("sumo_join_driving.{f}.xml.gz"));
+    }
+}
+
 /// sumo_compare: the lanes of duckOSM's SUMO network against SUMO's own OSM import of the same PBF, as Python's `lane_diff` gives
 /// them (`monaco_sumo_lane_diff.tsv`; needs netconvert and osmium).
 #[test]

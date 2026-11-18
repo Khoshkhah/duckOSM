@@ -512,5 +512,5 @@ its own) and leaves out the other 13:
 
 The CSVs are validated against the standard's own schemas on every test run, and `duckosm gmns --check`
 tests that the values agree with each other (a link starts and ends on its nodes, `length` is its shape's,
-lane numbers run 1..n, a movement turns where its inbound link ends and uses lanes that exist). See
+lane numbers run 1..n (and -1 left of lane 1), a movement turns where its inbound link ends and uses lanes that exist). See
 [Conformance](gmns.md#conformance-to-the-gmns-standard).

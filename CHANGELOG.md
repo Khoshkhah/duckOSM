@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Seven faults of the command line, found by the review of the docs.** On Monaco:
+  - `duckosm gmns --check` failed 4 of 48 checks. The checks were wrong, not the data: a lane left of lane 1 (a bike lane on
+    the left of a one-way road) has the number -1, as the GMNS spec says, and the walking network has only the walking lane,
+    not the motor lanes that `link.lanes` counts. Now 48 of 48 pass (Python's `check_gmns` too).
+  - `junctions.join` of the SUMO export works in Rust (`to_sumo(config={"junctions.join": "true"})`, and the new option
+    `duckosm sumo --join-junctions`). Before, it stopped with "not ported". The plain XML equals Python's on Monaco
+    (18 joined junctions).
+  - `duckosm export-graph -f gpickle` writes the pickle in Rust. `pickle.load` gives the same networkx graph as
+    `write_graph` (node graph, edge graph, `--geometry shapely`).
+  - The positive flag of each `--x` / `--no-x` pair parses: `--graph` (build), `--arrows` and `--boundary` (viz),
+    `--connections` and `--netconvert` (sumo), `--gzip` (matsim), `--signals` (matsim-lanes), `--lane-geometry` (gmns),
+    `--boundary` (export-gis). The last one on the command line wins.
+  - The checks `validation.assert_single_component` and `assert_no_stranded_named` are removed: they did nothing, because
+    every road stays. A config that has them gets a warning.
+  - `docs/reference/cli.md`: the options of `gmns-map` and `levels-edit` are those of the program.
+
 - **The switch, step 6 of `docs/design/all_in_rust.md`.** The Rust program is `duckosm`. `duckosm-rust` stays for one release:
   it prints "use duckosm" and runs the same command. The wheel has the whole program in the module `duckosm._rust` (with
   DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust

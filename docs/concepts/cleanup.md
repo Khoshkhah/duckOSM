@@ -41,6 +41,8 @@ road that does not connect to the main network is still a real road, for example
 road that the area's border cut off. Every road now stays. The settings `clip.keep_largest_component` and
 `clip.min_component_edges`, and the option `--no-component-filter`, are still accepted so that old configs and scripts
 work, but they do nothing.
+The checks `validation.assert_single_component` and `validation.assert_no_stranded_named` are removed too (on
+2026-11-18): they did nothing, because a network can have separate pieces. A config that has them gets a warning.
 
 ## Where the border cuts
 
@@ -67,11 +69,9 @@ build unless `validation.fail_on_error: false`. How to switch it on and what the
 
 | Check (`validation.` key) | Passes when |
 |---|---|
-| `assert_single_component` | the largest piece holds at least 99.9% of the edges |
-| `assert_no_stranded_named` | no edge with a name is outside the largest piece |
 | `assert_unique_node_id` | no `node_id` appears twice in `nodes` |
 | `assert_way_length_conserved` | no stretch of a kept OSM way is missing while an edge of the same way joins its two ends |
 | `warn_layer_without_structure` | a warning only: edges with `layer` ≠ 0 but no `bridge` or `tunnel` tag |
 
-The first two are skipped: a network can have separate pieces (see [Component filter](#component-filter)). `assert_way_length_conserved` is skipped in a
+There is no check that the network is one piece: a network can have separate pieces (see [Component filter](#component-filter)). `assert_way_length_conserved` is skipped in a
 clip build, which has no `ways` table.

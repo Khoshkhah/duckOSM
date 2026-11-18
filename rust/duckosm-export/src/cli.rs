@@ -37,6 +37,9 @@ enum Cmd {
         /// Do not export main.boundary as a boundary layer.
         #[arg(long)]
         no_boundary: bool,
+        /// Export main.boundary as a layer (the default). With --no-boundary: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_boundary")]
+        boundary: bool,
         /// The base name of the layers and files (default: the file name of the db).
         #[arg(long)]
         name: Option<String>,
@@ -87,6 +90,9 @@ enum Cmd {
         /// Do not gzip the output (gzip is the MATSim convention and the default).
         #[arg(long)]
         no_gzip: bool,
+        /// Gzip the output (the default). With --no-gzip: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_gzip")]
+        gzip: bool,
         /// The output file (default: <name>_network.xml[.gz]).
         #[arg(short, long)]
         out: Option<PathBuf>,
@@ -122,6 +128,9 @@ enum Cmd {
         /// Do not write the signal files.
         #[arg(long)]
         no_signals: bool,
+        /// Write the signal files (the default). With --no-signals: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_signals")]
+        signals: bool,
         /// The default signal cycle time (seconds).
         #[arg(long, default_value_t = 90)]
         cycle: i64,
@@ -147,12 +156,22 @@ enum Cmd {
         /// Do not write the connections of edge_graph (netconvert makes its own: the turn restrictions are lost).
         #[arg(long)]
         no_connections: bool,
+        /// Write the connections of edge_graph (the default). With --no-connections: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_connections")]
+        connections: bool,
         /// A netconvert config (.netccfg) to use in place of the built-in options.
         #[arg(short, long)]
         config: Option<PathBuf>,
         /// Do not run netconvert: write only the plain XML.
         #[arg(long)]
         no_netconvert: bool,
+        /// Run netconvert (the default). With --no-netconvert: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_netconvert")]
+        netconvert: bool,
+        /// Join close junctions (netconvert's junctions.join): the nodes of a crossroads mapped as two or three nodes become one
+        /// junction, and each legal path through them one connection.
+        #[arg(long, conflicts_with = "config")]
+        join_junctions: bool,
     },
     /// Extract a built network to a standalone GMNS DuckDB: every GMNS table OSM can support (config, node, link, geometry,
     /// lane, movement, use_definition/use_group, signal_controller, curb_seg), with native geometry and lane detail, keeping
@@ -173,6 +192,9 @@ enum Cmd {
         /// No per-lane offset geometry.
         #[arg(long)]
         no_lane_geometry: bool,
+        /// Make a line for each lane (the default). With --no-lane-geometry: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_lane_geometry")]
+        lane_geometry: bool,
         /// Also build a mesoscopic (lane-level) network: meso_<mode> schemas.
         #[arg(long)]
         meso: bool,
@@ -277,13 +299,13 @@ fn stem(db: &Path) -> String {
 pub fn run(args: &[String]) -> Result<()> {
     let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
-        Cmd::Matsim { db, mode, crs, no_gzip, out } => {
+        Cmd::Matsim { db, mode, crs, no_gzip, out, .. } => {
             check_db(&db)?;
             let out = out.unwrap_or_else(|| format!("{}_network.xml{}", stem(&db), if no_gzip { "" } else { ".gz" }).into());
             let s = crate::matsim::to_matsim(&db, &out, &mode, crs.as_deref(), !no_gzip)?;
             println!("wrote {} — {} nodes, {} links (CRS {})", out.display(), s.nodes, s.links, s.crs);
         }
-        Cmd::ExportGis { db, modes, fmt, out, no_boundary, name } => {
+        Cmd::ExportGis { db, modes, fmt, out, no_boundary, name, .. } => {
             check_db(&db)?;
             let base = name.unwrap_or_else(|| stem(&db));
             let out = out.unwrap_or_else(|| {
@@ -309,7 +331,7 @@ pub fn run(args: &[String]) -> Result<()> {
             let extra = if junctions { format!(" + {} connecting roads, {} junctions", s.connecting_roads, s.junctions) } else { String::new() };
             println!("wrote {} — {} roads{extra} (CRS {})", out.display(), s.roads, s.crs);
         }
-        Cmd::MatsimLanes { gmns_db, mode, no_signals, cycle, out_dir } => {
+        Cmd::MatsimLanes { gmns_db, mode, no_signals, cycle, out_dir, .. } => {
             if !gmns_db.exists() {
                 return Err(format!("{}: no such file", gmns_db.display()));
             }
@@ -320,13 +342,17 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             println!("{msg} -> {}", out_dir.display());
         }
-        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, no_netconvert } => {
+        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, no_netconvert, join_junctions, .. } => {
             check_db(&db)?;
             if let Some(c) = config.as_ref().filter(|c| !c.exists()) {
                 return Err(format!("{}: no such file", c.display()));
             }
             let name = name.unwrap_or_else(|| stem(&db));
-            let s = crate::sumo::to_sumo(&db, &out_dir, &mode, &name, !no_connections, config.as_deref(), !no_netconvert)?;
+            let o = crate::sumo::SumoOptions {
+                config: if join_junctions { vec![("junctions.join".into(), "true".into())] } else { Vec::new() },
+                ..Default::default()
+            };
+            let s = crate::sumo::to_sumo_with(&db, &out_dir, &mode, &name, !no_connections, config.as_deref(), !no_netconvert, &o)?;
             println!("wrote {} ({} edges) and {} ({} nodes)", s.edg.display(), s.n_edges, s.nod.display(), s.n_nodes);
             if let Some(c) = &s.con {
                 println!("wrote {} ({} connections)", c.display(), s.n_connections);
@@ -382,6 +408,7 @@ pub fn run(args: &[String]) -> Result<()> {
             gtfs_max_m,
             csv_extensions,
             check,
+            ..
         } => {
             check_db(&db)?;
             if let Some(p) = gtfs.iter().find(|p| !p.exists()) {
