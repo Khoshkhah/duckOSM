@@ -119,7 +119,7 @@ a cut and every export ([how](concepts/edge-ids.md)).
 
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes.
+All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each output is checked against a reference tool ([how](concepts/checks.md)).
 
 <div class="dk-levels">
 <div class="lv"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></div>
@@ -129,58 +129,7 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 <a class="lv" href="exports/#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
 </div>
 
-| Output | Command | Format | More |
-|---|---|---|---|
-| **Road networks**: driving, walking and cycling, and the graph of legal turns | `duckosm build` | DuckDB | [Build a network](guides/build.md) |
-| **Base-map layers**: water, land use, buildings, POIs | `duckosm build` | DuckDB (`features.*`) | [Base-map layers](reference/features.md) |
-| **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB | [Drawing order](guides/drawing-order.md), [walls](concepts/building-walls.md) |
-| **The OSM features table** of QuackOSM | `duckosm quack`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoParquet, DuckDB | [duckOSM and QuackOSM](concepts/quackosm.md) |
-| **GDAL's five OSM layers**, as QGIS reads them | `duckosm quack --gdal`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoPackage, GeoParquet | [duckOSM and GDAL](concepts/gdal.md) |
-| **Traffic simulation networks** | `duckosm sumo`, `matsim`, `gmns` | SUMO, MATSim, GMNS | [Exports](exports/index.md) |
-| **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx | [GIS](exports/gis.md), [networkx](exports/networkx.md) |
-| **Heights**: the ground height of each node | `duckosm elevation` | DuckDB | [Add elevation](guides/elevation.md) |
-| **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML | [Draw a map](guides/draw-map.md) |
-
-Each output is compared with a reference tool ([how each output is checked](concepts/checks.md)).
-
-## Fix the OSM data
-
-OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
-file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
-
-| Where | How |
-|---|---|
-| Browser | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), step **Edit OSM data** |
-| Your computer | `duckosm edit my_area.duckdb` opens the same editor |
-| Build | `duckosm build --fixes osm_fixes.yaml`, `duckosm quack --fixes osm_fixes.yaml` |
-
-You can change roads (one-way, lanes, speed, class, access), buildings (floors, height, roof, the type of each wall),
-nodes (traffic signals, crossings), turns, and add roads that OSM does not have.
-
-More: [Edit OSM data](guides/edit-osm-data.md), [Fix OSM errors](guides/fix-osm-errors.md).
-
-## Two versions, one engine
-
-| | Native | Browser |
-|---|---|---|
-| Program | `duckosm` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) and the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) |
-| Install | `pip install duckosm` | none |
-| Storage | the disk | the browser's storage (OPFS) |
-| Rows | the same | the same |
-
-Both build every area by map tiles, cut by [pbfcut](https://github.com/Khoshkhah/pbfcut), so the memory does not grow with
-the area ([Browser and native builds](concepts/browser-native.md)).
-
-## Speed on France
-
-France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB). Both versions build by map tiles, cut by
-[pbfcut](https://github.com/Khoshkhah/pbfcut).
-
-| Job | Native | Browser | Other tool |
-|---|---|---|---|
-| Road network, driving | 3 min 36 s | 5 min 16 s | |
-| OSM features table (`quack`) | 2 min 9 s | 4 min 54 s | QuackOSM: 9 min 30 s |
-| GDAL's layers, GeoParquet (`quack --gdal`) | 3 min 37 s | 5 min 23 s | `ogr2ogr`: 14 min 18 s |
+All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
 
 ## Quick start
 
