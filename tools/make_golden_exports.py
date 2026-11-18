@@ -152,7 +152,8 @@ def gtfs_feed(db, path):
 def gmns(db, out):
     """duckosm gmns on Monaco (every mode, lane geometry, with --combined and --to-csv) -> one line for each column of the GMNS
     db, the MD5 of each CSV file, the rows of gmns_check (check_gmns, graph_report), one line for each column of the meso
-    and micro networks, and one line for each column of `location` with the stops of a GTFS feed."""
+    and micro networks, one line for each column of `location` with the stops of a GTFS feed, and one line for each column
+    of gmns_walking with --walk-frame."""
     import hashlib
     from duckosm.gmns import to_meso, to_micro
     from duckosm.gmns_check import check_gmns, graph_report
@@ -178,6 +179,9 @@ def gmns(db, out):
         to_gmns(db, f"{tmp}/gtfs.duckdb", gtfs=[str(out / "monaco_gtfs.zip")])
         lines = [x for x in columns(f"{tmp}/gtfs.duckdb") if x.startswith("table\t") or ".location\t" in x]
         (out / "monaco_gmns_gtfs_location.tsv").write_text("\n".join(lines) + "\n")
+        # --walk-frame: the columns of gmns_walking (its lane lines are checked by their properties)
+        to_gmns(db, f"{tmp}/wf/monaco_gmns.duckdb", modes=["driving", "walking"], walk_frame=True)
+        (out / "monaco_gmns_walk_frame_columns.tsv").write_text("\n".join(columns(f"{tmp}/wf/monaco_gmns.duckdb", "gmns\\_walking")) + "\n")
 
 
 def gz(src, dst):

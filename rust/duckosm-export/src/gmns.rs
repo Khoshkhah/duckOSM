@@ -49,7 +49,7 @@ const CAPACITY: [(&str, i32); 10] = [
 ];
 
 /// Roads that cars cannot use (duckOSM's `road_filter.NON_MOTOR`).
-const NON_MOTOR: [&str; 8] = ["footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform"];
+pub(crate) const NON_MOTOR: [&str; 8] = ["footway", "path", "cycleway", "steps", "pedestrian", "bridleway", "corridor", "platform"];
 
 fn capacity_case(hw: &str) -> String {
     let whens: Vec<String> = CAPACITY.iter().map(|(k, v)| format!("WHEN '{k}' THEN {v}")).collect();
@@ -128,11 +128,15 @@ pub struct GmnsOptions {
     pub gtfs: Vec<std::path::PathBuf>,
     /// A GTFS stop goes on a link within this many metres.
     pub gtfs_max_m: f64,
+    /// A mapped sidewalk takes its place from its road's lanes (off by default).
+    pub walk_frame: bool,
+    /// The gap in metres between the kerb and a sidewalk placed by `walk_frame`.
+    pub walk_clearance_m: f64,
 }
 
 impl Default for GmnsOptions {
     fn default() -> Self {
-        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0 }
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0 }
     }
 }
 
@@ -206,10 +210,16 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
         c.exec(&format!(
             "CREATE TABLE {sch}.link_along(link_id BIGINT, along_link_id BIGINT, along_mode VARCHAR, covered_m DOUBLE, gap_m DOUBLE)"
         ))?;
+        let mut along = HashMap::new();
         if mode != "driving" {
-            sidewalk_parents(&c, &sch, has_raw, drive_side)?;
+            along = sidewalk_parents(&c, &sch, has_raw, drive_side)?;
         }
         build_lane_curb(&c, &sch, mode, uses, has_raw, drive_side, o.lane_geometry, o.pair_carriageways)?;
+        if o.walk_frame && mode != "driving" && o.lane_geometry {
+            crate::gmns_walk::walk_frame(&c, &sch, drive_side, &along, o.walk_clearance_m)?; // before the lane connectors
+            crate::gmns_walk::walk_kerb(&c, &sch, o.walk_clearance_m)?;
+            crate::gmns_walk::walk_join(&c, &sch)?;
+        }
         build_movement(&c, &sch, mode, uses)?;
         if mode == "driving" || mode == "cycling" {
             // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut
@@ -610,8 +620,8 @@ fn default_lane_w(highway: Option<&str>) -> f64 {
     }
 }
 
-const DEFAULT_LANE_W: f64 = 3.25;
-const DEFAULT_WALK_W: f64 = 2.0;
+pub(crate) const DEFAULT_LANE_W: f64 = 3.25;
+pub(crate) const DEFAULT_WALK_W: f64 = 2.0;
 const CROSSING_ALONG: f64 = 0.6;
 const CROSSING_MIN_M: f64 = 10.0;
 const ALONG_NEAR_M: f64 = 8.0;
@@ -636,12 +646,12 @@ fn heading(g: &[P], len: f64, t: f64) -> f64 {
 /// `_sidewalk_parents`: for each footpath (a mapped sidewalk, or a footpath right beside a road), the road it runs along
 /// (`link.along_*`, and `parent_link_id` of a sidewalk where the road is a link of this schema) and every road it runs along
 /// for 4 m or more (`link_along`). The roads are those of `gmns_driving` when it is there, else the schema's own roads.
-fn sidewalk_parents(c: &Ctx, sch: &str, has_raw: bool, drive_side: &str) -> Result<()> {
+fn sidewalk_parents(c: &Ctx, sch: &str, has_raw: bool, drive_side: &str) -> Result<HashMap<i64, i64>> {
     const MAX_GAP_M: f64 = 30.0;
     const MAX_TURN_DEG: f64 = 30.0;
     const ADJACENT_M: f64 = 5.0;
     if !has_raw {
-        return Ok(());
+        return Ok(HashMap::new());
     }
     let near_classes = NON_MOTOR.iter().filter(|h| !["steps", "platform", "corridor"].contains(h)).map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
     type Sw = (i64, String, Option<String>, Option<String>, Option<String>, String, Option<bool>, i64, i64);
@@ -660,7 +670,7 @@ fn sidewalk_parents(c: &Ctx, sch: &str, has_raw: bool, drive_side: &str) -> Resu
         .map_err(|e| e.to_string())?;
     drop(st);
     if sw.is_empty() {
-        return Ok(());
+        return Ok(HashMap::new());
     }
     let nonroad = NON_MOTOR.iter().map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
     let has_link = |s: &str| c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{s}' AND table_name = 'link'")).map(|n| n > 0);
@@ -679,7 +689,7 @@ fn sidewalk_parents(c: &Ctx, sch: &str, has_raw: bool, drive_side: &str) -> Resu
         .map_err(|e| e.to_string())?;
     drop(st);
     if rows.is_empty() {
-        return Ok(());
+        return Ok(HashMap::new());
     }
     let own: HashSet<i64> = if have_drive {
         let mine: HashSet<i64> = c.strings(&format!("SELECT link_id::VARCHAR FROM {sch}.link"))?.iter().map(|s| s.parse().unwrap()).collect();
@@ -829,7 +839,9 @@ fn sidewalk_parents(c: &Ctx, sch: &str, has_raw: bool, drive_side: &str) -> Resu
         "UPDATE {sch}.link SET parent_link_id = p.road FROM _parents p WHERE p.link = {sch}.link.link_id AND p.kind = 'sidewalk' AND p.road IN ({own_list});
          UPDATE {sch}.link SET along_link_id = p.road, along_mode = p.mode, along_gap_m = p.gap, along_kind = p.kind FROM _parents p WHERE p.link = {sch}.link.link_id;
          DROP TABLE _parents"
-    ))
+    ))?;
+    // every mapped sidewalk -> the road it runs along, for walk_frame (a later row of a link wins, as in Python's dict)
+    Ok(parents.iter().filter(|p| p.3 == "sidewalk").map(|p| (p.1, p.0)).collect())
 }
 
 const DEFAULT_BIKE_W: f64 = 1.5;
