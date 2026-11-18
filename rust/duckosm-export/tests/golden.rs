@@ -275,16 +275,16 @@ fn lanelet2_equals_python() {
     assert!(bad.is_empty(), "{} boundaries differ from Python:\n{}", bad.len(), bad.join("\n"));
 }
 
-/// One line for each column of each `gmns_*` table: its type, the rows and the MD5 of its values as text, sorted. The same SQL
-/// as `columns` in tools/make_golden_exports.py.
-fn gmns_columns(db: &Path) -> Vec<String> {
+/// One line for each column of each table of the schemas `LIKE like`: its type, the rows and the MD5 of its values as text,
+/// sorted. The same SQL as `columns` in tools/make_golden_exports.py.
+fn gmns_columns(db: &Path, like: &str) -> Vec<String> {
     let con = duckdb::Connection::open(db).unwrap();
     con.execute_batch("INSTALL spatial; LOAD spatial").unwrap();
     let mut st = con
-        .prepare(
+        .prepare(&format!(
             "SELECT table_schema || '.' || table_name, column_name, data_type FROM information_schema.columns \
-             WHERE table_schema LIKE 'gmns\\_%' ESCAPE '\\' ORDER BY 1, ordinal_position",
-        )
+             WHERE table_schema LIKE '{like}' ESCAPE '\\' ORDER BY 1, ordinal_position",
+        ))
         .unwrap();
     let cols: Vec<(String, String, String)> =
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect();
@@ -305,10 +305,28 @@ fn gmns_columns(db: &Path) -> Vec<String> {
     lines
 }
 
-/// The columns that the test skips: the computed lane geometry, which `gmns_lanes_by_properties` checks (Kaveh, 2026-11-18), and
-/// the columns that a step not ported yet changes. An entry is `table.column` (in every schema), `schema.table` or
-/// `schema.table.column`.
-const GMNS_PENDING: [&str; 3] = ["lane.geom", "lane.geom_cut", "lane_connector.geom"];
+/// The computed geometry and the measures taken on it, which `gmns_lanes_by_properties` checks, not equality with Python (Kaveh,
+/// 2026-11-18; docs/design/all_in_rust.md): the lane lines and the crossings, whose overlays are the `geo` crate's here and GEOS's
+/// in Python. The micro cells are cut from the lane lines, so their points and lengths follow them. An entry is `table.column` (in
+/// every schema), `schema.table` or `schema.table.column`.
+const GMNS_BY_PROPERTIES: [&str; 16] = [
+    "lane.geom",
+    "lane.geom_cut",
+    "lane_connector.geom",
+    "crossing.width",
+    "crossing.length",
+    "crossing.geom",
+    "lane_crossing.start_lr",
+    "lane_crossing.end_lr",
+    "lane_crossing.across_from",
+    "lane_crossing.across_to",
+    "micro_node.x_coord",
+    "micro_node.y_coord",
+    "micro_node.geom",
+    "micro_link.length",
+    "micro_link.geometry",
+    "micro_link.geom",
+];
 
 /// The lane geometry: checked by its properties (`gmns_lanes_by_properties`), not by equality with Python (Kaveh, 2026-11-18;
 /// docs/design/all_in_rust.md, "How the lane geometry is checked").
@@ -318,7 +336,7 @@ fn gmns_lanes_by_properties() {
     duckosm_export::gmns::to_gmns(db(), &a, &[]).unwrap();
     duckosm_export::gmns::to_gmns(db(), &b, &[]).unwrap();
     let lanes = |p: &Path| -> Vec<String> {
-        gmns_columns(p).into_iter().filter(|l| l.contains(".lane\tgeom\t")).collect()
+        gmns_columns(p, "gmns\\_%").into_iter().filter(|l| l.contains(".lane\tgeom\t")).collect()
     };
     assert_eq!(lanes(&a), lanes(&b), "two runs give other lane geometry");
     let got = duckosm_export::gmns_lanes::lane_report(&a).unwrap().join("\n") + "\n";
@@ -329,14 +347,126 @@ fn gmns_lanes_by_properties() {
     assert_eq!(got, text(&path), "the lane checks changed (GMNS_LANES_WRITE=1 writes them again after a wanted change)");
 }
 
+/// gmns-viz: the page of a db made from tests/data/exports/gmns_viewer/ (the columns that the viewer reads, from Python's GMNS
+/// export with --meso --micro) has the MD5 and the size of Python's page of the same db. The same SQL as `viewer` in
+/// tools/make_golden_exports.py.
+#[test]
+fn gmns_viewer_equals_python() {
+    let p = out("viewer").join("monaco_gmns.duckdb");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&p);
+    let con = duckdb::Connection::open(&p).unwrap();
+    con.execute_batch("INSTALL spatial; LOAD spatial; CREATE SCHEMA gmns_driving; CREATE SCHEMA meso_driving; CREATE SCHEMA micro_driving").unwrap();
+    for t in ["gmns_driving.lane", "gmns_driving.node", "gmns_driving.link", "gmns_driving.movement", "meso_driving.meso_link", "meso_driving.meso_node", "micro_driving.micro_link"] {
+        let f = data().join(format!("exports/gmns_viewer/{t}.parquet"));
+        con.execute_batch(&format!("CREATE TABLE {t} AS SELECT * FROM read_parquet('{}')", f.display())).unwrap();
+    }
+    drop(con);
+    let html = out("viewer").join("v.html");
+    duckosm_export::gmns_viewer::write_viewer(&p, &html, "driving").unwrap();
+    let page = std::fs::read(&html).unwrap();
+    let md5: String = duckdb::Connection::open_in_memory().unwrap().query_row("SELECT md5(?)", [String::from_utf8(page.clone()).unwrap()], |r| r.get(0)).unwrap();
+    assert_eq!(format!("driving\t{md5}\t{}\n", page.len()), text(&data().join("exports/monaco_gmns_viewer.tsv")), "the viewer page differs from Python's");
+}
+
+/// GMNS `--walk-frame` (driving and walking): every column of gmns_walking but the lane lines equals Python; the lines are the
+/// same on two runs, and the sidewalk lanes that still touch a driving lane are counted (`monaco_gmns_walk_frame.tsv`, made by
+/// the Rust export, GMNS_LANES_WRITE=1).
+#[test]
+fn gmns_walk_frame() {
+    let opts = duckosm_export::gmns::GmnsOptions { modes: vec!["driving".into(), "walking".into()], walk_frame: true, ..Default::default() };
+    let (a, b) = (out("walk_frame_a").join("monaco_gmns.duckdb"), out("walk_frame_b").join("monaco_gmns.duckdb"));
+    duckosm_export::gmns::to_gmns_with(db(), &a, &opts).unwrap();
+    duckosm_export::gmns::to_gmns_with(db(), &b, &opts).unwrap();
+    let got = gmns_columns(&a, "gmns\\_walking");
+    assert_eq!(got, gmns_columns(&b, "gmns\\_walking"), "two runs differ");
+    let bad = columns_differ(&got, &text(&data().join("exports/monaco_gmns_walk_frame_columns.tsv")));
+    assert!(bad.is_empty(), "{} columns differ from the Python export:\n{}", bad.len(), bad.join("\n"));
+    // the sidewalk lanes (and their points) that still lie on a driving lane, less 0.1 m from its edge
+    let con = duckdb::Connection::open(&a).unwrap();
+    con.execute_batch("LOAD spatial").unwrap();
+    let (lanes, points): (i64, i64) = con
+        .query_row(
+            "WITH d AS (SELECT ST_Buffer(ST_Transform(geom, 'EPSG:4326', 'EPSG:32632', always_xy := true), COALESCE(width, 3.25) / 2 - 0.1) AS g
+                        FROM gmns_driving.lane WHERE geom IS NOT NULL AND allowed_uses IN ('auto', 'bus', 'bus,bike')),
+                  s AS (SELECT l.lane_id, unnest(ST_Dump(ST_Points(ST_Transform(l.geom, 'EPSG:4326', 'EPSG:32632', always_xy := true)))).geom AS p
+                        FROM gmns_walking.lane l JOIN gmns_walking.link k USING (link_id) WHERE k.footway = 'sidewalk')
+             SELECT count(DISTINCT lane_id), count(*) FROM s WHERE EXISTS (SELECT 1 FROM d WHERE ST_Intersects(d.g, s.p))",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let got = format!("sidewalk lanes on a driving lane\t{lanes}\nsidewalk points on a driving lane\t{points}\n");
+    let path = data().join("exports/monaco_gmns_walk_frame.tsv");
+    if std::env::var("GMNS_LANES_WRITE").is_ok() {
+        std::fs::write(&path, &got).unwrap();
+    }
+    assert_eq!(got, text(&path), "the walk frame checks changed (GMNS_LANES_WRITE=1 writes them again after a wanted change)");
+}
+
 /// GMNS: each column of each table that the Rust export makes so far equals the Python export (the same type, rows and values).
 #[test]
 fn gmns_equals_python() {
     // its own folder: gmns() writes a file of the same name (the name is the dataset_name of the export)
     let o = out("gmns").join("monaco_gmns.duckdb");
-    duckosm_export::gmns::to_gmns(db(), &o, &[]).unwrap();
-    let got = gmns_columns(&o);
-    let golden = text(&data().join("exports/monaco_gmns_columns.tsv"));
+    let csv = out("gmns").join("csv");
+    let _ = std::fs::remove_dir_all(&csv);
+    let opts = duckosm_export::gmns::GmnsOptions { combined: true, to_csv: Some(csv.clone()), ..Default::default() };
+    duckosm_export::gmns::to_gmns_with(db(), &o, &opts).unwrap();
+    // the CSVs: the header and the sorted rows of each file (the order of some tables is that of a parallel query)
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut todo = vec![csv.clone()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            if e.path().is_dir() {
+                todo.push(e.path());
+            } else if e.path().extension().is_some_and(|x| x == "csv") {
+                files.push(e.path());
+            }
+        }
+    }
+    files.sort();
+    let got_csv: String = files
+        .iter()
+        .map(|p| {
+            let t = std::fs::read_to_string(p).unwrap();
+            let mut lines = t.split('\n');
+            let head = lines.next().unwrap().to_string();
+            let mut rows: Vec<&str> = lines.filter(|r| !r.is_empty()).collect();
+            rows.sort();
+            let text = std::iter::once(head.as_str()).chain(rows).collect::<Vec<_>>().join("\n");
+            let digest = duckdb::Connection::open_in_memory().unwrap().query_row("SELECT md5(?)", [text], |r| r.get::<_, String>(0)).unwrap();
+            format!("{}\t{digest}\n", p.strip_prefix(&csv).unwrap().display())
+        })
+        .collect();
+    assert_eq!(got_csv, text(&data().join("exports/monaco_gmns_csv.tsv")), "the GMNS CSVs differ from Python's");
+    // gmns_check: the checks and the graph report
+    let mut check: Vec<String> =
+        duckosm_export::gmns_check::check_gmns(&o, &[]).unwrap().into_iter().map(|(s, n, bad, total)| format!("{s}\t{n}\t{bad}\t{total}")).collect();
+    for g in duckosm_export::gmns_check::graph_report(&o, &[]).unwrap() {
+        check.push(format!("graph\t{}\t{}\t{}\t{}\t{}\t{}", g.schema, g.nodes, g.links, g.biggest, g.parts, g.dead_ends));
+    }
+    assert_eq!(check.join("\n") + "\n", text(&data().join("exports/monaco_gmns_check.tsv")), "gmns_check differs from Python's");
+    let mut bad = columns_differ(&gmns_columns(&o, "gmns\\_%"), &text(&data().join("exports/monaco_gmns_columns.tsv")));
+    // meso and micro of driving and cycling
+    let modes = ["driving".to_string(), "cycling".to_string()];
+    duckosm_export::gmns_meso::to_meso(&o, &modes, 6.0).unwrap();
+    duckosm_export::gmns_meso::to_micro(&o, &modes, 7.0).unwrap();
+    let mut got = gmns_columns(&o, "meso\\_%");
+    got.extend(gmns_columns(&o, "micro\\_%").into_iter().skip(1));
+    bad.extend(columns_differ(&got, &text(&data().join("exports/monaco_gmns_meso_columns.tsv"))));
+    // --gtfs: the stops of a feed as location rows
+    let g = out("gmns").join("gtfs.duckdb");
+    let opts = duckosm_export::gmns::GmnsOptions { gtfs: vec![data().join("exports/monaco_gtfs.zip")], ..Default::default() };
+    duckosm_export::gmns::to_gmns_with(db(), &g, &opts).unwrap();
+    let got: Vec<String> = gmns_columns(&g, "gmns\\_%").into_iter().filter(|l| l.starts_with("table\t") || l.contains(".location\t")).collect();
+    bad.extend(columns_differ(&got, &text(&data().join("exports/monaco_gmns_gtfs_location.tsv"))));
+    assert!(bad.is_empty(), "{} columns differ from the Python export:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// The lines of `golden` (from `columns`) that `got` does not have, except the columns of `GMNS_BY_PROPERTIES` and the tables
+/// that Rust does not make.
+fn columns_differ(got: &[String], golden: &str) -> Vec<String> {
     let key = |l: &str| l.split('\t').take(2).collect::<Vec<_>>().join("\t");
     let tables: std::collections::HashSet<&str> = got.iter().skip(1).map(|l| l.split('\t').next().unwrap()).collect();
     let mine: std::collections::HashMap<String, &String> = got.iter().map(|l| (key(l), l)).collect();
@@ -344,7 +474,7 @@ fn gmns_equals_python() {
     for want in golden.lines().skip(1) {
         let (t, c) = (want.split('\t').next().unwrap(), want.split('\t').nth(1).unwrap());
         let short = format!("{}.{c}", t.split('.').nth(1).unwrap());
-        let pending = [short, t.to_string(), format!("{t}.{c}")].iter().any(|k| GMNS_PENDING.contains(&k.as_str()));
+        let pending = [short, t.to_string(), format!("{t}.{c}")].iter().any(|k| GMNS_BY_PROPERTIES.contains(&k.as_str()));
         if !tables.contains(t) || pending {
             continue;
         }
@@ -354,5 +484,5 @@ fn gmns_equals_python() {
             None => bad.push(format!(" missing: {want}")),
         }
     }
-    assert!(bad.is_empty(), "{} columns differ from the Python export:\n{}", bad.len(), bad.join("\n"));
+    bad
 }

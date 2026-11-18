@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 8] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2"];
+pub const COMMANDS: [&str; 10] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2", "gmns", "gmns-viz"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -43,6 +43,19 @@ enum Cmd {
     },
     /// Check an export: read the GeoPackage or the shapefiles again through GDAL and write one HTML page: a map of each layer
     /// and the checks (the number of features, the CRS, edge_id exact, and the edge_id against --source-db).
+    /// Write a self-contained interactive HTML viewer for a GMNS db: the lanes (offset by use), and the meso and micro
+    /// networks where the db has them (`gmns --meso --micro`); hover a line for its type, id and attributes.
+    #[command(name = "gmns-viz")]
+    GmnsViz {
+        /// The GMNS db (`duckosm gmns`).
+        gmns_db: PathBuf,
+        /// The mode schema to view.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// The output HTML (default: <name>_viewer.html).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
     #[command(name = "gis-debug")]
     GisDebug {
         /// A .gpkg file or a folder of shapefiles.
@@ -141,6 +154,65 @@ enum Cmd {
         #[arg(long)]
         no_netconvert: bool,
     },
+    /// Extract a built network to a standalone GMNS DuckDB: every GMNS table OSM can support (config, node, link, geometry,
+    /// lane, movement, use_definition/use_group, signal_controller, curb_seg), with native geometry and lane detail, keeping
+    /// duckOSM edge_id as link_id. Units: length metres, free_speed km/h, coordinates EPSG:4326. Needs netconvert (SUMO) for
+    /// the lanes of the movements.
+    Gmns {
+        /// The duckOSM database.
+        db: PathBuf,
+        /// Output GMNS .duckdb file (default: <name>_gmns.duckdb).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Mode schema(s) to extract (default: every mode present in the db).
+        #[arg(short, long = "mode")]
+        modes: Vec<String>,
+        /// Also dump spec-standard GMNS CSVs into this directory.
+        #[arg(long)]
+        to_csv: Option<PathBuf>,
+        /// No per-lane offset geometry.
+        #[arg(long)]
+        no_lane_geometry: bool,
+        /// Also build a mesoscopic (lane-level) network: meso_<mode> schemas.
+        #[arg(long)]
+        meso: bool,
+        /// Modes to build meso for (default: driving).
+        #[arg(long = "meso-mode")]
+        meso_modes: Vec<String>,
+        /// Also write a single mode-tagged gmns_all network (links merged, allowed_uses unioned).
+        #[arg(long)]
+        combined: bool,
+        /// Traffic side: two-way lanes offset to this side so the directions separate.
+        #[arg(long, default_value = "right", value_parser = ["right", "left"])]
+        drive_side: String,
+        /// Do not place a one-way road mapped next to its opposite direction as one two-way road.
+        #[arg(long)]
+        no_pair_carriageways: bool,
+        /// Move a mapped sidewalk off the carriageway: it takes its place from its road's lanes.
+        #[arg(long)]
+        walk_frame: bool,
+        /// Gap in metres between the kerb and a footpath placed by --walk-frame.
+        #[arg(long, default_value_t = 0.0)]
+        walk_clearance: f64,
+        /// Also build a microscopic (cell-based) network: micro_<mode> schemas.
+        #[arg(long)]
+        micro: bool,
+        /// Modes to build micro for (default: driving).
+        #[arg(long = "micro-mode")]
+        micro_modes: Vec<String>,
+        /// A GTFS feed (zip file or folder), repeatable: its stops become location rows with their gtfs_stop_id.
+        #[arg(long)]
+        gtfs: Vec<PathBuf>,
+        /// How far from a link, in metres, a GTFS stop may be and still be put on it.
+        #[arg(long, default_value_t = 30.0)]
+        gtfs_max_m: f64,
+        /// Keep duckOSM's extra columns in the CSVs as user-defined fields with a u_ prefix.
+        #[arg(long)]
+        csv_extensions: bool,
+        /// Check the values of the result (ends on nodes, lengths, lane numbers, movements); exit 1 if a check fails.
+        #[arg(long)]
+        check: bool,
+    },
     /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
     /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
     /// the lanelet2 library, not a survey-grade HD map.
@@ -178,6 +250,23 @@ fn check_db(db: &Path) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// An integer with a comma between each group of three digits, as Python's `{:,}`.
+pub(crate) fn thousands(n: i64) -> String {
+    let s = n.abs().to_string();
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    if n < 0 {
+        format!("-{out}")
+    } else {
+        out
+    }
 }
 
 fn stem(db: &Path) -> String {
@@ -246,6 +335,14 @@ pub fn run(args: &[String]) -> Result<()> {
                 println!("wrote {}", n.display());
             }
         }
+        Cmd::GmnsViz { gmns_db, mode, out } => {
+            if !gmns_db.exists() {
+                return Err(format!("{}: no such file", gmns_db.display()));
+            }
+            let out = out.unwrap_or_else(|| format!("{}_viewer.html", stem(&gmns_db)).into());
+            let v = crate::gmns_viewer::write_viewer(&gmns_db, &out, &mode)?;
+            println!("wrote {} — open in a browser", v.path.display());
+        }
         Cmd::GisDebug { export_path, source_db, out, name, json } => {
             for p in std::iter::once(&export_path).chain(source_db.as_ref()) {
                 if !p.exists() {
@@ -264,6 +361,98 @@ pub fn run(args: &[String]) -> Result<()> {
                 println!("{}", j.dump(Some(1)));
             } else {
                 println!("wrote {} — open in a browser", out.display());
+            }
+        }
+        Cmd::Gmns {
+            db,
+            out,
+            modes,
+            to_csv,
+            no_lane_geometry,
+            meso,
+            meso_modes,
+            combined,
+            drive_side,
+            no_pair_carriageways,
+            walk_frame,
+            walk_clearance,
+            micro,
+            micro_modes,
+            gtfs,
+            gtfs_max_m,
+            csv_extensions,
+            check,
+        } => {
+            check_db(&db)?;
+            if let Some(p) = gtfs.iter().find(|p| !p.exists()) {
+                return Err(format!("--gtfs: {} does not exist", p.display()));
+            }
+            let out = out.unwrap_or_else(|| format!("{}_gmns.duckdb", stem(&db)).into());
+            let o = crate::gmns::GmnsOptions {
+                modes: modes.clone(),
+                lane_geometry: !no_lane_geometry,
+                pair_carriageways: !no_pair_carriageways,
+                drive_side,
+                combined,
+                to_csv: to_csv.clone(),
+                csv_extensions,
+                gtfs,
+                gtfs_max_m,
+                walk_frame,
+                walk_clearance_m: walk_clearance,
+            };
+            let res = crate::gmns::to_gmns_with(&db, &out, &o)?;
+            println!("wrote {}", out.display());
+            for m in &res.modes {
+                let n = |t: &str| m.counts.iter().find(|c| c.0 == t).map(|c| c.1).unwrap_or(0);
+                println!(
+                    "  {}: {} links, {} lanes, {} movements, {} signals, {} curb segments",
+                    m.mode,
+                    n("link"),
+                    n("lane"),
+                    n("movement"),
+                    n("signal_controller"),
+                    n("curb_seg")
+                );
+            }
+            if let Some((nodes, links)) = res.combined {
+                println!("  combined: gmns_all — {links} links, {nodes} nodes (mode-tagged)");
+            }
+            if meso {
+                for (mode, nodes, normal, movement) in crate::gmns_meso::to_meso(&out, &meso_modes, 6.0)? {
+                    println!("  meso[{mode}]: {} meso links ({normal} section + {movement} connector), {nodes} nodes", normal + movement);
+                }
+            }
+            if micro {
+                for (mode, nodes, cell, change, turn) in crate::gmns_meso::to_micro(&out, &micro_modes, 7.0)? {
+                    println!("  micro[{mode}]: {} micro links ({cell} cell + {change} lane-change + {turn} turn), {nodes} nodes", cell + change + turn);
+                }
+            }
+            if let Some(d) = &to_csv {
+                println!("  + GMNS CSVs -> {}", d.display());
+            }
+            if check {
+                let rows = crate::gmns_check::check_gmns(&out, &modes)?;
+                for g in crate::gmns_check::graph_report(&out, &modes)? {
+                    println!(
+                        "  graph {}: {} nodes, {} links; the largest strongly connected part has {} nodes ({:.0}%), {} parts in all; {} dead-end links",
+                        g.schema,
+                        thousands(g.nodes),
+                        thousands(g.links as i64),
+                        thousands(g.biggest as i64),
+                        g.share * 100.0,
+                        thousands(g.parts as i64),
+                        thousands(g.dead_ends as i64)
+                    );
+                }
+                let failed: Vec<_> = rows.iter().filter(|r| r.2 != 0).collect();
+                for (schema, name, bad, total) in &failed {
+                    eprintln!("  CHECK FAILED {schema}: {name}: {bad} of {total}");
+                }
+                println!("  checks: {} of {} passed", rows.len() - failed.len(), rows.len());
+                if !failed.is_empty() {
+                    std::process::exit(1);
+                }
             }
         }
         Cmd::Lanelet2 { gmns_db, mode, out } => {

@@ -1,0 +1,54 @@
+gmns_cycling	link starts at its from_node	0	11293
+gmns_cycling	link ends at its to_node	0	11293
+gmns_cycling	link from_node / to_node exist	0	11293
+gmns_cycling	link is not a loop	0	11293
+gmns_cycling	link.length is its geometry's length	0	11293
+gmns_cycling	node has a link	0	4638
+gmns_cycling	link has lane rows	0	11293
+gmns_cycling	lane_num is 1..n	0	11293
+gmns_cycling	link.lanes is not more than the lane rows	0	2933
+gmns_cycling	location lies on its link	0	3469
+gmns_cycling	movement turns where its inbound link ends	0	21426
+gmns_cycling	movement turns where its outbound link starts	0	21426
+gmns_cycling	movement ib and ob links differ	0	21426
+gmns_cycling	movement inbound lanes exist	0	21426
+gmns_cycling	movement outbound lanes exist	0	21426
+gmns_cycling	movement lane ranges are as long on both sides	0	21426
+gmns_cycling	movement has both lane ranges or neither	0	21426
+gmns_driving	link starts at its from_node	0	2862
+gmns_driving	link ends at its to_node	0	2862
+gmns_driving	link from_node / to_node exist	0	2862
+gmns_driving	link is not a loop	0	2862
+gmns_driving	link.length is its geometry's length	0	2862
+gmns_driving	node has a link	0	1773
+gmns_driving	link has lane rows	0	2862
+gmns_driving	lane_num is 1..n	42	2862
+gmns_driving	link.lanes is not more than the lane rows	0	2862
+gmns_driving	location lies on its link	0	1628
+gmns_driving	movement turns where its inbound link ends	0	3762
+gmns_driving	movement turns where its outbound link starts	0	3762
+gmns_driving	movement ib and ob links differ	0	3762
+gmns_driving	movement inbound lanes exist	43	3762
+gmns_driving	movement outbound lanes exist	52	3762
+gmns_driving	movement lane ranges are as long on both sides	0	3762
+gmns_driving	movement has both lane ranges or neither	0	3762
+gmns_walking	link starts at its from_node	0	11934
+gmns_walking	link ends at its to_node	0	11934
+gmns_walking	link from_node / to_node exist	0	11934
+gmns_walking	link is not a loop	0	11934
+gmns_walking	link.length is its geometry's length	0	11934
+gmns_walking	node has a link	0	4579
+gmns_walking	link has lane rows	0	11934
+gmns_walking	lane_num is 1..n	0	11934
+gmns_walking	link.lanes is not more than the lane rows	200	2320
+gmns_walking	location lies on its link	0	3590
+gmns_walking	movement turns where its inbound link ends	0	23273
+gmns_walking	movement turns where its outbound link starts	0	23273
+gmns_walking	movement ib and ob links differ	0	23273
+gmns_walking	movement inbound lanes exist	0	23273
+gmns_walking	movement outbound lanes exist	0	23273
+gmns_walking	movement lane ranges are as long on both sides	0	23273
+gmns_walking	movement has both lane ranges or neither	0	23273
+graph	gmns_cycling	4638	11293	4445	104	22
+graph	gmns_driving	1773	2862	1605	122	25
+graph	gmns_walking	4579	11934	4462	38	0

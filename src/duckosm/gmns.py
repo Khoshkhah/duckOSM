@@ -747,29 +747,30 @@ def _build_combined(con, modes, name):
                 + " UNION ".join(f"SELECT * FROM gmns_{m}.use_definition" for m in modes))
     con.execute("CREATE TABLE gmns_all.use_group AS "
                 + " UNION ".join(f"SELECT * FROM gmns_{m}.use_group" for m in modes))
+    # the first value in the order of the modes (any_value() took any: the db was not the same on two runs)
     con.execute(f"""CREATE TABLE gmns_all.node AS
-      WITH u AS ({" UNION ALL ".join(f"SELECT * FROM gmns_{m}.node" for m in modes)})
-      SELECT node_id, any_value(name) AS name, any_value(x_coord) AS x_coord,
-             any_value(y_coord) AS y_coord, any_value(z_coord) AS z_coord,
-             any_value(node_type) AS node_type, max(ctrl_type) AS ctrl_type,
-             any_value(zone_id) AS zone_id, any_value(parent_node_id) AS parent_node_id,
-             any_value(geom) AS geom
+      WITH u AS ({" UNION ALL ".join(f"SELECT *, {k} AS _k FROM gmns_{m}.node" for k, m in enumerate(modes))})
+      SELECT node_id, first(name ORDER BY _k) FILTER (WHERE name IS NOT NULL) AS name, first(x_coord ORDER BY _k) FILTER (WHERE x_coord IS NOT NULL) AS x_coord,
+             first(y_coord ORDER BY _k) FILTER (WHERE y_coord IS NOT NULL) AS y_coord, first(z_coord ORDER BY _k) FILTER (WHERE z_coord IS NOT NULL) AS z_coord,
+             first(node_type ORDER BY _k) FILTER (WHERE node_type IS NOT NULL) AS node_type, max(ctrl_type) AS ctrl_type,
+             first(zone_id ORDER BY _k) FILTER (WHERE zone_id IS NOT NULL) AS zone_id, first(parent_node_id ORDER BY _k) FILTER (WHERE parent_node_id IS NOT NULL) AS parent_node_id,
+             first(geom ORDER BY _k) FILTER (WHERE geom IS NOT NULL) AS geom
       FROM u GROUP BY node_id""")
     con.execute(f"""CREATE TABLE gmns_all.link AS
-      WITH u AS ({" UNION ALL ".join(f"SELECT * FROM gmns_{m}.link" for m in modes)})
-      SELECT link_id, any_value(name) AS name, any_value(from_node_id) AS from_node_id,
-             any_value(to_node_id) AS to_node_id, any_value(directed) AS directed,
-             any_value(geometry_id) AS geometry_id, any_value(geometry) AS geometry,
-             any_value(parent_link_id) AS parent_link_id, any_value(dir_flag) AS dir_flag,
-             any_value(length) AS length, any_value(grade) AS grade,
-             any_value(facility_type) AS facility_type, any_value(capacity) AS capacity,
-             any_value(free_speed) AS free_speed, any_value(lanes) AS lanes,
-             any_value(bike_facility) AS bike_facility, any_value(ped_facility) AS ped_facility,
-             any_value(parking) AS parking,
+      WITH u AS ({" UNION ALL ".join(f"SELECT *, {k} AS _k FROM gmns_{m}.link" for k, m in enumerate(modes))})
+      SELECT link_id, first(name ORDER BY _k) FILTER (WHERE name IS NOT NULL) AS name, first(from_node_id ORDER BY _k) FILTER (WHERE from_node_id IS NOT NULL) AS from_node_id,
+             first(to_node_id ORDER BY _k) FILTER (WHERE to_node_id IS NOT NULL) AS to_node_id, first(directed ORDER BY _k) FILTER (WHERE directed IS NOT NULL) AS directed,
+             first(geometry_id ORDER BY _k) FILTER (WHERE geometry_id IS NOT NULL) AS geometry_id, first(geometry ORDER BY _k) FILTER (WHERE geometry IS NOT NULL) AS geometry,
+             first(parent_link_id ORDER BY _k) FILTER (WHERE parent_link_id IS NOT NULL) AS parent_link_id, first(dir_flag ORDER BY _k) FILTER (WHERE dir_flag IS NOT NULL) AS dir_flag,
+             first(length ORDER BY _k) FILTER (WHERE length IS NOT NULL) AS length, first(grade ORDER BY _k) FILTER (WHERE grade IS NOT NULL) AS grade,
+             first(facility_type ORDER BY _k) FILTER (WHERE facility_type IS NOT NULL) AS facility_type, first(capacity ORDER BY _k) FILTER (WHERE capacity IS NOT NULL) AS capacity,
+             first(free_speed ORDER BY _k) FILTER (WHERE free_speed IS NOT NULL) AS free_speed, first(lanes ORDER BY _k) FILTER (WHERE lanes IS NOT NULL) AS lanes,
+             first(bike_facility ORDER BY _k) FILTER (WHERE bike_facility IS NOT NULL) AS bike_facility, first(ped_facility ORDER BY _k) FILTER (WHERE ped_facility IS NOT NULL) AS ped_facility,
+             first(parking ORDER BY _k) FILTER (WHERE parking IS NOT NULL) AS parking,
              string_agg(DISTINCT allowed_uses, ',' ORDER BY allowed_uses) AS allowed_uses,
-             any_value(toll) AS toll, any_value(jurisdiction) AS jurisdiction,
-             any_value(row_width) AS row_width, any_value(osm_id) AS osm_id, any_value(edge_ref) AS edge_ref, any_value(footway) AS footway, any_value(crossing) AS crossing, any_value(crossing_markings) AS crossing_markings, any_value(bridge) AS bridge,
-             any_value(tunnel) AS tunnel, any_value(layer) AS layer, any_value(geom) AS geom
+             first(toll ORDER BY _k) FILTER (WHERE toll IS NOT NULL) AS toll, first(jurisdiction ORDER BY _k) FILTER (WHERE jurisdiction IS NOT NULL) AS jurisdiction,
+             first(row_width ORDER BY _k) FILTER (WHERE row_width IS NOT NULL) AS row_width, first(osm_id ORDER BY _k) FILTER (WHERE osm_id IS NOT NULL) AS osm_id, first(edge_ref ORDER BY _k) FILTER (WHERE edge_ref IS NOT NULL) AS edge_ref, first(footway ORDER BY _k) FILTER (WHERE footway IS NOT NULL) AS footway, first(crossing ORDER BY _k) FILTER (WHERE crossing IS NOT NULL) AS crossing, first(crossing_markings ORDER BY _k) FILTER (WHERE crossing_markings IS NOT NULL) AS crossing_markings, first(bridge ORDER BY _k) FILTER (WHERE bridge IS NOT NULL) AS bridge,
+             first(tunnel ORDER BY _k) FILTER (WHERE tunnel IS NOT NULL) AS tunnel, first(layer ORDER BY _k) FILTER (WHERE layer IS NOT NULL) AS layer, first(geom ORDER BY _k) FILTER (WHERE geom IS NOT NULL) AS geom
       FROM u GROUP BY link_id""")
     return {t: con.execute(f"SELECT count(*) FROM gmns_all.{t}").fetchone()[0]
             for t in ("node", "link")}
@@ -2314,11 +2315,11 @@ def _dump_csv(con, modes, to_csv, schema_prefix="gmns_", csv_extensions=False):
             if con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? "
                            "AND table_name = ?", [sch, t]).fetchone()[0] == 0:
                 continue
-            excl = _CSV_EXCLUDE.get(t)
+            kinds = dict(con.execute("SELECT column_name, data_type FROM duckdb_columns() WHERE "
+                                     "schema_name = ? AND table_name = ?", [sch, t]).fetchall())
+            excl = [c for c in _CSV_EXCLUDE.get(t, []) if c in kinds]   # only the table's own: a cycling lane has no geom_cut
             sel = f"* EXCLUDE ({', '.join(excl)})" if excl else "*"
             if excl and csv_extensions:        # keep the extension columns, as the spec's user-defined `u_` fields
-                kinds = dict(con.execute("SELECT column_name, data_type FROM duckdb_columns() WHERE "
-                                         "schema_name = ? AND table_name = ?", [sch, t]).fetchall())
                 sel += "".join(f", {c} AS u_{c}" for c in excl if kinds.get(c) != "GEOMETRY")
             path = os.path.join(d, f"{t}.csv")
             con.execute(f"COPY (SELECT {sel} FROM {sch}.{t}) TO '{path}' (HEADER, DELIMITER ',')")

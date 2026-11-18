@@ -5,8 +5,45 @@ on:
     branches: [main]
   pull_request:
 
+# a new commit on a branch stops the run of its old commit
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # code: false when a pull request changes only the docs (docs/, README.md, CHANGELOG.md, mkdocs.yml). Then the jobs of the code show
+  # as skipped, and the job docs is the check.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
+          echo "$files"
+          if echo "$files" | grep -vE '^(docs/|README\.md$|CHANGELOG\.md$|mkdocs\.yml$)' | grep -q .; then echo code=true; else echo code=false; fi >> "$GITHUB_OUTPUT"
+
+  # the docs site, as docs.yml builds it for Pages
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # MkDocs 2.0 drops the plugin/theme system Material depends on: stay on 1.x
+      - run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6"
+      - run: mkdocs build --strict
+
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30      # a hung test must not hold the runner for GitHub's 6 hours
     strategy:
@@ -35,6 +72,8 @@ jobs:
 
   # The Rust engine (rust/, docs/design/rust_engine_move.md): the golden tests of the crates. One invocation compiles DuckDB one time.
   rust:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     # the time of this job was the link of each test binary with thin LTO (about 50 binaries, each with the bundled DuckDB):
@@ -64,6 +103,8 @@ jobs:
   # duckosm-rust viz and route-map in a browser (tests/test_route_map_rust.py, group F of docs/design/all_in_rust.md): the planner page routes
   # as route-points and directions on Monaco, walk + drive, and the pages at 390 x 844
   maps-page:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # ubuntu-24.04, not ubuntu-latest: Playwright 1.55 has no Chromium for ubuntu-latest (26.04) (2026-11-11)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -88,6 +129,8 @@ jobs:
 
   # duckosm edit in a browser (tests/test_edit_page.py, docs/design/edit_page.md): the page of a Monaco build, a change, the box, Build again
   edit-page:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # ubuntu-24.04, not ubuntu-latest: Playwright 1.55 has no Chromium for ubuntu-latest (26.04) (2026-11-11)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -108,6 +151,8 @@ jobs:
 
   # duckosm studio in a browser (tests/test_studio_page.py, docs/guides/studio.md): the six steps on Monaco, at a desktop width and at 390 x 844
   studio-page:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # ubuntu-24.04, not ubuntu-latest: Playwright 1.55 has no Chromium for ubuntu-latest (26.04) (2026-11-11)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -130,6 +175,8 @@ jobs:
       - run: python -m pytest tests/test_studio_page.py -q -rs
 
   package:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

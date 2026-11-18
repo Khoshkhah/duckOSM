@@ -861,6 +861,7 @@ dependencies = [
  "duckdb",
  "duckosm-build",
  "flate2",
+ "geo",
 ]
 
 [[package]]

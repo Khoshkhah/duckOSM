@@ -45,6 +45,41 @@ GMNS = {"link": "link_id, name, from_node_id, to_node_id, length, capacity, free
         "lane": "link_id, allowed_uses, width, geom"}
 
 
+# the columns that gmns-viz reads (driving, with --meso --micro)
+VIEWER = {"gmns_driving.lane": "link_id, lane_num, allowed_uses, turn, geom",
+          "gmns_driving.node": "node_id, x_coord, y_coord",
+          "gmns_driving.link": "link_id, to_node_id, lanes, length",
+          "gmns_driving.movement": "node_id",
+          "meso_driving.meso_link": "link_id, macro_link_id, lanes, facility_type, mvmt_txt_id, start_ib_lane, end_ib_lane, meso_type, geom",
+          "meso_driving.meso_node": "geom",
+          "micro_driving.micro_link": "cell_type, mvmt_txt_id, geom"}
+
+
+def viewer(gmns_db, out, tmp):
+    """The viewer fixture (tests/data/exports/gmns_viewer/: the columns that gmns-viz reads, as Parquet, from `gmns_db`) and
+    monaco_gmns_viewer.tsv: the MD5 and the size of the page of Python's write_viewer on a db made from these files (the same
+    SQL as `viewer_db` in golden.rs)."""
+    import hashlib
+    from duckosm.gmns_viewer import write_viewer
+    d = out / "gmns_viewer"
+    d.mkdir(exist_ok=True)
+    con = duckdb.connect(str(gmns_db), read_only=True)
+    con.execute("INSTALL spatial; LOAD spatial")
+    for t, cols in VIEWER.items():
+        con.execute(f"COPY (SELECT {cols} FROM {t}) TO '{d}/{t}.parquet' (FORMAT parquet, COMPRESSION zstd)")
+    con.close()
+    db = Path(tmp) / "viewer" / "monaco_gmns.duckdb"
+    db.parent.mkdir()
+    con = duckdb.connect(str(db))
+    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA gmns_driving; CREATE SCHEMA meso_driving; CREATE SCHEMA micro_driving")
+    for t in VIEWER:
+        con.execute(f"CREATE TABLE {t} AS SELECT * FROM read_parquet('{d}/{t}.parquet')")
+    con.close()
+    write_viewer(db, Path(tmp) / "viewer" / "v.html")
+    page = (Path(tmp) / "viewer" / "v.html").read_bytes()
+    (out / "monaco_gmns_viewer.tsv").write_text(f"driving\t{hashlib.md5(page).hexdigest()}\t{len(page)}\n")
+
+
 def gmns_fixture(gmns_db, out):
     con = duckdb.connect(gmns_db, read_only=True)
     con.execute("INSTALL spatial; LOAD spatial")
@@ -115,11 +150,74 @@ def columns(db, schema_like="gmns\\_%"):
     return lines
 
 
+def gtfs_feed(db, path):
+    """A small GTFS feed of Monaco for `--gtfs` (the same bytes on each run): each OpenStreetMap bus stop 2 m north of its node,
+    served by a bus (route_type 3, or 700 for every second stop) or by no trip (every tenth stop); the railway stops (a train,
+    route_type 2), the station entrances (location_type 2), the station (1) and one stop far from Monaco. Deflated."""
+    import zipfile
+    con = duckdb.connect(str(db), read_only=True)
+    q = lambda w: con.execute(f"SELECT osm_id, tags['name'], lat, lon FROM raw.nodes WHERE {w} ORDER BY osm_id").fetchall()  # noqa: E731
+    stops, service = [], {}
+    for i, (osm_id, name, lat, lon) in enumerate(q("tags['highway'] = 'bus_stop'")):
+        stops.append((f"B{osm_id}", name or "", round(lat + 0.00002, 7), lon, 0))
+        if i % 10:
+            service[f"B{osm_id}"] = 700 if i % 2 else 3
+    for osm_id, name, lat, lon in q("tags['railway'] = 'stop'"):
+        stops.append((f"R{osm_id}", name or "", lat, lon, 0))
+        service[f"R{osm_id}"] = 2
+    for osm_id, name, lat, lon in q("tags['railway'] = 'train_station_entrance'"):
+        stops.append((f"E{osm_id}", name or "", lat, lon, 2))
+        service[f"E{osm_id}"] = 2
+    for osm_id, name, lat, lon in q("tags['railway'] = 'station'"):
+        stops.append((f"S{osm_id}", name or "", lat, lon, 1))
+    stops.append(("FAR", "Far away", 43.9, 7.5, 0))
+    service["FAR"] = 3
+    con.close()
+    types = sorted(set(service.values()))
+    files = {"stops.txt": [["stop_id", "stop_name", "stop_lat", "stop_lon", "location_type"], *stops],
+             "routes.txt": [["route_id", "route_type"], *[[f"r{t}", t] for t in types]],
+             "trips.txt": [["trip_id", "route_id"], *[[f"t{t}", f"r{t}"] for t in types]],
+             "stop_times.txt": [["trip_id", "stop_id"], *[[f"t{t}", sid] for sid, t in service.items()]]}
+    with zipfile.ZipFile(path, "w") as z:
+        for n, rows in files.items():
+            text = "".join(",".join(f'"{v}"' if "," in str(v) else str(v) for v in r) + "\n" for r in rows)
+            z.writestr(zipfile.ZipInfo(n, (1980, 1, 1, 0, 0, 0)), text, compress_type=zipfile.ZIP_DEFLATED)
+
+
 def gmns(db, out):
-    """duckosm gmns on Monaco (its defaults: every mode, lane geometry) -> one line for each column of the GMNS db."""
+    """duckosm gmns on Monaco (every mode, lane geometry, with --combined and --to-csv) -> one line for each column of the GMNS
+    db, the MD5 of each CSV file, the rows of gmns_check (check_gmns, graph_report), one line for each column of the meso
+    and micro networks, one line for each column of `location` with the stops of a GTFS feed, and one line for each column
+    of gmns_walking with --walk-frame, and the gmns-viz fixture and page (`viewer`)."""
+    import hashlib
+    from duckosm.gmns import to_meso, to_micro
+    from duckosm.gmns_check import check_gmns, graph_report
     with tempfile.TemporaryDirectory() as tmp:
-        to_gmns(db, f"{tmp}/monaco_gmns.duckdb")
+        to_gmns(db, f"{tmp}/monaco_gmns.duckdb", combined=True, to_csv=f"{tmp}/csv")
         (out / "monaco_gmns_columns.tsv").write_text("\n".join(columns(f"{tmp}/monaco_gmns.duckdb")) + "\n")
+        csv = sorted(Path(f"{tmp}/csv").rglob("*.csv"))
+
+        def md5(p):                       # the header and the sorted rows: the order of some tables is that of a parallel query
+            head, *rows = p.read_text().split("\n")
+            return hashlib.md5("\n".join([head, *sorted(r for r in rows if r)]).encode()).hexdigest()
+        (out / "monaco_gmns_csv.tsv").write_text("".join(f"{p.relative_to(f'{tmp}/csv')}\t{md5(p)}\n" for p in csv))
+        rows = [f"{s}\t{n}\t{bad}\t{total}" for s, n, bad, total in check_gmns(f"{tmp}/monaco_gmns.duckdb")]
+        rows += [f"graph\t{s}\t{n}\t{links}\t{big}\t{parts}\t{dead}" for s, n, links, big, _, parts, dead in graph_report(f"{tmp}/monaco_gmns.duckdb")]
+        (out / "monaco_gmns_check.tsv").write_text("\n".join(rows) + "\n")
+        # meso and micro (`--meso --micro`) of driving and cycling
+        to_meso(f"{tmp}/monaco_gmns.duckdb", modes=["driving", "cycling"])
+        to_micro(f"{tmp}/monaco_gmns.duckdb", modes=["driving", "cycling"])
+        lines = columns(f"{tmp}/monaco_gmns.duckdb", "meso\\_%") + columns(f"{tmp}/monaco_gmns.duckdb", "micro\\_%")[1:]
+        (out / "monaco_gmns_meso_columns.tsv").write_text("\n".join(lines) + "\n")
+        viewer(f"{tmp}/monaco_gmns.duckdb", out, tmp)      # gmns-viz
+        # --gtfs: the stops of a feed as location rows
+        gtfs_feed(db, out / "monaco_gtfs.zip")
+        to_gmns(db, f"{tmp}/gtfs.duckdb", gtfs=[str(out / "monaco_gtfs.zip")])
+        lines = [x for x in columns(f"{tmp}/gtfs.duckdb") if x.startswith("table\t") or ".location\t" in x]
+        (out / "monaco_gmns_gtfs_location.tsv").write_text("\n".join(lines) + "\n")
+        # --walk-frame: the columns of gmns_walking (its lane lines are checked by their properties)
+        to_gmns(db, f"{tmp}/wf/monaco_gmns.duckdb", modes=["driving", "walking"], walk_frame=True)
+        (out / "monaco_gmns_walk_frame_columns.tsv").write_text("\n".join(columns(f"{tmp}/wf/monaco_gmns.duckdb", "gmns\\_walking")) + "\n")
 
 
 def gz(src, dst):
