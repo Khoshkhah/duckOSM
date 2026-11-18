@@ -1,26 +1,48 @@
 # Exports
 
-Every export reads a built database and keeps the **`edge_id` as the id in the target format**
-(SUMO edge id, MATSim link id, GMNS `link_id`, OpenDRIVE road id, a GIS attribute). So anything
-you keyed on an `edge_id` in duckOSM (counts, speeds, sensor data) joins straight onto the
-exported network.
+## Exports by use
 
-## Which export for which tool
+Each export reads a built database. Pick the group of your work.
 
-| You use | Export | Command |
+### Traffic simulation
+
+| Tool | Export | Command |
 |---|---|---|
 | SUMO | [SUMO](sumo.md) `.net.xml` | `duckosm sumo` |
-| MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, plus lanes and signals | `duckosm matsim`, `matsim-lanes` |
-| DTALite, Path4GMNS, other GMNS tools | [GMNS](gmns.md) tables (DuckDB or CSV), plus meso / micro networks | `duckosm gmns` |
-| QGIS, ArcGIS, FME, Visum, Aimsun importers | [GeoPackage or shapefile](gis.md) | `duckosm export-gis` |
-| Python analysis | [networkx](networkx.md) graph, GraphML, gpickle | `duckosm export-graph` |
-| CARLA, esmini, Vissim | [OpenDRIVE](opendrive.md) `.xodr` (experimental) | `duckosm opendrive` |
-| Autoware, the lanelet2 library | [Lanelet2](lanelet2.md) `.osm` (experimental) | `duckosm lanelet2` |
-| OpenTrack, RailSys, Viriato | [railML 2.4](railml.md) (experimental) | `duckosm railml` |
-| Your own lane-level routing | [a lane graph](lane-routing.md) (experimental) | `duckosm lane-graph`, `route-lanes` |
+| MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals | `duckosm matsim`, `matsim-lanes` |
+| DTALite, Path4GMNS | [GMNS](gmns.md) tables: macro, meso (`--meso`), micro (`--micro`) | `duckosm gmns` |
+| Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) | `duckosm railml` |
 
-**Experimental** exports work and are tested for structure, but haven't been loaded in the target
-tools yet. If you try one, an issue saying how it went helps.
+### Maps and GIS
+
+| Tool | Export | Command |
+|---|---|---|
+| QGIS, ArcGIS, FME | the network as [GeoPackage or shapefile](gis.md) | `duckosm export-gis` |
+| QGIS, ArcGIS | GDAL's five OSM layers, as GeoPackage or GeoParquet ([duckOSM and GDAL](../concepts/gdal.md)) | `duckosm quack --gdal` |
+| DuckDB, pandas, Spark | the OSM features table of QuackOSM, as GeoParquet ([duckOSM and QuackOSM](../concepts/quackosm.md)) | `duckosm quack` |
+
+### Graph analysis
+
+| Tool | Export | Command |
+|---|---|---|
+| networkx | [a networkx graph](networkx.md), GraphML, gpickle | `to_networkx()`, `duckosm export-graph` |
+| Your own router | the turn graph `edge_graph` in the database | `route()`, `Router` ([Route](../guides/route.md)) |
+
+### Lane level and 3D
+
+| Tool | Export | Command |
+|---|---|---|
+| CARLA, esmini, Vissim | [OpenDRIVE](opendrive.md) `.xodr` | `duckosm opendrive` |
+| Autoware, lanelet2 | [Lanelet2](lanelet2.md) `.osm` | `duckosm lanelet2` |
+| Your own lane router | [a lane graph](lane-routing.md) | `duckosm lane-graph`, `route-lanes` |
+
+OpenDRIVE, Lanelet2, railML and the lane graph are **experimental**: tested for structure, not yet loaded in the target tools.
+
+## The same id everywhere
+
+Each network export keeps the **`edge_id`** as the id in the target format: the SUMO edge id, the MATSim link id, the GMNS
+`link_id`, the OpenDRIVE road id, a GIS attribute. Data that you join on an `edge_id` in duckOSM (counts, speeds, sensor data)
+joins on the exported network too.
 
 ## Two starting points
 

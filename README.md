@@ -46,7 +46,7 @@ All outputs come from one `.osm.pbf` file.
 OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
 file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
 
-<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-page.png" alt="Edit OSM data: a road and its form" width="720">
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-turn.png" alt="The Turn tab: road 688731299 is picked, the junction box shows its junction, and the list shows the two roads that leave it, each with Allowed. On the map, the road is blue, the roads that leave are green and the road that only arrives is violet" width="720">
 
 | Where | How |
 |---|---|
@@ -62,7 +62,7 @@ file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does n
 | Turns | a turn that a driver cannot make, or must make |
 | New roads | a road that OSM does not have |
 
-The network and all its exports use your fixes. More: [Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/).
+The network, all its exports, and the quack outputs (`duckosm quack --fixes`) use your fixes. More: [Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/).
 
 ## Two versions, one engine
 
