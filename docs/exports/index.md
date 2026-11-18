@@ -4,23 +4,15 @@
 
 The levels go from the raw OSM data to the most detailed network. Each level is made from the level before it.
 
-```mermaid
-flowchart LR
-  L0["<b>0. The OSM file</b><br/>.osm.pbf<br/>cut to your area"]
-  L1["<b>1. OSM data</b><br/>no network<br/>QuackOSM · GDAL"]
-  L2["<b>2. The network</b><br/>edges, edge_id, turns<br/>GeoPackage · networkx"]
-  L3["<b>3. Traffic simulation</b><br/>links, nodes, turns<br/>GMNS · MATSim · SUMO"]
-  L4["<b>4. Lane level and 3D</b><br/>each lane, its shape<br/>Lanelet2 · OpenDRIVE"]
-  F(["your OSM fixes"])
-  L0 --> L1 --> L2 --> L3 --> L4
-  F -.-> L0
-  F -.-> L1
-  F -.-> L2
-  click L1 "#1-osm-data"
-  click L2 "#2-the-network"
-  click L3 "#3-traffic-simulation"
-  click L4 "#4-lane-level-and-3d"
-```
+<div class="dk-levels">
+<div class="lv"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></div>
+<a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
+<a class="lv" href="#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
+<a class="lv" href="#3-traffic-simulation"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
+<a class="lv" href="#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
+</div>
+
+Your OSM fixes go into every level.
 
 ### 1. OSM data
 
