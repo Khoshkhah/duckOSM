@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["duckdb", "zstd", "tzf"]
+default = ["duckdb", "zstd", "tzf", "gpkg"]
+# quack --gdal -f gpkg: the GeoPackage (SQLite, a C library: not in the browser build)
+gpkg = ["dep:rusqlite"]
 # the time zone of an area from the world map of tzf-rs (2.7 MB with gzip): natively; the browser build uses the
 # page's time zone table (www/timezones.json) instead
 tzf = ["dep:tzf-rs"]
@@ -19,6 +21,7 @@ zstd = ["duckosm-parquet/zstd", "duckosm-core/zstd"]
 duckosm-core = { path = "../duckosm-core" }
 duckosm-parquet = { path = "../duckosm-parquet", default-features = false, features = ["pbf"] }
 duckosm-duckdb = { path = "../duckosm-duckdb", optional = true }
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 yaml-rust2 = "0.13"
 # the H3 columns (h3.rs): pure Rust, its cells equal those of the C library that the Python package h3 wraps
 h3o = { version = "0.11", features = ["geo"] }
@@ -41,5 +44,7 @@ arrow-array = "=60.0.0"
 roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "39696602fac3a6e200fd324526022bc88239b95f" }
 
 [dev-dependencies]
+# the golden file of quack --gdal (tests/quack_gdal_monaco.rs)
+flate2 = "1"
 # the tests read the .duckdb file that the build writes (the version of duckosm-duckdb)
 duckdb = { version = "=1.10506.1", features = ["bundled"] }

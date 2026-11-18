@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`duckosm-rust quack --gdal`** (`docs/rust/quack.md`, "GDAL layers"): the five layers of GDAL's OSM driver (`points`,
+  `lines`, `multilinestrings`, `multipolygons`, `other_relations`, GDAL's default `osmconf.ini`), made by the quack engine in one
+  pass, as a GeoPackage (default) or one GeoParquet file for each layer (`-f geoparquet`), also by tiles (`--tile-zoom`). On
+  Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
+  on the Mac mini: 3.7 s against 8.9 s for `ogr2ogr`.
+
 - **`duckosm-rust extract` and `admin`** (`docs/design/all_in_rust.md`, group B), with the options of the Python commands. `admin`
   reads the boundary relations of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), and `--gpkg` writes or reuses
   a GeoPackage; `extract` cuts a database to an area by name, OSM id or GeoJSON file, with the time zone of the Rust build. On

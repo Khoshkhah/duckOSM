@@ -59,6 +59,28 @@ last digits.
 
 One row for each OSM element with tags, as QuackOSM 0.20.0 with its default options.
 
+## GDAL layers (`--gdal`)
+
+`--gdal` writes the five layers of GDAL's OSM driver (`points`, `lines`, `multilinestrings`, `multipolygons`,
+`other_relations`), as `ogr2ogr` and QGIS give them for the `.osm.pbf` file with GDAL's default `osmconf.ini`. The same
+engine makes them in one pass. The output is a GeoPackage, or one GeoParquet file for each layer with `-f geoparquet`.
+
+```bash
+duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky    # out/kentucky_gdal.gpkg
+```
+
+The rows are the same as the rows of `ogr2ogr -f GPKG out.gpkg kentucky.osm.pbf` (GDAL 3.13.3): the same ids, column
+values and geometries in each layer. A test checks this on Monaco.
+
+Kentucky (141 MB), Mac mini:
+
+| | `ogr2ogr` (GDAL 3.13.3) | `quack --gdal` |
+|---|---|---|
+| Time, GeoPackage | 8.9 s | **3.7 s** |
+| Time, GeoPackage, `--tile-zoom 8` | | 5.3 s |
+| Time, GeoParquet | | 2.7 s |
+| Memory | **0.45 GB** | 1.1 GB |
+
 ## Where QuackOSM is better
 
 - Its `.duckdb` file is smaller (France: 19.7 GB against 22.3 GB).

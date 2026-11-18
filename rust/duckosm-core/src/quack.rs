@@ -34,7 +34,7 @@ use std::io::Read;
 pub type Pt = (f64, f64);
 
 /// One row of the features table: `node/<id>`, `way/<id>` or `relation/<id>`, the tags, and the geometry as WKB.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Feature {
     pub feature_id: String,
     pub tags: RawTags,
@@ -43,11 +43,21 @@ pub struct Feature {
     pub center: Pt,
     /// The tile of a tile table owns the row ([`Owner`] with no `relations`); true in all other runs.
     pub owner: bool,
+    /// quack --gdal: the layer of the row (`crate::gdal::POINTS` to `OTHER_RELATIONS`); 0 in the table of quack.
+    pub layer: u8,
+    /// quack --gdal by tiles: the row is one member of a relation of `multilinestrings` or `other_relations`, at this
+    /// place in the members (`crate::gdal::Parts` joins the members of all tiles into the row). None: a whole row.
+    pub part: Option<u32>,
 }
 
 impl Feature {
     fn new(feature_id: String, tags: RawTags, g: &Geom) -> Feature {
-        Feature { feature_id, tags, geometry: g.wkb(), center: g.center(), owner: true }
+        Feature { feature_id, tags, geometry: g.wkb(), center: g.center(), owner: true, ..Default::default() }
+    }
+
+    /// A row of quack --gdal.
+    fn gdal(feature_id: String, layer: u8, tags: RawTags, geometry: Vec<u8>, center: Pt) -> Feature {
+        Feature { feature_id, tags, geometry, center, owner: true, layer, part: None }
     }
 }
 
@@ -570,11 +580,32 @@ fn relation_geometry(members: &[(&str, Vec<Pt>)]) -> Option<Geom> {
 }
 
 /// The ways and the relations of one block (pass 1): each way with 2 or more nodes, and each relation of the type
-/// multipolygon or boundary with its member ways.
+/// multipolygon or boundary with its member ways (quack --gdal: each relation with its member nodes and ways, and the
+/// roles as they are).
 #[derive(Default)]
 struct WaysPart {
+    gdal: bool,
     ways: Vec<(i64, RawTags, Vec<i64>)>,
-    relations: Vec<(i64, RawTags, Vec<(i64, String)>)>,
+    relations: Vec<(i64, RawTags, Vec<Member>)>,
+}
+
+/// A member of a relation: its id, its type and its role.
+type Member = (i64, MemberType, String);
+
+fn member_type(t: MemberType) -> u8 {
+    match t {
+        MemberType::Node => 0,
+        MemberType::Way => 1,
+        MemberType::Relation => 2,
+    }
+}
+
+fn member_of(b: u8) -> MemberType {
+    match b {
+        0 => MemberType::Node,
+        1 => MemberType::Way,
+        _ => MemberType::Relation,
+    }
 }
 
 impl RawSink for WaysPart {
@@ -594,14 +625,22 @@ impl RawSink for WaysPart {
         members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
     ) {
         let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        if self.gdal {
+            // GDAL: each relation, with its member nodes and ways
+            let m: Vec<Member> = members.filter(|m| m.1 != MemberType::Relation).map(|m| (m.0, m.1, m.2.to_string())).collect();
+            if !m.is_empty() {
+                self.relations.push((id, tags, m));
+            }
+            return;
+        }
         if !matches!(tag(&tags, "type"), Some("multipolygon" | "boundary")) {
             return;
         }
-        let ways: Vec<(i64, String)> =
+        let ways: Vec<Member> =
             // QuackOSM: COALESCE(ref_role, 'outer'), and ST_READOSM gives NULL for an empty role
             members
                 .filter(|m| m.1 == MemberType::Way)
-                .map(|m| (m.0, if m.2.is_empty() { "outer" } else { m.2 }.to_string()))
+                .map(|m| (m.0, m.1, if m.2.is_empty() { "outer" } else { m.2 }.to_string()))
                 .collect();
         if !ways.is_empty() {
             self.relations.push((id, tags, ways));
@@ -616,12 +655,20 @@ struct NodesPart {
     features: Vec<Feature>,
     /// quack by tiles and the tile tables: only the nodes in this tile are features
     tile: Option<Tile>,
+    gdal: bool,
 }
 
 impl RawSink for NodesPart {
     fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
         self.nodes.push((id, lon, lat));
         let tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        if self.gdal {
+            if crate::gdal::is_point(&tags) && self.tile.is_none_or(|t| Tile::of(t.z, lon, lat) == t) {
+                let geometry = crate::gdal::wkb_point((lon, lat));
+                self.features.push(Feature::gdal(format!("node/{id}"), crate::gdal::POINTS, tags, geometry, (lon, lat)));
+            }
+            return;
+        }
         let tags = clean(&tags);
         if !tags.is_empty() && self.tile.is_none_or(|t| Tile::of(t.z, lon, lat) == t) {
             self.features.push(Feature::new(format!("node/{id}"), tags, &Geom::Point((round7(lon), round7(lat)))));
@@ -677,17 +724,19 @@ fn get_tags(b: &mut &[u8]) -> RawTags {
     (0..get_u32(b)).map(|_| (get_str(b), get_str(b))).collect()
 }
 
-/// The header of a way in the temporary file of pass 1: its id, its number of nodes and its tags (before [`clean`]).
+/// The header of a way in the temporary file of pass 1: its id, its number of nodes, its tags (before [`clean`]), and
+/// whether its first node is its last node.
 struct Header;
 
-impl Codec<(i64, u32, RawTags)> for Header {
-    fn put(&self, r: &(i64, u32, RawTags), out: &mut Vec<u8>) {
+impl Codec<(i64, u32, RawTags, bool)> for Header {
+    fn put(&self, r: &(i64, u32, RawTags, bool), out: &mut Vec<u8>) {
         out.extend_from_slice(&r.0.to_le_bytes());
         put_u32(out, r.1 as usize);
         put_tags(out, &r.2);
+        out.push(r.3 as u8);
     }
-    fn get(&self, b: &mut &[u8]) -> (i64, u32, RawTags) {
-        (get_i64(b), get_u32(b), get_tags(b))
+    fn get(&self, b: &mut &[u8]) -> (i64, u32, RawTags, bool) {
+        (get_i64(b), get_u32(b), get_tags(b), take(b, 1)[0] == 1)
     }
 }
 
@@ -708,21 +757,25 @@ impl Codec<(i64, Vec<i64>)> for WayRefs {
     }
 }
 
-/// A relation (pass 1): its id, its tags and the role of each member way, in the order of the members.
+/// A relation (pass 1): its id, its tags and its members, in their order.
 struct RelHeader;
 
-impl Codec<(i64, RawTags, Vec<String>)> for RelHeader {
-    fn put(&self, r: &(i64, RawTags, Vec<String>), out: &mut Vec<u8>) {
+impl Codec<(i64, RawTags, Vec<Member>)> for RelHeader {
+    fn put(&self, r: &(i64, RawTags, Vec<Member>), out: &mut Vec<u8>) {
         out.extend_from_slice(&r.0.to_le_bytes());
         put_tags(out, &r.1);
         put_u32(out, r.2.len());
-        r.2.iter().for_each(|s| put_str(out, s));
+        for (id, t, role) in &r.2 {
+            out.extend_from_slice(&id.to_le_bytes());
+            out.push(member_type(*t));
+            put_str(out, role);
+        }
     }
-    fn get(&self, b: &mut &[u8]) -> (i64, RawTags, Vec<String>) {
+    fn get(&self, b: &mut &[u8]) -> (i64, RawTags, Vec<Member>) {
         let id = get_i64(b);
         let tags = get_tags(b);
         let n = get_u32(b);
-        (id, tags, (0..n).map(|_| get_str(b)).collect())
+        (id, tags, (0..n).map(|_| (get_i64(b), member_of(take(b, 1)[0]), get_str(b))).collect())
     }
 }
 
@@ -730,20 +783,30 @@ impl Codec<(i64, RawTags, Vec<String>)> for RelHeader {
 /// (`relation << 32 | place`). The key comes first, so a sort of the bytes reads it with [`line_key`].
 struct KeyedLine;
 
-/// A line of a member way: its key, whether the tile owns the way (the tile tables), and its points.
-impl Codec<(i64, bool, Vec<Grid>)> for KeyedLine {
-    fn put(&self, r: &(i64, bool, Vec<Grid>), out: &mut Vec<u8>) {
+/// The flags of a [`KeyedLine`]: the tile owns the way (the tile tables, quack --gdal by tiles), the way is an area
+/// (quack --gdal), the line is the point of a member node (quack --gdal).
+const OWNED: u8 = 1;
+const AREA: u8 = 2;
+const NODE: u8 = 4;
+
+/// A line of a member: its key, its flags, its points, and (quack --gdal) the tags that an area way gives to a
+/// multipolygon with no tags of its own (`crate::gdal::way_tags`; else none).
+type KLine = (i64, u8, Vec<Grid>, RawTags);
+
+impl Codec<KLine> for KeyedLine {
+    fn put(&self, r: &KLine, out: &mut Vec<u8>) {
         out.extend_from_slice(&r.0.to_le_bytes());
-        out.push(r.1 as u8);
+        out.push(r.1);
         put_u32(out, r.2.len());
         for g in &r.2 {
             out.extend_from_slice(&g[0].to_le_bytes());
             out.extend_from_slice(&g[1].to_le_bytes());
         }
+        put_tags(out, &r.3);
     }
-    fn get(&self, b: &mut &[u8]) -> (i64, bool, Vec<Grid>) {
+    fn get(&self, b: &mut &[u8]) -> KLine {
         let key = get_i64(b);
-        let owned = take(b, 1)[0] == 1;
+        let flags = take(b, 1)[0];
         let n = get_u32(b);
         let pts = (0..n)
             .map(|_| {
@@ -752,7 +815,7 @@ impl Codec<(i64, bool, Vec<Grid>)> for KeyedLine {
                 [x, y]
             })
             .collect();
-        (key, owned, pts)
+        (key, flags, pts, get_tags(b))
     }
 }
 
@@ -787,6 +850,101 @@ fn way_feature(id: i64, raw: &RawTags, pts: &[Pt]) -> Option<Feature> {
         Geom::Line(line)
     };
     Some(Feature::new(format!("way/{id}"), tags, &geometry))
+}
+
+/// The number of `node/<id>`, `way/<id>` or `relation/<id>`.
+fn feature_number(feature_id: &str) -> i64 {
+    feature_id.split_once('/').and_then(|(_, n)| n.parse().ok()).expect("a feature id")
+}
+
+/// quack --gdal: the row of a way with tags and 2 or more points: the polygon of an area (when GDAL keeps a tag of it),
+/// else a line.
+fn gdal_way(id: i64, tags: &RawTags, pts: &[Pt], area: bool) -> Option<Feature> {
+    use crate::gdal::*;
+    if area {
+        let tags = way_tags(tags);
+        let g = wkb_multipolygon(&[vec![pts.to_vec()]]);
+        return (!tags.is_empty()).then(|| Feature::gdal(format!("way/{id}"), MULTIPOLYGONS, tags, g, pts[0]));
+    }
+    Some(Feature::gdal(format!("way/{id}"), LINES, tags.clone(), wkb_line(pts), pts[0]))
+}
+
+/// quack --gdal: the rows of a relation from the lines of its members that the file has (in the order of the members).
+///
+/// - A multipolygon or boundary with all its member ways (not `subarea`): its outer closed member ways go to `used`; the
+///   relation is a row when `mine` and it has a ring.
+/// - Else the members (nodes only in `other_relations`; ways not `subarea`): one row, or `by_tiles` one row for each
+///   member that the tile owns (`Feature::part`).
+fn gdal_relation(
+    id: i64,
+    tags: RawTags,
+    members: &[Member],
+    got: Vec<(usize, u8, Vec<Pt>, RawTags)>,
+    by_tiles: bool,
+    mine: &dyn Fn(i64) -> bool,
+    used: &std::sync::Mutex<Vec<i64>>,
+) -> Vec<Feature> {
+    use crate::gdal::*;
+    let layer = relation_layer(&tags);
+    let way = |place: usize| members[place].1 == MemberType::Way && members[place].2 != "subarea";
+    if layer == MULTIPOLYGONS {
+        let need = (0..members.len()).filter(|&p| way(p)).count();
+        let have: Vec<&(usize, u8, Vec<Pt>, RawTags)> = got.iter().filter(|l| way(l.0)).collect();
+        if have.len() != need {
+            return Vec::new();
+        }
+        let outer = |l: &&&(usize, u8, Vec<Pt>, RawTags)| members[l.0].2 == "outer";
+        used.lock().expect("the used ways").extend(
+            have.iter().filter(outer).filter(|l| !l.2.is_empty() && l.2.first() == l.2.last()).map(|l| members[l.0].0),
+        );
+        if !mine(id) {
+            return Vec::new();
+        }
+        let Some(polys) = multipolygon(have.iter().map(|l| l.2.clone()).collect()) else {
+            return Vec::new();
+        };
+        let tags = if has_own_tags(&tags) {
+            tags
+        } else {
+            // GDAL: the tags of the first outer member area, and the type
+            let mut t = have.iter().filter(outer).map(|l| &l.3).find(|d| !d.is_empty()).cloned().unwrap_or_default();
+            if let Some(v) = tags.iter().rev().find(|t| t.0 == "type") {
+                t.push(v.clone());
+            }
+            t
+        };
+        let center = polys[0][0][0];
+        return vec![Feature::gdal(format!("relation/{id}"), MULTIPOLYGONS, tags, wkb_multipolygon(&polys), center)];
+    }
+    let mut parts: Vec<(usize, Part)> = Vec::new();
+    for (place, flags, pts, _) in got {
+        if by_tiles && flags & OWNED == 0 {
+            continue;
+        }
+        if members[place].1 == MemberType::Node {
+            if layer == OTHER_RELATIONS {
+                parts.push((place, Part::Point(pts[0])));
+            }
+        } else if way(place) {
+            parts.push((place, if layer == OTHER_RELATIONS && flags & AREA != 0 { Part::Area(pts) } else { Part::Line(pts) }));
+        }
+    }
+    let center = |p: &Part| match p {
+        Part::Point(x) => *x,
+        Part::Line(l) | Part::Area(l) => l[0],
+    };
+    if by_tiles {
+        return parts
+            .into_iter()
+            .map(|(place, p)| Feature { part: Some(place as u32), ..Feature::gdal(format!("relation/{id}"), layer, tags.clone(), p.wkb(), center(&p)) })
+            .collect();
+    }
+    if parts.is_empty() {
+        return Vec::new();
+    }
+    let wkb: Vec<Vec<u8>> = parts.iter().map(|p| p.1.wkb()).collect();
+    let g = wkb_collection(layer, &wkb.iter().map(|w| w.as_slice()).collect::<Vec<_>>());
+    vec![Feature::gdal(format!("relation/{id}"), layer, tags, g, center(&parts[0].1))]
 }
 
 /// The memory that each sort of the temporary files holds (the default of [`features`]).
@@ -846,6 +1004,28 @@ pub fn features_owned<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: Option<&Owner>,
+    emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    run(open, budget, owner, false, emit)
+}
+
+/// quack --gdal: the rows of GDAL's five layers ([`crate::gdal`], each row with its `layer`) from one read of the file, as
+/// [`features`] reads it. `emit` gets the points, the lines and the polygons of the ways, the relations, then the polygons
+/// of the ways that are outer members of a multipolygon (GDAL leaves out the ones of a complete multipolygon).
+pub fn gdal_features<R: Read + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    run(open, budget, None, true, emit)
+}
+
+/// The engine of [`features_owned`] and [`gdal_features`]: `gdal` chooses the rules of GDAL's layers.
+fn run<R: Read + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    owner: Option<&Owner>,
+    gdal: bool,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
     use crate::spill::join::{Point, Request};
@@ -861,19 +1041,23 @@ pub fn features_owned<R: Read + Send>(
     let mut rel_headers = Writer::new(store).map_err(io)?;
     let mut rel_members = Writer::new(store).map_err(io)?;
     let mut member_ids: Vec<i64> = Vec::new();
+    // quack --gdal: the member nodes of the relations, and the ways that are outer members of a multipolygon or boundary
+    let mut node_members = Writer::new(store).map_err(io)?;
+    let mut member_nodes: Vec<i64> = Vec::new();
+    let mut outer_ids: Vec<i64> = Vec::new();
     let (mut ways, mut rels) = (0u32, 0u32);
     let mut way = |id: i64, refs: &[i64], tags: RawTags, headers: &mut Writer, requests: &mut Buckets| -> Result<(), String> {
         for (k, &n) in refs.iter().enumerate() {
             requests.push(store, n, &Request, &(n, ways, k as u32)).map_err(io)?;
         }
-        headers.push(&Header, &(id, refs.len() as u32, tags)).map_err(io)?;
+        headers.push(&Header, &(id, refs.len() as u32, tags, refs.first() == refs.last())).map_err(io)?;
         ways = ways.checked_add(1).ok_or("quack: more than 4 294 967 295 ways")?;
         Ok(())
     };
     crate::cutstream::each_block(
         &mut open()?,
         |b, buf| {
-            let mut part = WaysPart::default();
+            let mut part = WaysPart { gdal, ..Default::default() };
             crate::pbfraw::decode_block(b, [false, true, true], buf, &mut part)?;
             Ok(part)
         },
@@ -886,18 +1070,29 @@ pub fn features_owned<R: Read + Send>(
                 }
             }
             for (id, tags, members) in part.relations {
-                for (place, (w, _)) in members.iter().enumerate() {
-                    rel_members.push(&Request, &(*w, rels, place as u32)).map_err(io)?;
-                    member_ids.push(*w);
+                let polygons = gdal && crate::gdal::relation_layer(&tags) == crate::gdal::MULTIPOLYGONS;
+                for (place, (m, t, role)) in members.iter().enumerate() {
+                    if *t == MemberType::Node {
+                        node_members.push(&Request, &(*m, rels, place as u32)).map_err(io)?;
+                        member_nodes.push(*m);
+                        continue;
+                    }
+                    rel_members.push(&Request, &(*m, rels, place as u32)).map_err(io)?;
+                    member_ids.push(*m);
+                    if polygons && role == "outer" {
+                        outer_ids.push(*m);
+                    }
                 }
-                rel_headers.push(&RelHeader, &(id, tags, members.into_iter().map(|m| m.1).collect())).map_err(io)?;
+                rel_headers.push(&RelHeader, &(id, tags, members)).map_err(io)?;
                 rels = rels.checked_add(1).ok_or("quack: more than 4 294 967 295 relations")?;
             }
             Ok(true)
         },
     )?;
-    member_ids.sort_unstable();
-    member_ids.dedup();
+    for v in [&mut member_ids, &mut member_nodes, &mut outer_ids] {
+        v.sort_unstable();
+        v.dedup();
+    }
     for w in untagged.finish().map_err(io)?.read(&WayRefs).map_err(io)? {
         let (id, refs) = w.map_err(io)?;
         if member_ids.binary_search(&id).is_ok() {
@@ -913,10 +1108,11 @@ pub fn features_owned<R: Read + Send>(
     let mut parts = SortedParts::new(requests.finish().map_err(io)?, &Request, |r: &(i64, u32, u32)| r.0);
     let (mut part, mut at): (Vec<(i64, u32, u32)>, usize) = (Vec::new(), 0);
     let (mut last, mut seen, mut more) = (i64::MIN, false, true);
+    let mut node_lines = Writer::new(store).map_err(io)?;
     crate::cutstream::each_block(
         &mut open()?,
         |b, buf| {
-            let mut part = NodesPart { tile: owner.map(|o| o.tile), ..Default::default() };
+            let mut part = NodesPart { tile: owner.map(|o| o.tile), gdal, ..Default::default() };
             crate::pbfraw::decode_block(b, [true, false, false], buf, &mut part)?;
             Ok(part)
         },
@@ -947,6 +1143,11 @@ pub fn features_owned<R: Read + Send>(
                     points.push(store, w as i64, &Point, &(w, place, lon, lat)).map_err(io)?;
                     at += 1;
                 }
+                if !member_nodes.is_empty() && member_nodes.binary_search(&id).is_ok() {
+                    let here = owner.is_none_or(|o| Tile::of(o.tile.z, lon, lat) == o.tile);
+                    let p = to_grid((round7(lon), round7(lat)));
+                    node_lines.push(&KeyedLine, &(id, NODE | if here { OWNED } else { 0 }, vec![p], Vec::new())).map_err(io)?;
+                }
             }
             counts.nodes += nodes.features.len();
             emit(nodes.features)?;
@@ -958,12 +1159,13 @@ pub fn features_owned<R: Read + Send>(
     crate::util::step("quack 2: the nodes and the points");
     // pass 3: the ways. A reader joins the headers with their points into batches; the features of each batch are made on
     // all threads and written, and the lines of the member ways go to a file.
-    // (id, tags, points, owned, a node in the tile)
-    type WayBatch = Vec<(i64, RawTags, Vec<Pt>, bool, bool)>;
+    // (id, tags, points, owned, a node in the tile, an area of quack --gdal)
+    type WayBatch = Vec<(i64, RawTags, Vec<Pt>, bool, bool, bool)>;
     let way_tile = owner.map(|o| o.tile);
     // the tile tables: a tile gives all its rows, each with its owner
     let mark = owner.is_some_and(|o| o.relations.is_none());
     let mut member_lines = Writer::new(store).map_err(io)?;
+    let mut deferred = Writer::new(store).map_err(io)?;
     let headers = headers.finish().map_err(io)?;
     let read_ways = move |give: &mut dyn FnMut(WayBatch) -> Result<(), String>| -> Result<(), String> {
         // the points of each bucket, sorted, one bucket in memory at a time (no copy)
@@ -983,10 +1185,14 @@ pub fn features_owned<R: Read + Send>(
         .peekable();
         let mut batch: WayBatch = Vec::new();
         for (number, h) in headers.read(&Header).map_err(io)?.enumerate() {
-            let (id, refs, tags) = h.map_err(io)?;
+            let (id, refs, tags, closed) = h.map_err(io)?;
             let (mut pts, mut owned, mut touches) = (Vec::with_capacity(refs as usize), true, way_tile.is_none());
+            let mut first_node = false;
             while let Some(p) = points.next_if(|p| p.as_ref().is_ok_and(|p| p.0 == number as u32)) {
                 let p = p.map_err(io)?;
+                if pts.is_empty() {
+                    first_node = p.1 == 0;
+                }
                 if let Some(t) = way_tile {
                     let here = Tile::of(t.z, p.2, p.3) == t;
                     if pts.is_empty() {
@@ -999,9 +1205,19 @@ pub fn features_owned<R: Read + Send>(
             if let Some(Err(_)) = points.peek() {
                 return Err(io(points.next().expect("peeked").expect_err("an error")));
             }
-            // a way with a node that is not in the file is not a feature, and not a member of a relation
-            if pts.len() == refs as usize {
-                batch.push((id, tags, pts, owned, touches));
+            if gdal {
+                // GDAL keeps the nodes that the file has (2 or more), and closes an area again when its first node is not
+                // in the file
+                let area = closed && crate::gdal::is_area(&tags);
+                if area && !first_node && !pts.is_empty() {
+                    pts.push(pts[0]);
+                }
+                if pts.len() >= 2 {
+                    batch.push((id, tags, pts, owned, touches, area));
+                }
+            } else if pts.len() == refs as usize {
+                // a way with a node that is not in the file is not a feature, and not a member of a relation
+                batch.push((id, tags, pts, owned, touches, false));
             }
             if batch.len() >= 50_000 {
                 give(std::mem::take(&mut batch))?;
@@ -1011,22 +1227,35 @@ pub fn features_owned<R: Read + Send>(
     };
     {
         let mut use_ways = |batch: WayBatch| -> Result<(), String> {
-            for (id, _, pts, owned, _) in &batch {
+            for (id, tags, pts, owned, _, area) in &batch {
                 if member_ids.binary_search(id).is_ok() {
-                    member_lines.push(&KeyedLine, &(*id, *owned, pts.iter().map(|&p| to_grid(p)).collect())).map_err(io)?;
+                    let flags = if *owned { OWNED } else { 0 } | if *area { AREA } else { 0 };
+                    let donor = if *area && outer_ids.binary_search(id).is_ok() { crate::gdal::way_tags(tags) } else { Vec::new() };
+                    member_lines.push(&KeyedLine, &(*id, flags, pts.iter().map(|&p| to_grid(p)).collect(), donor)).map_err(io)?;
                 }
             }
             // the member ways with no tags are not features
-            let made: Vec<Feature> = batch
+            let mut made: Vec<Feature> = batch
                 .par_iter()
                 .filter(|w| !w.1.is_empty() && if mark { w.4 } else { w.3 })
-                .filter_map(|(id, tags, pts, owned, _)| {
-                    way_feature(*id, tags, pts).map(|mut f| {
+                .filter_map(|(id, tags, pts, owned, _, area)| {
+                    let f = if gdal { gdal_way(*id, tags, pts, *area) } else { way_feature(*id, tags, pts) };
+                    f.map(|mut f| {
                         f.owner = *owned;
                         f
                     })
                 })
                 .collect();
+            if gdal && !outer_ids.is_empty() {
+                // the polygon of an outer member of a multipolygon waits for the multipolygons
+                let (wait, now): (Vec<Feature>, Vec<Feature>) = made.into_iter().partition(|f| {
+                    f.layer == crate::gdal::MULTIPOLYGONS && outer_ids.binary_search(&feature_number(&f.feature_id)).is_ok()
+                });
+                for f in wait {
+                    deferred.push(&Numbered, &(feature_number(&f.feature_id) as u64, f)).map_err(io)?;
+                }
+                made = now;
+            }
             counts.ways += made.len();
             emit(made)
         };
@@ -1049,21 +1278,21 @@ pub fn features_owned<R: Read + Send>(
         #[cfg(target_arch = "wasm32")]
         read_ways(&mut use_ways)?;
     }
-    drop(member_ids);
+    drop((member_ids, outer_ids));
     crate::util::step("quack 3: the ways");
     // pass 4: the relations. The members and the lines, each sorted by way, give the lines of each relation; sorted by
-    // relation and place, they meet the relation headers.
-    let members = sort_bytes(rel_members.finish().map_err(io)?, crate::spill::join::node_id, budget, store).map_err(io)?;
-    let lines = sort_bytes(member_lines.finish().map_err(io)?, line_key, budget, store).map_err(io)?;
+    // relation and place, they meet the relation headers. quack --gdal: the member nodes and their points too.
     let mut rel_lines = Writer::new(store).map_err(io)?;
-    {
+    for (members, lines) in [(rel_members, member_lines), (node_members, node_lines)] {
+        let members = sort_bytes(members.finish().map_err(io)?, crate::spill::join::node_id, budget, store).map_err(io)?;
+        let lines = sort_bytes(lines.finish().map_err(io)?, line_key, budget, store).map_err(io)?;
         let mut lines = lines.read(&KeyedLine).map_err(io)?.peekable();
         for m in members.read(&Request).map_err(io)? {
             let (w, r, place) = m.map_err(io)?;
             while lines.next_if(|l| l.as_ref().is_ok_and(|l| l.0 < w)).is_some() {}
             match lines.peek() {
                 Some(Ok(l)) if l.0 == w => {
-                    rel_lines.push(&KeyedLine, &(((r as i64) << 32) | place as i64, l.1, l.2.clone())).map_err(io)?;
+                    rel_lines.push(&KeyedLine, &(((r as i64) << 32) | place as i64, l.1, l.2.clone(), l.3.clone())).map_err(io)?;
                 }
                 Some(Err(_)) => return Err(io(lines.next().expect("peeked").expect_err("an error"))),
                 _ => {}
@@ -1072,59 +1301,66 @@ pub fn features_owned<R: Read + Send>(
     }
     let rel_lines = sort_bytes(rel_lines.finish().map_err(io)?, line_key, budget, store).map_err(io)?;
     crate::util::step("quack 4a: the lines of the relations");
-    // the relations with all their lines
-    // (id, tags, member lines, the tile owns the first member way)
-    type Rel = (i64, RawTags, Vec<(String, Vec<Pt>)>, bool);
-    type Rels<'a> = dyn Iterator<Item = Result<Option<Rel>, String>> + Send + 'a;
+    // each relation with the lines of its members that the file has: (id, tags, members, (place, flags, points, tags))
+    type Rel = (i64, RawTags, Vec<Member>, Vec<(usize, u8, Vec<Pt>, RawTags)>);
+    type Rels<'a> = dyn Iterator<Item = Result<Rel, String>> + Send + 'a;
     let with_rels = move |use_rels: &mut dyn FnMut(&mut Rels) -> Result<(), String>| -> Result<(), String> {
         let mut lines = rel_lines.read(&KeyedLine).map_err(io)?.peekable();
         let headers = rel_headers.finish().map_err(io)?;
-        let mut rels = headers.read(&RelHeader).map_err(io)?.enumerate().map(|(r, h)| -> Result<Option<Rel>, String> {
-            let (id, tags, roles) = h.map_err(io)?;
-            let mut got: Vec<(String, Vec<Pt>)> = Vec::with_capacity(roles.len());
-            let mut first_owned = true;
+        let mut rels = headers.read(&RelHeader).map_err(io)?.enumerate().map(|(r, h)| -> Result<Rel, String> {
+            let (id, tags, members) = h.map_err(io)?;
+            let mut got = Vec::new();
             while let Some(l) = lines.next_if(|l| l.as_ref().is_ok_and(|l| (l.0 >> 32) as usize == r)) {
-                let (key, owned, pts) = l.map_err(io)?;
-                if got.is_empty() {
-                    first_owned = owned;
-                }
-                got.push((roles[(key & 0xffff_ffff) as usize].clone(), pts.iter().map(from_grid).collect()));
+                let (key, flags, pts, donor) = l.map_err(io)?;
+                got.push(((key & 0xffff_ffff) as usize, flags, pts.iter().map(from_grid).collect(), donor));
             }
             if let Some(Err(_)) = lines.peek() {
                 return Err(io(lines.next().expect("peeked").expect_err("an error")));
             }
-            // a relation with a member way that is not a valid way is not a feature; by tiles, the first tile with the
-            // relation whole makes it
-            let mine = || owner.and_then(|o| o.relations).is_none_or(|r| r.lock().expect("the relations").insert(id));
-            Ok((got.len() == roles.len() && mine()).then_some((id, tags, got, first_owned)))
+            Ok((id, tags, members, got))
         });
         use_rels(&mut rels)
     };
-    let make = |(id, tags, members, owned): Rel| -> Option<Feature> {
+    // by tiles, the first tile with the relation whole makes it
+    let mine = |id: i64| owner.and_then(|o| o.relations).is_none_or(|r| r.lock().expect("the relations").insert(id));
+    // quack --gdal: the outer member ways of the complete multipolygons (GDAL does not give their polygons)
+    let used = std::sync::Mutex::new(Vec::<i64>::new());
+    let make = |(id, tags, members, got): Rel| -> Vec<Feature> {
         #[cfg(not(target_arch = "wasm32"))]
         let t = std::time::Instant::now();
-        let m: Vec<(&str, Vec<Pt>)> = members.iter().map(|(role, l)| (role.as_str(), l.clone())).collect();
-        let geometry = relation_geometry(&m);
+        let made = if gdal {
+            gdal_relation(id, tags, &members, got, owner.is_some(), &mine, &used)
+        } else {
+            // a relation with a member way that is not a valid way is not a feature
+            let owned = got.first().is_some_and(|l| l.1 & OWNED != 0);
+            let m: Vec<(&str, Vec<Pt>)> = got.into_iter().map(|(place, _, pts, _)| (members[place].2.as_str(), pts)).collect();
+            let complete = m.len() == members.len();
+            let geometry = if complete && mine(id) { relation_geometry(&m) } else { None };
+            let tags = clean(&tags);
+            (geometry.is_some() && !tags.is_empty())
+                .then(|| Feature { owner: owned, ..Feature::new(format!("relation/{id}"), tags, &geometry.unwrap()) })
+                .into_iter()
+                .collect()
+        };
         #[cfg(not(target_arch = "wasm32"))]
         {
             let secs = t.elapsed().as_secs_f64();
             if secs > 2.0 {
-                eprintln!("quack: relation {id} ({} members) took {secs:.1} s", m.len());
+                eprintln!("quack: relation {id} ({} members) took {secs:.1} s", members.len());
             }
         }
-        let tags = clean(&tags);
-        (geometry.is_some() && !tags.is_empty()).then(|| Feature { owner: owned, ..Feature::new(format!("relation/{id}"), tags, &geometry.unwrap()) })
+        made
     };
     // natively, a reader thread streams the relations into all threads (a slow relation delays only itself), and this
     // thread writes each part of rows that the threads make
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::scope(|scope| -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Option<Feature>, String>>(4096);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Vec<Feature>, String>>(4096);
         let make = &make;
         scope.spawn(move || {
             let read = with_rels(&mut |rels| {
                 rels.par_bridge().try_for_each_with(tx.clone(), |tx, rel| {
-                    let made = rel.map(|rel| rel.and_then(make));
+                    let made = rel.map(make);
                     // a full channel: this thread helps with the other parallel work (the writer makes its batches
                     // on these threads too) and tries again; a plain send would wait for ever when all threads wait
                     let mut item = made;
@@ -1148,12 +1384,10 @@ pub fn features_owned<R: Read + Send>(
         });
         let mut part = Vec::new();
         for f in rx {
-            if let Some(f) = f? {
-                part.push(f);
-                if part.len() >= 10_000 {
-                    counts.relations += part.len();
-                    emit(std::mem::take(&mut part))?;
-                }
+            part.extend(f?);
+            if part.len() >= 10_000 {
+                counts.relations += part.len();
+                emit(std::mem::take(&mut part))?;
             }
         }
         counts.relations += part.len();
@@ -1168,15 +1402,14 @@ pub fn features_owned<R: Read + Send>(
         while more {
             match rels.next() {
                 Some(r) => {
-                    if let Some(rel) = r? {
-                        points += rel.2.iter().map(|m| m.1.len()).sum::<usize>();
-                        batch.push(rel);
-                    }
+                    let rel = r?;
+                    points += rel.3.iter().map(|m| m.2.len()).sum::<usize>();
+                    batch.push(rel);
                 }
                 None => more = false,
             }
             if points >= REL_BATCH || (!more && !batch.is_empty()) {
-                let made: Vec<Feature> = std::mem::take(&mut batch).into_par_iter().filter_map(make).collect();
+                let made: Vec<Feature> = std::mem::take(&mut batch).into_par_iter().flat_map_iter(make).collect();
                 points = 0;
                 counts.relations += made.len();
                 emit(made)?;
@@ -1184,6 +1417,21 @@ pub fn features_owned<R: Read + Send>(
         }
         Ok(())
     })?;
+    if gdal {
+        // the polygons of the outer members that no complete multipolygon used
+        let mut used = used.into_inner().expect("the used ways");
+        used.sort_unstable();
+        let mut part = Vec::new();
+        for r in deferred.finish().map_err(io)?.read(&Numbered).map_err(io)? {
+            let (way, mut f) = r.map_err(io)?;
+            if used.binary_search(&(way as i64)).is_err() {
+                f.layer = crate::gdal::MULTIPOLYGONS;
+                part.push(f);
+            }
+        }
+        counts.ways += part.len();
+        emit(part)?;
+    }
     crate::util::step("quack 4b: the relations");
     Ok(counts)
 }
@@ -1229,7 +1477,19 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     size: TileSize,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, |_, part| emit(part))
+    features_of_tiles(open, budget, size, false, |_, part| emit(part))
+}
+
+/// [`gdal_features`] made tile by tile, as [`features_by_tiles`] makes the table of quack. A relation of
+/// `multilinestrings` or `other_relations` comes in parts (`Feature::part`): each tile gives its members, and
+/// `crate::gdal::Parts` joins them.
+pub fn gdal_features_by_tiles<R: Read + std::io::Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    size: TileSize,
+    mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    features_of_tiles(open, budget, size, true, |_, part| emit(part))
 }
 
 /// [`features_by_tiles`], and `emit` gets the tile that made each part too (the tiles one after the other: a part of a
@@ -1238,6 +1498,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
+    gdal: bool,
     mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
     crate::util::raise_open_files();
@@ -1261,7 +1522,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
      -> Result<Counts, String> {
         let owner = Owner { tile, relations: Some(&relations) };
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        features_owned(open_tile, budget, Some(&owner), give)
+        run(open_tile, budget, Some(&owner), gdal, give)
     };
     let mut done = |k: usize, (_, tile, c): &(usize, Tile, crate::cutstream::CutCounts), got: Counts| {
         counts.nodes += got.nodes;
@@ -1624,7 +1885,7 @@ impl Codec<(u64, Feature)> for Numbered {
         let feature_id = s(b);
         let tags = (0..get_u32(b)).map(|_| (s(b), s(b))).collect();
         let geometry = bytes(b).to_vec();
-        (i, Feature { feature_id, tags, geometry, center, owner: true })
+        (i, Feature { feature_id, tags, geometry, center, owner: true, ..Default::default() })
     }
 }
 
@@ -2158,7 +2419,7 @@ mod tests {
         let rows: Vec<Feature> = pts
             .iter()
             .enumerate()
-            .map(|(i, &c)| Feature { feature_id: format!("node/{i}"), tags: vec![("k".into(), i.to_string())], geometry: vec![i as u8], center: c, owner: true })
+            .map(|(i, &c)| Feature { feature_id: format!("node/{i}"), tags: vec![("k".into(), i.to_string())], geometry: vec![i as u8], center: c, owner: true, ..Default::default() })
             .collect();
         // parts of other sizes, larger and smaller than a piece of push
         let mut rest = &rows[..];
@@ -2200,6 +2461,7 @@ mod tests {
             geometry: vec![1],
             center: pts[i],
             owner: true,
+            ..Default::default()
         };
         let mut parts: Vec<std::collections::VecDeque<Feature>> = Vec::new();
         let mut at = 0;

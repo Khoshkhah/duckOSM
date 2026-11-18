@@ -196,9 +196,14 @@ struct QuackCli {
     /// The name of the area: the files are <out>/<name>_quack.duckdb and <out>/<name>_quack.parquet.
     #[arg(long, default_value = "area")]
     name: String,
-    /// Output formats, comma separated: geoparquet, duckdb (the table main.quackosm).
-    #[arg(short, long, default_value = "duckdb,geoparquet")]
-    format: String,
+    /// Output formats, comma separated: geoparquet, duckdb (the table main.quackosm). With --gdal: gpkg, geoparquet.
+    #[arg(short, long)]
+    format: Option<String>,
+    /// Write the five layers of GDAL's OSM driver (points, lines, multilinestrings, multipolygons, other_relations: what
+    /// ogr2ogr and QGIS give for the .osm.pbf file, with GDAL's default osmconf.ini) in place of QuackOSM's table:
+    /// <out>/<name>_gdal.gpkg (default), or <out>/<name>_gdal_<layer>.parquet with --format geoparquet.
+    #[arg(long)]
+    gdal: bool,
     /// The threads (default: all the cores), as QuackOSM's cpu_limit: the pool of the Rust threads, the blocks of the file
     /// that are decoded at the same time, and the threads of DuckDB.
     #[arg(long)]
@@ -229,8 +234,11 @@ fn quack(args: &[String]) -> Result<(), String> {
     let cli = QuackCli::parse_from(args);
     let _ = QUACK_START.set(std::time::Instant::now());
     let _ = duckosm_build::STEP_HOOK.set(quack_step);
+    if cli.gdal {
+        return quack_gdal(&cli);
+    }
     let (mut duckdb, mut geoparquet) = (false, false);
-    for f in cli.format.split(',') {
+    for f in cli.format.as_deref().unwrap_or("duckdb,geoparquet").split(',') {
         match f.trim() {
             "duckdb" => duckdb = true,
             "geoparquet" => geoparquet = true,
@@ -254,6 +262,33 @@ fn quack(args: &[String]) -> Result<(), String> {
         t.elapsed().as_secs_f64()
     );
     for p in db.iter().chain(parquet.iter()) {
+        eprintln!("  {}", p.display());
+    }
+    Ok(())
+}
+
+/// `duckosm-rust quack --gdal`: GDAL's five layers.
+fn quack_gdal(cli: &QuackCli) -> Result<(), String> {
+    let (mut gpkg, mut geoparquet) = (false, false);
+    for f in cli.format.as_deref().unwrap_or("gpkg").split(',') {
+        match f.trim() {
+            "gpkg" => gpkg = true,
+            "geoparquet" => geoparquet = true,
+            other => return Err(format!("unknown format {other} with --gdal: use gpkg, geoparquet or both")),
+        }
+    }
+    std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
+    let base = cli.out.join(format!("{}_gdal", cli.name));
+    let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
+    let tiles = cli.tile_zoom.map(duckosm_build::TileSize::Zoom).or(cli.tiles.map(duckosm_build::TileSize::Nodes));
+    let t = std::time::Instant::now();
+    let gpkg = gpkg.then(|| base.with_extension("gpkg"));
+    let n = duckosm_build::quack_gdal::quack_gdal(&cli.pbf, gpkg.as_deref(), geoparquet.then_some(base.as_path()), tiles)?;
+    let names = ["points", "lines", "multilinestrings", "multipolygons", "other_relations"];
+    let rows: Vec<String> = names.iter().enumerate().map(|(i, l)| format!("{} {l}", n.rows[i + 1])).collect();
+    eprintln!("quack --gdal: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());
+    for p in &n.files {
         eprintln!("  {}", p.display());
     }
     Ok(())
