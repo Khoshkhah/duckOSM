@@ -53,7 +53,7 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
     ---
 
-    `edge_id = hash(osm_id, source, target)`: the same after a rebuild, a cut and an export.
+    One id for each road **and each direction**, the same after a rebuild, a cut and an export.
     [Stable edge ids](concepts/edge-ids.md)
 
 -   :material-car-multiple:{ .lg .middle } **Traffic simulation**
@@ -111,6 +111,27 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 </figure>
 
 </div>
+
+## One edge id for each direction
+
+Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. Many also keep a two-way street as one
+edge. duckOSM gives each edge a hash of three OSM ids:
+
+```text
+edge_id = hash(osm_id, source, target)
+```
+
+| | |
+|---|---|
+| `osm_id` | the OSM way of the road |
+| `source`, `target` | the OSM nodes where the edge starts and ends; their order is the **direction** |
+
+So **each direction of a road has its own `edge_id`**: a two-way street is two edges, A → B and B → A. Traffic counts,
+speeds and sensor data are per direction, and they join to the right edge.
+
+None of the three is a number that duckOSM makes, so the id stays the same after a rebuild, in a city cut from a country,
+and in every export (the SUMO edge id, the MATSim link id, the GMNS `link_id`). Other projects join on it
+([how the id is built](concepts/edge-ids.md)).
 
 ## What duckOSM makes
 
