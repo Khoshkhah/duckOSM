@@ -315,6 +315,8 @@ roads that **only arrive** (a one-way road into the junction) are violet. The co
 and in the dark theme. A road of another network that meets the junction and is not in the driving network (a footway, a path) is named under the list.
 It is not on the map of this tab.
 
+![The Turn tab: road 688731299 is picked, the junction box shows its junction, and the list shows the two roads that leave it, each with Allowed. On the map, the road is blue, the roads that leave are green and the road that only arrives is violet](../images/edit-turn.png)
+
 ### New road tab
 
 ```yaml

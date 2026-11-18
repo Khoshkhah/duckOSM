@@ -39,7 +39,7 @@ All outputs come from one `.osm.pbf` file.
 OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
 file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
 
-![Edit OSM data: a road and its form](images/edit-page.png)
+![The Turn tab: road 688731299 is picked, the junction box shows its junction, and the list shows the two roads that leave it, each with Allowed. On the map, the road is blue, the roads that leave are green and the road that only arrives is violet](images/edit-turn.png)
 
 | Where | How |
 |---|---|
