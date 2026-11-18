@@ -143,16 +143,21 @@ nav:
       - Check a build: guides/check-build.md
   - Exports:
       - Overview: exports/index.md
-      - SUMO: exports/sumo.md
-      - MATSim: exports/matsim.md
-      - GMNS: exports/gmns.md
-      - GMNS tables: exports/gmns_tables.md
-      - GeoPackage / shapefile: exports/gis.md
-      - networkx: exports/networkx.md
-      - Experimental:
+      - Traffic simulation:
+          - SUMO: exports/sumo.md
+          - MATSim: exports/matsim.md
+          - GMNS: exports/gmns.md
+          - GMNS tables: exports/gmns_tables.md
+          - railML: exports/railml.md
+      - Maps and GIS:
+          - GeoPackage / shapefile: exports/gis.md
+          - GDAL's OSM layers: concepts/gdal.md
+          - QuackOSM table: concepts/quackosm.md
+      - Graph analysis:
+          - networkx: exports/networkx.md
+      - Lane level and 3D:
           - OpenDRIVE: exports/opendrive.md
           - Lanelet2: exports/lanelet2.md
-          - railML: exports/railml.md
           - Lane-level routing: exports/lane-routing.md
   - Concepts:
       - How a build works: concepts/build.md
@@ -167,8 +172,6 @@ nav:
       - The walls of the buildings: concepts/building-walls.md
       - Routing across modes: concepts/multimodal.md
       - duckOSM and OSMnx: concepts/osmnx.md
-      - duckOSM and QuackOSM: concepts/quackosm.md
-      - duckOSM and GDAL: concepts/gdal.md
       - How each output is checked: concepts/checks.md
   - Reference:
       - Command line: reference/cli.md
