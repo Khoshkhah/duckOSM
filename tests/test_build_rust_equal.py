@@ -26,13 +26,12 @@ def _tables(con, db):
     return {f"{s}.{t}" for s, t in con.execute(q).fetchall()}
 
 
-def _sel(col):
-    name, typ = col
-    return f"ST_AsText({name})" if typ.startswith("GEOMETRY") else f'"{name}"'
+# the time of the build, and where it ran: not the same in two builds
+VOLATILE = {"created", "built_at", "area", "build_dir", "build_config", "roadstyle_version"}
 
 
 def _rows(con, db, table):
-    desc = con.execute(f"DESCRIBE {db}.{table}").fetchall()
+    desc = [r for r in con.execute(f"DESCRIBE {db}.{table}").fetchall() if r[0] not in VOLATILE]
     cols = [(r[0], r[1]) for r in desc]
     sel = ", ".join(f"ST_AsWKB({r[0]})" if r[1].startswith("GEOMETRY") else f'"{r[0]}"' for r in desc)
     return cols, sorted(map(repr, con.execute(f"SELECT {sel} FROM {db}.{table}").fetchall()))
@@ -42,7 +41,7 @@ def test_rust_build_equals_python_build(tmp_path, monkeypatch):
     monkeypatch.chdir(ROOT)                      # the sample config has relative paths
     py = DuckOSM(Config.from_yaml(str(_config(tmp_path, "py")))).run()
     rs_dir = tmp_path / "rs"
-    assert _rust.cli(["duckosm", "--config", str(_config(tmp_path, "rs"))]) == 0
+    assert _rust.cli(["duckosm", "build", "-c", str(_config(tmp_path, "rs"))]) == 0
     rs = rs_dir / "monaco.duckdb"
     con = duckdb.connect()
     con.execute("LOAD spatial")
@@ -58,11 +57,18 @@ def test_rust_build_equals_python_build(tmp_path, monkeypatch):
             diffs.append(f"{t}: columns differ: {sorted(set(pc) ^ set(rc))}")
         elif pr != rr:
             diffs.append(f"{t}: {len(pr)} / {len(rr)} rows, {len(set(pr) ^ set(rr))} rows differ")
-            for i, (c, _) in enumerate(pc):              # the columns that differ, with an example of each side
-                q = f'SELECT {_sel(pc[i])} FROM {{}}.{t} ORDER BY 1'
-                pv = [repr(r[0]) for r in con.execute(q.format("py")).fetchall()]
-                rv = [repr(r[0]) for r in con.execute(q.format("rs")).fetchall()]
-                if pv != rv:
-                    only_p, only_r = sorted(set(pv) - set(rv)), sorted(set(rv) - set(pv))
-                    diffs.append(f"    {c}: py {only_p[:2]} | rs {only_r[:2]}"[:600])
+            # one row that differs, by the first column (the id): the values of the columns that differ
+            key = pc[0][0]
+            skip = VOLATILE & {d[0] for d in con.execute(f"DESCRIBE py.{t}").fetchall()}
+            ex = f" EXCLUDE ({', '.join(skip)})" if skip else ""
+            q = (f'SELECT * FROM {{}}.{t} WHERE "{key}" IN (SELECT "{key}" FROM (SELECT *{ex} FROM py.{t} EXCEPT SELECT *{ex} FROM rs.{t}) '
+                 'LIMIT 1)')
+            try:
+                cols = [d[0] for d in con.execute(f"DESCRIBE py.{t}").fetchall()]
+                a, b = con.execute(q.format("py")).fetchone(), con.execute(q.format("rs")).fetchone()
+                for c, x, y in zip(cols, a or [], b or []):
+                    if c not in VOLATILE and x != y:
+                        diffs.append(f"    {key}={a[0]} {c}: py {str(x)[:1500]} | rs {str(y)[:1500]}")
+            except Exception as e:                     # noqa: BLE001 (only the message of the test)
+                diffs.append(f"    (no example row: {e})")
     assert not diffs, "\n".join(diffs)

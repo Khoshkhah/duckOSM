@@ -161,7 +161,7 @@ fn metadata(a: &Area, shape: Option<&(Vec<Vec<Vec<Pt>>>, String)>) -> Metadata {
             None => zone_of_map(x, y),
         }),
         built_at: a.built_at,
-        version: format!("duckosm {}", env!("CARGO_PKG_VERSION")),
+        version: env!("CARGO_PKG_VERSION").to_string(),   // as duckOSM writes it (__version__)
     }
 }
 

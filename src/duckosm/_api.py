@@ -210,7 +210,7 @@ def _run(*args):
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"duckosm {args[0]}: {(r.stderr or r.stdout).strip()}")
-    return r.stdout
+    return r.stdout + r.stderr
 
 
 def _opt(flag, value):
@@ -221,6 +221,26 @@ def _opt(flag, value):
 def _each(flag, values):
     values = [values] if isinstance(values, str) else list(values or [])
     return [x for v in values for x in (flag, v)]
+
+
+def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None,
+          features=None, levels=None, graph=None, h3_index=None, h3_resolution=None):
+    """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``). ``config``: a
+    config file; an option that is not None overrides it. Returns the path of the .duckdb file."""
+    def flag(name, value):
+        return None if value is None else (f"--{name}" if value else f"--no-{name}")
+    text = _run("build", *_opt("-c", config), *_opt("-p", pbf), *_opt("-o", output), *_opt("-b", boundary),
+                *_opt("--source-db", source_db), *_opt("--h3-cell", h3_cell), *_each("-m", modes), *_opt("--fixes", fixes),
+                flag("features", features), flag("levels", levels), flag("graph", graph), flag("h3-index", h3_index),
+                *_opt("--h3-resolution", h3_resolution))
+    return Path(text.rsplit("Output: ", 1)[1].strip())
+
+
+def levels(db):
+    """``duckosm levels``: make the drawing order of the roads again (``visualization.edge_levels``), with the edits, heads and caps of
+    ``visualization.level_*``. The database is changed in place. Returns its path."""
+    _run("levels", db)
+    return Path(db)
 
 
 def quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None,

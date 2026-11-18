@@ -22,6 +22,11 @@ use std::sync::{Arc, Mutex};
 pub mod native;
 #[cfg(feature = "duckdb")]
 pub mod cli;
+#[cfg(feature = "duckdb")]
+pub mod levels;
+/// The DuckDB of the native database, for the program (rust/duckosm-cli).
+#[cfg(feature = "duckdb")]
+pub use duckdb;
 pub mod maps;
 pub mod page;
 #[cfg(feature = "duckdb")]

@@ -78,6 +78,13 @@ pub fn level_edges(db: &mut dyn Db) -> Result<Vec<u8>, String> {
     parquet(db, &d::level_edges_sql(&cat).map_err(|e| e.to_string())?)
 }
 
+/// The ids of the edges of the level area (every edge of [`level_edges`]).
+pub fn level_edge_ids(db: &mut dyn Db) -> Result<Vec<i64>, String> {
+    let cat = catalog(db)?;
+    let sql = d::level_edges_sql(&cat).map_err(|e| e.to_string())?;
+    db.texts(&format!("SELECT edge_id::VARCHAR FROM ({sql})"))?.into_iter().flatten().map(|t| t.parse().map_err(|e| format!("{t}: {e}"))).collect()
+}
+
 /// Card 8: the stored levels, `{"csv", "edge_hash"}` (visualization.edge_levels as levels.csv text, and the edge hash of edge_levels_meta), or
 /// null when the database has none.
 pub fn stored_levels(db: &mut dyn Db) -> Result<Value, String> {

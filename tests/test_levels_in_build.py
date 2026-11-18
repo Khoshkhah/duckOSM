@@ -87,7 +87,7 @@ def test_a_road_that_comes_back_is_used_again(first):
     con.execute("DROP TABLE IF EXISTS visualization.level_unmatched")
     con.execute(f"CREATE TABLE visualization.level_unmatched AS SELECT 'level_heads' AS kind, '{{\"road\": \"{a_road}\", \"start_m\": \"7\", \"end_m\": \"5\"}}' AS row")
     con.close()
-    from duckosm.levels import make_and_solve
+    from duckosm._levels import make_and_solve
     res = make_and_solve(first)
     assert res["unmatched"] == 0
     assert "level_unmatched" not in {r[0] for r in _q(first, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'visualization'")}
@@ -125,7 +125,7 @@ def test_a_clip_takes_the_edits_of_its_parent(first, tmp_path):
 # ---- duckosm levels-edit -------------------------------------------------------------------------
 
 def test_levels_edit_prepares_the_area_from_the_tables(first, tmp_path):
-    from duckosm.levels import is_current
+    from duckosm._levels import is_current
     from duckosm.levels_edit import prepare
     a_road, = _q(first, "SELECT edge_id FROM driving.edges ORDER BY edge_id LIMIT 1")[0]
     con = duckdb.connect(str(first))

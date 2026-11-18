@@ -1,10 +1,8 @@
 # Store the drawing order
 
 ```bash
-pip install "duckosm[levels]"
-duckosm levels monaco.duckdb                 # the level area monaco.levels/, solved, written into the file
-duckosm levels-edit monaco.duckdb            # optional: fix places by hand, with mapstyle's base map and every road; each Apply writes into the file
-duckosm levels-edit monaco.duckdb       # the same in the Rust program (Studio's card 8 on the file), no Python
+duckosm levels monaco.duckdb                 # solve the drawing order again, with your edits, and write it into the file
+duckosm levels-edit monaco.duckdb            # optional: fix places by hand (Studio's card 8 on the file)
 ```
 
 When roads cross or meet, a map must decide which is painted over which: a bridge over the road under it, a street over its sidewalk, a junction without a ring between the roads that meet.
@@ -17,17 +15,17 @@ For a big area the step takes long: `options.levels: false` (`build --no-levels`
 
 ## The level area
 
-The roads of **all the modes together** (`edges` and `private_edges` of `driving`, `walking` and `cycling`) go into one **level area**, a folder next to the file (`monaco.levels/`, or `--area DIR`):
+The roads of **all the modes together** (`edges` and `private_edges` of `driving`, `walking` and `cycling`) are one **level area**.
+roadstyle's Rust code makes the pairs of roads that cross or meet and solves them. Your edits are tables in the file, and they are the
+input of each solve:
 
-| File | Whose | Holds |
-|---|---|---|
-| `roads.parquet`, `pairs.csv` | made by each run | the solver's input: one row per road, the pairs of roads that cross or meet |
-| `edits.csv`, `heads.csv`, `caps.csv` | **yours**; a copy of the tables in the file | your changes: pairs added or switched off, head lengths and end shapes per road end. The tables are the master: each run writes these files from them |
-| `levels.csv`, `levels_info.json` | made by each solve | the result, and what the solver says about it |
-| `area.json` | made once | the file the area belongs to |
+| Table | Holds |
+|---|---|
+| `visualization.level_edits` | pairs that you added or switched off |
+| `visualization.level_heads`, `level_caps` | the head length and the end shape of a road end |
+| `visualization.level_unmatched` | the edit rows that name a road that is not in the file now. The next solve tries them again |
 
-Your edits are in the file itself (`visualization.level_*`, below): a rebuild carries them over, and the folder is only a work area. A file of the folder that differs from the table is kept as `*.csv.before` when it is written again. A row that names a road that is not in the file any more is ignored with a warning and kept in `visualization.level_unmatched`; the next build tries it again. How the solver decides, and the editor:
-[Which road is on top](https://khoshkhah.github.io/roadstyle/guides/levels/).
+How the solver decides, and the editor: [Which road is on top](https://khoshkhah.github.io/roadstyle/guides/levels/).
 
 ## What it writes
 
@@ -35,20 +33,19 @@ Your edits are in the file itself (`visualization.level_*`, below): a rebuild ca
 |---|---|
 | `visualization.edge_levels` | one row for every `edge_id`: `casing_start`, `casing_level`, `casing_end`, `fill_level`, and its ends as drawn: `head_start_m`, `head_end_m`, `cap_start`, `cap_end` |
 | `visualization.edge_levels_meta` | one row: where it came from (the area), the number of edges and a hash of their ids, the roadstyle version, the time |
-| `visualization.level_edits`, `level_heads`, `level_caps` | your `edits.csv`, `heads.csv` and `caps.csv`, copied at each solve, so the database holds everything. A new area folder gets them back from here (needs a roadstyle that has `restore_area_inputs`) |
+| `visualization.level_edits`, `level_heads`, `level_caps` | your edits, as above: written again at each solve |
 
 Both tables are replaced at each solve, by `duckosm levels` and by the editor. A stack of roads that cannot all be kept is counted in the message, never hidden.
 
 ## Read it
 
 ```python
-import duckdb, roadstyle as rs
-from duckosm.levels import load_roads
+import duckdb
 
 con = duckdb.connect("monaco.duckdb", read_only=True)
-levels = rs.load_area_levels(con, load_roads("monaco.duckdb"))
+levels = con.execute("SELECT * FROM visualization.edge_levels").df()
 ```
 
-`load_area_levels` checks that the edges are those the numbers were solved for, and stops with a message if not. It never recomputes. After a rebuild of the file, run `duckosm levels` again.
+After a rebuild with `--no-levels`, run `duckosm levels` again: the stored numbers are for the edges of the earlier build.
 
 Options: [`duckosm levels`](../reference/cli.md#levels).

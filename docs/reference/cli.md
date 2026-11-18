@@ -173,18 +173,16 @@ duckosm viz [OPTIONS] DB
 
 ### `levels`
 
-Makes and solves the level area of the database and stores the drawing order in it (schema [`visualization`](database.md#visualization-schema)): every road gets a casing number
-(start, main, end), a fill number and its ends as drawn. The roads of all modes go into one level area folder next to the database (`DB.levels`), where your `edits.csv`,
-`heads.csv` and `caps.csv` are written from the tables `visualization.level_*` of the database (they are the master); roadstyle solves it with them. `duckosm build` does this as its last step; this command makes it again, or later for a build with `--no-levels`. The database is
-changed in place. To fix places by hand: `roadstyle-levels edit DB.levels`. Needs `duckosm[levels]`. Guide: [Store the drawing order](../guides/drawing-order.md).
+Makes the drawing order of the roads again and stores it in the database (schema [`visualization`](database.md#visualization-schema)):
+every road gets a casing number (start, main, end), a fill number and its ends as drawn. The roads of all modes are one level area.
+Your edits are the tables `visualization.level_edits`, `level_heads` and `level_caps`: they are the input. An edit row that names
+no road of the database goes to `visualization.level_unmatched`, and the next run tries it again. `duckosm build` does this as its
+last step and keeps the edits of the file that it replaces. Use this command after a build with `--no-levels`. The database is
+changed in place. To fix places by hand: [`levels-edit`](#levels-edit). Guide: [Store the drawing order](../guides/drawing-order.md).
 
 ```text
-duckosm levels [OPTIONS] DB
+duckosm levels DB
 ```
-
-| Option | Does | Default |
-|---|---|---|
-| `--area DIR` | the level area folder | `DB.levels` next to the database |
 
 ### `levels-edit`
 

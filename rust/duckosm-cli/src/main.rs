@@ -825,6 +825,35 @@ fn serve_studio(site: duckosm_edit::studio::Studio, url: Option<String>, no_open
 
 /// duckosm levels-edit: the level editor of a database (duckOSM `duckosm levels-edit`): Studio's card 8, roadstyle's level editor, on the
 /// one file. Each "← Steps" writes the drawing order into the file (visualization.edge_levels, docs/levels.md).
+/// duckosm levels: make the drawing order of the roads again (visualization.edge_levels), with your edits, heads and caps of
+/// visualization.level_edits, level_heads and level_caps. `duckosm build` does this as its last step; this command makes it again, or
+/// later for a build with --no-levels. The database is changed in place.
+#[derive(Parser)]
+#[command(name = "duckosm levels", version)]
+struct LevelsCli {
+    /// The database (`<name>.duckdb`).
+    db: PathBuf,
+    /// No effect: the edits are in the database, not in a level area folder. Kept so that old scripts work.
+    #[arg(long, hide = true)]
+    area: Option<PathBuf>,
+}
+
+#[cfg(feature = "duckdb")]
+fn levels(args: &[String]) -> Result<(), String> {
+    let cli = LevelsCli::parse_from(args);
+    if !cli.db.exists() {
+        return Err(format!("{}: no such file", cli.db.display()));
+    }
+    let s = duckosm_edit::levels::levels(&cli.db)?;
+    println!("Drawing order: {} roads ({} edges), {} given up, {} edit row(s) not used (visualization.edge_levels)", s.roads, s.edges, s.given_up, s.unmatched);
+    Ok(())
+}
+
+#[cfg(not(feature = "duckdb"))]
+fn levels(_: &[String]) -> Result<(), String> {
+    Err("levels needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
+}
+
 #[derive(Parser)]
 #[command(name = "duckosm levels-edit", version)]
 struct LevelsEditCli {
@@ -981,7 +1010,7 @@ fn main() {
 /// Run the program with `args` (the first is the program name) and give the exit code. The Python package calls it
 /// (`duckosm._rust.cli`).
 #[allow(dead_code)]
-pub fn main_with(mut args: Vec<String>) -> i32 {
+pub fn main_with(args: Vec<String>) -> i32 {
     // glibc: blocks of 128 KB and more go back to the system when they are freed (128 KB is the start value of glibc; this
     // stops its increase). Without this, each thread keeps the large blocks that it freed: the levels step alone on France
     // used 950 MB with a live heap of 520 MB. The build by tiles of France (--raw) with it, same time: levels 1597 -> 1071
@@ -997,9 +1026,17 @@ pub fn main_with(mut args: Vec<String>) -> i32 {
     duckosm_build::set_progress(Some(Box::new(heap::report)));
     #[cfg(feature = "heap-probe")]
     let _ = duckosm_build::STEP_HOOK.set(heap::report);
-    // `duckosm build ...` is the build (as in duckOSM's Python CLI); `duckosm <pbf>` and `duckosm --config` also
+    // `duckosm build ...`: the build with the options of docs/reference/cli.md; `duckosm <pbf>` and `duckosm --config`: the build with
+    // the options of this program (the tiles and the pages call it so)
+    #[cfg(feature = "duckdb")]
     if args.get(1).is_some_and(|a| a == "build") {
-        args.remove(1);
+        return match build_cmd(&args[1..]) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("error: {e}");
+                1
+            }
+        };
     }
     // `duckosm edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
@@ -1007,6 +1044,7 @@ pub fn main_with(mut args: Vec<String>) -> i32 {
         Some("ask") => ask(&args[1..]),
         Some("studio") => studio(&args[1..]),
         Some("levels-edit") => levels_edit(&args[1..]),
+        Some("levels") => levels(&args[1..]),
         Some("cut") => cut(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),
@@ -1029,6 +1067,169 @@ pub fn main_with(mut args: Vec<String>) -> i32 {
         return 1;
     }
     0
+}
+
+/// duckosm build: build a routing network from a PBF, or cut one from a built database (docs/reference/cli.md, `build`). An option
+/// that you type overrides the config file. Writes only the .duckdb file. The drawing order is the last step, with the edits
+/// (visualization.level_*) of the file that the build replaces.
+#[cfg(feature = "duckdb")]
+#[derive(Parser)]
+#[command(name = "duckosm build", version)]
+struct BuildCli {
+    /// A config file (YAML; `duckosm init-config` writes a commented one).
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+    /// The input .osm.pbf file.
+    #[arg(short, long)]
+    pbf: Option<PathBuf>,
+    /// The output .duckdb file (default: <boundary name>.duckdb, else <pbf name>.duckdb, in the current folder).
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// A GeoJSON boundary: the area to build.
+    #[arg(short, long)]
+    boundary: Option<PathBuf>,
+    /// Cut the area from this built database (source.type: duckdb) in place of a PBF.
+    #[arg(long)]
+    source_db: Option<PathBuf>,
+    /// Build the area of this H3 cell (its outline is the boundary).
+    #[arg(long)]
+    h3_cell: Option<String>,
+    /// Build edge_graph, the graph of legal turns (on by default).
+    #[arg(long, overrides_with = "no_graph")]
+    graph: bool,
+    #[arg(long, overrides_with = "graph")]
+    no_graph: bool,
+    /// Add the H3 cell ids to the nodes and the edges (on by default).
+    #[arg(long, overrides_with = "no_h3_index")]
+    h3_index: bool,
+    #[arg(long, overrides_with = "h3_index")]
+    no_h3_index: bool,
+    /// The H3 resolution, 0 to 15 (default 8).
+    #[arg(long, value_parser = clap::value_parser!(i64).range(0..=15))]
+    h3_resolution: Option<i64>,
+    /// The modes: driving, walking or cycling; repeat for several (default driving).
+    #[arg(short, long)]
+    modes: Vec<String>,
+    /// Build the base-map layers, features.* (on by default).
+    #[arg(long, overrides_with = "no_features")]
+    features: bool,
+    #[arg(long, overrides_with = "features")]
+    no_features: bool,
+    /// The last step: the drawing order of the roads, with your edits kept (on by default; off for a big area, then `duckosm levels`).
+    #[arg(long, overrides_with = "no_levels")]
+    levels: bool,
+    #[arg(long, overrides_with = "levels")]
+    no_levels: bool,
+    /// The rules file of the fixes for OSM errors (config key: osm_overrides).
+    #[arg(long)]
+    fixes: Option<PathBuf>,
+    /// No effect: the network step is always the Rust engine. Kept so that old scripts work.
+    #[arg(long, hide = true)]
+    engine: Option<String>,
+    /// Also write the log to this file.
+    #[arg(long)]
+    log_file: Option<PathBuf>,
+}
+
+/// The level inputs (visualization.level_*) of a database, copied into a new file, for the build that replaces the database.
+#[cfg(feature = "duckdb")]
+fn save_level_inputs(db: &std::path::Path, to: &std::path::Path) -> Result<bool, String> {
+    let q = |p: &std::path::Path| p.display().to_string().replace('\'', "''");
+    let con = duckosm_edit::duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
+    con.execute_batch(&format!("ATTACH '{}' AS old (READ_ONLY); ATTACH '{}' AS keep;", q(db), q(to))).map_err(|e| e.to_string())?;
+    let mut st = con
+        .prepare("SELECT table_name FROM information_schema.tables WHERE table_catalog = 'old' AND table_schema = 'visualization' AND table_name IN ('level_edits', 'level_heads', 'level_caps', 'level_unmatched')")
+        .map_err(|e| e.to_string())?;
+    let tables: Vec<String> = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+    for t in &tables {
+        con.execute_batch(&format!("CREATE TABLE keep.main.{t} AS SELECT * FROM old.visualization.{t}")).map_err(|e| e.to_string())?;
+    }
+    Ok(!tables.is_empty())
+}
+
+#[cfg(feature = "duckdb")]
+fn build_cmd(args: &[String]) -> Result<(), String> {
+    let cli = BuildCli::parse_from(args);
+    let s = |p: &Option<PathBuf>| p.as_ref().map(|p| p.display().to_string());
+    let on = |yes: bool, no: bool| (yes || no).then_some(yes);
+    let default = PathBuf::from("config/default.yaml");
+    let config = cli.config.clone().or_else(|| (cli.pbf.is_none() && cli.source_db.is_none() && default.exists()).then_some(default));
+    let modes: Vec<String> = cli.modes.iter().flat_map(|m| m.split(',')).map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
+    let o = config::Overrides {
+        pbf: s(&cli.pbf),
+        source_db: s(&cli.source_db),
+        output: s(&cli.output),
+        boundary: s(&cli.boundary),
+        h3_cell: cli.h3_cell.clone(),
+        modes: (!modes.is_empty()).then_some(modes),
+        fixes: s(&cli.fixes),
+        graph: on(cli.graph, cli.no_graph),
+        h3_index: on(cli.h3_index, cli.no_h3_index),
+        h3_resolution: cli.h3_resolution,
+        features: on(cli.features, cli.no_features),
+        levels: on(cli.levels, cli.no_levels),
+    };
+    if config.is_none() && o.pbf.is_none() && o.source_db.is_none() {
+        return Err("provide --config, or --pbf, or --source-db (or config/default.yaml must exist)".into());
+    }
+    if cli.engine.as_deref().is_some_and(|e| e != "rust") {
+        eprintln!("warning: --engine {}: the network step is always the Rust engine", cli.engine.as_deref().unwrap_or_default());
+    }
+    let text = config::with_overrides(config.as_deref(), &o)?;
+    let c = config::read_text(&text, "build", false)?;
+    let mut p = c.params;
+    p.set_formats(&["duckdb"])?;
+    // the drawing order runs after the .duckdb file is written, as `duckosm levels`: with the edits that the old file had
+    let levels = p.levels != duckosm_build::LevelsMethod::None;
+    p.levels = duckosm_build::LevelsMethod::None;
+    let db = c.out.join(format!("{}.duckdb", p.name));
+    let kept = std::env::temp_dir().join(format!("duckosm-build-{}-levels.duckdb", std::process::id()));
+    let _ = std::fs::remove_file(&kept);
+    let mut have_inputs = levels && db.exists() && save_level_inputs(&db, &kept)?;
+    // a cut with no file of its own: the edits of its parent (only the rows of its roads are used)
+    let parent = levels && !have_inputs && p.clip.is_some() && c.pbf.exists() && save_level_inputs(&c.pbf, &kept)?;
+    have_inputs |= parent;
+    let mut log = cli.log_file.as_ref().map(std::fs::File::create).transpose().map_err(|e| e.to_string())?;
+    let r = (|| -> Result<(), String> {
+        let sum = build(&c.pbf, &c.out, &p)?;
+        let dir = std::env::current_dir().map_err(|e| e.to_string())?;
+        duckosm_edit::native::record(&db, &text, &dir)?;
+        let mut lines = sum.lines();
+        if levels {
+            if have_inputs {
+                let q = |p: &std::path::Path| p.display().to_string().replace('\'', "''");
+                let con = duckosm_edit::duckdb::Connection::open(&db).map_err(|e| e.to_string())?;
+                let mut sql = format!("ATTACH '{}' AS keep (READ_ONLY); CREATE SCHEMA IF NOT EXISTS visualization;", q(&kept));
+                for t in ["level_edits", "level_heads", "level_caps", "level_unmatched"] {
+                    sql += &format!("CREATE TABLE IF NOT EXISTS visualization.{t} AS SELECT * FROM keep.main.{t};");
+                }
+                // tables that the old file did not have are not made: the error of a missing table is no error here
+                for stmt in sql.split(';').filter(|x| !x.trim().is_empty()) {
+                    let _ = con.execute_batch(stmt);
+                }
+            }
+            match duckosm_edit::levels::levels(&db) {
+                Ok(s) => lines.push(format!("Drawing order: {} roads, {} given up, {} edit row(s) not used (visualization.edge_levels)", s.roads, s.given_up, s.unmatched)),
+                Err(e) => lines.push(format!("warning: drawing order failed: {e}")),
+            }
+            if parent {
+                // the parent's rows for the roads outside this cut are not kept
+                let con = duckosm_edit::duckdb::Connection::open(&db).map_err(|e| e.to_string())?;
+                con.execute_batch("DROP TABLE IF EXISTS visualization.level_unmatched").map_err(|e| e.to_string())?;
+            }
+        }
+        lines.push(format!("Output: {}", db.display()));
+        for l in &lines {
+            eprintln!("{l}");
+            if let Some(f) = log.as_mut() {
+                use std::io::Write;
+                writeln!(f, "{l}").map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&kept);
+    r
 }
 
 /// duckosm features-check: list the OSM polygons that no features.* table holds, grouped by tag (duckOSM
