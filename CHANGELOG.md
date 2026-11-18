@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crate `rust/duckosm-route`. The
+- **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
+  algorithms: no DuckDB, no threads, it builds for WebAssembly) and `rust/duckosm-route` (the database, GraphML, the CLI). The
   routing graph is in memory with the order of networkx's graph, and the route is a port of networkx's bidirectional Dijkstra
   (the same heap keys), so a tie gives the path of duckOSM's `routing.route`. `route DB FROM TO` prints `route()` as JSON;
   `--pairs FILE` routes many pairs on one graph, as `Router` does. `export-graph` writes the same GraphML files as duckOSM

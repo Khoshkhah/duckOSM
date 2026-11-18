@@ -11,6 +11,8 @@ license.workspace = true
 duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+# the algorithms (no DuckDB: they build for WebAssembly too)
+duckosm-router = { path = "../duckosm-router" }
 duckosm-tools = { path = "../duckosm-tools" }
 # Python's text of a float (place::py_float)
 duckosm-build = { path = "../duckosm-build" }

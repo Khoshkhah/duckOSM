@@ -888,10 +888,15 @@ dependencies = [
  "clap",
  "duckdb",
  "duckosm-build",
+ "duckosm-router",
  "duckosm-tools",
  "md-5",
  "serde_json",
 ]
+
+[[package]]
+name = "duckosm-router"
+version = "0.7.0"
 
 [[package]]
 name = "duckosm-tools"

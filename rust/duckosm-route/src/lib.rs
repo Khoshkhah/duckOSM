@@ -2,9 +2,10 @@
 //! order of networkx's graph, so the routes (also when two routes cost the same) are those of duckOSM's Python code.
 
 pub mod cli;
-pub mod graph;
 pub mod graphml;
 pub mod route;
+
+pub use duckosm_router::graph;
 
 pub type Result<T> = std::result::Result<T, String>;
 
