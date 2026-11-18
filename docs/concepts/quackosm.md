@@ -17,7 +17,7 @@ In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quac
 
 ## Results
 
-Mac mini (12 cores, 16 GB). duckOSM is **3 to 7 times faster** and needs **2 to 5 times less memory**.
+Mac mini (Apple M6, 12 cores, 16 GB). duckOSM is **3 to 7 times faster** and needs **2 to 5 times less memory**.
 
 ### France (5.1 GB)
 

@@ -33,7 +33,7 @@ tiles (`duckosm FILE` is one build). The local dashboard (`duckosm studio`) runs
 duckosm tiles france.osm.pbf --boundary france.geojson -o out -- --modes driving
 ```
 
-Mac mini (12 cores, 16 GB), headless Chromium for the browser, 2026-11-17: the levels `solve`, tiles of zoom 8. The tables
+Mac mini (Apple M6, 12 cores, 16 GB), headless Chromium for the browser, 2026-11-17: the levels `solve`, tiles of zoom 8. The tables
 of the build by tiles are equal to those of one build. Time, memory, the most disk at one time (the browser: its storage),
 and the output.
 

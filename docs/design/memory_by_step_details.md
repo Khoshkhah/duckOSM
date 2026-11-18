@@ -8,7 +8,7 @@ Kentucky; the changes since then are in [What changed](#what-changed).
 
 ## How it was measured
 
-- **Areas and options:** driving, `--building-faces --levels solve`, on the Mac mini (12 cores, 16 GB).
+- **Areas and options:** driving, `--building-faces --levels solve`, on the Mac mini (Apple M6, 12 cores, 16 GB).
   - Kentucky, cut from the US South file with `kentucky.geojson`, also with `--raw` (the options of the Studio page).
   - France, from the Geofabrik France file, with a box around metropolitan France as the boundary, without `--raw` (raw.*
     of France is about 20 GB of files; its memory is that of its sorts, see step 7). France: 27.8 million edges, 49.5
