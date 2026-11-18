@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>OpenStreetMap → road networks, map layers and GIS files.<br>
-  One Rust program, on your computer and in the browser.</b>
+  <b>Turn OpenStreetMap into routable networks, map layers and GIS files.<br>
+  One Rust engine, for your computer and your browser.</b>
 </p>
 
 <p align="center">
