@@ -6,7 +6,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// The command names of this module: `duckosm <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 2] = ["viz", "route-map"];
+pub const COMMANDS: [&str; 3] = ["viz", "route-map", "gmns-map"];
 
 #[derive(Parser)]
 #[command(name = "duckosm")]
@@ -62,6 +62,20 @@ enum Cmd {
         #[arg(short, long)]
         out: Option<PathBuf>,
     },
+    /// Write a lane-level HTML map of a GMNS DuckDB with lanestyle: the roads of the level area as roadstyle draws them, each as
+    /// wide as its lanes, with the lanes, lane lines, arrows, zebras and sidewalks on them. Needs `duckosm levels SOURCE_DB` first.
+    GmnsMap {
+        gmns_db: PathBuf,
+        /// The core db the GMNS file was made from.
+        #[arg(long)]
+        source_db: PathBuf,
+        /// The level area (default: SOURCE_DB.levels, made by `duckosm levels SOURCE_DB`).
+        #[arg(long)]
+        area: Option<PathBuf>,
+        /// The output HTML (default: <name>_lanes.html).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
 }
 
 /// Run one command; `args[0]` is its name.
@@ -83,6 +97,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let g3d = if google_3d { Some(true) } else if no_google_3d { Some(false) } else { None };
             let p = crate::route_map::write_route_map(&db, &out, mode.as_deref(), basemap.as_deref(), g3d)?;
             println!("wrote {} — open it in a browser", p.display());
+            Ok(())
+        }
+        Cmd::GmnsMap { gmns_db, source_db, area, out } => {
+            for f in [&gmns_db, &source_db] {
+                if !f.exists() {
+                    return Err(format!("{}: no such file", f.display()));
+                }
+            }
+            let name = gmns_db.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let out = out.unwrap_or_else(|| PathBuf::from(format!("{name}_lanes.html")));
+            let p = crate::gmns_map::write_map(&gmns_db, &out, &source_db, area.as_deref())?;
+            println!("wrote {} — open in a browser", p.display());
             Ok(())
         }
     }

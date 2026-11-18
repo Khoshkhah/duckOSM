@@ -54,7 +54,6 @@ To do:
   edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
   tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
 - GMNS (group C): the command `gmns` is Rust; the functions `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
-- The maps (group F): `gmns-map`.
 - No Rust port yet: `levels`, `bus`, `multimodal`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
   the Python CLI reads them and the build runs in Rust.
 - Then: remove `PYTHON_COMMANDS` of `src/duckosm/_main.py`, remove the Python engine code (the tag `python-engine-final`
@@ -180,7 +179,7 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | `--meso`, `--micro` (`meso_<mode>`, `micro_<mode>`; `src/gmns_meso.rs`) | Done: on Monaco (driving and cycling) and Tartu (driving) every meso column equals Python. Every micro column equals Python but the points and lengths of the cells, which are cut from the lane lines and so follow their check by properties. The golden file is `monaco_gmns_meso_columns.tsv`. |
 | `--gtfs`, `--gtfs-max-m` (the stops of a GTFS feed as `location` rows; `src/gtfs.rs`) | Done: on Monaco, with a feed made from its OpenStreetMap stops (`tests/data/exports/monaco_gtfs.zip`: bus stops, stops no trip calls at, railway stops, entrances, a station and a far stop), every `location` column of every mode equals Python, also with the feed as a folder. A zip file is read with `flate2` (stored and deflated files; no zip64). |
 | `gmns-viz` (`src/gmns_viewer.rs`) | Done: the page is byte for byte Python's on the same db (Monaco driving, cycling and walking, with meso and micro). The template is now one file, `src/duckosm/templates/gmns_viewer.html`, that both read. The golden test reads a db made from `tests/data/exports/gmns_viewer/` (the columns that the viewer reads, from Python's export): the Rust lane lines differ from Python's below 1 mm, and that moves some of the page's rounded points. |
-| `gmns-map` | Not ported: it only calls lanestyle (`lane_page`), a Python library. To decide: keep it as a Python command, or port lanestyle's page. |
+| `gmns-map` | Done: `duckosm gmns-map` (`duckosm-edit/src/gmns_map.rs`) calls lanestyle's Rust engine (`lanestyle::page::lane_page`; lanestyle was ported to Rust, 0.4). lanestyle's golden check compares its items with the Python lanestyle 0.3.1 on Monaco and Tartu (all equal, coordinates to 1 mm); `duckosm-edit/tests/gmns_map.rs` makes the page of Monaco. |
 
 ## Not changed
 

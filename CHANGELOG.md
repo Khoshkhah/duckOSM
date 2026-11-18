@@ -7,13 +7,19 @@
   DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust
   (`src/duckosm/_api.py`): `to_sumo`, `to_gis`, `to_matsim`,
   `to_matsim_lanes`, `to_opendrive`, `to_railml`, `to_lanelet2`, `to_elevation`, `route`, `Router`, `route_multimodal`,
-  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. The GMNS functions, `gmns-map` and the
+  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. The GMNS functions and the
   commands `levels`, `bus`, `multimodal` and `clip-pbf` still run the Python code. `Router` has no `.graph` (the graph is
   in Rust). A connection to an in-memory database runs the Python code. `DuckOSM.run()` is as before (the Python steps
   with the Rust network step): the whole build in Rust is not yet equal to it (`docs/design/all_in_rust.md`, step 6).
   `import duckosm` loads the names when they are first used.
 
-- **`duckosm route-map`: the route planner page is in Rust** (`rust/duckosm-edit/src/route_map.rs`,
+- **`duckosm gmns-map`: the lane map of a GMNS file is in Rust** (`rust/duckosm-edit/src/gmns_map.rs`,
+  `docs/design/all_in_rust.md`, group C), with the options of `duckosm gmns-map` (`--source-db`, `--area`, `-o`). It calls
+  lanestyle's Rust engine (the crate `lanestyle` 0.4, a Git dependency): the roads of the level area as roadstyle draws them, each
+  as wide as its lanes, with the lanes, lane lines, arrows, zebras and sidewalks. lanestyle's items equal those of the Python
+  lanestyle 0.3.1 on Monaco and Tartu (lanestyle's golden check). The level area is still made by `duckosm levels`. Monaco: the
+  page in 3 s.
+
 - **`duckosm levels-edit DB`: the level editor in the Rust program** (`docs/design/all_in_rust.md`, group F). It is the page of
   `duckosm studio` on the one file, with card 8 (Edit levels) open: roadstyle's level editor over the area's map. "← Steps"
   writes the drawing order into the file. Options: `--port` (default 8000) and `--no-open`.
@@ -247,7 +253,7 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
 
 - **`duckosm studio`: the map of an area is roadstyle's way D** (roadstyle PR 168; `rust/duckosm-edit/src/studio.rs`, `page/studio.js`). The server keeps a
   `roadstyle_local::Local` for each open area (the last 3) and answers its addresses at `/areas/<name>/`: `style.json`, the tiles, the rows and the lines of the
-  roads, and, in the program `duckosm`, the queries and the schema over the area's `.duckdb` file (read only). The page gives the dashboard
+  roads, and, in the program `duckosm-rust`, the queries and the schema over the area's `.duckdb` file (read only). The page gives the dashboard
   `rsHttpAdapter`, so a click on a road asks the server for its fields and its line. `GET /api/style/<name>` and `GET /tiles/<name>/...` are removed.
   The Python module has no DuckDB inside: there the map has no queries.
 - **`duckosm studio`: step 1 and step 3 compared with Studio, action by action.** The page was run next to Studio in headless Chromium with the same actions (type "burnaby", hover each result, click one, each Draw tool and its key, the File and H3 tabs); the differences were fixed: the text "a point" of a place with no boundary, the File tab text and a file dropped on the map, the boxes of the Draw hint and of the H3 note, the gap between the search field and the list, the size of a tab icon, the panel "?", and no extract is chosen at the start (the person picks the file, as in Studio). *Host: nothing is needed.*

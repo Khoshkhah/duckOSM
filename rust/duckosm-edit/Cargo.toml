@@ -7,7 +7,7 @@ description = "duckosm edit: a page on 127.0.0.1 that edits the OSM fixes of a d
 
 [features]
 # the native database and the native build (the CLI). The Python module gives its own database (duckosm/edit.py) and has no DuckDB inside
-duckdb = ["dep:duckdb", "duckosm-build/duckdb", "roadstyle-local/duckdb", "dep:duckosm-route"]
+duckdb = ["dep:duckdb", "duckosm-build/duckdb", "roadstyle-local/duckdb", "dep:duckosm-route", "dep:lanestyle"]
 
 [dependencies]
 duckosm-editor = { path = "../duckosm-editor" }   # the files of the fixes editor
@@ -24,6 +24,9 @@ ureq = "3"                     # duckosm studio: the download of a Geofabrik ext
 duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = true }
 # duckosm route-map: the edge graph a mode routes on, the lines of the roads (the planner's data)
 duckosm-route = { path = "../duckosm-route", optional = true }
+# duckosm gmns-map: the lane page of a GMNS file (lanestyle's Rust engine: its GMNS reader, its items, roadstyle's page)
+lanestyle = { git = "https://github.com/Khoshkhah/lanestyle.git", rev = "273040519162be63ec9f15a3c7ce1934877ea0a3", features = ["page"], optional = true }
 
 [dev-dependencies]
 duckosm-planner = { path = "../duckosm-planner" }   # tests/route_map.rs: the page's router against the program's
+duckosm-export = { path = "../duckosm-export" }     # tests/gmns_map.rs: the GMNS file of Monaco
