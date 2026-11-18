@@ -11,7 +11,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: [".github/workflows/release.yml"]
+    paths: [".github/workflows/release.yml", "pyproject.toml", "rust/duckosm-py/**", "rust/duckosm-cli/**", "src/duckosm/_main.py", "src/duckosm/_api.py", "tests/test_wheel.py"]
   workflow_dispatch:
 
 jobs:
@@ -38,8 +38,9 @@ jobs:
           EOF
 
   # One wheel for each system (abi3: one wheel for every Python from 3.9), tested in a clean virtual environment.
-  # The wheel has the module duckosm._rust, built from rust/ (no DuckDB inside). Python 3.9 is the abi3 floor; the
-  # package itself needs 3.10 (requires-python).
+  # The wheel has the module duckosm._rust, built from rust/ with DuckDB inside: the whole program duckosm is in it
+  # (duckosm._rust.cli; the command duckosm of the wheel runs it). Python 3.9 is the abi3 floor; the package itself
+  # needs 3.10 (requires-python).
   wheels:
     name: wheel ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -70,7 +71,7 @@ jobs:
           path: dist
       # The wheel is installed by its file name: PyPI has the same version, and --find-links would not choose
       # the file. The test runs in tests/, so "import duckosm" finds the installed package and not src/.
-      - name: Test the wheel in a new virtual environment (the Rust module on Monaco)
+      - name: Test the wheel in a new virtual environment (the Rust module, the program duckosm and the API on Monaco)
         shell: bash
         run: |
           set -e
@@ -78,10 +79,18 @@ jobs:
           if [ -f test-env/Scripts/activate ]; then source test-env/Scripts/activate; else source test-env/bin/activate; fi
           pip install dist/*.whl
           python tests/test_wheel.py
+          duckosm --help
+          duckosm tests/data/monaco_sample.osm.pbf -o cli-test --name monaco --modes driving,walking,cycling --no-merge-segments \
+            --no-component-filter --no-speeds --no-costs --no-connect-paths --no-sidewalk-inference 2> cli-test.log
+          cat cli-test.log
+          grep -q "^driving: 3092 edges, 1904 nodes, 724 private edges" cli-test.log
+          duckosm build --pbf tests/data/monaco_sample.osm.pbf --output build-test/monaco.duckdb --modes driving --no-features
+          duckosm info build-test/monaco.duckdb
+          python -c "import duckosm; print(duckosm.to_matsim('build-test/monaco.duckdb', 'build-test/network.xml.gz'))"
 
   # The Rust program (rust/duckosm-cli) as one archive for each system. The Linux program needs glibc 2.35 or newer
-  # (the runner's glibc). The file name and the program name are `duckosm-rust` until the name is decided (D4 of
-  # docs/design/rust_engine_move.md).
+  # (the runner's glibc). The program is `duckosm`; `duckosm-rust` is the old name, for one release (it prints
+  # "use duckosm" and runs the same command).
   cli:
     name: CLI ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -105,7 +114,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          bin=rust/target/release/duckosm-rust; [ -f $bin.exe ] && bin=$bin.exe
+          bin=rust/target/release/duckosm; [ -f $bin.exe ] && bin=$bin.exe
           $bin tests/data/monaco_sample.osm.pbf -o cli-test --modes driving,walking,cycling --no-merge-segments \
             --no-component-filter --no-speeds --no-costs --no-connect-paths --no-sidewalk-inference 2> cli-test.log
           cat cli-test.log
@@ -114,10 +123,10 @@ jobs:
           grep -q "^cycling: 10670 edges, 4867 nodes, 141 private edges" cli-test.log
           mkdir dist
           v=${GITHUB_REF_NAME#v}; [ "$GITHUB_REF_TYPE" = tag ] || v=dev
-          if [ -f rust/target/release/duckosm-rust.exe ]; then
-            7z a dist/duckosm-rust-$v-${{ matrix.name }}.zip ./rust/target/release/duckosm-rust.exe README.md LICENSE
+          if [ -f rust/target/release/duckosm.exe ]; then
+            7z a dist/duckosm-$v-${{ matrix.name }}.zip ./rust/target/release/duckosm.exe ./rust/target/release/duckosm-rust.exe README.md LICENSE
           else
-            tar czf dist/duckosm-rust-$v-${{ matrix.name }}.tar.gz -C rust/target/release duckosm-rust -C ../../.. README.md LICENSE
+            tar czf dist/duckosm-$v-${{ matrix.name }}.tar.gz -C rust/target/release duckosm duckosm -C ../../.. README.md LICENSE
           fi
       - uses: actions/upload-artifact@v4
         with:

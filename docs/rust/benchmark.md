@@ -1,4 +1,4 @@
-# Benchmark: network step, duckOSM and duckosm-rust
+# Benchmark: network step, duckOSM (Python) and duckosm (Rust)
 
 Date: 2026-10-21. **Only Monaco is tested.** Large areas are not tested yet.
 
@@ -11,9 +11,9 @@ Machine: Intel Core i5-13600K (20 threads), 23 GB memory, WSL2 (Linux 6.6.87.2),
 | Program | Version |
 |---|---|
 | duckOSM (Python) | source at git `b857caf` (`pyproject.toml` says 0.6.0; the installed metadata says 0.5.0), DuckDB 1.5.3 |
-| duckosm-rust | this repository at commit `bd7e158` (later commits change only the default `--format` and docs), `cargo build --release`, `lto = "thin"` |
+| duckosm | this repository at commit `bd7e158` (later commits change only the default `--format` and docs), `cargo build --release`, `lto = "thin"` |
 | Rust | rustc 1.99.1 |
-| DuckDB inside duckosm-rust | 1.5.6 (crate `duckdb` 1.10506.1, `bundled`) |
+| DuckDB inside duckosm | 1.5.6 (crate `duckdb` 1.10506.1, `bundled`) |
 
 ## What is compared
 
@@ -22,31 +22,31 @@ The **network step of the driving mode**: PBF in, driving edges and nodes out. I
 The settings are the same for both programs:
 
 - one mode (driving), no boundary (so no `osmium` cut and no component filter), global junctions on,
-  `merge_segments` off (`--no-merge-segments`, and `--no-speeds` since duckosm-rust has the speed step; the benchmark was measured before it had the merge or the speeds), no OSM fixes;
+  `merge_segments` off (`--no-merge-segments`, and `--no-speeds` since duckosm has the speed step; the benchmark was measured before it had the merge or the speeds), no OSM fixes;
 - duckOSM: the config `bench/python_network_step.yaml`, with every other step switched off (graph of
   legal turns, H3, speeds, costs, turn restrictions, features, bus routes, drawing order);
-- duckosm-rust: `duckosm-rust monaco.osm.pbf -o <dir> --name monaco --no-component-filter --format duckdb`
+- duckosm: `duckosm monaco.osm.pbf -o <dir> --name monaco --no-component-filter --format duckdb`
   and `--format geoparquet`.
 
 **The results are equal.** Only the three tables that both programs write are compared: `driving.edges`,
 `driving.private_edges` and `driving.nodes`. The other tables of duckOSM (`edge_graph`, `lane_profile`,
-`ways`, `raw.*`, and so on) are not written by duckosm-rust, so they are not compared.
+`ways`, `raw.*`, and so on) are not written by duckosm, so they are not compared.
 
-| Table | rows (duckOSM = duckosm-rust) | rows that differ, in any column |
+| Table | rows (duckOSM = duckosm) | rows that differ, in any column |
 |---|---|---|
 | `driving.edges` | 3,092 | 0 |
 | `driving.private_edges` | 724 | 0 |
 | `driving.nodes` | 1,904 | 0 |
 
-`tools/compare_with_duckosm.py <duckOSM db> <duckosm-rust output>` joins on `edge_id` (nodes on
+`tools/compare_with_duckosm.py <duckOSM db> <duckosm output>` joins on `edge_id` (nodes on
 `node_id`) and compares every column. The geometry is compared as exact bytes (WKB), `length_m` as the
-exact 32-bit float. It was run on the `.duckdb` file and on the GeoParquet files of duckosm-rust.
+exact 32-bit float. It was run on the `.duckdb` file and on the GeoParquet files of duckosm.
 
 There is a second check with a smaller, cut file and a build with the component filter on
 (2,765 edges, 79 dropped), and the golden test `cargo test` (see [development.md](development.md)).
 Against `monaco.duckdb` of 2026-10-21, 78 edges differ in `lanes` and nothing else. These are the OSM
 fixes (`osm_overrides.yaml` sets the lanes of Boulevard du Larvotto, Avenue Albert II and others).
-duckosm-rust has no fixes yet.
+duckosm has no fixes yet.
 
 ## Method
 
@@ -57,7 +57,7 @@ and the largest peak memory (maximum resident set size).
 The start-up and the real work are shown apart:
 
 1. **Start-up only.** The program starts, prints its version and stops: `duckosm --version` and
-   `duckosm-rust --version`. This is the time to load the program and its libraries (for duckOSM:
+   `duckosm --version`. This is the time to load the program and its libraries (for duckOSM:
    Python, DuckDB, click and others).
 2. **Whole command.** The build, from start to end.
 3. **Network steps only.** The sum of the times that the program reports for its own steps, inside one
@@ -65,7 +65,7 @@ The start-up and the real work are shown apart:
    - duckOSM: `_load_pbf`, `_build_global_junctions`, `_filter_roads`, `_build_edges`,
      `_simplify_graph`, `_split_private`. `bench/python_steps.py` wraps these methods of `DuckOSM` and
      prints their time. The code that runs is the code of `duckosm build`.
-   - duckosm-rust (`--timing`): read ways, read nodes, build network.
+   - duckosm (`--timing`): read ways, read nodes, build network.
 
 **Lane profile.** duckOSM always runs the step `_lane_profile` for the driving mode and has no switch for
 it. It is not part of the network step. It adds a large cost (see below). The row "lane profile off" runs
@@ -77,26 +77,26 @@ it. It is not part of the network step. It adds a large cost (see below). The ro
 | Program | wall min (s) | wall median (s) | peak memory (MB) | network steps min (s) | network steps median (s) |
 |---|---|---|---|---|---|
 | Start-up only, duckOSM (`duckosm --version`) | 0.19 | 0.21 | 70 | - | - |
-| Start-up only, duckosm-rust (`duckosm-rust --version`) | 0.00 | 0.00 | 13 | - | - |
+| Start-up only, duckosm (`duckosm --version`) | 0.00 | 0.00 | 13 | - | - |
 | duckOSM: `duckosm build --config config.yaml` | 36.55 | 40.48 | 313 | - | - |
 | duckOSM: same, lane profile off | 1.73 | 2.05 | 322 | 0.53 | 0.60 |
-| duckosm-rust: `--format duckdb` | 0.17 | 0.31 | 62 | 0.02 | 0.02 |
-| duckosm-rust: `--format geoparquet` | 0.03 | 0.03 | 43 | 0.02 | 0.02 |
+| duckosm: `--format duckdb` | 0.17 | 0.31 | 62 | 0.02 | 0.02 |
+| duckosm: `--format geoparquet` | 0.03 | 0.03 | 43 | 0.02 | 0.02 |
 
 Wall time of each run (s):
 
 - duckOSM `duckosm build`: 40.04, 39.18, 51.13, 41.63, 44.60, 53.63, 38.87, 40.93, 39.46, 36.55.
-- duckosm-rust: see `bench/run_bench.py` output; the `duckdb` runs vary from 0.17 to 0.31 s because the
+- duckosm: see `bench/run_bench.py` output; the `duckdb` runs vary from 0.17 to 0.31 s because the
   machine was busy.
 
 Reading the table:
 
-- **Start-up:** duckOSM needs about 0.2 s before it does anything. duckosm-rust needs less than 10 ms.
+- **Start-up:** duckOSM needs about 0.2 s before it does anything. duckosm needs less than 10 ms.
   For a file as small as Monaco, this is a large part of the 1.7-2.1 s of the whole duckOSM run with the
   lane profile off.
-- **Network steps alone (no start-up):** 0.53-0.60 s in duckOSM and 0.02 s in duckosm-rust. This is the
+- **Network steps alone (no start-up):** 0.53-0.60 s in duckOSM and 0.02 s in duckosm. This is the
   best estimate of the real work, but it is for 3,092 edges. It does not tell what happens at 3 million.
-- **Output writing:** the `.duckdb` file of duckosm-rust adds about 0.13 s (loading the GeoParquet files
+- **Output writing:** the `.duckdb` file of duckosm adds about 0.13 s (loading the GeoParquet files
   with DuckDB). GeoParquet alone takes 0.005 s.
 
 ### Steps inside the programs (one run, seconds)
@@ -105,7 +105,7 @@ duckOSM: `_connect` 0.06, `_load_pbf` 0.08, `_build_global_junctions` 0.02, `_fi
 `_build_edges` 0.03, `_simplify_graph` 0.35, `_split_private` 0.03, `_create_indexes` 0.07, `_cleanup` 0.01,
 `_generate_metadata` 0.01, `_checkpoint` 0.09. Total inside the process: 1.51 s.
 
-duckosm-rust: read ways 0.011, read nodes 0.006, build network 0.006, write GeoParquet 0.005,
+duckosm: read ways 0.011, read nodes 0.006, build network 0.006, write GeoParquet 0.005,
 write `.duckdb` 0.134. Total: 0.162 s.
 
 ### The lane profile step
@@ -139,14 +139,14 @@ in duckOSM use the same call for lists that can be large (for example `component
   the plain duckOSM runs from 36 to 54 s.
 - **The programs do not do the same work in every way.** duckOSM also loads all OSM ways, nodes and
   relations into `raw.*`, and writes `ways`, `way_nodes`, `main.global_junctions`, `lane_profile`,
-  metadata and the time zone. duckosm-rust keeps only the highway ways and the nodes they use. Both give the
+  metadata and the time zone. duckosm keeps only the highway ways and the nodes they use. Both give the
   same `edges`, `private_edges` and `nodes`.
-- **Threads.** duckOSM runs on DuckDB, which can use all threads for the SQL steps. duckosm-rust reads the
+- **Threads.** duckOSM runs on DuckDB, which can use all threads for the SQL steps. duckosm reads the
   PBF with all threads (rayon) and builds the network on one thread. Monaco is too small for threads to
   matter.
 - **Memory** is the peak of the whole process. In Python it includes the interpreter and DuckDB.
 - **Not measured:** `merge_segments`, the component filter, the walking and cycling modes. They are not in
-  duckosm-rust yet (the component filter is in the code and tested on the cut Monaco file; it is off in the
+  duckosm yet (the component filter is in the code and tested on the cut Monaco file; it is off in the
   benchmark because duckOSM runs it only with a boundary).
 - **The `.duckdb` writer** loads the GeoParquet files with DuckDB, so `--format duckdb` includes writing
   GeoParquet to disk first.

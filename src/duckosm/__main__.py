@@ -1,8 +1,6 @@
-"""
-Main entry point for duckOSM.
-"""
+"""``python -m duckosm``: the program duckosm."""
 
-from duckosm.cli import main
+from duckosm._main import main
 
 if __name__ == '__main__':
     main()

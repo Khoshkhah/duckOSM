@@ -7,6 +7,9 @@
 //! dr.edge_id_hash(osm_id, source, target)
 //! ```
 
+#[cfg(feature = "duckdb")]
+mod api;
+
 use duckosm_build::{
     build as run_build, config, parse_levels, NetworkMode, NetworkOptions, Params, Summary,
 };
@@ -290,6 +293,8 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(studio, m)?)?;
     m.add_function(wrap_pyfunction!(elevation_grid, m)?)?;
     m.add_class::<StepSink>()?;
+    #[cfg(feature = "duckdb")]
+    api::add(m)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

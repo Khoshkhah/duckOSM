@@ -331,6 +331,6 @@ def write_debug(path, source_db=None, out=None, name=None, standalone=True, retu
 # ---------------------------------------------------------------------------------------------------
 # The page (templates/gis_debug.html): CSS + markup + a tiny canvas renderer, all inlined. Theme-aware chrome
 # (light/dark via tokens); the map itself is a committed dark "plotter" surface in both themes. `/*__PAYLOAD__*/null`
-# is replaced with the JSON payload; `__TITLE__` with the document title. duckosm-rust gis-debug reads the same file.
+# is replaced with the JSON payload; `__TITLE__` with the document title. duckosm gis-debug reads the same file.
 # ---------------------------------------------------------------------------------------------------
 _TEMPLATE = (Path(__file__).parent / "templates" / "gis_debug.html").read_text(encoding="utf-8")

@@ -1,12 +1,12 @@
 # duckOSM and GDAL
 
 GDAL's OSM driver (`ogr2ogr`, QGIS) reads an `.osm.pbf` file as five layers.
-`duckosm-rust quack --gdal` makes the **same five layers, with the same rows**: faster, and also in the browser.
+`duckosm quack --gdal` makes the **same five layers, with the same rows**: faster, and also in the browser.
 
 ```bash
-duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky                # one GeoPackage, as ogr2ogr -f GPKG
-duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet  # one GeoParquet file for each layer
-duckosm-rust quack france.osm.pbf --gdal -o out --name france --tile-zoom 8      # tile by tile (for a country)
+duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky                # one GeoPackage, as ogr2ogr -f GPKG
+duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet  # one GeoParquet file for each layer
+duckosm quack france.osm.pbf --gdal -o out --name france --tile-zoom 8      # tile by tile (for a country)
 ```
 
 In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio, output **GDAL layers**.

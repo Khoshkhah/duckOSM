@@ -14,7 +14,7 @@ A part belongs to its owner in two ways: as a page of its own on your computer (
 
 ```bash
 duckosm studio [OUT_DIR] [--port 8792] [--geofabrik-index URL_OR_FILE] [--no-open]
-duckosm-rust studio [OUT_DIR] [same options]
+duckosm studio [OUT_DIR] [same options]
 ```
 
 The two commands run the same Rust server (`rust/duckosm-edit/src/studio.rs`). `duckosm studio` calls `duckosm._rust.studio()`; there is no Python web

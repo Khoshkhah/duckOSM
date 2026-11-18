@@ -80,7 +80,7 @@ pub enum Elem {
 }
 
 /// One rule of `extra.tag_edits`: set and delete tags of a way, a node or a relation. duckOSM reads only `overrides`, so it
-/// ignores the key `extra`: this is an extension of duckosm-rust. The rule acts on the network ways and on `raw.*`, so the base-map
+/// ignores the key `extra`: this is an extension of duckosm. The rule acts on the network ways and on `raw.*`, so the base-map
 /// layers (`features.*`) see the edited tags too. The tags are set first, then deleted: a key in both is deleted.
 #[derive(Clone, Debug)]
 pub struct TagEdit {

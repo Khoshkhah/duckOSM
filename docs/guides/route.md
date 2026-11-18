@@ -46,9 +46,9 @@ Needs `pip install "duckosm[viz]"`. Everything is inside the page, so keep it to
 100,000 edges the command warns. `-m driving` puts that mode in front and picks it first;
 `-m walk+drive` shows every mode and opens on Walk + drive, as the map above does.
 
-The Rust program writes the same page: `duckosm-rust route-map monaco.duckdb -m walk+drive`. Its map is drawn by roadstyle's
+The Rust program writes the same page: `duckosm route-map monaco.duckdb -m walk+drive`. Its map is drawn by roadstyle's
 Rust engine, and the page routes with the program's own router, built as WebAssembly into the page. So the page gives the routes
-and the directions of `duckosm-rust route-points`, `route-multimodal-points` and `directions`. One difference is possible: when
+and the directions of `duckosm route-points`, `route-multimodal-points` and `directions`. One difference is possible: when
 two routes have the same time and length, the page and the command can take different roads. The database gives the roads near
 a point in the order of its spatial index, and the page in the order of the table.
 
@@ -166,7 +166,7 @@ Public transport isn't included. How it works: [Routing across modes](../concept
 
 ## Large areas
 
-The Rust program has the same routes: `duckosm-rust route`, `route-points`, `route-multimodal`, `route-multimodal-points`,
+The Rust program has the same routes: `duckosm route`, `route-points`, `route-multimodal`, `route-multimodal-points`,
 `directions`, `lane-graph` and `route-lanes`. Each prints duckOSM's result as JSON, and `--pairs` / `--batch` answer many
 queries on one graph. The graph of one mode is in memory with 12 bytes for each turn. A trip across modes reads only the modes
 of `--modes`.
@@ -175,11 +175,11 @@ Measured on a Mac mini (Apple M6, 12 cores, 16 GB, 2026-11-17):
 
 | Area | Step | Time | Peak memory |
 |---|---|---|---|
-| France, driving (25.9 million edges, 62.5 million turns) | build by tiles (`duckosm-rust tiles`) | 204 s | 1.6 GB |
+| France, driving (25.9 million edges, 62.5 million turns) | build by tiles (`duckosm tiles`) | 204 s | 1.6 GB |
 | | load the driving graph | 11 to 16 s | 6.4 GB (load and route) |
 | | `route` Paris to Marseille (773 km, 6.5 h, 1,427 edges) | 3.7 s | |
 | | `route-points` Paris to Marseille (reads all weights and turns for each call) | 33 s | 5.4 GB |
-| Île-de-France, three modes (1.8, 4.1 and 4.0 million edges) | build (`duckosm-rust`, GeoParquet) | 55 s | 3.0 GB |
+| Île-de-France, three modes (1.8, 4.1 and 4.0 million edges) | build (`duckosm`, GeoParquet) | 55 s | 3.0 GB |
 | | `route-points` by bike across Paris (Porte Maillot to Nation, 9.3 km) | 3.5 s | 1.3 GB |
 | | `route-multimodal-points` Versailles to Bastille (walk, drive, walk; 24.3 km, 35 min), `--modes walking,driving` | 4.5 s load, 4.4 s trip | 2.6 GB |
 | | the same trip with all modes in memory | 8.0 s load, 4.9 s trip | 4.4 GB |

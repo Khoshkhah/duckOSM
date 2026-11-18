@@ -1,10 +1,10 @@
 # duckOSM and QuackOSM
 
 [QuackOSM](https://github.com/kraina-ai/quackosm) turns an `.osm.pbf` file into one table of OSM features.
-`duckosm-rust quack` makes the **same table, with the same rows**: faster, with less memory, and also in the browser.
+`duckosm quack` makes the **same table, with the same rows**: faster, with less memory, and also in the browser.
 
 ```bash
-duckosm-rust quack france.osm.pbf -o out --name france -f geoparquet,duckdb
+duckosm quack france.osm.pbf -o out --name france -f geoparquet,duckdb
 ```
 
 | Option | Does |

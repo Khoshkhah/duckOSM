@@ -1,4 +1,4 @@
-//! `duckosm-rust gmns-map` on Monaco: the GMNS file (duckosm-export, with netconvert on the PATH), the level area (roadstyle's make_area
+//! `duckosm gmns-map` on Monaco: the GMNS file (duckosm-export, with netconvert on the PATH), the level area (roadstyle's make_area
 //! on the roads of card 8), and the lane page of lanestyle's Rust engine. lanestyle's own golden check compares the page's items with
 //! the Python lanestyle 0.3.1; here the command makes the page, with the lanes in it, and says how to make a missing level area.
 #![cfg(feature = "duckdb")]

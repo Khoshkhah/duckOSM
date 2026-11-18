@@ -1,4 +1,4 @@
-"""Compare the tables of group 1, the lane profile (docs/tables.md) and the bus routes (docs/bus.md) of duckosm-rust
+"""Compare the tables of group 1, the lane profile (docs/tables.md) and the bus routes (docs/bus.md) of duckosm
 with a duckOSM database, row by row.
 
     python tools/compare_tables.py golden.duckdb ours.duckdb [modes]
@@ -29,7 +29,7 @@ def differ(name, select):
     only_py, only_rs = q("py", "rs"), q("rs", "py")
     ok = only_py == 0 and only_rs == 0
     bad += not ok
-    print(f"{'ok  ' if ok else 'DIFF'} {name}: {n} rows" + ("" if ok else f", {only_py} only in duckOSM, {only_rs} only in duckosm-rust"))
+    print(f"{'ok  ' if ok else 'DIFF'} {name}: {n} rows" + ("" if ok else f", {only_py} only in duckOSM, {only_rs} only in duckosm"))
 
 
 for m in MODES:

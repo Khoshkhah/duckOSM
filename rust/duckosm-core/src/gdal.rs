@@ -1,4 +1,4 @@
-//! duckosm-rust quack --gdal: the rules of GDAL's OSM driver (GDAL 3.13, its default `osmconf.ini`), for the quack engine
+//! duckosm quack --gdal: the rules of GDAL's OSM driver (GDAL 3.13, its default `osmconf.ini`), for the quack engine
 //! ([`crate::quack`], docs/rust/quack.md, "GDAL layers"). The engine reads the file as quack does; these rules decide what
 //! each element becomes, and the writers make GDAL's five layers from the rows.
 //!

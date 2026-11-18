@@ -2,12 +2,12 @@ use clap::Parser;
 use duckosm_build::{build, config, parse_levels, NetworkMode, NetworkOptions, Params};
 use std::path::PathBuf;
 
-/// duckosm-rust: build the road networks of duckOSM (driving, walking, cycling) from an .osm.pbf file.
+/// duckosm: build the road networks of duckOSM (driving, walking, cycling) from an .osm.pbf file.
 #[derive(Parser)]
-#[command(name = "duckosm-rust", version, after_help = "To edit the OSM data of a database on a page: duckosm-rust edit <AREA>.duckdb (duckosm-rust edit --help). To make the data of an area on a page: duckosm-rust studio (duckosm-rust studio --help)")]
+#[command(name = "duckosm", version, after_help = "To edit the OSM data of a database on a page: duckosm edit <AREA>.duckdb (duckosm edit --help). To make the data of an area on a page: duckosm studio (duckosm studio --help)")]
 struct Cli {
     /// The input .osm.pbf file (already cut to the area). With --config: this file, not the input of the config (the build of
-    /// one tile of `duckosm-rust tiles --config`).
+    /// one tile of `duckosm tiles --config`).
     #[arg(required_unless_present = "config")]
     pbf: Option<PathBuf>,
     /// A duckOSM config file (YAML). It gives the input, the output, the modes and the options.
@@ -85,15 +85,15 @@ struct Cli {
     /// whole area at the nodes outside the tile.
     #[arg(long, value_name = "FILE")]
     outside_junctions: Option<PathBuf>,
-    /// The build of one tile of a large build (duckosm-rust tiles): only the part of the boundary (of --boundary or of the
+    /// The build of one tile of a large build (duckosm tiles): only the part of the boundary (of --boundary or of the
     /// config) in this map tile.
     #[arg(long, value_name = "Z/X/Y")]
     tile: Option<String>,
     /// The build of one tile of a large build: the roads that get sidewalk=separate in the whole area (the sidewalk step of
-    /// duckosm-rust tiles); the build does not run the sidewalk rule.
+    /// duckosm tiles); the build does not run the sidewalk rule.
     #[arg(long, value_name = "FILE", hide = true, requires = "tile")]
     sidewalks: Option<PathBuf>,
-    /// Only the sidewalk step of the tile (duckosm-rust tiles): its roads that get sidewalk=separate, to sidewalks.bin.
+    /// Only the sidewalk step of the tile (duckosm tiles): its roads that get sidewalk=separate, to sidewalks.bin.
     #[arg(long, hide = true, requires = "tile")]
     sidewalks_step: bool,
     /// With --boundary: also write duckOSM's raw.* of the area (raw_nodes.parquet, raw_ways.parquet,
@@ -150,10 +150,10 @@ struct Cli {
     timing: bool,
 }
 
-/// duckosm-rust cut: step 0 alone. Cut a region file to a boundary and write the area as a `.osm.pbf` file
+/// duckosm cut: step 0 alone. Cut a region file to a boundary and write the area as a `.osm.pbf` file
 /// (osmium's smart cut). Only lists of ids stay in memory.
 #[derive(Parser)]
-#[command(name = "duckosm-rust cut", version)]
+#[command(name = "duckosm cut", version)]
 struct CutCli {
     /// The region file (.osm.pbf, sorted by type and id, as the files of Geofabrik).
     region: PathBuf,
@@ -182,11 +182,11 @@ fn cut(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// duckosm-rust quack: the features table of QuackOSM (feature_id, tags, geometry) from an .osm.pbf file, with the rows of
+/// duckosm quack: the features table of QuackOSM (feature_id, tags, geometry) from an .osm.pbf file, with the rows of
 /// QuackOSM 0.20.0 with its default options (docs/rust/quack.md). To make the table of an area, cut the region file first
-/// (duckosm-rust cut).
+/// (duckosm cut).
 #[derive(Parser)]
-#[command(name = "duckosm-rust quack", version)]
+#[command(name = "duckosm quack", version)]
 struct QuackCli {
     /// The input .osm.pbf file.
     pbf: PathBuf,
@@ -221,10 +221,10 @@ struct QuackCli {
     tile_zoom: Option<u8>,
 }
 
-/// The start of `duckosm-rust quack`, for the times of its steps.
+/// The start of `duckosm quack`, for the times of its steps.
 static QUACK_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-/// A step of `duckosm-rust quack`: the time since the start, and the step (`duckosm_core::util::step`).
+/// A step of `duckosm quack`: the time since the start, and the step (`duckosm_core::util::step`).
 fn quack_step(name: &str) {
     let t = QUACK_START.get().map_or(0.0, |t| t.elapsed().as_secs_f64());
     eprintln!("{t:>8.1} s  {name}");
@@ -267,7 +267,7 @@ fn quack(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `duckosm-rust quack --gdal`: GDAL's five layers.
+/// `duckosm quack --gdal`: GDAL's five layers.
 fn quack_gdal(cli: &QuackCli) -> Result<(), String> {
     let (mut gpkg, mut geoparquet) = (false, false);
     for f in cli.format.as_deref().unwrap_or("gpkg").split(',') {
@@ -294,11 +294,11 @@ fn quack_gdal(cli: &QuackCli) -> Result<(), String> {
     Ok(())
 }
 
-/// duckosm-rust quack-tiles: QuackOSM's features table as one table for each map tile of one zoom,
+/// duckosm quack-tiles: QuackOSM's features table as one table for each map tile of one zoom,
 /// <out>/<z>/<x>/<y>.parquet (docs/rust/quack.md, "Tile tables"). The table of a tile holds every feature whose geometry
 /// touches the tile, so it is usable alone; its column `owner` is true in one tile only, for the union (quack-union).
 #[derive(Parser)]
-#[command(name = "duckosm-rust quack-tiles", version)]
+#[command(name = "duckosm quack-tiles", version)]
 struct QuackTilesCli {
     /// The input .osm.pbf file.
     pbf: PathBuf,
@@ -338,10 +338,10 @@ fn quack_tiles(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// duckosm-rust quack-union: the union of tile tables of quack-tiles (the rows with `owner`) as one GeoParquet file with
+/// duckosm quack-union: the union of tile tables of quack-tiles (the rows with `owner`) as one GeoParquet file with
 /// QuackOSM's columns. Give a folder (all its tile tables) or tile tables.
 #[derive(Parser)]
-#[command(name = "duckosm-rust quack-union", version)]
+#[command(name = "duckosm quack-union", version)]
 struct QuackUnionCli {
     /// Tile tables (<z>/<x>/<y>.parquet), or folders with them.
     #[arg(required = true)]
@@ -373,13 +373,13 @@ fn quack_union(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// duckosm-rust tiles: build a large area by tiles. One read of the region file cuts it to the standard map tiles of the
+/// duckosm tiles: build a large area by tiles. One read of the region file cuts it to the standard map tiles of the
 /// boundary (one file for each tile, with the junctions of the nodes outside the tile); each tile builds alone, `--jobs`
 /// tiles at a time, each in its own process; the union joins the tables of the tiles into the tables of the area. The bus
 /// routes and the drawing levels run after the union, in batches and in tiles, so their memory does not grow with the area
 /// (docs/design/tail_steps_by_tiles.md). The .duckdb file comes from the tables of the union.
 #[derive(Parser)]
-#[command(name = "duckosm-rust tiles", version)]
+#[command(name = "duckosm tiles", version)]
 struct TilesCli {
     /// The region file (.osm.pbf, sorted by type and id, as the files of Geofabrik). Not with --config.
     #[arg(required_unless_present = "config", conflicts_with = "config")]
@@ -388,7 +388,7 @@ struct TilesCli {
     #[arg(long, required_unless_present = "config", conflicts_with = "config")]
     boundary: Option<PathBuf>,
     /// A duckOSM config file (YAML): the region file, the boundary, the output folder and the options of the build (as
-    /// `duckosm-rust --config`; the options after `--` come after it). The local dashboard (`duckosm-rust studio`) builds
+    /// `duckosm --config`; the options after `--` come after it). The local dashboard (`duckosm studio`) builds
     /// this way. Its relative paths are for the current folder; each tile build reads the same config.
     #[arg(long, value_name = "FILE")]
     config: Option<PathBuf>,
@@ -422,7 +422,7 @@ struct TilesCli {
     /// memory starts from nothing).
     #[arg(long, hide = true)]
     only_duckdb: bool,
-    /// The options of the build of each tile, after `--` (as for `duckosm-rust FILE`, for example `-- --modes driving --raw`).
+    /// The options of the build of each tile, after `--` (as for `duckosm FILE`, for example `-- --modes driving --raw`).
     #[arg(last = true)]
     build: Vec<String>,
 }
@@ -446,7 +446,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
     // them); with --config, the config gives the region file, the boundary and the output folder too, and each tile build
     // reads it (an absolute path: the tile builds run in the same folder)
     let config = cli.config.as_ref().map(|c| std::path::absolute(c).map_err(|e| format!("{}: {e}", c.display()))).transpose()?;
-    let mut all = vec!["duckosm-rust".to_string()];
+    let mut all = vec!["duckosm".to_string()];
     match (&config, &cli.boundary) {
         (Some(c), _) => all.extend(["--config".to_string(), c.to_string_lossy().into_owned()]),
         (None, Some(b)) => all.extend(["tile.osm.pbf".to_string(), "--boundary".to_string(), b.to_string_lossy().into_owned()]),
@@ -488,10 +488,9 @@ fn tiles(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     // the cut and the .duckdb file, each as a process of this program: its memory goes back to the system when it ends
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let step = |flag: &str| -> Result<(f64, u64), String> {
         let t = std::time::Instant::now();
-        let mut c = std::process::Command::new(&exe);
+        let mut c = duckosm_build::self_command().map_err(|e| e.to_string())?;
         c.arg("tiles");
         if config.is_none() {
             c.arg(&region);
@@ -538,7 +537,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
     let child = |t: &duckosm_build::Tile, step: bool| -> Result<std::process::Child, String> {
         let name = format!("{}_{}_{}", t.z, t.x, t.y);
         let log = std::fs::File::create(dir.join(format!("{name}{}.log", if step { ".sidewalks" } else { "" }))).map_err(|e| e.to_string())?;
-        let mut c = std::process::Command::new(&exe);
+        let mut c = duckosm_build::self_command().map_err(|e| e.to_string())?;
         c.arg(dir.join(format!("{name}.osm.pbf")))
             .args(&area)
             .args(["--tile", &t.name(), "--format", "geoparquet", "--levels", "none"])
@@ -743,12 +742,12 @@ fn fit_line(pts: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
     Some((base, factor, margin))
 }
 
-/// duckosm-rust edit: a page on 127.0.0.1 that edits the OSM data of a database (docs/guides/edit-osm-data.md, "Edit on your computer").
+/// duckosm edit: a page on 127.0.0.1 that edits the OSM data of a database (docs/guides/edit-osm-data.md, "Edit on your computer").
 /// Each change goes into the fixes file at once. Build again builds the database again with the file.
 #[derive(Parser)]
-#[command(name = "duckosm-rust edit", version)]
+#[command(name = "duckosm edit", version)]
 struct EditCli {
-    /// The database (<area>.duckdb) that duckosm build or duckosm-rust wrote.
+    /// The database (<area>.duckdb) that duckosm build or duckosm wrote.
     db: PathBuf,
     /// The fixes file (default: osm_fixes.yaml beside the database). It need not exist: the first change makes it.
     #[arg(long)]
@@ -758,12 +757,12 @@ struct EditCli {
     port: u16,
 }
 
-/// duckosm-rust ask: ask questions about the OSM data of a database, and about its changes, on a page on 127.0.0.1. The page is roadstyle's
+/// duckosm ask: ask questions about the OSM data of a database, and about its changes, on a page on 127.0.0.1. The page is roadstyle's
 /// dashboard of the database with a data dock (one SQL line over a wide table) and Ask (a question in words, answered with SQL). The table
 /// extra.edits has the changes of the fixes file. Ask uses your own key of a free AI service: it stays in your browser. The page does not
 /// change the data or the file.
 #[derive(Parser)]
-#[command(name = "duckosm-rust ask", version)]
+#[command(name = "duckosm ask", version)]
 struct AskCli {
     /// The database (<area>.duckdb).
     db: PathBuf,
@@ -775,10 +774,10 @@ struct AskCli {
     port: u16,
 }
 
-/// duckosm-rust studio: a page on 127.0.0.1 that makes the data of an area, step by step (docs/guides/studio.md): the area, the OSM data, the settings,
+/// duckosm studio: a page on 127.0.0.1 that makes the data of an area, step by step (docs/guides/studio.md): the area, the OSM data, the settings,
 /// the ground (DEM), the build and the result. The build is the native engine. Each area is made in `<OUT>/<name>/`.
 #[derive(Parser)]
-#[command(name = "duckosm-rust studio", version)]
+#[command(name = "duckosm studio", version)]
 struct StudioCli {
     /// The folder of the areas (default: the current folder).
     out: Option<PathBuf>,
@@ -800,7 +799,7 @@ fn studio(args: &[String]) -> Result<(), String> {
     let listener = duckosm_edit::bind(cli.port)?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let site = duckosm_edit::studio::Studio::new(Box::new(duckosm_edit::native::NativeHost), &out, port, cli.geofabrik_index)?;
-    eprintln!("duckosm-rust studio: {}  (the areas are in {}; Ctrl+C stops)", site.url(), site.out().display());
+    eprintln!("duckosm studio: {}  (the areas are in {}; Ctrl+C stops)", site.url(), site.out().display());
     serve_studio(site, None, cli.no_open, listener)
 }
 
@@ -816,10 +815,10 @@ fn serve_studio(site: duckosm_edit::studio::Studio, url: Option<String>, no_open
     Ok(())
 }
 
-/// duckosm-rust levels-edit: the level editor of a database (duckOSM `duckosm levels-edit`): Studio's card 8, roadstyle's level editor, on the
+/// duckosm levels-edit: the level editor of a database (duckOSM `duckosm levels-edit`): Studio's card 8, roadstyle's level editor, on the
 /// one file. Each "← Steps" writes the drawing order into the file (visualization.edge_levels, docs/levels.md).
 #[derive(Parser)]
-#[command(name = "duckosm-rust levels-edit", version)]
+#[command(name = "duckosm levels-edit", version)]
 struct LevelsEditCli {
     /// The database (`<name>.duckdb`).
     db: PathBuf,
@@ -838,7 +837,7 @@ fn levels_edit(args: &[String]) -> Result<(), String> {
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let site = duckosm_edit::studio::Studio::for_file(Box::new(duckosm_edit::native::NativeHost), &cli.db, port)?;
     let url = site.levels_url();
-    eprintln!("duckosm-rust levels-edit: {}  (Ctrl+C stops)", url.as_deref().unwrap_or_default());
+    eprintln!("duckosm levels-edit: {}  (Ctrl+C stops)", url.as_deref().unwrap_or_default());
     serve_studio(site, url, cli.no_open, listener)
 }
 
@@ -858,7 +857,7 @@ fn edit(args: &[String]) -> Result<(), String> {
     serve_page(c.db, c.fixes, c.port, duckosm_edit::Mode::Edit)
 }
 
-/// duckosm-rust ask (duckOSM `duckosm ask`, docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor.
+/// duckosm ask (duckOSM `duckosm ask`, docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor.
 #[cfg(feature = "duckdb")]
 fn ask(args: &[String]) -> Result<(), String> {
     let c = AskCli::parse_from(args);
@@ -876,7 +875,7 @@ fn serve_page(db: PathBuf, fixes: Option<PathBuf>, port: u16, mode: duckosm_edit
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let name = if mode == duckosm_edit::Mode::Ask { "ask" } else { "edit" };
     let site = duckosm_edit::Site::with_mode(Box::new(duckosm_edit::native::NativeDb::new(&db)), &db, &fixes, port, mode)?;
-    eprintln!("duckosm-rust {name}: {}  (the fixes file: {}; Ctrl+C stops)", site.url(), fixes.display());
+    eprintln!("duckosm {name}: {}  (the fixes file: {}; Ctrl+C stops)", site.url(), fixes.display());
     duckosm_edit::serve(std::sync::Arc::new(site), listener);
     Ok(())
 }
@@ -952,6 +951,29 @@ mod heap {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    // duckosm-rust: the old name of the program, for one release
+    if std::path::Path::new(&args[0]).file_stem().is_some_and(|s| s == "duckosm-rust") {
+        eprintln!("duckosm-rust is now duckosm: use duckosm");
+    }
+    // macOS keeps the memory that a program frees, unless MallocSpaceEfficient is set when the program starts: quack
+    // --gdal on Kentucky had a footprint of 0.89 GB with it unset and 0.25 GB with it (a heap of at most 0.37 GB; time
+    // 3.9 s and 4.3 s). So quack --gdal starts again with it.
+    #[cfg(target_os = "macos")]
+    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal") && std::env::var_os("MallocSpaceEfficient").is_none() {
+        use std::os::unix::process::CommandExt;
+        if let Ok(me) = std::env::current_exe() {
+            // exec returns only when it fails: then this process goes on
+            let _ = std::process::Command::new(me).args(&args[1..]).env("MallocSpaceEfficient", "1").exec();
+        }
+    }
+    std::process::exit(main_with(args));
+}
+
+/// Run the program with `args` (the first is the program name) and give the exit code. The Python package calls it
+/// (`duckosm._rust.cli`).
+#[allow(dead_code)]
+pub fn main_with(mut args: Vec<String>) -> i32 {
     // glibc: blocks of 128 KB and more go back to the system when they are freed (128 KB is the start value of glibc; this
     // stops its increase). Without this, each thread keeps the large blocks that it freed: the levels step alone on France
     // used 950 MB with a live heap of 520 MB. The build by tiles of France (--raw) with it, same time: levels 1597 -> 1071
@@ -967,19 +989,11 @@ fn main() {
     duckosm_build::set_progress(Some(Box::new(heap::report)));
     #[cfg(feature = "heap-probe")]
     let _ = duckosm_build::STEP_HOOK.set(heap::report);
-    let args: Vec<String> = std::env::args().collect();
-    // macOS keeps the memory that a program frees, unless MallocSpaceEfficient is set when the program starts: quack
-    // --gdal on Kentucky had a footprint of 0.89 GB with it unset and 0.25 GB with it (a heap of at most 0.37 GB; time
-    // 3.9 s and 4.3 s). So quack --gdal starts again with it.
-    #[cfg(target_os = "macos")]
-    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal") && std::env::var_os("MallocSpaceEfficient").is_none() {
-        use std::os::unix::process::CommandExt;
-        if let Ok(me) = std::env::current_exe() {
-            // exec returns only when it fails: then this process goes on
-            let _ = std::process::Command::new(me).args(&args[1..]).env("MallocSpaceEfficient", "1").exec();
-        }
+    // `duckosm build ...` is the build (as in duckOSM's Python CLI); `duckosm <pbf>` and `duckosm --config` also
+    if args.get(1).is_some_and(|a| a == "build") {
+        args.remove(1);
     }
-    // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
+    // `duckosm edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
         Some("edit") => edit(&args[1..]),
         Some("ask") => ask(&args[1..]),
@@ -1000,19 +1014,20 @@ fn main() {
         Some(c) if duckosm_route::cli::COMMANDS.contains(&c) => duckosm_route::cli::run(&args[1..]),
         #[cfg(feature = "duckdb")]
         Some(c) if duckosm_edit::cli::COMMANDS.contains(&c) => duckosm_edit::cli::run(&args[1..]),
-        _ => run(),
+        _ => run(&args),
     };
     if let Err(e) = r {
         eprintln!("error: {e}");
-        std::process::exit(1);
+        return 1;
     }
+    0
 }
 
-/// duckosm-rust features-check: list the OSM polygons that no features.* table holds, grouped by tag (duckOSM
+/// duckosm features-check: list the OSM polygons that no features.* table holds, grouped by tag (duckOSM
 /// `duckosm features-check`). A group with no reason is a possible miss. Needs raw.* and features.* in the database.
 #[cfg(feature = "duckdb")]
 #[derive(Parser)]
-#[command(name = "duckosm-rust features-check", version)]
+#[command(name = "duckosm features-check", version)]
 struct FeaturesCheckCli {
     /// The .duckdb file of a build.
     db: PathBuf,
@@ -1029,11 +1044,11 @@ fn features_check(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn run() -> Result<(), String> {
-    let cli = Cli::parse();
+fn run(args: &[String]) -> Result<(), String> {
+    let cli = Cli::parse_from(args);
     let (pbf, out, p) = params(&cli)?;
     let sum = build(&pbf, &out, &p)?;
-    // the build's record in the database, for duckosm-rust edit (Build again): the config file and the folder of its relative paths
+    // the build's record in the database, for duckosm edit (Build again): the config file and the folder of its relative paths
     #[cfg(feature = "duckdb")]
     if let (Some(cfg), true) = (&cli.config, p.duckdb) {
         let text = std::fs::read_to_string(cfg).map_err(|e| format!("{}: {e}", cfg.display()))?;

@@ -206,8 +206,8 @@ duckosm levels-edit [OPTIONS] DB
 | `--reports DIR` | a folder of maps (`duckosm viz`), served as files at the same port; any other address is the editor | `reports` |
 | `--plain` | no base-map layers: the editor as roadstyle draws it | off |
 
-`duckosm-rust levels-edit DB [--port PORT] [--no-open]` is the same editor in the Rust program, with no Python: the page of
-`duckosm-rust studio` on this one file, with card 8 (Edit levels) open. "← Steps" writes the drawing order into the file. The map
+`duckosm levels-edit DB [--port PORT] [--no-open]` is the same editor in the Rust program, with no Python: the page of
+`duckosm studio` on this one file, with card 8 (Edit levels) open. "← Steps" writes the drawing order into the file. The map
 is the area's map of Studio (the base-map layers of `features.*` and every road), and the work folder is the page's own (no
 `DB.levels` folder). The map files (`DB` name `.map.html`, the terrain) go next to the file. It has no `--area`, `--reports` and `--plain`.
 The program needs the level editor's WebAssembly package (`rust/duckosm-edit/editor_pkg.sh` before the build); without it, card 8 says so.
@@ -217,7 +217,7 @@ The program needs the level editor's WebAssembly package (`rust/duckosm-edit/edi
 Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
 of duckOSM Studio. Each change goes into the fixes file at once. **Build again** runs the build of the database again with the file,
 and the page then shows the new network. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm-rust edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
+`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
 
 ```text
 duckosm edit [OPTIONS] DB
@@ -229,14 +229,14 @@ duckosm edit [OPTIONS] DB
 | `--port INTEGER` | the port of the page on 127.0.0.1 | `8790` |
 
 Build again needs the record of the build in the database (`build_config` and `build_dir` of
-[`visualization_metadata`](database.md#visualization_metadata)). `duckosm build` writes it, and `duckosm-rust --config` too.
+[`visualization_metadata`](database.md#visualization_metadata)). `duckosm build` writes it, and `duckosm --config` too.
 
 ### `studio`
 
 Makes the data of an area on a page on your computer, in six steps: the area, the OSM data (a Geofabrik extract, or a `.osm.pbf` file), the settings,
 the ground (the DEM), the build and the result. The steps are the steps of duckOSM Studio. The build is `duckosm build`. The result is the page of
 [`edit`](#edit). Each area is made in `OUT_DIR/<name>/`. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm-rust studio` is the same page in the Rust program. Guide: [Make the data of an area on your computer](../guides/studio.md).
+`duckosm studio` is the same page in the Rust program. Guide: [Make the data of an area on your computer](../guides/studio.md).
 
 ```text
 duckosm studio [OPTIONS] [OUT_DIR]

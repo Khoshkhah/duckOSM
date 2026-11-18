@@ -161,7 +161,7 @@ fn metadata(a: &Area, shape: Option<&(Vec<Vec<Vec<Pt>>>, String)>) -> Metadata {
             None => zone_of_map(x, y),
         }),
         built_at: a.built_at,
-        version: format!("duckosm-rust {}", env!("CARGO_PKG_VERSION")),
+        version: format!("duckosm {}", env!("CARGO_PKG_VERSION")),
     }
 }
 

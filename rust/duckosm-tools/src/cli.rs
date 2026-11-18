@@ -1,14 +1,14 @@
-//! The database tools of `duckosm-rust` (`duckosm-rust info ...`), with the options of the Python CLI (src/duckosm/cli.py).
+//! The database tools of `duckosm` (`duckosm info ...`), with the options of the Python CLI (src/duckosm/cli.py).
 
 use crate::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
+/// The command names of this crate: `duckosm <name> ...` goes to [`run`].
 pub const COMMANDS: [&str; 7] = ["info", "way", "init-config", "boundary", "extract", "admin", "elevation"];
 
 #[derive(Parser)]
-#[command(name = "duckosm-rust")]
+#[command(name = "duckosm")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -150,7 +150,7 @@ fn need_db(db: &std::path::Path) -> Result<()> {
 
 /// Run one command; `args` starts with the command name.
 pub fn run(args: &[String]) -> Result<()> {
-    let cli = Cli::parse_from(std::iter::once("duckosm-rust".to_string()).chain(args.iter().cloned()));
+    let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
         Cmd::Info { db, as_json } => {
             need_db(&db)?;

@@ -18,7 +18,7 @@ the user cannot see the area before the build.
 - The tool is a separate page. `index.html` does not change.
 - The output format is the format of `duckosm boundary`: a FeatureCollection with one Feature. The properties
   are `name`, `osm_id`, `admin_level`, `area_km2`, `source` and `geofabrik` (the 3 smallest extracts that cover
-  the area, each `{id, name, pbf}`). The file works in Python duckOSM, in `duckosm-rust --boundary` and in
+  the area, each `{id, name, pbf}`). The file works in Python duckOSM, in `duckosm --boundary` and in
   `index.html`.
 - `area_km2` is the spherical ring area (radius 6378137 m), rounded to 2 decimals: 2.39 for Monaco
   (`tests/data/monaco.geojson`), as in duckOSM.

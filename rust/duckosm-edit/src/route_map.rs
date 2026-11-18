@@ -1,6 +1,6 @@
 //! `duckosm route-map`: the route planner page (duckOSM's route_map.py). The map is roadstyle's page of the database (`maps.rs`);
 //! the panel (page/planner.html) routes in the browser with duckosm-planner as WebAssembly, on the page's data (`RM`, made here
-//! from the tables), so the page and `duckosm-rust route-points`, `route-multimodal-points` and `directions` give the same routes.
+//! from the tables), so the page and `duckosm route-points`, `route-multimodal-points` and `directions` give the same routes.
 
 use crate::maps::{env_keys, map_page, MODES};
 use crate::native::NativeDb;

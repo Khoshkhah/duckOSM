@@ -1,4 +1,4 @@
-"""Compare visualization.edge_levels of a duckosm-rust file with roadstyle's result on the same edges (docs/levels.md).
+"""Compare visualization.edge_levels of a duckosm file with roadstyle's result on the same edges (docs/levels.md).
 
     /home/kaveh/projects/duckOSM/.venv/bin/python tools/compare_levels.py ours.duckdb
 
@@ -67,5 +67,5 @@ def check(name, table):
     return hard, lifted, kept
 
 
-a, b = check("roadstyle", ref), check("duckosm-rust", ours)
+a, b = check("roadstyle", ref), check("duckosm", ours)
 sys.exit(int(b[0] > 0 or a != b))

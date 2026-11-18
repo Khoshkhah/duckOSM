@@ -1,15 +1,15 @@
-//! The map commands of `duckosm-rust` (group F of docs/design/all_in_rust.md), with the options of the Python CLI (src/duckosm/cli.py).
+//! The map commands of `duckosm` (group F of docs/design/all_in_rust.md), with the options of the Python CLI (src/duckosm/cli.py).
 
 use crate::maps::{render_maps, Viz};
 use crate::native::NativeDb;
 use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
 
-/// The command names of this module: `duckosm-rust <name> ...` goes to [`run`].
+/// The command names of this module: `duckosm <name> ...` goes to [`run`].
 pub const COMMANDS: [&str; 3] = ["viz", "route-map", "gmns-map"];
 
 #[derive(Parser)]
-#[command(name = "duckosm-rust")]
+#[command(name = "duckosm")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -80,7 +80,7 @@ enum Cmd {
 
 /// Run one command; `args[0]` is its name.
 pub fn run(args: &[String]) -> Result<(), String> {
-    let cli = Cli::parse_from(std::iter::once("duckosm-rust".to_string()).chain(args.iter().cloned()));
+    let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
         Cmd::Viz { db, modes, basemap, out_dir, no_arrows, no_boundary, google_3d, no_google_3d } => {
             let all = modes.is_empty();

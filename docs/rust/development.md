@@ -30,14 +30,14 @@ rustup toolchain install nightly-2026-10-15 --profile minimal --component rust-s
 cargo build --release          # the first build takes several minutes: it compiles DuckDB
 cargo test --release           # hash vectors, geometry tests, and the Monaco golden test
 cargo build --release --no-default-features -p duckosm-cli   # without DuckDB: GeoParquet only, 7.9 MB program, builds in under a minute
-./target/release/duckosm-rust tests/data/monaco.osm.pbf -o out --name monaco --no-component-filter
+./target/release/duckosm tests/data/monaco.osm.pbf -o out --name monaco --no-component-filter
 ```
 
-The binary is `target/release/duckosm-rust`. `--timing` prints the time of each step.
+The binary is `target/release/duckosm`. `--timing` prints the time of each step.
 
 ## One shared build folder
 
-On Kaveh's machine, all worktrees of duckosm-rust and of roadstyle use one build folder for each repository:
+On Kaveh's machine, all worktrees of duckosm and of roadstyle use one build folder for each repository:
 `<main checkout>/.shared-target`. Thus the dependencies (DuckDB is the largest) compile one time, not one time
 for each worktree. The `cargo` wrapper `tools/cargo` does this. Install it before `~/.cargo/bin` in `PATH`:
 
@@ -49,7 +49,7 @@ For `build`, `check`, `clippy`, `doc`, `fix`, `run`, `rustc`, `test` and `bench`
 repositories, the wrapper does these steps:
 
 1. If the workspace has no `target`, it makes `target` a link to `.shared-target`. Paths such as
-   `target/release/duckosm-rust` thus stay correct. A workspace that has a `target/` folder of its own keeps
+   `target/release/duckosm` thus stay correct. A workspace that has a `target/` folder of its own keeps
    that folder: the change starts when you delete the old folder.
 2. Cargo finds a crate "fresh" from the file times, and it identifies a workspace crate by its relative path.
    Thus a worktree with older files can get the binary of the worktree that built last. To prevent this, the
@@ -78,7 +78,7 @@ python tools/compare_with_duckosm.py monaco_golden.duckdb out/monaco.duckdb [dri
 ```
 
 `tests/data/golden_monaco_modes.yaml` is the config of the three-mode golden (four variants; the comments say which lines to change). `tools/make_golden_summary.py` writes `tests/data/monaco_modes_summary.tsv` from those databases. `tools/make_golden.py` writes `tests/data/monaco_driving_edges.tsv` from such a database.
-`tools/compare_levels.py` compares `visualization.edge_levels` of a duckosm-rust file with roadstyle's result on
+`tools/compare_levels.py` compares `visualization.edge_levels` of a duckosm file with roadstyle's result on
 the same edges, in duckOSM's virtual environment ([levels.md](levels.md), "The equality check"):
 
 ```bash
@@ -153,11 +153,11 @@ Checks:
 cargo test --release -p duckosm-wasm     # the browser build equals duckosm_build::build, byte for byte (Monaco, 3 modes, a fixes file)
 python crates/duckosm-wasm/www/e2e.py tests/data/monaco.osm.pbf out-page --fixes fixes.yaml   # the page in headless Chromium (Playwright)
 python crates/duckosm-wasm/www/e2e.py tests/data/monaco_sample.osm.pbf out-area --boundary tests/data/monaco.geojson   # the cut to a boundary (add --one-thread for pkg/)
-duckosm-rust tests/data/monaco_sample.osm.pbf --boundary tests/data/monaco.geojson -m driving,walking,cycling -f geoparquet -o out-cli   # the same, native
+duckosm tests/data/monaco_sample.osm.pbf --boundary tests/data/monaco.geojson -m driving,walking,cycling -f geoparquet -o out-cli   # the same, native
 ```
 
 The test writes its files to `target/tmp/<checkout>/duckosm-wasm-native/` (`<checkout>`: the folder name of the
-checkout, for example `duckosm-rust`). Compare them with `cmp` to the files of
+checkout, for example `duckosm`). Compare them with `cmp` to the files of
 `run_node.mjs` or `e2e.py` (built with the same fixes text as the test). `e2e.py` also prints the times of
 the page as JSON. The CLI writes zstd and the page writes snap, so compare `out-area` and `out-cli` by rows,
 not with `cmp`.
@@ -266,7 +266,7 @@ keeps its `raw.*` and is built with its OSM fixes, so `raw.*` and all 11 layers 
 
 ```bash
 cargo test --release -p duckosm-core --test raw     # the raw cut equals osmium's smart cut (tests/data/monaco_smart.osm.pbf)
-./target/release/duckosm-rust tests/data/monaco_sample.osm.pbf --boundary tests/data/monaco.geojson -m driving,walking,cycling \
+./target/release/duckosm tests/data/monaco_sample.osm.pbf --boundary tests/data/monaco.geojson -m driving,walking,cycling \
     --fixes ../duckOSM/osm_overrides/osm_overrides.yaml --raw -f geoparquet -o out-raw
 python tools/compare_features.py out-raw --duckosm ../duckOSM/monaco.duckdb
 python crates/duckosm-wasm/www/e2e.py tests/data/monaco_sample.osm.pbf out-page --boundary tests/data/monaco.geojson \
@@ -292,26 +292,26 @@ build the WebAssembly modules again (the module holds the text):
 `monaco.duckdb` of duckOSM is built with its OSM fixes file, so all driving rows must be equal:
 
 ```bash
-./target/release/duckosm-rust tests/data/monaco.osm.pbf -o out-fixes --fixes ../duckOSM/osm_overrides/osm_overrides.yaml
+./target/release/duckosm tests/data/monaco.osm.pbf -o out-fixes --fixes ../duckOSM/osm_overrides/osm_overrides.yaml
 python tools/compare_with_duckosm.py ../duckOSM/monaco.duckdb out-fixes driving
 ```
 
 ## Check another area (example: Tartu)
 
-Build the golden with duckOSM, then run duckosm-rust with the matching flags and compare. The yaml is
+Build the golden with duckOSM, then run duckosm with the matching flags and compare. The yaml is
 `tests/data/golden_monaco_modes.yaml` with `pbf_path` changed and the switches set (see the comments in it).
 
 ```bash
 # duckOSM (in an empty folder; the lane profile step is switched off because it is slow and not part of the network step)
 python bench/python_steps.py g.yaml --no-lane-profile
-# duckosm-rust, same settings as g.yaml (here: no boundary, merge on, global junctions on, sidewalk rule on, connector on)
-duckosm-rust area.osm.pbf -o out --format geoparquet --modes driving,walking,cycling --no-component-filter
+# duckosm, same settings as g.yaml (here: no boundary, merge on, global junctions on, sidewalk rule on, connector on)
+duckosm area.osm.pbf -o out --format geoparquet --modes driving,walking,cycling --no-component-filter
 python tools/compare_with_duckosm.py golden.duckdb out walking
 ```
 
 Switches: `--no-functional-types`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-global-junctions`, `--no-sidewalk-inference`, `--no-connect-paths`,
 `--no-component-filter`. With a boundary in the yaml (and `build_graph`, `process_speeds` and
-`calculate_costs` on, because duckOSM runs the component filter only then), give duckosm-rust the cut file
+`calculate_costs` on, because duckOSM runs the component filter only then), give duckosm the cut file
 that duckOSM wrote in `pbf/` and leave the component filter on.
 
 Known difference: a connector between two facing dangling ends can have the other direction label

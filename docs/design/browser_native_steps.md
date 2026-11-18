@@ -14,7 +14,7 @@ The short page for users is [docs/concepts/native-browser.md](../concepts/native
 
 ## The native build
 
-A build of a whole file with `duckosm-rust`. In the diagrams, a blue cylinder is storage, a red rounded box is memory, and a
+A build of a whole file with `duckosm`. In the diagrams, a blue cylinder is storage, a red rounded box is memory, and a
 plain box is a step.
 
 ```mermaid
@@ -172,9 +172,9 @@ measured build.
 | How it was measured | |
 |---|---|
 | Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores (2 super, 4 performance, 6 efficiency), 16 GB memory, internal SSD, macOS 27.2 |
-| Version | **native only**: the native program `duckosm-rust` from duckOSM `main` of 2026-11-11 (before 3.1 to 3.11 moved to temporary files), `cargo build --release --features heap-probe`. For the whole build native and browser, see [Kentucky, native and browser](#kentucky-native-and-browser) |
+| Version | **native only**: the native program `duckosm` from duckOSM `main` of 2026-11-11 (before 3.1 to 3.11 moved to temporary files), `cargo build --release --features heap-probe`. For the whole build native and browser, see [Kentucky, native and browser](#kentucky-native-and-browser) |
 | Area | Kentucky, driving mode (see [the area](#the-area-kentucky)) |
-| Command | `duckosm-rust kentucky-latest.osm.pbf -o out --name kentucky -f duckdb -m driving --h3-resolution 8 --timing` |
+| Command | `duckosm kentucky-latest.osm.pbf -o out --name kentucky -f duckdb -m driving --h3-resolution 8 --timing` |
 | Memory | the live Rust heap after the sub-step: a counting allocator (`heap-probe`) that counts the bytes that the program has from the system. It does not include the memory of DuckDB |
 | Time | the wall time of the sub-step: the middle value of three runs, with no other program working. The three runs had the same memory to 0.1 MiB, and times within 0.02 s |
 
@@ -218,7 +218,7 @@ give the same rows.
 |---|---|
 | Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores, 16 GB memory, internal SSD, macOS 27.2 |
 | Input | Kentucky cut from `us-south-latest.osm.pbf` (Geofabrik, 4.16 GB) with Geofabrik's border of the state, driving mode: 2,224,823 edges. This cut keeps each way with a node inside, whole, so it has more edges than `kentucky-latest.osm.pbf` |
-| Native | `duckosm-rust us-south-latest.osm.pbf --boundary kentucky.geojson --modes driving --format geoparquet`, 12 threads, `cargo build --release --features heap-probe`. Memory: the peak of the Rust heap in the step. Time: the middle value of three runs |
+| Native | `duckosm us-south-latest.osm.pbf --boundary kentucky.geojson --modes driving --format geoparquet`, 12 threads, `cargo build --release --features heap-probe`. Memory: the peak of the Rust heap in the step. Time: the middle value of three runs |
 | Browser | duckOSM Studio in Chromium (Playwright), 12 threads (the page uses the number of cores, at most 12), the area file and the temporary files of the network in OPFS. Memory: the WebAssembly memory after the step. It never gets smaller, so it is the peak up to that step. Two runs: the totals were the same to 0.2 s and the memory to 5 MiB; the table gives the first |
 
 **The whole build:**

@@ -1,6 +1,6 @@
 //! Compare two features tables of QuackOSM's form (feature_id, tags, geometry), each a GeoParquet file or the table
 //! main.quackosm of a .duckdb file, for example the output of
-//! `duckosm-rust quack` and the one of QuackOSM (docs/rust/quack.md):
+//! `duckosm quack` and the one of QuackOSM (docs/rust/quack.md):
 //!
 //!     cargo run --release --example quack_diff -- area_quack.duckdb quackosm.parquet
 //!

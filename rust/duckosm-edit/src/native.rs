@@ -65,7 +65,7 @@ impl Db for NativeDb {
     }
 }
 
-/// The build by tiles of this program (`duckosm-rust tiles --config`, the same code as the command; duckOSM docs/design/build_by_tiles.md),
+/// The build by tiles of this program (`duckosm tiles --config`, the same code as the command; duckOSM docs/design/build_by_tiles.md),
 /// for every area: the config in `config.yaml` of the folder `dir` (its relative paths are for `dir`), the tables of the union in the
 /// `.duckdb` file `db` (only it; the GeoParquet files go). `fixes`: the OSM fixes file in place of the config's. Each line of the command goes
 /// to `log`; the lines are the summary. The command runs the cut, each tile and the `.duckdb` file as processes of this program.
@@ -75,8 +75,7 @@ pub fn build_by_tiles(config: &str, dir: &Path, db: &Path, fixes: Option<&Path>,
     let file = dir.join("config.yaml");
     std::fs::write(&file, config).map_err(|e| format!("{}: {e}", file.display()))?;
     let out = std::path::absolute(db.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut cmd = std::process::Command::new(exe);
+    let mut cmd = duckosm_build::self_command().map_err(|e| e.to_string())?;
     cmd.current_dir(dir).args(["tiles", "--config"]).arg(&file).arg("-o").arg(&out).args(["--", "--format", "duckdb"]);
     if let Some(f) = fixes {
         cmd.arg("--fixes").arg(f);
@@ -105,7 +104,7 @@ pub fn build_by_tiles(config: &str, dir: &Path, db: &Path, fixes: Option<&Path>,
 }
 
 /// Write the build's record into `db` (main.visualization_metadata: `build_config`, the config as YAML, and `build_dir`, the folder of
-/// the build), so that `duckosm edit` can build it again. `duckosm-rust --config` calls it after a build, and Build again after its build.
+/// the build), so that `duckosm edit` can build it again. `duckosm --config` calls it after a build, and Build again after its build.
 pub fn record(db: &Path, config: &str, dir: &Path) -> Result<(), String> {
     let con = Connection::open(db).map_err(|e| format!("{}: {e}", db.display()))?;
     con.execute_batch("ALTER TABLE main.visualization_metadata ADD COLUMN IF NOT EXISTS build_config VARCHAR;
@@ -116,7 +115,7 @@ pub fn record(db: &Path, config: &str, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The program's host of `duckosm-rust studio`: the build by tiles of this program builds the area (the same as `duckosm-rust tiles --config`), and
+/// The program's host of `duckosm studio`: the build by tiles of this program builds the area (the same as `duckosm tiles --config`), and
 /// the page of the result opens the file with the bundled DuckDB. The DEM is the config's `elevation:` section.
 pub struct NativeHost;
 

@@ -4,7 +4,7 @@ duckOSM's layers change.
 
     /home/kaveh/projects/duckOSM/.venv/bin/python tools/make_features_sql.py [path/to/duckOSM]
 
-The file first loads raw_nodes.parquet, raw_ways.parquet and raw_relations.parquet (duckosm-rust --raw, or the page)
+The file first loads raw_nodes.parquet, raw_ways.parquet and raw_relations.parquet (duckosm --raw, or the page)
 into raw.*, with the column types of duckOSM. One change to duckOSM's SQL: geom.way_line comes from the `line` column of
 raw_ways.parquet (each way as WKB, made in Rust), not from geom.way_pt and ST_MakeLine: these two statements were 75 %
 of the time (Tartu). The sea (features.ocean) is not in it.

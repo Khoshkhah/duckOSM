@@ -1,4 +1,4 @@
-"""Check the base-map layers of duckosm-rust (docs/features.md): load the raw.* files of `duckosm-rust --raw`, run
+"""Check the base-map layers of duckosm (docs/features.md): load the raw.* files of `duckosm --raw`, run
 rust/duckosm-build/sql/features.sql, and compare the result, row by row,
 - with a duckOSM database (--duckosm): raw.* and each features.* table;
 - with the features_<table>.parquet files of the page (--page, a folder that www/e2e.py wrote).
@@ -17,7 +17,7 @@ import sys
 import duckdb
 
 a = argparse.ArgumentParser()
-a.add_argument("out", help="the output folder of duckosm-rust --raw")
+a.add_argument("out", help="the output folder of duckosm --raw")
 a.add_argument("--duckosm", help="a duckOSM database of the same area")
 a.add_argument("--page", help="a folder with the page's features_<table>.parquet files")
 args = a.parse_args()

@@ -45,7 +45,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30      # a hung test must not hold the runner for GitHub's 6 hours
+    timeout-minutes: 60      # a hung test must not hold the runner for GitHub's 6 hours (the module compiles DuckDB)
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +56,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       # GDAL (ogr2ogr) and osmium: duckosm boundary / clip-pbf and the sample build's pre-clip.
       - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool
       # Tests that need local PBFs / built dbs / netconvert skip themselves.
@@ -94,7 +97,7 @@ jobs:
       # the router has no DuckDB and no threads: it builds for the pages too (WebAssembly; the planner page of route-map runs duckosm-planner)
       - run: cargo check --release -p duckosm-router -p duckosm-planner --target wasm32-unknown-unknown
         working-directory: rust
-      # ogr2ogr: the GeoPackage of one file of duckosm-rust export-gis and the golden of gis-debug
+      # ogr2ogr: the GeoPackage of one file of duckosm export-gis and the golden of gis-debug
       - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool   # osmium: sumo_compare's .pbf
       # netconvert for the GMNS export (gmns_sumo): the version that made tests/data/exports/monaco_gmns_columns.tsv
       - run: python3 -m pip install --user -q eclipse-sumo==1.27.0 && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -102,7 +105,7 @@ jobs:
       - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit -p duckosm-export -p duckosm-tools -p duckosm-route -p duckosm-router -p duckosm-planner --features duckosm-edit/duckdb
         working-directory: rust
 
-  # duckosm-rust viz and route-map in a browser (tests/test_route_map_rust.py, group F of docs/design/all_in_rust.md): the planner page routes
+  # duckosm viz and route-map in a browser (tests/test_route_map_rust.py, group F of docs/design/all_in_rust.md): the planner page routes
   # as route-points and directions on Monaco, walk + drive, and the pages at 390 x 844
   maps-page:
     needs: changes

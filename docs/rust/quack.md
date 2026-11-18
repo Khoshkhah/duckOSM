@@ -1,4 +1,4 @@
-# The features table of QuackOSM (`duckosm-rust quack`)
+# The features table of QuackOSM (`duckosm quack`)
 
 Status: done, 2026-11-13. Kaveh asked for a duckOSM output that is the same as the output of QuackOSM, so that the two tools
 can be compared on the same rows. QuackOSM (kraina-ai) is a Python library that converts an `.osm.pbf` file to one table of
@@ -7,7 +7,7 @@ features in GeoParquet or DuckDB.
 ## The command
 
 ```bash
-duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
+duckosm quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
 ```
 
 - `-f geoparquet` writes `out/kentucky_quack.parquet` (GeoParquet 1.0, WKB, zstd level 3, row groups of 100 000 rows, as
@@ -23,11 +23,11 @@ duckosm-rust quack kentucky.osm.pbf -o out --name kentucky -f duckdb,geoparquet
   the size of a tile, not of the file (see "By tiles"). It writes GeoParquet only.
 - `--tile-zoom Z` makes the table tile by tile with the map tiles of zoom `Z` (0 to 14), in place of `--tiles`.
 
-`duckosm-rust quack-tiles FILE --zoom 9 -o DIR` writes one table for each map tile (see "Tile tables"), and
-`duckosm-rust quack-union DIR -o FILE.parquet` joins tile tables into one table.
+`duckosm quack-tiles FILE --zoom 9 -o DIR` writes one table for each map tile (see "Tile tables"), and
+`duckosm quack-union DIR -o FILE.parquet` joins tile tables into one table.
 
 The input must be sorted by type and id (nodes, then ways, then relations), as the files of Geofabrik are. To make the table of
-an area, cut the region file first with `duckosm-rust cut`.
+an area, cut the region file first with `duckosm cut`.
 
 The table has three columns, as in QuackOSM: `feature_id` (`node/<id>`, `way/<id>` or `relation/<id>`), `tags`
 (`MAP(VARCHAR, VARCHAR)`) and `geometry`.
@@ -121,7 +121,7 @@ the design above, each measured on France (unsorted GeoParquet):
 The browser has at most 4 GiB of WebAssembly memory, and this memory never shrinks. In one run, Kentucky (141 MB) needs
 1.9 GiB, and Île-de-France (338 MB) stops with no memory left in pass 3. Parts of one run grow with the area: the node
 buckets cover a fixed range of ids, the sorts have a budget of 512 MB (128 MB in the browser), and the browser collects
-the relations in memory. `features_by_tiles` (`duckosm-rust quack --tiles N`, `duckosm_build::quack_tiles_to`) makes the
+the relations in memory. `features_by_tiles` (`duckosm quack --tiles N`, `duckosm_build::quack_tiles_to`) makes the
 same rows tile by tile:
 
 1. **The tiles.** A pass over the nodes counts the nodes of each map tile of zoom 14. A tile with more than `N` nodes is
@@ -281,7 +281,7 @@ each map tile of one zoom, `DIR/<z>/<x>/<y>.parquet` (`duckosm_build::quack_tile
    its first node, a relation by the place of the first node of its first member way. The cut and quack decode the same
    coordinates, so the owner tile always has the row.
 4. **The union** keeps the rows with `owner`, so each row comes one time with no search for doubles:
-   `duckosm-rust quack-union DIR -o FILE.parquet`, or in DuckDB
+   `duckosm quack-union DIR -o FILE.parquet`, or in DuckDB
    `SELECT feature_id, tags, geometry FROM read_parquet('DIR/9/*/*.parquet') WHERE owner`.
 
 A polygon that covers a tile with no node or member in it (a country around the tile) is not in the table of that tile.
@@ -303,7 +303,7 @@ France: the count 4.1 s, the cut 96.2 s, the tiles 132.3 s, and a peak disk use 
 no zlib, and each multipolygon and boundary is whole in each tile with a member). The union is byte for byte the table of
 one run (fingerprints of all 99 412 535 rows).
 
-`duckosm-rust` raises its limit of open files to 10 240 at the start: 4 tiles at a time keep about 700 temporary files
+`duckosm` raises its limit of open files to 10 240 at the start: 4 tiles at a time keep about 700 temporary files
 open, and macOS gives a process 256.
 
 ## The sort
@@ -354,14 +354,14 @@ process tree and of the free disk every 2 s for the large runs, and `stat` for t
 
 ## GDAL layers (`--gdal`)
 
-Status: done, 2026-11-17. `duckosm-rust quack --gdal` writes the five layers of GDAL's OSM driver, as `ogr2ogr` and QGIS
+Status: done, 2026-11-17. `duckosm quack --gdal` writes the five layers of GDAL's OSM driver, as `ogr2ogr` and QGIS
 give them for an `.osm.pbf` file with GDAL's default `osmconf.ini` (GDAL 3.13): `points`, `lines`, `multilinestrings`,
 `multipolygons` and `other_relations`.
 
 ```bash
-duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky                  # out/kentucky_gdal.gpkg
-duckosm-rust quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet    # out/kentucky_gdal_<layer>.parquet
-duckosm-rust quack france.osm.pbf --gdal -o out --name france --tile-zoom 8         # tile by tile
+duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky                  # out/kentucky_gdal.gpkg
+duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet    # out/kentucky_gdal_<layer>.parquet
+duckosm quack france.osm.pbf --gdal -o out --name france --tile-zoom 8         # tile by tile
 ```
 
 The engine is the engine of quack. It has three parts: read, decide and write. `--gdal` changes only "decide" and
@@ -416,7 +416,7 @@ The memory (Kentucky, Mac mini, peak footprint): 1.1 GB at first, 0.25 GB now (`
 - The buffers of the temporary files of `spill::Buckets`: about 100 files of requests on Kentucky, with 1 MB each. Now
   256 KB each.
 - macOS keeps the memory that a program frees: the heap was at most 0.37 GB, the footprint 0.89 GB. The memory of macOS
-  is space-efficient when `MallocSpaceEfficient` is set at the start of the program, so `duckosm-rust quack --gdal` starts
+  is space-efficient when `MallocSpaceEfficient` is set at the start of the program, so `duckosm quack --gdal` starts
   again with it on macOS (0.25 GB; the time goes from 3.9 s to 4.3 s). Linux returns the memory with the `mallopt` of
   `main`.
 
@@ -439,5 +439,5 @@ self-touching ring with GEOS in `organizePolygons` (Monaco has none).
 
 The filters: tags (`tags_filter`), OSM ids, custom SQL, and a geometry (`geometry_filter`, features that touch it). The
 automatic download of an extract for a geometry, the geocoding, more than one PBF in one call, the tags as columns
-(`explode_tags`), the Hilbert sort (`sort_algorithm="hilbert"`) and the WKT output. `duckosm-rust quack` makes the table of
+(`explode_tags`), the Hilbert sort (`sort_algorithm="hilbert"`) and the WKT output. `duckosm quack` makes the table of
 QuackOSM's default options, with or without the sort.

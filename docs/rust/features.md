@@ -123,7 +123,7 @@ Rust writes each way there as WKB, from the points of its nodes, as `ST_MakeLine
 `ST_MakeLine` were 75 % of the SQL time on Tartu.
 
 - The wasm module gives the text: `features_sql()` (`include_str!`). The page needs no other file.
-- The native CLI runs the same text in its DuckDB (done 2026-11-10): `duckosm-rust --features` with `--boundary`, or `build_features` in a config.
+- The native CLI runs the same text in its DuckDB (done 2026-11-10): `duckosm --features` with `--boundary`, or `build_features` in a config.
   It needs the spatial extension in the native DuckDB (`INSTALL spatial` downloads it one time).
 
 ### 3. The page

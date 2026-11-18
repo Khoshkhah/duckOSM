@@ -1,4 +1,4 @@
-"""Time the network step of duckOSM (Python) and duckosm-rust on one PBF file.
+"""Time the network step of duckOSM (Python) and duckosm on one PBF file.
 
     python bench/run_bench.py --pbf area.osm.pbf --label monaco --runs 3 [--e2e-runs 3]
 
@@ -6,7 +6,7 @@ For each program: one untimed run (to warm the file cache), then N timed runs un
 It prints the minimum and the median of the wall time and the peak memory (maximum resident set size).
 For the network step alone it adds the sum of the step times that each program reports itself:
   duckOSM: _load_pbf, _build_global_junctions, _filter_roads, _build_edges, _simplify_graph, _split_private
-  duckosm-rust: read ways, read nodes, build network
+  duckosm: read ways, read nodes, build network
 """
 import argparse
 import re
@@ -20,7 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 VENV = Path("/home/kaveh/projects/duckOSM/.venv/bin")
-RUST = ROOT / "target/release/duckosm-rust"
+RUST = ROOT / "target/release/duckosm"
 PY_NET_STEPS = ["_load_pbf", "_build_global_junctions", "_filter_roads", "_build_edges", "_simplify_graph", "_split_private"]
 RS_NET_STEPS = ["read ways", "read nodes", "build network"]
 
@@ -52,13 +52,13 @@ def main():
     jobs = []   # (name, command, runs, step names)
     # start-up: the program starts and stops without a build (imports, loading the libraries)
     jobs.append(("start-up only, duckOSM: `duckosm --version`", [VENV / "duckosm", "--version"], a.runs, None))
-    jobs.append(("start-up only, duckosm-rust: `duckosm-rust --version`", [RUST, "--version"], a.runs, None))
+    jobs.append(("start-up only, duckosm: `duckosm --version`", [RUST, "--version"], a.runs, None))
     if e2e_runs:
         jobs.append(("duckOSM 0.6.0: `duckosm build --config config.yaml`", [VENV / "duckosm", "build", "--config", cfg], e2e_runs, None))
     jobs.append(("duckOSM 0.6.0: same, lane profile off (`bench/python_steps.py config.yaml --no-lane-profile`)",
                  [VENV / "python", HERE / "python_steps.py", cfg, "--no-lane-profile"], a.runs, PY_NET_STEPS))
-    jobs.append(("duckosm-rust: `--format duckdb`", [RUST, pbf, "-o", work / "rs_db", "--name", a.label, "--no-component-filter", "--no-merge-segments", "--no-speeds", "--no-functional-types", "--format", "duckdb", "--timing"], a.runs, RS_NET_STEPS))
-    jobs.append(("duckosm-rust: `--format geoparquet`", [RUST, pbf, "-o", work / "rs_pq", "--no-component-filter", "--no-merge-segments", "--no-speeds", "--no-functional-types", "--format", "geoparquet", "--timing"], a.runs, RS_NET_STEPS))
+    jobs.append(("duckosm: `--format duckdb`", [RUST, pbf, "-o", work / "rs_db", "--name", a.label, "--no-component-filter", "--no-merge-segments", "--no-speeds", "--no-functional-types", "--format", "duckdb", "--timing"], a.runs, RS_NET_STEPS))
+    jobs.append(("duckosm: `--format geoparquet`", [RUST, pbf, "-o", work / "rs_pq", "--no-component-filter", "--no-merge-segments", "--no-speeds", "--no-functional-types", "--format", "geoparquet", "--timing"], a.runs, RS_NET_STEPS))
     rows = []
     for name, cmd, runs, net in jobs:
         for k in range(runs + 1):           # run 0 is the warm-up

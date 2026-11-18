@@ -73,7 +73,7 @@ The `edge_id` is a hash of the way and its two end nodes, so it does not depend 
 
 ## Part A: the ways in a stream, the edges on disk
 
-The input is `raw.ways`, `raw.nodes` and `main.global_junctions` in DuckDB. For a whole-file build of `duckosm-rust`,
+The input is `raw.ways`, `raw.nodes` and `main.global_junctions` in DuckDB. For a whole-file build of `duckosm`,
 they are there before the network step (`read_osm` and the global junctions SQL). This needs one change of the order
 of the build: today, the Rust build makes the network first and the `.duckdb` file after it.
 
@@ -94,7 +94,7 @@ measures it.
 
 ### Step A1 (done): `raw.*` first, the input from DuckDB
 
-A whole-file build of `duckosm-rust` with the `.duckdb` output now writes `raw.*` with `read_osm` first. The network
+A whole-file build of `duckosm` with the `.duckdb` output now writes `raw.*` with `read_osm` first. The network
 reads the highway ways, the coordinates of their nodes and the turn restrictions from `raw.*`
 (`duckosm_duckdb::RawInput`, through the trait `NetworkSource` and `Input::Source`), not from the file a second time.
 `write_network_tables` adds the network tables to the file. A build of an area is the same as before.

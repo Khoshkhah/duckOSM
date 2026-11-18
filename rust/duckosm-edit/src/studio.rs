@@ -320,7 +320,7 @@ impl Studio {
                     index_text: Mutex::new(None), page: crate::page::make_studio()?, file: None, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(Vec::new()), making: Mutex::new(()), pager })
     }
 
-    /// A server for the one database `db` (`duckosm-rust levels-edit`): its area is the name of the file, and the files of the area (the map, the
+    /// A server for the one database `db` (`duckosm levels-edit`): its area is the name of the file, and the files of the area (the map, the
     /// terrain) are written next to it.
     pub fn for_file(host: Box<dyn Host>, db: &Path, port: u16) -> Result<Studio, String> {
         let name = db.file_stem().and_then(|n| n.to_str()).filter(|n| db.extension().is_some_and(|e| e == "duckdb") && is_name(n) && db.is_file())

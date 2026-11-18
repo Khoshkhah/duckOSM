@@ -7,7 +7,7 @@
 
 The duckosm-rust page has a panel "Edit OSM data" (card 7). The panel writes a fixes file: duckOSM's `overrides`, `new_ways` and
 `turn_restrictions`, and the extension keys `extra.tag_edits` and `extra.building_faces`. The engine code that applies the fixes is in
-duckOSM (`rust/duckosm-core/src/fixes.rs`, `raw.rs`, `building_faces.rs`). The panel code is in duckosm-rust
+duckOSM (`rust/duckosm-core/src/fixes.rs`, `raw.rs`, `building_faces.rs`). The panel code is in duckosm
 (`crates/duckosm-wasm/www/app/fixes_panel.js`, `fixes.js`, `presets.json`, about 70 lines of markup and 90 lines of CSS in `index.html`).
 
 The rule of Kaveh is that each editor lives with its owner. roadstyle owns the level editor, and the page copies it from roadstyle at a
@@ -18,7 +18,7 @@ duckOSM rev, and they cannot get out of step.
 
 A new folder `web/fixes_editor/` at the root of the repository:
 
-| File | What it is | From duckosm-rust |
+| File | What it is | From duckosm |
 |---|---|---|
 | `fixes.js` | The rules as data: read and write the fixes file, one function for each change. No DOM, no map. | `app/fixes.js`, no change |
 | `fixes_panel.js` | The panel: its markup, the six tabs, the map layers, undo and redo. | `app/fixes_panel.js` and the markup of `index.html` |
@@ -30,7 +30,7 @@ A new folder `web/fixes_editor/` at the root of the repository:
 The folder is not in the Python package. A pip install has no use for it, and only files in `src/duckosm/` ship. The CI job `test`
 gets one more step: `node web/fixes_editor/fixes_units.mjs`.
 
-The two Playwright tests `fixes_e2e.py` and `phone_fixes_e2e.py` stay in duckosm-rust. They test the page: the build, the card, the
+The two Playwright tests `fixes_e2e.py` and `phone_fixes_e2e.py` stay in duckosm. They test the page: the build, the card, the
 phone sheet and the clicks on roadstyle's map. They need the page and its Wasm build, and duckOSM has neither.
 
 ## The API for a host page
@@ -93,12 +93,12 @@ the rev (`git fetch --depth 1`, as it fetches roadstyle at `ROADSTYLE_COMMIT`), 
 `www/app/fixes_editor/`. The copy is not in git. One rev then gives the engine and the editor. The page has no second pin that can
 get out of step.
 
-The main session makes this change in duckosm-rust after the duckOSM PR merges. This session does not change duckosm-rust.
+The main session makes this change in duckosm after the duckOSM PR merges. This session does not change duckosm.
 
 ## The fixes file in `duckosm build`
 
 The check: one fixes file from the page with every fix kind, on the sample of the page (`tests/data/monaco_sample.osm.pbf` of
-duckosm-rust, with `monaco.geojson`). The page builds Monaco without and with the file. `duckosm build` (the Rust engine) does the same.
+duckosm, with `monaco.geojson`). The page builds Monaco without and with the file. `duckosm build` (the Rust engine) does the same.
 For each table, a digest compares the two: the row count and the md5 of the sorted rows, all columns but the geometry, on the columns that
 the two tables have. The check script picks the objects of the file from the tables of the page:
 
@@ -222,7 +222,7 @@ rule wins, as in the build."), and the Changes tab marks the object ("2 rules").
 - Fix 2 (`options.building_faces`), with the test of the error in `tests/test_osm_overrides.py`.
 - `tests/test_page_fixes.py`: the check of this note as a test. `tests/data/page_fixes/osm_fixes.yaml` is the fixes file.
   `page_tables.json` has the digests of the page's tables (`tests/page_tables.py`), from `scripts/page_tables.py` (the page at
-  duckosm-rust `062cda8`). The test builds Monaco with the file and `options.building_faces`. All 44 tables that the two builds have
+  duckosm `062cda8`). The test builds Monaco with the file and `options.building_faces`. All 44 tables that the two builds have
   are equal in all columns. The page has one column more in `main.boundary` (`geofabrik`); there the test compares each column.
 - The guide `docs/guides/edit-osm-data.md`, and `main.building_faces` in `docs/reference/database.md`.
 - A check of the moved panel in the page: a copy of the duckosm-rust page (outside the repository) with the new API, and the page's own

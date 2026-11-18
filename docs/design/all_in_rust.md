@@ -5,7 +5,7 @@ program takes the name `duckosm`.
 
 ## Where we are
 
-The Rust program `duckosm-rust` has: the build (with H3, levels, bus routes, lane profile, base-map layers, OSM fixes,
+The Rust program `duckosm` has: the build (with H3, levels, bus routes, lane profile, base-map layers, OSM fixes,
 the DEM in the build), `tiles`, `cut`, `quack`, `quack-tiles`, `quack-union`, `edit` and `studio`.
 
 These parts are only in Python (`src/duckosm/`, about 11,000 lines without the old build glue):
@@ -38,22 +38,43 @@ rows, or the same file bytes where the format allows. A golden file holds the Py
    - The docs say `duckosm` everywhere.
    - Release 1.0.0. Then move the pins in Studio, sensor-matching, SonoFlow and the other projects.
 
+## Step 6: the state
+
+Done (before GMNS and the maps): the program `duckosm` (`duckosm-rust` is an alias for one release), the wheel with the
+whole program in `duckosm._rust` (`cli`), and the Python API on Rust (`src/duckosm/_api.py`): the exports, the routing
+and the elevation. A connection to an in-memory database runs the Python code. The command `duckosm` of the
+wheel (`src/duckosm/_main.py`) runs Rust in the Python process. Work in other processes (the tiles) starts
+`python -m duckosm` again (`DUCKOSM_PYTHON`, `duckosm_build::self_command`).
+
+To do:
+
+- The build: `DuckOSM.run()` and `duckosm build --pbf/--config` run the Python steps with the Rust network step, as before.
+  The whole build in Rust (`duckosm --config`) is not yet equal to it. With it, these tests fail: `test_engine_rust.py`
+  (no `features.ocean`), `test_levels_in_build.py` (no `visualization.level_heads` and the other tables of the level
+  edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
+  tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
+- GMNS (group C): the command `gmns` is Rust; the functions `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
+- No Rust port yet: `levels`, `bus`, `multimodal`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
+  the Python CLI reads them and the build runs in Rust.
+- Then: remove `PYTHON_COMMANDS` of `src/duckosm/_main.py`, remove the Python engine code (the tag `python-engine-final`
+  keeps it), release 1.0.0.
+
 ## Group D: the state
 
-The exports are in the crate `rust/duckosm-export`. The commands are `duckosm-rust <export> ...`, with the options of the
+The exports are in the crate `rust/duckosm-export`. The commands are `duckosm <export> ...`, with the options of the
 Python CLI. The golden test (`rust/duckosm-export/tests/golden.rs`) compares each Rust export with the Python output on Monaco;
 `tools/make_golden_exports.py` makes the golden files.
 
 | Export | Rust command | State |
 |---|---|---|
-| MATSim | `duckosm-rust matsim` | Done. The same bytes as Python on Monaco and Tartu (gzip: the same text). |
-| railML | `duckosm-rust railml` | Done. The same bytes as Python on Monaco and Tartu. |
-| GIS | `duckosm-rust export-gis` | Done. GeoPackage, GeoParquet, shapefile: the same columns and rows as Python on Monaco and Tartu; `layers.json`: the same bytes. |
-| GIS check | `duckosm-rust gis-debug` | Done. The same page and the same `--json` as Python (a GeoPackage, shapefiles, and shapefiles with errors; Monaco and Tartu). The export is read through GDAL (`ST_Read`); the page is `src/duckosm/templates/gis_debug.html` for both. |
-| OpenDRIVE | `duckosm-rust opendrive` | Done. The same bytes as Python on Monaco and Tartu, with and without `--junctions`. A CRS that is not UTM or EPSG:3006 gets its proj4 text from PROJ's `projinfo` (pyproj uses the same PROJ function). |
-| MATSim lanes | `duckosm-rust matsim-lanes` | Done. The same bytes as Python on Monaco and Tartu. |
-| Lanelet2 | `duckosm-rust lanelet2` | Done. The same bytes as Python on Monaco and Tartu. The offset line of shapely is ported from GEOS 3.13.1 in pure Rust: the raw offset curve (`src/offset.rs`), and the buffer polygon of the line (`src/geos.rs`: GEOS's noder, planar graph, depths and polygon builder). On all 53,614 lane sides of Monaco and Tartu it gives the same points as GEOS (within 1e-17 m). Not ported: a closed line (GEOS buffers both sides of the ring) and GEOS's second try with less precision when its buffer fails; the Rust export stops with an error there. |
-| SUMO | `duckosm-rust sumo` | Done for the command. The plain XML and the `.netccfg`: the same bytes as Python on Monaco (three modes) and Tartu; the `.net.xml` of netconvert: the same but its header comment. Also the second netconvert pass of the turn permissions. The parts of the Python API for GMNS (`gmns_sumo`: the join of nodes, the turn arrows, `bus_edges`, `edge_attrs`, `lanes`) move with group C. |
+| MATSim | `duckosm matsim` | Done. The same bytes as Python on Monaco and Tartu (gzip: the same text). |
+| railML | `duckosm railml` | Done. The same bytes as Python on Monaco and Tartu. |
+| GIS | `duckosm export-gis` | Done. GeoPackage, GeoParquet, shapefile: the same columns and rows as Python on Monaco and Tartu; `layers.json`: the same bytes. |
+| GIS check | `duckosm gis-debug` | Done. The same page and the same `--json` as Python (a GeoPackage, shapefiles, and shapefiles with errors; Monaco and Tartu). The export is read through GDAL (`ST_Read`); the page is `src/duckosm/templates/gis_debug.html` for both. |
+| OpenDRIVE | `duckosm opendrive` | Done. The same bytes as Python on Monaco and Tartu, with and without `--junctions`. A CRS that is not UTM or EPSG:3006 gets its proj4 text from PROJ's `projinfo` (pyproj uses the same PROJ function). |
+| MATSim lanes | `duckosm matsim-lanes` | Done. The same bytes as Python on Monaco and Tartu. |
+| Lanelet2 | `duckosm lanelet2` | Done. The same bytes as Python on Monaco and Tartu. The offset line of shapely is ported from GEOS 3.13.1 in pure Rust: the raw offset curve (`src/offset.rs`), and the buffer polygon of the line (`src/geos.rs`: GEOS's noder, planar graph, depths and polygon builder). On all 53,614 lane sides of Monaco and Tartu it gives the same points as GEOS (within 1e-17 m). Not ported: a closed line (GEOS buffers both sides of the ring) and GEOS's second try with less precision when its buffer fails; the Rust export stops with an error there. |
+| SUMO | `duckosm sumo` | Done for the command. The plain XML and the `.netccfg`: the same bytes as Python on Monaco (three modes) and Tartu; the `.net.xml` of netconvert: the same but its header comment. Also the second netconvert pass of the turn permissions. The parts of the Python API for GMNS (`gmns_sumo`: the join of nodes, the turn arrows, `bus_edges`, `edge_attrs`, `lanes`) move with group C. |
 
 The exports of a GMNS db read the test tables of `tests/data/exports/gmns_driving/` (the columns that they read, as
 Parquet), until group C makes the GMNS db in Rust.
@@ -67,7 +88,7 @@ GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `lo
 
 ## Group G: the state
 
-`duckosm-rust elevation` is in the crate `rust/duckosm-tools` (`elevation.rs`, with the catalog `dem_sources.rs`). It has the
+`duckosm elevation` is in the crate `rust/duckosm-tools` (`elevation.rs`, with the catalog `dem_sources.rs`). It has the
 options of `duckosm elevation` and writes the same columns and rows: `ele`, `z_from`, `z_to`, `z_vertices` (and the same with
 `--suffix`) and `main.elevation_metadata`. The golden test (`elevation_equals_duckosm`, `tools/make_golden_elevation.py`) keeps the
 Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata and `--source copernicus`; Tartu with
@@ -93,9 +114,9 @@ the same engine.
 
 | Part | State |
 |---|---|
-| `viz` and the build's `viz.enabled` | Done: `duckosm-rust viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
-| `route-map` and the planner page (the router in WebAssembly) | Done: `duckosm-rust route-map` (`route_map.rs`, `page/planner.html`). The page routes with `duckosm-planner` as WebAssembly. |
-| `levels-edit` | Done: `duckosm-rust levels-edit DB`, the page of `duckosm-rust studio` on one file (`Studio::for_file`) with card 8 open (`?area=<name>&step=8`). |
+| `viz` and the build's `viz.enabled` | Done: `duckosm viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
+| `route-map` and the planner page (the router in WebAssembly) | Done: `duckosm route-map` (`route_map.rs`, `page/planner.html`). The page routes with `duckosm-planner` as WebAssembly. |
+| `levels-edit` | Done: `duckosm levels-edit DB`, the page of `duckosm studio` on one file (`Studio::for_file`) with card 8 open (`?area=<name>&step=8`). |
 
 - The pages are roadstyle's `duckosm.page(db, mode, only=...)`: the "liberty" theme and the "google" paths of roadstyle's port.
   mapstyle's own `render_map` (the "osm" theme) does not run with the current roadstyle (`palette_to_dict` is gone), so
@@ -154,11 +175,11 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
 | Crossings (`crossing`, `lane_crossing`) | Done: on Monaco the same 492 crossings and 2,118 lane rows as Python, with every id, link, type, marking, `painted` and `to_left` equal. The overlays (unions, buffers of a union, intersections) are the `geo` crate's, so the widths, lengths and stretches are checked by their properties (`lane_report`): each stretch inside its lane, each part across inside the zebra, the width the tag's or 2.5-4 m. Two ties are now decided the same way in Python and Rust: the lane nearest to a node where lanes and connectors meet (a lane before a connector, then the smallest lane id), and the tangent of a lane at a point on a corner's bisector (the corner). |
 | Walk joins (`gmns_walking.lane_connector`) | Done: equal on Monaco (the line by its properties). With this every table and column of `duckosm gmns` with its defaults is made. |
-| The command `duckosm-rust gmns` with `--combined`, `--to-csv`, `--csv-extensions`, `--drive-side`, `--no-pair-carriageways`, `--no-lane-geometry` and `--check` (`gmns_check`: the checks and the graph report) | Done: on Monaco the output, the failed checks, the 41 CSV files (header and sorted rows) and `gmns_all` equal Python's. Two Python faults fixed in both: `--to-csv` failed on every build with cycling (its lanes have no `geom_cut`), and `gmns_all` took `any_value()` of a column that differs between the modes (now the first value in the order of the modes). |
+| The command `duckosm gmns` with `--combined`, `--to-csv`, `--csv-extensions`, `--drive-side`, `--no-pair-carriageways`, `--no-lane-geometry` and `--check` (`gmns_check`: the checks and the graph report) | Done: on Monaco the output, the failed checks, the 41 CSV files (header and sorted rows) and `gmns_all` equal Python's. Two Python faults fixed in both: `--to-csv` failed on every build with cycling (its lanes have no `geom_cut`), and `gmns_all` took `any_value()` of a column that differs between the modes (now the first value in the order of the modes). |
 | `--meso`, `--micro` (`meso_<mode>`, `micro_<mode>`; `src/gmns_meso.rs`) | Done: on Monaco (driving and cycling) and Tartu (driving) every meso column equals Python. Every micro column equals Python but the points and lengths of the cells, which are cut from the lane lines and so follow their check by properties. The golden file is `monaco_gmns_meso_columns.tsv`. |
 | `--gtfs`, `--gtfs-max-m` (the stops of a GTFS feed as `location` rows; `src/gtfs.rs`) | Done: on Monaco, with a feed made from its OpenStreetMap stops (`tests/data/exports/monaco_gtfs.zip`: bus stops, stops no trip calls at, railway stops, entrances, a station and a far stop), every `location` column of every mode equals Python, also with the feed as a folder. A zip file is read with `flate2` (stored and deflated files; no zip64). |
 | `gmns-viz` (`src/gmns_viewer.rs`) | Done: the page is byte for byte Python's on the same db (Monaco driving, cycling and walking, with meso and micro). The template is now one file, `src/duckosm/templates/gmns_viewer.html`, that both read. The golden test reads a db made from `tests/data/exports/gmns_viewer/` (the columns that the viewer reads, from Python's export): the Rust lane lines differ from Python's below 1 mm, and that moves some of the page's rounded points. |
-| `gmns-map` | Done: `duckosm-rust gmns-map` (`duckosm-edit/src/gmns_map.rs`) calls lanestyle's Rust engine (`lanestyle::page::lane_page`; lanestyle was ported to Rust, 0.4). lanestyle's golden check compares its items with the Python lanestyle 0.3.1 on Monaco and Tartu (all equal, coordinates to 1 mm); `duckosm-edit/tests/gmns_map.rs` makes the page of Monaco. |
+| `gmns-map` | Done: `duckosm gmns-map` (`duckosm-edit/src/gmns_map.rs`) calls lanestyle's Rust engine (`lanestyle::page::lane_page`; lanestyle was ported to Rust, 0.4). lanestyle's golden check compares its items with the Python lanestyle 0.3.1 on Monaco and Tartu (all equal, coordinates to 1 mm); `duckosm-edit/tests/gmns_map.rs` makes the page of Monaco. |
 
 ## Not changed
 

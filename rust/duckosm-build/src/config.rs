@@ -502,7 +502,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
 }
 
 const FIX_TOP: [&str; 4] = ["overrides", "new_ways", "turn_restrictions", "extra"];
-/// The keys of `extra` (an extension of duckosm-rust: duckOSM reads only `overrides`, so it ignores the key `extra`).
+/// The keys of `extra` (an extension of duckosm: duckOSM reads only `overrides`, so it ignores the key `extra`).
 const FIX_EXTRA: [&str; 2] = ["tag_edits", "building_faces"];
 const FIX_FACE_EDIT: [&str; 7] = ["building", "from_node", "to_node", "type", "door", "note", "changed"];
 /// `was`: what the data had before the change, kept by the page to show "was to now". `changed` (in each list): the date and the time of the

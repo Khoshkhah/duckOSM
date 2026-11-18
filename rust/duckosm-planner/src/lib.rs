@@ -1,6 +1,6 @@
 //! The route planner of `duckosm route-map` (docs/design/all_in_rust.md, group F): duckOSM's routes between two points over an area
 //! held in memory, the data of the planner page (`RM`). The page runs this crate as WebAssembly (`wasm.rs`), so it routes as
-//! `duckosm-rust route-points`, `route-multimodal-points` and `directions` do: the same router (`duckosm-router`), the same data,
+//! `duckosm route-points`, `route-multimodal-points` and `directions` do: the same router (`duckosm-router`), the same data,
 //! the same results (`tests/planner.rs` compares them on Monaco).
 
 use duckosm_router::directions::{self, Road as DirRoad};

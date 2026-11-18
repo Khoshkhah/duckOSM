@@ -263,10 +263,10 @@ fn load(db: &mut dyn Db, path: &Path, pager: Pager, cache: Option<&Path>) -> Res
 }
 
 /// The build's record in the database: `build_config` (the config as YAML) and `build_dir` (the folder of the build) of
-/// main.visualization_metadata, which `duckosm build` and `duckosm-rust --config` write. Err: why Build again is off.
+/// main.visualization_metadata, which `duckosm build` and `duckosm --config` write. Err: why Build again is off.
 fn source(db: &mut dyn Db) -> Result<(String, PathBuf), String> {
     const NONE: &str = "This database has no record of its build (the config and the PBF file). Build it again with duckosm build, \
-                        or with duckosm-rust --config, then Build again works here.";
+                        or with duckosm --config, then Build again works here.";
     let has = rows(db, "SELECT count(*) AS n FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'visualization_metadata' \
                         AND column_name IN ('build_config', 'build_dir')")?;
     if has.first().and_then(|r| r["n"].as_i64()) != Some(2) {

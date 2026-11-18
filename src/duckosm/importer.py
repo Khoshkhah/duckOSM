@@ -150,7 +150,7 @@ class DuckOSM:
                 global_steps.append(("global_junctions", "Building global junctions",
                                      self._build_global_junctions))
             if rust:
-                global_steps.append(("rust_build", "Building the networks with duckosm-rust", self._rust_build))
+                global_steps.append(("rust_build", "Building the networks with duckosm", self._rust_build))
 
         # 2. Mode-specific steps (run for each mode)
         def get_mode_steps(mode):
@@ -170,8 +170,8 @@ class DuckOSM:
                 steps.append(("apply_osm_overrides", f"[{mode}] Applying OSM overrides",
                               lambda m=mode: self._apply_osm_overrides(m)))
             if rust:
-                # the network step of duckosm-rust, in place of the SQL steps below (one load per mode)
-                steps.append(("rust_network", f"[{mode}] Loading the network of duckosm-rust",
+                # the network step of duckosm, in place of the SQL steps below (one load per mode)
+                steps.append(("rust_network", f"[{mode}] Loading the network of duckosm",
                               lambda m=mode: self._rust_network(m)))
             else:
                 steps.append(("build_edges", f"[{mode}] Building edges", self._build_edges))
@@ -206,13 +206,13 @@ class DuckOSM:
                 # `private_edges` before the graph: visible on maps, never routable.
                 steps.append(("split_private", f"[{mode}] Moving private roads", lambda m=mode: self._split_private(m)))
 
-            if self.config.options.extract_restrictions and not rust:   # rust: duckosm-rust made them
+            if self.config.options.extract_restrictions and not rust:   # rust: duckosm made them
                 # Turn restrictions only for driving for now
                 if mode == "driving":
                     steps.append(("extract_restrictions", f"[{mode}] Extracting turn restrictions", self._extract_restrictions))
 
             if self.config.options.build_graph:
-                if not rust:          # rust: duckosm-rust made edge_graph and turn_permission (_rust_network loads them)
+                if not rust:          # rust: duckosm made edge_graph and turn_permission (_rust_network loads them)
                     steps.append(("build_edge_graph", f"[{mode}] Building edge graph", lambda: self._build_edge_graph(mode)))
 
             if self.config.options.h3_indexing:
@@ -903,7 +903,7 @@ class DuckOSM:
         logger.info(f"  Indexes created in {self.stats['index_time']:.2f}s")
     
     def _rust_build(self) -> None:
-        """options.engine: rust: duckosm-rust builds the network step of every mode on the cut PBF; the
+        """options.engine: rust: duckosm builds the network step of every mode on the cut PBF; the
         GeoParquet files wait in a temporary folder next to the output file (_rust_network loads them,
         _cleanup removes the folder). See docs/design/rust_engine.md."""
         self._rust_dir = Path(tempfile.mkdtemp(prefix=f".{self.config.name}.rust-", dir=self.output_path.parent))
@@ -913,7 +913,7 @@ class DuckOSM:
         self._rust_modes = res["modes"]
         if res.get("sidewalk_roads"):
             self.stats['sidewalk_roads_rust'] = res["sidewalk_roads"]
-        logger.info(f"  duckosm-rust built {len(res['modes'])} network(s) in {self.stats['rust_build_time']:.2f}s")
+        logger.info(f"  duckosm built {len(res['modes'])} network(s) in {self.stats['rust_build_time']:.2f}s")
         if self.config.options.building_faces:
             logger.info(f"  main.building_faces: {rust_engine.load_building_faces(self.con, self._rust_dir):,} walls")
             logger.info(f"  main.building_entrances: {rust_engine.make_building_entrances(self.con):,} doors")
@@ -924,7 +924,7 @@ class DuckOSM:
                                                  self.config.options.merge_segments)
         self.stats['edge_count'], self.stats['node_count'] = n_edges, n_nodes
         m = self._rust_modes.get(mode, {})
-        logger.info(f"  [{mode}] duckosm-rust: {n_edges:,} edges, {n_nodes:,} nodes, "
+        logger.info(f"  [{mode}] duckosm: {n_edges:,} edges, {n_nodes:,} nodes, "
                     f"{m.get('private_edges', 0):,} private edges, {m.get('connectors', 0):,} connectors, "
                     f"{m.get('osm_fixes', 0):,} OSM fixes")
 

@@ -28,7 +28,7 @@ The heights are in two forms today:
 
 | Where | The heights |
 |---|---|
-| the `.duckdb` of the native build (`duckosm-rust --dem`) and of `duckosm elevation` | columns of each mode's `nodes` and `edges`, as in the table above |
+| the `.duckdb` of the native build (`duckosm --dem`) and of `duckosm elevation` | columns of each mode's `nodes` and `edges`, as in the table above |
 | the Parquet files of the Rust build | apart, in `elevation_nodes_<mode>.parquet` (`node_id`, `ele`) and `elevation_edges_<mode>.parquet` (`edge_id`, `z_from`, `z_to`, `z_vertices`): the build writes `edges_<mode>.parquet` before it samples the DEM |
 | duckOSM Studio, and its `make_duckdb.sql` | apart, as the tables `<mode>.elevation_nodes` and `<mode>.elevation_edges`: Studio makes one table for each Parquet file |
 
@@ -85,7 +85,7 @@ State on 2026-11-10.
 
 | Part | Reads | Does | Writes or shows | State |
 |---|---|---|---|---|
-| **duckOSM build** (`duckosm-rust --dem`) | the DEM file (GeoTIFF, EPSG:4326, 32-bit floats) and its product, vertical datum and licence | reads the DEM one time; takes its pixels over the area and samples it at each node and at each point of each edge | `main.elevation_grid`, `nodes.ele`, `edges.z_from`, `z_to`, `z_vertices`, `main.elevation_metadata` with the ground id (`sha256`) | done |
+| **duckOSM build** (`duckosm --dem`) | the DEM file (GeoTIFF, EPSG:4326, 32-bit floats) and its product, vertical datum and licence | reads the DEM one time; takes its pixels over the area and samples it at each node and at each point of each edge | `main.elevation_grid`, `nodes.ele`, `edges.z_from`, `z_to`, `z_vertices`, `main.elevation_metadata` with the ground id (`sha256`) | done |
 | **duckOSM Studio** (browser) | the DEM file that you select in the step "Ground"; the step sets its product, datum and licence from a catalog | the same Rust build, in WebAssembly | the same data; the heights as the tables `<mode>.elevation_nodes` and `<mode>.elevation_edges`, not as columns; the terrain file for its map (made by roadstyle's WebAssembly) | done (Studio PRs 137 and 138) |
 | **`duckosm elevation`** (Python) | a DEM file or a global source | samples the DEM at the nodes and the edge points | the same columns `ele`, `z_from`, `z_to`, `z_vertices`; no grid | done |
 | **SimReady** `import-elevation` | the heights at the road points (duckOSM) and the bridge groups | writes heights at stations along each carriageway, then fits the graded profile: straight grades and vertical curves | `sim.elevation_profile` (`dem_sample`, `graded`, `earthwork_m`: cut or fill) | done for Monaco (FABDEM) and Vancouver (1 m LiDAR); some height checks still fail where a junction meets a lane |
@@ -252,13 +252,13 @@ elevation:
 ```
 
 ```bash
-duckosm-rust --config my_area.yaml
+duckosm --config my_area.yaml
 ```
 
 Or give it on the command line. `--dem` wins over the config:
 
 ```bash
-duckosm-rust monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco \
+duckosm monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco \
   --dem fabdem-monaco.tif --dem-product DTM --dem-vertical-datum EGM2008 --dem-license CC-BY-NC-SA-4.0
 ```
 

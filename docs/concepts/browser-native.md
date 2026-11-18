@@ -4,7 +4,7 @@ duckOSM builds an area in two versions, with the same Rust engine and the same r
 
 | | Native | Browser |
 |---|---|---|
-| Program | `duckosm-rust` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) in the browser (WebAssembly) |
+| Program | `duckosm` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) in the browser (WebAssembly) |
 | Storage | the disk | the browser's storage (OPFS) |
 | Memory | the RAM of the computer | the tab: at most 4 GB for each WebAssembly module |
 | Result | a `.duckdb` file | tables in the page; a `.duckdb` file when you export |
@@ -27,10 +27,10 @@ Each step reads its data in blocks and writes its result to storage. Diagrams an
 
 Both versions build every area by tiles (since 2026-11-17): [pbfcut](https://github.com/Khoshkhah/pbfcut) cuts the region
 file into tiles, each tile builds alone, and a union joins the tiles. The memory does not grow with the area. The local
-dashboard (`duckosm-rust studio`) runs `duckosm-rust tiles` for its build:
+dashboard (`duckosm studio`) runs `duckosm tiles` for its build:
 
 ```bash
-duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out -- --modes driving
+duckosm tiles france.osm.pbf --boundary france.geojson -o out -- --modes driving
 ```
 
 Mac mini (12 cores, 16 GB), headless Chromium for the browser, 2026-11-17: the levels `solve`, tiles of zoom 8. The tables

@@ -4,7 +4,7 @@ A build of a large area (for example France) by tiles keeps the memory of each s
 union puts the tables of the tiles together.
 
 ```bash
-duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -- --modes driving
+duckosm tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -- --modes driving
 ```
 
 ## The steps
@@ -205,7 +205,7 @@ each tile.
 
 More memory does not make the build faster: the time is in the work of the tiles, not in waiting for memory.
 
-On Linux, `duckosm-rust` sets the glibc memory thresholds to 128 KB (`mallopt`, `M_MMAP_THRESHOLD` and
+On Linux, `duckosm` sets the glibc memory thresholds to 128 KB (`mallopt`, `M_MMAP_THRESHOLD` and
 `M_TRIM_THRESHOLD`): a freed block of 128 KB or more goes back to the system. Without this, each thread keeps the large
 blocks that it freed, and a step uses much more memory than its live data. France (driving, `--raw`), same time:
 
@@ -250,8 +250,8 @@ The zoom again, with the cut with two reads (PRs 196 and 197; France, driving, G
 | 8 | 104 | 73.4 s, 1,110 MB | 208.7 s | 87.2 s | 369.3 s | 902 MB |
 
 In the browser, quack by tiles is fastest at zoom 8 (Sweden in Chromium on the Mac, 12 threads: 37.0 s; zoom 10: 72.7 s).
-**Zoom 8 is the default and the one tile zoom of all parts** (Kaveh, 2026-11-15): `duckosm-rust tiles`,
-`duckosm-rust quack-tiles` and the quack page. At zoom 8 the build by tiles of France takes 23 % more time than at zoom
+**Zoom 8 is the default and the one tile zoom of all parts** (Kaveh, 2026-11-15): `duckosm tiles`,
+`duckosm quack-tiles` and the quack page. At zoom 8 the build by tiles of France takes 23 % more time than at zoom
 10, all in the tile builds: the 104 large tiles fit fewer at a time in the memory, and the largest finish last. The
 largest tile (902 MB) stays in the budget of 2 GB.
 

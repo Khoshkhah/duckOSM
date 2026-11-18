@@ -1,4 +1,4 @@
-//! The database tools of duckOSM in Rust (docs/design/all_in_rust.md, group B). `duckosm-rust <tool> ...` goes to
+//! The database tools of duckOSM in Rust (docs/design/all_in_rust.md, group B). `duckosm <tool> ...` goes to
 //! [`cli::run`]; [`cli::COMMANDS`] has the names.
 
 pub mod admin;

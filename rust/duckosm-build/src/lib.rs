@@ -638,7 +638,7 @@ pub fn write_elevation_metadata<W: Write + Send>(
             p.dem_vertical_datum.as_deref().unwrap_or("unknown"),
             p.dem_license.as_deref().unwrap_or("unknown"),
             &sampled,
-            concat!("duckosm-rust ", env!("CARGO_PKG_VERSION")),
+            concat!("duckosm ", env!("CARGO_PKG_VERSION")),
             &format!("{:x}", hash.finalize()),
         ],
         resolution_m,
@@ -1707,7 +1707,7 @@ pub fn run<W: Write + Send>(
     Ok(sum)
 }
 
-/// duckosm-rust quack: the features table of QuackOSM (feature_id, tags, geometry; docs/rust/quack.md) of the whole PBF file,
+/// duckosm quack: the features table of QuackOSM (feature_id, tags, geometry; docs/rust/quack.md) of the whole PBF file,
 /// made in Rust in one pass (`duckosm_core::quack`): into the table `main.quackosm` of the `.duckdb` file `duckdb`
 /// (directly, no Parquet file between), into the GeoParquet file `parquet`, or into both in the same pass.
 pub fn quack(
@@ -2301,4 +2301,16 @@ mod area_raw_tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The command that starts this program again, for work in other processes (the tiles, the build by tiles). In the Python
+/// package, the program runs inside Python (`duckosm._rust.cli`): `DUCKOSM_PYTHON` names that Python, and the command is
+/// `python -m duckosm`.
+pub fn self_command() -> std::io::Result<std::process::Command> {
+    if let Some(py) = std::env::var_os("DUCKOSM_PYTHON") {
+        let mut c = std::process::Command::new(py);
+        c.args(["-m", "duckosm"]);
+        return Ok(c);
+    }
+    Ok(std::process::Command::new(std::env::current_exe()?))
 }

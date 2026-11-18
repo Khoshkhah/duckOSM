@@ -1,11 +1,11 @@
-"""`duckosm-rust route-map` and `viz` in a browser, on Monaco (group F of docs/design/all_in_rust.md).
+"""`duckosm route-map` and `viz` in a browser, on Monaco (group F of docs/design/all_in_rust.md).
 
 The planner page routes with the program's router built as WebAssembly. Here the page's route from A to B, in each mode, has the
-edges of `duckosm-rust route-points` for the same points, and the page's steps are the texts of `duckosm-rust directions`. The
+edges of `duckosm route-points` for the same points, and the page's steps are the texts of `duckosm directions`. The
 walk + drive page opens on Walk + drive, with a change of mode, and its Fastest and Shortest each win on their own measure. At
 390 x 844 (a phone) the pages load, the planner draws its route and nothing is wider than the screen.
 
-Needs the program (rust/target/release/duckosm-rust, or DUCKOSM_RUST) built with the wasm32 target, and playwright with chromium."""
+Needs the program (rust/target/release/duckosm, or DUCKOSM_RUST) built with the wasm32 target, and playwright with chromium."""
 import json
 import os
 import subprocess
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-EXE = Path(os.environ.get("DUCKOSM_RUST", ROOT / "rust" / "target" / "release" / "duckosm-rust"))
+EXE = Path(os.environ.get("DUCKOSM_RUST", ROOT / "rust" / "target" / "release" / "duckosm"))
 sync_api = pytest.importorskip("playwright.sync_api")
 if not EXE.exists():
     pytest.skip(f"no {EXE}: cargo build --release -p duckosm-cli", allow_module_level=True)

@@ -167,10 +167,10 @@ rules of the panel, so the comments of a file that you wrote by hand do not stay
 does not change it.
 
 **Build again** is off when the database has no record of its build: a database from an older duckOSM, from duckOSM Studio, or from
-`duckosm-rust` without `--config`. The reason shows under the button. Build the database again with `duckosm build`, then it works.
+`duckosm` without `--config`. The reason shows under the button. Build the database again with `duckosm build`, then it works.
 
-`duckosm-rust edit my_area.duckdb` opens the same page from duckOSM's Rust program. Its **Build again** runs the build of the Rust program
-(`duckosm-rust --config`). It writes the `.duckdb` file only, and it skips the steps that the Rust program does not have.
+`duckosm edit my_area.duckdb` opens the same page from duckOSM's Rust program. Its **Build again** runs the build of the Rust program
+(`duckosm --config`). It writes the `.duckdb` file only, and it skips the steps that the Rust program does not have.
 
 ## Build with the file
 

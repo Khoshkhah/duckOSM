@@ -127,6 +127,6 @@ can compare the file with the database.
 
 ## Not in this update
 
-- `duckosm-rust ask` (the native program). The Python command `duckosm ask` has it.
+- `duckosm ask` (the native program). The Python command `duckosm ask` has it.
 - A table for the OSM tags of a changed object before the change (`was`). The text in `what` has it.
 - Ask on a changed database that has not been built again. Ask sees the file (`extra.edits`) and the built database, not a build of both.

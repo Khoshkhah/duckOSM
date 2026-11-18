@@ -1,4 +1,4 @@
-//! `duckosm-rust quack --gdal` on `tests/data/monaco.osm.pbf` equals `ogr2ogr -f GPKG out.gpkg monaco.osm.pbf` of GDAL
+//! `duckosm quack --gdal` on `tests/data/monaco.osm.pbf` equals `ogr2ogr -f GPKG out.gpkg monaco.osm.pbf` of GDAL
 //! 3.13.3 (the golden file `tests/data/monaco_gdal.jsonl.gz`, made from that GeoPackage before the code): the same rows
 //! in each layer, with the same ids and column values, and the same geometries. The coordinates are integers of 1e-7
 //! degrees; the rings of a multipolygon are compared with no regard to their first point, their direction and their

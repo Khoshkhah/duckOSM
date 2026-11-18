@@ -51,7 +51,7 @@ elevation:
 Or on the command line (`--dem` wins over the config):
 
 ```bash
-duckosm-rust monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco \
+duckosm monaco.osm.pbf --boundary monaco.geojson -m driving,walking -o monaco \
   --dem fabdem-monaco.tif --dem-product DTM --dem-vertical-datum EGM2008 --dem-license CC-BY-NC-SA-4.0
 ```
 

@@ -1,8 +1,8 @@
 # The Rust engine: `options.engine: rust`
 
-Status: implemented on 2026-10-22. Since 2026-11-04 the engine is the default (`options.engine: rust`) and its code is in `rust/` ([rust_engine_move.md](rust_engine_move.md)); `python` is the reference. Decision by Kaveh (duckosm-rust design, section 12): Python duckOSM
+Status: implemented on 2026-10-22. Since 2026-11-04 the engine is the default (`options.engine: rust`) and its code is in `rust/` ([rust_engine_move.md](rust_engine_move.md)); `python` is the reference. Decision by Kaveh (duckosm design, section 12): Python duckOSM
 calls the Rust wheel part by part, with a config option as the switch. Part 1 (2026-10-22): the network
-step. Part 2 (2026-10-22, duckosm-rust 0.2.0): the turn restrictions and the edge graph.
+step. Part 2 (2026-10-22, duckosm 0.2.0): the turn restrictions and the edge graph.
 
 ## What it does
 
@@ -50,7 +50,7 @@ A clip build (`source.type: duckdb`) has no PBF, so the engine has no effect the
 The duckosm-rust repository tests the network step against duckOSM on Monaco (nine variants, three
 modes, every row), Tartu and Estonia. One known difference: a connector between two facing dangling
 ends can have the other direction label (`edge_ref`, `is_reverse`, and the columns that follow from
-them). duckOSM does not fix this order; see section 6 of the duckosm-rust design.
+them). duckOSM does not fix this order; see section 6 of the duckosm design.
 
 `tests/test_engine_rust.py` builds the Monaco sample with both engines and compares the tables, with the
 edge graph and the turn restrictions. The test has no mask: the connector labels are equal since commit

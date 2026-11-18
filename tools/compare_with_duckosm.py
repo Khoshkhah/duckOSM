@@ -1,8 +1,8 @@
-"""Compare the edges and nodes of duckosm-rust with a duckOSM database, row by row.
+"""Compare the edges and nodes of duckosm with a duckOSM database, row by row.
 
     python tools/compare_with_duckosm.py monaco.duckdb OUT_DIR_OR_DUCKDB [mode]
 
-The second argument is the output of duckosm-rust: a folder with edges_<mode>.parquet and
+The second argument is the output of duckosm: a folder with edges_<mode>.parquet and
 nodes_<mode>.parquet, or a .duckdb file. Rows are matched on edge_id (nodes on node_id).
 Needs the duckdb Python package with the spatial extension.
 """

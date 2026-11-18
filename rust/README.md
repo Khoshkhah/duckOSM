@@ -11,8 +11,8 @@ The plan is `docs/design/rust_engine_move.md`. The notes of the engine are in `d
 | `duckosm-duckdb` | Write the tables into a `.duckdb` file (DuckDB 1.5.6, bundled). |
 | `duckosm-build` | The whole build, from a config file or from options. |
 | `duckosm-export` | The exports of a `.duckdb` file (MATSim, railML, ...), with the same output as the Python exports. |
-| `duckosm-cli` | The program `duckosm-rust` (it gets a new name in a later step). |
-| `duckosm-py` | The Python module `duckosm_rust` (it becomes `duckosm._rust` in a later step). |
+| `duckosm-cli` | The program `duckosm` (and `duckosm-rust`, the old name, for one release). |
+| `duckosm-py` | The Python module `duckosm._rust`. It has the whole program `duckosm` in it (`cli`) and the Rust parts of the Python API (`src/duckosm/_api.py`). |
 
 ```bash
 cd rust

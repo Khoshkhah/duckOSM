@@ -2,7 +2,7 @@
 
 Step 0 of a build with a boundary cuts the region file to the area. This note describes the cut that writes the
 area to a `.osm.pbf` file while it reads the region file (`duckosm_core::cutstream::cut_to_pbf`, the command
-`duckosm-rust cut`).
+`duckosm cut`).
 
 ## The problem
 
@@ -196,7 +196,7 @@ The files are the same as before.
 ## Kentucky, offline and online, step by step
 
 Kentucky from the US South file, the driving mode, `raw.*` and the building faces. Mac mini (Apple M6, 12 cores, 16 GB).
-Offline: `duckosm-rust` with 12 threads, the Rust heap (cargo feature `heap-probe`). Online: duckOSM Studio in Chromium
+Offline: `duckosm` with 12 threads, the Rust heap (cargo feature `heap-probe`). Online: duckOSM Studio in Chromium
 with 8 threads, the area file and the temporary files of the network in OPFS, the WebAssembly memory (it never shrinks,
 so it is the peak until then).
 

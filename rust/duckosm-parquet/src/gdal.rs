@@ -1,4 +1,4 @@
-//! The GeoParquet files of `duckosm-rust quack --gdal -f geoparquet`: one file for each of GDAL's layers
+//! The GeoParquet files of `duckosm quack --gdal -f geoparquet`: one file for each of GDAL's layers
 //! (`duckosm_core::gdal`), with the columns of the layer (text; `z_order` an integer) and the geometry as WKB.
 
 use super::{compression, err, geo_metadata, ParWriter, ROW_GROUP};

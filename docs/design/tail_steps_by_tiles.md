@@ -7,11 +7,11 @@ drawing levels (`union::levels`, which calls `levels::tiled`). This document giv
 the structures that hold the whole area, and a design that removes them. The result stays equal to the whole build.
 
 The filter of the largest part is not in this document: it was removed on 2026-11-14 (`build_by_tiles.md`, "The largest
-part"). Only the help text of `duckosm-rust tiles` still names it. The change corrects that text.
+part"). Only the help text of `duckosm tiles` still names it. The change corrects that text.
 
 ## The measurements
 
-Mac mini (Apple M6, 12 cores, 16 GB), native, `duckosm-rust tiles ... -- --modes driving --format geoparquet`, zoom 8,
+Mac mini (Apple M6, 12 cores, 16 GB), native, `duckosm tiles ... -- --modes driving --format geoparquet`, zoom 8,
 main at `85284ac`. France is the box of `france-box.geojson`, Sweden a box of 10.5–24.2° E, 55.0–69.1° N.
 
 | Area | Tiles | Driving edges | Union | Bus routes | Levels (tags) | Levels (solve) | Total |
@@ -38,7 +38,7 @@ The live heap after bus 1 is 2.3 MB, 48 MB and 377 MB: about 480 bytes for each 
 
 The RSS of the process is larger than the heap on macOS, because the allocator keeps freed pages. In France the levels
 start at 501 MB RSS with an empty heap: these are the pages that the bus step freed. The peak RSS of the steps after the
-union is 1.6 GB (tags) and 1.4 GB (solve); in Sweden it is 1.1 GB. On Linux, `duckosm-rust` gives freed blocks back to
+union is 1.6 GB (tags) and 1.4 GB (solve); in Sweden it is 1.1 GB. On Linux, `duckosm` gives freed blocks back to
 the system (`mallopt`), so its RSS is nearer to the heap.
 
 ## What holds the whole area

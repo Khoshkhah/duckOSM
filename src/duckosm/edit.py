@@ -1,5 +1,5 @@
 """``duckosm edit`` (docs/design/edit_page.md): the database part of the page. The page, its server and its safety rules are Rust
-(rust/duckosm-edit, in ``duckosm._rust``), the same code as ``duckosm-rust edit``. The module has no DuckDB inside, so this class gives
+(rust/duckosm-edit, in ``duckosm._rust``), the same code as ``duckosm edit``. The module has no DuckDB inside, so this class gives
 the server the duckdb package of Python: it opens the file read only, runs the queries, and Build again runs ``duckosm build`` again."""
 from __future__ import annotations
 

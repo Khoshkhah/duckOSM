@@ -1,4 +1,4 @@
-//! `duckosm-rust quack --gdal` (docs/rust/quack.md, "GDAL layers"): the five layers of GDAL's OSM driver
+//! `duckosm quack --gdal` (docs/rust/quack.md, "GDAL layers"): the five layers of GDAL's OSM driver
 //! (`duckosm_core::gdal`), made by the quack engine in one read of the file, as a GeoPackage with the tables that GDAL's
 //! GeoPackage driver writes (`ogr2ogr -f GPKG out.gpkg in.osm.pbf`) or as one GeoParquet file for each layer.
 
