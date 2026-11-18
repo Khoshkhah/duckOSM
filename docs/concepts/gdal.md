@@ -21,6 +21,7 @@ Mac mini (12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the mem
 |---|---|---|---|
 | Time, GeoPackage | ≈ 10 min³ | ≈ 4 min 40 s³ | |
 | Time, GeoParquet | 14 min 18 s¹ | **3 min 37 s** | 5 min 23 s |
+| Memory, GeoPackage | ≈ 1.3 GB³ | ≈ 1.0 GB³ | |
 | Memory, GeoParquet | 1.7 GB | **1.0 GB** | 1.3 GB + 4.3 GB⁴ |
 | Files, GeoPackage | ≈ 37 GB³ | ≈ 30 GB³ | |
 | Files, GeoParquet | 16.7 GB | **12.1 GB** | 14.4 GB⁵ |
