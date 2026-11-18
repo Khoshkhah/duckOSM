@@ -27,6 +27,7 @@ pub mod h3;
 pub mod levels;
 pub mod place;
 pub mod quack_gdal;
+pub mod quack_pmtiles;
 pub mod quack_tiles;
 pub mod union;
 
