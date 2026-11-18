@@ -41,7 +41,7 @@ fn multimodal_and_points_equal_duckosm() {
     p.geoparquet = false;
     duckosm_build::build(&c.pbf, &c.out, &p).unwrap();
     let con = duckosm_route::route::open(&out.join("monaco.duckdb")).unwrap();
-    let net = duckosm_route::points::network(&con, "mm").unwrap();
+    let net = duckosm_route::points::network(&con, "mm", None).unwrap();
     let g: J = serde_json::from_str(&std::fs::read_to_string(root.join("tests/data/golden_route/monaco_multimodal_points.json")).unwrap()).unwrap();
 
     // the routes in the order of the steps of the golden file: route_points, route_multimodal_points, route_multimodal
@@ -50,7 +50,7 @@ fn multimodal_and_points_equal_duckosm() {
     let mut mm_routes = Vec::new();
     for q in g["mm"].as_array().unwrap() {
         let (a, b) = (q[0][0].as_i64().unwrap(), q[0][1].as_i64().unwrap());
-        let full = duckosm_route::points::route_multimodal(&con, &net, Some(a), Some(b), "mm", "walking", "walking", true, None, None);
+        let full = duckosm_route::points::route_multimodal(&con, &net, Some(a), Some(b), "mm", "walking", "walking", true, None);
         if let Ok(v) = &full {
             if found(v) {
                 mm_routes.push(("walking".to_string(), v.clone()));

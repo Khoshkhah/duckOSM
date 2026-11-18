@@ -78,18 +78,19 @@ pub fn routing_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]
     };
     let mut st = con.prepare(&sql).map_err(err)?;
     let mut rows = st.query([]).map_err(err)?;
-    let mut g = Graph::default();
+    let mut g = duckosm_router::graph::GraphBuilder::default();
     while let Some(r) = rows.next().map_err(err)? {
         let w: Option<f64> = r.get(2).map_err(err)?;
         g.add_arc(r.get(0).map_err(err)?, r.get(1).map_err(err)?, w.unwrap_or(f64::NAN));
     }
-    Ok(g)
+    Ok(g.finish())
 }
 
 /// Open a database read-only with the spatial extension.
 pub fn open(db: &std::path::Path) -> Result<Connection> {
     let con = duckosm_tools::open_read_only(db)?;
-    con.execute_batch("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;").map_err(err)?;
+    // the router holds its own graph: DuckDB only streams the rows to it (France: 68 million rows of the edge graph)
+    con.execute_batch("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; SET memory_limit = '2GB';").map_err(err)?;
     Ok(con)
 }
 
