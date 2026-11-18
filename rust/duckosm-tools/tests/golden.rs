@@ -48,3 +48,27 @@ fn info_and_way_equal_duckosm() {
     }
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// `boundary` writes the file of duckOSM's `duckosm boundary` (Python, 2026-11-17), from the borders of Monaco's sample PBF,
+/// offline: by name ("Monaco": the country, with the other matches) and by a name with other case and no hyphen.
+#[test]
+fn boundary_equals_duckosm() {
+    use duckosm_build::place::{find_boundary, write_boundary, Wanted};
+    let pbf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/sample/monaco.osm.pbf");
+    let out = std::env::temp_dir().join(format!("duckosm-tools-boundary-{}", std::process::id()));
+    std::fs::create_dir_all(&out).unwrap();
+    for (name, file) in [("Monaco", "boundary_monaco.geojson"), ("monte carlo", "boundary_monte_carlo.geojson")] {
+        let (geom, info) = find_boundary(Wanted::Name(name), Some(&pbf), true).unwrap();
+        let path = out.join(file);
+        write_boundary(geom, info.clone(), &path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), golden(file), "{name}");
+        if name == "Monaco" {
+            // the other matches of the name, best first
+            let others: Vec<i64> = info["others"].as_array().unwrap().iter().map(|o| o["osm_id"].as_i64().unwrap()).collect();
+            assert_eq!(others.first(), Some(&2220322), "{others:?}");
+        }
+    }
+    let e = find_boundary(Wanted::Name("Nowhere"), Some(&pbf), true).unwrap_err();
+    assert_eq!(e, "no boundary found for 'Nowhere' in monaco.osm.pbf. Try a more specific name (e.g. 'Södermalm, Stockholm') or --osm-id.");
+    let _ = std::fs::remove_dir_all(&out);
+}

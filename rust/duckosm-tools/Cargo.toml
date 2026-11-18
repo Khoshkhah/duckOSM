@@ -11,8 +11,6 @@ license.workspace = true
 duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 serde = "1"
-serde_json = { version = "1", features = ["preserve_order"] }
-
-[dev-dependencies]
-# the tests build Monaco, the database that the tools read
+# boundary: the place lookup and the GeoJSON writer of the build (place.rs)
 duckosm-build = { path = "../duckosm-build" }
+serde_json = { version = "1", features = ["preserve_order"] }
