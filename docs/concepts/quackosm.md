@@ -64,17 +64,6 @@ MB = 10^6 bytes, GB = 10^9 bytes. QuackOSM is 0.20.0 on the Mac mini; it was not
 The `.duckdb` file of duckOSM is larger because DuckDB 1.5.6 does not compress the geometry. DuckDB 2.0, which QuackOSM
 uses, compresses it.
 
-The GDAL layers of `--gdal` (the next section; `ogr2ogr` is GDAL 3.13.3 on the Mac mini):
-
-| Area | Output | `ogr2ogr` | `quack --gdal` |
-|---|---|---|---|
-| Monaco | GeoPackage | | 3.9 MB |
-| | GeoParquet, the five files | | 1.0 MB |
-| Tartu | GeoPackage | | 21.9 MB |
-| | GeoParquet, the five files | | 5.8 MB |
-| Kentucky | GeoPackage | 1 011 MB | **966 MB** |
-| | GeoParquet, the five files | | 302 MB |
-
 Monaco and Tartu ran on Linux (x86-64), Kentucky and France on the Mac mini; the Kentucky sizes of duckOSM were measured
 again on 2026-11-18 and are the same as before.
 
