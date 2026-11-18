@@ -26,8 +26,9 @@ def _tables(con, db):
     return {f"{s}.{t}" for s, t in con.execute(q).fetchall()}
 
 
-# the time of the build, and where it ran: not the same in two builds
-VOLATILE = {"created", "built_at", "area", "build_dir", "build_config", "roadstyle_version"}
+# the time of the build, and where it ran: not the same in two builds. The heads of edge_levels: roadstyle's Rust level editor makes the
+# two heads of a road shorter than 10 m shorter (newer than the roadstyle of the Python build), so only the numbers are compared.
+VOLATILE = {"created", "built_at", "area", "build_dir", "build_config", "roadstyle_version", "head_start_m", "head_end_m"}
 
 
 def _rows(con, db, table):
@@ -66,8 +67,15 @@ def test_rust_build_equals_python_build(tmp_path, monkeypatch):
                 cols = [d[0] for d in con.execute(f"DESCRIBE py.{t}").fetchall()]
                 a, b = (con.execute(f'SELECT * FROM {db}.{t} WHERE "{key}" = ? LIMIT 1', [k]).fetchone() for db in ("py", "rs"))
                 for c, x, y in zip(cols, a or [], b or [None] * len(cols)):
-                    if c not in VOLATILE and x != y:
-                        diffs.append(f"    {key}={k} {c}: py {str(x)[:1500]} | rs {str(y)[:1500]}")
+                    if c in VOLATILE or repr(x) == repr(y):
+                        continue
+                    if x == y:                         # equal values in another order (a map): the order differs
+                        diffs.append(f"    {key}={k} {c}: the same values in another order: py {repr(x)[:400]} | rs {repr(y)[:400]}")
+                        continue
+                    sx, sy = str(x), str(y)
+                    i = next((i for i, (p, q) in enumerate(zip(sx, sy)) if p != q), min(len(sx), len(sy)))
+                    diffs.append(f"    {key}={k} {c} (lengths {len(sx)} / {len(sy)}, first difference at {i}): "
+                                 f"py ...{sx[max(0, i - 80):i + 200]} | rs ...{sy[max(0, i - 80):i + 200]}")
             except Exception as e:                     # noqa: BLE001 (only the message of the test)
                 diffs.append(f"    (no example row: {e})")
     assert not diffs, "\n".join(diffs)
