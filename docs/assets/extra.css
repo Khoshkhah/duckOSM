@@ -15,21 +15,13 @@
   --md-primary-bg-color--light: #f6f4eeb3;
 }
 
-/* Light theme: the logo's yellow, as on the buttons. Yellow text on white cannot be read (contrast 1.4:1), so a link is
-   dark text with a thick yellow underline, and hover and the current menu item get a yellow background. */
+/* Light theme: links in the logo's yellow, darker (#b58900) so that the words can be read on white;
+   the current menu item gets the logo's yellow as its background. */
 [data-md-color-scheme="default"][data-md-color-accent="custom"] {
-  --md-accent-fg-color: var(--dk-ink);
+  --md-accent-fg-color: #8a6a00;
   --md-accent-fg-color--transparent: #ffd43b40;
-  --md-typeset-a-color: var(--dk-ink);
+  --md-typeset-a-color: #b58900;
 }
-[data-md-color-scheme="default"] .md-typeset a:not(.md-button) {
-  text-decoration: underline;
-  text-decoration-color: var(--dk-yellow);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 0.25em;
-  text-decoration-skip-ink: none;   /* one unbroken line, also under p, g and y */
-}
-[data-md-color-scheme="default"] .md-typeset a:not(.md-button):hover { background: var(--dk-yellow); }
 [data-md-color-scheme="default"] .md-nav__link--active,
 [data-md-color-scheme="default"] .md-nav__item .md-nav__link--active {
   color: var(--dk-ink);
