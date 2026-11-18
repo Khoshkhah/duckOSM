@@ -3,16 +3,53 @@
 use duckdb::types::{TimeUnit, Value};
 use serde_json::{json, Value as J};
 
-/// `json.dumps(v, indent=1)`: one space for each level, `", "` never at the end of a line, `": "` after a key, and
-/// non-ASCII letters as `\uXXXX`.
+/// `json.dumps(v, indent=1)`: one space for each level, `": "` after a key, floats as Python's `repr`, and non-ASCII
+/// letters as `\uXXXX`.
 pub fn dumps(v: &J) -> String {
-    let mut out = Vec::new();
-    let mut ser = serde_json::Serializer::with_formatter(&mut out, serde_json::ser::PrettyFormatter::with_indent(b" "));
-    serde::Serialize::serialize(v, &mut ser).expect("JSON of a serde_json value");
-    let s = String::from_utf8(out).expect("serde_json writes UTF-8");
-    // Python escapes each non-ASCII character (ensure_ascii=True)
-    let mut e = String::with_capacity(s.len());
-    for c in s.chars() {
+    let mut out = String::new();
+    write(v, 0, &mut out);
+    out
+}
+
+fn write(v: &J, level: usize, out: &mut String) {
+    match v {
+        J::Array(a) if a.is_empty() => out.push_str("[]"),
+        J::Object(o) if o.is_empty() => out.push_str("{}"),
+        J::Array(a) => {
+            out.push_str("[\n");
+            for (i, x) in a.iter().enumerate() {
+                out.push_str(&" ".repeat(level + 1));
+                write(x, level + 1, out);
+                out.push_str(if i + 1 < a.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(&" ".repeat(level));
+            out.push(']');
+        }
+        J::Object(o) => {
+            out.push_str("{\n");
+            for (i, (k, x)) in o.iter().enumerate() {
+                out.push_str(&" ".repeat(level + 1));
+                out.push_str(&text(k));
+                out.push_str(": ");
+                write(x, level + 1, out);
+                out.push_str(if i + 1 < o.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(&" ".repeat(level));
+            out.push('}');
+        }
+        J::String(s) => out.push_str(&text(s)),
+        J::Number(n) if n.is_f64() => {
+            let f = n.as_f64().unwrap_or(f64::NAN);
+            out.push_str(&duckosm_build::place::py_float(f));
+        }
+        other => out.push_str(&other.to_string()),
+    }
+}
+
+/// A JSON text as Python writes it (ensure_ascii=True).
+fn text(s: &str) -> String {
+    let mut e = String::new();
+    for c in serde_json::to_string(s).expect("JSON of a text").chars() {
         if c.is_ascii() {
             e.push(c);
         } else {
@@ -84,7 +121,7 @@ fn key(v: Value) -> String {
     }
 }
 
-/// A float as Python writes it: NaN and infinity as `NaN` / `Infinity` (not valid JSON, as Python does).
+/// A float (NaN and infinity have no JSON number: as text).
 fn float(f: f64) -> J {
     serde_json::Number::from_f64(f).map_or_else(|| J::String(format!("{f}")), J::Number)
 }

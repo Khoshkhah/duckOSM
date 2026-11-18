@@ -10,7 +10,6 @@ license.workspace = true
 [dependencies]
 duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
-serde = "1"
 # boundary: the place lookup and the GeoJSON writer of the build (place.rs)
 duckosm-build = { path = "../duckosm-build" }
 # extract: the edge_id macros of each database

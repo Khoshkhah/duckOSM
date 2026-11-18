@@ -66,16 +66,41 @@ pub fn py_dumps(v: &Value) -> String {
     }
 }
 
-/// Python's `repr` of a float.
+/// Python's `repr` of a float: the shortest digits that give the float back, a tie between two such texts to the even
+/// digit (Rust's shortest text takes the upper one), in fixed form for a decimal exponent from -4 to 15, else as `1e+16`.
 pub fn py_float(f: f64) -> String {
-    if f.is_finite() && f != 0.0 && (f.abs() >= 1e16 || f.abs() < 1e-4) {
-        // Python: 1e+16, 1e-05
-        let s = format!("{f:e}");
-        let (m, e) = s.split_once('e').unwrap_or((&s, "0"));
-        let e: i32 = e.parse().unwrap_or(0);
-        format!("{m}e{}{:02}", if e < 0 { '-' } else { '+' }, e.abs())
+    if !f.is_finite() {
+        return if f.is_nan() { "nan".into() } else if f > 0.0 { "inf".into() } else { "-inf".into() };
+    }
+    if f == 0.0 {
+        return if f.is_sign_negative() { "-0.0".into() } else { "0.0".into() };
+    }
+    // the number of digits of the shortest text
+    let short = format!("{:e}", f);
+    let n = short.split('e').next().unwrap_or("").chars().filter(char::is_ascii_digit).count().max(1);
+    // the exact value rounded to n digits (round half to even), if it gives f back
+    let exact = format!("{:.*e}", n - 1, f);
+    let pick = if exact.parse::<f64>() == Ok(f) { exact } else { short };
+    let (m, e) = pick.split_once('e').unwrap_or((&pick, "0"));
+    let e: i32 = e.parse().unwrap_or(0);
+    let neg = m.starts_with('-');
+    let digits: String = m.chars().filter(char::is_ascii_digit).collect();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let sign = if neg { "-" } else { "" };
+    if (-4..16).contains(&e) {
+        let point = e + 1; // the digits before the point
+        let body = if point <= 0 {
+            format!("0.{}{digits}", "0".repeat((-point) as usize))
+        } else if point as usize >= digits.len() {
+            format!("{digits}{}.0", "0".repeat(point as usize - digits.len()))
+        } else {
+            format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
+        };
+        format!("{sign}{body}")
     } else {
-        format!("{f:?}")
+        let mant = if digits.len() > 1 { format!("{}.{}", &digits[..1], &digits[1..]) } else { digits.to_string() };
+        format!("{sign}{mant}e{}{:02}", if e < 0 { '-' } else { '+' }, e.abs())
     }
 }
 
@@ -420,6 +445,26 @@ pub fn buffered(_: &Path, _: f64) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn floats_as_python_writes_them() {
+        // Python: repr(...)
+        for (f, py) in [
+            (72.557403564453125, "72.55740356445312"),
+            (91.990753173828125, "91.99075317382812"),
+            (0.1, "0.1"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            (30.0, "30.0"),
+            (1e16, "1e+16"),
+            (1.5e-5, "1.5e-05"),
+            (0.0001, "0.0001"),
+            (-2.5, "-2.5"),
+            (123456789012345.6, "123456789012345.6"),
+            (7.4524351, "7.4524351"),
+        ] {
+            assert_eq!(super::py_float(f), py);
+        }
+    }
+
     #[test]
     fn a_box_and_a_cell_as_duckosm_writes_them() {
         // duckOSM: area.h3_geojson("883969a40bfffff"), a cell of Monaco
