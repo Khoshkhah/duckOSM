@@ -1,8 +1,3 @@
----
-hide:
-  - toc
----
-
 # duckOSM
 
 **OpenStreetMap → road networks, map layers and GIS files. One Rust program, on your computer and in the browser.**
