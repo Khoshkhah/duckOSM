@@ -1,46 +1,54 @@
 # Install
 
-duckOSM needs Python 3.10 or newer.
-
 ```bash
 pip install duckosm
 duckosm --version
 ```
 
-The wheel has the Rust program in it (the module `duckosm._rust`, no other install). The command `duckosm` and the Python
-API (`to_sumo`, `route`, `to_elevation`, ...) run the Rust code. There is a wheel for Linux (x86_64 and aarch64), macOS (x86_64
-and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that needs a
-[Rust toolchain](https://rustup.rs).
+| | |
+|---|---|
+| You get | the program `duckosm` (Rust) and a Python package that calls it |
+| Python | 3.10 or newer |
+| Ready-made packages | Linux (x86_64, aarch64), macOS (x86_64, arm64), Windows (x64) |
+| Other systems | `pip` builds from the source; this needs a [Rust toolchain](https://rustup.rs) |
 
-These commands still run duckOSM's Python code: `levels`, `bus` and `multimodal`. The same for the functions `to_gmns`, `to_meso`, `to_micro` and
-`check_gmns`.
+## No install: the browser
 
-## Extras
+| Page | Does |
+|---|---|
+| [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) | choose an area, build its network, edit the OSM data, export |
+| [The quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) | the OSM features table of QuackOSM and GDAL's five layers |
 
-Some features need more packages. Add the extras you want in brackets, for example
-`pip install "duckosm[viz,sumo]"`. `route()`, `duckosm elevation` and the other exports need no extra.
-
-| Extra | Adds | For |
-|---|---|---|
-| `viz` | mapstyle (with roadstyle and geopandas), lanestyle | `duckosm viz`, `route-map`, `gmns-map` |
-| `levels` | roadstyle | `duckosm levels`: the drawing levels |
-| `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`; `routing` is its old name, for one more release |
-| `sumo` | eclipse-sumo (SUMO's `netconvert`) | `duckosm sumo` |
-
-## The program without Python
+## No Python: the program alone
 
 Each [GitHub release](https://github.com/Khoshkhah/duckOSM/releases) has the program `duckosm` as one file for each system.
-To build it from the source, use a Rust toolchain:
+Or build it with Rust:
 
 ```bash
 cargo install --git https://github.com/Khoshkhah/duckOSM duckosm-cli
-duckosm --help
 ```
 
-The program `duckosm-rust` is the old name. It stays for one release: it prints "use duckosm" and runs the same command.
+`duckosm-rust` is the old name of the program. It works for one more release.
+
+## Extras
+
+Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
+
+| Extra | Adds | For |
+|---|---|---|
+| `sumo` | SUMO (`eclipse-sumo`, with `netconvert`) | `duckosm sumo` builds the `.net.xml` |
+| `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. `routing` is its old name, for one more release |
+| `levels` | roadstyle | `duckosm levels` (not ported to Rust yet) |
+| `viz` | mapstyle, lanestyle | the maps of `duckosm build` with `viz.enabled: true` (not ported to Rust yet), and the map functions in Python |
+
+`route()`, the exports, `export-graph` to GraphML and `duckosm elevation` need no extra. No duckOSM command needs osmium or GDAL.
+
+## Not ported to Rust yet
+
+`build` (in part), `levels`, `bus` and `multimodal`. They work, and they move to Rust next.
 
 ## Where files go
 
-Every relative path (outputs, configs, reports) is relative to the folder you run `duckosm` in.
+A relative path (an output, a config, a report) is relative to the folder you run `duckosm` in.
 
 Next: [build your first network](first_network.md).
