@@ -37,15 +37,11 @@ duckosm edit monaco.duckdb
 ![A road is picked: the form shows its tags, Lanes each way is changed to 3](../images/edit-road.png)
 
 The form shows an error in red and does not add the change until you correct it. A warning in amber does not stop the change.
-When you pick an object that is in your changes, a box shows **Edit it** and **Delete it**:
-
-![The box This road is in your changes, with the time of the change, Edit it and Delete it](../images/edit-box.png)
+When you pick an object that is in your changes, a box shows **Edit it** and **Delete it**.
 
 In the **Turn** tab, the **From** road is blue, the roads that leave the junction are green, and the roads that only arrive are violet:
 
 ![The Turn tab: the picked road is blue, the roads that leave are green and the road that only arrives is violet](../images/edit-turn.png)
-
-![The Changes tab: Undo, Redo, Download, Add a file, Delete all changes, Changes on the map, one change, and Build again](../images/edit-changes.png)
 
 | Button in **Changes** | Does |
 |---|---|
@@ -62,6 +58,14 @@ The details of the checks and of each record: [on GitHub](https://github.com/Kho
 
 `osm_fixes.yaml` has five keys. A rule for an object that is not in the area does nothing, so one file can hold the fixes of
 all your areas. The editor adds `changed`, the time of the change, to each record; the build does not read it.
+
+| Key | Does |
+|---|---|
+| `overrides` | change a way: one-way, lanes, layer, tags; remove it |
+| `new_ways` | add a road that OSM does not have |
+| `turn_restrictions` | forbid or force a turn |
+| `extra.tag_edits` | set or delete the tags of a way, a node or a relation |
+| `extra.building_faces` | give a wall of a building a type and a door |
 
 `overrides` changes a way, by its OSM id:
 
