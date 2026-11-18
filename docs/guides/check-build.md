@@ -1,32 +1,25 @@
 # Check a build
 
-With validation on, the build checks its own result and stops when a check fails.
+With validation on, the build checks its own result and stops when a check fails. Only a
+[config file](build.md#the-config-file) can turn it on; the template of `duckosm init-config` does.
 
 ```yaml
 validation:
   enabled: true
+report:
+  enabled: true      # also write a report
 ```
 
-Validation is off by default, and only a [config file](build.md#the-config-file) can turn it on. The template of
-`duckosm init-config` turns it on.
+| Key under `validation:` | Checks | When it fails |
+|---|---|---|
+| `assert_unique_node_id` | no two nodes have the same id | the build stops |
+| `assert_way_length_conserved` | no part of an OSM way is missing after the split into edges | the build stops |
+| `warn_layer_without_structure` | a road with a `layer` tag has a `bridge` or `tunnel` tag | a warning only |
+| `fail_on_error: false` | | warnings in place of a stop |
 
-| Check | Result when it fails |
-|---|---|
-| `unique_node_id` | the build stops: two nodes have the same id |
-| `way_length_conserved` | the build stops: a part of an OSM way is missing after the split into edges |
-| `layer_without_structure` | a warning only: a road with a `layer` tag and no `bridge` or `tunnel` tag |
+All checks are on when validation is on. Each key: [Configuration](../reference/configuration.md#validation).
 
-Set `fail_on_error: false` to get warnings in place of a stop. The keys of each check:
-[Configuration](../reference/configuration.md#validation).
-
-With `report: {enabled: true}`, the build also writes a report to `reports/` (Markdown and HTML): the counts of each mode,
-the roads that the filter kept and removed, the parts of the network, and the results of the checks.
-
-In a clone of the repository, `scripts/validate_geometry.py` checks that each edge starts and ends at its nodes, and
-that there are no loops and no edges of zero length:
-
-```bash
-python scripts/validate_geometry.py --db monaco.duckdb
-```
+With `report.enabled`, the build writes `reports/<name>_<time>.md` and `.html`: the counts of each mode, the roads that
+the filter kept and removed, and the results of the checks.
 
 To look at one street, use [`duckosm way`](query.md#look-up-one-osm-way).
