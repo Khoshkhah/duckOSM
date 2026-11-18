@@ -15,12 +15,12 @@ id changes only when its edge changes: a new way id, new end nodes, a new juncti
 or, for a [merged edge](#merged-edges), a change in the pieces it is made of.
 
 The `is_reverse` column says whether an edge runs against the way's drawing direction (a way tagged
-`oneway=-1` is turned round first, so its one edge is not a reverse). For a merged two-way edge the
-forward direction is chosen by node id, not by the drawing. It is not part of the id.
+`oneway=-1` is turned round first, so its one edge is not a reverse). For a merged two-way edge, the node ids set the
+forward direction, not the drawing. `is_reverse` is not part of the id.
 
 ## One id per edge
 
-`(osm_id, source, target)` must be unique. Where it would repeat (a way that ends where it starts, a
+`(osm_id, source, target)` must be unique. Where it repeats (a way that ends where it starts, a
 way that runs between the same two junctions twice, or goes from A to B and back), the build splits
 the edge at its midpoint with a **virtual node**. A virtual node has `node_id < 0` and its id is a
 hash of the edge's content, so it is as stable as the rest. If a repeated triple still survives, the
@@ -32,13 +32,13 @@ Every mode cuts ways at one shared set of points, `main.global_junctions`: each 
 that another highway way also uses (another road, or a footway, path or cycleway, such as a
 crosswalk), and each node where a road ends. It is made once from all highway ways in `raw.ways`,
 before any mode filters them. A road is cut at these points, and so is a footway or path that
-passes through one, even in a mode that doesn't have the road. So a way that is in two modes is cut
+passes through one, also in a mode that does not have the road. So a way that is in two modes is cut
 into the same pieces and has the same `edge_id` in both. Monaco: 2,754 of the 2,765 driving edges
-have the same `edge_id` in cycling, 2,275 in walking. The others are roads that mode doesn't keep.
+have the same `edge_id` in cycling, 2,275 in walking. The others are roads that the mode does not keep.
 
 So a crosswalk cuts the road it crosses in driving too, and the road cuts the crosswalk in walking
-too (where a road whose sidewalk is a separate way isn't in the walking network): walkers and cyclists connect to
-the road there, and the pieces are the same in every mode. Ways that don't exist on the ground
+too (where a road whose sidewalk is a separate way is not in the walking network). Walkers and cyclists connect to
+the road there, and the pieces are the same in every mode. Ways that do not exist on the ground
 (`highway=proposed`, `construction`, …) cut nothing. `options.global_junctions: false` makes each mode
 split at its own junctions, and the ids of a road can then differ between modes.
 
@@ -110,8 +110,8 @@ SELECT count(*) FROM driving.edges WHERE edge_id <> edge_id_hash(osm_id, source,
 
 In Python: `from duckosm import edge_id_hash, edge_id_expr` (one id, or the SQL expression).
 
-`hash()` is internal to DuckDB and may change in a new major version, so duckOSM requires
-`duckdb<2`. Outside DuckDB the id can't be recomputed. To give your own data the ids, join on the
+`hash()` is internal to DuckDB and can change in a new major version, so duckOSM requires
+`duckdb<2`. Outside DuckDB, you cannot compute the id again. To give your own data the ids, join on the
 three columns and read `edge_id`:
 
 ```sql

@@ -1,18 +1,15 @@
 # Elevation sources
 
-Where `duckosm elevation` can get its heights, and how the sources compare. How to run it:
+Where `duckosm elevation` gets its heights, and how the sources compare. How to run it:
 [Add elevation](../guides/elevation.md).
 
-The list of sources is data: `src/duckosm/data/dem_sources.json`. The code, the page "Ground" of
-duckOSM Studio and the two tables below (`python scripts/update_elevation_sources_doc.py`) read it.
-[The sources for an area](#the-sources-for-an-area) tells the order.
+| Option | Gives |
+|---|---|
+| `--source` | a 30 m model for the area, downloaded. `copernicus` works everywhere with no setup; `eudtm` is Europe only and needs a free key |
+| `--dem` | a **file** that you have: the best choice where a national 1 m model exists. It must be a GeoTIFF in EPSG:4326 ([File formats](#file-formats)) |
 
-There are two ways to give it a model:
-
-- `--source` fetches a 30 m model for the area. `copernicus` works anywhere with nothing to set up;
-  `eudtm` is Europe only and needs a free key.
-- `--dem` reads a **file** you have, in any raster format GDAL reads: best where a national 1 m
-  model exists.
+The list of sources is data: `src/duckosm/data/dem_sources.json`. The program, the ground of duckOSM Studio
+(step 4, Build) and the two tables below read it. [The sources for an area](#the-sources-for-an-area) gives the order.
 
 ## `--source`
 
@@ -26,14 +23,14 @@ The Europe rectangle also covers North Africa north of 34°N, Turkey, Cyprus and
 `--dem` wins over `--source`. Copernicus has no tiles over open sea: nodes there get `--nodata-fill`
 (default `0.0`).
 
-Both use the EGM2008 vertical datum. The licence is stored in `main.elevation_metadata.license`:
-`copernicus` records "Copernicus open (attribution)", free with attribution; `eudtm` records
+Both use the EGM2008 vertical datum. The license goes in `main.elevation_metadata.license`:
+`copernicus` writes "Copernicus open (attribution)", free with attribution; `eudtm` writes
 "EU-DTM via OpenTopography (see provider terms)". A **DSM** is the top surface (roofs, trees); a **DTM** is the
 bare ground ([below](#dtm-or-dsm)).
 
 ## Other global models
 
-To use one of these, download it and pass it with `--dem`.
+To use one of these, download it, convert it ([File formats](#file-formats)), and give it with `--dem`.
 
 <!-- dem-sources:global -->
 | Model | Resolution | Covers | Type | Access | Licence |
@@ -54,7 +51,7 @@ roads.
 ## National models
 
 Many countries publish a 1 m DTM made from LiDAR. It shows cliffs, cuttings and bridge ramps that a
-30 m model can't. Some examples:
+30 m model cannot show. Some examples:
 
 <!-- dem-sources:national -->
 | Country | Model | Resolution | CRS (coordinate system) | Access | Licence |
@@ -65,8 +62,8 @@ Many countries publish a 1 m DTM made from LiDAR. It shows cliffs, cuttings and 
 | France | IGN RGE ALTI / LiDAR HD | 1 m DTM | EPSG:2154, heights IGN69 | `geoservices.ign.fr` | Etalab 2.0 |
 <!-- /dem-sources:national -->
 
-For other countries, search for the national mapping agency's open DTM. Any CRS works: node
-coordinates are converted to the model's CRS before sampling.
+For other countries, find the open DTM of the national mapping agency. A national model has its own CRS:
+convert it to EPSG:4326 before you give it to `--dem` ([File formats](#file-formats)).
 
 ## The sources for an area
 
@@ -78,52 +75,61 @@ coordinates are converted to the model's CRS before sampling.
 4. Copernicus GLO-30 (a DSM);
 5. the other models, by resolution.
 
-A source covers the box when the whole box is inside its coverage. The coverage of a country is a coarse outline: check the
-download page of the source. Each entry has the product (`DTM` or `DSM`), the CRS, the vertical datum, the licence
-(`license`) and whether it allows commercial use, the access (a download, a COG, a STAC API, or tiles; an account or a key) and
-`cors` (true when a web page can read the data: the Copernicus COG files on AWS send no CORS header, so a page cannot).
-The page "Ground" of Studio uses the list to suggest a source and to fill the product, the datum and the licence of the file that
-the person gives.
+A source covers the box when the full box is in its coverage. The coverage of a country is an approximate outline:
+look at the download page of the source.
+
+| Field of an entry | Holds |
+|---|---|
+| product | `DTM` or `DSM` |
+| CRS, vertical datum | the coordinate system and the height reference |
+| `license` | the license, and whether it permits commercial use |
+| access | a download, a COG, a STAC API, or tiles; an account or a key |
+| `cors` | TRUE when a web page can read the data. The Copernicus COG files on AWS send no CORS header, so a page cannot read them |
+
+The ground of Studio uses the list to suggest a source, and to fill the product, the datum and the license of
+a file that you give.
 
 ## File formats
 
-**Works with `--dem`**: any raster GDAL reads. The format is detected from the file.
+`--dem` reads one format: a GeoTIFF in EPSG:4326, with one band of 32-bit floats, not compressed or compressed with
+deflate. Give a file or an HTTP address.
 
-| Format | Note |
-|---|---|
-| GeoTIFF (`.tif`) | the usual format |
-| Cloud-Optimized GeoTIFF (COG) | a GeoTIFF that can be read in parts over HTTP: pass a URL and only the needed part is downloaded |
-| VRT (`.vrt`) | a small XML file that joins many tiles into one: `gdalbuildvrt dem.vrt tiles/*.tif` |
-| `.img`, `.asc`, `.hgt`, DTED | also read; convert a large `.asc` to GeoTIFF first |
+To convert a model in a different format or CRS (a COG, a VRT of many tiles, `.img`, `.asc`, `.hgt`, a national
+projection), use GDAL:
 
-**Doesn't work:**
+```bash
+gdalbuildvrt dem.vrt tiles/*.tif                     # many tiles: join them first
+gdalwarp -t_srs EPSG:4326 -ot Float32 -co COMPRESS=DEFLATE dem.vrt dem_4326.tif
+duckosm elevation monaco.duckdb --dem dem_4326.tif --product DTM --vertical-datum EGM2008 --license "CC0"
+```
 
-- **LAS / LAZ** point clouds: points, not a grid. Use the provider's ready-made DTM, or make a
-  raster from the ground points (classification 2) with PDAL.
-- **WMS** services: they return pictures, not heights. A **WCS** service returns heights and GDAL can
-  read it.
+These do not work:
 
-A **STAC** catalogue lists which tiles cover an area; each tile is a COG you can pass to `--dem` or
-join in a VRT.
+| Input | Why | Do this |
+|---|---|---|
+| LAS / LAZ point clouds | points, not a grid | use the DTM of the provider, or make a raster from the ground points (class 2) with PDAL |
+| a WMS service | it gives pictures, not heights | use a WCS service of the same provider, and convert its output with GDAL |
+
+A **STAC** catalog lists which tiles cover an area. Each tile is a COG: download it and convert it as above.
 
 ## DTM or DSM
 
 - **DSM** (surface model): the top surface, with roofs, trees and bridge decks.
 - **DTM** (terrain model): the bare ground.
 
-For road gradients use a **DTM**. A DSM puts a node under trees on the tree tops and a node next to
-a building on its roof edge, which gives false slopes. Copernicus GLO-30 is a DSM; EU-DTM, FABDEM
+For road gradients, use a **DTM**. A DSM puts a node under trees on the tree tops, and a node next to
+a building on its roof edge. This gives incorrect slopes. Copernicus GLO-30 is a DSM; EU-DTM, FABDEM
 and the national models above are DTMs. EU-DEM is a DSM that is close to a DTM.
 
 With both a DTM and a DSM from the same survey, store the DSM as a second surface
-(`--suffix dsm`): `ele_dsm - ele` is then the height of buildings and trees. Two unrelated 30 m
-models give noise, not heights.
+(`--suffix dsm`): `ele_dsm - ele` is then the height of buildings and trees. Two 30 m models from different
+surveys give noise, not heights.
 
 ## Vertical datum
 
-Heights are measured from a reference surface, and models differ: most use the geoid (about sea
-level, e.g. EGM2008), GNSS uses the ellipsoid. The difference can be tens of metres. Heights from one
-model compare fine; don't mix models. `main.elevation_metadata.vertical_datum` records it.
+A height is measured from a reference surface, and the models are different. Most use the geoid (approximately sea
+level, for example EGM2008). GNSS uses the ellipsoid. The difference can be tens of meters. You can compare the heights
+of one model. Do not mix models. `main.elevation_metadata.vertical_datum` records it.
 
 ## Which one
 

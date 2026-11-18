@@ -10,7 +10,7 @@ Each export reads a built database. Pick the group of your work.
 |---|---|---|
 | SUMO | [SUMO](sumo.md) `.net.xml` | `duckosm sumo` |
 | MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals | `duckosm matsim`, `matsim-lanes` |
-| DTALite, Path4GMNS | [GMNS](gmns.md) tables: macro, meso (`--meso`), micro (`--micro`) | `duckosm gmns` |
+| DTALite, Path4GMNS | [GMNS](gmns.md) tables: macro; [meso and micro](gmns-meso-micro.md) (`--meso`, `--micro`) | `duckosm gmns` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) | `duckosm railml` |
 
 ### Maps and GIS
@@ -19,6 +19,7 @@ Each export reads a built database. Pick the group of your work.
 |---|---|---|
 | QGIS, ArcGIS, FME | the network as [GeoPackage or shapefile](gis.md) | `duckosm export-gis` |
 | QGIS, ArcGIS | GDAL's five OSM layers, as GeoPackage or GeoParquet ([duckOSM and GDAL](../concepts/gdal.md)) | `duckosm quack --gdal` |
+| QGIS, a map style | the [base-map layers](base-map.md) `features.*`: water, land use, buildings, POIs | `duckosm build` |
 | DuckDB, pandas, Spark | the OSM features table of QuackOSM, as GeoParquet ([duckOSM and QuackOSM](../concepts/quackosm.md)) | `duckosm quack` |
 
 ### Graph analysis
@@ -26,7 +27,7 @@ Each export reads a built database. Pick the group of your work.
 | Tool | Export | Command |
 |---|---|---|
 | networkx | [a networkx graph](networkx.md), GraphML, gpickle | `to_networkx()`, `duckosm export-graph` |
-| Your own router | the turn graph `edge_graph` in the database | `route()`, `Router` ([Route](../guides/route.md)) |
+| Your own router | [the turn graph](turn-graph.md) `edge_graph` in the database | `route()`, `Router` ([Route](../guides/route.md)) |
 
 ### Lane level and 3D
 

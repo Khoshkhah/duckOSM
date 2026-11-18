@@ -9,7 +9,8 @@ options:
   building_faces: true
 ```
 
-The walls need the Rust engine, a PBF source and a boundary. Monaco: 10,909 walls of 1,262 buildings in about 0.2 s.
+The walls need a PBF source and a boundary. On the command line, add `--building-faces`. In duckOSM Studio, select
+**Wall labels**. Monaco: 10,909 walls of 1,262 buildings.
 
 ## The five types
 
@@ -17,7 +18,7 @@ The walls need the Rust engine, a PBF source and a boundary. Monaco: 10,909 wall
 |---|---|---|
 | `front` | green | faces a street that it can see, or has an entrance. A corner building can have more than one front |
 | `back` | red | points away from the front and faces no near street |
-| `side` | grey | every other wall of the outer ring |
+| `side` | gray | every other wall of the outer ring |
 | `party` | purple | is shared with another building (the same two nodes) |
 | `court` | cyan | is a wall of a courtyard (an inner ring of a multipolygon) |
 
