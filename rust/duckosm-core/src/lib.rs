@@ -17,6 +17,8 @@ pub mod hash;
 pub mod lanes;
 pub mod model;
 pub mod network;
+#[cfg(feature = "pbf")]
+pub mod osm2pgsql;
 pub mod osmjson;
 #[cfg(feature = "pbf")]
 pub mod pbf;

@@ -33,6 +33,8 @@ mod raw_load;
 pub mod quack;
 #[cfg(feature = "pbf")]
 pub mod gdal;
+#[cfg(feature = "pbf")]
+pub mod osm2pgsql;
 pub mod read;
 pub mod merge;
 pub use par_writer::ParWriter;

@@ -149,7 +149,7 @@ nav:
           - QuackOSM table: concepts/quackosm.md
           - GDAL's OSM layers: concepts/gdal.md
           # - Geofabrik layers: exports/geofabrik.md (added by its session)
-          # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
+          - osm2pgsql tables: exports/osm2pgsql.md
           # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
       - 2. The network:
           - The turn graph: exports/turn-graph.md

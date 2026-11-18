@@ -47,8 +47,8 @@ pub fn quack_gdal(
     };
     let rows = write_layers(gpkg, parquet, |send| {
         match tiles {
-            None => quack::gdal_features(open, quack::BUDGET, fixes.as_ref(), send)?,
-            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, fixes, send)?,
+            None => quack::gdal_features(open, quack::BUDGET, quack::Mode::Gdal, fixes.as_ref(), send)?,
+            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, quack::Mode::Gdal, fixes, send)?,
         };
         Ok(())
     })?;
@@ -70,7 +70,7 @@ pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
     let mut out = snappy::write::FrameEncoder::new(out);
     let owner = quack::Owner { tile, relations: None };
     let (mut n, mut b) = ([0usize; 6], Vec::new());
-    quack::gdal_features_owned(open, quack::BUDGET, &owner, fixes, |rows| {
+    quack::gdal_features_owned(open, quack::BUDGET, &owner, quack::Mode::Gdal, fixes, |rows| {
         for f in rows.iter().filter(|f| f.owner) {
             n[f.layer as usize] += 1;
             b.clear();

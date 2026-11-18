@@ -61,6 +61,16 @@ impl Feature {
     }
 }
 
+/// The rules of a layer run of the engine ([`gdal_features`]): GDAL's five layers (`duckosm quack --gdal`), or the rows
+/// of osm2pgsql's four tables (`duckosm quack --osm2pgsql`, [`crate::osm2pgsql`]). The osm2pgsql mode reads the file as
+/// GDAL does; its rules decide the rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Quack,
+    Gdal,
+    Osm2pgsql,
+}
+
 /// The numbers of a [`features`] run.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Counts {
@@ -262,16 +272,17 @@ impl QuackFixes {
     }
 
     /// The rows of the new ways that `owner` owns (all with no owner).
-    fn new_rows(&self, owner: Option<&Owner>, gdal: bool) -> Vec<Feature> {
+    fn new_rows(&self, owner: Option<&Owner>, mode: Mode) -> Vec<Feature> {
         let mine = |l: &NewLine| {
             owner.is_none_or(|o| match l.tile {
                 Some((z, x, y)) => (o.tile.z, o.tile.x, o.tile.y) == (z, x, y),
                 None => l.pts.first().is_some_and(|p| Tile::of(o.tile.z, p.0, p.1) == o.tile),
             })
         };
-        let row = |l: &NewLine| match gdal {
-            true => (l.pts.len() >= 2).then(|| gdal_way(l.id, &l.tags, &l.pts, l.closed && crate::gdal::is_area(&l.tags))).flatten(),
-            false => way_feature(l.id, &l.tags, &l.pts),
+        let row = |l: &NewLine| match mode {
+            Mode::Gdal => (l.pts.len() >= 2).then(|| gdal_way(l.id, &l.tags, &l.pts, l.closed && crate::gdal::is_area(&l.tags))).flatten(),
+            Mode::Osm2pgsql => crate::osm2pgsql::way(l.id, &l.tags, &l.pts, l.closed),
+            Mode::Quack => way_feature(l.id, &l.tags, &l.pts),
         };
         self.new_ways.iter().filter(|l| mine(l)).filter_map(row).collect()
     }
@@ -878,6 +889,7 @@ struct NodesPart<'f> {
     /// quack by tiles and the tile tables: only the nodes in this tile are features
     tile: Option<Tile>,
     gdal: bool,
+    osm2pgsql: bool,
 }
 
 impl RawSink for NodesPart<'_> {
@@ -885,6 +897,12 @@ impl RawSink for NodesPart<'_> {
         self.nodes.push((id, lon, lat));
         let mut tags: RawTags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
         fix_tags(self.fixes.map(|f| &f.nodes), id, &mut tags);
+        if self.osm2pgsql {
+            if self.tile.is_none_or(|t| Tile::of(t.z, lon, lat) == t) {
+                self.features.extend(crate::osm2pgsql::point(id, &tags, (lon, lat)));
+            }
+            return;
+        }
         if self.gdal {
             if crate::gdal::is_point(&tags) && self.tile.is_none_or(|t| Tile::of(t.z, lon, lat) == t) {
                 let geometry = crate::gdal::wkb_point((lon, lat));
@@ -1172,6 +1190,32 @@ fn gdal_relation(
     vec![Feature::gdal(format!("relation/{id}"), layer, tags, g, center(&parts[0].1))]
 }
 
+/// quack --osm2pgsql: the rows of a relation ([`crate::osm2pgsql::relation`]) from the lines of its member ways that the file
+/// has (in the order of the members): the polygons and the line of a multipolygon or boundary when `mine` (the cut puts it
+/// whole in each tile with a member); the line of a route, or `by_tiles` one part for each member way that the tile owns
+/// (`Feature::part`).
+fn osm2pgsql_relation(id: i64, tags: &RawTags, members: &[Member], got: Vec<(usize, u8, Vec<Pt>, RawTags)>, by_tiles: bool, mine: &dyn Fn(i64) -> bool) -> Vec<Feature> {
+    let Some(rule) = crate::osm2pgsql::relation(tags) else { return Vec::new() };
+    let ways: Vec<(usize, u8, Vec<Pt>)> = got.into_iter().filter(|l| members[l.0].1 == MemberType::Way).map(|l| (l.0, l.1, l.2)).collect();
+    if rule.polygons {
+        if !mine(id) {
+            return Vec::new();
+        }
+        let owner = ways.first().is_some_and(|l| l.1 & OWNED != 0);
+        let lines: Vec<Vec<Pt>> = ways.into_iter().map(|l| l.2).collect();
+        return crate::osm2pgsql::relation_rows(id, &rule, &lines).into_iter().map(|f| Feature { owner, ..f }).collect();
+    }
+    if by_tiles {
+        return ways
+            .into_iter()
+            .filter(|l| l.1 & OWNED != 0)
+            .map(|(place, _, pts)| crate::osm2pgsql::relation_part(id, &rule, place as u32, &pts))
+            .collect();
+    }
+    let lines: Vec<Vec<Pt>> = ways.into_iter().map(|l| l.2).collect();
+    crate::osm2pgsql::relation_rows(id, &rule, &lines)
+}
+
 /// The memory that each sort of the temporary files holds (the default of [`features`]).
 pub const BUDGET: usize = 512 << 20;
 
@@ -1233,7 +1277,7 @@ pub fn features_owned<R: Read + Send>(
     fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, owner, false, fixes, emit)
+    run(open, budget, owner, Mode::Quack, fixes, emit)
 }
 
 /// quack --gdal: the rows of GDAL's five layers ([`crate::gdal`], each row with its `layer`) from one read of the file, as
@@ -1242,10 +1286,11 @@ pub fn features_owned<R: Read + Send>(
 pub fn gdal_features<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
+    mode: Mode,
     fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, None, true, fixes, emit)
+    run(open, budget, None, mode, fixes, emit)
 }
 
 /// [`gdal_features`] of the file of one tile alone (a worker of the browser for each tile): the rows that `owner` owns
@@ -1255,21 +1300,24 @@ pub fn gdal_features_owned<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: &Owner,
+    mode: Mode,
     fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, Some(owner), true, fixes, emit)
+    run(open, budget, Some(owner), mode, fixes, emit)
 }
 
-/// The engine of [`features_owned`] and [`gdal_features`]: `gdal` chooses the rules of GDAL's layers.
+/// The engine of [`features_owned`] and [`gdal_features`]: `mode` chooses the rules of the layers.
 fn run<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: Option<&Owner>,
-    gdal: bool,
+    mode: Mode,
     fixes: Option<&QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
+    let gdal = mode != Mode::Quack;
+    let o2p = mode == Mode::Osm2pgsql;
     use crate::spill::join::{Point, Request};
     use crate::spill::{sort_bytes, temp_store, Buckets, SortedParts, Writer};
     let io = |e: std::io::Error| format!("quack: a temporary file: {e}");
@@ -1312,7 +1360,7 @@ fn run<R: Read + Send>(
                 }
             }
             for (id, tags, members) in part.relations {
-                let polygons = gdal && crate::gdal::relation_layer(&tags) == crate::gdal::MULTIPOLYGONS;
+                let polygons = mode == Mode::Gdal && crate::gdal::relation_layer(&tags) == crate::gdal::MULTIPOLYGONS;
                 for (place, (m, t, role)) in members.iter().enumerate() {
                     if *t == MemberType::Node {
                         node_members.push(&Request, &(*m, rels, place as u32)).map_err(io)?;
@@ -1354,7 +1402,7 @@ fn run<R: Read + Send>(
     crate::cutstream::each_block(
         &mut open()?,
         |b, buf| {
-            let mut part = NodesPart { tile: owner.map(|o| o.tile), gdal, fixes, ..Default::default() };
+            let mut part = NodesPart { tile: owner.map(|o| o.tile), gdal, osm2pgsql: o2p, fixes, ..Default::default() };
             crate::pbfraw::decode_block(b, [true, false, false], buf, &mut part)?;
             Ok(part)
         },
@@ -1447,7 +1495,12 @@ fn run<R: Read + Send>(
             if let Some(Err(_)) = points.peek() {
                 return Err(io(points.next().expect("peeked").expect_err("an error")));
             }
-            if gdal {
+            if o2p {
+                // osm2pgsql keeps the nodes that the file has; `closed` (the ids) takes the place of the area
+                if pts.len() >= 2 {
+                    batch.push((id, tags, pts, owned, touches, closed));
+                }
+            } else if gdal {
                 // GDAL keeps the nodes that the file has (2 or more), and closes an area again when its first node is not
                 // in the file
                 let area = closed && crate::gdal::is_area(&tags);
@@ -1471,7 +1524,7 @@ fn run<R: Read + Send>(
         let mut use_ways = |batch: WayBatch| -> Result<(), String> {
             for (id, tags, pts, owned, _, area) in &batch {
                 if member_ids.binary_search(id).is_ok() {
-                    let flags = if *owned { OWNED } else { 0 } | if *area { AREA } else { 0 };
+                    let flags = if *owned { OWNED } else { 0 } | if *area && !o2p { AREA } else { 0 };
                     let donor = if *area && outer_ids.binary_search(id).is_ok() { crate::gdal::way_tags(tags) } else { Vec::new() };
                     member_lines.push(&KeyedLine, &(*id, flags, pts.iter().map(|&p| to_grid(p)).collect(), donor)).map_err(io)?;
                 }
@@ -1482,7 +1535,11 @@ fn run<R: Read + Send>(
                 // quack --gdal: only the ways that the tile owns, also in a tile alone (the polygons that wait lose the mark)
                 .filter(|w| !w.1.is_empty() && if mark && !gdal { w.4 } else { w.3 })
                 .filter_map(|(id, tags, pts, owned, _, area)| {
-                    let f = if gdal { gdal_way(*id, tags, pts, *area) } else { way_feature(*id, tags, pts) };
+                    let f = match mode {
+                        Mode::Osm2pgsql => crate::osm2pgsql::way(*id, tags, pts, *area),
+                        Mode::Gdal => gdal_way(*id, tags, pts, *area),
+                        Mode::Quack => way_feature(*id, tags, pts),
+                    };
                     f.map(|mut f| {
                         f.owner = *owned;
                         f
@@ -1522,7 +1579,7 @@ fn run<R: Read + Send>(
         read_ways(&mut use_ways)?;
     }
     if let Some(f) = fixes {
-        let made = f.new_rows(owner, gdal);
+        let made = f.new_rows(owner, mode);
         counts.ways += made.len();
         emit(made)?;
     }
@@ -1576,7 +1633,9 @@ fn run<R: Read + Send>(
     let make = |(id, tags, members, got): Rel| -> Vec<Feature> {
         #[cfg(not(target_arch = "wasm32"))]
         let t = std::time::Instant::now();
-        let made = if gdal {
+        let made = if o2p {
+            osm2pgsql_relation(id, &tags, &members, got, owner.is_some(), &mine)
+        } else if gdal {
             gdal_relation(id, tags, &members, got, owner.is_some(), &mine, &used)
         } else {
             // a relation with a member way that is not a valid way is not a feature
@@ -1730,7 +1789,7 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, false, fixes, |_, part| emit(part))
+    features_of_tiles(open, budget, size, Mode::Quack, fixes, |_, part| emit(part))
 }
 
 /// [`gdal_features`] made tile by tile, as [`features_by_tiles`] makes the table of quack. A relation of
@@ -1740,10 +1799,11 @@ pub fn gdal_features_by_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
+    mode: Mode,
     fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, true, fixes, |_, part| emit(part))
+    features_of_tiles(open, budget, size, mode, fixes, |_, part| emit(part))
 }
 
 /// [`features_by_tiles`], and `emit` gets the tile that made each part too (the tiles one after the other: a part of a
@@ -1752,7 +1812,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
-    gdal: bool,
+    mode: Mode,
     mut fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
@@ -1781,7 +1841,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
      -> Result<Counts, String> {
         let owner = Owner { tile, relations: Some(&relations) };
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        run(open_tile, budget, Some(&owner), gdal, fixes, give)
+        run(open_tile, budget, Some(&owner), mode, fixes, give)
     };
     let mut done = |k: usize, (_, tile, c): &(usize, Tile, crate::cutstream::CutCounts), got: Counts| {
         counts.nodes += got.nodes;
@@ -1803,7 +1863,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     // threads takes the next tile. A group that waits for its last tile kept the rows of four tiles: France had 8.8 GB of
     // rows in memory at zoom 8.
     #[cfg(not(target_arch = "wasm32"))]
-    if gdal {
+    if mode != Mode::Quack {
         enum Msg {
             Part(Tile, Vec<Feature>),
             Done(usize, Counts),
