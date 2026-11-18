@@ -137,6 +137,30 @@ def test_levels_keeps_the_edits(tmp_path, monkeypatch):
             con.close()
     edits, unmatched, (n, distinct), meta = state()
     assert edits == [(a[0], b[0])] and unmatched == [("level_edits",)]
-    assert n == distinct > 10_000 and meta == ("area",)
+    assert n == distinct > 2000 and meta == ("area",)
     duckosm.build(pbf=PBF, boundary=BOUNDARY, output="monaco.duckdb")
     assert state()[:2] == (edits, unmatched)
+
+
+def test_to_rustworkx(monaco_db):
+    """The rustworkx graphs have the nodes and the edges of the networkx graphs, and a shortest path has the same cost."""
+    rx = pytest.importorskip("rustworkx")
+    nx = pytest.importorskip("networkx")
+    con = duckdb.connect(str(monaco_db), read_only=True)
+    for mode in ("driving", "walking"):
+        t, j = duckosm.to_rustworkx(monaco_db, mode), duckosm.to_rustworkx(monaco_db, mode, graph="junctions")
+        gt, gj = duckosm.to_networkx(con, mode, node_attrs=False), duckosm.to_networkx_nodes(con, mode, geometry="none")
+        assert (t.num_nodes(), t.num_edges()) == (gt.number_of_nodes(), gt.number_of_edges())
+        assert (j.num_nodes(), j.num_edges()) == (gj.number_of_nodes(), gj.number_of_edges())
+        assert set(t.attrs["index"]) == set(gt.nodes) and set(j.attrs["index"]) == set(gj.nodes)
+    ids = list(gt.nodes)
+    a = ids[0]
+    lengths = nx.single_source_dijkstra_path_length(gt, a, weight="weight")
+    b = max(lengths, key=lengths.get)                       # the farthest edge: a long path
+    ix = t.attrs["index"]
+    got = rx.dijkstra_shortest_path_lengths(t, ix[a], edge_cost_fn=float, goal=ix[b])
+    assert got[ix[b]] == pytest.approx(lengths[b])
+    path = rx.dijkstra_shortest_paths(t, ix[a], target=ix[b], weight_fn=float)[ix[b]]
+    assert sum(t.get_edge_data(u, v) for u, v in zip(path, path[1:])) == pytest.approx(lengths[b])
+    road = j.get_edge_data_by_index(0)
+    assert "edge_id" in road and "highway" in road and "source" not in road

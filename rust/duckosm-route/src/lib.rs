@@ -4,6 +4,7 @@
 pub mod cli;
 pub mod directions;
 pub mod graphml;
+pub mod graphs;
 pub mod lanes;
 pub mod points;
 pub mod route;

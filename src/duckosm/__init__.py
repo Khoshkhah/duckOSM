@@ -21,6 +21,7 @@ _NAMES = {
     "to_railml": "duckosm._api", "to_lanelet2": "duckosm._api",
     "quack": "duckosm._api", "tiles": "duckosm._api", "extract": "duckosm._api", "boundary": "duckosm._api",
     "init_config": "duckosm._api", "build": "duckosm._api", "levels": "duckosm._api",
+    "to_rustworkx": "duckosm._api",
     "build_lane_graph": "duckosm._api", "route_lanes": "duckosm._api", "to_elevation": "duckosm._api",
 }
 __all__ = list(_NAMES)

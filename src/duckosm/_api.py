@@ -198,6 +198,40 @@ def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
     return json.loads(_rust().route_lanes(_db(gmns_db), str(from_lane), str(to_lane), mode))
 
 
+# ---- graphs ------------------------------------------------------------------------------------------------------
+
+def to_rustworkx(con, mode="driving", graph="turns", weight="time"):
+    """The graph of ``mode`` as a ``rustworkx.PyDiGraph``, from the rows of the Rust code (no networkx).
+
+    ``graph="turns"``: the graph of :func:`to_networkx` (a node is an ``edge_id``, an arc a legal turn with its ``weight``:
+    ``"time"`` in seconds or ``"length"`` in metres). ``graph="junctions"``: the graph of ``to_networkx_nodes`` (a node is
+    ``{"node_id", "x", "y"}``, an edge a road with all its columns, ``geometry`` as WKT; parallel roads stay). ``g.attrs["index"]``
+    gives the node index of an id (an ``edge_id`` or a ``node_id``)."""
+    try:
+        import rustworkx as rx
+    except ImportError as e:
+        raise ImportError('to_rustworkx needs rustworkx: pip install "duckosm[rustworkx]"') from e
+    if graph not in ("turns", "junctions"):
+        raise ValueError("graph must be 'turns' or 'junctions'")
+    db = _db(con)
+    if db is None:
+        raise ValueError("to_rustworkx reads a database file: give its path or a connection to it")
+    junctions, roads, turns = _rust().graph_rows(db, mode, weight)
+    if graph == "turns":
+        ids = list(dict.fromkeys(i for a, b, _ in turns for i in (a, b)))     # the order of first use, as networkx
+        g = rx.PyDiGraph(multigraph=False, attrs={"mode": mode, "weight": weight})
+        g.attrs["index"] = dict(zip(ids, g.add_nodes_from(ids)))
+        ix = g.attrs["index"]
+        g.add_edges_from([(ix[a], ix[b], w) for a, b, w in turns])
+        return g
+    g = rx.PyDiGraph(multigraph=True, attrs={"mode": mode, "crs": "EPSG:4326"})
+    g.attrs["index"] = dict(zip((j[0] for j in junctions),
+                                g.add_nodes_from([{"node_id": n, "x": x, "y": y} for n, x, y in junctions])))
+    ix = g.attrs["index"]
+    g.add_edges_from([(ix[s], ix[t], {"edge_id": e, **json.loads(c)}) for s, t, e, c in roads])
+    return g
+
+
 # ---- the commands: build, tiles, quack, extract, boundary, levels, init-config -----------------------------------
 # Each function runs the program duckosm (the Rust code, duckosm._rust.cli) in its own process, with the options of its
 # command: the memory goes back to the system at the end, and the global thread pool of a command starts new each time.

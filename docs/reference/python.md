@@ -61,6 +61,8 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 | `route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm", allowed_modes=None, enforce_sequence=True)` | `a`, `b`: `(lon, lat)` points | a dict with the legs of each mode | `duckosm route-multimodal-points` |
 | `directions(con, route, mode="driving")` | `route`: a result of a route function | a list of the turn-by-turn steps | `duckosm directions` |
 | `to_networkx(con, mode="driving", weight="time")` | | a `networkx.DiGraph`: a node is an `edge_id` | `duckosm export-graph` |
+| `to_networkx_nodes(con, mode="driving")` | | a `networkx.MultiDiGraph`: a node is a junction, an edge a road | `duckosm export-graph` |
+| `to_rustworkx(con, mode="driving", graph="turns", weight="time")` | `graph`: `"turns"` (the graph of `to_networkx`) or `"junctions"` (the graph of `to_networkx_nodes`). Needs `duckosm[rustworkx]`. | a `rustworkx.PyDiGraph`; `g.attrs["index"]` gives the node index of an id | |
 
 Guide: [Route](../guides/route.md).
 

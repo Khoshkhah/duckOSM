@@ -61,14 +61,13 @@ def test_rust_build_equals_python_build(tmp_path, monkeypatch):
             key = pc[0][0]
             skip = VOLATILE & {d[0] for d in con.execute(f"DESCRIBE py.{t}").fetchall()}
             ex = f" EXCLUDE ({', '.join(skip)})" if skip else ""
-            q = (f'SELECT * FROM {{}}.{t} WHERE "{key}" IN (SELECT "{key}" FROM (SELECT *{ex} FROM py.{t} EXCEPT SELECT *{ex} FROM rs.{t}) '
-                 'LIMIT 1)')
             try:
+                k = con.execute(f'SELECT "{key}" FROM (SELECT *{ex} FROM py.{t} EXCEPT SELECT *{ex} FROM rs.{t}) ORDER BY 1 LIMIT 1').fetchone()[0]
                 cols = [d[0] for d in con.execute(f"DESCRIBE py.{t}").fetchall()]
-                a, b = con.execute(q.format("py")).fetchone(), con.execute(q.format("rs")).fetchone()
-                for c, x, y in zip(cols, a or [], b or []):
+                a, b = (con.execute(f'SELECT * FROM {db}.{t} WHERE "{key}" = ? LIMIT 1', [k]).fetchone() for db in ("py", "rs"))
+                for c, x, y in zip(cols, a or [], b or [None] * len(cols)):
                     if c not in VOLATILE and x != y:
-                        diffs.append(f"    {key}={a[0]} {c}: py {str(x)[:1500]} | rs {str(y)[:1500]}")
+                        diffs.append(f"    {key}={k} {c}: py {str(x)[:1500]} | rs {str(y)[:1500]}")
             except Exception as e:                     # noqa: BLE001 (only the message of the test)
                 diffs.append(f"    (no example row: {e})")
     assert not diffs, "\n".join(diffs)

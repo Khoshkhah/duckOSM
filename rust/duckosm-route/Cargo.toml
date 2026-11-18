@@ -17,5 +17,11 @@ duckosm-tools = { path = "../duckosm-tools" }
 # Python's text of a float (place::py_float)
 duckosm-build = { path = "../duckosm-build" }
 
+# graphs::to_petgraph: the junction graph and the turn graph as petgraph graphs (docs/reference/rust.md)
+petgraph = { version = "0.8", optional = true, default-features = false, features = ["std"] }
+
+[features]
+petgraph = ["dep:petgraph"]
+
 [dev-dependencies]
 md-5 = "0.10"
