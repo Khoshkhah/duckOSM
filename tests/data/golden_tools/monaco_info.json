@@ -1,0 +1,52 @@
+{
+ "modes": [
+  {
+   "mode": "driving",
+   "edges": 2844,
+   "nodes": 1769,
+   "private_edges": 689,
+   "km": 96.2,
+   "edge_graph": 6765,
+   "turn_restrictions": 38
+  },
+  {
+   "mode": "walking",
+   "edges": 11934,
+   "nodes": 4579,
+   "private_edges": 158,
+   "km": 262.3,
+   "edge_graph": 35134,
+   "turn_restrictions": null
+  },
+  {
+   "mode": "cycling",
+   "edges": 11293,
+   "nodes": 4638,
+   "private_edges": 133,
+   "km": 251.3,
+   "edge_graph": 31387,
+   "turn_restrictions": null
+  }
+ ],
+ "timezone": "Europe/Monaco",
+ "raw": true,
+ "features": [
+  "buildings",
+  "land",
+  "paved",
+  "place_labels",
+  "pois",
+  "public_transport",
+  "sites",
+  "streets",
+  "traffic",
+  "water_lines",
+  "water_polygons"
+ ],
+ "multimodal": false,
+ "boundary": true,
+ "admin_boundaries": 0,
+ "elevation": false,
+ "visualization": false,
+ "bus": true
+}

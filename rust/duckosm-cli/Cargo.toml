@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [features]
 default = ["duckdb"]
-duckdb = ["duckosm-build/duckdb", "dep:duckosm-edit", "duckosm-edit/duckdb", "dep:duckosm-export"]
+duckdb = ["duckosm-build/duckdb", "dep:duckosm-edit", "duckosm-edit/duckdb", "dep:duckosm-export", "dep:duckosm-tools", "dep:duckosm-route"]
 # a counting allocator: after each step, the live and the peak Rust heap (docs/design/network_stream.md). DuckDB's own memory is
 # not counted (it has its own memory_limit). Only for measurements: the counting costs some time.
 heap-probe = []
@@ -19,6 +19,8 @@ heap-probe = []
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
 clap = { version = "4", features = ["derive"] }
 duckosm-edit = { path = "../duckosm-edit", optional = true }
+duckosm-tools = { path = "../duckosm-tools", optional = true }   # the database tools (info, way, init-config, ...)
+duckosm-route = { path = "../duckosm-route", optional = true }   # the routing commands (route, export-graph, ...)
 duckosm-export = { path = "../duckosm-export", optional = true }   # the exports of a database (matsim, railml, ...)   # duckosm-rust edit: the page that edits the fixes (needs DuckDB)
 # duckosm-rust quack --threads: the size of the thread pool (the rayon of duckosm-core)
 rayon = "1.12"
@@ -26,3 +28,8 @@ rayon = "1.12"
 # duckosm-rust tiles: the peak memory of each tile process (wait4); the glibc thresholds of the memory (mallopt)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# the test of the local dashboard (tests/studio.rs) reads the .duckdb file that it builds (the version of duckosm-duckdb)
+duckdb = { version = "=1.10506.1", features = ["bundled", "json"] }
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -1,4 +1,4 @@
-//! A Parquet writer that encodes the columns of a row group on all threads (docs/concepts/offline-online.md, step 4).
+//! A Parquet writer that encodes the columns of a row group on all threads (docs/concepts/browser-native.md, step 4).
 //! `ArrowWriter` encodes the columns one after the other on the calling thread, so the writing of the network files
 //! used one core. Here each leaf column of a batch is encoded into a buffer on a thread of the pool, and the calling
 //! thread appends the finished column chunks in their order. The file is written only on the calling thread (in the

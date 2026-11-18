@@ -23,14 +23,14 @@ export the result.
 
 ## Two versions
 
-| | Online | On your computer |
+| | Browser | Native (on your computer) |
 |---|---|---|
 | Start | open [the page](https://khoshkhah.github.io/duckosm-studio/) | `duckosm-rust studio areas`, then open `http://127.0.0.1:8792/` |
 | The build runs | in the browser (WebAssembly) | in the native program |
 | The areas are | in the browser's storage | in folders on your disk |
-| Largest area | about the size of Kentucky (4 GB of the tab) | a country, by tiles |
+| Largest area | a country, by tiles (France: 4 min 56 s) | a country, by tiles (France: 3 min 34 s) |
 
-Both versions use the same steps and give the same tables. See [Offline and online builds](../concepts/offline-online.md).
+Both versions use the same steps and give the same tables. See [Browser and native builds](../concepts/browser-native.md).
 
 More about the version on your computer (its options, your areas, the limits):
 [the details on GitHub](https://github.com/Khoshkhah/duckOSM/blob/main/docs/rust/studio_local.md).

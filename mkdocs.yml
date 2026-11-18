@@ -155,7 +155,7 @@ nav:
           - Lane-level routing: exports/lane-routing.md
   - Concepts:
       - How a build works: concepts/build.md
-      - Offline and online builds: concepts/offline-online.md
+      - Browser and native builds: concepts/browser-native.md
       - Memory at each step: concepts/memory-by-step.md
       - The ground reference: concepts/ground-reference.md
       - The terrain of an area: concepts/terrain.md

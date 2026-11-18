@@ -25,13 +25,105 @@ pub fn h3_geojson(cell: &str) -> Result<Value, String> {
     Ok(json!({"type": "Polygon", "coordinates": [ring]}))
 }
 
-/// Write a boundary as a FeatureCollection of one feature, `props` its properties (duckOSM `area.write_boundary`).
-pub fn write_boundary(geometry: Value, props: Value, out: &Path) -> Result<(), String> {
-    if let Some(d) = out.parent() {
+/// Write a boundary as a FeatureCollection of one feature, `props` its properties without `others` (duckOSM
+/// `area.write_boundary`), as Python's `json.dumps` writes it.
+pub fn write_boundary(geometry: Value, mut props: Value, out: &Path) -> Result<(), String> {
+    if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
+    props.as_object_mut().map(|o| o.shift_remove("others"));
     let doc = json!({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": props, "geometry": geometry}]});
-    std::fs::write(out, doc.to_string()).map_err(|e| format!("{}: {e}", out.display()))
+    std::fs::write(out, py_dumps(&doc)).map_err(|e| format!("{}: {e}", out.display()))
+}
+
+/// Python's `json.dumps(v)`: `", "` and `": "` between the items, and each non-ASCII letter as `\uXXXX`.
+pub fn py_dumps(v: &Value) -> String {
+    match v {
+        Value::Array(a) => format!("[{}]", a.iter().map(py_dumps).collect::<Vec<_>>().join(", ")),
+        Value::Object(o) => format!(
+            "{{{}}}",
+            o.iter().map(|(k, v)| format!("{}: {}", py_dumps(&Value::String(k.clone())), py_dumps(v))).collect::<Vec<_>>().join(", ")
+        ),
+        Value::String(s) => {
+            let mut e = String::new();
+            for c in serde_json::to_string(s).expect("JSON of a text").chars() {
+                if c.is_ascii() {
+                    e.push(c);
+                } else {
+                    let mut b = [0u16; 2];
+                    for u in c.encode_utf16(&mut b) {
+                        e += &format!("\\u{u:04x}");
+                    }
+                }
+            }
+            e
+        }
+        Value::Number(n) => match n.as_f64() {
+            Some(f) if !n.is_i64() && !n.is_u64() => py_float(f),
+            _ => n.to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
+/// Python's `repr` of a float: the shortest digits that give the float back, a tie between two such texts to the even
+/// digit (Rust's shortest text takes the upper one), in fixed form for a decimal exponent from -4 to 15, else as `1e+16`.
+pub fn py_float(f: f64) -> String {
+    if !f.is_finite() {
+        return if f.is_nan() { "nan".into() } else if f > 0.0 { "inf".into() } else { "-inf".into() };
+    }
+    if f == 0.0 {
+        return if f.is_sign_negative() { "-0.0".into() } else { "0.0".into() };
+    }
+    // the number of digits of the shortest text
+    let short = format!("{:e}", f);
+    let n = short.split('e').next().unwrap_or("").chars().filter(char::is_ascii_digit).count().max(1);
+    // the exact value rounded to n digits (round half to even), if it gives f back
+    let exact = format!("{:.*e}", n - 1, f);
+    let pick = if exact.parse::<f64>() == Ok(f) { exact } else { short };
+    let (m, e) = pick.split_once('e').unwrap_or((&pick, "0"));
+    let e: i32 = e.parse().unwrap_or(0);
+    let neg = m.starts_with('-');
+    let digits: String = m.chars().filter(char::is_ascii_digit).collect();
+    let digits = digits.trim_end_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let sign = if neg { "-" } else { "" };
+    if (-4..16).contains(&e) {
+        let point = e + 1; // the digits before the point
+        let body = if point <= 0 {
+            format!("0.{}{digits}", "0".repeat((-point) as usize))
+        } else if point as usize >= digits.len() {
+            format!("{digits}{}.0", "0".repeat(point as usize - digits.len()))
+        } else {
+            format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
+        };
+        format!("{sign}{body}")
+    } else {
+        let mant = if digits.len() > 1 { format!("{}.{}", &digits[..1], &digits[1..]) } else { digits.to_string() };
+        format!("{sign}{mant}e{}{:02}", if e < 0 { '-' } else { '+' }, e.abs())
+    }
+}
+
+/// Python's `repr` of a text.
+pub fn py_repr(s: &str) -> String {
+    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let mut out = String::from(q);
+    for c in s.chars() {
+        match c {
+            '\\' => out += "\\\\",
+            '\n' => out += "\\n",
+            '\r' => out += "\\r",
+            '\t' => out += "\\t",
+            c if c == q => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => out += &format!("\\x{:02x}", c as u32),
+            c => out.push(c),
+        }
+    }
+    out.push(q);
+    out
 }
 
 #[cfg(feature = "duckdb")]
@@ -56,63 +148,115 @@ mod sql {
     /// GDAL's `osmconf.ini` (GDAL 3.4): the OSM driver of GDAL needs a config file, and the DuckDB build has none.
     const OSMCONF: &str = include_str!("osmconf.ini");
 
-    /// The admin boundary called `name` in the borders of `pbf` (OSM relations with `boundary=administrative`, read by GDAL as
-    /// `ogr2ogr ... multipolygons` does), as duckOSM `area._from_pbf` and `admin_match_sql` choose it: case, accents and
-    /// hyphens ignored, `name:en` too, an exact name first, then the largest area.
-    fn from_pbf(pbf: &Path, name: &str) -> Result<Option<(Value, Value)>, String> {
-        let conf = std::env::temp_dir().join(format!("duckosm-osmconf-{}.ini", std::process::id()));
-        std::fs::write(&conf, OSMCONF).map_err(|e| e.to_string())?;
-        let con = spatial()?;
-        let read = con.execute_batch(&format!(
-            "CREATE TEMP TABLE admin_boundaries AS
-             SELECT TRY_CAST(COALESCE(osm_id, osm_way_id) AS BIGINT) AS osm_id, name,
-                    NULLIF(regexp_extract(other_tags, '\"name:en\"=>\"([^\"]*)\"', 1), '') AS name_en,
-                    TRY_CAST(admin_level AS INTEGER) AS admin_level, geom::GEOMETRY AS geometry
-             FROM ST_Read('{}', layer = 'multipolygons', open_options = ['CONFIG_FILE={}'])
-             WHERE boundary = 'administrative'",
+    /// The `ST_Read` of the multipolygons of a PBF with `boundary=administrative`, as `ogr2ogr ... multipolygons -where
+    /// "boundary='administrative'"` reads them (duckOSM `admin.extract_boundaries`), with GDAL's columns. `conf` is a file
+    /// with [`OSMCONF`] (see [`write_osmconf`]).
+    pub fn admin_multipolygons(pbf: &Path, conf: &Path) -> String {
+        format!(
+            "SELECT * FROM ST_Read('{}', layer = 'multipolygons', open_options = ['CONFIG_FILE={}']) WHERE boundary = 'administrative'",
             quote(pbf),
-            quote(&conf)
-        ));
-        let _ = std::fs::remove_file(&conf);
-        read.map_err(|e| format!("the borders of {}: {e}", pbf.display()))?;
-        let norm = |x: &str| format!("replace(strip_accents(lower({x})), '-', ' ')");
-        let (q, nm, en) = (norm("$1"), norm("name"), norm("coalesce(name_en, '')"));
-        let sql = format!(
-            "SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM (
-               SELECT geometry AS geom, osm_id, name, admin_level FROM admin_boundaries
-               WHERE {nm} LIKE '%' || {q} || '%' OR {en} LIKE '%' || {q} || '%'
-               ORDER BY ({nm} = {q} OR {en} = {q}) DESC, ST_Area(geometry) DESC LIMIT 1)"
-        );
-        let mut st = con.prepare(&sql).map_err(err)?;
-        let mut rows = st.query(params![name]).map_err(err)?;
-        let Some(r) = rows.next().map_err(err)? else {
-            return Ok(None);
-        };
-        let geom: String = r.get(0).map_err(err)?;
-        let area: f64 = r.get(4).map_err(err)?;
-        let file = pbf.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-        let info = json!({
-            "name": r.get::<_, Option<String>>(2).map_err(err)?,
-            "osm_id": r.get::<_, Option<i64>>(1).map_err(err)?,
-            "admin_level": r.get::<_, Option<i64>>(3).map_err(err)?,
-            "area_km2": (area * 100.0).round() / 100.0,
-            "source": format!("PBF {file}"),
-        });
-        Ok(Some((serde_json::from_str(&geom).map_err(|e| e.to_string())?, info)))
+            quote(conf)
+        )
     }
 
-    /// The first polygon that OpenStreetMap's Nominatim finds for `name` (duckOSM `area._from_nominatim`). None when it
-    /// finds none or cannot be reached.
-    fn from_nominatim(name: &str) -> Result<Option<(Value, Value)>, String> {
+    /// The columns of duckOSM's `admin_boundaries` (`admin.load_boundaries`) from `source`, a SELECT of GDAL's multipolygons.
+    pub fn admin_select(source: &str) -> String {
+        format!(
+            "SELECT TRY_CAST(COALESCE(osm_id, osm_way_id) AS BIGINT) AS osm_id, name,
+                    NULLIF(regexp_extract(other_tags, '\"name:en\"=>\"([^\"]*)\"', 1), '') AS name_en,
+                    TRY_CAST(admin_level AS INTEGER) AS admin_level, geom::GEOMETRY AS geometry
+             FROM ({source})"
+        )
+    }
+
+    /// Write GDAL's `osmconf.ini` to a temporary file; the caller removes it.
+    pub fn write_osmconf() -> Result<PathBuf, String> {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let conf = std::env::temp_dir().join(format!("duckosm-osmconf-{}-{n}.ini", std::process::id()));
+        std::fs::write(&conf, OSMCONF).map_err(|e| e.to_string())?;
+        Ok(conf)
+    }
+
+    /// What to look for: a name (case, accents and hyphens ignored, `name:en` too) or one OSM relation id.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Wanted<'a> {
+        Name(&'a str),
+        OsmId(i64),
+    }
+
+    /// The admin boundaries for `want` in the borders of `pbf` (OSM relations with `boundary=administrative`, read by GDAL
+    /// as `ogr2ogr ... multipolygons` does), best first (duckOSM `area._from_pbf` and `admin_match_sql`): an exact name
+    /// first, then the largest area; at most 6.
+    fn from_pbf(pbf: &Path, want: Wanted) -> Result<Vec<(Value, Value)>, String> {
+        let conf = write_osmconf()?;
+        let con = spatial()?;
+        let read = con.execute_batch(&format!("CREATE TEMP TABLE admin_boundaries AS {}", admin_select(&admin_multipolygons(pbf, &conf))));
+        let _ = std::fs::remove_file(&conf);
+        read.map_err(|e| format!("the borders of {}: {e}", pbf.display()))?;
+        let pick = "SELECT ST_AsGeoJSON(geom), osm_id, name, admin_level, ST_Area_Spheroid(ST_FlipCoordinates(geom)) / 1e6 FROM ";
+        let (sql, arg) = match want {
+            Wanted::OsmId(id) => (
+                format!("{pick}(SELECT geometry AS geom, osm_id, name, admin_level FROM admin_boundaries WHERE osm_id = {id})"),
+                None,
+            ),
+            Wanted::Name(n) => {
+                let norm = |x: &str| format!("replace(strip_accents(lower({x})), '-', ' ')");
+                let (q, nm, en) = (norm("$1"), norm("name"), norm("coalesce(name_en, '')"));
+                (
+                    format!(
+                        "{pick}(SELECT geometry AS geom, osm_id, name, admin_level FROM admin_boundaries
+                           WHERE {nm} LIKE '%' || {q} || '%' OR {en} LIKE '%' || {q} || '%'
+                           ORDER BY ({nm} = {q} OR {en} = {q}) DESC, ST_Area(geometry) DESC LIMIT 6)"
+                    ),
+                    Some(n),
+                )
+            }
+        };
+        let mut st = con.prepare(&sql).map_err(err)?;
+        let map = |r: &duckosm_duckdb::duckdb::Row| -> duckosm_duckdb::duckdb::Result<(String, Option<i64>, Option<String>, Option<i64>, f64)> {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        };
+        let rows: Vec<_> = match arg {
+            Some(a) => st.query_map(params![a], map).map_err(err)?.collect::<Result<_, _>>().map_err(err)?,
+            None => st.query_map([], map).map_err(err)?.collect::<Result<_, _>>().map_err(err)?,
+        };
+        let file = pbf.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+        rows.into_iter()
+            .map(|(geom, osm_id, name, level, area)| {
+                let info = json!({"name": name, "osm_id": osm_id, "admin_level": level, "area_km2": round2(area), "source": format!("PBF {file}")});
+                Ok((serde_json::from_str(&geom).map_err(|e| e.to_string())?, info))
+            })
+            .collect()
+    }
+
+    /// Python's `round(x, 2)`.
+    fn round2(x: f64) -> f64 {
+        let r = (x * 100.0).round() / 100.0;
+        // round half to even, as Python: the two neighbours of a tie
+        let lo = (x * 100.0).floor() / 100.0;
+        if ((x - lo) * 100.0 - 0.5).abs() < 1e-9 && ((lo * 100.0).round() as i64) % 2 == 0 { lo } else { r }
+    }
+
+    /// The polygons that OpenStreetMap's Nominatim finds for `want` (duckOSM `area._from_nominatim`), best first. Empty when
+    /// it finds none or cannot be reached.
+    fn from_nominatim(want: Wanted) -> Result<Vec<(Value, Value)>, String> {
         let con = spatial()?;
         // Nominatim asks each program to name itself
         let ua = format!("duckOSM/{} (+https://github.com/Khoshkhah/duckOSM)", env!("CARGO_PKG_VERSION"));
-        let q: String = name.bytes().map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
-            b' ' => "+".to_string(),
-            _ => format!("%{b:02X}"),
-        }).collect();
-        let url = format!("https://nominatim.openstreetmap.org/search?q={q}&format=geojson&polygon_geojson=1&limit=5");
+        let enc = |x: &str| -> String {
+            x.bytes()
+                .map(|b| match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+                    b' ' => "+".to_string(),
+                    _ => format!("%{b:02X}"),
+                })
+                .collect()
+        };
+        let url = match want {
+            Wanted::OsmId(id) => format!("https://nominatim.openstreetmap.org/lookup?osm_ids=R{id}&format=geojson&polygon_geojson=1"),
+            Wanted::Name(n) => format!("https://nominatim.openstreetmap.org/search?q={}&format=geojson&polygon_geojson=1&limit=5", enc(n)),
+        };
         let text: Result<String, _> = con
             .execute_batch(&format!("INSTALL httpfs; LOAD httpfs; CREATE SECRET (TYPE http, EXTRA_HTTP_HEADERS MAP {{'User-Agent': '{ua}'}});"))
             .and_then(|_| con.query_row(&format!("SELECT content FROM read_text('{url}')"), [], |r| r.get(0)));
@@ -120,10 +264,11 @@ mod sql {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("  Nominatim not reachable: {e}");
-                return Ok(None);
+                return Ok(Vec::new());
             }
         };
         let doc: Value = serde_json::from_str(&text).map_err(|e| format!("Nominatim: {e}"))?;
+        let mut found = Vec::new();
         for f in doc["features"].as_array().into_iter().flatten() {
             if matches!(f["geometry"]["type"].as_str(), Some("Polygon" | "MultiPolygon")) {
                 let geom = f["geometry"].to_string();
@@ -131,31 +276,69 @@ mod sql {
                     .query_row("SELECT ST_Area_Spheroid(ST_FlipCoordinates(ST_GeomFromGeoJSON(?))) / 1e6", params![geom], |r| r.get(0))
                     .map_err(err)?;
                 let p = &f["properties"];
-                let info = json!({
-                    "name": if p["display_name"].is_null() { p["name"].clone() } else { p["display_name"].clone() },
-                    "osm_id": p["osm_id"].clone(),
-                    "admin_level": null,
-                    "area_km2": (area * 100.0).round() / 100.0,
-                    "source": "Nominatim",
-                });
-                return Ok(Some((f["geometry"].clone(), info)));
+                let name = if p["display_name"].is_null() { p["name"].clone() } else { p["display_name"].clone() };
+                let info = json!({"name": name, "osm_id": p["osm_id"].clone(), "admin_level": null, "area_km2": round2(area), "source": "Nominatim"});
+                found.push((f["geometry"].clone(), info));
             }
         }
-        Ok(None)
+        Ok(found)
     }
 
-    /// The boundary of the place `name` (duckOSM `area.find_boundary`): the borders of `pbf` first (a clip has none), then
-    /// Nominatim.
-    pub fn find(name: &str, pbf: Option<&Path>) -> Result<(Value, Value), String> {
-        if let Some(pbf) = pbf {
-            if let Some(hit) = from_pbf(pbf, name)? {
-                return Ok(hit);
+    /// The boundary for `want` (duckOSM `area.find_boundary`): the borders of `pbf` first, then Nominatim unless `offline`.
+    /// The info has `name`, `osm_id`, `admin_level`, `area_km2`, `source` and `others` (the other matches, best first).
+    pub fn find_boundary(want: Wanted, pbf: Option<&Path>, offline: bool) -> Result<(Value, Value), String> {
+        let label = match want {
+            Wanted::Name(n) => n.to_string(),
+            Wanted::OsmId(id) => format!("OSM relation {id}"),
+        };
+        let with_others = |mut hits: Vec<(Value, Value)>, source: Option<&str>| -> (Value, Value) {
+            let (geom, mut info) = hits.remove(0);
+            let others: Vec<Value> = hits
+                .into_iter()
+                .map(|(_, mut i)| {
+                    i.as_object_mut().map(|o| o.shift_remove("source"));
+                    i
+                })
+                .collect();
+            if let Some(s) = source {
+                info["source"] = json!(s);
             }
-            eprintln!("  no border matching {name:?} in {}", pbf.display());
+            info["others"] = Value::Array(others);
+            (geom, info)
+        };
+        if let Some(pbf) = pbf {
+            let hits = from_pbf(pbf, want)?;
+            if !hits.is_empty() {
+                return Ok(with_others(hits, None));
+            }
+            let file = pbf.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+            eprintln!("  no border matching {} in {file}", py_repr(&label));
         }
-        let place = pbf.map(|p| format!("in {} or ", p.display())).unwrap_or_default();
-        from_nominatim(name)?
-            .ok_or(format!("no boundary found for {name:?} {place}on Nominatim. Try a more specific name (e.g. 'Södermalm, Stockholm')."))
+        if !offline {
+            let hits = from_nominatim(want)?;
+            if !hits.is_empty() {
+                return Ok(with_others(hits, None));
+            }
+        }
+        let place = match pbf {
+            Some(p) => {
+                let file = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+                format!("in {file}{}", if offline { "" } else { " or on Nominatim" })
+            }
+            None => "on Nominatim".into(),
+        };
+        Err(format!(
+            "no boundary found for {} {place}. Try a more specific name (e.g. 'Södermalm, Stockholm') or --osm-id.",
+            py_repr(&label)
+        ))
+    }
+
+    /// The boundary of the place `name` for a build (duckOSM `Config.materialize_boundary`): the borders of `pbf` first (a
+    /// clip has none), then Nominatim. The info without `others`.
+    pub fn find(name: &str, pbf: Option<&Path>) -> Result<(Value, Value), String> {
+        let (geom, mut info) = find_boundary(Wanted::Name(name), pbf, false)?;
+        info.as_object_mut().map(|o| o.shift_remove("others"));
+        Ok((geom, info))
     }
 
     /// The boundary grown by `m` metres in the UTM zone of its centroid, as `<stem>.buffer<m>m.geojson` next to it (duckOSM
@@ -249,7 +432,7 @@ mod sql {
 }
 
 #[cfg(feature = "duckdb")]
-pub use sql::{boundary_cells, buffered, find};
+pub use sql::{admin_multipolygons, admin_select, boundary_cells, buffered, find, find_boundary, write_osmconf, Wanted};
 
 #[cfg(not(feature = "duckdb"))]
 pub fn find(_: &str, _: Option<&Path>) -> Result<(Value, Value), String> {
@@ -262,6 +445,26 @@ pub fn buffered(_: &Path, _: f64) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn floats_as_python_writes_them() {
+        // Python: repr(...)
+        for (f, py) in [
+            (72.557403564453125, "72.55740356445312"),
+            (91.990753173828125, "91.99075317382812"),
+            (0.1, "0.1"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            (30.0, "30.0"),
+            (1e16, "1e+16"),
+            (1.5e-5, "1.5e-05"),
+            (0.0001, "0.0001"),
+            (-2.5, "-2.5"),
+            (123456789012345.6, "123456789012345.6"),
+            (7.4524351, "7.4524351"),
+        ] {
+            assert_eq!(super::py_float(f), py);
+        }
+    }
+
     #[test]
     fn a_box_and_a_cell_as_duckosm_writes_them() {
         // duckOSM: area.h3_geojson("883969a40bfffff"), a cell of Monaco

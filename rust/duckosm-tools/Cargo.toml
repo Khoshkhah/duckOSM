@@ -1,0 +1,17 @@
+[package]
+name = "duckosm-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The database tools of duckOSM (docs/design/all_in_rust.md, group B): info, way, init-config, boundary, extract, admin, ask.
+# Each tool gives the same output as the Python command of src/duckosm/cli.py.
+
+[dependencies]
+duckdb = { version = "=1.10506.1", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+# boundary: the place lookup and the GeoJSON writer of the build (place.rs)
+duckosm-build = { path = "../duckosm-build" }
+# extract: the edge_id macros of each database
+duckosm-duckdb = { path = "../duckosm-duckdb" }
+serde_json = { version = "1", features = ["preserve_order"] }

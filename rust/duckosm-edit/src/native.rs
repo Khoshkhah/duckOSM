@@ -60,19 +60,48 @@ impl Db for NativeDb {
     }
 
     fn build(&mut self, config: &str, dir: &Path, fixes: &Path, db: &Path) -> Result<String, String> {
-        let c = read_config(config, dir)?;
-        let mut p = c.params;
-        p.osm_fixes = Some(std::fs::canonicalize(fixes).map_err(|e| format!("{}: {e}", fixes.display()))?);
-        // the build writes the open database again: the same folder and name, the .duckdb only
-        p.name = db.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "area".into());
-        (p.duckdb, p.geoparquet) = (true, false);
-        let out = db.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        let sum = duckosm_build::build(&c.pbf, out, &p)?;
-        crate::native::record(db, config, dir)?;
-        let mut lines: Vec<String> = sum.lines();
-        lines.extend(c.skipped.iter().map(|s| format!("skipped: {s}")));
-        Ok(lines.join("\n"))
+        let fixes = std::fs::canonicalize(fixes).map_err(|e| format!("{}: {e}", fixes.display()))?;
+        build_by_tiles(config, dir, db, Some(&fixes), &|_| {})
     }
+}
+
+/// The build by tiles of this program (`duckosm-rust tiles --config`, the same code as the command; duckOSM docs/design/build_by_tiles.md),
+/// for every area: the config in `config.yaml` of the folder `dir` (its relative paths are for `dir`), the tables of the union in the
+/// `.duckdb` file `db` (only it; the GeoParquet files go). `fixes`: the OSM fixes file in place of the config's. Each line of the command goes
+/// to `log`; the lines are the summary. The command runs the cut, each tile and the `.duckdb` file as processes of this program.
+pub fn build_by_tiles(config: &str, dir: &Path, db: &Path, fixes: Option<&Path>, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
+    use std::io::BufRead;
+    let name = read_config(config, dir)?.params.name;
+    let file = dir.join("config.yaml");
+    std::fs::write(&file, config).map_err(|e| format!("{}: {e}", file.display()))?;
+    let out = std::path::absolute(db.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.current_dir(dir).args(["tiles", "--config"]).arg(&file).arg("-o").arg(&out).args(["--", "--format", "duckdb"]);
+    if let Some(f) = fixes {
+        cmd.arg("--fixes").arg(f);
+    }
+    let mut child = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("the build by tiles: {e}"))?;
+    let mut lines = Vec::new();
+    for line in std::io::BufReader::new(child.stderr.take().expect("piped")).lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        log(&line);
+        lines.push(line);
+    }
+    if !child.wait().map_err(|e| e.to_string())?.success() {
+        return Err(format!("the build by tiles failed: {}", lines.last().map_or("", String::as_str)));
+    }
+    // the command names the file after the config (`name`); the database of the page keeps its own name
+    let made = out.join(format!("{name}.duckdb"));
+    if made != std::path::absolute(db).map_err(|e| e.to_string())? {
+        std::fs::rename(&made, db).map_err(|e| format!("{}: {e}", made.display()))?;
+    }
+    record(db, config, dir)?;
+    Ok(lines.join("\n"))
 }
 
 /// Write the build's record into `db` (main.visualization_metadata: `build_config`, the config as YAML, and `build_dir`, the folder of
@@ -87,8 +116,8 @@ pub fn record(db: &Path, config: &str, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The program's host of `duckosm studio`: the native engine builds the area (`duckosm-build`, the same as `duckosm-rust --config`), and the
-/// page of the result opens the file with the bundled DuckDB. The DEM is the config's `elevation:` section.
+/// The program's host of `duckosm-rust studio`: the build by tiles of this program builds the area (the same as `duckosm-rust tiles --config`), and
+/// the page of the result opens the file with the bundled DuckDB. The DEM is the config's `elevation:` section.
 pub struct NativeHost;
 
 impl crate::studio::Host for NativeHost {
@@ -111,27 +140,9 @@ impl crate::studio::Host for NativeHost {
         con.query_row(&sql, [], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())
     }
 
+    /// The build by tiles of this program, for every area ([`build_by_tiles`]).
     fn build(&self, config: &str, dir: &Path, db: &Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
-        let c = read_config(config, dir)?;
-        let mut p = c.params;
-        p.name = db.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "area".into());
-        (p.duckdb, p.geoparquet) = (true, false);
-        let out = db.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        // the steps of the engine go to `log` while the build runs
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        duckosm_build::set_progress(Some(Box::new(move |step| {
-            let _ = tx.send(step.to_string());
-        })));
-        let sum = std::thread::scope(|s| {
-            s.spawn(move || rx.iter().for_each(|line| log(&line)));
-            let r = duckosm_build::build(&c.pbf, out, &p);
-            duckosm_build::set_progress(None);       // the hook held the sender: the reader ends
-            r
-        })?;
-        record(db, config, dir)?;
-        let mut lines: Vec<String> = sum.lines();
-        lines.extend(c.skipped.iter().map(|s| format!("skipped: {s}")));
-        Ok(lines.join("\n"))
+        build_by_tiles(config, dir, db, None, log)
     }
 }
 

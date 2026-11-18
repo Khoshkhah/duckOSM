@@ -16,6 +16,7 @@ use crate::raw::{RawNode, RawWay};
 use crate::spill::{Codec, Rows, Writer};
 use crate::util::FxHashMap;
 use rstar::{Envelope, RTree, RTreeObject, AABB};
+use std::io::{Read, Write};
 use std::sync::Arc;
 
 /// A street farther than this from the middle of a wall is not the street of the wall (meters).
@@ -699,15 +700,23 @@ impl Codec<(u64, Street)> for StreetCodec {
     }
 }
 
-/// The street segments of the faces in a temporary file, in their order (the order of the edges).
+/// The street segments of the faces in a temporary file, in their order (the order of the edges), in groups (the modes, in their order:
+/// a segment of an earlier group wins over the same segment of a later one; [`StreetFile::next_group`]).
 pub struct StreetFile {
     w: Writer,
     seq: u64,
 }
 
+/// The number of a segment: its group in the bits from this one up, and its place in the bits below.
+const GROUP_SHIFT: u32 = 48;
+
 impl StreetFile {
     pub fn new() -> Result<StreetFile, String> {
         Ok(StreetFile { w: Writer::new(&*crate::spill::temp_store()).map_err(io_err)?, seq: 0 })
+    }
+    /// The segments after this call are in a new group (the next mode).
+    pub fn next_group(&mut self) {
+        self.seq = ((self.seq >> GROUP_SHIFT) + 1) << GROUP_SHIFT;
     }
     pub fn push(&mut self, s: Street) -> Result<(), String> {
         let r = (self.seq, s);
@@ -803,12 +812,84 @@ impl RingWriter {
         Ok(())
     }
 
+    /// The rings of a part file of [`BuildingRings::split`], in their order. With `seen`, a building already in `seen` is left out
+    /// (the border parts: one copy of each building), and each new building goes into it.
+    pub fn add_part(&mut self, part: &mut dyn Read, mut seen: Option<&mut crate::util::FxHashSet<(i64, bool)>>) -> Result<(), String> {
+        let mut len = [0u8; 4];
+        // the building of the last ring, and whether its rings stay
+        let (mut buf, mut current) = (Vec::new(), None::<((i64, bool), bool)>);
+        loop {
+            match part.read_exact(&mut len) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+                Err(e) => return Err(io_err(e)),
+            }
+            buf.resize(u32::from_le_bytes(len) as usize, 0);
+            part.read_exact(&mut buf).map_err(io_err)?;
+            let r = RingCodec.get(&mut &buf[..]);
+            let b = (r.id, r.relation);
+            let keep = match current {
+                Some((x, keep)) if x == b => keep,
+                _ => seen.as_deref_mut().map_or(true, |s| s.insert(b)),
+            };
+            current = Some((b, keep));
+            if !keep {
+                continue;
+            }
+            self.push(r)?;
+        }
+    }
+
     pub fn finish(self, entrances: FxHashMap<i64, ()>) -> Result<BuildingRings, String> {
         Ok(BuildingRings { file: self.w.finish().map_err(io_err)?, n: self.n, lo: self.lo, hi: self.hi, entrances })
     }
 }
 
+/// The rings of one tile of a build by tiles, for the union (duckOSM docs/design/build_by_tiles.md, "The building faces"): each row
+/// is the length (4 bytes) and the bytes of a ring; a file of entrances is the ids of the entrance nodes (8 bytes each).
+fn put_row(out: &mut dyn Write, r: &Ring, buf: &mut Vec<u8>) -> std::io::Result<()> {
+    buf.clear();
+    RingCodec.put(r, buf);
+    out.write_all(&(buf.len() as u32).to_le_bytes())?;
+    out.write_all(buf)
+}
+
 impl BuildingRings {
+    /// The rings of a tile of a build by tiles in two part files: `mine`, the buildings that the tile owns, and `border`, the buildings
+    /// that no tile alone owns (outside the area: the union keeps one copy of each); the buildings of other tiles nowhere. `class` gives
+    /// the owner of a building from its id, whether it is a relation, and the first point of its first ring (`union::Owner::place`:
+    /// 1 this tile, 2 the border, 0 another tile). All rings of a building go with it. `entrances` gets the ids of the entrance nodes.
+    pub fn split(
+        self,
+        class: impl Fn(i64, bool, Pt) -> u8,
+        mine: &mut dyn Write,
+        border: &mut dyn Write,
+        entrances: &mut dyn Write,
+    ) -> Result<(usize, usize), String> {
+        let (mut buf, mut last, mut n) = (Vec::new(), None, (0, 0));
+        for r in self.file.read(&RingCodec).map_err(io_err)? {
+            let r = r.map_err(io_err)?;
+            let c = match last {
+                Some((id, rel, c)) if id == r.id && rel == r.relation => c,
+                _ => class(r.id, r.relation, r.pts[0]),
+            };
+            last = Some((r.id, r.relation, c));
+            if c == 1 {
+                put_row(mine, &r, &mut buf).map_err(io_err)?;
+                n.0 += 1;
+            } else if c == 2 {
+                put_row(border, &r, &mut buf).map_err(io_err)?;
+                n.1 += 1;
+            }
+        }
+        let mut ids: Vec<i64> = self.entrances.into_keys().collect();
+        ids.sort_unstable();
+        for id in ids {
+            entrances.write_all(&id.to_le_bytes()).map_err(io_err)?;
+        }
+        Ok(n)
+    }
+
     /// The grid near the rings: a street segment out of it is too far from every building (see [`NearBuildings`]).
     pub fn near(&mut self) -> Result<NearBuildings, String> {
         let mut g = NearBuildings::grid(self.lo, self.hi, self.n > 0);
@@ -1068,8 +1149,11 @@ pub fn building_faces_of(
                 weight: class_weight(&st.highway),
             };
             let north = seg.a.1.max(seg.b.1);
+            // the copy of a segment in the first group (mode) wins, and in one group the copy with the lowest edge_id (an edge and its
+            // reverse edge have one segment): in the order of the edges of one build, and in any order of the tiles of a build by tiles
+            let rank = |s: u64, e: i64| (s >> GROUP_SHIFT, e);
             match seen.get(&key) {
-                Some(&i) if segs[i].0 < seq => {}
+                Some(&i) if rank(segs[i].0, segs[i].3.edge_id) <= rank(seq, seg.edge_id) => {}
                 Some(&i) => segs[i] = (seq, key, north, seg),
                 None => {
                     seen.insert(key, segs.len());

@@ -196,6 +196,12 @@ fn lookup_point(nodes: &[(Mode, Vec<Node>)]) -> Option<(f64, f64)> {
     Some((near.lon, near.lat))
 }
 
+/// The IANA time zone at a point (longitude, latitude), from the world map of `tzf-rs`; None without the cargo feature `tzf`
+/// or at sea.
+pub fn timezone_at(lon: f64, lat: f64) -> Option<String> {
+    zone_of_map(lon, lat)
+}
+
 /// The zone at a point from the world map of `tzf-rs` (the native build).
 #[cfg(feature = "tzf")]
 fn zone_of_map(x: f64, y: f64) -> Option<String> {

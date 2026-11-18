@@ -21,8 +21,10 @@ duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out --memory 2G -
    whole area, and whether the tile is its **home tile**:
    - A tile does not have all ways of a node outside the tile, so without the file it does not see the junctions there,
      and its edges are too long.
-   - No tile holds a node outside the area. The cut gives each such node a home tile: the first tile (in the order of
-     the tiles) of the ways at the node, and the cut adds all ways of the node to the home tile. These ways have a node
+   - No tile holds a node outside the area. The cut gives each such node a home tile: the tile that holds the place of
+     the node, when that tile has a file, else the first tile (in the order of the tiles) of the ways at the node. The cut
+     adds all ways of the node to the home tile. (Before 2026-11-17 the home was always the first tile of the ways. The
+     connector of the dangling paths runs only near its tile, so Tartu lost one connector edge: pbfcut PR 55.) These ways have a node
      inside the area, so they are complete, and they bring no more work: their own outside nodes are in the file too.
 3. **Tile builds** (each in its own process with `--tile-threads` threads; see "The scheduler"). `--tile z/x/y` keeps
    the part of the area in the tile and the home nodes (`Boundary::within_tile`, `Boundary::with_points`), and the tile
@@ -122,6 +124,10 @@ half of a dual carriageway) cover both its sides. It reads the lines within 12 m
 Kentucky walking: the step finds 2,948 roads, as the whole build; `ways_walking` and `way_nodes_walking` are equal. The step
 takes 7.1 s.
 
+A line of another tile is checked only against the boxes of the roads in its cells of a grid (about 1 km). Before
+2026-11-17 each line was checked against all boxes of the tile: at zoom 8 the tile of Louisville has about 100,000 roads,
+and the step of Kentucky (the three modes) took 23.0 s; now 3.3 s.
+
 ## The connectors
 
 The connector of the dangling paths (`connect_paths`) joins a dangling path end to the nearest node within `snap_m` (10 m).
@@ -138,6 +144,27 @@ It was not local in three ways, and each one has a fix:
 
 Kentucky walking, Kentucky driving and cycling, and Monaco with Studio edits at zoom 14 in all three modes: all tables are
 equal to the whole build.
+
+## The building faces
+
+The walls of the buildings (`main.building_faces`, with `--raw --building-faces`) run after the union, as the bus routes and the
+levels. A wall reads the streets within 150 m and the other buildings within 60 m (the line of sight, the party walls), and these
+can be in other tiles.
+
+1. Each tile build writes the rings of the buildings that it owns, with the OSM fixes, to `building_rings.bin` (the tile of the
+   first point of the building, `Owner::place`), the buildings outside the area to `building_rings.border.bin`, and the ids of the
+   entrance nodes to `building_entrances.bin`. It makes no walls.
+2. The union reads the rings of the tiles in their order, one copy of each building of the border parts, and all entrances. The
+   street segments come from the edges of the union (driving, then walking), as the whole build reads them from the network.
+3. The faces are the whole build's (`building_faces_of`, in bands: the memory does not grow with the area).
+
+A segment that two edges have (an edge and its reverse edge, or two modes) takes the street of the first mode, and in one mode
+the edge with the lowest `edge_id`. Before 2026-11-17 the rule was "the first copy in the order of the edges"; the edges of the
+whole build are in the order of `edge_id`, so its walls do not change (Monaco, Tartu, Kentucky: the same file, byte for byte),
+and the rule no longer depends on the order of the tiles.
+
+`building_id` is the OSM id of the way or the relation of the building (with `building_type`). Monaco at zoom 14, Tartu and
+Kentucky by tiles: the walls are equal to the whole build in every row (Kentucky: 6,887,305 walls).
 
 ## H3 and the heights
 
@@ -261,6 +288,31 @@ France, the tables of the union with `raw.*` (27 GB of files):
 
 Kentucky, driving, `--format duckdb --raw`: the 23 tables of the two `.duckdb` files are equal (but the two with the time of the
 build), `raw.*` too (22.4 million rows). The load takes 10.7 s.
+
+## In the browser (duckOSM Studio, 2026-11-17)
+
+Studio runs the same functions in the browser: `union::cut_tiles`, `build` with `--tile` for each tile (a Web Worker of its
+own), and `union::union_all`. The browser has no folders, so their files go through `duckosm_core::fs`: natively they are
+the files of `std::fs` (no change), and a page sets its own files for the calling thread (`fs::set`). Three parts for the
+browser:
+
+- `fs::Blocks`: the temporary files of a step, named or not, are blocks of 1 MiB in one open file of the page. A file of
+  OPFS opens only asynchronously, and the steps are synchronous, so the page opens its files before a step; with the
+  blocks, the number of temporary files has no limit (France: 402 part files of the bus step). Only the files of the
+  result are files of their own.
+- `merge::Concat`: the join of Parquet files with the offsets in a u64. The writer of the parquet crate counts the bytes
+  of a file in a usize, 32 bits in WebAssembly: France's `edges_driving` (more than 4 GiB with snap) got a wrong footer.
+  The bus step adds the parts of each batch to its two tables at once.
+- `union::cut_tiles` in WebAssembly gives the tile files to a sink (pbfcut `cut_to_sink_build`) with no zlib.
+
+France in the browser (Mac mini, driving): 296 s, 5.7 GB of WebAssembly memory in all, 16.2 GB of browser storage at most.
+The tile build against one build (the three modes, `--levels solve`, zoom 8, Mac mini; the tables are equal):
+
+| Area | Native one build | Native by tiles |
+|---|---|---|
+| Monaco | 0.18 s | 0.27 s |
+| Tartu | 0.91 s | 1.41 s |
+| Kentucky | 35.7 s, 3.2 GB | 31.7 s, 1.3 GB |
 
 ## After the switch to pbfcut (2026-11-17)
 

@@ -7,6 +7,76 @@
   no GEOS library: the raw offset curve, and the buffer polygon of the line (GEOS's noder, planar graph, depths and polygon
   builder, `src/geos.rs`). On Monaco and Tartu the `.osm` file has the same bytes as the Python export.
 
+- **The Rust router holds less for a large area** (France on a Mac mini, `docs/guides/route.md`, "Large areas"). The graph is
+  flat arrays of arcs in both directions (12 bytes for each turn), the searches keep dense labels, and a trip across modes
+  reads only the modes of `--modes` and makes its indexes one time. France driving (25.9 million edges): the route Paris to
+  Marseille took 7.0 s with a peak of 8.7 GB, now 3.7 s and 6.4 GB. Île-de-France, Versailles to Bastille on foot and by car:
+  2.6 GB with the two modes, 4.4 GB with all. The routes are the same as before (and as Python's).
+
+- **`duckosm-rust elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
+  `duckosm elevation` (`--dem`, `--source`, `--mode`, `--nodata-fill`, `--suffix`, `--product`, `--vertical-datum`, `--license`,
+  `--not-reference`). It writes the same heights and the same `main.elevation_metadata` as Python on Monaco (a DEM file, a crop
+  with nodata, `--source copernicus`) and Tartu (`--source copernicus`, 60 s in place of 4 min 17 s). The DEM is a GeoTIFF in
+  EPSG:4326 with 32-bit floats; the downloads use DuckDB's httpfs. The DEM catalog (`dem_sources.json`) has a Rust reader too.
+  The DEM reader of the build now finds the pixel of a point as rasterio does, so a point on a pixel edge gets the same
+  height as in Python.
+
+- **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
+  commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
+  networkx's `dijkstra_path`). On Monaco and Tartu, `lane_<mode>.lane_edges` and 126 lane routes (with and without the stored
+  graph) equal Python's, with the text, `--json` and the `-o` GeoJSON (`duckosm-route/tests/lanes.rs`). With this, every part of
+  group E is in Rust.
+
+- **`duckosm-rust directions`** (`docs/design/all_in_rust.md`, group E): the turn-by-turn steps of `directions.py` for any route
+  result (one mode, across modes, between points), in `duckosm-router` (no DuckDB). On Monaco and Tartu, the steps of 1,423
+  routes (about 23,000 steps) equal Python's, with their texts (`duckosm-route/tests/multimodal_points.rs`).
+
+- **`duckosm-rust route-multimodal`, `route-points` and `route-multimodal-points`** (`docs/design/all_in_rust.md`, group E): the
+  trip across modes (`route_multimodal`, every part on the edge graph of its mode, walk* vehicle* walk*), and the routes between
+  two points (`route_points`, `route_multimodal_points`), in `duckosm-router` (no DuckDB). A point joins its roads with GEOS's
+  own formulas (distance, project, interpolate, length), so `fraction`, `access_m` and `road_point` are the same floats as
+  shapely gives. Each command prints duckOSM's dict as JSON, and `--batch FILE` answers many queries on one graph. On Monaco and
+  Tartu, 1,500 queries give the same JSON as Python, floats and error texts too (`duckosm-route/tests/multimodal_points.rs`).
+
+- **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
+  algorithms: no DuckDB, no threads, it builds for WebAssembly) and `rust/duckosm-route` (the database, GraphML, the CLI). The
+  routing graph is in memory with the order of networkx's graph, and the route is a port of networkx's bidirectional Dijkstra
+  (the same heap keys), so a tie gives the path of duckOSM's `routing.route`. `route DB FROM TO` prints `route()` as JSON;
+  `--pairs FILE` routes many pairs on one graph, as `Router` does. `export-graph` writes the same GraphML files as duckOSM
+  (node graph and edge graph), byte for byte; `gpickle` (a Python pickle) stays in Python. On Monaco and Tartu, 1,200 routes of
+  driving and walking, by time and by length, have the same edges, `time_s` and `length_m` as Python
+  (`duckosm-route/tests/golden.rs`). With `weight=length` Python's graph comes from a join with no fixed row order, so its ties
+  change from run to run; the Rust graph keeps the order of the edge graph. Python's text of a float (`place::py_float`) and
+  the JSON of the tools now round a tie of the shortest digits to the even digit, as Python does.
+
+- **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
+  database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of
+  `/api/info`, `/api/query`, `/api/sql`, `/ask/*.js` are the same bytes as Python's on Monaco. With this, every command of group B
+  is in Rust.
+
+- **`duckosm-rust extract` and `admin`** (`docs/design/all_in_rust.md`, group B), with the options of the Python commands. `admin`
+  reads the boundary relations of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), and `--gpkg` writes or reuses
+  a GeoPackage; `extract` cuts a database to an area by name, OSM id or GeoJSON file, with the time zone of the Rust build. On
+  Monaco (all three kinds of area, both `--gpkg` cases) and with the Tartu PBF, every table equals the Python output
+  (`duckosm-tools/tests/golden.rs`).
+
+- **`duckosm-rust boundary`** (`docs/design/all_in_rust.md`, group B): the options of `duckosm boundary` (`NAME`, `--pbf`,
+  `--osm-id`, `--offline`, `-o`). It looks in the borders of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), then
+  on Nominatim, and writes the same GeoJSON file, byte for byte, with the same lines (the other matches too). A boundary that a
+  build makes from `boundary.place`, `bbox` or `h3_cell` is now written in the same format as Python's.
+
+- **`duckosm-rust info`, `way` and `init-config`** (`docs/design/all_in_rust.md`, group B), in the new crate `rust/duckosm-tools`.
+  They have the options of the Python commands and give the same output: the text and `--json` of `info`, and the text (DuckDB's
+  table print), `--json` and the `--out` files (.csv, .json, .parquet) of `way`; `init-config` writes the same template. Checked on
+  Monaco (both builds, a clip) and Tartu; a golden test keeps the Python output (`tests/data/golden_tools/`). Two differences:
+  a `.parquet` file of `way --out` names DuckDB 1.5.6 in its metadata (its rows are equal), and `way` takes a negative id with no
+  `--` before it.
+
+- **`duckosm-rust`: the bus routes of a build with no boundary.** A build of the whole file (the `.duckdb` output) reads the
+  route relations, their member ways and the elements of the fixes from `raw.*` (`RawInput::raw_part`), applies the fixes, and
+  makes `bus.routes` and `bus.route_edges`, as duckOSM does. Before, it made no bus tables. Monaco (`tests/bus_whole_file.rs`)
+  and Tartu (the cut file as a whole file) equal the Python build row by row.
+
 - **`duckosm-rust --config`: the base-map layers without a boundary, and `duckosm-rust features-check`, are in Rust**
   (`docs/design/all_in_rust.md`, group A). Without a boundary, the layers run on the `raw.*` of the whole file with duckOSM's
   own `geom.way_line`, and the sea uses the box of the nodes, as in duckOSM. The OSM fixes change `raw.*` first, as

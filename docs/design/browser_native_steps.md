@@ -1,6 +1,6 @@
-# Offline and online builds: each step in detail
+# Browser and native builds: each step in detail
 
-The short page for users is [docs/concepts/offline-online.md](../concepts/offline-online.md). This page has the details: the diagrams, where each step keeps its data, the sub-steps of the network, and the Kentucky measurement of each step.
+The short page for users is [docs/concepts/native-browser.md](../concepts/native-browser.md). This page has the details: the diagrams, where each step keeps its data, the sub-steps of the network, and the Kentucky measurement of each step.
 
 ## The signs
 
@@ -12,7 +12,7 @@ The short page for users is [docs/concepts/offline-online.md](../concepts/offlin
 | **In blocks** | the step reads or writes a part at a time, so its memory does not grow with the area |
 | **Spills** | DuckDB keeps the data in memory up to its limit, and writes the rest to a temporary file |
 
-## The offline build
+## The native build
 
 A build of a whole file with `duckosm-rust`. In the diagrams, a blue cylinder is storage, a red rounded box is memory, and a
 plain box is a step.
@@ -49,7 +49,7 @@ flowchart TB
     class M1,M2,M3 mem
 ```
 
-## The online build
+## The browser build
 
 Studio in the browser. The page always builds an area that you choose inside a region file.
 
@@ -92,7 +92,7 @@ flowchart TB
 
 What each step holds in memory, and which part of it the step reads: [Memory at each step](../concepts/memory-by-step.md).
 
-| Step | Offline | Online |
+| Step | Native | Browser |
 |---|---|---|
 | **The input** | **Storage:** the `.osm.pbf` file on the disk. | **Storage:** the region file in OPFS. It comes one time through the relay, and the next area in the same region needs no download. |
 | **0. Cut to the area** | A whole-file build has no cut. An area with a boundary: the Rust cut reads the file **in blocks** and writes the area file to **storage**. It keeps only lists of ids in **memory**. | Always. The same cut reads the region file **in blocks** from OPFS, and writes the area file to **OPFS**. It keeps only lists of ids in **tab memory**. The page removes the area file after the build. |
@@ -102,14 +102,14 @@ What each step holds in memory, and which part of it the step reads: [Memory at 
 | **4. Write the network files** | GeoParquet files to **storage**, from the network in memory. | Parquet files in **OPFS**: each file of the result goes to an OPFS file of its own, in a folder of the tab. |
 | **5. Area tables, levels, lane profile** | Read the ways and the coordinates in **memory**; write files to **storage**. | The same, files in **OPFS**. |
 | **6. The tables** | DuckDB reads the GeoParquet files into the `.duckdb` file in **storage**. It uses its `memory_limit` and **spills** what is more. | The files are already in **OPFS**, in a folder of the tab: the build wrote them there. A file larger than 256 KB **stays there**: DuckDB-Wasm reads it through a view, at each query. A smaller file, and the tables of the level editor (`visualization.*`), are copied into DuckDB-Wasm's **memory**. |
-| **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: the area file is read again **in blocks** into Parquet files. Only the elements that the fixes change, and the tags of the network's ways, come from memory. | From the area file, as Parquet files in **OPFS**. DuckDB-Wasm reads them only to make the base-map layers, and then drops them: online there are no `raw.*` tables. |
+| **7. `raw.*`** | A whole-file build: `read_osm` gives the blocks of the file to DuckDB, which writes the tables to **storage**. The memory is DuckDB's limit and **one block for each thread**. An area: the area file is read again **in blocks** into Parquet files. Only the elements that the fixes change, and the tags of the network's ways, come from memory. | From the area file, as Parquet files in **OPFS**. DuckDB-Wasm reads them only to make the base-map layers, and then drops them: browser there are no `raw.*` tables. |
 | **The base-map layers** | An area: `features.sql` runs in DuckDB on `raw.*`; it **spills**. | `features.sql` runs in DuckDB-Wasm on the `raw_*` files in OPFS. The layers become Parquet files in **OPFS**, as the other tables. |
 | **The result** | The `.duckdb` file in **storage**. | The Parquet files in **OPFS**, with views in DuckDB-Wasm (small tables in its **memory**). **Save** keeps the files after the tab closes; **Export** copies the tables into a `.duckdb` file to download. |
 
 ## Step 3 in detail: the network of a mode
 
-The network step runs one time for each mode (driving, walking, cycling). The offline and the online build run the same
-Rust code. Only the place of the files is different: offline they go to the disk, online they stay as bytes in the
+The network step runs one time for each mode (driving, walking, cycling). The native and the browser build run the same
+Rust code. Only the place of the files is different: native they go to the disk, browser they stay as bytes in the
 memory of the tab.
 
 The sub-steps have the numbers 3.1 to 3.13, in the order in which they run. The code (`build_network_junctions` in
@@ -130,8 +130,8 @@ flowchart TB
     S9b["<b>3.13 Edge graph</b><br/>the moves of each edge,<br/>in edge_id order"]
     W["<b>Write the</b><br/><b>network files</b>"]
     LV["<b>Levels</b><br/>take the edges<br/>(no copy)"]
-    F1[("offline:<br/>GeoParquet files<br/>[storage]")]
-    F2[("online:<br/>Parquet files<br/>[storage: OPFS]")]
+    F1[("native:<br/>GeoParquet files<br/>[storage]")]
+    F2[("browser:<br/>Parquet files<br/>[storage: OPFS]")]
 
     IN --> S0 --> S1 --> M1
     M1 <--> S2
@@ -167,12 +167,12 @@ measured build.
 | Driving: length of all edges (both directions together) | 350,771 km |
 | Driving: rows of the edge graph / turn restrictions | 6,210,008 / 2,393 |
 
-### The memory and the time of each sub-step (offline)
+### The memory and the time of each sub-step (native)
 
 | How it was measured | |
 |---|---|
 | Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores (2 super, 4 performance, 6 efficiency), 16 GB memory, internal SSD, macOS 27.2 |
-| Version | **offline only**: the native program `duckosm-rust` from duckOSM `main` of 2026-11-11 (before 3.1 to 3.11 moved to temporary files), `cargo build --release --features heap-probe`. For the whole build offline and online, see [Kentucky, offline and online](#kentucky-offline-and-online) |
+| Version | **native only**: the native program `duckosm-rust` from duckOSM `main` of 2026-11-11 (before 3.1 to 3.11 moved to temporary files), `cargo build --release --features heap-probe`. For the whole build native and browser, see [Kentucky, native and browser](#kentucky-native-and-browser) |
 | Area | Kentucky, driving mode (see [the area](#the-area-kentucky)) |
 | Command | `duckosm-rust kentucky-latest.osm.pbf -o out --name kentucky -f duckdb -m driving --h3-resolution 8 --timing` |
 | Memory | the live Rust heap after the sub-step: a counting allocator (`heap-probe`) that counts the bytes that the program has from the system. It does not include the memory of DuckDB |
@@ -209,30 +209,30 @@ After the mode, 1.5 GB is live on Kentucky: the ways and the coordinates (0.4 GB
 later steps) and the edges and the nodes of the mode (1.1 GB). The network files are then written, and the levels take
 the edges. The edges are the largest part.
 
-## Kentucky, offline and online
+## Kentucky, native and browser
 
-The same engine (duckOSM `main` of 2026-11-13, after PR #127) builds the same area offline and online. Both versions
+The same engine (duckOSM `main` of 2026-11-13, after PR #127) builds the same area native and browser. Both versions
 give the same rows.
 
 | How it was measured | |
 |---|---|
 | Computer | Mac mini (Mac18,5): Apple M6 chip, 12 cores, 16 GB memory, internal SSD, macOS 27.2 |
 | Input | Kentucky cut from `us-south-latest.osm.pbf` (Geofabrik, 4.16 GB) with Geofabrik's border of the state, driving mode: 2,224,823 edges. This cut keeps each way with a node inside, whole, so it has more edges than `kentucky-latest.osm.pbf` |
-| Offline | `duckosm-rust us-south-latest.osm.pbf --boundary kentucky.geojson --modes driving --format geoparquet`, 12 threads, `cargo build --release --features heap-probe`. Memory: the peak of the Rust heap in the step. Time: the middle value of three runs |
-| Online | duckOSM Studio in Chromium (Playwright), 12 threads (the page uses the number of cores, at most 12), the area file and the temporary files of the network in OPFS. Memory: the WebAssembly memory after the step. It never gets smaller, so it is the peak up to that step. Two runs: the totals were the same to 0.2 s and the memory to 5 MiB; the table gives the first |
+| Native | `duckosm-rust us-south-latest.osm.pbf --boundary kentucky.geojson --modes driving --format geoparquet`, 12 threads, `cargo build --release --features heap-probe`. Memory: the peak of the Rust heap in the step. Time: the middle value of three runs |
+| Browser | duckOSM Studio in Chromium (Playwright), 12 threads (the page uses the number of cores, at most 12), the area file and the temporary files of the network in OPFS. Memory: the WebAssembly memory after the step. It never gets smaller, so it is the peak up to that step. Two runs: the totals were the same to 0.2 s and the memory to 5 MiB; the table gives the first |
 
 **The whole build:**
 
-| Kentucky, driving | Offline | Online |
+| Kentucky, driving | Native | Browser |
 |---|---|---|
 | The network, area tables, levels and lane profile | 20.1 s, 2,161 MiB | 29.9 to 30.0 s, 2,123 to 2,301 MiB |
 | The same, with `raw.*`, the base-map layers and the building faces | 28.4 s, 3,228 MiB | 42.4 to 42.6 s, 3,250 to 3,255 MiB |
 
-A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with the layers has about 840 MiB free.
+A WebAssembly module can use at most 4 GB (4,096 MiB), so the browser build with the layers has about 840 MiB free.
 
 **Each step, with `raw.*`, the base-map layers and the building faces:**
 
-| Step | Offline: time | Offline: peak memory | Online: time | Online: memory |
+| Step | Native: time | Native: peak memory | Browser: time | Browser: memory |
 |---|---|---|---|---|
 | 0. Cut to the area file | 8.1 s | 356 MiB | 14.7 s | 446 MiB |
 | 1. Ways, coordinates, turn restrictions | 0.6 s | 619 MiB | 1.0 s | 886 MiB |
@@ -248,18 +248,18 @@ A WebAssembly module can use at most 4 GB (4,096 MiB), so the online build with 
 
 - Step 0 is the slowest step in both versions: it reads all of the 4.16 GB region file. Its largest cost was the test
   of each node against the border of the area: now a node tests only the edges of the border at its own latitude (PR
-  #127: the cut 11.3 s -> 8.1 s offline, 17.6 s -> 14.7 s online). Online, the file comes from OPFS in pieces, and each
+  #127: the cut 11.3 s -> 8.1 s native, 17.6 s -> 14.7 s browser). Browser, the file comes from OPFS in pieces, and each
   thread unpacks and decodes about 1.6 times slower than natively.
 - The area file has full blocks (3,053 for Kentucky). Before PR #122 it had one small block for each block of the region
   file (37,534), and each later step paid for each block.
 - Step 3 sorts the edges by `edge_id` and writes sorted runs (about 580 MB) to temporary files. When the disk of the
   Mac was 96% full, this writing paused for about 3 s in some runs (one native run of four: 3.19 s, the others 0.11 s;
-  online, step 3 took up to 9.7 s). With 30 GB and more free, no run paused: 8 of 8 native runs and 3 of 3 online runs.
+  browser, step 3 took up to 9.7 s). With 30 GB and more free, no run paused: 8 of 8 native runs and 3 of 3 browser runs.
   So keep free space on the disk for the temporary files of a large area.
-- Online, the build writes each Parquet file of the result (2.6 GB in all) straight to OPFS, not to the memory of the
+- Browser, the build writes each Parquet file of the result (2.6 GB in all) straight to OPFS, not to the memory of the
   tab. All Chromium processes together peaked at 4.7 GB on Kentucky. Before, when the files were in JavaScript memory
   until the page wrote them to OPFS, they peaked at 7.9 to 8.5 GB.
-- On 2026-11-12, at the start of this work, the offline build took 54.2 s and 17,206 MiB, and the online build
+- On 2026-11-12, at the start of this work, the native build took 54.2 s and 17,206 MiB, and the browser build
   stopped at the limit of 4 GB. The changes are in
   [the cut to an area file](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/cut_stream.md).
 

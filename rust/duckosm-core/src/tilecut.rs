@@ -1,6 +1,6 @@
 //! Step 0 of a build by tiles: one read of the region file gives one file for each tile ([`crate::tiles`]). The cut is
 //! the pbfcut library (`pbfcut::tilecut`, docs/design/build_by_tiles.md). This module keeps the names that duckOSM and
-//! its hosts call, and gives pbfcut the rule of duckOSM's junctions ([`Junctions`]) for the junctions file of each tile.
+//! its hosts call, and gives pbfcut the rule of duckOSM's junctions ([`JunctionRule`]) for the junctions file of each tile.
 
 use crate::boundary::Boundary;
 use crate::cutstream::CutCounts;
@@ -10,7 +10,7 @@ use std::io::{Read, Seek};
 use std::path::Path;
 
 pub use crate::tiles::near_tile;
-pub use pbfcut::tilecut::{border_m, read_junctions, Sink, TileFiles, HOME, JUNCTIONS_MAGIC};
+pub use pbfcut::tilecut::{border_m, parse_junctions, Junctions, Sink, TileFiles, HOME, JUNCTIONS_MAGIC};
 
 /// The node is a junction in the whole area (`main.global_junctions`).
 pub const JUNCTION: u8 = 1;
@@ -19,9 +19,9 @@ pub const ROAD: u8 = 2;
 
 /// The rule of `main.global_junctions`, for the junctions files of the cut: a tile does not have all ways of a node
 /// outside it, so the file tells it which of these nodes are junctions in the whole area.
-struct Junctions;
+struct JunctionRule;
 
-impl NodeUses for Junctions {
+impl NodeUses for JunctionRule {
     fn of_way(&self, tags: &[(String, String)], refs: &[i64], out: &mut Vec<(i64, u8)>) {
         let tags = crate::model::Tags::from_pairs(tags.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         crate::network::JunctionUses::of_way(&tags, refs, out);
@@ -38,6 +38,13 @@ impl NodeUses for Junctions {
 /// The steps of pbfcut go to [`crate::util::step`] (the probes and the progress of the page).
 fn steps() {
     let _ = pbfcut::util::STEP_HOOK.set(crate::util::step);
+}
+
+/// Read a junctions file of the tile cut (through `crate::fs`: natively a file, in the browser a file of the page): (node id,
+/// flags).
+pub fn read_junctions(path: &Path) -> Result<Vec<(i64, u8)>, String> {
+    let b = crate::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    parse_junctions(&b).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The positions of the nodes of `ids` in a PBF file (the home nodes of a tile: the build of the tile holds them).
@@ -60,7 +67,7 @@ pub fn cut_to_tiles<R: Read + Seek + Send>(
     steps();
     let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
     // zlib: the tile files can stay (--keep-tiles), and the cut of France keeps its peak memory
-    pbfcut::tilecut::cut_to_tiles(open, boundary, tiles, dir, complete, border_m, Some(&Junctions), true)
+    pbfcut::tilecut::cut_to_tiles(open, boundary, tiles, dir, complete, border_m, Some(&JunctionRule), true)
 }
 
 /// [`cut_to_tiles`] into the temporary store (`spill::temp_store`: a folder natively, OPFS in the browser), with no
@@ -86,7 +93,23 @@ pub fn cut_to_store_build<R: Read + Seek + Send>(
     border_m: f64,
 ) -> Result<TileFiles, String> {
     steps();
-    pbfcut::tilecut::cut_to_store_build(open, boundary, tiles, multipolygons, border_m, Some(&Junctions), true)
+    pbfcut::tilecut::cut_to_store_build(open, boundary, tiles, multipolygons, border_m, Some(&JunctionRule), true)
+}
+
+/// [`cut_to_tiles`], with each tile file given to `sink` (in pieces, tile by tile) and the junctions files in [`Junctions`]:
+/// the cut of the build by tiles where no folder is (the browser). The files are equal to the files of [`cut_to_tiles`].
+pub fn cut_to_sink_build<R: Read + Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    boundary: &Boundary,
+    tiles: &[Tile],
+    multipolygons: bool,
+    border_m: f64,
+    compress: bool,
+    sink: Sink,
+) -> Result<(Vec<CutCounts>, Junctions), String> {
+    steps();
+    let complete: &[&str] = if multipolygons { &["multipolygon"] } else { &[] };
+    pbfcut::tilecut::cut_to_sink_build(open, boundary, tiles, complete, border_m, &JunctionRule, compress, sink)
 }
 
 /// [`cut_to_store`], with each tile file given to `sink` (in pieces, tile by tile): the browser writes each tile into a

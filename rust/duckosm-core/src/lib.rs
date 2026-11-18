@@ -7,6 +7,7 @@ pub mod cutfile;
 #[cfg(feature = "pbf")]
 pub mod cutstream;
 pub mod filter;
+pub mod fs;
 pub mod fixes;
 pub mod geom;
 pub mod graph;
