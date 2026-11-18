@@ -17,12 +17,12 @@ The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md), [GIS](
 
 ## Where the heights come from
 
-| Source | Model | License |
-|---|---|---|
-| `--source copernicus` | Copernicus GLO-30: 30 m, the whole world, a surface model (DSM) | Copernicus open, with attribution |
-| `--source eudtm` | EU-DTM: 30 m, Europe, bare earth (DTM); needs a free key in `OPENTOPOGRAPHY_API_KEY` | the terms of OpenTopography |
-| `--source auto` (default) | `eudtm` when the area is in Europe and the key is set, else `copernicus` | |
-| `--dem FILE` | your own file, for example a national 1 m DTM | the license that you give |
+| Source | Model | Reference ground | License |
+|---|---|---|---|
+| `--source copernicus` | Copernicus GLO-30: 30 m, the whole world, a surface model (DSM) | no: it includes buildings and trees | Copernicus open, with attribution |
+| `--source eudtm` | EU-DTM: 30 m, Europe, bare earth (DTM); needs a free key in `OPENTOPOGRAPHY_API_KEY` | yes | the terms of OpenTopography |
+| `--source auto` (default) | `eudtm` when the area is in Europe and the key is set, else `copernicus` | | |
+| `--dem FILE` | your own file, for example a national 1 m DTM | yes, with `--product DTM` | the license that you give |
 
 The other models and their licenses: [Elevation sources](../reference/elevation-sources.md).
 
@@ -41,8 +41,11 @@ use GDAL ([File formats](../reference/elevation-sources.md#file-formats)). The f
 `main.elevation_metadata.sha256` is the ground id: the SHA-256 of the file, the same value as `sha256sum my_dtm.tif`.
 It is NULL when the command reads the file in parts (Copernicus, or a `--dem` address).
 
-In duckOSM Studio, the step **Ground height (DEM)** does this work: it lists the sources for the area, links to their
-download pages and takes a file that you drop. The local `duckosm studio` downloads the tiles itself.
+| Where | How |
+|---|---|
+| the program | `duckosm elevation DB` |
+| duckOSM Studio (browser) | the step **Ground height (DEM)**: it lists the sources for the area and links to their download pages; you drop the file |
+| `duckosm studio` (your computer) | the same step; it also downloads the tiles itself |
 
 ## What the heights mean
 
