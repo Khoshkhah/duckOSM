@@ -17,6 +17,7 @@ from pathlib import Path
 import duckdb
 
 from duckosm.gis import to_gis
+from duckosm.gmns import to_gmns
 from duckosm.gis_debug import write_debug
 from duckosm.matsim import to_matsim
 from duckosm.matsim_lanes import to_matsim_lanes
@@ -95,6 +96,31 @@ def gis(db, out):
     (out / "monaco_gis_summary.tsv").write_text("\n".join(lines) + "\n")
 
 
+def columns(db, schema_like="gmns\\_%"):
+    """One line for each column of each table of the schemas `schema_like`: its type, the rows and the MD5 of its values as
+    text, sorted (NULL is the empty text after a mark). The same SQL as `columns` in golden_gmns.rs: if you change one,
+    change the other."""
+    con = duckdb.connect(str(db), read_only=True)
+    con.execute("INSTALL spatial; LOAD spatial")
+    lines = ["table\tcolumn\ttype\trows\tmd5"]
+    cols = con.execute("SELECT table_schema || '.' || table_name, column_name, data_type FROM information_schema.columns "
+                       f"WHERE table_schema LIKE '{schema_like}' ESCAPE '\\' ORDER BY 1, ordinal_position").fetchall()
+    for t, c, typ in cols:
+        v = f'ST_AsText("{c}")' if typ.startswith("GEOMETRY") else f'"{c}"::VARCHAR'
+        n, h = con.execute(f"SELECT count(*), md5(coalesce(string_agg(coalesce('=' || {v}, '-'), chr(10) "
+                           f"ORDER BY coalesce('=' || {v}, '-')), '')) FROM {t}").fetchone()
+        lines.append(f"{t}\t{c}\t{typ}\t{n}\t{h}")
+    con.close()
+    return lines
+
+
+def gmns(db, out):
+    """duckosm gmns on Monaco (its defaults: every mode, lane geometry) -> one line for each column of the GMNS db."""
+    with tempfile.TemporaryDirectory() as tmp:
+        to_gmns(db, f"{tmp}/monaco_gmns.duckdb")
+        (out / "monaco_gmns_columns.tsv").write_text("\n".join(columns(f"{tmp}/monaco_gmns.duckdb")) + "\n")
+
+
 def gz(src, dst):
     """Keep the large Python output gzip-compressed, with the time 0 in its header (the same bytes on each run)."""
     with open(src, "rb") as f, open(dst, "wb") as o:
@@ -127,6 +153,7 @@ def main(db, out, gmns=None):
     to_matsim(db, out / "monaco_all_network.xml.gz", mode="all", crs="EPSG:3035")
     to_railml(db, out / "monaco.railml.xml")
     gis(db, out)
+    gmns(db, out)
     for p in sorted(x for x in out.iterdir() if x.is_file()):
         n = len(gzip.open(p).read()) if p.suffix == ".gz" else p.stat().st_size
         print(f"{p}: {n} bytes")

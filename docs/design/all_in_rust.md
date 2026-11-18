@@ -82,6 +82,21 @@ Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata
 - DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. The command drops the R-tree
   index of `edges` for the update of `z_vertices` and makes it again (64 s to 10 s for the cycling edges of Tartu).
 
+## Group C: the state
+
+The GMNS export is ported step by step into `rust/duckosm-export/src/gmns.rs`, in the order of `to_gmns`, with the same SQL.
+The golden file `tests/data/exports/monaco_gmns_columns.tsv` has one line for each column of each table of Python's
+`duckosm gmns` on Monaco: the type, the number of rows and the MD5 of the values as sorted text. The test `gmns_equals_python`
+compares each column of each table that the Rust export makes; `GMNS_PENDING` lists the columns that a later step changes.
+The command `duckosm-rust gmns` comes when all the steps are ported.
+
+| Step | State |
+|---|---|
+| `config`, `use_definition`, `use_group`, `node`, the inherited lane counts, `link`, `geometry` | Done: 176 columns equal Python on Monaco. |
+| Sidewalk parents (`link_along`, `link.along_*`, `link.parent_link_id`), lanes and curbs, walking frame, movements | Not started. |
+| `gmns_sumo` (netconvert), lanes that meet, crossings, signals, `location` (with GTFS), signs, node types, `zone` | Not started. Python's cycling lane geometry is not the same on two runs: to look at before the lane step. |
+| Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
+
 ## Not changed
 
 - The tables and `edge_id` stay the same: other projects join on them.
