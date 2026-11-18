@@ -123,25 +123,27 @@ exclude_docs: |
 
 nav:
   - Home: index.md
-  - Get started:
+  - Start:
       - Install: install.md
       - Your first network: first_network.md
-  - Guides:
-      - duckOSM Studio: guides/studio.md
+      - duckOSM Studio (browser): guides/studio.md
+  - Build an area:
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
-      - Fix OSM errors: guides/fix-osm-errors.md
-      - Edit OSM data: guides/edit-osm-data.md
-      - Query the database: guides/query.md
-      - Questions to ask the AI agent: guides/ask-questions.md
-      - Draw a map: guides/draw-map.md
-      - Store the drawing order: guides/drawing-order.md
-      - Route: guides/route.md
-      - Walking: guides/walking.md
+      - Fix the OSM data: guides/edit-osm-data.md
+      - The fixes file: guides/fix-osm-errors.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md
-  - Exports:
+  - Use the network:
+      - Route: guides/route.md
+      - Walking: guides/walking.md
+      - Routing across modes: concepts/multimodal.md
+      - Query the database: guides/query.md
+      - Questions to ask the AI agent: guides/ask-questions.md
+      - Draw a map: guides/draw-map.md
+      - Drawing order: guides/drawing-order.md
+  - Export:
       - Overview: exports/index.md
       - Traffic simulation:
           - SUMO: exports/sumo.md
@@ -159,25 +161,26 @@ nav:
           - OpenDRIVE: exports/opendrive.md
           - Lanelet2: exports/lanelet2.md
           - Lane-level routing: exports/lane-routing.md
-  - Concepts:
+  - How it works:
       - How a build works: concepts/build.md
       - Browser and native builds: concepts/browser-native.md
       - Memory at each step: concepts/memory-by-step.md
-      - The ground reference: concepts/ground-reference.md
-      - The terrain of an area: concepts/terrain.md
-      - The Rust engine: concepts/rust-engine.md
       - Stable edge ids: concepts/edge-ids.md
       - What each network contains: concepts/networks.md
       - Network clean-up: concepts/cleanup.md
       - The walls of the buildings: concepts/building-walls.md
-      - Routing across modes: concepts/multimodal.md
-      - duckOSM and OSMnx: concepts/osmnx.md
+      - The ground reference: concepts/ground-reference.md
+      - The terrain of an area: concepts/terrain.md
       - How each output is checked: concepts/checks.md
+      - The Rust engine: concepts/rust-engine.md
+  - Compare:
+      - Speed on France: compare/speed.md
+      - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:
       - Command line: reference/cli.md
-      - Configuration: reference/configuration.md
       - Python SDK: reference/python.md
       - Rust SDK: reference/rust.md
+      - Configuration: reference/configuration.md
       - Database schema: reference/database.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md
