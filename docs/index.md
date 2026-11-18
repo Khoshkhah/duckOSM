@@ -55,7 +55,7 @@ file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does n
 | Turns | a turn that a driver cannot make, or must make |
 | New roads | a road that OSM does not have |
 
-The network and all its exports use your fixes. More: [Edit OSM data](guides/edit-osm-data.md), [Fix OSM errors](guides/fix-osm-errors.md).
+The network, all its exports, and the quack outputs (`duckosm quack --fixes`) use your fixes. More: [Edit OSM data](guides/edit-osm-data.md), [Fix OSM errors](guides/fix-osm-errors.md).
 
 ## Two versions, one engine
 
