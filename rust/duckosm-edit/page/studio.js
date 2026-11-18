@@ -370,7 +370,13 @@
     refreshSteps();
     // the address names an open area (/?area=<name>: back from the editor, or a reload): it opens on the map; a new visit (/) has no area
     const want = new URLSearchParams(location.search).get("area");
-    paintAreas().then(async () => { if (want) await openArea(want); }).catch((e) => { closeArea(); rs.sections.note("areas", e.message); });
+    const wantLevels = new URLSearchParams(location.search).get("step") === "8";      // read now: openArea writes the address again
+    paintAreas().then(async () => {
+      if (!want) return;
+      await openArea(want);
+      // /?area=<name>&step=8 (duckosm-rust levels-edit): the level editor opens at once
+      if (wantLevels && !levelWhy && !levelPart?.isOpen()) levelCard.querySelector(".rs-sec-title").click();
+    }).catch((e) => { closeArea(); rs.sections.note("areas", e.message); });
     window.studio = { area, data, settings, ground, build, result, viz, map, levelPart };           // for the tests
     window.studioReady = true;
   }
