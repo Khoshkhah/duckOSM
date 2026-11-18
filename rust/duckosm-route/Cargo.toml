@@ -1,0 +1,21 @@
+[package]
+name = "duckosm-route"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Routing on a built duckOSM database (docs/design/all_in_rust.md, group E): the edge graph in memory (in place of networkx),
+# the routes of duckOSM's routing.py, point_routing.py, directions.py and lane_routing.py, and export-graph (GraphML).
+
+[dependencies]
+duckdb = { version = "=1.10506.1", features = ["bundled", "parquet"] }
+clap = { version = "4", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+# the algorithms (no DuckDB: they build for WebAssembly too)
+duckosm-router = { path = "../duckosm-router" }
+duckosm-tools = { path = "../duckosm-tools" }
+# Python's text of a float (place::py_float)
+duckosm-build = { path = "../duckosm-build" }
+
+[dev-dependencies]
+md-5 = "0.10"

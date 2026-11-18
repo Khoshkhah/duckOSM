@@ -1,0 +1,10 @@
+[package]
+name = "duckosm-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The routing algorithms of duckOSM (docs/design/all_in_rust.md, group E), with plain data in and out: no DuckDB, no threads,
+# no dependency, so that it builds for WebAssembly too. duckosm-route reads a database into it; a page can give it its own data.
+
+[dependencies]
