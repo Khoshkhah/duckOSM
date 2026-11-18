@@ -88,28 +88,49 @@ struct Meta {
     sha256: Option<String>,
 }
 
-/// Where the heights come from: one raster, or the 1° tiles of Copernicus GLO-30 (downloaded once, when a point needs them).
+/// Where the heights come from: one raster, or the 1° tiles of Copernicus GLO-30 (`bbox`: the box of all the points). `got`:
+/// the tiles and the bytes downloaded.
 enum Sampler {
     File(Dem),
-    Tiles { tiles: HashMap<(i32, i32), Option<Dem>>, bbox: [f64; 4] },
+    Tiles { bbox: [f64; 4], got: (usize, usize) },
 }
 
 impl Sampler {
-    /// The height at a point, or None outside the DEM or on nodata.
-    fn sample(&mut self, con: &Connection, lon: f64, lat: f64) -> Option<f64> {
+    /// The heights at the points (`xs`, `ys`), NaN outside the DEM or on nodata. The tiles of Copernicus are read one at a
+    /// time, for the points that they hold, so that one tile only is in memory (France has about 70).
+    fn sample_all(&mut self, con: &Connection, xs: &[f64], ys: &[f64]) -> Vec<f64> {
+        let at = |d: &Dem, i: usize| d.sample(xs[i], ys[i]).unwrap_or(f64::NAN);
         match self {
-            Sampler::File(d) => d.sample(lon, lat),
-            Sampler::Tiles { tiles, bbox } => {
-                let key = (lat.floor() as i32, lon.floor() as i32);
-                tiles.entry(key).or_insert_with(|| copernicus_tile(con, key, *bbox)).as_ref()?.sample(lon, lat)
+            Sampler::File(d) => (0..xs.len()).map(|i| at(d, i)).collect(),
+            Sampler::Tiles { bbox, got } => {
+                let key = |i: u32| (ys[i as usize].floor() as i32, xs[i as usize].floor() as i32);
+                let mut order: Vec<u32> = (0..xs.len() as u32).collect();
+                order.sort_unstable_by_key(|&i| key(i));
+                let mut z = vec![f64::NAN; xs.len()];
+                for run in order.chunk_by(|&a, &b| key(a) == key(b)) {
+                    // the pixels over the points of this tile only (and inside the box of all the points)
+                    let (mut w, mut s, mut e, mut n) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                    for &i in run {
+                        let (x, y) = (xs[i as usize], ys[i as usize]);
+                        (w, s, e, n) = (w.min(x), s.min(y), e.max(x), n.max(y));
+                    }
+                    let b = [w.max(bbox[0]), s.max(bbox[1]), e.min(bbox[2]), n.min(bbox[3])];
+                    if let Some((d, bytes)) = copernicus_tile(con, key(run[0]), b) {
+                        *got = (got.0 + 1, got.1 + bytes);
+                        for &i in run {
+                            z[i as usize] = at(&d, i as usize);
+                        }
+                    }
+                }
+                z
             }
         }
     }
 }
 
-/// The tile of Copernicus GLO-30 whose south-west corner is (lat, lon), with the pixels over `bbox` only. None when the
-/// tile does not exist (sea) or cannot be read; then its points get the fill value, as in duckOSM.
-fn copernicus_tile(con: &Connection, (lat, lon): (i32, i32), bbox: [f64; 4]) -> Option<Dem> {
+/// The tile of Copernicus GLO-30 whose south-west corner is (lat, lon), with the pixels over `bbox` only, and the size of its
+/// file. None when the tile does not exist (sea) or cannot be read; then its points get the fill value, as in duckOSM.
+fn copernicus_tile(con: &Connection, (lat, lon): (i32, i32), bbox: [f64; 4]) -> Option<(Dem, usize)> {
     let name = format!(
         "Copernicus_DSM_COG_10_{}{:02}_00_{}{:03}_00_DEM",
         if lat >= 0 { 'N' } else { 'S' },
@@ -118,8 +139,12 @@ fn copernicus_tile(con: &Connection, (lat, lon): (i32, i32), bbox: [f64; 4]) -> 
         lon.abs()
     );
     let url = format!("{COP_BASE}/{name}/{name}.tif");
-    match download(con, &url).and_then(|b| Dem::window(std::io::Cursor::new(b), &url, bbox, 1)) {
-        Ok(d) => Some(d),
+    let tile = download(con, &url).and_then(|b| {
+        let n = b.len();
+        Dem::window(std::io::Cursor::new(b), &url, bbox, 1).map(|d| (d, n))
+    });
+    match tile {
+        Ok(t) => Some(t),
         Err(e) => {
             eprintln!("  copernicus tile missing at {lat},{lon} (ocean/void?) — its nodes get nodata_fill ({e})");
             None
@@ -270,7 +295,7 @@ fn make_sampler(con: &Connection, o: &Options, provider: Option<&Provider>, node
         return Ok((Sampler::File(d), meta(Some(hash))));
     }
     // the streamed tiles: no whole file is read, so there is no ground id
-    Ok((Sampler::Tiles { tiles: HashMap::new(), bbox: window }, meta(None)))
+    Ok((Sampler::Tiles { bbox: window, got: (0, 0) }, meta(None)))
 }
 
 /// Add the heights to the database `db` in place (duckOSM `to_elevation`).
@@ -325,96 +350,141 @@ pub fn to_elevation(db: &Path, o: &Options) -> Result<Stats> {
 
     let mut stats = Stats { source: meta.source.clone(), modes: Vec::new(), column: ele.clone(), n_nodes: 0, n_nodata: 0 };
     for m in &chosen {
-        let nodes: Vec<(i64, f64, f64)> = {
+        // the nodes, then the vertices of the edges from the text of the geometry, as duckOSM reads them
+        let (mut ids, mut xs, mut ys) = (Vec::new(), Vec::new(), Vec::new());
+        {
             let mut st = con.prepare(&format!("SELECT node_id, ST_X(geom), ST_Y(geom) FROM {m}.nodes WHERE geom IS NOT NULL")).map_err(err)?;
-            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?;
-            rows.collect::<std::result::Result<_, _>>().map_err(err)?
-        };
-        if nodes.is_empty() {
+            let mut rows = st.query([]).map_err(err)?;
+            while let Some(r) = rows.next().map_err(err)? {
+                ids.push(r.get::<_, i64>(0).map_err(err)?);
+                xs.push(r.get::<_, f64>(1).map_err(err)?);
+                ys.push(r.get::<_, f64>(2).map_err(err)?);
+            }
+        }
+        if ids.is_empty() {
             stats.modes.push((m.clone(), 0, 0));
             continue;
         }
-        let mut nodata = 0;
-        // ADD IF NOT EXISTS: DuckDB stops a DROP or an ALTER of a column of a table with an index, but allows ADD
+        let n_nodes = ids.len();
+        let g = &geo[m];
+        let mut edges: Vec<(i64, usize)> = Vec::new(); // the edge and the index of its first vertex
+        {
+            let mut st = con.prepare(&format!("SELECT edge_id, ST_AsText({g}) FROM {m}.edges WHERE {g} IS NOT NULL")).map_err(err)?;
+            let mut rows = st.query([]).map_err(err)?;
+            while let Some(r) = rows.next().map_err(err)? {
+                let (id, wkt): (i64, String) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+                edges.push((id, xs.len()));
+                let (a, b) = (wkt.find('(').map_or(0, |i| i + 1), wkt.rfind(')').unwrap_or(wkt.len()));
+                for pair in wkt[a..b].split(',') {
+                    let mut xy = pair.split_whitespace().map(|v| v.parse::<f64>());
+                    let (Some(Ok(x)), Some(Ok(y))) = (xy.next(), xy.next()) else {
+                        return Err(format!("{m}.edges {id}: a vertex that is not 'x y': {pair}"));
+                    };
+                    xs.push(x);
+                    ys.push(y);
+                }
+            }
+        }
+        // one pass over the DEM for the nodes and the vertices of the mode; to the cm (a DEM is accurate to about a metre)
+        let z = sampler.sample_all(&con, &xs, &ys);
+        drop((xs, ys));
+        let nodata = z[..n_nodes].iter().filter(|v| v.is_nan()).count();
+        let cm = |v: f64| round_cm(if v.is_nan() { fill } else { v });
+
         con.execute_batch(&format!(
             "ALTER TABLE {m}.nodes ADD COLUMN IF NOT EXISTS {ele} DOUBLE; CREATE OR REPLACE TEMP TABLE _ele(node_id BIGINT, ele DOUBLE);"
         ))
         .map_err(err)?;
         {
             let mut app = con.appender_to_catalog_and_db("_ele", "temp", "main").map_err(err)?;
-            for &(id, x, y) in &nodes {
-                let z = sampler.sample(&con, x, y).unwrap_or_else(|| {
-                    nodata += 1;
-                    fill
-                });
-                // to the cm: a DEM is accurate to about a metre
-                app.append_row(duckdb::params![id, round_cm(z)]).map_err(err)?;
+            for (i, id) in ids.iter().enumerate() {
+                app.append_row(duckdb::params![id, cm(z[i])]).map_err(err)?;
             }
         }
-        con.execute_batch(&format!(
-            "UPDATE {m}.nodes n SET {ele} = (SELECT ele FROM _ele t WHERE t.node_id = n.node_id);
-             ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS {zf} DOUBLE;
-             ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS {zt} DOUBLE;
-             UPDATE {m}.edges e SET {zf} = (SELECT {ele} FROM {m}.nodes n WHERE n.node_id = e.source), \
-             {zt} = (SELECT {ele} FROM {m}.nodes n WHERE n.node_id = e.target);"
-        ))
-        .map_err(err)?;
-
-        // the heights at the vertices, from the text of the geometry as duckOSM reads them
-        let g = &geo[m];
-        let edges: Vec<(i64, String)> = {
-            let mut st = con.prepare(&format!("SELECT edge_id, ST_AsText({g}) FROM {m}.edges WHERE {g} IS NOT NULL")).map_err(err)?;
-            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
-            rows.collect::<std::result::Result<_, _>>().map_err(err)?
-        };
-        if !edges.is_empty() {
-            con.execute_batch("CREATE OR REPLACE TEMP TABLE _zv_flat(edge_id BIGINT, i INTEGER, z DOUBLE);").map_err(err)?;
-            {
-                let mut app = con.appender_to_catalog_and_db("_zv_flat", "temp", "main").map_err(err)?;
-                for (id, wkt) in &edges {
-                    let (a, b) = (wkt.find('(').map_or(0, |i| i + 1), wkt.rfind(')').unwrap_or(wkt.len()));
-                    for (i, pair) in wkt[a..b].split(',').enumerate() {
-                        let mut xy = pair.split_whitespace().map(|v| v.parse::<f64>());
-                        let (Some(Ok(x)), Some(Ok(y))) = (xy.next(), xy.next()) else {
-                            return Err(format!("{m}.edges {id}: a vertex that is not 'x y': {pair}"));
-                        };
-                        let z = round_cm(sampler.sample(&con, x, y).unwrap_or(fill));
-                        app.append_row(duckdb::params![id, i as i32, z]).map_err(err)?;
-                    }
+        // ADD IF NOT EXISTS: DuckDB stops a DROP or an ALTER of a column of a table with an index, but allows ADD
+        con.execute_batch(&format!("UPDATE {m}.nodes n SET {ele} = (SELECT ele FROM _ele t WHERE t.node_id = n.node_id); DROP TABLE _ele;"))
+            .map_err(err)?;
+        drop(ids);
+        con.execute_batch("CREATE OR REPLACE TEMP TABLE _zv_flat(edge_id BIGINT, i INTEGER, z DOUBLE);").map_err(err)?;
+        {
+            let mut app = con.appender_to_catalog_and_db("_zv_flat", "temp", "main").map_err(err)?;
+            for (k, &(id, first)) in edges.iter().enumerate() {
+                let last = edges.get(k + 1).map_or(z.len(), |e| e.1);
+                for (i, &v) in z[first..last].iter().enumerate() {
+                    app.append_row(duckdb::params![id, i as i32, cm(v)]).map_err(err)?;
                 }
             }
-            con.execute_batch(&format!(
-                "ALTER TABLE {m}.edges ADD COLUMN IF NOT EXISTS {zv} DOUBLE[];
-                 CREATE OR REPLACE TEMP TABLE _zv AS SELECT edge_id, list(z ORDER BY i) AS z FROM _zv_flat GROUP BY edge_id;"
-            ))
-            .map_err(err)?;
-            // DuckDB updates a list column as a delete and an insert, and then updates an R-tree index row by row: 64 s for
-            // the cycling edges of Tartu, 10 s without the index. So the R-tree indexes go before the update and come back
-            // after it (from their own SQL), also when the update fails.
-            let rtree: Vec<(String, String)> = {
-                let mut st = con
-                    .prepare("SELECT index_name, sql FROM duckdb_indexes() WHERE schema_name = ? AND table_name = 'edges' AND sql ILIKE '%USING RTREE%'")
-                    .map_err(err)?;
-                let rows = st.query_map([m], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
-                rows.collect::<std::result::Result<_, _>>().map_err(err)?
-            };
-            for (name, _) in &rtree {
-                con.execute_batch(&format!("DROP INDEX {m}.{name}")).map_err(err)?;
-            }
-            let updated = con.execute_batch(&format!("UPDATE {m}.edges e SET {zv} = (SELECT z FROM _zv t WHERE t.edge_id = e.edge_id)"));
-            for (_, sql) in &rtree {
-                con.execute_batch(sql).map_err(err)?;
-            }
-            updated.map_err(err)?;
         }
-        eprintln!("  [{m}] {} nodes sampled ({nodata} nodata/fill) -> {ele}", nodes.len());
-        stats.modes.push((m.clone(), nodes.len(), nodata));
-        stats.n_nodes += nodes.len();
+        drop(z);
+        con.execute_batch("CREATE OR REPLACE TEMP TABLE _zv AS SELECT edge_id, list(z ORDER BY i) AS z FROM _zv_flat GROUP BY edge_id; DROP TABLE _zv_flat;")
+            .map_err(err)?;
+        // z_vertices only when the mode has an edge with a geometry, as duckOSM
+        let mut new = vec![(zf.as_str(), format!("a.{ele}")), (zt.as_str(), format!("b.{ele}"))];
+        if !edges.is_empty() {
+            new.push((zv.as_str(), "t.z".to_string()));
+        }
+        drop(edges);
+        write_edges(&con, m, &new)?;
+        con.execute_batch("DROP TABLE _zv;").map_err(err)?;
+        eprintln!("  [{m}] {n_nodes} nodes sampled ({nodata} nodata/fill) -> {ele}");
+        stats.modes.push((m.clone(), n_nodes, nodata));
+        stats.n_nodes += n_nodes;
         stats.n_nodata += nodata;
+    }
+    if let Sampler::Tiles { got: (n, bytes), .. } = sampler {
+        eprintln!("  {n} Copernicus tiles downloaded, {:.1} MB", bytes as f64 / 1e6);
     }
     write_metadata(&con, &meta, fill, stats.n_nodes, stats.n_nodata, &ele)?;
     con.execute_batch("CHECKPOINT").map_err(err)?;
     Ok(stats)
+}
+
+/// Write `z_from`, `z_to` and `z_vertices` of the edges of mode `m` (`new`: each column and its value): the same values as the
+/// UPDATE of duckOSM (the height of the source and the target node, the list of `_zv`). DuckDB updates a list column as a delete
+/// and an insert, which took 64 s for the cycling edges of Tartu (France has 26 million edges), so the table is made again in
+/// the order of its rows, in 0.3 s: a column that is there keeps its place, a new column goes at the end, as ALTER TABLE ADD
+/// puts it. The indexes, the column defaults and the comments are made again from their own SQL, in the same transaction.
+fn write_edges(con: &Connection, m: &str, new: &[(&str, String)]) -> Result<()> {
+    let err = |e: duckdb::Error| e.to_string();
+    let rows = |q: &str| -> Result<Vec<(String, Option<String>, Option<String>)>> {
+        let mut st = con.prepare(q).map_err(err)?;
+        let r = st.query_map([m], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?;
+        r.collect::<std::result::Result<_, _>>().map_err(err)
+    };
+    let cols = rows("SELECT column_name, column_default, comment FROM duckdb_columns() WHERE schema_name = ? AND table_name = 'edges' ORDER BY column_index")?;
+    let indexes = rows("SELECT index_name, sql, NULL FROM duckdb_indexes() WHERE schema_name = ? AND table_name = 'edges'")?;
+    let table_comment = rows("SELECT table_name, comment, NULL FROM duckdb_tables() WHERE schema_name = ? AND table_name = 'edges'")?;
+    let q = |c: &str| format!("\"{}\"", c.replace('"', "\"\""));
+    let have = |c: &str| cols.iter().any(|x| x.0 == c);
+    let replace: Vec<String> = new.iter().filter(|(c, _)| have(c)).map(|(c, v)| format!("{v} AS {}", q(c))).collect();
+    let mut select = if replace.is_empty() { "e.*".to_string() } else { format!("e.* REPLACE ({})", replace.join(", ")) };
+    for (c, v) in new.iter().filter(|(c, _)| !have(c)) {
+        select += &format!(", {v}::{} AS {}", if c.starts_with("z_vertices") { "DOUBLE[]" } else { "DOUBLE" }, q(c));
+    }
+    let mut sql = format!(
+        "BEGIN; CREATE OR REPLACE TABLE {m}.edges AS SELECT {select} FROM {m}.edges e \
+         LEFT JOIN {m}.nodes a ON a.node_id = e.source LEFT JOIN {m}.nodes b ON b.node_id = e.target \
+         LEFT JOIN _zv t ON t.edge_id = e.edge_id ORDER BY e.rowid;"
+    );
+    for (c, default, comment) in &cols {
+        if let Some(d) = default {
+            sql += &format!("ALTER TABLE {m}.edges ALTER COLUMN {} SET DEFAULT {d};", q(c));
+        }
+        if let Some(t) = comment {
+            sql += &format!("COMMENT ON COLUMN {m}.edges.{} IS '{}';", q(c), t.replace('\'', "''"));
+        }
+    }
+    for (_, s, _) in &indexes {
+        sql += &format!("{};", s.clone().unwrap_or_default().trim_end_matches(';'));
+    }
+    if let Some((_, Some(t), _)) = table_comment.first() {
+        sql += &format!("COMMENT ON TABLE {m}.edges IS '{}';", t.replace('\'', "''"));
+    }
+    sql += "COMMIT;";
+    con.execute_batch(&sql).map_err(|e| {
+        let _ = con.execute_batch("ROLLBACK");
+        format!("{m}.edges: {e}")
+    })
 }
 
 /// One row of `main.elevation_metadata` for each height column (duckOSM `_write_metadata`): a new run of `ele` replaces its
