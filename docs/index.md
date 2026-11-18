@@ -34,6 +34,29 @@ All outputs come from one `.osm.pbf` file.
 | **Heights**: the ground height of each node | `duckosm elevation` | DuckDB | [Add elevation](guides/elevation.md) |
 | **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML | [Draw a map](guides/draw-map.md) |
 
+## Fix the OSM data
+
+OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
+file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
+
+![Edit OSM data: a road and its form](images/edit-page.png)
+
+| Where | How |
+|---|---|
+| Browser | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), step **Edit OSM data** |
+| Your computer | `duckosm edit my_area.duckdb` opens the same editor |
+| Build | `duckosm build --fixes osm_fixes.yaml` |
+
+| You can change | Examples |
+|---|---|
+| Roads | one-way, lanes, speed, road class, access; delete a road |
+| Buildings | floors, height, roof; the type of each wall and its door |
+| Nodes | traffic signals, crossings |
+| Turns | a turn that a driver cannot make, or must make |
+| New roads | a road that OSM does not have |
+
+The network and all its exports use your fixes. More: [Edit OSM data](guides/edit-osm-data.md), [Fix OSM errors](guides/fix-osm-errors.md).
+
 ## Two versions, one engine
 
 | | Native | Browser |
