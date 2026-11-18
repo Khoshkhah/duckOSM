@@ -758,6 +758,23 @@ struct EditCli {
     port: u16,
 }
 
+/// duckosm-rust ask: ask questions about the OSM data of a database, and about its changes, on a page on 127.0.0.1. The page is roadstyle's
+/// dashboard of the database with a data dock (one SQL line over a wide table) and Ask (a question in words, answered with SQL). The table
+/// extra.edits has the changes of the fixes file. Ask uses your own key of a free AI service: it stays in your browser. The page does not
+/// change the data or the file.
+#[derive(Parser)]
+#[command(name = "duckosm-rust ask", version)]
+struct AskCli {
+    /// The database (<area>.duckdb).
+    db: PathBuf,
+    /// The fixes file whose changes you can ask about (default: osm_fixes.yaml beside the database).
+    #[arg(long)]
+    fixes: Option<PathBuf>,
+    /// The port of the page on 127.0.0.1.
+    #[arg(long, default_value_t = 8791)]
+    port: u16,
+}
+
 /// duckosm-rust studio: a page on 127.0.0.1 that makes the data of an area, step by step (docs/guides/studio.md): the area, the OSM data, the settings,
 /// the ground (DEM), the build and the result. The build is the native engine. Each area is made in `<OUT>/<name>/`.
 #[derive(Parser)]
@@ -800,16 +817,29 @@ fn studio(_: &[String]) -> Result<(), String> {
 
 #[cfg(feature = "duckdb")]
 fn edit(args: &[String]) -> Result<(), String> {
-    let cli = EditCli::parse_from(args);
-    let db = std::fs::canonicalize(&cli.db).map_err(|e| format!("{}: {e}", cli.db.display()))?;
-    let fixes = match cli.fixes {
+    let c = EditCli::parse_from(args);
+    serve_page(c.db, c.fixes, c.port, duckosm_edit::Mode::Edit)
+}
+
+/// duckosm-rust ask (duckOSM `duckosm ask`, docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor.
+#[cfg(feature = "duckdb")]
+fn ask(args: &[String]) -> Result<(), String> {
+    let c = AskCli::parse_from(args);
+    serve_page(c.db, c.fixes, c.port, duckosm_edit::Mode::Ask)
+}
+
+#[cfg(feature = "duckdb")]
+fn serve_page(db: PathBuf, fixes: Option<PathBuf>, port: u16, mode: duckosm_edit::Mode) -> Result<(), String> {
+    let db = std::fs::canonicalize(&db).map_err(|e| format!("{}: {e}", db.display()))?;
+    let fixes = match fixes {
         Some(f) => std::path::absolute(&f).map_err(|e| format!("{}: {e}", f.display()))?,
         None => db.with_file_name("osm_fixes.yaml"),
     };
-    let listener = duckosm_edit::bind(cli.port)?;
+    let listener = duckosm_edit::bind(port)?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let site = duckosm_edit::Site::new(Box::new(duckosm_edit::native::NativeDb::new(&db)), &db, &fixes, port)?;
-    eprintln!("duckosm-rust edit: {}  (the fixes file: {}; Ctrl+C stops)", site.url(), fixes.display());
+    let name = if mode == duckosm_edit::Mode::Ask { "ask" } else { "edit" };
+    let site = duckosm_edit::Site::with_mode(Box::new(duckosm_edit::native::NativeDb::new(&db)), &db, &fixes, port, mode)?;
+    eprintln!("duckosm-rust {name}: {}  (the fixes file: {}; Ctrl+C stops)", site.url(), fixes.display());
     duckosm_edit::serve(std::sync::Arc::new(site), listener);
     Ok(())
 }
@@ -817,6 +847,11 @@ fn edit(args: &[String]) -> Result<(), String> {
 #[cfg(not(feature = "duckdb"))]
 fn edit(_: &[String]) -> Result<(), String> {
     Err("edit needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
+}
+
+#[cfg(not(feature = "duckdb"))]
+fn ask(_: &[String]) -> Result<(), String> {
+    Err("ask needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
 }
 
 /// The live and the peak Rust heap after each step of a build (cargo feature `heap-probe`, for measurements).
@@ -899,6 +934,7 @@ fn main() {
     // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
         Some("edit") => edit(&args[1..]),
+        Some("ask") => ask(&args[1..]),
         Some("studio") => studio(&args[1..]),
         Some("cut") => cut(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
