@@ -107,6 +107,7 @@ plugins:
           - concepts/multimodal.md
           - concepts/osmnx.md
           - concepts/quackosm.md
+          - concepts/gdal.md
         Reference:
           - reference/cli.md
           - reference/configuration.md
@@ -167,6 +168,7 @@ nav:
       - Routing across modes: concepts/multimodal.md
       - duckOSM and OSMnx: concepts/osmnx.md
       - duckOSM and QuackOSM: concepts/quackosm.md
+      - duckOSM and GDAL: concepts/gdal.md
   - Reference:
       - Command line: reference/cli.md
       - Configuration: reference/configuration.md
