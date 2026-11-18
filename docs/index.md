@@ -121,9 +121,17 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 
 All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
 
-## Use it from code
+## Use it
 
 <div class="grid cards" markdown>
+
+-   :material-console:{ .lg .middle } **Command line**
+
+    ---
+
+    One program, `duckosm`: `build`, `quack`, `sumo`, `gmns`, `edit` and more, each with `--help`.
+
+    [Command line](reference/cli.md) · [Quick start](install.md#quick-start)
 
 -   :material-language-python:{ .lg .middle } **Python SDK**
 
