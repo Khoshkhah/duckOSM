@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm-rust boundary`** (`docs/design/all_in_rust.md`, group B): the options of `duckosm boundary` (`NAME`, `--pbf`,
+  `--osm-id`, `--offline`, `-o`). It looks in the borders of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), then
+  on Nominatim, and writes the same GeoJSON file, byte for byte, with the same lines (the other matches too). A boundary that a
+  build makes from `boundary.place`, `bbox` or `h3_cell` is now written in the same format as Python's.
+
 - **`duckosm-rust info`, `way` and `init-config`** (`docs/design/all_in_rust.md`, group B), in the new crate `rust/duckosm-tools`.
   They have the options of the Python commands and give the same output: the text and `--json` of `info`, and the text (DuckDB's
   table print), `--json` and the `--out` files (.csv, .json, .parquet) of `way`; `init-config` writes the same template. Checked on

@@ -1,0 +1,4 @@
+wrote py.b1.geojson: Monaco (admin level 2, OSM relation 1124039, 79.8 km²), from PBF monaco.osm.pbf
+also matched (pick one with --osm-id):
+  Monaco (admin level 8, OSM relation 2220322, 2.39 km²)
+  Monaco-Ville (admin level 10, OSM relation 2220207, 0.2 km²)
