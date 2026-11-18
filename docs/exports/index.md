@@ -26,6 +26,8 @@ Each export reads a built database. Pick the group of your work.
 | Tool | Export | Command |
 |---|---|---|
 | networkx | [a networkx graph](networkx.md), GraphML, gpickle | `to_networkx()`, `duckosm export-graph` |
+| rustworkx | [a rustworkx graph](networkx.md): an API like networkx with a Rust engine, faster for large areas | `to_rustworkx()` |
+| petgraph (Rust) | [a petgraph graph](../reference/rust.md) | `duckosm_route::graphs::to_petgraph()` |
 | Your own router | the turn graph `edge_graph` in the database | `route()`, `Router` ([Route](../guides/route.md)) |
 
 ### Lane level and 3D
