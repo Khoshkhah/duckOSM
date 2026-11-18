@@ -12,6 +12,8 @@ pub mod gmns_check;
 pub mod gmns_lanes;
 pub mod gmns_meso;
 pub mod gmns_sumo;
+pub mod gmns_viewer;
+pub mod gmns_walk;
 pub mod gtfs;
 pub mod matsim;
 pub mod matsim_lanes;
@@ -20,6 +22,7 @@ pub mod opendrive;
 pub mod railml;
 pub mod shapely;
 pub mod sumo;
+pub mod sumo_compare;
 
 use duckdb::{AccessMode, Config, Connection};
 use std::path::Path;

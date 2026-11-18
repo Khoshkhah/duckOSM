@@ -347,6 +347,63 @@ fn gmns_lanes_by_properties() {
     assert_eq!(got, text(&path), "the lane checks changed (GMNS_LANES_WRITE=1 writes them again after a wanted change)");
 }
 
+/// gmns-viz: the page of a db made from tests/data/exports/gmns_viewer/ (the columns that the viewer reads, from Python's GMNS
+/// export with --meso --micro) has the MD5 and the size of Python's page of the same db. The same SQL as `viewer` in
+/// tools/make_golden_exports.py.
+#[test]
+fn gmns_viewer_equals_python() {
+    let p = out("viewer").join("monaco_gmns.duckdb");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&p);
+    let con = duckdb::Connection::open(&p).unwrap();
+    con.execute_batch("INSTALL spatial; LOAD spatial; CREATE SCHEMA gmns_driving; CREATE SCHEMA meso_driving; CREATE SCHEMA micro_driving").unwrap();
+    for t in ["gmns_driving.lane", "gmns_driving.node", "gmns_driving.link", "gmns_driving.movement", "meso_driving.meso_link", "meso_driving.meso_node", "micro_driving.micro_link"] {
+        let f = data().join(format!("exports/gmns_viewer/{t}.parquet"));
+        con.execute_batch(&format!("CREATE TABLE {t} AS SELECT * FROM read_parquet('{}')", f.display())).unwrap();
+    }
+    drop(con);
+    let html = out("viewer").join("v.html");
+    duckosm_export::gmns_viewer::write_viewer(&p, &html, "driving").unwrap();
+    let page = std::fs::read(&html).unwrap();
+    let md5: String = duckdb::Connection::open_in_memory().unwrap().query_row("SELECT md5(?)", [String::from_utf8(page.clone()).unwrap()], |r| r.get(0)).unwrap();
+    assert_eq!(format!("driving\t{md5}\t{}\n", page.len()), text(&data().join("exports/monaco_gmns_viewer.tsv")), "the viewer page differs from Python's");
+}
+
+/// GMNS `--walk-frame` (driving and walking): every column of gmns_walking but the lane lines equals Python; the lines are the
+/// same on two runs, and the sidewalk lanes that still touch a driving lane are counted (`monaco_gmns_walk_frame.tsv`, made by
+/// the Rust export, GMNS_LANES_WRITE=1).
+#[test]
+fn gmns_walk_frame() {
+    let opts = duckosm_export::gmns::GmnsOptions { modes: vec!["driving".into(), "walking".into()], walk_frame: true, ..Default::default() };
+    let (a, b) = (out("walk_frame_a").join("monaco_gmns.duckdb"), out("walk_frame_b").join("monaco_gmns.duckdb"));
+    duckosm_export::gmns::to_gmns_with(db(), &a, &opts).unwrap();
+    duckosm_export::gmns::to_gmns_with(db(), &b, &opts).unwrap();
+    let got = gmns_columns(&a, "gmns\\_walking");
+    assert_eq!(got, gmns_columns(&b, "gmns\\_walking"), "two runs differ");
+    let bad = columns_differ(&got, &text(&data().join("exports/monaco_gmns_walk_frame_columns.tsv")));
+    assert!(bad.is_empty(), "{} columns differ from the Python export:\n{}", bad.len(), bad.join("\n"));
+    // the sidewalk lanes (and their points) that still lie on a driving lane, less 0.1 m from its edge
+    let con = duckdb::Connection::open(&a).unwrap();
+    con.execute_batch("LOAD spatial").unwrap();
+    let (lanes, points): (i64, i64) = con
+        .query_row(
+            "WITH d AS (SELECT ST_Buffer(ST_Transform(geom, 'EPSG:4326', 'EPSG:32632', always_xy := true), COALESCE(width, 3.25) / 2 - 0.1) AS g
+                        FROM gmns_driving.lane WHERE geom IS NOT NULL AND allowed_uses IN ('auto', 'bus', 'bus,bike')),
+                  s AS (SELECT l.lane_id, unnest(ST_Dump(ST_Points(ST_Transform(l.geom, 'EPSG:4326', 'EPSG:32632', always_xy := true)))).geom AS p
+                        FROM gmns_walking.lane l JOIN gmns_walking.link k USING (link_id) WHERE k.footway = 'sidewalk')
+             SELECT count(DISTINCT lane_id), count(*) FROM s WHERE EXISTS (SELECT 1 FROM d WHERE ST_Intersects(d.g, s.p))",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let got = format!("sidewalk lanes on a driving lane\t{lanes}\nsidewalk points on a driving lane\t{points}\n");
+    let path = data().join("exports/monaco_gmns_walk_frame.tsv");
+    if std::env::var("GMNS_LANES_WRITE").is_ok() {
+        std::fs::write(&path, &got).unwrap();
+    }
+    assert_eq!(got, text(&path), "the walk frame checks changed (GMNS_LANES_WRITE=1 writes them again after a wanted change)");
+}
+
 /// GMNS: each column of each table that the Rust export makes so far equals the Python export (the same type, rows and values).
 #[test]
 fn gmns_equals_python() {
@@ -428,4 +485,17 @@ fn columns_differ(got: &[String], golden: &str) -> Vec<String> {
         }
     }
     bad
+}
+
+/// sumo_compare: the lanes of duckOSM's SUMO network against SUMO's own OSM import of the same PBF, as Python's `lane_diff` gives
+/// them (`monaco_sumo_lane_diff.tsv`; needs netconvert and osmium).
+#[test]
+fn sumo_lane_diff_equals_python() {
+    let dir = out("lane_diff");
+    let _ = std::fs::remove_dir_all(&dir);
+    let (rows, n) = duckosm_export::sumo_compare::lane_diff(db(), &data().join("monaco_sample.osm.pbf"), &dir).unwrap();
+    let t = |x: (usize, usize, usize)| format!("{},{},{}", x.0, x.1, x.2);
+    let mut got = vec![format!("compared\t{n}")];
+    got.extend(rows.iter().map(|r| format!("{}\t{}\t{}\t{}\t{}\t{}", r.way, r.dir, t(r.duckosm), t(r.sumo_osm), r.sources.join(","), r.cause)));
+    assert_eq!(got.join("\n") + "\n", text(&data().join("exports/monaco_sumo_lane_diff.tsv")), "lane_diff differs from Python's");
 }

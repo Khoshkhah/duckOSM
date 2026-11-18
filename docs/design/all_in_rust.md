@@ -54,7 +54,7 @@ To do:
   edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
   tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
 - GMNS (group C): the command `gmns` is Rust; the functions `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
-- The maps (group F): `gmns-viz`, `gmns-map`.
+- The maps (group F): `gmns-map`.
 - No Rust port yet: `levels`, `bus`, `multimodal`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
   the Python CLI reads them and the build runs in Rust.
 - Then: remove `PYTHON_COMMANDS` of `src/duckosm/_main.py`, remove the Python engine code (the tag `python-engine-final`
@@ -81,7 +81,9 @@ The exports of a GMNS db read the test tables of `tests/data/exports/gmns_drivin
 Parquet), until group C makes the GMNS db in Rust.
 
 `sumo_compare.py` is not a command: `lane_diff` compares the lanes of duckOSM with the lanes of SUMO's own OSM import, for a
-test (`tests/test_levels.py`). It moves with group C (the lane profile).
+test (`tests/test_levels.py`). It moves with group C (the lane profile): done, `rust/duckosm-export/src/sumo_compare.rs`. On the
+golden db it gives Python's rows (`tests/data/exports/monaco_sumo_lane_diff.tsv`: 24 differences in 993 way-directions, each
+with its cause). The Rust CI job installs osmium for it.
 
 GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
 
@@ -169,7 +171,7 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | Lanes (`lane` without `geom`) and `curb_seg` | Done: equal on Monaco. The lanes of driving come from `driving.lane_profile`; an older db without it, and walking and cycling, use the tag rules (`_rule_lanes`). |
 | Lane geometry (`lane.geom`) | Done: checked by its properties (below). On Monaco Rust and the fixed Python agree within 1 mm on every lane. The checks find 7 lanes that cross themselves (Monaco: driving 4, cycling 3) and 2 pairs of crossing lanes of one cycling link: the same in Python, open. |
 | Movements (`movement`, without their lanes) | Done: equal to Python after this step on Monaco. The lanes of the movements, and the rows that the SUMO step adds in driving and cycling, come with that step. |
-| Walking frame (`--walk-frame`, off by default) | Not started. |
+| Walking frame (`--walk-frame`, off by default; `src/gmns_walk.rs`) | Done: every column of `gmns_walking` but the lane lines equals Python on Monaco (`monaco_gmns_walk_frame_columns.tsv`). The lines are checked by their properties: the same on two runs, and the sidewalk lanes that still lie on a driving lane are counted (`monaco_gmns_walk_frame.tsv`; Monaco: 193, the same as Python, 236 without the frame). The kerb push cuts a line with the union of the road's lanes (the `geo` crate's overlay, GEOS's in Python): Monaco moves 830 sidewalks (Python 834), Tartu 1,424 (Python 1,422), and 2 Monaco lanes differ from Python by more than 1 mm (at most 8 cm). The frame and the joins move the same lanes as Python. |
 | The lanes of the walking movements, `signal_controller`, `location`, the signs, the node types, `zone` | Done: equal on Monaco. |
 | `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
 | Crossings (`crossing`, `lane_crossing`) | Done: on Monaco the same 492 crossings and 2,118 lane rows as Python, with every id, link, type, marking, `painted` and `to_left` equal. The overlays (unions, buffers of a union, intersections) are the `geo` crate's, so the widths, lengths and stretches are checked by their properties (`lane_report`): each stretch inside its lane, each part across inside the zebra, the width the tag's or 2.5-4 m. Two ties are now decided the same way in Python and Rust: the lane nearest to a node where lanes and connectors meet (a lane before a connector, then the smallest lane id), and the tangent of a lane at a point on a corner's bisector (the corner). |
@@ -177,7 +179,8 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | The command `duckosm gmns` with `--combined`, `--to-csv`, `--csv-extensions`, `--drive-side`, `--no-pair-carriageways`, `--no-lane-geometry` and `--check` (`gmns_check`: the checks and the graph report) | Done: on Monaco the output, the failed checks, the 41 CSV files (header and sorted rows) and `gmns_all` equal Python's. Two Python faults fixed in both: `--to-csv` failed on every build with cycling (its lanes have no `geom_cut`), and `gmns_all` took `any_value()` of a column that differs between the modes (now the first value in the order of the modes). |
 | `--meso`, `--micro` (`meso_<mode>`, `micro_<mode>`; `src/gmns_meso.rs`) | Done: on Monaco (driving and cycling) and Tartu (driving) every meso column equals Python. Every micro column equals Python but the points and lengths of the cells, which are cut from the lane lines and so follow their check by properties. The golden file is `monaco_gmns_meso_columns.tsv`. |
 | `--gtfs`, `--gtfs-max-m` (the stops of a GTFS feed as `location` rows; `src/gtfs.rs`) | Done: on Monaco, with a feed made from its OpenStreetMap stops (`tests/data/exports/monaco_gtfs.zip`: bus stops, stops no trip calls at, railway stops, entrances, a station and a far stop), every `location` column of every mode equals Python, also with the feed as a folder. A zip file is read with `flate2` (stored and deflated files; no zip64). |
-| `--walk-frame`, `gmns-viz`, `gmns-map` | Not started: the command stops with an error that names the option. |
+| `gmns-viz` (`src/gmns_viewer.rs`) | Done: the page is byte for byte Python's on the same db (Monaco driving, cycling and walking, with meso and micro). The template is now one file, `src/duckosm/templates/gmns_viewer.html`, that both read. The golden test reads a db made from `tests/data/exports/gmns_viewer/` (the columns that the viewer reads, from Python's export): the Rust lane lines differ from Python's below 1 mm, and that moves some of the page's rounded points. |
+| `gmns-map` | Not ported: it only calls lanestyle (`lane_page`), a Python library. To decide: keep it as a Python command, or port lanestyle's page. |
 
 ## Not changed
 
