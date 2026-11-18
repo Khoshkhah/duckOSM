@@ -13,4 +13,6 @@ clap = { version = "4", features = ["derive"] }
 serde = "1"
 # boundary: the place lookup and the GeoJSON writer of the build (place.rs)
 duckosm-build = { path = "../duckosm-build" }
+# extract: the edge_id macros of each database
+duckosm-duckdb = { path = "../duckosm-duckdb" }
 serde_json = { version = "1", features = ["preserve_order"] }

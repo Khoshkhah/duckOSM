@@ -72,3 +72,82 @@ fn boundary_equals_duckosm() {
     assert_eq!(e, "no boundary found for 'Nowhere' in monaco.osm.pbf. Try a more specific name (e.g. 'Södermalm, Stockholm') or --osm-id.");
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// `admin` and `extract` give the tables of duckOSM's `duckosm admin` and `duckosm extract` (Python, 2026-11-17): admin on the
+/// database of `info_and_way_equal_duckosm` with Monaco's sample PBF, then `extract --name "monte carlo"` from it. Each row: the
+/// number of rows of a table and the MD5 of its rows as text (geometries as WKB).
+#[test]
+fn admin_and_extract_equal_duckosm() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let out = std::env::temp_dir().join(format!("duckosm-tools-extract-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).unwrap();
+    let s = root.join("data/sample");
+    let cfg = format!(
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n",
+        out.display(),
+        s.display(),
+        s.display()
+    );
+    std::fs::write(out.join("config.yaml"), cfg).unwrap();
+    let c = duckosm_build::config::read(&out.join("config.yaml"), false, true).unwrap();
+    let mut p = c.params;
+    p.geoparquet = false;
+    duckosm_build::build(&c.pbf, &c.out, &p).unwrap();
+    let db = out.join("monaco.duckdb");
+    duckosm_tools::admin::admin(&s.join("monaco.osm.pbf"), &db, None).unwrap();
+    let rows = |db: &std::path::Path, t: &str| -> (i64, Option<String>) {
+        let con = duckdb::Connection::open(db).unwrap();
+        con.execute_batch("LOAD spatial").unwrap();
+        let mut st = con.prepare(&format!("SELECT column_name, column_type FROM (DESCRIBE {t})")).unwrap();
+        let cols: Vec<(String, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
+        let x = cols
+            .iter()
+            .map(|(c, ty)| if ty.starts_with("GEOMETRY") { format!("hex(ST_AsWKB(\"{c}\"))") } else { format!("\"{c}\"::VARCHAR") })
+            .collect::<Vec<_>>()
+            .join(", ");
+        con.query_row(&format!("SELECT count(*), md5(string_agg(x, ',' ORDER BY x)) FROM (SELECT concat_ws('|', {x}) x FROM {t})"), [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap()
+    };
+    let con = duckdb::Connection::open(&db).unwrap();
+    con.execute_batch("LOAD spatial").unwrap();
+    let admin: (i64, String) = con
+        .query_row(
+            "SELECT count(*), md5(string_agg(x, ',' ORDER BY x)) FROM (SELECT concat_ws('|', osm_id, name, name_en, admin_level, parent_osm_id, hex(ST_AsWKB(geometry))) x FROM main.admin_boundaries)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(admin, (11, "7295fecdb15e821e753b7647c0249fba".to_string()));
+    drop(con);
+
+    let part = out.join("part.duckdb");
+    duckosm_tools::extract::extract(&db, &part, duckosm_tools::extract::Area::Name("monte carlo")).unwrap();
+    for (t, n, md5) in [
+        ("driving.edges", 671, "9a75a6265ec956886941744670a31486"),
+        ("driving.nodes", 416, "2825d84df6b8a74bb07d5129d5a572fd"),
+        ("driving.edge_graph", 1485, "b818e64e360472cc20a7026a4ef6b2ae"),
+        ("driving.private_edges", 111, "eedc476d857bf42912e5fa2086870f04"),
+        ("driving.turn_restrictions", 9, "ef0a0bb2692d44970a23cc950f4b9acb"),
+        ("driving.ways", 208, "c8b2c86706c3798d830b105f0afc1a61"),
+        ("driving.way_nodes", 1648, "e9c02e1e78703b08f0c14f7c3f704e0a"),
+        ("walking.edges", 2610, "9c0b0946a8da25c47171374b608cc975"),
+        ("walking.edge_graph", 7830, "1ea201277fd201cc395de953410c7d0c"),
+        ("cycling.edges", 2336, "1839042a1dca413fb631bf07eef65702"),
+        ("cycling.nodes", 982, "31f72e03393ba5dbb4f23b00d6eb5897"),
+        ("main.boundary", 1, "81413ffaf1d6551c1f21b329820b5ffe"),
+        ("main.admin_boundaries", 1, "bac5003260a48d438b700a28b45de311"),
+    ] {
+        assert_eq!(rows(&part, t), (n, Some(md5.to_string())), "{t}");
+    }
+    let con = duckdb::Connection::open(&part).unwrap();
+    let meta: (f64, f64, i32, String) = con
+        .query_row("SELECT center_lat, center_lon, initial_zoom, timezone FROM main.visualization_metadata", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap();
+    assert_eq!(meta, (43.74031361981264, 7.426073129259986, 15, "Europe/Monaco".to_string()));
+    let _ = std::fs::remove_dir_all(&out);
+}

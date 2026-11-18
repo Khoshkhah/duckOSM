@@ -885,6 +885,7 @@ dependencies = [
  "clap",
  "duckdb",
  "duckosm-build",
+ "duckosm-duckdb",
  "serde",
  "serde_json",
 ]

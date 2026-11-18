@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`duckosm-rust extract` and `admin`** (`docs/design/all_in_rust.md`, group B), with the options of the Python commands. `admin`
+  reads the boundary relations of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), and `--gpkg` writes or reuses
+  a GeoPackage; `extract` cuts a database to an area by name, OSM id or GeoJSON file, with the time zone of the Rust build. On
+  Monaco (all three kinds of area, both `--gpkg` cases) and with the Tartu PBF, every table equals the Python output
+  (`duckosm-tools/tests/golden.rs`).
+
 - **`duckosm-rust boundary`** (`docs/design/all_in_rust.md`, group B): the options of `duckosm boundary` (`NAME`, `--pbf`,
   `--osm-id`, `--offline`, `-o`). It looks in the borders of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), then
   on Nominatim, and writes the same GeoJSON file, byte for byte, with the same lines (the other matches too). A boundary that a
