@@ -429,3 +429,16 @@ fn columns_differ(got: &[String], golden: &str) -> Vec<String> {
     }
     bad
 }
+
+/// sumo_compare: the lanes of duckOSM's SUMO network against SUMO's own OSM import of the same PBF, as Python's `lane_diff` gives
+/// them (`monaco_sumo_lane_diff.tsv`; needs netconvert and osmium).
+#[test]
+fn sumo_lane_diff_equals_python() {
+    let dir = out("lane_diff");
+    let _ = std::fs::remove_dir_all(&dir);
+    let (rows, n) = duckosm_export::sumo_compare::lane_diff(db(), &data().join("monaco_sample.osm.pbf"), &dir).unwrap();
+    let t = |x: (usize, usize, usize)| format!("{},{},{}", x.0, x.1, x.2);
+    let mut got = vec![format!("compared\t{n}")];
+    got.extend(rows.iter().map(|r| format!("{}\t{}\t{}\t{}\t{}\t{}", r.way, r.dir, t(r.duckosm), t(r.sumo_osm), r.sources.join(","), r.cause)));
+    assert_eq!(got.join("\n") + "\n", text(&data().join("exports/monaco_sumo_lane_diff.tsv")), "lane_diff differs from Python's");
+}

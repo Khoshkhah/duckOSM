@@ -1,0 +1,25 @@
+compared	993
+1099823017	f	1,0,0	2,0,0	lanes	contraflow bus lane
+1131276184	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+1203858295	f	1,0,0	2,0,0	default	no lanes tag
+1233828725	f	1,0,0	0,1,0	default	no lanes tag
+1238339144	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+1238339145	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+1449981121	f	1,0,0	2,0,0	lanes	contraflow bus lane
+166009794	f	1,0,0	2,0,0	lanes	contraflow bus lane
+176757512	f	1,0,0	2,0,0	lanes	contraflow bus lane
+182700002	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+182700008	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+4229298	f	1,0,0	0,1,0	default	no lanes tag
+4230083	f	1,0,0	2,0,0	default	no lanes tag
+503462464	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+503462466	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+503462468	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+503633031	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+503753416	f	2,0,0	1,0,0	turn:lanes	turn:lanes count
+503813537	f	1,0,0	2,0,0	lanes	contraflow bus lane
+50501897	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+624357054	f	1,0,0	2,0,0	default	no lanes tag
+80378487	f	2,0,1	1,0,1	cycleway:right,inherited	inherited
+93137621	f	2,0,1	2,0,0	cycleway:left,lanes	bike lane
+93209287	f	1,0,0	2,0,0	default	no lanes tag

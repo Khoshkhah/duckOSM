@@ -168,7 +168,7 @@ fn e(e: duckdb::Error) -> String {
 
 /// netconvert: `SUMO_HOME/bin`, the PATH, or the eclipse-sumo package of the active Python environment (`VIRTUAL_ENV`).
 /// Returns the program and the SUMO_HOME that it needs.
-fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
+pub(crate) fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
     if let Some(h) = std::env::var_os("SUMO_HOME").map(PathBuf::from) {
         if h.join("bin/netconvert").is_file() {
             return Ok((h.join("bin/netconvert"), None));

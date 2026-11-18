@@ -180,6 +180,20 @@ def gmns(db, out):
         (out / "monaco_gmns_gtfs_location.tsv").write_text("\n".join(lines) + "\n")
 
 
+def lane_diff_lines(rows, n):
+    """The lines of monaco_sumo_lane_diff.tsv: the number compared, then one line for each difference."""
+    t = lambda x: ",".join(map(str, x))  # noqa: E731
+    return [f"compared\t{n}"] + [f"{r['way']}\t{r['dir']}\t{t(r['duckosm'])}\t{t(r['sumo_osm'])}\t{','.join(r['sources'])}\t{r['cause']}" for r in rows]
+
+
+def sumo_lane_diff(db, out):
+    """sumo_compare.lane_diff of the golden db and its PBF (tests/data/monaco_sample.osm.pbf; needs netconvert and osmium)."""
+    from duckosm.sumo_compare import lane_diff
+    with tempfile.TemporaryDirectory() as tmp:
+        rows, n = lane_diff(db, Path(__file__).parent.parent / "tests" / "data" / "monaco_sample.osm.pbf", tmp)
+    (out / "monaco_sumo_lane_diff.tsv").write_text("\n".join(lane_diff_lines(rows, n)) + "\n")
+
+
 def gz(src, dst):
     """Keep the large Python output gzip-compressed, with the time 0 in its header (the same bytes on each run)."""
     with open(src, "rb") as f, open(dst, "wb") as o:
@@ -215,6 +229,7 @@ def main(db, out, gmns=None):
     to_railml(db, out / "monaco.railml.xml")
     gis(db, out)
     gmns(db, out)
+    sumo_lane_diff(db, out)
     for p in sorted(x for x in out.iterdir() if x.is_file()):
         n = len(gzip.open(p).read()) if p.suffix == ".gz" else p.stat().st_size
         print(f"{p}: {n} bytes")
