@@ -273,6 +273,7 @@ fn lanelet2_equals_python() {
         }
     }
     assert!(bad.is_empty(), "{} boundaries differ from Python:\n{}", bad.len(), bad.join("\n"));
+}
 
 /// One line for each column of each `gmns_*` table: its type, the rows and the MD5 of its values as text, sorted. The same SQL
 /// as `columns` in tools/make_golden_exports.py.
@@ -310,7 +311,8 @@ const GMNS_PENDING: [&str; 7] = ["node.node_type", "node.ctrl_type", "link.paren
 /// GMNS: each column of each table that the Rust export makes so far equals the Python export (the same type, rows and values).
 #[test]
 fn gmns_equals_python() {
-    let o = out("monaco_gmns.duckdb");
+    // its own folder: gmns() writes a file of the same name (the name is the dataset_name of the export)
+    let o = out("gmns").join("monaco_gmns.duckdb");
     duckosm_export::gmns::to_gmns(db(), &o, &[]).unwrap();
     let got = gmns_columns(&o);
     let golden = text(&data().join("exports/monaco_gmns_columns.tsv"));
