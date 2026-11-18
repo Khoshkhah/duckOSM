@@ -4,10 +4,15 @@
 
 The levels go from the raw OSM data to the most detailed network. Each level is made from the level before it.
 
-```text
-.osm.pbf ─► 1. OSM data ─► 2. The network ─► 3. Traffic simulation ─► 4. Lane level and 3D
-            (no network)    (edges, edge_id)    (links, nodes, turns)     (each lane, its shape)
-```
+<div class="dk-levels">
+<div class="lv"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></div>
+<a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
+<a class="lv" href="#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
+<a class="lv" href="#3-traffic-simulation"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
+<a class="lv" href="#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
+</div>
+
+Your OSM fixes go into every level.
 
 ### 1. OSM data
 
