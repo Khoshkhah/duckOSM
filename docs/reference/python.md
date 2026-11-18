@@ -39,16 +39,15 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 
 ## Build and areas
 
-These functions are new in this version.
 
 | Function | Main options | Returns | Command |
 |---|---|---|---|
-| `build(pbf=None, *, config=None, boundary=None, modes=["driving"], output=None, source_db=None, h3_cell=None, fixes=None, features=True, levels=True, graph=True, h3_index=True, h3_resolution=8)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that you give overrides the file. | the `Path` of the `.duckdb` file | [`duckosm build`](cli.md#build) |
+| `build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None, features=None, levels=None, graph=None, h3_index=None, h3_resolution=None)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that is not `None` overrides the file. Without a config file, `None` is the default of the command (`modes=["driving"]`, the switches on, `h3_resolution=8`). | the `Path` of the `.duckdb` file | [`duckosm build`](cli.md#build) |
 | `tiles(region=None, *, boundary=None, out=None, config=None, zoom=8, memory="2G", jobs=None, tile_threads=2, keep_tiles=False, build_args=[])` | `build_args`: the build options of each tile (the options after `--`) | the `Path` of the output folder | `duckosm tiles` |
 | `quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None, tile_zoom=None)` | `formats`: `["geoparquet"]`, `["duckdb"]` or both. With `gdal=True`: `["gpkg"]` or `["geoparquet"]`. `fixes`: an [OSM fixes file](../guides/fix-osm-errors.md). `tile_zoom`: make the table tile by tile (zoom 0 to 14). | a list of the `Path`s of the files that it wrote | `duckosm quack` |
 | `extract(source, db, *, name=None, osm_id=None, boundary=None)` | Give one of `name`, `osm_id` and `boundary`. | the `Path` of the new database | [`duckosm extract`](cli.md#extract) |
 | `boundary(name=None, *, pbf=None, osm_id=None, offline=False, out=None)` | `pbf`: search the borders in this PBF first | the `Path` of the GeoJSON file | [`duckosm boundary`](cli.md#boundary) |
-| `levels(db, *, area=None)` | `area`: the level area folder (default `DB.levels`) | the `Path` of the database | [`duckosm levels`](cli.md#levels) |
+| `levels(db)` | Solves the drawing order again with the edits in the database | the `Path` of the database | [`duckosm levels`](cli.md#levels) |
 | `init_config(path="duckosm.yaml", *, force=False)` | `force`: overwrite the file | the `Path` of the file | [`duckosm init-config`](cli.md#init-config) |
 
 ## Routing

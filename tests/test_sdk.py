@@ -49,6 +49,7 @@ def _same(a, b):
     ({"formats": ["geoparquet", "duckdb"]}, ["-f", "geoparquet,duckdb"]),
     ({"gdal": True, "formats": "geoparquet"}, ["--gdal", "-f", "geoparquet"]),
     ({"formats": ["geoparquet"], "tile_zoom": 14}, ["-f", "geoparquet", "--tile-zoom", "14"]),
+    ({"formats": "geoparquet", "fixes": DATA / "osm_fixes_quack.yaml"}, ["-f", "geoparquet", "--fixes", DATA / "osm_fixes_quack.yaml"]),
 ])
 def test_quack(tmp_path, kw, args):
     files = duckosm.quack(PBF, out=tmp_path / "py", name="monaco", **kw)
