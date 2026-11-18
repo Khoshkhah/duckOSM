@@ -371,13 +371,37 @@ pub mod tiled {
             }
             (own, others)
         };
+        // 2a. the waits of the tiles (the solve: a tile reads the numbers of the edges of earlier tiles), from a first read
         let mut waits: HashMap<Tile, FxHashSet<Tile>> = HashMap::new();
-        // the rows, sorted as they come (a sorter: one copy of the rows on the disk at most, not the rows and the sorted rows): the
-        // tiles in their order (a tile waits only for earlier tiles, so the order is a valid order of the work), and in a tile the
-        // edges in the order of the tables, then of edge_id (the order of the whole build)
+        if !tags_rule {
+            each(&mut |_, _, _, geometry| {
+                if geometry.len() >= 2 {
+                    let (own, others) = touching(&geometry);
+                    for t in others.iter().filter(|t| order[t] > order[&own]) {
+                        waits.entry(*t).or_default().insert(own);
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        // the tiles in the order of their depth in the waits (a tile after all the tiles it waits for), then in their order: the
+        // tiles of one depth do not wait for each other and run at the same time. The rule reads the numbers of the earlier tiles
+        // in `order`, so the result does not change
+        let depth: HashMap<Tile, usize> = {
+            let mut tiles: Vec<(Tile, usize)> = order.iter().map(|(&t, &i)| (t, i)).collect();
+            tiles.sort_unstable_by_key(|&(_, i)| i);
+            let mut depth: HashMap<Tile, usize> = HashMap::with_capacity(tiles.len());
+            for (t, _) in tiles {
+                let d = waits.get(&t).map_or(0, |w| w.iter().map(|u| depth[u] + 1).max().unwrap_or(0));
+                depth.insert(t, d);
+            }
+            depth
+        };
+        // 2b. the rows, sorted as they come (a sorter: one copy of the rows on the disk at most, not the rows and the sorted rows):
+        // in a tile, the edges in the order of the tables, then of edge_id (the order of the whole build)
         let key = |b: &[u8]| {
             let t = tile_at(b);
-            (order[&t], table_of[b[11] as usize], i64::from_le_bytes(b[12..20].try_into().expect("8 bytes")))
+            (depth[&t], order[&t], table_of[b[11] as usize], i64::from_le_bytes(b[12..20].try_into().expect("8 bytes")))
         };
         let mut tags = TagTable::default();
         let mut sorter = spill::Sorter::new(key, BUDGET, store);
@@ -388,11 +412,6 @@ pub mod tiled {
             let (own, others) = touching(&geometry);
             // the later tiles read the numbers of the edge (the tags rule reads no numbers of other tiles)
             let later = if tags_rule { 0 } else { others.iter().filter(|t| order[t] > order[&own]).count() as u16 };
-            if !tags_rule {
-                for t in others.iter().filter(|t| order[t] > order[&own]) {
-                    waits.entry(*t).or_default().insert(own);
-                }
-            }
             let id = tags.id(attrs);
             for t in &others {
                 sorter.push(&TileEdgeCodec, &(*t, false, 0, rank, edge_id, id, geometry.clone())).map_err(io)?;
@@ -487,8 +506,8 @@ pub mod tiled {
                     in_memory += tile.len();
                     window.push_back(std::mem::take(&mut tile));
                 }
-                // the tiles of the window that wait for no tile that is not done start. The tiles are in their order, and a tile waits
-                // only for earlier tiles: when no tile runs, the first tile of the window is ready
+                // the tiles of the window that wait for no tile that is not done start. The tiles are in the order of their depth in
+                // the waits: when no tile runs, the first tile of the window is ready
                 let ready = |t: &Tile| waits.get(t).is_none_or(|w| w.iter().all(|u| done.contains(u)));
                 let (run, wait): (Vec<_>, Vec<_>) = window.drain(..).partition(|x| ready(&x[0].0));
                 window.extend(wait);
@@ -572,7 +591,7 @@ pub mod tiled {
                 &mut || finished.borrow_mut().pop_front().ok_or_else(|| "no finished tile of the levels".to_string()),
             )?;
         }
-        // the sorted rows borrow `order` (their key)
+        // the sorted rows borrow `order` and `depth` (their key)
         drop(rows);
         drop((earlier, tags, waits, done, order));
         duckosm_core::util::step("levels: the tiles");
