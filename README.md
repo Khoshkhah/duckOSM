@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>OpenStreetMap → a routable road network in one DuckDB file,<br>
-  with edge IDs that survive every rebuild, clip and export.</b>
+  <b>OpenStreetMap → road networks, map layers and GIS files.<br>
+  One Rust program, on your computer and in the browser.</b>
 </p>
 
 <p align="center">
@@ -17,29 +17,62 @@
 
 <p align="center">
   <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
+  <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/guides/build/">Guides</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/database/">Database schema</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/guides/query/">Query the database</a>
+  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a> ·
+  <a href="https://khoshkhah.github.io/duckOSM/reference/database/">Database schema</a>
 </p>
 
 ---
 
-## Why duckOSM
+## What duckOSM makes
 
-Most OSM-to-network tools number their edges `0, 1, 2, …`, so the numbers change whenever you
-rebuild, cut out an area or export, and every table keyed on them has to be matched again.
-duckOSM's `edge_id` is a **content hash** of three ids that OpenStreetMap already gives the road
-segment: the OSM **way** it comes from (`osm_id`) and the OSM **nodes** where it starts and ends
-(`source`, `target`):
+All outputs come from one `.osm.pbf` file.
+
+| Output | Command | Format |
+|---|---|---|
+| **Road networks**: driving, walking and cycling, and the graph of legal turns | `duckosm build` | DuckDB |
+| **Base-map layers**: water, land use, buildings, POIs | `duckosm build` | DuckDB (`features.*`) |
+| **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB |
+| **The OSM features table** of [QuackOSM](https://khoshkhah.github.io/duckOSM/concepts/quackosm/) | `duckosm quack` | GeoParquet, DuckDB |
+| **GDAL's five OSM layers**, as [QGIS reads them](https://khoshkhah.github.io/duckOSM/concepts/gdal/) | `duckosm quack --gdal` | GeoPackage, GeoParquet |
+| **Traffic simulation networks** | `duckosm sumo`, `matsim`, `gmns` | SUMO, MATSim, GMNS |
+| **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx |
+| **Heights**: the ground height of each node | `duckosm elevation` | DuckDB |
+| **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML |
+
+## Two versions, one engine
+
+| | Native | Browser |
+|---|---|---|
+| Program | `duckosm` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), a web page |
+| Install | `pip install duckosm` | none |
+| Rows | the same | the same |
+
+Both build every area by map tiles, so the memory does not grow with the area
+([Browser and native builds](https://khoshkhah.github.io/duckOSM/concepts/browser-native/)).
+
+## Speed on France
+
+France: 5.1 GB `.osm.pbf`, Mac mini (12 cores, 16 GB).
+
+| Job | Native | Browser | Other tool |
+|---|---|---|---|
+| Road network, driving | 3 min 36 s | 5 min 16 s | |
+| OSM features table (`quack`) | 2 min 9 s | 4 min 54 s | QuackOSM: 9 min 30 s |
+| GDAL's layers, GeoParquet (`quack --gdal`) | 3 min 37 s | 5 min 23 s | `ogr2ogr`: 14 min 18 s |
+
+## Edge ids that stay the same
+
+Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. duckOSM's `edge_id` is a hash of
+three OSM ids: the way (`osm_id`) and the nodes where the edge starts and ends (`source`, `target`).
 
 ```text
 edge_id = hash(osm_id, source, target)
 ```
 
-The order of `source` and `target` is the direction, so the two directions of a two-way street get
-different ids. None of the three is a number duckOSM makes up, so the id stays the same
-**across rebuilds, clips and exports** ([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+The same OSM data gives the same ids after a rebuild, in a city cut from a country, and in every export
+([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
 
 ## Quick start
 
@@ -48,6 +81,7 @@ pip install "duckosm[routing]"
 
 curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
 duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
+duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
 ```
 
 ```python
@@ -63,48 +97,20 @@ r = route(con, a, b)                     # fastest path; weight="length" for dis
 r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
 ```
 
-## What you get
+## How each output is checked
 
-- **A driving, a walking and a cycling network** in one file, one schema each, split at the same
-  junctions so a road has the same `edge_id` in every mode. OSM access tags are respected: private
-  roads are kept for the map but never routed ([details](https://khoshkhah.github.io/duckOSM/concepts/networks/#access-private-and-forbidden-roads)).
-- **The graph of legal turns** (`edge_graph`), with OSM turn restrictions, for routing in SQL,
-  Python or networkx.
-- **Base-map layers** (`features.*`: water, land use, buildings, POIs) in the same file.
-- **Maps in one offline HTML page:** `duckosm viz` draws the network and the base map from the
-  database; `duckosm route-map` is a route planner (drive, walk, cycle, walk + drive) where you drag a
-  start and an end and get turn-by-turn directions ([try it](https://khoshkhah.github.io/duckOSM/guides/route/)).
-  The pages are drawn by [mapstyle](https://github.com/Khoshkhah/mapstyle).
-- **The drawing order of the roads:** `duckosm levels` stores which road is painted over which (casing and fill
-  numbers) in the file ([how](https://khoshkhah.github.io/duckOSM/guides/drawing-order/)).
-- **Any area:** a GeoJSON boundary, a place name, a box or an H3 cell; `duckosm boundary` finds an
-  area's border by name, and `duckosm extract` cuts a city out of a country build in seconds.
-- **Your own fixes for OSM errors**, applied on every build ([how](https://khoshkhah.github.io/duckOSM/guides/fix-osm-errors/)).
-- **A Rust engine** for the network step (`rust/`), the default since 2026-11-04 (`options.engine: rust`).
-  The Python engine stays as the reference until the next release.
-- **In the browser:** [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) builds the same tables in a web page,
-  with the same Rust engine. Its panel **Edit OSM data** (`web/fixes_editor/`) writes the fixes file that `duckosm build` reads
-  ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
-- **Make an area on your computer:** `duckosm studio areas` opens a page with the steps of Studio: the area, the OSM data, the settings, the ground (DEM), the
-  build and the result, which is the page of `duckosm edit` ([how](https://khoshkhah.github.io/duckOSM/guides/studio/)).
-- **Edit on your computer:** `duckosm edit my_area.duckdb` opens the same panel on a page on your computer, and
-  **Build again** builds the area with your fixes ([how](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/#edit-on-your-computer-duckosm-edit)).
-- **Ask on your computer:** `duckosm ask my_area.duckdb` opens the map with an SQL line and Ask (a question in words, answered with SQL). Roads and
-  buildings are clickable, and the table `extra.edits` has your changes ([how](https://khoshkhah.github.io/duckOSM/guides/query/#ask-questions-on-a-page-duckosm-ask)).
+| Output | Check |
+|---|---|
+| OSM features table | each row equals QuackOSM's |
+| GDAL's layers | each row equals GDAL's (Monaco, Kentucky) |
+| SUMO | SUMO's `netconvert` |
+| MATSim | MATSim's DTD and XSD schemas |
+| GMNS | the GMNS table specification |
+| GeoPackage, shapefile | `duckosm gis-debug` compares each `edge_id` through GDAL |
+| Browser build | the tables equal the native build's |
 
-## Exports
-
-| Format | Command | How it's verified |
-|---|---|---|
-| **SUMO** | `duckosm sumo` | SUMO's own `netconvert` assembles the network |
-| **MATSim** | `duckosm matsim`, `matsim-lanes` | validated against MATSim's official DTD and XSD schemas |
-| **GMNS** | `duckosm gmns` | follows the GMNS table spec |
-| **GeoPackage / shapefile** | `duckosm export-gis` | `duckosm gis-debug` reads it back through GDAL and diffs every `edge_id` |
-| **networkx** | `duckosm export-graph` | unit tests |
-
-**Experimental:** OpenDRIVE, Lanelet2, railML, lane-level routing, GMNS meso/micro, intermodal
-routing, elevation, admin boundaries, base-map layers. See the
-[documentation](https://khoshkhah.github.io/duckOSM/).
+Experimental exports: OpenDRIVE, Lanelet2, railML, lane-level routing. See the
+[documentation](https://khoshkhah.github.io/duckOSM/exports/).
 
 ## For AI agents
 
@@ -118,5 +124,5 @@ routing, elevation, admin boundaries, base-map layers. See the
 
 ## License
 
-MIT. duckOSM is built on [DuckDB](https://duckdb.org) and its spatial extension; it is an
+MIT. duckOSM is built on [DuckDB](https://duckdb.org) and its spatial extension. It is an
 independent project, not affiliated with or endorsed by the DuckDB Foundation.
