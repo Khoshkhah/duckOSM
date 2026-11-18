@@ -91,7 +91,7 @@ duckosm clip-pbf [OPTIONS] PBF BOUNDARY
 ### `extract`
 
 Cuts one area out of a built database into a new database, by name, OSM id or GeoJSON. Edge ids are
-kept. Guide: [Several areas from one region](../guides/prepare-area.md#cut-an-area-from-a-built-region).
+kept. Guide: [Cut an area from a built region](../guides/prepare-area.md#cut-an-area-from-a-built-region).
 
 ```text
 duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --boundary BOUNDARY)
