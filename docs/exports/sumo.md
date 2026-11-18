@@ -2,6 +2,12 @@
 
 `duckosm sumo` writes a network for [SUMO](https://eclipse.dev/sumo/). Each SUMO edge id is the duckOSM `edge_id`.
 
+| Reference and format | |
+|---|---|
+| Format | SUMO [plain XML](https://sumo.dlr.de/docs/Networks/PlainXML.html) (`.nod.xml`, `.edg.xml`, `.con.xml`) and the [SUMO network](https://sumo.dlr.de/docs/Networks/SUMO_Road_Networks.html) (`.net.xml`) |
+| Reference tool | SUMO's [netconvert](https://sumo.dlr.de/docs/netconvert.html) |
+| Check | netconvert reads the plain XML and keeps each edge id and each connection. [How each output is checked](../concepts/checks.md) |
+
 ```bash
 pip install "duckosm[sumo]"          # adds SUMO's netconvert
 duckosm sumo monaco.duckdb           # -> sumo/monaco.net.xml
@@ -56,10 +62,6 @@ this. The command has no option for it. How it works: [design](https://github.co
 
 **Compare with SUMO's OSM import.** `duckosm.sumo_compare.lane_diff(db, osm_file, work_dir)` builds the same area with
 SUMO's own OSM import. It lists each lane difference for each OSM way and direction, with its cause.
-
-## How it is checked
-
-netconvert reads the network in the tests. See [How each output is checked](../concepts/checks.md).
 
 ## Limits
 

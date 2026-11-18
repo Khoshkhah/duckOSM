@@ -1,9 +1,12 @@
 # railML (experimental)
 
-!!! warning "Experimental"
-    The file is checked for structure only. It is not yet loaded in a rail tool.
-
 `duckosm railml` writes a railML 2.4 infrastructure file, for rail tools such as OpenTrack, RailSys and Viriato.
+
+| Reference and format | |
+|---|---|
+| Format | [railML 2.4](https://www.railml.org/en/documentation-railml2), infrastructure ([XML tree](https://wiki2.railml.org/wiki/Dev:XMLtree/2.4)) |
+| Reference tool | none: the file is not yet loaded in a rail tool |
+| Check | none yet against the railML schema, because it needs a registration. The tests check the XML structure and its references. [How each output is checked](../concepts/checks.md) |
 
 ```bash
 duckosm railml monaco.duckdb        # -> monaco.railml.xml
@@ -37,11 +40,6 @@ to_railml("monaco.duckdb", "monaco.railml.xml")     # -> {"tracks", "switches", 
 ```
 
 Design: [railml_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/railml_export.md).
-
-## How it is checked
-
-The tests check the XML structure. They do not use the railML schema, because it needs a registration.
-See [How each output is checked](../concepts/checks.md).
 
 ## Limits
 
