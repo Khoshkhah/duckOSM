@@ -45,14 +45,41 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      # the router has no DuckDB and no threads: it builds for the pages too (WebAssembly)
-      - run: cargo check --release -p duckosm-router --target wasm32-unknown-unknown
+      # the router has no DuckDB and no threads: it builds for the pages too (WebAssembly; the planner page of route-map runs duckosm-planner)
+      - run: cargo check --release -p duckosm-router -p duckosm-planner --target wasm32-unknown-unknown
         working-directory: rust
       # ogr2ogr: the GeoPackage of one file of duckosm-rust export-gis and the golden of gis-debug
       - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin
+      # netconvert for the GMNS export (gmns_sumo): the version that made tests/data/exports/monaco_gmns_columns.tsv
+      - run: python3 -m pip install --user -q eclipse-sumo==1.27.0 && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # duckosm-edit too: the CLI and the wheel link it, so the golden tests run with the features that it adds (roadstyle's serde_json)
-      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit -p duckosm-export -p duckosm-tools -p duckosm-route -p duckosm-router --features duckosm-edit/duckdb
+      - run: cargo test --release -p duckosm-core -p duckosm-duckdb -p duckosm-parquet -p duckosm-build -p duckosm-edit -p duckosm-export -p duckosm-tools -p duckosm-route -p duckosm-router -p duckosm-planner --features duckosm-edit/duckdb
         working-directory: rust
+
+  # duckosm-rust viz and route-map in a browser (tests/test_route_map_rust.py, group F of docs/design/all_in_rust.md): the planner page routes
+  # as route-points and directions on Monaco, walk + drive, and the pages at 390 x 844
+  maps-page:
+    # ubuntu-24.04, not ubuntu-latest: Playwright 1.55 has no Chromium for ubuntu-latest (26.04) (2026-11-11)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # the program, with the planner's WebAssembly in it (duckosm-edit's build.rs)
+      - run: cargo build --release -p duckosm-cli
+        working-directory: rust
+      - run: pip install pytest "duckdb<2" "playwright==1.55.0"   # tests/conftest.py installs the spatial extension
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest tests/test_route_map_rust.py -q -rs
 
   # duckosm edit in a browser (tests/test_edit_page.py, docs/design/edit_page.md): the page of a Monaco build, a change, the box, Build again
   edit-page:

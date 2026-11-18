@@ -4,7 +4,8 @@
 //! steps are those of `to_gmns` in the same order, with the same SQL; the Python loops are Rust loops over the same rows.
 //! Ported so far: the fixed tables (`config`, `use_definition`, `use_group`), `node`, the lanes that a one-way road takes
 //! from the road it continues, `link`, `geometry`, and the roads that a footpath runs along (`link_along`, `link.along_*`,
-//! `link.parent_link_id`), and the lanes (without their geometry yet) and curbs.
+//! `link.parent_link_id`), the lanes and curbs, the movements, the lanes of the walking movements, `signal_controller`,
+//! `location`, the stop and give-way signs, the node types and `zone`.
 
 use crate::gmns_lanes as lanes;
 use crate::shapely::{self as shp, P};
@@ -69,29 +70,29 @@ const PED_FACILITY: &str = "CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN '
 WHEN 'yes' THEN 'sidewalk' WHEN 'separate' THEN 'offstreet_path' WHEN 'no' THEN 'none' \
 WHEN 'none' THEN 'none' ELSE 'unknown' END END";
 
-struct Ctx<'a> {
-    con: &'a Connection,
+pub(crate) struct Ctx<'a> {
+    pub(crate) con: &'a Connection,
 }
 
 impl Ctx<'_> {
-    fn exec(&self, sql: &str) -> Result<()> {
+    pub(crate) fn exec(&self, sql: &str) -> Result<()> {
         self.con.execute_batch(sql).map_err(|e| format!("{e}\n{sql}"))
     }
-    fn count(&self, sql: &str) -> Result<i64> {
+    pub(crate) fn count(&self, sql: &str) -> Result<i64> {
         self.con.query_row(sql, [], |r| r.get(0)).map_err(|e| format!("{e}\n{sql}"))
     }
-    fn strings(&self, sql: &str) -> Result<Vec<String>> {
+    pub(crate) fn strings(&self, sql: &str) -> Result<Vec<String>> {
         let mut st = self.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
         let v = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>();
         v.map_err(|e| e.to_string())
     }
-    fn exists(&self, schema: &str, table: &str) -> Result<bool> {
+    pub(crate) fn exists(&self, schema: &str, table: &str) -> Result<bool> {
         Ok(self.count(&format!(
             "SELECT count(*) FROM duckdb_tables() WHERE database_name = 's' AND schema_name = '{schema}' AND table_name = '{table}'"
         ))? > 0)
     }
     /// The columns of the source db's `<mode>.<table>`.
-    fn src_cols(&self, mode: &str, table: &str) -> Result<HashSet<String>> {
+    pub(crate) fn src_cols(&self, mode: &str, table: &str) -> Result<HashSet<String>> {
         Ok(self
             .strings(&format!(
                 "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = '{mode}' AND table_name = '{table}'"
@@ -162,6 +163,22 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
             sidewalk_parents(&c, &sch, has_raw, "right")?;
         }
         build_lane_curb(&c, &sch, mode, uses, has_raw, "right")?;
+        build_movement(&c, &sch, mode, uses)?;
+        if mode == "driving" || mode == "cycling" {
+            // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut
+            crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, mode == "driving", "right")?;
+            meet_lanes(&c, &sch)?;
+        } else {
+            walk_lanes(&c, &sch)?;
+        } // then (not ported yet) the crossings in driving
+        c.exec(&format!(
+            "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
+             FROM {sch}.node WHERE ctrl_type = 'signal'"
+        ))?;
+        build_location(&c, &sch, mode, has_raw)?;
+        apply_signs(&c, &sch, mode, has_raw)?;
+        node_types(&c, &sch, has_raw)?;
+        build_zone(&c, &sch, name.strip_suffix("_gmns").unwrap_or(&name))?;
         let mut counts = Vec::new();
         for t in ["node", "link", "geometry"] {
             counts.push((t, c.count(&format!("SELECT count(*) FROM {sch}.{t}"))?));
@@ -841,6 +858,461 @@ impl Rules<'_> {
         }
         out
     }
+}
+
+/// `_walk_lanes`: a footpath is one strip, so the lanes of a walking movement pair in order; a lane with no way in or out goes
+/// to `lane_check`.
+fn walk_lanes(c: &Ctx, sch: &str) -> Result<()> {
+    c.exec(&format!(
+        "UPDATE {sch}.movement m SET start_ib_lane = 1, end_ib_lane = least(i.n, o.n), start_ob_lane = 1, end_ob_lane = least(i.n, o.n)
+         FROM (SELECT link_id, count(*) n FROM {sch}.lane GROUP BY 1) i, (SELECT link_id, count(*) n FROM {sch}.lane GROUP BY 1) o
+         WHERE i.link_id = m.ib_link_id AND o.link_id = m.ob_link_id;
+         CREATE OR REPLACE TABLE {sch}.lane_check(kind VARCHAR, id VARCHAR, detail VARCHAR);
+         INSERT INTO {sch}.lane_check
+         SELECT 'no way out', l.lane_id, 'no movement leaves this lane' FROM {sch}.lane l
+         WHERE l.link_id IN (SELECT ib_link_id FROM {sch}.movement)
+           AND NOT EXISTS (SELECT 1 FROM {sch}.movement m WHERE m.ib_link_id = l.link_id AND l.lane_num BETWEEN m.start_ib_lane AND m.end_ib_lane)
+         UNION ALL
+         SELECT 'no way in', l.lane_id, 'no movement enters this lane' FROM {sch}.lane l
+         WHERE l.link_id IN (SELECT ob_link_id FROM {sch}.movement)
+           AND NOT EXISTS (SELECT 1 FROM {sch}.movement m WHERE m.ob_link_id = l.link_id AND l.lane_num BETWEEN m.start_ob_lane AND m.end_ob_lane)"
+    ))
+}
+
+/// The OSM point features that `location` holds.
+const LOC_HIGHWAY: [&str; 8] = ["crossing", "bus_stop", "give_way", "stop", "traffic_signals", "toll_gantry", "mini_roundabout", "speed_camera"];
+
+/// `_build_location`: the tagged OSM nodes on a link, one row for each link they lie on, `lr` along it. Needs the raw tags.
+fn build_location(c: &Ctx, sch: &str, mode: &str, has_raw: bool) -> Result<()> {
+    if !has_raw {
+        return Ok(());
+    }
+    let hw = LOC_HIGHWAY.iter().map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
+    let ecols = c.src_cols(mode, "edges")?;
+    let elev = ecols.contains("z_from") && ecols.contains("z_to");
+    let z = if elev { "e.z_from + (e.z_to - e.z_from) * lr / NULLIF(link_len, 0)" } else { "NULL" };
+    let structs: Vec<String> = ["tunnel", "bridge"].iter().filter(|k| ecols.contains(**k)).map(|k| format!("COALESCE(e.{k}, 'no') NOT IN ('no', '')")).collect();
+    let zskip = if elev && !structs.is_empty() { structs.join(" OR ") } else { "false".to_string() };
+    let need: Vec<&str> = std::iter::once("edge_id").chain(["z_from", "z_to", "tunnel", "bridge"].into_iter().filter(|k| ecols.contains(*k))).collect();
+    let ej = if elev { format!("LEFT JOIN (SELECT {} FROM _edges) e ON e.edge_id = pos.link_id", need.join(", ")) } else { String::new() };
+    c.exec(&format!(
+        "CREATE TABLE {sch}.location AS
+      WITH pts AS (
+        SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p, n.tags['name'] AS name,
+               CASE WHEN n.tags['highway'] IN ({hw}) THEN n.tags['highway']
+                    WHEN n.tags['traffic_calming'] IS NOT NULL THEN 'traffic_calming'
+                    WHEN n.tags['amenity'] = 'parking_entrance' THEN 'parking_entrance'
+                    WHEN n.tags['railway'] = 'level_crossing' THEN 'level_crossing' END AS loc_type
+        FROM s.raw.nodes n
+        WHERE n.tags['highway'] IN ({hw}) OR n.tags['traffic_calming'] IS NOT NULL
+           OR n.tags['amenity'] = 'parking_entrance' OR n.tags['railway'] = 'level_crossing'
+      ), hit AS (
+        SELECT pts.*, k.link_id, k.from_node_id, k.length AS link_len, k.geom AS lg,
+               ST_LineLocatePoint(k.geom, pts.p) AS f
+        FROM pts JOIN {sch}.link k ON ST_DWithin(k.geom, pts.p, 2e-6)
+      )
+      , pos AS (
+        SELECT hit.*, CASE WHEN f <= 0 THEN 0.0 WHEN f >= 1 THEN link_len
+                           ELSE ST_Length_Spheroid(ST_FlipCoordinates(ST_LineSubstring(lg, 0, f))) END AS lr
+        FROM hit)
+      SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id, lr,
+             lon AS x_coord, lat AS y_coord,
+             CASE WHEN {zskip} THEN NULL ELSE ({z})::DOUBLE END AS z_coord, loc_type, 1::BIGINT AS zone_id,
+             NULL::VARCHAR AS gtfs_stop_id, osm_id, name, p AS geom
+      FROM pos {ej} ORDER BY link_id, lr"
+    ))
+}
+
+/// `_apply_signs`: `ctrl_type` stop / yield from the OSM stop and give-way signs on the approach (cars and bikes).
+fn apply_signs(c: &Ctx, sch: &str, mode: &str, has_raw: bool) -> Result<()> {
+    if !has_raw || mode == "walking" || !c.exists(mode, "edges")? {
+        return Ok(());
+    }
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _sign AS
+      SELECT x.link_id AS ib, bool_or(x.loc_type = 'stop') AS stop
+      FROM {sch}.location x JOIN {sch}.link k ON k.link_id = x.link_id
+        JOIN s.raw.nodes n ON n.osm_id = x.osm_id JOIN _edges e ON e.edge_id = x.link_id
+      WHERE x.loc_type IN ('stop', 'give_way') AND x.lr >= k.length - 50.0 AND x.lr < k.length - 0.5
+        AND ((n.tags['direction'] IN ('forward', 'both') AND NOT e.is_reverse)
+          OR (n.tags['direction'] IN ('backward', 'both') AND e.is_reverse))
+      GROUP BY 1;
+      UPDATE {sch}.movement m SET ctrl_type = CASE WHEN g.stop THEN 'stop' ELSE 'yield' END
+      FROM _sign g WHERE m.ib_link_id = g.ib AND m.ctrl_type IS NULL;
+      UPDATE {sch}.node SET ctrl_type = c.t FROM (
+        SELECT k.to_node_id AS node_id, count(*) AS n_in, count(g.ib) AS n_sign, count(*) FILTER (WHERE g.stop) AS n_stop,
+               CASE WHEN count(*) FILTER (WHERE g.stop) = count(*) AND count(*) >= 4 THEN 'stop_4_way'
+                    WHEN count(*) FILTER (WHERE g.stop) = count(*) THEN 'stop'
+                    WHEN count(*) FILTER (WHERE g.stop) > 0 THEN 'stop_2_way' ELSE 'yield' END AS t
+        FROM {sch}.link k LEFT JOIN _sign g ON g.ib = k.link_id GROUP BY 1 HAVING count(g.ib) > 0) c
+      WHERE node.node_id = c.node_id AND node.ctrl_type IS NULL"
+    ))
+}
+
+/// `_node_types`: the OSM highway value of a turning circle, mini roundabout or motorway junction, else `intersection` (three
+/// or more neighbours) or `dead_end` (one).
+fn node_types(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
+    let (osm, join) = if has_raw {
+        ("CASE WHEN n.tags['highway'] IN ('turning_circle', 'mini_roundabout', 'motorway_junction') THEN n.tags['highway'] END", "LEFT JOIN s.raw.nodes n ON n.osm_id = nd.node_id")
+    } else {
+        ("NULL", "")
+    };
+    c.exec(&format!(
+        "UPDATE {sch}.node SET node_type = c.t FROM (
+        WITH nb AS (SELECT node_id, count(DISTINCT other) AS deg FROM (
+                      SELECT from_node_id AS node_id, to_node_id AS other FROM {sch}.link
+                      UNION ALL SELECT to_node_id, from_node_id FROM {sch}.link) GROUP BY 1)
+        SELECT nd.node_id, COALESCE({osm}, CASE WHEN nb.deg >= 3 THEN 'intersection' WHEN nb.deg = 1 THEN 'dead_end' END) AS t
+        FROM {sch}.node nd LEFT JOIN nb USING (node_id) {join}) c
+      WHERE node.node_id = c.node_id AND c.t IS NOT NULL"
+    ))
+}
+
+/// `_build_zone`: the one zone of every node, with the area's boundary when the source db has one.
+fn build_zone(c: &Ctx, sch: &str, area: &str) -> Result<()> {
+    let area_q = area.replace('\'', "''");
+    let cols = if c.exists("main", "boundary")? { c.src_cols("main", "boundary")? } else { HashSet::new() };
+    if cols.contains("geom") && c.count("SELECT count(*) FROM s.main.boundary")? > 0 {
+        let name = if cols.contains("name") { "string_agg(DISTINCT name, ', ')" } else { "NULL::VARCHAR" };
+        c.exec(&format!(
+            "CREATE TABLE {sch}.zone AS SELECT 1::BIGINT AS zone_id, coalesce({name}, '{area_q}') AS name,
+          ST_AsText(ST_Union_Agg(geom)) AS boundary, NULL::VARCHAR AS super_zone, ST_Union_Agg(geom) AS geom
+          FROM s.main.boundary"
+        ))
+    } else {
+        c.exec(&format!(
+            "CREATE TABLE {sch}.zone AS SELECT 1::BIGINT AS zone_id, '{area_q}' AS name,
+          NULL::VARCHAR AS boundary, NULL::VARCHAR AS super_zone, NULL::GEOMETRY AS geom"
+        ))
+    }
+}
+
+/// `_meet_lanes`: lane lines that continue one another meet. A lane continues one other lane when the straight-on movements send
+/// it to exactly that lane and nothing else of its use feeds that lane; of the two, the link with fewer lanes bends (over 15 m at
+/// most, half its length). Lane ends more than 8 m apart, or already within 1 cm, stay. The movements in a fixed order (links, lanes): a
+/// lane that bends first changes how the next one bends (the table's order is that of a parallel query).
+fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
+    const TAPER_M: f64 = 15.0;
+    const MAX_M: f64 = 8.0;
+    let sql = format!("SELECT lane_id, link_id, lane_num, allowed_uses, ST_AsText(geom) FROM {sch}.lane WHERE geom IS NOT NULL");
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let rows: Vec<(String, i64, i64, String, String)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let lanes: HashMap<String, (i64, i64, String, Vec<P>)> = rows.iter().map(|r| (r.0.clone(), (r.1, r.2, r.3.clone(), shp::wkt_points(&r.4)))).collect();
+    let by_num: HashMap<(i64, i64), String> = rows.iter().map(|r| ((r.1, r.2), r.0.clone())).collect();
+    let mut count: HashMap<i64, usize> = HashMap::new();
+    for r in &rows {
+        *count.entry(r.1).or_default() += 1;
+    }
+    let sql = format!(
+        "SELECT ib_link_id, start_ib_lane, end_ib_lane, ob_link_id, start_ob_lane, end_ob_lane FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge')
+         ORDER BY ib_link_id, ob_link_id, start_ib_lane, start_ob_lane"
+    );
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    type M = (i64, Option<i64>, Option<i64>, i64, Option<i64>, Option<i64>);
+    let mv: Vec<M> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut nxt: Vec<(String, Vec<String>)> = Vec::new(); // a dict of sets of Python, in the order of its keys
+    let mut prv: HashMap<String, HashSet<String>> = HashMap::new();
+    for (ib, s0, s1, ob, o0, o1) in mv {
+        let (Some(s0), Some(s1), Some(o0), Some(o1)) = (s0, s1, o0, o1) else { continue };
+        if s1 - s0 != o1 - o0 {
+            continue;
+        }
+        for k in 0..=(s1 - s0) {
+            if let (Some(a), Some(b)) = (by_num.get(&(ib, s0 + k)), by_num.get(&(ob, o0 + k))) {
+                if lanes[a].2 == lanes[b].2 {
+                    match nxt.iter_mut().find(|x| x.0 == *a) {
+                        Some(x) => {
+                            if !x.1.contains(b) {
+                                x.1.push(b.clone());
+                            }
+                        }
+                        None => nxt.push((a.clone(), vec![b.clone()])),
+                    }
+                    prv.entry(b.clone()).or_default().insert(a.clone());
+                }
+            }
+        }
+    }
+    let metres = |lat: f64| (111320.0 * lat.to_radians().cos(), 111320.0);
+    let bend = |ln: &[P], at_start: bool, to: P| -> Vec<P> {
+        let pts: Vec<P> = if at_start { ln.to_vec() } else { ln.iter().rev().copied().collect() };
+        let (kx, ky) = metres(pts[0].1);
+        let (dx, dy) = (to.0 - pts[0].0, to.1 - pts[0].1);
+        let n: f64 = pts.windows(2).map(|w| ((w[1].0 - w[0].0) * kx).hypot((w[1].1 - w[0].1) * ky)).sum();
+        let taper = TAPER_M.min(n / 2.0);
+        let mut run = 0.0;
+        let mut out = vec![(pts[0].0 + dx, pts[0].1 + dy)];
+        for w in pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let seg = ((b.0 - a.0) * kx).hypot((b.1 - a.1) * ky);
+            if run < taper && taper < run + seg {
+                let f = (taper - run) / seg;
+                out.push((a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f));
+            }
+            run += seg;
+            let wgt = if taper > 0.0 { (1.0 - run / taper).max(0.0) } else { 0.0 };
+            out.push((b.0 + dx * wgt, b.1 + dy * wgt));
+        }
+        if !at_start {
+            out.reverse();
+        }
+        out
+    };
+    let mut moved: Vec<(String, Vec<P>)> = Vec::new(); // a dict of Python
+    let get = |moved: &Vec<(String, Vec<P>)>, id: &str| -> Vec<P> { moved.iter().find(|x| x.0 == id).map(|x| x.1.clone()).unwrap_or_else(|| lanes[id].3.clone()) };
+    let put = |moved: &mut Vec<(String, Vec<P>)>, id: &str, g: Vec<P>| match moved.iter_mut().find(|x| x.0 == id) {
+        Some(x) => x.1 = g,
+        None => moved.push((id.to_string(), g)),
+    };
+    for (a, bs) in &nxt {
+        if bs.len() != 1 {
+            continue;
+        }
+        let b = &bs[0];
+        if prv.get(b).is_none_or(|p| p.len() != 1 || !p.contains(a)) {
+            continue;
+        }
+        let (la, lb) = (get(&moved, a), get(&moved, b));
+        let (end, start) = (*la.last().unwrap(), lb[0]);
+        let (kx, ky) = metres(end.1);
+        let gap = ((end.0 - start.0) * kx).hypot((end.1 - start.1) * ky);
+        if !(0.01..=MAX_M).contains(&gap) {
+            continue;
+        }
+        if count[&lanes[a].0] >= count[&lanes[b].0] {
+            put(&mut moved, b, bend(&lb, true, end));
+        } else {
+            put(&mut moved, a, bend(&la, false, start));
+        }
+    }
+    if !moved.is_empty() {
+        c.exec("CREATE OR REPLACE TEMP TABLE _moved(lane_id VARCHAR, wkt VARCHAR)")?;
+        let mut app = c.con.appender("_moved").map_err(|e| e.to_string())?;
+        for (id, g) in &moved {
+            app.append_row(duckdb::params![id, lanes::wkt(g)]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        drop(app);
+        c.exec(&format!("UPDATE {sch}.lane l SET geom = ST_GeomFromText(m.wkt) FROM _moved m WHERE m.lane_id = l.lane_id; DROP TABLE _moved"))?;
+    }
+    eprintln!("GMNS[{}]: {} lane ends moved to meet the lane they continue", &sch[5..], moved.len());
+    Ok(moved.len())
+}
+
+/// `_bezier_line_sql`: a SQL expression of a cubic Bézier line sampled at 11 points.
+fn bezier_line_sql(x0: &str, y0: &str, cx0: &str, cy0: &str, cx1: &str, cy1: &str, x1: &str, y1: &str) -> String {
+    let ts = (0..=10).map(|i| format!("{:.4}", i as f64 / 10.0)).collect::<Vec<_>>().join(", ");
+    let bx = format!("pow(1-u,3)*{x0} + 3*pow(1-u,2)*u*{cx0} + 3*(1-u)*pow(u,2)*{cx1} + pow(u,3)*{x1}");
+    let by = format!("pow(1-u,3)*{y0} + 3*pow(1-u,2)*u*{cy0} + 3*(1-u)*pow(u,2)*{cy1} + pow(u,3)*{y1}");
+    format!("ST_MakeLine(list_transform([{ts}], lambda u: ST_Point({bx}, {by})))")
+}
+
+/// `_window_angle`: the turn from a link into the next one in degrees (left +), from the heading of the outbound link over its
+/// first 15 m and of the inbound link over its last 15 m. None when a link is shorter than half a metre.
+pub(crate) fn window_angle(inbound: &str, outbound: &str) -> Option<f64> {
+    let local = |w: &str| -> Vec<P> {
+        let pts = shp::wkt_points(w);
+        let (x0, y0) = pts[0];
+        let kx = y0.to_radians().cos() * 111320.0;
+        pts.iter().map(|(x, y)| ((x - x0) * kx, (y - y0) * 111320.0)).collect()
+    };
+    let heading = |l: &[P], at: f64, to: f64| {
+        let (p, q) = (shp::interpolate(l, at), shp::interpolate(l, to));
+        (q.1 - p.1).atan2(q.0 - p.0).to_degrees()
+    };
+    let (li, lo) = (local(inbound), local(outbound));
+    let (ni, no) = (shp::length(&li), shp::length(&lo));
+    if ni < 0.5 || no < 0.5 {
+        return None;
+    }
+    Some(lanes::pymod(heading(&lo, 0.0, 15.0f64.min(no)) - heading(&li, (ni - 15.0).max(0.0), ni) + 180.0, 360.0) - 180.0)
+}
+
+/// `_fork_letters`: the turn letter of the `mvmt_code` of every `diverge` movement: the straightest branch keeps T, a branch
+/// 8 degrees or more to its left is L, to its right R.
+fn fork_letters(c: &Ctx, sch: &str, mv: &str) -> Result<()> {
+    let sql = format!(
+        "SELECT m.mvmt_id, m.node_id, m.mvmt_code, il.geometry, ol.geometry FROM {mv} m
+        JOIN {sch}.link il ON il.link_id = m.ib_link_id JOIN {sch}.link ol ON ol.link_id = m.ob_link_id
+        WHERE m.type = 'diverge' AND m.mvmt_code IS NOT NULL"
+    );
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let rows: Vec<(String, i64, String, String, String)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut by_node: Vec<(i64, Vec<(String, String)>)> = Vec::new();
+    let mut ang: HashMap<String, f64> = HashMap::new();
+    for (mid, node, code, gi, go) in rows {
+        if let Some(a) = window_angle(&gi, &go) {
+            ang.insert(mid.clone(), a);
+            match by_node.iter_mut().find(|x| x.0 == node) {
+                Some(x) => x.1.push((mid, code)),
+                None => by_node.push((node, vec![(mid, code)])),
+            }
+        }
+    }
+    c.exec("CREATE OR REPLACE TEMP TABLE _fork_codes(mvmt_id VARCHAR, code VARCHAR)")?;
+    let mut app = c.con.appender("_fork_codes").map_err(|e| e.to_string())?;
+    for (_, ms) in &by_node {
+        // the first of the least |angle|, as Python's min()
+        let mut straight = ang[&ms[0].0];
+        for (mid, _) in ms {
+            if ang[mid].abs() < straight.abs() {
+                straight = ang[mid];
+            }
+        }
+        for (mid, code) in ms {
+            let a = ang[mid];
+            let letter = if (a - straight).abs() < 8.0 { "T" } else if a > straight { "L" } else { "R" };
+            let head: String = code.chars().take(2).collect();
+            app.append_row(duckdb::params![mid, format!("{head}{letter}")]).map_err(|e| e.to_string())?;
+        }
+    }
+    app.flush().map_err(|e| e.to_string())?;
+    drop(app);
+    c.exec(&format!("UPDATE {mv} SET mvmt_code = f.code FROM _fork_codes f WHERE f.mvmt_id = {mv}.mvmt_id; DROP TABLE _fork_codes"))
+}
+
+/// `_fork_types`: the movement types `diverge` (at a fork) and `merge`, and the fork letters.
+fn fork_types(c: &Ctx, sch: &str, mv: &str) -> Result<()> {
+    c.exec(&format!(
+        "UPDATE {mv} m SET type = 'diverge' WHERE type <> 'uturn' AND m.node_id IN (
+        SELECT f.node_id FROM {mv} f
+        WHERE (SELECT count(*) FROM {sch}.link k WHERE k.to_node_id = f.node_id) = 1 AND f.type <> 'uturn'
+        GROUP BY f.node_id HAVING count(*) >= 2 AND max(abs(f._ang)) < 45.0)"
+    ))?;
+    fork_letters(c, sch, mv)?;
+    c.exec(&format!(
+        "UPDATE {mv} m SET type = 'merge' WHERE type <> 'uturn' AND m.ob_link_id IN (
+        SELECT f.ob_link_id FROM {mv} f
+        WHERE (SELECT count(*) FROM {sch}.link k WHERE k.from_node_id = f.node_id) = 1 AND f.type <> 'uturn'
+        GROUP BY f.ob_link_id HAVING count(*) >= 2 AND max(abs(f._ang)) < 45.0)"
+    ))
+}
+
+/// `_build_movement`: one row for each legal turn of `edge_graph` (the mode's own rows and the bus rows), its type from the
+/// bearing change, its code and a Bézier line through the junction. The lanes come later.
+fn build_movement(c: &Ctx, sch: &str, mode: &str, uses: &str) -> Result<()> {
+    if !c.exists(mode, "edge_graph")? {
+        return c.exec(&format!(
+            "CREATE TABLE {sch}.movement(
+          mvmt_id VARCHAR, node_id BIGINT, name VARCHAR, ib_link_id BIGINT, start_ib_lane INT,
+          end_ib_lane INT, ob_link_id BIGINT, start_ob_lane INT, end_ob_lane INT, type VARCHAR,
+          penalty DOUBLE, capacity DOUBLE, ctrl_type VARCHAR, mvmt_code VARCHAR,
+          allowed_uses VARCHAR, geometry VARCHAR)"
+        ));
+    }
+    let routed = match mode {
+        "driving" => "car",
+        "walking" => "walk",
+        "cycling" => "bike",
+        m => m,
+    };
+    let has_uses = c.src_cols(mode, "edge_graph")?.contains("uses");
+    let own = format!("'{routed}'");
+    let (o_uses, i_uses) = if has_uses { ("o.uses".to_string(), "i.uses".to_string()) } else { (own.clone(), own.clone()) };
+    let gate = if has_uses { format!("WHERE uses IN ({own}, 'bus')") } else { String::new() };
+    let perm = if c.exists(mode, "turn_permission")? {
+        format!(
+            "UNION ALL SELECT from_edge, to_edge, string_agg(DISTINCT u, ',' ORDER BY u), true FROM (
+                  SELECT from_edge, to_edge, CASE WHEN v IN ('psv', 'bus') THEN 'bus' WHEN v = 'bicycle' THEN 'bike' END AS u
+                  FROM (SELECT from_edge, to_edge, trim(unnest(string_split(vehicles, ';'))) AS v FROM s.{mode}.turn_permission WHERE allowed))
+                WHERE u IS NOT NULL GROUP BY 1, 2"
+        )
+    } else {
+        String::new()
+    };
+    let eg_uses = if has_uses { "uses".to_string() } else { own.clone() };
+    let bez = bezier_line_sql("t.x0", "t.y0", "t.cx0", "t.cy0", "t.cx1", "t.cy1", "t.x1", "t.y1");
+    c.exec(&format!(
+        "CREATE TEMP TABLE _mv_all AS
+      WITH mv AS (
+        SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id, eg.uses = {own} AS _own,
+               CASE WHEN eg._perm THEN eg.uses WHEN eg.uses = {own} THEN '{uses}'
+                    WHEN (NOT fe._bus OR fe._bike) AND (NOT te._bus OR te._bike) THEN 'bus,bike' ELSE eg.uses END AS allowed_uses,
+               fe.geometry AS ibg, te.geometry AS obg,
+               ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER)       AS pe,
+               ST_PointN(fe.geometry, ST_NPoints(fe.geometry)::INTEGER - 1)   AS pp,
+               ST_PointN(te.geometry, 1) AS qs, ST_PointN(te.geometry, 2) AS qn
+        FROM (SELECT from_edge, to_edge, {eg_uses} AS uses, false AS _perm FROM s.{mode}.edge_graph {gate} {perm}) eg
+        JOIN _edges fe ON fe.edge_id = eg.from_edge
+        JOIN _edges te ON te.edge_id = eg.to_edge
+        WHERE NOT (te.osm_id = fe.osm_id AND te.source = fe.target AND te.target = fe.source
+                   AND EXISTS (SELECT 1 FROM (SELECT * FROM s.{mode}.edge_graph {gate}) o
+                               WHERE o.from_edge = eg.from_edge AND o.to_edge <> eg.to_edge
+                                 AND (eg.uses <> {own} OR {o_uses} = {own}))
+                   AND EXISTS (SELECT 1 FROM (SELECT * FROM s.{mode}.edge_graph {gate}) i
+                               WHERE i.to_edge = eg.to_edge AND i.from_edge <> eg.from_edge
+                                 AND (eg.uses <> {own} OR {i_uses} = {own})))
+      ), b AS (
+        SELECT ib, ob, node_id, _own, allowed_uses, ibg, obg,
+          atan2(ST_Y(pe) - ST_Y(pp), (ST_X(pe) - ST_X(pp)) * cos(radians(ST_Y(pe)))) AS in_b,
+          atan2(ST_Y(qn) - ST_Y(qs), (ST_X(qn) - ST_X(qs)) * cos(radians(ST_Y(qs)))) AS out_b
+        FROM mv
+      ), t AS (
+        SELECT ib, ob, node_id, _own, allowed_uses, ibg, obg, ang,
+          CASE WHEN abs(ang) >= 150 THEN 'uturn' WHEN abs(ang) < 30 THEN 'thru'
+               WHEN ang >= 30 THEN 'left' ELSE 'right' END AS type,
+          ((90 - degrees(in_b)) - floor((90 - degrees(in_b)) / 360) * 360) AS hdg
+        FROM (SELECT *, ((degrees(out_b - in_b) + 180) - floor((degrees(out_b - in_b) + 180) / 360) * 360) - 180 AS ang FROM b)
+      ), pts AS (
+        SELECT t.*,
+          ST_X(ST_LineInterpolatePoint(ibg, 0.94)) AS x0, ST_Y(ST_LineInterpolatePoint(ibg, 0.94)) AS y0,
+          ST_X(ST_LineInterpolatePoint(ibg, 0.78)) AS xb, ST_Y(ST_LineInterpolatePoint(ibg, 0.78)) AS yb,
+          ST_X(ST_LineInterpolatePoint(obg, 0.06)) AS x1, ST_Y(ST_LineInterpolatePoint(obg, 0.06)) AS y1,
+          ST_X(ST_LineInterpolatePoint(obg, 0.22)) AS xa, ST_Y(ST_LineInterpolatePoint(obg, 0.22)) AS ya
+        FROM t
+      ), cp AS (
+        SELECT pts.*,
+          x0 + (x0 - xb) / GREATEST(sqrt(pow(x0-xb,2)+pow(y0-yb,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cx0,
+          y0 + (y0 - yb) / GREATEST(sqrt(pow(x0-xb,2)+pow(y0-yb,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cy0,
+          x1 - (xa - x1) / GREATEST(sqrt(pow(xa-x1,2)+pow(ya-y1,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cx1,
+          y1 - (ya - y1) / GREATEST(sqrt(pow(xa-x1,2)+pow(ya-y1,2)), 1e-9)
+               * (0.3 * sqrt(pow(x1-x0,2)+pow(y1-y0,2))) AS cy1
+        FROM pts
+      )
+      SELECT t.ib::VARCHAR || '-' || t.ob::VARCHAR AS mvmt_id, t.node_id, NULL::VARCHAR AS name,
+             t.ib AS ib_link_id, NULL::INT AS start_ib_lane, NULL::INT AS end_ib_lane,
+             t.ob AS ob_link_id, NULL::INT AS start_ob_lane, NULL::INT AS end_ob_lane, t.type,
+             NULL::DOUBLE AS penalty, NULL::DOUBLE AS capacity,
+             CASE WHEN sig.osm_id IS NOT NULL THEN 'signal' END AS ctrl_type,
+             CASE WHEN t.type = 'uturn' THEN NULL
+                  ELSE (CASE WHEN t.hdg < 45 OR t.hdg >= 315 THEN 'NB' WHEN t.hdg < 135 THEN 'EB'
+                             WHEN t.hdg < 225 THEN 'SB' ELSE 'WB' END)
+                       || (CASE t.type WHEN 'left' THEN 'L' WHEN 'right' THEN 'R' ELSE 'T' END)
+             END AS mvmt_code,
+             t.allowed_uses,
+             ST_AsText({bez}) AS geometry,
+             t.ang AS _ang, t._own
+      FROM cp t
+      LEFT JOIN _sig sig ON sig.osm_id = t.node_id"
+    ))?;
+    c.exec(&format!("CREATE TABLE {sch}.movement AS SELECT * EXCLUDE (_own) FROM _mv_all WHERE _own"))?;
+    c.exec("CREATE TEMP TABLE _mv_bus AS SELECT * EXCLUDE (_own) FROM _mv_all WHERE node_id IN (SELECT node_id FROM _mv_all WHERE NOT _own)")?;
+    c.exec("CREATE TEMP TABLE _bus_mv_ids AS SELECT mvmt_id FROM _mv_all WHERE NOT _own")?;
+    c.exec("DROP TABLE _mv_all")?;
+    let n_bus = c.count("SELECT count(*) FROM _bus_mv_ids")?;
+    fork_types(c, sch, &format!("{sch}.movement"))?;
+    if n_bus > 0 {
+        fork_types(c, sch, "_mv_bus")?;
+        eprintln!("GMNS[{mode}]: {n_bus} movements into or out of bus-only links");
+    }
+    c.exec(&format!("ALTER TABLE {sch}.movement DROP COLUMN IF EXISTS _ang"))?;
+    c.exec(&format!("INSERT INTO {sch}.movement SELECT * EXCLUDE (_ang) FROM _mv_bus WHERE mvmt_id IN (SELECT mvmt_id FROM _bus_mv_ids)"))?;
+    c.exec("DROP TABLE _mv_bus; DROP TABLE _bus_mv_ids")
 }
 
 /// The geometry of the lanes, as `_build_lane_curb` places them: the runs of pieces, the paired carriageways, the tapers at a

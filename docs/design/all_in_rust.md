@@ -91,13 +91,23 @@ the same engine.
 | Part | State |
 |---|---|
 | `viz` and the build's `viz.enabled` | Done: `duckosm-rust viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
-| `route-map` and the planner page (the router in WebAssembly) | Not started. |
+| `route-map` and the planner page (the router in WebAssembly) | Done: `duckosm-rust route-map` (`route_map.rs`, `page/planner.html`). The page routes with `duckosm-planner` as WebAssembly. |
 | `levels-edit` | Not started. |
 
 - The pages are roadstyle's `duckosm.page(db, mode, only=...)`: the "liberty" theme and the "google" paths of roadstyle's port.
   mapstyle's own `render_map` (the "osm" theme) does not run with the current roadstyle (`palette_to_dict` is gone), so
   `duckosm viz` in Python fails today.
 - A file with no stored levels: the engine solves them while it draws (mapstyle's rule).
+- The planner page: `duckosm-planner` holds the area in memory (the page's data `RM`: each road's line, each mode's roads in
+  table order, the turns, walk + drive) and gives the JSON of `route-points`, `route-multimodal-points` and `directions`.
+  `duckosm-edit/build.rs` builds it for wasm32 (no wasm-bindgen: the page calls its exports) into the program, and the page
+  holds the module as base64. `duckosm-edit/tests/route_map.rs` compares it with the program on Monaco (420 questions);
+  `tests/test_route_map_rust.py` compares the page in Chromium with the commands, and checks the pages at 390 x 844.
+- A tie: the database gives the roads near a point in the order of its R-tree index, the page in the order of the table. Two
+  routes with the same time and length can then differ (2 of 386 routes on Monaco). Python has the R-tree order too.
+- The page's Shortest walk + drive (by length, a change of mode 0.1 m) is not in duckOSM: the router has `Weight::Length` for it.
+- The other planner pages (the GeoLibre plugin, Studio) can use the same module: load it, `rm_load` the data, `rm_plan` each
+  request.
 
 ## Group C: the state
 
@@ -133,8 +143,11 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | The roads a footpath runs along (`link_along`, `link.along_*`, `link.parent_link_id`) | Done: equal on Monaco. shapely's linear referencing, line distance and the order of its `STRtree` (with libstdc++'s `std::sort`, for equal envelopes) are in `src/shapely.rs`: a tie between two roads goes to the first in that order, as in Python. |
 | Lanes (`lane` without `geom`) and `curb_seg` | Done: equal on Monaco. The lanes of driving come from `driving.lane_profile`; an older db without it, and walking and cycling, use the tag rules (`_rule_lanes`). |
 | Lane geometry (`lane.geom`) | Done: checked by its properties (below). On Monaco Rust and the fixed Python agree within 1 mm on every lane. The checks find 7 lanes that cross themselves (Monaco: driving 4, cycling 3) and 2 pairs of crossing lanes of one cycling link: the same in Python, open. |
-| Walking frame (`--walk-frame`, off by default), movements | Not started. |
-| `gmns_sumo` (netconvert), lanes that meet, crossings, signals, `location` (with GTFS), signs, node types, `zone` | Not started. Python's cycling lane geometry is not the same on two runs: to look at before the lane step. |
+| Movements (`movement`, without their lanes) | Done: equal to Python after this step on Monaco. The lanes of the movements, and the rows that the SUMO step adds in driving and cycling, come with that step. |
+| Walking frame (`--walk-frame`, off by default) | Not started. |
+| The lanes of the walking movements, `signal_controller`, `location`, the signs, the node types, `zone` | Done: equal on Monaco. |
+| `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
+| Crossings, GTFS stops, walk joins | Not started. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
 ## Not changed
