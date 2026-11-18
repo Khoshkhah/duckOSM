@@ -12,6 +12,27 @@ duckosm --version
 | Ready-made packages | Linux (x86_64, aarch64), macOS (x86_64, arm64), Windows (x64) |
 | Other systems | `pip` builds from the source; this needs a [Rust toolchain](https://rustup.rs) |
 
+## Quick start
+
+```bash
+curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
+duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
+duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
+```
+
+```python
+import duckosm
+
+db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build (in the next release)
+
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
+r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
+duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
+```
+
+All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
+
+
 ## No install: the browser
 
 | Page | Does |
@@ -57,30 +78,8 @@ Both are being replaced by Rust code.
 
 `build` (in part), `levels`, `bus`, `multimodal` and `clip-pbf`. They work, and they move to Rust next.
 
-## Quick start
-
-```bash
-pip install duckosm
-
-curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
-duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
-duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
-```
-
-```python
-import duckosm
-
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build
-
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
-r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
-duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
-```
-
-Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
-
 ## Where files go
 
 A relative path (an output, a config, a report) is relative to the folder you run `duckosm` in.
 
-Next: [build your first network](first_network.md).
+Next: [Your first network](first_network.md), step by step.
