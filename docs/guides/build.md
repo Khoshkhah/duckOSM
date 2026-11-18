@@ -56,5 +56,5 @@ A key that is not in the file has its default. A relative path starts from the f
 that you type overrides the file, for example `duckosm build -c monaco.yaml -m driving`.
 Every key: [Configuration](../reference/configuration.md).
 
-For a country, build the region one time and [cut the areas from it](prepare-area.md#cut-an-area-from-a-built-region).
+For a country, build the region one time and [cut the areas from it](prepare-area.md#2-cut-a-built-region).
 To build a large area tile by tile, give the same config file to `duckosm tiles --config monaco.yaml`.

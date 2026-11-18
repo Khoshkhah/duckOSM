@@ -12,7 +12,7 @@ in the output DuckDB file. For the Rust build, see [Browser and native builds](b
 | `edge_id` | made from OSM | the parent's |
 | Tables | all | `edges`, `private_edges`, `nodes`, `edge_graph`, `turn_restrictions` |
 
-How to clip: [Cut an area from a built region](../guides/prepare-area.md#cut-an-area-from-a-built-region).
+How to clip: [Cut a built region](../guides/prepare-area.md#2-cut-a-built-region).
 
 ## The steps of a PBF build
 
