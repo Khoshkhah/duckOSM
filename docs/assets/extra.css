@@ -15,20 +15,13 @@
   --md-primary-bg-color--light: #f6f4eeb3;
 }
 
-/* Light theme: the logo's yellow, as on the buttons. Yellow text on white cannot be read (contrast 1.4:1), so a link is
-   dark text with a thick yellow underline, and hover and the current menu item get a yellow background. */
+/* Light theme: links in the logo's yellow, darker (#b58900) so that the words can be read on white;
+   the current menu item gets the logo's yellow as its background. */
 [data-md-color-scheme="default"][data-md-color-accent="custom"] {
-  --md-accent-fg-color: var(--dk-ink);
+  --md-accent-fg-color: #8a6a00;
   --md-accent-fg-color--transparent: #ffd43b40;
-  --md-typeset-a-color: var(--dk-ink);
+  --md-typeset-a-color: #b58900;
 }
-[data-md-color-scheme="default"] .md-typeset a:not(.md-button) {
-  text-decoration: underline;
-  text-decoration-color: var(--dk-yellow);
-  text-decoration-thickness: 0.18em;
-  text-underline-offset: 0.18em;
-}
-[data-md-color-scheme="default"] .md-typeset a:not(.md-button):hover { background: var(--dk-yellow); }
 [data-md-color-scheme="default"] .md-nav__link--active,
 [data-md-color-scheme="default"] .md-nav__item .md-nav__link--active {
   color: var(--dk-ink);
@@ -142,3 +135,22 @@
 /* A tour: pictures of one size in two columns, cut to fit, the caption under each */
 .md-typeset .grid.tour { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 .md-typeset .grid.tour figure img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 0.4rem; }
+
+/* Export: the diagram of the levels: a row of boxes with arrows; a column with down arrows on a phone */
+.md-typeset .dk-levels { display: flex; gap: 1.4rem; margin: 0.8rem 0 0.6rem; }
+.md-typeset .dk-levels .lv { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem;
+  padding: 0.7rem 0.7rem 0.6rem; border: 2px solid var(--dk-yellow); border-radius: 0.6rem; color: var(--md-default-fg-color);
+  text-decoration: none; line-height: 1.3; }
+.md-typeset .dk-levels a.lv:hover { background: #ffd43b33; }
+.md-typeset .dk-levels .lv .n { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: var(--dk-yellow); color: var(--dk-ink); font-weight: 700; font-size: 0.8rem; }
+.md-typeset .dk-levels .lv b { font-size: 0.8rem; }
+.md-typeset .dk-levels .lv .s { font-size: 0.7rem; color: var(--md-default-fg-color--light); }
+.md-typeset .dk-levels .lv code { font-size: 0.62rem; background: none; padding: 0; white-space: normal; }
+.md-typeset .dk-levels .lv:not(:last-child)::after { content: "→"; position: absolute; right: -1.25rem; top: 50%;
+  transform: translateY(-50%); color: var(--md-default-fg-color--light); font-size: 1.1rem; }
+@media (max-width: 45em) {
+  .md-typeset .dk-levels { flex-direction: column; gap: 1.3rem; }
+  .md-typeset .dk-levels .lv:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -1.35rem;
+    transform: translateX(-50%); }
+}

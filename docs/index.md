@@ -1,21 +1,16 @@
----
-hide:
-  - toc
----
-
 # duckOSM
 
-**OpenStreetMap → road networks, map layers and GIS files. One Rust program, on your computer and in the browser.**
+**Turn OpenStreetMap into routable networks, map layers and GIS files. One Rust engine, for your computer and your browser.**
 
 duckOSM reads an `.osm.pbf` file and makes the routable network of an area, its map layers, and files for GIS,
-traffic simulation and routing. You can fix the OSM data on a map first, and every output uses your fixes.
+traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go into one file, `osm_fixes.yaml`, and every step of duckOSM reads it: the OSM file, the OSM data tables, the network and every export. So all outputs show the same corrected data.
 
 <div class="hero-actions" markdown>
 
 [Try it in your browser](https://khoshkhah.github.io/duckosm-studio/){ .md-button .md-button--primary }
 [Install](install.md){ .md-button }
 [Get started](first_network.md){ .md-button }
-[GitHub](https://github.com/Khoshkhah/duckOSM){ .md-button }
+[Compare](compare/index.md){ .md-button }
 
 </div>
 
@@ -53,7 +48,7 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
     ---
 
-    `edge_id = hash(osm_id, source, target)`: the same after a rebuild, a cut and an export.
+    One id for each road **and each direction**, the same after a rebuild, a cut and an export.
     [Stable edge ids](concepts/edge-ids.md)
 
 -   :material-car-multiple:{ .lg .middle } **Traffic simulation**
@@ -122,9 +117,27 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
 </div>
 
+## One edge id for each direction
+
+```text
+edge_id = hash(osm_id, source, target)
+```
+
+**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
+to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
+a cut and every export ([how](concepts/edge-ids.md)).
+
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file, and all take your OSM fixes.
+All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes.
+
+<div class="dk-levels">
+<div class="lv"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></div>
+<a class="lv" href="exports/#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
+<a class="lv" href="exports/#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
+<a class="lv" href="exports/#3-traffic-simulation"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
+<a class="lv" href="exports/#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
+</div>
 
 | Output | Command | Format | More |
 |---|---|---|---|
@@ -170,7 +183,7 @@ the area ([Browser and native builds](concepts/browser-native.md)).
 
 ## Speed on France
 
-France: 5.1 GB `.osm.pbf`, Mac mini (12 cores, 16 GB). Both versions build by map tiles, cut by
+France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB). Both versions build by map tiles, cut by
 [pbfcut](https://github.com/Khoshkhah/pbfcut).
 
 | Job | Native | Browser | Other tool |
@@ -192,11 +205,11 @@ duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
 ```python
 import duckosm
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")   # as duckosm build
+db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
-r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and the ordered edge_ids
-duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
+r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
+duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
 ```
 
 Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
