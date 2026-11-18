@@ -4,9 +4,22 @@
 
 The levels go from the raw OSM data to the most detailed network. Each level is made from the level before it.
 
-```text
-.osm.pbf ─► 1. OSM data ─► 2. The network ─► 3. Traffic simulation ─► 4. Lane level and 3D
-            (no network)    (edges, edge_id)    (links, nodes, turns)     (each lane, its shape)
+```mermaid
+flowchart LR
+  L0["<b>0. The OSM file</b><br/>.osm.pbf<br/>cut to your area"]
+  L1["<b>1. OSM data</b><br/>no network<br/>QuackOSM · GDAL"]
+  L2["<b>2. The network</b><br/>edges, edge_id, turns<br/>GeoPackage · networkx"]
+  L3["<b>3. Traffic simulation</b><br/>links, nodes, turns<br/>GMNS · MATSim · SUMO"]
+  L4["<b>4. Lane level and 3D</b><br/>each lane, its shape<br/>Lanelet2 · OpenDRIVE"]
+  F(["your OSM fixes"])
+  L0 --> L1 --> L2 --> L3 --> L4
+  F -.-> L0
+  F -.-> L1
+  F -.-> L2
+  click L1 "#1-osm-data"
+  click L2 "#2-the-network"
+  click L3 "#3-traffic-simulation"
+  click L4 "#4-lane-level-and-3d"
 ```
 
 ### 1. OSM data
