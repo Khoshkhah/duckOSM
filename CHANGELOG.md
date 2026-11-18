@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
+  algorithms: no DuckDB, no threads, it builds for WebAssembly) and `rust/duckosm-route` (the database, GraphML, the CLI). The
+  routing graph is in memory with the order of networkx's graph, and the route is a port of networkx's bidirectional Dijkstra
+  (the same heap keys), so a tie gives the path of duckOSM's `routing.route`. `route DB FROM TO` prints `route()` as JSON;
+  `--pairs FILE` routes many pairs on one graph, as `Router` does. `export-graph` writes the same GraphML files as duckOSM
+  (node graph and edge graph), byte for byte; `gpickle` (a Python pickle) stays in Python. On Monaco and Tartu, 1,200 routes of
+  driving and walking, by time and by length, have the same edges, `time_s` and `length_m` as Python
+  (`duckosm-route/tests/golden.rs`). With `weight=length` Python's graph comes from a join with no fixed row order, so its ties
+  change from run to run; the Rust graph keeps the order of the edge graph. Python's text of a float (`place::py_float`) and
+  the JSON of the tools now round a tie of the shortest digits to the even digit, as Python does.
+
 - **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
   database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of
   `/api/info`, `/api/query`, `/api/sql`, `/ask/*.js` are the same bytes as Python's on Monaco. With this, every command of group B
