@@ -92,7 +92,7 @@ the same engine.
 | Part | State |
 |---|---|
 | `viz` and the build's `viz.enabled` | Done: `duckosm-rust viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
-| `route-map` and the planner page (the router in WebAssembly) | Not started. |
+| `route-map` and the planner page (the router in WebAssembly) | Done: `duckosm-rust route-map` (`route_map.rs`, `page/planner.html`). The page routes with `duckosm-planner` as WebAssembly. |
 | `levels-edit` | Done: `duckosm-rust levels-edit DB`, the page of `duckosm-rust studio` on one file (`Studio::for_file`) with card 8 open (`?area=<name>&step=8`). |
 
 - The pages are roadstyle's `duckosm.page(db, mode, only=...)`: the "liberty" theme and the "google" paths of roadstyle's port.
@@ -102,6 +102,16 @@ the same engine.
   roadstyle's Python editor with mapstyle's layers; the Rust page uses Studio's map of the area. `--area`, `--reports` and
   `--plain` are not ported: the work folder is in the page, the maps have their own command (`viz`), and the map is always Studio's.
 - A file with no stored levels: the engine solves them while it draws (mapstyle's rule).
+- The planner page: `duckosm-planner` holds the area in memory (the page's data `RM`: each road's line, each mode's roads in
+  table order, the turns, walk + drive) and gives the JSON of `route-points`, `route-multimodal-points` and `directions`.
+  `duckosm-edit/build.rs` builds it for wasm32 (no wasm-bindgen: the page calls its exports) into the program, and the page
+  holds the module as base64. `duckosm-edit/tests/route_map.rs` compares it with the program on Monaco (420 questions);
+  `tests/test_route_map_rust.py` compares the page in Chromium with the commands, and checks the pages at 390 x 844.
+- A tie: the database gives the roads near a point in the order of its R-tree index, the page in the order of the table. Two
+  routes with the same time and length can then differ (2 of 386 routes on Monaco). Python has the R-tree order too.
+- The page's Shortest walk + drive (by length, a change of mode 0.1 m) is not in duckOSM: the router has `Weight::Length` for it.
+- The other planner pages (the GeoLibre plugin, Studio) can use the same module: load it, `rm_load` the data, `rm_plan` each
+  request.
 
 ## Group C: the state
 
