@@ -20,7 +20,7 @@ use duckosm_core::raw::{RawNode, RawTags, RawWay};
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::WriterProperties;
-use std::fs::File;
+use duckosm_core::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -34,6 +34,41 @@ pub mod quack;
 pub mod read;
 pub mod merge;
 pub use par_writer::ParWriter;
+
+/// A Parquet file to read, from `duckosm_core::fs` (natively a file; in the browser a file of the page): the Parquet reader
+/// reads its parts through a second reader of the file ([`duckosm_core::fs::File::try_clone`]), as for `std::fs::File`.
+pub struct Source(File);
+
+/// Open the Parquet file `path` to read it.
+pub fn source(path: &Path) -> Result<Source, String> {
+    File::open(path).map(Source).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+impl parquet::file::reader::Length for Source {
+    fn len(&self) -> u64 {
+        self.0.len().unwrap_or(0)
+    }
+}
+
+impl parquet::file::reader::ChunkReader for Source {
+    type T = std::io::BufReader<File>;
+
+    fn get_read(&self, start: u64) -> parquet::errors::Result<Self::T> {
+        use std::io::Seek;
+        let mut f = self.0.try_clone()?;
+        f.seek(std::io::SeekFrom::Start(start))?;
+        Ok(std::io::BufReader::new(f))
+    }
+
+    fn get_bytes(&self, start: u64, length: usize) -> parquet::errors::Result<bytes::Bytes> {
+        use std::io::{Read, Seek};
+        let mut f = self.0.try_clone()?;
+        f.seek(std::io::SeekFrom::Start(start))?;
+        let mut b = vec![0; length];
+        f.read_exact(&mut b)?;
+        Ok(b.into())
+    }
+}
 pub use raw_load::*;
 
 fn geo_metadata(geometry_type: &str) -> KeyValue {

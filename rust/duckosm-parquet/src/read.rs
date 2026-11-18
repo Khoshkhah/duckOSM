@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 fn batches(path: &Path) -> Result<impl Iterator<Item = Result<RecordBatch, String>>, String> {
-    let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let f = crate::source(path)?;
     let r = ParquetRecordBatchReaderBuilder::try_new(f).map_err(|e| e.to_string())?.build().map_err(|e| e.to_string())?;
     Ok(r.map(|b| b.map_err(|e| e.to_string())))
 }
@@ -125,7 +125,7 @@ pub fn read_edges(
 /// `osm_id`, `edge_ref`, `is_reverse`, `access`, `refs`). The other fields of each edge are empty: no line, no tags. The
 /// lines are most of the bytes of the file (France: 26 million edges, of which 7.5 million are route edges).
 pub fn read_route_edges(path: &Path, want: impl Fn(i64) -> bool, mut f: impl FnMut(Edge) -> Result<(), String>) -> Result<(), String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = crate::source(path)?;
     let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
     let names = ["edge_id", "source", "target", "osm_id", "edge_ref", "is_reverse", "access", "refs"];
     let cols: Vec<usize> = names.iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
@@ -293,7 +293,7 @@ pub fn read_level_edges(
     attrs: &mut FxHashSet<Arc<Attrs>>,
     mut f: impl FnMut(i64, &Arc<Attrs>, Vec<Pt>) -> Result<(), String>,
 ) -> Result<(), String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = crate::source(path)?;
     let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
     let names = ["edge_id", "geometry", "highway", "tunnel", "bridge", "layer", "junction"];
     let cols: Vec<usize> = names.iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
@@ -331,7 +331,7 @@ pub fn read_level_edges(
 /// The id, the source and target nodes, and the two ends of the line of each edge of an `edges` file (only these columns are
 /// read).
 pub fn read_edge_ends(path: &Path, mut f: impl FnMut(i64, i64, i64, Pt, Pt)) -> Result<(), String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = crate::source(path)?;
     let b = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| e.to_string())?;
     let cols: Vec<usize> = ["edge_id", "source", "target", "geometry"].iter().filter_map(|n| b.schema().index_of(n).ok()).collect();
     let mask = parquet::arrow::ProjectionMask::roots(b.parquet_schema(), cols);
