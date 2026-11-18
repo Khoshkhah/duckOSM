@@ -90,12 +90,14 @@ Kentucky (141 MB):
 
 France (5.1 GB), GeoParquet, `--tile-zoom 8`:
 
-| | `ogr2ogr` | `quack --gdal` |
-|---|---|---|
-| Time | 14 min 18 s (5 runs) | **3 min 37 s** |
-| Time, one read (estimate) | about 6 min 10 s | |
-| Memory | 1.6 GB | **0.9 GB** |
-| Size | 15.6 GB | **11.3 GB** |
+| | `ogr2ogr` | `quack --gdal` | `quack --gdal` in the browser |
+|---|---|---|---|
+| Time | 14 min 18 s (5 runs) | **3 min 37 s** | 5 min 23 s |
+| Time, one read (estimate) | about 6 min 10 s | | |
+| Memory | 1.6 GB | **0.9 GB** | 1.3 GB + 4.1 GB in 12 tile workers |
+| Size | 15.6 GB | **11.3 GB** | 13.7 GB (Snappy) |
+
+The browser (Chromium, duckOSM Studio's quack page, output **GDAL layers**) used at most 43 GB of browser storage.
 
 GDAL's Parquet driver writes one layer to one file, so `ogr2ogr -f Parquet` gives one layer in each run:
 `ogr2ogr -f Parquet points.parquet france.osm.pbf points`, and so on for the five layers. Each run reads the whole file, so
