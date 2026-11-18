@@ -60,7 +60,7 @@ flowchart TB
 `source.type: duckdb` in a config (or `duckosm build --source-db`) reads no OSM. It copies every edge
 that touches the boundary, whole (`clip.predicate`, default `intersects`), out of an existing build,
 so every `edge_id` is the parent's.
-How to use it: [Several areas from one region](../guides/prepare-area.md#cut-an-area-from-a-built-region).
+How to use it: [Cut an area from a built region](../guides/prepare-area.md#cut-an-area-from-a-built-region).
 
 ```mermaid
 flowchart LR
