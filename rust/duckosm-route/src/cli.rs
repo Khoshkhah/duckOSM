@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 2] = ["route", "export-graph"];
+pub const COMMANDS: [&str; 5] = ["route", "export-graph", "route-multimodal", "route-points", "route-multimodal-points"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -35,6 +35,74 @@ enum Cmd {
         /// The fastest route (time) or the shortest (length).
         #[arg(long, default_value = "time", value_parser = ["time", "length"])]
         weight: String,
+    },
+    /// The fastest trip across modes between two junction node_ids over the mm.* graph (duckOSM `routing.route_multimodal`):
+    /// one JSON object (time_s, length_m, edges, legs, transfers, nodes) or null. Every part follows the edge graph of its
+    /// mode. With --batch, a JSON list for the pairs of a file ("SRC DST" on each line), the graph read once.
+    #[command(name = "route-multimodal")]
+    RouteMultimodal {
+        db: PathBuf,
+        #[arg(allow_hyphen_values = true, required_unless_present = "batch")]
+        src: Option<i64>,
+        #[arg(allow_hyphen_values = true, required_unless_present = "batch")]
+        dst: Option<i64>,
+        #[arg(long, conflicts_with_all = ["src", "dst"])]
+        batch: Option<PathBuf>,
+        /// The multimodal schema.
+        #[arg(long, default_value = "mm")]
+        schema: String,
+        #[arg(long, default_value = "walking")]
+        start_mode: String,
+        #[arg(long, default_value = "walking")]
+        end_mode: String,
+        /// Any change of mode that the transfers allow (default: walk* (drive|cycle)* walk*).
+        #[arg(long)]
+        no_enforce_sequence: bool,
+        /// Only these modes, a comma list (for example walking,cycling: a car-free trip).
+        #[arg(long)]
+        modes: Option<String>,
+    },
+    /// The route in one mode between two points (lon, lat) (duckOSM `point_routing.route_points`): each point joins its roads
+    /// within --radius, the walk to the road at --access-kmh. One JSON object or null. With --batch, a JSON list for the
+    /// points of a file ("LON LAT LON LAT" on each line).
+    #[command(name = "route-points")]
+    RoutePoints {
+        db: PathBuf,
+        /// LON LAT LON LAT.
+        #[arg(num_args = 4, allow_hyphen_values = true, required_unless_present = "batch")]
+        coords: Vec<f64>,
+        #[arg(long, conflicts_with = "coords")]
+        batch: Option<PathBuf>,
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        #[arg(long, default_value = "time", value_parser = ["time", "length"])]
+        weight: String,
+        #[arg(long, default_value_t = 50.0)]
+        radius: f64,
+        #[arg(long, default_value_t = 4.5)]
+        access_kmh: f64,
+    },
+    /// The trip across modes between two points (lon, lat), starting and ending walking (duckOSM
+    /// `point_routing.route_multimodal_points`). One JSON object or null. With --batch, a JSON list for the points of a file.
+    #[command(name = "route-multimodal-points")]
+    RouteMultimodalPoints {
+        db: PathBuf,
+        /// LON LAT LON LAT.
+        #[arg(num_args = 4, allow_hyphen_values = true, required_unless_present = "batch")]
+        coords: Vec<f64>,
+        #[arg(long, conflicts_with = "coords")]
+        batch: Option<PathBuf>,
+        #[arg(long, default_value_t = 50.0)]
+        radius: f64,
+        #[arg(long, default_value_t = 4.5)]
+        access_kmh: f64,
+        #[arg(long, default_value = "mm")]
+        schema: String,
+        /// Only these modes, a comma list (it must have walking).
+        #[arg(long)]
+        modes: Option<String>,
+        #[arg(long)]
+        no_enforce_sequence: bool,
     },
     /// Export a built network as a graph file (GraphML). By default the geographic node-based MultiDiGraph (OSM junctions as
     /// nodes, road segments keyed by edge_id carrying their full attribute set); --graph edge for the edge-based routing
@@ -72,6 +140,37 @@ fn need_db(db: &Path) -> Result<()> {
     if db.exists() { Ok(()) } else { Err(format!("database not found: {}", db.display())) }
 }
 
+fn mode_set(modes: Option<&str>) -> Option<std::collections::HashSet<String>> {
+    modes.map(|m| m.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+}
+
+/// One query (its words) as one JSON value, or each line of `batch` (`n` words) as a JSON list; an error of a line is
+/// `{"error": text}` in its place.
+fn print_one_or_batch(batch: Option<&Path>, n: usize, one: Option<Vec<String>>, f: impl Fn(&[String]) -> Result<serde_json::Value>) -> Result<()> {
+    let v = match (batch, one) {
+        (Some(file), _) => {
+            let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let mut list = Vec::new();
+            for l in text.lines().filter(|l| !l.trim().is_empty()) {
+                let words: Vec<String> = l.split_whitespace().map(String::from).collect();
+                if words.len() != n {
+                    return Err(format!("{}: not {n} numbers: {l}", file.display()));
+                }
+                list.push(f(&words).unwrap_or_else(|e| serde_json::json!({"error": e})));
+            }
+            serde_json::Value::Array(list)
+        }
+        (None, Some(v)) => f(&v)?,
+        _ => return Err("no query: give the numbers or --batch FILE".into()),
+    };
+    println!("{}", duckosm_tools::json::dumps(&v));
+    Ok(())
+}
+
+fn nums<T: std::str::FromStr>(w: &[String]) -> Result<Vec<T>> {
+    w.iter().map(|x| x.parse::<T>().map_err(|_| format!("not a number: {x}"))).collect()
+}
+
 /// Run one command; `args` starts with the command name.
 pub fn run(args: &[String]) -> Result<()> {
     let cli = Cli::parse_from(std::iter::once("duckosm-rust".to_string()).chain(args.iter().cloned()));
@@ -98,6 +197,37 @@ pub fn run(args: &[String]) -> Result<()> {
                 _ => return Err("give FROM_EDGE TO_EDGE or --pairs FILE".into()),
             };
             println!("{}", duckosm_tools::json::dumps(&v));
+        }
+        Cmd::RouteMultimodal { db, src, dst, batch, schema, start_mode, end_mode, no_enforce_sequence, modes } => {
+            need_db(&db)?;
+            let con = crate::route::open(&db)?;
+            let net = crate::points::network(&con, &schema)?;
+            let allowed = mode_set(modes.as_deref());
+            let one = |w: &[String]| {
+                let v: Vec<i64> = nums(w)?;
+                crate::points::route_multimodal(&con, &net, Some(v[0]), Some(v[1]), &schema, &start_mode, &end_mode, !no_enforce_sequence, allowed.as_ref(), None)
+            };
+            print_one_or_batch(batch.as_deref(), 2, src.zip(dst).map(|(a, b)| vec![a.to_string(), b.to_string()]), one)?;
+        }
+        Cmd::RoutePoints { db, coords, batch, mode, weight, radius, access_kmh } => {
+            need_db(&db)?;
+            let con = crate::route::open(&db)?;
+            let one = |w: &[String]| {
+                let v: Vec<f64> = nums(w)?;
+                crate::points::route_points(&con, (v[0], v[1]), (v[2], v[3]), &mode, &weight, radius, access_kmh)
+            };
+            print_one_or_batch(batch.as_deref(), 4, (!coords.is_empty()).then(|| coords.iter().map(|x| x.to_string()).collect()), one)?;
+        }
+        Cmd::RouteMultimodalPoints { db, coords, batch, radius, access_kmh, schema, modes, no_enforce_sequence } => {
+            need_db(&db)?;
+            let con = crate::route::open(&db)?;
+            let net = crate::points::network(&con, &schema)?;
+            let allowed = mode_set(modes.as_deref());
+            let one = |w: &[String]| {
+                let v: Vec<f64> = nums(w)?;
+                crate::points::route_multimodal_points(&con, &net, (v[0], v[1]), (v[2], v[3]), radius, access_kmh, &schema, allowed.as_ref(), !no_enforce_sequence)
+            };
+            print_one_or_batch(batch.as_deref(), 4, (!coords.is_empty()).then(|| coords.iter().map(|x| x.to_string()).collect()), one)?;
         }
         Cmd::ExportGraph { db, mode, out, graph_kind, fmt, weight, geometry, uses } => {
             need_db(&db)?;
