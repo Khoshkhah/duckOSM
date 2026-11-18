@@ -4,7 +4,8 @@
 //! steps are those of `to_gmns` in the same order, with the same SQL; the Python loops are Rust loops over the same rows.
 //! Ported so far: the fixed tables (`config`, `use_definition`, `use_group`), `node`, the lanes that a one-way road takes
 //! from the road it continues, `link`, `geometry`, and the roads that a footpath runs along (`link_along`, `link.along_*`,
-//! `link.parent_link_id`), the lanes and curbs, and the movements (without their lanes).
+//! `link.parent_link_id`), the lanes and curbs, the movements, the lanes of the walking movements, `signal_controller`,
+//! `location`, the stop and give-way signs, the node types and `zone`.
 
 use crate::gmns_lanes as lanes;
 use crate::shapely::{self as shp, P};
@@ -163,6 +164,17 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
         }
         build_lane_curb(&c, &sch, mode, uses, has_raw, "right")?;
         build_movement(&c, &sch, mode, uses)?;
+        if mode == "walking" {
+            walk_lanes(&c, &sch)?;
+        } // driving and cycling: the lanes of the movements from SUMO (not ported yet), then the crossings in driving
+        c.exec(&format!(
+            "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
+             FROM {sch}.node WHERE ctrl_type = 'signal'"
+        ))?;
+        build_location(&c, &sch, mode, has_raw)?;
+        apply_signs(&c, &sch, mode, has_raw)?;
+        node_types(&c, &sch, has_raw)?;
+        build_zone(&c, &sch, name.strip_suffix("_gmns").unwrap_or(&name))?;
         let mut counts = Vec::new();
         for t in ["node", "link", "geometry"] {
             counts.push((t, c.count(&format!("SELECT count(*) FROM {sch}.{t}"))?));
@@ -841,6 +853,133 @@ impl Rules<'_> {
             out.push((lane_num, u, width, turn));
         }
         out
+    }
+}
+
+/// `_walk_lanes`: a footpath is one strip, so the lanes of a walking movement pair in order; a lane with no way in or out goes
+/// to `lane_check`.
+fn walk_lanes(c: &Ctx, sch: &str) -> Result<()> {
+    c.exec(&format!(
+        "UPDATE {sch}.movement m SET start_ib_lane = 1, end_ib_lane = least(i.n, o.n), start_ob_lane = 1, end_ob_lane = least(i.n, o.n)
+         FROM (SELECT link_id, count(*) n FROM {sch}.lane GROUP BY 1) i, (SELECT link_id, count(*) n FROM {sch}.lane GROUP BY 1) o
+         WHERE i.link_id = m.ib_link_id AND o.link_id = m.ob_link_id;
+         CREATE OR REPLACE TABLE {sch}.lane_check(kind VARCHAR, id VARCHAR, detail VARCHAR);
+         INSERT INTO {sch}.lane_check
+         SELECT 'no way out', l.lane_id, 'no movement leaves this lane' FROM {sch}.lane l
+         WHERE l.link_id IN (SELECT ib_link_id FROM {sch}.movement)
+           AND NOT EXISTS (SELECT 1 FROM {sch}.movement m WHERE m.ib_link_id = l.link_id AND l.lane_num BETWEEN m.start_ib_lane AND m.end_ib_lane)
+         UNION ALL
+         SELECT 'no way in', l.lane_id, 'no movement enters this lane' FROM {sch}.lane l
+         WHERE l.link_id IN (SELECT ob_link_id FROM {sch}.movement)
+           AND NOT EXISTS (SELECT 1 FROM {sch}.movement m WHERE m.ob_link_id = l.link_id AND l.lane_num BETWEEN m.start_ob_lane AND m.end_ob_lane)"
+    ))
+}
+
+/// The OSM point features that `location` holds.
+const LOC_HIGHWAY: [&str; 8] = ["crossing", "bus_stop", "give_way", "stop", "traffic_signals", "toll_gantry", "mini_roundabout", "speed_camera"];
+
+/// `_build_location`: the tagged OSM nodes on a link, one row for each link they lie on, `lr` along it. Needs the raw tags.
+fn build_location(c: &Ctx, sch: &str, mode: &str, has_raw: bool) -> Result<()> {
+    if !has_raw {
+        return Ok(());
+    }
+    let hw = LOC_HIGHWAY.iter().map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
+    let ecols = c.src_cols(mode, "edges")?;
+    let elev = ecols.contains("z_from") && ecols.contains("z_to");
+    let z = if elev { "e.z_from + (e.z_to - e.z_from) * lr / NULLIF(link_len, 0)" } else { "NULL" };
+    let structs: Vec<String> = ["tunnel", "bridge"].iter().filter(|k| ecols.contains(**k)).map(|k| format!("COALESCE(e.{k}, 'no') NOT IN ('no', '')")).collect();
+    let zskip = if elev && !structs.is_empty() { structs.join(" OR ") } else { "false".to_string() };
+    let need: Vec<&str> = std::iter::once("edge_id").chain(["z_from", "z_to", "tunnel", "bridge"].into_iter().filter(|k| ecols.contains(*k))).collect();
+    let ej = if elev { format!("LEFT JOIN (SELECT {} FROM _edges) e ON e.edge_id = pos.link_id", need.join(", ")) } else { String::new() };
+    c.exec(&format!(
+        "CREATE TABLE {sch}.location AS
+      WITH pts AS (
+        SELECT n.osm_id, n.lon, n.lat, ST_Point(n.lon, n.lat) AS p, n.tags['name'] AS name,
+               CASE WHEN n.tags['highway'] IN ({hw}) THEN n.tags['highway']
+                    WHEN n.tags['traffic_calming'] IS NOT NULL THEN 'traffic_calming'
+                    WHEN n.tags['amenity'] = 'parking_entrance' THEN 'parking_entrance'
+                    WHEN n.tags['railway'] = 'level_crossing' THEN 'level_crossing' END AS loc_type
+        FROM s.raw.nodes n
+        WHERE n.tags['highway'] IN ({hw}) OR n.tags['traffic_calming'] IS NOT NULL
+           OR n.tags['amenity'] = 'parking_entrance' OR n.tags['railway'] = 'level_crossing'
+      ), hit AS (
+        SELECT pts.*, k.link_id, k.from_node_id, k.length AS link_len, k.geom AS lg,
+               ST_LineLocatePoint(k.geom, pts.p) AS f
+        FROM pts JOIN {sch}.link k ON ST_DWithin(k.geom, pts.p, 2e-6)
+      )
+      , pos AS (
+        SELECT hit.*, CASE WHEN f <= 0 THEN 0.0 WHEN f >= 1 THEN link_len
+                           ELSE ST_Length_Spheroid(ST_FlipCoordinates(ST_LineSubstring(lg, 0, f))) END AS lr
+        FROM hit)
+      SELECT osm_id::VARCHAR || '_' || link_id::VARCHAR AS loc_id, link_id, from_node_id AS ref_node_id, lr,
+             lon AS x_coord, lat AS y_coord,
+             CASE WHEN {zskip} THEN NULL ELSE ({z})::DOUBLE END AS z_coord, loc_type, 1::BIGINT AS zone_id,
+             NULL::VARCHAR AS gtfs_stop_id, osm_id, name, p AS geom
+      FROM pos {ej} ORDER BY link_id, lr"
+    ))
+}
+
+/// `_apply_signs`: `ctrl_type` stop / yield from the OSM stop and give-way signs on the approach (cars and bikes).
+fn apply_signs(c: &Ctx, sch: &str, mode: &str, has_raw: bool) -> Result<()> {
+    if !has_raw || mode == "walking" || !c.exists(mode, "edges")? {
+        return Ok(());
+    }
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _sign AS
+      SELECT x.link_id AS ib, bool_or(x.loc_type = 'stop') AS stop
+      FROM {sch}.location x JOIN {sch}.link k ON k.link_id = x.link_id
+        JOIN s.raw.nodes n ON n.osm_id = x.osm_id JOIN _edges e ON e.edge_id = x.link_id
+      WHERE x.loc_type IN ('stop', 'give_way') AND x.lr >= k.length - 50.0 AND x.lr < k.length - 0.5
+        AND ((n.tags['direction'] IN ('forward', 'both') AND NOT e.is_reverse)
+          OR (n.tags['direction'] IN ('backward', 'both') AND e.is_reverse))
+      GROUP BY 1;
+      UPDATE {sch}.movement m SET ctrl_type = CASE WHEN g.stop THEN 'stop' ELSE 'yield' END
+      FROM _sign g WHERE m.ib_link_id = g.ib AND m.ctrl_type IS NULL;
+      UPDATE {sch}.node SET ctrl_type = c.t FROM (
+        SELECT k.to_node_id AS node_id, count(*) AS n_in, count(g.ib) AS n_sign, count(*) FILTER (WHERE g.stop) AS n_stop,
+               CASE WHEN count(*) FILTER (WHERE g.stop) = count(*) AND count(*) >= 4 THEN 'stop_4_way'
+                    WHEN count(*) FILTER (WHERE g.stop) = count(*) THEN 'stop'
+                    WHEN count(*) FILTER (WHERE g.stop) > 0 THEN 'stop_2_way' ELSE 'yield' END AS t
+        FROM {sch}.link k LEFT JOIN _sign g ON g.ib = k.link_id GROUP BY 1 HAVING count(g.ib) > 0) c
+      WHERE node.node_id = c.node_id AND node.ctrl_type IS NULL"
+    ))
+}
+
+/// `_node_types`: the OSM highway value of a turning circle, mini roundabout or motorway junction, else `intersection` (three
+/// or more neighbours) or `dead_end` (one).
+fn node_types(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
+    let (osm, join) = if has_raw {
+        ("CASE WHEN n.tags['highway'] IN ('turning_circle', 'mini_roundabout', 'motorway_junction') THEN n.tags['highway'] END", "LEFT JOIN s.raw.nodes n ON n.osm_id = nd.node_id")
+    } else {
+        ("NULL", "")
+    };
+    c.exec(&format!(
+        "UPDATE {sch}.node SET node_type = c.t FROM (
+        WITH nb AS (SELECT node_id, count(DISTINCT other) AS deg FROM (
+                      SELECT from_node_id AS node_id, to_node_id AS other FROM {sch}.link
+                      UNION ALL SELECT to_node_id, from_node_id FROM {sch}.link) GROUP BY 1)
+        SELECT nd.node_id, COALESCE({osm}, CASE WHEN nb.deg >= 3 THEN 'intersection' WHEN nb.deg = 1 THEN 'dead_end' END) AS t
+        FROM {sch}.node nd LEFT JOIN nb USING (node_id) {join}) c
+      WHERE node.node_id = c.node_id AND c.t IS NOT NULL"
+    ))
+}
+
+/// `_build_zone`: the one zone of every node, with the area's boundary when the source db has one.
+fn build_zone(c: &Ctx, sch: &str, area: &str) -> Result<()> {
+    let area_q = area.replace('\'', "''");
+    let cols = if c.exists("main", "boundary")? { c.src_cols("main", "boundary")? } else { HashSet::new() };
+    if cols.contains("geom") && c.count("SELECT count(*) FROM s.main.boundary")? > 0 {
+        let name = if cols.contains("name") { "string_agg(DISTINCT name, ', ')" } else { "NULL::VARCHAR" };
+        c.exec(&format!(
+            "CREATE TABLE {sch}.zone AS SELECT 1::BIGINT AS zone_id, coalesce({name}, '{area_q}') AS name,
+          ST_AsText(ST_Union_Agg(geom)) AS boundary, NULL::VARCHAR AS super_zone, ST_Union_Agg(geom) AS geom
+          FROM s.main.boundary"
+        ))
+    } else {
+        c.exec(&format!(
+            "CREATE TABLE {sch}.zone AS SELECT 1::BIGINT AS zone_id, '{area_q}' AS name,
+          NULL::VARCHAR AS boundary, NULL::VARCHAR AS super_zone, NULL::GEOMETRY AS geom"
+        ))
     }
 }
 

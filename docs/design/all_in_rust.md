@@ -118,7 +118,8 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | Lane geometry (`lane.geom`) | Done: checked by its properties (below). On Monaco Rust and the fixed Python agree within 1 mm on every lane. The checks find 7 lanes that cross themselves (Monaco: driving 4, cycling 3) and 2 pairs of crossing lanes of one cycling link: the same in Python, open. |
 | Movements (`movement`, without their lanes) | Done: equal to Python after this step on Monaco. The lanes of the movements, and the rows that the SUMO step adds in driving and cycling, come with that step. |
 | Walking frame (`--walk-frame`, off by default) | Not started. |
-| `gmns_sumo` (netconvert), lanes that meet, crossings, signals, `location` (with GTFS), signs, node types, `zone` | Not started. Python's cycling lane geometry is not the same on two runs: to look at before the lane step. |
+| The lanes of the walking movements, `signal_controller`, `location`, the signs, the node types, `zone` | Done: equal on Monaco. |
+| `gmns_sumo` (netconvert), lanes that meet, crossings, GTFS stops | Not started. With 12 OpenBLAS threads Python's export still moves one cycling lane by 29 mm: from one of these steps. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
 ## Not changed
