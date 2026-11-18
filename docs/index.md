@@ -20,8 +20,8 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 </div>
 
 <figure markdown="span">
-  ![duckOSM Studio: the steps in the panel, and the area of Monaco on the map](images/studio.png)
-  <figcaption>duckOSM Studio in the browser: choose an area, get its OSM data, build, edit and export.</figcaption>
+  ![duckOSM Studio: the Build card in the panel, and the road network of Monaco on the map](images/tour-studio.png)
+  <figcaption>duckOSM Studio in the browser: Monaco built with three modes in 2.2 s. Choose an area, build, edit and export.</figcaption>
 </figure>
 
 ## Highlights
@@ -96,13 +96,23 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 </figure>
 
 <figure markdown="span">
-  ![Every lane of a GMNS network as a width ribbon: traffic lanes, bus lanes and turn connectors](images/gmns_lane_width.png)
-  <figcaption>GMNS lanes of Södermalm: each lane with its own width, bus lanes and turn connectors.</figcaption>
+  ![The quack page: the counts of the five GDAL layers of Monaco and a download button for each layer](images/tour-quack.png)
+  <figcaption>The quack page: GDAL's five OSM layers or the QuackOSM table, made in the browser.</figcaption>
 </figure>
 
 <figure markdown="span">
-  ![Monaco: the ground heights from FABDEM, with the area boundary](images/terrain-monaco.png)
-  <figcaption>The ground of an area: one bare-earth DEM for every height.</figcaption>
+  ![The route planner: a walking route from Fontvieille to Larvotto on the map, with the directions](images/tour-route.png)
+  <figcaption>The route planner of `duckosm route-map`: a route on the turn graph, with directions.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![The map of duckosm viz: the driving, walking and cycling networks of Monaco on its base map](images/tour-map.png)
+  <figcaption>The map of `duckosm viz`: all modes on the base map of the database.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![Every lane of a GMNS network as a width ribbon: traffic lanes, bus lanes and turn connectors](images/gmns_lane_width.png)
+  <figcaption>GMNS lanes of Södermalm: each lane with its own width, bus lanes and turn connectors.</figcaption>
 </figure>
 
 <figure markdown="span">
