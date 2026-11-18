@@ -305,8 +305,20 @@ fn gmns_columns(db: &Path) -> Vec<String> {
     lines
 }
 
-/// The columns that a later step of `to_gmns` changes or adds, not ported yet: the test skips them.
-const GMNS_PENDING: [&str; 4] = ["node.node_type", "node.ctrl_type", "lane.geom", "lane.geom_cut"];
+/// The columns that a later step of `to_gmns` changes or adds, not ported yet: the test skips them. An entry is `table.column`
+/// (in every schema), `schema.table` or `schema.table.column`.
+const GMNS_PENDING: [&str; 10] = [
+    "node.node_type",
+    "node.ctrl_type",
+    "lane.geom",
+    "lane.geom_cut",
+    "gmns_driving.movement",
+    "gmns_cycling.movement",
+    "gmns_walking.movement.start_ib_lane",
+    "gmns_walking.movement.end_ib_lane",
+    "gmns_walking.movement.start_ob_lane",
+    "gmns_walking.movement.end_ob_lane",
+];
 
 /// The lane geometry: checked by its properties (`gmns_lanes_by_properties`), not by equality with Python (Kaveh, 2026-11-18;
 /// docs/design/all_in_rust.md, "How the lane geometry is checked").
@@ -342,7 +354,8 @@ fn gmns_equals_python() {
     for want in golden.lines().skip(1) {
         let (t, c) = (want.split('\t').next().unwrap(), want.split('\t').nth(1).unwrap());
         let short = format!("{}.{c}", t.split('.').nth(1).unwrap());
-        if !tables.contains(t) || GMNS_PENDING.contains(&short.as_str()) {
+        let pending = [short, t.to_string(), format!("{t}.{c}")].iter().any(|k| GMNS_PENDING.contains(&k.as_str()));
+        if !tables.contains(t) || pending {
             continue;
         }
         match mine.get(&key(want)) {
