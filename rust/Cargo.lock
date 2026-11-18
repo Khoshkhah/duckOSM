@@ -791,6 +791,7 @@ dependencies = [
  "duckosm-build",
  "duckosm-edit",
  "duckosm-export",
+ "duckosm-tools",
  "libc",
  "rayon",
 ]
@@ -875,6 +876,17 @@ dependencies = [
  "duckosm-core",
  "duckosm-edit",
  "pyo3",
+]
+
+[[package]]
+name = "duckosm-tools"
+version = "0.7.0"
+dependencies = [
+ "clap",
+ "duckdb",
+ "duckosm-build",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

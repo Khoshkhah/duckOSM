@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`duckosm-rust info`, `way` and `init-config`** (`docs/design/all_in_rust.md`, group B), in the new crate `rust/duckosm-tools`.
+  They have the options of the Python commands and give the same output: the text and `--json` of `info`, and the text (DuckDB's
+  table print), `--json` and the `--out` files (.csv, .json, .parquet) of `way`; `init-config` writes the same template. Checked on
+  Monaco (both builds, a clip) and Tartu; a golden test keeps the Python output (`tests/data/golden_tools/`). Two differences:
+  a `.parquet` file of `way --out` names DuckDB 1.5.6 in its metadata (its rows are equal), and `way` takes a negative id with no
+  `--` before it.
+
 - **`duckosm-rust`: the bus routes of a build with no boundary.** A build of the whole file (the `.duckdb` output) reads the
   route relations, their member ways and the elements of the fixes from `raw.*` (`RawInput::raw_part`), applies the fixes, and
   makes `bus.routes` and `bus.route_edges`, as duckOSM does. Before, it made no bus tables. Monaco (`tests/bus_whole_file.rs`)
