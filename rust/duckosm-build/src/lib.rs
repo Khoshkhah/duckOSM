@@ -603,7 +603,7 @@ pub fn write_elevation_metadata<W: Write + Send>(
     let mut hash = Sha256::new();
     let (name, uri) = match (&p.dem, &p.dem_bytes) {
         (Some(path), _) => {
-            let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let mut f = duckosm_core::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
             std::io::copy(&mut f, &mut hash).map_err(|e| format!("{}: {e}", path.display()))?;
             (
                 path.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned()),
@@ -706,7 +706,7 @@ fn write_layers_json(dir: &Path, sum: &Summary) -> Result<(), String> {
         }
     }
     let json = format!("{{\"layers\": [\n{}\n]}}\n", rows.join(",\n"));
-    std::fs::write(dir.join("layers.json"), json).map_err(|e| e.to_string())
+    duckosm_core::fs::write(dir.join("layers.json"), json).map_err(|e| e.to_string())
 }
 
 impl Params {
@@ -744,6 +744,11 @@ pub trait NetworkSource {
     fn ways(&self) -> Result<Vec<duckosm_core::model::Way>, String>;
     fn coords(&self, ways: &[duckosm_core::model::Way]) -> Result<Coords, String>;
     fn restrictions(&self) -> Result<Vec<duckosm_core::graph::Relation>, String>;
+    /// The part of `raw.*` for the bus routes and the fixes (`ids`: the nodes, ways and relations that the fixes touch;
+    /// `routes`: the values of `route`). None: this source has no relations (no bus routes).
+    fn raw_part(&self, _ids: &[Vec<i64>; 3], _routes: &[&str]) -> Result<Option<Raw>, String> {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "duckdb")]
@@ -756,6 +761,9 @@ impl NetworkSource for duckosm_duckdb::RawInput {
     }
     fn restrictions(&self) -> Result<Vec<duckosm_core::graph::Relation>, String> {
         duckosm_duckdb::RawInput::restrictions(self)
+    }
+    fn raw_part(&self, ids: &[Vec<i64>; 3], routes: &[&str]) -> Result<Option<Raw>, String> {
+        duckosm_duckdb::RawInput::raw_part(self, ids, routes).map(Some)
     }
 }
 
@@ -798,10 +806,13 @@ impl StepLog {
         }
     }
 
-    /// The system clock and no memory (not in WebAssembly).
+    /// The system clock and no memory (in WebAssembly, where std has no clock, no times).
     pub fn system() -> StepLog {
         StepLog::new(
             || {
+                if cfg!(target_arch = "wasm32") {
+                    return 0.0;
+                }
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
@@ -1156,7 +1167,8 @@ pub fn run<W: Write + Send>(
     let driving = p.modes.contains(&Mode::Driving);
     let need_relations = opts.extract_restrictions && driving;
     // the bus routes need the route relations and the member ways of the raw cut (docs/bus.md)
-    let bus = p.bus_routes && driving && matches!(input, Input::Area(..)); // OSM JSON has no route relations
+    // OSM JSON has no route relations; a whole-file build reads them from raw.* in the .duckdb file (Input::Source)
+    let bus = p.bus_routes && driving && matches!(input, Input::Area(..) | Input::Source(..));
     let cut_file = p.cut_pbf || p.cut_osm;
     // the base-map layers run on raw.*, so they need it, but write it to a file only with p.raw (see `build`)
     let want_raw = p.raw || p.features;
@@ -1187,14 +1199,24 @@ pub fn run<W: Write + Send>(
             fixes,
             log,
         )?,
-        Input::Source(s) => read_pbf(
-            || s.ways(),
-            |w| s.coords(w),
-            || s.restrictions(),
-            need_relations,
-            fixes,
-            log,
-        )?,
+        Input::Source(s) => {
+            if bus {
+                // the route relations and their member ways, and the elements that the fixes touch, with the fixes (as an
+                // area file gives them, `read_raw_part`)
+                let touched = fix_ids(fixes);
+                let sorted = |i: usize| {
+                    let mut v: Vec<i64> = touched[i].iter().copied().collect();
+                    v.sort_unstable();
+                    v
+                };
+                if let Some(mut part) = s.raw_part(&[sorted(0), sorted(1), sorted(2)], &duckosm_core::bus::ROUTES)? {
+                    part.apply_fixes(fixes);
+                    raw = Some(part);
+                    log.step("read the raw part");
+                }
+            }
+            read_pbf(|| s.ways(), |w| s.coords(w), || s.restrictions(), need_relations, fixes, log)?
+        }
         Input::Pbf(bytes) => read_pbf(
             || pbf::read_ways_bytes(bytes),
             |w| pbf::read_coords_bytes(bytes, w),
@@ -1687,9 +1709,9 @@ pub fn quack(
         return Err(format!("{}: the .duckdb output needs the cargo feature \"duckdb\"", db.display()));
     }
     let parquet = parquet.ok_or("quack: no output (use geoparquet, duckdb or both)")?;
-    let out = std::fs::File::create(parquet).map_err(|e| format!("{}: {e}", parquet.display()))?;
+    let out = duckosm_core::fs::File::create(parquet).map_err(|e| format!("{}: {e}", parquet.display()))?;
     let open = || {
-        let f = std::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
+        let f = duckosm_core::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
         Ok(std::io::BufReader::with_capacity(1 << 20, f))
     };
     match tiles {
@@ -1853,12 +1875,12 @@ pub fn quack_tiles_to<R: Read + std::io::Seek + Send, W: Write + Send>(
 /// Build from the PBF file `pbf_path` (cut to `p.boundary` when there is one) and write the files into `out`.
 /// Sorted ids, as 8-byte little-endian numbers (the file of [`tile_sidewalks`]).
 pub fn write_ids(path: &Path, ids: &[i64]) -> Result<(), String> {
-    std::fs::write(path, ids.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<u8>>()).map_err(|e| format!("{}: {e}", path.display()))
+    duckosm_core::fs::write(path, ids.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<u8>>()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The ids of a file of [`write_ids`].
 pub fn read_ids(path: &Path) -> Result<Vec<i64>, String> {
-    let b = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let b = duckosm_core::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(b.chunks_exact(8).map(|c| i64::from_le_bytes(c.try_into().expect("8 bytes"))).collect())
 }
 
@@ -1873,7 +1895,7 @@ pub fn tile_sidewalks(dir: &Path, tile: duckosm_core::tiles::Tile, area: &Bounda
     let path = |t: Tile| dir.join(format!("{}_{}_{}.osm.pbf", t.z, t.x, t.y));
     // the lines of the rule in the file of a tile (with `keep`: only those whose box meets a box of `keep`)
     let read = |t: Tile, keep: &dyn Fn([f64; 4]) -> bool, ways: &mut Vec<Way>, coords: &mut Coords, seen: &mut FxHashSet<i64>| -> Result<(), String> {
-        let open = || std::fs::File::open(path(t)).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path(t).display()));
+        let open = || duckosm_core::fs::File::open(path(t)).map(std::io::BufReader::new).map_err(|e| format!("{}: {e}", path(t).display()));
         let mut w = pbf::read_ways_from(open()?)?;
         fixes.apply_to_ways(&mut w)?;
         w.retain(|w| sidewalks::kind(w).is_some() && !seen.contains(&w.id));
@@ -1923,16 +1945,32 @@ pub fn tile_sidewalks(dir: &Path, tile: duckosm_core::tiles::Tile, area: &Bounda
         for x in lo.x..=hi.x {
             for y in lo.y..=hi.y {
                 let t = Tile { z: tile.z, x, y };
-                if t != tile && !others.contains(&t) && path(t).exists() {
+                if t != tile && !others.contains(&t) && duckosm_core::fs::exists(path(t)) {
                     others.push(t);
                 }
             }
         }
     }
     others.sort_by_key(|t| (t.y, t.x));
+    // the boxes in cells of a grid (about 1 km), so a line of another tile is checked only against the boxes of its cells (each
+    // line against all boxes took most of the step: Kentucky, the tile of Louisville has about 100,000 roads)
+    const CELL: f64 = 0.01;
+    let cell = |x: f64, y: f64| ((x / CELL).floor() as i64, (y / CELL).floor() as i64);
+    let mut grid: duckosm_core::util::FxHashMap<(i64, i64), Vec<u32>> = Default::default();
+    for (i, r) in reach.iter().enumerate() {
+        let (lo, hi) = (cell(r[0], r[1]), cell(r[2], r[3]));
+        for cx in lo.0..=hi.0 {
+            for cy in lo.1..=hi.1 {
+                grid.entry((cx, cy)).or_default().push(i as u32);
+            }
+        }
+    }
+    let near = |b: [f64; 4]| {
+        let (lo, hi) = (cell(b[0], b[1]), cell(b[2], b[3]));
+        (lo.0..=hi.0).any(|cx| (lo.1..=hi.1).any(|cy| grid.get(&(cx, cy)).is_some_and(|v| v.iter().any(|&i| meets(reach[i as usize], b)))))
+    };
     for t in others {
-        // ponytail: each line against all boxes; a tree of the boxes if a tile has very many roads near its border
-        read(t, &|b| reach.iter().any(|r| meets(*r, b)), &mut ways, &mut coords, &mut seen)?;
+        read(t, &near, &mut ways, &mut coords, &mut seen)?;
     }
     // the rule reads the lines in the order of the ids, as the whole build has them
     ways.sort_by_key(|w| w.id);
@@ -1949,7 +1987,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     if !p.geoparquet && !p.duckdb {
         return Err("no output format: use geoparquet, duckdb or both".into());
     }
-    std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    duckosm_core::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     if let Some(predicate) = &p.clip {
         return clip::build(pbf_path, out, p, predicate);
     }
@@ -1962,14 +2000,14 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         let (Some(tile), Some(b)) = (p.tile, &p.boundary) else {
             return Err("the sidewalk step needs --tile and --boundary".into());
         };
-        let area = Boundary::parse(&std::fs::read_to_string(b).map_err(|e| format!("{}: {e}", b.display()))?)?;
+        let area = Boundary::parse(&duckosm_core::fs::read_to_string(b).map_err(|e| format!("{}: {e}", b.display()))?)?;
         let dir = pbf_path.parent().unwrap_or(Path::new("."));
         let ids = tile_sidewalks(dir, tile, &area, &fixes)?;
         write_ids(&out.join("sidewalks.bin"), &ids)?;
         return Ok(Summary { sidewalk_roads: Some(ids.len()), ..Default::default() });
     }
     let read = |path: &PathBuf| {
-        std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
+        duckosm_core::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
     };
     let cut = match &p.boundary {
         Some(path) => {
@@ -1988,7 +2026,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                     let pts = if home.is_empty() {
                         Vec::new()
                     } else {
-                        let f = std::fs::File::open(pbf_path).map_err(|e| format!("{}: {e}", pbf_path.display()))?;
+                        let f = duckosm_core::fs::File::open(pbf_path).map_err(|e| format!("{}: {e}", pbf_path.display()))?;
                         duckosm_core::tilecut::node_positions(std::io::BufReader::new(f), &home)?
                     };
                     b.within_tile(t).with_points(pts.into_iter().map(|p| p.1))
@@ -1998,8 +2036,9 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         }
         None => None,
     };
-    if p.bus_routes && p.modes.contains(&Mode::Driving) && cut.is_none() {
-        eprintln!("no bus tables: the build has no area outline (--boundary)");
+    // a whole-file build with the .duckdb output reads the route relations from raw.* (Input::Source)
+    if p.bus_routes && p.modes.contains(&Mode::Driving) && cut.is_none() && !p.duckdb {
+        eprintln!("no bus tables: the build has no area outline (--boundary) and no .duckdb output");
     }
     let area_boundary = match p.area_boundary.as_ref().or(p.boundary.as_ref()) {
         Some(path) => Some(read(path)?),
@@ -2023,16 +2062,16 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     let raw_first = p.duckdb && cut.is_none();
     #[cfg(feature = "duckdb")]
     let (raw_rows, source) = if raw_first {
-        std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+        duckosm_core::fs::create_dir_all(out).map_err(|e| e.to_string())?;
         let db = out.join(format!("{}.duckdb", p.name));
-        let _ = std::fs::remove_file(&db);
+        let _ = duckosm_core::fs::remove_file(&db);
         let n = duckosm_duckdb::write_raw(&db, pbf_path, p.memory_limit.as_deref(), p.threads)?;
         log.step("raw (read_osm)");
         (Some(n), Some(duckosm_duckdb::RawInput::open(&db)?))
     } else {
         (None, None)
     };
-    std::fs::create_dir_all(&pq_dir).map_err(|e| e.to_string())?;
+    duckosm_core::fs::create_dir_all(&pq_dir).map_err(|e| e.to_string())?;
     // step 0: cut the region file to the area file. It is the output cut.osm.pbf when the user asks for it. The input of a
     // tile build is already the cut of the area to the tile (tilecut): no second cut
     let area_file = match &cut {
@@ -2043,7 +2082,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     };
     let open = || -> Result<Box<dyn Read + Send>, String> {
         let f = area_file.as_deref().unwrap_or(pbf_path);
-        let r = std::fs::File::open(f).map_err(|e| format!("{}: {e}", f.display()))?;
+        let r = duckosm_core::fs::File::open(f).map_err(|e| format!("{}: {e}", f.display()))?;
         Ok(Box::new(std::io::BufReader::with_capacity(1 << 20, r)))
     };
     let input = match &cut {
@@ -2081,7 +2120,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 }
                 .join(name);
                 files.push((name.trim_end_matches(".parquet").to_string(), path.clone()));
-                std::fs::File::create(&path).map_err(|e| e.to_string())
+                duckosm_core::fs::File::create(&path).map_err(|e| e.to_string())
             },
         )?;
         sum.files = files;
@@ -2134,7 +2173,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 if !p.raw {
                     // the .duckdb file has raw.*: the files are only the input of the SQL
                     for f in ["raw_nodes", "raw_ways", "raw_relations"] {
-                        let _ = std::fs::remove_file(pq_dir.join(format!("{f}.parquet")));
+                        let _ = duckosm_core::fs::remove_file(pq_dir.join(format!("{f}.parquet")));
                     }
                     sum.files.retain(|(k, _)| !k.starts_with("raw_"));
                 }
@@ -2147,10 +2186,10 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     })();
     // the temporary folder and the area file go also after an error
     if let Some(f) = area_file.as_ref().filter(|f| f.ends_with("area.osm.pbf")) {
-        let _ = std::fs::remove_file(f);
+        let _ = duckosm_core::fs::remove_file(f);
     }
     if !p.geoparquet {
-        let _ = std::fs::remove_dir_all(&pq_dir);
+        let _ = duckosm_core::fs::remove_dir_all(&pq_dir);
     }
     let mut sum = res?;
     if !p.geoparquet {
@@ -2173,11 +2212,11 @@ pub fn cut_file(region: &Path, boundary: &str, out: &Path) -> Result<duckosm_cor
 
 fn cut_to_file(region: &Path, b: &Boundary, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
     let open = || {
-        std::fs::File::open(region)
+        duckosm_core::fs::File::open(region)
             .map(|f| std::io::BufReader::with_capacity(1 << 20, f))
             .map_err(|e| format!("{}: {e}", region.display()))
     };
-    let f = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let f = duckosm_core::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let (w, n) = duckosm_core::cutstream::cut_to_pbf(open, b, std::io::BufWriter::with_capacity(1 << 20, f))?;
     w.into_inner().map_err(|e| format!("{}: {e}", out.display()))?;
     Ok(n)

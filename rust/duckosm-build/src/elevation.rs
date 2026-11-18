@@ -40,7 +40,7 @@ const NO_PIXELS: (usize, usize, usize, usize) = (1, 0, 1, 0);
 
 impl Dem {
     pub fn open(path: &Path) -> Result<Dem, String> {
-        let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let f = duckosm_core::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Dem::from_reader(std::io::BufReader::new(f), &path.display().to_string())
     }
 
@@ -66,14 +66,14 @@ impl Dem {
 
     /// [`Dem::window`] of a file.
     pub fn open_window(path: &Path, bbox: [f64; 4], margin: usize) -> Result<Dem, String> {
-        let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let f = duckosm_core::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Dem::window(std::io::BufReader::new(f), &path.display().to_string(), bbox, margin)
     }
 
     /// The DEM of a file with the pixels of the columns `px.0` to `px.1` and the rows `px.2` to `px.3` only (see
     /// [`Dem::pixels`]); with `None`, no pixels (the size, the place and the resolution of the raster only).
     pub fn open_pixels(path: &Path, px: Option<(usize, usize, usize, usize)>) -> Result<Dem, String> {
-        let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let f = duckosm_core::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Dem::read(std::io::BufReader::new(f), &path.display().to_string(), Some(px.unwrap_or(NO_PIXELS)))
     }
 
