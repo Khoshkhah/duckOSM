@@ -51,13 +51,14 @@ pub fn quack_gdal(pbf: &Path, gpkg: Option<&Path>, parquet: Option<&Path>, tiles
 
 /// The rows of GDAL's layers of one tile alone (a worker of the browser for each tile, as `quack_tile_to`), from the file
 /// of the tile that `open` opens (a file of the tile cut), to `out` as rows of `gdal::put_row` (a u32 of the length before
-/// each row): only the rows that the tile owns. [`quack_gdal_join_to`] joins the files of all tiles. Gives the rows of
+/// each row), compressed as Snappy frames (France: about 30 GB of rows): only the rows that the tile owns. [`quack_gdal_join_to`] joins the files of all tiles. Gives the rows of
 /// each layer (the parts of the relations in their layer).
 pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
     open: impl Fn() -> Result<R, String>,
     tile: duckosm_core::tiles::Tile,
-    mut out: W,
+    out: W,
 ) -> Result<[usize; 6], String> {
+    let mut out = snappy::write::FrameEncoder::new(out);
     let owner = quack::Owner { tile, relations: None };
     let (mut n, mut b) = ([0usize; 6], Vec::new());
     quack::gdal_features_owned(open, quack::BUDGET, &owner, |rows| {
@@ -69,7 +70,7 @@ pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
         }
         Ok(())
     })?;
-    out.flush().map_err(|e| format!("quack --gdal: the file of the tile: {e}"))?;
+    out.into_inner().map_err(|e| format!("quack --gdal: the file of the tile: {e}"))?.flush().map_err(|e| format!("quack --gdal: the file of the tile: {e}"))?;
     Ok(n)
 }
 
@@ -79,7 +80,7 @@ pub fn quack_gdal_join_to<R: Read, W: Write + Send>(parts: Vec<R>, gpkg: Option<
     write_layers(gpkg, outs, |send| {
         for r in parts {
             // a buffer: in the browser, each read of a part is a read of its file (two for each row took 14 s on Monaco)
-            let mut r = std::io::BufReader::with_capacity(1 << 20, r);
+            let mut r = snappy::read::FrameDecoder::new(std::io::BufReader::with_capacity(1 << 20, r));
             let mut batch = Vec::new();
             let mut len = [0u8; 4];
             loop {

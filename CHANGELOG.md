@@ -306,6 +306,11 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   of all tiles into the five layers; duckOSM Studio's quack page uses them. On Monaco, each tile alone with the join equals
   `ogr2ogr` (`duckosm-build/tests/quack_gdal_monaco.rs`).
 
+- **quack --gdal: France on the Mac mini** (`docs/concepts/quackosm.md`): GeoParquet by tiles in 3 min 24 s against 14 min 18 s
+  for `ogr2ogr -f Parquet` (five runs, one for each layer: GDAL's Parquet driver writes one layer to one file), 5.0 GB against
+  1.6 GB of memory, 11.3 GB against 15.6 GB of files. The files of the tiles of the browser are Snappy frames now (France: about
+  30 GB of rows without them).
+
 ## 0.7.0 (2026-11-06)
 
 The Rust engine is the default and is in the wheel (wheels for 5 systems). `duckosm edit` opens the fixes editor on a page on your computer. The fixes editor shows a box for an object that is already in your changes.
