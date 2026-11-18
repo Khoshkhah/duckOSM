@@ -70,29 +70,29 @@ const PED_FACILITY: &str = "CASE WHEN {v} IS NULL THEN NULL ELSE CASE {v} WHEN '
 WHEN 'yes' THEN 'sidewalk' WHEN 'separate' THEN 'offstreet_path' WHEN 'no' THEN 'none' \
 WHEN 'none' THEN 'none' ELSE 'unknown' END END";
 
-struct Ctx<'a> {
-    con: &'a Connection,
+pub(crate) struct Ctx<'a> {
+    pub(crate) con: &'a Connection,
 }
 
 impl Ctx<'_> {
-    fn exec(&self, sql: &str) -> Result<()> {
+    pub(crate) fn exec(&self, sql: &str) -> Result<()> {
         self.con.execute_batch(sql).map_err(|e| format!("{e}\n{sql}"))
     }
-    fn count(&self, sql: &str) -> Result<i64> {
+    pub(crate) fn count(&self, sql: &str) -> Result<i64> {
         self.con.query_row(sql, [], |r| r.get(0)).map_err(|e| format!("{e}\n{sql}"))
     }
-    fn strings(&self, sql: &str) -> Result<Vec<String>> {
+    pub(crate) fn strings(&self, sql: &str) -> Result<Vec<String>> {
         let mut st = self.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
         let v = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>();
         v.map_err(|e| e.to_string())
     }
-    fn exists(&self, schema: &str, table: &str) -> Result<bool> {
+    pub(crate) fn exists(&self, schema: &str, table: &str) -> Result<bool> {
         Ok(self.count(&format!(
             "SELECT count(*) FROM duckdb_tables() WHERE database_name = 's' AND schema_name = '{schema}' AND table_name = '{table}'"
         ))? > 0)
     }
     /// The columns of the source db's `<mode>.<table>`.
-    fn src_cols(&self, mode: &str, table: &str) -> Result<HashSet<String>> {
+    pub(crate) fn src_cols(&self, mode: &str, table: &str) -> Result<HashSet<String>> {
         Ok(self
             .strings(&format!(
                 "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = '{mode}' AND table_name = '{table}'"
@@ -164,9 +164,13 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
         }
         build_lane_curb(&c, &sch, mode, uses, has_raw, "right")?;
         build_movement(&c, &sch, mode, uses)?;
-        if mode == "walking" {
+        if mode == "driving" || mode == "cycling" {
+            // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut
+            crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, mode == "driving", "right")?;
+            meet_lanes(&c, &sch)?;
+        } else {
             walk_lanes(&c, &sch)?;
-        } // driving and cycling: the lanes of the movements from SUMO (not ported yet), then the crossings in driving
+        } // then (not ported yet) the crossings in driving
         c.exec(&format!(
             "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
              FROM {sch}.node WHERE ctrl_type = 'signal'"
@@ -983,6 +987,126 @@ fn build_zone(c: &Ctx, sch: &str, area: &str) -> Result<()> {
     }
 }
 
+/// `_meet_lanes`: lane lines that continue one another meet. A lane continues one other lane when the straight-on movements send
+/// it to exactly that lane and nothing else of its use feeds that lane; of the two, the link with fewer lanes bends (over 15 m at
+/// most, half its length). Lane ends more than 8 m apart, or already within 1 cm, stay. The movements in the order of their id: a
+/// lane that bends first changes how the next one bends (the table's order is that of a parallel query).
+fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
+    const TAPER_M: f64 = 15.0;
+    const MAX_M: f64 = 8.0;
+    let sql = format!("SELECT lane_id, link_id, lane_num, allowed_uses, ST_AsText(geom) FROM {sch}.lane WHERE geom IS NOT NULL");
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let rows: Vec<(String, i64, i64, String, String)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let lanes: HashMap<String, (i64, i64, String, Vec<P>)> = rows.iter().map(|r| (r.0.clone(), (r.1, r.2, r.3.clone(), shp::wkt_points(&r.4)))).collect();
+    let by_num: HashMap<(i64, i64), String> = rows.iter().map(|r| ((r.1, r.2), r.0.clone())).collect();
+    let mut count: HashMap<i64, usize> = HashMap::new();
+    for r in &rows {
+        *count.entry(r.1).or_default() += 1;
+    }
+    let sql = format!(
+        "SELECT ib_link_id, start_ib_lane, end_ib_lane, ob_link_id, start_ob_lane, end_ob_lane FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge')
+         ORDER BY mvmt_id"
+    );
+    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+    type M = (i64, Option<i64>, Option<i64>, i64, Option<i64>, Option<i64>);
+    let mv: Vec<M> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut nxt: Vec<(String, Vec<String>)> = Vec::new(); // a dict of sets of Python, in the order of its keys
+    let mut prv: HashMap<String, HashSet<String>> = HashMap::new();
+    for (ib, s0, s1, ob, o0, o1) in mv {
+        let (Some(s0), Some(s1), Some(o0), Some(o1)) = (s0, s1, o0, o1) else { continue };
+        if s1 - s0 != o1 - o0 {
+            continue;
+        }
+        for k in 0..=(s1 - s0) {
+            if let (Some(a), Some(b)) = (by_num.get(&(ib, s0 + k)), by_num.get(&(ob, o0 + k))) {
+                if lanes[a].2 == lanes[b].2 {
+                    match nxt.iter_mut().find(|x| x.0 == *a) {
+                        Some(x) => {
+                            if !x.1.contains(b) {
+                                x.1.push(b.clone());
+                            }
+                        }
+                        None => nxt.push((a.clone(), vec![b.clone()])),
+                    }
+                    prv.entry(b.clone()).or_default().insert(a.clone());
+                }
+            }
+        }
+    }
+    let metres = |lat: f64| (111320.0 * lat.to_radians().cos(), 111320.0);
+    let bend = |ln: &[P], at_start: bool, to: P| -> Vec<P> {
+        let pts: Vec<P> = if at_start { ln.to_vec() } else { ln.iter().rev().copied().collect() };
+        let (kx, ky) = metres(pts[0].1);
+        let (dx, dy) = (to.0 - pts[0].0, to.1 - pts[0].1);
+        let n: f64 = pts.windows(2).map(|w| ((w[1].0 - w[0].0) * kx).hypot((w[1].1 - w[0].1) * ky)).sum();
+        let taper = TAPER_M.min(n / 2.0);
+        let mut run = 0.0;
+        let mut out = vec![(pts[0].0 + dx, pts[0].1 + dy)];
+        for w in pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let seg = ((b.0 - a.0) * kx).hypot((b.1 - a.1) * ky);
+            if run < taper && taper < run + seg {
+                let f = (taper - run) / seg;
+                out.push((a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f));
+            }
+            run += seg;
+            let wgt = if taper > 0.0 { (1.0 - run / taper).max(0.0) } else { 0.0 };
+            out.push((b.0 + dx * wgt, b.1 + dy * wgt));
+        }
+        if !at_start {
+            out.reverse();
+        }
+        out
+    };
+    let mut moved: Vec<(String, Vec<P>)> = Vec::new(); // a dict of Python
+    let get = |moved: &Vec<(String, Vec<P>)>, id: &str| -> Vec<P> { moved.iter().find(|x| x.0 == id).map(|x| x.1.clone()).unwrap_or_else(|| lanes[id].3.clone()) };
+    let put = |moved: &mut Vec<(String, Vec<P>)>, id: &str, g: Vec<P>| match moved.iter_mut().find(|x| x.0 == id) {
+        Some(x) => x.1 = g,
+        None => moved.push((id.to_string(), g)),
+    };
+    for (a, bs) in &nxt {
+        if bs.len() != 1 {
+            continue;
+        }
+        let b = &bs[0];
+        if prv.get(b).is_none_or(|p| p.len() != 1 || !p.contains(a)) {
+            continue;
+        }
+        let (la, lb) = (get(&moved, a), get(&moved, b));
+        let (end, start) = (*la.last().unwrap(), lb[0]);
+        let (kx, ky) = metres(end.1);
+        let gap = ((end.0 - start.0) * kx).hypot((end.1 - start.1) * ky);
+        if !(0.01..=MAX_M).contains(&gap) {
+            continue;
+        }
+        if count[&lanes[a].0] >= count[&lanes[b].0] {
+            put(&mut moved, b, bend(&lb, true, end));
+        } else {
+            put(&mut moved, a, bend(&la, false, start));
+        }
+    }
+    if !moved.is_empty() {
+        c.exec("CREATE OR REPLACE TEMP TABLE _moved(lane_id VARCHAR, wkt VARCHAR)")?;
+        let mut app = c.con.appender("_moved").map_err(|e| e.to_string())?;
+        for (id, g) in &moved {
+            app.append_row(duckdb::params![id, lanes::wkt(g)]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        drop(app);
+        c.exec(&format!("UPDATE {sch}.lane l SET geom = ST_GeomFromText(m.wkt) FROM _moved m WHERE m.lane_id = l.lane_id; DROP TABLE _moved"))?;
+    }
+    eprintln!("GMNS[{}]: {} lane ends moved to meet the lane they continue", &sch[5..], moved.len());
+    Ok(moved.len())
+}
+
 /// `_bezier_line_sql`: a SQL expression of a cubic Bézier line sampled at 11 points.
 fn bezier_line_sql(x0: &str, y0: &str, cx0: &str, cy0: &str, cx1: &str, cy1: &str, x1: &str, y1: &str) -> String {
     let ts = (0..=10).map(|i| format!("{:.4}", i as f64 / 10.0)).collect::<Vec<_>>().join(", ");
@@ -993,7 +1117,7 @@ fn bezier_line_sql(x0: &str, y0: &str, cx0: &str, cy0: &str, cx1: &str, cy1: &st
 
 /// `_window_angle`: the turn from a link into the next one in degrees (left +), from the heading of the outbound link over its
 /// first 15 m and of the inbound link over its last 15 m. None when a link is shorter than half a metre.
-fn window_angle(inbound: &str, outbound: &str) -> Option<f64> {
+pub(crate) fn window_angle(inbound: &str, outbound: &str) -> Option<f64> {
     let local = |w: &str| -> Vec<P> {
         let pts = shp::wkt_points(w);
         let (x0, y0) = pts[0];

@@ -26,7 +26,7 @@ gmns_cycling.lane	r_barrier	VARCHAR	11707	582853cd699e27066137721db3c3f3b8
 gmns_cycling.lane	l_barrier	VARCHAR	11707	582853cd699e27066137721db3c3f3b8
 gmns_cycling.lane	width	DOUBLE	11707	8d9ec9716a9e5119cb6ced2dc446fcac
 gmns_cycling.lane	turn	VARCHAR	11707	944a07fec3fe493db6bcf85e082fc2a2
-gmns_cycling.lane	geom	GEOMETRY	11707	3b3114a2fe8adfb4ea7c55f6c463f8dd
+gmns_cycling.lane	geom	GEOMETRY	11707	a62482def58956ec8f965a535e189aa1
 gmns_cycling.lane_check	kind	VARCHAR	6	fb3d071afd80df691ecf8b2028fb2624
 gmns_cycling.lane_check	id	VARCHAR	6	47fb3d7fe50fbdffc8cd1b96914bc334
 gmns_cycling.lane_check	detail	VARCHAR	6	3138b99425b13804dcbc47e45b69c080

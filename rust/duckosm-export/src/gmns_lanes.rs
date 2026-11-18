@@ -571,7 +571,7 @@ pub fn lane_report(gmns_db: &std::path::Path) -> crate::Result<Vec<String>> {
         v.map_err(|e| e.to_string())
     };
     let schemas = q("SELECT DISTINCT table_schema FROM information_schema.tables WHERE table_name = 'lane' AND table_schema LIKE 'gmns\\_%' ESCAPE '\\' ORDER BY 1")?;
-    let mut out = vec!["schema\tlanes\tlength_m\tnot_simple\tcrossing_pairs\tconstant_offset".to_string()];
+    let mut out = vec!["schema\tlanes\tlength_m\tnot_simple\tcrossing_pairs\tconstant_offset\tconnectors\tconnector_ends_off".to_string()];
     for s in schemas {
         let sql = format!(
             "SELECT l.lane_id, ST_AsText(l.geom), ST_AsText(k.geom) FROM {s}.lane l JOIN {s}.link k USING (link_id) WHERE l.geom IS NOT NULL ORDER BY l.lane_id"
@@ -609,7 +609,34 @@ pub fn lane_report(gmns_db: &std::path::Path) -> crate::Result<Vec<String>> {
         let crossing = n(format!(
             "SELECT count(*) FROM {s}.lane a JOIN {s}.lane b ON a.link_id = b.link_id AND a.lane_id < b.lane_id WHERE ST_Intersects(a.geom, b.geom)"
         ))?;
-        out.push(format!("{s}\t{}\t{:.3}\t{not_simple}\t{crossing}\t{constant}", rows.len(), total));
+        // the lane connectors meet the ends of the lanes they join (geom_cut: the lane line to the junction) within 1 mm
+        let has_conn = n(format!("SELECT count(*) FROM information_schema.tables WHERE table_schema = '{s}' AND table_name = 'lane_connector'"))? > 0
+            && n(format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = '{s}' AND table_name = 'lane' AND column_name = 'geom_cut'"))? > 0;
+        let (conns, off) = if has_conn {
+            let sql = format!(
+                "SELECT ST_AsText(c.geom), ST_AsText(a.geom_cut), ST_AsText(b.geom_cut) FROM {s}.lane_connector c
+                 JOIN {s}.lane a ON a.lane_id = c.from_lane_id JOIN {s}.lane b ON b.lane_id = c.to_lane_id ORDER BY c.connector_id"
+            );
+            let mut st = con.prepare(&sql).map_err(|e| e.to_string())?;
+            let rows: Vec<(String, Option<String>, Option<String>)> =
+                st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(|e| e.to_string())?.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+            let mut off = 0;
+            for (cw, aw, bw) in &rows {
+                let cp = shp::wkt_points(cw);
+                let (Some(a), Some(b)) = (aw.as_deref().map(shp::wkt_points), bw.as_deref().map(shp::wkt_points)) else {
+                    off += 1;
+                    continue;
+                };
+                let k = |p: P, q: P| ((p.0 - q.0) * kx_of(p.1) * M).hypot((p.1 - q.1) * M);
+                if k(cp[0], *a.last().unwrap()) > 1e-3 || k(*cp.last().unwrap(), b[0]) > 1e-3 {
+                    off += 1;
+                }
+            }
+            (rows.len().to_string(), off.to_string())
+        } else {
+            ("-".to_string(), "-".to_string())
+        };
+        out.push(format!("{s}\t{}\t{:.3}\t{not_simple}\t{crossing}\t{constant}\t{conns}\t{off}", rows.len(), total));
     }
     Ok(out)
 }

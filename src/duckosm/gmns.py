@@ -1337,7 +1337,8 @@ def _meet_lanes(con, sch):
     count = Counter(lk for lk, *_ in lanes.values())
     nxt, prv = defaultdict(set), defaultdict(set)
     for ib, s0, s1, ob, o0, o1 in con.execute(f"SELECT ib_link_id, start_ib_lane, end_ib_lane, ob_link_id, start_ob_lane, end_ob_lane "
-                                              f"FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge')").fetchall():   # straight on, not a turn
+                                              f"FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge') ORDER BY mvmt_id").fetchall():   # straight on, not a turn;
+        # in a fixed order: a lane that bends first changes how the next one bends, and the table's order is that of a parallel query
         if None in (s0, s1, o0, o1) or s1 - s0 != o1 - o0:
             continue
         for k in range(s1 - s0 + 1):

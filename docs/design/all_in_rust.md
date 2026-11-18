@@ -119,7 +119,8 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | Movements (`movement`, without their lanes) | Done: equal to Python after this step on Monaco. The lanes of the movements, and the rows that the SUMO step adds in driving and cycling, come with that step. |
 | Walking frame (`--walk-frame`, off by default) | Not started. |
 | The lanes of the walking movements, `signal_controller`, `location`, the signs, the node types, `zone` | Done: equal on Monaco. |
-| `gmns_sumo` (netconvert), lanes that meet, crossings, GTFS stops | Not started. With 12 OpenBLAS threads Python's export still moves one cycling lane by 29 mm: from one of these steps. |
+| `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
+| Crossings, GTFS stops, walk joins | Not started. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
 ## Not changed

@@ -305,9 +305,10 @@ fn gmns_columns(db: &Path) -> Vec<String> {
     lines
 }
 
-/// The columns that a later step of `to_gmns` changes or adds, not ported yet: the test skips them. An entry is `table.column`
-/// (in every schema), `schema.table` or `schema.table.column`.
-const GMNS_PENDING: [&str; 4] = ["lane.geom", "lane.geom_cut", "gmns_driving.movement", "gmns_cycling.movement"];
+/// The columns that the test skips: the computed lane geometry, which `gmns_lanes_by_properties` checks (Kaveh, 2026-11-18), and
+/// the columns that a step not ported yet changes. An entry is `table.column` (in every schema), `schema.table` or
+/// `schema.table.column`.
+const GMNS_PENDING: [&str; 3] = ["lane.geom", "lane.geom_cut", "lane_connector.geom"];
 
 /// The lane geometry: checked by its properties (`gmns_lanes_by_properties`), not by equality with Python (Kaveh, 2026-11-18;
 /// docs/design/all_in_rust.md, "How the lane geometry is checked").
