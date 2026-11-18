@@ -37,12 +37,12 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 | Extra | Adds | For |
 |---|---|---|
 | `sumo` | SUMO (`netconvert`) | `duckosm sumo` builds the `.net.xml` |
-| `routing` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()` |
-| `levels` | roadstyle | `duckosm levels` (not ported to Rust yet) |
-| `viz` | mapstyle, lanestyle | map functions in Python |
-| `elevation` | rasterio, pyproj | not needed by `duckosm elevation` (Rust); this extra goes away |
+| `routing` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. PR 279 renames it to `networkx` |
+| `levels` | roadstyle | `duckosm levels` and the drawing levels of `duckosm build` (without it, the build only warns) |
+| `viz` | mapstyle, lanestyle | the map functions in Python. `duckosm viz` (Rust) needs no extra |
+| `elevation` | rasterio, pyproj | nothing: `duckosm elevation` (Rust) needs no extra. PR 279 removes it |
 
-`route()`, the exports and `duckosm elevation` need no extra.
+`route()`, the exports, `duckosm viz` and `duckosm elevation` need no extra. PR 275 adds the extra `rustworkx`.
 
 ## Outside tools
 
@@ -51,11 +51,13 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 | osmium | `clip-pbf` and `build -b` | `build` uses the whole PBF; `clip-pbf` stops |
 | GDAL (`ogr2ogr`) | `export-gis` as one file | `export-gis` writes one file for each layer |
 
-Both are being replaced by Rust code.
+PR 279 removes both: `clip-pbf` and `export-gis` move to Rust.
 
 ## Not ported to Rust yet
 
-`build` (in part), `levels`, `bus`, `multimodal` and `clip-pbf`. They work, and they move to Rust next.
+`build` (in part), `levels`, `bus`, `multimodal` and `clip-pbf`. They work.
+
+`build` and `levels` move to Rust in PR 275, `clip-pbf` in PR 279.
 
 ## Quick start
 
@@ -70,14 +72,16 @@ duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
 ```python
 import duckosm
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build
+db = "monaco.duckdb"  # made by duckosm build above
 
 r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
 r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
 duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
 ```
 
-Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
+The function `duckosm.build()` comes in PR 275.
+
+All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
 
 ## Where files go
 
