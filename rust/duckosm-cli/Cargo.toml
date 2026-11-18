@@ -27,3 +27,8 @@ rayon = "1.12"
 # duckosm-rust tiles: the peak memory of each tile process (wait4); the glibc thresholds of the memory (mallopt)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# the test of the local dashboard (tests/studio.rs) reads the .duckdb file that it builds (the version of duckosm-duckdb)
+duckdb = { version = "=1.10506.1", features = ["bundled", "json"] }
+serde_json = { version = "1", features = ["preserve_order"] }
