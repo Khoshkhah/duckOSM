@@ -77,7 +77,7 @@ In the browser, open:
 - [**duckOSM Studio**](https://khoshkhah.github.io/duckosm-studio/): choose an area, build its network, edit the OSM data, and export.
 - [**The quack page**](https://khoshkhah.github.io/duckosm-studio/quack.html): the OSM features table of QuackOSM and GDAL's five layers.
 
-Both build every area by map tiles, so the memory does not grow with the area
+Both build every area by map tiles, cut by [pbfcut](https://github.com/Khoshkhah/pbfcut), so the memory does not grow with the area
 ([Browser and native builds](https://khoshkhah.github.io/duckOSM/concepts/browser-native/)).
 
 ## Speed on France
