@@ -138,6 +138,76 @@ impl Graph {
     }
 }
 
+impl Graph {
+    /// networkx `dijkstra_path(G, source, target)` (`_dijkstra_multisource` with one source and a target): the length and
+    /// the path (node ids), None when there is no path.
+    pub fn dijkstra(&self, source: i64, target: i64) -> Result<Option<(f64, Vec<i64>)>> {
+        let s = self.index_of(source).ok_or(format!("Source {source} is not in G"))?;
+        let t = self.index_of(target).ok_or(format!("Target {target} is not in G"))?;
+        let n = self.ids.len();
+        let mut dist: Vec<Option<f64>> = vec![None; n];
+        let mut seen: Vec<Option<f64>> = vec![None; n];
+        let mut parent: Vec<usize> = vec![usize::MAX; n];
+        let mut fringe = BinaryHeap::new();
+        let mut c: u64 = 0;
+        seen[s] = Some(0.0);
+        fringe.push(Key(0.0, c, s));
+        c += 1;
+        while let Some(Key(d, _, v)) = fringe.pop() {
+            if dist[v].is_some() {
+                continue;
+            }
+            dist[v] = Some(d);
+            if v == t {
+                break;
+            }
+            for &(u, cost) in &self.succ[v] {
+                if cost.is_nan() {
+                    continue;
+                }
+                let vu = d + cost;
+                if let Some(du) = dist[u] {
+                    if vu < du {
+                        return Err("Contradictory paths found: negative weights?".into());
+                    }
+                } else if seen[u].is_none_or(|su| vu < su) {
+                    seen[u] = Some(vu);
+                    fringe.push(Key(vu, c, u));
+                    c += 1;
+                    parent[u] = v;
+                }
+            }
+        }
+        let Some(d) = dist[t] else { return Ok(None) };
+        let mut path = vec![t];
+        while path.last() != Some(&s) {
+            path.push(parent[*path.last().expect("not empty")]);
+        }
+        path.reverse();
+        Ok(Some((d, path.into_iter().map(|i| self.ids[i]).collect())))
+    }
+
+    /// networkx `has_path`: is `target` reached from `source` (any weights)?
+    pub fn has_path(&self, source: i64, target: i64) -> bool {
+        let (Some(s), Some(t)) = (self.index_of(source), self.index_of(target)) else { return false };
+        let mut seen = vec![false; self.ids.len()];
+        let mut stack = vec![s];
+        seen[s] = true;
+        while let Some(v) = stack.pop() {
+            if v == t {
+                return true;
+            }
+            for &(u, _) in &self.succ[v] {
+                if !seen[u] {
+                    seen[u] = true;
+                    stack.push(u);
+                }
+            }
+        }
+        false
+    }
+}
+
 /// A heap entry `(distance, counter, node)`, the smallest first (Python's `heapq` with tuples).
 #[derive(PartialEq)]
 struct Key(f64, u64, usize);
@@ -169,5 +239,8 @@ mod tests {
         }
         assert_eq!(g.bidirectional_dijkstra(1, 4).unwrap(), Some((2.0, vec![1, 2, 4])));
         assert_eq!(g.bidirectional_dijkstra(5, 1).unwrap(), None);
+        // networkx: nx.dijkstra_path(G, 1, 4) -> [1, 2, 4]; nx.has_path(G, 5, 1) -> False
+        assert_eq!(g.dijkstra(1, 4).unwrap(), Some((2.0, vec![1, 2, 4])));
+        assert!(!g.has_path(5, 1) && g.has_path(1, 5));
     }
 }

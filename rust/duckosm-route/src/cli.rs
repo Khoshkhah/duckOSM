@@ -5,7 +5,8 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 6] = ["route", "export-graph", "route-multimodal", "route-points", "route-multimodal-points", "directions"];
+pub const COMMANDS: [&str; 8] =
+    ["route", "export-graph", "route-multimodal", "route-points", "route-multimodal-points", "directions", "lane-graph", "route-lanes"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -112,6 +113,34 @@ enum Cmd {
         /// The mode of a route of one mode (route, route-points); a route across modes has its modes in its legs.
         #[arg(short, long, default_value = "driving")]
         mode: String,
+    },
+    /// Build a lane-level routing graph in a GMNS db: lane->lane turn edges (from movements) + lane-change edges (adjacent
+    /// lanes), written as lane_<mode>.lane_edges.
+    #[command(name = "lane-graph")]
+    LaneGraph {
+        gmns_db: PathBuf,
+        /// GMNS mode schema.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+    },
+    /// Plan a lane-level route between two lanes (each a lane_id or an edge_id -> its lane 1). Prints the lane count / cost /
+    /// maneuvers; with -o writes the route geometry as GeoJSON.
+    #[command(name = "route-lanes")]
+    RouteLanes {
+        gmns_db: PathBuf,
+        #[arg(allow_hyphen_values = true)]
+        from_lane: String,
+        #[arg(allow_hyphen_values = true)]
+        to_lane: String,
+        /// GMNS mode schema.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// Write the route as GeoJSON to this path.
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Print the route as JSON: lanes, cost, maneuvers, geometry (WKT).
+        #[arg(long = "json")]
+        as_json: bool,
     },
     /// Export a built network as a graph file (GraphML). By default the geographic node-based MultiDiGraph (OSM junctions as
     /// nodes, road segments keyed by edge_id carrying their full attribute set); --graph edge for the edge-based routing
@@ -256,6 +285,49 @@ pub fn run(args: &[String]) -> Result<()> {
                 r => crate::directions::directions(&con, r, &mode)?,
             };
             println!("{}", duckosm_tools::json::dumps(&out));
+        }
+        Cmd::LaneGraph { gmns_db, mode } => {
+            if !gmns_db.exists() {
+                return Err(format!("Invalid value for 'GMNS_DB': Path '{}' does not exist.", gmns_db.display()));
+            }
+            let (lanes, lc, turn) = crate::lanes::build_lane_graph(&gmns_db, &mode)?;
+            let t = duckosm_tools::info::thousands;
+            eprintln!("lane graph[{mode}]: {} lanes, {} edges ({} turn + {} lane-change) -> lane_{mode}.lane_edges", t(lanes), t(lc + turn), t(turn), t(lc));
+            println!("built lane graph — {lanes} lanes, {} edges ({turn} turn + {lc} lane-change)", lc + turn);
+        }
+        Cmd::RouteLanes { gmns_db, from_lane, to_lane, mode, out, as_json } => {
+            if !gmns_db.exists() {
+                return Err(format!("Invalid value for 'GMNS_DB': Path '{}' does not exist.", gmns_db.display()));
+            }
+            let res = crate::lanes::route_lanes(&gmns_db, &from_lane, &to_lane, &mode)?;
+            let lanes = res["lanes"].as_array().map_or(0, Vec::len);
+            if as_json {
+                let mut o = serde_json::json!({"from": from_lane, "to": to_lane});
+                for (k, v) in res.as_object().expect("an object") {
+                    o[k] = v.clone();
+                }
+                println!("{}", duckosm_tools::json::dumps(&o));
+            } else if lanes == 0 {
+                println!("no lane route from {from_lane} to {to_lane}");
+                return Ok(());
+            } else {
+                let m: Vec<&str> = res["maneuvers"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).collect();
+                println!("route: {lanes} lanes, cost {:.0}, maneuvers: {}", res["cost"].as_f64().unwrap_or(0.0), if m.is_empty() { "(none)".to_string() } else { m.join(", ") });
+            }
+            if let (Some(path), Some(wkt)) = (out, res["geometry"].as_str()) {
+                let body = &wkt[wkt.find('(').map_or(0, |i| i + 1)..wkt.rfind(')').unwrap_or(wkt.len())];
+                let coords: Vec<serde_json::Value> = body
+                    .split(',')
+                    .map(|p| serde_json::Value::Array(p.split_whitespace().take(2).filter_map(|x| x.parse::<f64>().ok()).map(|x| serde_json::json!(x)).collect()))
+                    .collect();
+                let fc = serde_json::json!({"type": "FeatureCollection", "features": [{"type": "Feature",
+                    "properties": {"lanes": lanes, "cost": res["cost"], "maneuvers": res["maneuvers"]},
+                    "geometry": {"type": "LineString", "coordinates": coords}}]});
+                std::fs::write(&path, duckosm_build::place::py_dumps(&fc)).map_err(|e| format!("{}: {e}", path.display()))?;
+                if !as_json {
+                    println!("wrote {}", path.display());
+                }
+            }
         }
         Cmd::ExportGraph { db, mode, out, graph_kind, fmt, weight, geometry, uses } => {
             need_db(&db)?;

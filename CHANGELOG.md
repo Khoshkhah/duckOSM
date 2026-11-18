@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
+  commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
+  networkx's `dijkstra_path`). On Monaco and Tartu, `lane_<mode>.lane_edges` and 126 lane routes (with and without the stored
+  graph) equal Python's, with the text, `--json` and the `-o` GeoJSON (`duckosm-route/tests/lanes.rs`). With this, every part of
+  group E is in Rust.
+
 - **`duckosm-rust directions`** (`docs/design/all_in_rust.md`, group E): the turn-by-turn steps of `directions.py` for any route
   result (one mode, across modes, between points), in `duckosm-router` (no DuckDB). On Monaco and Tartu, the steps of 1,423
   routes (about 23,000 steps) equal Python's, with their texts (`duckosm-route/tests/multimodal_points.rs`).
