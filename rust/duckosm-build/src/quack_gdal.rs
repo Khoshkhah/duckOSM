@@ -18,12 +18,19 @@ pub struct GdalCounts {
 }
 
 /// Make GDAL's layers of `pbf` into the GeoPackage `gpkg` and the GeoParquet files `<parquet>_<layer>.parquet`
-/// (either or both). `tiles`: tile by tile, as quack by tiles.
-pub fn quack_gdal(pbf: &Path, gpkg: Option<&Path>, parquet: Option<&Path>, tiles: Option<TileSize>) -> Result<GdalCounts, String> {
+/// (either or both). `tiles`: tile by tile, as quack by tiles. `fixes`: the OSM fixes of `duckosm build --fixes`.
+pub fn quack_gdal(
+    pbf: &Path,
+    gpkg: Option<&Path>,
+    parquet: Option<&Path>,
+    tiles: Option<TileSize>,
+    fixes: Option<&duckosm_core::fixes::OsmFixes>,
+) -> Result<GdalCounts, String> {
     let open = || {
         let f = duckosm_core::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
         Ok(std::io::BufReader::with_capacity(1 << 20, f))
     };
+    let fixes = fixes.map(|f| quack::QuackFixes::new(f, open)).transpose()?;
     let mut files: Vec<PathBuf> = gpkg.iter().map(|p| p.to_path_buf()).collect();
     let parquet = match parquet {
         Some(base) => {
@@ -40,8 +47,8 @@ pub fn quack_gdal(pbf: &Path, gpkg: Option<&Path>, parquet: Option<&Path>, tiles
     };
     let rows = write_layers(gpkg, parquet, |send| {
         match tiles {
-            None => quack::gdal_features(open, quack::BUDGET, send)?,
-            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, send)?,
+            None => quack::gdal_features(open, quack::BUDGET, fixes.as_ref(), send)?,
+            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, fixes, send)?,
         };
         Ok(())
     })?;
@@ -52,16 +59,18 @@ pub fn quack_gdal(pbf: &Path, gpkg: Option<&Path>, parquet: Option<&Path>, tiles
 /// The rows of GDAL's layers of one tile alone (a worker of the browser for each tile, as `quack_tile_to`), from the file
 /// of the tile that `open` opens (a file of the tile cut), to `out` as rows of `gdal::put_row` (a u32 of the length before
 /// each row), compressed as Snappy frames (France: about 30 GB of rows): only the rows that the tile owns. [`quack_gdal_join_to`] joins the files of all tiles. Gives the rows of
-/// each layer (the parts of the relations in their layer).
+/// each layer (the parts of the relations in their layer). `fixes`: the OSM fixes, placed on the tiles
+/// (`QuackFixes::place`).
 pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
     open: impl Fn() -> Result<R, String>,
     tile: duckosm_core::tiles::Tile,
     out: W,
+    fixes: Option<&quack::QuackFixes>,
 ) -> Result<[usize; 6], String> {
     let mut out = snappy::write::FrameEncoder::new(out);
     let owner = quack::Owner { tile, relations: None };
     let (mut n, mut b) = ([0usize; 6], Vec::new());
-    quack::gdal_features_owned(open, quack::BUDGET, &owner, |rows| {
+    quack::gdal_features_owned(open, quack::BUDGET, &owner, fixes, |rows| {
         for f in rows.iter().filter(|f| f.owner) {
             n[f.layer as usize] += 1;
             b.clear();

@@ -7,6 +7,7 @@ GDAL's OSM driver (`ogr2ogr`, QGIS) reads an `.osm.pbf` file as five layers.
 duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky                # one GeoPackage, as ogr2ogr -f GPKG
 duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet  # one GeoParquet file for each layer
 duckosm quack france.osm.pbf --gdal -o out --name france --tile-zoom 8      # tile by tile (for a country)
+duckosm quack monaco.osm.pbf --gdal -o out --fixes osm_fixes.yaml           # with the OSM fixes of Edit OSM data
 ```
 
 In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio, output **GDAL layers**, format GeoParquet, GeoPackage or both.
@@ -53,6 +54,21 @@ with 30 GB free. ⁴ In the 12 tile workers. ⁵ Snappy: the browser has no zstd
 | `other_relations` | all other relations |
 
 The rules and the columns are those of GDAL's default `osmconf.ini`; the other tags go into `other_tags`.
+
+## OSM fixes
+
+`--fixes FILE` applies the OSM fixes file of `duckosm build --fixes` to the five layers, as for
+[the QuackOSM table](quackosm.md#osm-fixes):
+
+| Rule of the fixes file | In the output |
+|---|---|
+| `remove`, `keep_nodes`, `tags` | applied to the way |
+| `extra.tag_edits` | applied to the node, the way or the relation |
+| `new_ways` | a new way, with the same id as in the network (from 9 000 000 000 000) |
+| `oneway`, `lanes`, `lanes_forward`, `lanes_backward`, `layer` | OSM tags with the value of the rule: `oneway=yes` or `no`, `lanes`, `lanes:forward`, `lanes:backward`, `layer` |
+| `exclude_modes`, `turn_lanes_*`, `turn_restrictions` | not applied: they have no OSM tag of a way |
+
+With no `--fixes`, the rows are the rows of GDAL.
 
 ## The rows are the same
 

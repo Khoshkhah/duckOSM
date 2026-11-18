@@ -1,0 +1,27 @@
+# The OSM fixes of the quack tests (rust/duckosm-build/tests/quack_tiles.rs and quack_gdal_monaco.rs): each rule kind that
+# changes the OSM data of quack and quack --gdal (Monaco ids, not real fixes).
+overrides:
+  - osm_id: 23715051            # a building: removed
+    remove: true
+  - osm_id: 25722685            # a building: only a part of its ring stays
+    keep_nodes: [280486998, 1209309217]
+  - osm_id: 4227277             # Rue de la Colle: a tag
+    tags: {surface: cobblestone}
+  - osm_id: 503462470           # OSM: oneway=no, lanes=2. The network rules become OSM tags
+    oneway: true
+    lanes: 3
+  - osm_id: 4227277             # no OSM tag: quack leaves it out
+    exclude_modes: [walking]
+new_ways:
+  - id: 9000000000001           # the tags of way 4227277 and its own, an OSM node and a new node
+    tags_from: 4227277
+    tags: {highway: footway, name: Test}
+    nodes: [1918966551, [7.4201, 43.7321]]
+  - id: 9000000000002           # OSM nodes and a new node between them
+    nodes: [21911886, [7.4235072, 43.7371133], 21914340]
+    tags: {highway: service}
+extra:
+  tag_edits:
+    - {type: node, id: 21911886, set: {crossing: marked}, delete: [crossing_ref]}
+    - {type: way, id: 4227277, set: {sidewalk: both}, delete: [lit]}
+    - {type: relation, id: 393226, set: {name: Test relation}}

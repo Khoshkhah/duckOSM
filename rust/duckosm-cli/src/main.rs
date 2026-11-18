@@ -219,6 +219,12 @@ struct QuackCli {
     /// Make the table tile by tile with the map tiles of one zoom (0 to 14, for example 9) in place of --tiles.
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=14))]
     tile_zoom: Option<u8>,
+    /// The OSM fixes file of `duckosm build --fixes` (YAML), also with --gdal and the tiles. The OSM data gets remove,
+    /// keep_nodes, tags, the tag edits and the new ways (with the ids of the network). The network rules become OSM tags:
+    /// oneway (oneway=yes or no), lanes, lanes_forward (lanes:forward), lanes_backward (lanes:backward) and layer.
+    /// exclude_modes, turn_lanes_* and turn_restrictions have no OSM tag of a way, so quack leaves them out.
+    #[arg(long, value_name = "FILE")]
+    fixes: Option<PathBuf>,
 }
 
 /// The start of `duckosm quack`, for the times of its steps.
@@ -253,7 +259,8 @@ fn quack(args: &[String]) -> Result<(), String> {
     use duckosm_build::TileSize;
     let tiles = cli.tile_zoom.map(TileSize::Zoom).or(cli.tiles.map(TileSize::Nodes));
     let t = std::time::Instant::now();
-    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort, tiles)?;
+    let fixes = cli.fixes.as_deref().map(duckosm_build::config::read_osm_fixes).transpose()?;
+    let n = duckosm_build::quack(&cli.pbf, parquet.as_deref(), db.as_deref(), threads, !cli.no_sort, tiles, fixes.as_ref())?;
     eprintln!(
         "quack: {} nodes, {} ways, {} relations in {:.2} s",
         n.nodes,
@@ -284,7 +291,8 @@ fn quack_gdal(cli: &QuackCli) -> Result<(), String> {
     let tiles = cli.tile_zoom.map(duckosm_build::TileSize::Zoom).or(cli.tiles.map(duckosm_build::TileSize::Nodes));
     let t = std::time::Instant::now();
     let gpkg = gpkg.then(|| base.with_extension("gpkg"));
-    let n = duckosm_build::quack_gdal::quack_gdal(&cli.pbf, gpkg.as_deref(), geoparquet.then_some(base.as_path()), tiles)?;
+    let fixes = cli.fixes.as_deref().map(duckosm_build::config::read_osm_fixes).transpose()?;
+    let n = duckosm_build::quack_gdal::quack_gdal(&cli.pbf, gpkg.as_deref(), geoparquet.then_some(base.as_path()), tiles, fixes.as_ref())?;
     let names = ["points", "lines", "multilinestrings", "multipolygons", "other_relations"];
     let rows: Vec<String> = names.iter().enumerate().map(|(i, l)| format!("{} {l}", n.rows[i + 1])).collect();
     eprintln!("quack --gdal: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());

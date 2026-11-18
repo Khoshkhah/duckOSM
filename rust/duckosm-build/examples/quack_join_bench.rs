@@ -18,7 +18,7 @@ fn main() {
         let t = Instant::now();
         for (i, f) in files.iter().enumerate().filter(|(_, f)| !f.is_empty()) {
             let mut p = Vec::new();
-            duckosm_build::quack_tile_to(|| Ok(std::io::Cursor::new(&f[..])), tiles[i], &mut p, sort).unwrap();
+            duckosm_build::quack_tile_to(|| Ok(std::io::Cursor::new(&f[..])), tiles[i], &mut p, sort, None).unwrap();
         }
         eprintln!("tiles, sort {sort}: {:.1} s", t.elapsed().as_secs_f64());
     }
@@ -29,7 +29,7 @@ fn main() {
         .filter(|(_, f)| !f.is_empty())
         .map(|(i, f)| {
             let mut p = Vec::new();
-            duckosm_build::quack_tile_to(|| Ok(std::io::Cursor::new(&f[..])), tiles[i], &mut p, true).unwrap();
+            duckosm_build::quack_tile_to(|| Ok(std::io::Cursor::new(&f[..])), tiles[i], &mut p, true, None).unwrap();
             p
         })
         .collect();

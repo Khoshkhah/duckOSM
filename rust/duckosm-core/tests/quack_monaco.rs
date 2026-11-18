@@ -48,7 +48,7 @@ fn monaco_equals_quackosm() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
     let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
     let mut kinds: BTreeMap<u32, (usize, f64)> = BTreeMap::new();
-    let n = duckosm_core::quack::features(open, 1 << 20, |rows| {
+    let n = duckosm_core::quack::features(open, 1 << 20, None, |rows| {
         for r in rows {
             let (k, a) = kind_and_area(&r.geometry);
             let e = kinds.entry(k).or_default();
@@ -83,8 +83,8 @@ fn monaco_by_tiles_equals_the_whole_file() {
             Ok(())
         };
         let n = match by_tiles {
-            Some(size) => duckosm_core::quack::features_by_tiles(open, 1 << 20, size, keep),
-            None => duckosm_core::quack::features(open, 1 << 20, keep),
+            Some(size) => duckosm_core::quack::features_by_tiles(open, 1 << 20, size, None, keep),
+            None => duckosm_core::quack::features(open, 1 << 20, None, keep),
         }
         .unwrap();
         all.sort();

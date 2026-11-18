@@ -12,10 +12,12 @@ fn row(f: Feature) -> Row {
 
 #[test]
 fn monaco_tile_tables() {
+    // three tests at once: macOS gives 256 open files
+    duckosm_core::util::raise_open_files();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
     let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
     let mut whole: Vec<Row> = Vec::new();
-    duckosm_core::quack::features(open, 1 << 20, |rows| {
+    duckosm_core::quack::features(open, 1 << 20, None, |rows| {
         whole.extend(rows.into_iter().map(row));
         Ok(())
     })
@@ -64,6 +66,7 @@ fn monaco_tile_tables() {
 /// part (`quack_tile_to`), and the join of the parts equals the table of the whole file.
 #[test]
 fn monaco_tile_workers() {
+    duckosm_core::util::raise_open_files();
     use duckosm_core::quack::{tiles_of_file, TileSize, WORLD};
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
@@ -73,7 +76,7 @@ fn monaco_tile_workers() {
         ))
     };
     let mut whole: Vec<Row> = Vec::new();
-    duckosm_core::quack::features(open, 1 << 20, |rows| {
+    duckosm_core::quack::features(open, 1 << 20, None, |rows| {
         // the center from the WKB (the key of the merge) is the center of the row (the key of the sort in the tile)
         for f in &rows {
             let c = duckosm_core::quack::wkb_center(&f.geometry).unwrap();
@@ -112,6 +115,7 @@ fn monaco_tile_workers() {
                 tiles[i],
                 &mut part,
                 sort,
+                None,
             )
             .unwrap();
             list.push(std::io::Cursor::new(part));
@@ -173,4 +177,84 @@ fn monaco_tile_workers() {
         .collect();
     let got: Vec<String> = read(joined).into_iter().map(|f| f.feature_id).collect();
     assert!(got == want, "the sorted join has the order of str_order");
+}
+
+/// quack with the OSM fixes (`tests/data/osm_fixes_quack.yaml`): the whole file, by tiles, and the tile workers of the
+/// browser (the fixes as JSON, placed on the tiles) give the same rows, with the fixes in them.
+#[test]
+fn monaco_fixes() {
+    duckosm_core::util::raise_open_files();
+    use duckosm_core::quack::{features, features_by_tiles, tiles_of_file, QuackFixes, TileSize, WORLD};
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+    let path = data.join("monaco.osm.pbf");
+    let open = || Ok(std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| e.to_string())?));
+    let osm = duckosm_build::config::read_osm_fixes(&data.join("osm_fixes_quack.yaml")).unwrap();
+    let fixes = || QuackFixes::new(&osm, open).unwrap();
+    let mut whole: Vec<Row> = Vec::new();
+    features(open, 1 << 20, Some(&fixes()), |rows| {
+        whole.extend(rows.into_iter().map(row));
+        Ok(())
+    })
+    .unwrap();
+    whole.sort();
+    let get = |id: &str| whole.iter().find(|r| r.0 == id);
+    let tag = |id: &str, k: &str| get(id).and_then(|r| r.1.iter().find(|t| t.0 == k)).map(|t| t.1.as_str());
+    assert!(get("way/23715051").is_none(), "removed");
+    assert_eq!(tag("way/4227277", "surface"), Some("cobblestone"));
+    assert_eq!(tag("way/503462470", "oneway"), Some("yes"));
+    assert_eq!(tag("way/503462470", "lanes"), Some("3"));
+    assert_eq!(tag("way/4227277", "sidewalk"), Some("both"));
+    assert_eq!(tag("way/4227277", "lit"), None);
+    assert_eq!(tag("way/9000000000001", "name"), Some("Test"));
+    assert_eq!(tag("way/9000000000001", "highway"), Some("footway"));
+    assert_eq!(tag("way/9000000000002", "highway"), Some("service"));
+    assert_eq!(tag("node/21911886", "crossing"), Some("marked"));
+    assert_eq!(tag("node/21911886", "crossing_ref"), None);
+    assert_eq!(tag("relation/393226", "name"), Some("Test relation"));
+    // with no fixes, the rows differ
+    let mut plain: Vec<Row> = Vec::new();
+    features(open, 1 << 20, None, |rows| {
+        plain.extend(rows.into_iter().map(row));
+        Ok(())
+    })
+    .unwrap();
+    assert!(plain.iter().any(|r| r.0 == "way/23715051"));
+    for size in [TileSize::Nodes(2_000), TileSize::Zoom(14)] {
+        let mut tiled: Vec<Row> = Vec::new();
+        features_by_tiles(open, 1 << 20, size, Some(fixes()), |rows| {
+            tiled.extend(rows.into_iter().map(row));
+            Ok(())
+        })
+        .unwrap();
+        tiled.sort();
+        assert!(tiled == whole, "by tiles {size:?}");
+    }
+    // the browser: the fixes go to each worker as JSON, placed on the tiles of the plan
+    let tiles = tiles_of_file(&open, TileSize::Zoom(14)).unwrap();
+    let mut placed = fixes();
+    placed.place(&tiles);
+    let json = placed.to_json();
+    let world = duckosm_core::boundary::Boundary::parse(WORLD).unwrap();
+    let files = duckosm_core::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"]).unwrap();
+    let mut parts = Vec::new();
+    for (i, (tile, c)) in files.tiles.iter().enumerate() {
+        if c.nodes == 0 {
+            continue;
+        }
+        let worker = QuackFixes::from_json(&json).unwrap();
+        let mut part = Vec::new();
+        let open_tile = || Ok(std::io::BufReader::new(files.reader(i)));
+        duckosm_build::quack_tile_to(open_tile, *tile, &mut part, false, Some(&worker)).unwrap();
+        parts.push(std::io::Cursor::new(part));
+    }
+    let mut joined = Vec::new();
+    duckosm_build::quack_join_to(parts, &mut joined, false, &mut |_, _| {}).unwrap();
+    let mut got: Vec<Row> = Vec::new();
+    duckosm_parquet::quack::read_quack_bytes(joined, |b| {
+        got.extend(duckosm_parquet::quack::features_of(&b)?.into_iter().map(row));
+        Ok(())
+    })
+    .unwrap();
+    got.sort();
+    assert!(got == whole, "the tile workers");
 }

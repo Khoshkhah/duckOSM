@@ -11,7 +11,7 @@ fn run_in_time(tiles: Option<duckosm_build::TileSize>, both: bool) {
     let (gpkg, base) = (dir.join("m.gpkg"), dir.join("m"));
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let r = duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), both.then_some(base.as_path()), tiles);
+        let r = duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), both.then_some(base.as_path()), tiles, None);
         let _ = tx.send(r.map(|n| n.rows));
     });
     let rows = rx

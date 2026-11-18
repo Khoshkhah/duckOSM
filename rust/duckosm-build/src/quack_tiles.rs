@@ -61,7 +61,7 @@ pub fn quack_tile_tables<R: Read + Seek + Send>(open: impl Fn() -> Result<R, Str
         let owner = Owner { tile, relations: None };
         let mut owned = 0;
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        quack::features_owned(open_tile, quack::BUDGET, Some(&owner), |rows| {
+        quack::features_owned(open_tile, quack::BUDGET, Some(&owner), None, |rows| {
             owned += rows.iter().filter(|f| f.owner).count();
             for b in rows.par_chunks(20_000).map(tile_batch).collect::<Result<Vec<_>, _>>()? {
                 w.write(&b)?;
