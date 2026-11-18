@@ -179,6 +179,7 @@ nav:
       - How each output is checked: concepts/checks.md
       - The Rust engine: concepts/rust-engine.md
   - Compare:
+      - Overview: compare/index.md
       - Speed on France: compare/speed.md
       - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:
