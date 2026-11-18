@@ -1370,7 +1370,7 @@ fn run<R: Read + Send>(
     // thread writes each part of rows that the threads make
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::scope(|scope| -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Vec<Feature>, String>>(4096);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Vec<Feature>, String>>(REL_CHANNEL.load(std::sync::atomic::Ordering::Relaxed));
         let make = &make;
         scope.spawn(move || {
             let read = with_rels(&mut |rels| {
@@ -1450,6 +1450,10 @@ fn run<R: Read + Send>(
     crate::util::step("quack 4b: the relations");
     Ok(counts)
 }
+
+/// The rows of the relations that wait for the thread that writes them (pass 4). A test makes it small, so the channel is
+/// full and the threads that make the relations wait (`duckosm-build/tests/quack_gdal_full.rs`).
+pub static REL_CHANNEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(4096);
 
 /// The tiles that [`features_by_tiles`] and the tile tables make at the same time natively.
 // ponytail: a fixed number, and a group waits for its slowest tile; a pool of tiles when the time matters more
@@ -1555,6 +1559,49 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     // cores), and their rows go to `emit` in the order of the tiles. Each tile has a thread of its own, not a thread of
     // the pool: a tile waits for rows that the pool makes, so tiles on the pool with 4 threads or fewer left no thread to
     // make them (the test stopped on the CI machine).
+    // quack --gdal: the order of the rows does not matter, so each tile sends its parts at once, and a pool of TILES_AT_ONCE
+    // threads takes the next tile. A group that waits for its last tile kept the rows of four tiles: France had 8.8 GB of
+    // rows in memory at zoom 8.
+    #[cfg(not(target_arch = "wasm32"))]
+    if gdal {
+        enum Msg {
+            Part(Tile, Vec<Feature>),
+            Done(usize, Counts),
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<Msg, String>>(TILES_AT_ONCE);
+        std::thread::scope(|scope| -> Result<(), String> {
+            for _ in 0..TILES_AT_ONCE {
+                let (tx, run, next, todo) = (tx.clone(), &run, &next, &todo);
+                scope.spawn(move || loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(t) = todo.get(k) else { break };
+                    let stopped = || "quack: the rows of the tiles stopped".to_string();
+                    let got = run(t, &mut |p| tx.send(Ok(Msg::Part(t.1, p))).map_err(|_| stopped()));
+                    let sent = match got {
+                        Ok(got) => tx.send(Ok(Msg::Done(k, got))),
+                        Err(e) => tx.send(Err(e)),
+                    };
+                    if sent.is_err() {
+                        break;
+                    }
+                });
+            }
+            drop(tx);
+            let mut finished = 0;
+            for m in rx {
+                match m? {
+                    Msg::Part(t, p) => emit(t, p)?,
+                    Msg::Done(k, got) => {
+                        finished += 1;
+                        done(finished, &todo[k], got);
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        return Ok(counts);
+    }
     #[cfg(not(target_arch = "wasm32"))]
     for (g, group) in todo.chunks(TILES_AT_ONCE).enumerate() {
         let run = &run;

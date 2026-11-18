@@ -80,26 +80,30 @@ Kentucky (141 MB):
 
 | | `ogr2ogr` | `quack --gdal` |
 |---|---|---|
-| GeoPackage, time | 8.8 s | **4.2 s** |
-| GeoPackage, time, `--tile-zoom 8` | | 6.4 s |
-| GeoPackage, memory | 0.44 GB | **0.25 GB** |
-| GeoParquet, time | 12.5 s (5 runs) | **3.2 s** |
-| GeoParquet, time, `--tile-zoom 8` | | 5.3 s |
-| GeoParquet, memory | 0.58 GB | **0.25 GB** |
+| GeoPackage, time | 8.8 s | **4.5 s** |
+| GeoPackage, time, `--tile-zoom 8` | | 5.3 s |
+| GeoPackage, memory | 0.44 GB | **0.28 GB** |
+| GeoParquet, time | 12.5 s (5 runs) | **3.7 s** |
+| GeoParquet, time, `--tile-zoom 8` | | 4.1 s |
+| GeoParquet, memory | 0.58 GB | **0.27 GB** |
 | GeoParquet, size | 0.43 GB | **0.37 GB** |
 
 France (5.1 GB), GeoParquet, `--tile-zoom 8`:
 
-| | `ogr2ogr` | `quack --gdal` |
-|---|---|---|
-| Time | 14 min 18 s (5 runs) | **3 min 24 s** |
-| Memory | **1.6 GB** | 5.0 GB |
-| Size | 15.6 GB | **11.3 GB** |
+| | `ogr2ogr` | `quack --gdal` | `quack --gdal` in the browser |
+|---|---|---|---|
+| Time | 14 min 18 s (5 runs) | **3 min 37 s** | 5 min 23 s |
+| Time, one read (estimate) | about 6 min 10 s | | |
+| Memory | 1.6 GB | **0.9 GB** | 1.3 GB + 4.1 GB in 12 tile workers |
+| Size | 15.6 GB | **11.3 GB** | 13.7 GB (Snappy) |
+
+The browser (Chromium, duckOSM Studio's quack page, output **GDAL layers**) used at most 43 GB of browser storage.
 
 GDAL's Parquet driver writes one layer to one file, so `ogr2ogr -f Parquet` gives one layer in each run:
 `ogr2ogr -f Parquet points.parquet france.osm.pbf points`, and so on for the five layers. Each run reads the whole file, so
 the time of the five runs is more than the time of one GDAL read. One read to the five layers (`ogr2ogr -f FlatGeobuf`, one
-file for each layer) took 5.4 s on Kentucky, 0.43 of the 12.5 s of the five runs. France as FlatGeobuf (about 27 GB) and as
+file for each layer) took 5.4 s on Kentucky, 0.43 of the 12.5 s of the five runs. The estimate for France is 0.43 of its
+five runs; it was not measured. France as FlatGeobuf (about 27 GB) and as
 a GeoPackage (about 31 GB) did not fit on the disk of the Mac mini with 30 GB free. The memory of `ogr2ogr` is the largest
 of the five runs.
 
