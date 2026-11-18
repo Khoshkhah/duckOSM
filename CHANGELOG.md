@@ -8,6 +8,14 @@
   Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
   on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
 
+- **`duckosm-rust elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
+  `duckosm elevation` (`--dem`, `--source`, `--mode`, `--nodata-fill`, `--suffix`, `--product`, `--vertical-datum`, `--license`,
+  `--not-reference`). It writes the same heights and the same `main.elevation_metadata` as Python on Monaco (a DEM file, a crop
+  with nodata, `--source copernicus`) and Tartu (`--source copernicus`, 60 s in place of 4 min 17 s). The DEM is a GeoTIFF in
+  EPSG:4326 with 32-bit floats; the downloads use DuckDB's httpfs. The DEM catalog (`dem_sources.json`) has a Rust reader too.
+  The DEM reader of the build now finds the pixel of a point as rasterio does, so a point on a pixel edge gets the same
+  height as in Python.
+
 - **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
   commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
   networkx's `dijkstra_path`). On Monaco and Tartu, `lane_<mode>.lane_edges` and 126 lane routes (with and without the stored

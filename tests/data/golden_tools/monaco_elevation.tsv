@@ -1,0 +1,8 @@
+cycling.nodes	ele	4638	1b55774c958c31c2e1c241fb7c877cee
+cycling.edges	z_from,z_to,z_vertices	11293	a09ed1d6ce6542518ef3e1aede0b98e1
+driving.nodes	ele,ele_dsm	1769	1d2d99518d17db49a179041ddd32e707
+driving.edges	z_from,z_to,z_vertices,z_from_dsm,z_to_dsm,z_vertices_dsm	2844	5a0f224526960304e0447ba2777c773a
+walking.nodes	ele,ele_dsm	4579	bda8b2e9b5e429f3ec44eda9f222c69e
+walking.edges	z_from,z_to,z_vertices,z_from_dsm,z_to_dsm,z_vertices_dsm	11934	3cbc74aef940f48f8753c5856ad612d0
+{'ele_column': ele, 'source': monaco-copernicus-glo30.tif, 'source_type': file, 'resolution_m': 30.922, 'product': DTM, 'dem_crs': 'EPSG:4326', 'vertical_datum': EGM2008, 'license': 'Copernicus open (attribution)', 'nodata_fill': 0.0, 'n_nodes': 10986, 'n_nodata': 0, 'sha256': ef8a6f3f58345c3a164d560f5a0d7ec13e372e418c75a9b463e16953a06f5570}
+{'ele_column': ele_dsm, 'source': monaco_dem_crop.tif, 'source_type': file, 'resolution_m': 30.922, 'product': unknown, 'dem_crs': 'EPSG:4326', 'vertical_datum': unknown, 'license': unknown, 'nodata_fill': -5.5, 'n_nodes': 6348, 'n_nodata': 1194, 'sha256': 46c228324220e105cdb5fa4266cecd08e774921be1c507bdcec54a8bced5b988}
