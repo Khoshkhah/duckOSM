@@ -153,7 +153,4 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
 ---
 
-Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the [ODbL](https://opendatacommons.org/licenses/odbl/). The region files come from [Geofabrik](https://www.geofabrik.de/)'s free [download server](https://download.geofabrik.de/), and `duckosm quack --geofabrik` follows its layer rules.
-
-duckOSM is MIT-licensed and built on [DuckDB](https://duckdb.org) and its spatial extension.
-It is an independent project, not affiliated with or endorsed by the DuckDB Foundation.
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) ([ODbL](https://opendatacommons.org/licenses/odbl/)). Files from [Geofabrik](https://www.geofabrik.de/). Built on [DuckDB](https://duckdb.org/). duckOSM is MIT-licensed.
