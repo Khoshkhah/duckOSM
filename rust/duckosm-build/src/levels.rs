@@ -350,15 +350,9 @@ pub mod tiled {
         }
         // 2. each edge to its tile, and to each tile whose box (with the margin) it touches; sorted by tile. A tile waits for the
         // earlier tiles that own a road of it (their numbers are fixed in it)
-        let mut waits: HashMap<Tile, FxHashSet<Tile>> = HashMap::new();
-        let mut tags = TagTable::default();
-        let mut rows = Writer::new(store).map_err(io)?;
-        each(&mut |rank, edge_id, attrs, geometry| {
-            if geometry.len() < 2 {
-                return Ok(());
-            }
-            let own = owner(&geometry);
-            let b = bbox(&geometry);
+        let touching = |geometry: &[(f64, f64)]| -> (Tile, Vec<Tile>) {
+            let own = owner(geometry);
+            let b = bbox(geometry);
             let (lo, hi) = (tile_of((b[0], b[1])), tile_of((b[2], b[3])));
             let mut others: Vec<Tile> = Vec::new();
             for y in lo.0..=hi.0 {
@@ -375,22 +369,21 @@ pub mod tiled {
                     }
                 }
             }
-            // the later tiles read the numbers of the edge (the tags rule reads no numbers of other tiles)
-            let later = if tags_rule { 0 } else { others.iter().filter(|t| order[t] > order[&own]).count() as u16 };
-            if !tags_rule {
-                for t in others.iter().filter(|t| order[t] > order[&own]) {
-                    waits.entry(*t).or_default().insert(own);
+            (own, others)
+        };
+        // 2a. the waits of the tiles (the solve: a tile reads the numbers of the edges of earlier tiles), from a first read
+        let mut waits: HashMap<Tile, FxHashSet<Tile>> = HashMap::new();
+        if !tags_rule {
+            each(&mut |_, _, _, geometry| {
+                if geometry.len() >= 2 {
+                    let (own, others) = touching(&geometry);
+                    for t in others.iter().filter(|t| order[t] > order[&own]) {
+                        waits.entry(*t).or_default().insert(own);
+                    }
                 }
-            }
-            let id = tags.id(attrs);
-            for t in &others {
-                rows.push(&TileEdgeCodec, &(*t, false, 0, rank, edge_id, id, geometry.clone())).map_err(io)?;
-            }
-            rows.push(&TileEdgeCodec, &(own, true, later, rank, edge_id, id, geometry)).map_err(io)?;
-            Ok(())
-        })?;
-        drop((boxes, near));
-        duckosm_core::util::step("levels: the edges to their tiles");
+                Ok(())
+            })?;
+        }
         // the tiles in the order of their depth in the waits (a tile after all the tiles it waits for), then in their order: the
         // tiles of one depth do not wait for each other and run at the same time. The rule reads the numbers of the earlier tiles
         // in `order`, so the result does not change
@@ -404,13 +397,30 @@ pub mod tiled {
             }
             depth
         };
-        // in a tile: the edges in the order of the tables, then of edge_id (the order of the whole build)
+        // 2b. the rows, sorted as they come (a sorter: one copy of the rows on the disk at most, not the rows and the sorted rows):
+        // in a tile, the edges in the order of the tables, then of edge_id (the order of the whole build)
         let key = |b: &[u8]| {
             let t = tile_at(b);
             (depth[&t], order[&t], table_of[b[11] as usize], i64::from_le_bytes(b[12..20].try_into().expect("8 bytes")))
         };
-        let rows = spill::sort_bytes(rows.finish().map_err(io)?, key, BUDGET, store).map_err(io)?;
-        drop(depth);
+        let mut tags = TagTable::default();
+        let mut sorter = spill::Sorter::new(key, BUDGET, store);
+        each(&mut |rank, edge_id, attrs, geometry| {
+            if geometry.len() < 2 {
+                return Ok(());
+            }
+            let (own, others) = touching(&geometry);
+            // the later tiles read the numbers of the edge (the tags rule reads no numbers of other tiles)
+            let later = if tags_rule { 0 } else { others.iter().filter(|t| order[t] > order[&own]).count() as u16 };
+            let id = tags.id(attrs);
+            for t in &others {
+                sorter.push(&TileEdgeCodec, &(*t, false, 0, rank, edge_id, id, geometry.clone())).map_err(io)?;
+            }
+            sorter.push(&TileEdgeCodec, &(own, true, later, rank, edge_id, id, geometry)).map_err(io)?;
+            Ok(())
+        })?;
+        duckosm_core::util::step("levels: the edges to their tiles");
+        let rows = sorter.sorted(&TileEdgeCodec).map_err(io)?;
         duckosm_core::util::step("levels: the sort by tile");
         // 3. the tiles: the numbers of an edge that a later tile needs are kept, with the order of its tile and the count of the
         // later tiles that still read them (an entry goes when the count is 0). A tile reads only the
@@ -451,7 +461,7 @@ pub mod tiled {
         let mut window: std::collections::VecDeque<Vec<TileEdge>> = std::collections::VecDeque::new();
         // the edges of the tiles in the window and of the running tiles
         let (mut in_memory, mut tile) = (0usize, Vec::<TileEdge>::new());
-        let mut rows = rows.read(&TileEdgeCodec).map_err(io)?.peekable();
+        let mut rows = rows.peekable();
         // a tile starts when all the tiles it waits for are done (not when the tiles before it are done): `dispatch` starts the
         // ready tiles, and `receive` gives the result of one finished tile
         type Job = (Vec<TileEdge>, FxHashMap<i64, [i64; 4]>);
@@ -581,6 +591,8 @@ pub mod tiled {
                 &mut || finished.borrow_mut().pop_front().ok_or_else(|| "no finished tile of the levels".to_string()),
             )?;
         }
+        // the sorted rows borrow `order` and `depth` (their key)
+        drop(rows);
         drop((earlier, tags, waits, done, order));
         duckosm_core::util::step("levels: the tiles");
         // 4. one move to the ground for the whole area (not for the tags rule: its numbers are final); the rows in the order of

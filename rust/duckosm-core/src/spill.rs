@@ -42,8 +42,13 @@ pub struct Writer {
 
 impl Writer {
     pub fn new(store: &dyn Store) -> io::Result<Self> {
+        Self::with_buffer(store, 1 << 20)
+    }
+
+    /// A writer with a buffer of `bytes` (a table of many writers, as [`Buckets`], keeps one buffer for each writer).
+    pub fn with_buffer(store: &dyn Store, bytes: usize) -> io::Result<Self> {
         Ok(Writer {
-            w: BufWriter::with_capacity(1 << 20, store.create()?),
+            w: BufWriter::with_capacity(bytes, store.create()?),
             buf: Vec::new(),
             len: 0,
             bytes: 0,
@@ -203,6 +208,15 @@ pub fn sorted<'a, K: Ord + Send + 'a, T: 'a, C: Codec<T>>(
     codec: &'a C,
 ) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a> {
     let runs = sorted_runs(rows, |_| true, &key, budget, store)?;
+    merged(runs, key, codec)
+}
+
+/// The rows of sorted `runs`, merged while they are read: the smallest (key, run) first, as in `merge`.
+fn merged<'a, K: Ord + Send + 'a, T: 'a, C: Codec<T>>(
+    runs: Vec<Rows>,
+    key: impl Fn(&[u8]) -> K + 'a,
+    codec: &'a C,
+) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a> {
     let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
     let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
     let mut heap = BinaryHeap::new();
@@ -244,20 +258,7 @@ fn sorted_runs<K: Ord + Send>(
     let mut data: Vec<u8> = Vec::new();
     let mut index: Vec<(K, usize, usize)> = Vec::new(); // key, start and end of the row in `data`
     let flush = |data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, runs: &mut Vec<Rows>| -> io::Result<()> {
-        // stable; on all threads when the crate has rayon (the feature `pbf`)
-        #[cfg(feature = "pbf")]
-        {
-            use rayon::slice::ParallelSliceMut;
-            index.par_sort_by(|a, b| a.0.cmp(&b.0));
-        }
-        #[cfg(not(feature = "pbf"))]
-        index.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut w = Writer::new(store)?;
-        for (_, a, b) in index.drain(..) {
-            w.push_bytes(&data[a..b])?;
-        }
-        data.clear();
-        runs.push(w.finish()?);
+        runs.push(write_run(data, index, store)?);
         Ok(())
     };
     let row = std::mem::size_of::<(K, usize, usize)>();
@@ -287,6 +288,76 @@ fn sorted_runs<K: Ord + Send>(
         flush(&mut data, &mut index, &mut runs)?;
     }
     Ok(runs)
+}
+
+/// One sorted run of the rows in `data` (`index`: the key, the start and the end of each row); `data` and `index` are empty after.
+fn write_run<K: Ord + Send>(data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, store: &dyn Store) -> io::Result<Rows> {
+    // stable; on all threads when the crate has rayon (the feature `pbf`)
+    #[cfg(feature = "pbf")]
+    {
+        use rayon::slice::ParallelSliceMut;
+        index.par_sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    #[cfg(not(feature = "pbf"))]
+    index.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut w = Writer::new(store)?;
+    for (_, a, b) in index.drain(..) {
+        w.push_bytes(&data[a..b])?;
+    }
+    data.clear();
+    w.finish()
+}
+
+/// A sort with no unsorted file: [`Sorter::push`] keeps the rows in memory up to `budget` bytes and writes each full block as a
+/// sorted run, and [`Sorter::sorted`] merges the runs while they are read. The disk holds one copy of the rows at most; with
+/// [`sort_bytes`], the unsorted file and the runs (or the runs and their merged copy) are on the disk together (the levels after
+/// the union of Kentucky by tiles: 2.86 GB in the browser). The order is the order of [`sort_bytes`] (stable).
+pub struct Sorter<'s, K, F: Fn(&[u8]) -> K> {
+    key: F,
+    budget: usize,
+    store: &'s dyn Store,
+    data: Vec<u8>,
+    index: Vec<(K, usize, usize)>,
+    runs: Vec<Rows>,
+    buf: Vec<u8>,
+}
+
+impl<'s, K: Ord + Send, F: Fn(&[u8]) -> K> Sorter<'s, K, F> {
+    pub fn new(key: F, budget: usize, store: &'s dyn Store) -> Self {
+        Sorter { key, budget, store, data: Vec::new(), index: Vec::new(), runs: Vec::new(), buf: Vec::new() }
+    }
+
+    pub fn push<T>(&mut self, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
+        let mut buf = std::mem::take(&mut self.buf);
+        buf.clear();
+        codec.put(row, &mut buf);
+        let start = self.data.len();
+        self.data.extend_from_slice(&buf);
+        self.buf = buf;
+        self.index.push(((self.key)(&self.data[start..]), start, self.data.len()));
+        if self.data.len() + self.index.len() * std::mem::size_of::<(K, usize, usize)>() >= self.budget {
+            self.runs.push(write_run(&mut self.data, &mut self.index, self.store)?);
+            // at most MERGE_FAN open runs; the runs so far are the first rows, so their merge keeps the sort stable
+            if self.runs.len() == MERGE_FAN {
+                let all = std::mem::take(&mut self.runs);
+                self.runs.push(merge(all, &self.key, self.store)?);
+            }
+        }
+        Ok(())
+    }
+
+    /// The rows in the order of the key, merged from the runs while they are read.
+    pub fn sorted<'a, T: 'a, C: Codec<T>>(mut self, codec: &'a C) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a>
+    where
+        K: 'a,
+        F: 'a,
+    {
+        if self.runs.is_empty() || !self.index.is_empty() {
+            self.runs.push(write_run(&mut self.data, &mut self.index, self.store)?);
+        }
+        let runs = std::mem::take(&mut self.runs);
+        merged(runs, self.key, codec)
+    }
 }
 
 /// The runs that a merge of [`sort_bytes`] reads at once.
@@ -509,6 +580,40 @@ impl Codec<Edge> for EdgeCodec {
 }
 
 #[cfg(test)]
+mod sorter_tests {
+    use super::*;
+
+    /// A row of one i64.
+    struct I64;
+    impl Codec<i64> for I64 {
+        fn put(&self, r: &i64, out: &mut Vec<u8>) {
+            out.extend_from_slice(&r.to_le_bytes());
+        }
+        fn get(&self, b: &mut &[u8]) -> i64 {
+            get_i64(b)
+        }
+    }
+
+    /// The sorter (no unsorted file; more runs than MERGE_FAN with this budget) gives the rows of `sort_bytes`, in the same stable
+    /// order: the key is the row divided by 10, so the rows of one key keep their order.
+    #[test]
+    fn the_sorter_equals_sort_bytes() {
+        let store = temp_store();
+        let key = |b: &[u8]| i64::from_le_bytes(b[..8].try_into().unwrap()).div_euclid(10);
+        let rows: Vec<i64> = (0..5000).map(|i| (i * 7919) % 5000 - 1300).collect();
+        let (mut w, mut s) = (Writer::new(&*store).unwrap(), Sorter::new(key, 200, &*store));
+        for k in &rows {
+            w.push(&I64, k).unwrap();
+            s.push(&I64, k).unwrap();
+        }
+        let want: Vec<i64> = sort_bytes(w.finish().unwrap(), key, 200, &*store).unwrap().read(&I64).unwrap().map(|r| r.unwrap()).collect();
+        let got: Vec<i64> = s.sorted(&I64).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!((got.len(), &got), (5000, &want));
+        assert_eq!(Sorter::new(key, 200, &*store).sorted(&I64).unwrap().count(), 0);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -664,7 +769,8 @@ impl Buckets {
     pub fn push<T>(&mut self, store: &dyn Store, key: i64, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
         let part = match self.parts.entry(key >> self.shift) {
             std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
-            std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::new(store)?),
+            // a buffer of 256 KB: quack on Kentucky has about 100 parts of requests (1 MB each: 100 MB)
+            std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::with_buffer(store, 256 << 10)?),
         };
         part.push(codec, row)
     }

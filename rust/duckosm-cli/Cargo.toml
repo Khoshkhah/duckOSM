@@ -16,7 +16,7 @@ duckdb = ["duckosm-build/duckdb", "dep:duckosm-edit", "duckosm-edit/duckdb", "de
 heap-probe = []
 
 [dependencies]
-duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
+duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf", "gpkg"] }
 clap = { version = "4", features = ["derive"] }
 duckosm-edit = { path = "../duckosm-edit", optional = true }
 duckosm-tools = { path = "../duckosm-tools", optional = true }   # the database tools (info, way, init-config, ...)

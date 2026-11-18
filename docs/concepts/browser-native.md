@@ -33,25 +33,35 @@ dashboard (`duckosm-rust studio`) runs `duckosm-rust tiles` for its build:
 duckosm-rust tiles france.osm.pbf --boundary france.geojson -o out -- --modes driving
 ```
 
-Mac mini (12 cores, 16 GB), headless Chromium for the browser. The three modes (France: driving only), the levels `solve`,
-tiles of zoom 8. The tables of the build by tiles are equal to those of one build.
+Mac mini (12 cores, 16 GB), headless Chromium for the browser, 2026-11-17: the levels `solve`, tiles of zoom 8. The tables
+of the build by tiles are equal to those of one build. Time, memory, the most disk at one time (the browser: its storage),
+and the output.
 
-| Area | Native | Browser |
+| Area (modes) | Native | Browser |
 |---|---|---|
-| Monaco | 0.27 s, 75 MB | 2.6 s, 66 MB |
-| Tartu | 1.4 s, 125 MB | 3.9 s, 180 MB |
-| Kentucky | 31.7 s, 1.3 GB | 55.6 s, 2.1 GB |
-| France | 3 min 34 s, 1.6 GB | 4 min 56 s, 5.7 GB |
+| Monaco (3) | 0.3 s, 71 MB, 4 MB disk, 4 MB output | 2.7 s, 65 MB, 41 MB storage |
+| Tartu (3) | 1.4 s, 127 MB, 37 MB disk, 24 MB output | 4.0 s, 168 MB, 112 MB storage |
+| Kentucky (driving) | 12.3 s, 0.8 GB, 1.2 GB disk, 0.7 GB output | 24.6 s, 1.5 GB, 2.1 GB storage |
+| Kentucky (3) | 32.9 s, 1.4 GB, 3.6 GB disk, 2.1 GB output | 55.2 s, 2.0 GB, 4.8 GB storage |
+| France (driving) | 3 min 36 s, 1.6 GB, 11.2 GB disk, 7.2 GB output | 5 min 16 s, 5.7 GB, 14.9 GB storage |
+| France (3), **estimate from Kentucky** | about 10 min, 2.6 GB, 35 GB disk, 23 GB output | about 12 min, 7.5 GB, 35 GB storage |
 
-- France: 25.9 million edges, 104 tiles. In the browser, 16.2 GB of browser storage at most; the memory is the WebAssembly
-  memory of all workers at the same time.
-- One build, for comparison: Kentucky 35.7 s and 3.2 GB natively, 64.5 s in the browser; France 4 min 31 s and 8.1 GB
-  natively, and it does not fit in the 4 GB of the browser. On a small area one build is faster by less than 1 s (Tartu:
-  0.91 s natively, 3.3 s in the browser).
+- The three modes are driving, walking and cycling. France with the three modes was not built: the Mac mini has too little free
+  disk. Its row is France with driving times the ratio of Kentucky with three modes to Kentucky with driving (native: time 2.7,
+  memory 1.65, disk 3.1, output 3.1; browser: time 2.2, memory 1.3, storage 2.4).
+- France: 25.9 million edges (driving), 104 tiles. The memory of the browser is the WebAssembly memory of all workers at the
+  same time.
+- The browser writes about twice the output of the native program: its Parquet files are compressed with snap, because zstd
+  is a C library (Kentucky with three modes: 4.1 GB in the browser, 2.1 GB natively).
+- The largest temporary file is the sort of the levels after the union: the rows go straight into sorted runs, so one copy is
+  on the disk at one time (Kentucky with three modes in the browser: 6.0 GB of storage before, 4.8 GB now).
+- One build, for comparison: Kentucky (3) 35.7 s and 3.2 GB natively, 64.5 s in the browser; France (driving) 4 min 31 s and
+  8.1 GB natively, and it does not fit in the 4 GB of the browser. On a small area one build is faster by less than 1 s (Tartu:
+  0.9 s natively, 3.3 s in the browser).
 
 ## The limits
 
-- **Native:** the memory does not limit the area: France by tiles needs less than 2 GB. The disk does: France with the three
-  modes needs more than 28 GB of disk for the files of the tiles.
+- **Native:** the memory does not limit the area: France by tiles needs less than 3 GB. The disk does: about 35 GB for France
+  with the three modes (an estimate).
 - **Browser:** the same, with the browser's storage in place of the disk. Each WebAssembly module (each tile, the union)
   has its own 4 GB.

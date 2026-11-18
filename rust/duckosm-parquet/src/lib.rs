@@ -31,6 +31,8 @@ mod par_writer;
 mod raw_load;
 #[cfg(feature = "pbf")]
 pub mod quack;
+#[cfg(feature = "pbf")]
+pub mod gdal;
 pub mod read;
 pub mod merge;
 pub use par_writer::ParWriter;
