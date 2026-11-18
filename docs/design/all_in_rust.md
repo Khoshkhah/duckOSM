@@ -115,7 +115,6 @@ The GMNS export is ported step by step into `rust/duckosm-export/src/gmns.rs`, i
 The golden file `tests/data/exports/monaco_gmns_columns.tsv` has one line for each column of each table of Python's
 `duckosm gmns` on Monaco: the type, the number of rows and the MD5 of the values as sorted text. The test `gmns_equals_python`
 compares each column of each table that the Rust export makes; `GMNS_PENDING` lists the columns that a later step changes.
-The command `duckosm-rust gmns` comes when all the steps are ported.
 
 ### How the lane geometry is checked (Kaveh, 2026-11-18)
 
@@ -149,7 +148,8 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
 | Crossings (`crossing`, `lane_crossing`) | Done: on Monaco the same 492 crossings and 2,118 lane rows as Python, with every id, link, type, marking, `painted` and `to_left` equal. The overlays (unions, buffers of a union, intersections) are the `geo` crate's, so the widths, lengths and stretches are checked by their properties (`lane_report`): each stretch inside its lane, each part across inside the zebra, the width the tag's or 2.5-4 m. Two ties are now decided the same way in Python and Rust: the lane nearest to a node where lanes and connectors meet (a lane before a connector, then the smallest lane id), and the tangent of a lane at a point on a corner's bisector (the corner). |
 | Walk joins (`gmns_walking.lane_connector`) | Done: equal on Monaco (the line by its properties). With this every table and column of `duckosm gmns` with its defaults is made. |
-| The options (`--walk-frame`, `--gtfs`, `--combined`, `--to-csv`, left-hand traffic, no lane geometry), meso, micro, `gmns_check`, the command `duckosm-rust gmns`, `gmns-viz`, `gmns-map` | Not started. |
+| The command `duckosm-rust gmns` with `--combined`, `--to-csv`, `--csv-extensions`, `--drive-side`, `--no-pair-carriageways`, `--no-lane-geometry` and `--check` (`gmns_check`: the checks and the graph report) | Done: on Monaco the output, the failed checks, the 41 CSV files (header and sorted rows) and `gmns_all` equal Python's. Two Python faults fixed in both: `--to-csv` failed on every build with cycling (its lanes have no `geom_cut`), and `gmns_all` took `any_value()` of a column that differs between the modes (now the first value in the order of the modes). |
+| `--meso`, `--micro`, `--gtfs`, `--walk-frame`, `gmns-viz`, `gmns-map` | Not started: the command stops with an error that names the option. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
 ## Not changed

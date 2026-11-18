@@ -116,10 +116,22 @@ def columns(db, schema_like="gmns\\_%"):
 
 
 def gmns(db, out):
-    """duckosm gmns on Monaco (its defaults: every mode, lane geometry) -> one line for each column of the GMNS db."""
+    """duckosm gmns on Monaco (every mode, lane geometry, with --combined and --to-csv) -> one line for each column of the GMNS
+    db, the MD5 of each CSV file, and the rows of gmns_check (check_gmns, graph_report)."""
+    import hashlib
+    from duckosm.gmns_check import check_gmns, graph_report
     with tempfile.TemporaryDirectory() as tmp:
-        to_gmns(db, f"{tmp}/monaco_gmns.duckdb")
+        to_gmns(db, f"{tmp}/monaco_gmns.duckdb", combined=True, to_csv=f"{tmp}/csv")
         (out / "monaco_gmns_columns.tsv").write_text("\n".join(columns(f"{tmp}/monaco_gmns.duckdb")) + "\n")
+        csv = sorted(Path(f"{tmp}/csv").rglob("*.csv"))
+
+        def md5(p):                       # the header and the sorted rows: the order of some tables is that of a parallel query
+            head, *rows = p.read_text().split("\n")
+            return hashlib.md5("\n".join([head, *sorted(r for r in rows if r)]).encode()).hexdigest()
+        (out / "monaco_gmns_csv.tsv").write_text("".join(f"{p.relative_to(f'{tmp}/csv')}\t{md5(p)}\n" for p in csv))
+        rows = [f"{s}\t{n}\t{bad}\t{total}" for s, n, bad, total in check_gmns(f"{tmp}/monaco_gmns.duckdb")]
+        rows += [f"graph\t{s}\t{n}\t{links}\t{big}\t{parts}\t{dead}" for s, n, links, big, _, parts, dead in graph_report(f"{tmp}/monaco_gmns.duckdb")]
+        (out / "monaco_gmns_check.tsv").write_text("\n".join(rows) + "\n")
 
 
 def gz(src, dst):

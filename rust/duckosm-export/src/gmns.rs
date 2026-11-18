@@ -108,9 +108,48 @@ pub struct ModeSummary {
     pub counts: Vec<(&'static str, i64)>,
 }
 
+/// The options of `to_gmns` (the options of `duckosm gmns`).
+pub struct GmnsOptions {
+    /// The modes (default: each mode of the db).
+    pub modes: Vec<String>,
+    /// The offset geometry of each lane.
+    pub lane_geometry: bool,
+    /// A one-way road next to its opposite direction is one side of a two-way road.
+    pub pair_carriageways: bool,
+    /// `right` or `left` traffic.
+    pub drive_side: String,
+    /// Also a mode-tagged `gmns_all` network.
+    pub combined: bool,
+    /// Also the spec CSVs into this folder.
+    pub to_csv: Option<std::path::PathBuf>,
+    /// Keep duckOSM's extra columns in the CSVs as `u_` fields.
+    pub csv_extensions: bool,
+}
+
+impl Default for GmnsOptions {
+    fn default() -> Self {
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false }
+    }
+}
+
+/// The result of `to_gmns`: the counts of each mode, and of `gmns_all` (node, link) when made.
+pub struct GmnsSummary {
+    pub modes: Vec<ModeSummary>,
+    pub combined: Option<(i64, i64)>,
+}
+
 /// Write the GMNS db `out` from the built duckOSM db `source`, as `to_gmns` with its defaults (every mode when `modes` is
 /// empty). Returns the counts of each mode.
 pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSummary>> {
+    Ok(to_gmns_with(source, out, &GmnsOptions { modes: modes.to_vec(), ..GmnsOptions::default() })?.modes)
+}
+
+/// Write the GMNS db `out` from the built duckOSM db `source`, as `to_gmns` with the options `o`.
+pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSummary> {
+    let (modes, drive_side) = (&o.modes, o.drive_side.as_str());
+    if drive_side != "right" && drive_side != "left" {
+        return Err(format!("drive_side must be right or left, not {drive_side}"));
+    }
     crate::open(source)?; // fail fast if the source is unreadable
     if out.exists() {
         std::fs::remove_file(out).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -160,14 +199,16 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
             "CREATE TABLE {sch}.link_along(link_id BIGINT, along_link_id BIGINT, along_mode VARCHAR, covered_m DOUBLE, gap_m DOUBLE)"
         ))?;
         if mode != "driving" {
-            sidewalk_parents(&c, &sch, has_raw, "right")?;
+            sidewalk_parents(&c, &sch, has_raw, drive_side)?;
         }
-        build_lane_curb(&c, &sch, mode, uses, has_raw, "right")?;
+        build_lane_curb(&c, &sch, mode, uses, has_raw, drive_side, o.lane_geometry, o.pair_carriageways)?;
         build_movement(&c, &sch, mode, uses)?;
         if mode == "driving" || mode == "cycling" {
             // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut
-            crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, mode == "driving", "right")?;
-            meet_lanes(&c, &sch)?;
+            crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
+            if o.lane_geometry {
+                meet_lanes(&c, &sch)?;
+            }
         } else {
             walk_lanes(&c, &sch)?;
         }
@@ -183,7 +224,7 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
         node_types(&c, &sch, has_raw)?;
         build_zone(&c, &sch, name.strip_suffix("_gmns").unwrap_or(&name))?;
         let mut counts = Vec::new();
-        for t in ["node", "link", "geometry"] {
+        for t in ["node", "link", "lane", "movement", "signal_controller", "curb_seg"] {
             counts.push((t, c.count(&format!("SELECT count(*) FROM {sch}.{t}"))?));
         }
         summary.push(ModeSummary { mode: mode.clone(), counts });
@@ -191,8 +232,108 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
     if chosen.iter().any(|m| m == "driving") && chosen.iter().any(|m| m == "walking") {
         build_walk_joins(&c)?; // after both modes: the road lane ends come from gmns_driving
     }
+    let combined = if o.combined && chosen.len() > 1 { Some(build_combined(&c, &chosen, &name)?) } else { None };
+    if let Some(dir) = &o.to_csv {
+        dump_csv(&c, &chosen, dir, o.csv_extensions)?;
+        if combined.is_some() {
+            dump_csv(&c, &["all".to_string()], &dir.join("combined"), o.csv_extensions)?;
+        }
+    }
     c.exec("DETACH s")?;
-    Ok(summary)
+    Ok(GmnsSummary { modes: summary, combined })
+}
+
+/// `_build_combined`: one mode-tagged `gmns_all` network: the modes' nodes and links merged on their id, `allowed_uses` the
+/// union of the modes that have the link. Returns (nodes, links).
+fn build_combined(c: &Ctx, modes: &[String], name: &str) -> Result<(i64, i64)> {
+    let union = |t: &str, all: &str| modes.iter().map(|m| format!("SELECT * FROM gmns_{m}.{t}")).collect::<Vec<_>>().join(all);
+    // the node and link rows with the place of their mode: a column takes the first value in the order of the modes
+    let ranked = |t: &str| modes.iter().enumerate().map(|(k, m)| format!("SELECT *, {k} AS _k FROM gmns_{m}.{t}")).collect::<Vec<_>>().join(" UNION ALL ");
+    c.exec(&format!(
+        "CREATE SCHEMA gmns_all;
+         CREATE TABLE gmns_all.config AS SELECT * FROM (VALUES
+           ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
+         ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format, currency, version_number, id_type);
+         CREATE TABLE gmns_all.use_definition AS {};
+         CREATE TABLE gmns_all.use_group AS {};
+         CREATE TABLE gmns_all.node AS
+           WITH u AS ({})
+           SELECT node_id, first(name ORDER BY _k) FILTER (WHERE name IS NOT NULL) AS name, first(x_coord ORDER BY _k) FILTER (WHERE x_coord IS NOT NULL) AS x_coord,
+                  first(y_coord ORDER BY _k) FILTER (WHERE y_coord IS NOT NULL) AS y_coord, first(z_coord ORDER BY _k) FILTER (WHERE z_coord IS NOT NULL) AS z_coord,
+                  first(node_type ORDER BY _k) FILTER (WHERE node_type IS NOT NULL) AS node_type, max(ctrl_type) AS ctrl_type,
+                  first(zone_id ORDER BY _k) FILTER (WHERE zone_id IS NOT NULL) AS zone_id, first(parent_node_id ORDER BY _k) FILTER (WHERE parent_node_id IS NOT NULL) AS parent_node_id,
+                  first(geom ORDER BY _k) FILTER (WHERE geom IS NOT NULL) AS geom
+           FROM u GROUP BY node_id;
+         CREATE TABLE gmns_all.link AS
+           WITH u AS ({})
+           SELECT link_id, first(name ORDER BY _k) FILTER (WHERE name IS NOT NULL) AS name, first(from_node_id ORDER BY _k) FILTER (WHERE from_node_id IS NOT NULL) AS from_node_id,
+                  first(to_node_id ORDER BY _k) FILTER (WHERE to_node_id IS NOT NULL) AS to_node_id, first(directed ORDER BY _k) FILTER (WHERE directed IS NOT NULL) AS directed,
+                  first(geometry_id ORDER BY _k) FILTER (WHERE geometry_id IS NOT NULL) AS geometry_id, first(geometry ORDER BY _k) FILTER (WHERE geometry IS NOT NULL) AS geometry,
+                  first(parent_link_id ORDER BY _k) FILTER (WHERE parent_link_id IS NOT NULL) AS parent_link_id, first(dir_flag ORDER BY _k) FILTER (WHERE dir_flag IS NOT NULL) AS dir_flag,
+                  first(length ORDER BY _k) FILTER (WHERE length IS NOT NULL) AS length, first(grade ORDER BY _k) FILTER (WHERE grade IS NOT NULL) AS grade,
+                  first(facility_type ORDER BY _k) FILTER (WHERE facility_type IS NOT NULL) AS facility_type, first(capacity ORDER BY _k) FILTER (WHERE capacity IS NOT NULL) AS capacity,
+                  first(free_speed ORDER BY _k) FILTER (WHERE free_speed IS NOT NULL) AS free_speed, first(lanes ORDER BY _k) FILTER (WHERE lanes IS NOT NULL) AS lanes,
+                  first(bike_facility ORDER BY _k) FILTER (WHERE bike_facility IS NOT NULL) AS bike_facility, first(ped_facility ORDER BY _k) FILTER (WHERE ped_facility IS NOT NULL) AS ped_facility,
+                  first(parking ORDER BY _k) FILTER (WHERE parking IS NOT NULL) AS parking,
+                  string_agg(DISTINCT allowed_uses, ',' ORDER BY allowed_uses) AS allowed_uses,
+                  first(toll ORDER BY _k) FILTER (WHERE toll IS NOT NULL) AS toll, first(jurisdiction ORDER BY _k) FILTER (WHERE jurisdiction IS NOT NULL) AS jurisdiction,
+                  first(row_width ORDER BY _k) FILTER (WHERE row_width IS NOT NULL) AS row_width, first(osm_id ORDER BY _k) FILTER (WHERE osm_id IS NOT NULL) AS osm_id, first(edge_ref ORDER BY _k) FILTER (WHERE edge_ref IS NOT NULL) AS edge_ref, first(footway ORDER BY _k) FILTER (WHERE footway IS NOT NULL) AS footway, first(crossing ORDER BY _k) FILTER (WHERE crossing IS NOT NULL) AS crossing, first(crossing_markings ORDER BY _k) FILTER (WHERE crossing_markings IS NOT NULL) AS crossing_markings, first(bridge ORDER BY _k) FILTER (WHERE bridge IS NOT NULL) AS bridge,
+                  first(tunnel ORDER BY _k) FILTER (WHERE tunnel IS NOT NULL) AS tunnel, first(layer ORDER BY _k) FILTER (WHERE layer IS NOT NULL) AS layer, first(geom ORDER BY _k) FILTER (WHERE geom IS NOT NULL) AS geom
+           FROM u GROUP BY link_id",
+        union("use_definition", " UNION "),
+        union("use_group", " UNION "),
+        ranked("node"),
+        ranked("link")
+    ))?;
+    Ok((c.count("SELECT count(*) FROM gmns_all.node")?, c.count("SELECT count(*) FROM gmns_all.link")?))
+}
+
+/// The non-spec columns of each table, left out of the CSVs (`_CSV_EXCLUDE`).
+fn csv_exclude(t: &str) -> &'static [&'static str] {
+    match t {
+        "node" => &["geom"],
+        "link" => &["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"],
+        "geometry" => &["geom"],
+        "lane" => &["geom", "geom_cut", "turn"],
+        "location" => &["osm_id", "name", "geom"],
+        "zone" => &["geom"],
+        "signal_controller" => &["node_id", "control_type"],
+        _ => &[],
+    }
+}
+
+/// `_dump_csv`: each GMNS table as a spec CSV (one folder for each mode when there are several).
+fn dump_csv(c: &Ctx, modes: &[String], to_csv: &Path, extensions: bool) -> Result<()> {
+    let tables = ["config", "node", "link", "geometry", "lane", "movement", "use_definition", "use_group", "signal_controller", "curb_seg", "location", "zone"];
+    for mode in modes {
+        let sch = format!("gmns_{mode}");
+        let d = if modes.len() > 1 { to_csv.join(mode) } else { to_csv.to_path_buf() };
+        std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
+        for t in tables {
+            if c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{sch}' AND table_name = '{t}'"))? == 0 {
+                continue;
+            }
+            let sql = format!("SELECT column_name, data_type FROM duckdb_columns() WHERE schema_name = '{sch}' AND table_name = '{t}'");
+            let mut st = c.con.prepare(&sql).map_err(|e| e.to_string())?;
+            let kinds: HashMap<String, String> =
+                st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+            drop(st);
+            // only the table's own extra columns: a cycling lane has no geom_cut
+            let excl: Vec<&str> = csv_exclude(t).iter().copied().filter(|col| kinds.contains_key(*col)).collect();
+            let mut sel = if excl.is_empty() { "*".to_string() } else { format!("* EXCLUDE ({})", excl.join(", ")) };
+            if !excl.is_empty() && extensions {
+                // the extension columns as the spec's user-defined u_ fields
+                for col in &excl {
+                    if kinds.get(*col).map(|k| k.as_str()) != Some("GEOMETRY") {
+                        sel.push_str(&format!(", {col} AS u_{col}"));
+                    }
+                }
+            }
+            let path = d.join(format!("{t}.csv")).display().to_string().replace('\'', "''");
+            c.exec(&format!("COPY (SELECT {sel} FROM {sch}.{t}) TO '{path}' (HEADER, DELIMITER ',')"))?;
+        }
+    }
+    Ok(())
 }
 
 /// config + use_definition + use_group: the small fixed tables.
@@ -1414,6 +1555,7 @@ fn build_movement(c: &Ctx, sch: &str, mode: &str, uses: &str) -> Result<()> {
 /// The geometry of the lanes, as `_build_lane_curb` places them: the runs of pieces, the paired carriageways, the tapers at a
 /// joint and the carriageways that leave a two-way road in OSM's V.
 struct LaneGeo {
+    lane_geometry: bool,
     side_sign: f64,
     info: HashMap<i64, lanes::Info>,
     w_of: HashMap<i64, Vec<f64>>,
@@ -1436,7 +1578,17 @@ fn pts_of(w: &str) -> Vec<P> {
 }
 
 impl LaneGeo {
-    fn new(c: &Ctx, rows: &[LaneRow], prof: &HashMap<i64, Vec<(i64, String, Option<f64>, Option<String>)>>, rules: &Rules, contra: &HashSet<i64>, bus_of: &HashMap<i64, &str>) -> Result<LaneGeo> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        c: &Ctx,
+        rows: &[LaneRow],
+        prof: &HashMap<i64, Vec<(i64, String, Option<f64>, Option<String>)>>,
+        rules: &Rules,
+        contra: &HashSet<i64>,
+        bus_of: &HashMap<i64, &str>,
+        lane_geometry: bool,
+        pair: bool,
+    ) -> Result<LaneGeo> {
         let side_sign = if rules.drive_side == "right" { -1.0 } else { 1.0 };
         let order: Vec<i64> = rows.iter().map(|r| r.edge_id).collect();
         let mut info: HashMap<i64, lanes::Info> = HashMap::new();
@@ -1524,7 +1676,7 @@ impl LaneGeo {
             .collect();
         let mut lvs: Vec<i64> = lv_of.values().copied().collect::<HashSet<_>>().into_iter().collect();
         lvs.sort();
-        for lv in lvs {
+        for lv in lvs.into_iter().filter(|_| lane_geometry && pair) {
             let group: Vec<(usize, Vec<P>, f64)> = cand.iter().filter(|x| lv_of[&x.0] == lv).cloned().collect();
             run_gaps.extend(lanes::paired_gaps(&group, side_sign, &mut run_profiles));
         }
@@ -1541,6 +1693,7 @@ impl LaneGeo {
         }
         let run_place: Vec<Option<f64>> = runs.iter().map(|run| run.iter().find_map(|e| place_of[e])).collect();
         let mut g = LaneGeo {
+            lane_geometry,
             side_sign,
             info,
             w_of,
@@ -1629,6 +1782,10 @@ impl LaneGeo {
                 g.vfix.insert(on[0], (*e, at_end));
             }
         }
+        g.lane_geometry = lane_geometry;
+        if !lane_geometry {
+            return Ok(g);
+        }
         // the lanes of each run of two or more pieces, from the run's one offset curve
         for (i, run) in g.runs.clone().iter().enumerate() {
             if run.len() > 1 && g.merged.contains_key(&i) {
@@ -1686,6 +1843,9 @@ impl LaneGeo {
 
     /// The geometry of lane `i` of the edge `r`, as WKT.
     fn lane(&self, r: &LaneRow, i: usize) -> Result<Option<String>> {
+        if !self.lane_geometry {
+            return Ok(None);
+        }
         let e = r.edge_id;
         let Some(w) = r.wkt.as_deref() else { return Ok(None) };
         let line = pts_of(w);
@@ -1742,7 +1902,8 @@ impl LaneGeo {
 
 /// `_build_lane_curb`: the lanes of each link (from `driving.lane_profile` in driving, else from the tags) and `curb_seg` from the
 /// parking tags. The lane geometry is not ported yet: `geom` is NULL.
-fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, drive_side: &str) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, drive_side: &str, lane_geometry: bool, pair: bool) -> Result<()> {
     let raw_join = if has_raw { "LEFT JOIN s.raw.ways w ON w.osm_id = abs(e.osm_id)" } else { "" };
     let tagcol = if has_raw { "w.tags" } else { "NULL::MAP(VARCHAR, VARCHAR)" };
     let endcol = if has_raw { "e.target IS NOT DISTINCT FROM (CASE WHEN e.is_reverse THEN w.refs[1] ELSE w.refs[-1] END)" } else { "true" };
@@ -1805,7 +1966,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     let car_ways: HashSet<i64> = rows.iter().filter(|r| !r.bus).map(|r| r.osm_id).collect();
     let contra: HashSet<i64> = bus_ways.intersection(&car_ways).copied().collect();
     let rules = Rules { mode, drive_side };
-    let geo = LaneGeo::new(c, &rows, &prof, &rules, &contra, &bus_of)?;
+    let geo = LaneGeo::new(c, &rows, &prof, &rules, &contra, &bus_of, lane_geometry, pair)?;
     c.exec("CREATE OR REPLACE TEMP TABLE _lane_rows(lane_id VARCHAR, link_id BIGINT, lane_num BIGINT, allowed_uses VARCHAR, width DOUBLE, turn VARCHAR, geom_wkt VARCHAR)")?;
     c.exec("CREATE OR REPLACE TEMP TABLE _curb_rows(curb_seg_id VARCHAR, link_id BIGINT, ref_node_id BIGINT, start_lr DOUBLE, end_lr DOUBLE, regulation VARCHAR)")?;
     {

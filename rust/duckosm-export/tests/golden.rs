@@ -345,7 +345,44 @@ fn gmns_lanes_by_properties() {
 fn gmns_equals_python() {
     // its own folder: gmns() writes a file of the same name (the name is the dataset_name of the export)
     let o = out("gmns").join("monaco_gmns.duckdb");
-    duckosm_export::gmns::to_gmns(db(), &o, &[]).unwrap();
+    let csv = out("gmns").join("csv");
+    let _ = std::fs::remove_dir_all(&csv);
+    let opts = duckosm_export::gmns::GmnsOptions { combined: true, to_csv: Some(csv.clone()), ..Default::default() };
+    duckosm_export::gmns::to_gmns_with(db(), &o, &opts).unwrap();
+    // the CSVs: the header and the sorted rows of each file (the order of some tables is that of a parallel query)
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut todo = vec![csv.clone()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            if e.path().is_dir() {
+                todo.push(e.path());
+            } else if e.path().extension().is_some_and(|x| x == "csv") {
+                files.push(e.path());
+            }
+        }
+    }
+    files.sort();
+    let got_csv: String = files
+        .iter()
+        .map(|p| {
+            let t = std::fs::read_to_string(p).unwrap();
+            let mut lines = t.split('\n');
+            let head = lines.next().unwrap().to_string();
+            let mut rows: Vec<&str> = lines.filter(|r| !r.is_empty()).collect();
+            rows.sort();
+            let text = std::iter::once(head.as_str()).chain(rows).collect::<Vec<_>>().join("\n");
+            let digest = duckdb::Connection::open_in_memory().unwrap().query_row("SELECT md5(?)", [text], |r| r.get::<_, String>(0)).unwrap();
+            format!("{}\t{digest}\n", p.strip_prefix(&csv).unwrap().display())
+        })
+        .collect();
+    assert_eq!(got_csv, text(&data().join("exports/monaco_gmns_csv.tsv")), "the GMNS CSVs differ from Python's");
+    // gmns_check: the checks and the graph report
+    let mut check: Vec<String> =
+        duckosm_export::gmns_check::check_gmns(&o, &[]).unwrap().into_iter().map(|(s, n, bad, total)| format!("{s}\t{n}\t{bad}\t{total}")).collect();
+    for g in duckosm_export::gmns_check::graph_report(&o, &[]).unwrap() {
+        check.push(format!("graph\t{}\t{}\t{}\t{}\t{}\t{}", g.schema, g.nodes, g.links, g.biggest, g.parts, g.dead_ends));
+    }
+    assert_eq!(check.join("\n") + "\n", text(&data().join("exports/monaco_gmns_check.tsv")), "gmns_check differs from Python's");
     let got = gmns_columns(&o);
     let golden = text(&data().join("exports/monaco_gmns_columns.tsv"));
     let key = |l: &str| l.split('\t').take(2).collect::<Vec<_>>().join("\t");
