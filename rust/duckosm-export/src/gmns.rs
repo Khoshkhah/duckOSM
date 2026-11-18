@@ -989,7 +989,7 @@ fn build_zone(c: &Ctx, sch: &str, area: &str) -> Result<()> {
 
 /// `_meet_lanes`: lane lines that continue one another meet. A lane continues one other lane when the straight-on movements send
 /// it to exactly that lane and nothing else of its use feeds that lane; of the two, the link with fewer lanes bends (over 15 m at
-/// most, half its length). Lane ends more than 8 m apart, or already within 1 cm, stay. The movements in the order of their id: a
+/// most, half its length). Lane ends more than 8 m apart, or already within 1 cm, stay. The movements in a fixed order (links, lanes): a
 /// lane that bends first changes how the next one bends (the table's order is that of a parallel query).
 fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
     const TAPER_M: f64 = 15.0;
@@ -1009,7 +1009,7 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
     }
     let sql = format!(
         "SELECT ib_link_id, start_ib_lane, end_ib_lane, ob_link_id, start_ob_lane, end_ob_lane FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge')
-         ORDER BY mvmt_id"
+         ORDER BY ib_link_id, ob_link_id, start_ib_lane, start_ob_lane"
     );
     let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
     type M = (i64, Option<i64>, Option<i64>, i64, Option<i64>, Option<i64>);
