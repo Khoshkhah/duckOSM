@@ -13,7 +13,7 @@ PYTHON_COMMANDS = {
     # The whole build in Rust: `duckosm <PBF> -o <DIR>` and `duckosm --config` (not yet equal: docs/design/all_in_rust.md).
     "build",
     "gmns",                                          # group C
-    "gmns-viz", "gmns-map", "levels-edit",           # group F
+    "gmns-viz", "gmns-map",                          # group F
     "levels", "bus", "multimodal", "clip-pbf",       # no Rust port yet
 }
 

@@ -54,7 +54,7 @@ To do:
   edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
   tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
 - GMNS (group C): `gmns`, `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
-- The maps (group F): `levels-edit`, `gmns-viz`, `gmns-map`.
+- The maps (group F): `gmns-viz`, `gmns-map`.
 - No Rust port yet: `levels`, `bus`, `multimodal`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
   the Python CLI reads them and the build runs in Rust.
 - Then: remove `PYTHON_COMMANDS` of `src/duckosm/_main.py`, remove the Python engine code (the tag `python-engine-final`
@@ -91,7 +91,7 @@ GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `lo
 options of `duckosm elevation` and writes the same columns and rows: `ele`, `z_from`, `z_to`, `z_vertices` (and the same with
 `--suffix`) and `main.elevation_metadata`. The golden test (`elevation_equals_duckosm`, `tools/make_golden_elevation.py`) keeps the
 Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata and `--source copernicus`; Tartu with
-`--source copernicus` (60 s, Python 4 min 17 s). All rows are equal.
+`--source copernicus` (6 s, Python 4 min 17 s). All rows are equal. France driving (12.3 M nodes) takes 7 min on a Mac mini.
 
 - The DEM is read in pure Rust with the reader of the build (`duckosm_build::elevation::Dem`, the `tiff` crate): a GeoTIFF in
   EPSG:4326 with 32-bit float values, a file or an HTTP address. Python reads all the formats and CRSs of GDAL. A projected
@@ -101,8 +101,9 @@ Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata
   (`docs/concepts/ground-reference.md`) does not allow them as the ground.
 - The pixel of a point is found as rasterio finds it: the inverse affine transform, then floor. Before, the reader of the build
   divided by the pixel size, and one point of Tartu on a pixel edge took the next pixel.
-- DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. The command drops the R-tree
-  index of `edges` for the update of `z_vertices` and makes it again (64 s to 10 s for the cycling edges of Tartu).
+- DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. So the command does not
+  update `edges`: it makes the table again in one transaction (`CREATE OR REPLACE TABLE … POSITIONAL JOIN` the new heights) and
+  sets its indexes, column defaults and comments again (Tartu: the update took 64 s for the cycling edges; the whole command now takes 6 s).
 
 ## Group F: the state
 
@@ -114,11 +115,14 @@ the same engine.
 |---|---|
 | `viz` and the build's `viz.enabled` | Done: `duckosm viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
 | `route-map` and the planner page (the router in WebAssembly) | Done: `duckosm route-map` (`route_map.rs`, `page/planner.html`). The page routes with `duckosm-planner` as WebAssembly. |
-| `levels-edit` | Not started. |
+| `levels-edit` | Done: `duckosm levels-edit DB`, the page of `duckosm studio` on one file (`Studio::for_file`) with card 8 open (`?area=<name>&step=8`). |
 
 - The pages are roadstyle's `duckosm.page(db, mode, only=...)`: the "liberty" theme and the "google" paths of roadstyle's port.
   mapstyle's own `render_map` (the "osm" theme) does not run with the current roadstyle (`palette_to_dict` is gone), so
   `duckosm viz` in Python fails today.
+- `levels-edit` uses roadstyle's level-edit part and its WebAssembly level editor, as Studio's card 8. The Python command serves
+  roadstyle's Python editor with mapstyle's layers; the Rust page uses Studio's map of the area. `--area`, `--reports` and
+  `--plain` are not ported: the work folder is in the page, the maps have their own command (`viz`), and the map is always Studio's.
 - A file with no stored levels: the engine solves them while it draws (mapstyle's rule).
 - The planner page: `duckosm-planner` holds the area in memory (the page's data `RM`: each road's line, each mode's roads in
   table order, the turns, walk + drive) and gives the JSON of `route-points`, `route-multimodal-points` and `directions`.
@@ -165,8 +169,11 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | The roads a footpath runs along (`link_along`, `link.along_*`, `link.parent_link_id`) | Done: equal on Monaco. shapely's linear referencing, line distance and the order of its `STRtree` (with libstdc++'s `std::sort`, for equal envelopes) are in `src/shapely.rs`: a tie between two roads goes to the first in that order, as in Python. |
 | Lanes (`lane` without `geom`) and `curb_seg` | Done: equal on Monaco. The lanes of driving come from `driving.lane_profile`; an older db without it, and walking and cycling, use the tag rules (`_rule_lanes`). |
 | Lane geometry (`lane.geom`) | Done: checked by its properties (below). On Monaco Rust and the fixed Python agree within 1 mm on every lane. The checks find 7 lanes that cross themselves (Monaco: driving 4, cycling 3) and 2 pairs of crossing lanes of one cycling link: the same in Python, open. |
-| Walking frame (`--walk-frame`, off by default), movements | Not started. |
-| `gmns_sumo` (netconvert), lanes that meet, crossings, signals, `location` (with GTFS), signs, node types, `zone` | Not started. Python's cycling lane geometry is not the same on two runs: to look at before the lane step. |
+| Movements (`movement`, without their lanes) | Done: equal to Python after this step on Monaco. The lanes of the movements, and the rows that the SUMO step adds in driving and cycling, come with that step. |
+| Walking frame (`--walk-frame`, off by default) | Not started. |
+| The lanes of the walking movements, `signal_controller`, `location`, the signs, the node types, `zone` | Done: equal on Monaco. |
+| `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
+| Crossings, GTFS stops, walk joins | Not started. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
 ## Not changed

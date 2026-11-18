@@ -420,6 +420,18 @@ The memory (Kentucky, Mac mini, peak footprint): 1.1 GB at first, 0.25 GB now (`
   again with it on macOS (0.25 GB; the time goes from 3.9 s to 4.3 s). Linux returns the memory with the `mallopt` of
   `main`.
 
+By tiles, France had a footprint of 5.0 GB at first, and a later run stopped with no error. Two causes:
+
+- Natively, the tiles ran in groups of four, and each tile kept all its rows until the group was done: the four dense tiles
+  of Paris held 8.8 GB of rows. With `--gdal` (the order of the rows does not matter), each tile sends its rows at once
+  through a small channel, and a pool of four threads takes the next tile when a tile is done.
+- The writer encoded on the pool of the engine. A thread that waited for a job of the writer took a job of the relations;
+  that job waited for the channel of the relations, which waited for the writer. Now the writer has a pool of its own (a
+  quarter of the cores, at least 2). `duckosm-build/tests/quack_gdal_full.rs` runs Monaco with two threads, a channel of
+  one row for the relations (`quack::REL_CHANNEL`) and tiles of zoom 14.
+
+France by tiles now: 3 min 37 s and 0.9 GB (Mac mini).
+
 Not done: GDAL's own `osmconf.ini` (only the default one), the open options of the driver, and GDAL's repair of a
 self-touching ring with GEOS in `organizePolygons` (Monaco has none).
 

@@ -8,6 +8,7 @@ pub mod geos;
 pub mod lanelet2;
 pub mod gmns;
 pub mod gmns_lanes;
+pub mod gmns_sumo;
 pub mod matsim;
 pub mod matsim_lanes;
 pub mod offset;

@@ -160,12 +160,19 @@ pub fn write_layers<W: Write + Send>(
     std::thread::scope(|scope| -> Result<[usize; 6], String> {
         // one batch waits for the writer: with 8, the waiting rows were 200 MB of the memory on Kentucky
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(1);
+        // the writer encodes on a pool of its own. On the pool of the engine, a thread that waited for a job of the writer
+        // took a job of the relations, and that job waited for the channel of the relations, which waited for the writer:
+        // France by tiles stopped with no error.
+        let threads = (rayon::current_num_threads() / 4).max(2);
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().map_err(|e| format!("quack --gdal: the writer's threads: {e}"))?;
         let writer = scope.spawn(move || -> Result<[usize; 6], String> {
-            let mut out = make_out()?;
-            for batch in rx {
-                out.write(batch)?;
-            }
-            out.close()
+            pool.install(|| {
+                let mut out = make_out()?;
+                for batch in rx {
+                    out.write(batch)?;
+                }
+                out.close()
+            })
         });
         let made = feed(&mut |rows| tx.send(rows).map_err(|_| "quack --gdal: the writer stopped".to_string()));
         drop(tx);

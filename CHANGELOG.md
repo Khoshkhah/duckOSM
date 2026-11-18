@@ -7,11 +7,16 @@
   DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust
   (`src/duckosm/_api.py`): `to_sumo`, `to_gis`, `to_matsim`,
   `to_matsim_lanes`, `to_opendrive`, `to_railml`, `to_lanelet2`, `to_elevation`, `route`, `Router`, `route_multimodal`,
-  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. GMNS, the maps and the
+  `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. GMNS, the GMNS maps and the
   commands `levels`, `bus`, `multimodal` and `clip-pbf` still run the Python code. `Router` has no `.graph` (the graph is
   in Rust). A connection to an in-memory database runs the Python code. `DuckOSM.run()` is as before (the Python steps
   with the Rust network step): the whole build in Rust is not yet equal to it (`docs/design/all_in_rust.md`, step 6).
   `import duckosm` loads the names when they are first used.
+
+- **`duckosm route-map`: the route planner page is in Rust** (`rust/duckosm-edit/src/route_map.rs`,
+- **`duckosm levels-edit DB`: the level editor in the Rust program** (`docs/design/all_in_rust.md`, group F). It is the page of
+  `duckosm studio` on the one file, with card 8 (Edit levels) open: roadstyle's level editor over the area's map. "← Steps"
+  writes the drawing order into the file. Options: `--port` (default 8000) and `--no-open`.
 
 - **`duckosm route-map`: the route planner page is in Rust** (`rust/duckosm-edit/src/route_map.rs`,
   `docs/design/all_in_rust.md`, group F), with the options of `duckosm route-map`. The page routes with the program's own
@@ -333,6 +338,11 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   for `ogr2ogr -f Parquet` (five runs, one for each layer: GDAL's Parquet driver writes one layer to one file), 5.0 GB against
   1.6 GB of memory, 11.3 GB against 15.6 GB of files. The files of the tiles of the browser are Snappy frames now (France: about
   30 GB of rows without them).
+
+- **quack --gdal by tiles: 0.9 GB on France, and no stop** (`docs/rust/quack.md`, "GDAL layers"). Each tile sends its rows at
+  once (a group of four tiles kept 8.8 GB of rows), and the writer encodes on a pool of its own (on the engine's pool, a run of
+  France stopped: the writer and the relations waited for each other). France: 3 min 37 s and 0.9 GB, against 5.0 GB before
+  and 1.6 GB for `ogr2ogr`. `duckosm-build/tests/quack_gdal_full.rs` runs Monaco with full channels.
 
 ## 0.7.0 (2026-11-06)
 

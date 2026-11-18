@@ -206,6 +206,12 @@ duckosm levels-edit [OPTIONS] DB
 | `--reports DIR` | a folder of maps (`duckosm viz`), served as files at the same port; any other address is the editor | `reports` |
 | `--plain` | no base-map layers: the editor as roadstyle draws it | off |
 
+`duckosm levels-edit DB [--port PORT] [--no-open]` is the same editor in the Rust program, with no Python: the page of
+`duckosm studio` on this one file, with card 8 (Edit levels) open. "← Steps" writes the drawing order into the file. The map
+is the area's map of Studio (the base-map layers of `features.*` and every road), and the work folder is the page's own (no
+`DB.levels` folder). The map files (`DB` name `.map.html`, the terrain) go next to the file. It has no `--area`, `--reports` and `--plain`.
+The program needs the level editor's WebAssembly package (`rust/duckosm-edit/editor_pkg.sh` before the build); without it, card 8 says so.
+
 ### `edit`
 
 Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
