@@ -1,42 +1,45 @@
 # Draw a map
 
 ```bash
-pip install "duckosm[viz]"
-duckosm viz monaco.duckdb        # in reports/: monaco_map.html (every mode) + one page per mode
+duckosm viz monaco.duckdb        # writes reports/monaco_map.html (every mode) and one page for each mode
 ```
 
-The maps are drawn by [mapstyle](https://khoshkhah.github.io/mapstyle/), duckOSM's map library, from
-the database itself: water, land, buildings and the sea ([base-map layers](../reference/features.md))
-under the roads, so the page needs no background from the web (one can still be picked). The roads
-are coloured by class, with a hover tooltip and a 2D/3D button; click a road to copy its `edge_id`.
-Tunnels are drawn under the roads above them, bridges on top. Private roads are grey and bus lanes a
-muted blue: you see them, but they are not in the network
-([why](../concepts/networks.md#access-private-and-forbidden-roads)). In the Roads box, the road
-classes and the Bridges, Tunnels, Private roads and Bus lanes rows hide or show those roads.
+`duckosm viz` draws the maps with roadstyle's engine, from the database itself. Under the roads are the
+[base-map layers](../reference/features.md) of the database: water, land, buildings and the sea. The page needs no
+background from the web, but you can select one.
 
-`monaco_map.html` has every mode; each `monaco_<mode>_network.html` brings one mode to the front.
-Try it: this is Monaco with every mode, as `duckosm viz` wrote it.
+| On the map | How it shows |
+|---|---|
+| Roads | a color for each road class |
+| Tunnels and bridges | tunnels under the roads above them, bridges on top ([Store the drawing order](drawing-order.md)) |
+| Private roads, bus lanes | drawn, but not in the network ([why](../concepts/networks.md#access-private-and-forbidden-roads)) |
+| A click on a road | the panel shows the road and its `edge_id` |
+
+`monaco_map.html` has every mode. Each `monaco_<mode>_network.html` has the edges and the private roads of one mode.
+This is Monaco with every mode:
 
 <iframe src="../../maps/monaco_map.html" title="Monaco, every mode, drawn by duckosm viz"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
 
-| Option | Does |
-|---|---|
-| `-m driving` | only that mode's page (repeat for several); without `-m`: every mode's page plus `<name>_map.html` |
-| `--basemap voyager` | a background from the web under the map: `voyager`, `positron`, `osm`, `satellite` (default: none, the database's own layers) |
-| `--no-arrows` | no direction arrows (on by default, on one-way roads; zoom in to see them) |
-| `--no-boundary` | hide the dashed outline of the area |
-| `--out-dir maps` | output folder (default `reports`) |
+| Option | Does | Default |
+|---|---|---|
+| `-m driving` | only the page of that mode; repeat it for more modes | every mode, and `<name>_map.html` |
+| `--basemap voyager` | the first background: `voyager`, `positron`, `osm`, `satellite`, … | the database's own layers |
+| `--no-arrows` | no direction arrows on one-way roads | arrows on |
+| `--no-boundary` | no dashed outline of the area | outline on |
+| `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map; needs `GOOGLE_MAPS_KEY` | on when `GOOGLE_MAPS_KEY` is set |
+| `--out-dir maps` | the output folder | `reports` |
 
-A page holds the whole network, so keep it to a city. For other looks, or to build your own
-dashboard, use mapstyle directly (`pip install mapstyle`; its themes, path styles and dashboard
-page are in its [docs](https://khoshkhah.github.io/mapstyle/)).
+A page holds the whole network. Use it for a city, not a country. For a large area, use
+[duckOSM Studio](studio.md), which draws the map from tiles.
 
-**Other palettes, or colour by a column** (needs a clone of the repo):
+## Other palettes, or a color for each value of a column
+
+This script is in the repository. It needs `pip install geopandas roadstyle`.
 
 ```bash
 python scripts/roadstyle_map.py --db monaco.duckdb --palette mono
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
 
-The order in which crossing and meeting roads are painted can be stored in the file: [Store the drawing order](drawing-order.md).
+To set the order in which the build paints the roads at a crossing, see [Store the drawing order](drawing-order.md).
