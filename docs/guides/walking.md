@@ -38,7 +38,7 @@ The most specific of `foot` and `access` decides:
 Thus `access=no` + `foot=yes` is walkable.
 
 A way that the network does not hold is still in `raw.ways`. To add or remove one road, use a
-[fix](fix-osm-errors.md).
+[fix](edit-osm-data.md#the-fixes-file).
 
 ## `walk_type`
 

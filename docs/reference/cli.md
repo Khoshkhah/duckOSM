@@ -39,7 +39,7 @@ duckosm build [OPTIONS]
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
-| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); overrides the config's `osm_overrides` key | none |
+| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/edit-osm-data.md#the-fixes-file); overrides the config's `osm_overrides` key | none |
 | `--log-file FILE` | also write the log to this file | console only |
 
 With none of `-c`, `-p` and `--source-db`, it uses `config/default.yaml` if that file exists.
@@ -77,7 +77,7 @@ duckosm boundary [OPTIONS] [NAME]
 ### `clip-pbf`
 
 Cuts a PBF down to a GeoJSON area, with `osmium`. Guide:
-[Cut a smaller PBF](../guides/prepare-area.md#cut-a-smaller-pbf).
+[Cut a smaller PBF](../guides/prepare-area.md#cut-a-region-file-to-the-area).
 
 ```text
 duckosm clip-pbf [OPTIONS] PBF BOUNDARY
@@ -217,7 +217,7 @@ The program needs the level editor's WebAssembly package (`rust/duckosm-edit/edi
 Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
 of duckOSM Studio. Each change goes into the fixes file at once. **Build again** runs the build of the database again with the file,
 and the page then shows the new network. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
+`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#the-editor).
 
 ```text
 duckosm edit [OPTIONS] DB
@@ -541,7 +541,7 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 ### `elevation`
 
 Adds the ground height to every node (`nodes.ele`) and edge end (`edges.z_from`, `z_to`), and a row
-in `main.elevation_metadata`. Running it again overwrites. Needs `duckosm[elevation]`. Guide:
+in `main.elevation_metadata`. Running it again overwrites. Guide:
 [Add elevation](../guides/elevation.md); sources: [Elevation sources](elevation-sources.md).
 
 ```text
@@ -550,7 +550,7 @@ duckosm elevation [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--dem TEXT` | an elevation file or URL, any format GDAL reads; wins over `--source` | |
+| `--dem TEXT` | a GeoTIFF in EPSG:4326 with 32-bit floats, a file or an HTTP address; wins over `--source` | |
 | `--source TEXT` | `auto`, `copernicus` or `eudtm` (needs `OPENTOPOGRAPHY_API_KEY`). `auto` picks EU-DTM in Europe when the key is set, else Copernicus | `auto` |
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
 | `--nodata-fill FLOAT` | height written where the model has no value | `0.0` |

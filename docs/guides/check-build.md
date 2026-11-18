@@ -1,60 +1,32 @@
 # Check a build
 
-## Validation during the build
-
-Switch validation on in your [config file](build.md#the-config-file). The build then checks its
-own result and fails if something is wrong:
+With validation on, the build checks its own result and stops when a check fails.
 
 ```yaml
 validation:
   enabled: true
 ```
 
-It's off by default (and a build from the command line alone can't switch it on), but the
-[config template](build.md#the-config-file) turns it on. On Monaco it prints, per mode:
+Validation is off by default, and only a [config file](build.md#the-config-file) can turn it on. The template of
+`duckosm init-config` turns it on.
 
-```text
-validate[driving] single_component: OK — 1 component(s), largest 2,765/2,765 (100.0%)
-validate[driving] no_stranded_named: OK — 0 named edge(s) outside the largest component
-validate[driving] unique_node_id: OK — 0 duplicate node_id(s) in nodes
-validate[driving] way_length_conserved: OK — 0 deleted parallel arc(s) (way stretch missing while a kept edge bridges its endpoints)
-validate[driving] layer_without_structure: WARN — 11 edge(s) with layer≠0 but no bridge/tunnel tag (OSM tagging; drawn grade-separated, no 3D deck)
-```
-
-| Check | Fails the build when |
+| Check | Result when it fails |
 |---|---|
-| `single_component` | the network isn't one connected piece |
-| `no_stranded_named` | a named road sits outside the main network |
-| `unique_node_id` | two nodes share an id |
-| `way_length_conserved` | part of an OSM way went missing when it was split into edges |
-| `layer_without_structure` | never: a warning about OSM tagging (a road on another level with no bridge or tunnel tag) |
+| `unique_node_id` | the build stops: two nodes have the same id |
+| `way_length_conserved` | the build stops: a part of an OSM way is missing after the split into edges |
+| `layer_without_structure` | a warning only: a road with a `layer` tag and no `bridge` or `tunnel` tag |
 
-The first two only run when the build has a boundary: a whole region can legitimately have separate
-pieces (islands, for example). Each check can be switched off; see [Configuration](../reference/configuration.md).
-Set `fail_on_error: false` to be warned instead of stopped.
+Set `fail_on_error: false` to get warnings in place of a stop. The keys of each check:
+[Configuration](../reference/configuration.md#validation).
 
-## A report of the build
+With `report: {enabled: true}`, the build also writes a report to `reports/` (Markdown and HTML): the counts of each mode,
+the roads that the filter kept and removed, the parts of the network, and the results of the checks.
 
-With `report: {enabled: true}` in the config, the build also writes a summary to `reports/` as
-Markdown and HTML: counts per mode, what the road filter kept and dropped, the network pieces, and the
-validation results.
-
-## Check the geometry
-
-In a clone of the repo, `scripts/validate_geometry.py` checks that every edge's geometry starts and
-ends at its nodes, and that there are no loops or zero-length edges (driving and walking networks):
+In a clone of the repository, `scripts/validate_geometry.py` checks that each edge starts and ends at its nodes, and
+that there are no loops and no edges of zero length:
 
 ```bash
 python scripts/validate_geometry.py --db monaco.duckdb
 ```
 
-```text
-Validating Geometry for Mode: driving
-  ✓ No self-loops found.
-  ✓ All edge endpoints match their topological nodes.
-  ✓ No degenerate (zero-length) geometries.
-...
-ALL GEOMETRY CHECKS PASSED!
-```
-
-To look at one street in detail, see [Look up one OSM way](query.md#look-up-one-osm-way).
+To look at one street, use [`duckosm way`](query.md#look-up-one-osm-way).

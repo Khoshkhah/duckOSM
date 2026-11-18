@@ -75,7 +75,6 @@ plugins:
         Guides:
           - guides/prepare-area.md
           - guides/build.md
-          - guides/fix-osm-errors.md
           - guides/studio.md
           - guides/edit-osm-data.md
           - guides/query.md
@@ -115,6 +114,8 @@ plugins:
           - reference/features.md
           - reference/elevation-sources.md
 
+not_in_nav: |
+  guides/fix-osm-errors.md
 exclude_docs: |
   design/
   development.md
@@ -131,7 +132,6 @@ nav:
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
       - Fix the OSM data: guides/edit-osm-data.md
-      - The fixes file: guides/fix-osm-errors.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md
