@@ -63,6 +63,25 @@ test (`tests/test_levels.py`). It moves with group C (the lane profile).
 
 GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
 
+## Group G: the state
+
+`duckosm-rust elevation` is in the crate `rust/duckosm-tools` (`elevation.rs`, with the catalog `dem_sources.rs`). It has the
+options of `duckosm elevation` and writes the same columns and rows: `ele`, `z_from`, `z_to`, `z_vertices` (and the same with
+`--suffix`) and `main.elevation_metadata`. The golden test (`elevation_equals_duckosm`, `tools/make_golden_elevation.py`) keeps the
+Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata and `--source copernicus`; Tartu with
+`--source copernicus` (60 s, Python 4 min 17 s). All rows are equal.
+
+- The DEM is read in pure Rust with the reader of the build (`duckosm_build::elevation::Dem`, the `tiff` crate): a GeoTIFF in
+  EPSG:4326 with 32-bit float values, a file or an HTTP address. Python reads all the formats and CRSs of GDAL. A projected
+  national DTM (for example EPSG:3006) needs a Rust projection first.
+- `--source copernicus` downloads each 1° tile with DuckDB's httpfs (Python reads parts of the tile over HTTP). `--source eudtm`
+  downloads the GeoTIFF of the box from OpenTopography. The AWS Terrain Tiles are not a source of the command: the ground rule
+  (`docs/concepts/ground-reference.md`) does not allow them as the ground.
+- The pixel of a point is found as rasterio finds it: the inverse affine transform, then floor. Before, the reader of the build
+  divided by the pixel size, and one point of Tartu on a pixel edge took the next pixel.
+- DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. The command drops the R-tree
+  index of `edges` for the update of `z_vertices` and makes it again (64 s to 10 s for the cycling edges of Tartu).
+
 ## Not changed
 
 - The tables and `edge_id` stay the same: other projects join on them.

@@ -151,3 +151,91 @@ fn admin_and_extract_equal_duckosm() {
     assert_eq!(meta, (43.74031361981264, 7.426073129259986, 15, "Europe/Monaco".to_string()));
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// The table summary of `elevation_equals_duckosm`: the same SQL as `summary` in tools/make_golden_elevation.py.
+fn elevation_summary(db: &std::path::Path) -> String {
+    let con = duckosm_tools::open_read_only(db).unwrap();
+    let mut out = String::new();
+    for m in ["cycling", "driving", "walking"] {
+        for (t, key) in [("nodes", "node_id"), ("edges", "edge_id")] {
+            let mut st = con
+                .prepare(
+                    "SELECT column_name FROM duckdb_columns() WHERE schema_name = ? AND table_name = ? \
+                     AND (column_name LIKE 'ele%' OR column_name LIKE 'z\\_%' ESCAPE '\\') ORDER BY column_index",
+                )
+                .unwrap();
+            let cols: Vec<String> = st.query_map([m, t], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+            let sel = std::iter::once(key.to_string()).chain(cols.iter().cloned()).collect::<Vec<_>>().join(", ");
+            let (n, h): (i64, String) = con
+                .query_row(
+                    &format!("SELECT count(*), md5(string_agg(t::VARCHAR, chr(10) ORDER BY t::VARCHAR)) FROM (SELECT {sel} FROM {m}.{t}) t"),
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            out += &format!("{m}.{t}\t{}\t{n}\t{h}\n", cols.join(","));
+        }
+    }
+    let mut st = con
+        .prepare("SELECT t::VARCHAR FROM (SELECT * EXCLUDE (uri, sampled_at, duckosm_version) FROM main.elevation_metadata) t ORDER BY ele_column")
+        .unwrap();
+    for r in st.query_map([], |r| r.get::<_, String>(0)).unwrap() {
+        out += &(r.unwrap() + "\n");
+    }
+    out
+}
+
+/// `elevation` writes the heights of duckOSM's `duckosm elevation` (Python, 2026-11-17, tests/data/golden_tools/monaco_elevation.tsv):
+/// the Monaco crop of Copernicus GLO-30 as the reference ground in `ele`, then a smaller crop (a part of Monaco: the other nodes get
+/// the fill value) in `ele_dsm` of two modes. The database stays in <target>/tmp/duckosm-tools-elevation/ for
+/// tools/make_golden_elevation.py.
+#[test]
+fn elevation_equals_duckosm() {
+    use duckosm_tools::elevation::{to_elevation, Options};
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("duckosm-tools-elevation");
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).unwrap();
+    let s = root.join("data/sample");
+    let cfg = format!(
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n",
+        out.display(),
+        s.display(),
+        s.display()
+    );
+    std::fs::write(out.join("config.yaml"), cfg).unwrap();
+    let c = duckosm_build::config::read(&out.join("config.yaml"), false, true).unwrap();
+    let mut p = c.params;
+    p.geoparquet = false;
+    duckosm_build::build(&c.pbf, &c.out, &p).unwrap();
+    let db = out.join("elevation.duckdb");
+    std::fs::copy(out.join("monaco.duckdb"), &db).unwrap();
+
+    let o = |dem: &str| Options {
+        dem: Some(root.join(dem).to_string_lossy().into_owned()),
+        source: "auto".into(),
+        modes: Vec::new(),
+        nodata_fill: 0.0,
+        suffix: String::new(),
+        product: None,
+        vertical_datum: None,
+        license: None,
+        reference: true,
+    };
+    let whole = Options {
+        product: Some("DTM".into()),
+        vertical_datum: Some("EGM2008".into()),
+        license: Some("Copernicus open (attribution)".into()),
+        ..o("rust/duckosm-build/tests/data/monaco-copernicus-glo30.tif")
+    };
+    // the ground rule: a DEM in `ele` needs its product, datum and license
+    assert!(to_elevation(&db, &Options { license: None, ..o("rust/duckosm-build/tests/data/monaco-copernicus-glo30.tif") }).unwrap_err().contains("reference ground"));
+    let r = to_elevation(&db, &whole).unwrap();
+    assert_eq!((r.n_nodes, r.n_nodata, r.column.as_str()), (10986, 0, "ele"));
+    let crop = Options { suffix: "dsm".into(), nodata_fill: -5.5, modes: vec!["walking".into(), "driving".into()], ..o("tests/data/golden_tools/monaco_dem_crop.tif") };
+    let r = to_elevation(&db, &crop).unwrap();
+    assert_eq!((r.n_nodes, r.n_nodata, r.column.as_str()), (6348, 1194, "ele_dsm"));
+    assert_eq!(elevation_summary(&db), golden("monaco_elevation.tsv"));
+    let e = to_elevation(&db, &Options { modes: vec!["boat".into()], ..whole }).unwrap_err();
+    assert_eq!(e, "mode(s) ['boat'] not found (present: ['cycling', 'driving', 'walking'])");
+}

@@ -3,6 +3,8 @@
 
 pub mod admin;
 pub mod cli;
+pub mod dem_sources;
+pub mod elevation;
 pub mod extract;
 pub mod info;
 pub mod json;
