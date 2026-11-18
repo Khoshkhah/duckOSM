@@ -122,3 +122,6 @@
 .md-typeset figure img { display: block; }
 .md-typeset figure figcaption { max-width: none; margin: 0.4em auto 0; }
 .md-typeset .grid > figure { margin: 0; }
+/* A tour: pictures of one size in two columns, cut to fit, the caption under each */
+.md-typeset .grid.tour { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.md-typeset .grid.tour figure img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 0.4rem; }
