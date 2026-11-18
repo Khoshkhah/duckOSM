@@ -15,25 +15,31 @@ In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quac
 
 Mac mini (12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the memory is the peak footprint.
 
-### France (5.1 GB)
+### France (5.1 GB), `--tile-zoom 8`
 
-| | `ogr2ogr` | duckOSM | duckOSM in the browser |
+| | `ogr2ogr` | duckOSM | duckOSM in the browser² |
 |---|---|---|---|
-| Time | 14 min 18 s¹ | **3 min 37 s** | 5 min 23 s |
-| Memory | 1.7 GB | **1.0 GB** | 1.3 GB + 4.3 GB² |
-| Files | 16.7 GB | **12.1 GB** | 14.4 GB³ |
+| Time, GeoPackage | ≈ 10 min³ | ≈ 4 min 40 s³ | |
+| Time, GeoParquet | 14 min 18 s¹ | **3 min 37 s** | 5 min 23 s |
+| Memory, GeoParquet | 1.7 GB | **1.0 GB** | 1.3 GB + 4.3 GB⁴ |
+| Files, GeoPackage | ≈ 37 GB³ | ≈ 30 GB³ | |
+| Files, GeoParquet | 16.7 GB | **12.1 GB** | 14.4 GB⁵ |
 
 ### Kentucky (148 MB)
 
-| | `ogr2ogr` | duckOSM | duckOSM in the browser |
+| | `ogr2ogr` | duckOSM | duckOSM in the browser² |
 |---|---|---|---|
-| Time | 12.5 s¹ | **3.7 s** | –⁴ |
-| Memory | 0.62 GB | **0.29 GB** | –⁴ |
-| Files | 0.46 GB | **0.39 GB** | –⁴ |
+| Time, GeoPackage | 8.8 s | **4.5 s** | |
+| Time, GeoParquet | 12.5 s¹ | **3.7 s** | 7.8 s |
+| Memory, GeoPackage | 0.47 GB | **0.30 GB** | |
+| Memory, GeoParquet | 0.62 GB | **0.29 GB** | 0.27 GB + 0.96 GB⁴ |
+| Files, GeoPackage | 1.01 GB | **0.97 GB** | |
+| Files, GeoParquet | 0.46 GB | **0.39 GB** | 0.41 GB⁵ |
 
-¹ Five runs, one for each layer: GDAL's Parquet driver writes one layer to a file. One read takes about 0.43 of this (Kentucky, measured); France one read: about 6 min 10 s (an estimate).
-² In the 12 tile workers. ³ Snappy: the browser has no zstd. ⁴ Not measured on the Mac mini.
-As a GeoPackage, Kentucky takes 8.8 s with `ogr2ogr` and 4.5 s with duckOSM.
+¹ Five runs, one for each layer: GDAL's Parquet driver writes one layer to a file. One read takes about 0.43 of this
+(Kentucky, measured); France one read: about 6 min 10 s (an estimate).
+² GeoParquet only. ³ An estimate from the Kentucky ratios: France as a GeoPackage does not fit on the disk of the Mac mini
+with 30 GB free. ⁴ In the 12 tile workers. ⁵ Snappy: the browser has no zstd.
 
 ## The layers
 
