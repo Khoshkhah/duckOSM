@@ -50,7 +50,8 @@ pub fn quack_gdal(pbf: &Path, gpkg: Option<&Path>, parquet: Option<&Path>, tiles
         None => None,
     };
     let rows = std::thread::scope(|scope| -> Result<[usize; 6], String> {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(8);
+        // one batch waits for the writer: with 8, the waiting rows were 200 MB of the memory on Kentucky
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(1);
         let writer = scope.spawn(move || -> Result<[usize; 6], String> {
             let mut out = Out {
                 #[cfg(feature = "gpkg")]

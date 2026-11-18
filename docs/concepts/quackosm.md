@@ -78,10 +78,11 @@ Kentucky (141 MB), Mac mini:
 
 | | `ogr2ogr` (GDAL 3.13.3) | `quack --gdal` |
 |---|---|---|
-| Time, GeoPackage | 8.9 s | **3.7 s** |
-| Time, GeoPackage, `--tile-zoom 8` | | 5.3 s |
-| Time, GeoParquet | | 2.7 s |
-| Memory | **0.45 GB** | 1.1 GB |
+| Time, GeoPackage | 8.9 s | **4.2 s** |
+| Time, GeoPackage, `--tile-zoom 8` | | 6.4 s |
+| Time, GeoParquet | | 3.2 s |
+| Memory | 0.44 GB | **0.25 GB** |
+| Memory, `--tile-zoom 8` | | 0.35 GB |
 
 ## Where QuackOSM is better
 

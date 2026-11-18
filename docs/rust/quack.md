@@ -404,6 +404,17 @@ Linux x86-64; against GDAL 3.13.3 of Homebrew on the Mac mini (arm64), one multi
 a ring that touches another ring at a vertex is a hole there and a polygon here. GDAL's test of a point on a ring
 (`dx1 * dy2 - dx2 * dy1 == 0`) gives another result on that build; the x86-64 build agrees with duckOSM.
 
+The memory (Kentucky, Mac mini, peak footprint): 1.1 GB at first, 0.25 GB now (`ogr2ogr`: 0.44 GB). Three causes:
+
+- The rows that wait for the writer: a channel of 8 batches of up to 50 000 rows held 200 MB. Now one batch waits; the
+  engine waits for the writer.
+- The buffers of the temporary files of `spill::Buckets`: about 100 files of requests on Kentucky, with 1 MB each. Now
+  256 KB each.
+- macOS keeps the memory that a program frees: the heap was at most 0.37 GB, the footprint 0.89 GB. The memory of macOS
+  is space-efficient when `MallocSpaceEfficient` is set at the start of the program, so `duckosm-rust quack --gdal` starts
+  again with it on macOS (0.25 GB; the time goes from 3.9 s to 4.3 s). Linux returns the memory with the `mallopt` of
+  `main`.
+
 Not done: GDAL's own `osmconf.ini` (only the default one), the open options of the driver, and GDAL's repair of a
 self-touching ring with GEOS in `organizePolygons` (Monaco has none).
 

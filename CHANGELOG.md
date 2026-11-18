@@ -6,7 +6,7 @@
   `lines`, `multilinestrings`, `multipolygons`, `other_relations`, GDAL's default `osmconf.ini`), made by the quack engine in one
   pass, as a GeoPackage (default) or one GeoParquet file for each layer (`-f geoparquet`), also by tiles (`--tile-zoom`). On
   Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
-  on the Mac mini: 3.7 s against 8.9 s for `ogr2ogr`.
+  on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
 
 - **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
   database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of

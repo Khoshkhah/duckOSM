@@ -931,6 +931,17 @@ fn main() {
     #[cfg(feature = "heap-probe")]
     let _ = duckosm_build::STEP_HOOK.set(heap::report);
     let args: Vec<String> = std::env::args().collect();
+    // macOS keeps the memory that a program frees, unless MallocSpaceEfficient is set when the program starts: quack
+    // --gdal on Kentucky had a footprint of 0.89 GB with it unset and 0.25 GB with it (a heap of at most 0.37 GB; time
+    // 3.9 s and 4.3 s). So quack --gdal starts again with it.
+    #[cfg(target_os = "macos")]
+    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal") && std::env::var_os("MallocSpaceEfficient").is_none() {
+        use std::os::unix::process::CommandExt;
+        if let Ok(me) = std::env::current_exe() {
+            // exec returns only when it fails: then this process goes on
+            let _ = std::process::Command::new(me).args(&args[1..]).env("MallocSpaceEfficient", "1").exec();
+        }
+    }
     // `duckosm-rust edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
         Some("edit") => edit(&args[1..]),

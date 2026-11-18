@@ -42,8 +42,13 @@ pub struct Writer {
 
 impl Writer {
     pub fn new(store: &dyn Store) -> io::Result<Self> {
+        Self::with_buffer(store, 1 << 20)
+    }
+
+    /// A writer with a buffer of `bytes` (a table of many writers, as [`Buckets`], keeps one buffer for each writer).
+    pub fn with_buffer(store: &dyn Store, bytes: usize) -> io::Result<Self> {
         Ok(Writer {
-            w: BufWriter::with_capacity(1 << 20, store.create()?),
+            w: BufWriter::with_capacity(bytes, store.create()?),
             buf: Vec::new(),
             len: 0,
             bytes: 0,
@@ -664,7 +669,8 @@ impl Buckets {
     pub fn push<T>(&mut self, store: &dyn Store, key: i64, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
         let part = match self.parts.entry(key >> self.shift) {
             std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
-            std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::new(store)?),
+            // a buffer of 256 KB: quack on Kentucky has about 100 parts of requests (1 MB each: 100 MB)
+            std::collections::btree_map::Entry::Vacant(e) => e.insert(Writer::with_buffer(store, 256 << 10)?),
         };
         part.push(codec, row)
     }
