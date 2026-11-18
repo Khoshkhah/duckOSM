@@ -173,6 +173,8 @@ nav:
   - Reference:
       - Command line: reference/cli.md
       - Configuration: reference/configuration.md
+      - Python SDK: reference/python.md
+      - Rust SDK: reference/rust.md
       - Database schema: reference/database.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md

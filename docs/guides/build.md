@@ -20,7 +20,7 @@ rest. What each step does:
 | `-b`, `--boundary` | GeoJSON area to build ([make one](prepare-area.md)) | none: the whole PBF |
 | `-m`, `--modes` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `-o`, `--output` | output file | `<boundary name>.duckdb`, else `<pbf name>.duckdb` |
-| `-c`, `--config` | a config file (below) | |
+| `-c`, `--config` | a [config file](#the-config-file) | |
 | `--source-db` | cut from a built db instead of a PBF ([how](prepare-area.md#several-areas-from-one-region)) | |
 | `--graph` / `--no-graph` | build the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
@@ -29,32 +29,67 @@ rest. What each step does:
 | `--fixes` | a rules file of [fixes for OSM errors](fix-osm-errors.md) | none |
 | `--log-file` | also write the log to a file | console only |
 
-## With a config file
+## The config file
 
-For repeatable builds, keep the settings in a file. `duckosm init-config` writes a fully commented
-template:
+A config file keeps the settings of a build, so that you can build the same area again with one
+command. Write the commented template, change some keys, and build:
 
 ```bash
-duckosm init-config monaco.yaml          # edit it, then:
+duckosm init-config monaco.yaml          # writes the template with all keys and their defaults
 duckosm build -c monaco.yaml
 ```
 
+### The keys that you change most
+
+| Key | Does | Example | Default |
+|---|---|---|---|
+| `name` | The name of the output file, `<name>.duckdb` | `monaco` | `default` |
+| `source.pbf_path` | The input `.osm.pbf` file | `monaco-latest.osm.pbf` | |
+| `boundary.path` or `boundary.place` | The area: a GeoJSON file, or a place name (the PBF's borders, then Nominatim) | `monaco.geojson` or `"Monaco"` | none: the whole PBF |
+| `modes` | The networks to build | `[driving, walking, cycling]` | `[driving]` |
+| `osm_overrides` | A rules file of [fixes for OSM errors](fix-osm-errors.md) | `osm_fixes.yaml` | none |
+| `options.build_features` | Build the [base-map layers](../reference/features.md) (water, land, buildings, POIs) | `false` | `true` |
+| `options.levels` | Make the [drawing order](drawing-order.md) of the roads as the last step. Set `false` for a large area. | `false` | `true` |
+| `options.h3_resolution` | The H3 resolution of the cell columns, 0 to 15 | `9` | `8` |
+
+The config file has no key for tiles. To build a large area by tiles, give the same file to
+`duckosm tiles --config monaco.yaml`.
+
+### A complete small file
+
 ```yaml
-name: monaco                           # output: <output_path>/monaco.duckdb
-output_path: .
+name: monaco
+output_path: .                         # a folder, or a full *.duckdb path
 source:
   pbf_path: monaco-latest.osm.pbf
 boundary:
   path: monaco.geojson
 modes: [driving, walking, cycling]
-validation:
-  enabled: true                        # check the result (see "Check a build")
+osm_overrides: osm_fixes.yaml
+options:
+  build_features: true
+  levels: true
+  h3_resolution: 8
 ```
 
-A config file also reaches settings the command line doesn't have: [validation](check-build.md),
-[fixes for OSM errors](fix-osm-errors.md), memory limits, and more. Every field:
-[Configuration](../reference/configuration.md). In a clone of the repo, `config/sample_monaco.yaml` is a ready
-example.
+A key that is not in the file has its default. Relative paths start from the folder where you run
+`duckosm`.
+
+### The same config from Python
+
+```python
+import duckosm
+
+db = duckosm.build(config="monaco.yaml")                       # as duckosm build -c monaco.yaml
+db = duckosm.build(config="monaco.yaml", modes=["driving"])    # an option that you give overrides the file
+```
+
+On the command line, an option that you type also overrides the file:
+`duckosm build -c monaco.yaml -m driving`.
+
+Every key: [Configuration](../reference/configuration.md). All Python functions:
+[Python SDK](../reference/python.md). In a clone of the repository, `config/sample_monaco.yaml` is a
+ready example.
 
 ## Large areas
 

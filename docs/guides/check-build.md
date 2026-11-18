@@ -2,7 +2,7 @@
 
 ## Validation during the build
 
-Switch validation on in your [config file](build.md#with-a-config-file). The build then checks its
+Switch validation on in your [config file](build.md#the-config-file). The build then checks its
 own result and fails if something is wrong:
 
 ```yaml
@@ -11,7 +11,7 @@ validation:
 ```
 
 It's off by default (and a build from the command line alone can't switch it on), but the
-[config template](build.md#with-a-config-file) turns it on. On Monaco it prints, per mode:
+[config template](build.md#the-config-file) turns it on. On Monaco it prints, per mode:
 
 ```text
 validate[driving] single_component: OK — 1 component(s), largest 2,765/2,765 (100.0%)

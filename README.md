@@ -113,17 +113,16 @@ duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
 ```
 
 ```python
-import duckdb
-from duckosm import route
+import duckosm
 
-con = duckdb.connect("monaco.duckdb", read_only=True)
-q = "SELECT min(edge_id) FROM driving.edges WHERE name = ?"
-a = con.execute(q, ["Boulevard du Larvotto"]).fetchone()[0]
-b = con.execute(q, ["Avenue Princesse Grace"]).fetchone()[0]
+db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")   # as duckosm build
 
-r = route(con, a, b)                     # fastest path; weight="length" for distance
-r["time_s"], r["length_m"], r["edges"]   # ~114 s, ~1.5 km, the ordered edge_ids
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
+r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and the ordered edge_ids
+duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
 ```
+
+All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/). Rust: [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
 
 Each output is compared with a reference tool: QuackOSM, GDAL, SUMO, MATSim and the GMNS specification
 ([how each output is checked](https://khoshkhah.github.io/duckOSM/concepts/checks/)).

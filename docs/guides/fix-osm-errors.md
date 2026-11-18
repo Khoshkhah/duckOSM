@@ -21,7 +21,7 @@ turn_restrictions:           # turns OSM should forbid but doesn't
     restriction: no_left_turn
 ```
 
-Give it to the build, on the command line or in your [config file](build.md#with-a-config-file):
+Give it to the build, on the command line or in your [config file](build.md#the-config-file):
 
 ```bash
 duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson -m driving -m cycling --fixes fixes.yaml

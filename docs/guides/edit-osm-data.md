@@ -181,7 +181,7 @@ duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson --fixes osm_fixes.ya
 ```
 
 A wall rule (`extra.building_faces`) needs the table `main.building_faces`. Set `options.building_faces` in the
-[config file](build.md#with-a-config-file):
+[config file](build.md#the-config-file):
 
 ```yaml
 osm_overrides: osm_fixes.yaml   # or --fixes on the command line
