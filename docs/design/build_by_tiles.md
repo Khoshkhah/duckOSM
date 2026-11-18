@@ -145,6 +145,27 @@ It was not local in three ways, and each one has a fix:
 Kentucky walking, Kentucky driving and cycling, and Monaco with Studio edits at zoom 14 in all three modes: all tables are
 equal to the whole build.
 
+## The building faces
+
+The walls of the buildings (`main.building_faces`, with `--raw --building-faces`) run after the union, as the bus routes and the
+levels. A wall reads the streets within 150 m and the other buildings within 60 m (the line of sight, the party walls), and these
+can be in other tiles.
+
+1. Each tile build writes the rings of the buildings that it owns, with the OSM fixes, to `building_rings.bin` (the tile of the
+   first point of the building, `Owner::place`), the buildings outside the area to `building_rings.border.bin`, and the ids of the
+   entrance nodes to `building_entrances.bin`. It makes no walls.
+2. The union reads the rings of the tiles in their order, one copy of each building of the border parts, and all entrances. The
+   street segments come from the edges of the union (driving, then walking), as the whole build reads them from the network.
+3. The faces are the whole build's (`building_faces_of`, in bands: the memory does not grow with the area).
+
+A segment that two edges have (an edge and its reverse edge, or two modes) takes the street of the first mode, and in one mode
+the edge with the lowest `edge_id`. Before 2026-11-17 the rule was "the first copy in the order of the edges"; the edges of the
+whole build are in the order of `edge_id`, so its walls do not change (Monaco, Tartu, Kentucky: the same file, byte for byte),
+and the rule no longer depends on the order of the tiles.
+
+`building_id` is the OSM id of the way or the relation of the building (with `building_type`). Monaco at zoom 14, Tartu and
+Kentucky by tiles: the walls are equal to the whole build in every row (Kentucky: 6,887,305 walls).
+
 ## H3 and the heights
 
 H3 (`--h3-resolution`) and the heights (`--dem`) are local: the row of a node or an edge needs only its own points.

@@ -120,11 +120,71 @@ pub fn union_all(tiles: &[(Tile, PathBuf)], boundary: &str, p: &crate::Params, c
     if p.levels != crate::LevelsMethod::None {
         timed("levels", || levels(&p.modes, p.levels, built_at(p), out))?;
     }
+    if p.building_faces {
+        timed("building faces", || building_faces(tiles, p, consume, out))?;
+    }
     if let Some(dem) = &p.dem {
         timed("elevation metadata and grid", || elevation_main(dem, p, &rows, out))?;
     }
     timed("area tables", || write_whole_area_tables(out, boundary, p))?;
     Ok(rows.into_iter().filter(|(name, _)| !name.starts_with("elevation_nodata_")).collect())
+}
+
+/// `main.building_faces` of the whole area after the union (docs/design/build_by_tiles.md, "The building faces"): the rings of the
+/// buildings that each tile owns (`building_rings.bin`, in the order of the tiles), one copy of each building outside the area (the
+/// border parts), the entrances of all tiles, and the street segments of the edges of the union (driving, then walking), as the whole
+/// build reads them; then the faces of the whole build (`building_faces_of`, in bands: its memory does not grow with the area).
+fn building_faces(tiles: &[(Tile, PathBuf)], p: &crate::Params, consume: bool, out: &Path) -> Result<(), String> {
+    use duckosm_core::building_faces::{building_faces_of, RingWriter, StreetFile};
+    let open = |f: &Path| File::open(f).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", f.display()));
+    let mut w = RingWriter::new()?;
+    let mut entrances = duckosm_core::util::FxHashMap::default();
+    for (_, d) in tiles {
+        let f = d.join("building_rings.bin");
+        if fs::exists(&f) {
+            w.add_part(&mut open(&f)?, None)?;
+        }
+        let e = d.join("building_entrances.bin");
+        if fs::exists(&e) {
+            for id in fs::read(&e).map_err(io)?.chunks_exact(8) {
+                entrances.insert(i64::from_le_bytes(id.try_into().expect("8 bytes")), ());
+            }
+        }
+    }
+    let mut seen = FxHashSet::default();
+    for (_, d) in tiles {
+        let f = d.join("building_rings.border.bin");
+        if fs::exists(&f) {
+            w.add_part(&mut open(&f)?, Some(&mut seen))?;
+        }
+    }
+    drop(seen);
+    if consume {
+        for (_, d) in tiles {
+            for n in ["building_rings.bin", "building_rings.border.bin", "building_entrances.bin"] {
+                let _ = fs::remove_file(d.join(n));
+            }
+        }
+    }
+    let mut rings = w.finish(entrances)?;
+    let near = rings.near()?;
+    let mut streets = StreetFile::new()?;
+    let mut attrs = FxHashSet::default();
+    for &m in &p.modes {
+        let path = out.join(format!("edges_{}.parquet", m.name()));
+        if matches!(m, Mode::Driving | Mode::Walking) && fs::exists(&path) {
+            duckosm_parquet::read::read_edges(&path, &mut attrs, |_| true, |e| crate::street_segments(&e, &near, &mut streets))?;
+            streets.next_group();
+        }
+    }
+    drop(near);
+    let fixes = match &p.osm_fixes {
+        Some(f) => crate::config::read_osm_fixes(f)?,
+        None => Default::default(),
+    };
+    let mut writer = duckosm_parquet::BuildingFacesWriter::new(create(&out.join("building_faces_main.parquet"))?)?;
+    building_faces_of(rings, streets.finish()?, &fixes.face_edits, |part| writer.write(&part))?;
+    writer.close()
 }
 
 /// The elevation tables of the whole area after the union (as the whole build writes them): `elevation_metadata_main`, with the

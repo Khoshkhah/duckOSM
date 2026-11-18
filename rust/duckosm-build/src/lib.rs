@@ -1625,6 +1625,18 @@ pub fn run<W: Write + Send>(
                 building_faces::building_rings(&r.ways, &r.nodes, &r.relations)?
             }
         };
+        if let Some(o) = owner.as_ref().filter(|_| p.tile.is_some()) {
+            // a tile of a build by tiles: a wall reads the streets and the buildings near it, also in other tiles, so the union
+            // makes the faces of the whole area; the tile gives the rings of its buildings (docs/design/build_by_tiles.md, "The
+            // building faces")
+            let class = |_: i64, _: bool, pt: duckosm_core::geom::Pt| o.place(pt);
+            let (mut mine, mut border, mut doors) = (file("building_rings.bin")?, file("building_rings.border.bin")?, file("building_entrances.bin")?);
+            rings.split(class, &mut mine, &mut border, &mut doors)?;
+            for w in [&mut mine, &mut border, &mut doors] {
+                w.flush().map_err(|e| e.to_string())?;
+            }
+            log.step("building rings of the tile");
+        } else {
         // the street segments near a building, from the edges of the spill files, to a temporary file
         let near = rings.near()?;
         let mut streets = building_faces::StreetFile::new()?;
@@ -1637,6 +1649,7 @@ pub fn run<W: Write + Send>(
                     }
                 })?;
                 err.map_or(Ok(()), Err)?;
+                streets.next_group();
             }
         }
         drop(near);
@@ -1655,6 +1668,7 @@ pub fn run<W: Write + Send>(
         w.close()?;
         sum.building_faces = Some((faces, buildings));
         log.step("building faces");
+        }
     }
     drop(mode_files);
     if let Some(r) = raw.as_mut().filter(|_| want_raw) {
