@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
+  database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of
+  `/api/info`, `/api/query`, `/api/sql`, `/ask/*.js` are the same bytes as Python's on Monaco. With this, every command of group B
+  is in Rust.
+
 - **`duckosm-rust extract` and `admin`** (`docs/design/all_in_rust.md`, group B), with the options of the Python commands. `admin`
   reads the boundary relations of the PBF with GDAL in DuckDB's spatial extension (no `ogr2ogr`), and `--gpkg` writes or reuses
   a GeoPackage; `extract` cuts a database to an area by name, OSM id or GeoJSON file, with the time zone of the Rust build. On
