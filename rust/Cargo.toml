@@ -5,7 +5,7 @@ resolver = "2"
 members = ["duckosm-core", "duckosm-parquet", "duckosm-duckdb", "duckosm-build", "duckosm-editor", "duckosm-edit", "duckosm-cli", "duckosm-py", "duckosm-export", "duckosm-tools", "duckosm-route", "duckosm-router", "duckosm-planner"]
 
 [workspace.package]
-version = "1.0.0"   # the version of the Python package duckosm (tests/test_wheel.py checks that they are equal)
+version = "0.8.0"   # the version of the Python package duckosm (tests/test_wheel.py checks that they are equal)
 edition = "2021"
 license = "MIT"
 authors = ["Kaveh Khoshkhah"]

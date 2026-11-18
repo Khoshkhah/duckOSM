@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (2026-11-18)
+## 0.8.0 (2026-11-18)
 
 The program is `duckosm`, in Rust, and `pip install duckosm` installs it (wheels for 5 systems). The exports, the routers, the maps, the editors and GMNS run in Rust. The Python API keeps its names and calls Rust. The commands `levels`, `bus`, `multimodal` and `clip-pbf`, and the build steps of `DuckOSM.run()`, still run the Python code.
 
