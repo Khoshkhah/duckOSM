@@ -20,6 +20,9 @@ use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "duckdb")]
 pub mod native;
+#[cfg(feature = "duckdb")]
+pub mod cli;
+pub mod maps;
 pub mod page;
 pub mod studio;
 
