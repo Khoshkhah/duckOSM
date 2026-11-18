@@ -347,6 +347,28 @@ fn gmns_lanes_by_properties() {
     assert_eq!(got, text(&path), "the lane checks changed (GMNS_LANES_WRITE=1 writes them again after a wanted change)");
 }
 
+/// gmns-viz: the page of a db made from tests/data/exports/gmns_viewer/ (the columns that the viewer reads, from Python's GMNS
+/// export with --meso --micro) has the MD5 and the size of Python's page of the same db. The same SQL as `viewer` in
+/// tools/make_golden_exports.py.
+#[test]
+fn gmns_viewer_equals_python() {
+    let p = out("viewer").join("monaco_gmns.duckdb");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&p);
+    let con = duckdb::Connection::open(&p).unwrap();
+    con.execute_batch("INSTALL spatial; LOAD spatial; CREATE SCHEMA gmns_driving; CREATE SCHEMA meso_driving; CREATE SCHEMA micro_driving").unwrap();
+    for t in ["gmns_driving.lane", "gmns_driving.node", "gmns_driving.link", "gmns_driving.movement", "meso_driving.meso_link", "meso_driving.meso_node", "micro_driving.micro_link"] {
+        let f = data().join(format!("exports/gmns_viewer/{t}.parquet"));
+        con.execute_batch(&format!("CREATE TABLE {t} AS SELECT * FROM read_parquet('{}')", f.display())).unwrap();
+    }
+    drop(con);
+    let html = out("viewer").join("v.html");
+    duckosm_export::gmns_viewer::write_viewer(&p, &html, "driving").unwrap();
+    let page = std::fs::read(&html).unwrap();
+    let md5: String = duckdb::Connection::open_in_memory().unwrap().query_row("SELECT md5(?)", [String::from_utf8(page.clone()).unwrap()], |r| r.get(0)).unwrap();
+    assert_eq!(format!("driving\t{md5}\t{}\n", page.len()), text(&data().join("exports/monaco_gmns_viewer.tsv")), "the viewer page differs from Python's");
+}
+
 /// GMNS `--walk-frame` (driving and walking): every column of gmns_walking but the lane lines equals Python; the lines are the
 /// same on two runs, and the sidewalk lanes that still touch a driving lane are counted (`monaco_gmns_walk_frame.tsv`, made by
 /// the Rust export, GMNS_LANES_WRITE=1).
