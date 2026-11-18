@@ -177,9 +177,18 @@ impl Dem {
         if !(lon >= self.x0 && lon <= right && lat >= bottom && lat <= self.y0) {
             return None;
         }
-        let col = ((lon - self.x0) / self.sx).floor() as usize;
-        let row = ((self.y0 - lat) / self.sy).floor() as usize;
-        let z = f64::from(self.pixel(col.min(self.width - 1), row.min(self.height - 1))?);
+        // the pixel as rasterio's `sample` finds it: the inverse of the affine transform (the `affine` package, literally),
+        // applied as a matrix product, then floor; a point on the east or the south edge is outside, as there
+        let (a, b, c, d, e, f) = (self.sx, 0.0, self.x0, 0.0, -self.sy, self.y0);
+        let idet = 1.0 / (a * e - b * d);
+        let (ra, rb, rd, re) = (e * idet, -b * idet, -d * idet, a * idet);
+        let (rc, rf) = (-c * ra - f * rb, -c * rd - f * re);
+        let col = (ra * lon + rb * lat + rc).floor();
+        let row = (rd * lon + re * lat + rf).floor();
+        if !(col >= 0.0 && col < self.width as f64 && row >= 0.0 && row < self.height as f64) {
+            return None;
+        }
+        let z = f64::from(self.pixel(col as usize, row as usize)?);
         (z.is_finite() && Some(z) != self.nodata).then_some(z)
     }
 
@@ -238,6 +247,15 @@ pub fn round_cm(x: f64) -> f64 {
         r
     };
     r / 100.0
+}
+
+/// The ground id of a DEM file: the SHA-256 of its bytes, in hex (duckOSM `elevation._sha256`).
+pub fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut hash = Sha256::new();
+    std::io::copy(&mut f, &mut hash).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 /// A node's height: (node_id, ele).
