@@ -1,6 +1,6 @@
 # Speed on France
 
-France: 5.1 GB `.osm.pbf`. Mac mini (12 cores, 16 GB). Time and the highest memory of each job.
+France: 5.1 GB `.osm.pbf`. Mac mini (Apple M6, 12 cores, 16 GB). Time and the highest memory of each job.
 
 | Job | duckOSM, native | duckOSM, browser | Other tool | Details |
 |---|---|---|---|---|

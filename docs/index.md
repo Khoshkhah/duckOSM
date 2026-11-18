@@ -168,7 +168,7 @@ the area ([Browser and native builds](concepts/browser-native.md)).
 
 ## Speed on France
 
-France: 5.1 GB `.osm.pbf`, Mac mini (12 cores, 16 GB). Both versions build by map tiles, cut by
+France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB). Both versions build by map tiles, cut by
 [pbfcut](https://github.com/Khoshkhah/pbfcut).
 
 | Job | Native | Browser | Other tool |

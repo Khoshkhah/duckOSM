@@ -82,7 +82,7 @@ Both build every area by map tiles, cut by [pbfcut](https://github.com/Khoshkhah
 
 ## Speed on France
 
-France: 5.1 GB `.osm.pbf`, Mac mini (12 cores, 16 GB).
+France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB).
 
 | Job | Native | Browser | Other tool |
 |---|---|---|---|
