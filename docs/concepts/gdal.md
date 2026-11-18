@@ -9,7 +9,7 @@ duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet  # on
 duckosm quack france.osm.pbf --gdal -o out --name france --tile-zoom 8      # tile by tile (for a country)
 ```
 
-In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio, output **GDAL layers**.
+In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio, output **GDAL layers**, format GeoParquet, GeoPackage or both.
 
 ## Results
 
@@ -30,16 +30,16 @@ Mac mini (12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the mem
 
 | | `ogr2ogr` | duckOSM | duckOSM in the browser² |
 |---|---|---|---|
-| Time, GeoPackage | 8.8 s | **4.5 s** | |
+| Time, GeoPackage | 8.8 s | **4.5 s** | 13.0 s |
 | Time, GeoParquet | 12.5 s¹ | **3.7 s** | 7.8 s |
-| Memory, GeoPackage | 0.47 GB | **0.30 GB** | |
+| Memory, GeoPackage | 0.47 GB | **0.30 GB** | 0.27 GB + 0.96 GB⁴ |
 | Memory, GeoParquet | 0.62 GB | **0.29 GB** | 0.27 GB + 0.96 GB⁴ |
-| Files, GeoPackage | 1.01 GB | **0.97 GB** | |
+| Files, GeoPackage | 1.01 GB | **0.97 GB** | 0.89 GB |
 | Files, GeoParquet | 0.46 GB | **0.39 GB** | 0.41 GB⁵ |
 
 ¹ Five runs, one for each layer: GDAL's Parquet driver writes one layer to a file. One read takes about 0.43 of this
 (Kentucky, measured); France one read: about 6 min 10 s (an estimate).
-² GeoParquet only. ³ An estimate from the Kentucky ratios: France as a GeoPackage does not fit on the disk of the Mac mini
+² France: GeoParquet only. ³ An estimate from the Kentucky ratios: France as a GeoPackage does not fit on the disk of the Mac mini
 with 30 GB free. ⁴ In the 12 tile workers. ⁵ Snappy: the browser has no zstd.
 
 ## The layers
@@ -56,7 +56,10 @@ The rules and the columns are those of GDAL's default `osmconf.ini`; the other t
 
 ## The rows are the same
 
-On Monaco (all layers, also in the browser) and Kentucky (2 240 511 rows), each row equals GDAL's.⁵
+On Monaco (all layers, also in the browser) and Kentucky (2 240 511 rows), each row equals GDAL's.⁵ The GeoPackage of the
+browser has the rows of the native GeoPackage on Monaco (0.9 s, 3.6 MB) and on Kentucky (relation rows can be in another order).
+SQLite's `integrity_check` is ok, and `ogrinfo` opens it. The browser writes it directly into its file in the browser storage, with no
+copy in memory.
 
 ⁵ GDAL on Linux. GDAL on the Mac mini (arm64) gives one other polygon on Kentucky.
 
