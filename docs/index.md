@@ -107,16 +107,6 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 
 </div>
 
-## One edge id for each direction
-
-```text
-edge_id = hash(osm_id, source, target)
-```
-
-**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
-to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
-a cut and every export ([how](concepts/edge-ids.md)).
-
 ## What duckOSM makes
 
 All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each output is checked against a reference tool ([how](concepts/checks.md)).
