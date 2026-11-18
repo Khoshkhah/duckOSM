@@ -3,7 +3,7 @@
 
 use crate::{err, Result};
 use duckdb::Connection;
-use duckosm_router::multimodal::{self, Network, Points, Step, HUB};
+use duckosm_router::multimodal::{Network, Points, Prepared, Step, HUB};
 use duckosm_router::points::{self, Cand, Road};
 use serde_json::{json, Value as J};
 use std::collections::{HashMap, HashSet};
@@ -15,30 +15,43 @@ fn table_exists(con: &Connection, schema: &str, table: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
-/// The roads, the changes of mode and the legal turns of `schema` (duckOSM reads them in `route_multimodal`).
-pub fn network(con: &Connection, schema: &str) -> Result<Network> {
+/// The roads, the changes of mode and the legal turns of `schema` (duckOSM reads them in `route_multimodal`), made into the
+/// router's indexes. `allowed`: only these modes are read (a large area: the other modes are not in memory).
+pub fn network(con: &Connection, schema: &str, allowed: Option<&[String]>) -> Result<Prepared> {
     let mut net = Network::default();
-    let mut st = con.prepare(&format!("SELECT mode, source, target, edge_id, cost_s::DOUBLE FROM {schema}.edges")).map_err(err)?;
+    let only = |col: &str| match allowed {
+        Some(a) => format!(" WHERE {col} IN ({})", a.iter().map(|m| format!("'{}'", m.replace('\'', "''"))).collect::<Vec<_>>().join(", ")),
+        None => String::new(),
+    };
+    let mut st = con.prepare(&format!("SELECT mode, source, target, edge_id, cost_s::DOUBLE FROM {schema}.edges{}", only("mode"))).map_err(err)?;
     let mut rows = st.query([]).map_err(err)?;
     while let Some(r) = rows.next().map_err(err)? {
-        net.edges.push((r.get(0).map_err(err)?, r.get(1).map_err(err)?, r.get(2).map_err(err)?, r.get(3).map_err(err)?, r.get(4).map_err(err)?));
+        let m: String = r.get(0).map_err(err)?;
+        let m = net.mode(&m);
+        net.edges.push((m, r.get(1).map_err(err)?, r.get(2).map_err(err)?, r.get(3).map_err(err)?, r.get(4).map_err(err)?));
     }
-    let mut st = con.prepare(&format!("SELECT node_id, from_mode, to_mode, cost_s::DOUBLE, kind FROM {schema}.transfers")).map_err(err)?;
+    let both = match allowed {
+        Some(_) => format!("{} AND {}", only("from_mode"), only("to_mode").replacen(" WHERE ", "", 1)),
+        None => String::new(),
+    };
+    let mut st = con.prepare(&format!("SELECT node_id, from_mode, to_mode, cost_s::DOUBLE, kind FROM {schema}.transfers{both}")).map_err(err)?;
     let mut rows = st.query([]).map_err(err)?;
     while let Some(r) = rows.next().map_err(err)? {
-        net.transfers.push((r.get(0).map_err(err)?, r.get(1).map_err(err)?, r.get(2).map_err(err)?, r.get(3).map_err(err)?, r.get(4).map_err(err)?));
+        let (fm, tm): (String, String) = (r.get(1).map_err(err)?, r.get(2).map_err(err)?);
+        let (fm, tm) = (net.mode(&fm), net.mode(&tm));
+        net.transfers.push((r.get(0).map_err(err)?, fm, tm, r.get(3).map_err(err)?, r.get(4).map_err(err)?));
     }
-    let modes: HashSet<String> = net.edges.iter().map(|e| e.0.clone()).collect();
-    for m in modes {
-        if !table_exists(con, &m, "edge_graph")? {
+    let modes: Vec<(u8, String)> = net.modes.iter().enumerate().map(|(i, m)| (i as u8, m.clone())).collect();
+    for (i, m) in modes {
+        if !net.edges.iter().any(|e| e.0 == i) || !table_exists(con, &m, "edge_graph")? {
             continue;
         }
         let g = crate::route::routed_graph(con, &m, &[])?;
         let mut st = con.prepare(&format!("SELECT from_edge, to_edge FROM {g}")).map_err(err)?;
         let rows: Vec<(i64, i64)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<std::result::Result<_, _>>().map_err(err)?;
-        net.turns.insert(m, rows);
+        net.turns.insert(i, rows);
     }
-    Ok(net)
+    Ok(Prepared::new(net, allowed))
 }
 
 /// duckOSM `route_multimodal`: the dict of the trip (time_s, length_m, edges, legs, transfers, nodes; with points also
@@ -46,26 +59,21 @@ pub fn network(con: &Connection, schema: &str) -> Result<Network> {
 #[allow(clippy::too_many_arguments)]
 pub fn route_multimodal(
     con: &Connection,
-    net: &Network,
+    net: &Prepared,
     src: Option<i64>,
     dst: Option<i64>,
     schema: &str,
     start_mode: &str,
     end_mode: &str,
     enforce_sequence: bool,
-    allowed: Option<&HashSet<String>>,
     points: Option<&Points>,
 ) -> Result<J> {
-    let steps = multimodal::route(net, src.unwrap_or(0), dst.unwrap_or(0), start_mode, end_mode, enforce_sequence, allowed, points)
+    let steps = net
+        .route(src.unwrap_or(0), dst.unwrap_or(0), start_mode, end_mode, enforce_sequence, points)
         .map_err(|e| e.replace("mm.edges", &format!("{schema}.edges")))?;
     let Some(steps) = steps else {
         return Ok(J::Null);
     };
-    // the end of each road (duckOSM: info[(mode, edge_id)][1])
-    let mut target: HashMap<(String, i64), i64> = HashMap::new();
-    for (m, _, t, e, _) in &net.edges {
-        target.insert((m.clone(), *e), *t);
-    }
     let mut edges_seq: Vec<(String, i64)> = Vec::new();
     let mut legs: Vec<(String, Vec<i64>, f64, Vec<f64>)> = Vec::new();
     let mut transfers: Vec<J> = Vec::new();
@@ -84,7 +92,8 @@ pub fn route_multimodal(
                 l.3.push(*frac);
                 l.2 += cost;
                 access_s += acc;
-                let t = target[&(m.clone(), *e)];
+                // the end of the road (duckOSM: info[(mode, edge_id)][1])
+                let t = net.target(m, *e).ok_or(format!("edge {e} is not a {m} road"))?;
                 if nodes.last() != Some(&t) {
                     nodes.push(t);
                 }
@@ -282,16 +291,16 @@ pub fn route_points(con: &Connection, a: (f64, f64), b: (f64, f64), mode: &str, 
 #[allow(clippy::too_many_arguments)]
 pub fn route_multimodal_points(
     con: &Connection,
-    net: &Network,
+    net: &Prepared,
     a: (f64, f64),
     b: (f64, f64),
     radius_m: f64,
     access_kmh: f64,
     schema: &str,
-    allowed: Option<&HashSet<String>>,
+    allowed: Option<&[String]>,
     enforce_sequence: bool,
 ) -> Result<J> {
-    if allowed.is_some_and(|m| !m.is_empty() && !m.contains(HUB)) {
+    if allowed.is_some_and(|m| !m.is_empty() && !m.iter().any(|x| x == HUB)) {
         return Err("a trip between two points starts and ends walking: allowed_modes needs 'walking'".into());
     }
     let (s, t) = ends(con, HUB, a, b, radius_m)?;
@@ -304,8 +313,7 @@ pub fn route_multimodal_points(
     for c in &t {
         tby.insert(c.edge_id, c);
     }
-    let allowed = allowed.filter(|m| !m.is_empty());
-    let mut r = route_multimodal(con, net, None, None, schema, HUB, HUB, enforce_sequence, allowed, Some(&pts))?;
+    let mut r = route_multimodal(con, net, None, None, schema, HUB, HUB, enforce_sequence, Some(&pts))?;
     if r.is_null() {
         return Ok(r);
     }
