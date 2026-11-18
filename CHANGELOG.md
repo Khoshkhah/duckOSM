@@ -8,6 +8,34 @@
   Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
   on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
 
+- **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
+  commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
+  networkx's `dijkstra_path`). On Monaco and Tartu, `lane_<mode>.lane_edges` and 126 lane routes (with and without the stored
+  graph) equal Python's, with the text, `--json` and the `-o` GeoJSON (`duckosm-route/tests/lanes.rs`). With this, every part of
+  group E is in Rust.
+
+- **`duckosm-rust directions`** (`docs/design/all_in_rust.md`, group E): the turn-by-turn steps of `directions.py` for any route
+  result (one mode, across modes, between points), in `duckosm-router` (no DuckDB). On Monaco and Tartu, the steps of 1,423
+  routes (about 23,000 steps) equal Python's, with their texts (`duckosm-route/tests/multimodal_points.rs`).
+
+- **`duckosm-rust route-multimodal`, `route-points` and `route-multimodal-points`** (`docs/design/all_in_rust.md`, group E): the
+  trip across modes (`route_multimodal`, every part on the edge graph of its mode, walk* vehicle* walk*), and the routes between
+  two points (`route_points`, `route_multimodal_points`), in `duckosm-router` (no DuckDB). A point joins its roads with GEOS's
+  own formulas (distance, project, interpolate, length), so `fraction`, `access_m` and `road_point` are the same floats as
+  shapely gives. Each command prints duckOSM's dict as JSON, and `--batch FILE` answers many queries on one graph. On Monaco and
+  Tartu, 1,500 queries give the same JSON as Python, floats and error texts too (`duckosm-route/tests/multimodal_points.rs`).
+
+- **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
+  algorithms: no DuckDB, no threads, it builds for WebAssembly) and `rust/duckosm-route` (the database, GraphML, the CLI). The
+  routing graph is in memory with the order of networkx's graph, and the route is a port of networkx's bidirectional Dijkstra
+  (the same heap keys), so a tie gives the path of duckOSM's `routing.route`. `route DB FROM TO` prints `route()` as JSON;
+  `--pairs FILE` routes many pairs on one graph, as `Router` does. `export-graph` writes the same GraphML files as duckOSM
+  (node graph and edge graph), byte for byte; `gpickle` (a Python pickle) stays in Python. On Monaco and Tartu, 1,200 routes of
+  driving and walking, by time and by length, have the same edges, `time_s` and `length_m` as Python
+  (`duckosm-route/tests/golden.rs`). With `weight=length` Python's graph comes from a join with no fixed row order, so its ties
+  change from run to run; the Rust graph keeps the order of the edge graph. Python's text of a float (`place::py_float`) and
+  the JSON of the tools now round a tie of the shortest digits to the even digit, as Python does.
+
 - **`duckosm-rust ask`** (`docs/design/all_in_rust.md`, group B): the page of `duckosm ask` (roadstyle's data dock and Ask on a
   database), with the native database in place of Python's (`DB`, `--fixes`, `--port`, default 8791). The page and the answers of
   `/api/info`, `/api/query`, `/api/sql`, `/ask/*.js` are the same bytes as Python's on Monaco. With this, every command of group B

@@ -958,6 +958,8 @@ fn main() {
         Some(c) if duckosm_export::cli::COMMANDS.contains(&c) => duckosm_export::cli::run(&args[1..]),
         #[cfg(feature = "duckdb")]
         Some(c) if duckosm_tools::cli::COMMANDS.contains(&c) => duckosm_tools::cli::run(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some(c) if duckosm_route::cli::COMMANDS.contains(&c) => duckosm_route::cli::run(&args[1..]),
         _ => run(),
     };
     if let Err(e) = r {

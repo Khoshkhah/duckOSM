@@ -794,6 +794,7 @@ dependencies = [
  "duckosm-build",
  "duckosm-edit",
  "duckosm-export",
+ "duckosm-route",
  "duckosm-tools",
  "libc",
  "rayon",
@@ -883,6 +884,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "duckosm-route"
+version = "0.7.0"
+dependencies = [
+ "clap",
+ "duckdb",
+ "duckosm-build",
+ "duckosm-router",
+ "duckosm-tools",
+ "md-5",
+ "serde_json",
+]
+
+[[package]]
+name = "duckosm-router"
+version = "0.7.0"
+
+[[package]]
 name = "duckosm-tools"
 version = "0.7.0"
 dependencies = [
@@ -890,7 +908,6 @@ dependencies = [
  "duckdb",
  "duckosm-build",
  "duckosm-duckdb",
- "serde",
  "serde_json",
 ]
 
@@ -1641,6 +1658,16 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
 
 [[package]]
 name = "memchr"
