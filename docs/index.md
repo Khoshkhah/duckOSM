@@ -206,11 +206,11 @@ duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
 ```python
 import duckosm
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")   # as duckosm build
+db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
-r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and the ordered edge_ids
-duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
+r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
+duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
 ```
 
 Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
