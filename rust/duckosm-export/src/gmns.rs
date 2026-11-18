@@ -6,6 +6,7 @@
 //! from the road it continues, `link`, `geometry`, and the roads that a footpath runs along (`link_along`, `link.along_*`,
 //! `link.parent_link_id`), and the lanes (without their geometry yet) and curbs.
 
+use crate::gmns_lanes as lanes;
 use crate::shapely::{self as shp, P};
 use crate::Result;
 use duckdb::Connection;
@@ -720,6 +721,9 @@ struct LaneRow {
     bus: bool,
     bike: Option<bool>,
     way_end: bool,
+    wkt: Option<String>,
+    target: i64,
+    name: Option<String>,
 }
 
 /// The rules of the lanes of one edge from its tags (`pick`, `bike_extra`, `bike_left`, `is_foot`, `lane_widths`, `_rule_lanes`).
@@ -839,6 +843,335 @@ impl Rules<'_> {
     }
 }
 
+/// The geometry of the lanes, as `_build_lane_curb` places them: the runs of pieces, the paired carriageways, the tapers at a
+/// joint and the carriageways that leave a two-way road in OSM's V.
+struct LaneGeo {
+    side_sign: f64,
+    info: HashMap<i64, lanes::Info>,
+    w_of: HashMap<i64, Vec<f64>>,
+    opp_total: HashMap<i64, f64>,
+    runs: Vec<Vec<i64>>,
+    wh: HashMap<i64, (usize, usize)>,
+    merged: HashMap<usize, String>,
+    gaps: HashMap<i64, f64>,
+    run_profiles: HashMap<usize, Vec<(f64, f64)>>,
+    run_place: Vec<Option<f64>>,
+    taper: HashMap<i64, [f64; 4]>,
+    vfix: HashMap<i64, (i64, bool)>,
+    run_geoms: HashMap<i64, Vec<Vec<P>>>,
+    wkt_of: HashMap<i64, Option<String>>,
+}
+
+/// The points of a `LINESTRING (...)` text, as Python's `_w.loads(wkt).coords`.
+fn pts_of(w: &str) -> Vec<P> {
+    shp::wkt_points(w)
+}
+
+impl LaneGeo {
+    fn new(c: &Ctx, rows: &[LaneRow], prof: &HashMap<i64, Vec<(i64, String, Option<f64>, Option<String>)>>, rules: &Rules, contra: &HashSet<i64>, bus_of: &HashMap<i64, &str>) -> Result<LaneGeo> {
+        let side_sign = if rules.drive_side == "right" { -1.0 } else { 1.0 };
+        let order: Vec<i64> = rows.iter().map(|r| r.edge_id).collect();
+        let mut info: HashMap<i64, lanes::Info> = HashMap::new();
+        let (mut w_of, mut place_of) = (HashMap::new(), HashMap::new());
+        let tags_of: HashMap<i64, &Tags> = rows.iter().map(|r| (r.edge_id, &r.tags)).collect();
+        for r in rows {
+            let oneway = r.oneway && !contra.contains(&r.osm_id);
+            let w_each: Vec<f64> = if !prof.is_empty() {
+                prof[&r.edge_id].iter().map(|x| x.2.unwrap_or(0.0)).collect()
+            } else {
+                rules.lane_widths(&r.tags, r.lanes, r.is_rev, bus_of.contains_key(&r.edge_id), oneway).2
+            };
+            let foot = rules.is_foot(&r.tags);
+            let place = if oneway || foot || side_sign < 0.0 { lanes::placement(rules.pick(&r.tags, "placement", r.is_rev), &w_each) } else { None };
+            place_of.insert(r.edge_id, place);
+            let (h0, h1) = r.wkt.as_deref().map(|w| lanes::headings(&pts_of(w))).unwrap_or((0.0, 0.0));
+            info.insert(
+                r.edge_id,
+                lanes::Info {
+                    osm_id: r.osm_id,
+                    is_rev: r.is_rev,
+                    source: r.source,
+                    target: r.target,
+                    oneway: oneway || foot,
+                    widths: w_each.clone(),
+                    name: r.name.clone(),
+                    roundabout: tag(&r.tags, "junction") == Some("roundabout"),
+                    h0,
+                    h1,
+                    opp: -1.0,
+                },
+            );
+            w_of.insert(r.edge_id, w_each);
+        }
+        // a two-way road's line is the middle of both directions: the other direction's total width
+        let mut by_ends: HashMap<(i64, i64, i64), i64> = HashMap::new();
+        for e in &order {
+            let v = &info[e];
+            by_ends.insert((v.osm_id, v.source, v.target), *e);
+        }
+        let mut opp_total = HashMap::new();
+        for e in &order {
+            let v = &info[e];
+            if let Some(o) = by_ends.get(&(v.osm_id, v.target, v.source)) {
+                opp_total.insert(*e, w_of[o].iter().sum::<f64>());
+            }
+        }
+        for e in &order {
+            let t = shp::py_round(opp_total.get(e).copied().unwrap_or(-1.0), 2);
+            info.get_mut(e).unwrap().opp = t;
+        }
+        let (runs, wh, closed) = lanes::chain_runs(&order, &info);
+        let wkt_of: HashMap<i64, Option<String>> = rows.iter().map(|r| (r.edge_id, r.wkt.clone())).collect();
+        let mut merged: HashMap<usize, String> = HashMap::new();
+        'runs: for (i, run) in runs.iter().enumerate() {
+            let mut cs: Vec<String> = Vec::new();
+            for e in run {
+                let Some(w) = wkt_of[e].as_deref().filter(|w| !w.is_empty()) else { continue 'runs };
+                let (Some(a), Some(b)) = (w.find('('), w.rfind(')')) else { continue 'runs };
+                let c: Vec<String> = w[a + 1..b].split(',').map(|p| p.trim().to_string()).collect();
+                if !cs.is_empty() && c[0] == *cs.last().unwrap() {
+                    cs.extend_from_slice(&c[1..]);
+                } else {
+                    cs.extend(c);
+                }
+            }
+            merged.insert(i, format!("LINESTRING ({})", cs.join(", ")));
+        }
+        // the paired carriageways, one level at a time
+        let mut run_profiles = HashMap::new();
+        let mut run_gaps: HashMap<usize, f64> = HashMap::new();
+        let cand: Vec<(usize, Vec<P>, f64)> = runs
+            .iter()
+            .enumerate()
+            .filter(|(i, run)| merged.contains_key(i) && info[&run[0]].oneway && !rules.is_foot(tags_of[&run[0]]))
+            .map(|(i, run)| (i, pts_of(&merged[&i]), w_of[&run[0]].iter().sum::<f64>() / 2.0))
+            .collect();
+        let lv_of: HashMap<usize, i64> = cand
+            .iter()
+            .map(|(i, _, _)| {
+                let t = tags_of[&runs[*i][0]];
+                let g = |k: &str| t.get(k).cloned();
+                (*i, level(&g("layer"), &g("bridge"), &g("tunnel")))
+            })
+            .collect();
+        let mut lvs: Vec<i64> = lv_of.values().copied().collect::<HashSet<_>>().into_iter().collect();
+        lvs.sort();
+        for lv in lvs {
+            let group: Vec<(usize, Vec<P>, f64)> = cand.iter().filter(|x| lv_of[&x.0] == lv).cloned().collect();
+            run_gaps.extend(lanes::paired_gaps(&group, side_sign, &mut run_profiles));
+        }
+        let mut gaps = HashMap::new();
+        for (i, run) in runs.iter().enumerate() {
+            if let Some(g) = run_gaps.get(&i) {
+                for e in run {
+                    gaps.insert(*e, *g);
+                }
+            }
+        }
+        if !gaps.is_empty() {
+            eprintln!("GMNS[{}]: {} one-way edges placed with their opposite carriageway", rules.mode, gaps.len());
+        }
+        let run_place: Vec<Option<f64>> = runs.iter().map(|run| run.iter().find_map(|e| place_of[e])).collect();
+        let mut g = LaneGeo {
+            side_sign,
+            info,
+            w_of,
+            opp_total,
+            runs,
+            wh,
+            merged,
+            gaps,
+            run_profiles,
+            run_place,
+            taper: HashMap::new(),
+            vfix: HashMap::new(),
+            run_geoms: HashMap::new(),
+            wkt_of,
+        };
+        // a two-way road's centring changes over a taper at a plain joint
+        let len_of: HashMap<i64, f64> = rows.iter().map(|r| (r.edge_id, r.length_m.unwrap_or(0.0))).collect();
+        let (mut at_src, mut at_tgt): (HashMap<i64, Vec<i64>>, HashMap<i64, Vec<i64>>) = (HashMap::new(), HashMap::new());
+        let mut roads_at: HashMap<i64, HashSet<i64>> = HashMap::new();
+        for e in &order {
+            let v = &g.info[e];
+            at_src.entry(v.source).or_default().push(*e);
+            at_tgt.entry(v.target).or_default().push(*e);
+            roads_at.entry(v.source).or_default().insert(v.osm_id);
+            roads_at.entry(v.target).or_default().insert(v.osm_id);
+        }
+        for e in &order {
+            let Some(ce) = g.centring(*e) else { continue };
+            let v = g.info[e].clone();
+            let on: Vec<i64> = at_src
+                .get(&v.target)
+                .map(|fs| {
+                    fs.iter()
+                        .copied()
+                        .filter(|f| *f != *e && g.info[f].target != v.source && g.centring(*f).is_some() && (lanes::pymod(g.info[f].h0 - v.h1 + 180.0, 360.0) - 180.0).abs() < 30.0)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if on.len() != 1 || roads_at[&v.target] != HashSet::from([v.osm_id, g.info[&on[0]].osm_id]) {
+                continue;
+            }
+            let f = on[0];
+            let ds = g.centring(f).unwrap() - ce;
+            if ds.abs() < 0.05 {
+                continue;
+            }
+            let half_l = ds.abs() * lanes::LANE_TAPER_PER_M / 2.0;
+            let te = g.taper.entry(*e).or_insert([0.0; 4]);
+            te[2] = ds / 2.0;
+            te[3] = half_l.min(len_of[e] / 2.0);
+            let tf = g.taper.entry(f).or_insert([0.0; 4]);
+            tf[0] = -ds / 2.0;
+            tf[1] = half_l.min(len_of[&f] / 2.0);
+        }
+        // a carriageway leaves a two-way road in OSM's V: its lanes go straight on from the two-way road's lanes
+        for e in &order {
+            if g.centring(*e).is_none() {
+                continue;
+            }
+            let v = g.info[e].clone();
+            for (at_end, node) in [(true, v.target), (false, v.source)] {
+                if roads_at[&node].len() != 3 {
+                    continue;
+                }
+                let empty = Vec::new();
+                let cands = if at_end { at_src.get(&node).unwrap_or(&empty) } else { at_tgt.get(&node).unwrap_or(&empty) };
+                let on: Vec<i64> = cands
+                    .iter()
+                    .copied()
+                    .filter(|f| {
+                        let fi = &g.info[f];
+                        let d = if at_end { fi.h0 - v.h1 } else { v.h0 - fi.h1 };
+                        fi.oneway && fi.osm_id != v.osm_id && g.w_of[f].len() == g.w_of[e].len() && lanes::pymod((d + 180.0).abs(), 360.0) - 180.0 < 30.0
+                    })
+                    .collect();
+                if on.len() != 1 {
+                    continue;
+                }
+                let third: HashSet<i64> = roads_at[&node].iter().copied().filter(|x| *x != v.osm_id && *x != g.info[&on[0]].osm_id).collect();
+                let (bl, al) = if at_end { (at_tgt.get(&node), at_src.get(&node)) } else { (at_src.get(&node), at_tgt.get(&node)) };
+                let back: Vec<i64> = bl.unwrap_or(&empty).iter().copied().filter(|x| third.contains(&g.info[x].osm_id)).collect();
+                let ahead = al.unwrap_or(&empty).iter().any(|x| third.contains(&g.info[x].osm_id));
+                if back.len() != 1 || ahead || !g.info[&back[0]].oneway {
+                    continue;
+                }
+                g.vfix.insert(on[0], (*e, at_end));
+            }
+        }
+        // the lanes of each run of two or more pieces, from the run's one offset curve
+        for (i, run) in g.runs.clone().iter().enumerate() {
+            if run.len() > 1 && g.merged.contains_key(&i) {
+                let pieces: Vec<Vec<P>> = run.iter().map(|e| pts_of(g.wkt_of[e].as_deref().unwrap_or(""))).collect();
+                if let Some(per_piece) = lanes::run_lane_wkts(&pieces, &g.offsets(run[0]), closed.contains(&i))? {
+                    for (e, l) in run.iter().zip(per_piece) {
+                        g.run_geoms.insert(*e, l);
+                    }
+                }
+            }
+        }
+        c.exec("CREATE OR REPLACE TEMP TABLE _lane_runs(link_id BIGINT, run_id BIGINT, seq BIGINT, n BIGINT, closed BOOLEAN)")?;
+        let mut app = c.con.appender("_lane_runs").map_err(|e| e.to_string())?;
+        for (e, (i, k)) in &g.wh {
+            app.append_row(duckdb::params![e, *i as i64, *k as i64, g.runs[*i].len() as i64, closed.contains(i)]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        Ok(g)
+    }
+
+    fn centring(&self, e: i64) -> Option<f64> {
+        if self.info[&e].oneway || self.gaps.contains_key(&e) || self.run_place[self.wh[&e].0].is_some() {
+            return None;
+        }
+        let total: f64 = self.w_of[&e].iter().sum();
+        Some(-self.side_sign * (total - self.opp_total.get(&e).copied().unwrap_or(total)) / 2.0)
+    }
+
+    /// `offsets`: each lane's offset from the road line (left +).
+    fn offsets(&self, e: i64) -> Vec<f64> {
+        let w_each = &self.w_of[&e];
+        let oneway = self.info[&e].oneway;
+        let total: f64 = w_each.iter().sum();
+        let half = total / 2.0;
+        let gap = self.gaps.get(&e).copied();
+        let place = self.run_place[self.wh[&e].0];
+        let centre = -self.side_sign * (total - self.opp_total.get(&e).copied().unwrap_or(total)) / 2.0;
+        let mut run = 0.0;
+        let mut out = Vec::new();
+        for &w in w_each {
+            let d = if self.side_sign < 0.0 { run + w / 2.0 } else { total - run - w / 2.0 };
+            out.push(if let Some(p) = place {
+                p - (run + w / 2.0)
+            } else if oneway && gap.is_some() {
+                self.side_sign * (d - gap.unwrap() / 2.0)
+            } else if oneway {
+                half - (run + w / 2.0)
+            } else {
+                self.side_sign * d + centre
+            });
+            run += w;
+        }
+        out
+    }
+
+    /// The geometry of lane `i` of the edge `r`, as WKT.
+    fn lane(&self, r: &LaneRow, i: usize) -> Result<Option<String>> {
+        let e = r.edge_id;
+        let Some(w) = r.wkt.as_deref() else { return Ok(None) };
+        let line = pts_of(w);
+        let geom: Vec<P> = match self.run_geoms.get(&e) {
+            Some(g) => g[i].clone(),
+            None => crate::lanelet2::offset_lonlat(&line, self.offsets(e)[i])?,
+        };
+        Ok(Some(match self.finish(r, i, geom.clone())? {
+            Some(g) => g,
+            None => lanes::wkt(&geom),
+        }))
+    }
+
+    /// The moves after the offset: along a varying gap, over a taper, and straight on through OSM's V. None: no move.
+    fn finish(&self, r: &LaneRow, i: usize, mut geom: Vec<P>) -> Result<Option<String>> {
+        let e = r.edge_id;
+        let ri = self.wh[&e].0;
+        let mut moved = false;
+        if let (Some(g0), Some(prof)) = (self.gaps.get(&e), self.run_profiles.get(&ri)) {
+            if self.run_place[ri].is_none() {
+                if let Some(g) = lanes::vary(&geom, &pts_of(&self.merged[&ri]), prof, *g0, self.side_sign) {
+                    geom = g;
+                    moved = true;
+                }
+            }
+        }
+        if let Some(t) = self.taper.get(&e) {
+            if let Some(g) = lanes::taper(&geom, t[0], t[1], t[2], t[3]) {
+                geom = g;
+                moved = true;
+            }
+        }
+        if let Some(&(two, leaves)) = self.vfix.get(&e) {
+            let le = crate::lanelet2::offset_lonlat(&pts_of(self.wkt_of[&two].as_deref().unwrap_or("")), self.offsets(two)[i])?;
+            let lf = pts_of(self.wkt_of[&e].as_deref().unwrap_or(""));
+            let n = le.len();
+            let (a, b) = if leaves { (le[n - 2], le[n - 1]) } else { (le[1], le[0]) };
+            let kx = lanes::kx_of(b.1);
+            let (tx, ty) = ((b.0 - a.0) * kx, b.1 - a.1);
+            let nn = match tx.hypot(ty) {
+                0.0 => 1.0,
+                x => x,
+            };
+            let fc: Vec<P> = if leaves { lf.clone() } else { lf.iter().rev().copied().collect() };
+            let seg = ((fc[1].0 - fc[0].0) * kx * 111320.0).hypot((fc[1].1 - fc[0].1) * 111320.0);
+            if let Some(g) = lanes::straight(&geom, b, (tx / nn, ty / nn), seg.max(5.0).min(40.0), leaves) {
+                geom = g;
+                moved = true;
+            }
+        }
+        Ok(moved.then(|| lanes::wkt(&geom)))
+    }
+}
+
 /// `_build_lane_curb`: the lanes of each link (from `driving.lane_profile` in driving, else from the tags) and `curb_seg` from the
 /// parking tags. The lane geometry is not ported yet: `geom` is NULL.
 fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, drive_side: &str) -> Result<()> {
@@ -850,7 +1183,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     for src in ["_edges_car", "_edges_bus"] {
         let sql = format!(
             "SELECT e.edge_id, e.is_reverse::BOOLEAN, COALESCE(li.lanes, e.lanes)::BIGINT, e.length_m::DOUBLE, e.source, ({oneway_sel})::BOOLEAN AS oneway,
-             {tagcol} AS tags, e.osm_id, e._bus, e._bike, ({endcol})::BOOLEAN AS way_end
+             {tagcol} AS tags, e.osm_id, e._bus, e._bike, ({endcol})::BOOLEAN AS way_end, ST_AsText(e.geometry), e.target, e.name
              FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id"
         );
         let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
@@ -868,6 +1201,9 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
                     bus: r.get::<_, Option<bool>>(8)?.unwrap_or(false),
                     bike: r.get(9)?,
                     way_end: r.get::<_, Option<bool>>(10)?.unwrap_or(false),
+                    wkt: r.get(11)?,
+                    target: r.get(12)?,
+                    name: r.get(13)?,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -901,7 +1237,8 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     let car_ways: HashSet<i64> = rows.iter().filter(|r| !r.bus).map(|r| r.osm_id).collect();
     let contra: HashSet<i64> = bus_ways.intersection(&car_ways).copied().collect();
     let rules = Rules { mode, drive_side };
-    c.exec("CREATE OR REPLACE TEMP TABLE _lane_rows(lane_id VARCHAR, link_id BIGINT, lane_num BIGINT, allowed_uses VARCHAR, width DOUBLE, turn VARCHAR)")?;
+    let geo = LaneGeo::new(c, &rows, &prof, &rules, &contra, &bus_of)?;
+    c.exec("CREATE OR REPLACE TEMP TABLE _lane_rows(lane_id VARCHAR, link_id BIGINT, lane_num BIGINT, allowed_uses VARCHAR, width DOUBLE, turn VARCHAR, geom_wkt VARCHAR)")?;
     c.exec("CREATE OR REPLACE TEMP TABLE _curb_rows(curb_seg_id VARCHAR, link_id BIGINT, ref_node_id BIGINT, start_lr DOUBLE, end_lr DOUBLE, regulation VARCHAR)")?;
     {
         let mut lanes = c.con.appender("_lane_rows").map_err(|e| e.to_string())?;
@@ -912,8 +1249,9 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
                 Some(p) if !prof.is_empty() => p.clone(),
                 _ => rules.rule_lanes(r, one, &bus_of, uses),
             };
-            for (n, u, w, t) in these {
-                lanes.append_row(duckdb::params![format!("{}_{n}", r.edge_id), r.edge_id, n, u, w, t]).map_err(|e| e.to_string())?;
+            for (i, (n, u, w, t)) in these.into_iter().enumerate() {
+                let g = geo.lane(r, i)?;
+                lanes.append_row(duckdb::params![format!("{}_{n}", r.edge_id), r.edge_id, n, u, w, t, g]).map_err(|e| e.to_string())?;
             }
             for side in ["left", "right", "both"] {
                 let val = or(tag(&r.tags, &format!("parking:{side}")), tag(&r.tags, &format!("parking:lane:{side}")));
@@ -927,7 +1265,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     }
     c.exec(&format!(
         "CREATE TABLE {sch}.lane AS SELECT lane_id, link_id, lane_num, allowed_uses, NULL::VARCHAR AS r_barrier,
-           NULL::VARCHAR AS l_barrier, width, turn, NULL::GEOMETRY AS geom FROM _lane_rows;
+           NULL::VARCHAR AS l_barrier, width, turn, ST_GeomFromText(geom_wkt) AS geom FROM _lane_rows;
          CREATE TABLE {sch}.curb_seg AS SELECT curb_seg_id, link_id, ref_node_id, start_lr, end_lr, regulation, NULL::INTEGER AS width
            FROM _curb_rows;
          DROP TABLE _lane_rows; DROP TABLE _curb_rows"

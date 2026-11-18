@@ -72,9 +72,10 @@ fn simplify(pts: &[P], tol: f64) -> Vec<P> {
     pts.iter().zip(&deleted).filter(|(_, d)| !**d).map(|(p, _)| *p).collect()
 }
 
-/// GEOS `OffsetSegmentGenerator`, the left side only (as the offset curve and the line buffer use it).
+/// GEOS `OffsetSegmentGenerator`. `side`: 1 the left side, -1 the right side (a ring's right side).
 struct Gen {
     d: f64,
+    side: f64,
     quantum: f64,
     min_vertex: f64,
     pts: Vec<P>,
@@ -89,6 +90,7 @@ impl Gen {
     fn new(d: f64) -> Gen {
         Gen {
             d,
+            side: 1.0,
             quantum: FRAC_PI_2 / QUADRANT_SEGMENTS,
             min_vertex: d * CURVE_VERTEX_SNAP_DISTANCE_FACTOR,
             pts: Vec::new(),
@@ -117,7 +119,7 @@ impl Gen {
     fn init_side(&mut self, a: P, b: P) {
         self.s1 = a;
         self.s2 = b;
-        self.off1 = Gen::offset(a, b, 1.0, self.d);
+        self.off1 = Gen::offset(a, b, self.side, self.d);
     }
     fn fillet_angles(&mut self, p: P, start: f64, end: f64, direction: i32, r: f64) {
         let f = if direction == CW { -1.0 } else { 1.0 };
@@ -162,8 +164,8 @@ impl Gen {
         self.s0 = self.s1;
         self.s1 = self.s2;
         self.s2 = p;
-        self.off0 = Gen::offset(self.s0, self.s1, 1.0, self.d);
-        self.off1 = Gen::offset(self.s1, self.s2, 1.0, self.d);
+        self.off0 = Gen::offset(self.s0, self.s1, self.side, self.d);
+        self.off1 = Gen::offset(self.s1, self.s2, self.side, self.d);
         let o = orient(self.s0, self.s1, self.s2);
         let (s1, d) = (self.s1, self.d);
         let (o0, o1) = (self.off0, self.off1);
@@ -172,8 +174,8 @@ impl Gen {
             if intersection_count(self.s0, s1, s1, self.s2) >= 2 {
                 self.fillet(s1, o0.1, o1.0, CW, d);
             }
-        } else if o == CW {
-            // the outside turn (the left side)
+        } else if (o == CW && self.side > 0.0) || (o == CCW && self.side < 0.0) {
+            // the outside turn
             if dist(o0.1, o1.0) < d * OFFSET_SEGMENT_SEPARATION_FACTOR {
                 self.add(o0.1);
                 return;
@@ -269,6 +271,119 @@ pub fn buffer_ring(pts: &[P], d: f64) -> Vec<P> {
         g.pts.push(f);
     }
     g.pts
+}
+
+/// GEOS `computeRingBufferCurve`: the curve of one side of a closed ring (`side` 1 left, -1 right), closed.
+fn ring_curve(pts: &[P], d: f64, side: f64) -> Vec<P> {
+    let tol = if side < 0.0 { -d / SIMPLIFY_FACTOR } else { d / SIMPLIFY_FACTOR };
+    let s = simplify(pts, tol);
+    let n = s.len() - 1;
+    let mut g = Gen::new(d);
+    g.side = side;
+    g.init_side(s[n - 1], s[0]);
+    for p in &s[1..=n] {
+        g.next_segment(*p);
+    }
+    if g.pts.first() != g.pts.last() {
+        let f = g.pts[0];
+        g.pts.push(f);
+    }
+    g.pts
+}
+
+/// GEOS `isRingFullyEroded`.
+fn fully_eroded(pts: &[P], is_hole: bool, d: f64) -> bool {
+    let n = pts.len();
+    if n < 4 {
+        return true;
+    }
+    if n == 4 {
+        let (p0, p1, p2) = (pts[0], pts[1], pts[2]);
+        let (l0, l1, l2) = (dist(p1, p2), dist(p0, p2), dist(p0, p1));
+        let c = l0 + l1 + l2;
+        let centre = ((l0 * p0.0 + l1 * p1.0 + l2 * p2.0) / c, (l0 * p0.1 + l1 * p1.1 + l2 * p2.1) / c);
+        return point_to_segment(centre, p0, p1) < d.abs();
+    }
+    let (minx, miny, maxx, maxy) = pts.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |e, p| (e.0.min(p.0), e.1.min(p.1), e.2.max(p.0), e.3.max(p.1)));
+    let erodable = (is_hole && d > 0.0) || (!is_hole && d < 0.0);
+    erodable && 2.0 * d.abs() > (maxy - miny).min(maxx - minx)
+}
+
+/// GEOS `Orientation::isCCWArea`.
+fn is_ccw_area(pts: &[P]) -> bool {
+    let n = pts.len();
+    if n < 3 {
+        return false;
+    }
+    let x0 = pts[0].0;
+    (1..n - 1).map(|i| (pts[i].0 - x0) * (pts[i - 1].1 - pts[i + 1].1)).sum::<f64>() / 2.0 < 0.0
+}
+
+/// The buffer of the polygon whose shell is `shell` (closed, no holes) by `d` (negative: inwards), as shapely's
+/// `Polygon(shell).buffer(d)` (GEOS `BufferCurveSetBuilder::addPolygon`, round joins, 16 segments for a quarter circle).
+pub fn polygon_buffer(shell: &[P], d: f64) -> Result<Vec<crate::geos::Polygon>, String> {
+    let (od, mut side) = if d < 0.0 { (-d, -1.0) } else { (d, 1.0) };
+    if d < 0.0 && fully_eroded(shell, false, d) {
+        return Ok(vec![]);
+    }
+    let mut clean: Vec<P> = Vec::with_capacity(shell.len());
+    for p in shell {
+        if p.0.is_finite() && p.1.is_finite() && clean.last() != Some(p) {
+            clean.push(*p);
+        }
+    }
+    if d <= 0.0 && clean.len() < 3 {
+        return Ok(vec![]);
+    }
+    let mut delta = -1;
+    if clean.len() >= 4 && is_ccw_area(&clean) {
+        delta = 1;
+        side = -side;
+    }
+    let curve = ring_curve(&clean, od, side);
+    if ring_curve_inverted(&clean, od, &curve) {
+        return Ok(vec![]);
+    }
+    crate::geos::buffer_polygons(&[(curve, delta)])
+}
+
+/// GEOS `BufferCurveSetBuilder::addLinearRingSides` for a closed line: the curve of each side that the buffer has, with its
+/// depth delta (left: -1, right: +1).
+fn ring_sides(pts: &[P], d: f64) -> Vec<(Vec<P>, i32)> {
+    let eroded = fully_eroded(pts, true, d);
+    let hole = !eroded;
+    let ccw = is_ccw_area(pts);
+    let mut out = Vec::new();
+    for (side, delta, want) in [(1.0, -1, !ccw || hole), (-1.0, 1, ccw || hole)] {
+        if !want {
+            continue;
+        }
+        let curve = ring_curve(pts, d, side);
+        if !ring_curve_inverted(pts, d, &curve) {
+            out.push((curve, delta));
+        }
+    }
+    out
+}
+
+/// GEOS `isRingCurveInverted`: a small ring whose curve has no point at the buffer distance.
+fn ring_curve_inverted(input: &[P], d: f64, curve: &[P]) -> bool {
+    if d == 0.0 || input.len() <= 3 || input.len() >= 9 || curve.len() > 4 * input.len() {
+        return false;
+    }
+    let tol = 0.99 * d.abs();
+    let to_ring = |p: P| input.windows(2).map(|w| point_to_segment(p, w[0], w[1])).fold(dist(p, input[0]), f64::min);
+    for i in 0..curve.len() {
+        let v = curve[i];
+        if to_ring(v) > tol {
+            return false;
+        }
+        let nx = curve[if i < curve.len() - 1 { i + 1 } else { 0 }];
+        if to_ring(((v.0 + nx.0) / 2.0, (v.1 + nx.1) / 2.0)) > tol {
+            return false;
+        }
+    }
+    true
 }
 
 const MATCH_DISTANCE_FACTOR: f64 = 10000.0;
@@ -386,10 +501,13 @@ pub fn offset_curve(pts: &[P], d: f64) -> Result<Vec<Vec<P>>, String> {
     if raw.is_empty() {
         return Ok(vec![]);
     }
-    if clean.first() == clean.last() {
-        return Err("a closed line (GEOS buffers both sides of the ring: not ported)".into());
-    }
-    let polys = crate::geos::buffer_polygons(&buffer_ring(&clean, d.abs()))?;
+    // a closed line (GEOS's CoordinateSequence::isRing): the buffer of both sides of the ring
+    let curves = if clean.len() >= 4 && clean.first() == clean.last() {
+        ring_sides(&clean, d.abs())
+    } else {
+        vec![(buffer_ring(&clean, d.abs()), -1)]
+    };
+    let polys = crate::geos::buffer_polygons(&curves)?;
     // extractMaxAreaPolygon (the first of the largest)
     let mut best: Option<(f64, &crate::geos::Polygon)> = None;
     for p in &polys {

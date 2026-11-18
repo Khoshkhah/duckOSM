@@ -90,12 +90,33 @@ The golden file `tests/data/exports/monaco_gmns_columns.tsv` has one line for ea
 compares each column of each table that the Rust export makes; `GMNS_PENDING` lists the columns that a later step changes.
 The command `duckosm-rust gmns` comes when all the steps are ported.
 
+### How the lane geometry is checked (Kaveh, 2026-11-18)
+
+Python's lane geometry is not a reference: its result changed from run to run. At a round corner the joint of two pieces is
+the centre of the fillet arc, so every arc point is the same distance from it (to 1e-15 m), and GEOS's `project` picked one
+from the last bit of numpy's `lstsq` (OpenBLAS threads change that bit). Both exports now cut a run at the middle of the tied
+arc, on the corner's bisector (`_project_tol` in `gmns.py`, `shapely::project_tol` in Rust).
+
+So the computed lane geometry (`lane.geom`, and the lane geometry of later steps) is checked by its properties, not by
+equality with Python:
+
+- each lane line is at its offset from the link's line within 1 mm, except near the joins, the tapers and the varying gaps;
+- no lane crosses itself, and the lanes of a link do not cross each other;
+- the number of lanes agrees with `link.lanes` (`gmns_check`);
+- the lane ends meet the movements and connectors at the nodes within 1 mm (when those steps are ported);
+- two runs give the same geometry.
+
+The golden file `tests/data/exports/monaco_gmns_lanes.tsv` holds only a small, stable summary that the Rust export makes:
+the counts, the total lengths to 1 mm and the results of the checks. The other columns (ids, attributes, counts, the
+geometry copied from the source db) still compare with Python's `monaco_gmns_columns.tsv`, where Python is deterministic.
+
 | Step | State |
 |---|---|
 | `config`, `use_definition`, `use_group`, `node`, the inherited lane counts, `link`, `geometry` | Done: 176 columns equal Python on Monaco. |
 | The roads a footpath runs along (`link_along`, `link.along_*`, `link.parent_link_id`) | Done: equal on Monaco. shapely's linear referencing, line distance and the order of its `STRtree` (with libstdc++'s `std::sort`, for equal envelopes) are in `src/shapely.rs`: a tie between two roads goes to the first in that order, as in Python. |
 | Lanes (`lane` without `geom`) and `curb_seg` | Done: equal on Monaco. The lanes of driving come from `driving.lane_profile`; an older db without it, and walking and cycling, use the tag rules (`_rule_lanes`). |
-| Lane geometry, walking frame, movements | Not started. |
+| Lane geometry (`lane.geom`) | Done: checked by its properties (below). On Monaco Rust and the fixed Python agree within 1 mm on every lane. The checks find 7 lanes that cross themselves (Monaco: driving 4, cycling 3) and 2 pairs of crossing lanes of one cycling link: the same in Python, open. |
+| Walking frame (`--walk-frame`, off by default), movements | Not started. |
 | `gmns_sumo` (netconvert), lanes that meet, crossings, signals, `location` (with GTFS), signs, node types, `zone` | Not started. Python's cycling lane geometry is not the same on two runs: to look at before the lane step. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
