@@ -26,6 +26,11 @@ def _tables(con, db):
     return {f"{s}.{t}" for s, t in con.execute(q).fetchall()}
 
 
+def _sel(col):
+    name, typ = col
+    return f"ST_AsText({name})" if typ.startswith("GEOMETRY") else f'"{name}"'
+
+
 def _rows(con, db, table):
     desc = con.execute(f"DESCRIBE {db}.{table}").fetchall()
     cols = [(r[0], r[1]) for r in desc]
@@ -53,4 +58,11 @@ def test_rust_build_equals_python_build(tmp_path, monkeypatch):
             diffs.append(f"{t}: columns differ: {sorted(set(pc) ^ set(rc))}")
         elif pr != rr:
             diffs.append(f"{t}: {len(pr)} / {len(rr)} rows, {len(set(pr) ^ set(rr))} rows differ")
+            for i, (c, _) in enumerate(pc):              # the columns that differ, with an example of each side
+                q = f'SELECT {_sel(pc[i])} FROM {{}}.{t} ORDER BY 1'
+                pv = [repr(r[0]) for r in con.execute(q.format("py")).fetchall()]
+                rv = [repr(r[0]) for r in con.execute(q.format("rs")).fetchall()]
+                if pv != rv:
+                    only_p, only_r = sorted(set(pv) - set(rv)), sorted(set(rv) - set(pv))
+                    diffs.append(f"    {c}: py {only_p[:2]} | rs {only_r[:2]}"[:600])
     assert not diffs, "\n".join(diffs)

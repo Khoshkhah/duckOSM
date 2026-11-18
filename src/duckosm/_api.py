@@ -196,3 +196,75 @@ def build_lane_graph(gmns_db, mode="driving"):
 def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
     """See :func:`duckosm.lane_routing.route_lanes`."""
     return json.loads(_rust().route_lanes(_db(gmns_db), str(from_lane), str(to_lane), mode))
+
+
+# ---- the commands: build, tiles, quack, extract, boundary, levels, init-config -----------------------------------
+# Each function runs the program duckosm (the Rust code, duckosm._rust.cli) in its own process, with the options of its
+# command: the memory goes back to the system at the end, and the global thread pool of a command starts new each time.
+
+def _run(*args):
+    """Run ``duckosm ARGS`` and give its standard output. A failure raises RuntimeError with the message of the command."""
+    import subprocess
+    import sys
+    cmd = [sys.executable, "-m", "duckosm", *(str(a) for a in args if a is not None)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"duckosm {args[0]}: {(r.stderr or r.stdout).strip()}")
+    return r.stdout
+
+
+def _opt(flag, value):
+    """``[flag, value]``, or nothing when ``value`` is None."""
+    return [] if value is None else [flag, value]
+
+
+def _each(flag, values):
+    values = [values] if isinstance(values, str) else list(values or [])
+    return [x for v in values for x in (flag, v)]
+
+
+def quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None,
+          tile_zoom=None):
+    """``duckosm quack``: the features table of QuackOSM, or with ``gdal=True`` the five layers of GDAL's OSM driver. Returns
+    the paths of the files that it wrote."""
+    formats = [formats] if isinstance(formats, str) else formats
+    _run("quack", pbf, "-o", out, "--name", name, *_opt("--format", formats and ",".join(formats)),
+         "--gdal" if gdal else None, *_opt("--fixes", fixes), *_opt("--threads", threads), None if sort else "--no-sort",
+         *_opt("--tiles", tiles), *_opt("--tile-zoom", tile_zoom))
+    out = Path(out)
+    return sorted(out.glob(f"{name}_gdal*" if gdal else f"{name}_quack.*"))
+
+
+def tiles(region=None, *, boundary=None, out=None, config=None, zoom=8, memory="2G", jobs=None, tile_threads=2,
+          keep_tiles=False, build_args=()):
+    """``duckosm tiles``: build a large area by tiles. ``build_args``: the build options of each tile (after ``--``).
+    Returns the output folder."""
+    _run("tiles", region, *_opt("--boundary", boundary), *_opt("-o", out), *_opt("--config", config),
+                    "--zoom", zoom, "--memory", memory, *_opt("--jobs", jobs), "--tile-threads", tile_threads,
+                    "--keep-tiles" if keep_tiles else None, *(["--", *build_args] if build_args else []))
+    if out is None:                    # the output_path of the config
+        import yaml
+        out = yaml.safe_load(Path(config).read_text()).get("output_path", ".")
+    return Path(out)
+
+
+def extract(source, db, *, name=None, osm_id=None, boundary=None):
+    """``duckosm extract``: cut one area (give one of ``name``, ``osm_id`` and ``boundary``) out of a built database into
+    the new database ``db``. Returns its path."""
+    _run("extract", "--source", source, "--db", db, *_opt("--name", name), *_opt("--osm-id", osm_id),
+         *_opt("--boundary", boundary))
+    return Path(db)
+
+
+def boundary(name=None, *, pbf=None, osm_id=None, offline=False, out=None):
+    """``duckosm boundary``: find the boundary of an area by name or OSM id and write it as GeoJSON. Returns its path."""
+    text = _run("boundary", name, *_opt("--pbf", pbf), *_opt("--osm-id", osm_id), "--offline" if offline else None,
+                *_opt("-o", out))
+    # the first line is "wrote <file>: ..."
+    return Path(out) if out is not None else Path(text.split("\n", 1)[0].removeprefix("wrote ").split(": ", 1)[0])
+
+
+def init_config(path="duckosm.yaml", *, force=False):
+    """``duckosm init-config``: write the commented config template. Returns its path."""
+    _run("init-config", path, "--force" if force else None)
+    return Path(path)
