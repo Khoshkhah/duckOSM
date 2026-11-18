@@ -316,6 +316,11 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   1.6 GB of memory, 11.3 GB against 15.6 GB of files. The files of the tiles of the browser are Snappy frames now (France: about
   30 GB of rows without them).
 
+- **quack --gdal by tiles: 0.9 GB on France, and no stop** (`docs/rust/quack.md`, "GDAL layers"). Each tile sends its rows at
+  once (a group of four tiles kept 8.8 GB of rows), and the writer encodes on a pool of its own (on the engine's pool, a run of
+  France stopped: the writer and the relations waited for each other). France: 3 min 37 s and 0.9 GB, against 5.0 GB before
+  and 1.6 GB for `ogr2ogr`. `duckosm-build/tests/quack_gdal_full.rs` runs Monaco with full channels.
+
 ## 0.7.0 (2026-11-06)
 
 The Rust engine is the default and is in the wheel (wheels for 5 systems). `duckosm edit` opens the fixes editor on a page on your computer. The fixes editor shows a box for an object that is already in your changes.
