@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- **`duckosm-rust quack --gdal`** (`docs/rust/quack.md`, "GDAL layers"): the five layers of GDAL's OSM driver (`points`,
-  `lines`, `multilinestrings`, `multipolygons`, `other_relations`, GDAL's default `osmconf.ini`), made by the quack engine in one
-  pass, as a GeoPackage (default) or one GeoParquet file for each layer (`-f geoparquet`), also by tiles (`--tile-zoom`). On
-  Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
-  on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
+- **The Rust router holds less for a large area** (France on a Mac mini, `docs/guides/route.md`, "Large areas"). The graph is
+  flat arrays of arcs in both directions (12 bytes for each turn), the searches keep dense labels, and a trip across modes
+  reads only the modes of `--modes` and makes its indexes one time. France driving (25.9 million edges): the route Paris to
+  Marseille took 7.0 s with a peak of 8.7 GB, now 3.7 s and 6.4 GB. Île-de-France, Versailles to Bastille on foot and by car:
+  2.6 GB with the two modes, 4.4 GB with all. The routes are the same as before (and as Python's).
 
 - **`duckosm-rust elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
   `duckosm elevation` (`--dem`, `--source`, `--mode`, `--nodata-fill`, `--suffix`, `--product`, `--vertical-datum`, `--license`,
@@ -287,6 +287,12 @@ For a host that runs the fixes editor (duckOSM Studio, `duckosm edit`). Each ent
   are red, the roads that leave a junction are green and the road under the pointer in the Turn list is dark, on the road's own fill
   at the road's width. Without it, the editor's own line layers stay. `duckosm edit` gives the hook. The roadstyle pin of
   `duckosm-edit` moves to `e1b0617a` (roadstyle #58, #59, #60).
+
+- **`duckosm-rust quack --gdal`** (`docs/rust/quack.md`, "GDAL layers"): the five layers of GDAL's OSM driver (`points`,
+  `lines`, `multilinestrings`, `multipolygons`, `other_relations`, GDAL's default `osmconf.ini`), made by the quack engine in one
+  pass, as a GeoPackage (default) or one GeoParquet file for each layer (`-f geoparquet`), also by tiles (`--tile-zoom`). On
+  Monaco, each layer equals `ogr2ogr -f GPKG` of GDAL 3.13.3 row by row (`duckosm-build/tests/quack_gdal_monaco.rs`). Kentucky
+  on the Mac mini: 4.2 s and 0.25 GB against 8.9 s and 0.44 GB for `ogr2ogr`.
 
 ## 0.7.0 (2026-11-06)
 
