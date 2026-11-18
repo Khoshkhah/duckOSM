@@ -8,7 +8,7 @@ use duckosm_core::gdal::{columns, values, Value};
 use duckosm_core::quack::{self, Feature, TileSize};
 #[cfg(feature = "gpkg")]
 use duckosm_core::spill::Codec;
-use std::io::BufWriter;
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// The numbers of rows of the layers (index: the layer, 1 to 5) and the files.
@@ -18,98 +18,171 @@ pub struct GdalCounts {
 }
 
 /// Make GDAL's layers of `pbf` into the GeoPackage `gpkg` and the GeoParquet files `<parquet>_<layer>.parquet`
-/// (either or both). `tiles`: tile by tile, as quack by tiles. A writer thread writes the rows while the engine makes
-/// them; the parts of the relations by tiles wait in `Parts` until the engine is done.
+/// (either or both). `tiles`: tile by tile, as quack by tiles.
 pub fn quack_gdal(pbf: &Path, gpkg: Option<&Path>, parquet: Option<&Path>, tiles: Option<TileSize>) -> Result<GdalCounts, String> {
     let open = || {
         let f = duckosm_core::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
         Ok(std::io::BufReader::with_capacity(1 << 20, f))
     };
-    let mut files = Vec::new();
-    // the GeoPackage is made on the writer thread (its temporary files belong to that thread)
-    #[cfg(feature = "gpkg")]
-    let gpkg_path = gpkg.map(|p| {
-        files.push(p.to_path_buf());
-        p.to_path_buf()
-    });
-    #[cfg(not(feature = "gpkg"))]
-    if let Some(p) = gpkg {
-        return Err(format!("{}: the GeoPackage output needs the cargo feature \"gpkg\"", p.display()));
-    }
+    let mut files: Vec<PathBuf> = gpkg.iter().map(|p| p.to_path_buf()).collect();
     let parquet = match parquet {
         Some(base) => {
             let mut w = Vec::new();
             for layer in 1..=5u8 {
                 let path = PathBuf::from(format!("{}_{}.parquet", base.display(), gdal::layer_name(layer)));
                 let f = std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                w.push(duckosm_parquet::gdal::GdalWriter::new(layer, BufWriter::new(f))?);
+                w.push(BufWriter::new(f));
                 files.push(path);
             }
             Some(w)
         }
         None => None,
     };
-    let rows = std::thread::scope(|scope| -> Result<[usize; 6], String> {
-        // one batch waits for the writer: with 8, the waiting rows were 200 MB of the memory on Kentucky
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(1);
-        let writer = scope.spawn(move || -> Result<[usize; 6], String> {
-            let mut out = Out {
-                #[cfg(feature = "gpkg")]
-                gpkg: None,
-                parquet,
-                rows: [0; 6],
-            };
-            #[cfg(feature = "gpkg")]
-            if let Some(p) = gpkg_path {
-                out.gpkg = Some(Gpkg::new(&p)?);
-            }
-            for batch in rx {
-                out.write(batch)?;
-            }
-            out.close()
-        });
-        let stopped = || "quack --gdal: the writer stopped".to_string();
-        let mut parts = Parts::new()?;
-        let made = (|| -> Result<(), String> {
-            let mut send = |rows: Vec<Feature>| -> Result<(), String> {
-                let (part, whole): (Vec<Feature>, Vec<Feature>) = rows.into_iter().partition(|f| f.part.is_some());
-                part.iter().try_for_each(|f| parts.push(f))?;
-                tx.send(whole).map_err(|_| stopped())
-            };
-            match tiles {
-                None => quack::gdal_features(open, quack::BUDGET, &mut send)?,
-                Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, &mut send)?,
-            };
-            let mut batch = Vec::new();
-            parts.rows(quack::BUDGET, |f| {
-                batch.push(f);
-                if batch.len() >= 10_000 {
-                    tx.send(std::mem::take(&mut batch)).map_err(|_| stopped())?;
-                }
-                Ok(())
-            })?;
-            tx.send(batch).map_err(|_| stopped())?;
-            duckosm_core::util::step("quack --gdal: the relations of the tiles");
-            Ok(())
-        })();
-        drop(tx);
-        // the error of the writer explains a stop of the engine
-        let written = writer.join().unwrap_or_else(|_| Err("quack --gdal: the writer stopped (panic)".into()));
-        made.and(written)
+    let rows = write_layers(gpkg, parquet, |send| {
+        match tiles {
+            None => quack::gdal_features(open, quack::BUDGET, send)?,
+            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, send)?,
+        };
+        Ok(())
     })?;
     duckosm_core::util::step("quack --gdal: the files");
     Ok(GdalCounts { rows, files })
 }
 
+/// The rows of GDAL's layers of one tile alone (a worker of the browser for each tile, as `quack_tile_to`), from the file
+/// of the tile that `open` opens (a file of the tile cut), to `out` as rows of `gdal::put_row` (a u32 of the length before
+/// each row): only the rows that the tile owns. [`quack_gdal_join_to`] joins the files of all tiles. Gives the rows of
+/// each layer (the parts of the relations in their layer).
+pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
+    open: impl Fn() -> Result<R, String>,
+    tile: duckosm_core::tiles::Tile,
+    mut out: W,
+) -> Result<[usize; 6], String> {
+    let owner = quack::Owner { tile, relations: None };
+    let (mut n, mut b) = ([0usize; 6], Vec::new());
+    quack::gdal_features_owned(open, quack::BUDGET, &owner, |rows| {
+        for f in rows.iter().filter(|f| f.owner) {
+            n[f.layer as usize] += 1;
+            b.clear();
+            gdal::put_row(f, &mut b);
+            out.write_all(&(b.len() as u32).to_le_bytes()).and_then(|_| out.write_all(&b)).map_err(|e| format!("quack --gdal: the file of the tile: {e}"))?;
+        }
+        Ok(())
+    })?;
+    out.flush().map_err(|e| format!("quack --gdal: the file of the tile: {e}"))?;
+    Ok(n)
+}
+
+/// Join the files of the tiles of [`quack_gdal_tile_to`] (`parts`) into the GeoParquet files of the five layers (`outs`,
+/// in the order of the layers) and/or the GeoPackage `gpkg`. Gives the rows of each layer.
+pub fn quack_gdal_join_to<R: Read, W: Write + Send>(parts: Vec<R>, gpkg: Option<&Path>, outs: Option<Vec<W>>) -> Result<[usize; 6], String> {
+    write_layers(gpkg, outs, |send| {
+        for r in parts {
+            // a buffer: in the browser, each read of a part is a read of its file (two for each row took 14 s on Monaco)
+            let mut r = std::io::BufReader::with_capacity(1 << 20, r);
+            let mut batch = Vec::new();
+            let mut len = [0u8; 4];
+            loop {
+                match r.read_exact(&mut len) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    Err(e) => return Err(format!("quack --gdal: the file of a tile: {e}")),
+                }
+                let mut b = vec![0u8; u32::from_le_bytes(len) as usize];
+                r.read_exact(&mut b).map_err(|e| format!("quack --gdal: the file of a tile: {e}"))?;
+                batch.push(gdal::get_row(&mut &b[..]));
+                if batch.len() >= 20_000 {
+                    send(std::mem::take(&mut batch))?;
+                }
+            }
+            send(batch)?;
+        }
+        Ok(())
+    })
+}
+
+/// Write the rows that `produce` gives (to its `send`) into the GeoPackage `gpkg` and the GeoParquet files of the five
+/// layers `parquet` (either or both). Natively, a writer thread writes while `produce` makes the rows; in the browser this
+/// thread does both. The parts of the relations wait in `Parts` until `produce` is done. Gives the rows of each layer.
+pub fn write_layers<W: Write + Send>(
+    gpkg: Option<&Path>,
+    parquet: Option<Vec<W>>,
+    produce: impl FnOnce(&mut dyn FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String>,
+) -> Result<[usize; 6], String> {
+    #[cfg(not(feature = "gpkg"))]
+    if let Some(p) = gpkg {
+        return Err(format!("{}: the GeoPackage output needs the cargo feature \"gpkg\"", p.display()));
+    }
+    let make_out = move || -> Result<Out<W>, String> {
+        let parquet = match parquet {
+            Some(ws) => Some(ws.into_iter().zip(1..=5u8).map(|(w, layer)| duckosm_parquet::gdal::GdalWriter::new(layer, w)).collect::<Result<_, _>>()?),
+            None => None,
+        };
+        Ok(Out {
+            // the GeoPackage is made on the writer thread (its temporary files belong to that thread)
+            #[cfg(feature = "gpkg")]
+            gpkg: match gpkg {
+                Some(p) => Some(Gpkg::new(p)?),
+                None => None,
+            },
+            parquet,
+            rows: [0; 6],
+        })
+    };
+    // the rows to the writer, the parts to `Parts`; then the joined parts
+    let feed = |send: &mut dyn FnMut(Vec<Feature>) -> Result<(), String>| -> Result<(), String> {
+        let mut parts = Parts::new()?;
+        produce(&mut |rows: Vec<Feature>| {
+            let (part, whole): (Vec<Feature>, Vec<Feature>) = rows.into_iter().partition(|f| f.part.is_some());
+            part.iter().try_for_each(|f| parts.push(f))?;
+            send(whole)
+        })?;
+        let mut batch = Vec::new();
+        parts.rows(quack::BUDGET, |f| {
+            batch.push(f);
+            if batch.len() >= 10_000 {
+                send(std::mem::take(&mut batch))?;
+            }
+            Ok(())
+        })?;
+        send(batch)?;
+        duckosm_core::util::step("quack --gdal: the relations of the tiles");
+        Ok(())
+    };
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut out = make_out()?;
+        feed(&mut |rows| out.write(rows))?;
+        out.close()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::scope(|scope| -> Result<[usize; 6], String> {
+        // one batch waits for the writer: with 8, the waiting rows were 200 MB of the memory on Kentucky
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(1);
+        let writer = scope.spawn(move || -> Result<[usize; 6], String> {
+            let mut out = make_out()?;
+            for batch in rx {
+                out.write(batch)?;
+            }
+            out.close()
+        });
+        let made = feed(&mut |rows| tx.send(rows).map_err(|_| "quack --gdal: the writer stopped".to_string()));
+        drop(tx);
+        // the error of the writer explains a stop of the engine
+        let written = writer.join().unwrap_or_else(|_| Err("quack --gdal: the writer stopped (panic)".into()));
+        made.and(written)
+    })
+}
+
 /// The writers of the rows (on the writer thread).
-struct Out {
+struct Out<W: Write + Send> {
     #[cfg(feature = "gpkg")]
     gpkg: Option<Gpkg>,
-    parquet: Option<Vec<duckosm_parquet::gdal::GdalWriter<BufWriter<std::fs::File>>>>,
+    parquet: Option<Vec<duckosm_parquet::gdal::GdalWriter<W>>>,
     rows: [usize; 6],
 }
 
-impl Out {
+impl<W: Write + Send> Out<W> {
     fn write(&mut self, batch: Vec<Feature>) -> Result<(), String> {
         batch.iter().for_each(|f| self.rows[f.layer as usize] += 1);
         #[cfg(feature = "gpkg")]

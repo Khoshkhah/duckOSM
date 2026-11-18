@@ -368,6 +368,46 @@ impl crate::spill::Codec<(i64, u32, u8, RawTags, Vec<u8>)> for PartCodec {
     }
 }
 
+/// A row of quack --gdal as bytes, for the files of the tiles of the browser ([`get_row`] reads it): the layer, the place
+/// of a part (u32::MAX: a whole row), the feature id, the tags and the WKB.
+pub fn put_row(f: &Feature, o: &mut Vec<u8>) {
+    o.push(f.layer);
+    o.extend_from_slice(&f.part.unwrap_or(u32::MAX).to_le_bytes());
+    let s = |o: &mut Vec<u8>, b: &[u8]| {
+        o.extend_from_slice(&(b.len() as u32).to_le_bytes());
+        o.extend_from_slice(b);
+    };
+    s(o, f.feature_id.as_bytes());
+    o.extend_from_slice(&(f.tags.len() as u32).to_le_bytes());
+    for (k, v) in &f.tags {
+        s(o, k.as_bytes());
+        s(o, v.as_bytes());
+    }
+    s(o, &f.geometry);
+}
+
+/// The row of [`put_row`].
+pub fn get_row(b: &mut &[u8]) -> Feature {
+    fn take<'a>(b: &mut &'a [u8], n: usize) -> &'a [u8] {
+        let (x, rest) = b.split_at(n);
+        *b = rest;
+        x
+    }
+    let u32_ = |b: &mut &[u8]| u32::from_le_bytes(take(b, 4).try_into().expect("4 bytes"));
+    let bytes = |b: &mut &[u8]| {
+        let n = u32_(b) as usize;
+        take(b, n).to_vec()
+    };
+    let text = |b: &mut &[u8]| String::from_utf8_lossy(&bytes(b)).into_owned();
+    let layer = take(b, 1)[0];
+    let part = Some(u32_(b)).filter(|p| *p != u32::MAX);
+    let feature_id = text(b);
+    let tags = (0..u32_(b)).map(|_| (text(b), text(b))).collect();
+    let geometry = bytes(b);
+    let center = crate::quack::wkb_center(&geometry).unwrap_or_default();
+    Feature { feature_id, tags, geometry, center, owner: true, layer, part }
+}
+
 impl Parts {
     pub fn new() -> Result<Parts, String> {
         let store = crate::spill::temp_store();

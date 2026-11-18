@@ -2,7 +2,7 @@
 //! 3.13.3 (the golden file `tests/data/monaco_gdal.jsonl.gz`, made from that GeoPackage before the code): the same rows
 //! in each layer, with the same ids and column values, and the same geometries. The coordinates are integers of 1e-7
 //! degrees; the rings of a multipolygon are compared with no regard to their first point, their direction and their
-//! order. The whole file and the file by tiles of zoom 12.
+//! order. The whole file, the file by tiles of zoom 12, and each tile alone with the join (the browser).
 #![cfg(feature = "gpkg")]
 
 use serde_json::{json, Value};
@@ -127,12 +127,49 @@ fn ours(gpkg: &std::path::Path) -> Rows {
     rows
 }
 
-fn check(tiles: Option<duckosm_build::TileSize>) {
+/// How the GeoPackage is made: the whole file, by tiles, or each tile alone and then the join (the browser).
+enum Mode {
+    Whole,
+    Tiles,
+    TilesAlone,
+}
+
+/// The browser's way: the tile cut, each tile of zoom 12 alone (`quack_gdal_tile_to`), then the join.
+fn tiles_alone(pbf: &std::path::Path, gpkg: &std::path::Path) {
+    use duckosm_core::quack;
+    let open = || Ok(std::io::BufReader::new(std::fs::File::open(pbf).map_err(|e| e.to_string())?));
+    let tiles = quack::tiles_of_file(&open, quack::TileSize::Zoom(12)).unwrap();
+    let world = duckosm_core::boundary::Boundary::parse(quack::WORLD).unwrap();
+    let files = duckosm_core::tilecut::cut_to_store(&open, &world, &tiles, &["multipolygon", "boundary"]).unwrap();
+    let mut parts = Vec::new();
+    for (i, (tile, c)) in files.tiles.iter().enumerate() {
+        if c.nodes == 0 {
+            continue;
+        }
+        let mut out = Vec::new();
+        let open_tile = || Ok(std::io::BufReader::new(files.reader(i)));
+        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, &mut out).unwrap();
+        parts.push(std::io::Cursor::new(out));
+    }
+    assert!(parts.len() > 1, "more than one tile");
+    duckosm_build::quack_gdal::quack_gdal_join_to::<_, Vec<u8>>(parts, Some(gpkg), None).unwrap();
+}
+
+fn check(mode: Mode) {
     let pbf = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/monaco.osm.pbf");
-    let dir = std::env::temp_dir().join(format!("quack_gdal_monaco_{}_{}", std::process::id(), tiles.is_some()));
+    let name = match mode {
+        Mode::Whole => "whole",
+        Mode::Tiles => "tiles",
+        Mode::TilesAlone => "alone",
+    };
+    let dir = std::env::temp_dir().join(format!("quack_gdal_monaco_{}_{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let gpkg = dir.join("monaco_gdal.gpkg");
-    duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, tiles).unwrap();
+    match mode {
+        Mode::Whole => drop(duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, None).unwrap()),
+        Mode::Tiles => drop(duckosm_build::quack_gdal::quack_gdal(&pbf, Some(&gpkg), None, Some(duckosm_build::TileSize::Zoom(12))).unwrap()),
+        Mode::TilesAlone => tiles_alone(&pbf, &gpkg),
+    }
     let (want, got) = (golden(), ours(&gpkg));
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(want.len(), got.len(), "the number of rows");
@@ -159,10 +196,16 @@ fn check(tiles: Option<duckosm_build::TileSize>) {
 
 #[test]
 fn monaco_equals_ogr2ogr() {
-    check(None);
+    check(Mode::Whole);
 }
 
 #[test]
 fn monaco_by_tiles_equals_ogr2ogr() {
-    check(Some(duckosm_build::TileSize::Zoom(12)));
+    check(Mode::Tiles);
+}
+
+/// Each tile alone and the join (the quack page of duckOSM Studio).
+#[test]
+fn monaco_tiles_alone_equal_ogr2ogr() {
+    check(Mode::TilesAlone);
 }
