@@ -60,8 +60,9 @@ impl Shape {
         b
     }
 
-    /// The shape with Douglas-Peucker simplification at `tol` world units (no change at 0). A line keeps its two ends; a
-    /// ring that has less than 4 points after it is removed, and a polygon whose shell is removed is removed.
+    /// The shape with Douglas-Peucker simplification at `tol` world units (no change at 0). A line keeps its two ends. A
+    /// hole that has less than 4 points after it is removed; a shell keeps its points then (a small polygon stays on the
+    /// map, as in Tilemaker; the quantization to the tile grid removes a polygon of no area).
     pub fn simplify(&self, tol: f64) -> Option<Shape> {
         if tol <= 0.0 {
             return Some(self.clone());
@@ -76,9 +77,10 @@ impl Shape {
                 let ps: Vec<Vec<Vec<P>>> = ps
                     .iter()
                     .filter_map(|rings| {
-                        let shell = douglas_peucker(rings.first()?, tol);
+                        let first = rings.first()?;
+                        let mut shell = douglas_peucker(first, tol);
                         if shell.len() < 4 {
-                            return None;
+                            shell = first.clone();
                         }
                         let mut out = vec![shell];
                         out.extend(rings[1..].iter().map(|r| douglas_peucker(r, tol)).filter(|r| r.len() >= 4));

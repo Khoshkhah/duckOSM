@@ -768,8 +768,11 @@ pub fn features(feature_id: &str, tags: &RawTags, wkb: &[u8]) -> Vec<Out> {
     match g {
         Geom::Point(p) => node(&mut m, p),
         g => {
-            // Tilemaker's area test: a closed way is an area unless area=no; a multipolygon or a boundary is an area
+            // Tilemaker's area test: a closed way is an area unless area=no; a multipolygon or a boundary is an area. The
+            // quack engine (as QuackOSM) has no tag `area`: a way with `highway` is a polygon only with area=yes.
+            let way_polygon = !relation && matches!(g, Geom::Polygons(_));
             let explicit = t.get("area") == "yes"
+                || (way_polygon && t.has("highway"))
                 || relation
                 || matches!(t.get("type"), "multipolygon" | "boundary")
                 || matches!(t.get("area:aeroway"), "runway" | "taxiway");
