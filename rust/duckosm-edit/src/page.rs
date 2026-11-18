@@ -128,25 +128,49 @@ UPDATE visualization.edge_levels_meta SET source = 'area', area = '{}', created 
 }
 
 /// The roads, the base-map rows and the look of an area's page (the stored levels, the layers of the database), for `make_with` and `make_tiled`.
-type Prepared = (roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look, Option<String>);
+pub(crate) type Prepared = (roadstyle::RoadTable, Option<roadstyle::FeatureTable>, roadstyle::look::Options, roadstyle::Look, Option<String>);
 
 fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>, walls: bool) -> Result<Prepared, String> {
+    // the buildings from zoom 11 (Kaveh, 2026-11-11; roadstyle's default is the theme's, 14): a tilted map shows them far away too
+    let base = json!({"mode": "all", "theme": "liberty", "paths": "google", "place": name, "buildings_min_zoom": 11});
+    // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
+    // the clicked road in the panel (no tooltip)
+    let mut args = json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "page_script": script, "page_style": style, "street_view": false});
+    if let Some(b) = basemap {
+        args["basemap"] = json!(b);
+    }
+    prepare_map(db, "all", None, base, args, json!("tags"), walls)
+}
+
+/// The roads, the base-map rows and the look of a map of the open database (roadstyle's `duckosm.read` and `duckosm.look`): the roads of
+/// every mode in the style of `mode`, or with `only` the edges and private_edges of that mode alone (render_map(only=True)). `base`: the
+/// look's base map; `args`: the look's map options, with the keyword `levels` put in here (the stored levels' check, else `no_levels`:
+/// "tags" opens the page at once, null lets the engine solve the levels).
+pub(crate) fn prepare_map(db: &mut dyn Db, mode: &str, only: Option<&str>, base: Value, mut args: Value, no_levels: Value, walls: bool)
+                          -> Result<Prepared, String> {
     let cat = catalog(db)?;
-    // the stored levels of the build (visualization.edge_levels); a file with none: the tags rule (no solve: the page opens at once)
+    // the stored levels of the build (visualization.edge_levels); a file with none: `no_levels`
     let tags = !cat.tables.iter().any(|(a, b)| a == "visualization" && b == "edge_levels");
     let run = d::Run::new("duckosm_edit").map_err(|e| e.to_string())?;
-    let [e, r, drop_e] = d::roads_sql(&cat, tags, None, &run)?;
+    let [e, r, drop_e] = d::roads_sql(&cat, tags, only, &run)?;
     db.execute(&e)?;
     let meta = if tags { None } else { values(db, &d::levels_meta_sql(&cat)).ok().and_then(|v| v.into_iter().next()) };
     db.execute(&r)?;
     db.execute(&drop_e)?;
-    let levels = if tags { json!("tags") } else {
+    let levels = if tags { no_levels } else {
         let row = meta.as_ref().map(|m| (m[0].as_str().unwrap_or_default(), m[1].as_i64().unwrap_or_default(), m[2].as_str().unwrap_or_default()));
-        d::levels_keyword(row).map_err(|e| e.to_string())?
+        if only.is_some() {
+            // the map of one mode: each road has its stored row (roadstyle's load_area_levels(subset=True))
+            let sub = values(db, &d::subset_sql(&run))?.into_iter().next().unwrap_or_default();
+            let ids: Vec<i64> = values(db, &d::ids_sql(&run))?.iter().filter_map(|r| r[0].as_i64()).collect();
+            let missing = sub.first().and_then(Value::as_i64).unwrap_or_default();
+            d::subset_levels_keyword(row, missing, sub.get(1).and_then(Value::as_i64), &ids).map_err(|e| e.to_string())?
+        } else {
+            d::levels_keyword(row).map_err(|e| e.to_string())?
+        }
     };
+    args["levels"] = levels;
     // the base map of the duckOSM file: its look gives the layers (layers.yaml), and each layer's first query that runs makes its table
-    // the buildings from zoom 11 (Kaveh, 2026-11-11; roadstyle's default is the theme's, 14): a tilted map shows them far away too
-    let base = json!({"mode": "all", "theme": "liberty", "paths": "google", "place": name, "buildings_min_zoom": 11});
     let look = |args: Value| -> Result<(roadstyle::look::Options, roadstyle::Look), String> {
         let o = roadstyle::look::Options::from_value(&json!({"base_map": base, "args": args})).map_err(|e| e.to_string())?;
         let l = roadstyle::Look::resolve(&o).map_err(|e| e.to_string())?;
@@ -159,7 +183,7 @@ fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Opti
             made.push(l.spec);
         }
     }
-    let roads = parquet(db, &d::roads_select("all", &run).map_err(|e| e.to_string())?)?;
+    let roads = parquet(db, &d::roads_select(mode, &run).map_err(|e| e.to_string())?)?;
     let features = d::features_select(&made, &run).map(|q| parquet(db, &q)).transpose()?;
     // the walls of the buildings (`walls`; Studio's wallsData, here on the server): the roof of each building that has walls (its height tags, from the
     // rows of the map) and each wall of main.building_faces; the heights come below, from the look's rule of the 3D buildings
@@ -171,12 +195,6 @@ fn prepare(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Opti
         _ => None,
     };
     db.execute(&run.drop_sql(&made))?;
-    // roadstyle's dashboard page (roadstyle's duckosm.page(dashboard=True)) in roadstyle's default layout (the panel a card over the map),
-    // the clicked road in the panel (no tooltip)
-    let mut args = json!({"name": name, "template": "dashboard", "tooltip": null, "state": "live", "levels": levels, "page_script": script, "page_style": style, "street_view": false});
-    if let Some(b) = basemap {
-        args["basemap"] = json!(b);
-    }
     let (o, lk) = look(args)?;
     let roads = roadstyle::read::read_roads(roads, "geometry").map_err(|e| e.to_string())?;
     let features = features.map(roadstyle::read_features).transpose().map_err(|e| e.to_string())?;
@@ -210,11 +228,17 @@ fn walls_of(lk: &roadstyle::Look, roofs: &[Value], faces: &[Value]) -> Result<St
 }
 
 fn make_with(db: &mut dyn Db, name: &str, script: &str, style: &str, basemap: Option<&str>) -> Result<String, String> {
-    let (roads, features, o, lk, _) = prepare(db, name, script, style, basemap, false)?;
-    let given = roadstyle::page_options::given_of(&lk, &o.args);
+    page_html(prepare(db, name, script, style, basemap, false)?, serde_json::Map::new(), "duckosm edit")
+}
+
+/// The page of a prepared map (roadstyle's page writer), with MapLibre in it. `extra`: the caller's page keys over the look's (a key of the
+/// environment, street_view_key). A warning of the writer goes to stderr, after `who`.
+pub(crate) fn page_html((roads, features, o, lk, _): Prepared, extra: serde_json::Map<String, Value>, who: &str) -> Result<String, String> {
+    let mut given = roadstyle::page_options::given_of(&lk, &o.args);
+    given.extend(extra);
     let page = roadstyle::page_options::page_from(roads, features, &lk, &o, &given).map_err(|e| e.to_string())?;
     for w in &page.warnings {
-        eprintln!("duckosm edit: the map: {w}");
+        eprintln!("{who}: the map: {w}");
     }
     Ok(page.html.replacen("__MAPLIBRE_CSS__", MAPLIBRE_CSS, 1).replacen("__MAPLIBRE_JS__", &MAPLIBRE_JS.replace("</script>", "<\\/script>"), 1))
 }

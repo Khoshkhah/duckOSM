@@ -6,6 +6,11 @@
   `duckosm-rust studio` on the one file, with card 8 (Edit levels) open: roadstyle's level editor over the area's map. "← Steps"
   writes the drawing order into the file. Options: `--port` (default 8000) and `--no-open`.
 
+- **`duckosm-rust viz`: the maps are in Rust** (`rust/duckosm-edit/src/maps.rs`, `docs/design/all_in_rust.md`, group F), with
+  the options of `duckosm viz`: one page with every mode and one page for each mode with only its roads, drawn by roadstyle's
+  Rust engine (the engine of the `duckosm edit` page). The build's `viz.enabled` now draws them too, so the config of
+  `duckosm-rust` has no skipped step. Monaco: the four pages in 3 s.
+
 - **`duckosm-rust lanelet2`: the Lanelet2 export is in Rust** (`rust/duckosm-export/src/lanelet2.rs`,
   `docs/design/all_in_rust.md`, group D). The offset line of shapely (`offset_curve`) is a pure Rust port of GEOS 3.13.1, with
   no GEOS library: the raw offset curve, and the buffer polygon of the line (GEOS's noder, planar graph, depths and polygon

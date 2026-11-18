@@ -344,6 +344,41 @@ def _smooth_ring(coords, step_deg=3.0, min_radius=3.0, free_first=False):
     return out
 
 
+def _project_tol(line, pt, tol=1e-9):
+    """``line.project(pt)`` (GEOS ``LengthIndexOfPoint``), but where several segments are within ``tol`` metres of the least
+    distance, the middle of them: at a round corner a joint is the centre of the fillet arc, so every arc point is the same
+    distance from it to within 1e-15 m, and the cut goes on the corner's bisector. GEOS's strict least picked an arc point from
+    the last bit of the numbers (numpy's ``lstsq`` of a roundabout's circle, which OpenBLAS threads change from run to run), so
+    the lanes were not the same on two runs (Kaveh, 2026-11-18)."""
+    c = list(line.coords)
+    best, start, rows = math.inf, 0.0, []
+    for (ax, ay), (bx, by) in zip(c, c[1:]):
+        dx, dy = bx - ax, by - ay
+        seg = math.sqrt(dx * dx + dy * dy)
+        if (pt.x, pt.y) == (ax, ay) or seg == 0:
+            f = 0.0
+        elif (pt.x, pt.y) == (bx, by):
+            f = 1.0
+        else:
+            f = ((pt.x - ax) * dx + (pt.y - ay) * dy) / (dx * dx + dy * dy)
+        if seg == 0:
+            d = math.sqrt((pt.x - ax) * (pt.x - ax) + (pt.y - ay) * (pt.y - ay))
+        else:
+            r = ((pt.x - ax) * dx + (pt.y - ay) * dy) / (dx * dx + dy * dy)
+            if r <= 0:
+                d = math.sqrt((pt.x - ax) * (pt.x - ax) + (pt.y - ay) * (pt.y - ay))
+            elif r >= 1:
+                d = math.sqrt((pt.x - bx) * (pt.x - bx) + (pt.y - by) * (pt.y - by))
+            else:
+                d = abs(((ay - pt.y) * dx - (ax - pt.x) * dy) / (dx * dx + dy * dy)) * math.sqrt(dx * dx + dy * dy)
+        m = start if f <= 0 else start + f * seg if f <= 1 else start + seg
+        rows.append((d, m))
+        best = min(best, d)
+        start += seg
+    tied = [m for d, m in rows if d <= best + tol]
+    return (tied[0] + tied[-1]) / 2 if tied else 0.0
+
+
 def _run_lane_wkts(piece_wkts, offs, closed=False):
     """The lanes of a run: each lane offset once from the run's merged line (so a bend is one curve
     and the pieces' lanes meet exactly), then cut back into the pieces at the joints (the lane point
@@ -405,7 +440,7 @@ def _run_lane_wkts(piece_wkts, offs, closed=False):
             return None
         if line.geom_type == "MultiLineString":
             line = max(line.geoms, key=lambda s: s.length)
-        ds = [0.0] + [line.project(j) for j in joints] + [line.length]
+        ds = [0.0] + [_project_tol(line, j) for j in joints] + [line.length]
         if any(ds[i + 1] - ds[i] < 0.3 for i in range(len(ds) - 1)):
             return None
         segs = [substring(line, ds[i], ds[i + 1]) for i in range(len(ds) - 1)]

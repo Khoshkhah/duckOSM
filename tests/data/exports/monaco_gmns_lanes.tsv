@@ -1,0 +1,4 @@
+schema	lanes	length_m	not_simple	crossing_pairs	constant_offset
+gmns_cycling	11707	262077.435	3	2	10328
+gmns_driving	3321	110191.997	4	0	2695
+gmns_walking	11934	262612.011	0	0	11578

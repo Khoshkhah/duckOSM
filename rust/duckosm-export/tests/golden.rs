@@ -306,7 +306,26 @@ fn gmns_columns(db: &Path) -> Vec<String> {
 }
 
 /// The columns that a later step of `to_gmns` changes or adds, not ported yet: the test skips them.
-const GMNS_PENDING: [&str; 2] = ["node.node_type", "node.ctrl_type"];
+const GMNS_PENDING: [&str; 4] = ["node.node_type", "node.ctrl_type", "lane.geom", "lane.geom_cut"];
+
+/// The lane geometry: checked by its properties (`gmns_lanes_by_properties`), not by equality with Python (Kaveh, 2026-11-18;
+/// docs/design/all_in_rust.md, "How the lane geometry is checked").
+#[test]
+fn gmns_lanes_by_properties() {
+    let (a, b) = (out("gmns_a").join("monaco_gmns.duckdb"), out("gmns_b").join("monaco_gmns.duckdb"));
+    duckosm_export::gmns::to_gmns(db(), &a, &[]).unwrap();
+    duckosm_export::gmns::to_gmns(db(), &b, &[]).unwrap();
+    let lanes = |p: &Path| -> Vec<String> {
+        gmns_columns(p).into_iter().filter(|l| l.contains(".lane\tgeom\t")).collect()
+    };
+    assert_eq!(lanes(&a), lanes(&b), "two runs give other lane geometry");
+    let got = duckosm_export::gmns_lanes::lane_report(&a).unwrap().join("\n") + "\n";
+    let path = data().join("exports/monaco_gmns_lanes.tsv");
+    if std::env::var("GMNS_LANES_WRITE").is_ok() {
+        std::fs::write(&path, &got).unwrap(); // the summary is made by the Rust export itself: GMNS_LANES_WRITE=1 cargo test ...
+    }
+    assert_eq!(got, text(&path), "the lane checks changed (GMNS_LANES_WRITE=1 writes them again after a wanted change)");
+}
 
 /// GMNS: each column of each table that the Rust export makes so far equals the Python export (the same type, rows and values).
 #[test]
