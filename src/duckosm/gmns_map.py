@@ -1,5 +1,5 @@
 """
-Lane-level HTML map of a GMNS DuckDB, drawn by [lanestyle](https://github.com/Khoshkhah/lanestyle) (0.3 or later): the roads
+Lane-level HTML map of a GMNS DuckDB, drawn by [lanestyle](https://github.com/Khoshkhah/lanestyle) (0.4 or later: its Rust engine): the roads
 of the level area as roadstyle draws them, each as wide as its lanes, with the lanes, lane lines, arrows, zebras and
 sidewalks on them. The inspection viewer is [gmns_viewer](gmns_viewer.py).
 
