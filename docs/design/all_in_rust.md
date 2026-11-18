@@ -150,7 +150,8 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | Walk joins (`gmns_walking.lane_connector`) | Done: equal on Monaco (the line by its properties). With this every table and column of `duckosm gmns` with its defaults is made. |
 | The command `duckosm-rust gmns` with `--combined`, `--to-csv`, `--csv-extensions`, `--drive-side`, `--no-pair-carriageways`, `--no-lane-geometry` and `--check` (`gmns_check`: the checks and the graph report) | Done: on Monaco the output, the failed checks, the 41 CSV files (header and sorted rows) and `gmns_all` equal Python's. Two Python faults fixed in both: `--to-csv` failed on every build with cycling (its lanes have no `geom_cut`), and `gmns_all` took `any_value()` of a column that differs between the modes (now the first value in the order of the modes). |
 | `--meso`, `--micro` (`meso_<mode>`, `micro_<mode>`; `src/gmns_meso.rs`) | Done: on Monaco (driving and cycling) and Tartu (driving) every meso column equals Python. Every micro column equals Python but the points and lengths of the cells, which are cut from the lane lines and so follow their check by properties. The golden file is `monaco_gmns_meso_columns.tsv`. |
-| `--gtfs`, `--walk-frame`, `gmns-viz`, `gmns-map` | Not started: the command stops with an error that names the option. |
+| `--gtfs`, `--gtfs-max-m` (the stops of a GTFS feed as `location` rows; `src/gtfs.rs`) | Done: on Monaco, with a feed made from its OpenStreetMap stops (`tests/data/exports/monaco_gtfs.zip`: bus stops, stops no trip calls at, railway stops, entrances, a station and a far stop), every `location` column of every mode equals Python, also with the feed as a folder. A zip file is read with `flate2` (stored and deflated files; no zip64). |
+| `--walk-frame`, `gmns-viz`, `gmns-map` | Not started: the command stops with an error that names the option. |
 
 ## Not changed
 

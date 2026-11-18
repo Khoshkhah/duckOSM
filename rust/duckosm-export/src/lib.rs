@@ -12,6 +12,7 @@ pub mod gmns_check;
 pub mod gmns_lanes;
 pub mod gmns_meso;
 pub mod gmns_sumo;
+pub mod gtfs;
 pub mod matsim;
 pub mod matsim_lanes;
 pub mod offset;

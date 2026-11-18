@@ -398,6 +398,12 @@ fn gmns_equals_python() {
     let mut got = gmns_columns(&o, "meso\\_%");
     got.extend(gmns_columns(&o, "micro\\_%").into_iter().skip(1));
     bad.extend(columns_differ(&got, &text(&data().join("exports/monaco_gmns_meso_columns.tsv"))));
+    // --gtfs: the stops of a feed as location rows
+    let g = out("gmns").join("gtfs.duckdb");
+    let opts = duckosm_export::gmns::GmnsOptions { gtfs: vec![data().join("exports/monaco_gtfs.zip")], ..Default::default() };
+    duckosm_export::gmns::to_gmns_with(db(), &g, &opts).unwrap();
+    let got: Vec<String> = gmns_columns(&g, "gmns\\_%").into_iter().filter(|l| l.starts_with("table\t") || l.contains(".location\t")).collect();
+    bad.extend(columns_differ(&got, &text(&data().join("exports/monaco_gmns_gtfs_location.tsv"))));
     assert!(bad.is_empty(), "{} columns differ from the Python export:\n{}", bad.len(), bad.join("\n"));
 }
 

@@ -124,11 +124,15 @@ pub struct GmnsOptions {
     pub to_csv: Option<std::path::PathBuf>,
     /// Keep duckOSM's extra columns in the CSVs as `u_` fields.
     pub csv_extensions: bool,
+    /// GTFS feeds (zip files or folders): their stops as `location` rows.
+    pub gtfs: Vec<std::path::PathBuf>,
+    /// A GTFS stop goes on a link within this many metres.
+    pub gtfs_max_m: f64,
 }
 
 impl Default for GmnsOptions {
     fn default() -> Self {
-        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false }
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0 }
     }
 }
 
@@ -181,6 +185,10 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
         eprintln!("GMNS: no 'raw' schema — lane/signal/curb detail limited (no OSM tags)");
     }
     let name = out.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let stops = if o.gtfs.is_empty() { None } else { Some(crate::gtfs::read_stops(&o.gtfs)?) };
+    if let Some(s) = &stops {
+        eprintln!("GTFS: {} stops", s.len());
+    }
     let mut summary = Vec::new();
     for mode in &chosen {
         let sch = format!("gmns_{mode}");
@@ -219,7 +227,10 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
             "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
              FROM {sch}.node WHERE ctrl_type = 'signal'"
         ))?;
-        build_location(&c, &sch, mode, has_raw)?;
+        build_location(&c, &sch, mode, has_raw, stops.is_some())?;
+        if let Some(s) = &stops {
+            crate::gtfs::add_transit_stops(&c, &sch, mode, s, drive_side, o.gtfs_max_m)?;
+        }
         apply_signs(&c, &sch, mode, has_raw)?;
         node_types(&c, &sch, has_raw)?;
         build_zone(&c, &sch, name.strip_suffix("_gmns").unwrap_or(&name))?;
@@ -1030,8 +1041,16 @@ fn walk_lanes(c: &Ctx, sch: &str) -> Result<()> {
 const LOC_HIGHWAY: [&str; 8] = ["crossing", "bus_stop", "give_way", "stop", "traffic_signals", "toll_gantry", "mini_roundabout", "speed_camera"];
 
 /// `_build_location`: the tagged OSM nodes on a link, one row for each link they lie on, `lr` along it. Needs the raw tags.
-fn build_location(c: &Ctx, sch: &str, mode: &str, has_raw: bool) -> Result<()> {
+fn build_location(c: &Ctx, sch: &str, mode: &str, has_raw: bool, create_empty: bool) -> Result<()> {
     if !has_raw {
+        if create_empty {
+            // the transit stops of a GTFS feed still go here
+            c.exec(&format!(
+                "CREATE TABLE {sch}.location(loc_id VARCHAR, link_id BIGINT, ref_node_id BIGINT, lr DOUBLE,
+              x_coord DOUBLE, y_coord DOUBLE, z_coord DOUBLE, loc_type VARCHAR, zone_id BIGINT, gtfs_stop_id VARCHAR,
+              osm_id BIGINT, name VARCHAR, geom GEOMETRY)"
+            ))?;
+        }
         return Ok(());
     }
     let hw = LOC_HIGHWAY.iter().map(|h| format!("'{h}'")).collect::<Vec<_>>().join(", ");
