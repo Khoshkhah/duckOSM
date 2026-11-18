@@ -60,7 +60,7 @@ Walking and cycling edges get a type from OSM sub-tags, for example `sidewalk`, 
 
 ## Turn restrictions
 
-Only driving has them, from OSM `type=restriction` relations (via a node) and from a [fixes file](../guides/fix-osm-errors.md).
+Only driving has them, from OSM `type=restriction` relations (via a node) and from a [fixes file](../guides/edit-osm-data.md#the-fixes-file).
 A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction removes all other turns. Monaco: 38 of the
 43 restriction relations map onto edges.
 
