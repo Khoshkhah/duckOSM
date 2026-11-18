@@ -14,7 +14,7 @@ duckosm admin --pbf monaco-latest.osm.pbf --db monaco.duckdb
 | `--gpkg FILE` | keep the borders in this GeoPackage, and use it again in the next run |
 
 Use the table to find the district of a road, or to cut an area by name with
-[`extract --name`](prepare-area.md#several-areas-from-one-region). For the boundary file of one area, use
+[`extract --name`](prepare-area.md#cut-an-area-from-a-built-region). For the boundary file of one area, use
 [`duckosm boundary`](prepare-area.md#make-the-boundary-file).
 
 ## The table
