@@ -3,7 +3,7 @@
 **OpenStreetMap → road networks, map layers and GIS files. One Rust program, on your computer and in the browser.**
 
 duckOSM reads an `.osm.pbf` file and makes the routable network of an area, its map layers, and files for GIS,
-traffic simulation and routing. You can fix the OSM data on a map first, and every output uses your fixes.
+traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go into one file, `osm_fixes.yaml`, and every step of duckOSM reads it: the OSM file, the OSM data tables, the network and every export. So all outputs show the same corrected data.
 
 <div class="hero-actions" markdown>
 
