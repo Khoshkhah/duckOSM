@@ -104,11 +104,6 @@ class DuckOSM:
         Returns:
             Path to output DuckDB file
         """
-        # options.engine: rust (the default): the whole build in Rust (duckosm build --config); python: the reference
-        if self.config.options.engine == "rust":
-            from duckosm import _api
-            return _api.build(self.config)
-
         from rich.console import Console
         from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
         

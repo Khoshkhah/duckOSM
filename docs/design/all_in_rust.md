@@ -41,12 +41,18 @@ rows, or the same file bytes where the format allows. A golden file holds the Py
 ## Step 6: the state
 
 Done (before GMNS and the maps): the program `duckosm` (`duckosm-rust` is an alias for one release), the wheel with the
-whole program in `duckosm._rust` (`cli`), and the Python API on Rust (`src/duckosm/_api.py`). The command `duckosm` of the
+whole program in `duckosm._rust` (`cli`), and the Python API on Rust (`src/duckosm/_api.py`): the exports, the routing
+and the elevation. A connection to an in-memory database runs the Python code. The command `duckosm` of the
 wheel (`src/duckosm/_main.py`) runs Rust in the Python process. Work in other processes (the tiles) starts
 `python -m duckosm` again (`DUCKOSM_PYTHON`, `duckosm_build::self_command`).
 
 To do:
 
+- The build: `DuckOSM.run()` and `duckosm build --pbf/--config` run the Python steps with the Rust network step, as before.
+  The whole build in Rust (`duckosm --config`) is not yet equal to it. With it, these tests fail: `test_engine_rust.py`
+  (no `features.ocean`), `test_levels_in_build.py` (no `visualization.level_heads` and the other tables of the level
+  edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
+  tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
 - GMNS (group C): `gmns`, `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
 - The maps (group F): `viz`, `route-map`, `levels-edit`, `gmns-viz`, `gmns-map`.
 - No Rust port yet: `levels`, `bus`, `multimodal`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):

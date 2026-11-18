@@ -5,11 +5,13 @@
 - **The switch, step 6 of `docs/design/all_in_rust.md`.** The Rust program is `duckosm`. `duckosm-rust` stays for one release:
   it prints "use duckosm" and runs the same command. The wheel has the whole program in the module `duckosm._rust` (with
   DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust
-  (`src/duckosm/_api.py`): `DuckOSM.run()` (with `options.engine: rust`), `to_sumo`, `to_gis`, `to_matsim`,
+  (`src/duckosm/_api.py`): `to_sumo`, `to_gis`, `to_matsim`,
   `to_matsim_lanes`, `to_opendrive`, `to_railml`, `to_lanelet2`, `to_elevation`, `route`, `Router`, `route_multimodal`,
   `route_points`, `route_multimodal_points`, `directions`, `build_lane_graph`, `route_lanes`. GMNS, the maps and the
   commands `levels`, `bus`, `multimodal` and `clip-pbf` still run the Python code. `Router` has no `.graph` (the graph is
-  in Rust). `import duckosm` loads the names when they are first used.
+  in Rust). A connection to an in-memory database runs the Python code. `DuckOSM.run()` is as before (the Python steps
+  with the Rust network step): the whole build in Rust is not yet equal to it (`docs/design/all_in_rust.md`, step 6).
+  `import duckosm` loads the names when they are first used.
 
 - **`duckosm lanelet2`: the Lanelet2 export is in Rust** (`rust/duckosm-export/src/lanelet2.rs`,
   `docs/design/all_in_rust.md`, group D). The offset line of shapely (`offset_curve`) is a pure Rust port of GEOS 3.13.1, with

@@ -8,7 +8,7 @@ duckosm --version
 ```
 
 The wheel has the Rust program in it (the module `duckosm._rust`, no other install). The command `duckosm` and the Python
-API (`DuckOSM`, `to_sumo`, `route`, ...) run the Rust code. There is a wheel for Linux (x86_64 and aarch64), macOS (x86_64
+API (`to_sumo`, `route`, `to_elevation`, ...) run the Rust code. There is a wheel for Linux (x86_64 and aarch64), macOS (x86_64
 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that needs a
 [Rust toolchain](https://rustup.rs).
 
