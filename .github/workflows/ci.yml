@@ -37,6 +37,11 @@ jobs:
   rust:
     runs-on: ubuntu-22.04
     timeout-minutes: 40
+    # the time of this job was the link of each test binary with thin LTO (about 50 binaries, each with the bundled DuckDB):
+    # 35 min of the build. The tests do not need LTO; opt-level 3 stays, so the tests run as fast as before.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
