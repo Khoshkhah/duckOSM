@@ -4,6 +4,12 @@
 Specification), the open table format of DTALite, Path4GMNS and other network-modelling tools. Each GMNS `link_id` is
 the duckOSM `edge_id`.
 
+| Reference and format | |
+|---|---|
+| Format | [GMNS](https://github.com/zephyr-data-specs/GMNS) release 0.97: the CSV tables of the specification; all tables in a [DuckDB file](https://duckdb.org/docs/stable/internals/storage) |
+| Reference tool | [frictionless](https://framework.frictionlessdata.io/) and [Path4GMNS](https://github.com/jdlph/Path4GMNS) |
+| Check | frictionless validates the CSV files against the schemas of the specification; Path4GMNS loads them and finds a route. [How each output is checked](../concepts/checks.md) |
+
 ```bash
 pip install "duckosm[sumo]"                      # driving and cycling lanes need SUMO's netconvert
 duckosm gmns monaco.duckdb                       # -> monaco_gmns.duckdb
@@ -71,21 +77,8 @@ Lane geometry:
 
 ## Meso and micro networks
 
-For simulators that work below the road level:
-
-```bash
-duckosm gmns monaco.duckdb --meso --micro
-```
-
-| Network | Schema | One row is |
-|---|---|---|
-| meso | `meso_driving` | a road section (one for each link), or a connector between sections (one for each legal turn) |
-| micro | `micro_driving` | a 7 m cell of a lane, a lane change between cells side by side, or a turn across a junction |
-
-Both are modelled on the networks of osm2gmns, but they are not equal to them
-([differences](gmns_tables.md#meso-and-micro-networks)). Their ids come from `edge_id` (`M<edge_id>` for a section,
-`X<from edge_id>-<to edge_id>` for a connector), so they stay the same when you build again.
-Use `--meso-mode cycling` or `--micro-mode cycling` for cycling.
+`--meso` and `--micro` also make road sections and lane cells for simulators:
+[GMNS meso and micro networks](gmns-meso-micro.md).
 
 ## All modes in one network
 
@@ -124,7 +117,7 @@ movements lead into turn green. Bus lanes and bike lanes have their own color.
 | `-o`, `--out` | the output file | `<name>_gmns.duckdb` |
 | `--to-csv DIR` | also write the CSV files of the specification | |
 | `--csv-extensions` | keep duckOSM's extra columns in the CSV files, as user-defined fields with a `u_` prefix | standard columns only |
-| `--meso`, `--micro` | also make the meso or micro network | off |
+| `--meso`, `--micro` | also make the [meso or micro network](gmns-meso-micro.md) | off |
 | `--meso-mode`, `--micro-mode` | their modes; repeat for several | `driving` |
 | `--combined` | also write `gmns_all` | off |
 | `--drive-side` | `right` or `left` traffic | `right` |
@@ -148,7 +141,7 @@ check_gmns("monaco_gmns.duckdb")
 
 **The tables.** The tests check the CSV files against the schemas of the specification, release v0.97, with
 [frictionless](https://framework.frictionlessdata.io/). The test also checks the category values (`ped_facility`,
-`bike_facility`, movement `type`, `ctrl_type`). See [How each output is checked](../concepts/checks.md).
+`bike_facility`, movement `type`, `ctrl_type`). A test loads the CSV files in Path4GMNS and finds a route.
 To check your own output:
 
 ```bash

@@ -1,10 +1,13 @@
 # Lanelet2 (experimental)
 
-!!! warning "Experimental"
-    The map is checked for structure only. It is not yet loaded in Autoware.
-
 `duckosm lanelet2` writes a [Lanelet2](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) map, the lane-map
 format of Autoware and of the `lanelet2` library. The file is OSM XML, so OSM tools can also open it.
+
+| Reference and format | |
+|---|---|
+| Format | [Lanelet2 map](https://github.com/fzi-forschungszentrum-informatik/Lanelet2/blob/master/lanelet2_core/doc/LaneletAndAreaTagging.md) ([primitives](https://github.com/fzi-forschungszentrum-informatik/Lanelet2/blob/master/lanelet2_core/doc/LaneletPrimitives.md)) in [OSM XML](https://wiki.openstreetmap.org/wiki/OSM_XML) |
+| Reference tool | none: the map is not yet loaded in Autoware or in the `lanelet2` library |
+| Check | none yet against a tool. The tests check the structure and the tags of the lanelets. [How each output is checked](../concepts/checks.md) |
 
 ```bash
 duckosm gmns monaco.duckdb                  # first: the lanes
@@ -40,10 +43,6 @@ to_lanelet2("monaco_gmns.duckdb", "monaco.lanelet2.osm")     # -> {"lanelets", "
 ```
 
 Design: [lanelet2_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/lanelet2_export.md).
-
-## How it is checked
-
-The tests check the structure of the file. See [How each output is checked](../concepts/checks.md).
 
 ## Limits
 

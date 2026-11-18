@@ -3,6 +3,12 @@
 `duckosm matsim` writes a MATSim `network.xml` (the `network_v2` format). MATSim, BEAM and eqasim read it.
 Each MATSim link id is the duckOSM `edge_id`.
 
+| Reference and format | |
+|---|---|
+| Format | MATSim [network_v2 DTD](https://www.matsim.org/files/dtd/network_v2.dtd); lanes and signals: [laneDefinitions_v2.0](https://www.matsim.org/files/dtd/laneDefinitions_v2.0.xsd), [signalSystems_v2.0](https://www.matsim.org/files/dtd/signalSystems_v2.0.xsd), [signalGroups_v2.0](https://www.matsim.org/files/dtd/signalGroups_v2.0.xsd) and [signalControl_v2.0](https://www.matsim.org/files/dtd/signalControl_v2.0.xsd) XSD |
+| Reference tool | none: no test loads the files in MATSim |
+| Check | `network.xml` is valid against the DTD; the lanes and signal files are valid against the XSD schemas. [How each output is checked](../concepts/checks.md) |
+
 ```bash
 duckosm matsim monaco.duckdb           # -> monaco_network.xml.gz
 ```
@@ -76,10 +82,6 @@ duckosm matsim-lanes monaco_gmns.duckdb     # -> ./lanes.xml, signalSystems.xml,
 
 Design: [matsim_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/matsim_export.md),
 [matsim_lanes_signals](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/matsim_lanes_signals.md).
-
-## How it is checked
-
-The files are checked against MATSim's DTD and XSD schemas in the tests. See [How each output is checked](../concepts/checks.md).
 
 ## Limits
 
