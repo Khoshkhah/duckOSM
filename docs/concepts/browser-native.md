@@ -51,8 +51,9 @@ and the output.
   memory 1.65, disk 3.1, output 3.1; browser: time 2.2, memory 1.3, storage 2.4).
 - France: 25.9 million edges (driving), 104 tiles. The memory of the browser is the WebAssembly memory of all workers at the
   same time.
-- The browser writes about twice the output of the native program: its Parquet files are compressed with snap, because zstd
-  is a C library (Kentucky with three modes: 4.1 GB in the browser, 2.1 GB natively).
+- The browser's Parquet files are about 1.2 times those of the native program: they are compressed with snap, because zstd is
+  a C library (Kentucky, driving, one build: 851 MB in WebAssembly, 704 MB natively). After a build, Studio also saves the area
+  in the browser (its saved areas) with a copy of each table, so the storage then holds the tables twice.
 - The largest temporary file is the sort of the levels after the union: the rows go straight into sorted runs, so one copy is
   on the disk at one time (Kentucky with three modes in the browser: 6.0 GB of storage before, 4.8 GB now).
 - One build, for comparison: Kentucky (3) 35.7 s and 3.2 GB natively, 64.5 s in the browser; France (driving) 4 min 31 s and
