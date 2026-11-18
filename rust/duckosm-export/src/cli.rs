@@ -187,7 +187,7 @@ enum Cmd {
         /// Modes to build micro for (default: driving).
         #[arg(long = "micro-mode")]
         micro_modes: Vec<String>,
-        /// A GTFS feed (not ported yet).
+        /// A GTFS feed (zip file or folder), repeatable: its stops become location rows with their gtfs_stop_id.
         #[arg(long)]
         gtfs: Vec<PathBuf>,
         /// How far from a link, in metres, a GTFS stop may be and still be put on it.
@@ -358,15 +358,16 @@ pub fn run(args: &[String]) -> Result<()> {
             micro,
             micro_modes,
             gtfs,
-            gtfs_max_m: _,
+            gtfs_max_m,
             csv_extensions,
             check,
         } => {
             check_db(&db)?;
-            for (on, name) in [(walk_frame, "--walk-frame"), (!gtfs.is_empty(), "--gtfs")] {
-                if on {
-                    return Err(format!("{name} is not ported to Rust yet (docs/design/all_in_rust.md, group C): use `duckosm gmns`"));
-                }
+            if walk_frame {
+                return Err("--walk-frame is not ported to Rust yet (docs/design/all_in_rust.md, group C): use `duckosm gmns`".into());
+            }
+            if let Some(p) = gtfs.iter().find(|p| !p.exists()) {
+                return Err(format!("--gtfs: {} does not exist", p.display()));
             }
             let out = out.unwrap_or_else(|| format!("{}_gmns.duckdb", stem(&db)).into());
             let o = crate::gmns::GmnsOptions {
@@ -377,6 +378,8 @@ pub fn run(args: &[String]) -> Result<()> {
                 combined,
                 to_csv: to_csv.clone(),
                 csv_extensions,
+                gtfs,
+                gtfs_max_m,
             };
             let res = crate::gmns::to_gmns_with(&db, &out, &o)?;
             println!("wrote {}", out.display());
