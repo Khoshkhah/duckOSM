@@ -8,4 +8,5 @@ that the rows are the same.
 | [OSMnx](https://osmnx.readthedocs.io/) | a road network from OSM | directed, with turn restrictions and stable `edge_id`s | [duckOSM and OSMnx](../concepts/osmnx.md) |
 | [QuackOSM](https://github.com/kraina-ai/quackosm) | the OSM features table | 3 to 7 times faster, 2 to 5 times less memory, same rows | [duckOSM and QuackOSM](../concepts/quackosm.md) |
 | [GDAL](https://gdal.org/drivers/vector/osm.html) (`ogr2ogr`) | GDAL's five OSM layers | about 4 times faster on France, same rows | [duckOSM and GDAL](../concepts/gdal.md) |
+| [osm2pgsql](https://osm2pgsql.org/) | the four tables of PostGIS map styles | the same rows, byte for byte on Monaco; also GeoParquet and DuckDB, and the OSM fixes | [osm2pgsql tables](../exports/osm2pgsql.md) |
 | all of them | time and memory on France | | [Speed on France](speed.md) |
