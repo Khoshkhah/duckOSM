@@ -116,3 +116,20 @@ ORDER BY abs(z_to - z_from) / length_m DESC LIMIT 5;
 
 With Copernicus, the tunnels of Monaco would top this list: Tunnel Albert II "falls" from 336 m to
 32 m, the height of the hill above it.
+
+## In Rust
+
+`duckosm-rust elevation` has the same options and writes the same values as `duckosm elevation`. It keeps the Copernicus
+tiles in memory and writes no DEM file to disk.
+
+Size test: France, driving only, `--source copernicus`, on a Mac mini (Apple M4, 16 GB, 2026-11-17):
+
+| Item | Value |
+|---|---:|
+| Nodes | 12,292,934 (3,164 nodata) |
+| Copernicus GLO-30 tiles downloaded | 96, 3.4 GB |
+| Time | 6 min 53 s |
+| Peak memory (resident) | 7.3 GB |
+| Database before and after | 6.8 GB, 12.0 GB |
+
+The time includes the download. For the whole France box, GLO-30 has 155 tiles (5.1 GB) and GLO-90 has 0.6 GB.

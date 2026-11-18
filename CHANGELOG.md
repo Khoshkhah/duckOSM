@@ -5,10 +5,12 @@
 - **`duckosm-rust elevation`** (`docs/design/all_in_rust.md`, group G), in `rust/duckosm-tools`, with the options of
   `duckosm elevation` (`--dem`, `--source`, `--mode`, `--nodata-fill`, `--suffix`, `--product`, `--vertical-datum`, `--license`,
   `--not-reference`). It writes the same heights and the same `main.elevation_metadata` as Python on Monaco (a DEM file, a crop
-  with nodata, `--source copernicus`) and Tartu (`--source copernicus`, 60 s in place of 4 min 17 s). The DEM is a GeoTIFF in
+  with nodata, `--source copernicus`) and Tartu (`--source copernicus`, 6 s in place of 4 min 17 s). The DEM is a GeoTIFF in
   EPSG:4326 with 32-bit floats; the downloads use DuckDB's httpfs. The DEM catalog (`dem_sources.json`) has a Rust reader too.
   The DEM reader of the build now finds the pixel of a point as rasterio does, so a point on a pixel edge gets the same
   height as in Python.
+  It writes `edges` again in one step (not a row-by-row UPDATE) and loads one Copernicus tile at a time, so it runs on
+  France driving (12.3 M nodes) in 7 min on a Mac mini with 16 GB ([Add elevation](docs/guides/elevation.md#in-rust)).
 
 - **`duckosm-rust lane-graph` and `route-lanes`** (`docs/design/all_in_rust.md`, group E), with the options of the Python
   commands: the lane graph of a GMNS file (the same SQL, the same rows in the same order) and the lane route (a port of
