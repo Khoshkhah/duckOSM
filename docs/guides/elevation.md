@@ -122,7 +122,7 @@ With Copernicus, the tunnels of Monaco would top this list: Tunnel Albert II "fa
 `duckosm-rust elevation` has the same options and writes the same values as `duckosm elevation`. It keeps the Copernicus
 tiles in memory and writes no DEM file to disk.
 
-Size test: France, driving only, `--source copernicus`, on a Mac mini (Apple M4, 16 GB, 2026-11-17):
+Size test: France, driving only, `--source copernicus`, on a Mac mini (Apple M6, 16 GB, 2026-11-17):
 
 | Item | Value |
 |---|---:|
