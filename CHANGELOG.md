@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`duckosm-rust route-multimodal`, `route-points` and `route-multimodal-points`** (`docs/design/all_in_rust.md`, group E): the
+  trip across modes (`route_multimodal`, every part on the edge graph of its mode, walk* vehicle* walk*), and the routes between
+  two points (`route_points`, `route_multimodal_points`), in `duckosm-router` (no DuckDB). A point joins its roads with GEOS's
+  own formulas (distance, project, interpolate, length), so `fraction`, `access_m` and `road_point` are the same floats as
+  shapely gives. Each command prints duckOSM's dict as JSON, and `--batch FILE` answers many queries on one graph. On Monaco and
+  Tartu, 1,500 queries give the same JSON as Python, floats and error texts too (`duckosm-route/tests/multimodal_points.rs`).
+
 - **`duckosm-rust route` and `export-graph`** (`docs/design/all_in_rust.md`, group E), in the new crates `rust/duckosm-router` (the
   algorithms: no DuckDB, no threads, it builds for WebAssembly) and `rust/duckosm-route` (the database, GraphML, the CLI). The
   routing graph is in memory with the order of networkx's graph, and the route is a port of networkx's bidirectional Dijkstra

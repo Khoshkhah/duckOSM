@@ -3,6 +3,7 @@
 
 pub mod cli;
 pub mod graphml;
+pub mod points;
 pub mod route;
 
 pub use duckosm_router::graph;
