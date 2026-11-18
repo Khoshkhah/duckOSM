@@ -838,6 +838,8 @@ dependencies = [
  "duckdb",
  "duckosm-build",
  "duckosm-editor",
+ "duckosm-planner",
+ "duckosm-route",
  "httparse",
  "roadstyle",
  "roadstyle-local",
@@ -872,6 +874,14 @@ dependencies = [
  "parquet",
  "rayon",
  "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=39696602fac3a6e200fd324526022bc88239b95f)",
+]
+
+[[package]]
+name = "duckosm-planner"
+version = "0.7.0"
+dependencies = [
+ "duckosm-router",
+ "serde_json",
 ]
 
 [[package]]

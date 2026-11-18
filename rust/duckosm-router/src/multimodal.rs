@@ -22,6 +22,16 @@ pub struct Network {
     pub transfers: Vec<(i64, u8, u8, Option<f64>, Option<String>)>,
     /// The legal turns (from_edge, to_edge) of each mode that has an edge graph, in its order.
     pub turns: HashMap<u8, Vec<(i64, i64)>>,
+    /// The length of each road (edge_id -> length_m), for a trip by length (`Weight::Length`); a road with none: 0.
+    pub lengths: HashMap<i64, f64>,
+}
+
+/// What a trip makes least: the time (duckOSM), or the length (the planner page's "Shortest": metres; the access walks in
+/// metres, at the walking speed `v` in m/s; a change of mode 0.1 m, so that a change that does not make the trip shorter is not taken).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Weight {
+    Time,
+    Length { v: f64 },
 }
 
 impl Network {
@@ -60,6 +70,7 @@ struct Layer {
     eid: Vec<i64>,
     target: Vec<i64>,
     cost: Vec<f64>,
+    len: Vec<f64>,
     index: HashMap<i64, u32>,
     /// node -> the range of `out` of the roads that leave it (empty for a node that is only an end)
     nodes: HashMap<i64, (u32, u32)>,
@@ -117,12 +128,14 @@ impl Prepared {
                 Some(&i) => {
                     l.target[i as usize] = t;
                     l.cost[i as usize] = c.unwrap_or(0.0);
+                    l.len[i as usize] = net.lengths.get(&e).copied().unwrap_or(0.0);
                 }
                 None => {
                     l.index.insert(e, l.eid.len() as u32);
                     l.eid.push(e);
                     l.target.push(t);
                     l.cost.push(c.unwrap_or(0.0));
+                    l.len.push(net.lengths.get(&e).copied().unwrap_or(0.0));
                 }
             }
             sources[m as usize].push(s);
@@ -212,6 +225,17 @@ impl Prepared {
     /// The steps of the fastest trip, or `Ok(None)` when the ends are not connected. `Err` names an end that is not in its
     /// layer.
     pub fn route(&self, src: i64, dst: i64, start_mode: &str, end_mode: &str, enforce_sequence: bool, points: Option<&Points>) -> Result<Option<Vec<Step>>, String> {
+        self.route_by(src, dst, start_mode, end_mode, enforce_sequence, points, Weight::Time)
+    }
+
+    /// `route` with the `weight` of the search; the steps keep their time costs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn route_by(&self, src: i64, dst: i64, start_mode: &str, end_mode: &str, enforce_sequence: bool, points: Option<&Points>, weight: Weight)
+                    -> Result<Option<Vec<Step>>, String> {
+        // the label of a road (its time, or its length), of an access walk (its seconds, or its metres), of a change of mode
+        let wt = |l: &Layer, i: usize| match weight { Weight::Time => l.cost[i], Weight::Length { .. } => l.len[i] };
+        let wa = |acc: f64| match weight { Weight::Time => acc, Weight::Length { v } => acc * v };
+        let wtr = |c: f64| match weight { Weight::Time => c, Weight::Length { .. } => 0.1 };
         let hub = self.mode_ix(HUB);
         let (smi, emi) = (self.mode_ix(start_mode), self.mode_ix(end_mode));
         if points.is_none() {
@@ -261,11 +285,11 @@ impl Prepared {
                 let l = &self.layers[h as usize];
                 for &(e, frac, acc) in &p.starts {
                     let i = *l.index.get(&e).ok_or(format!("edge {e} is not a walking road of mm.edges"))?;
-                    let c = l.cost[i as usize];
-                    push(acc + (1.0 - frac) * c, State::E(h, i, init_phase), None, Some(Step::Edge(e, HUB.into(), (1.0 - frac) * c, 1.0 - frac, acc)), &mut dist, &mut pq);
+                    let (c, w) = (l.cost[i as usize], wt(l, i as usize));
+                    push(wa(acc) + (1.0 - frac) * w, State::E(h, i, init_phase), None, Some(Step::Edge(e, HUB.into(), (1.0 - frac) * c, 1.0 - frac, acc)), &mut dist, &mut pq);
                     if let Some(&(g, acc_t)) = p.ends.get(&e) {
                         if frac <= g {
-                            let total = acc + (g - frac) * c + acc_t;
+                            let total = wa(acc) + (g - frac) * w + wa(acc_t);
                             if best_direct.as_ref().is_none_or(|b| total < b.0) {
                                 best_direct = Some((total, vec![Step::Edge(e, HUB.into(), (g - frac) * c, g - frac, acc + acc_t)]));
                             }
@@ -297,12 +321,12 @@ impl Prepared {
             let roads = if is_edge { following(m, key as u32) } else { leaving(m, node) };
             for &i in roads {
                 // onto: take the road i; maybe stop part-way along it
-                let (e, c) = (l.eid[i as usize], l.cost[i as usize]);
-                push(d + c, State::E(m, i, phase), Some(st), Some(Step::Edge(e, name(m), c, 1.0, 0.0)), &mut dist, &mut pq);
+                let (e, c, w) = (l.eid[i as usize], l.cost[i as usize], wt(l, i as usize));
+                push(d + w, State::E(m, i, phase), Some(st), Some(Step::Edge(e, name(m), c, 1.0, 0.0)), &mut dist, &mut pq);
                 if let Some(en) = ends {
                     if Some(m) == hub {
                         if let Some(&(g, acc_t)) = en.get(&e) {
-                            push(d + g * c + acc_t, State::End, Some(st), Some(Step::Edge(e, name(m), g * c, g, acc_t)), &mut dist, &mut pq);
+                            push(d + g * w + wa(acc_t), State::End, Some(st), Some(Step::Edge(e, name(m), g * c, g, acc_t)), &mut dist, &mut pq);
                         }
                     }
                 }
@@ -325,7 +349,7 @@ impl Prepared {
                     }
                 }
                 let kind = kind.map(|k| self.kinds[k as usize].clone());
-                push(d + cost, State::N(tm, node, nphase), Some(st), Some(Step::Transfer(node, name(m), name(tm), cost, kind)), &mut dist, &mut pq);
+                push(d + wtr(cost), State::N(tm, node, nphase), Some(st), Some(Step::Transfer(node, name(m), name(tm), cost, kind)), &mut dist, &mut pq);
             }
         }
         if let Some((total, steps)) = &best_direct {
