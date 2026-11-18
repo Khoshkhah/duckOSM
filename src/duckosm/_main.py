@@ -9,8 +9,8 @@ import sys
 
 # TODO (step 6 of docs/design/all_in_rust.md): remove each command when its Rust PR merges, then this list.
 PYTHON_COMMANDS = {
-    # the options of duckOSM's `duckosm build` (--pbf, --output, ...): the Python CLI makes the config, and the build runs
-    # in Rust (DuckOSM.run). The Rust options (`duckosm <PBF> -o <DIR>`, `duckosm --config`) run in Rust directly.
+    # duckOSM's `duckosm build` (--pbf, --output, --config, ...): the Python steps with the Rust network step (DuckOSM.run).
+    # The whole build in Rust: `duckosm <PBF> -o <DIR>` and `duckosm --config` (not yet equal: docs/design/all_in_rust.md).
     "build",
     "gmns",                                          # group C
     "gmns-viz", "gmns-map", "viz", "route-map", "levels-edit",   # group F
