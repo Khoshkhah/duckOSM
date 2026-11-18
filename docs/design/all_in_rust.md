@@ -59,7 +59,9 @@ The exports of a GMNS db read the test tables of `tests/data/exports/gmns_drivin
 Parquet), until group C makes the GMNS db in Rust.
 
 `sumo_compare.py` is not a command: `lane_diff` compares the lanes of duckOSM with the lanes of SUMO's own OSM import, for a
-test (`tests/test_levels.py`). It moves with group C (the lane profile).
+test (`tests/test_levels.py`). It moves with group C (the lane profile): done, `rust/duckosm-export/src/sumo_compare.rs`. On the
+golden db it gives Python's rows (`tests/data/exports/monaco_sumo_lane_diff.tsv`: 24 differences in 993 way-directions, each
+with its cause). The Rust CI job installs osmium for it.
 
 GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `location` table. It moves with group C.
 

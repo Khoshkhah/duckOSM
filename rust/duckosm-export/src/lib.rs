@@ -22,6 +22,7 @@ pub mod opendrive;
 pub mod railml;
 pub mod shapely;
 pub mod sumo;
+pub mod sumo_compare;
 
 use duckdb::{AccessMode, Config, Connection};
 use std::path::Path;

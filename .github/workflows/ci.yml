@@ -88,7 +88,7 @@ jobs:
       - run: cargo check --release -p duckosm-router -p duckosm-planner --target wasm32-unknown-unknown
         working-directory: rust
       # ogr2ogr: the GeoPackage of one file of duckosm-rust export-gis and the golden of gis-debug
-      - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool   # osmium: sumo_compare's .pbf
       # netconvert for the GMNS export (gmns_sumo): the version that made tests/data/exports/monaco_gmns_columns.tsv
       - run: python3 -m pip install --user -q eclipse-sumo==1.27.0 && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # duckosm-edit too: the CLI and the wheel link it, so the golden tests run with the features that it adds (roadstyle's serde_json)
