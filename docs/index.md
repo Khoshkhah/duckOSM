@@ -101,8 +101,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </figure>
 
 <figure markdown="span">
-  ![The map of duckosm viz: the driving, walking and cycling networks of Monaco on its base map](images/tour-map.png)
-  <figcaption>The map of <code>duckosm viz</code>: all modes on the base map of the database.</figcaption>
+  ![The map of duckosm viz in 3D: the buildings of Monaco stand up around the port, with the roads between them](images/tour-map.png)
+  <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database.</figcaption>
 </figure>
 
 <figure markdown="span">
@@ -111,8 +111,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </figure>
 
 <figure markdown="span">
-  ![Monaco in 3D: the roads colored by their ground height, from dark at the sea to yellow on the hill behind the port](images/tour-elevation.png)
-  <figcaption>Monaco in 3D: each road at its height, from the ground of the area (<code>duckosm elevation</code>, or the step Ground height in Studio).</figcaption>
+  ![Monaco in 3D on the ground of the area, with hillshade: the hill rises behind the port, and the roads climb it](images/tour-elevation.png)
+  <figcaption>Monaco in 3D on the ground of the area: the hill behind the port and the roads that climb it (<code>duckosm elevation</code>, or the step Ground height in Studio).</figcaption>
 </figure>
 
 </div>
