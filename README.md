@@ -138,6 +138,13 @@ Experimental exports: OpenDRIVE, Lanelet2, railML, lane-level routing. See the
   take `--json`.
 - To change duckOSM: the rules are in [`AGENTS.md`](AGENTS.md).
 
+## Data and credits
+
+- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the
+  [ODbL](https://opendatacommons.org/licenses/odbl/). Outputs made from OSM data keep this license.
+- The region files come from [Geofabrik](https://www.geofabrik.de/)'s free [download server](https://download.geofabrik.de/).
+  `duckosm quack --geofabrik` follows Geofabrik's [layer rules](https://download.geofabrik.de/osm-data-in-gis-formats-free.pdf).
+
 ## License
 
 MIT. duckOSM is built on [DuckDB](https://duckdb.org) and its spatial extension. It is an
