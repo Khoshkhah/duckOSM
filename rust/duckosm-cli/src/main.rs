@@ -801,13 +801,50 @@ fn studio(args: &[String]) -> Result<(), String> {
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let site = duckosm_edit::studio::Studio::new(Box::new(duckosm_edit::native::NativeHost), &out, port, cli.geofabrik_index)?;
     eprintln!("duckosm-rust studio: {}  (the areas are in {}; Ctrl+C stops)", site.url(), site.out().display());
-    if !cli.no_open {
+    serve_studio(site, None, cli.no_open, listener)
+}
+
+/// Open `url` (default: the page of `site`) in the browser of the desktop, unless `no_open`, and serve `site` until Ctrl+C.
+#[cfg(feature = "duckdb")]
+fn serve_studio(site: duckosm_edit::studio::Studio, url: Option<String>, no_open: bool, listener: std::net::TcpListener) -> Result<(), String> {
+    if !no_open {
         // the browser of the desktop; on a computer with no desktop (an ssh session) nothing opens, and the address above is the way
         let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
-        let _ = std::process::Command::new(opener).arg(site.url()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+        let _ = std::process::Command::new(opener).arg(url.unwrap_or_else(|| site.url())).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
     }
     duckosm_edit::studio::serve(std::sync::Arc::new(site), listener);
     Ok(())
+}
+
+/// duckosm-rust levels-edit: the level editor of a database (duckOSM `duckosm levels-edit`): Studio's card 8, roadstyle's level editor, on the
+/// one file. Each "← Steps" writes the drawing order into the file (visualization.edge_levels, docs/levels.md).
+#[derive(Parser)]
+#[command(name = "duckosm-rust levels-edit", version)]
+struct LevelsEditCli {
+    /// The database (`<name>.duckdb`).
+    db: PathBuf,
+    /// The port of the page on 127.0.0.1.
+    #[arg(long, default_value_t = 8000)]
+    port: u16,
+    /// Do not open the page in the browser.
+    #[arg(long)]
+    no_open: bool,
+}
+
+#[cfg(feature = "duckdb")]
+fn levels_edit(args: &[String]) -> Result<(), String> {
+    let cli = LevelsEditCli::parse_from(args);
+    let listener = duckosm_edit::bind(cli.port)?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let site = duckosm_edit::studio::Studio::for_file(Box::new(duckosm_edit::native::NativeHost), &cli.db, port)?;
+    let url = site.levels_url();
+    eprintln!("duckosm-rust levels-edit: {}  (Ctrl+C stops)", url.as_deref().unwrap_or_default());
+    serve_studio(site, url, cli.no_open, listener)
+}
+
+#[cfg(not(feature = "duckdb"))]
+fn levels_edit(_: &[String]) -> Result<(), String> {
+    Err("levels-edit needs DuckDB: this program is built without the cargo feature \"duckdb\"".into())
 }
 
 #[cfg(not(feature = "duckdb"))]
@@ -947,6 +984,7 @@ fn main() {
         Some("edit") => edit(&args[1..]),
         Some("ask") => ask(&args[1..]),
         Some("studio") => studio(&args[1..]),
+        Some("levels-edit") => levels_edit(&args[1..]),
         Some("cut") => cut(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),

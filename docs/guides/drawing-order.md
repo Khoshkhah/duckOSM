@@ -4,6 +4,7 @@
 pip install "duckosm[levels]"
 duckosm levels monaco.duckdb                 # the level area monaco.levels/, solved, written into the file
 duckosm levels-edit monaco.duckdb            # optional: fix places by hand, with mapstyle's base map and every road; each Apply writes into the file
+duckosm-rust levels-edit monaco.duckdb       # the same in the Rust program (Studio's card 8 on the file), no Python
 ```
 
 When roads cross or meet, a map must decide which is painted over which: a bridge over the road under it, a street over its sidewalk, a junction without a ring between the roads that meet.

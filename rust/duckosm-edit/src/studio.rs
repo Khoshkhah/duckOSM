@@ -113,6 +113,8 @@ pub struct Studio {
     /// One making of a tiled map at a time: the tiles of an area that the server does not have (after a restart) make it once, and wait.
     making: Mutex<()>,
     pager: Pager,
+    /// `levels-edit DB`: the one area of the server, a database `<out>/<name>.duckdb` (not in a folder of its own), or None.
+    file: Option<String>,
 }
 
 /// The date `back` days ago, UTC, as Geofabrik writes it in the name of a dated file: yymmdd.
@@ -315,7 +317,22 @@ impl Studio {
         std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
         let out = std::fs::canonicalize(out).map_err(|e| format!("{}: {e}", out.display()))?;
         Ok(Studio { out: Mutex::new(out), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], port, host, index: index.unwrap_or_else(|| GEOFABRIK_INDEX.into()),
-                    index_text: Mutex::new(None), page: crate::page::make_studio()?, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(Vec::new()), making: Mutex::new(()), pager })
+                    index_text: Mutex::new(None), page: crate::page::make_studio()?, file: None, job: Mutex::new(Job::default()), dl: Mutex::new(Job::default()), edit: Mutex::new(None), opening: Mutex::new(String::new()), current: Mutex::new(String::new()), tiled: Mutex::new(Vec::new()), making: Mutex::new(()), pager })
+    }
+
+    /// A server for the one database `db` (`duckosm-rust levels-edit`): its area is the name of the file, and the files of the area (the map, the
+    /// terrain) are written next to it.
+    pub fn for_file(host: Box<dyn Host>, db: &Path, port: u16) -> Result<Studio, String> {
+        let name = db.file_stem().and_then(|n| n.to_str()).filter(|n| db.extension().is_some_and(|e| e == "duckdb") && is_name(n) && db.is_file())
+            .ok_or_else(|| format!("{}: not a .duckdb file whose name is letters, digits, _, - and .", db.display()))?.to_string();
+        let mut s = Studio::new(host, db.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")), port, None)?;
+        s.file = Some(name);
+        Ok(s)
+    }
+
+    /// The address of the page with the one area of `for_file` open and its level editor (card 8) open.
+    pub fn levels_url(&self) -> Option<String> {
+        self.file.as_ref().map(|n| format!("{}?area={n}&step=8", self.url()))
     }
 
     /// The folder of the areas now.
@@ -455,7 +472,10 @@ impl Studio {
 
     /// The file of an area's folder that the name `<name>/<file>` is, or None.
     fn area_dir(&self, name: &str) -> Option<PathBuf> {
-        is_name(name).then(|| self.out().join(name))
+        match &self.file {
+            Some(f) => (f == name).then(|| self.out()),
+            None => is_name(name).then(|| self.out().join(name)),
+        }
     }
 
     /// Start a build from the request of the page (`POST /api/build`):
@@ -585,6 +605,9 @@ impl Studio {
 
     /// Use another folder for the areas: `{"path", "create": bool}`. A folder that is not there is made only when `create` is true.
     fn set_folder(&self, body: &[u8]) -> Result<String, String> {
+        if self.file.is_some() {
+            return Err("this server edits one database (levels-edit): the folder does not change".into());
+        }
         let b: Value = serde_json::from_slice(body).map_err(|e| format!("the request: {e}"))?;
         let path = PathBuf::from(b["path"].as_str().unwrap_or_default().trim());
         if path.as_os_str().is_empty() {
@@ -603,9 +626,12 @@ impl Studio {
 
     /// The areas of the folder: each folder `<name>/` that has `<name>.duckdb`, newest first. The config is in the answer (the page reads the networks from it).
     fn areas(&self) -> Value {
-        let mut list: Vec<(u64, Value)> = std::fs::read_dir(self.out()).into_iter().flatten().flatten().filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let (dir, db) = (e.path(), e.path().join(format!("{name}.duckdb")));
+        let dirs: Vec<(String, PathBuf)> = match &self.file {
+            Some(f) => vec![(f.clone(), self.out())],
+            None => std::fs::read_dir(self.out()).into_iter().flatten().flatten().map(|e| (e.file_name().to_string_lossy().into_owned(), e.path())).collect(),
+        };
+        let mut list: Vec<(u64, Value)> = dirs.into_iter().filter_map(|(name, dir)| {
+            let db = dir.join(format!("{name}.duckdb"));
             let meta = std::fs::metadata(&db).ok().filter(|m| m.is_file() && is_name(&name))?;
             let secs = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
             Some((secs, json!({"name": name, "size": meta.len(), "modified": secs, "dem": dir.join("dem.tif").is_file(), "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default()})))
@@ -617,7 +643,19 @@ impl Studio {
     /// The boundary and the config of a saved area, to load them into the steps again.
     fn area_info(&self, name: &str) -> Result<String, String> {
         let dir = self.area_dir(name).filter(|d| d.join(format!("{name}.duckdb")).is_file()).ok_or("no such area")?;
-        let boundary: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("boundary.geojson")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        // the boundary of the build; a database that is not in a folder of its own (levels-edit) has the one of the file
+        let text = match std::fs::read_to_string(dir.join("boundary.geojson")) {
+            Ok(t) => t,
+            Err(e) if self.file.is_some() => {
+                let mut db = self.host.db(&dir.join(format!("{name}.duckdb")));
+                db.open()?;
+                let t = db.texts("SELECT boundary_geojson::VARCHAR FROM main.visualization_metadata LIMIT 1");
+                db.close();
+                t?.into_iter().next().flatten().ok_or_else(|| format!("boundary.geojson: {e}, and the database has no boundary"))?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let boundary: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
         let files: Vec<Value> = folder_files(&dir).into_iter().map(|(n, b)| json!({"name": n, "size": b})).collect();
         Ok(json!({"name": name, "boundary": boundary, "config": std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default(),
                   "dir": dir.display().to_string(), "db": dir.join(format!("{name}.duckdb")).display().to_string(), "files": files,
@@ -1222,6 +1260,26 @@ mod tests {
         assert!(t.ends_with("modes: [walking]\n"));
         let t = config_text("m", "p\"x", Some(&json!({"not_reference": true})), "");
         assert!(t.contains("pbf_path: \"p\\\"x\"") && t.contains("  reference: false\n") && !t.contains("product"), "{t}");
+    }
+
+    /// `levels-edit DB`: the one area is the file, next to the files of its folder; the folder does not change, and a build makes no other area.
+    #[test]
+    fn one_file_is_the_one_area() {
+        let dir = std::env::temp_dir().join(format!("duckosm-studio-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("other")).unwrap();
+        std::fs::write(dir.join("monaco.duckdb"), b"db").unwrap();
+        std::fs::write(dir.join("other").join("other.duckdb"), b"db").unwrap();
+        let s = Studio::for_file(Box::new(FakeHost(Default::default())), &dir.join("monaco.duckdb"), 8000).unwrap();
+        assert_eq!(s.levels_url().as_deref(), Some("http://127.0.0.1:8000/?area=monaco&step=8"));
+        let names: Vec<String> = s.areas().as_array().unwrap().iter().map(|a| a["name"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names, ["monaco"]);
+        assert_eq!(s.area_dir("monaco"), Some(std::fs::canonicalize(&dir).unwrap()));
+        assert_eq!(s.area_dir("other"), None);
+        assert!(s.set_folder(br#"{"path": "/tmp"}"#).is_err());
+        assert!(Studio::for_file(Box::new(FakeHost(Default::default())), &dir.join("nope.duckdb"), 8000).is_err());
+        assert!(Studio::new(Box::new(FakeHost(Default::default())), &dir, 8000, None).unwrap().levels_url().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

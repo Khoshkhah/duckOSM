@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`duckosm-rust levels-edit DB`: the level editor in the Rust program** (`docs/design/all_in_rust.md`, group F). It is the page of
+  `duckosm-rust studio` on the one file, with card 8 (Edit levels) open: roadstyle's level editor over the area's map. "← Steps"
+  writes the drawing order into the file. Options: `--port` (default 8000) and `--no-open`.
+
 - **`duckosm-rust route-map`: the route planner page is in Rust** (`rust/duckosm-edit/src/route_map.rs`,
   `docs/design/all_in_rust.md`, group F), with the options of `duckosm route-map`. The page routes with the program's own
   router: the new crate `duckosm-planner`, built as WebAssembly into the page, in place of the page's JavaScript copy of the

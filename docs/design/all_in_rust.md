@@ -69,7 +69,7 @@ GTFS (`gtfs.py`) is not an export: it reads the stops of a feed for the GMNS `lo
 options of `duckosm elevation` and writes the same columns and rows: `ele`, `z_from`, `z_to`, `z_vertices` (and the same with
 `--suffix`) and `main.elevation_metadata`. The golden test (`elevation_equals_duckosm`, `tools/make_golden_elevation.py`) keeps the
 Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata and `--source copernicus`; Tartu with
-`--source copernicus` (60 s, Python 4 min 17 s). All rows are equal.
+`--source copernicus` (6 s, Python 4 min 17 s). All rows are equal. France driving (12.3 M nodes) takes 7 min on a Mac mini.
 
 - The DEM is read in pure Rust with the reader of the build (`duckosm_build::elevation::Dem`, the `tiff` crate): a GeoTIFF in
   EPSG:4326 with 32-bit float values, a file or an HTTP address. Python reads all the formats and CRSs of GDAL. A projected
@@ -79,8 +79,9 @@ Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata
   (`docs/concepts/ground-reference.md`) does not allow them as the ground.
 - The pixel of a point is found as rasterio finds it: the inverse affine transform, then floor. Before, the reader of the build
   divided by the pixel size, and one point of Tartu on a pixel edge took the next pixel.
-- DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. The command drops the R-tree
-  index of `edges` for the update of `z_vertices` and makes it again (64 s to 10 s for the cycling edges of Tartu).
+- DuckDB updates a list column as a delete and an insert, and updates an R-tree index row by row. So the command does not
+  update `edges`: it makes the table again in one transaction (`CREATE OR REPLACE TABLE … POSITIONAL JOIN` the new heights) and
+  sets its indexes, column defaults and comments again (Tartu: the update took 64 s for the cycling edges; the whole command now takes 6 s).
 
 ## Group F: the state
 
@@ -92,11 +93,14 @@ the same engine.
 |---|---|
 | `viz` and the build's `viz.enabled` | Done: `duckosm-rust viz` (`maps.rs`), the same pages and options as `duckosm viz`. The config has no skipped step now. |
 | `route-map` and the planner page (the router in WebAssembly) | Done: `duckosm-rust route-map` (`route_map.rs`, `page/planner.html`). The page routes with `duckosm-planner` as WebAssembly. |
-| `levels-edit` | Not started. |
+| `levels-edit` | Done: `duckosm-rust levels-edit DB`, the page of `duckosm-rust studio` on one file (`Studio::for_file`) with card 8 open (`?area=<name>&step=8`). |
 
 - The pages are roadstyle's `duckosm.page(db, mode, only=...)`: the "liberty" theme and the "google" paths of roadstyle's port.
   mapstyle's own `render_map` (the "osm" theme) does not run with the current roadstyle (`palette_to_dict` is gone), so
   `duckosm viz` in Python fails today.
+- `levels-edit` uses roadstyle's level-edit part and its WebAssembly level editor, as Studio's card 8. The Python command serves
+  roadstyle's Python editor with mapstyle's layers; the Rust page uses Studio's map of the area. `--area`, `--reports` and
+  `--plain` are not ported: the work folder is in the page, the maps have their own command (`viz`), and the map is always Studio's.
 - A file with no stored levels: the engine solves them while it draws (mapstyle's rule).
 - The planner page: `duckosm-planner` holds the area in memory (the page's data `RM`: each road's line, each mode's roads in
   table order, the turns, walk + drive) and gives the JSON of `route-points`, `route-multimodal-points` and `directions`.
