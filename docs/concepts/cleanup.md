@@ -44,7 +44,7 @@ work, but they do nothing.
 
 ## Where the border cuts
 
-**Build from a PBF.** The PBF is cut with `osmium` (strategy `smart` by default, `complete_ways` when
+**Build from a PBF.** The PBF is cut to the boundary (strategy `smart` by default, `complete_ways` when
 `options.build_features: false`; `options.clip_strategy` sets it): every way with a node inside
 the boundary is kept whole, so roads that cross the border stick out past it. Then the component
 filter removes what doesn't connect. `boundary.buffer_m` grows the boundary first.

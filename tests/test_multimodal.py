@@ -6,11 +6,10 @@ and :func:`duckosm.routing.route_multimodal` (node-based Dijkstra with the walk*
 Fast tests build a tiny in-memory DuckDB with hand-written ``walking`` / ``driving`` (/ ``cycling``)
 schemas sharing junction ``node_id``s — mirroring ``tests/test_routing.py`` /
 ``tests/test_road_filter_oneway.py``. One gated integration test builds a real 2-mode area from the
-metro-vancouver PBF (skipped if the data file or ``osmium`` is absent).
+metro-vancouver PBF (skipped if the data file is absent).
 
 Run: ``pytest tests/test_multimodal.py -q``
 """
-import shutil
 from pathlib import Path
 
 import duckdb
@@ -290,8 +289,7 @@ _REPO = Path(__file__).resolve().parents[1]
 _PBF = _REPO / "data" / "maps" / "metro_vancouver.osm.pbf"
 
 
-@pytest.mark.skipif(not _PBF.exists() or shutil.which("osmium") is None,
-                    reason="needs data/maps/metro_vancouver.osm.pbf + osmium")
+@pytest.mark.skipif(not _PBF.exists(), reason="needs data/maps/metro_vancouver.osm.pbf")
 def test_multimodal_integration_build(tmp_path):
     """End-to-end: clip a tiny downtown-Vancouver bbox, build driving+walking, then the mm graph
     (via the importer), and assert real transfers + a real walk->drive route with a transfer."""

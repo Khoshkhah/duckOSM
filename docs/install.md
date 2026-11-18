@@ -12,29 +12,20 @@ API (`to_sumo`, `route`, `to_elevation`, ...) run the Rust code. There is a whee
 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that needs a
 [Rust toolchain](https://rustup.rs).
 
-These commands still run duckOSM's Python code: `levels`, `bus`, `multimodal` and `clip-pbf`. The same for the functions `to_gmns`, `to_meso`, `to_micro` and
+These commands still run duckOSM's Python code: `levels`, `bus` and `multimodal`. The same for the functions `to_gmns`, `to_meso`, `to_micro` and
 `check_gmns`.
 
 ## Extras
 
 Some features need more packages. Add the extras you want in brackets, for example
-`pip install "duckosm[routing,viz]"`.
+`pip install "duckosm[viz,sumo]"`. `route()`, `duckosm elevation` and the other exports need no extra.
 
 | Extra | Adds | For |
 |---|---|---|
-| `routing` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()` |
-| `viz` | roadstyle | `duckosm viz` maps |
-| `sumo` | SUMO's `netconvert` | `duckosm sumo` |
-| `elevation` | rasterio, pyproj | `duckosm elevation` |
-
-## Tools outside Python
-
-Two command-line tools that pip can't install make some steps better. duckOSM works without them.
-
-| Tool | Used for | Without it | Install |
-|---|---|---|---|
-| **osmium** | cutting a PBF to a boundary (`build -b`, `clip-pbf`) | `build` uses the whole PBF (with a warning); `clip-pbf` fails | `apt install osmium-tool` · `brew install osmium-tool` |
-| **GDAL** (`ogr2ogr`) | reading borders from a PBF (`boundary`, `admin`), one-file GeoPackage (`export-gis`) | `boundary` looks the border up online; `export-gis` writes one file per layer; `admin` fails | `apt install gdal-bin` · `brew install gdal` |
+| `viz` | mapstyle (with roadstyle and geopandas), lanestyle | `duckosm viz`, `route-map`, `gmns-map` |
+| `levels` | roadstyle | `duckosm levels`: the drawing levels |
+| `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`; `routing` is its old name, for one more release |
+| `sumo` | eclipse-sumo (SUMO's `netconvert`) | `duckosm sumo` |
 
 ## The program without Python
 

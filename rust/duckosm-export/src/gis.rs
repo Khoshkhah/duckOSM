@@ -3,7 +3,7 @@
 //!
 //! The layers are `edges_<mode>`, `nodes_<mode>` and `boundary` (GeoParquet: also `features_<table>`). DuckDB's spatial
 //! extension writes each layer (`COPY ... (FORMAT gdal)` or `(FORMAT parquet)`). A GeoPackage has one layer for each
-//! file, so `ogr2ogr` puts the layers into one file; without `ogr2ogr`, each layer stays in its own file.
+//! file, so SQLite then copies the tables of each layer file into one file ([`join_gpkg`]).
 
 use crate::{open, Result};
 use duckdb::Connection;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 pub struct Summary {
     pub fmt: String,
-    /// The GeoPackage file (None: one file for each layer), or the folder of the shapefiles or the GeoParquet files.
+    /// The GeoPackage file, or the folder of the shapefiles or the GeoParquet files.
     pub path: Option<PathBuf>,
     pub layers: Vec<(String, i64)>,
     pub files: Vec<PathBuf>,
@@ -79,18 +79,14 @@ fn count(con: &Connection, schema: &str, table: &str) -> Result<i64> {
     con.query_row(&format!("SELECT count(*) FROM \"{schema}\".\"{table}\""), [], |r| r.get(0)).map_err(e)
 }
 
-fn copy_gdal(con: &Connection, sql: &str, out: &Path, driver: &str, srs: &str) -> Result<()> {
-    con.execute_batch(&format!("COPY ({sql}) TO '{}' (FORMAT gdal, DRIVER '{driver}', SRS '{srs}')", out.display()))
+fn copy_gdal(con: &Connection, sql: &str, out: &Path, driver: &str, srs: &str, layer: Option<&str>) -> Result<()> {
+    let layer = layer.map_or(String::new(), |l| format!(", LAYER_NAME '{l}'"));
+    con.execute_batch(&format!("COPY ({sql}) TO '{}' (FORMAT gdal, DRIVER '{driver}', SRS '{srs}'{layer})", out.display()))
         .map_err(|x| format!("{}: {x}", out.display()))
 }
 
 fn mkdir(d: &Path) -> Result<()> {
     std::fs::create_dir_all(if d.as_os_str().is_empty() { Path::new(".") } else { d }).map_err(|x| format!("{}: {x}", d.display()))
-}
-
-/// The `ogr2ogr` program on the PATH.
-fn find_ogr2ogr() -> Option<PathBuf> {
-    std::env::var_os("PATH")?.to_str()?.split(':').map(|d| Path::new(d).join("ogr2ogr")).find(|p| p.is_file())
 }
 
 /// Export the layers of the database `db`, as `to_gis`. `modes`: empty = each mode of the database. `fmt`: gpkg, shp or
@@ -133,13 +129,13 @@ pub fn to_gis(db: &Path, out: &Path, modes: &[String], fmt: &str, boundary: bool
             let mut s = Summary { fmt, path: Some(out.to_path_buf()), layers: vec![], files: vec![] };
             for (lyr, schema, table) in layers {
                 let path = out.join(format!("{base}_{lyr}.shp"));
-                copy_gdal(&con, &select_sql(&con, &schema, &table, true)?, &path, "ESRI Shapefile", srs)?;
+                copy_gdal(&con, &select_sql(&con, &schema, &table, true)?, &path, "ESRI Shapefile", srs, None)?;
                 s.layers.push((lyr, count(&con, &schema, &table)?));
                 s.files.push(path);
             }
             Ok(s)
         }
-        _ => gpkg(&con, out, &base, layers, srs),
+        _ => gpkg(&con, out, layers, srs),
     }
 }
 
@@ -181,46 +177,71 @@ fn geoparquet(con: &Connection, dir: &Path, mut layers: Vec<(String, String, Str
     Ok(s)
 }
 
-fn gpkg(con: &Connection, out: &Path, base: &str, layers: Vec<(String, String, String)>, srs: &str) -> Result<Summary> {
+fn gpkg(con: &Connection, out: &Path, layers: Vec<(String, String, String)>, srs: &str) -> Result<Summary> {
     let dir = out.parent().unwrap_or(Path::new(""));
     mkdir(dir)?;
     let mut s = Summary { fmt: "gpkg".into(), path: None, layers: vec![], files: vec![] };
-    let Some(ogr) = find_ogr2ogr() else {
-        eprintln!("ogr2ogr not found — writing one GeoPackage per layer (install GDAL for a single multi-layer .gpkg)");
-        for (lyr, schema, table) in layers {
-            let path = dir.join(format!("{base}_{lyr}.gpkg"));
-            copy_gdal(con, &select_sql(con, &schema, &table, false)?, &path, "GPKG", srs)?;
-            s.layers.push((lyr, count(con, &schema, &table)?));
-            s.files.push(path);
-        }
-        return Ok(s);
-    };
     if out.exists() {
         std::fs::remove_file(out).map_err(|x| format!("{}: {x}", out.display()))?;
     }
     let tmp = std::env::temp_dir().join(format!("duckosm-gis-{}", std::process::id()));
     mkdir(&tmp)?;
     let r = (|| {
+        let mut parts = Vec::new();
         for (lyr, schema, table) in &layers {
             let part = tmp.join(format!("{lyr}.gpkg"));
-            copy_gdal(con, &select_sql(con, schema, table, false)?, &part, "GPKG", srs)?;
-            let mut cmd = std::process::Command::new(&ogr);
-            cmd.args(["-f", "GPKG"]);
-            if out.exists() {
-                cmd.args(["-update", "-append"]);
-            }
-            let res = cmd.arg(out).arg(&part).args(["-nln", lyr]).output().map_err(|x| format!("ogr2ogr: {x}"))?;
-            if !res.status.success() {
-                let err = String::from_utf8_lossy(&res.stderr);
-                return Err(format!("ogr2ogr failed on layer {lyr} ({}):\n{}", res.status, &err[err.len().saturating_sub(2000)..]));
-            }
+            copy_gdal(con, &select_sql(con, schema, table, false)?, &part, "GPKG", srs, Some(lyr))?;
+            parts.push(part);
             s.layers.push((lyr.clone(), count(con, schema, table)?));
         }
-        Ok(())
+        join_gpkg(&parts, out)
     })();
     let _ = std::fs::remove_dir_all(&tmp);
     r?;
     s.path = Some(out.to_path_buf());
     s.files.push(out.to_path_buf());
     Ok(s)
+}
+
+/// Join GeoPackage files of one layer each into the file `out`: the first file becomes `out`, then SQLite copies the
+/// tables, the R-tree, the `gpkg_*` rows, the indexes and the triggers of each other file into it, as GDAL wrote them.
+fn join_gpkg(parts: &[PathBuf], out: &Path) -> Result<()> {
+    let Some((first, rest)) = parts.split_first() else { return Ok(()) };
+    std::fs::copy(first, out).map_err(|x| format!("{}: {x}", out.display()))?;
+    let db = rusqlite::Connection::open(out).map_err(|x| format!("{}: {x}", out.display()))?;
+    let x = |x: rusqlite::Error| format!("{}: {x}", out.display());
+    for part in rest {
+        db.execute("ATTACH ?1 AS p", [part.to_string_lossy()]).map_err(x)?;
+        let objects = |kind: &str| -> Result<Vec<(String, String)>> {
+            let mut q = db
+                .prepare("SELECT name, sql FROM p.sqlite_master WHERE type = ?1 AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rootpage")
+                .map_err(x)?;
+            let rows = q.query_map([kind], |r| Ok((r.get(0)?, r.get(1)?))).map_err(x)?;
+            rows.collect::<rusqlite::Result<_>>().map_err(x)
+        };
+        let tables = objects("table")?;
+        // an R-tree makes its own tables (`<name>_node`, `_parent`, `_rowid`)
+        let virt: Vec<&String> = tables.iter().filter(|t| t.1.starts_with("CREATE VIRTUAL")).map(|t| &t.0).collect();
+        let shadow = |n: &str| virt.iter().any(|v| ["_node", "_parent", "_rowid"].iter().any(|s| n == format!("{v}{s}")));
+        db.execute_batch("BEGIN").map_err(x)?;
+        // the `gpkg_*` tables, and their indexes and triggers, are in `out` already: only their rows come
+        let have = |name: &str| -> Result<bool> {
+            db.query_row("SELECT count(*) FROM main.sqlite_master WHERE name = ?1", [name], |r| r.get::<_, i64>(0)).map(|n| n > 0).map_err(x)
+        };
+        for (name, sql) in tables.iter().filter(|t| !shadow(&t.0)) {
+            if !have(name)? {
+                db.execute_batch(sql).map_err(x)?;
+            }
+            let q = name.replace('"', "\"\"");
+            db.execute_batch(&format!("INSERT OR IGNORE INTO main.\"{q}\" SELECT * FROM p.\"{q}\"")).map_err(x)?;
+        }
+        // the indexes and the triggers after the rows, as GDAL writes them
+        for (name, sql) in objects("index")?.into_iter().chain(objects("trigger")?) {
+            if !have(&name)? {
+                db.execute_batch(&sql).map_err(x)?;
+            }
+        }
+        db.execute_batch("COMMIT; DETACH p").map_err(x)?;
+    }
+    Ok(())
 }

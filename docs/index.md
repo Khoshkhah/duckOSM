@@ -99,7 +99,7 @@ The same OSM data gives the same ids after a rebuild, in a city cut from a count
 ## Quick start
 
 ```bash
-pip install "duckosm[routing]"
+pip install duckosm
 
 curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
 duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving

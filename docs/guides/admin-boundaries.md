@@ -2,7 +2,7 @@
 
 `duckosm admin` adds every administrative area of a region (country, counties, municipalities,
 districts, …) to a built database, as the table `main.admin_boundaries`, with each area's parent so
-the hierarchy can be walked. It needs [GDAL](../install.md#tools-outside-python).
+the hierarchy can be walked.
 
 ```bash
 duckosm admin --pbf monaco-latest.osm.pbf --db monaco.duckdb

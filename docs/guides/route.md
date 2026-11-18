@@ -1,7 +1,7 @@
 # Route
 
 A route goes from one edge (a directed piece of road) to another over the graph of legal turns, so
-it never takes a banned turn. Needs `pip install "duckosm[routing]"`.
+it never takes a banned turn.
 
 ```python
 import duckdb

@@ -1,7 +1,6 @@
 # Add elevation
 
-`duckosm elevation` adds the ground height to every node of a finished build, in place. Needs
-`pip install "duckosm[elevation]"`.
+`duckosm elevation` adds the ground height to every node of a finished build, in place.
 
 ```bash
 duckosm elevation monaco.duckdb

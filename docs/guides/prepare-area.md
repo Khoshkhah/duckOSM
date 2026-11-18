@@ -35,8 +35,8 @@ duckosm boundary --osm-id 2220322 --pbf monaco-latest.osm.pbf       # -> monaco.
 wrote monaco.geojson: Monaco (admin level 8, OSM relation 2220322, 2.39 km²), from PBF monaco-latest.osm.pbf
 ```
 
-With `--pbf`, the border is read from the PBF itself (offline; needs [GDAL](../install.md#tools-outside-python)).
-Without it, or if GDAL is missing, it's fetched from OpenStreetMap online.
+With `--pbf`, the border is read from the PBF itself (offline).
+Without it, or if the PBF has no such border, it's fetched from OpenStreetMap online.
 
 **By name instead of id.** `duckosm boundary Monaco --pbf monaco-latest.osm.pbf` searches by name:
 case, accents and hyphens don't matter, and English names (`name:en`) match too. If the name matches
@@ -96,6 +96,6 @@ To get just the area's map data as a PBF, for example for another tool:
 duckosm clip-pbf sweden-latest.osm.pbf sodermalm.geojson      # -> sodermalm.osm.pbf
 ```
 
-It needs [osmium](../install.md#tools-outside-python). By default, ways that cross the border are kept
+By default, ways that cross the border are kept
 whole (`--strategy complete_ways`); `--strategy smart` also keeps rivers and other areas whole, which
 the [base-map layers](../reference/features.md) need.

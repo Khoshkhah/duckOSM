@@ -18,7 +18,7 @@ How to clip: [Several areas from one region](../guides/prepare-area.md#several-a
 
 | Stage | Steps |
 |---|---|
-| ① Once | cut the PBF to the boundary (`osmium`), parse OSM into `raw.*`, global junctions |
+| ① Once | cut the PBF to the boundary, parse OSM into `raw.*`, global junctions |
 | ② Each mode | filter roads ([What each network contains](networks.md)), OSM fixes, build edges, simplify and merge, connect dangling paths, speeds, costs, walk / cycle type, private roads apart, turn restrictions, edge graph, H3, indexes, validate |
 | ③ Once, at the end | intermodal graph `mm.*`, base-map layers `features.*`, bus routes `bus.*`, `edge_id_hash` macros, metadata and time zone, report and map |
 

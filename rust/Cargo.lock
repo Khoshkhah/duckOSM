@@ -875,6 +875,7 @@ dependencies = [
  "duckosm-build",
  "flate2",
  "geo",
+ "rusqlite",
 ]
 
 [[package]]

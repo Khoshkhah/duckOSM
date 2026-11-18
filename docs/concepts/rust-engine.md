@@ -13,7 +13,8 @@ duckOSM builds the road networks with an engine in Rust. It is the default since
 |---|---|
 | The network: `edges`, `private_edges`, `nodes`, `edge_id_map`, `edge_graph`, turn restrictions | Rust |
 | `raw.*` of a whole file in the program `duckosm`: the table function `read_osm`, about 30% less CPU than `ST_READOSM` ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/streaming_load.md)) | Rust |
-| The osmium cut, `raw.*` of `duckosm build`, the base-map layers (`features.*`), the bus routes, the drawing levels | Python, for now |
+| The cut of the PBF to the boundary (`clip-pbf`, also in `duckosm build`) | Rust |
+| `raw.*` of `duckosm build`, the base-map layers (`features.*`), the bus routes, the drawing levels | Python, for now |
 
 The Python steps move to Rust one at a time. Each move has a test that the tables stay equal.
 

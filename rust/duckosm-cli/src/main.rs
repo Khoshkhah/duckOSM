@@ -182,6 +182,51 @@ fn cut(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// duckosm clip-pbf: cut PBF down to the area in BOUNDARY (a GeoJSON polygon), with the rules of a strategy of
+/// `osmium extract`.
+#[derive(Parser)]
+#[command(name = "duckosm clip-pbf", version)]
+struct ClipCli {
+    /// The PBF file to cut (sorted by type and id, as the files of Geofabrik).
+    pbf: PathBuf,
+    /// The boundary (GeoJSON).
+    boundary: PathBuf,
+    /// Output PBF (default: <boundary name>.osm.pbf).
+    #[arg(short, long)]
+    out: Option<PathBuf>,
+    /// complete_ways keeps roads crossing the border whole; smart also completes multipolygons (rivers, land cover)
+    /// for a base-map build; simple keeps only the nodes inside.
+    #[arg(long, default_value = "complete_ways", value_parser = ["complete_ways", "smart", "simple"])]
+    strategy: String,
+}
+
+fn clip_pbf(args: &[String]) -> Result<(), String> {
+    let cli = ClipCli::parse_from(args);
+    for p in [&cli.pbf, &cli.boundary] {
+        if !p.exists() {
+            return Err(format!("Path '{}' does not exist.", p.display()));
+        }
+    }
+    let out = cli.out.unwrap_or_else(|| {
+        let mut name = cli.boundary.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        for suffix in [".pbf", ".osm", ".geojson", ".json", ".duckdb"] {
+            name = name.strip_suffix(suffix).map(str::to_string).unwrap_or(name);
+        }
+        PathBuf::from(format!("{name}.osm.pbf"))
+    });
+    if std::path::absolute(&out).ok() == std::path::absolute(&cli.pbf).ok() {
+        return Err("the output would overwrite the input PBF; pass --out".into());
+    }
+    if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+    }
+    let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
+    duckosm_build::clip_file(&cli.pbf, &text, &out, cli.strategy.parse()?)?;
+    let mb = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0);
+    println!("wrote {} ({:.1} MB, from {:.1} MB)", out.display(), mb(&out), mb(&cli.pbf));
+    Ok(())
+}
+
 /// duckosm quack: the features table of QuackOSM (feature_id, tags, geometry) from an .osm.pbf file, with the rows of
 /// QuackOSM 0.20.0 with its default options (docs/rust/quack.md). To make the table of an area, cut the region file first
 /// (duckosm cut).
@@ -1008,6 +1053,7 @@ pub fn main_with(mut args: Vec<String>) -> i32 {
         Some("studio") => studio(&args[1..]),
         Some("levels-edit") => levels_edit(&args[1..]),
         Some("cut") => cut(&args[1..]),
+        Some("clip-pbf") => clip_pbf(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),
         Some("quack-tiles") => quack_tiles(&args[1..]),

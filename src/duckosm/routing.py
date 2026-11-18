@@ -349,7 +349,7 @@ def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", 
     try:
         import networkx as nx
     except ImportError as e:
-        raise ImportError("route needs networkx — `pip install duckosm[routing]`") from e
+        raise ImportError("route needs networkx — `pip install duckosm[networkx]`") from e
 
     g = graph if graph is not None else to_networkx(con, mode=mode, weight=weight,
                                                     node_attrs=False)

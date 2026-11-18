@@ -12,7 +12,7 @@ PYTHON_COMMANDS = {
     # duckOSM's `duckosm build` (--pbf, --output, --config, ...): the Python steps with the Rust network step (DuckOSM.run).
     # The whole build in Rust: `duckosm <PBF> -o <DIR>` and `duckosm --config` (not yet equal: docs/design/all_in_rust.md).
     "build",
-    "levels", "bus", "multimodal", "clip-pbf",       # no Rust port yet
+    "levels", "bus", "multimodal",                   # no Rust port yet
 }
 
 

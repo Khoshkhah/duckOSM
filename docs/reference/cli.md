@@ -69,14 +69,14 @@ duckosm boundary [OPTIONS] [NAME]
 
 | Option | Does | Default |
 |---|---|---|
-| `--pbf PATH` | search the borders in this PBF first; needs GDAL's `ogr2ogr` | |
+| `--pbf PATH` | search the borders in this PBF first | |
 | `--osm-id INTEGER` | take this OSM boundary relation (when a name matches several) | |
 | `--offline` | never ask Nominatim | |
 | `-o`, `--out FILE` | output GeoJSON | `<name>.geojson` |
 
 ### `clip-pbf`
 
-Cuts a PBF down to a GeoJSON area, with `osmium`. Guide:
+Cuts a PBF down to a GeoJSON area. The strategies have the rules of `osmium extract`. Guide:
 [Cut a smaller PBF](../guides/prepare-area.md#cut-a-smaller-pbf).
 
 ```text
@@ -541,7 +541,7 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 ### `elevation`
 
 Adds the ground height to every node (`nodes.ele`) and edge end (`edges.z_from`, `z_to`), and a row
-in `main.elevation_metadata`. Running it again overwrites. Needs `duckosm[elevation]`. Guide:
+in `main.elevation_metadata`. Running it again overwrites. Guide:
 [Add elevation](../guides/elevation.md); sources: [Elevation sources](elevation-sources.md).
 
 ```text
@@ -550,7 +550,7 @@ duckosm elevation [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--dem TEXT` | an elevation file or URL, any format GDAL reads; wins over `--source` | |
+| `--dem TEXT` | an elevation file or URL (GeoTIFF); wins over `--source` | |
 | `--source TEXT` | `auto`, `copernicus` or `eudtm` (needs `OPENTOPOGRAPHY_API_KEY`). `auto` picks EU-DTM in Europe when the key is set, else Copernicus | `auto` |
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
 | `--nodata-fill FLOAT` | height written where the model has no value | `0.0` |
@@ -566,7 +566,7 @@ A `--dem` file in `ele` (no `--suffix`) is the area's ground reference. Give `--
 ### `admin`
 
 Adds `main.admin_boundaries`: every OSM administrative boundary in the PBF, with its parent. Replaces
-the table if it exists. Needs GDAL's `ogr2ogr`. Guide:
+the table if it exists. Guide:
 [Add administrative boundaries](../guides/admin-boundaries.md).
 
 ```text
@@ -577,7 +577,7 @@ duckosm admin --pbf PBF --db DB [--gpkg GPKG]
 |---|---|---|
 | `--pbf PBF` | the OSM PBF | required |
 | `--db DB` | the database to add the table to | required |
-| `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (skips the slow `ogr2ogr` step next time) | a temporary file |
+| `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (the next run does not read the PBF again) | a temporary file |
 
 ### `multimodal`
 

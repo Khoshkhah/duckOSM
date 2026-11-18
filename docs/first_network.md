@@ -1,7 +1,7 @@
 # Your first network
 
 This builds the road network of Monaco from scratch, then queries it, routes on it and draws it.
-It takes a few minutes. You need duckOSM [installed](install.md) with `pip install "duckosm[routing,viz]"`.
+It takes a few minutes. You need duckOSM [installed](install.md) with `pip install "duckosm[viz]"`.
 
 ## 1. Choose your area
 

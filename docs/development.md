@@ -5,7 +5,7 @@
 ```bash
 git clone https://github.com/Khoshkhah/duckOSM.git && cd duckOSM
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,routing]"
+pip install -e ".[dev,networkx]"
 ```
 
 ## How the code is laid out
@@ -24,8 +24,8 @@ pip install -e ".[dev,routing]"
 - **`edge_id`**: `(hash(osm_id, source, target) >> 1)::BIGINT` ([Stable edge ids](concepts/edge-ids.md)).
   Other projects join on it. Don't change the formula, the order of its inputs, or the `duckdb<2` pin.
   The code also runs on DuckDB 2.0; `docs/design/duckdb2_upgrade.md` lists what the upgrade still needs.
-- **Heavy dependencies are imported inside functions** (geopandas, networkx, rasterio, roadstyle,
-  sumolib), so the core install stays small: duckdb, shapely, h3, click, rich, pyyaml, pandas,
+- **Heavy dependencies are imported inside functions** (geopandas, networkx, rasterio, roadstyle),
+  so the core install stays small: duckdb, shapely, h3, click, rich, pyyaml, pandas,
   timezonefinder (`[project.dependencies]` in `pyproject.toml`).
 - **Paths are relative to the current folder**: a pip install has no repo, so only files inside
   `src/duckosm/` ship.
@@ -47,20 +47,19 @@ else. Some tests skip themselves when an optional tool or local data is missing:
 | Skipped without | Install / provide |
 |---|---|
 | `netconvert` | `pip install "duckosm[sumo]"` |
-| `ogr2ogr` | GDAL |
-| `osmium` | osmium-tool |
-| `rasterio` (elevation tests) | `pip install "duckosm[elevation]"` |
+| `osmium` (only `sumo_compare`, a developer check) | osmium-tool |
+| `rasterio` (the tests of the Python elevation reference) | `pip install rasterio pyproj` |
 | `roadstyle` (`tests/test_route_map.py`) | `pip install "duckosm[viz]"` |
 | `geopandas` | `pip install geopandas` (the `viz` extra brings it) |
 | the maintainer's local data (`pbf/`, `data/db/`, `data/maps/`, `data/boundaries/`, a mapstyle checkout) | not needed: the Monaco sample (`tests/test_sample_config.py`) covers a full build |
 
 A skip is not a pass: run `-rs` to see what didn't run.
 
-CI (`.github/workflows/ci.yml`) installs GDAL and osmium, runs the tests on Python 3.10 and 3.12
-with `pip install -e ".[dev,routing,sumo]"`, and builds the package with `twine check --strict`, on
+CI (`.github/workflows/ci.yml`) runs the tests on Python 3.10 and 3.12
+with `pip install -e ".[dev,networkx,sumo]"`, and builds the package with `twine check --strict`, on
 every push to `main` and every pull request. The map tests (`tests/test_maps.py`) need
 the `viz` extra, which CI doesn't install, so they are skipped there: run them locally with
-`pip install -e ".[dev,routing,viz]"`. The `dev` extra also installs `black` and `ruff`; CI doesn't
+`pip install -e ".[dev,networkx,viz]"`. The `dev` extra also installs `black` and `ruff`; CI doesn't
 run them.
 
 A route map has no unit test for what happens in the browser. Check one by hand with playwright

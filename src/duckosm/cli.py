@@ -4,7 +4,7 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm build    build a routing network from a PBF, or clip one from a parent db
   duckosm init-config  write the commented config template to a file, to edit and build from
   duckosm boundary     find an area's boundary by name (in a PBF, else Nominatim) -> GeoJSON
-  duckosm clip-pbf     cut a PBF down to a boundary (osmium)
+  duckosm clip-pbf     cut a PBF down to a boundary
   duckosm extract  slice a sub-area out of an existing build into a new db
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
@@ -198,71 +198,32 @@ def build(config, pbf, output, boundary, source_db, h3_cell, graph, h3_index, h3
         raise click.ClickException(str(e))
 
 
-@main.command()
-@click.argument("name", required=False)
-@click.option("--pbf", type=click.Path(exists=True),
-              help="Search the borders stored in this PBF first (offline; needs GDAL's ogr2ogr)")
-@click.option("--osm-id", type=int, help="Pick one exact OSM boundary relation (for ambiguous names)")
-@click.option("--offline", is_flag=True, help="Never ask OpenStreetMap's Nominatim search online")
-@click.option("--out", "-o", type=click.Path(dir_okay=False), help="Output GeoJSON (default: <name>.geojson)")
-def boundary(name, pbf, osm_id, offline, out):
-    """Find the boundary of the area called NAME and write it as GeoJSON.
+# boundary/clip-pbf/extract/admin forward all arguments to the Rust program or an argparse script: don't let Click
+# intercept unknown options or --help — the wrapped program parses and handles them.
+_PASSTHROUGH = dict(context_settings=dict(ignore_unknown_options=True, help_option_names=[]),
+                    add_help_option=False)
+
+
+def _rust_cli(command, args):
+    from duckosm import _rust
+    raise SystemExit(_rust.cli(["duckosm", command, *args]))
+
+
+@main.command(**_PASSTHROUGH)
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
+def boundary(args):
+    """Find the boundary of the area called NAME and write it as GeoJSON (the Rust `duckosm boundary`).
 
     Looks in --pbf's own borders first (offline), then asks Nominatim online.
-
-    \b
-    Examples:
-        duckosm boundary Monaco --pbf monaco-latest.osm.pbf     # -> monaco.geojson
-        duckosm boundary "Södermalm, Stockholm"                 # online
     """
-    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
-    from duckosm.area import find_boundary, write_boundary
-
-    if not name and osm_id is None:
-        raise click.ClickException("give a NAME or --osm-id")
-    try:
-        geom, info = find_boundary(name, pbf, osm_id, offline)
-    except LookupError as e:
-        raise click.ClickException(str(e))
-    out = out or f"{(name or info['name']).split(',')[0].strip().lower().replace(' ', '_')}.geojson"
-    write_boundary(geom, info, out)
-    def describe(i):
-        level = f"admin level {i['admin_level']}, " if i["admin_level"] is not None else ""
-        return f"{i['name']} ({level}OSM relation {i['osm_id']}, {i['area_km2']} km²)"
-    click.echo(f"wrote {out}: {describe(info)}, from {info['source']}")
-    if info.get("others"):
-        click.echo("also matched (pick one with --osm-id):")
-        for o in info["others"]:
-            click.echo(f"  {describe(o)}")
+    _rust_cli("boundary", args)
 
 
-@main.command(name="clip-pbf")
-@click.argument("pbf", type=click.Path(exists=True))
-@click.argument("boundary", type=click.Path(exists=True))
-@click.option("--out", "-o", type=click.Path(dir_okay=False),
-              help="Output PBF (default: <boundary name>.osm.pbf)")
-@click.option("--strategy", type=click.Choice(["complete_ways", "smart", "simple"]),
-              default="complete_ways", show_default=True,
-              help="complete_ways keeps roads crossing the border whole; smart also completes "
-                   "multipolygons (rivers, land cover) for a base-map build")
-def clip_pbf_cmd(pbf, boundary, out, strategy):
-    """Cut PBF down to the area in BOUNDARY (a GeoJSON polygon), with osmium.
-
-    \b
-    Example:
-        duckosm clip-pbf sweden-latest.osm.pbf sodermalm.geojson   # -> sodermalm.osm.pbf
-    """
-    from duckosm.area import clip_pbf
-
-    out = out or f"{_stem(boundary)}.osm.pbf"
-    if Path(out).resolve() == Path(pbf).resolve():
-        raise click.ClickException("the output would overwrite the input PBF; pass --out")
-    try:
-        clip_pbf(pbf, boundary, out, strategy)
-    except RuntimeError as e:
-        raise click.ClickException(str(e))
-    mb = lambda p: Path(p).stat().st_size / 1e6
-    click.echo(f"wrote {out} ({mb(out):.1f} MB, from {mb(pbf):.1f} MB)")
+@main.command(name="clip-pbf", **_PASSTHROUGH)
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
+def clip_pbf_cmd(args):
+    """Cut PBF down to the area in BOUNDARY (a GeoJSON polygon) (the Rust `duckosm clip-pbf`)."""
+    _rust_cli("clip-pbf", args)
 
 
 @main.command(name="init-config")
@@ -283,12 +244,6 @@ def init_config(path, force):
     click.echo(f"Wrote {dst}. Edit it, then: duckosm build --config {dst}")
 
 
-# extract/admin forward all arguments to an argparse-based script: don't let Click
-# intercept unknown options or --help — the wrapped script parses and handles them.
-_PASSTHROUGH = dict(context_settings=dict(ignore_unknown_options=True, help_option_names=[]),
-                    add_help_option=False)
-
-
 @main.command(**_PASSTHROUGH)
 @click.argument('args', nargs=-1, type=click.UNPROCESSED)
 def extract(args):
@@ -304,13 +259,11 @@ def extract(args):
 @main.command(**_PASSTHROUGH)
 @click.argument('args', nargs=-1, type=click.UNPROCESSED)
 def admin(args):
-    """Add OSM administrative boundaries (admin_boundaries table) to a built db.
+    """Add OSM administrative boundaries (admin_boundaries table) to a built db (the Rust `duckosm admin`).
 
-    Wraps duckosm.admin — run `duckosm admin --help` for options
-    (--pbf, --db, optional --gpkg). Requires ogr2ogr (GDAL).
+    Run `duckosm admin --help` for options (--pbf, --db, optional --gpkg).
     """
-    from duckosm.admin import main as admin_main
-    raise SystemExit(admin_main(list(args)))
+    _rust_cli("admin", args)
 
 
 @main.command()
@@ -743,7 +696,7 @@ def export_gis(db, modes, fmt, out, boundary, name):
     """Export a built network to GeoPackage / GeoParquet / shapefile, keeping duckOSM edge_id as an attribute.
 
     Writes the geographic layers only — edges_<mode>, nodes_<mode> and boundary — in EPSG:4326.
-    GeoPackage is one multi-layer file (assembled with ogr2ogr; needs GDAL); shapefile is one
+    GeoPackage is one multi-layer file; shapefile is one
     fileset per layer. GeoParquet is one .parquet file per layer; the edges files also get the
     columns of visualization.edge_levels when the db has that table. Routing adjacency
     (edge_graph/turn_restrictions) is not GIS data — use `export-graph` or `sumo` for that. Needs the DuckDB spatial extension.
@@ -765,8 +718,6 @@ def export_gis(db, modes, fmt, out, boundary, name):
     dest = res.get("path") or res.get("dir")
     click.echo(f"wrote {dest} ({res['fmt']}: {len(res['layers'])} layers — "
                + ", ".join(f"{k} {v}" for k, v in res['layers'].items()) + ")")
-    if res['fmt'] == 'gpkg' and res.get('path') is None:
-        click.echo(f"  (ogr2ogr not found — wrote {len(res['files'])} single-layer files instead)")
 
 
 @main.command(name="gis-debug")
@@ -1184,7 +1135,7 @@ def elevation(db, dem, source, modes, nodata_fill, suffix, product, vertical_dat
     bbox and picks the best provider whose coverage contains it: EU-DTM (bare-earth)
     inside Europe when OPENTOPOGRAPHY_API_KEY is set, else Copernicus GLO-30 (streamed
     from AWS, no auth, works anywhere). Re-runnable — a second pass overwrites. The db
-    is modified in place. Needs `pip install duckosm[elevation]` (rasterio + pyproj).
+    is modified in place.
 
     --suffix keeps a second surface side by side, so a bare-earth DTM and a DSM can both
     live in one db and `ele_dsm - ele` gives height above ground.
@@ -1195,7 +1146,7 @@ def elevation(db, dem, source, modes, nodata_fill, suffix, product, vertical_dat
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
-    from duckosm.elevation import to_elevation
+    from duckosm._api import to_elevation
 
     try:
         res = to_elevation(db, dem=dem, source=source, modes=list(modes) or None,
