@@ -17,7 +17,9 @@ For a big area the step takes long: `options.levels: false` (`build --no-levels`
 
 The roads of **all the modes together** (`edges` and `private_edges` of `driving`, `walking` and `cycling`) are one **level area**.
 roadstyle's Rust code makes the pairs of roads that cross or meet and solves them. Your edits are tables in the file, and they are the
-input of each solve:
+input of each solve. Each solve also writes the area's files into the folder `monaco.levels/` next to the file (`roads.parquet`,
+`pairs.csv`, `edits.csv`, `heads.csv`, `caps.csv`, `levels.csv`), for [`duckosm gmns-map`](../reference/cli.md#gmns-map). The tables are
+the master: do not edit the folder.
 
 | Table | Holds |
 |---|---|

@@ -48,7 +48,8 @@ const TOP: [&str; 16] = [
     "h3_cell",
     "elevation",
 ];
-const OPTIONS: [&str; 22] = [
+const OPTIONS: [&str; 23] = [
+    "engine",
     "build_graph",
     "h3_indexing",
     "h3_resolution",
@@ -497,6 +498,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
     for k in [
         "simplify_batches",
         "clip_strategy",
+        // the network step is always Rust: an old config's `engine` has no effect
+        "engine",
     ] {
         if options.get(k).is_some() {
             ignored.push(format!("options.{k} (no effect in this program)"));

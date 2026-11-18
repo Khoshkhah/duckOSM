@@ -176,7 +176,8 @@ duckosm viz [OPTIONS] DB
 Makes the drawing order of the roads again and stores it in the database (schema [`visualization`](database.md#visualization-schema)):
 every road gets a casing number (start, main, end), a fill number and its ends as drawn. The roads of all modes are one level area.
 Your edits are the tables `visualization.level_edits`, `level_heads` and `level_caps`: they are the input. An edit row that names
-no road of the database goes to `visualization.level_unmatched`, and the next run tries it again. `duckosm build` does this as its
+no road of the database goes to `visualization.level_unmatched`, and the next run tries it again. The area's files go to the folder
+`DB.levels` next to the database, for [`gmns-map`](#gmns-map). `duckosm build` does this as its
 last step and keeps the edits of the file that it replaces. Use this command after a build with `--no-levels`. The database is
 changed in place. To fix places by hand: [`levels-edit`](#levels-edit). Guide: [Store the drawing order](../guides/drawing-order.md).
 
