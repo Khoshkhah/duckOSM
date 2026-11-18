@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm-rust <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 9] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2", "gmns"];
+pub const COMMANDS: [&str; 10] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2", "gmns", "gmns-viz"];
 
 #[derive(Parser)]
 #[command(name = "duckosm-rust")]
@@ -43,6 +43,19 @@ enum Cmd {
     },
     /// Check an export: read the GeoPackage or the shapefiles again through GDAL and write one HTML page: a map of each layer
     /// and the checks (the number of features, the CRS, edge_id exact, and the edge_id against --source-db).
+    /// Write a self-contained interactive HTML viewer for a GMNS db: the lanes (offset by use), and the meso and micro
+    /// networks where the db has them (`gmns --meso --micro`); hover a line for its type, id and attributes.
+    #[command(name = "gmns-viz")]
+    GmnsViz {
+        /// The GMNS db (`duckosm gmns`).
+        gmns_db: PathBuf,
+        /// The mode schema to view.
+        #[arg(short, long, default_value = "driving")]
+        mode: String,
+        /// The output HTML (default: <name>_viewer.html).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
     #[command(name = "gis-debug")]
     GisDebug {
         /// A .gpkg file or a folder of shapefiles.
@@ -175,7 +188,7 @@ enum Cmd {
         /// Do not place a one-way road mapped next to its opposite direction as one two-way road.
         #[arg(long)]
         no_pair_carriageways: bool,
-        /// Move a mapped sidewalk off the carriageway (not ported yet).
+        /// Move a mapped sidewalk off the carriageway: it takes its place from its road's lanes.
         #[arg(long)]
         walk_frame: bool,
         /// Gap in metres between the kerb and a footpath placed by --walk-frame.
@@ -240,7 +253,7 @@ fn check_db(db: &Path) -> Result<()> {
 }
 
 /// An integer with a comma between each group of three digits, as Python's `{:,}`.
-fn thousands(n: i64) -> String {
+pub(crate) fn thousands(n: i64) -> String {
     let s = n.abs().to_string();
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
@@ -322,6 +335,14 @@ pub fn run(args: &[String]) -> Result<()> {
                 println!("wrote {}", n.display());
             }
         }
+        Cmd::GmnsViz { gmns_db, mode, out } => {
+            if !gmns_db.exists() {
+                return Err(format!("{}: no such file", gmns_db.display()));
+            }
+            let out = out.unwrap_or_else(|| format!("{}_viewer.html", stem(&gmns_db)).into());
+            let v = crate::gmns_viewer::write_viewer(&gmns_db, &out, &mode)?;
+            println!("wrote {} — open in a browser", v.path.display());
+        }
         Cmd::GisDebug { export_path, source_db, out, name, json } => {
             for p in std::iter::once(&export_path).chain(source_db.as_ref()) {
                 if !p.exists() {
@@ -354,7 +375,7 @@ pub fn run(args: &[String]) -> Result<()> {
             drive_side,
             no_pair_carriageways,
             walk_frame,
-            walk_clearance: _,
+            walk_clearance,
             micro,
             micro_modes,
             gtfs,
@@ -363,9 +384,6 @@ pub fn run(args: &[String]) -> Result<()> {
             check,
         } => {
             check_db(&db)?;
-            if walk_frame {
-                return Err("--walk-frame is not ported to Rust yet (docs/design/all_in_rust.md, group C): use `duckosm gmns`".into());
-            }
             if let Some(p) = gtfs.iter().find(|p| !p.exists()) {
                 return Err(format!("--gtfs: {} does not exist", p.display()));
             }
@@ -380,6 +398,8 @@ pub fn run(args: &[String]) -> Result<()> {
                 csv_extensions,
                 gtfs,
                 gtfs_max_m,
+                walk_frame,
+                walk_clearance_m: walk_clearance,
             };
             let res = crate::gmns::to_gmns_with(&db, &out, &o)?;
             println!("wrote {}", out.display());

@@ -50,6 +50,7 @@ fn class_index(hw: Option<&str>) -> i64 {
 #[derive(Clone)]
 pub enum J {
     Null,
+    Bool(bool),
     Int(i64),
     Float(f64),
     Str(String),
@@ -96,6 +97,7 @@ impl J {
         };
         match self {
             J::Null => o.push_str("null"),
+            J::Bool(b) => o.push_str(if *b { "true" } else { "false" }),
             J::Int(i) => o.push_str(&i.to_string()),
             J::Float(f) => o.push_str(&crate::sumo::py_float(*f)),
             J::Str(s) => jstr(s, o),

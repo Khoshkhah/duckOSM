@@ -43,11 +43,11 @@ fn level(ly: &Option<String>, br: &Option<String>, tu: &Option<String>) -> i64 {
     crate::gmns::level(ly, br, tu)
 }
 
-fn ls(l: &[P]) -> LineString<f64> {
+pub(crate) fn ls(l: &[P]) -> LineString<f64> {
     LineString(l.iter().map(|(x, y)| Coord { x: *x, y: *y }).collect())
 }
 
-fn mp(polys: &[crate::geos::Polygon]) -> MultiPolygon<f64> {
+pub(crate) fn mp(polys: &[crate::geos::Polygon]) -> MultiPolygon<f64> {
     let ring = |r: &Vec<P>| LineString(r.iter().map(|(x, y)| Coord { x: *x, y: *y }).collect());
     MultiPolygon(polys.iter().map(|p| Polygon::new(ring(&p.shell), p.holes.iter().map(ring).collect())).collect())
 }
@@ -113,25 +113,7 @@ fn pieces(l: &Lanes, line: &[P], only: Option<&HashSet<usize>>, lv: Option<i64>)
     }
     let area = u.buffer_with_style(geo::algorithm::buffer::BufferStyle::new(0.1).line_join(geo::algorithm::buffer::LineJoin::Round(std::f64::consts::PI / 32.0)));
     let on: MultiLineString<f64> = area.clip(&MultiLineString(vec![ls(line)]), false);
-    // line_merge: pieces that meet end to start are one, in whatever order the clip gives them
-    let mut parts: Vec<Vec<P>> = on.0.into_iter().map(|g| g.0.iter().map(|c| (c.x, c.y)).collect::<Vec<P>>()).filter(|p| p.len() >= 2).collect();
-    loop {
-        let mut joined = false;
-        'find: for i in 0..parts.len() {
-            for j in 0..parts.len() {
-                if i != j && shp::dist(*parts[i].last().unwrap(), parts[j][0]) < 1e-9 {
-                    let tail = parts.remove(j);
-                    let i = if j < i { i - 1 } else { i };
-                    parts[i].extend_from_slice(&tail[1..]);
-                    joined = true;
-                    break 'find;
-                }
-            }
-        }
-        if !joined {
-            break;
-        }
-    }
+    let parts = line_merge(&on);
     let mut out = Vec::new();
     for part in parts {
         let len = shp::length(&part);
@@ -152,6 +134,29 @@ fn pieces(l: &Lanes, line: &[P], only: Option<&HashSet<usize>>, lv: Option<i64>)
         out.push(part);
     }
     (out, near)
+}
+
+/// shapely's `line_merge` of the pieces of a clip: pieces that meet end to start are one, in whatever order the clip gives them.
+pub(crate) fn line_merge(on: &MultiLineString<f64>) -> Vec<Vec<P>> {
+    let mut parts: Vec<Vec<P>> = on.0.iter().map(|g| g.0.iter().map(|c| (c.x, c.y)).collect::<Vec<P>>()).filter(|p| p.len() >= 2).collect();
+    loop {
+        let mut joined = false;
+        'find: for i in 0..parts.len() {
+            for j in 0..parts.len() {
+                if i != j && shp::dist(*parts[i].last().unwrap(), parts[j][0]) < 1e-9 {
+                    let tail = parts.remove(j);
+                    let i = if j < i { i - 1 } else { i };
+                    parts[i].extend_from_slice(&tail[1..]);
+                    joined = true;
+                    break 'find;
+                }
+            }
+        }
+        if !joined {
+            break;
+        }
+    }
+    parts
 }
 
 /// `_nearest`: the lane of `near` nearest to p; of those as near (within 1e-9 m), a lane before a connector, then the smallest
