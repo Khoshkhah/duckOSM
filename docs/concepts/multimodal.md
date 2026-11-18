@@ -1,16 +1,16 @@
 # Routing across modes
 
 `duckosm multimodal` joins the walking, cycling and driving networks of a database into one graph,
-so that a trip can change mode on the way: walk to the car, drive, walk from the car. How to run it
+so that a trip can change mode: walk to the car, drive, walk from the car. How to run it
 and route with `route_multimodal`: [Route across modes](../guides/route.md#across-modes-walk--drive--walk).
-*Experimental.*
+*Experimental.* The command `duckosm multimodal` is not ported to Rust yet. The build makes the same tables.
 
 ## What it adds
 
 It writes a schema `mm` into the database (or the build does, with `multimodal.enabled: true`). It
-needs walking and at least one other mode; without them it only warns and writes an empty
-`mm.transfers`. `mm.edges` is a view, but `mm.transfers` is a table: run `duckosm multimodal` again
-after rebuilding a mode.
+needs walking and at least one other mode. Without them, it only warns and writes an empty
+`mm.transfers`. `mm.edges` is a view, but `mm.transfers` is a table: after you build a mode again, run
+`duckosm multimodal` again.
 
 | Table | Contents |
 |---|---|
@@ -66,10 +66,10 @@ config above.
 
 ## Limits
 
-- **A vehicle is waiting at every shared junction.** Transfers aren't limited to car parks or bike
-  stands, so a trip can "pick up a car" anywhere. Good for comparing modes, not a real trip planner.
+- **A vehicle waits at every shared junction.** Transfers are not only at car parks or bike
+  stands, so a trip can "pick up a car" anywhere. Use it to compare modes, not as a real trip planner.
 - **Turn restrictions** hold on every leg: each part of the trip follows the `edge_graph` of its mode, as `route()` does.
   A database without an `edge_graph` for a mode (an old build) lets any road that leaves the junction follow.
-  Design: `docs/design/multimodal_edge_graph.md`.
+  Design: [turns across modes](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/multimodal_edge_graph.md).
 - **No public transport.** OSM has stops and lines but no timetables.
-- The graph is held in memory: fine for a city.
+- The graph is in memory: use it for a city, not for a country.

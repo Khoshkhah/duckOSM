@@ -1,9 +1,8 @@
 # duckOSM and OSMnx
 
-[OSMnx](https://osmnx.readthedocs.io) is the standard Python library for street networks from OSM, so
-it is a useful independent check of what duckOSM extracts. The two don't use the same road filter or
-the same graph model, so compare **length of road per `highway` class**, not totals and not edge
-counts.
+[OSMnx](https://osmnx.readthedocs.io) is a Python library for street networks from OSM. Use it as an
+independent check of the duckOSM network. The two use different road filters and graph models, so compare
+the **length of road for each `highway` class**, not totals and not edge counts.
 
 ## Line them up first
 
@@ -27,12 +26,12 @@ keeps `access=private` roads in `private_edges`, drawn on its maps but never rou
 and cut both networks to the same area before measuring. Here the area is duckOSM's own boundary
 polygon, because the box around Monaco also holds French roads that duckOSM left out.
 
-**Length.** Measure in a metric CRS, the UTM zone of the data. Web Mercator (EPSG:3857) makes
-lengths about 1.5 times too long at this latitude.
+**Length.** Measure in a metric CRS, the UTM zone of the data. At this latitude, Web Mercator (EPSG:3857)
+makes lengths about 1.5 times too long.
 
 ## Recipe
 
-Run it in an environment that has `osmnx`, `duckdb` and `geopandas`. It needs a live connection to
+Run it in an environment that has `osmnx`, `duckdb` and `geopandas`. It needs a connection to
 the Overpass API.
 
 ```python
@@ -45,7 +44,7 @@ con.execute("LOAD spatial")
 area = gpd.GeoSeries.from_wkb(
     con.execute("SELECT ST_AsWKB(geom) FROM main.boundary").df().iloc[:, 0].map(bytes),
     crs=4326).union_all()
-utm = gpd.GeoSeries([area], crs=4326).estimate_utm_crs()   # metres (EPSG:32632 for Monaco)
+utm = gpd.GeoSeries([area], crs=4326).estimate_utm_crs()   # meters (EPSG:32632 for Monaco)
 cut = gpd.GeoSeries([area], crs=4326).to_crs(utm).iloc[0]
 
 def metres(gdf, name):
@@ -77,8 +76,8 @@ OSMnx graph.
 
 ## An example
 
-Measured on Monaco with the recipe above: metres of road inside the boundary of the duckOSM build
-(OSM data as of the run; a new run can differ by a few hundred metres).
+Monaco, with the recipe above: meters of road inside the boundary of the duckOSM build. A run with newer
+OSM data can be different by some hundred meters.
 
 | `highway` | OSMnx `drive` | `drive` + truncate | `drive_service` + truncate | duckOSM | Difference |
 |---|--:|--:|--:|--:|--:|
@@ -102,17 +101,20 @@ The difference is duckOSM minus `drive_service` + truncate.
   `access=private`, so it keeps them. Smaller differences go the other way.
 - **residential, secondary, unclassified, secondary_link**: differences of 100 to 200 m each.
   Where OSMnx merges several ways into one edge, its `highway` is a list, and the recipe takes the
-  first element, so a class can shift to a neighbour from run to run.
+  first element, so a class can move to a neighbor class from run to run.
 - **living_street**: equal here. The extra `living_street` from pedestrian streets open to cars
   (see above) did not show up in Monaco.
 
-`tertiary`, `primary`, `primary_link`, `living_street` and `tertiary_link` match to the metre:
+`tertiary`, `primary`, `primary_link`, `living_street` and `tertiary_link` match to the meter:
 where the filters agree, the geometry agrees.
 
 ## What it is good for
 
-Good for checking geometry and clipping, and for noticing a whole road class that went missing.
-Not good for counts of edges or nodes: OSMnx also splits and merges, but duckOSM cuts every mode
-at the same points, including where a footway or crosswalk meets a road, merges chains by its own
-rules, and adds virtual nodes, so its counts can't match OSMnx's. OSMnx downloads from the Overpass
-API, so keep the area small.
+| Use it to check | Do not use it to check |
+|---|---|
+| the geometry and the cut to the boundary | the counts of edges or nodes |
+| a road class that is missing | |
+
+OSMnx also splits and merges. But duckOSM cuts every mode at the same points (also where a footway or crosswalk meets a
+road), merges chains by its own rules, and adds virtual nodes. So the counts cannot be equal. OSMnx downloads from the
+Overpass API, so keep the area small.
