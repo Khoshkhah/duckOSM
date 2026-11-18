@@ -88,11 +88,11 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
 ## A tour
 
-<div class="grid" markdown>
+<div class="grid tour" markdown>
 
 <figure markdown="span">
   ![The Turn tab of Edit OSM data: a picked road and the roads that leave its junction](images/edit-turn.png)
-  <figcaption>Edit OSM data: the turns at a junction, in the browser or with `duckosm edit`.</figcaption>
+  <figcaption>Edit OSM data: the turns at a junction, in the browser or with <code>duckosm edit</code>.</figcaption>
 </figure>
 
 <figure markdown="span">
@@ -117,7 +117,7 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
 <figure markdown="span">
   ![The heights of the roads of Södermalm](images/sodermalm_elevation.png)
-  <figcaption>The height of each node and edge, after `duckosm elevation`.</figcaption>
+  <figcaption>The height of each node and edge, after <code>duckosm elevation</code>.</figcaption>
 </figure>
 
 </div>
@@ -151,13 +151,8 @@ file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does n
 | Your computer | `duckosm edit my_area.duckdb` opens the same editor |
 | Build | `duckosm build --fixes osm_fixes.yaml`, `duckosm quack --fixes osm_fixes.yaml` |
 
-| You can change | Examples |
-|---|---|
-| Roads | one-way, lanes, speed, road class, access; delete a road |
-| Buildings | floors, height, roof; the type of each wall and its door |
-| Nodes | traffic signals, crossings |
-| Turns | a turn that a driver cannot make, or must make |
-| New roads | a road that OSM does not have |
+You can change roads (one-way, lanes, speed, class, access), buildings (floors, height, roof, the type of each wall),
+nodes (traffic signals, crossings), turns, and add roads that OSM does not have.
 
 More: [Edit OSM data](guides/edit-osm-data.md), [Fix OSM errors](guides/fix-osm-errors.md).
 
