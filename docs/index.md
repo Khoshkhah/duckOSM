@@ -102,12 +102,12 @@ traffic simulation and routing. You can fix the OSM data on a map first, and eve
 
 <figure markdown="span">
   ![The route planner: a walking route from Fontvieille to Larvotto on the map, with the directions](images/tour-route.png)
-  <figcaption>The route planner of `duckosm route-map`: a route on the turn graph, with directions.</figcaption>
+  <figcaption>The route planner of <code>duckosm route-map</code>: a route on the turn graph, with directions.</figcaption>
 </figure>
 
 <figure markdown="span">
   ![The map of duckosm viz: the driving, walking and cycling networks of Monaco on its base map](images/tour-map.png)
-  <figcaption>The map of `duckosm viz`: all modes on the base map of the database.</figcaption>
+  <figcaption>The map of <code>duckosm viz</code>: all modes on the base map of the database.</figcaption>
 </figure>
 
 <figure markdown="span">
