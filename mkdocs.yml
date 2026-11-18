@@ -145,27 +145,28 @@ nav:
       - Drawing order: guides/drawing-order.md
   - Export:
       - Overview: exports/index.md
-      - Traffic simulation:
-          - SUMO: exports/sumo.md
-          - MATSim: exports/matsim.md
-          - GMNS: exports/gmns.md
-          - GMNS meso and micro: exports/gmns-meso-micro.md
-          - GMNS tables: exports/gmns_tables.md
-          - railML: exports/railml.md
-      - Maps and GIS:
-          - GeoPackage / shapefile: exports/gis.md
-          - Base-map layers: exports/base-map.md
-          - GDAL's OSM layers: concepts/gdal.md
+      - 1. OSM data:
           - QuackOSM table: concepts/quackosm.md
-          # - duckOSM and Geofabrik: exports/geofabrik.md (added by another session)
-          # - Vector tiles (PMTiles): exports/pmtiles.md (added by another session)
-      - Graph analysis:
+          - GDAL's OSM layers: concepts/gdal.md
+          # - Geofabrik layers: exports/geofabrik.md (added by its session)
+          # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
+          # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
+      - 2. The network:
           - The turn graph: exports/turn-graph.md
+          - Base-map layers: exports/base-map.md
+          - GeoPackage / shapefile: exports/gis.md
           - networkx: exports/networkx.md
-      - Lane level and 3D:
-          - OpenDRIVE: exports/opendrive.md
-          - Lanelet2: exports/lanelet2.md
+      - 3. Traffic simulation:
+          - GMNS: exports/gmns.md
+          - GMNS tables: exports/gmns_tables.md
+          - MATSim: exports/matsim.md
+          - SUMO: exports/sumo.md
+          - GMNS meso and micro: exports/gmns-meso-micro.md
+          - railML: exports/railml.md
+      - 4. Lane level and 3D:
           - Lane-level routing: exports/lane-routing.md
+          - Lanelet2: exports/lanelet2.md
+          - OpenDRIVE: exports/opendrive.md
   - How it works:
       - How a build works: concepts/build.md
       - Browser and native builds: concepts/browser-native.md
