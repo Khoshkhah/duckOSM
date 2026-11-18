@@ -41,14 +41,24 @@ duckosm cut sweden-latest.osm.pbf --boundary sodermalm.geojson -o sodermalm.osm.
 
 ## Several areas from one region
 
-Build the region one time, then cut each area from it. A cut reads no OSM data and takes seconds. Each `edge_id` stays
-the same as in the region, so data that uses the ids of the region also works on the area.
+Use this when you need many areas of one region, for example the districts of Stockholm. Build the region once. Then
+`duckosm extract` copies the part of each area from the built database. It does not read the `.osm.pbf` again, so each
+area takes seconds.
 
 ```bash
+# 1. Build the region once (slow)
 duckosm build --pbf sweden-latest.osm.pbf -m driving
+
+# 2. Get the border of one area
 duckosm boundary --osm-id 2017432 -o sodermalm.geojson
-duckosm extract --source sweden-latest.duckdb --db sodermalm.duckdb --boundary sodermalm.geojson
+
+# 3. Cut the area from the region (seconds)
+duckosm extract --source sweden-latest.duckdb \
+    --db sodermalm.duckdb --boundary sodermalm.geojson
 ```
+
+Each road keeps its `edge_id` from the region. So data that you joined to the roads of the region, such as traffic counts,
+also fits the area.
 
 | Option of `extract` | Does |
 |---|---|
