@@ -274,3 +274,63 @@ fn lanelet2_equals_python() {
     }
     assert!(bad.is_empty(), "{} boundaries differ from Python:\n{}", bad.len(), bad.join("\n"));
 }
+
+/// One line for each column of each `gmns_*` table: its type, the rows and the MD5 of its values as text, sorted. The same SQL
+/// as `columns` in tools/make_golden_exports.py.
+fn gmns_columns(db: &Path) -> Vec<String> {
+    let con = duckdb::Connection::open(db).unwrap();
+    con.execute_batch("INSTALL spatial; LOAD spatial").unwrap();
+    let mut st = con
+        .prepare(
+            "SELECT table_schema || '.' || table_name, column_name, data_type FROM information_schema.columns \
+             WHERE table_schema LIKE 'gmns\\_%' ESCAPE '\\' ORDER BY 1, ordinal_position",
+        )
+        .unwrap();
+    let cols: Vec<(String, String, String)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().map(|r| r.unwrap()).collect();
+    let mut lines = vec!["table\tcolumn\ttype\trows\tmd5".to_string()];
+    for (t, c, typ) in cols {
+        let v = if typ.starts_with("GEOMETRY") { format!("ST_AsText(\"{c}\")") } else { format!("\"{c}\"::VARCHAR") };
+        let (n, h): (i64, String) = con
+            .query_row(
+                &format!(
+                    "SELECT count(*), md5(coalesce(string_agg(coalesce('=' || {v}, '-'), chr(10) ORDER BY coalesce('=' || {v}, '-')), '')) FROM {t}"
+                ),
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        lines.push(format!("{t}\t{c}\t{typ}\t{n}\t{h}"));
+    }
+    lines
+}
+
+/// The columns that a later step of `to_gmns` changes or adds, not ported yet: the test skips them.
+const GMNS_PENDING: [&str; 7] = ["node.node_type", "node.ctrl_type", "link.parent_link_id", "link.along_link_id", "link.along_mode", "link.along_gap_m", "link.along_kind"];
+
+/// GMNS: each column of each table that the Rust export makes so far equals the Python export (the same type, rows and values).
+#[test]
+fn gmns_equals_python() {
+    // its own folder: gmns() writes a file of the same name (the name is the dataset_name of the export)
+    let o = out("gmns").join("monaco_gmns.duckdb");
+    duckosm_export::gmns::to_gmns(db(), &o, &[]).unwrap();
+    let got = gmns_columns(&o);
+    let golden = text(&data().join("exports/monaco_gmns_columns.tsv"));
+    let key = |l: &str| l.split('\t').take(2).collect::<Vec<_>>().join("\t");
+    let tables: std::collections::HashSet<&str> = got.iter().skip(1).map(|l| l.split('\t').next().unwrap()).collect();
+    let mine: std::collections::HashMap<String, &String> = got.iter().map(|l| (key(l), l)).collect();
+    let mut bad = Vec::new();
+    for want in golden.lines().skip(1) {
+        let (t, c) = (want.split('\t').next().unwrap(), want.split('\t').nth(1).unwrap());
+        let short = format!("{}.{c}", t.split('.').nth(1).unwrap());
+        if !tables.contains(t) || GMNS_PENDING.contains(&short.as_str()) {
+            continue;
+        }
+        match mine.get(&key(want)) {
+            Some(g) if *g == want => {}
+            Some(g) => bad.push(format!(" rust:   {g}\n python: {want}")),
+            None => bad.push(format!(" missing: {want}")),
+        }
+    }
+    assert!(bad.is_empty(), "{} columns differ from the Python export:\n{}", bad.len(), bad.join("\n"));
+}
