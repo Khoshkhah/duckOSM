@@ -111,8 +111,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </figure>
 
 <figure markdown="span">
-  ![The heights of the roads of Södermalm](images/sodermalm_elevation.png)
-  <figcaption>The height of each node and edge, after <code>duckosm elevation</code>.</figcaption>
+  ![Monaco in 3D: the roads colored by their ground height, from dark at the sea to yellow on the hill behind the port](images/tour-elevation.png)
+  <figcaption>Monaco in 3D: each road at its height, from the ground of the area (<code>duckosm elevation</code>, or the step Ground height in Studio).</figcaption>
 </figure>
 
 </div>
