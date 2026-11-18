@@ -39,6 +39,34 @@ France sorted in the browser used at most 17.9 GB of browser storage on the disk
 The rows are the same: 99.9998 % of the 99 million France rows have an equal geometry, and the rest differ only in the
 last digits.
 
+### Output size
+
+MB = 10^6 bytes, GB = 10^9 bytes. QuackOSM is 0.20.0 on the Mac mini; it was not measured on Monaco and Tartu.
+
+| Area (input) | Output | QuackOSM | duckOSM |
+|---|---|---|---|
+| Monaco (0.7 MB) | GeoParquet, sorted | | 0.85 MB |
+| | GeoParquet, not sorted | | 0.83 MB |
+| | `.duckdb`, sorted | | 3.2 MB |
+| | `.duckdb`, not sorted | | 2.6 MB |
+| Tartu (3.0 MB) | GeoParquet, sorted | | 4.7 MB |
+| | GeoParquet, not sorted | | 5.1 MB |
+| | `.duckdb`, sorted | | 11.3 MB |
+| | `.duckdb`, not sorted | | 11.0 MB |
+| Kentucky (141 MB) | GeoParquet, sorted | 311.5 MB | **308.4 MB** |
+| | GeoParquet, not sorted | 349.3 MB | **320.5 MB** |
+| | `.duckdb`, sorted | **670 MB** | 780 MB |
+| | `.duckdb`, not sorted | 702 to 739 MB | 706 MB |
+| France (5.1 GB) | GeoParquet, sorted | **9.05 GB** | 9.22 GB |
+| | GeoParquet, not sorted | 11.62 GB | **10.29 GB** |
+| | `.duckdb`, not sorted | **19.7 GB** | 22.3 GB |
+
+The `.duckdb` file of duckOSM is larger because DuckDB 1.5.6 does not compress the geometry. DuckDB 2.0, which QuackOSM
+uses, compresses it.
+
+Monaco and Tartu ran on Linux (x86-64), Kentucky and France on the Mac mini; the Kentucky sizes of duckOSM were measured
+again on 2026-11-18 and are the same as before.
+
 ## How it differs
 
 | | QuackOSM | duckOSM |
