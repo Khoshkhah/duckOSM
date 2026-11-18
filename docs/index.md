@@ -121,27 +121,27 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 
 All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
 
-## Quick start
+## Use it from code
 
-```bash
-pip install duckosm
+<div class="grid cards" markdown>
 
-curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
-duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
-duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
-```
+-   :material-language-python:{ .lg .middle } **Python SDK**
 
-```python
-import duckosm
+    ---
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build
+    `pip install duckosm`, then `import duckosm`: build, quack, route and export from Python, all in the Rust engine.
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
-r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
-duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
-```
+    [Python SDK](reference/python.md) · [Quick start](install.md#quick-start)
 
-Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
+-   :material-language-rust:{ .lg .middle } **Rust SDK**
+
+    ---
+
+    The crates `duckosm-core`, `duckosm-build` and others: the same engine in your own Rust program.
+
+    [Rust SDK](reference/rust.md)
+
+</div>
 
 ---
 
