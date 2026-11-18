@@ -117,8 +117,10 @@ def columns(db, schema_like="gmns\\_%"):
 
 def gmns(db, out):
     """duckosm gmns on Monaco (every mode, lane geometry, with --combined and --to-csv) -> one line for each column of the GMNS
-    db, the MD5 of each CSV file, and the rows of gmns_check (check_gmns, graph_report)."""
+    db, the MD5 of each CSV file, the rows of gmns_check (check_gmns, graph_report), and one line for each column of the meso
+    and micro networks."""
     import hashlib
+    from duckosm.gmns import to_meso, to_micro
     from duckosm.gmns_check import check_gmns, graph_report
     with tempfile.TemporaryDirectory() as tmp:
         to_gmns(db, f"{tmp}/monaco_gmns.duckdb", combined=True, to_csv=f"{tmp}/csv")
@@ -132,6 +134,11 @@ def gmns(db, out):
         rows = [f"{s}\t{n}\t{bad}\t{total}" for s, n, bad, total in check_gmns(f"{tmp}/monaco_gmns.duckdb")]
         rows += [f"graph\t{s}\t{n}\t{links}\t{big}\t{parts}\t{dead}" for s, n, links, big, _, parts, dead in graph_report(f"{tmp}/monaco_gmns.duckdb")]
         (out / "monaco_gmns_check.tsv").write_text("\n".join(rows) + "\n")
+        # meso and micro (`--meso --micro`) of driving and cycling
+        to_meso(f"{tmp}/monaco_gmns.duckdb", modes=["driving", "cycling"])
+        to_micro(f"{tmp}/monaco_gmns.duckdb", modes=["driving", "cycling"])
+        lines = columns(f"{tmp}/monaco_gmns.duckdb", "meso\\_%") + columns(f"{tmp}/monaco_gmns.duckdb", "micro\\_%")[1:]
+        (out / "monaco_gmns_meso_columns.tsv").write_text("\n".join(lines) + "\n")
 
 
 def gz(src, dst):
