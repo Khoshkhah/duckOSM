@@ -90,17 +90,19 @@ France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB).
 | OSM features table (`quack`) | 2 min 9 s | 4 min 54 s | QuackOSM: 9 min 30 s |
 | GDAL's layers, GeoParquet (`quack --gdal`) | 3 min 37 s | 5 min 23 s | `ogr2ogr`: 14 min 18 s |
 
-## Edge ids that stay the same
+## One edge id for each direction
 
-Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. duckOSM's `edge_id` is a hash of
-three OSM ids: the way (`osm_id`) and the nodes where the edge starts and ends (`source`, `target`).
+Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. Many also keep a two-way street as one
+edge. duckOSM's `edge_id` is a hash of three OSM ids: the way (`osm_id`) and the nodes where the edge starts and ends
+(`source`, `target`). The order of `source` and `target` is the direction.
 
 ```text
 edge_id = hash(osm_id, source, target)
 ```
 
-The same OSM data gives the same ids after a rebuild, in a city cut from a country, and in every export
-([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+So **each direction of a road has its own `edge_id`**: a two-way street is two edges, and data per direction (traffic
+counts, speeds, sensors) joins to the right edge. The same OSM data gives the same ids after a rebuild, in a city cut from
+a country, and in every export ([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
 
 ## Quick start
 
