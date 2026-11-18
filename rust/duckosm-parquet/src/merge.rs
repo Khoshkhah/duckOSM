@@ -10,6 +10,7 @@ use parquet::file::properties::WriterProperties;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::io::Write;
+use duckosm_core::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -25,12 +26,12 @@ struct Cursor {
     keys: Vec<Vec<i64>>,
 }
 
-fn open(p: &Path) -> Result<ParquetRecordBatchReaderBuilder<std::fs::File>, String> {
-    ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?).map_err(err)
+fn open(p: &Path) -> Result<ParquetRecordBatchReaderBuilder<crate::Source>, String> {
+    ParquetRecordBatchReaderBuilder::try_new(crate::source(p)?).map_err(err)
 }
 
 /// The properties of a file like `meta`: the compression and the blocks of the build, and the metadata (GeoParquet).
-fn props_of(meta: &ParquetRecordBatchReaderBuilder<std::fs::File>) -> WriterProperties {
+fn props_of(meta: &ParquetRecordBatchReaderBuilder<crate::Source>) -> WriterProperties {
     let kv = meta.metadata().file_metadata().key_value_metadata().cloned();
     WriterProperties::builder()
         .set_compression(compression())
@@ -74,7 +75,7 @@ pub fn split_file(path: &Path, mut class: impl FnMut(&RecordBatch) -> Result<Vec
     let props = props_of(&meta);
     let mine_path = path.with_extension("mine");
     let border_path = path.with_extension("border.parquet");
-    let mut mine = ParWriter::try_new(std::io::BufWriter::new(std::fs::File::create(&mine_path).map_err(err)?), schema.clone(), Some(props.clone())).map_err(err)?;
+    let mut mine = ParWriter::try_new(std::io::BufWriter::new(fs::File::create(&mine_path).map_err(err)?), schema.clone(), Some(props.clone())).map_err(err)?;
     let mut border = None;
     let (mut n_mine, mut n_border) = (0, 0);
     for b in meta.build().map_err(err)? {
@@ -90,7 +91,7 @@ pub fn split_file(path: &Path, mut class: impl FnMut(&RecordBatch) -> Result<Vec
         if x.num_rows() > 0 {
             n_border += x.num_rows();
             if border.is_none() {
-                let f = std::io::BufWriter::new(std::fs::File::create(&border_path).map_err(err)?);
+                let f = std::io::BufWriter::new(fs::File::create(&border_path).map_err(err)?);
                 border = Some(ParWriter::try_new(f, schema.clone(), Some(props.clone())).map_err(err)?);
             }
             border.as_mut().expect("made").write(&x).map_err(err)?;
@@ -100,7 +101,7 @@ pub fn split_file(path: &Path, mut class: impl FnMut(&RecordBatch) -> Result<Vec
     if let Some(w) = border {
         w.close().map_err(err)?;
     }
-    std::fs::rename(&mine_path, path).map_err(err)?;
+    fs::rename(&mine_path, path).map_err(err)?;
     Ok((n_mine, n_border))
 }
 
@@ -108,14 +109,22 @@ pub fn split_file(path: &Path, mut class: impl FnMut(&RecordBatch) -> Result<Vec
 /// no new compression; as the tool parquet-concat of the parquet crate). The file has the metadata (GeoParquet) of the
 /// first input. `consume`: each input goes when it is copied. Returns the number of rows.
 pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usize, String> {
+    if inputs.is_empty() {
+        return Ok(0);
+    }
+    // the writer of the parquet crate counts the bytes of the file in a usize: in WebAssembly (32 bits) the offsets of a file of
+    // more than 4 GiB wrap (France: edges_driving, 4.5 GB with snap)
+    if cfg!(target_pointer_width = "32") {
+        return concat_files_u64(inputs, consume, out);
+    }
     use parquet::column::writer::ColumnCloseResult;
     use parquet::file::metadata::ParquetMetaDataReader;
     use parquet::file::writer::SerializedFileWriter;
     let Some(first) = inputs.first() else {
         return Ok(0);
     };
-    let meta = |p: &Path| -> Result<(std::fs::File, parquet::file::metadata::ParquetMetaData), String> {
-        let f = std::fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let meta = |p: &Path| -> Result<(crate::Source, parquet::file::metadata::ParquetMetaData), String> {
+        let f = crate::source(p)?;
         let m = ParquetMetaDataReader::new().parse_and_finish(&f).map_err(err)?;
         Ok((f, m))
     };
@@ -123,7 +132,7 @@ pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usi
     let kv = m0.file_metadata().key_value_metadata().cloned();
     let props = Arc::new(WriterProperties::builder().set_compression(compression()).set_key_value_metadata(kv).build());
     let schema = m0.file_metadata().schema_descr().root_schema_ptr();
-    let f = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let f = fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut w = SerializedFileWriter::new(std::io::BufWriter::new(f), schema.clone(), props).map_err(err)?;
     let mut n = 0;
     for p in inputs {
@@ -148,11 +157,114 @@ pub fn concat_files(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usi
             n += rg.num_rows() as usize;
         }
         if consume {
-            let _ = std::fs::remove_file(p);
+            let _ = fs::remove_file(p);
         }
     }
     w.close().map_err(err)?;
     Ok(n)
+}
+
+/// [`concat_files`] with the offsets of the file counted in a u64 ([`Concat`]): the writer of the parquet crate counts in a
+/// usize, 32 bits in WebAssembly.
+pub fn concat_files_u64(inputs: &[PathBuf], consume: bool, out: &Path) -> Result<usize, String> {
+    let mut c = Concat::new(out)?;
+    for p in inputs {
+        c.add(p, consume)?;
+    }
+    c.finish()
+}
+
+/// A join of Parquet files (one schema) into `out` that takes one file at a time ([`Concat::add`]): their blocks of rows one
+/// after the other, copied as bytes, and at the end ([`Concat::finish`]) the footer with their new offsets, counted in a u64.
+/// The file has the metadata (GeoParquet) of the first input; no page indexes and no bloom filters (the inputs have none). A
+/// step that makes its rows in parts adds each part when it is made: one part file at a time, for any number of parts.
+pub struct Concat {
+    w: std::io::BufWriter<fs::File>,
+    out: PathBuf,
+    at: u64,
+    groups: Vec<parquet::file::metadata::RowGroupMetaData>,
+    rows: i64,
+    first: Option<parquet::file::metadata::ParquetMetaData>,
+    buf: Vec<u8>,
+}
+
+impl Concat {
+    pub fn new(out: &Path) -> Result<Concat, String> {
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?);
+        w.write_all(b"PAR1").map_err(err)?;
+        Ok(Concat { w, out: out.to_path_buf(), at: 4, groups: Vec::new(), rows: 0, first: None, buf: Vec::new() })
+    }
+
+    /// Add the blocks of the file `p`; `consume`: the file goes after.
+    pub fn add(&mut self, p: &Path, consume: bool) -> Result<(), String> {
+        use parquet::file::metadata::{ParquetMetaDataReader, RowGroupMetaData};
+        use std::io::{Read, Seek, SeekFrom};
+        let m = ParquetMetaDataReader::new().parse_and_finish(&crate::source(p)?).map_err(err)?;
+        let schema = self.first.get_or_insert_with(|| m.clone()).file_metadata().schema_descr_ptr();
+        if m.file_metadata().schema_descr().root_schema_ptr() != schema.root_schema_ptr() {
+            return Err(format!("{}: another schema than the first file of {}", p.display(), self.out.display()));
+        }
+        let mut input = fs::File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        for rg in m.row_groups() {
+            let mut cols = Vec::new();
+            let start = self.at;
+            for c in rg.columns() {
+                let (from, len) = c.byte_range();
+                input.seek(SeekFrom::Start(from)).map_err(err)?;
+                self.buf.resize(len as usize, 0);
+                input.read_exact(&mut self.buf).map_err(err)?;
+                self.w.write_all(&self.buf).map_err(err)?;
+                let at = self.at;
+                let shift = |o: i64| o - from as i64 + at as i64;
+                cols.push(
+                    c.clone()
+                        .into_builder()
+                        .set_data_page_offset(shift(c.data_page_offset()))
+                        .set_dictionary_page_offset(c.dictionary_page_offset().map(shift))
+                        .set_index_page_offset(c.index_page_offset().map(shift))
+                        .set_offset_index_offset(None)
+                        .set_offset_index_length(None)
+                        .set_column_index_offset(None)
+                        .set_column_index_length(None)
+                        .set_bloom_filter_offset(None)
+                        .set_bloom_filter_length(None)
+                        .build()
+                        .map_err(err)?,
+                );
+                self.at += len;
+            }
+            self.groups.push(
+                RowGroupMetaData::builder(schema.clone())
+                    .set_num_rows(rg.num_rows())
+                    .set_total_byte_size(rg.total_byte_size())
+                    .set_column_metadata(cols)
+                    .set_file_offset(start as i64)
+                    .set_ordinal(self.groups.len() as i16 as i32)
+                    .build()
+                    .map_err(err)?,
+            );
+            self.rows += rg.num_rows();
+        }
+        drop(input);
+        if consume {
+            let _ = fs::remove_file(p);
+        }
+        Ok(())
+    }
+
+    /// Write the footer. Gives the number of rows. With no file added, an error.
+    pub fn finish(mut self) -> Result<usize, String> {
+        use parquet::file::metadata::{FileMetaData, ParquetMetaDataBuilder, ParquetMetaDataWriter};
+        let Some(m0) = self.first.take() else {
+            return Err(format!("{}: no file to join", self.out.display()));
+        };
+        let f = m0.file_metadata();
+        let file = FileMetaData::new(f.version(), self.rows, f.created_by().map(str::to_string), f.key_value_metadata().cloned(), f.schema_descr_ptr(), f.column_orders().cloned());
+        let md = ParquetMetaDataBuilder::new(file).set_row_groups(std::mem::take(&mut self.groups)).build();
+        ParquetMetaDataWriter::new(&mut self.w, &md).finish().map_err(err)?;
+        self.w.flush().map_err(err)?;
+        Ok(self.rows as usize)
+    }
 }
 
 /// The key of each row of a batch: the values of the columns `key` (BIGINT or INTEGER; NULL is the smallest).
@@ -194,7 +306,7 @@ fn sorted<W: Write + Send>(inputs: &[PathBuf], key: &[&str], one: bool, consume:
     let gone = |group: &[PathBuf]| {
         if consume {
             group.iter().for_each(|p| {
-                let _ = std::fs::remove_file(p);
+                let _ = fs::remove_file(p);
             });
         }
     };
@@ -203,21 +315,20 @@ fn sorted<W: Write + Send>(inputs: &[PathBuf], key: &[&str], one: bool, consume:
         gone(inputs);
         return Ok(n);
     }
-    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!("duckosm-union-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-    std::fs::create_dir_all(&dir).map_err(err)?;
+    let dir = fs::temp_dir("duckosm-union");
+    fs::create_dir_all(&dir).map_err(err)?;
     let result = (|| {
         let mut parts = Vec::new();
         for (k, group) in inputs.chunks(FAN).enumerate() {
             let p = dir.join(format!("{k}.parquet"));
-            merge(group, key, one, std::io::BufWriter::new(std::fs::File::create(&p).map_err(err)?))?;
+            merge(group, key, one, std::io::BufWriter::new(fs::File::create(&p).map_err(err)?))?;
             gone(group);
             parts.push(p);
         }
         // the group files are temporary: each goes when the next merge has read it
         sorted(&parts, key, one, true, out)
     })();
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
     result
 }
 
@@ -330,5 +441,36 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         let want: Vec<i64> = (0..=FAN as i64 + 3).chain([100]).collect();
         assert_eq!((n, got), (want.len(), want));
+    }
+
+    /// The join with the offsets in a u64 (WebAssembly) gives the rows and the blocks of the join of the parquet crate.
+    #[test]
+    fn the_u64_join_equals_the_join() {
+        use duckosm_core::raw::RawNode;
+        let dir = std::env::temp_dir().join(format!("duckosm-concat-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let inputs: Vec<PathBuf> = (0..3)
+            .map(|k| {
+                let rows: Vec<RawNode> = (0..1000 * (k + 1))
+                    .map(|i| RawNode { id: k * 10_000 + i, lon: i as f64, lat: k as f64, tags: vec![("highway".into(), ["crossing", "stop"][(i % 2) as usize].into())] })
+                    .collect();
+                let p = dir.join(format!("{k}.parquet"));
+                crate::write_raw_nodes_to(std::fs::File::create(&p).unwrap(), &rows).unwrap();
+                p
+            })
+            .collect();
+        let rows = |p: &Path| -> (usize, Vec<String>) {
+            let b = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(p).unwrap()).unwrap();
+            let groups = b.metadata().num_row_groups();
+            let text = b.build().unwrap().map(|b| format!("{:?}", b.unwrap())).collect();
+            (groups, text)
+        };
+        let (a, b) = (dir.join("a.parquet"), dir.join("b.parquet"));
+        assert_eq!(concat_files(&inputs, false, &a).unwrap(), 6000);
+        assert_eq!(concat_files_u64(&inputs, false, &b).unwrap(), 6000);
+        let (ra, rb) = (rows(&a), rows(&b));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(ra.0, 3);
+        assert!(ra == rb, "the two joins differ");
     }
 }
