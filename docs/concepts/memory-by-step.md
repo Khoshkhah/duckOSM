@@ -3,7 +3,7 @@
 Each step writes its tables to storage. A later step reads only what it needs. This page shows the heap of each step in
 one build (`duckosm FILE`, not by tiles). The build by tiles and its totals: [Browser and native builds](browser-native.md).
 
-Driving, `--building-faces --levels solve`, on the Mac mini (12 cores, 16 GB). Kentucky also with `--raw`. The step
+Driving, `--building-faces --levels solve`, on the Mac mini (Apple M6, 12 cores, 16 GB). Kentucky also with `--raw`. The step
 numbers are those of [Browser and native builds](browser-native.md#the-steps).
 
 ## Heap peak of each step
