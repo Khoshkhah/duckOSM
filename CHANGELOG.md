@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`duckosm-rust directions`** (`docs/design/all_in_rust.md`, group E): the turn-by-turn steps of `directions.py` for any route
+  result (one mode, across modes, between points), in `duckosm-router` (no DuckDB). On Monaco and Tartu, the steps of 1,423
+  routes (about 23,000 steps) equal Python's, with their texts (`duckosm-route/tests/multimodal_points.rs`).
+
 - **`duckosm-rust route-multimodal`, `route-points` and `route-multimodal-points`** (`docs/design/all_in_rust.md`, group E): the
   trip across modes (`route_multimodal`, every part on the edge graph of its mode, walk* vehicle* walk*), and the routes between
   two points (`route_points`, `route_multimodal_points`), in `duckosm-router` (no DuckDB). A point joins its roads with GEOS's

@@ -2,6 +2,7 @@
 //! order of networkx's graph, so the routes (also when two routes cost the same) are those of duckOSM's Python code.
 
 pub mod cli;
+pub mod directions;
 pub mod graphml;
 pub mod points;
 pub mod route;

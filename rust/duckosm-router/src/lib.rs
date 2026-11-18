@@ -10,3 +10,4 @@ pub type Result<T> = std::result::Result<T, String>;
 pub mod geom;
 pub mod multimodal;
 pub mod points;
+pub mod directions;

@@ -1,7 +1,8 @@
 //! `route_multimodal`, `route_points` and `route_multimodal_points` equal duckOSM's Python output (2026-11-17) on the
 //! database of this config: Monaco's sample PBF in its boundary, three modes, no sea, no levels, no base-map layers, with
 //! `multimodal.enabled`. tests/data/golden_route/monaco_multimodal_points.json has 8 answers of each (the geometries taken out):
-//! random node pairs, and random points near nodes, in driving and walking, by time and by length.
+//! random node pairs, and random points near nodes, in driving and walking, by time and by length; and
+//! tests/data/golden_route/monaco_directions.json the steps of `directions` for each of these routes.
 
 use serde_json::Value as J;
 use std::path::PathBuf;
@@ -43,22 +44,49 @@ fn multimodal_and_points_equal_duckosm() {
     let net = duckosm_route::points::network(&con, "mm").unwrap();
     let g: J = serde_json::from_str(&std::fs::read_to_string(root.join("tests/data/golden_route/monaco_multimodal_points.json")).unwrap()).unwrap();
 
+    // the routes in the order of the steps of the golden file: route_points, route_multimodal_points, route_multimodal
+    let mut routes: Vec<(String, J)> = Vec::new();
+    let found = |v: &J| !v.is_null() && v.get("error").is_none();
+    let mut mm_routes = Vec::new();
     for q in g["mm"].as_array().unwrap() {
         let (a, b) = (q[0][0].as_i64().unwrap(), q[0][1].as_i64().unwrap());
-        let got = answer(duckosm_route::points::route_multimodal(&con, &net, Some(a), Some(b), "mm", "walking", "walking", true, None, None));
-        assert_eq!(got, q[1], "route_multimodal {a} {b}");
+        let full = duckosm_route::points::route_multimodal(&con, &net, Some(a), Some(b), "mm", "walking", "walking", true, None, None);
+        if let Ok(v) = &full {
+            if found(v) {
+                mm_routes.push(("walking".to_string(), v.clone()));
+            }
+        }
+        assert_eq!(answer(full), q[1], "route_multimodal {a} {b}");
     }
     let pts: Vec<Vec<f64>> = g["points"].as_array().unwrap().iter().map(|p| p.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()).collect();
     for q in g["pts"].as_array().unwrap() {
         let (mode, w) = (q[0].as_str().unwrap(), q[1].as_str().unwrap());
         for (p, want) in pts.iter().zip(q[2].as_array().unwrap()) {
-            let got = answer(duckosm_route::points::route_points(&con, (p[0], p[1]), (p[2], p[3]), mode, w, 50.0, 4.5));
-            assert_eq!(&got, want, "route_points {mode} {w} {p:?}");
+            let full = duckosm_route::points::route_points(&con, (p[0], p[1]), (p[2], p[3]), mode, w, 50.0, 4.5);
+            if let Ok(v) = &full {
+                if found(v) {
+                    routes.push((mode.to_string(), v.clone()));
+                }
+            }
+            assert_eq!(&answer(full), want, "route_points {mode} {w} {p:?}");
         }
     }
     for (p, want) in pts.iter().zip(g["mmpts"].as_array().unwrap()) {
-        let got = answer(duckosm_route::points::route_multimodal_points(&con, &net, (p[0], p[1]), (p[2], p[3]), 50.0, 4.5, "mm", None, true));
-        assert_eq!(&got, want, "route_multimodal_points {p:?}");
+        let full = duckosm_route::points::route_multimodal_points(&con, &net, (p[0], p[1]), (p[2], p[3]), 50.0, 4.5, "mm", None, true);
+        if let Ok(v) = &full {
+            if found(v) {
+                routes.push(("walking".to_string(), v.clone()));
+            }
+        }
+        assert_eq!(&answer(full), want, "route_multimodal_points {p:?}");
+    }
+    routes.extend(mm_routes);
+    let steps: J = serde_json::from_str(&std::fs::read_to_string(root.join("tests/data/golden_route/monaco_directions.json")).unwrap()).unwrap();
+    let steps = steps.as_array().unwrap();
+    assert_eq!(routes.len(), steps.len());
+    for (i, ((mode, r), want)) in routes.iter().zip(steps).enumerate() {
+        assert_eq!(mode, want[0].as_str().unwrap());
+        assert_eq!(duckosm_route::directions::directions(&con, r, mode).unwrap(), want[1], "directions of route {i}");
     }
     let _ = std::fs::remove_dir_all(&out);
 }
