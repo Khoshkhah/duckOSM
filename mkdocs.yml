@@ -169,6 +169,7 @@ nav:
       - duckOSM and OSMnx: concepts/osmnx.md
       - duckOSM and QuackOSM: concepts/quackosm.md
       - duckOSM and GDAL: concepts/gdal.md
+      - How each output is checked: concepts/checks.md
   - Reference:
       - Command line: reference/cli.md
       - Configuration: reference/configuration.md

@@ -34,12 +34,35 @@ All outputs come from one `.osm.pbf` file.
 | **Road networks**: driving, walking and cycling, and the graph of legal turns | `duckosm build` | DuckDB |
 | **Base-map layers**: water, land use, buildings, POIs | `duckosm build` | DuckDB (`features.*`) |
 | **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB |
-| **The OSM features table** of [QuackOSM](https://khoshkhah.github.io/duckOSM/concepts/quackosm/) | `duckosm quack` | GeoParquet, DuckDB |
-| **GDAL's five OSM layers**, as [QGIS reads them](https://khoshkhah.github.io/duckOSM/concepts/gdal/) | `duckosm quack --gdal` | GeoPackage, GeoParquet |
+| **The OSM features table** of [QuackOSM](https://khoshkhah.github.io/duckOSM/concepts/quackosm/) | `duckosm quack`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoParquet, DuckDB |
+| **GDAL's five OSM layers**, as [QGIS reads them](https://khoshkhah.github.io/duckOSM/concepts/gdal/) | `duckosm quack --gdal`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoPackage, GeoParquet |
 | **Traffic simulation networks** | `duckosm sumo`, `matsim`, `gmns` | SUMO, MATSim, GMNS |
 | **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx |
 | **Heights**: the ground height of each node | `duckosm elevation` | DuckDB |
 | **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML |
+
+## Fix the OSM data
+
+OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
+file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-page.png" alt="Edit OSM data: a road and its form" width="720">
+
+| Where | How |
+|---|---|
+| Browser | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), step **Edit OSM data** |
+| Your computer | `duckosm edit my_area.duckdb` opens the same editor |
+| Build | `duckosm build --fixes osm_fixes.yaml` |
+
+| You can change | Examples |
+|---|---|
+| Roads | one-way, lanes, speed, road class, access; delete a road |
+| Buildings | floors, height, roof; the type of each wall and its door |
+| Nodes | traffic signals, crossings |
+| Turns | a turn that a driver cannot make, or must make |
+| New roads | a road that OSM does not have |
+
+The network and all its exports use your fixes. More: [Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/).
 
 ## Two versions, one engine
 
@@ -48,6 +71,11 @@ All outputs come from one `.osm.pbf` file.
 | Program | `duckosm` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), a web page |
 | Install | `pip install duckosm` | none |
 | Rows | the same | the same |
+
+In the browser, open:
+
+- [**duckOSM Studio**](https://khoshkhah.github.io/duckosm-studio/): choose an area, build its network, edit the OSM data, and export.
+- [**The quack page**](https://khoshkhah.github.io/duckosm-studio/quack.html): the OSM features table of QuackOSM and GDAL's five layers.
 
 Both build every area by map tiles, so the memory does not grow with the area
 ([Browser and native builds](https://khoshkhah.github.io/duckOSM/concepts/browser-native/)).
@@ -96,17 +124,8 @@ duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
 
 All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/). Rust: [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
 
-## How each output is checked
-
-| Output | Check |
-|---|---|
-| OSM features table | each row equals QuackOSM's |
-| GDAL's layers | each row equals GDAL's (Monaco, Kentucky) |
-| SUMO | SUMO's `netconvert` |
-| MATSim | MATSim's DTD and XSD schemas |
-| GMNS | the GMNS table specification |
-| GeoPackage, shapefile | `duckosm gis-debug` compares each `edge_id` through GDAL |
-| Browser build | the tables equal the native build's |
+Each output is compared with a reference tool: QuackOSM, GDAL, SUMO, MATSim and the GMNS specification
+([how each output is checked](https://khoshkhah.github.io/duckOSM/concepts/checks/)).
 
 Experimental exports: OpenDRIVE, Lanelet2, railML, lane-level routing. See the
 [documentation](https://khoshkhah.github.io/duckOSM/exports/).
