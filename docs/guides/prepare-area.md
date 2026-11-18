@@ -39,7 +39,7 @@ duckosm cut sweden-latest.osm.pbf --boundary sodermalm.geojson -o sodermalm.osm.
 | `duckosm cut REGION --boundary FILE -o OUT` | the smart cut of osmium: ways that cross the border stay whole, and relations (rivers, land cover) are complete | a PBF sorted by type and id (the Geofabrik files are) |
 | `duckosm clip-pbf PBF BOUNDARY` | the cut of osmium, with `--strategy complete_ways` (default), `smart` or `simple`; not ported to Rust yet | [osmium](../install.md#outside-tools) and a PBF sorted by type and id |
 
-## Several areas from one region
+## Cut an area from a built region
 
 Use this when you need many areas of one region, for example the districts of Stockholm. Build the region once. Then
 `duckosm extract` copies the part of each area from the built database. It does not read the `.osm.pbf` again, so each

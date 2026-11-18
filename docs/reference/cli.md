@@ -31,7 +31,7 @@ duckosm build [OPTIONS]
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
 | `-o`, `--output PATH` | output file | `<name>.duckdb`, named after the boundary file, else the PBF, else the `--source-db` file |
 | `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
-| `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#several-areas-from-one-region)) | |
+| `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#cut-an-area-from-a-built-region)) | |
 | `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
@@ -91,7 +91,7 @@ duckosm clip-pbf [OPTIONS] PBF BOUNDARY
 ### `extract`
 
 Cuts one area out of a built database into a new database, by name, OSM id or GeoJSON. Edge ids are
-kept. Guide: [Several areas from one region](../guides/prepare-area.md#several-areas-from-one-region).
+kept. Guide: [Several areas from one region](../guides/prepare-area.md#cut-an-area-from-a-built-region).
 
 ```text
 duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --boundary BOUNDARY)
