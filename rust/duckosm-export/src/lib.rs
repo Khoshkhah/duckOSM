@@ -2,6 +2,7 @@
 //! Python export in src/duckosm/ and writes the same file. `cli` has the commands of `duckosm-rust`.
 
 pub mod cli;
+pub mod crossings;
 pub mod gis;
 pub mod gis_debug;
 pub mod geos;

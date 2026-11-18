@@ -170,7 +170,10 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
             meet_lanes(&c, &sch)?;
         } else {
             walk_lanes(&c, &sch)?;
-        } // then (not ported yet) the crossings in driving
+        }
+        if mode == "driving" {
+            crate::crossings::build_crossings(&c, &sch, has_raw)?; // zebra crossings on the driving lanes
+        }
         c.exec(&format!(
             "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
              FROM {sch}.node WHERE ctrl_type = 'signal'"
@@ -427,7 +430,7 @@ fn build_geometry(c: &Ctx, sch: &str) -> Result<()> {
 }
 
 /// `crossings._level`: the OSM `layer` if it is a number other than 0, else 1 for a bridge, -1 for a tunnel, else 0.
-fn level(layer: &Option<String>, bridge: &Option<String>, tunnel: &Option<String>) -> i64 {
+pub(crate) fn level(layer: &Option<String>, bridge: &Option<String>, tunnel: &Option<String>) -> i64 {
     let ly = layer.as_deref().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite()).map(|v| v.trunc() as i64).unwrap_or(0);
     if ly != 0 {
         return ly;

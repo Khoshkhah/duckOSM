@@ -6,6 +6,8 @@ zebra, so a reader paints the stripes lane by lane and they stay continuous from
 """
 import math
 
+from duckosm.gmns import _project_tol
+
 _ROAD_USES = ("auto", "bus", "bus,bike")                     # a zebra is painted on driving lanes; a bike lane is no part of it
 _DEFAULT_LANE_W = 3.25
 _ZEBRA_W_PER_ROAD_W = 0.4                           # the zebra's width, from the width of the road it crosses ...
@@ -66,6 +68,14 @@ def _zebra_width(tagged, road_width):
     """The zebra's width along the road: the OSM ``width`` if tagged, else estimated from the width of the road it crosses (the span
     across the covered lanes): ``_ZEBRA_W_PER_ROAD_W`` of it, between ``_ZEBRA_W_MIN`` and ``_ZEBRA_W_MAX``."""
     return tagged or min(max(_ZEBRA_W_PER_ROAD_W * road_width, _ZEBRA_W_MIN), _ZEBRA_W_MAX)
+
+
+def _nearest(near, dist, lane_conn, lane_id):
+    """The nearest lane of ``near``; where several are as near (within 1e-9 m: a node where lanes and connectors meet), a lane before
+    a connector, then the smallest lane id. ``min`` alone took the first in the order of a set of integers (Kaveh, 2026-11-18)."""
+    d = {j: dist(j) for j in near}
+    best = min(d.values())
+    return min((j for j in near if d[j] <= best + 1e-9), key=lambda j: (lane_conn[j], lane_id[j]))
 
 
 def build_crossings(con, sch, has_raw):
@@ -129,7 +139,9 @@ def build_crossings(con, sch, has_raw):
     tree = shapely.STRtree(poly)
 
     def tangent(lane, p):
-        s = lane.project(p)
+        # where p is as near to two segments at a corner of the lane (its bisector, to 1e-6 m), the corner: lane.project jumped
+        # across it for a change of p in the last bits, and the tangent turned (Kaveh, 2026-11-18)
+        s = _project_tol(lane, p, 1e-6)
         a, b = lane.interpolate(max(s - 0.5, 0)), lane.interpolate(min(s + 0.5, lane.length))
         n = math.hypot(b.x - a.x, b.y - a.y) or 1.0
         return (b.x - a.x) / n, (b.y - a.y) / n
@@ -151,7 +163,7 @@ def build_crossings(con, sch, has_raw):
             if chord < 1.0 or part.length > _MAX_WIND * chord:
                 continue
             mid = part.interpolate(0.5, normalized=True)
-            lane = min(near, key=lambda j: geom[j].distance(mid))
+            lane = _nearest(near, lambda j: geom[j].distance(mid), lane_conn, lane_id)
             tx, ty = tangent(geom[lane], mid)
             if abs((b[0] - a[0]) * ty - (b[1] - a[1]) * tx) / chord < _MIN_ANGLE_SIN:
                 continue
@@ -184,7 +196,7 @@ def build_crossings(con, sch, has_raw):
         near = [j for j in only if geom[j].distance(p) < 12.0]
         if not near:
             continue
-        lane = min(near, key=lambda j: geom[j].distance(p))
+        lane = _nearest(near, lambda j: geom[j].distance(p), lane_conn, lane_id)
         tx, ty = tangent(geom[lane], p)
         line = LineString([(p.x - ty * _NODE_REACH_M, p.y + tx * _NODE_REACH_M), (p.x + ty * _NODE_REACH_M, p.y - tx * _NODE_REACH_M)])
         cands.append(["n", osm, ct, mk, None, line, only, None])

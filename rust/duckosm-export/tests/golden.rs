@@ -305,10 +305,21 @@ fn gmns_columns(db: &Path) -> Vec<String> {
     lines
 }
 
-/// The columns that the test skips: the computed lane geometry, which `gmns_lanes_by_properties` checks (Kaveh, 2026-11-18), and
-/// the columns that a step not ported yet changes. An entry is `table.column` (in every schema), `schema.table` or
-/// `schema.table.column`.
-const GMNS_PENDING: [&str; 3] = ["lane.geom", "lane.geom_cut", "lane_connector.geom"];
+/// The computed geometry and the measures taken on it, which `gmns_lanes_by_properties` checks, not equality with Python (Kaveh,
+/// 2026-11-18; docs/design/all_in_rust.md): the lane lines and the crossings, whose overlays are the `geo` crate's here and GEOS's
+/// in Python. An entry is `table.column` (in every schema), `schema.table` or `schema.table.column`.
+const GMNS_BY_PROPERTIES: [&str; 10] = [
+    "lane.geom",
+    "lane.geom_cut",
+    "lane_connector.geom",
+    "crossing.width",
+    "crossing.length",
+    "crossing.geom",
+    "lane_crossing.start_lr",
+    "lane_crossing.end_lr",
+    "lane_crossing.across_from",
+    "lane_crossing.across_to",
+];
 
 /// The lane geometry: checked by its properties (`gmns_lanes_by_properties`), not by equality with Python (Kaveh, 2026-11-18;
 /// docs/design/all_in_rust.md, "How the lane geometry is checked").
@@ -344,7 +355,7 @@ fn gmns_equals_python() {
     for want in golden.lines().skip(1) {
         let (t, c) = (want.split('\t').next().unwrap(), want.split('\t').nth(1).unwrap());
         let short = format!("{}.{c}", t.split('.').nth(1).unwrap());
-        let pending = [short, t.to_string(), format!("{t}.{c}")].iter().any(|k| GMNS_PENDING.contains(&k.as_str()));
+        let pending = [short, t.to_string(), format!("{t}.{c}")].iter().any(|k| GMNS_BY_PROPERTIES.contains(&k.as_str()));
         if !tables.contains(t) || pending {
             continue;
         }

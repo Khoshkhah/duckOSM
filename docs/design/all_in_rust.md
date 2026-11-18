@@ -147,7 +147,8 @@ geometry copied from the source db) still compare with Python's `monaco_gmns_col
 | Walking frame (`--walk-frame`, off by default) | Not started. |
 | The lanes of the walking movements, `signal_controller`, `location`, the signs, the node types, `zone` | Done: equal on Monaco. |
 | `gmns_sumo` (netconvert: the lanes of the movements, `lane_check`, `lane_connector`, `lane.geom_cut`), the lanes that meet | Done: every column but the geometry equals Python on Monaco; the lane geometry agrees with Python within 1 mm, and the connectors meet the ends of their lanes within 1 mm (`lane_report`). `sumo::to_sumo_with` has the options that GMNS gives: the bus-only edges, GMNS's lanes with their arrows (netconvert's OSM import), the lane middles as shapes. The Rust CI job installs netconvert 1.27.0. |
-| Crossings, GTFS stops, walk joins | Not started. |
+| Crossings (`crossing`, `lane_crossing`) | Done: on Monaco the same 492 crossings and 2,118 lane rows as Python, with every id, link, type, marking, `painted` and `to_left` equal. The overlays (unions, buffers of a union, intersections) are the `geo` crate's, so the widths, lengths and stretches are checked by their properties (`lane_report`): each stretch inside its lane, each part across inside the zebra, the width the tag's or 2.5-4 m. Two ties are now decided the same way in Python and Rust: the lane nearest to a node where lanes and connectors meet (a lane before a connector, then the smallest lane id), and the tangent of a lane at a point on a corner's bisector (the corner). |
+| GTFS stops, walk joins | Not started. |
 | Walk joins, `gmns_all`, CSV, meso, micro, `gmns_check`, `gmns-viz`, `gmns-map` | Not started. |
 
 ## Not changed

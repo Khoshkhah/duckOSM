@@ -195,13 +195,16 @@ impl Gen {
             self.add(o1.0);
         }
     }
-    /// GEOS `addLineEndCap`, round: the fillet from the angle of p0-p1 plus 90 degrees to the angle minus 90 degrees.
-    fn end_cap(&mut self, p0: P, p1: P) {
+    /// GEOS `addLineEndCap`, round: the fillet from the angle of p0-p1 plus 90 degrees to the angle minus 90 degrees; flat: the
+    /// two offset points only.
+    fn end_cap(&mut self, p0: P, p1: P, flat: bool) {
         let l = Gen::offset(p0, p1, 1.0, self.d);
         let r = Gen::offset(p0, p1, -1.0, self.d);
-        let angle = (p1.1 - p0.1).atan2(p1.0 - p0.0);
         self.add(l.1);
-        self.fillet_angles(p1, angle + FRAC_PI_2, angle - FRAC_PI_2, CW, self.d);
+        if !flat {
+            let angle = (p1.1 - p0.1).atan2(p1.0 - p0.0);
+            self.fillet_angles(p1, angle + FRAC_PI_2, angle - FRAC_PI_2, CW, self.d);
+        }
         self.add(r.1);
     }
 }
@@ -246,6 +249,26 @@ pub fn raw_curve(pts: &[P], d: f64) -> Vec<P> {
 /// The raw ring of the buffer of the line (GEOS `computeLineBufferCurve`, round caps): clockwise around the line.
 #[doc(hidden)]
 pub fn buffer_ring(pts: &[P], d: f64) -> Vec<P> {
+    buffer_ring_cap(pts, d, false)
+}
+
+/// The buffer of a line by `d` (> 0), as shapely's `line.buffer(d)` (round joins, 16 segments for a quarter circle; `flat`:
+/// `cap_style="flat"`, else round caps): GEOS `BufferOp` of a line.
+pub fn line_buffer(pts: &[P], d: f64, flat: bool) -> Result<Vec<crate::geos::Polygon>, String> {
+    let mut clean: Vec<P> = Vec::with_capacity(pts.len());
+    for p in pts {
+        if p.0.is_finite() && p.1.is_finite() && clean.last() != Some(p) {
+            clean.push(*p);
+        }
+    }
+    if clean.len() < 2 || d <= 0.0 {
+        return Ok(vec![]);
+    }
+    let curves = if clean.len() >= 4 && clean.first() == clean.last() { ring_sides(&clean, d) } else { vec![(buffer_ring_cap(&clean, d, flat), -1)] };
+    crate::geos::buffer_polygons(&curves)
+}
+
+fn buffer_ring_cap(pts: &[P], d: f64, flat: bool) -> Vec<P> {
     let mut g = Gen::new(d);
     let tol = d / SIMPLIFY_FACTOR;
     let s1 = simplify(pts, tol);
@@ -258,14 +281,14 @@ pub fn buffer_ring(pts: &[P], d: f64) -> Vec<P> {
     g.add(last);
     let s2 = simplify(pts, -tol);
     let n2 = s2.len() - 1;
-    g.end_cap(s1[n1 - 1], s1[n1]);
+    g.end_cap(s1[n1 - 1], s1[n1], flat);
     g.init_side(s2[n2], s2[n2 - 1]);
     for i in (1..n2).rev() {
         g.next_segment(s2[i - 1]);
     }
     let last = g.off1.1;
     g.add(last);
-    g.end_cap(s2[1], s2[0]);
+    g.end_cap(s2[1], s2[0], flat);
     if g.pts.first() != g.pts.last() {
         let f = g.pts[0];
         g.pts.push(f);
