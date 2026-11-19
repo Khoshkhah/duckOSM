@@ -144,7 +144,7 @@ pub fn write_tables<W: Write + Send>(
         Some(ws) => Some(ws.into_iter().zip(1..=4u8).map(|(w, t)| Osm2pgsqlWriter::new(t, merc, w)).collect::<Result<Vec<_>, _>>()?),
         None => None,
     };
-    let mut pg = postgis.map(|_| Copy::new()).transpose()?;
+    let mut pg = postgis.map(|conn| Copy::new(conn, merc)).transpose()?;
     let mut rows = [0usize; 5];
     let mut write = |batch: Vec<Feature>| -> Result<(), String> {
         let mut out = Vec::new();
@@ -152,7 +152,7 @@ pub fn write_tables<W: Write + Send>(
         for f in out {
             rows[f.layer as usize] += 1;
             if let Some(c) = pg.as_mut() {
-                c.write(&f, merc)?;
+                c.write(&f)?;
             }
             if let Some(w) = parquet.as_mut() {
                 w[f.layer as usize - 1].write(f)?;
@@ -178,16 +178,20 @@ pub fn write_tables<W: Write + Send>(
     if let Some(w) = parquet {
         w.into_iter().try_for_each(|w| w.close().map(|_| ()))?;
     }
-    if let (Some(c), Some(conn)) = (pg, postgis) {
-        c.load(conn, merc)?;
+    if let Some(mut c) = pg {
+        c.finish(true)?;
     }
     Ok(rows)
 }
 
-/// The rows of the four tables in PostgreSQL's COPY text format, in temporary files, as osm2pgsql sends them: `osm_id`,
-/// the columns, `tags` as hstore text, and the geometry as hex EWKB.
+/// The rows of the four tables in PostgreSQL's COPY text format, as osm2pgsql sends them (`osm_id`, the columns, `tags`
+/// as hstore text, the geometry as hex EWKB), sent while the file is read: each table has its own thread and connection,
+/// which takes the rows through a channel.
 struct Copy {
-    files: Vec<(PathBuf, BufWriter<std::fs::File>)>,
+    merc: bool,
+    lines: Vec<String>,
+    to: Vec<std::sync::mpsc::SyncSender<Option<String>>>,
+    jobs: Vec<std::thread::JoinHandle<Result<(), String>>>,
 }
 
 /// A value in COPY text: `\` before `\`, and the tab, the new line and the carriage return as `\t`, `\n`, `\r`.
@@ -221,96 +225,130 @@ fn ewkb_hex(wkb: &[u8], srid: u32, out: &mut String) {
     }
 }
 
+/// The rows that a table thread gets in one message.
+const CHUNK: usize = 1 << 20;
+
 impl Copy {
-    fn new() -> Result<Copy, String> {
-        let dir = std::env::temp_dir();
-        let mut files = Vec::new();
-        for t in 1..=4u8 {
-            let p = dir.join(format!("duckosm-{}-{}.copy", std::process::id(), o2p::table_name(t)));
-            files.push((p.clone(), BufWriter::new(std::fs::File::create(&p).map_err(|e| format!("{}: {e}", p.display()))?)));
+    #[cfg(feature = "postgis")]
+    fn new(conn: &str, merc: bool) -> Result<Copy, String> {
+        connect(conn)?
+            .batch_execute("CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS hstore;")
+            .map_err(pg_err)?;
+        let (mut to, mut jobs) = (Vec::new(), Vec::new());
+        for table in 1..=4u8 {
+            // 4 chunks in the channel for each table: at most 20 MB of rows wait
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Option<String>>(4);
+            let conn = conn.to_string();
+            to.push(tx);
+            jobs.push(std::thread::spawn(move || load(&conn, table, merc, rx)));
         }
-        Ok(Copy { files })
+        Ok(Copy { merc, lines: vec![String::new(); 4], to, jobs })
     }
 
-    fn write(&mut self, f: &Feature, merc: bool) -> Result<(), String> {
-        let mut line = o2p::osm_id(f).to_string();
+    #[cfg(not(feature = "postgis"))]
+    fn new(_: &str, _: bool) -> Result<Copy, String> {
+        Err("the PostGIS output needs the cargo feature \"postgis\"".into())
+    }
+
+    fn write(&mut self, f: &Feature) -> Result<(), String> {
+        let t = f.layer as usize - 1;
+        let line = &mut self.lines[t];
+        line.push_str(&o2p::osm_id(f).to_string());
         let (vals, tags) = o2p::values(f);
         for v in vals {
             line.push('\t');
             match v {
                 None => line.push_str("\\N"),
-                Some(o2p::Cell::Text(s)) => copy_text(&s, &mut line),
+                Some(o2p::Cell::Text(s)) => copy_text(&s, line),
                 Some(o2p::Cell::Int(n)) => line.push_str(&n.to_string()),
                 Some(o2p::Cell::Real(n)) => line.push_str(&n.to_string()),
             }
         }
         line.push('\t');
-        copy_text(&hstore(&tags), &mut line);
+        copy_text(&hstore(&tags), line);
         line.push('\t');
-        ewkb_hex(&f.geometry, if merc { 3857 } else { 4326 }, &mut line);
+        ewkb_hex(&f.geometry, if self.merc { 3857 } else { 4326 }, line);
         line.push('\n');
-        let p = &mut self.files[f.layer as usize - 1];
-        p.1.write_all(line.as_bytes()).map_err(|e| format!("{}: {e}", p.0.display()))
-    }
-
-    /// The tables as osm2pgsql makes them (`table_t::start` and `table_t::stop`): CREATE TABLE, COPY, the rows sorted by
-    /// the geometry, a GiST index with fillfactor 100, ANALYZE. As osm2pgsql, each table on its own connection, all four at
-    /// the same time.
-    #[cfg(feature = "postgis")]
-    fn load(self, conn: &str, merc: bool) -> Result<(), String> {
-        let e = |x: postgres::Error| format!("PostGIS: {x}");
-        let connect = || postgres::Client::connect(conn, postgres::NoTls).map_err(e);
-        connect()?.batch_execute("CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS hstore;").map_err(e)?;
-        let srid = if merc { 3857 } else { 4326 };
-        let mut files = Vec::new();
-        for (path, w) in self.files {
-            drop(w.into_inner().map_err(|x| format!("{}: {x}", path.display()))?);
-            files.push(path);
+        if line.len() >= CHUNK {
+            let chunk = std::mem::take(line);
+            if self.to[t].send(Some(chunk)).is_err() {
+                // the thread stopped: its error
+                return Err(self.finish(false).err().unwrap_or_else(|| "PostGIS: a load thread stopped".into()));
+            }
         }
-        let one = |table: u8, path: &Path| -> Result<(), String> {
-            let mut c = connect()?;
-            let name = o2p::table_name(table);
-            let cols: Vec<String> = o2p::columns(table)
-                .iter()
-                .map(|(c, k)| format!("\"{c}\" {}", match k {
-                    o2p::Kind::Text => "text",
-                    o2p::Kind::Int => "int4",
-                    o2p::Kind::Real => "real",
-                }))
-                .collect();
-            let kind = match table {
-                o2p::POINT => "POINT",
-                o2p::POLYGON => "GEOMETRY",
-                _ => "LINESTRING",
-            };
-            c.batch_execute(&format!(
-                "DROP TABLE IF EXISTS {name}; DROP TABLE IF EXISTS {name}_tmp;
-                 CREATE UNLOGGED TABLE {name}_tmp (osm_id int8,{},\"tags\" hstore,way geometry({kind},{srid}))",
-                cols.join(",")
-            ))
-            .map_err(e)?;
-            let mut copy = c.copy_in(&format!("COPY {name}_tmp FROM STDIN")).map_err(e)?;
-            std::io::copy(&mut std::fs::File::open(path).map_err(|x| format!("{}: {x}", path.display()))?, &mut copy)
-                .map_err(|x| format!("PostGIS: COPY {name}: {x}"))?;
-            copy.finish().map_err(e)?;
-            c.batch_execute(&format!(
-                "CREATE TABLE {name} AS SELECT * FROM {name}_tmp ORDER BY way; DROP TABLE {name}_tmp;
-                 CREATE INDEX ON {name} USING GIST (way) WITH (fillfactor = 100); ANALYZE {name};"
-            ))
-            .map_err(e)
-        };
-        let done: Vec<Result<(), String>> = std::thread::scope(|s| {
-            let jobs: Vec<_> = files.iter().zip(1..=4u8).map(|(p, t)| s.spawn(move || one(t, p))).collect();
-            jobs.into_iter().map(|j| j.join().unwrap_or_else(|_| Err("PostGIS: a load thread stopped".into()))).collect()
-        });
-        files.iter().for_each(|p| drop(std::fs::remove_file(p)));
-        done.into_iter().collect()
+        Ok(())
     }
 
-    #[cfg(not(feature = "postgis"))]
-    fn load(self, _: &str, _: bool) -> Result<(), String> {
-        Err("the PostGIS output needs the cargo feature \"postgis\"".into())
+    /// Send the last rows (`ok`; else the tables are not made), and wait for the four tables.
+    fn finish(&mut self, ok: bool) -> Result<(), String> {
+        for (tx, line) in std::mem::take(&mut self.to).into_iter().zip(&mut self.lines) {
+            let chunk = std::mem::take(line);
+            if ok {
+                let _ = tx.send(Some(chunk)).and_then(|_| tx.send(None));
+            }
+        }
+        let mut result = Ok(());
+        for j in std::mem::take(&mut self.jobs) {
+            let r = j.join().unwrap_or_else(|_| Err("PostGIS: a load thread stopped".into()));
+            if result.is_ok() {
+                result = r;
+            }
+        }
+        result
     }
+}
+
+#[cfg(feature = "postgis")]
+fn pg_err(x: postgres::Error) -> String {
+    format!("PostGIS: {x}")
+}
+
+#[cfg(feature = "postgis")]
+fn connect(conn: &str) -> Result<postgres::Client, String> {
+    postgres::Client::connect(conn, postgres::NoTls).map_err(pg_err)
+}
+
+/// One table as osm2pgsql makes it (`table_t::start` and `table_t::stop`): CREATE TABLE, COPY of the rows from `rx`, the
+/// rows sorted by the geometry, a GiST index with fillfactor 100, ANALYZE.
+#[cfg(feature = "postgis")]
+fn load(conn: &str, table: u8, merc: bool, rx: std::sync::mpsc::Receiver<Option<String>>) -> Result<(), String> {
+    let mut c = connect(conn)?;
+    let name = o2p::table_name(table);
+    let cols: Vec<String> = o2p::columns(table)
+        .iter()
+        .map(|(c, k)| format!("\"{c}\" {}", match k {
+            o2p::Kind::Text => "text",
+            o2p::Kind::Int => "int4",
+            o2p::Kind::Real => "real",
+        }))
+        .collect();
+    let kind = match table {
+        o2p::POINT => "POINT",
+        o2p::POLYGON => "GEOMETRY",
+        _ => "LINESTRING",
+    };
+    let srid = if merc { 3857 } else { 4326 };
+    c.batch_execute(&format!(
+        "DROP TABLE IF EXISTS {name}; DROP TABLE IF EXISTS {name}_tmp;
+         CREATE UNLOGGED TABLE {name}_tmp (osm_id int8,{},\"tags\" hstore,way geometry({kind},{srid}))",
+        cols.join(",")
+    ))
+    .map_err(pg_err)?;
+    let mut copy = c.copy_in(&format!("COPY {name}_tmp FROM STDIN")).map_err(pg_err)?;
+    // None: the last rows; a channel closed with no None (the read failed) drops the COPY, and nothing is made
+    loop {
+        match rx.recv() {
+            Ok(Some(chunk)) => copy.write_all(chunk.as_bytes()).map_err(|x| format!("PostGIS: COPY {name}: {x}"))?,
+            Ok(None) => break,
+            Err(_) => return Err(format!("PostGIS: {name}: the rows stopped")),
+        }
+    }
+    copy.finish().map_err(pg_err)?;
+    c.batch_execute(&format!(
+        "CREATE TABLE {name} AS SELECT * FROM {name}_tmp ORDER BY way; DROP TABLE {name}_tmp;
+         CREATE INDEX ON {name} USING GIST (way) WITH (fillfactor = 100); ANALYZE {name};"
+    ))
+    .map_err(pg_err)
 }
 
 #[cfg(test)]
