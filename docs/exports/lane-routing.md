@@ -1,32 +1,53 @@
 # Lane-level routing (experimental)
 
-A route that says **which lane** to be in, not only which road. It runs on a
-[GMNS database](gmns.md):
+A route that says **which lane** to be in, not only which road, with your OSM fixes. It runs on the GMNS database of
+[`duckosm gmns`](gmns.md).
+
+| Reference and format | |
+|---|---|
+| Format | the lane graph as the table `lane_driving.lane_edges` in the GMNS database. A route as GeoJSON |
+| Reference tool | none |
+| Check | the tests on Monaco. [How each output is checked](../concepts/checks.md) |
 
 ```bash
-duckosm gmns monaco.duckdb
-duckosm lane-graph monaco_gmns.duckdb       # 3,182 lanes, 3,890 turn + 834 lane-change links
-duckosm route-lanes monaco_gmns.duckdb <from> <to> -o route.geojson
+duckosm gmns monaco.duckdb                                            # first: the lanes and the turns
+duckosm lane-graph monaco_gmns.duckdb                                 # the lane graph
+duckosm route-lanes monaco_gmns.duckdb <from> <to> -o route.geojson   # one route
 ```
 
-```text
-route: 115 lanes, cost 3876, maneuvers: right turn, right turn, merge, fork, lane change, … (25 in all), right turn, U-turn
-```
+`<from>` and `<to>` are lane ids (`<edge_id>_<lane number>`), or `edge_id`s: then lane 1 of the edge.
 
-`<from>` and `<to>` are lane ids (`<edge_id>_<lane number>`, e.g. `4737533508550016661_1`), or
-`edge_id`s (then their lane 1). An unknown id gives "no lane route", as an unreachable lane does. The
-lane graph links each lane to the lanes it can turn into (legal turns only) and to the lanes beside
-it (a lane change). The cost is metres, plus a penalty for each turn and lane change.
-`lane-graph` saves the graph in the GMNS database (`lane_driving.lane_edges`) so that repeated
-routes are faster; `route-lanes` also works without it.
+## The lane graph
 
-```python
-from duckosm import build_lane_graph, route_lanes
-build_lane_graph("monaco_gmns.duckdb")
-r = route_lanes("monaco_gmns.duckdb", from_lane, to_lane)
-r["lanes"], r["cost"], r["maneuvers"], r["geometry"]
-```
+| Link | Joins |
+|---|---|
+| turn | a lane to each lane that it can turn into, legal turns only |
+| lane change | a lane to the lane beside it |
 
-**Limits:** where OSM has no `turn:lanes` (most roads), any lane may take any legal turn, so a
-route can turn from a lane a real driver would leave first. Good for planning, not for lane-accurate
-control. Driving by default; `-m cycling` runs too, but cycling roads mostly have one lane.
+The cost is the length in metres, plus a penalty for each turn and each lane change. A route gives its lanes, its
+cost, its maneuvers (right turn, merge, fork, lane change, U-turn) and its shape.
+
+## Lane graph and the GMNS micro network
+
+Both are networks of lanes, from the same GMNS lanes and turns. They differ in the size of a node and in their use:
+
+| | Lane graph (`lane-graph`) | GMNS micro (`gmns --micro`) |
+|---|---|---|
+| A node is | one whole lane of a road | the start of a cell of about 7 m of a lane |
+| A link is | a turn into another lane, or a lane change | a cell, a lane change between cells side by side, or a turn |
+| A lane change can be | anywhere along the lane | at each cell |
+| Use it for | routing: which lane to be in | simulation: where each vehicle is on its lane |
+| Size | small: one node for each lane | large: one node for each 7 m of each lane |
+
+## Speed and memory
+
+| Area (input) | Time | Memory |
+|---|---|---|
+| Monaco (0.7 MB) | 0.04 s | 25 MB |
+| Kentucky (148 MB) | not run: `duckosm gmns` stops on Kentucky | |
+| France (5.1 GB) | not run | |
+
+## Limits
+
+Where OSM has no `turn:lanes` (most roads), any lane can take any legal turn. So a route can turn from a lane that a
+real driver leaves first. Use it for planning, not for lane-accurate control.

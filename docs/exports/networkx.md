@@ -1,45 +1,55 @@
 # networkx
 
-Load the network into [networkx](https://networkx.org) for your own analysis, or save it to a file.
-The functions need `pip install "duckosm[networkx]"`. The command `duckosm export-graph` writes GraphML
-with no extra.
+Load the network into a graph library for your own analysis, or save it as GraphML or gpickle, with your OSM fixes.
 
-| Function | Nodes | Edges |
+| Reference and format | |
+|---|---|
+| Format | a [networkx](https://networkx.org) or [rustworkx](https://www.rustworkx.org) graph in Python, a [petgraph](https://docs.rs/petgraph) graph in Rust, or a [GraphML](http://graphml.graphdrawing.org/) or gpickle file |
+| Check | each graph has the nodes and arcs of the database tables. [How each output is checked](../concepts/checks.md) |
+
+```bash
+duckosm export-graph monaco.duckdb                              # -> monaco_driving.graphml, the junction graph
+duckosm export-graph monaco.duckdb -g edge -o routing.graphml   # the turn graph
+duckosm export-graph monaco.duckdb -f gpickle                   # a networkx pickle: keeps the lists and the types, Python only
+```
+
+```python
+G = duckosm.to_networkx(con)            # the turn graph; pip install "duckosm[networkx]"
+G = duckosm.to_networkx_nodes(con)      # the junction graph
+```
+
+## The two graphs
+
+| Graph | A node is | An arc is |
 |---|---|---|
-| `to_networkx(con)` | edges (`edge_id`), with `name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry` (WKT) | legal turns; `weight` is the time of the edge you leave (`weight="length"`: its metres) |
-| `to_networkx_nodes(con)` | junctions (`x`, `y` = lon, lat) | roads, keyed by `edge_id`, with every column (osmnx layout, but the length is `length_m`, not `length`) |
+| turn graph (`to_networkx`, `-g edge`) | an edge (`edge_id`), with `name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s`, `geometry` | a legal turn. `weight` is the time of the edge you leave |
+| junction graph (`to_networkx_nodes`, the default of `export-graph`) | a junction, with `x`, `y` (longitude, latitude) | a road, keyed by `edge_id`, with every column of `edges`, as in OSMnx |
 
-Both take `mode=` too.
+Routing needs the turn graph, because only it knows the turn restrictions.
+
+## The libraries
 
 | Library | Function | Use it for |
 |---|---|---|
-| networkx | `to_networkx`, `to_networkx_nodes` | the most tools and examples (osmnx, momepy) |
-| rustworkx | `to_rustworkx(con, graph="turns")`, `to_rustworkx(con, graph="junctions")` | an API like networkx with a Rust engine: faster for large areas. Needs `pip install "duckosm[rustworkx]"` |
-| petgraph (Rust) | `duckosm_route::graphs::to_petgraph` | Rust programs ([Rust SDK](../reference/rust.md)) |
+| networkx | `to_networkx`, `to_networkx_nodes` | the most tools and examples (OSMnx, momepy) |
+| rustworkx | `to_rustworkx(con, graph="turns")` or `graph="junctions"` | the same graphs, faster for large areas. `pip install "duckosm[rustworkx]"` |
+| petgraph | `duckosm_route::graphs::to_petgraph` | Rust programs ([Rust SDK](../reference/rust.md)) |
 
-The three libraries get the same two graphs. In rustworkx a node has an index: `g.attrs["index"][edge_id]` gives it.
+## Speed and memory
 
-To save either one to a file (the format comes from the extension):
+Mac mini (Apple M6, 12 cores, 16 GB).
 
-```bash
-duckosm export-graph monaco.duckdb                            # -> monaco_driving.graphml (junctions)
-duckosm export-graph monaco.duckdb -g edge -o routing.graphml # the routing graph
-```
+| Area (input) | Output | Time | Memory | Output size |
+|---|---|---|---|---|
+| Kentucky (148 MB) | `export-graph` (GraphML) | 13 s | 9.3 GB | 1.9 GB |
+| | `to_networkx()` | 16 s | 5.9 GB | |
+| France (5.1 GB) | both | not run: they need more memory than the Mac mini has | | |
 
-GraphML opens in any tool but stores lists and geometry as text. gpickle keeps lists and types but
-only loads in Python: write it from Python, `write_graph(con, "monaco.gpickle")` (add `geometry="shapely"` for shapely
-geometries on the junction graph).
-
+networkx keeps each node and arc as a Python object, so it is for a city or a region: France needs about 27 GB. For a
+country, use rustworkx, petgraph or [`duckosm route`](../guides/route.md).
 
 ## Turns of the restricted edges
 
-The edge graph has only the mode's own turns. To add the turns into and out of the restricted edges
-(`private_edges`: `bus`, `private`, `pedestrian`, `delivery`), give `uses`:
-
-```python
-G = to_networkx(con, "driving", uses="pedestrian,private")   # CLI: duckosm export-graph --graph edge --uses pedestrian,private
-G.nodes[edge_id]["access"]                                    # 'pedestrian' on a restricted edge; absent on a usable edge
-```
-
-A restricted edge is a node with its `cost_s` as the weight of its arcs. Do not route cars over them: use this to look at what
-meets at a junction. [Database reference](../reference/database.md#edge_graph).
+The turn graph has only the turns of the mode. To add the turns into and out of the restricted edges (`bus`, `private`,
+`pedestrian`, `delivery`), give `uses`: `to_networkx(con, uses="pedestrian,private")`, or
+`duckosm export-graph -g edge --uses pedestrian,private`. A restricted edge then has the attribute `access`.

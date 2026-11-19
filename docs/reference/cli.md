@@ -5,9 +5,10 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 
 | Group | Commands |
 |---|---|
-| [Build and areas](#build-and-areas) | `get`, `cut`, `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
-| [Query and inspect](#query-and-inspect) | `way`, `features-check` |
-| [Maps and routing](#maps-and-routing) | `viz`, `route-map` |
+| [Build and areas](#build-and-areas) | `duckosm FILE`, `tiles`, `get`, `cut`, `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
+| [OSM data](#osm-data) | `quack`, `quack-tiles`, `quack-union` |
+| [Query and inspect](#query-and-inspect) | `info`, `way` |
+| [Maps, pages and routing](#maps-and-routing) | `viz`, `levels`, `levels-edit`, `edit`, `studio`, `ask`, `bus`, `route-map`, `route`, `route-points`, `directions`, `route-multimodal`, `route-multimodal-points`, `features-check` |
 | [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
 | [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
 | [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
@@ -16,6 +17,60 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 enrich a database (`elevation`, `admin`, `multimodal`) change it in place.
 
 ## Build and areas
+
+### `duckosm FILE`
+
+The build, all in Rust: the networks of an area from an `.osm.pbf` file, into `<out>/<name>.duckdb` and GeoParquet files.
+Guide: [Build a network](../guides/build.md). Its steps: [How a build works](../concepts/build.md).
+
+```text
+duckosm [OPTIONS] [PBF]
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `PBF` | the input `.osm.pbf` file | |
+| `-c`, `--config FILE` | a [config file](configuration.md): the input, the output, the modes and the options | |
+| `--boundary FILE` | the [boundary](boundary.md): the file is cut to it first | the whole file |
+| `-o`, `--out DIR` | the output folder | `.` |
+| `--name NAME` | the name of the area: the file is `<out>/<name>.duckdb` | `area` |
+| `-f`, `--format` | `duckdb`, `geoparquet` or both | both |
+| `-m`, `--modes` | `driving`, `walking`, `cycling`, comma separated | `driving` |
+| `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) | |
+| `--features` | the [base-map layers](features.md); needs `--boundary` | off |
+| `--sea` | with `--features`: also `features.ocean` from Overture Maps | off |
+| `--building-faces` | the [walls of the buildings](../concepts/building-walls.md); needs `--boundary` | off |
+| `--levels METHOD` | the [drawing order](../guides/drawing-order.md): `tags`, `solve` or `none` | `tags` |
+| `--dem FILE` | a DEM to sample at each node and edge vertex, with `--dem-product`, `--dem-vertical-datum`, `--dem-license` or `--dem-not-reference` ([the ground reference](../concepts/ground-reference.md)) | |
+| `--h3-resolution RES` | the H3 columns at this resolution, 0 to 15 | |
+| `--raw` | with `--boundary`: also write `raw.*` | off |
+| `--cut-pbf`, `--cut-osm` | with `--boundary`: also write the cut area as `cut.osm.pbf` or `cut.osm` | off |
+| `--no-graph`, `--no-restrictions`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-functional-types`, `--no-bus-routes`, `--no-ways-tables` | turn off one step | |
+| `--no-connect-paths`, `--snap-m M` | the [connection of dangling paths](../concepts/cleanup.md), and its distance | on, 10 m |
+| `--timing` | print the time of each step | |
+
+`duckosm FILE --help` lists all options.
+
+### `tiles`
+
+Builds a large area by map tiles: one read of the region file cuts it into the tiles of the boundary, each tile builds
+alone, and a union joins them. The memory does not grow with the area. [Browser and native builds](../concepts/browser-native.md#by-tiles).
+
+```text
+duckosm tiles [OPTIONS] [REGION] [-- BUILD_OPTIONS...]
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `REGION` | the region file, sorted by type and id | |
+| `--boundary FILE` | the boundary of the area | |
+| `--config FILE` | a config file in place of `REGION` and `--boundary` | |
+| `-o`, `--out DIR` | the output folder | |
+| `--zoom Z` | the zoom of the tiles | `8` |
+| `--memory SIZE` | the memory for the tile builds at the same time, for example `4G` | |
+| `--jobs N`, `--tile-threads N` | the tiles that build at the same time, and the threads of each | the cores / 2, `2` |
+| `--keep-tiles` | keep the files of each tile | |
+| `-- BUILD_OPTIONS` | the options of the build of each tile, as for `duckosm FILE`, for example `-- --modes driving` | |
 
 ### `get`
 
@@ -57,7 +112,9 @@ duckosm cut [OPTIONS] --boundary FILE -o FILE REGION
 
 ### `build`
 
-Builds a network from a PBF, or cuts one from a built database. Guide: [Build a network](../guides/build.md).
+Builds a network from a PBF with a config file, or cuts one from a built database. The validation, the report and the
+multimodal graph of this command are not ported to Rust yet; [`duckosm FILE`](#duckosm-file) is the build all in Rust.
+Guide: [Build a network](../guides/build.md).
 
 ```text
 duckosm build [OPTIONS]
@@ -144,6 +201,35 @@ duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --bound
 | `--osm-id OSM_ID` | the area, by its `admin_boundaries` OSM id | one of the three |
 | `--boundary BOUNDARY` | the area, as a GeoJSON file | one of the three |
 
+## OSM data
+
+### `quack`
+
+The OSM data as tables, with no network, with your OSM fixes. Pages: [QuackOSM table](../concepts/quackosm.md),
+[GDAL's OSM layers](../concepts/gdal.md).
+
+```text
+duckosm quack [OPTIONS] PBF
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `-o`, `--out DIR` | the output folder | `.` |
+| `--name NAME` | the files are `<out>/<name>_quack.*` | `area` |
+| `-f`, `--format` | `geoparquet`, `duckdb`; with `--gdal`: `gpkg`, `geoparquet` | |
+| `--gdal` | the five layers of GDAL's OSM driver, in place of the QuackOSM table | |
+| `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) | |
+| `--tile-zoom Z` | make the table tile by tile with the map tiles of zoom `Z`, so the memory follows a tile, not the area | |
+| `--tiles N` | tile by tile, with at most `N` nodes in a tile | |
+| `--no-sort` | do not sort the rows (faster) | sorted |
+| `--threads N` | the threads | all cores |
+
+### `quack-tiles`, `quack-union`
+
+`quack-tiles` writes the QuackOSM table as one table for each map tile of one zoom (`<out>/<z>/<x>/<y>.parquet`).
+`quack-union` joins those tile tables into one GeoParquet file. `duckosm quack-tiles --help` and
+`duckosm quack-union --help` list their options.
+
 ## Query and inspect
 
 ### `info`
@@ -189,7 +275,7 @@ duckosm way [OPTIONS] DB OSM_ID
 | `-o`, `--out PATH` | write the table to a `.csv`, `.parquet` or `.json` file instead of printing it | |
 | `--json` | print one JSON object: the raw way (`tags`, `refs`) and its edges | |
 
-## Maps and routing
+## Maps, pages and routing {#maps-and-routing}
 
 ### `viz`
 
@@ -212,13 +298,9 @@ duckosm viz [OPTIONS] DB
 
 ### `levels`
 
-Makes the drawing order of the roads again and stores it in the database (schema [`visualization`](database.md#visualization-schema)):
-every road gets a casing number (start, main, end), a fill number and its ends as drawn. The roads of all modes are one level area.
-Your edits are the tables `visualization.level_edits`, `level_heads` and `level_caps`: they are the input. An edit row that names
-no road of the database goes to `visualization.level_unmatched`, and the next run tries it again. The area's files go to the folder
-`DB.levels` next to the database, for [`gmns-map`](#gmns-map). `duckosm build` does this as its
-last step and keeps the edits of the file that it replaces. Use this command after a build with `--no-levels`. The database is
-changed in place. To fix places by hand: [`levels-edit`](#levels-edit). Guide: [Store the drawing order](../guides/drawing-order.md).
+Makes the [drawing order](../guides/drawing-order.md) of the roads again, and stores it in the schema
+[`visualization`](database.md#visualization-schema). Your edits of the order are kept. The build does this as its last
+step; use this command after a build with `--no-levels`. The database is changed in place.
 
 ```text
 duckosm levels DB
@@ -226,11 +308,9 @@ duckosm levels DB
 
 ### `levels-edit`
 
-The level editor of the database: fix which road is drawn over which (bridges, crossings) and the head and the cap of a road end. It is
-the page of `duckosm studio` on this one file, with card 8 (Edit levels) open: [roadstyle's editor](https://khoshkhah.github.io/roadstyle/guides/levels/)
-on the area's map of Studio (the base-map layers of `features.*` and every road of the file). "← Steps" writes the drawing order into the
-file. The map files (`DB` name `.map.html`, the terrain) go next to the file. The program needs the level editor's WebAssembly package
-(`rust/duckosm-edit/editor_pkg.sh` before the build); without it, card 8 says so. Guide: [Store the drawing order](../guides/drawing-order.md).
+The level editor of the database: fix which road is drawn over which (bridges, crossings), and the head and the cap of a
+road end. It opens [`duckosm studio`](#studio) on this file, with card 8 (Edit levels) open. "← Steps" writes the drawing
+order into the file. Guide: [Store the drawing order](../guides/drawing-order.md).
 
 ```text
 duckosm levels-edit [OPTIONS] DB
@@ -243,10 +323,9 @@ duckosm levels-edit [OPTIONS] DB
 
 ### `edit`
 
-Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
-of duckOSM Studio. Each change goes into the fixes file at once. **Build again** runs the build of the database again with the file,
-and the page then shows the new network. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#the-editor).
+Edits the OSM data of the database on a page on your computer, with the panel **Edit OSM data**. Each change goes into
+the fixes file at once, and **Build again** builds the database again with it. The page is at `http://127.0.0.1:PORT/`.
+Guide: [Fix the OSM data](../guides/edit-osm-data.md).
 
 ```text
 duckosm edit [OPTIONS] DB
@@ -262,10 +341,8 @@ Build again needs the record of the build in the database (`build_config` and `b
 
 ### `studio`
 
-Makes the data of an area on a page on your computer, in six steps: the area, the OSM data (a Geofabrik extract, or a `.osm.pbf` file), the settings,
-the ground (the DEM), the build and the result. The steps are the steps of duckOSM Studio. The build is `duckosm build`. The result is the page of
-[`edit`](#edit). Each area is made in `OUT_DIR/<name>/`. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm studio` is the same page in the Rust program. Guide: [Make the data of an area on your computer](../guides/studio.md).
+duckOSM Studio on your computer: the area, the OSM data, the settings, the ground (the DEM), the build and the result,
+as on the web page. Each area goes into `OUT_DIR/<name>/`. Guide: [duckOSM Studio](../guides/studio.md).
 
 ```text
 duckosm studio [OPTIONS] [OUT_DIR]
@@ -279,13 +356,9 @@ duckosm studio [OPTIONS] [OUT_DIR]
 
 ### `ask`
 
-Asks questions about the OSM data of the database, and about its changes, on a page on your computer: roadstyle's dashboard of the database with a
-data dock (one SQL line over a wide table) and **Ask** (a question in words, answered with SQL). Roads and buildings are clickable, and the card of
-the data dock shows the facts of the clicked item and the columns of the clicked row. A result with a geometry column is drawn on the map (nodes, buildings, walls).
-A result of ids shows its objects: turns (`edge_graph`, `turn_restrictions`), ways, bus routes and H3 cells, each with a card. The table `extra.edits`
-has the changes of the fixes file, with the time of each. **Ask** uses your own key of a free AI service, which stays in your browser. The page does not
-change the data or the fixes file. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-Guide: [Ask questions on a page](../guides/query.md#ask-in-words).
+Asks questions about the database in words, on a page on your computer: **Ask** answers with SQL and draws the
+result on the map, with your own key of a free AI service. The page does not change the data.
+Guide: [Ask in words](../guides/query.md#ask-in-words).
 
 ```text
 duckosm ask [OPTIONS] DB
@@ -323,6 +396,27 @@ duckosm route-map [OPTIONS] DB
 | `--basemap TEXT` | a background from the web: `voyager`, `positron`, `osm`, `satellite`, … | none: the database's own layers |
 | `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map. It needs a Google Maps key in `GOOGLE_MAPS_KEY`, and the page must be served over http | on when `GOOGLE_MAPS_KEY` is set |
 | `-o`, `--out TEXT` | output HTML | `reports/<name>_route_map.html` |
+
+### `route`, `route-points`, `directions` {#route-route-points-directions}
+
+Routing on a built database, from the command line. Each prints JSON. Guide: [Route](../guides/route.md).
+
+```text
+duckosm route [OPTIONS] DB FROM_EDGE TO_EDGE
+duckosm route-points [OPTIONS] DB LON LAT LON LAT
+duckosm directions [OPTIONS] DB ROUTE
+duckosm route-multimodal [OPTIONS] DB SRC_NODE DST_NODE          # across modes: needs the mm schema (multimodal)
+duckosm route-multimodal-points [OPTIONS] DB LON LAT LON LAT
+```
+
+| Option | Command | Does | Default |
+|---|---|---|---|
+| `-m`, `--mode` | all | the mode | `driving` |
+| `--weight` | `route`, `route-points` | `time` (fastest) or `length` (shortest) | `time` |
+| `--pairs FILE` | `route` | many routes: one pair of edge ids on each line | |
+| `--radius M` | `route-points` | the roads that a point can join, within `M` metres | `50` |
+| `--access-kmh V` | `route-points` | the walking speed to the road | `4.5` |
+| `ROUTE` | `directions` | a JSON file of a route, as `route` prints it; `-` reads the standard input | |
 
 ### `features-check`
 

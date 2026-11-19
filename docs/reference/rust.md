@@ -1,9 +1,7 @@
 # Rust SDK
 
-The engine of duckOSM is a set of Rust crates in the folder
-[`rust/`](https://github.com/Khoshkhah/duckOSM/tree/main/rust) of the repository. The program
-`duckosm`, the Python package and the browser page ([duckOSM Studio](../guides/studio.md)) use the
-same crates. A Rust program can use them too.
+duckOSM is a set of Rust crates in the folder [`rust/`](https://github.com/Khoshkhah/duckOSM/tree/main/rust). The program
+`duckosm`, the Python SDK and [duckOSM Studio](../guides/studio.md) use the same crates, and your Rust program can too.
 
 ## Add a crate
 
@@ -61,8 +59,8 @@ For WebAssembly, use `default-features = false, features = ["snap"]`.
 
 | Function | Does | Command |
 |---|---|---|
-| `duckosm_build::build(pbf, out, &Params) -> Result<Summary, String>` | Builds the networks of an area. Writes GeoParquet files and `<out>/<name>.duckdb`. | `duckosm build` |
-| `duckosm_build::config::read(path, pbf_is_cut, strict) -> Result<FromConfig, String>` | Reads a [config file](../guides/build.md#the-config-file) into a PBF path, an output folder and `Params` | `duckosm build -c` |
+| `duckosm_build::build(pbf, out, &Params) -> Result<Summary, String>` | Builds the networks of an area. Writes GeoParquet files and `<out>/<name>.duckdb`. | `duckosm FILE` |
+| `duckosm_build::config::read(path, pbf_is_cut, strict) -> Result<FromConfig, String>` | Reads a [config file](../guides/build.md#the-config-file) into a PBF path, an output folder and `Params` | `duckosm --config` |
 | `duckosm_build::run(input, &fixes, boundary, &Params, &mut log, file)` | The whole build without a file system: each output file goes to a writer that you give. The browser build uses it. | |
 | `duckosm_build::quack(pbf, parquet, duckdb, threads, sort, tiles)` | The features table of QuackOSM | `duckosm quack` |
 | `duckosm_build::quack_gdal::quack_gdal(pbf, gpkg, geoparquet, tiles)` | The five layers of GDAL's OSM driver | `duckosm quack --gdal` |
