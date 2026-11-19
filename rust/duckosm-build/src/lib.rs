@@ -21,6 +21,7 @@ pub mod area;
 pub mod clip;
 pub mod config;
 pub mod elevation;
+pub mod get;
 #[cfg(feature = "duckdb")]
 pub mod features_check;
 pub mod h3;
@@ -28,6 +29,7 @@ pub mod levels;
 pub mod place;
 pub mod quack_gdal;
 pub mod quack_tiles;
+pub mod shp;
 pub mod union;
 
 pub use area::{write_area_tables, write_lane_profile, write_levels, Area};
@@ -109,6 +111,9 @@ pub struct Params {
     /// duckOSM `options.h3_indexing` with `options.h3_resolution`: add `nodes.h3_cell` and `edges.from_cell`, `to_cell`
     /// and `lca_res` (h3.rs). None: no H3 columns.
     pub h3_resolution: Option<u8>,
+    /// `options.tile_indexing`: add `nodes.tile` and `edges.from_tile`, `to_tile` and `lca_zoom`, the zoom-28 tile keys of
+    /// tileroute (`duckosm_core::tiles::key`).
+    pub tile_indexing: bool,
     /// duckOSM `options.build_features`: make the base-map layers, `features.*`, and keep `raw.*` in the `.duckdb` file.
     /// duckOSM's SQL runs on DuckDB's spatial extension (docs/features.md). Needs a boundary and a region file, as `raw` does,
     /// and the `.duckdb` output.
@@ -164,6 +169,7 @@ impl Default for Params {
             memory_limit: None,
             threads: None,
             h3_resolution: None,
+            tile_indexing: true,
             features: false,
             sea: false,
             after: after::After::default(),
@@ -538,6 +544,7 @@ fn write_h3_heights<W: Write + Send>(
     net: &mut NetworkFiles,
     n: &str,
     h3_resolution: Option<u8>,
+    tile_indexing: bool,
     dem: Option<&dyn Fn([f64; 4]) -> Result<elevation::Dem, String>>,
     owner: Option<&union::Owner>,
     mut file: impl FnMut(&str) -> Result<W, String>,
@@ -567,6 +574,17 @@ fn write_h3_heights<W: Write + Send>(
             }
             if any(&edge_class, k) {
                 pq::write_h3_edges_to(file(&format!("h3_edges_{n}{suffix}.parquet"))?, &rows(&h3_edges, pick(&edge_class, k)))?;
+            }
+        }
+    }
+    if tile_indexing {
+        let (tile_nodes, tile_edges) = duckosm_core::tiles::index(nodes, &edges);
+        for &(k, suffix) in parts {
+            if any(&node_class, k) {
+                pq::write_tile_nodes_to(file(&format!("tile_nodes_{n}{suffix}.parquet"))?, &rows(&tile_nodes, pick(&node_class, k)))?;
+            }
+            if any(&edge_class, k) {
+                pq::write_tile_edges_to(file(&format!("tile_edges_{n}{suffix}.parquet"))?, &rows(&tile_edges, pick(&edge_class, k)))?;
             }
         }
     }
@@ -1471,13 +1489,13 @@ pub fn run<W: Write + Send>(
             w.finish()?;
         }
         log.step(&format!("build {n}"));
-        if p.h3_resolution.is_some() || dem.is_some() {
+        if p.h3_resolution.is_some() || p.tile_indexing || dem.is_some() {
             let window = |b: [f64; 4]| dem_at(b, 1);
             let window: Option<&dyn Fn([f64; 4]) -> Result<elevation::Dem, String>> = dem.as_ref().map(|_| &window as _);
-            let (nodes, nodata) = write_h3_heights(&mut net, n, p.h3_resolution, window, owner.as_ref(), &mut file)?;
+            let (nodes, nodata) = write_h3_heights(&mut net, n, p.h3_resolution, p.tile_indexing, window, owner.as_ref(), &mut file)?;
             dem_nodes += nodes as i64;
             dem_nodata += nodata as i64;
-            log.step(&format!("h3 and elevation {n}"));
+            log.step(&format!("h3, tiles and elevation {n}"));
         }
         let classes = write_tables_owned(&mut net, *mode, opts, owner.as_ref(), &mut file)?;
         if *mode == Mode::Driving {
@@ -2126,7 +2144,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     let p = &Params { cut_pbf: false, features: p.features && cut.is_some(), ..p.clone() };
     let res = (|| -> Result<Summary, String> {
         if let (Some(b), Some(f)) = (&cut, &area_file) {
-            cut_to_file(pbf_path, b, f)?;
+            cut_to_file(pbf_path, b, f, duckosm_core::cutstream::Strategy::Smart)?;
             log.step("cut to the boundary");
         }
         let mut files = Vec::new();
@@ -2233,17 +2251,33 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
 /// Step 0 alone: cut the region file `region` to `boundary` (GeoJSON text) and write the area to `out` as a
 /// `.osm.pbf` file. The cut keeps only lists of ids in memory ([`duckosm_core::cutstream`]).
 pub fn cut_file(region: &Path, boundary: &str, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
-    cut_to_file(region, &Boundary::parse(boundary)?, out)
+    cut_to_file(region, &Boundary::parse(boundary)?, out, duckosm_core::cutstream::Strategy::Smart)
 }
 
-fn cut_to_file(region: &Path, b: &Boundary, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
+/// [`cut_file`] with the rules of `strategy` (`duckosm clip-pbf`).
+pub fn clip_file(
+    region: &Path,
+    boundary: &str,
+    out: &Path,
+    strategy: duckosm_core::cutstream::Strategy,
+) -> Result<duckosm_core::cutstream::CutCounts, String> {
+    cut_to_file(region, &Boundary::parse(boundary)?, out, strategy)
+}
+
+fn cut_to_file(
+    region: &Path,
+    b: &Boundary,
+    out: &Path,
+    strategy: duckosm_core::cutstream::Strategy,
+) -> Result<duckosm_core::cutstream::CutCounts, String> {
     let open = || {
         duckosm_core::fs::File::open(region)
             .map(|f| std::io::BufReader::with_capacity(1 << 20, f))
             .map_err(|e| format!("{}: {e}", region.display()))
     };
     let f = duckosm_core::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let (w, n) = duckosm_core::cutstream::cut_to_pbf(open, b, std::io::BufWriter::with_capacity(1 << 20, f))?;
+    let inside = |lon, lat| b.contains(lon, lat);
+    let (w, n) = duckosm_core::cutstream::cut_with(open, &inside, strategy, std::io::BufWriter::with_capacity(1 << 20, f))?;
     w.into_inner().map_err(|e| format!("{}: {e}", out.display()))?;
     Ok(n)
 }

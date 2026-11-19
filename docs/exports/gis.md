@@ -6,8 +6,8 @@ duckosm export-gis monaco.duckdb -f shp          # -> monaco_gis/monaco_edges_dr
 duckosm export-gis monaco.duckdb -f geoparquet   # -> monaco_geoparquet/edges_driving.parquet, … (one per layer)
 ```
 
-For QGIS, ArcGIS, FME, or any tool that imports GIS files (Visum, Aimsun, …). GeoPackage uses
-GDAL's `ogr2ogr` to put every layer in one file; without it you get one `.gpkg` per layer.
+For QGIS, ArcGIS, FME, or any tool that imports GIS files (Visum, Aimsun, …). The GeoPackage is one
+file with all layers.
 
 ## GeoParquet
 

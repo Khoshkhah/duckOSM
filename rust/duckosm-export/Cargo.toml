@@ -12,6 +12,8 @@ duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 flate2 = "1"
 geo = { version = "0.33", default-features = false }
+# the join of the layer files into one GeoPackage (the version of duckosm-build)
+rusqlite = { version = "0.39", features = ["bundled"] }
 
 [dev-dependencies]
 duckosm-build = { path = "../duckosm-build" }

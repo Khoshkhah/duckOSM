@@ -69,27 +69,30 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `from_cell` | BIGINT | H3 cell of `source`, at `options.h3_resolution` |
 | `to_cell` | BIGINT | H3 cell of `target` |
 | `lca_res` | TINYINT | resolution of the smallest H3 cell that holds both `from_cell` and `to_cell` |
+| `from_tile` | BIGINT | [tile key](#tile-keys) of `source`, at zoom 28 |
+| `to_tile` | BIGINT | tile key of `target`, at zoom 28 |
+| `lca_zoom` | TINYINT | zoom of the smallest tile that holds both `from_tile` and `to_tile`, 0 to 28 |
 | `z_from`, `z_to` | DOUBLE | ground height in meters at `source` / `target`. Only after [`duckosm elevation`](../guides/elevation.md) |
 | `z_vertices` | DOUBLE[] | the ground height at each vertex of `geometry`, in its order. Only after `duckosm elevation` |
 | `z_from_<suffix>`, `z_to_<suffix>`, `z_vertices_<suffix>` | DOUBLE, DOUBLE[] | the same on a second surface, from `duckosm elevation --suffix <suffix>` |
 
 `maxspeed_kmh` and `cost_s` need `options.process_speeds` and `options.calculate_costs`;
 `walk_type` and `cycle_type` need `options.functional_types`; the H3 columns need
-`options.h3_indexing`. All are on by default.
+`options.h3_indexing`; the tile columns need `options.tile_indexing` and the Rust build (`duckosm --config`,
+`duckosm <PBF>`). All are on by default.
 
 ### `private_edges`
 
-The roads that the mode cannot use, built like `edges` and then moved out of it: private roads
-(`access` is `private`) and, in driving, bus-only roads and bus lanes (`access` is `bus`; [bus
-lanes](../concepts/networks.md#access-private-and-forbidden-roads)) and the pedestrian streets that
-cars cannot use (`highway` is `pedestrian`; `access` is `pedestrian`, `private` or `delivery`; [pedestrian
-streets](../concepts/networks.md#pedestrian-streets-in-driving)). They
-are never routable: not in `turn_restrictions` or any export, nor in the routed rows of `edge_graph`
-(each has rows of its own there, with its `access` label in `uses`; see the table below), and `nodes` holds only
-the ends of routable edges. The maps draw them, marked. [Access: private and forbidden roads](../concepts/networks.md#access-private-and-forbidden-roads).
+The roads that the mode cannot use. They are drawn on the maps, but never routed and never exported.
 
-Columns: those of `edges` from `edge_id` to `cycle_type`. The H3 columns and the elevation columns
-are not added.
+| `access` | Roads |
+|---|---|
+| `private` | private roads |
+| `bus` | driving: bus-only roads and bus lanes |
+| `pedestrian`, `delivery`, `private` with `highway = 'pedestrian'` | driving: pedestrian streets that cars cannot use |
+
+Columns: those of `edges` from `edge_id` to `cycle_type`. The H3 columns, the tile columns and the
+elevation columns are not added.
 
 ### `nodes`
 
@@ -100,6 +103,7 @@ The ends of the routable edges.
 | `node_id` | BIGINT | the OSM node id. Negative for a virtual node (below) |
 | `geom` | GEOMETRY | the point |
 | `h3_cell` | BIGINT | H3 cell at `options.h3_resolution` |
+| `tile` | BIGINT | [tile key](#tile-keys) of the point, at zoom 28 |
 | `ele` | DOUBLE | ground height in meters. Only after [`duckosm elevation`](../guides/elevation.md) |
 | `ele_<suffix>` | DOUBLE | the height on a second surface, from `duckosm elevation --suffix <suffix>`. `ele_dsm - ele` is the height above ground |
 
@@ -107,6 +111,33 @@ A **virtual node** splits a loop, or two edges between the same two nodes, at it
 that `(osm_id, source, target)` is unique and every edge gets its own `edge_id`. Its id is a hash too,
 so it is the same on every rebuild: `-(hash(osm_id, source, refs::VARCHAR) >> 2)` for a loop,
 `-(hash(osm_id, source, target, refs::VARCHAR) >> 2)` for a split edge.
+
+### Tile keys {#tile-keys}
+
+The tile columns (`nodes.tile`, `edges.from_tile`, `to_tile`, `lca_zoom`) are for tileroute
+(`https://github.com/Khoshkhah/tileroute`). Tileroute routes on a graph that is kept by map tiles
+and reads only the tiles that a route needs. The tiles are the standard map tiles (z/x/y, Web Mercator),
+the same tiles as the tile build. A tile at one zoom holds exactly 4 tiles of the next zoom.
+
+A tile key is a BIGINT, always 0 or more:
+
+| Bits | Value |
+|---|---|
+| 63–62 | 0 |
+| 61–6 | the quadkey digits, the coarsest first. The digit at zoom level i is `2 * ybit + xbit`. A tile at zoom z fills the top `2z` bits; the other bits are 0 |
+| 5–0 | the zoom z, 0 to 28 |
+
+`key = (digits << (6 + 2 * (28 - z))) | z`. The parent at zoom r:
+`(key & ~((1 << (6 + 2 * (28 - r))) - 1)) | r`. Thus the keys of a tile and of all its smaller tiles
+are in one range, and `ORDER BY tile` puts near nodes near each other.
+
+The build gives each node point the key of its tile at zoom 28 (about 15 cm at the equator). The tile of a
+point is `x = floor((lon + 180) / 360 * 2^z)`, `y = floor((1 - asinh(tan(lat)) / pi) / 2 * 2^z)`, with
+the latitude clamped to ±85.0511287798 degrees. An edge takes the keys of its two end nodes, so a tile
+build and the whole build give the same keys. The value is NULL when the node has no point.
+
+`lca_zoom` is the zoom of the smallest tile that holds both ends: the number of quadkey digits that
+`from_tile` and `to_tile` share. An edge with `lca_zoom` 14 stays inside one zoom-14 tile.
 
 ### `edge_graph`
 
@@ -121,17 +152,11 @@ the other. Edge-based routing runs on it.
 | `cost` | FLOAT | `cost_s` of `from_edge` |
 | `uses` | VARCHAR | who can make the turn: the mode's own (`car` in driving, `walk`, `bike`) between two of its `edges`; where one of the two edges is in `private_edges`, its `access` label: `bus`, `private`, `pedestrian` or `delivery`. Two restricted edges with different labels have no row |
 
-Each reader takes the rows of the mode by default (`routed_graph(con, mode)`), and has an option for the others:
-`routed_graph(con, mode, uses="pedestrian,private")`, `to_networkx(con, uses=...)` (the restricted edges get an
-`access` attribute) and `duckosm export-graph --graph edge --uses ...`. `route()`, `Router`, point routing, the route map and
-the SUMO connections stay on the mode's own rows. The GMNS export reads the own rows and the `bus` rows (the bus turns of
-[bus lanes](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/bus_only_edges.md)); the other labels are not links there.
-[Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/restricted_edge_graph_rows.md).
-
-A U-turn onto the reverse twin is in the table. The build removes the turns that `turn_restrictions` forbids for all
-vehicles at all times: for a `no_*` restriction that one turn, for an `only_*` restriction all other turns out of
-`from_edge`. A restriction for one vehicle class, or with a condition, does not remove a turn.
-[`turn_permission`](#turn_permission) holds these turns, and the exempt vehicles of a removed turn.
+- Routing reads only the rows of the mode's own use (`car`, `walk`, `bike`). To read the restricted rows too, give
+  `uses`: `to_networkx(con, uses="pedestrian,private")` or `duckosm export-graph -g edge --uses pedestrian,private`.
+- A U-turn onto the reverse twin is in the table.
+- The build removes the turns that a restriction forbids for all vehicles at all times. A restriction for one vehicle
+  class, or with a condition, removes no turn: [`turn_permission`](#turn_permission) holds it.
 
 ### `turn_restrictions`
 
@@ -210,7 +235,7 @@ The nodes of `ways`, one row per node.
 
 ### `edge_id_map`
 
-For each merged edge, the edges that it was made from. It can be empty (driving in Monaco: no roads merge). Columns and use:
+For each merged edge, the edges that it was made from. It can be empty, when no edges merge. Columns and use:
 [`edge_id_map`](../concepts/edge-ids.md#edge_id_map).
 
 | Column | Type |
@@ -257,13 +282,12 @@ Always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
 | [`global_junctions`](#global_junctions) | a build from a PBF, with `options.global_junctions` (on) |
 | [`boundary_cells`](#boundary_cells) | a build from a PBF, with `options.boundary_cells` (off) and a boundary |
 | [`elevation_metadata`](#elevation_metadata) | after `duckosm elevation` |
-| [`elevation_grid`](#elevation_grid) | the native build (`duckosm` with `--dem`) and duckOSM Studio |
+| [`elevation_grid`](#elevation_grid) | the build with `--dem`, and duckOSM Studio |
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 | [`building_entrances`](#building_entrances) | `duckosm build` from a PBF, with `options.building_faces` (off) and a boundary |
 
-`main` also holds two macros: `edge_id_hash(osm_id, source, target)` gives the `edge_id` formula,
-and `edge_id_hash_v1(osm_id, source, target, is_reverse)` the formula of version 1.
+`main` also holds the macro `edge_id_hash(osm_id, source, target)`, the `edge_id` formula:
 [Compute or match an id](../concepts/edge-ids.md#compute-or-match-an-id).
 
 ### `visualization_metadata`
@@ -339,8 +363,7 @@ Where the heights came from: one row per height column (`ele`, `ele_dsm`, …). 
 
 The pixels of the DEM over the network: the ground between the roads, for a reader that makes a terrain (for example
 the `gltf` adapter of SimReady). The rows are the pixels of the raster, with no resampling, over the bounding box of the
-nodes of all modes, plus 3 pixels on each side. The native build (`duckosm --dem`) and duckOSM Studio write it.
-Example: Monaco (driving, walking and cycling) with a FABDEM crop gives 140 × 103 pixels (14,420 rows).
+nodes of all modes, plus 3 pixels on each side. The build with `--dem` and duckOSM Studio write it.
 
 | Column | Type | Description |
 |---|---|---|
@@ -366,7 +389,7 @@ Every OSM administrative boundary in the PBF. [Add administrative boundaries](..
 ### `building_faces`
 
 One row for each wall of a building of the area: a segment of the outer ring of a building way, or of a ring of a multipolygon building
-relation. The Rust engine finds the type of each wall from the street edges of the driving and walking networks, then applies the wall
+relation. The build finds the type of each wall from the street edges of the driving and walking networks, then applies the wall
 rules of the [fixes file](../guides/edit-osm-data.md#the-fixes-file). A wall shorter than 0.1 m has no row. The method:
 [The walls of the buildings](../concepts/building-walls.md).
 
@@ -457,7 +480,7 @@ The base-map layers: one table per layer, all with the columns `osm_id`, `osm_ty
 
 ## `visualization` schema
 
-The drawing order of the roads. The last step of `duckosm build` (`options.levels`) and [`duckosm levels`](cli.md#levels) write it. A new build keeps your edits: `level_edits`, `level_heads`, `level_caps` (the master copy of your changes) and `level_unmatched`. Design: [levels](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels.md), [levels in the build](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels_in_build.md).
+The drawing order of the roads: which road a map paints over which. The build (`options.levels`) and [`duckosm levels`](cli.md#levels) write it. Your edits of the order are in `level_edits`, `level_heads` and `level_caps`, and a new build keeps them. [Drawing order](../guides/drawing-order.md).
 
 ### `edge_levels`
 
@@ -487,8 +510,7 @@ One row: where the numbers came from.
 
 ### `level_edits`, `level_heads`, `level_caps`
 
-Your changes to the drawing order, the **master** copy: the files `edits.csv`, `heads.csv` and `caps.csv` of the level area, as text (the ids are BIGINT). The level
-editor writes them at each Apply, a new build keeps them, and each solve writes the files of the area from them.
+Your changes to the drawing order. The level editor writes them at each Apply, and a new build keeps them.
 
 | Table | Columns |
 |---|---|

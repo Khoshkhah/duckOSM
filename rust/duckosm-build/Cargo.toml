@@ -16,6 +16,8 @@ duckdb = ["dep:duckosm-duckdb"]
 snap = ["duckosm-parquet/snap"]
 # zstd is a C library: the browser build (duckosm-wasm) leaves it out and uses snap.
 zstd = ["duckosm-parquet/zstd", "duckosm-core/zstd"]
+# duckosm get: the download of a Geofabrik extract (not in the browser build)
+get = ["dep:ureq", "dep:md-5"]
 
 [dependencies]
 duckosm-core = { path = "../duckosm-core" }
@@ -25,6 +27,12 @@ rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 # the files of the tiles of quack --gdal in the browser (Snappy frames, pure Rust; the name "snap" is a feature here)
 snappy = { package = "snap", version = "1" }
 yaml-rust2 = "0.13"
+# the shapefiles of quack --geofabrik (shp.rs): pure Rust, also in the browser; the zip file with deflate of flate2's
+# Rust code (miniz_oxide)
+shapefile = "0.9"
+dbase = "0.8"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # the H3 columns (h3.rs): pure Rust, its cells equal those of the C library that the Python package h3 wraps
 h3o = { version = "0.11", features = ["geo"] }
 # the polygons of the boundary cells (h3o's tiler takes geo's types)
@@ -40,6 +48,8 @@ sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order"] }
 # the tiles of the levels that do not wait for each other run at the same time (the same rayon as duckosm-core)
 rayon = "1.12"
+ureq = { version = "3", optional = true }
+md-5 = { version = "0.10", optional = true }
 # the build of a tile keeps only its own rows (union.rs, own_rows)
 arrow-array = "=60.0.0"
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place

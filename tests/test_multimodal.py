@@ -1,23 +1,25 @@
 """Tests for intermodal (multimodal) routing — the ``mm.*`` layered graph.
 
-Covers :class:`duckosm.processors.multimodal.MultimodalBuilder` (union edges + coarse transfers)
+Covers ``duckosm multimodal`` (Rust: union edges + coarse transfers)
 and :func:`duckosm.routing.route_multimodal` (node-based Dijkstra with the walk* veh* walk* guard).
 
 Fast tests build a tiny in-memory DuckDB with hand-written ``walking`` / ``driving`` (/ ``cycling``)
 schemas sharing junction ``node_id``s — mirroring ``tests/test_routing.py`` /
 ``tests/test_road_filter_oneway.py``. One gated integration test builds a real 2-mode area from the
-metro-vancouver PBF (skipped if the data file or ``osmium`` is absent).
+metro-vancouver PBF (skipped if the data file is absent).
 
 Run: ``pytest tests/test_multimodal.py -q``
 """
 import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import duckdb
 import pytest
 
 from duckosm import Config, route_multimodal
-from duckosm.processors import MultimodalBuilder
 
 
 # ---- fixtures ---------------------------------------------------------------------------------
@@ -37,6 +39,27 @@ def _new_db(modes=("walking", "driving")):
             f"CREATE TABLE {m}.edges(edge_id BIGINT, source BIGINT, target BIGINT, cost_s DOUBLE, "
             f"length_m DOUBLE, highway VARCHAR, name VARCHAR, geometry GEOMETRY)")
     return con
+
+
+def _mm(con, *args):
+    """`duckosm multimodal` (Rust) on a file copy of the in-memory ``con``; its mm.* go back into ``con``, so that the routes
+    below run on ``con``. Returns the output of the command; a failure is a ValueError with its message."""
+    d = Path(tempfile.mkdtemp())
+    db = d / "net.duckdb"
+    try:
+        con.execute(f"ATTACH '{db}' AS f; COPY FROM DATABASE memory TO f; DETACH f")
+        r = subprocess.run([sys.executable, "-m", "duckosm", "multimodal", str(db), *map(str, args)], capture_output=True, text=True)
+        if r.returncode:
+            raise ValueError(r.stderr)
+        con.execute(f"ATTACH '{db}' AS f (READ_ONLY)")
+        view = con.execute("SELECT sql FROM duckdb_views() WHERE database_name = 'f' AND schema_name = 'mm' "
+                           "AND view_name = 'edges'").fetchone()[0]
+        con.execute("CREATE SCHEMA IF NOT EXISTS mm; DROP VIEW IF EXISTS mm.edges; "
+                    "CREATE OR REPLACE TABLE mm.transfers AS SELECT * FROM f.mm.transfers; DETACH f")
+        con.execute(view)
+    finally:
+        shutil.rmtree(d)
+    return r.stdout
 
 
 def _add_node(con, mode, nid, x, y):
@@ -63,13 +86,13 @@ def _mm_db():
     return con
 
 
-# ---- MultimodalBuilder: mm.edges ---------------------------------------------------------------
+# ---- duckosm multimodal: mm.edges ---------------------------------------------------------------
 
 def test_builder_unions_edges_with_mode():
     con = _mm_db()
-    stats = MultimodalBuilder(con, transfer_s=60).run()
+    out = _mm(con, "--transfer-cost", 60)
     # rows = Σ per-mode edges, each tagged with its mode
-    assert stats["edge_count"] == 3
+    assert "mm.edges (3 edges)" in out
     by_mode = dict(con.execute(
         "SELECT mode, COUNT(*) FROM mm.edges GROUP BY mode").fetchall())
     assert by_mode == {"walking": 2, "driving": 1}
@@ -80,7 +103,7 @@ def test_builder_unions_edges_with_mode():
 def test_mm_edges_is_a_view_not_a_table():
     """mm.edges must be a VIEW (no row duplication) — so it isn't in duckdb_tables()."""
     con = _mm_db()
-    MultimodalBuilder(con).run()
+    _mm(con)
     ttype = con.execute("SELECT table_type FROM information_schema.tables "
                         "WHERE table_schema = 'mm' AND table_name = 'edges'").fetchone()[0]
     assert ttype == "VIEW"
@@ -98,7 +121,7 @@ def test_builder_key_is_mode_plus_edge_id():
         _add_node(con, m, 1, 0, 0)
         _add_node(con, m, 2, 1, 0)
         _add_edge(con, m, 999, 1, 2, 30)          # SAME edge_id in both modes (real: no mode in hash)
-    MultimodalBuilder(con).run()
+    _mm(con)
     assert con.execute("SELECT COUNT(*) FROM mm.edges WHERE edge_id = 999").fetchone()[0] == 2
     dup = con.execute(
         "SELECT COUNT(*) FROM (SELECT mode, edge_id FROM mm.edges "
@@ -109,7 +132,7 @@ def test_builder_key_is_mode_plus_edge_id():
 def test_builder_discovers_present_modes_only():
     con = _mm_db()
     con.execute("CREATE TABLE main.notes(x INTEGER)")   # a non-mode schema table must be ignored
-    MultimodalBuilder(con).run()
+    _mm(con)
     modes = {r[0] for r in con.execute("SELECT DISTINCT mode FROM mm.edges").fetchall()}
     assert modes == {"walking", "driving"}              # not 'main'/'raw'/'mm'
 
@@ -122,14 +145,14 @@ def test_builder_requires_cost_s():
         con.execute(f"CREATE TABLE {m}.nodes(node_id BIGINT, geom GEOMETRY)")
         con.execute(f"CREATE TABLE {m}.edges(edge_id BIGINT, source BIGINT, target BIGINT)")  # no cost_s
     with pytest.raises(ValueError, match="cost_s"):
-        MultimodalBuilder(con).run()
+        _mm(con)
 
 
-# ---- MultimodalBuilder: mm.transfers (v1 coarse) ----------------------------------------------
+# ---- duckosm multimodal: mm.transfers (v1 coarse) ----------------------------------------------
 
 def test_coarse_transfers_at_shared_nodes():
     con = _mm_db()
-    MultimodalBuilder(con, transfer_s=60).run()
+    _mm(con, "--transfer-cost", 60)
     rows = con.execute(
         "SELECT node_id, from_mode, to_mode, cost_s, kind FROM mm.transfers "
         "ORDER BY from_mode").fetchall()
@@ -142,8 +165,7 @@ def test_coarse_transfers_at_shared_nodes():
 
 def test_transfer_cost_overrides_are_per_direction():
     con = _mm_db()
-    MultimodalBuilder(con, transfer_s=60,
-                      transfer_costs={"walking->driving": 120, "driving->walking": 15}).run()
+    _mm(con, "--transfer-cost", 60, "--pair-cost", "walking->driving=120", "--pair-cost", "driving->walking=15")
     costs = dict(con.execute(
         "SELECT from_mode || '->' || to_mode, cost_s FROM mm.transfers").fetchall())
     assert costs == {"walking->driving": 120.0, "driving->walking": 15.0}
@@ -155,7 +177,7 @@ def test_transfers_route_through_walking_only():
     for m in ("walking", "driving", "cycling"):
         _add_node(con, m, 20, 1, 0)                 # junction shared by ALL three modes
         _add_edge(con, m, 100 + hash(m) % 50, 20, 20 + len(m), 10)   # a stub edge so the mode is 'present'
-    MultimodalBuilder(con).run()
+    _mm(con)
     pairs = {(f, t) for f, t in con.execute(
         "SELECT DISTINCT from_mode, to_mode FROM mm.transfers").fetchall()}
     assert ("driving", "cycling") not in pairs and ("cycling", "driving") not in pairs
@@ -169,8 +191,7 @@ def test_no_walking_leaves_transfers_empty():
     for m in ("driving", "cycling"):
         _add_node(con, m, 20, 1, 0)
         _add_edge(con, m, 300 + len(m), 20, 21, 10)
-    stats = MultimodalBuilder(con).run()
-    assert stats["transfer_count"] == 0
+    assert "mm.transfers (0 arcs)" in _mm(con)
     assert con.execute("SELECT COUNT(*) FROM mm.transfers").fetchone()[0] == 0
 
 
@@ -179,7 +200,7 @@ def test_no_walking_leaves_transfers_empty():
 def test_route_walk_drive_exists_and_costs():
     """walk 10->20, transfer (park), drive 20->40; time = edges + transfer penalty (exact)."""
     con = _mm_db()
-    MultimodalBuilder(con, transfer_s=60).run()
+    _mm(con, "--transfer-cost", 60)
     r = route_multimodal(con, 10, 40, start_mode="walking", end_mode="driving")
     assert r is not None
     assert r["edges"] == [("walking", 101), ("driving", 201)]
@@ -201,7 +222,7 @@ def test_route_walk_drive_walk_round_trip():
     _add_node(con, "driving", 10, 0, 0)             # give driving a copy of 10 so 40->...->10 not needed
     _add_edge(con, "walking", 401, 40, 50, 50, x0=1, y0=1, x1=2, y1=2, hw="footway")
     _add_node(con, "walking", 50, 2, 2)
-    MultimodalBuilder(con, transfer_s=60).run()
+    _mm(con, "--transfer-cost", 60)
     r = route_multimodal(con, 10, 50, start_mode="walking", end_mode="walking")
     assert r is not None
     assert [leg["mode"] for leg in r["legs"]] == ["walking", "driving", "walking"]
@@ -213,7 +234,7 @@ def test_route_walk_drive_walk_round_trip():
 def test_no_transfers_means_no_mode_change():
     """spec test 2: with mm.transfers empty, the layers are disconnected — no cross-mode route."""
     con = _mm_db()
-    MultimodalBuilder(con, transfer_s=60).run()
+    _mm(con, "--transfer-cost", 60)
     con.execute("DELETE FROM mm.transfers")
     assert route_multimodal(con, 10, 40, start_mode="walking", end_mode="driving") is None
     # ...but a same-mode route still works
@@ -241,7 +262,7 @@ def _guard_db():
 
 def test_mode_sequence_guard_rejects_two_vehicle_segments():
     con = _guard_db()
-    MultimodalBuilder(con, transfer_s=1).run()
+    _mm(con, "--transfer-cost", 1)
     # legal walk* drive* walk* reaching node 4 (ONE drive segment) is fine
     ok = route_multimodal(con, 1, 4, enforce_sequence=True)
     assert ok is not None and [leg["mode"] for leg in ok["legs"]] == ["walking", "driving", "walking"]
@@ -254,12 +275,12 @@ def test_mode_sequence_guard_rejects_two_vehicle_segments():
 
 def test_route_unknown_endpoint_raises():
     con = _mm_db()
-    MultimodalBuilder(con).run()
+    _mm(con)
     with pytest.raises(ValueError, match="not in"):
         route_multimodal(con, 999999, 40, start_mode="walking", end_mode="driving")
 
 
-# ---- config + v2 stub --------------------------------------------------------------------------
+# ---- config --------------------------------------------------------------------------
 
 def test_config_multimodal_block(tmp_path):
     y = tmp_path / "c.yaml"
@@ -278,20 +299,13 @@ def test_config_multimodal_default_disabled():
     assert Config().multimodal.enabled is False
 
 
-def test_realistic_flag_not_implemented():
-    con = _mm_db()
-    with pytest.raises(NotImplementedError, match="realistic"):
-        MultimodalBuilder(con, realistic=True).run()
-
-
 # ---- gated integration: build a real 2-mode area + route across it -----------------------------
 
 _REPO = Path(__file__).resolve().parents[1]
 _PBF = _REPO / "data" / "maps" / "metro_vancouver.osm.pbf"
 
 
-@pytest.mark.skipif(not _PBF.exists() or shutil.which("osmium") is None,
-                    reason="needs data/maps/metro_vancouver.osm.pbf + osmium")
+@pytest.mark.skipif(not _PBF.exists(), reason="needs data/maps/metro_vancouver.osm.pbf")
 def test_multimodal_integration_build(tmp_path):
     """End-to-end: clip a tiny downtown-Vancouver bbox, build driving+walking, then the mm graph
     (via the importer), and assert real transfers + a real walk->drive route with a transfer."""
@@ -363,7 +377,7 @@ def _turn_db(forbid_direct_turn=True):
     for f, t in pairs:
         con.execute(f"INSERT INTO driving.edge_graph VALUES ({f}, {t}, {t}, 10)")
     con.execute("CREATE TABLE walking.edge_graph(from_edge BIGINT, to_edge BIGINT, via_edge BIGINT, cost DOUBLE)")
-    MultimodalBuilder(con, transfer_s=60).run()
+    _mm(con, "--transfer-cost", 60)
     return con
 
 

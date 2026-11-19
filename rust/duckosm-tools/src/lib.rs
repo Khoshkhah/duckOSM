@@ -6,6 +6,7 @@ pub mod cli;
 pub mod dem_sources;
 pub mod elevation;
 pub mod extract;
+pub mod get;
 pub mod info;
 pub mod json;
 pub mod way;

@@ -41,7 +41,7 @@ NEW_WAY_ID_MIN = 9_000_000_000_000
 
 
 def pbf_cut_path(cache_dir, name, strategy, pbf, boundary) -> Path:
-    """Where the osmium cut of ``pbf`` to ``boundary`` is cached: ``<name>.<strategy>.<key>.osm.pbf``,
+    """Where the cut of ``pbf`` to ``boundary`` is cached: ``<name>.<strategy>.<key>.osm.pbf``,
     the key a fingerprint of the boundary file's content and the PBF (path, size, modification
     time), so a changed boundary or a newer PBF never reuses an old cut."""
     import hashlib
@@ -130,7 +130,7 @@ class DuckOSM:
             ]
         else:
             global_steps = [("connect", "Connecting to DuckDB", self._connect)]
-            # In-pipeline osmium clip: make `boundary` actually clip the graph (A1).
+            # In-pipeline clip: make `boundary` actually clip the graph (A1).
             if self.config.effective_boundary_path:
                 global_steps.append(("clip_pbf", "Clipping PBF to boundary", self._clip_pbf))
             global_steps.append(("load_pbf", "Loading PBF file", self._load_pbf))
@@ -281,9 +281,7 @@ class DuckOSM:
                 # Needs raw.* and the driving network; options.bus_routes (on).
                 if self.config.options.bus_routes and "driving" in self.config.modes and self.config.source.type == "pbf":
                     self._say(progress, main_task, "Matching bus routes...")
-                    from duckosm.bus import write_bus_routes
-                    routes = write_bus_routes(self.con)
-                    logger.info(f"  Bus routes: {len(routes)}, {int((routes['gaps'].str.len() > 0).sum())} with gaps (bus.routes)")
+                    self._rust_step("bus")
 
                 # Every driving edge's lanes, decided once (docs/design/gmns_lane_profile.md): after all modes (a bus-only edge in the
                 # cycling network is shared by bikes) and while raw.* is still here
@@ -394,6 +392,10 @@ class DuckOSM:
         for stale in (self.output_path, wal):
             if stale.exists():
                 stale.unlink()
+        self._open()
+
+    def _open(self) -> None:
+        """Open the output file with the settings of the build (the build can close it for a step of the `duckosm` program)."""
         self.con = duckdb.connect(str(self.output_path))
         # geometry_always_xy = false: the *_Spheroid functions take (lat, lon), as before DuckDB 2.0; 2.0 refuses them until it is set
         self.con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
@@ -416,6 +418,20 @@ class DuckOSM:
         except Exception:
             logger.warning("H3 extension not available, using Python fallback")
             self._h3_available = False
+
+    def _rust_step(self, *args) -> None:
+        """Run the `duckosm` program (Rust) with ``args`` and the output file: close the file first (the program opens it
+        itself), then open it again in the schema that was in use."""
+        schema = self.con.execute("SELECT current_schema()").fetchone()[0]
+        self.con.execute("CHECKPOINT")
+        self.con.close()
+        try:
+            code = rust_engine.module().cli(["duckosm", *map(str, args), str(self.output_path)])
+        finally:
+            self._open()
+            self.con.execute(f"USE {schema}")
+        if code:
+            raise RuntimeError(f"duckosm {args[0]} failed (exit code {code})")
     
     def _raw_way_fixes(self) -> None:
         """The osm_overrides fixes that act on raw.ways, before any step reads it (docs/design/osm_override_new_ways.md):
@@ -600,15 +616,11 @@ class DuckOSM:
             self.con, Path(self._effective_boundary_path()).resolve(), resolutions
         ).run()
 
-    # ---- source.type: pbf — in-pipeline osmium clip (A1) -----------------------------
+    # ---- source.type: pbf — in-pipeline clip (A1) -------------------------------------
     def _clip_pbf(self) -> None:
-        """Pre-clip the source PBF to the boundary with osmium so `boundary` actually
+        """Pre-clip the source PBF to the boundary (the Rust ``duckosm clip-pbf``) so `boundary` actually
         constrains the graph. Idempotent (caches to pbf/<name>.osm.pbf). Falls back to
-        the original PBF if osmium is unavailable or the clip fails."""
-        osmium = shutil.which("osmium")
-        if not osmium:
-            logger.warning("osmium not found — skipping in-pipeline clip; using PBF as-is")
-            return
+        the original PBF if the clip fails."""
         boundary = Path(self._effective_boundary_path()).resolve()
         cache_dir = Path("pbf")
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -635,7 +647,7 @@ class DuckOSM:
                 old.unlink()
         if not clipped.exists():
             from duckosm.area import clip_pbf
-            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium, --strategy {strategy}) ...")
+            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (--strategy {strategy}) ...")
             try:
                 clip_pbf(self.pbf_path, boundary, clipped, strategy)
             except RuntimeError as e:
@@ -837,15 +849,14 @@ class DuckOSM:
     def _build_multimodal(self) -> None:
         """Build the intermodal mm.* transfer graph (walk<->drive<->cycle). Optional post-mode step;
         never aborts the build."""
-        from duckosm.processors import MultimodalBuilder
         mm = self.config.multimodal
         logger.info("Building multimodal transfer graph (mm.*)...")
         start = time.time()
+        pairs = [a for k, v in (mm.transfer_costs or {}).items() for a in ("--pair-cost", f"{k}={v}")]
         try:
-            stats = MultimodalBuilder(self.con, transfer_s=mm.transfer_s,
-                                      transfer_costs=mm.transfer_costs).run()
-            self.stats['mm_edge_count'] = stats.get('edge_count', 0)
-            self.stats['mm_transfer_count'] = stats.get('transfer_count', 0)
+            self._rust_step("multimodal", "--transfer-cost", mm.transfer_s, *pairs)
+            self.stats['mm_edge_count'] = self.con.execute("SELECT count(*) FROM mm.edges").fetchone()[0]
+            self.stats['mm_transfer_count'] = self.con.execute("SELECT count(*) FROM mm.transfers").fetchone()[0]
             logger.info(f"  Multimodal graph built in {time.time() - start:.2f}s: "
                         f"{self.stats['mm_edge_count']:,} edges, "
                         f"{self.stats['mm_transfer_count']:,} transfers")

@@ -191,7 +191,8 @@ impl RawInput {
         }))?;
         let sql = format!("SELECT osm_id, lat, lon, map_keys(tags), map_values(tags) FROM raw.nodes WHERE osm_id IN ({}) ORDER BY osm_id", list(&ids[0]));
         let mut nodes = Vec::new();
-        self.with(|con| batches(con, &sql, |b| {
+        // no nodes wanted (`duckosm bus`): no query, so a file without raw.nodes also works
+        self.with(|con| if ids[0].is_empty() { Ok(()) } else { batches(con, &sql, |b| {
             let id = col(b, 0, &DataType::Int64)?;
             let (lat, lon) = (col(b, 1, &DataType::Float64)?, col(b, 2, &DataType::Float64)?);
             let (k, v) = (col(b, 3, &text_list())?, col(b, 4, &text_list())?);
@@ -205,7 +206,7 @@ impl RawInput {
                 });
             }
             Ok(())
-        }))?;
+        }) })?;
         Ok(Raw { nodes, ways, relations, timestamp: None })
     }
 

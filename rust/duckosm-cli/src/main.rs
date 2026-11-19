@@ -110,6 +110,12 @@ struct Cli {
     /// Add duckOSM's H3 columns (nodes.h3_cell, edges.from_cell, to_cell, lca_res) at this resolution (0 to 15; duckOSM's default is 8).
     #[arg(long, value_name = "RES", conflicts_with = "config")]
     h3_resolution: Option<u8>,
+    /// Add the tile columns (nodes.tile, edges.from_tile, to_tile, lca_zoom: the zoom-28 tile keys of tileroute). On by default.
+    #[arg(long, overrides_with = "no_tile_index")]
+    tile_index: bool,
+    /// Do not add the tile columns (options.tile_indexing: false).
+    #[arg(long, overrides_with = "tile_index")]
+    no_tile_index: bool,
     /// With --boundary: also write the cut area as cut.osm.pbf (the nodes, ways and relations of osmium's smart cut,
     /// before the OSM fixes), to read in other tools or to use as the cut file of the browser page.
     #[arg(long, requires = "boundary")]
@@ -163,13 +169,20 @@ struct CutCli {
     /// The area file to write (.osm.pbf).
     #[arg(short, long)]
     out: PathBuf,
+    /// The OSM fixes file of `duckosm build --fixes` (YAML): the area file has the fixes in it (the rules of quack
+    /// --fixes, and each turn rule as a restriction relation), so other tools read the edited data.
+    #[arg(long, value_name = "FILE")]
+    fixes: Option<PathBuf>,
 }
 
 fn cut(args: &[String]) -> Result<(), String> {
     let cli = CutCli::parse_from(args);
     let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
     let t = std::time::Instant::now();
-    let n = duckosm_build::cut_file(&cli.region, &text, &cli.out)?;
+    let n = duckosm_build::get::cut_with_fixes(&cli.region, &text, &cli.out, cli.fixes.as_deref())?;
+    if n.nodes == 0 {
+        eprintln!("warning: the cut has no nodes: is the boundary in longitude, latitude order (docs/reference/boundary.md)?");
+    }
     eprintln!(
         "cut: {} nodes, {} ways, {} relations in {:.2} s",
         n.nodes,
@@ -179,6 +192,51 @@ fn cut(args: &[String]) -> Result<(), String> {
     );
     #[cfg(feature = "heap-probe")]
     heap::report("cut");
+    Ok(())
+}
+
+/// duckosm clip-pbf: cut PBF down to the area in BOUNDARY (a GeoJSON polygon), with the rules of a strategy of
+/// `osmium extract`.
+#[derive(Parser)]
+#[command(name = "duckosm clip-pbf", version)]
+struct ClipCli {
+    /// The PBF file to cut (sorted by type and id, as the files of Geofabrik).
+    pbf: PathBuf,
+    /// The boundary (GeoJSON).
+    boundary: PathBuf,
+    /// Output PBF (default: <boundary name>.osm.pbf).
+    #[arg(short, long)]
+    out: Option<PathBuf>,
+    /// complete_ways keeps roads crossing the border whole; smart also completes multipolygons (rivers, land cover)
+    /// for a base-map build; simple keeps only the nodes inside.
+    #[arg(long, default_value = "complete_ways", value_parser = ["complete_ways", "smart", "simple"])]
+    strategy: String,
+}
+
+fn clip_pbf(args: &[String]) -> Result<(), String> {
+    let cli = ClipCli::parse_from(args);
+    for p in [&cli.pbf, &cli.boundary] {
+        if !p.exists() {
+            return Err(format!("Path '{}' does not exist.", p.display()));
+        }
+    }
+    let out = cli.out.unwrap_or_else(|| {
+        let mut name = cli.boundary.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        for suffix in [".pbf", ".osm", ".geojson", ".json", ".duckdb"] {
+            name = name.strip_suffix(suffix).map(str::to_string).unwrap_or(name);
+        }
+        PathBuf::from(format!("{name}.osm.pbf"))
+    });
+    if std::path::absolute(&out).ok() == std::path::absolute(&cli.pbf).ok() {
+        return Err("the output would overwrite the input PBF; pass --out".into());
+    }
+    if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+    }
+    let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
+    duckosm_build::clip_file(&cli.pbf, &text, &out, cli.strategy.parse()?)?;
+    let mb = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0);
+    println!("wrote {} ({:.1} MB, from {:.1} MB)", out.display(), mb(&out), mb(&cli.pbf));
     Ok(())
 }
 
@@ -197,13 +255,20 @@ struct QuackCli {
     #[arg(long, default_value = "area")]
     name: String,
     /// Output formats, comma separated: geoparquet, duckdb (the table main.quackosm). With --gdal: gpkg, geoparquet.
+    /// With --geofabrik: gpkg, shp, geoparquet.
     #[arg(short, long)]
     format: Option<String>,
     /// Write the five layers of GDAL's OSM driver (points, lines, multilinestrings, multipolygons, other_relations: what
     /// ogr2ogr and QGIS give for the .osm.pbf file, with GDAL's default osmconf.ini) in place of QuackOSM's table:
     /// <out>/<name>_gdal.gpkg (default), or <out>/<name>_gdal_<layer>.parquet with --format geoparquet.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "geofabrik")]
     gdal: bool,
+    /// Write the 20 layers of Geofabrik's free shapefiles and GeoPackages (gis_osm_roads_free, gis_osm_pois_free,
+    /// gis_osm_buildings_a_free, ...: the feature classes of Geofabrik's "OpenStreetMap Data in Layered GIS Format") in
+    /// place of QuackOSM's table: <out>/<name>_geofabrik.gpkg (default), <out>/<name>_geofabrik.shp.zip with --format shp,
+    /// or <out>/<name>_geofabrik_<layer>.parquet with --format geoparquet.
+    #[arg(long)]
+    geofabrik: bool,
     /// The threads (default: all the cores), as QuackOSM's cpu_limit: the pool of the Rust threads, the blocks of the file
     /// that are decoded at the same time, and the threads of DuckDB.
     #[arg(long)]
@@ -240,7 +305,7 @@ fn quack(args: &[String]) -> Result<(), String> {
     let cli = QuackCli::parse_from(args);
     let _ = QUACK_START.set(std::time::Instant::now());
     let _ = duckosm_build::STEP_HOOK.set(quack_step);
-    if cli.gdal {
+    if cli.gdal || cli.geofabrik {
         return quack_gdal(&cli);
     }
     let (mut duckdb, mut geoparquet) = (false, false);
@@ -274,28 +339,33 @@ fn quack(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `duckosm quack --gdal`: GDAL's five layers.
+/// `duckosm quack --gdal` (GDAL's five layers) and `duckosm quack --geofabrik` (Geofabrik's 20 layers).
 fn quack_gdal(cli: &QuackCli) -> Result<(), String> {
-    let (mut gpkg, mut geoparquet) = (false, false);
+    use duckosm_build::quack_gdal::Mode;
+    let (mode, flag) = if cli.geofabrik { (Mode::Geofabrik, "geofabrik") } else { (Mode::Gdal, "gdal") };
+    let (mut gpkg, mut geoparquet, mut shp) = (false, false, false);
     for f in cli.format.as_deref().unwrap_or("gpkg").split(',') {
         match f.trim() {
             "gpkg" => gpkg = true,
             "geoparquet" => geoparquet = true,
+            "shp" if cli.geofabrik => shp = true,
+            other if cli.geofabrik => return Err(format!("unknown format {other} with --geofabrik: use gpkg, shp, geoparquet")),
             other => return Err(format!("unknown format {other} with --gdal: use gpkg, geoparquet or both")),
         }
     }
     std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
-    let base = cli.out.join(format!("{}_gdal", cli.name));
+    let base = cli.out.join(format!("{}_{flag}", cli.name));
     let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
     rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
     let tiles = cli.tile_zoom.map(duckosm_build::TileSize::Zoom).or(cli.tiles.map(duckosm_build::TileSize::Nodes));
     let t = std::time::Instant::now();
     let gpkg = gpkg.then(|| base.with_extension("gpkg"));
     let fixes = cli.fixes.as_deref().map(duckosm_build::config::read_osm_fixes).transpose()?;
-    let n = duckosm_build::quack_gdal::quack_gdal(&cli.pbf, gpkg.as_deref(), geoparquet.then_some(base.as_path()), tiles, fixes.as_ref())?;
-    let names = ["points", "lines", "multilinestrings", "multipolygons", "other_relations"];
-    let rows: Vec<String> = names.iter().enumerate().map(|(i, l)| format!("{} {l}", n.rows[i + 1])).collect();
-    eprintln!("quack --gdal: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());
+    let shp = shp.then(|| PathBuf::from(format!("{}.shp.zip", base.display())));
+    let n = duckosm_build::quack_gdal::quack_layers(&cli.pbf, mode, gpkg.as_deref(), geoparquet.then_some(base.as_path()), shp.as_deref(), tiles, fixes.as_ref())?;
+    let schema = duckosm_build::quack_gdal::schema(mode);
+    let rows: Vec<String> = (1..=schema.layers).map(|l| format!("{} {}", n.rows[l as usize], (schema.table)(l))).collect();
+    eprintln!("quack --{flag}: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());
     for p in &n.files {
         eprintln!("  {}", p.display());
     }
@@ -968,7 +1038,7 @@ fn main() {
     // --gdal on Kentucky had a footprint of 0.89 GB with it unset and 0.25 GB with it (a heap of at most 0.37 GB; time
     // 3.9 s and 4.3 s). So quack --gdal starts again with it.
     #[cfg(target_os = "macos")]
-    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal") && std::env::var_os("MallocSpaceEfficient").is_none() {
+    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal" || a == "--geofabrik") && std::env::var_os("MallocSpaceEfficient").is_none() {
         use std::os::unix::process::CommandExt;
         if let Ok(me) = std::env::current_exe() {
             // exec returns only when it fails: then this process goes on
@@ -1008,6 +1078,9 @@ pub fn main_with(mut args: Vec<String>) -> i32 {
         Some("studio") => studio(&args[1..]),
         Some("levels-edit") => levels_edit(&args[1..]),
         Some("cut") => cut(&args[1..]),
+        Some("clip-pbf") => clip_pbf(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some("get") => duckosm_tools::get::run(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),
         Some("quack-tiles") => quack_tiles(&args[1..]),
@@ -1154,6 +1227,9 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
     }
     if cli.config.is_none() {
         p.h3_resolution = cli.h3_resolution;
+    }
+    if cli.tile_index || cli.no_tile_index {
+        p.tile_indexing = cli.tile_index;
     }
     if let Some(f) = &cli.format {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;

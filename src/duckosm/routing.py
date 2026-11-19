@@ -353,7 +353,7 @@ def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", 
     try:
         import networkx as nx
     except ImportError as e:
-        raise ImportError("route needs networkx — `pip install duckosm[routing]`") from e
+        raise ImportError("route needs networkx — `pip install duckosm[networkx]`") from e
 
     g = graph if graph is not None else to_networkx(con, mode=mode, weight=weight,
                                                     node_attrs=False)
@@ -410,7 +410,7 @@ class Router:
 
 # ---- multimodal (intermodal) routing over the mm.* layered graph ------------------------------
 
-# The pedestrian layer every mode-change routes through (matches MultimodalBuilder). A trip is
+# The pedestrian layer every mode-change routes through (as `duckosm multimodal` makes the transfers). A trip is
 # walk* (drive|cycle)* walk*: you can only *enter* a vehicle from walking and *leave* it back to
 # walking, so every vehicular leg is bracketed by walking.
 _HUB_MODE = "walking"
@@ -422,7 +422,7 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
 
     Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
-    by :class:`duckosm.processors.multimodal.MultimodalBuilder`: the roads are ``mm.edges`` (weight
+    by ``duckosm multimodal``: the roads are ``mm.edges`` (weight
     ``cost_s``) and the changes of mode are ``mm.transfers`` (a transfer penalty in seconds). So a
     single trip can **switch mode** (walk → drive → walk).
 

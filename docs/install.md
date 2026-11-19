@@ -15,15 +15,16 @@ duckosm --version
 ## Quick start
 
 ```bash
-curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
-duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
-duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
+duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
+duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco
 ```
 
 ```python
 import duckosm
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build (in the next release)
+area = duckosm.get("Monaco")  # as duckosm get (in the next release)
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build (in the next release)
 
 r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
 r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
@@ -57,26 +58,16 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 
 | Extra | Adds | For |
 |---|---|---|
-| `sumo` | SUMO (`netconvert`) | `duckosm sumo` builds the `.net.xml` |
-| `routing` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()` |
+| `sumo` | SUMO (`eclipse-sumo`, with `netconvert`) | `duckosm sumo` builds the `.net.xml` |
+| `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. `routing` is its old name, for one more release |
 | `levels` | roadstyle | `duckosm levels` (not ported to Rust yet) |
-| `viz` | mapstyle, lanestyle | map functions in Python |
-| `elevation` | rasterio, pyproj | not needed by `duckosm elevation` (Rust); this extra goes away |
+| `viz` | mapstyle, lanestyle | the maps of `duckosm build` with `viz.enabled: true` (not ported to Rust yet), and the map functions in Python |
 
-`route()`, the exports and `duckosm elevation` need no extra.
-
-## Outside tools
-
-| Tool | Only for | Without it |
-|---|---|---|
-| osmium | `clip-pbf` and `build -b` | `build` uses the whole PBF; `clip-pbf` stops |
-| GDAL (`ogr2ogr`) | `export-gis` as one file | `export-gis` writes one file for each layer |
-
-Both are being replaced by Rust code.
+`route()`, the exports, `export-graph` to GraphML and `duckosm elevation` need no extra. No duckOSM command needs osmium or GDAL.
 
 ## Not ported to Rust yet
 
-`build` (in part), `levels`, `bus`, `multimodal` and `clip-pbf`. They work, and they move to Rust next.
+`build` (in part) and `levels`. They work, and they move to Rust next.
 
 ## Where files go
 

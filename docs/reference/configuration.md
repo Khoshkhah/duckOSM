@@ -71,7 +71,7 @@ The clean-up after the area is cut. Details: [Network clean-up](../concepts/clea
 | Key | Default | Does |
 |---|---|---|
 | `clip.predicate` | `intersects` | `duckdb` source only: which edges are copied. `intersects`: every edge that touches the area; `within`: only edges completely inside; `centroid`: edges whose middle point is inside. A `pbf` build always keeps whole ways |
-| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md#component-filter)) |
+| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md)) |
 | `clip.min_component_edges` | `1` | no effect: the component filter is removed |
 | `clip.connectivity_rescue` | `true` | walking and cycling, `pbf` build: [join dangling path ends](../concepts/cleanup.md#connect-dangling-paths) to the nearest node. Runs with or without a boundary |
 | `clip.connect_snap_m` | `10.0` | the largest gap, in metres, that `connectivity_rescue` joins |
@@ -86,6 +86,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns |
 | `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res`. `duckosm` writes the same values (flag: `--h3-resolution`) |
 | `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` (`duckosm`: for the columns only) |
+| `options.tile_indexing` | `true` | `--tile-index` / `--no-tile-index` | add `nodes.tile` and `edges.from_tile`, `to_tile`, `lca_zoom`: the zoom-28 [tile keys](database.md#tile-keys) of tileroute. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) writes them. There is no zoom option: the zoom is always 28 |
 | `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
 | `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
 | `options.engine` | `rust` | `--engine` | who builds the network step (edges, private edges, nodes, `edge_id_map`): `rust`, the Rust engine in the module `duckosm._rust` (about 50 times faster, the same tables and ids), or `python`, the SQL steps in DuckDB (the reference). The other steps run in Python in both cases. A clip build (`source.type: duckdb`) has no PBF and ignores the option. [The Rust engine](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/rust_engine.md) |
@@ -102,7 +103,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.levels` | `true` | | the last step: the drawing order of the roads, [`visualization.edge_levels`](database.md#visualization-schema), solved with your edits kept in `visualization.level_*` (`build --no-levels` turns it off). Needs the `levels` extra. A clip takes the edits of its parent for the roads it has. [Guide](../guides/drawing-order.md) |
 | `options.building_faces` | `false` (`true` in the config templates) | | write [`main.building_faces`](database.md#building_faces), the walls of the buildings with a type each ([The walls of the buildings](../concepts/building-walls.md)), and apply the wall rules (`extra.building_faces`) of the [fixes file](../guides/edit-osm-data.md). Needs the Rust engine, a PBF and a boundary: another build writes a warning and makes no walls |
 | `options.bus_routes` | `true` | | match the OSM bus routes to the driving edges: schema [`bus`](database.md#bus-schema). Needs driving and `raw.*`, so a `duckdb` build skips it |
-| `options.clip_strategy` | none | | how `osmium` cuts the PBF: `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
+| `options.clip_strategy` | none | | how duckOSM cuts the PBF (the rules of `osmium extract`): `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
 | `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default. The program `duckosm` uses it for the load of `raw.*` |
 | `options.threads` | none | | number of DuckDB threads; none is DuckDB's default. The program `duckosm` uses it for the load of `raw.*` |
 | `options.simplify_batches` | `0` | | split the simplify step into this many batches to save memory; `0` sizes them from the node count, `1` is one pass |
@@ -140,7 +141,7 @@ command line. Only the Rust build (`duckosm --config`) reads this section: it sa
 `main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
 `duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
 [`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#the-editor) do that
-step themselves, with the keys of this section (they need `duckosm[elevation]`).
+step themselves, with the keys of this section.
 
 | Key | Default | Does |
 |---|---|---|
