@@ -900,7 +900,7 @@ impl BuildingRings {
 
     /// The rows of `main.building_entrances`: each door node, with the smallest id of the building ways that have it in their
     /// ring (None: no building way has it). A building relation gives no id.
-    pub fn entrances(&self) -> Result<Vec<(&RawNode, Option<i64>)>, String> {
+    pub fn entrances(&mut self) -> Result<Vec<(&RawNode, Option<i64>)>, String> {
         let mut rows: Vec<(&RawNode, Option<i64>)> = self.doors.iter().map(|d| (d, None)).collect();
         if rows.is_empty() {
             return Ok(rows);
