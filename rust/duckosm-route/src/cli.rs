@@ -381,30 +381,29 @@ pub fn run(args: &[String]) -> Result<()> {
                 return Err("uses is for the edge graph (graph='edge'): its turns carry the labels".into());
             }
             let con = crate::route::open(&db)?;
-            let doc = if graph_kind == "node" {
+            if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+            let ferr = |e: std::io::Error| format!("{}: {e}", out.display());
+            let mut f = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(&out).map_err(ferr)?);
+            let t = duckosm_tools::info::thousands;
+            let (n, m) = if graph_kind == "node" {
                 let geom = geometry != "none";
-                let d = crate::graphml::node_graph(&con, &mode, geom)?;
+                let (n, m) = crate::graphml::write_node_graph(&con, &mode, geom, &mut f)?;
                 let geo = if geometry == "shapely" { "wkt" } else { geometry.as_str() };
-                eprintln!(
-                    "node graph[{mode}]: {} nodes, {} edges, geometry={geo}",
-                    duckosm_tools::info::thousands(d.nodes.len() as i64),
-                    duckosm_tools::info::thousands(d.edges.len() as i64)
-                );
-                d
+                eprintln!("node graph[{mode}]: {} nodes, {} edges, geometry={geo}", t(n as i64), t(m as i64));
+                (n, m)
             } else {
                 let d = crate::graphml::edge_graph(&con, &mode, &weight, &uses)?;
                 eprintln!(
                     "routing graph[{mode}]: {} edges, {} arcs, weight={weight}, +node attrs",
-                    duckosm_tools::info::thousands(d.nodes.len() as i64),
-                    duckosm_tools::info::thousands(d.edges.len() as i64)
+                    t(d.nodes.len() as i64),
+                    t(d.edges.len() as i64)
                 );
-                d
+                std::io::Write::write_all(&mut f, d.write().as_bytes()).map_err(ferr)?;
+                (d.nodes.len(), d.edges.len())
             };
-            if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
-                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-            }
-            std::fs::write(&out, doc.write()).map_err(|e| format!("{}: {e}", out.display()))?;
-            let (n, m) = (doc.nodes.len(), doc.edges.len());
+            std::io::Write::flush(&mut f).map_err(ferr)?;
             eprintln!(
                 "wrote {graph_kind} graph[{mode}] -> {} ({fmt}: {} nodes, {} edges)",
                 out.display(),

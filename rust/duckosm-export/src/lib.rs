@@ -21,6 +21,7 @@ pub mod offset;
 pub mod opendrive;
 pub mod railml;
 pub mod shapely;
+pub mod stream;
 pub mod sumo;
 pub mod sumo_compare;
 
@@ -101,6 +102,47 @@ pub fn write_text(path: &Path, text: &str, gz: bool) -> Result<()> {
         Ok(())
     } else {
         std::fs::write(path, text).map_err(err)
+    }
+}
+
+/// A buffered file writer for `path` (and its folder), gzip-compressed when `gz`: the exports write each row as it comes.
+/// Call [`Out::finish`] at the end (it writes the gzip trailer and reports an error of the last write).
+pub struct Out {
+    w: OutFile,
+    path: std::path::PathBuf,
+}
+
+enum OutFile {
+    Plain(std::io::BufWriter<std::fs::File>),
+    Gz(flate2::write::GzEncoder<std::io::BufWriter<std::fs::File>>),
+}
+
+impl Out {
+    pub fn create(path: &Path, gz: bool) -> Result<Out> {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        let f = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?);
+        let w = if gz { OutFile::Gz(flate2::write::GzEncoder::new(f, flate2::Compression::default())) } else { OutFile::Plain(f) };
+        Ok(Out { w, path: path.to_path_buf() })
+    }
+
+    pub fn put(&mut self, s: &str) -> Result<()> {
+        use std::io::Write;
+        match &mut self.w {
+            OutFile::Plain(f) => f.write_all(s.as_bytes()),
+            OutFile::Gz(g) => g.write_all(s.as_bytes()),
+        }
+        .map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+
+    pub fn finish(self) -> Result<()> {
+        use std::io::Write;
+        let err = |e: std::io::Error| format!("{}: {e}", self.path.display());
+        match self.w {
+            OutFile::Plain(mut f) => f.flush().map_err(err),
+            OutFile::Gz(g) => g.finish().map_err(err)?.flush().map_err(err),
+        }
     }
 }
 
