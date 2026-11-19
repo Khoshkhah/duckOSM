@@ -463,6 +463,29 @@ The rules are in `duckosm-core/src/geofabrik_rules.txt`, one line for each rule:
 Each key of the rules gives one row: a cafe with `shop=bakery` is a `bakery` row and a `cafe` row in `pois`, as in
 Geofabrik's files. The file lists where Geofabrik's PDF and its files do not agree; the rules follow the files.
 
+#### Where Geofabrik's PDF and its files do not agree
+
+Geofabrik describes the layers in
+[OpenStreetMap Data in Layered GIS Format](https://download.geofabrik.de/osm-data-in-gis-formats-free.pdf). Its files
+are not always as the PDF says. duckOSM follows the files:
+
+| The PDF | The files |
+|---|---|
+| parking: `parking_surface`, `parking_multistorey`, ..., not `access=private` | only `parking`, also with `access=private` |
+| `crossing`, `market_place`, `art`, `taxi_rank` | `pedestrian_crossing`, `marketplace`, `artwork`, `taxi` |
+| no `fitness_centre`, `sports_hall`, `track` in `pois` | these three are in `pois` |
+| `tree`, `street_lamp`, `mobile_phone_shop`, `car_dealership` are not in the free files | they are in the free files |
+| `scrub` is `landuse=scrub` | `natural=scrub` |
+| guide posts and maps are `tourist_guidepost`, `tourist_map` | `tourist_info` |
+| bus stops include `public_transport=stop_position` | only `highway=bus_stop` |
+| one feature class for each object | one row for each key: a cafe with `shop=bakery` is a `bakery` row and a `cafe` row |
+| `railways` has no `name` | it has `name` |
+| no `places_a` layer | `places_a` is in the files |
+
+A class that Monaco does not have follows Geofabrik's 0.8 standard, without the classes that the PDF calls "not in the
+free files". Not checked: names such as "fixme" (the PDF says that they become empty), `maxspeed` in mph, and the oneway
+of motorways.
+
 The writers are those of `--gdal` with a `gdal::Schema` (the tables, the geometry types, the columns and their widths),
 and one more: `duckosm-build/src/shp.rs` writes a shapefile for each layer (crates `shapefile` and `dbase`, pure Rust)
 into one zip file (crate `zip`). The files of a layer grow in temporary files, and a complete layer goes into the zip file.
