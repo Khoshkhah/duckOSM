@@ -103,20 +103,23 @@ agents) and `llms-full.txt` (every page as Markdown, in one file). Pages under `
 repo but are not published.
 
 The maps embedded in the docs are built from the Monaco sample, run from the repo root (it writes
-`monaco.duckdb` and `monaco_gmns.duckdb` there; both are git-ignored). Draw them with the released
-mapstyle and roadstyle from PyPI (the `viz` extra), not local checkouts, so they show what users get.
+`monaco.duckdb` and `monaco_gmns.duckdb` there; both are git-ignored). Draw them with the `duckosm` program of the release (or of main), so that they show what users get.
 Set the project's docs CARTO key first (`export CARTO_API_KEY=$CARTO_DOCS_KEY`): the background
 switcher offers CARTO maps, and roadstyle writes the key into their tile URLs (without it they show an
 "API KEY REQUIRED" watermark). That key only works on `khoshkhah.github.io`, so those backgrounds stay
 empty when you open the pages locally:
 
 ```bash
-duckosm build -c config/sample_monaco.yaml && duckosm multimodal monaco.duckdb
-duckosm viz monaco.duckdb --out-dir docs/maps -m driving && mv docs/maps/monaco_driving_network.html docs/maps/monaco_driving.html
-duckosm viz monaco.duckdb --out-dir docs/maps && rm docs/maps/monaco_*_network.html   # keeps monaco_map.html
-duckosm route-map monaco.duckdb -m walk+drive -o docs/maps/monaco_route_map.html
-duckosm gmns monaco.duckdb && duckosm levels monaco.duckdb && duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb -o docs/maps/monaco_gmns_lanes.html
+mkdir -p docmaps && cd docmaps
+duckosm ../tests/data/monaco.osm.pbf --boundary ../tests/data/monaco.geojson -m driving,walking,cycling \
+    --features --building-faces --levels solve --fixes ../osm_overrides/osm_overrides.yaml -o . --name monaco
+duckosm viz monaco.duckdb --out-dir maps -m driving && cp maps/monaco_driving_network.html ../docs/maps/monaco_driving.html
+duckosm viz monaco.duckdb --out-dir maps && cp maps/monaco_map.html ../docs/maps/
+duckosm route-map monaco.duckdb -m walk+drive -o ../docs/maps/monaco_route_map.html
+duckosm gmns monaco.duckdb && duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb -o ../docs/maps/monaco_gmns_lanes.html
 ```
+
+The last line needs SUMO's netconvert today (`duckosm gmns`) and a levels folder (`gmns-map`); both are open faults.
 
 The Monaco numbers quoted in the docs come from the same build: rebuild them after a change to what
 a build keeps.

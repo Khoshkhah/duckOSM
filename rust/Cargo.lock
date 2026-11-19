@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-build"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arrow-array 60.0.0",
  "duckdb",
@@ -787,7 +787,7 @@ dependencies = [
  "geo",
  "h3o",
  "rayon",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=39696602fac3a6e200fd324526022bc88239b95f)",
+ "roadstyle-levels",
  "rusqlite",
  "serde_json",
  "sha2",
@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -815,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "flate2",
  "geo",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-duckdb"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -844,8 +844,9 @@ dependencies = [
 
 [[package]]
 name = "duckosm-edit"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "duckdb",
  "duckosm-build",
@@ -855,7 +856,7 @@ dependencies = [
  "duckosm-route",
  "httparse",
  "lanestyle",
- "roadstyle 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle",
  "roadstyle-local",
  "roadstyle-serve",
  "serde_json",
@@ -864,11 +865,11 @@ dependencies = [
 
 [[package]]
 name = "duckosm-editor"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "duckosm-export"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -880,7 +881,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-parquet"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -889,12 +890,12 @@ dependencies = [
  "duckosm-core",
  "parquet",
  "rayon",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=39696602fac3a6e200fd324526022bc88239b95f)",
+ "roadstyle-levels",
 ]
 
 [[package]]
 name = "duckosm-planner"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "duckosm-router",
  "serde_json",
@@ -902,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-py"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -920,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-route"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -933,11 +934,11 @@ dependencies = [
 
 [[package]]
 name = "duckosm-router"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "duckosm-tools"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -1584,8 +1585,8 @@ source = "git+https://github.com/Khoshkhah/lanestyle.git?rev=273040519162be63ec9
 dependencies = [
  "duckdb",
  "geographiclib-rs",
- "roadstyle 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-io 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
+ "roadstyle",
+ "roadstyle-io",
  "serde_json",
  "yaml-rust2",
 ]
@@ -2311,31 +2312,13 @@ source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0
 dependencies = [
  "base64 0.22.1",
  "flate2",
- "roadstyle-assets 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-engine 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-io 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-look 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-tiles 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "roadstyle"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "roadstyle-assets 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-engine 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-io 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-look 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-tiles 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle-assets",
+ "roadstyle-engine",
+ "roadstyle-io",
+ "roadstyle-levels",
+ "roadstyle-look",
+ "roadstyle-model",
+ "roadstyle-tiles",
  "serde",
  "serde_json",
 ]
@@ -2346,11 +2329,6 @@ version = "0.29.0"
 source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586#53135c49e3c575bb3f0edb3c2b0816f80f484586"
 
 [[package]]
-name = "roadstyle-assets"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-
-[[package]]
 name = "roadstyle-engine"
 version = "0.29.0"
 source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586#53135c49e3c575bb3f0edb3c2b0816f80f484586"
@@ -2358,26 +2336,11 @@ dependencies = [
  "base64 0.22.1",
  "foldhash 0.2.0",
  "indexmap",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-look 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
+ "roadstyle-levels",
+ "roadstyle-look",
+ "roadstyle-model",
  "rstar",
  "serde",
- "serde_json",
-]
-
-[[package]]
-name = "roadstyle-engine"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-dependencies = [
- "base64 0.22.1",
- "foldhash 0.2.0",
- "indexmap",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-look 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "rstar",
  "serde_json",
 ]
 
@@ -2395,56 +2358,17 @@ dependencies = [
  "parquet",
  "proj4rs",
  "proj4wkt",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
+ "roadstyle-levels",
+ "roadstyle-model",
  "rstar",
  "serde_json",
  "shapefile",
-]
-
-[[package]]
-name = "roadstyle-io"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-dependencies = [
- "arrow-array 60.0.0",
- "arrow-schema 60.0.0",
- "arrow-select 60.0.0",
- "bytes",
- "crs-definitions",
- "i_overlay 9.0.1",
- "parquet",
- "proj4rs",
- "proj4wkt",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "rstar",
- "serde_json",
- "shapefile",
-]
-
-[[package]]
-name = "roadstyle-levels"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=39696602fac3a6e200fd324526022bc88239b95f#39696602fac3a6e200fd324526022bc88239b95f"
-dependencies = [
- "rstar",
- "sha2",
 ]
 
 [[package]]
 name = "roadstyle-levels"
 version = "0.29.0"
 source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586#53135c49e3c575bb3f0edb3c2b0816f80f484586"
-dependencies = [
- "rstar",
- "sha2",
-]
-
-[[package]]
-name = "roadstyle-levels"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
 dependencies = [
  "rstar",
  "sha2",
@@ -2453,10 +2377,10 @@ dependencies = [
 [[package]]
 name = "roadstyle-local"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586#53135c49e3c575bb3f0edb3c2b0816f80f484586"
 dependencies = [
  "duckdb",
- "roadstyle 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle",
  "roadstyle-serve",
  "serde_json",
 ]
@@ -2470,25 +2394,8 @@ dependencies = [
  "crc32fast",
  "flate2",
  "indexmap",
- "roadstyle-assets 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "serde",
- "serde_json",
- "strsim",
- "yaml-rust2",
-]
-
-[[package]]
-name = "roadstyle-look"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-dependencies = [
- "base64 0.22.1",
- "crc32fast",
- "flate2",
- "indexmap",
- "roadstyle-assets 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle-assets",
+ "roadstyle-model",
  "serde",
  "serde_json",
  "strsim",
@@ -2503,21 +2410,7 @@ dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
  "arrow-select 60.0.0",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "rstar",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "roadstyle-model"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-dependencies = [
- "arrow-array 60.0.0",
- "arrow-schema 60.0.0",
- "arrow-select 60.0.0",
- "roadstyle-levels 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle-levels",
  "rstar",
  "serde",
  "serde_json",
@@ -2526,10 +2419,10 @@ dependencies = [
 [[package]]
 name = "roadstyle-serve"
 version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
+source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586#53135c49e3c575bb3f0edb3c2b0816f80f484586"
 dependencies = [
  "httparse",
- "roadstyle-assets 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle-assets",
 ]
 
 [[package]]
@@ -2541,21 +2434,7 @@ dependencies = [
  "foldhash 0.2.0",
  "indexmap",
  "mlt-core",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=53135c49e3c575bb3f0edb3c2b0816f80f484586)",
- "rstar",
- "serde_json",
-]
-
-[[package]]
-name = "roadstyle-tiles"
-version = "0.29.0"
-source = "git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa#9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa"
-dependencies = [
- "flate2",
- "foldhash 0.2.0",
- "indexmap",
- "mlt-core",
- "roadstyle-model 0.29.0 (git+https://github.com/Khoshkhah/roadstyle.git?rev=9df3ceda9d038a5c3a8be4702aaa6ed4422de9aa)",
+ "roadstyle-model",
  "rstar",
  "serde_json",
 ]

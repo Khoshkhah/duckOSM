@@ -6,7 +6,7 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | Schema | Holds | Written by |
 |---|---|---|
 | [`<mode>`](#mode-schema) | one network: `driving`, `walking` or `cycling` | `build` |
-| [`main`](#main-schema) | the area: boundary, map centre, time zone, …; the `edge_id` macros | `build`, `elevation`, `admin` |
+| [`main`](#main-schema) | the area: boundary, map center, time zone, …; the `edge_id` macros | `build`, `elevation`, `admin` |
 | [`raw`](#raw-schema) | the OSM data as read from the PBF | `build` from a PBF |
 | [`mm`](#mm-schema) | routing across modes | `multimodal`, or `multimodal.enabled` |
 | [`features`](#features-schema) | base-map layers | `options.build_features` |
@@ -22,13 +22,16 @@ longitude / latitude (EPSG:4326). How to query them: [Query the database](../gui
 | [`nodes`](#nodes) | always |
 | [`edge_graph`](#edge_graph) | `options.build_graph` (on); in a clip or extract, only if the parent has it |
 | [`turn_restrictions`](#turn_restrictions) | driving, with `options.extract_restrictions` (on); in a clip or extract, only if the parent has it |
+| [`turn_path_restrictions`](#turn_path_restrictions) | driving, with `options.extract_restrictions` (on); in a clip or extract, only if the parent has it |
+| [`turn_permission`](#turn_permission) | `options.build_graph` (on); in a clip or extract, only if the parent has it |
 | [`ways`](#ways), [`way_nodes`](#way_nodes) | a build from a PBF, and `duckosm extract` |
 | [`edge_id_map`](#edge_id_map) | a build from a PBF with `options.merge_segments` (on) |
 | [`virtual_nodes`](#virtual_nodes) | a build from a PBF; always empty |
 | [`lane_profile`](#lane_profile) | driving, a build from a PBF |
 
 A build cut from a parent database (`source.type: duckdb`) has only `edges`, `private_edges`,
-`nodes`, `edge_graph` and `turn_restrictions`, and each of the last three only if the parent has it.
+`nodes`, and the tables of turns (`edge_graph`, `turn_restrictions`, `turn_path_restrictions`, `turn_permission`)
+that the parent has.
 
 ### `edges`
 
@@ -38,12 +41,13 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | Column | Type | Description |
 |---|---|---|
 | `edge_id` | BIGINT | the edge's id: `(hash(osm_id, source, target) >> 1)::BIGINT`. The same on every rebuild and in every mode. [Stable edge ids](../concepts/edge-ids.md) |
-| `edge_ref` | VARCHAR | a readable id, `{osm_id}#{seq}` then `f` or `r` for the direction (e.g. `41790239#2f`); `seq` counts the way's edges from its start. Not stable across rebuilds: join on `edge_id` |
+| `edge_ref` | VARCHAR | a readable id, `{osm_id}#{seq}` then `f` or `r` for the direction (for example `41790239#2f`); `seq` counts the way's edges from its start. Not stable across rebuilds: join on `edge_id` |
 | `source` | BIGINT | the node the edge starts at |
 | `target` | BIGINT | the node the edge ends at |
 | `osm_id` | BIGINT | the OSM way. A merged edge has the way at its `source` end. Negative for a [connector edge](../concepts/cleanup.md#connect-dangling-paths) |
 | `highway` | VARCHAR | the OSM `highway` value |
 | `name` | VARCHAR | the OSM `name` |
+| `maxspeed` | VARCHAR | the OSM `maxspeed` tag, as written. Only when `options.process_speeds` is off: then `maxspeed_kmh` replaces it |
 | `oneway` | BOOLEAN | TRUE when the edge has no reverse twin of the same way. Never NULL. [One-way roads](../concepts/networks.md#one-way-roads) |
 | `lanes` | INTEGER | lanes in this edge's direction. Never NULL, except on connector edges (`osm_id < 0`). [Lanes](../concepts/networks.md#lanes) |
 | `surface` | VARCHAR | the OSM `surface` tag |
@@ -56,7 +60,7 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `refs` | BIGINT[] | the OSM node ids along the edge, from `source` to `target` |
 | `geometry` | GEOMETRY | the line, from `source` to `target` |
 | `is_reverse` | BOOLEAN | TRUE for the twin that runs against the way's drawing direction. A `oneway=-1` way is turned round first, so its edge is not reverse |
-| `length_m` | FLOAT | length in metres |
+| `length_m` | FLOAT | length in meters |
 | `dismount` | BOOLEAN | cycling only: TRUE on a [dismount edge](../concepts/networks.md#dismount-edges), where the bike is pushed |
 | `maxspeed_kmh` | FLOAT | speed in km/h. Never NULL. [Speeds and travel time](../concepts/networks.md#speeds-and-travel-time) |
 | `cost_s` | FLOAT | travel time in seconds: `length_m / (maxspeed_kmh / 3.6)` |
@@ -65,8 +69,9 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `from_cell` | BIGINT | H3 cell of `source`, at `options.h3_resolution` |
 | `to_cell` | BIGINT | H3 cell of `target` |
 | `lca_res` | TINYINT | resolution of the smallest H3 cell that holds both `from_cell` and `to_cell` |
-| `z_from`, `z_to` | DOUBLE | ground height in metres at `source` / `target`. Only after [`duckosm elevation`](../guides/elevation.md) |
-| `z_from_<suffix>`, `z_to_<suffix>` | DOUBLE | the same on a second surface, from `duckosm elevation --suffix <suffix>` |
+| `z_from`, `z_to` | DOUBLE | ground height in meters at `source` / `target`. Only after [`duckosm elevation`](../guides/elevation.md) |
+| `z_vertices` | DOUBLE[] | the ground height at each vertex of `geometry`, in its order. Only after `duckosm elevation` |
+| `z_from_<suffix>`, `z_to_<suffix>`, `z_vertices_<suffix>` | DOUBLE, DOUBLE[] | the same on a second surface, from `duckosm elevation --suffix <suffix>` |
 
 `maxspeed_kmh` and `cost_s` need `options.process_speeds` and `options.calculate_costs`;
 `walk_type` and `cycle_type` need `options.functional_types`; the H3 columns need
@@ -74,10 +79,10 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 
 ### `private_edges`
 
-The roads the mode may not use, built like `edges` and then moved out of it: private roads
+The roads that the mode cannot use, built like `edges` and then moved out of it: private roads
 (`access` is `private`) and, in driving, bus-only roads and bus lanes (`access` is `bus`; [bus
 lanes](../concepts/networks.md#access-private-and-forbidden-roads)) and the pedestrian streets that
-cars may not use (`highway` is `pedestrian`; `access` is `pedestrian`, `private` or `delivery`; [pedestrian
+cars cannot use (`highway` is `pedestrian`; `access` is `pedestrian`, `private` or `delivery`; [pedestrian
 streets](../concepts/networks.md#pedestrian-streets-in-driving)). They
 are never routable: not in `turn_restrictions` or any export, nor in the routed rows of `edge_graph`
 (each has rows of its own there, with its `access` label in `uses`; see the table below), and `nodes` holds only
@@ -95,7 +100,7 @@ The ends of the routable edges.
 | `node_id` | BIGINT | the OSM node id. Negative for a virtual node (below) |
 | `geom` | GEOMETRY | the point |
 | `h3_cell` | BIGINT | H3 cell at `options.h3_resolution` |
-| `ele` | DOUBLE | ground height in metres. Only after [`duckosm elevation`](../guides/elevation.md) |
+| `ele` | DOUBLE | ground height in meters. Only after [`duckosm elevation`](../guides/elevation.md) |
 | `ele_<suffix>` | DOUBLE | the height on a second surface, from `duckosm elevation --suffix <suffix>`. `ele_dsm - ele` is the height above ground |
 
 A **virtual node** splits a loop, or two edges between the same two nodes, at its middle point, so
@@ -114,31 +119,65 @@ the other. Edge-based routing runs on it.
 | `to_edge` | BIGINT | the edge you go on to; its `source` is `from_edge`'s `target` |
 | `via_edge` | BIGINT | the same as `to_edge` |
 | `cost` | FLOAT | `cost_s` of `from_edge` |
-| `uses` | VARCHAR | who may make the turn: the mode's own (`car` in driving, `walk`, `bike`) between two of its `edges`; where one of the two edges is in `private_edges`, its `access` label: `bus`, `private`, `pedestrian` or `delivery`. Two restricted edges with different labels have no row |
+| `uses` | VARCHAR | who can make the turn: the mode's own (`car` in driving, `walk`, `bike`) between two of its `edges`; where one of the two edges is in `private_edges`, its `access` label: `bus`, `private`, `pedestrian` or `delivery`. Two restricted edges with different labels have no row |
 
-Every reader takes the mode's own rows by default (`routed_graph(con, mode)`), and has an option for the others:
+Each reader takes the rows of the mode by default (`routed_graph(con, mode)`), and has an option for the others:
 `routed_graph(con, mode, uses="pedestrian,private")`, `to_networkx(con, uses=...)` (the restricted edges get an
 `access` attribute) and `duckosm export-graph --graph edge --uses ...`. `route()`, `Router`, point routing, the route map and
 the SUMO connections stay on the mode's own rows. The GMNS export reads the own rows and the `bus` rows (the bus turns of
 [bus lanes](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/bus_only_edges.md)); the other labels are not links there.
-Design: `docs/design/restricted_edge_graph_rows.md`.
-A database built before `uses` holds only the mode's own rows.
+[Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/restricted_edge_graph_rows.md).
 
-A U-turn onto the reverse twin is included. Turns forbidden by `turn_restrictions` are removed: for a
-`no_*` restriction that one turn, for an `only_*` restriction every other turn out of `from_edge`.
+A U-turn onto the reverse twin is in the table. The build removes the turns that `turn_restrictions` forbids for all
+vehicles at all times: for a `no_*` restriction that one turn, for an `only_*` restriction all other turns out of
+`from_edge`. A restriction for one vehicle class, or with a condition, does not remove a turn.
+[`turn_permission`](#turn_permission) holds these turns, and the exempt vehicles of a removed turn.
 
 ### `turn_restrictions`
 
-Driving only. OSM turn restrictions, and the turn rules of a [fixes file](../guides/fix-osm-errors.md#turn-fixes-turn_restrictions),
+Driving only. OSM turn restrictions, and the turn rules of a [fixes file](../guides/edit-osm-data.md#the-fixes-file),
 mapped to edges. [Turn restrictions](../concepts/networks.md#turn-restrictions).
 
 | Column | Type | Description |
 |---|---|---|
 | `restriction_id` | BIGINT | the OSM relation id; negative for a rule from the fixes file |
 | `restriction_type` | VARCHAR | the OSM `restriction` value: `no_left_turn`, `only_straight_on`, … |
+| `except_vehicles` | VARCHAR | the vehicles that the rule does not apply to (OSM `except`, separated by `;`); NULL: none |
+| `applies_to` | VARCHAR | the one vehicle class that the rule applies to (`restriction:<vehicle>`); NULL: all |
+| `condition` | VARCHAR | when the rule applies (`restriction:conditional`); NULL: always |
 | `via_node` | BIGINT | the junction node |
 | `from_edge_id` | BIGINT | the edge coming in |
 | `to_edge_id` | BIGINT | the edge going out |
+
+### `turn_path_restrictions`
+
+Driving only. The OSM turn restrictions with a via **way**: they forbid or make necessary a path of edges, not one turn.
+One row for each edge path. `edge_graph` cannot hold them. The exports that can show a path use them.
+[Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/turn_permissions.md).
+
+| Column | Type | Description |
+|---|---|---|
+| `restriction_id` | BIGINT | the OSM relation id |
+| `restriction_type` | VARCHAR | the OSM `restriction` value |
+| `except_vehicles`, `applies_to`, `condition` | VARCHAR | as in [`turn_restrictions`](#turn_restrictions) |
+| `from_edge` | BIGINT | the edge coming in |
+| `via_edges` | BIGINT[] | the edges along the via way(s), in order |
+| `to_edge` | BIGINT | the edge going out |
+
+### `turn_permission`
+
+The turns that `edge_graph` cannot show: the turns of a restriction with an exception, a vehicle class or a condition.
+One row for each turn and restriction. Empty when the area has no such restriction.
+
+| Column | Type | Description |
+|---|---|---|
+| `from_edge` | BIGINT | the edge you come from |
+| `to_edge` | BIGINT | the edge you go on to |
+| `allowed` | BOOLEAN | TRUE: the turn is removed from `edge_graph`, but `vehicles` can make it. FALSE: the turn is in `edge_graph`, but `vehicles` cannot make it (when `condition` applies) |
+| `vehicles` | VARCHAR | the vehicle classes of the row: the exempt vehicles (`allowed` TRUE), or the class of the rule (`allowed` FALSE); NULL: all |
+| `except_vehicles` | VARCHAR | with `allowed` FALSE: the vehicles that the rule does not apply to |
+| `condition` | VARCHAR | when the rule applies; NULL: always |
+| `restriction_id` | BIGINT | the restriction (`turn_restrictions.restriction_id`) |
 
 ### `ways`
 
@@ -151,6 +190,7 @@ The OSM ways the mode kept, after the road filter and any fixes.
 | `name` | VARCHAR | the OSM `name` |
 | `maxspeed` | VARCHAR | the OSM `maxspeed` tag, as written |
 | `oneway` | BOOLEAN | one-way for this mode |
+| `bus_back` | BOOLEAN | driving: a one-way way with a bus lane in the other direction. The build adds that reverse edge with `access` = `bus` |
 | `surface`, `service`, `junction`, `layer`, `bridge`, `tunnel` | VARCHAR | the OSM tags |
 | `access` | VARCHAR | the mode's access, as in `edges` |
 | `lanes_fwd` | INTEGER | lanes in the drawing direction |
@@ -170,7 +210,7 @@ The nodes of `ways`, one row per node.
 
 ### `edge_id_map`
 
-For each merged edge, the edges it was made from. It may be empty (driving in Monaco: no roads merge). Columns and use:
+For each merged edge, the edges that it was made from. It can be empty (driving in Monaco: no roads merge). Columns and use:
 [`edge_id_map`](../concepts/edge-ids.md#edge_id_map).
 
 | Column | Type |
@@ -191,13 +231,13 @@ Every driving edge's lanes, and every bus-only edge's (`private_edges` with `acc
 | `edge_id` | BIGINT | the edge |
 | `lane_num` | INTEGER | 1 = the left-most through lane, 1..n the motor lanes; -1 a bike lane left of them (on a one-way, `cycleway:left=lane`); n+1 a bike lane right of them |
 | `use` | VARCHAR | `auto`, `bus`, `bike`, `bus,bike` |
-| `width_m` | DOUBLE | the lane's width |
+| `width_m` | DOUBLE | the width of the lane, in meters |
 | `turn` | VARCHAR | its `turn:lanes` entry, or NULL |
-| `source` | VARCHAR | what put the lane there with its use: `lanes`, `lanes:forward`, `lanes:backward`, `turn:lanes`, `override` (osm_overrides.yaml), `inherited` (the road it continues), `default` (no tag), `bus:lanes`, `psv:lanes`, `lanes:bus`, `busway:*`, `cycleway:*`, `access=bus` |
+| `source` | VARCHAR | the tag that gives the lane and its use: `lanes`, `lanes:forward`, `lanes:backward`, `turn:lanes`, `override` (the fixes file), `inherited` (from the road that it continues), `default` (no tag), `bus:lanes`, `psv:lanes`, `lanes:bus`, `busway:*`, `cycleway:*`, `access=bus` |
 | `width_source` | VARCHAR | `width:lanes`, `cycleway:*:width`, or `default` |
 
-Bike lanes are not counted in `lanes` (OSM, and SUMO's own OSM import). A count or width no tag gives is `default`: count them
-(`WHERE source = 'default'`) to see how much of the network is guessed.
+`lanes` does not count the bike lanes (as OSM, and the OSM import of SUMO). A count or a width that no tag gives has
+`default`. To see how much of the network has no lane tags, count these rows (`WHERE source = 'default'`).
 
 ### `virtual_nodes`
 
@@ -206,7 +246,7 @@ Bike lanes are not counted in `lanes` (OSM, and SUMO's own OSM import). A count 
 | `node_id` | BIGINT |
 | `geom` | GEOMETRY |
 
-Left over from the build and always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
+Always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
 
 ## `main` schema
 
@@ -217,28 +257,29 @@ Left over from the build and always empty: the virtual nodes are in `nodes`, wit
 | [`global_junctions`](#global_junctions) | a build from a PBF, with `options.global_junctions` (on) |
 | [`boundary_cells`](#boundary_cells) | a build from a PBF, with `options.boundary_cells` (off) and a boundary |
 | [`elevation_metadata`](#elevation_metadata) | after `duckosm elevation` |
-| [`elevation_grid`](#elevation_grid) | the Rust build with `--dem` |
+| [`elevation_grid`](#elevation_grid) | the native build (`duckosm` with `--dem`) and duckOSM Studio |
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
+| [`building_entrances`](#building_entrances) | `duckosm build` from a PBF, with `options.building_faces` (off) and a boundary |
 
 `main` also holds two macros: `edge_id_hash(osm_id, source, target)` gives the `edge_id` formula,
-and `edge_id_hash_v1(osm_id, source, target, is_reverse)` the old one.
+and `edge_id_hash_v1(osm_id, source, target, is_reverse)` the formula of version 1.
 [Compute or match an id](../concepts/edge-ids.md#compute-or-match-an-id).
 
 ### `visualization_metadata`
 
-One row: where to open a map, and the area's time zone.
+One row: where to open a map, and the time zone of the area.
 
 | Column | Type | Description |
 |---|---|---|
 | `boundary_geojson` | JSON | the boundary; without one, the box around all OSM nodes |
-| `center_lat` | DOUBLE | latitude of the centre of the boundary's bounding box (of all OSM nodes if there is no boundary; in a `duckosm extract` result, the centre of the area) |
-| `center_lon` | DOUBLE | longitude of the same centre |
+| `center_lat` | DOUBLE | latitude of the center of the bounding box of the boundary (of all OSM nodes if there is no boundary; in a `duckosm extract` result, the center of the area) |
+| `center_lon` | DOUBLE | longitude of the same center |
 | `initial_zoom` | INTEGER | a map zoom level that shows the area, 1–14 (1–16 in a `duckosm extract` result) |
-| `timezone` | VARCHAR | the area's IANA time zone, e.g. `Europe/Monaco`, found at the network node nearest the middle of all nodes. Always set: the build fails without it |
-| `built_at` | TIMESTAMP | when the database was built (or extracted); NULL in a database built before duckOSM recorded it |
-| `duckosm_version` | VARCHAR | the duckOSM version that built it; NULL like `built_at` |
-| `build_config` | VARCHAR | the config of the build as YAML (all keys, with the options of the command line). [`duckosm edit`](cli.md#edit) builds the database again from it. NULL in a database from an older duckOSM, from `duckosm extract`, or from `duckosm` without `--config` |
+| `timezone` | VARCHAR | the IANA time zone of the area, for example `Europe/Monaco`, at the network node nearest to the middle of all nodes. Always set: the build stops without it |
+| `built_at` | TIMESTAMP | when the database was built (or extracted) |
+| `duckosm_version` | VARCHAR | the duckOSM version that built it |
+| `build_config` | VARCHAR | the config of the build as YAML (all keys, with the options of the command line). [`duckosm edit`](cli.md#edit) builds the database again from it. NULL in a database from `duckosm extract`, or from `duckosm` without `--config` |
 | `build_dir` | VARCHAR | the folder in which the build ran: the relative paths of `build_config` are for this folder; NULL like `build_config` |
 
 ### `boundary`
@@ -250,15 +291,15 @@ this is the grown boundary.
 
 ### `global_junctions`
 
-The nodes where every mode cuts its ways, so a way has the same edges in every mode: nodes of a
-road that another highway way in `raw.ways` also uses (a road, footway, path, cycleway, …; not
-`proposed` / `construction` / `abandoned` / `razed` / `disused` ones), and nodes where a road ends.
-A footway or path that passes through one is cut there too, even in a mode without the road.
+The nodes where every mode cuts its ways, so a way has the same edges in every mode. A node is in the table when two
+or more highway ways in `raw.ways` use it, or when a road ends there. Ways with `highway` = `proposed`, `construction`,
+`abandoned`, `razed` or `disused` do not count. A footway or path that goes through a road junction is cut there,
+also in a mode without the road.
 
 | Column | Type | Description |
 |---|---|---|
 | `node_id` | BIGINT | the OSM node id |
-| `is_road_junction` | BOOLEAN | always TRUE |
+| `is_road_junction` | BOOLEAN | TRUE: a road uses the node. FALSE: only paths (footway, path, cycleway, steps, …) meet there, and only the paths are cut |
 
 ### `boundary_cells`
 
@@ -278,36 +319,36 @@ Where the heights came from: one row per height column (`ele`, `ele_dsm`, …). 
 
 | Column | Type | Description |
 |---|---|---|
-| `ele_column` | VARCHAR | the column this row describes: `ele`, `ele_<suffix>` |
+| `ele_column` | VARCHAR | the height column of the row: `ele`, `ele_<suffix>` |
 | `source` | VARCHAR | the model (`Copernicus GLO-30`), or the `--dem` file name |
 | `source_type` | VARCHAR | `download` (from `--source`) or `file` (from `--dem`) |
 | `uri` | VARCHAR | where it was read from |
-| `resolution_m` | DOUBLE | the model's resolution in metres |
+| `resolution_m` | DOUBLE | the resolution of the model, in meters |
 | `product` | VARCHAR | `DTM` (bare earth), `DSM` (surface) or `unknown`. For a `--dem` file, the value of `--product` (`--dem-product` in `duckosm`); `unknown` like `vertical_datum` |
-| `dem_crs` | VARCHAR | the model's CRS, e.g. `EPSG:4326` |
-| `vertical_datum` | VARCHAR | e.g. `EGM2008`. For a `--dem` file, the value of `--vertical-datum` (`--dem-vertical-datum` in `duckosm`); `unknown` only with `--not-reference` or `--suffix` |
-| `license` | VARCHAR | the model's licence. For a `--dem` file, the value of `--license` (`--dem-license`); `unknown` like `vertical_datum` |
+| `dem_crs` | VARCHAR | the CRS of the model, for example `EPSG:4326` |
+| `vertical_datum` | VARCHAR | for example `EGM2008`. For a `--dem` file, the value of `--vertical-datum` (`--dem-vertical-datum` in `duckosm`); `unknown` only with `--not-reference` or `--suffix` |
+| `license` | VARCHAR | the license of the model. For a `--dem` file, the value of `--license` (`--dem-license`); `unknown` like `vertical_datum` |
 | `nodata_fill` | DOUBLE | the height written where the model had no value |
 | `n_nodes` | BIGINT | nodes sampled, over all modes |
 | `n_nodata` | BIGINT | nodes that got `nodata_fill` |
 | `sampled_at` | VARCHAR | when, as a UTC ISO time |
-| `duckosm_version` | VARCHAR | the duckOSM version |
-| `sha256` | VARCHAR | the **ground id**: the SHA-256 of the bytes of the DEM file, in lowercase hexadecimal, as `sha256sum` gives it. NULL when the step read no whole file: Copernicus tiles streamed from AWS, or a `--dem` URL or GDAL virtual path (`/vsi…`). EU-DTM is a downloaded file and has a hash. NULL in a database from an older duckOSM ([The ground reference](../concepts/ground-reference.md)) |
+| `duckosm_version` | VARCHAR | the program and its version, for example `duckosm 0.7.0` |
+| `sha256` | VARCHAR | the **ground id**: the SHA-256 of the bytes of the DEM file, in lowercase hexadecimal, as `sha256sum` gives it. NULL when the step read no whole file: Copernicus tiles streamed from AWS, or a `--dem` URL or GDAL virtual path (`/vsi…`). EU-DTM is a downloaded file and has a hash ([The ground reference](../concepts/ground-reference.md)) |
 
 ### `elevation_grid`
 
-The pixels of the DEM over the network: the ground between the roads, for a reader that makes a terrain (SimReady's
-`gltf` adapter). The rows are the raster's own pixels, with no resampling, over the bounding box of the nodes of
-every mode, plus 3 pixels on each side. Only the Rust build writes it: `duckosm --dem`, or `Params.dem_bytes` (the bytes of the GeoTIFF) in a build with no file system, as the browser. Monaco (`tests/data/monaco.osm.pbf`, the modes driving,
-walking and cycling) with the FABDEM crop: 140 × 103 pixels (14,420 rows), 45 KB of Parquet.
+The pixels of the DEM over the network: the ground between the roads, for a reader that makes a terrain (for example
+the `gltf` adapter of SimReady). The rows are the pixels of the raster, with no resampling, over the bounding box of the
+nodes of all modes, plus 3 pixels on each side. The native build (`duckosm --dem`) and duckOSM Studio write it.
+Example: Monaco (driving, walking and cycling) with a FABDEM crop gives 140 × 103 pixels (14,420 rows).
 
 | Column | Type | Description |
 |---|---|---|
 | `col` | INTEGER | the column of the pixel, 0 at the west edge |
 | `row` | INTEGER | the row of the pixel, 0 at the north edge (the order of the raster) |
-| `lon` | DOUBLE | the longitude of the pixel centre (the CRS of the DEM, EPSG:4326) |
-| `lat` | DOUBLE | the latitude of the pixel centre |
-| `z` | DOUBLE | the height of the pixel to the cm, as `ele` and `z_vertices` give it; NULL on nodata |
+| `lon` | DOUBLE | the longitude of the pixel center (the CRS of the DEM, EPSG:4326) |
+| `lat` | DOUBLE | the latitude of the pixel center |
+| `z` | DOUBLE | the height of the pixel, to the centimeter, as `ele` and `z_vertices`; NULL on nodata |
 
 ### `admin_boundaries`
 
@@ -326,7 +367,7 @@ Every OSM administrative boundary in the PBF. [Add administrative boundaries](..
 
 One row for each wall of a building of the area: a segment of the outer ring of a building way, or of a ring of a multipolygon building
 relation. The Rust engine finds the type of each wall from the street edges of the driving and walking networks, then applies the wall
-rules of the [fixes file](../guides/edit-osm-data.md#extrabuilding_faces). A wall shorter than 0.1 m has no row. The method:
+rules of the [fixes file](../guides/edit-osm-data.md#the-fixes-file). A wall shorter than 0.1 m has no row. The method:
 [The walls of the buildings](../concepts/building-walls.md).
 
 | Column | Type | Description |
@@ -345,6 +386,21 @@ rules of the [fixes file](../guides/edit-osm-data.md#extrabuilding_faces). A wal
 | `street_osm_id`, `street_edge_id`, `street_name` | BIGINT, BIGINT, VARCHAR | the street that the wall faces; NULL for none |
 | `distance_m` | FLOAT | the distance to that street |
 | `geometry` | GEOMETRY | the wall as a LineString |
+
+### `building_entrances`
+
+The doors of the area: one row for each OSM node with an `entrance` or a `door` tag. `duckosm build` writes it with
+`building_faces`.
+
+| Column | Type | Description |
+|---|---|---|
+| `osm_id` | BIGINT | the OSM node id |
+| `osm_type` | VARCHAR | always `node` |
+| `kind` | VARCHAR | the `entrance` value (`main`, `yes`, …), or `door` when the node has only a `door` tag |
+| `door`, `access`, `housenumber`, `street`, `level`, `wheelchair`, `name` | VARCHAR | the OSM tags `door`, `access`, `addr:housenumber`, `addr:street`, `level`, `wheelchair`, `name` |
+| `building_id` | BIGINT | the building way that has the node in its outline (the smallest id when two buildings share it); NULL: none |
+| `tags` | MAP(VARCHAR, VARCHAR) | all OSM tags of the node |
+| `geom` | GEOMETRY | the point |
 
 ## `raw` schema
 
@@ -401,7 +457,7 @@ The base-map layers: one table per layer, all with the columns `osm_id`, `osm_ty
 
 ## `visualization` schema
 
-Layers computed for drawing. Written by the last step of `duckosm build` (`options.levels`) and by [`duckosm levels`](cli.md#levels). A rebuild carries your edits over: `level_edits`, `level_heads`, `level_caps` (the master of your changes) and `level_unmatched`. Design: `docs/design/levels.md`, `docs/design/levels_in_build.md`.
+The drawing order of the roads. The last step of `duckosm build` (`options.levels`) and [`duckosm levels`](cli.md#levels) write it. A new build keeps your edits: `level_edits`, `level_heads`, `level_caps` (the master copy of your changes) and `level_unmatched`. Design: [levels](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels.md), [levels in the build](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels_in_build.md).
 
 ### `edge_levels`
 
@@ -414,10 +470,10 @@ One row for every `edge_id` of the roads of all modes (`edges` and `private_edge
 | `casing_level` | INTEGER | the casing number of the main part |
 | `casing_end` | INTEGER | the casing number of the head at the end of the edge |
 | `fill_level` | INTEGER | the fill number |
-| `head_start_m`, `head_end_m` | DOUBLE | the length of each head as drawn, metres |
+| `head_start_m`, `head_end_m` | DOUBLE | the length of each head as drawn, in meters |
 | `cap_start`, `cap_end` | VARCHAR | the end shape as drawn: `round`, `square` or `flat` |
 
-The casings and fills are painted number by number, lowest first; at each number all casings before all fills. 0 is the ground.
+The map paints the casings and the fills number by number, lowest first. At each number, it paints all casings before all fills. 0 is the ground.
 
 ### `edge_levels_meta`
 
@@ -431,24 +487,24 @@ One row: where the numbers came from.
 
 ### `level_edits`, `level_heads`, `level_caps`
 
-Your changes to the drawing order, the **master** copy: the level area's `edits.csv`, `heads.csv` and `caps.csv`, as text (the ids are BIGINT). The level
-editor writes them at each Apply, a rebuild carries them over, and each solve writes the area's files from them.
+Your changes to the drawing order, the **master** copy: the files `edits.csv`, `heads.csv` and `caps.csv` of the level area, as text (the ids are BIGINT). The level
+editor writes them at each Apply, a new build keeps them, and each solve writes the files of the area from them.
 
 | Table | Columns |
 |---|---|
 | `level_edits` | `relation` (`order`, `stack`, `meet`), `a`, `b` (edges), `a_end`, `b_end`, `enabled` |
-| `level_heads` | `road`, `start_m`, `end_m`: the head length at each end, in metres |
+| `level_heads` | `road`, `start_m`, `end_m`: the head length at each end, in meters |
 | `level_caps` | `road`, `start`, `end`: `round`, `square` or `flat` |
 
 ### `level_unmatched`
 
-The rows of those tables that name a road that is not in this file (a rebuild changed it): `kind` (the table) and `row` (the row as JSON). They are not used and not
-lost: the next build tries them again. The table is not there when there are none.
+The rows of those tables that name a road that is not in this file (a new build changed it): `kind` (the table) and `row` (the row as JSON). The build does not
+use them and does not delete them: the next build tries them again. The table is not there when there are no such rows.
 
 ## `bus` schema
 
-The OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) as the driving edges they travel, in order and in their direction. No geometry: the
-edges are in `driving.edges` and, for bus lanes and bus-only roads, `driving.private_edges`. Written by a build from a PBF with driving (`options.bus_routes`, on)
+The OSM bus route relations (`route` = `bus`, `trolleybus`, `share_taxi`) as the driving edges that they use, in order and in their direction. No geometry: the
+edges are in `driving.edges` and, for bus lanes and bus-only roads, in `driving.private_edges`. Written by a build from a PBF with driving (`options.bus_routes`, on)
 or by [`duckosm bus`](cli.md#bus). How: [Bus routes](../concepts/networks.md#bus-routes).
 
 ### `routes`
@@ -461,12 +517,12 @@ One row per route relation.
 | `route` | VARCHAR | `bus`, `trolleybus` or `share_taxi` |
 | `ref`, `name`, `operator`, `from`, `to`, `network` | VARCHAR | the relation's tags |
 | `edges` | INTEGER | rows in `route_edges` |
-| `outside` | INTEGER | member ways not in the file (outside the area) |
-| `gaps` | VARCHAR[] | `'<way_id> <kind>'` for every other way the route could not be followed on; empty: matched fully |
+| `outside` | INTEGER | the member ways that are not in the file (outside the area) |
+| `gaps` | VARCHAR[] | `'<way_id> <kind>'` for each other way where the build cannot follow the route; empty: the full route matches |
 
 ### `route_edges`
 
-One row per route and edge it travels.
+One row for each route and edge.
 
 | Column | Type | Description |
 |---|---|---|

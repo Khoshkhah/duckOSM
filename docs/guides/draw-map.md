@@ -1,42 +1,34 @@
 # Draw a map
 
+Draw the network of a database as HTML pages, with no server.
+
 ```bash
-pip install "duckosm[viz]"
-duckosm viz monaco.duckdb        # in reports/: monaco_map.html (every mode) + one page per mode
+duckosm viz monaco.duckdb        # writes reports/monaco_map.html and reports/monaco_<mode>_network.html
 ```
 
-The maps are drawn by [mapstyle](https://khoshkhah.github.io/mapstyle/), duckOSM's map library, from
-the database itself: water, land, buildings and the sea ([base-map layers](../reference/features.md))
-under the roads, so the page needs no background from the web (one can still be picked). The roads
-are coloured by class, with a hover tooltip and a 2D/3D button; click a road to copy its `edge_id`.
-Tunnels are drawn under the roads above them, bridges on top. Private roads are grey and bus lanes a
-muted blue: you see them, but they are not in the network
-([why](../concepts/networks.md#access-private-and-forbidden-roads)). In the Roads box, the road
-classes and the Bridges, Tunnels, Private roads and Bus lanes rows hide or show those roads.
-
-`monaco_map.html` has every mode; each `monaco_<mode>_network.html` brings one mode to the front.
-Try it: this is Monaco with every mode, as `duckosm viz` wrote it.
+The map is drawn by roadstyle, over the [base-map layers](../reference/features.md) of the database. Roads have a color
+for each class, and tunnels and bridges follow the [drawing order](drawing-order.md). Private roads and bus lanes are drawn,
+but they are not in the network ([why](../concepts/networks.md#access-private-and-forbidden-roads)). Click a road to see
+its `edge_id`.
 
 <iframe src="../../maps/monaco_map.html" title="Monaco, every mode, drawn by duckosm viz"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
 
-| Option | Does |
-|---|---|
-| `-m driving` | only that mode's page (repeat for several); without `-m`: every mode's page plus `<name>_map.html` |
-| `--basemap voyager` | a background from the web under the map: `voyager`, `positron`, `osm`, `satellite` (default: none, the database's own layers) |
-| `--no-arrows` | no direction arrows (on by default, on one-way roads; zoom in to see them) |
-| `--no-boundary` | hide the dashed outline of the area |
-| `--out-dir maps` | output folder (default `reports`) |
+| Option | Does | Default |
+|---|---|---|
+| `-m driving` | only the page of this mode; repeat it for more modes | every mode, and `<name>_map.html` |
+| `--basemap voyager` | the first background: `voyager`, `positron`, `osm`, `satellite`, ... | the layers of the database |
+| `--no-arrows` | no direction arrows on one-way roads | arrows on |
+| `--no-boundary` | no outline of the area | outline on |
+| `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map; needs `GOOGLE_MAPS_KEY` | on when the key is set |
+| `--out-dir maps` | the output folder | `reports` |
 
-A page holds the whole network, so keep it to a city. For other looks, or to build your own
-dashboard, use mapstyle directly (`pip install mapstyle`; its themes, path styles and dashboard
-page are in its [docs](https://khoshkhah.github.io/mapstyle/)).
+A page holds the whole network. Use it for a city. For a large area, use [duckOSM Studio](studio.md), which draws the map
+from tiles.
 
-**Other palettes, or colour by a column** (needs a clone of the repo):
+To use a different palette, or a color for each value of a column, use the script of the repository (it needs
+`pip install geopandas roadstyle`):
 
 ```bash
-python scripts/roadstyle_map.py --db monaco.duckdb --palette mono
 python scripts/roadstyle_map.py --db monaco.duckdb --color-by maxspeed_kmh
 ```
-
-The order in which crossing and meeting roads are painted can be stored in the file: [Store the drawing order](drawing-order.md).

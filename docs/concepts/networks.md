@@ -44,7 +44,8 @@ A pedestrian street that cars can use is a `living_street` in `driving.edges`. A
 ## Lanes
 
 `lanes` is the number of lanes in the edge's direction: from `lanes:forward` / `lanes:backward`, else from `lanes`, else 2 for
-`motorway` and `trunk` and 1 for other roads. It is NULL on connector edges.
+`motorway` and `trunk` and 1 for other roads. It is NULL on connector edges and on ways with no cars (footways, paths,
+cycleways, steps).
 
 ## Dismount edges
 
@@ -59,8 +60,9 @@ Walking and cycling edges get a type from OSM sub-tags, for example `sidewalk`, 
 
 ## Turn restrictions
 
-Only driving has them, from OSM `type=restriction` relations (via a node) and from a [fixes file](../guides/fix-osm-errors.md).
-A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction removes all other turns. Monaco: 38 of 43.
+Only driving has them, from OSM `type=restriction` relations (via a node) and from a [fixes file](../guides/edit-osm-data.md#the-fixes-file).
+A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction removes all other turns. Monaco: 38 of the
+43 restriction relations map onto edges.
 
 ## Bus routes
 

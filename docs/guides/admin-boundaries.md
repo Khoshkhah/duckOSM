@@ -1,136 +1,63 @@
 # Add administrative boundaries
 
-`duckosm admin` adds every administrative area of a region (country, counties, municipalities,
-districts, …) to a built database, as the table `main.admin_boundaries`, with each area's parent so
-the hierarchy can be walked.
+`duckosm admin` adds all administrative areas of a region (country, counties, municipalities, districts) to a built
+database, as the table `main.admin_boundaries`.
 
 ```bash
 duckosm admin --pbf monaco-latest.osm.pbf --db monaco.duckdb
 ```
 
-```text
-admin_boundaries: 11 features
-  admin_level    2: 1
-  admin_level    8: 1
-  admin_level   10: 9
-```
+| Option | Does |
+|---|---|
+| `--pbf FILE` | the PBF with the borders (required) |
+| `--db FILE` | the database (required) |
+| `--gpkg FILE` | keep the borders in this GeoPackage, and use it again in the next run |
 
-Use it to tag roads by district, or to cut areas by name with
-[`extract --name`](prepare-area.md#several-areas-from-one-region). (To get one area's boundary as a
-file, [`duckosm boundary`](prepare-area.md#make-the-boundary-file) is simpler.) Reading the borders of a
-whole country takes a while; `--gpkg FILE` reuses an earlier extraction.
+Use the table to find the district of a road, or to cut an area by name with
+[`extract --name`](prepare-area.md#2-cut-a-built-region). For the boundary file of one area, use
+[`duckosm boundary`](prepare-area.md#make-the-boundary-file).
 
-## What `admin_level` means
+## The table
 
-`admin_level` is a tag on OSM `boundary=administrative` relations: an integer
-(roughly 1–11) giving a feature's position in the administrative hierarchy.
-**Lower number = larger / higher-level unit**; `2` is the country, and each higher
-number is a progressively smaller subdivision.
+| Column | Type | Holds |
+|---|---|---|
+| `osm_id` | BIGINT | the OSM id of the boundary relation |
+| `name` | VARCHAR | the name in the local language; can be NULL |
+| `name_en` | VARCHAR | the English name (`name:en`); NULL when OSM has none |
+| `admin_level` | INTEGER | the OSM admin level; NULL when the relation has none |
+| `parent_osm_id` | BIGINT | the smallest boundary that contains this one; NULL for the country |
+| `geometry` | GEOMETRY | a MultiPolygon in EPSG:4326 |
 
-The **exact meaning of each number is country-specific** — `admin_level=4` is a
-*county* in Sweden but a *state* in the USA — because administrative structures
-differ between countries. The authoritative mapping is the per-country table in the
-OSM wiki: <https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative>.
+`admin_level` 2 is the country, and a higher number is a smaller area. Each country uses the numbers in its own way:
+4 is a county in Sweden and a state in the USA. The table of each country is in the
+[OSM wiki](https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative).
 
-### Sweden
+| Sweden | `admin_level` | Number |
+|---|---|---|
+| Country (Sverige) | 2 | 1 |
+| County (län) | 4 | 21 |
+| Sami reindeer-herding district (sameby) | 6 | |
+| Municipality (kommun) | 7 | 290 |
+| District, borough, neighborhood (distrikt, stadsdel) | 8 to 11 | not complete in OSM |
 
-Sweden's formal hierarchy is shallow — **Country → 21 Län (counties) → 290 Kommuner
-(municipalities)**. Below the municipality there is no general administrative
-subdivision; the levels below `7` are a mix of the statistical *distrikt* (created
-2016, based on the old parishes/*socknar*) and city-internal *stadsdelar*.
-
-| `admin_level` | Meaning | Swedish term | Notes |
-|--:|---|---|---|
-| 2 | Country | Land / Riket | "Sverige" |
-| 4 | County | Län | 21 of them |
-| 6 | Sami reindeer-herding district | Sameby | Special; sits inside a län, not a normal tier |
-| 7 | Municipality | Kommun | 290 official |
-| 8 | District (former parish) | Distrikt / socken | Partial OSM coverage |
-| 9 | District / city borough | Distrikt / Stadsdelsområde | Partial coverage |
-| 10 | Neighborhood / locality | Stadsdel / delområde | Partial coverage |
-| 11 | Minor locality | Köping / småort | Rare |
-
-Caveats:
-
-- **Levels 1, 3 and 5 are not used** in Sweden.
-- **Coverage below kommun (8–11) is incomplete.** Sweden has ~2,500 official
-  *distrikt*, but only a fraction are mapped in OSM, so do not treat levels 8–11 as
-  exhaustive.
-- A few boundaries carry `boundary=administrative` with **no `admin_level`** tag;
-  these land with `admin_level = NULL`.
-
-## Table schema
-
-`admin_boundaries`
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `osm_id` | BIGINT | OSM id of the boundary relation |
-| `name` | VARCHAR | Boundary name in the local language (may be NULL) |
-| `name_en` | VARCHAR | English name (OSM `name:en`); present for the country, counties and big cities, NULL otherwise |
-| `admin_level` | INTEGER | OSM admin level (see above); NULL if untagged |
-| `parent_osm_id` | BIGINT | `osm_id` of the immediate enclosing boundary (see below); NULL for the root and a few edge cases |
-| `geometry` | GEOMETRY | MultiPolygon, EPSG:4326 (same CRS as the edge geometries) |
-
-## The `parent_osm_id` hierarchy
-
-OSM does not store an explicit parent link, so `parent_osm_id` is derived
-**spatially**: a guaranteed-interior point of each boundary (`ST_PointOnSurface`)
-is tested against the geometry of candidate parents (those with a lower
-`admin_level`), bounding-box pre-filtered for speed. The **immediate parent** is the
-containing boundary with the *highest* `admin_level` below the child's (smallest by
-area to break ties).
-
-`parent_osm_id` is NULL for:
-
-- the country root (`admin_level = 2`), and
-- a small number of boundaries whose interior point isn't covered by any parent —
-  typically coastline/border artifacts (e.g. villages on the Sweden–Finland border)
-  or unnamed fragments.
-
-On the full Sweden extract this links **1,456 of 1,472** boundaries, e.g.
-21 counties → Sweden, 289 kommuner → county, districts → kommun.
+The parent is the boundary with a lower `admin_level` that contains a point inside the child. A boundary with a drawing
+fault at its border can have no parent.
 
 ## Example queries
 
-On Monaco:
-
 ```sql
--- how many areas at each level
-SELECT admin_level, count(*) AS areas FROM admin_boundaries GROUP BY 1 ORDER BY 1;
-
 -- each district with its parent
-SELECT c.name, c.admin_level, p.name AS parent
+SELECT c.name, p.name AS parent
 FROM admin_boundaries c LEFT JOIN admin_boundaries p ON c.parent_osm_id = p.osm_id
-WHERE c.admin_level = 10 ORDER BY c.name;
+WHERE c.admin_level = 10;
 
--- which district contains a point (lon, lat)?          -> Monte-Carlo
+-- the district that contains a point (lon, lat)
 SELECT name FROM admin_boundaries
 WHERE admin_level = 10 AND ST_Contains(geometry, ST_Point(7.4270, 43.7397));
 
--- driving edges per district
+-- driving edges in each district
 SELECT d.name AS district, count(*) AS edges
 FROM driving.edges e
 JOIN admin_boundaries d ON d.admin_level = 10 AND ST_Contains(d.geometry, ST_PointOnSurface(e.geometry))
 GROUP BY 1 ORDER BY edges DESC;
-```
-
-| district | edges |
-|---|---:|
-| Monte-Carlo | 636 |
-| Fontvieille | 494 |
-| La Condamine | 469 |
-| Larvotto | 269 |
-| … |  |
-
-The full ancestry of an area (district → municipality → country):
-
-```sql
-WITH RECURSIVE up AS (
-    SELECT osm_id, name, admin_level, parent_osm_id FROM admin_boundaries WHERE name = 'Monte-Carlo'
-    UNION ALL
-    SELECT b.osm_id, b.name, b.admin_level, b.parent_osm_id
-    FROM admin_boundaries b JOIN up ON b.osm_id = up.parent_osm_id
-)
-SELECT admin_level, name FROM up ORDER BY admin_level DESC;
 ```

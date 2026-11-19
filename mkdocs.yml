@@ -75,7 +75,6 @@ plugins:
         Guides:
           - guides/prepare-area.md
           - guides/build.md
-          - guides/fix-osm-errors.md
           - guides/studio.md
           - guides/edit-osm-data.md
           - guides/query.md
@@ -115,6 +114,8 @@ plugins:
           - reference/features.md
           - reference/elevation-sources.md
 
+not_in_nav: |
+  guides/fix-osm-errors.md
 exclude_docs: |
   design/
   development.md
@@ -123,58 +124,70 @@ exclude_docs: |
 
 nav:
   - Home: index.md
-  - Get started:
+  - Start:
       - Install: install.md
       - Your first network: first_network.md
-  - Guides:
-      - duckOSM Studio: guides/studio.md
+      - duckOSM Studio (browser): guides/studio.md
+  - Build an area:
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
-      - Fix OSM errors: guides/fix-osm-errors.md
-      - Edit OSM data: guides/edit-osm-data.md
-      - Query the database: guides/query.md
-      - Questions to ask the AI agent: guides/ask-questions.md
-      - Draw a map: guides/draw-map.md
-      - Store the drawing order: guides/drawing-order.md
-      - Route: guides/route.md
-      - Walking: guides/walking.md
+      - Fix the OSM data: guides/edit-osm-data.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md
-  - Exports:
+  - Use the network:
+      - Route: guides/route.md
+      - Walking: guides/walking.md
+      - Routing across modes: concepts/multimodal.md
+      - Query the database: guides/query.md
+      - Questions to ask the AI agent: guides/ask-questions.md
+      - Draw a map: guides/draw-map.md
+      - Drawing order: guides/drawing-order.md
+  - Export:
       - Overview: exports/index.md
-      - SUMO: exports/sumo.md
-      - MATSim: exports/matsim.md
-      - GMNS: exports/gmns.md
-      - GMNS tables: exports/gmns_tables.md
-      - GeoPackage / shapefile: exports/gis.md
-      - networkx: exports/networkx.md
-      - Experimental:
-          - OpenDRIVE: exports/opendrive.md
-          - Lanelet2: exports/lanelet2.md
+      - 1. OSM data:
+          - QuackOSM table: concepts/quackosm.md
+          - GDAL's OSM layers: concepts/gdal.md
+          # - Geofabrik layers: exports/geofabrik.md (added by its session)
+          # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
+          # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
+      - 2. The network:
+          - The turn graph: exports/turn-graph.md
+          - Base-map layers: exports/base-map.md
+          - GeoPackage / shapefile: exports/gis.md
+          - networkx: exports/networkx.md
+      - 3. Traffic simulation:
+          - GMNS: exports/gmns.md
+          - GMNS tables: exports/gmns_tables.md
+          - MATSim: exports/matsim.md
+          - SUMO: exports/sumo.md
+          - GMNS meso and micro: exports/gmns-meso-micro.md
           - railML: exports/railml.md
+      - 4. Lane level and 3D:
           - Lane-level routing: exports/lane-routing.md
-  - Concepts:
+          - Lanelet2: exports/lanelet2.md
+          - OpenDRIVE: exports/opendrive.md
+  - How it works:
       - How a build works: concepts/build.md
       - Browser and native builds: concepts/browser-native.md
       - Memory at each step: concepts/memory-by-step.md
-      - The ground reference: concepts/ground-reference.md
-      - The terrain of an area: concepts/terrain.md
-      - The Rust engine: concepts/rust-engine.md
       - Stable edge ids: concepts/edge-ids.md
       - What each network contains: concepts/networks.md
       - Network clean-up: concepts/cleanup.md
       - The walls of the buildings: concepts/building-walls.md
-      - Routing across modes: concepts/multimodal.md
-      - duckOSM and OSMnx: concepts/osmnx.md
-      - duckOSM and QuackOSM: concepts/quackosm.md
-      - duckOSM and GDAL: concepts/gdal.md
+      - The ground reference: concepts/ground-reference.md
+      - The terrain of an area: concepts/terrain.md
       - How each output is checked: concepts/checks.md
+      - The Rust engine: concepts/rust-engine.md
+  - Compare:
+      - Overview: compare/index.md
+      - Speed on France: compare/speed.md
+      - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:
       - Command line: reference/cli.md
-      - Configuration: reference/configuration.md
       - Python SDK: reference/python.md
       - Rust SDK: reference/rust.md
+      - Configuration: reference/configuration.md
       - Database schema: reference/database.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md

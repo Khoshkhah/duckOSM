@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>OpenStreetMap → road networks, map layers and GIS files.<br>
-  One Rust program, on your computer and in the browser.</b>
+  <b>Turn OpenStreetMap into routable networks, map layers and GIS files.<br>
+  One Rust engine, for your computer and your browser.</b>
 </p>
 
 <p align="center">
@@ -82,7 +82,7 @@ Both build every area by map tiles, cut by [pbfcut](https://github.com/Khoshkhah
 
 ## Speed on France
 
-France: 5.1 GB `.osm.pbf`, Mac mini (12 cores, 16 GB).
+France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB).
 
 | Job | Native | Browser | Other tool |
 |---|---|---|---|
@@ -90,17 +90,15 @@ France: 5.1 GB `.osm.pbf`, Mac mini (12 cores, 16 GB).
 | OSM features table (`quack`) | 2 min 9 s | 4 min 54 s | QuackOSM: 9 min 30 s |
 | GDAL's layers, GeoParquet (`quack --gdal`) | 3 min 37 s | 5 min 23 s | `ogr2ogr`: 14 min 18 s |
 
-## Edge ids that stay the same
-
-Other tools number their edges `0, 1, 2, …`, and the numbers change at each rebuild. duckOSM's `edge_id` is a hash of
-three OSM ids: the way (`osm_id`) and the nodes where the edge starts and ends (`source`, `target`).
+## One edge id for each direction
 
 ```text
 edge_id = hash(osm_id, source, target)
 ```
 
-The same OSM data gives the same ids after a rebuild, in a city cut from a country, and in every export
-([details](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
+to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
+a cut and every export ([how](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
 
 ## Quick start
 
@@ -139,6 +137,13 @@ Experimental exports: OpenDRIVE, Lanelet2, railML, lane-level routing. See the
 - `duckosm info DB --json` says what a database holds; `way`, `route-lanes` and `gis-debug` also
   take `--json`.
 - To change duckOSM: the rules are in [`AGENTS.md`](AGENTS.md).
+
+## Data and credits
+
+- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the
+  [ODbL](https://opendatacommons.org/licenses/odbl/). Outputs made from OSM data keep this license.
+- The region files come from [Geofabrik](https://www.geofabrik.de/)'s free [download server](https://download.geofabrik.de/).
+  `duckosm quack --geofabrik` follows Geofabrik's [layer rules](https://download.geofabrik.de/osm-data-in-gis-formats-free.pdf).
 
 ## License
 

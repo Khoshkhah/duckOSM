@@ -1,29 +1,27 @@
 # Base-map layers
 
-The `features` schema holds what a base map draws besides the routing networks: water, land use,
-buildings, points of interest, place names. Each layer is one table, with classes from the
-[Shortbread](https://shortbread-tiles.org/) vector-tile schema. mapstyle, duckOSM's full base-map
-library built on roadstyle, draws them.
+The `features` schema holds what a base map draws in addition to the networks: water, land use,
+buildings, points of interest, place names. Each layer is one table, with the classes of the
+[Shortbread](https://shortbread-tiles.org/) vector-tile schema. [`duckosm viz`](../guides/draw-map.md) and
+[duckOSM Studio](../guides/studio.md) draw them.
 
 ## Build them
 
-Every build from a PBF makes them (Monaco: 12 layers, under a second). To leave them out:
-`duckosm build --no-features`, or in a config file:
+Each build from a PBF makes them, at the end of the build, from `raw.*`.
 
-```yaml
-options:
-  build_features: false
-```
+| Build | Makes the layers | Turn off |
+|---|---|---|
+| `duckosm build` | always | `--no-features`, or `options.build_features: false` |
+| `duckosm` (native) | with `--boundary` and `--features` | omit `--features` |
 
-The layers are built from `raw.*` at the end of the build. With a boundary, the PBF is then cut with
-the `smart` strategy, so rivers and land-use areas that cross the border stay whole
-(`options.clip_strategy`). A build cut from a parent database has no `raw.*` and can't build them.
+With a boundary, the build cuts the PBF with the `smart` strategy (`options.clip_strategy`). Thus rivers and
+land-use areas that cross the border stay complete. A database cut from a larger database has no `raw.*`, so it
+cannot make the layers. If one layer fails, the build writes a warning and continues.
 
-The native program `duckosm` makes the same tables. Give it a boundary and `options.build_features` (the default), or the
-flags `--boundary` and `--features`. It runs the same SQL on the DuckDB inside the program, so the rows equal those of
-`duckosm build` (a test compares every row on Monaco). `features.ocean` needs `--sea`; offline it is empty, as in `duckosm build`.
+The two builds give the same rows. `features.ocean` needs the network (`options.sea`, or `--sea` in the native
+build). Without the network, the table is empty and the build continues.
 
-On a database that still has `raw.*`, you can also build them afterwards:
+On a database that still has `raw.*`, you can make the layers later:
 
 ```python
 import duckdb
@@ -32,8 +30,6 @@ from duckosm.features import FeaturesBuilder
 con = duckdb.connect("monaco.duckdb")
 FeaturesBuilder(con).run()              # -> {layer: row count}
 ```
-
-A layer that fails is logged and skipped; the build goes on.
 
 ## Columns
 
@@ -48,14 +44,14 @@ Every table has the same columns:
 | `tags` | MAP(VARCHAR, VARCHAR) | every OSM tag |
 | `geom` | GEOMETRY | the shape, longitude / latitude |
 
-`features.traffic` has one more: `bearing` (DOUBLE).
+`features.traffic` has one more column: `bearing` (DOUBLE). `features.ocean` has `source` (VARCHAR) in place of `tags`.
 
-An **area** layer holds closed ways and multipolygon relations; a **line** layer holds ways; a
+An **area** layer holds closed ways and multipolygon relations. A **line** layer holds ways. A
 **point** layer holds nodes.
 
 ## Layers
 
-In drawing order, bottom first. Monaco counts are from the sample build.
+In drawing order, bottom first. The Monaco column is an example from the sample build: it changes with the date of the OSM file.
 
 | Layer | Shape | From OSM | `kind` | Monaco |
 |---|---|---|---|---|
@@ -72,33 +68,33 @@ In drawing order, bottom first. Monaco counts are from the sample build.
 | `traffic` | point | `highway` = `traffic_signals`, `crossing` | the `highway` value | 575 |
 | `place_labels` | point | `place` = `city`, `town`, `village`, `hamlet`, `suburb`, `quarter`, `neighbourhood`, `isolated_dwelling`, `farm`, `island`, `locality` | the `place` value | 10 |
 
-`ocean` comes from Overture Maps (`options.sea: overture`, the default; `false` turns it off). The
-build reads it from Overture's public files on S3, so it needs the network: offline, the table is
-empty and the build goes on. Its `source` column names the Overture release; `osm_id` and `name`
-are NULL. Design: `docs/design/sea.md`.
+Notes on some layers:
 
-`paved` is not a Shortbread layer. Squares, piers and the like were in no table before; the same ways (a pedestrian area, a pier line) stay lines in `streets`. Design: `docs/design/missing_polygons.md`.
+| Layer | Note |
+|---|---|
+| `ocean` | from Overture Maps (`options.sea: overture`, the default; `false` turns it off). The build reads Overture's public files on S3, so it needs the network. `source` names the Overture release; `osm_id` and `name` are NULL. [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/sea.md) |
+| `paved` | not a Shortbread layer. The same ways (a pedestrian area, a pier) also stay lines in `streets`. [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/missing_polygons.md) |
+| `traffic` | not a Shortbread layer. On a crossing, `bearing` is the direction of the road under it, in degrees from north, so a map can draw the zebra marking across the road. NULL on traffic signals, and on a crossing that is on no road |
+| `streets` | all OSM ways with a `highway` tag, for drawing, not for routing. The routable roads are in the [mode schemas](database.md#mode-schema) |
 
-`traffic` is not a Shortbread layer. On a crossing, `bearing` is the direction of the road it lies
-on, in degrees from north, so a map can draw the zebra marking across the road. `bearing` is NULL on traffic
-signals, and on a crossing that lies on no road.
-
-`streets` is every OSM way with a `highway` tag, whatever the modes keep; it is for drawing, not
-routing. Routable roads are in the [mode schemas](database.md#mode-schema).
-
-Not built: a `boundaries` layer (administrative borders); use
-[`duckosm admin`](../guides/admin-boundaries.md) instead. The full lists of tag values are in
-`src/duckosm/features/layers.py`.
+There is no `boundaries` layer (administrative borders). Use [`duckosm admin`](../guides/admin-boundaries.md).
+The full lists of tag values are in
+[`src/duckosm/features/layers.py`](https://github.com/Khoshkhah/duckOSM/blob/main/src/duckosm/features/layers.py).
 
 ## Check what the build leaves out
 
-OSM has polygons that no layer asks for. `duckosm features-check DB` lists the closed ways with tags and the area relations of `raw.*` that
-are in no `features.*` table, grouped by their main tag, with the number of ways and relations and the area of the ways. A way that is a ring of a
-relation that a table holds is not listed. A group that the build leaves out on purpose (zones such as `place=neighbourhood`, boundaries, the
-coastline, parts of buildings, gone buildings, street furniture) has its reason in the last column. **A group with no reason is a possible miss**:
-add a rule to a layer in `src/duckosm/features/layers.py`, or the group to `LEFT_OUT` in `src/duckosm/features/check.py` with its reason.
-The Monaco sample has no group without a reason. The report needs `raw.*`, so a clipped database cannot be checked.
+OSM has polygons that no layer uses. `duckosm features-check DB` lists the closed ways with tags and the area relations of
+`raw.*` that are in no `features.*` table. It groups them by their main tag, with the number of ways and relations and the
+area of the ways.
 
 ```bash
 duckosm features-check monaco.duckdb
 ```
+
+| Group | Means |
+|---|---|
+| with a reason in the last column | the build leaves it out on purpose: zones such as `place=neighbourhood`, boundaries, the coastline, parts of buildings, street furniture |
+| with no reason | a possible miss: [open an issue](https://github.com/Khoshkhah/duckOSM/issues) |
+
+A way that is a ring of a relation in a table is not in the list. The check needs `raw.*`, so it cannot check a
+database cut from a larger database.
