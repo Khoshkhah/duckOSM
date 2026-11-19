@@ -47,7 +47,7 @@ picker
 You can also set the area and get the file from Python, with no click:
 
 ```python
-picker.area = {"mode": "bbox", "bbox": [7.40, 43.72, 7.44, 43.76]}
+picker.area = {"mode": "bbox", "bbox": [7.42, 43.728, 7.44, 43.738]}
 area = picker.get()
 ```
 
@@ -66,8 +66,8 @@ the boundary and the extract, and prints them as JSON. It downloads nothing and 
 `duckosm get`. You can run the same commands in a terminal:
 
 ```bash
-duckosm get --bbox 7.40,43.72,7.44,43.76 --dry-run
-duckosm get --bbox 7.40,43.72,7.44,43.76 -o data
+duckosm get --bbox 7.42,43.728,7.44,43.738 --dry-run
+duckosm get --bbox 7.42,43.728,7.44,43.738 -o data
 ```
 
 The map uses [MapLibre](https://maplibre.org) and the [OpenFreeMap](https://openfreemap.org) base map. The
