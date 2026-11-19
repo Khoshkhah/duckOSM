@@ -48,8 +48,8 @@ Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the pea
 | Area | Time | Memory | Output size |
 |---|---|---|---|
 | Monaco (0.7 MB) | 0.03 s | 18.6 MB | 0.1 MB |
-| Kentucky (148 MB) | measuring |  |  |
-| France (5.1 GB) | measuring |  |  |
+| Kentucky (148 MB) | 0.22 s | 394 MB | 4.8 MB |
+| France (5.1 GB) | not run: needs the build with `--features` (13 GB) |  |  |
 
 The command: `duckosm railml area.duckdb`. The input is the build with `--features`: railML reads `raw.*`.
 

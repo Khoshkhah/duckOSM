@@ -55,9 +55,9 @@ Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the pea
 
 | Area | Time | Memory | Output size |
 |---|---|---|---|
-| Monaco (0.7 MB) | 0.06 s | 50.2 MB | 5.9 MB |
-| Kentucky (148 MB) | measuring |  |  |
-| France (5.1 GB) | measuring |  |  |
+| Monaco (0.7 MB) | 0.06 s | 50.5 MB | 6.0 MB |
+| Kentucky (148 MB) | not run: `gmns` fails |  |  |
+| France (5.1 GB) | not run: needs the GMNS database |  |  |
 
 The command: `duckosm opendrive area_gmns.duckdb --junctions`. The input is the GMNS database of `duckosm gmns`.
 

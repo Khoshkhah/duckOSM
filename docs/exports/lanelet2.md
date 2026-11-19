@@ -50,9 +50,9 @@ Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the pea
 
 | Area | Time | Memory | Output size |
 |---|---|---|---|
-| Monaco (0.7 MB) | 0.11 s | 63.3 MB | 10.5 MB |
-| Kentucky (148 MB) | measuring |  |  |
-| France (5.1 GB) | measuring |  |  |
+| Monaco (0.7 MB) | 0.11 s | 63.6 MB | 10.6 MB |
+| Kentucky (148 MB) | not run: `gmns` fails |  |  |
+| France (5.1 GB) | not run: needs the GMNS database |  |  |
 
 The command: `duckosm lanelet2 area_gmns.duckdb`. The input is the GMNS database of `duckosm gmns`.
 

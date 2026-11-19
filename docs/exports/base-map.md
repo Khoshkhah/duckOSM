@@ -42,7 +42,7 @@ Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the pea
 | Area | Time | Memory | Output size |
 |---|---|---|---|
 | Monaco (0.7 MB) | 0.27 s | 134 MB | 13.6 MB |
-| Kentucky (148 MB) | measuring |  |  |
-| France (5.1 GB) | measuring |  |  |
+| Kentucky (148 MB) | 44 s | 3.7 GB | 2.8 GB |
+| France (5.1 GB) | not run, needs 13 GB |  |  |
 
-The command: `duckosm FILE.osm.pbf --boundary B.geojson -f duckdb --features`: the full build with the layers.
+The command: `duckosm FILE.osm.pbf --boundary B.geojson -f duckdb --features`: the full build (driving) with the layers. France: an estimate from Kentucky.

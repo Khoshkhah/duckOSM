@@ -55,8 +55,8 @@ Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the pea
 
 | Area | Time | Memory | Output size |
 |---|---|---|---|
-| Monaco (0.7 MB) | fault: needs netconvert |  |  |
-| Kentucky (148 MB) | measuring |  |  |
-| France (5.1 GB) | measuring |  |  |
+| Monaco (0.7 MB) | 30 s | 148 MB | 18.9 MB |
+| Kentucky (148 MB) | fault: netconvert stops (28 unknown edges) |  |  |
+| France (5.1 GB) | not run: fails on Kentucky |  |  |
 
-The command: `duckosm gmns area.duckdb --meso --micro`. The input is the driving network of `duckosm build` with the boundary of the area.
+The command: `duckosm gmns area.duckdb --meso --micro`. The input is the driving network with the boundary of the area: `duckosm build` (Monaco, Kentucky) and `duckosm tiles` (France, 8.8 GB DuckDB file).

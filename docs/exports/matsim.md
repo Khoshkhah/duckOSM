@@ -90,10 +90,10 @@ Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the pea
 | Area | Time | Memory | Output size |
 |---|---|---|---|
 | Monaco (0.7 MB) | 0.04 s | 18.6 MB | 0.1 MB |
-| Kentucky (148 MB) | measuring |  |  |
-| France (5.1 GB) | measuring |  |  |
+| Kentucky (148 MB) | 3.4 s | 853 MB | 84.1 MB |
+| France (5.1 GB) | 46 s | 10.0 GB | 923 MB |
 
-The command: `duckosm matsim area.duckdb`. The input is the driving network of `duckosm build` with the boundary of the area.
+The command: `duckosm matsim area.duckdb`. The input is the driving network with the boundary of the area: `duckosm build` (Monaco, Kentucky) and `duckosm tiles` (France, 8.8 GB DuckDB file).
 
 ## Limits
 
