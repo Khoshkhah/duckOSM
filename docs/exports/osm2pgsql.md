@@ -63,15 +63,16 @@ Mac mini (Apple M6, 12 cores, 16 GB), PostgreSQL 18 with PostGIS 3.7.
 | Monaco (0.6 MB) | Time | 0.25 s | 0.25 s | **0.09 s** |
 | | Memory | 29 MB | 52 MB | 62 MB |
 | | Size | 4.7 MB of tables | 4.7 MB of tables | 5.8 MB of files |
-| Kentucky (148 MB) | Time | **12.4 s** | 21.2 s | 14 s |
-| | Memory | **0.62 GB** | 1.22 GB | 1.3 GB |
-| | Size | 864 MB of tables | 863 MB of tables | 426 MB of files |
+| Kentucky (148 MB) | Time | 12.3 s | 7.3 s | **4.3 s** |
+| | Memory | **0.64 GB** | 0.86 GB | 1.37 GB |
+| | Size | 864 MB of tables | 863 MB of tables | 406 MB of files |
 | France (5.1 GB) | | measuring | measuring | measuring |
 
 - **osm2pgsql writes only into PostgreSQL.** So compare its column with "duckOSM into PostGIS": the same four tables, with the same size. GeoParquet is an extra output of duckOSM, with no PostgreSQL.
-- **Into PostGIS, duckOSM is 1.7 times slower than osm2pgsql** on Kentucky. On Monaco, most of the time is
-  PostgreSQL's own work, the same for both.
-- The memory does not include PostgreSQL's own memory.
+- **Into PostGIS, duckOSM is 1.7 times faster than osm2pgsql** on Kentucky, and uses 1.35 times its memory. On
+  Monaco, most of the time is PostgreSQL's own work, the same for both.
+- The memory is the peak memory footprint of the program (`/usr/bin/time -l`), without PostgreSQL's own memory.
+  Kentucky: the best of 3 runs.
 
 With `--latlong` (not the default), `way_area` differs in the 6th digit for a few polygons (65 on Monaco).
 
