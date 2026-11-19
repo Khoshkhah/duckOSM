@@ -27,6 +27,15 @@ Mac mini (Apple M6, 12 cores, 16 GB). duckOSM is **3 to 7 times faster** and nee
 | Time, sorted | 16 min 38 s | **2 min 30 s** | 5 min 40 s |
 | Memory | 9.8 GB | **3.8 GB** | 6.9 GB |
 
+### Monaco (0.7 MB)
+
+| | QuackOSM | duckOSM |
+|---|---|---|
+| Time | | **0.05 s** |
+| Memory | | **0.05 GB** |
+
+duckOSM writes GeoParquet and DuckDB (the default `-f`). QuackOSM was not measured on Monaco.
+
 ### Kentucky (141 MB)
 
 | | QuackOSM | duckOSM | duckOSM in the browser |

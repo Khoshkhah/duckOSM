@@ -34,3 +34,15 @@ To list the OSM polygons that no layer holds:
 ```bash
 duckosm features-check monaco.duckdb
 ```
+
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the peak memory footprint (`/usr/bin/time -l`). 1 MB = 10⁶ bytes.
+
+| Area | Time | Memory | Output size |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.27 s | 134 MB | 13.6 MB |
+| Kentucky (148 MB) | 44 s | 3.7 GB | 2.8 GB |
+| France (5.1 GB) | not run, needs 13 GB |  |  |
+
+The command: `duckosm FILE.osm.pbf --boundary B.geojson -f duckdb --features`: the full build (driving) with the layers. France: an estimate from Kentucky.

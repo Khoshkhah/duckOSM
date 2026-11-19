@@ -48,3 +48,15 @@ to_micro("monaco_gmns.duckdb", cell_length_m=7.0)
 ```
 
 `duckosm gmns-viz monaco_gmns.duckdb` shows the lanes and the meso and micro networks ([See it](gmns.md#see-it)).
+
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the peak memory footprint (`/usr/bin/time -l`). 1 MB = 10⁶ bytes.
+
+| Area | Time | Memory | Output size |
+|---|---|---|---|
+| Monaco (0.7 MB) | 30 s | 148 MB | 18.9 MB |
+| Kentucky (148 MB) | fault: netconvert stops (28 unknown edges) |  |  |
+| France (5.1 GB) | not run: fails on Kentucky |  |  |
+
+The command: `duckosm gmns area.duckdb --meso --micro`. The input is the driving network with the boundary of the area: `duckosm build` (Monaco, Kentucky) and `duckosm tiles` (France, 8.8 GB DuckDB file).
