@@ -1,0 +1,341 @@
+# The rules of the Geofabrik layers (duckosm quack --geofabrik, geofabrik.rs): the tags of an OSM element give the
+# feature class (fclass) and its code in each class of layers. One rule on each line:
+#
+#   <class> <code> <fclass> <condition> ...
+#
+# A condition is k=v, k=v1|v2 (one of the values), k=* (any value), k!=v1|v2 (no tag k, or another value) or !k (no tag
+# k). All conditions of a rule must hold. The key of a rule is the key of its first condition. In a class, each key gives
+# one row: the first rule of that key that holds, so a rule with more conditions comes before its general rule. A cafe
+# with shop=bakery is a bakery row and a cafe row, as in Geofabrik's files. A node goes to the point layer of its class (pois), a way to the line layer
+# (roads), and a closed way or a complete multipolygon to the area layer (pois_a, buildings_a).
+#
+# The source: Geofabrik's "OpenStreetMap Data in Layered GIS Format" (the free files, 2026-04-02, and the standard 0.8),
+# corrected by the free files of Monaco (2026-11-17), which the documents do not always describe:
+# - parking: only 5260 parking, also with access=private (no 5261 to 5264);
+# - pois: no 2253 sport=swimming, 2267 miniature_golf, 2562 car_repair, 2593 vending_drinks, 2594 vending_tickets and
+#   2704 to 2706 (a guidepost is tourist_info); the names are marketplace, artwork, fitness_centre, sports_hall, track;
+# - the rows of one element come in the order of the keys: tourism, shop, historic, leisure, amenity, office, man_made;
+# - transport: no public_transport=stop_position; 5641 is taxi;
+# - traffic: 5204 is pedestrian_crossing; 5209 street_lamp and natural 4121 tree are in the free files;
+# - landuse: 7217 scrub is natural=scrub.
+places 1001 city place=city
+places 1002 town place=town
+places 1003 village place=village
+places 1004 hamlet place=hamlet
+places 1010 suburb place=suburb
+places 1020 island place=island
+places 1030 farm place=farm
+places 1031 dwelling place=isolated_dwelling
+places 1040 region place=region
+places 1041 county place=county
+places 1050 locality place=locality
+pois 2401 hotel tourism=hotel
+pois 2402 motel tourism=motel
+pois 2403 bed_and_breakfast tourism=bed_and_breakfast
+pois 2404 guesthouse tourism=guest_house
+pois 2405 hostel tourism=hostel
+pois 2406 chalet tourism=chalet
+pois 2422 camp_site tourism=camp_site
+pois 2423 alpine_hut tourism=alpine_hut
+pois 2424 caravan_site tourism=caravan_site
+pois 2425 wilderness_hut tourism=wilderness_hut
+pois 2701 tourist_info tourism=information
+pois 2721 attraction tourism=attraction
+pois 2722 museum tourism=museum
+pois 2725 artwork tourism=artwork
+pois 2741 picnic_site tourism=picnic_site
+pois 2742 viewpoint tourism=viewpoint
+pois 2743 zoo tourism=zoo
+pois 2744 theme_park tourism=theme_park
+pois 2501 supermarket shop=supermarket
+pois 2502 bakery shop=bakery
+pois 2503 kiosk shop=kiosk
+pois 2504 mall shop=mall
+pois 2505 department_store shop=department_store
+pois 2510 general shop=general
+pois 2511 convenience shop=convenience
+pois 2512 clothes shop=clothes
+pois 2513 florist shop=florist
+pois 2514 chemist shop=chemist
+pois 2515 bookshop shop=books
+pois 2516 butcher shop=butcher
+pois 2517 shoe_shop shop=shoes
+pois 2518 beverages shop=alcohol|beverages|wine
+pois 2519 optician shop=optician
+pois 2520 jeweller shop=jewelry
+pois 2521 gift_shop shop=gift
+pois 2522 sports_shop shop=sports
+pois 2523 stationery shop=stationery
+pois 2524 outdoor_shop shop=outdoor
+pois 2525 mobile_phone_shop shop=mobile_phone
+pois 2526 toy_shop shop=toys
+pois 2527 newsagent shop=newsagent
+pois 2528 greengrocer shop=greengrocer
+pois 2529 beauty_shop shop=beauty
+pois 2530 video_shop shop=video
+pois 2541 car_dealership shop=car
+pois 2542 bicycle_shop shop=bicycle
+pois 2543 doityourself shop=doityourself|hardware
+pois 2544 furniture_shop shop=furniture
+pois 2546 computer_shop shop=computer
+pois 2547 garden_centre shop=garden_centre
+pois 2561 hairdresser shop=hairdresser
+pois 2567 travel_agent shop=travel_agency
+pois 2568 laundry shop=laundry|dry_cleaning
+pois 2723 monument historic=monument
+pois 2724 memorial historic=memorial
+pois 2731 castle historic=castle
+pois 2732 ruins historic=ruins
+pois 2733 archaeological historic=archaeological_site
+pois 2734 wayside_cross historic=wayside_cross
+pois 2735 wayside_shrine historic=wayside_shrine
+pois 2736 battlefield historic=battlefield
+pois 2737 fort historic=fort
+pois 2204 park leisure=park
+pois 2205 playground leisure=playground
+pois 2206 dog_park leisure=dog_park
+pois 2251 sports_centre leisure=sports_centre
+pois 2252 pitch leisure=pitch
+pois 2253 swimming_pool leisure=swimming_pool access!=private|customers
+pois 2253 swimming_pool leisure=water_park access!=private|customers
+pois 2255 golf_course leisure=golf_course
+pois 2256 stadium leisure=stadium
+pois 2257 ice_rink leisure=ice_rink
+pois 2258 track leisure=track
+pois 2259 fitness_centre leisure=fitness_centre
+pois 2261 sports_hall leisure=sports_hall
+pois 2001 police amenity=police
+pois 2002 fire_station amenity=fire_station
+pois 2004 post_box amenity=post_box
+pois 2005 post_office amenity=post_office
+pois 2006 telephone amenity=telephone
+pois 2007 library amenity=library
+pois 2008 town_hall amenity=townhall
+pois 2009 courthouse amenity=courthouse
+pois 2010 prison amenity=prison
+pois 2011 embassy amenity=embassy
+pois 2012 community_centre amenity=community_centre
+pois 2013 nursing_home amenity=nursing_home
+pois 2014 arts_centre amenity=arts_centre
+pois 2015 graveyard amenity=grave_yard
+pois 2016 marketplace amenity=marketplace
+pois 2031 recycling_glass amenity=recycling recycling:glass=yes
+pois 2031 recycling_glass amenity=recycling recycling:glass_bottles=yes
+pois 2032 recycling_paper amenity=recycling recycling:paper=yes
+pois 2033 recycling_clothes amenity=recycling recycling:clothes=yes
+pois 2034 recycling_metal amenity=recycling recycling:scrap_metal=yes
+pois 2030 recycling amenity=recycling
+pois 2081 university amenity=university
+pois 2082 school amenity=school
+pois 2083 kindergarten amenity=kindergarten
+pois 2084 college amenity=college
+pois 2099 public_building amenity=public_building
+pois 2101 pharmacy amenity=pharmacy
+pois 2110 hospital amenity=hospital
+pois 2111 clinic amenity=clinic
+pois 2120 doctors amenity=doctors
+pois 2121 dentist amenity=dentist
+pois 2129 veterinary amenity=veterinary
+pois 2201 theatre amenity=theatre
+pois 2202 nightclub amenity=nightclub
+pois 2203 cinema amenity=cinema
+pois 2253 swimming_pool amenity=swimming_pool access!=private|customers
+pois 2301 restaurant amenity=restaurant
+pois 2302 fast_food amenity=fast_food
+pois 2303 cafe amenity=cafe
+pois 2304 pub amenity=pub
+pois 2305 bar amenity=bar
+pois 2306 food_court amenity=food_court
+pois 2307 biergarten amenity=biergarten
+pois 2421 shelter amenity=shelter
+pois 2563 car_rental amenity=car_rental
+pois 2564 car_wash amenity=car_wash
+pois 2565 car_sharing amenity=car_sharing
+pois 2566 bicycle_rental amenity=bicycle_rental
+pois 2591 vending_cigarette amenity=vending_machine vending=cigarettes
+pois 2592 vending_parking amenity=vending_machine vending=parking_tickets
+pois 2590 vending_machine amenity=vending_machine
+pois 2601 bank amenity=bank
+pois 2602 atm amenity=atm
+pois 2901 toilet amenity=toilets
+pois 2902 bench amenity=bench
+pois 2903 drinking_water amenity=drinking_water
+pois 2904 fountain amenity=fountain
+pois 2905 hunting_stand amenity=hunting_stand
+pois 2906 waste_basket amenity=waste_basket
+pois 2011 embassy office=diplomatic diplomatic=embassy
+pois 2017 consulate office=diplomatic diplomatic=consulate
+pois 2907 camera_surveillance man_made=surveillance
+pois 2951 tower_comms man_made=tower tower:type=communication
+pois 2953 tower_observation man_made=tower tower:type=observation
+pois 2950 tower man_made=tower
+pois 2952 water_tower man_made=water_tower
+pois 2954 windmill man_made=windmill
+pois 2955 lighthouse man_made=lighthouse
+pois 2961 wastewater_plant man_made=wastewater_plant
+pois 2962 water_well man_made=water_well
+pois 2963 water_mill man_made=watermill
+pois 2964 water_works man_made=water_works
+pois 2015 graveyard landuse=cemetery
+pois 2254 tennis_court sport=tennis
+pofw 3101 christian_anglican amenity=place_of_worship religion=christian denomination=anglican
+pofw 3102 christian_catholic amenity=place_of_worship religion=christian denomination=catholic
+pofw 3103 christian_evangelical amenity=place_of_worship religion=christian denomination=evangelical
+pofw 3104 christian_lutheran amenity=place_of_worship religion=christian denomination=lutheran
+pofw 3105 christian_methodist amenity=place_of_worship religion=christian denomination=methodist
+pofw 3106 christian_orthodox amenity=place_of_worship religion=christian denomination=orthodox
+pofw 3107 christian_protestant amenity=place_of_worship religion=christian denomination=protestant
+pofw 3108 christian_baptist amenity=place_of_worship religion=christian denomination=baptist
+pofw 3109 christian_mormon amenity=place_of_worship religion=christian denomination=mormon
+pofw 3100 christian amenity=place_of_worship religion=christian
+pofw 3200 jewish amenity=place_of_worship religion=jewish
+pofw 3301 muslim_sunni amenity=place_of_worship religion=muslim denomination=sunni
+pofw 3302 muslim_shia amenity=place_of_worship religion=muslim denomination=shia
+pofw 3300 muslim amenity=place_of_worship religion=muslim
+pofw 3400 buddhist amenity=place_of_worship religion=buddhist
+pofw 3500 hindu amenity=place_of_worship religion=hindu
+pofw 3600 taoist amenity=place_of_worship religion=taoist
+pofw 3700 shintoist amenity=place_of_worship religion=shintoist
+pofw 3800 sikh amenity=place_of_worship religion=sikh
+natural 4101 spring natural=spring
+natural 4103 glacier natural=glacier
+natural 4111 peak natural=peak
+natural 4112 cliff natural=cliff
+natural 4113 volcano natural=volcano
+natural 4121 tree natural=tree
+natural 4131 mine natural=mine
+natural 4132 cave_entrance natural=cave_entrance
+natural 4141 beach natural=beach
+traffic 5201 traffic_signals highway=traffic_signals
+traffic 5202 mini_roundabout highway=mini_roundabout
+traffic 5203 stop highway=stop
+traffic 5204 pedestrian_crossing highway=crossing
+traffic 5205 ford highway=ford
+traffic 5206 motorway_junction highway=motorway_junction
+traffic 5207 turning_circle highway=turning_circle
+traffic 5208 speed_camera highway=speed_camera
+traffic 5209 street_lamp highway=street_lamp
+traffic 5236 railway_crossing railway=level_crossing|crossing
+traffic 5250 fuel amenity=fuel
+traffic 5251 service highway=services
+traffic 5260 parking amenity=parking
+traffic 5270 parking_bicycle amenity=bicycle_parking access!=private|customers
+traffic 5271 bicycle_repair_station amenity=bicycle_repair_station
+traffic 5301 slipway leisure=slipway
+traffic 5302 marina leisure=marina
+traffic 5303 pier man_made=pier
+traffic 5311 dam waterway=dam
+traffic 5321 waterfall waterway=waterfall
+traffic 5331 lock_gate waterway=lock_gate
+traffic 5332 weir waterway=weir
+transport 5601 railway_station railway=station
+transport 5602 railway_halt railway=halt
+transport 5603 tram_stop railway=tram_stop
+transport 5621 bus_stop highway=bus_stop
+transport 5622 bus_station amenity=bus_station
+transport 5641 taxi amenity=taxi
+transport 5655 helipad aeroway=helipad
+transport 5656 apron aeroway=apron
+transport 5661 ferry_terminal amenity=ferry_terminal
+roads 5111 motorway highway=motorway
+roads 5112 trunk highway=trunk
+roads 5113 primary highway=primary
+roads 5114 secondary highway=secondary
+roads 5115 tertiary highway=tertiary
+roads 5121 unclassified highway=unclassified
+roads 5122 residential highway=residential
+roads 5123 living_street highway=living_street
+roads 5124 pedestrian highway=pedestrian
+roads 5125 busway highway=busway
+roads 5131 motorway_link highway=motorway_link
+roads 5132 trunk_link highway=trunk_link
+roads 5133 primary_link highway=primary_link
+roads 5134 secondary_link highway=secondary_link
+roads 5135 tertiary_link highway=tertiary_link
+roads 5141 service highway=service
+roads 5143 track_grade1 highway=track tracktype=grade1
+roads 5144 track_grade2 highway=track tracktype=grade2
+roads 5145 track_grade3 highway=track tracktype=grade3
+roads 5146 track_grade4 highway=track tracktype=grade4
+roads 5147 track_grade5 highway=track tracktype=grade5
+roads 5142 track highway=track
+roads 5151 bridleway highway=bridleway
+roads 5151 bridleway highway=path horse=designated
+roads 5152 cycleway highway=cycleway
+roads 5152 cycleway highway=path bicycle=designated
+roads 5153 footway highway=footway
+roads 5153 footway highway=path foot=designated
+roads 5154 path highway=path
+roads 5155 steps highway=steps
+roads 5199 unknown highway=road
+railways 6101 rail railway=rail !traction
+railways 6102 light_rail railway=light_rail
+railways 6103 subway railway=subway
+railways 6104 tram railway=tram
+railways 6105 monorail railway=monorail
+railways 6106 narrow_gauge railway=narrow_gauge
+railways 6107 miniature railway=miniature
+railways 6108 funicular railway=funicular
+railways 6108 funicular railway=rail traction=funicular
+railways 6109 rack railway=rack
+railways 6109 rack railway=rail traction=rack
+railways 6109 rack railway=rail rack=yes
+waterways 8101 river waterway=river
+waterways 8102 stream waterway=stream
+waterways 8103 canal waterway=canal
+waterways 8104 drain waterway=drain
+adminareas 1201 admin_level1 boundary=administrative admin_level=1
+adminareas 1202 national boundary=administrative admin_level=2
+adminareas 1203 admin_level3 boundary=administrative admin_level=3
+adminareas 1204 admin_level4 boundary=administrative admin_level=4
+adminareas 1205 admin_level5 boundary=administrative admin_level=5
+adminareas 1206 admin_level6 boundary=administrative admin_level=6
+adminareas 1207 admin_level7 boundary=administrative admin_level=7
+adminareas 1208 admin_level8 boundary=administrative admin_level=8
+adminareas 1209 admin_level9 boundary=administrative admin_level=9
+adminareas 1210 admin_level10 boundary=administrative admin_level=10
+adminareas 1211 admin_level11 boundary=administrative admin_level=11
+buildings 1500 building building=*
+landuse 7201 forest landuse=forest
+landuse 7201 forest natural=wood
+landuse 7202 park leisure=park|common
+landuse 7203 residential landuse=residential
+landuse 7204 industrial landuse=industrial
+landuse 7206 cemetery landuse=cemetery
+landuse 7207 allotments landuse=allotments
+landuse 7208 meadow landuse=meadow
+landuse 7209 commercial landuse=commercial
+landuse 7210 nature_reserve leisure=nature_reserve
+landuse 7211 recreation_ground leisure=recreation_ground
+landuse 7211 recreation_ground landuse=recreation_ground
+landuse 7212 retail landuse=retail
+landuse 7213 military landuse=military
+landuse 7214 quarry landuse=quarry
+landuse 7215 orchard landuse=orchard
+landuse 7216 vineyard landuse=vineyard
+landuse 7217 scrub natural=scrub
+landuse 7218 grass landuse=grass
+landuse 7219 heath natural=heath
+landuse 7220 national_park boundary=national_park
+landuse 7228 farmland landuse=farmland
+landuse 7229 farmyard landuse=farmyard
+landuse 7233 landfill landuse=landfill
+protected_areas 7301 icun_1 boundary=protected_area protect_class=1|1a|1b
+protected_areas 7302 national_park boundary=national_park
+protected_areas 7302 national_park boundary=protected_area protect_class=2
+protected_areas 7303 icun_3 boundary=protected_area protect_class=3
+protected_areas 7304 icun_4 boundary=protected_area protect_class=4
+protected_areas 7305 icun_5 boundary=protected_area protect_class=5
+protected_areas 7306 icun_6 boundary=protected_area protect_class=6
+protected_areas 7307 icun_7 boundary=protected_area protect_class=7
+protected_areas 7308 icun_8 boundary=protected_area protect_class=97|98
+protected_areas 7308 icun_8 ramsar=yes
+protected_areas 7300 other_nature_reserve leisure=nature_reserve
+water 8201 reservoir landuse=reservoir
+water 8201 reservoir natural=water water=reservoir
+water 8202 river waterway=riverbank
+water 8202 river natural=water water=river
+water 8200 water natural=water
+water 8203 dock waterway=dock
+water 8211 glacier natural=glacier
+water 8221 wetland natural=wetland

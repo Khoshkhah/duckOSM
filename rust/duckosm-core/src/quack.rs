@@ -61,6 +61,17 @@ impl Feature {
     }
 }
 
+/// The rules of a layer run of the engine ([`gdal_features`]): GDAL's five layers (`duckosm quack --gdal`), or the rows
+/// that the Geofabrik layers come from (`duckosm quack --geofabrik`, [`crate::geofabrik`]). The Geofabrik mode reads the
+/// file as GDAL does, with two differences: a multipolygon with no tags of its own does not take the tags of its outer
+/// member, and the polygon of an outer member way is a row also when a complete multipolygon uses it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Quack,
+    Gdal,
+    Geofabrik,
+}
+
 /// The numbers of a [`features`] run.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Counts {
@@ -1119,7 +1130,8 @@ fn gdal_way(id: i64, tags: &RawTags, pts: &[Pt], area: bool) -> Option<Feature> 
 /// quack --gdal: the rows of a relation from the lines of its members that the file has (in the order of the members).
 ///
 /// - A multipolygon or boundary with all its member ways (not `subarea`): its outer closed member ways go to `used`; the
-///   relation is a row when `mine` and it has a ring.
+///   relation is a row when `mine` and it has a ring. `donate`: a relation with no tags of its own takes the tags of its
+///   first outer member area (GDAL).
 /// - Else the members (nodes only in `other_relations`; ways not `subarea`): one row, or `by_tiles` one row for each
 ///   member that the tile owns (`Feature::part`).
 fn gdal_relation(
@@ -1128,6 +1140,7 @@ fn gdal_relation(
     members: &[Member],
     got: Vec<(usize, u8, Vec<Pt>, RawTags)>,
     by_tiles: bool,
+    donate: bool,
     mine: &dyn Fn(i64) -> bool,
     used: &std::sync::Mutex<Vec<i64>>,
 ) -> Vec<Feature> {
@@ -1150,7 +1163,7 @@ fn gdal_relation(
         let Some(polys) = multipolygon(have.iter().map(|l| l.2.clone()).collect()) else {
             return Vec::new();
         };
-        let tags = if has_own_tags(&tags) {
+        let tags = if has_own_tags(&tags) || !donate {
             tags
         } else {
             // GDAL: the tags of the first outer member area, and the type
@@ -1257,7 +1270,7 @@ pub fn features_owned<R: Read + Send>(
     fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, owner, false, fixes, emit)
+    run(open, budget, owner, Mode::Quack, fixes, emit)
 }
 
 /// quack --gdal: the rows of GDAL's five layers ([`crate::gdal`], each row with its `layer`) from one read of the file, as
@@ -1266,10 +1279,11 @@ pub fn features_owned<R: Read + Send>(
 pub fn gdal_features<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
+    mode: Mode,
     fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, None, true, fixes, emit)
+    run(open, budget, None, mode, fixes, emit)
 }
 
 /// [`gdal_features`] of the file of one tile alone (a worker of the browser for each tile): the rows that `owner` owns
@@ -1279,21 +1293,23 @@ pub fn gdal_features_owned<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: &Owner,
+    mode: Mode,
     fixes: Option<&QuackFixes>,
     emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    run(open, budget, Some(owner), true, fixes, emit)
+    run(open, budget, Some(owner), mode, fixes, emit)
 }
 
-/// The engine of [`features_owned`] and [`gdal_features`]: `gdal` chooses the rules of GDAL's layers.
+/// The engine of [`features_owned`] and [`gdal_features`]: `mode` chooses the rules of the layers.
 fn run<R: Read + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     owner: Option<&Owner>,
-    gdal: bool,
+    mode: Mode,
     fixes: Option<&QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
+    let gdal = mode != Mode::Quack;
     use crate::spill::join::{Point, Request};
     use crate::spill::{sort_bytes, temp_store, Buckets, SortedParts, Writer};
     let io = |e: std::io::Error| format!("quack: a temporary file: {e}");
@@ -1601,7 +1617,7 @@ fn run<R: Read + Send>(
         #[cfg(not(target_arch = "wasm32"))]
         let t = std::time::Instant::now();
         let made = if gdal {
-            gdal_relation(id, tags, &members, got, owner.is_some(), &mine, &used)
+            gdal_relation(id, tags, &members, got, owner.is_some(), mode == Mode::Gdal, &mine, &used)
         } else {
             // a relation with a member way that is not a valid way is not a feature
             let owned = got.first().is_some_and(|l| l.1 & OWNED != 0);
@@ -1696,7 +1712,7 @@ fn run<R: Read + Send>(
         let mut part = Vec::new();
         for r in deferred.finish().map_err(io)?.read(&Numbered).map_err(io)? {
             let (way, mut f) = r.map_err(io)?;
-            if used.binary_search(&(way as i64)).is_err() {
+            if mode == Mode::Geofabrik || used.binary_search(&(way as i64)).is_err() {
                 f.layer = crate::gdal::MULTIPOLYGONS;
                 part.push(f);
             }
@@ -1754,7 +1770,7 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, false, fixes, |_, part| emit(part))
+    features_of_tiles(open, budget, size, Mode::Quack, fixes, |_, part| emit(part))
 }
 
 /// [`gdal_features`] made tile by tile, as [`features_by_tiles`] makes the table of quack. A relation of
@@ -1764,10 +1780,11 @@ pub fn gdal_features_by_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
+    mode: Mode,
     fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, true, fixes, |_, part| emit(part))
+    features_of_tiles(open, budget, size, mode, fixes, |_, part| emit(part))
 }
 
 /// [`features_by_tiles`], and `emit` gets the tile that made each part too (the tiles one after the other: a part of a
@@ -1776,7 +1793,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     open: impl Fn() -> Result<R, String>,
     budget: usize,
     size: TileSize,
-    gdal: bool,
+    mode: Mode,
     mut fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
@@ -1805,7 +1822,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
      -> Result<Counts, String> {
         let owner = Owner { tile, relations: Some(&relations) };
         let open_tile = || Ok(std::io::BufReader::with_capacity(1 << 20, files.reader(i)));
-        run(open_tile, budget, Some(&owner), gdal, fixes, give)
+        run(open_tile, budget, Some(&owner), mode, fixes, give)
     };
     let mut done = |k: usize, (_, tile, c): &(usize, Tile, crate::cutstream::CutCounts), got: Counts| {
         counts.nodes += got.nodes;
@@ -1827,7 +1844,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     // threads takes the next tile. A group that waits for its last tile kept the rows of four tiles: France had 8.8 GB of
     // rows in memory at zoom 8.
     #[cfg(not(target_arch = "wasm32"))]
-    if gdal {
+    if mode != Mode::Quack {
         enum Msg {
             Part(Tile, Vec<Feature>),
             Done(usize, Counts),
