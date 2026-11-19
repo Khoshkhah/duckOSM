@@ -2,8 +2,9 @@
 //! docs/design/gis_export.md.
 //!
 //! The layers are `edges_<mode>`, `nodes_<mode>` and `boundary` (GeoParquet: also `features_<table>`). DuckDB's spatial
-//! extension writes each layer (`COPY ... (FORMAT gdal)` or `(FORMAT parquet)`). A GeoPackage has one layer for each
-//! file, so SQLite then copies the tables of each layer file into one file ([`join_gpkg`]).
+//! extension writes each layer (`COPY ... (FORMAT gdal)` or `(FORMAT parquet)`). A GeoPackage gets one file: GDAL writes
+//! each layer with no rows (the tables, the SRS and the `gpkg_*` rows, a few KB), SQLite joins them ([`join_gpkg`]), and
+//! then the rows go from DuckDB into that file ([`fill_gpkg`]). So the export needs no disk for a second copy.
 
 use crate::{open, Result};
 use duckdb::Connection;
@@ -190,11 +191,16 @@ fn gpkg(con: &Connection, out: &Path, layers: Vec<(String, String, String)>, srs
         let mut parts = Vec::new();
         for (lyr, schema, table) in &layers {
             let part = tmp.join(format!("{lyr}.gpkg"));
-            copy_gdal(con, &select_sql(con, schema, table, false)?, &part, "GPKG", srs, Some(lyr))?;
+            copy_gdal(con, &format!("{} LIMIT 0", select_sql(con, schema, table, false)?), &part, "GPKG", srs, Some(lyr))?;
             parts.push(part);
-            s.layers.push((lyr.clone(), count(con, schema, table)?));
         }
-        join_gpkg(&parts, out)
+        join_gpkg(&parts, out)?;
+        let db = rusqlite::Connection::open(out).map_err(|x| format!("{}: {x}", out.display()))?;
+        for (lyr, schema, table) in &layers {
+            let n = fill_gpkg(con, &db, lyr, &select_sql(con, schema, table, false)?).map_err(|x| format!("{}: {x}", out.display()))?;
+            s.layers.push((lyr.clone(), n));
+        }
+        Ok::<(), String>(())
     })();
     let _ = std::fs::remove_dir_all(&tmp);
     r?;
@@ -244,4 +250,103 @@ fn join_gpkg(parts: &[PathBuf], out: &Path) -> Result<()> {
         db.execute_batch("COMMIT; DETACH p").map_err(x)?;
     }
     Ok(())
+}
+
+/// Write the rows of `sql` into the empty layer `lyr` of the GeoPackage `db`, as GDAL writes them: the geometry as a
+/// GeoPackage blob (the header, the envelope for a geometry that is not a point, then the WKB), the R-tree, the extent
+/// in `gpkg_contents` and the count in `gpkg_ogr_contents`. Returns the number of rows.
+fn fill_gpkg(con: &Connection, db: &rusqlite::Connection, lyr: &str, sql: &str) -> Result<i64> {
+    let x = |x: rusqlite::Error| x.to_string();
+    let (gcol, srs_id): (String, i32) = db
+        .query_row("SELECT column_name, srs_id FROM gpkg_geometry_columns WHERE table_name = ?1", [lyr], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(x)?;
+    let mut st = con.prepare(&format!("DESCRIBE {sql}")).map_err(e)?;
+    let cols: Vec<(String, String)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?;
+    let geoms: Vec<&String> = cols.iter().filter(|c| c.1.starts_with("GEOMETRY")).map(|c| &c.0).collect();
+    let [g] = geoms[..] else { return Err(format!("{lyr}: {} geometry columns, the export takes one", geoms.len())) };
+    let others: Vec<&(String, String)> = cols.iter().filter(|c| &c.0 != g).collect();
+    let q = |n: &str| format!("\"{}\"", n.replace('"', "\"\""));
+    // DuckDB gives these types as SQLite values; another type goes as text, as GDAL reads it
+    let plain = ["BOOLEAN", "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "UTINYINT", "USMALLINT", "UINTEGER", "FLOAT", "DOUBLE", "VARCHAR"];
+    let mut select: Vec<String> =
+        others.iter().map(|(n, t)| if plain.contains(&t.as_str()) { q(n) } else { format!("CAST({} AS VARCHAR)", q(n)) }).collect();
+    let gq = q(g);
+    select.push(format!(
+        "ST_AsWKB({gq})::BLOB, ST_XMin({gq}), ST_XMax({gq}), ST_YMin({gq}), ST_YMax({gq}), \
+         ST_GeometryType({gq})::VARCHAR = 'POINT', ST_IsEmpty({gq})"
+    ));
+    let k = others.len();
+    let mut rows_st = con.prepare(&format!("SELECT {} FROM ({sql}) t", select.join(", "))).map_err(e)?;
+    let mut rows = rows_st.query([]).map_err(e)?;
+
+    // the R-tree trigger calls ST_IsEmpty and ST_MinX, which only GDAL gives to SQLite: this function fills the R-tree
+    let rtree = format!("rtree_{lyr}_{gcol}");
+    let trigger = format!("{rtree}_insert");
+    let tsql: String = db.query_row("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1", [&trigger], |r| r.get(0)).map_err(x)?;
+    db.execute_batch(&format!("BEGIN; DROP TRIGGER {}", q(&trigger))).map_err(x)?;
+    let names: Vec<String> = std::iter::once(q(&gcol)).chain(others.iter().map(|c| q(&c.0))).collect();
+    let marks = vec!["?"; names.len()].join(", ");
+    let mut ins = db.prepare(&format!("INSERT INTO {} ({}) VALUES ({marks})", q(lyr), names.join(", "))).map_err(x)?;
+    let mut idx = db.prepare(&format!("INSERT INTO {} VALUES (?1, ?2, ?3, ?4, ?5)", q(&rtree))).map_err(x)?;
+    let (mut n, mut ext) = (0i64, [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY]);
+    use duckdb::types::ValueRef as D;
+    use rusqlite::types::Value as S;
+    while let Some(r) = rows.next().map_err(e)? {
+        let mut vals: Vec<S> = Vec::with_capacity(k + 1);
+        let mut env = None;
+        let geom = match r.get_ref(k).map_err(e)? {
+            D::Blob(wkb) => {
+                let (empty, point): (bool, bool) = (r.get(k + 6).map_err(e)?, r.get(k + 5).map_err(e)?);
+                let mut b = vec![b'G', b'P', 0, if empty { 0x11 } else if point { 0x01 } else { 0x03 }];
+                b.extend_from_slice(&srs_id.to_le_bytes());
+                if !empty {
+                    // minx, maxx, miny, maxy: the order of the GeoPackage envelope and of the R-tree
+                    let e4: [f64; 4] = [r.get(k + 1).map_err(e)?, r.get(k + 2).map_err(e)?, r.get(k + 3).map_err(e)?, r.get(k + 4).map_err(e)?];
+                    if !point {
+                        e4.iter().for_each(|v| b.extend_from_slice(&v.to_le_bytes()));
+                    }
+                    ext = [ext[0].min(e4[0]), ext[1].min(e4[2]), ext[2].max(e4[1]), ext[3].max(e4[3])];
+                    env = Some(e4);
+                }
+                b.extend_from_slice(wkb);
+                S::Blob(b)
+            }
+            _ => S::Null,
+        };
+        vals.push(geom);
+        for i in 0..k {
+            vals.push(match r.get_ref(i).map_err(e)? {
+                D::Null => S::Null,
+                D::Boolean(v) => S::Integer(v as i64),
+                D::TinyInt(v) => S::Integer(v.into()),
+                D::SmallInt(v) => S::Integer(v.into()),
+                D::Int(v) => S::Integer(v.into()),
+                D::BigInt(v) => S::Integer(v),
+                D::UTinyInt(v) => S::Integer(v.into()),
+                D::USmallInt(v) => S::Integer(v.into()),
+                D::UInt(v) => S::Integer(v.into()),
+                D::Float(v) => S::Real(v.into()),
+                D::Double(v) => S::Real(v),
+                D::Text(v) => S::Text(String::from_utf8_lossy(v).into_owned()),
+                v => return Err(format!("{lyr}.{}: the type {:?} is not exported", others[i].0, v.data_type())),
+            });
+        }
+        ins.execute(rusqlite::params_from_iter(vals)).map_err(x)?;
+        n += 1;
+        if let Some([a, b, c, d]) = env {
+            idx.execute(rusqlite::params![db.last_insert_rowid(), a, b, c, d]).map_err(x)?;
+        }
+    }
+    drop((ins, idx));
+    db.execute_batch(&tsql).map_err(x)?;
+    let ext: Vec<Option<f64>> = ext.iter().map(|v| v.is_finite().then_some(*v)).collect();
+    db.execute(
+        "UPDATE gpkg_contents SET min_x = ?1, min_y = ?2, max_x = ?3, max_y = ?4 WHERE table_name = ?5",
+        rusqlite::params![ext[0], ext[1], ext[2], ext[3], lyr],
+    )
+    .map_err(x)?;
+    db.execute("UPDATE gpkg_ogr_contents SET feature_count = ?1 WHERE table_name = ?2", rusqlite::params![n, lyr]).map_err(x)?;
+    db.execute_batch("COMMIT").map_err(x)?;
+    Ok(n)
 }
