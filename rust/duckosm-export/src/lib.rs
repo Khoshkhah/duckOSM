@@ -21,6 +21,7 @@ pub mod offset;
 pub mod opendrive;
 pub mod railml;
 pub mod shapely;
+pub mod stream;
 pub mod sumo;
 pub mod sumo_compare;
 
@@ -29,12 +30,18 @@ use std::path::Path;
 
 pub type Result<T> = std::result::Result<T, String>;
 
+/// DuckDB's memory limit for the exports that read a database (`open`).
+pub const MEMORY_LIMIT: &str = "2GB";
+
 /// Open a duckOSM database read-only, with DuckDB's spatial extension (the first `INSTALL` downloads it).
 pub fn open(db: &Path) -> Result<Connection> {
     let cfg = Config::default().access_mode(AccessMode::ReadOnly).map_err(|e| e.to_string())?;
     let con = Connection::open_with_flags(db, cfg).map_err(|e| format!("{}: {e}", db.display()))?;
     con.execute_batch("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         .map_err(|e| format!("the spatial extension of DuckDB: {e}"))?;
+    // the exports stream their rows: DuckDB's sorts, joins and ordered COPY spill to disk past this limit (its default, 80 %
+    // of the memory, let the GeoParquet export of France take 7.4 GB)
+    con.execute_batch(&format!("SET memory_limit = '{MEMORY_LIMIT}'")).map_err(|e| e.to_string())?;
     Ok(con)
 }
 
@@ -101,6 +108,60 @@ pub fn write_text(path: &Path, text: &str, gz: bool) -> Result<()> {
         Ok(())
     } else {
         std::fs::write(path, text).map_err(err)
+    }
+}
+
+/// Give each line of the text file `path` to `f`, one line at a time (a SUMO .net.xml is some GB: it is not read whole).
+pub fn each_line(path: &Path, mut f: impl FnMut(&str) -> Result<()>) -> Result<()> {
+    use std::io::BufRead;
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut r = std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path).map_err(err)?);
+    let mut l = String::new();
+    while r.read_line(&mut l).map_err(err)? > 0 {
+        f(l.trim_end_matches(['\n', '\r']))?;
+        l.clear();
+    }
+    Ok(())
+}
+
+/// A buffered file writer for `path` (and its folder), gzip-compressed when `gz`: the exports write each row as it comes.
+/// Call [`Out::finish`] at the end (it writes the gzip trailer and reports an error of the last write).
+pub struct Out {
+    w: OutFile,
+    path: std::path::PathBuf,
+}
+
+enum OutFile {
+    Plain(std::io::BufWriter<std::fs::File>),
+    Gz(flate2::write::GzEncoder<std::io::BufWriter<std::fs::File>>),
+}
+
+impl Out {
+    pub fn create(path: &Path, gz: bool) -> Result<Out> {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        let f = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?);
+        let w = if gz { OutFile::Gz(flate2::write::GzEncoder::new(f, flate2::Compression::default())) } else { OutFile::Plain(f) };
+        Ok(Out { w, path: path.to_path_buf() })
+    }
+
+    pub fn put(&mut self, s: &str) -> Result<()> {
+        use std::io::Write;
+        match &mut self.w {
+            OutFile::Plain(f) => f.write_all(s.as_bytes()),
+            OutFile::Gz(g) => g.write_all(s.as_bytes()),
+        }
+        .map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+
+    pub fn finish(self) -> Result<()> {
+        use std::io::Write;
+        let err = |e: std::io::Error| format!("{}: {e}", self.path.display());
+        match self.w {
+            OutFile::Plain(mut f) => f.flush().map_err(err),
+            OutFile::Gz(g) => g.finish().map_err(err)?.flush().map_err(err),
+        }
     }
 }
 

@@ -5,7 +5,6 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm init-config  write the commented config template to a file, to edit and build from
   duckosm boundary     find an area's boundary by name (in a PBF, else Nominatim) -> GeoJSON
   duckosm clip-pbf     cut a PBF down to a boundary
-  duckosm extract  slice a sub-area out of an existing build into a new db
   duckosm admin    add OSM administrative boundaries to a built db
   duckosm viz      render a roadstyle HTML map of a built network
   duckosm route-map  an interactive route planner page (click start and end; routes in the browser)
@@ -25,8 +24,8 @@ CLI for duckOSM — a subcommand-based command line interface.
   duckosm lane-graph    build a lane-level routing graph (lane->lane turns + lane-changes) in a GMNS db
   duckosm route-lanes   plan a lane-level route (lane sequence + geometry + maneuvers) over a GMNS db
 
-The `extract`/`admin` subcommands wrap duckosm.extract / duckosm.admin and forward their
-arguments verbatim, so `duckosm extract --help` shows the full underlying options.
+The `admin` subcommand wraps duckosm.admin and forwards its
+arguments verbatim, so `duckosm admin --help` shows the full underlying options.
 """
 
 import logging
@@ -246,18 +245,6 @@ def init_config(path, force):
 
 @main.command(**_PASSTHROUGH)
 @click.argument('args', nargs=-1, type=click.UNPROCESSED)
-def extract(args):
-    """Slice a sub-area out of an existing build into a new, self-contained db.
-
-    Wraps duckosm.extract — run `duckosm extract --help` for options
-    (--source, --db, and one of --name / --osm-id / --boundary).
-    """
-    from duckosm.extract import main as extract_main
-    raise SystemExit(extract_main(list(args)))
-
-
-@main.command(**_PASSTHROUGH)
-@click.argument('args', nargs=-1, type=click.UNPROCESSED)
 def admin(args):
     """Add OSM administrative boundaries (admin_boundaries table) to a built db (the Rust `duckosm admin`).
 
@@ -383,7 +370,7 @@ def levels(db, area):
     by hand: duckosm levels-edit DB (each of its solves writes into the db too). `duckosm build` does
     this as its last step. Your edits are the tables visualization.level_*: they are the master. Needs duckosm[levels].
     """
-    from duckosm.levels import make_and_solve
+    from duckosm._levels import make_and_solve
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     try:

@@ -65,7 +65,10 @@ def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bo
         raise ValueError("weight must be 'time' or 'length'")
 
     g = nx.DiGraph()
-    g.add_weighted_edges_from(con.execute(sql).fetchall(), weight="weight")
+    cur = con.execute(sql)
+    # in batches: a list of all arcs beside the graph doubles the memory
+    while rows := cur.fetchmany(100_000):
+        g.add_weighted_edges_from(rows, weight="weight")
     if node_attrs:
         _attach_edge_attrs(con, g, mode, roads)
     logger.info(f"routing graph[{mode}]: {g.number_of_nodes():,} edges, "
@@ -95,15 +98,16 @@ def _attach_edge_attrs(con, g, mode, roads=None):
     except Exception:
         pass
     with_access = roads is not None and roads != f"{mode}.edges"      # the restricted edges are in: say which ones
-    rows = con.execute(
+    cur = con.execute(
         f"SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry)"
-        f"{', access' if with_access else ''} FROM {roads or f'{mode}.edges'}").fetchall()
-    for eid, name, hw, length, spd, cost, geom, *acc in rows:
-        if eid in g:
-            g.nodes[eid].update(name=name, highway=hw, length_m=length,
-                                maxspeed_kmh=spd, cost_s=cost, geometry=geom)
-            if with_access and acc[0]:
-                g.nodes[eid]["access"] = acc[0]
+        f"{', access' if with_access else ''} FROM {roads or f'{mode}.edges'}")
+    while rows := cur.fetchmany(100_000):
+        for eid, name, hw, length, spd, cost, geom, *acc in rows:
+            if eid in g:
+                g.nodes[eid].update(name=name, highway=hw, length_m=length,
+                                    maxspeed_kmh=spd, cost_s=cost, geometry=geom)
+                if with_access and acc[0]:
+                    g.nodes[eid]["access"] = acc[0]
     return g
 
 

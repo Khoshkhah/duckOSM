@@ -10,7 +10,7 @@ import logging
 import os
 from pathlib import Path
 
-from duckosm.levels import is_current, load_roads, make_and_solve, roadstyle_module, sync_inputs
+from duckosm._levels import is_current, load_roads, make_and_solve, roadstyle_module, sync_inputs
 
 logger = logging.getLogger(__name__)
 

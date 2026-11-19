@@ -8,12 +8,7 @@ import signal
 import sys
 
 # TODO (step 6 of docs/design/all_in_rust.md): remove each command when its Rust PR merges, then this list.
-PYTHON_COMMANDS = {
-    # duckOSM's `duckosm build` (--pbf, --output, --config, ...): the Python steps with the Rust network step (DuckOSM.run).
-    # The whole build in Rust: `duckosm <PBF> -o <DIR>` and `duckosm --config` (not yet equal: docs/design/all_in_rust.md).
-    "build",
-    "levels",                   # no Rust port yet
-}
+PYTHON_COMMANDS = set()   # every command is in Rust now
 
 
 def main():

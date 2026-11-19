@@ -44,7 +44,7 @@ def test_write_map(tmp_path):
         pytest.skip("lanestyle before 0.3 has no lane_page")
     pytest.importorskip("scipy")
     from duckosm.gmns_map import write_map
-    from duckosm.levels import make_and_solve
+    from duckosm._levels import make_and_solve
     gmns = _gmns_db(tmp_path)
     src = tmp_path / "src.duckdb"
     with pytest.raises(FileNotFoundError, match="duckosm levels"):

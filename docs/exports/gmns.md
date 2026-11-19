@@ -100,7 +100,7 @@ Each command writes one HTML file (`-o` sets it).
 | `gmns-viz` | `-m` the mode (default `driving`), `-o` the output (default `<name>_viewer.html`) |
 | `gmns-map` | `--source-db` the database the GMNS file came from (required), `--area` the level area (default `<source-db>.levels`), `-o` the output (default `<name>_lanes.html`) |
 
-`duckosm levels` is not ported to Rust yet.
+`duckosm levels` writes the level area `<db>.levels` that `gmns-map` reads.
 
 The map below shows Monaco's lanes as `gmns-map` draws them. Each lane is a strip of road with its lane lines and an
 arrow for its direction. Bridges and tunnels keep their order. **Click a lane**: it turns red, and the lanes its

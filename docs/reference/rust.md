@@ -27,7 +27,7 @@ duckOSM Studio does this in its `crates/duckosm-wasm/Cargo.toml`.
 | `duckosm-parquet` | Write the tables as GeoParquet files | no |
 | `duckosm-duckdb` | Write the GeoParquet files into a `.duckdb` file, and make the base-map layers | yes |
 | `duckosm-build` | The whole build: `build`, `run`, the config file, `quack`, the levels | with the feature `duckdb` (on by default) |
-| `duckosm-route` | Routing on a built database: `route`, `route_points`, `directions` | yes |
+| `duckosm-route` | Routing on a built database: `route`, `route_points`, `directions`, and the graphs (`graphs`) | yes |
 | `duckosm-router` | The routing algorithms on plain data (no DuckDB), for the program, Python and the browser | no |
 | `duckosm-planner` | The route planner of `duckosm route-map`, also as WebAssembly | no |
 | `duckosm-export` | The exports: SUMO, MATSim, GMNS, GIS, OpenDRIVE, Lanelet2, railML | yes |
@@ -51,6 +51,12 @@ The crates with "no" also compile to WebAssembly.
 
 For WebAssembly, use `default-features = false, features = ["snap"]`.
 
+## Cargo features of `duckosm-route`
+
+| Feature | Does | Default |
+|---|---|---|
+| `petgraph` | `graphs::to_petgraph`: the graphs as [petgraph](https://docs.rs/petgraph) graphs | off |
+
 ## Main functions
 
 | Function | Does | Command |
@@ -66,6 +72,8 @@ For WebAssembly, use `default-features = false, features = ["snap"]`.
 | `duckosm_route::route::route(&con, &graph, from_edge, to_edge, mode)` | The shortest route between two edges, as JSON | `duckosm route` |
 | `duckosm_route::points::route_points(&con, a, b, mode, weight, radius_m, access_kmh)` | The shortest route between two `(lon, lat)` points | `duckosm route-points` |
 | `duckosm_route::directions::directions(&con, &route, mode)` | The turn-by-turn steps of a route | `duckosm directions` |
+| `duckosm_route::graphs::to_petgraph(db, mode, weight) -> Result<PetGraphs, String>` | The junction graph (`junctions`: a node is a junction with `x` and `y`, an edge a road with `edge_id` and its columns) and the turn graph (`turns`: a node is an `edge_id`, an arc a legal turn with its weight), as petgraph `DiGraph`s. The same graphs as Python's `to_networkx_nodes` and `to_networkx`. Needs the feature `petgraph`. | `duckosm export-graph` |
+| `duckosm_route::graphs::junction_rows`, `turn_rows` | The same graphs as rows, for another graph library | |
 | `duckosm_export::sumo::to_sumo(db, out_dir, mode, net_name, connections, config, netconvert)` | SUMO files | `duckosm sumo` |
 | `duckosm_export::matsim::to_matsim(db, out, mode, crs, gz)` | A MATSim network | `duckosm matsim` |
 | `duckosm_export::gmns::to_gmns(source, out, &modes)` | A GMNS database | `duckosm gmns` |
@@ -97,6 +105,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+```
+
+The graphs in petgraph (with `features = ["petgraph"]` on `duckosm-route`):
+
+```rust
+let g = duckosm_route::graphs::to_petgraph(Path::new("out/monaco.duckdb"), "driving", "time")?;
+let start = g.turn_index[&from];
+let cost = petgraph::algo::dijkstra(&g.turns, start, None, |e| *e.weight());
+println!("{} junctions, {} roads, {} turns", g.junctions.node_count(), g.junctions.edge_count(), g.turns.edge_count());
 ```
 
 To build from a config file, read it first:
