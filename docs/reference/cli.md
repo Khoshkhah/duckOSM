@@ -8,7 +8,7 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 | [Build and areas](#build-and-areas) | `get`, `cut`, `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
 | [Query and inspect](#query-and-inspect) | `way`, `features-check` |
 | [Maps and routing](#maps-and-routing) | `viz`, `route-map` |
-| [Exports](#exports) | `sumo`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
+| [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
 | [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
 | [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
 
@@ -74,6 +74,7 @@ duckosm build [OPTIONS]
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
+| `--tile-index` / `--no-tile-index` | add the zoom-28 [tile keys](database.md#tile-keys) to nodes and edges. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) has this option | on |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
@@ -435,6 +436,19 @@ duckosm gmns-map [OPTIONS] GMNS_DB
 | `--source-db PATH` | the core db, for bridges and tunnels in a GMNS file made before links had them | |
 | `-o`, `--out TEXT` | output HTML | `<name>_lanes.html` |
 
+### `sumo-map`
+
+Writes an HTML map of a SUMO net (the `.net.xml` of `duckosm sumo`) with lanestyle and roadstyle: each lane on its own
+shape at its width, and the internal lanes through the junctions. Page: [See it](../exports/sumo.md#see-it).
+
+```text
+duckosm sumo-map [OPTIONS] NET
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `-o`, `--out PATH` | output HTML | `<name>_lanes.html` |
+
 ### `gmns-viz`
 
 Writes an HTML viewer of a GMNS database: lanes, and the meso network when there is one. Hover a
@@ -629,4 +643,5 @@ duckosm multimodal [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `--transfer-cost FLOAT` | seconds added at each change of mode | `60.0` |
+| `--pair-cost FROM->TO=SECONDS` | another cost for one direction, for example `walking->driving=120`; repeat it for more directions (the build's `multimodal.transfer_costs`) | none |
 | `--schema TEXT` | schema for the two tables | `mm` |

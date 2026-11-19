@@ -1,6 +1,6 @@
 //! `duckosm gmns-map`: the lane-level page of a GMNS file (duckOSM's gmns_map.py, which called the Python lanestyle). The roads of the
 //! level area as roadstyle draws them, each as wide as its lanes, with the lanes, lane lines, arrows, zebras and sidewalks on them:
-//! lanestyle's Rust engine (`lanestyle::page::lane_page`).
+//! lanestyle's Rust engine (`lanestyle::page::lane_page`). `duckosm sumo-map`: the same look for a SUMO net (`lanestyle::page::sumo_page`).
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +18,21 @@ pub fn write_map(gmns_db: &Path, out: &Path, source_db: &Path, area: Option<&Pat
     }
     let text = |p: &Path| p.to_str().map(String::from).ok_or_else(|| format!("{}: not a UTF-8 path", p.display()));
     let (html, notes) = lanestyle::page::lane_page(&area, &text(gmns_db)?, &text(source_db)?, false, serde_json::Map::new())?;
+    for n in notes {
+        eprintln!("{n}");
+    }
+    if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+    }
+    std::fs::write(out, html).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(out.to_path_buf())
+}
+
+/// Write the lane page of the SUMO net `net` (a .net.xml) to `out`: SUMO's lanes and internal lanes, each on its own shape. Gives the path
+/// written.
+pub fn write_sumo_map(net: &Path, out: &Path) -> Result<PathBuf, String> {
+    let xml = std::fs::read_to_string(net).map_err(|e| format!("{}: {e}", net.display()))?;
+    let (html, notes) = lanestyle::page::sumo_page(&xml, serde_json::Map::new())?;
     for n in notes {
         eprintln!("{n}");
     }

@@ -1,0 +1,59 @@
+/* The home page's call-to-action row (buttons and the store badges) and the installation
+   page's store badges: on one line, spaced apart and wrapping onto further lines on narrow
+   screens. */
+.hero-actions p,
+.store-badges p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.hero-actions .md-button {
+  margin: 0;
+  padding-inline: 1.4em;
+}
+
+.hero-actions img,
+.store-badges img {
+  display: block;
+  height: 2rem;
+  width: auto;
+}
+
+/* Google's badge carries its own transparent margin: taller, with the margin cancelled, it
+   matches the other store badges. */
+img.store-badge-play {
+  height: 2.95rem;
+  margin: -0.475rem -0.4rem;
+}
+
+/* Screenshot captions: right under their image (the figure's Markdown leaves a line break
+   between them), as wide as it, at most two lines in the home page's two-column tour. */
+.md-typeset figure > br {
+  display: none;
+}
+
+.md-typeset figure img {
+  display: block;
+}
+
+.md-typeset figure figcaption {
+  max-width: none;
+  margin: 0.4em auto 0;
+}
+
+/* Video Tutorials: responsive 16:9 YouTube embeds. */
+.video-embed {
+  border-radius: 0.5rem;
+  margin: 1.2rem 0 1rem;
+  overflow: hidden;
+}
+
+.video-embed iframe {
+  aspect-ratio: 16 / 9;
+  border: 0;
+  display: block;
+  height: auto;
+  width: 100%;
+}
