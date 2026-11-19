@@ -110,6 +110,12 @@ struct Cli {
     /// Add duckOSM's H3 columns (nodes.h3_cell, edges.from_cell, to_cell, lca_res) at this resolution (0 to 15; duckOSM's default is 8).
     #[arg(long, value_name = "RES", conflicts_with = "config")]
     h3_resolution: Option<u8>,
+    /// Add the tile columns (nodes.tile, edges.from_tile, to_tile, lca_zoom: the zoom-28 tile keys of tileroute). On by default.
+    #[arg(long, overrides_with = "no_tile_index")]
+    tile_index: bool,
+    /// Do not add the tile columns (options.tile_indexing: false).
+    #[arg(long, overrides_with = "tile_index")]
+    no_tile_index: bool,
     /// With --boundary: also write the cut area as cut.osm.pbf (the nodes, ways and relations of osmium's smart cut,
     /// before the OSM fixes), to read in other tools or to use as the cut file of the browser page.
     #[arg(long, requires = "boundary")]
@@ -1154,6 +1160,9 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
     }
     if cli.config.is_none() {
         p.h3_resolution = cli.h3_resolution;
+    }
+    if cli.tile_index || cli.no_tile_index {
+        p.tile_indexing = cli.tile_index;
     }
     if let Some(f) = &cli.format {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;
