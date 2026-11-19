@@ -33,6 +33,9 @@ i_overlay = { version = "4.5", default-features = false }
 # the blocks of the temporary files of the sort of quack.rs (StrSort); a C library, so not in the browser build. The
 # version of parquet's zstd.
 zstd = { version = "0.14", optional = true }
+# mvt.rs and shortbread.rs: tan, ln, sinh and the other functions in pure Rust, so the tiles have the same bytes on
+# each platform and in the browser (the functions of std call the math library of the system)
+libm = "0.2"
 
 # util::raise_open_files: the tiles of quack keep many temporary files open
 [target.'cfg(unix)'.dependencies]

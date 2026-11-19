@@ -120,14 +120,11 @@ pub fn quack_pmtiles_to<R: Read + Seek + Send, W: Write + Seek>(
     duckosm_core::util::step("quack --pmtiles: the tiles");
 
     // the header and the metadata
-    let to_ll = |p: [f64; 2]| {
-        let lon = p[0] * 360.0 - 180.0;
-        let lat = (std::f64::consts::PI * (1.0 - 2.0 * p[1])).sinh().atan().to_degrees();
-        (lon, lat)
-    };
+    let to_ll = duckosm_core::mvt::lon_lat;
     let ((w0, n0), (e0, s0)) = if bbox[0] <= bbox[2] { (to_ll([bbox[0], bbox[1]]), to_ll([bbox[2], bbox[3]])) } else { ((0.0, 0.0), (0.0, 0.0)) };
     let span = (bbox[2] - bbox[0]).max(bbox[3] - bbox[1]).max(1e-9);
-    let center_zoom = (-span.log2()).floor().clamp(0.0, 14.0) as u8;
+    // the first zoom at which the area is less than one tile: an exact compare, the same on each platform
+    let center_zoom = (0..14u8).find(|&z| span * f64::from(1u32 << (z + 1)) > 1.0).unwrap_or(14);
     let mut layers = Vec::new();
     for (l, layer) in LAYERS.iter().enumerate() {
         if zooms[l].0 == u8::MAX {

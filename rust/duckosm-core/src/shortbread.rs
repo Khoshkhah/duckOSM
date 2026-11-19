@@ -189,26 +189,26 @@ const CIRCUMFERENCE: f64 = 40_052_725.78;
 
 /// Tilemaker's `zmin_for_area`: the first zoom at which an area (m², Mercator) has `px` square pixels.
 fn zmin_for_area(px: f64, area: f64) -> i32 {
-    ((px * CIRCUMFERENCE * CIRCUMFERENCE / (65536.0 * area)).ln() / (2.0 * std::f64::consts::LN_2)).floor() as i32
+    (libm::log(px * CIRCUMFERENCE * CIRCUMFERENCE / (65536.0 * area)) / (2.0 * std::f64::consts::LN_2)).floor() as i32
 }
 
 /// Tilemaker's `zmin_for_length`: the first zoom at which a line of `length` m has `px` pixels.
 fn zmin_for_length(px: f64, length: f64) -> i32 {
-    ((CIRCUMFERENCE * px / (256.0 * length)).ln() / std::f64::consts::LN_2).floor() as i32
+    (libm::log(CIRCUMFERENCE * px / (256.0 * length)) / std::f64::consts::LN_2).floor() as i32
 }
 
 /// The length of a line in meters on the sphere (as Tilemaker's `Length()`), from its world units.
 fn length_m(l: &[P]) -> f64 {
     let ll = |p: &P| {
-        let lon = p[0] * 360.0 - 180.0;
-        let lat = (std::f64::consts::PI * (1.0 - 2.0 * p[1])).sinh().atan().to_degrees();
+        let (lon, lat) = crate::mvt::lon_lat(*p);
         (lon.to_radians(), lat.to_radians())
     };
     l.windows(2)
         .map(|w| {
             let ((x1, y1), (x2, y2)) = (ll(&w[0]), ll(&w[1]));
-            let a = ((y2 - y1) / 2.0).sin().powi(2) + y1.cos() * y2.cos() * ((x2 - x1) / 2.0).sin().powi(2);
-            2.0 * 6_371_008.8 * a.sqrt().asin()
+            let (s1, s2) = (libm::sin((y2 - y1) / 2.0), libm::sin((x2 - x1) / 2.0));
+            let a = s1 * s1 + libm::cos(y1) * libm::cos(y2) * s2 * s2;
+            2.0 * 6_371_008.8 * libm::asin(a.sqrt())
         })
         .sum()
 }

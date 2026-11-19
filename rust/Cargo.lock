@@ -821,6 +821,7 @@ dependencies = [
  "geo",
  "i_overlay 4.5.2",
  "libc",
+ "libm",
  "miniz_oxide 0.8.9",
  "osmpbf",
  "pbfcut",

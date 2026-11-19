@@ -32,8 +32,13 @@ pub enum Shape {
 /// Web Mercator of a longitude and a latitude (degrees), with the latitude limit of the projection (85.0511°).
 pub fn mercator(lon: f64, lat: f64) -> P {
     let lat = lat.clamp(-85.051_128_78, 85.051_128_78).to_radians();
-    let y = 0.5 - (lat.tan() + 1.0 / lat.cos()).ln() / (2.0 * std::f64::consts::PI);
+    let y = 0.5 - libm::log(libm::tan(lat) + 1.0 / libm::cos(lat)) / (2.0 * std::f64::consts::PI);
     [(lon + 180.0) / 360.0, y]
+}
+
+/// The longitude and the latitude (degrees) of a point in world units: the inverse of [`mercator`].
+pub fn lon_lat(p: P) -> (f64, f64) {
+    (p[0] * 360.0 - 180.0, libm::atan(libm::sinh(std::f64::consts::PI * (1.0 - 2.0 * p[1]))).to_degrees())
 }
 
 /// The area of a ring (shoelace), in square world units; positive when the ring turns clockwise on the map.
