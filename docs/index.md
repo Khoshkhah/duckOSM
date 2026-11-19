@@ -105,10 +105,9 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
   <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database.</figcaption>
 </figure>
 
-<figure class="pair" markdown="span">
-  ![The lanes of one Monaco junction from the GMNS export, drawn by roadstyle](images/tour-lanes-gmns.png)
-  ![The same junction from the SUMO export after netconvert, drawn by roadstyle](images/tour-lanes-sumo.png)
-  <figcaption>One Monaco junction: the GMNS lanes (left) and SUMO's lanes after netconvert (right). The roads have the same lanes; inside the junction, SUMO draws its own.</figcaption>
+<figure markdown="span">
+  ![The lanes of one Monaco junction from the GMNS export: each lane at its width, with its turn arrows](images/tour-lanes-gmns.png)
+  <figcaption>GMNS lanes of one Monaco junction: each lane at its width, with its turns. <a href="exports/sumo/">Against SUMO</a></figcaption>
 </figure>
 
 <figure markdown="span">
@@ -124,10 +123,10 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 
 <div class="dk-levels">
 <a class="lv" href="exports/osm-file/"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
-<a class="lv" href="exports/#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
-<a class="lv" href="exports/#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
-<a class="lv" href="exports/#3-traffic-simulation"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
-<a class="lv" href="exports/#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
+<a class="lv" href="exports/osm-data/"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
+<a class="lv" href="exports/network/"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
+<a class="lv" href="exports/simulation/"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
+<a class="lv" href="exports/lanes/"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
 </div>
 
 All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
