@@ -757,20 +757,7 @@ impl Studio {
         }
         let mut db = self.host.db(&db_path);
         db.open()?;
-        let made = (|| -> Result<Option<(Value, Vec<u8>)>, String> {
-            let n = crate::rows(db.as_mut(), "SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = 'main' AND table_name IN ('elevation_grid', 'elevation_metadata')")?;
-            if n.first().and_then(|r| r["n"].as_i64()) != Some(2) {
-                return Ok(None);
-            }
-            let cells = db.texts("SELECT to_json({c: list(col), r: list(\"row\"), x: list(lon), y: list(lat), z: list(z)})::VARCHAR FROM main.elevation_grid")?;
-            let v: Value = serde_json::from_str(cells.first().cloned().flatten().as_deref().unwrap_or("null")).map_err(|e| format!("the ground grid: {e}"))?;
-            let ints = |k: &str| v[k].as_array().map(|a| a.iter().map(|x| x.as_i64().unwrap_or(0) as i32).collect::<Vec<_>>()).unwrap_or_default();
-            let floats = |k: &str| v[k].as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect::<Vec<_>>()).unwrap_or_default();
-            let g = roadstyle::tiles::terrain::Ground::from_cells(&ints("c"), &ints("r"), &floats("x"), &floats("y"), &floats("z"))?;
-            let meta = crate::rows(db.as_mut(), "SELECT sha256 AS id, source, product, vertical_datum, resolution_m, license FROM main.elevation_metadata LIMIT 1")?;
-            let meta = meta.into_iter().next().unwrap_or(Value::Null);
-            Ok(Some((meta.clone(), roadstyle::tiles::terrain::terrain_pmtiles(&g, &meta))))
-        })();
+        let made = crate::terrain_of(db.as_mut());
         db.close();
         match made? {
             Some((meta, bytes)) => {
@@ -1265,7 +1252,7 @@ mod tests {
     /// `levels-edit DB`: the one area is the file, next to the files of its folder; the folder does not change, and a build makes no other area.
     #[test]
     fn one_file_is_the_one_area() {
-        let dir = std::env::temp_dir().join(format!("duckosm-studio-file-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("duckosm-studio-one-file-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("other")).unwrap();
         std::fs::write(dir.join("monaco.duckdb"), b"db").unwrap();

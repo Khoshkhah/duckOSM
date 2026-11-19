@@ -38,3 +38,35 @@ fn viz_pages_of_monaco() {
     assert!(render_maps(&mut NativeDb::new(&db), &db, &bad).unwrap_err().contains("not in"));
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// The ground rule (docs/concepts/ground-reference.md, section 3): a page of an area with a ground draws that ground (roadstyle's page option
+/// `ground`, with the terrain file of main.elevation_grid), not the AWS Terrain Tiles. An area with no ground gets no option.
+#[test]
+fn pages_draw_the_area_ground() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let out = std::env::temp_dir().join(format!("duckosm-edit-ground-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).unwrap();
+    let s = root.join("data/sample");
+    let tif = root.join("rust/duckosm-build/tests/data/monaco-copernicus-glo30.tif");
+    for (name, dem) in [("bare", String::new()),
+                        ("dem", format!("elevation: {{dem: {}, product: DSM, vertical_datum: EGM2008, license: test}}\n", tif.display()))] {
+        let cfg = format!("name: {name}\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving]\noptions:\n  sea: false\n{dem}",
+                          out.display(), s.display(), s.display());
+        std::fs::write(out.join(format!("{name}.yaml")), cfg).unwrap();
+        let c = duckosm_build::config::read(&out.join(format!("{name}.yaml")), false, true).unwrap();
+        let mut p = c.params;
+        p.geoparquet = false;
+        duckosm_build::build(&c.pbf, &c.out, &p).unwrap();
+        let db = out.join(format!("{name}.duckdb"));
+        let mut d = NativeDb::new(&db);
+        duckosm_edit::Db::open(&mut d).unwrap();
+        let html = duckosm_edit::page::make(&mut d, name).unwrap();
+        let has = html.contains("data:application/vnd.pmtiles;base64,");
+        assert_eq!(has, name == "dem", "{name}: the page has the area's terrain file");
+        if has {
+            assert!(html.contains("\"product\":\"DSM\"") && html.contains("\"vertical_datum\":\"EGM2008\""), "the facts of main.elevation_metadata");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&out);
+}

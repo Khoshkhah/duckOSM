@@ -1,7 +1,7 @@
 # Your first network
 
 This builds the road network of Monaco from scratch, then queries it, routes on it and draws it.
-It takes a few minutes. You need duckOSM [installed](install.md) with `pip install "duckosm[routing,viz]"`.
+It takes a few minutes. You need duckOSM [installed](install.md): `pip install duckosm`.
 
 ## 1. Choose your area
 
@@ -21,7 +21,7 @@ extracts of every continent, country and many regions, updated daily. Monaco has
 curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf       # 0.7 MB
 ```
 
-For your own area, download the smallest region that contains it.
+For your own area, download the smallest region that contains it. Soon, `duckosm get` does steps 1 to 3 in one command.
 
 ## 3. Make the boundary file
 
@@ -40,10 +40,9 @@ duckosm build --pbf monaco-latest.osm.pbf -b monaco.geojson \
     -m driving -m walking -m cycling
 ```
 
-About ten seconds later you have **`monaco.duckdb`**: one file holding a driving, a walking and a
+A few seconds later you have **`monaco.duckdb`**: one file holding a driving, a walking and a
 cycling network, each in its own schema, plus the [base-map layers](reference/features.md) (water,
-buildings, POIs…). Roads that cross the border are kept whole, and small pieces that don't connect to
-the rest are removed.
+buildings, POIs…). Roads that cross the border are kept whole.
 
 ## 5. Query it
 
@@ -64,6 +63,8 @@ con.sql("""SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS 
 | secondary | 428 | 14.9 |
 | tertiary | 387 | 12.5 |
 | primary | 197 | 11.2 |
+
+Your numbers can be a little different: OSM changes every day.
 
 ## 6. Find a route
 
@@ -87,7 +88,7 @@ Every `edge_id` stays the same when you rebuild, cut out a smaller area, or expo
 ## 7. Draw it
 
 ```bash
-duckosm viz monaco.duckdb -m driving       # -> reports/monaco_driving_network.html (drawn by mapstyle)
+duckosm viz monaco.duckdb -m driving       # -> reports/monaco_driving_network.html
 ```
 
 Open the file in a browser. This is that file, live: zoom, hover a road, click one to see its
@@ -98,8 +99,9 @@ Open the file in a browser. This is that file, live: zoom, hover a road, click o
 
 ## Next
 
-- Build your own area: the same steps, with your area's id and region file.
-- [Guides](guides/prepare-area.md): prepare other areas, build options, fix OSM errors, query, route,
-  maps, elevation.
-- Exports: [SUMO](exports/sumo.md), [MATSim](exports/matsim.md), [GMNS](exports/gmns.md),
-  [GIS](exports/gis.md), [networkx](exports/networkx.md).
+| To | Read |
+|---|---|
+| build your own area | [Prepare an area](guides/prepare-area.md), [Build a network](guides/build.md) |
+| fix the OSM data | [Edit OSM data](guides/edit-osm-data.md) |
+| route and query | [Route](guides/route.md), [Query the database](guides/query.md) |
+| export to other tools | [Export](exports/index.md) |

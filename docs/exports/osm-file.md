@@ -3,7 +3,7 @@
 Level 0 of the outputs: the OSM data of your area as one `.osm.pbf` file, with your OSM fixes in it.
 
 `duckosm get` finds the area, downloads the OSM data and cuts it in one command. `duckosm cut --fixes` writes the
-fixes of [Edit OSM data](../guides/fix-osm-errors.md) into the file, so other tools read the edited data: OSMnx,
+fixes of [Edit OSM data](../guides/edit-osm-data.md#the-fixes-file) into the file, so other tools read the edited data: OSMnx,
 osm2pgsql, SUMO's OSM import, QGIS, osmium.
 
 | Reference and format | |

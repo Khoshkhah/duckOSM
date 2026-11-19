@@ -15,8 +15,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </div>
 
 <figure markdown="span">
-  ![duckOSM Studio: the steps in the panel, and the area of Monaco on the map](images/studio.png)
-  <figcaption>duckOSM Studio in the browser: choose an area, get its OSM data, build, edit and export.</figcaption>
+  ![duckOSM Studio: the Build card in the panel, and the road network of Monaco on the map](images/tour-studio.png)
+  <figcaption>duckOSM Studio in the browser: choose an area, build its network, edit the OSM data and export.</figcaption>
 </figure>
 
 ## Highlights
@@ -91,35 +91,35 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </figure>
 
 <figure markdown="span">
+  ![The quack page: the counts of the five GDAL layers of Monaco and a download button for each layer](images/tour-quack.png)
+  <figcaption>The quack page: GDAL's five OSM layers or the QuackOSM table, made in the browser.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![The route planner: a walking route from Fontvieille to Larvotto on the map, with the directions](images/tour-route.png)
+  <figcaption>The route planner of <code>duckosm route-map</code>: a route on the turn graph, with directions.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![The map of duckosm viz in 3D: the buildings of Monaco stand up around the port, with the roads between them](images/tour-map.png)
+  <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database.</figcaption>
+</figure>
+
+<figure markdown="span">
   ![Every lane of a GMNS network as a width ribbon: traffic lanes, bus lanes and turn connectors](images/gmns_lane_width.png)
   <figcaption>GMNS lanes of Södermalm: each lane with its own width, bus lanes and turn connectors.</figcaption>
 </figure>
 
 <figure markdown="span">
-  ![Monaco: the ground heights from FABDEM, with the area boundary](images/terrain-monaco.png)
-  <figcaption>The ground of an area: one bare-earth DEM for every height.</figcaption>
-</figure>
-
-<figure markdown="span">
-  ![The heights of the roads of Södermalm](images/sodermalm_elevation.png)
-  <figcaption>The height of each node and edge, after <code>duckosm elevation</code>.</figcaption>
+  ![Monaco in 3D on the ground of the area, with hillshade: the hill rises behind the port, and the roads climb it](images/tour-elevation.png)
+  <figcaption>Monaco in 3D on the ground of the area: the hill behind the port and the roads that climb it (<code>duckosm elevation</code>, or the step Ground height in Studio).</figcaption>
 </figure>
 
 </div>
 
-## One edge id for each direction
-
-```text
-edge_id = hash(osm_id, source, target)
-```
-
-**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
-to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
-a cut and every export ([how](concepts/edge-ids.md)).
-
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes.
+All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each output is checked against a reference tool ([how](concepts/checks.md)).
 
 <div class="dk-levels">
 <a class="lv" href="exports/osm-file/"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
@@ -129,83 +129,38 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 <a class="lv" href="exports/#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
 </div>
 
-| Output | Command | Format | More |
-|---|---|---|---|
-| **Road networks**: driving, walking and cycling, and the graph of legal turns | `duckosm build` | DuckDB | [Build a network](guides/build.md) |
-| **Base-map layers**: water, land use, buildings, POIs | `duckosm build` | DuckDB (`features.*`) | [Base-map layers](reference/features.md) |
-| **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB | [Drawing order](guides/drawing-order.md), [walls](concepts/building-walls.md) |
-| **The OSM features table** of QuackOSM | `duckosm quack`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoParquet, DuckDB | [duckOSM and QuackOSM](concepts/quackosm.md) |
-| **GDAL's five OSM layers**, as QGIS reads them | `duckosm quack --gdal`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoPackage, GeoParquet | [duckOSM and GDAL](concepts/gdal.md) |
-| **Traffic simulation networks** | `duckosm sumo`, `matsim`, `gmns` | SUMO, MATSim, GMNS | [Exports](exports/index.md) |
-| **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx | [GIS](exports/gis.md), [networkx](exports/networkx.md) |
-| **Heights**: the ground height of each node | `duckosm elevation` | DuckDB | [Add elevation](guides/elevation.md) |
-| **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML | [Draw a map](guides/draw-map.md) |
+All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
 
-Each output is compared with a reference tool ([how each output is checked](concepts/checks.md)).
+## Use it
 
-## Fix the OSM data
+<div class="grid cards" markdown>
 
-OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
-file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
+-   :material-console:{ .lg .middle } **Command line**
 
-| Where | How |
-|---|---|
-| Browser | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), step **Edit OSM data** |
-| Your computer | `duckosm edit my_area.duckdb` opens the same editor |
-| Build | `duckosm build --fixes osm_fixes.yaml`, `duckosm quack --fixes osm_fixes.yaml` |
+    ---
 
-You can change roads (one-way, lanes, speed, class, access), buildings (floors, height, roof, the type of each wall),
-nodes (traffic signals, crossings), turns, and add roads that OSM does not have.
+    One program, `duckosm`: `build`, `quack`, `sumo`, `gmns`, `edit` and more, each with `--help`.
 
-More: [Edit OSM data](guides/edit-osm-data.md), [Fix OSM errors](guides/fix-osm-errors.md).
+    [Command line](reference/cli.md) · [Quick start](install.md#quick-start)
 
-## Two versions, one engine
+-   :material-language-python:{ .lg .middle } **Python SDK**
 
-| | Native | Browser |
-|---|---|---|
-| Program | `duckosm` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) and the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) |
-| Install | `pip install duckosm` | none |
-| Storage | the disk | the browser's storage (OPFS) |
-| Rows | the same | the same |
+    ---
 
-Both build every area by map tiles, cut by [pbfcut](https://github.com/Khoshkhah/pbfcut), so the memory does not grow with
-the area ([Browser and native builds](concepts/browser-native.md)).
+    `pip install duckosm`, then `import duckosm`: build, quack, route and export from Python, all in the Rust engine.
 
-## Speed on France
+    [Python SDK](reference/python.md) · [Quick start](install.md#quick-start)
 
-France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB). Both versions build by map tiles, cut by
-[pbfcut](https://github.com/Khoshkhah/pbfcut).
+-   :material-language-rust:{ .lg .middle } **Rust SDK**
 
-| Job | Native | Browser | Other tool |
-|---|---|---|---|
-| Road network, driving | 3 min 36 s | 5 min 16 s | |
-| OSM features table (`quack`) | 2 min 9 s | 4 min 54 s | QuackOSM: 9 min 30 s |
-| GDAL's layers, GeoParquet (`quack --gdal`) | 3 min 37 s | 5 min 23 s | `ogr2ogr`: 14 min 18 s |
+    ---
 
-## Quick start
+    The crates `duckosm-core`, `duckosm-build` and others: the same engine in your own Rust program.
 
-```bash
-pip install duckosm
+    [Rust SDK](reference/rust.md)
 
-duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
-duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
-duckosm quack monaco.osm.pbf --gdal -o out --name monaco
-```
-
-```python
-import duckosm
-
-area = duckosm.get("Monaco")  # as duckosm get
-db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build
-
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
-r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
-duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
-```
-
-Next: [Your first network](first_network.md). All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
+</div>
 
 ---
 
-duckOSM is MIT-licensed and built on [DuckDB](https://duckdb.org) and its spatial extension.
-It is an independent project, not affiliated with or endorsed by the DuckDB Foundation.
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) ([ODbL](https://opendatacommons.org/licenses/odbl/)). Files from [Geofabrik](https://www.geofabrik.de/). Built on [DuckDB](https://duckdb.org/). duckOSM is MIT-licensed.

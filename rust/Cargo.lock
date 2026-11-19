@@ -848,6 +848,7 @@ dependencies = [
 name = "duckosm-edit"
 version = "0.8.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "duckdb",
  "duckosm-build",

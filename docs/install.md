@@ -12,6 +12,28 @@ duckosm --version
 | Ready-made packages | Linux (x86_64, aarch64), macOS (x86_64, arm64), Windows (x64) |
 | Other systems | `pip` builds from the source; this needs a [Rust toolchain](https://rustup.rs) |
 
+## Quick start
+
+```bash
+duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
+duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco
+```
+
+```python
+import duckosm
+
+area = duckosm.get("Monaco")  # as duckosm get (in the next release)
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build (in the next release)
+
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
+r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
+duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
+```
+
+All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).
+
+
 ## No install: the browser
 
 | Page | Does |
@@ -61,4 +83,4 @@ Both are being replaced by Rust code.
 
 A relative path (an output, a config, a report) is relative to the folder you run `duckosm` in.
 
-Next: [build your first network](first_network.md).
+Next: [Your first network](first_network.md), step by step.
