@@ -190,6 +190,7 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
     let con = Connection::open(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let c = Ctx { con: &con };
     c.exec("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")?;
+    c.exec(&format!("SET memory_limit = '{}'", crate::MEMORY_LIMIT))?;
     c.exec(&format!("ATTACH '{}' AS s (READ_ONLY)", source.display().to_string().replace('\'', "''")))?;
     let present = c.strings(
         "SELECT DISTINCT schema_name FROM duckdb_tables() WHERE database_name = 's' AND table_name = 'edges' \
