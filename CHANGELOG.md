@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`main.building_entrances` in the Rust build.** The Rust `duckosm` did not make the table of the doors, but the docs said
+  that `duckosm build` makes it with `--building-faces`. Now the step of the walls writes it from the nodes that it reads, so it
+  does not need `raw.*`. Monaco sample: 110 doors, 83 on a building outline, the same rows as the SQL on `raw.*`.
 - **Eight faults of the command line, found by the review of the docs.** On Monaco:
   - `duckosm gmns --check` failed 4 of 48 checks. The checks were wrong, not the data: a lane left of lane 1 (a bike lane on
     the left of a one-way road) has the number -1, as the GMNS spec says, and the walking network has only the walking lane,

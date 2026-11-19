@@ -225,6 +225,18 @@ fn route_lanes(py: Python<'_>, gmns_db: PathBuf, from_lane: String, to_lane: Str
     py.detach(|| duckosm_route::lanes::route_lanes(&gmns_db, &from_lane, &to_lane, &mode)).map(|v| text(&v)).map_err(err)
 }
 
+/// The rows of the junction graph and the turn graph of `mode` (duckosm_route::graphs), for `duckosm.to_rustworkx`: the junctions
+/// `(node_id, x, y)`, the roads `(source, target, edge_id, columns as JSON)` and the turns `(from_edge, to_edge, weight)`.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn graph_rows(py: Python<'_>, db: PathBuf, mode: String, weight: String)
+              -> PyResult<(Vec<(i64, Option<f64>, Option<f64>)>, Vec<(i64, i64, i64, String)>, Vec<(i64, i64, f64)>)> {
+    let ((js, roads), turns) = py.detach(|| duckosm_route::graphs::rows_of(&db, &mode, &weight)).map_err(err)?;
+    Ok((js.into_iter().map(|j| (j.node_id, j.x, j.y)).collect(),
+        roads.into_iter().map(|r| (r.source, r.target, r.edge_id, serde_json::Value::Object(r.columns).to_string())).collect(),
+        turns))
+}
+
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cli, m)?)?;
     m.add_function(wrap_pyfunction!(to_sumo, m)?)?;
@@ -237,6 +249,7 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_elevation, m)?)?;
     m.add_function(wrap_pyfunction!(route_multimodal, m)?)?;
     m.add_function(wrap_pyfunction!(route_points, m)?)?;
+    m.add_function(wrap_pyfunction!(graph_rows, m)?)?;
     m.add_function(wrap_pyfunction!(route_multimodal_points, m)?)?;
     m.add_function(wrap_pyfunction!(directions, m)?)?;
     m.add_function(wrap_pyfunction!(build_lane_graph, m)?)?;

@@ -1679,3 +1679,51 @@ mod tests {
         assert_eq!(nulls, 1);
     }
 }
+
+/// Write `building_entrances_main.parquet` (`main.building_entrances`), GeoParquet with a Point for each door: the door nodes of
+/// [`duckosm_core::building_faces::BuildingRings::entrances`] with their building, in the columns of duckOSM's SQL table.
+pub fn write_building_entrances_to<W: Write + Send>(out: W, rows: &[(&duckosm_core::raw::RawNode, Option<i64>)]) -> Result<(), String> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("osm_id", DataType::Int64, false),
+        Field::new("osm_type", DataType::Utf8, false),
+        Field::new("kind", DataType::Utf8, false),
+        field("door", DataType::Utf8),
+        field("access", DataType::Utf8),
+        field("housenumber", DataType::Utf8),
+        field("street", DataType::Utf8),
+        field("level", DataType::Utf8),
+        field("wheelchair", DataType::Utf8),
+        field("name", DataType::Utf8),
+        field("building_id", DataType::Int64),
+        field("tags", map_type()),
+        Field::new("geometry", DataType::Binary, false),
+    ]));
+    let mut w = ParWriter::try_new(out, schema.clone(), Some(props("Point"))).map_err(err)?;
+    for chunk in rows.chunks(ROW_GROUP) {
+        let tag = |k: &'static str| texts(chunk.iter().map(move |(n, _)| n.tags.iter().find(|t| t.0 == k).map(|t| t.1.as_str())));
+        let mut building = Int64Builder::new();
+        let mut g = BinaryBuilder::new();
+        for (n, b) in chunk {
+            building.append_option(*b);
+            g.append_value(point_wkb((n.lon, n.lat)));
+        }
+        let cols: Vec<ArrayRef> = vec![
+            i64s(chunk.iter().map(|(n, _)| n.id)),
+            texts(chunk.iter().map(|_| Some("node"))),
+            texts(chunk.iter().map(|(n, _)| Some(n.tags.iter().find(|t| t.0 == "entrance").map_or("door", |t| t.1.as_str())))),
+            tag("door"),
+            tag("access"),
+            tag("addr:housenumber"),
+            tag("addr:street"),
+            tag("level"),
+            tag("wheelchair"),
+            tag("name"),
+            Arc::new(building.finish()),
+            tags_column(chunk.iter().map(|(n, _)| &n.tags)),
+            Arc::new(g.finish()),
+        ];
+        w.write(&RecordBatch::try_new(schema.clone(), cols).map_err(err)?).map_err(err)?;
+    }
+    w.close().map_err(err)?;
+    Ok(())
+}

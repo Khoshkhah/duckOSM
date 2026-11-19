@@ -17,6 +17,7 @@ pub mod graph;
 pub mod hash;
 pub mod lanes;
 pub mod model;
+pub mod mvt;
 pub mod network;
 #[cfg(feature = "pbf")]
 pub mod osm2pgsql;
@@ -25,9 +26,12 @@ pub mod osmjson;
 pub mod pbf;
 #[cfg(feature = "pbf")]
 pub mod pbfraw;
+pub mod pmtiles;
 #[cfg(feature = "pbf")]
 pub mod quack;
 pub mod raw;
+#[cfg(feature = "pbf")]
+pub mod shortbread;
 pub mod sidewalks;
 pub mod speeds;
 pub mod spill;

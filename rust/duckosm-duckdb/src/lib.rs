@@ -53,8 +53,9 @@ pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memor
         &con,
         parquet_dir,
         "main",
-        // building_faces only when the build made the walls (--building-faces): write_schema skips a table that has no file
-        &["global_junctions", "boundary", "visualization_metadata", "building_faces"],
+        // building_faces and building_entrances only when the build made the walls (--building-faces): write_schema skips a table
+        // that has no file
+        &["global_junctions", "boundary", "visualization_metadata", "building_faces", "building_entrances"],
     )?;
     write_schema(&con, parquet_dir, "mm", &["transfers"])?;
     write_schema(&con, parquet_dir, "bus", &["routes", "route_edges"])?;
@@ -239,6 +240,34 @@ pub fn write_features(db: &Path, parquet_dir: &Path, sql: &str) -> Result<(), St
     con.execute_batch("CHECKPOINT").map_err(|e| e.to_string())
 }
 
+/// `main.building_faces` from `building_faces_main.parquet`, and `main.building_entrances`, the doors of the area, from `raw.*`
+/// (duckOSM `options.building_faces`; the same SQL as duckOSM's `rust_engine.py` and the page of Studio). A door is a node with
+/// `entrance` or `door`; its building is the building way that has the node in its outline (the smallest id). Returns (walls, doors).
+pub fn write_building_faces(db: &Path, parquet_dir: &Path) -> Result<(usize, usize), String> {
+    let con = Connection::open(db).map_err(|e| e.to_string())?;
+    let f = parquet_dir.join("building_faces_main.parquet").display().to_string().replace('\'', "''");
+    con.execute_batch(&format!(
+        "LOAD spatial;
+         CREATE OR REPLACE TABLE main.building_faces AS SELECT * REPLACE (geometry::GEOMETRY AS geometry) FROM read_parquet('{f}');
+         CREATE OR REPLACE TABLE main.building_entrances AS
+         WITH e AS (
+           SELECT osm_id, tags, lon, lat FROM raw.nodes WHERE map_extract(tags, 'entrance')[1] IS NOT NULL OR map_extract(tags, 'door')[1] IS NOT NULL
+         ), j AS (
+           SELECT node_id, min(building_id) AS building_id FROM (
+             SELECT w.osm_id AS building_id, unnest(w.refs) AS node_id FROM raw.ways w WHERE map_extract(w.tags, 'building')[1] IS NOT NULL)
+           WHERE node_id IN (SELECT osm_id FROM e) GROUP BY node_id)
+         SELECT e.osm_id, 'node' AS osm_type, coalesce(map_extract(e.tags, 'entrance')[1], 'door') AS kind, map_extract(e.tags, 'door')[1] AS door,
+                map_extract(e.tags, 'access')[1] AS access, map_extract(e.tags, 'addr:housenumber')[1] AS housenumber, map_extract(e.tags, 'addr:street')[1] AS street,
+                map_extract(e.tags, 'level')[1] AS level, map_extract(e.tags, 'wheelchair')[1] AS wheelchair, map_extract(e.tags, 'name')[1] AS name,
+                j.building_id, e.tags, ST_Point(e.lon, e.lat) AS geom
+         FROM e LEFT JOIN j ON j.node_id = e.osm_id;
+         CHECKPOINT;"
+    ))
+    .map_err(|e| format!("building_faces: {e}"))?;
+    let n = |t: &str| con.query_row(&format!("SELECT count(*) FROM main.{t}"), [], |r| r.get::<_, i64>(0)).map(|v| v as usize).map_err(|e| e.to_string());
+    Ok((n("building_faces")?, n("building_entrances")?))
+}
+
 /// The sea of the area, `features.ocean`, from Overture Maps (duckOSM `features/ocean.py`): the polygons of `base/water` with the
 /// subtype `ocean` of the newest release, cut to the box of `main.boundary` grown by 10 % (at least 500 m). It reads Overture's
 /// public GeoParquet on S3. Offline or on any error: a warning, an empty table, and `Ok(0)`, as duckOSM does.
@@ -343,7 +372,7 @@ const MODE_TABLES: &[&str] = &[
 pub fn select(table: &str) -> &'static str {
     match table {
         "nodes" | "virtual_nodes" => "SELECT node_id, geometry AS geom",
-        "boundary" => "SELECT * EXCLUDE (geometry), geometry AS geom",
+        "boundary" | "building_entrances" => "SELECT * EXCLUDE (geometry), geometry AS geom",
         "visualization_metadata" => {
             "SELECT boundary_geojson::JSON AS boundary_geojson, center_lat, center_lon, initial_zoom, timezone, built_at, duckosm_version"
         }

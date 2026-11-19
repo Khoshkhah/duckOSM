@@ -140,7 +140,7 @@ fn building_faces(tiles: &[(Tile, PathBuf)], p: &crate::Params, consume: bool, o
     use duckosm_core::building_faces::{building_faces_of, RingWriter, StreetFile};
     let open = |f: &Path| File::open(f).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", f.display()));
     let mut w = RingWriter::new()?;
-    let mut entrances = duckosm_core::util::FxHashMap::default();
+    let mut doors = Vec::new();
     for (_, d) in tiles {
         let f = d.join("building_rings.bin");
         if fs::exists(&f) {
@@ -148,9 +148,7 @@ fn building_faces(tiles: &[(Tile, PathBuf)], p: &crate::Params, consume: bool, o
         }
         let e = d.join("building_entrances.bin");
         if fs::exists(&e) {
-            for id in fs::read(&e).map_err(io)?.chunks_exact(8) {
-                entrances.insert(i64::from_le_bytes(id.try_into().expect("8 bytes")), ());
-            }
+            doors.extend(duckosm_core::building_faces::read_doors(&fs::read(&e).map_err(io)?)?);
         }
     }
     let mut seen = FxHashSet::default();
@@ -168,7 +166,8 @@ fn building_faces(tiles: &[(Tile, PathBuf)], p: &crate::Params, consume: bool, o
             }
         }
     }
-    let mut rings = w.finish(entrances)?;
+    let mut rings = w.finish(doors)?;
+    duckosm_parquet::write_building_entrances_to(create(&out.join("building_entrances_main.parquet"))?, &rings.entrances()?)?;
     let near = rings.near()?;
     let mut streets = StreetFile::new()?;
     let mut attrs = FxHashSet::default();

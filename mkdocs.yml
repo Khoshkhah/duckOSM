@@ -160,7 +160,7 @@ nav:
           - Base-map layers: exports/base-map.md
           - Geofabrik layers: exports/geofabrik.md
           - osm2pgsql tables: exports/osm2pgsql.md
-          # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
+          - Vector tiles (PMTiles): exports/pmtiles.md
       - 2. The network:
           - exports/network/index.md
           - The turn graph: exports/turn-graph.md

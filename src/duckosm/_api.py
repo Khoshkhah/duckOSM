@@ -198,6 +198,130 @@ def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
     return json.loads(_rust().route_lanes(_db(gmns_db), str(from_lane), str(to_lane), mode))
 
 
+# ---- graphs ------------------------------------------------------------------------------------------------------
+
+def to_rustworkx(con, mode="driving", graph="turns", weight="time"):
+    """The graph of ``mode`` as a ``rustworkx.PyDiGraph``, from the rows of the Rust code (no networkx).
+
+    ``graph="turns"``: the graph of :func:`to_networkx` (a node is an ``edge_id``, an arc a legal turn with its ``weight``:
+    ``"time"`` in seconds or ``"length"`` in metres). ``graph="junctions"``: the graph of ``to_networkx_nodes`` (a node is
+    ``{"node_id", "x", "y"}``, an edge a road with all its columns, ``geometry`` as WKT; parallel roads stay). ``g.attrs["index"]``
+    gives the node index of an id (an ``edge_id`` or a ``node_id``)."""
+    try:
+        import rustworkx as rx
+    except ImportError as e:
+        raise ImportError('to_rustworkx needs rustworkx: pip install "duckosm[rustworkx]"') from e
+    if graph not in ("turns", "junctions"):
+        raise ValueError("graph must be 'turns' or 'junctions'")
+    db = _db(con)
+    if db is None:
+        raise ValueError("to_rustworkx reads a database file: give its path or a connection to it")
+    junctions, roads, turns = _rust().graph_rows(db, mode, weight)
+    if graph == "turns":
+        ids = list(dict.fromkeys(i for a, b, _ in turns for i in (a, b)))     # the order of first use, as networkx
+        g = rx.PyDiGraph(multigraph=False, attrs={"mode": mode, "weight": weight})
+        g.attrs["index"] = dict(zip(ids, g.add_nodes_from(ids)))
+        ix = g.attrs["index"]
+        g.add_edges_from([(ix[a], ix[b], w) for a, b, w in turns])
+        return g
+    g = rx.PyDiGraph(multigraph=True, attrs={"mode": mode, "crs": "EPSG:4326"})
+    g.attrs["index"] = dict(zip((j[0] for j in junctions),
+                                g.add_nodes_from([{"node_id": n, "x": x, "y": y} for n, x, y in junctions])))
+    ix = g.attrs["index"]
+    g.add_edges_from([(ix[s], ix[t], {"edge_id": e, **json.loads(c)}) for s, t, e, c in roads])
+    return g
+
+
+# ---- the commands: build, tiles, quack, extract, boundary, levels, init-config -----------------------------------
+# Each function runs the program duckosm (the Rust code, duckosm._rust.cli) in its own process, with the options of its
+# command: the memory goes back to the system at the end, and the global thread pool of a command starts new each time.
+
+def _run(*args):
+    """Run ``duckosm ARGS`` and give its standard output. A failure raises RuntimeError with the message of the command."""
+    import subprocess
+    import sys
+    cmd = [sys.executable, "-m", "duckosm", *(str(a) for a in args if a is not None)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"duckosm {args[0]}: {(r.stderr or r.stdout).strip()}")
+    return r.stdout + r.stderr
+
+
+def _opt(flag, value):
+    """``[flag, value]``, or nothing when ``value`` is None."""
+    return [] if value is None else [flag, value]
+
+
+def _each(flag, values):
+    values = [values] if isinstance(values, str) else list(values or [])
+    return [x for v in values for x in (flag, v)]
+
+
+def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None,
+          features=None, levels=None, graph=None, h3_index=None, h3_resolution=None):
+    """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``). ``config``: a
+    config file; an option that is not None overrides it. Returns the path of the .duckdb file."""
+    def flag(name, value):
+        return None if value is None else (f"--{name}" if value else f"--no-{name}")
+    text = _run("build", *_opt("-c", config), *_opt("-p", pbf), *_opt("-o", output), *_opt("-b", boundary),
+                *_opt("--source-db", source_db), *_opt("--h3-cell", h3_cell), *_each("-m", modes), *_opt("--fixes", fixes),
+                flag("features", features), flag("levels", levels), flag("graph", graph), flag("h3-index", h3_index),
+                *_opt("--h3-resolution", h3_resolution))
+    return Path(text.rsplit("Output: ", 1)[1].strip())
+
+
+def levels(db):
+    """``duckosm levels``: make the drawing order of the roads again (``visualization.edge_levels``), with the edits, heads and caps of
+    ``visualization.level_*``. The database is changed in place. Returns its path."""
+    _run("levels", db)
+    return Path(db)
+
+
+def quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None,
+          tile_zoom=None):
+    """``duckosm quack``: the features table of QuackOSM, or with ``gdal=True`` the five layers of GDAL's OSM driver. Returns
+    the paths of the files that it wrote."""
+    formats = [formats] if isinstance(formats, str) else formats
+    _run("quack", pbf, "-o", out, "--name", name, *_opt("--format", formats and ",".join(formats)),
+         "--gdal" if gdal else None, *_opt("--fixes", fixes), *_opt("--threads", threads), None if sort else "--no-sort",
+         *_opt("--tiles", tiles), *_opt("--tile-zoom", tile_zoom))
+    out = Path(out)
+    return sorted(out.glob(f"{name}_gdal*" if gdal else f"{name}_quack.*"))
+
+
+def tiles(region=None, *, boundary=None, out=None, config=None, zoom=8, memory="2G", jobs=None, tile_threads=2,
+          keep_tiles=False, build_args=()):
+    """``duckosm tiles``: build a large area by tiles. ``build_args``: the build options of each tile (after ``--``).
+    Returns the output folder."""
+    _run("tiles", region, *_opt("--boundary", boundary), *_opt("-o", out), *_opt("--config", config),
+                    "--zoom", zoom, "--memory", memory, *_opt("--jobs", jobs), "--tile-threads", tile_threads,
+                    "--keep-tiles" if keep_tiles else None, *(["--", *build_args] if build_args else []))
+    if out is None:                    # the output_path of the config
+        import yaml
+        out = yaml.safe_load(Path(config).read_text()).get("output_path", ".")
+    return Path(out)
+
+
+def extract(source, db, *, name=None, osm_id=None, boundary=None):
+    """``duckosm extract``: cut one area (give one of ``name``, ``osm_id`` and ``boundary``) out of a built database into
+    the new database ``db``. Returns its path."""
+    _run("extract", "--source", source, "--db", db, *_opt("--name", name), *_opt("--osm-id", osm_id),
+         *_opt("--boundary", boundary))
+    return Path(db)
+
+
+def boundary(name=None, *, pbf=None, osm_id=None, offline=False, out=None):
+    """``duckosm boundary``: find the boundary of an area by name or OSM id and write it as GeoJSON. Returns its path."""
+    text = _run("boundary", name, *_opt("--pbf", pbf), *_opt("--osm-id", osm_id), "--offline" if offline else None,
+                *_opt("-o", out))
+    # the first line is "wrote <file>: ..."
+    return Path(out) if out is not None else Path(text.split("\n", 1)[0].removeprefix("wrote ").split(": ", 1)[0])
+
+
+def init_config(path="duckosm.yaml", *, force=False):
+    """``duckosm init-config``: write the commented config template. Returns its path."""
+    _run("init-config", path, "--force" if force else None)
+    return Path(path)
 # ---- level 0: the OSM file -----------------------------------------------------------------------------------------
 
 class Area:

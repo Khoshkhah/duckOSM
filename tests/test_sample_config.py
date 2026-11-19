@@ -47,11 +47,9 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     assert len(ids["walking"]) == 4 and ids["walking"] == ids["cycling"]
     # an extract keeps the boundary in `geom`, like a build, so maps can draw its outline
     # (it once wrote `geometry`, and the viz / route-map outline silently disappeared)
-    from duckosm.extract import main as extract
+    import duckosm
     from duckosm.viz import _boundary_geojson
-    part = tmp_path / "part.duckdb"
-    extract(["--source", str(tmp_path / "monaco.duckdb"), "--db", str(part),
-             "--boundary", str(ROOT / "data" / "sample" / "monaco.geojson")])
+    part = duckosm.extract(tmp_path / "monaco.duckdb", tmp_path / "part.duckdb", boundary=ROOT / "data" / "sample" / "monaco.geojson")
     assert _boundary_geojson(duckdb.connect(str(part), read_only=True)) is not None
     # a bus lane against a one-way street is in driving, with the private roads: Boulevard des Moulins
     # (way 166009794) is one-way for cars, its reverse a bus lane (docs/design/bus_only_edges.md)
