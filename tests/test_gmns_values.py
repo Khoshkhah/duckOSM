@@ -41,14 +41,14 @@ def test_a_fresh_build_passes_every_check(out):
 @pytest.mark.parametrize("sql, check", [
     ("UPDATE gmns_driving.link SET length = length * 1.2", "link.length is its geometry's length"),
     ("UPDATE gmns_driving.link SET lanes = lanes + 5", "link.lanes is not more than the lane rows"),
-    ("UPDATE gmns_driving.lane SET lane_num = lane_num + 1 WHERE lane_num = 2", "lane_num is 1..n"),
+    ("UPDATE gmns_driving.lane SET lane_num = lane_num + 1 WHERE lane_num = 2", "lane_num is 1..n, and -1..-k left of lane 1"),
     ("UPDATE gmns_driving.movement SET node_id = node_id + 1", "movement turns where its inbound link ends"),
     ("UPDATE gmns_driving.movement SET start_ib_lane = 1, end_ib_lane = 9, start_ob_lane = 1, end_ob_lane = 9",
      "movement inbound lanes exist"),
     ("UPDATE gmns_driving.movement SET start_ib_lane = 1, end_ib_lane = 2, start_ob_lane = 1, end_ob_lane = 1",
      "movement lane ranges are as long on both sides"),
     ("UPDATE gmns_driving.node SET x_coord = x_coord + 0.001", "link starts at its from_node"),
-    ("DELETE FROM gmns_driving.lane WHERE lane_num = 1", "lane_num is 1..n"),
+    ("DELETE FROM gmns_driving.lane WHERE lane_num = 1", "lane_num is 1..n, and -1..-k left of lane 1"),
     ("UPDATE gmns_driving.location SET lr = lr + 5000", "location lies on its link"),
 ])
 def test_each_check_fails_on_the_matching_break(out, sql, check):

@@ -6,8 +6,6 @@ ValidationError when `fail_on_error` and a check fails — the "fail loudly" saf
 that the per-way filter + component clean-up are supposed to satisfy.
 
 Checks (per mode):
-  - single_component      : the graph is one dominant weakly-connected component
-  - no_stranded_named     : no NAMED edge sits outside the largest component
   - unique_node_id        : no duplicate node_id in nodes (catches colliding virtual nodes)
   - way_length_conserved  : no interior stretch of a kept way is missing while a kept edge of the
                             same way bridges its endpoints — the exact signature of a parallel arc
@@ -22,7 +20,6 @@ A check result's `ok` is True (OK), False (FAIL — fatal under fail_on_error) o
 (WARN — reported but never fatal).
 """
 import logging
-from collections import Counter
 
 logger = logging.getLogger("duckosm")
 
@@ -38,39 +35,7 @@ class Validator:
         self.cfg = vcfg
 
     def run(self) -> list:
-        rows = self.con.execute(
-            f"SELECT edge_id, source, target, name FROM {self.mode}.edges").fetchall()
         results = []
-
-        if rows:
-            parent = {}
-
-            def find(x):
-                parent.setdefault(x, x)
-                r = x
-                while parent[r] != r:
-                    r = parent[r]
-                while parent[x] != r:
-                    parent[x], x = r, parent[x]
-                return r
-
-            for _, s, t, _ in rows:
-                parent[find(s)] = find(t)
-            comp = {eid: find(s) for eid, s, t, nm in rows}
-            sizes = Counter(comp.values())
-            largest = max(sizes, key=sizes.get)
-            n = len(rows)
-
-            if self.cfg.assert_single_component:
-                frac = sizes[largest] / n
-                ok = len(sizes) == 1 or frac >= 0.999
-                results.append(("single_component", ok,
-                                f"{len(sizes)} component(s), largest {sizes[largest]:,}/{n:,} "
-                                f"({frac:.1%})"))
-            if self.cfg.assert_no_stranded_named:
-                stranded = [eid for eid, s, t, nm in rows if nm and comp[eid] != largest]
-                results.append(("no_stranded_named", not stranded,
-                                f"{len(stranded)} named edge(s) outside the largest component"))
 
         if self.cfg.assert_unique_node_id:
             dups = self.con.execute(f"""

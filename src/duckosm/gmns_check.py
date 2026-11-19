@@ -18,7 +18,7 @@ _LEN_TOL = 0.01          # link.length vs its geometry (sphere vs ellipsoid expl
 def _checks(s):
     """(name, bad-count SQL, total-count SQL) for schema ``s``."""
     L, N, K, M = f"{s}.link", f"{s}.node", f"{s}.lane", f"{s}.movement"
-    cnt = f"(SELECT link_id, count(*) n, min(lane_num) lo, max(lane_num) hi FROM {K} GROUP BY link_id)"
+    cnt = f"(SELECT link_id, count(*) n, min(lane_num) lo, max(lane_num) hi, count(*) FILTER (lane_num > 0) np, min(lane_num) FILTER (lane_num > 0) plo, count(*) FILTER (lane_num < 0) nn, count(*) FILTER (lane_num = 0) nz, count(*) FILTER (allowed_uses = 'walk') nw FROM {K} GROUP BY link_id)"
     return [
         ("link starts at its from_node", f"""SELECT count(*) FROM {L} l JOIN {N} n ON n.node_id = l.from_node_id
             WHERE abs(ST_X(ST_StartPoint(l.geom)) - n.x_coord) > {_TOL_DEG}
@@ -35,11 +35,15 @@ def _checks(s):
             (SELECT from_node_id FROM {L} UNION SELECT to_node_id FROM {L})""", f"SELECT count(*) FROM {N}"),
         ("link has lane rows", f"SELECT count(*) FROM {L} WHERE link_id NOT IN (SELECT link_id FROM {K})",
          f"SELECT count(*) FROM {L}"),
-        ("lane_num is 1..n", f"SELECT count(*) FROM {cnt} WHERE lo <> 1 OR hi <> n", f"SELECT count(*) FROM {cnt}"),
+        # a lane left of lane 1 (a bike lane on the left of a one-way road) is -1, -2, ...: the spec numbers them negative
+        ("lane_num is 1..n, and -1..-k left of lane 1", f"""SELECT count(*) FROM {cnt}
+            WHERE nz > 0 OR (np > 0 AND (plo <> 1 OR hi <> np)) OR (nn > 0 AND lo <> -nn)""", f"SELECT count(*) FROM {cnt}"),
         # `lanes` counts motor lanes only (no turn pockets, bike lanes, shoulders), so it can be less than the
-        # lane rows, never more
+        # lane rows, never more. A link whose lane rows are only the walking lane (the walking network) has no rows
+        # for its motor lanes: it is not checked
         ("link.lanes is not more than the lane rows", f"""SELECT count(*) FROM {L} l JOIN {cnt} c USING (link_id)
-            WHERE l.lanes > c.n""", f"SELECT count(*) FROM {L} WHERE lanes IS NOT NULL"),
+            WHERE l.lanes > c.n AND c.nw < c.n""", f"""SELECT count(*) FROM {L} l JOIN {cnt} c USING (link_id)
+            WHERE l.lanes IS NOT NULL AND c.nw < c.n"""),
         ("location lies on its link", f"""SELECT count(*) FROM {s}.location x LEFT JOIN {L} l USING (link_id)
             WHERE l.link_id IS NULL OR x.lr < 0 OR x.lr > l.length + 0.01""", f"SELECT count(*) FROM {s}.location"),
         ("movement turns where its inbound link ends", f"""SELECT count(*) FROM {M} m JOIN {L} l ON l.link_id = m.ib_link_id
@@ -48,10 +52,12 @@ def _checks(s):
             WHERE l.from_node_id <> m.node_id""", f"SELECT count(*) FROM {M}"),
         ("movement ib and ob links differ", f"SELECT count(*) FROM {M} WHERE ib_link_id = ob_link_id", f"SELECT count(*) FROM {M}"),
         ("movement inbound lanes exist", f"""SELECT count(*) FROM {M} m JOIN {cnt} c ON c.link_id = m.ib_link_id
-            WHERE m.start_ib_lane IS NOT NULL AND (m.start_ib_lane < 1 OR m.end_ib_lane > c.n
+            WHERE m.start_ib_lane IS NOT NULL AND (m.start_ib_lane < c.lo OR m.end_ib_lane > c.hi
+                                                   OR m.start_ib_lane = 0 OR m.end_ib_lane = 0
                                                    OR m.start_ib_lane > m.end_ib_lane)""", f"SELECT count(*) FROM {M}"),
         ("movement outbound lanes exist", f"""SELECT count(*) FROM {M} m JOIN {cnt} c ON c.link_id = m.ob_link_id
-            WHERE m.start_ob_lane IS NOT NULL AND (m.start_ob_lane < 1 OR m.end_ob_lane > c.n
+            WHERE m.start_ob_lane IS NOT NULL AND (m.start_ob_lane < c.lo OR m.end_ob_lane > c.hi
+                                                   OR m.start_ob_lane = 0 OR m.end_ob_lane = 0
                                                    OR m.start_ob_lane > m.end_ob_lane)""", f"SELECT count(*) FROM {M}"),
         ("movement lane ranges are as long on both sides", f"""SELECT count(*) FROM {M}
             WHERE start_ib_lane IS NOT NULL AND start_ob_lane IS NOT NULL

@@ -77,7 +77,7 @@ import duckdb
 from duckosm import to_sumo
 con = duckdb.connect("monaco.duckdb", read_only=True)
 out = to_sumo(con, "sumo/")                                          # out["net"]: sumo/network.net.xml
-to_sumo(con, "sumo/", config={"junctions.join": "true"})             # change one netconvert option
+to_sumo(con, "sumo/", config={"junctions.join": "true"})             # change one netconvert option (CLI: duckosm sumo --join-junctions)
 to_sumo(con, "sumo/", edge_attrs={eid: {"numLanes": 2, "width": 3.1}})   # your lanes and widths for an edge
 ```
 
