@@ -1,4 +1,4 @@
-//! duckOSM's bus routes (`src/duckosm/bus.py`, docs/bus.md): each OSM bus route relation as the driving edges that its
+//! duckOSM's bus routes (docs/concepts/networks.md#bus-routes): each OSM bus route relation as the driving edges that its
 //! buses travel, in order and in their direction. A relation lists its ways in travel order; each way is travelled from
 //! the node that it shares with the way before to the node that it shares with the way after, so its direction comes
 //! from its neighbors, and the role `forward` / `backward` (or `oneway`) decides where a neighbor cannot. The node

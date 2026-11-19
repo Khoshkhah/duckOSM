@@ -30,7 +30,7 @@ fn multimodal_and_points_equal_duckosm() {
     std::fs::create_dir_all(&out).unwrap();
     let s = root.join("data/sample");
     let cfg = format!(
-        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n  build_features: false\nmultimodal: {{enabled: true}}\n",
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n  tile_indexing: false\n  build_features: false\nmultimodal: {{enabled: true}}\n",
         out.display(),
         s.display(),
         s.display()

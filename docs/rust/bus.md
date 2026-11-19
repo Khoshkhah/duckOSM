@@ -4,7 +4,7 @@ Status: done on 2026-10-23 (the decisions and the results are at the end). Group
 
 ## What duckOSM does
 
-duckOSM (`src/duckosm/bus.py`, "Bus routes" in `docs/concepts/networks.md`) writes each OSM bus route relation
+duckOSM (`src/duckosm/bus.py`, deleted after the port to Rust; "Bus routes" in `docs/concepts/networks.md`) writes each OSM bus route relation
 (`route` = `bus`, `trolleybus` or `share_taxi`) as the driving edges that its buses travel, in order and in their
 direction. A build from a PBF with driving does it (`options.bus_routes`, on by default). The input is `raw.relations`,
 `raw.ways` (after the OSM fixes), `driving.edges` and `driving.private_edges`.

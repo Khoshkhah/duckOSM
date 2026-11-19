@@ -95,14 +95,12 @@ def test_route_map_opens_on_walk_drive(monaco, tmp_path):
     pytest.importorskip("mapstyle")
     sync_api = pytest.importorskip("playwright.sync_api")
     import shutil
-    from duckosm.processors.multimodal import MultimodalBuilder
+    import subprocess
+    import sys
     from duckosm.route_map import write_route_map
     db = tmp_path / "monaco.duckdb"
     shutil.copy(monaco, db)
-    con = duckdb.connect(str(db))
-    con.execute("LOAD spatial")
-    MultimodalBuilder(con).run()
-    con.close()
+    subprocess.run([sys.executable, "-m", "duckosm", "multimodal", str(db)], check=True)
     page_file = write_route_map(db, tmp_path / "wd.html", mode="walk+drive")
     with sync_api.sync_playwright() as p:
         try:

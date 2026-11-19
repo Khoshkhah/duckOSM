@@ -135,6 +135,13 @@
 /* A tour: pictures of one size in two columns, cut to fit, the caption under each */
 .md-typeset .grid.tour { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 .md-typeset .grid.tour figure img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-radius: 0.4rem; }
+/* A pair of pictures side by side, one above the other on a phone; in the tour, on one full row */
+.md-typeset figure.pair { display: flex; flex-flow: row wrap; justify-content: center; gap: 0.6rem; }
+.md-typeset figure.pair img { flex: 1 1 14rem; min-width: 0; width: auto; border-radius: 0.4rem; }
+.md-typeset figure.pair figcaption { flex-basis: 100%; }
+.md-typeset figure.pair br { display: none; }
+.md-typeset .grid.tour figure.pair { grid-column: 1 / -1; }
+.md-typeset .grid.tour figure.pair img { aspect-ratio: 3 / 2; }
 
 /* Export: the diagram of the levels: a row of boxes with arrows; a column with down arrows on a phone */
 .md-typeset .dk-levels { display: flex; gap: 1.4rem; margin: 0.8rem 0 0.6rem; }

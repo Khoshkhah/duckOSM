@@ -48,10 +48,11 @@ const TOP: [&str; 16] = [
     "h3_cell",
     "elevation",
 ];
-const OPTIONS: [&str; 22] = [
+const OPTIONS: [&str; 23] = [
     "build_graph",
     "h3_indexing",
     "h3_resolution",
+    "tile_indexing",
     "merge_segments",
     "global_junctions",
     "infer_separate_sidewalks",
@@ -464,6 +465,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
         dem: dem.filter(|_| !clip_src),
         clip: clip_src.then(|| predicate.clone()),
         h3_resolution: h3_resolution.filter(|_| !clip_src),
+        tile_indexing: options.bool("tile_indexing", true)? && !clip_src,
         dem_product: elevation.str("product")?,
         dem_vertical_datum: elevation.str("vertical_datum")?,
         dem_license: elevation.str("license")?,

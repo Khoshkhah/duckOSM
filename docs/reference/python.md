@@ -12,7 +12,8 @@ pip install duckosm
 ```python
 import duckosm
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", boundary="monaco.geojson",
+area = duckosm.get("Monaco")                               # area.pbf, area.boundary
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary,
                    modes=["driving", "walking"])           # Path("monaco.duckdb")
 
 r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
@@ -43,6 +44,7 @@ These functions are new in this version.
 
 | Function | Main options | Returns | Command |
 |---|---|---|---|
+| `get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=".", name=None, fixes=None, cache=None, refresh=False)` | Give one of `place`, `osm_id`, `bbox` (a tuple `(west, south, east, north)`), `h3_cell` and `boundary`. `fixes`: the cut file has the [OSM fixes](../guides/edit-osm-data.md#the-fixes-file) in it. | an object with `pbf` and `boundary`, the `Path`s of the two files | [`duckosm get`](cli.md#get) |
 | `build(pbf=None, *, config=None, boundary=None, modes=["driving"], output=None, source_db=None, h3_cell=None, fixes=None, features=True, levels=True, graph=True, h3_index=True, h3_resolution=8)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that you give overrides the file. | the `Path` of the `.duckdb` file | [`duckosm build`](cli.md#build) |
 | `tiles(region=None, *, boundary=None, out=None, config=None, zoom=8, memory="2G", jobs=None, tile_threads=2, keep_tiles=False, build_args=[])` | `build_args`: the build options of each tile (the options after `--`) | the `Path` of the output folder | `duckosm tiles` |
 | `quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None, tile_zoom=None)` | `formats`: `["geoparquet"]`, `["duckdb"]` or both. With `gdal=True`: `["gpkg"]` or `["geoparquet"]`. `fixes`: an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file). `tile_zoom`: make the table tile by tile (zoom 0 to 14). | a list of the `Path`s of the files that it wrote | `duckosm quack` |
