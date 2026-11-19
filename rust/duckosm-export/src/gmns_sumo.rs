@@ -310,6 +310,14 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
     let k = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!("duckosm-gmns-sumo-{}-{k}-{mode}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
+    // the folder goes on each way out, also on an error (Kentucky: 1.3 GB)
+    struct Gone<'a>(&'a Path);
+    impl Drop for Gone<'_> {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.0);
+        }
+    }
+    let _gone = Gone(&tmp);
     let opts = crate::sumo::SumoOptions {
         bus_edges: mode == "driving",
         lanes: Some(ours_lanes),
@@ -318,7 +326,6 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
     };
     let s = crate::sumo::to_sumo_with(source, &tmp, mode, "gmns", true, None, true, &opts)?;
     let net = read_net(s.net.as_ref().ok_or("netconvert built no net")?)?;
-    let _ = std::fs::remove_dir_all(&tmp);
     let mut check: Vec<Check> = Vec::new();
     c.exec(&format!("CREATE OR REPLACE TABLE {sch}.lane_check(kind VARCHAR, id VARCHAR, detail VARCHAR)"))?;
     // our lanes of each link, left to right, and SUMO's (index from the right)
