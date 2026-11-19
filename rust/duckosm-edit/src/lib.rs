@@ -69,6 +69,32 @@ pub fn rows(db: &mut dyn Db, sql: &str) -> Result<Vec<Value>, String> {
         .map(|t| serde_json::from_str(&t.unwrap_or_else(|| "null".into())).map_err(|e| format!("a row: {e}"))).collect()
 }
 
+/// The facts of the area's ground (`main.elevation_metadata`, the row of `ele`) as roadstyle's page option `ground` takes them, or None when the
+/// database has no ground grid (`main.elevation_grid`): the area has no ground of its own (docs/concepts/ground-reference.md).
+pub fn ground_facts(db: &mut dyn Db) -> Result<Option<Value>, String> {
+    let n = rows(db, "SELECT count(*) AS n FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema = 'main' \
+                      AND table_name IN ('elevation_grid', 'elevation_metadata')")?;
+    if n.first().and_then(|r| r["n"].as_i64()) != Some(2) {
+        return Ok(None);
+    }
+    let meta = rows(db, "SELECT sha256 AS id, source, product, vertical_datum, resolution_m, license FROM main.elevation_metadata \
+                         WHERE coalesce(ele_column, 'ele') = 'ele' LIMIT 1")?;
+    Ok(Some(meta.into_iter().next().unwrap_or(Value::Null)))
+}
+
+/// The terrain file of the area's ground: roadstyle's terrain archive (`terrain_pmtiles`, Terrarium PNG tiles in one PMTiles file) of
+/// `main.elevation_grid`, with the facts of `ground_facts`. None when the area has no ground.
+pub fn terrain_of(db: &mut dyn Db) -> Result<Option<(Value, Vec<u8>)>, String> {
+    let Some(meta) = ground_facts(db)? else { return Ok(None) };
+    let cells = db.texts("SELECT to_json({c: list(col), r: list(\"row\"), x: list(lon), y: list(lat), z: list(z)})::VARCHAR FROM main.elevation_grid")?;
+    let v: Value = serde_json::from_str(cells.first().cloned().flatten().as_deref().unwrap_or("null")).map_err(|e| format!("the ground grid: {e}"))?;
+    let ints = |k: &str| v[k].as_array().map(|a| a.iter().map(|x| x.as_i64().unwrap_or(0) as i32).collect::<Vec<_>>()).unwrap_or_default();
+    let floats = |k: &str| v[k].as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect::<Vec<_>>()).unwrap_or_default();
+    let g = roadstyle::tiles::terrain::Ground::from_cells(&ints("c"), &ints("r"), &floats("x"), &floats("y"), &floats("z"))?;
+    let bytes = roadstyle::tiles::terrain::terrain_pmtiles(&g, &meta);
+    Ok(Some((meta, bytes)))
+}
+
 /// The database of one server, and what is made from it: the page, the tables, and the build's record.
 struct State {
     db: Box<dyn Db>,

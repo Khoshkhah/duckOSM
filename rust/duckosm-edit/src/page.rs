@@ -38,7 +38,24 @@ fn parquet(db: &mut dyn Db, sql: &str) -> Result<Vec<u8>, String> {
 
 /// The page of `duckosm edit`: the open database `db` (the area `name`) with the fixes editor.
 pub fn make(db: &mut dyn Db, name: &str) -> Result<String, String> {
-    make_with(db, name, SCRIPT, STYLE, None)
+    let extra = ground(db, "duckosm edit")?;
+    page_html(prepare(db, name, SCRIPT, STYLE, None, false)?, extra, "duckosm edit")
+}
+
+/// roadstyle's page option `ground` (docs/concepts/ground-reference.md, section 3: every renderer draws the area's ground): the facts of
+/// `main.elevation_metadata` and the terrain file of `main.elevation_grid`, in the page as a `data:` URL. An area with no ground gets no option:
+/// the map's terrain is then the AWS Terrain Tiles, and the map's attribution says "Ground: AWS Terrain Tiles". `who` says it on stderr too.
+pub(crate) fn ground(db: &mut dyn Db, who: &str) -> Result<serde_json::Map<String, Value>, String> {
+    use base64::Engine;
+    let mut extra = serde_json::Map::new();
+    match crate::terrain_of(db)? {
+        Some((mut facts, bytes)) => {
+            facts["terrain"] = json!(format!("data:application/vnd.pmtiles;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
+            extra.insert("ground".into(), facts);
+        }
+        None => eprintln!("{who}: the area has no ground grid (main.elevation_grid: build with a DEM, elevation.dem in the config): the 3D terrain is the AWS Terrain Tiles, not the area's ground"),
+    }
+    Ok(extra)
 }
 
 /// The page of the result of `duckosm studio`: the same page, with the base map "blank", so that the base map is the layers of the database itself (`features.*`: water, land
@@ -59,7 +76,8 @@ pub fn make_ask(db: &mut dyn Db, name: &str) -> Result<String, String> {
         let _ = std::fs::remove_file(f);
     }
     db.execute(&format!("ATTACH '{}' AS extra (READ_WRITE)", file.display().to_string().replace('\'', "''")))?;
-    make_with(db, name, ASK_SCRIPT, "", None)
+    let extra = ground(db, "duckosm ask")?;
+    page_html(prepare(db, name, ASK_SCRIPT, "", None, false)?, extra, "duckosm ask")
 }
 
 /// The tables and the columns of the open database, as roadstyle's plan of a duckOSM file reads them.

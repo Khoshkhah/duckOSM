@@ -3,7 +3,7 @@
 //! every mode (`<name>_map.html`) and one page for each mode with only that mode's edges and private roads (`<name>_<mode>_network.html`),
 //! over the database's own base map.
 
-use crate::page::{page_html, prepare_map};
+use crate::page::{ground, page_html, prepare_map};
 use crate::{rows, Db};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -71,7 +71,9 @@ pub fn map_page(db: &mut dyn Db, place: &str, mode: &str, only: bool, mut args: 
     }
     // the stored levels when the file has them, else the engine solves them (render_map's rule)
     let p = prepare_map(db, mode, only.then_some(mode), base, args, Value::Null, false)?;
-    page_html(p, env_keys(), "duckosm viz")
+    let mut extra = env_keys();
+    extra.extend(ground(db, "duckosm viz")?);
+    page_html(p, extra, "duckosm viz")
 }
 
 /// Write the maps of the built database `path` into `v.out_dir`; return the paths written.

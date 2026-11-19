@@ -4,6 +4,13 @@ resolver = "2"
 # The browser page (crates/duckosm-wasm) stays in duckosm-rust and takes these crates as a Git dependency.
 members = ["duckosm-core", "duckosm-parquet", "duckosm-duckdb", "duckosm-build", "duckosm-editor", "duckosm-edit", "duckosm-cli", "duckosm-py", "duckosm-export", "duckosm-tools", "duckosm-route", "duckosm-router", "duckosm-planner"]
 
+# One roadstyle commit for every crate (roadstyle main). lanestyle pins roadstyle too: keep the same rev, or the program has two roadstyle versions.
+[workspace.dependencies]
+roadstyle = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "53135c49e3c575bb3f0edb3c2b0816f80f484586" }
+roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "53135c49e3c575bb3f0edb3c2b0816f80f484586" }
+roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "53135c49e3c575bb3f0edb3c2b0816f80f484586", default-features = false }
+roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "53135c49e3c575bb3f0edb3c2b0816f80f484586" }
+
 [workspace.package]
 version = "0.8.0"   # the version of the Python package duckosm (tests/test_wheel.py checks that they are equal)
 edition = "2021"
