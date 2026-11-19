@@ -92,7 +92,7 @@ pub struct Counts {
 ///
 /// `exclude_modes`, the arrows of the lanes and the turn restrictions are not OSM data of a way, and quack leaves them out.
 /// The type goes to the workers of the browser as JSON.
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct QuackFixes {
     ways: crate::util::FxHashMap<i64, Change>,
     nodes: crate::util::FxHashMap<i64, Change>,
@@ -101,7 +101,7 @@ pub struct QuackFixes {
 }
 
 /// The changes of one element. `tags`: in this order, set a tag (`Some`) or delete it (`None`).
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Change {
     remove: bool,
     keep: Option<(i64, i64)>,
@@ -123,7 +123,7 @@ impl Change {
 }
 
 /// A new way: its points (rounded) and tags; `tile`: the tile (z, x, y) that owns it in quack by tiles.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct NewLine {
     id: i64,
     tags: RawTags,
@@ -140,7 +140,52 @@ impl QuackFixes {
     /// points of their OSM nodes and the tags of their `tags_from` ways. A new way with an OSM node that is not in the file
     /// is left out (the file of fixes is global), as in the build.
     pub fn new<R: Read + Send>(fixes: &crate::fixes::OsmFixes, open: impl Fn() -> Result<R, String>) -> Result<QuackFixes, String> {
-        use crate::fixes::{Elem, NewNode, NEW_WAY_ID_MIN};
+        let mut q = QuackFixes::rules(fixes)?;
+        if fixes.new_ways.is_empty() {
+            return Ok(q);
+        }
+        // the points of the OSM nodes and the tags of the `tags_from` ways
+        struct Find<'a> {
+            want: &'a NewWayInputs,
+            pts: Vec<(i64, Pt)>,
+            tags: Vec<(i64, RawTags)>,
+        }
+        impl RawSink for Find<'_> {
+            fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
+                if self.want.nodes.contains(&id) {
+                    self.pts.push((id, (lon, lat)));
+                }
+            }
+            fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {
+                if self.want.ways.contains(&id) {
+                    self.tags.push((id, tags.map(|(k, v)| (k.to_string(), v.to_string())).collect()));
+                }
+            }
+            fn relation<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>) {}
+        }
+        let want = NewWayInputs::of(fixes);
+        let (mut pts, mut from): (crate::util::FxHashMap<i64, Pt>, crate::util::FxHashMap<i64, RawTags>) = Default::default();
+        crate::cutstream::each_block(
+            &mut open()?,
+            |b, buf| {
+                let mut f = Find { want: &want, pts: Vec::new(), tags: Vec::new() };
+                crate::pbfraw::decode_block(b, [!want.nodes.is_empty(), !want.ways.is_empty(), false], buf, &mut f)?;
+                Ok((f.pts, f.tags))
+            },
+            |(p, t), _| {
+                pts.extend(p);
+                from.extend(t);
+                Ok(true)
+            },
+        )?;
+        q.finish(fixes, &pts, &from);
+        Ok(q)
+    }
+
+    /// The fixes of `fixes` without the new ways: the rules of the OSM elements and the network rules. [`QuackFixes::finish`]
+    /// adds the new ways. Checks the ids of the new ways.
+    pub fn rules(fixes: &crate::fixes::OsmFixes) -> Result<QuackFixes, String> {
+        use crate::fixes::{Elem, NEW_WAY_ID_MIN};
         let mut q = QuackFixes::default();
         for r in &fixes.ways {
             let c = q.ways.entry(r.osm_id).or_default();
@@ -165,56 +210,23 @@ impl QuackFixes {
             let tags = [oneway, num("lanes", r.lanes), num("lanes:forward", r.lanes_forward), num("lanes:backward", r.lanes_backward), num("layer", r.layer)];
             q.ways.entry(r.osm_id).or_default().tags.extend(tags.into_iter().flatten());
         }
-        if fixes.new_ways.is_empty() {
-            return Ok(q);
-        }
-        // the points of the OSM nodes and the tags of the `tags_from` ways
-        struct Find<'a> {
-            nodes: &'a crate::util::FxHashSet<i64>,
-            ways: &'a crate::util::FxHashSet<i64>,
-            pts: Vec<(i64, Pt)>,
-            tags: Vec<(i64, RawTags)>,
-        }
-        impl RawSink for Find<'_> {
-            fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
-                if self.nodes.contains(&id) {
-                    self.pts.push((id, (round7(lon), round7(lat))));
-                }
-            }
-            fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {
-                if self.ways.contains(&id) {
-                    self.tags.push((id, tags.map(|(k, v)| (k.to_string(), v.to_string())).collect()));
-                }
-            }
-            fn relation<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>) {}
-        }
-        let mut ids: (crate::util::FxHashSet<i64>, crate::util::FxHashSet<i64>) = Default::default();
-        for n in &fixes.new_ways {
-            ids.0.extend(n.nodes.iter().filter_map(|x| if let NewNode::Osm(id) = x { Some(*id) } else { None }));
-            ids.1.extend(n.tags_from);
-        }
-        let (mut pts, mut from): (crate::util::FxHashMap<i64, Pt>, crate::util::FxHashMap<i64, RawTags>) = Default::default();
-        crate::cutstream::each_block(
-            &mut open()?,
-            |b, buf| {
-                let mut f = Find { nodes: &ids.0, ways: &ids.1, pts: Vec::new(), tags: Vec::new() };
-                crate::pbfraw::decode_block(b, [!ids.0.is_empty(), !ids.1.is_empty(), false], buf, &mut f)?;
-                Ok((f.pts, f.tags))
-            },
-            |(p, t), _| {
-                pts.extend(p);
-                from.extend(t);
-                Ok(true)
-            },
-        )?;
         let mut seen = Vec::new();
         for n in &fixes.new_ways {
             if n.id < NEW_WAY_ID_MIN || seen.contains(&n.id) {
                 return Err(format!("osm_overrides new_ways: id {} is below {NEW_WAY_ID_MIN} or used two times", n.id));
             }
             seen.push(n.id);
+        }
+        Ok(q)
+    }
+
+    /// Add the new ways of `fixes`, with `pts` (lon, lat of the OSM nodes in the file) and `from` (the OSM tags of the
+    /// `tags_from` ways in the file). A new way with an OSM node that is not in `pts` is left out.
+    pub fn finish(&mut self, fixes: &crate::fixes::OsmFixes, pts: &crate::util::FxHashMap<i64, Pt>, from: &crate::util::FxHashMap<i64, RawTags>) {
+        use crate::fixes::NewNode;
+        for n in &fixes.new_ways {
             let line = n.nodes.iter().map(|x| match x {
-                NewNode::Osm(id) => pts.get(id).copied(),
+                NewNode::Osm(id) => pts.get(id).map(|&(lon, lat)| (round7(lon), round7(lat))),
                 NewNode::At((lon, lat)) => Some((round7(*lon), round7(*lat))),
             });
             let Some(line) = line.collect::<Option<Vec<Pt>>>() else {
@@ -227,7 +239,7 @@ impl QuackFixes {
                     tags.push((k.clone(), v.clone()));
                 }
             }
-            if let Some(c) = q.ways.get(&n.id) {
+            if let Some(c) = self.ways.get(&n.id) {
                 c.tags(&mut tags);
             }
             let closed = match (n.nodes.first(), n.nodes.last()) {
@@ -238,9 +250,8 @@ impl QuackFixes {
                 NewNode::Osm(id) => *id,
                 NewNode::At(_) => n.id * 1000 + i as i64 + 1,
             });
-            q.new_ways.push(NewLine { id: n.id, tags, pts: line, refs: refs.collect(), closed, tile: None });
+            self.new_ways.push(NewLine { id: n.id, tags, pts: line, refs: refs.collect(), closed, tile: None });
         }
-        Ok(q)
     }
 
     /// The fixes as JSON, for the workers of the browser and the DuckDB table function.
@@ -311,6 +322,26 @@ impl QuackFixes {
             Mode::Quack => way_feature(l.id, &l.tags, &l.pts),
         };
         self.new_ways.iter().filter(|l| mine(l)).filter_map(row).collect()
+    }
+}
+
+/// What the new ways of a fixes file need from the OSM file: the points of their OSM nodes and the tags of their
+/// `tags_from` ways.
+#[derive(Default)]
+pub struct NewWayInputs {
+    pub nodes: crate::util::FxHashSet<i64>,
+    pub ways: crate::util::FxHashSet<i64>,
+}
+
+impl NewWayInputs {
+    pub fn of(fixes: &crate::fixes::OsmFixes) -> NewWayInputs {
+        use crate::fixes::NewNode;
+        let mut w = NewWayInputs::default();
+        for n in &fixes.new_ways {
+            w.nodes.extend(n.nodes.iter().filter_map(|x| if let NewNode::Osm(id) = x { Some(*id) } else { None }));
+            w.ways.extend(n.tags_from);
+        }
+        w
     }
 }
 

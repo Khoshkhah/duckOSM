@@ -250,8 +250,7 @@ def _validator_db():
 
 
 def _vcfg(**on):
-    cfg = Validation(enabled=True, fail_on_error=False, assert_single_component=False,
-                     assert_no_stranded_named=False,
+    cfg = Validation(enabled=True, fail_on_error=False,
                      assert_unique_node_id=False, assert_way_length_conserved=False)
     for k, v in on.items():
         setattr(cfg, k, v)

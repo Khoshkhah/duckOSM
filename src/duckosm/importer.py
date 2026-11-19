@@ -677,15 +677,8 @@ class DuckOSM:
 
     # ---- validation (C) ---------------------------------------------------------------
     def _validate(self, mode: str) -> None:
-        from dataclasses import replace
-
         from duckosm.validate import Validator
         vcfg = self.config.validation
-        # There is no component filter (removed 2026-11-14: a road that does not connect to the main network is a real
-        # road), so a network can have separate parts: the single-component checks do not hold.
-        if vcfg.assert_single_component or vcfg.assert_no_stranded_named:
-            logger.info("  no component filter: skipping the single-component checks")
-            vcfg = replace(vcfg, assert_single_component=False, assert_no_stranded_named=False)
         self.validation_results[mode] = Validator(self.con, mode, vcfg).run()
 
     def _filter_roads(self, mode: str) -> None:

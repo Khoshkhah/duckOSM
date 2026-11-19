@@ -65,6 +65,9 @@ struct Cli {
     /// Do not build edge_graph and turn_permission (duckOSM option build_graph: false).
     #[arg(long, conflicts_with = "config")]
     no_graph: bool,
+    /// Build edge_graph and turn_permission (the default). With --no-graph: the last one on the command line wins.
+    #[arg(long, overrides_with = "no_graph", conflicts_with = "config")]
+    graph: bool,
     /// Do not build turn_restrictions and turn_path_restrictions (duckOSM option extract_restrictions: false).
     #[arg(long, conflicts_with = "config")]
     no_restrictions: bool,

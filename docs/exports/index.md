@@ -42,7 +42,7 @@ The routable network of each mode: edges with their `edge_id`, nodes, and the le
 | Your own router | [the turn graph](turn-graph.md) `edge_graph` in the database | `route()`, `Router` ([Route](../guides/route.md)) |
 | QGIS, a map style | the [base-map layers](base-map.md) `features.*`: water, land use, buildings, POIs | `duckosm build` |
 | QGIS, ArcGIS, FME | the network as [GeoPackage or shapefile](gis.md) | `duckosm export-gis` |
-| networkx | [a networkx graph](networkx.md), GraphML; gpickle only from Python (`write_graph()`) | `to_networkx()`, `duckosm export-graph` |
+| networkx | [a networkx graph](networkx.md), GraphML, gpickle | `to_networkx()`, `duckosm export-graph` |
 
 ### 3. Traffic simulation
 
