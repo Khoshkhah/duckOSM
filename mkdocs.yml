@@ -75,7 +75,6 @@ plugins:
         Guides:
           - guides/prepare-area.md
           - guides/build.md
-          - guides/fix-osm-errors.md
           - guides/studio.md
           - guides/edit-osm-data.md
           - guides/query.md
@@ -115,6 +114,8 @@ plugins:
           - reference/features.md
           - reference/elevation-sources.md
 
+not_in_nav: |
+  guides/fix-osm-errors.md
 exclude_docs: |
   design/
   development.md
@@ -131,7 +132,6 @@ nav:
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
       - Fix the OSM data: guides/edit-osm-data.md
-      - The fixes file: guides/fix-osm-errors.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md
@@ -145,22 +145,28 @@ nav:
       - Drawing order: guides/drawing-order.md
   - Export:
       - Overview: exports/index.md
-      - Traffic simulation:
-          - SUMO: exports/sumo.md
-          - MATSim: exports/matsim.md
+      - 1. OSM data:
+          - QuackOSM table: concepts/quackosm.md
+          - GDAL's OSM layers: concepts/gdal.md
+          # - Geofabrik layers: exports/geofabrik.md (added by its session)
+          # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
+          # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
+      - 2. The network:
+          - The turn graph: exports/turn-graph.md
+          - Base-map layers: exports/base-map.md
+          - GeoPackage / shapefile: exports/gis.md
+          - networkx: exports/networkx.md
+      - 3. Traffic simulation:
           - GMNS: exports/gmns.md
           - GMNS tables: exports/gmns_tables.md
+          - MATSim: exports/matsim.md
+          - SUMO: exports/sumo.md
+          - GMNS meso and micro: exports/gmns-meso-micro.md
           - railML: exports/railml.md
-      - Maps and GIS:
-          - GeoPackage / shapefile: exports/gis.md
-          - GDAL's OSM layers: concepts/gdal.md
-          - QuackOSM table: concepts/quackosm.md
-      - Graph analysis:
-          - networkx: exports/networkx.md
-      - Lane level and 3D:
-          - OpenDRIVE: exports/opendrive.md
-          - Lanelet2: exports/lanelet2.md
+      - 4. Lane level and 3D:
           - Lane-level routing: exports/lane-routing.md
+          - Lanelet2: exports/lanelet2.md
+          - OpenDRIVE: exports/opendrive.md
   - How it works:
       - How a build works: concepts/build.md
       - Browser and native builds: concepts/browser-native.md
@@ -174,6 +180,7 @@ nav:
       - How each output is checked: concepts/checks.md
       - The Rust engine: concepts/rust-engine.md
   - Compare:
+      - Overview: compare/index.md
       - Speed on France: compare/speed.md
       - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:

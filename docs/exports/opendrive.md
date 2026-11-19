@@ -1,10 +1,13 @@
 # OpenDRIVE (experimental)
 
-!!! warning "Experimental"
-    The file is checked for structure only, not against the ASAM schema. It is not yet loaded in CARLA or esmini.
-
 `duckosm opendrive` writes an ASAM OpenDRIVE 1.7 `.xodr` file, for driving simulators (CARLA, esmini) and
 microsimulators (PTV Vissim, Aimsun). Each OpenDRIVE road id is the duckOSM `edge_id`.
+
+| Reference and format | |
+|---|---|
+| Format | [ASAM OpenDRIVE 1.7](https://www.asam.net/standards/detail/opendrive/) (`.xodr`) |
+| Reference tool | none: the file is not yet loaded in CARLA or [esmini](https://github.com/esmini/esmini) |
+| Check | none yet against the ASAM schema. The tests check the XML structure and the order of its elements. [How each output is checked](../concepts/checks.md) |
 
 ```bash
 duckosm opendrive monaco.duckdb                       # -> monaco.xodr: roads only
@@ -45,10 +48,6 @@ to_opendrive("monaco_gmns.duckdb", "monaco.xodr", junctions=True)
 ```
 
 Design: [opendrive_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/opendrive_export.md).
-
-## How it is checked
-
-The tests check the XML structure and the order of its elements. See [How each output is checked](../concepts/checks.md).
 
 ## Limits
 

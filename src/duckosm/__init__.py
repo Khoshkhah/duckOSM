@@ -5,7 +5,7 @@ The names below are loaded when they are first used, so that ``import duckosm`` 
 fast. The exports, the routing and the elevation call the Rust code (``duckosm._api``, docs/design/all_in_rust.md).
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 _NAMES = {
     "DuckOSM": "duckosm.importer", "Config": "duckosm.config",

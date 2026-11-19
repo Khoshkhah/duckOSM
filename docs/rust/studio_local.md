@@ -46,7 +46,7 @@ One step is open at a time, and the next step opens when the one before is done.
    **Use**, or **In use** for the extract of the build. One extract serves every area that it covers, and the build does not download.
    The tab **File** takes the path of a `.osm.pbf` file on this computer. The build cuts the file to the area.
 4. **Build.** The networks and the options (the keys of [the config of `duckosm build`](../reference/configuration.md); open **Config of the build** to see the text),
-   **Fixes** (the path of a [fixes file](../guides/fix-osm-errors.md) on this computer: the key `osm_overrides`), and the button **Build**. The page shows the steps, and the
+   **Fixes** (the path of a [fixes file](../guides/edit-osm-data.md#the-fixes-file) on this computer: the key `osm_overrides`), and the button **Build**. The page shows the steps, and the
    time of each one. The build writes `OUT_DIR/<name>/<name>.duckdb`, the config it used (`config.yaml`) and the boundary (`boundary.geojson`). Then the map of
    the page shows the new area: its roads with their levels and the layers of the database, on a blank base map, with only the line of the boundary. The page
    does not load again: the server gives the map of the area as roadstyle's way D (`roadstyle local`): the tiles, the fields and the line of a
@@ -59,7 +59,7 @@ One step is open at a time, and the next step opens when the one before is done.
    of the file are the source's, and the ground id is the SHA-256 of the file. **Add the ground** builds the area again with the DEM (the same OSM data and
    settings). The 3D terrain of the map is then the area's own ground, not the AWS Terrain Tiles. Read [The ground reference](../concepts/ground-reference.md)
    and [Add elevation](../guides/elevation.md).
-7. **Edit OSM data.** The card opens the panel Edit OSM data of the area: the page of [`duckosm edit`](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
+7. **Edit OSM data.** The card opens the panel Edit OSM data of the area: the page of [`duckosm edit`](../guides/edit-osm-data.md#the-editor).
    Each change goes into `OUT_DIR/<name>/osm_fixes.yaml`, and **Build again** builds the area again with the file. Its back button comes back to the steps,
    with the area open.
 The map of an open area has the **3D walls by type** (front, back, side, party, court; the toolbox's 3D buildings, then the walls

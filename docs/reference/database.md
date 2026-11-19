@@ -135,7 +135,7 @@ vehicles at all times: for a `no_*` restriction that one turn, for an `only_*` r
 
 ### `turn_restrictions`
 
-Driving only. OSM turn restrictions, and the turn rules of a [fixes file](../guides/fix-osm-errors.md#turn-fixes-turn_restrictions),
+Driving only. OSM turn restrictions, and the turn rules of a [fixes file](../guides/edit-osm-data.md#the-fixes-file),
 mapped to edges. [Turn restrictions](../concepts/networks.md#turn-restrictions).
 
 | Column | Type | Description |
@@ -367,7 +367,7 @@ Every OSM administrative boundary in the PBF. [Add administrative boundaries](..
 
 One row for each wall of a building of the area: a segment of the outer ring of a building way, or of a ring of a multipolygon building
 relation. The Rust engine finds the type of each wall from the street edges of the driving and walking networks, then applies the wall
-rules of the [fixes file](../guides/edit-osm-data.md#extrabuilding_faces). A wall shorter than 0.1 m has no row. The method:
+rules of the [fixes file](../guides/edit-osm-data.md#the-fixes-file). A wall shorter than 0.1 m has no row. The method:
 [The walls of the buildings](../concepts/building-walls.md).
 
 | Column | Type | Description |
