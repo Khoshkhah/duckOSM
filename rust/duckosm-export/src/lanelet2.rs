@@ -5,7 +5,7 @@
 //! boundaries are merged on a grid of `snap_m`, so that lanelets share their nodes.
 
 use crate::offset::{offset_curve, P};
-use crate::{escape, has_table, open, write_text, Result};
+use crate::{escape, has_table, open, Out, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -91,28 +91,18 @@ pub fn to_lanelet2(gmns_db: &Path, out: &Path, mode: &str, snap_m: f64) -> Resul
     if !has_table(&con, &g, "lane")? {
         return Err(format!("no '{g}.lane' in {} — build a GMNS db first (duckosm gmns)", gmns_db.display()));
     }
-    let e = |e: duckdb::Error| e.to_string();
-    let mut st = con
-        .prepare(&format!(
-            "SELECT la.link_id, la.allowed_uses, COALESCE(la.width, 3.25)::DOUBLE, ST_AsText(la.geom), lk.free_speed::DOUBLE \
-             FROM {g}.lane la LEFT JOIN {g}.link lk ON lk.link_id = la.link_id WHERE la.geom IS NOT NULL"
-        ))
-        .map_err(e)?;
-    type Row = (i64, Option<String>, f64, String, Option<f64>);
-    let lanes: Vec<Row> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
-        .map_err(e)?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(e)?;
-    drop(st);
-    drop(con);
+    let sql = format!(
+        "SELECT la.link_id, la.allowed_uses, COALESCE(la.width, 3.25)::DOUBLE, ST_AsText(la.geom), lk.free_speed::DOUBLE \
+         FROM {g}.lane la LEFT JOIN {g}.link lk ON lk.link_id = la.link_id WHERE la.geom IS NOT NULL"
+    );
 
+    // the lanes come in chunks; only the snapped nodes, the ways and the lanelets stay (the file needs all nodes first)
     let snap = snap_m / 111320.0;
     let mut counter = 0i64;
     let mut node_id: HashMap<(i64, i64), i64> = HashMap::new();
     let mut nodes: Vec<(i64, f64, f64)> = Vec::new();
     let mut ways: Vec<(i64, Vec<i64>)> = Vec::new();
-    let mut rels: Vec<(i64, i64, i64, Vec<(&str, String)>)> = Vec::new();
+    let mut rels: Vec<(i64, i64, i64, i64, &'static str, Option<f64>)> = Vec::new(); // id, left, right, link, subtype, speed
     let mut way = |pts: &[P], counter: &mut i64, ways: &mut Vec<(i64, Vec<i64>)>| -> Option<i64> {
         let mut ns: Vec<i64> = Vec::new();
         for &(x, y) in pts {
@@ -133,47 +123,58 @@ pub fn to_lanelet2(gmns_db: &Path, out: &Path, mode: &str, snap_m: f64) -> Resul
         ways.push((*counter, ns));
         Some(*counter)
     };
-    for (link_id, use_, width, wkt, free_speed) in lanes {
-        let line = coords(&wkt);
-        let (left, right) = (offset_lonlat(&line, width / 2.0)?, offset_lonlat(&line, -width / 2.0)?);
-        if left.len() < 2 || right.len() < 2 {
-            continue;
+    crate::stream::each_chunk(&con, &sql, [], |c| {
+        for i in 0..c.len {
+            let (link_id, use_, width, free_speed) = (c.i64(0, i).unwrap_or_default(), c.str(1, i), c.f64(2, i).unwrap_or(3.25), c.f64(4, i));
+            let line = coords(c.str(3, i).unwrap_or_default());
+            let (left, right) = (offset_lonlat(&line, width / 2.0)?, offset_lonlat(&line, -width / 2.0)?);
+            if left.len() < 2 || right.len() < 2 {
+                continue;
+            }
+            let Some(lw) = way(&left, &mut counter, &mut ways) else { continue };
+            let Some(rw) = way(&right, &mut counter, &mut ways) else { continue };
+            counter += 1;
+            rels.push((counter, lw, rw, link_id, subtype(use_), free_speed.filter(|s| *s > 0.0)));
         }
-        let Some(lw) = way(&left, &mut counter, &mut ways) else { continue };
-        let Some(rw) = way(&right, &mut counter, &mut ways) else { continue };
+        Ok(())
+    })?;
+    drop(con);
+
+    let mut o = Out::create(out, false)?;
+    o.put("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<osm version=\"0.6\" generator=\"duckosm\">")?;
+    for (nid, lon, lat) in &nodes {
+        o.put(&format!("\n  <node id=\"{nid}\" visible=\"true\" version=\"1\" lat=\"{lat:.8}\" lon=\"{lon:.8}\"/>"))?;
+    }
+    for (wid, ns) in &ways {
+        let mut t = format!("\n  <way id=\"{wid}\" visible=\"true\" version=\"1\">");
+        for n in ns {
+            t += &format!("\n    <nd ref=\"{n}\"/>");
+        }
+        t += "\n    <tag k=\"type\" v=\"line_thin\"/>\n  </way>";
+        o.put(&t)?;
+    }
+    for (rid, lw, rw, link_id, sub, speed) in &rels {
         let mut tags = vec![
             ("type", "lanelet".to_string()),
-            ("subtype", subtype(use_.as_deref()).to_string()),
+            ("subtype", sub.to_string()),
             ("location", "urban".into()),
             ("one_way", "yes".into()),
             ("duckosm:edge_id", link_id.to_string()),
         ];
-        if let Some(s) = free_speed.filter(|s| *s > 0.0) {
-            tags.push(("speed_limit", py_g(s)));
+        if let Some(s) = speed {
+            tags.push(("speed_limit", py_g(*s)));
         }
-        counter += 1;
-        rels.push((counter, lw, rw, tags));
+        let mut t = format!("\n  <relation id=\"{rid}\" visible=\"true\" version=\"1\">");
+        t += &format!("\n    <member type=\"way\" ref=\"{lw}\" role=\"left\"/>");
+        t += &format!("\n    <member type=\"way\" ref=\"{rw}\" role=\"right\"/>");
+        for (k, v) in &tags {
+            t += &format!("\n    <tag k=\"{}\" v=\"{}\"/>", escape(k), escape(v));
+        }
+        t += "\n  </relation>";
+        o.put(&t)?;
     }
-
-    let mut o = vec!["<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(), "<osm version=\"0.6\" generator=\"duckosm\">".into()];
-    for (nid, lon, lat) in &nodes {
-        o.push(format!("  <node id=\"{nid}\" visible=\"true\" version=\"1\" lat=\"{lat:.8}\" lon=\"{lon:.8}\"/>"));
-    }
-    for (wid, ns) in &ways {
-        o.push(format!("  <way id=\"{wid}\" visible=\"true\" version=\"1\">"));
-        o.extend(ns.iter().map(|n| format!("    <nd ref=\"{n}\"/>")));
-        o.push("    <tag k=\"type\" v=\"line_thin\"/>".into());
-        o.push("  </way>".into());
-    }
-    for (rid, lw, rw, tags) in &rels {
-        o.push(format!("  <relation id=\"{rid}\" visible=\"true\" version=\"1\">"));
-        o.push(format!("    <member type=\"way\" ref=\"{lw}\" role=\"left\"/>"));
-        o.push(format!("    <member type=\"way\" ref=\"{rw}\" role=\"right\"/>"));
-        o.extend(tags.iter().map(|(k, v)| format!("    <tag k=\"{}\" v=\"{}\"/>", escape(k), escape(v))));
-        o.push("  </relation>".into());
-    }
-    o.push("</osm>\n".into());
-    write_text(out, &o.join("\n"), false)?;
+    o.put("\n</osm>\n")?;
+    o.finish()?;
     Ok(Summary { lanelets: rels.len(), ways: ways.len(), nodes: nodes.len() })
 }
 
