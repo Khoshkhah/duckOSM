@@ -91,7 +91,14 @@ The page holds all the roads. Use it for a city: above 100,000 edges, the comman
 
 ## Large areas
 
-The graph of one mode is in memory, with 12 bytes for each turn. On a Mac mini (Apple M6, 12 cores, 16 GB), a route by car
-from Paris to Marseille on the France network (25.9 million edges) takes 3.7 s after a load of 11 to 16 s, with a peak of
-6.4 GB. All measurements and the details of point routing and directions:
-[routing details](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/route_details.md).
+The router first loads the network of one mode into memory. This takes some time, but it happens once. After that, each
+route is fast. For many routes, use `Router`, which loads the network once and keeps it.
+
+France, driving (25.9 million edges), on a Mac mini (Apple M6, 12 cores, 16 GB):
+
+| Step | Time | Memory |
+|---|---|---|
+| Load the network (once) | 11 to 16 s | |
+| One route, Paris to Marseille | 3.7 s | 6.4 GB at the peak |
+
+More measurements: [routing details](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/route_details.md).
