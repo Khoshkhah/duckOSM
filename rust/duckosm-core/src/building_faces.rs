@@ -755,6 +755,8 @@ pub struct BuildingRings {
     lo: Pt,
     hi: Pt,
     entrances: FxHashMap<i64, ()>,
+    /// The door nodes ([`is_door`]) with all their tags, sorted by id: the rows of `main.building_entrances`.
+    doors: Vec<RawNode>,
 }
 
 /// The rings to a temporary file, one at a time: the building ways in their order, then the building multipolygons.
@@ -840,13 +842,21 @@ impl RingWriter {
         }
     }
 
-    pub fn finish(self, entrances: FxHashMap<i64, ()>) -> Result<BuildingRings, String> {
-        Ok(BuildingRings { file: self.w.finish().map_err(io_err)?, n: self.n, lo: self.lo, hi: self.hi, entrances })
+    /// The rings with the door nodes ([`is_door`], all their tags). The entrances of the walls are the doors with [`is_entrance`].
+    pub fn finish(self, mut doors: Vec<RawNode>) -> Result<BuildingRings, String> {
+        doors.sort_unstable_by_key(|n| n.id);
+        doors.dedup_by_key(|n| n.id);
+        let entrances = doors
+            .iter()
+            .filter(|n| is_entrance(n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str()))))
+            .map(|n| (n.id, ()))
+            .collect();
+        Ok(BuildingRings { file: self.w.finish().map_err(io_err)?, n: self.n, lo: self.lo, hi: self.hi, entrances, doors })
     }
 }
 
 /// The rings of one tile of a build by tiles, for the union (duckOSM docs/design/build_by_tiles.md, "The building faces"): each row
-/// is the length (4 bytes) and the bytes of a ring; a file of entrances is the ids of the entrance nodes (8 bytes each).
+/// is the length (4 bytes) and the bytes of a ring; a file of doors is the door nodes ([`put_door`]).
 fn put_row(out: &mut dyn Write, r: &Ring, buf: &mut Vec<u8>) -> std::io::Result<()> {
     buf.clear();
     RingCodec.put(r, buf);
@@ -858,13 +868,13 @@ impl BuildingRings {
     /// The rings of a tile of a build by tiles in two part files: `mine`, the buildings that the tile owns, and `border`, the buildings
     /// that no tile alone owns (outside the area: the union keeps one copy of each); the buildings of other tiles nowhere. `class` gives
     /// the owner of a building from its id, whether it is a relation, and the first point of its first ring (`union::Owner::place`:
-    /// 1 this tile, 2 the border, 0 another tile). All rings of a building go with it. `entrances` gets the ids of the entrance nodes.
+    /// 1 this tile, 2 the border, 0 another tile). All rings of a building go with it. `doors` gets the door nodes ([`put_door`]).
     pub fn split(
         self,
         class: impl Fn(i64, bool, Pt) -> u8,
         mine: &mut dyn Write,
         border: &mut dyn Write,
-        entrances: &mut dyn Write,
+        doors: &mut dyn Write,
     ) -> Result<(usize, usize), String> {
         let (mut buf, mut last, mut n) = (Vec::new(), None, (0, 0));
         for r in self.file.read(&RingCodec).map_err(io_err)? {
@@ -882,12 +892,32 @@ impl BuildingRings {
                 n.1 += 1;
             }
         }
-        let mut ids: Vec<i64> = self.entrances.into_keys().collect();
-        ids.sort_unstable();
-        for id in ids {
-            entrances.write_all(&id.to_le_bytes()).map_err(io_err)?;
+        for d in &self.doors {
+            put_door(doors, d).map_err(io_err)?;
         }
         Ok(n)
+    }
+
+    /// The rows of `main.building_entrances`: each door node, with the smallest id of the building ways that have it in their
+    /// ring (None: no building way has it). A building relation gives no id.
+    pub fn entrances(&self) -> Result<Vec<(&RawNode, Option<i64>)>, String> {
+        let mut rows: Vec<(&RawNode, Option<i64>)> = self.doors.iter().map(|d| (d, None)).collect();
+        if rows.is_empty() {
+            return Ok(rows);
+        }
+        for r in self.file.read_ref(&RingCodec).map_err(io_err)? {
+            let r = r.map_err(io_err)?;
+            if r.relation {
+                continue;
+            }
+            for n in &r.ids {
+                if let Ok(i) = rows.binary_search_by_key(n, |x| x.0.id) {
+                    let b = &mut rows[i].1;
+                    *b = Some(b.map_or(r.id, |b| b.min(r.id)));
+                }
+            }
+        }
+        Ok(rows)
     }
 
     /// The grid near the rings: a street segment out of it is too far from every building (see [`NearBuildings`]).
@@ -985,18 +1015,7 @@ pub fn building_rings(ways: &[RawWay], nodes: &[RawNode], relations: &[Relation]
             }
         }
     }
-    // the entrances: the nodes with an `entrance` tag that is a way in for people
-    let entrances: FxHashMap<i64, ()> = nodes
-        .iter()
-        .filter(|n| {
-            n.tags
-                .iter()
-                .any(|t| t.0 == "entrance" && !NOT_ENTRANCES.contains(&t.1.as_str()))
-        })
-        .map(|n| (n.id, ()))
-        .collect();
-
-    rings.finish(entrances)
+    rings.finish(nodes.iter().filter(|n| is_door(n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str())))).cloned().collect())
 }
 
 /// Is a way with these tags and nodes a building ring: a `building` tag that is not `no`, closed, 4 nodes or more.
@@ -1013,6 +1032,60 @@ pub fn is_building_relation(r: &Relation) -> bool {
 /// The `addr:street` of a building, trimmed and in lower case (the name of a street is compared in lower case).
 pub fn addr_of<'a>(mut tags: impl Iterator<Item = (&'a str, &'a str)>) -> Option<String> {
     tags.find(|t| t.0 == "addr:street" && !t.1.trim().is_empty()).map(|t| t.1.trim().to_lowercase())
+}
+
+/// Is a node a door of `main.building_entrances` (a node with an `entrance` or a `door` tag, of any value)?
+pub fn is_door<'a>(mut tags: impl Iterator<Item = (&'a str, &'a str)>) -> bool {
+    tags.any(|t| t.0 == "entrance" || t.0 == "door")
+}
+
+/// A door node to a file of doors of a tile: id, lon, lat (8 bytes each), the number of tags (4 bytes), and each key and value
+/// as its length (4 bytes) and its bytes.
+fn put_door(out: &mut dyn Write, n: &RawNode) -> std::io::Result<()> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&n.id.to_le_bytes());
+    b.extend_from_slice(&n.lon.to_le_bytes());
+    b.extend_from_slice(&n.lat.to_le_bytes());
+    b.extend_from_slice(&(n.tags.len() as u32).to_le_bytes());
+    for (k, v) in &n.tags {
+        for t in [k, v] {
+            b.extend_from_slice(&(t.len() as u32).to_le_bytes());
+            b.extend_from_slice(t.as_bytes());
+        }
+    }
+    out.write_all(&b)
+}
+
+/// The door nodes of a file of [`put_door`].
+pub fn read_doors(mut b: &[u8]) -> Result<Vec<RawNode>, String> {
+    fn take<'a>(b: &mut &'a [u8], n: usize) -> Result<&'a [u8], String> {
+        if b.len() < n {
+            return Err("a file of doors ends in a row".into());
+        }
+        let (h, t) = b.split_at(n);
+        *b = t;
+        Ok(h)
+    }
+    let u64_of = |x: &[u8]| u64::from_le_bytes(x.try_into().expect("8 bytes"));
+    let mut out = Vec::new();
+    while !b.is_empty() {
+        let id = u64_of(take(&mut b, 8)?) as i64;
+        let lon = f64::from_bits(u64_of(take(&mut b, 8)?));
+        let lat = f64::from_bits(u64_of(take(&mut b, 8)?));
+        let n = u32::from_le_bytes(take(&mut b, 4)?.try_into().expect("4 bytes"));
+        let mut tags = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let mut kv = [String::new(), String::new()];
+            for t in &mut kv {
+                let len = u32::from_le_bytes(take(&mut b, 4)?.try_into().expect("4 bytes")) as usize;
+                *t = String::from_utf8(take(&mut b, len)?.to_vec()).map_err(|e| e.to_string())?;
+            }
+            let [k, v] = kv;
+            tags.push((k, v));
+        }
+        out.push(RawNode { id, lon, lat, tags });
+    }
+    Ok(out)
 }
 
 /// Is a node with these tags an entrance (a way in for people)? See [`building_rings`].
@@ -1034,7 +1107,7 @@ pub fn building_faces_of(
     edits: &[FaceEdit],
     mut sink: impl FnMut(Vec<BuildingFace>) -> Result<(), String>,
 ) -> Result<(), String> {
-    let BuildingRings { file, n, lo, hi, entrances } = rings;
+    let BuildingRings { file, n, lo, hi, entrances, .. } = rings;
     if n == 0 {
         return Ok(());
     }

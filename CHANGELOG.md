@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`main.building_entrances` in the Rust build.** The Rust `duckosm` did not make the table of the doors, but the docs said
+  that `duckosm build` makes it with `--building-faces`. Now the step of the walls writes it from the nodes that it reads, so it
+  does not need `raw.*`. Monaco sample: 110 doors, 83 on a building outline, the same rows as the SQL on `raw.*`.
 - **`main.building_faces` is in the `.duckdb` file.** `duckosm --building-faces --boundary` wrote the walls only as
   `building_faces_main.parquet`, so `duckosm edit` showed no walls. Now the table is in the `.duckdb` output as
   `docs/reference/database.md` says (Monaco: 10,909 walls).

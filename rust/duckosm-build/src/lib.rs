@@ -212,6 +212,8 @@ pub struct Summary {
     pub ocean: Option<usize>,
     /// The walls and the buildings of `main.building_faces`, when it was made.
     pub building_faces: Option<(usize, usize)>,
+    /// The doors of `main.building_entrances` (made with the walls).
+    pub building_entrances: Option<usize>,
     /// A summary of the drawing levels, when they were made.
     pub levels: Option<String>,
     /// A summary of the lane profile, when the driving mode was built.
@@ -250,6 +252,9 @@ impl Summary {
         }
         if let Some((f, b)) = self.building_faces {
             out.push(format!("building faces: {f} walls of {b} buildings"));
+        }
+        if let Some(n) = self.building_entrances {
+            out.push(format!("building entrances: {n} doors"));
         }
         out.extend(self.levels.iter().chain(&self.lanes).cloned());
         out
@@ -936,7 +941,7 @@ fn read_raw_part(
     let way = |id: i64, t: &[(&str, &str)]| ids[1].contains(&id) || (faces && building(t));
     let node = |id: i64| ids[0].contains(&id);
     let tag = |kind: usize, id: i64, key: &str| {
-        ids[kind].contains(&id) || if kind == 0 { key == "entrance" } else { key == "building" || key == "addr:street" }
+        ids[kind].contains(&id) || if kind == 0 { key == "entrance" || key == "door" } else { key == "building" || key == "addr:street" }
     };
     duckosm_core::raw::read_part(open, &Want { relation: &relation, way: &way, node: &node, way_nodes, tag: &tag })
 }
@@ -1083,11 +1088,14 @@ fn faces_rings(open: Open, fixes: &OsmFixes) -> Result<building_faces::BuildingR
     let headers = headers.finish().map_err(io)?;
     duckosm_core::util::step("building faces 0b: the building ways");
     // the nodes of the file (but those that the fixes touch: the part has them, after the fixes): their coordinates to the join,
-    // and the entrances
-    struct Nodes(Vec<(i64, f64, f64, bool)>);
+    // and the doors with all their tags (main.building_entrances; the entrances of the walls are some of them)
+    struct Nodes(Vec<(i64, f64, f64, Option<duckosm_core::raw::RawTags>)>);
     impl RawSink for Nodes {
         fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
-            self.0.push((id, lon, lat, building_faces::is_entrance(tags)));
+            let t: Vec<(&str, &str)> = tags.collect();
+            let door = building_faces::is_door(t.iter().copied())
+                .then(|| t.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+            self.0.push((id, lon, lat, door));
         }
         fn way<'a>(&mut self, _: i64, _: &mut dyn Iterator<Item = (&'a str, &'a str)>, _: &mut dyn Iterator<Item = i64>) {}
         fn relation<'a>(
@@ -1098,7 +1106,7 @@ fn faces_rings(open: Open, fixes: &OsmFixes) -> Result<building_faces::BuildingR
         ) {
         }
     }
-    let each_node = |f: &mut dyn FnMut(i64, f64, f64, bool) -> Result<(), String>| {
+    let each_node = |f: &mut dyn FnMut(i64, f64, f64, Option<duckosm_core::raw::RawTags>) -> Result<(), String>| {
         duckosm_core::cutstream::each_block(
             &mut open()?,
             |b, buf| {
@@ -1107,27 +1115,27 @@ fn faces_rings(open: Open, fixes: &OsmFixes) -> Result<building_faces::BuildingR
                 Ok(s.0)
             },
             |nodes, _| {
-                for (id, lon, lat, entrance) in nodes {
+                for (id, lon, lat, door) in nodes {
                     if !touched[0].contains(&id) {
-                        f(id, lon, lat, entrance)?;
+                        f(id, lon, lat, door)?;
                     }
                 }
                 Ok(true)
             },
         )
     };
-    let mut entrances = duckosm_core::util::FxHashMap::default();
-    for n in &part.nodes {
-        if building_faces::is_entrance(n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str()))) {
-            entrances.insert(n.id, ());
-        }
-    }
+    let mut doors: Vec<duckosm_core::raw::RawNode> = part
+        .nodes
+        .iter()
+        .filter(|n| building_faces::is_door(n.tags.iter().map(|(k, v)| (k.as_str(), v.as_str()))))
+        .cloned()
+        .collect();
     let extra: Vec<_> = part.nodes.iter().map(|n| (n.id, n.lon, n.lat)).collect();
     let requests = requests.finish().map_err(io)?;
     let mut merge = join::Merge::new(requests, extra, BUDGET, store).map_err(io)?;
-    each_node(&mut |id, lon, lat, entrance| {
-        if entrance {
-            entrances.insert(id, ());
+    each_node(&mut |id, lon, lat, door| {
+        if let Some(tags) = door {
+            doors.push(duckosm_core::raw::RawNode { id, lon, lat, tags });
         }
         merge.node(id, lon, lat).map_err(io)
     })?;
@@ -1167,7 +1175,7 @@ fn faces_rings(open: Open, fixes: &OsmFixes) -> Result<building_faces::BuildingR
     }
     let refs = |id: i64| member_ways.binary_search_by_key(&id, |w| w.id).ok().map(|i| member_ways[i].refs.clone());
     rings.relations(relations.into_iter(), refs, &member_pts)?;
-    rings.finish(entrances)
+    rings.finish(doors)
 }
 
 /// The whole build without a file system, for the native build and the browser build (duckosm-wasm): read the
@@ -1676,6 +1684,10 @@ pub fn run<W: Write + Send>(
         }
         drop(near);
         let streets = streets.finish()?;
+        let doors = rings.entrances()?;
+        duckosm_parquet::write_building_entrances_to(file("building_entrances_main.parquet")?, &doors)?;
+        sum.building_entrances = Some(doors.len());
+        drop(doors);
         let mut w = duckosm_parquet::BuildingFacesWriter::new(file("building_faces_main.parquet")?)?;
         // the faces, and the buildings: a new building id after the one before
         let (mut faces, mut buildings, mut last) = (0, 0, None);
