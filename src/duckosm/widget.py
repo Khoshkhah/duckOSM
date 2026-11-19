@@ -53,6 +53,7 @@ class AreaPicker(anywidget.AnyWidget):
         super().__init__(**kwargs)
         self.out, self.fixes, self.cache = out, fixes, cache
         self.result = None
+        self._getting = None      # the thread of the Get button while it runs
         self._seq = 0
         self.on_msg(self._on_msg)
 
@@ -71,6 +72,7 @@ class AreaPicker(anywidget.AnyWidget):
     def _on_area(self, change):
         self._seq += 1
         seq, self.plan, self.status = self._seq, {}, "finding the boundary and the extract ..."
+        self.result = None        # the result of the area before
 
         def run():
             from duckosm import get
@@ -87,6 +89,12 @@ class AreaPicker(anywidget.AnyWidget):
         """``duckosm.get`` for the area: the download (when the extract is not in the cache) and the cut. Returns the
         :class:`duckosm.Area`, also in ``self.result``."""
         from duckosm import get
+        if self._getting and self._getting.is_alive() and self._getting is not threading.current_thread():
+            # Get was clicked: wait for that run, do not start a second one
+            self._getting.join()
+            if self.result is None:
+                raise RuntimeError(self.status)
+            return self.result
         self.busy = True
         try:
             self.result = get(**self._kwargs(), out=self.out, fixes=self.fixes,
@@ -106,4 +114,5 @@ class AreaPicker(anywidget.AnyWidget):
                     self.get()
                 except Exception:  # noqa: BLE001 -- the status line shows it
                     pass
-            threading.Thread(target=run, daemon=True).start()
+            self._getting = threading.Thread(target=run, daemon=True)
+            self._getting.start()

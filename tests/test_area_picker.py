@@ -37,3 +37,22 @@ def test_boundary_goes_to_a_file(monkeypatch):
     with open(kw["boundary"]) as f:
         assert json.load(f) == geojson
     assert kw["name"] == "area" and kw["cache"] == "c"
+
+
+def test_get_waits_for_the_get_button(monkeypatch):
+    import time
+    calls = []
+
+    def fake(**kw):
+        calls.append(kw)
+        if kw.get("dry_run"):
+            return {"name": "x", "extract": {}}
+        time.sleep(0.3)
+        return "the area"
+    monkeypatch.setattr("duckosm._api.get", fake)
+    monkeypatch.setattr("duckosm.get", fake, raising=False)
+    p = widget.AreaPicker()
+    p.area = {"mode": "h3", "h3_cell": "883969a40bfffff"}
+    p._on_msg(None, {"type": "get"}, [])       # the button
+    assert p.get() == "the area" == p.result   # waits for the button's run
+    assert sum(not kw.get("dry_run") for kw in calls) == 1

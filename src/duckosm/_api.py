@@ -231,7 +231,12 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=
             args += [flag, value]
     args += ["--refresh"] * bool(refresh) + ["--dry-run"] * bool(dry_run)
     cmd = [sys.executable, "-m", "duckosm", "get", *(str(a) for a in args if a is not None)]
+    import threading
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # stdout in a thread: a large boundary (the JSON of --dry-run) fills the pipe, and the program then waits
+    out = []
+    reader = threading.Thread(target=lambda: out.append(p.stdout.read()))
+    reader.start()
     # the program writes its progress to stderr; the download line ends with "\r"
     err, part = [], b""
 
@@ -246,7 +251,8 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=
         for raw in lines:
             line(raw)
     line(part)
-    stdout = p.stdout.read().decode(errors="replace")
+    reader.join()
+    stdout = out[0].decode(errors="replace")
     if p.wait() != 0:
         message = "\n".join(err) or stdout
         raise RuntimeError(f"duckosm get: {message.strip()}")
