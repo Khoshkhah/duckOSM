@@ -45,31 +45,6 @@ netconvert does not build some U-turns. It never adds a turn.
 If netconvert is not found, the command stops. Install SUMO (`pip install "duckosm[sumo]"` or a system package), set
 `SUMO_HOME`, or use `--no-netconvert`.
 
-## See it
-
-```bash
-duckosm sumo monaco.duckdb                          # -> sumo/monaco.net.xml
-duckosm sumo-map sumo/monaco.net.xml                # -> monaco_lanes.html: each SUMO lane, drawn by roadstyle
-```
-
-`sumo-map` draws each `<lane>` of the `.net.xml` on its `shape` at its `width`, with the internal lanes of the junctions
-(the `:<junction>_<n>` edges) under the roads. The colors are those of [`gmns-map`](gmns.md#see-it): a car lane is gray, a
-bus lane red, a bike lane blue. The pictures below show one Monaco junction in the two exports, at the same view.
-
-<figure class="pair" markdown="span">
-  ![The lanes of one Monaco junction from the GMNS export, drawn by roadstyle](../images/tour-lanes-gmns.png)
-  ![The same junction from the SUMO export after netconvert, drawn by roadstyle](../images/tour-lanes-sumo.png)
-  <figcaption>One Monaco junction: the GMNS lanes (left, <code>duckosm gmns-map</code>) and SUMO's lanes after netconvert (right, <code>duckosm sumo-map</code>).</figcaption>
-</figure>
-
-| | GMNS (`duckosm gmns`) | SUMO (`duckosm sumo`) |
-|---|---|---|
-| Lanes: count, width, users | `driving.lane_profile` | `driving.lane_profile` |
-| Lane shape | duckOSM: the road line to the node, moved to the side for each lane (`geom`), and cut where SUMO's junction begins (`geom_cut`) | netconvert: each lane ends at the edge of its junction |
-| Inside a junction | the road surface goes on to the node; SUMO's paths are kept as `lane_connector` (a duckOSM extension) | netconvert's junction shape and its internal lanes |
-| Ids | `link_id` = `edge_id`; a `lane_id` for each lane | edge id = `edge_id`; lane id `<edge_id>_<index>`, index 0 on the right |
-| Tools | DuckDB and SQL, GMNS tools such as Path4GMNS and DTALite, `duckosm gmns-map` | SUMO (`sumo`, `sumo-gui`, `netedit`), `duckosm sumo-map` |
-
 ## Python
 
 ```python

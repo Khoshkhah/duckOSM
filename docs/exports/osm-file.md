@@ -54,6 +54,7 @@ The steps:
 | `--fixes FILE` | an OSM fixes file: the cut file has the fixes in it | |
 | `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
 | `--refresh` | download the extract and the list of extracts again | the files in the cache are used |
+| `--dry-run` | find the boundary and the extract, print them as JSON and stop: no download, no files | |
 
 The list of extracts stays in the cache for 7 days. An extract in the cache stays until you use `--refresh`.
 
@@ -115,4 +116,5 @@ db = duckosm.build(pbf=area.pbf, boundary=area.boundary)
 area = duckosm.get(bbox=(7.40, 43.72, 7.44, 43.76), name="monaco_box", fixes="osm_fixes.yaml")
 ```
 
+To choose the area on a map in a notebook, see [Choose an area in Jupyter](../guides/area-picker.md).
 See [Python SDK](../reference/python.md#build-and-areas).

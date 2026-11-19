@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`duckosm.AreaPicker`: choose an area on a map in Jupyter** (`docs/guides/area-picker.md`). Search a place, type an
+  OSM relation id, drag a box, click an H3 cell or load a GeoJSON file. The widget shows the boundary and the Geofabrik
+  extract with its size, and **Get** runs `duckosm get`. `pip install "duckosm[widget]"` (anywidget). New:
+  `duckosm get --dry-run` prints the boundary and the extract as JSON and downloads nothing; `duckosm.get()` takes
+  `dry_run=` and `progress=`.
+
 - **Level 0 of the outputs: the OSM file** (`docs/exports/osm-file.md`). `duckosm get "Monaco"` finds the boundary
   (a name, an OSM id, a box, an H3 cell or a GeoJSON file), the smallest Geofabrik extract that holds it (the rule of
   Studio's page, now in Rust: `duckosm_build::get::covering`), downloads it to `~/.cache/duckosm` (resume, progress, MD5

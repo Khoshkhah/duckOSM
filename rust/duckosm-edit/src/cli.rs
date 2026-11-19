@@ -6,7 +6,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// The command names of this module: `duckosm <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 4] = ["viz", "route-map", "gmns-map", "sumo-map"];
+pub const COMMANDS: [&str; 3] = ["viz", "route-map", "gmns-map"];
 
 #[derive(Parser)]
 #[command(name = "duckosm")]
@@ -76,14 +76,6 @@ enum Cmd {
         #[arg(short, long)]
         out: Option<PathBuf>,
     },
-    /// Write a lane-level HTML map of a SUMO net (`duckosm sumo`'s .net.xml) with lanestyle: each SUMO lane on its own shape at its
-    /// width, and the internal lanes through the junctions, drawn by roadstyle in the look of gmns-map.
-    SumoMap {
-        net: PathBuf,
-        /// The output HTML (default: <name>_lanes.html).
-        #[arg(short, long)]
-        out: Option<PathBuf>,
-    },
 }
 
 /// Run one command; `args[0]` is its name.
@@ -116,13 +108,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let name = gmns_db.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
             let out = out.unwrap_or_else(|| PathBuf::from(format!("{name}_lanes.html")));
             let p = crate::gmns_map::write_map(&gmns_db, &out, &source_db, area.as_deref())?;
-            println!("wrote {} — open in a browser", p.display());
-            Ok(())
-        }
-        Cmd::SumoMap { net, out } => {
-            let name = net.file_name().map(|s| s.to_string_lossy().trim_end_matches(".xml").trim_end_matches(".net").to_string()).unwrap_or_default();
-            let out = out.unwrap_or_else(|| PathBuf::from(format!("{name}_lanes.html")));
-            let p = crate::gmns_map::write_sumo_map(&net, &out)?;
             println!("wrote {} — open in a browser", p.display());
             Ok(())
         }

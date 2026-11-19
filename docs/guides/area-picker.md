@@ -1,0 +1,75 @@
+# Choose an area in Jupyter
+
+`duckosm.AreaPicker` is a map in a Jupyter notebook. You use it to choose an area. Then you click **Get** to get the
+OSM file of the area. The widget does the same work as [`duckosm get`](../exports/osm-file.md): it finds the
+boundary, takes the smallest Geofabrik extract that holds the boundary, downloads the extract and cuts it.
+
+## Install
+
+```bash
+pip install "duckosm[widget]"
+```
+
+The extra installs only [anywidget](https://anywidget.dev). The widget works in JupyterLab, Jupyter Notebook and
+VS Code.
+
+## Use the widget
+
+```python
+import duckosm
+
+picker = duckosm.AreaPicker(out="data")
+picker
+```
+
+1. Choose an area with one of the five tabs:
+
+    | Tab | What to do | The argument of `duckosm.get()` |
+    |---|---|---|
+    | Search | Type a place name and click a match. You can choose only a match that is an OSM relation, because only a relation has a boundary. | `osm_id` |
+    | OSM id | Type the id of an OSM boundary relation. | `osm_id` |
+    | Box | Drag a box on the map, or type `west,south,east,north`. | `bbox` |
+    | H3 cell | Select the level (5 to 10) and click a hexagon, or type the cell id. | `h3_cell` |
+    | File | Load a GeoJSON file. | `boundary` |
+
+2. Examine the line under the map. It shows the Geofabrik extract and its size, and if the extract is already in
+   the cache folder. The map shows the boundary of the cut in blue. The widget downloads nothing in this step.
+
+3. Click **Get**. The line next to the button shows the progress of the download and the cut.
+
+4. Use the result:
+
+    ```python
+    area = picker.result            # area.pbf and area.boundary: paths
+    db = duckosm.build(pbf=area.pbf, boundary=area.boundary)
+    ```
+
+You can also set the area and get the file from Python, with no click:
+
+```python
+picker.area = {"mode": "bbox", "bbox": [7.40, 43.72, 7.44, 43.76]}
+area = picker.get()
+```
+
+## Arguments
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `out` | `"."` | The folder of the output files `<name>.osm.pbf` and `<name>.geojson`. |
+| `fixes` | `None` | An OSM fixes file (YAML). The cut file has the fixes in it. |
+| `cache` | `None` | The folder of the downloads. The default is `$DUCKOSM_CACHE`, else `~/.cache/duckosm`. |
+
+## How it works
+
+The widget does no OSM work in Python. When you choose an area, it runs `duckosm get --dry-run`. This command finds
+the boundary and the extract, and prints them as JSON. It downloads nothing and writes no files. **Get** runs
+`duckosm get`. You can run the same commands in a terminal:
+
+```bash
+duckosm get --bbox 7.40,43.72,7.44,43.76 --dry-run
+duckosm get --bbox 7.40,43.72,7.44,43.76 -o data
+```
+
+The map uses [MapLibre](https://maplibre.org) and the [OpenFreeMap](https://openfreemap.org) base map. The
+search uses OpenStreetMap's [Nominatim](https://nominatim.openstreetmap.org). The notebook must have a connection
+to the internet.

@@ -26,7 +26,7 @@ duckdb = { version = "=1.10506.1", features = ["bundled", "json"], optional = tr
 # duckosm route-map: the edge graph a mode routes on, the lines of the roads (the planner's data)
 duckosm-route = { path = "../duckosm-route", optional = true }
 # duckosm gmns-map: the lane page of a GMNS file (lanestyle's Rust engine: its GMNS reader, its items, roadstyle's page)
-lanestyle = { git = "https://github.com/Khoshkhah/lanestyle.git", rev = "62f70f835bb9b7bedf9497d154e5436cae36f9ab", features = ["page"], optional = true }
+lanestyle = { git = "https://github.com/Khoshkhah/lanestyle.git", rev = "273040519162be63ec9f15a3c7ce1934877ea0a3", features = ["page"], optional = true }
 
 [dev-dependencies]
 duckosm-planner = { path = "../duckosm-planner" }   # tests/route_map.rs: the page's router against the program's

@@ -42,6 +42,9 @@ struct GetCli {
     /// Download the extract and the list of extracts again, also when they are in the cache.
     #[arg(long)]
     refresh: bool,
+    /// Find the boundary and the extract, print them as JSON and stop: no download and no files.
+    #[arg(long)]
+    dry_run: bool,
     /// The list of extracts (an address or a file, as Geofabrik's index-v1.json).
     #[arg(long, hide = true)]
     index: Option<String>,
@@ -85,6 +88,9 @@ pub fn run(args: &[String]) -> Result<()> {
         (Some(g), info.to_string(), name)
     };
     let name = slug(cli.name.as_deref().unwrap_or(&name));
+    if cli.dry_run {
+        return dry_run(&cli, geom, &info, &name);
+    }
     std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
     let boundary = cli.out.join(format!("{name}.geojson"));
     match geom {
@@ -115,5 +121,29 @@ pub fn run(args: &[String]) -> Result<()> {
     );
     println!("wrote {} and {} in {:.1} s", pbf.display(), boundary.display(), t.elapsed().as_secs_f64());
     println!("next: duckosm build --pbf {} --boundary {}", pbf.display(), boundary.display());
+    Ok(())
+}
+
+/// `--dry-run`: one JSON object on stdout, `{"name", "boundary" (a GeoJSON Feature), "extract": {"id", "name", "km2",
+/// "url", "bytes", "cached"}}`. The duckOSM Jupyter widget (`duckosm.AreaPicker`) shows it before the download.
+fn dry_run(cli: &GetCli, geom: Option<serde_json::Value>, info: &str, name: &str) -> Result<()> {
+    let feature = match geom {
+        Some(g) => {
+            let mut props: serde_json::Value = serde_json::from_str(info).map_err(|e| e.to_string())?;
+            props.as_object_mut().map(|o| o.shift_remove("others"));
+            json!({"type": "Feature", "properties": props, "geometry": g})
+        }
+        None => serde_json::from_str(info).map_err(|e| format!("the boundary file: {e}"))?,
+    };
+    let area = duckosm_build::get::check_boundary(&feature.to_string())?;
+    let cache = cli.cache.clone().unwrap_or_else(duckosm_build::get::cache_dir);
+    let x = duckosm_build::get::choose(&area, &cache, cli.index.as_deref(), cli.refresh)?;
+    let cached = x.file.is_file() && !cli.refresh;
+    let bytes = match cached {
+        true => std::fs::metadata(&x.file).map_or(0, |m| m.len()),
+        false => x.size().map_or(0, |(_, b)| b),
+    };
+    let extract = json!({"id": x.id, "name": x.name, "km2": x.km2, "url": x.url, "bytes": bytes, "cached": cached});
+    println!("{}", json!({"name": name, "boundary": feature, "extract": extract}));
     Ok(())
 }

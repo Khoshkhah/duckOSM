@@ -211,11 +211,15 @@ class Area:
 
 
 def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=".", name=None, fixes=None,
-        cache=None, refresh=False):
+        cache=None, refresh=False, dry_run=False, progress=None):
     """``duckosm get``: the boundary of an area, the smallest Geofabrik extract that holds it (downloaded to a cache
     folder), and the cut of the extract to the boundary, with the OSM ``fixes`` in it when given. Give one of
     ``place``, ``osm_id``, ``bbox`` (``(west, south, east, north)``), ``h3_cell`` and ``boundary``. Returns an
-    :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``."""
+    :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``.
+
+    ``dry_run=True`` downloads and writes nothing: it returns a dict with the ``name``, the ``boundary`` (a GeoJSON
+    Feature) and the ``extract`` (``id``, ``name``, ``km2``, ``url``, ``bytes``, ``cached``). ``progress``: a function
+    that gets each progress line of the program (the download too)."""
     import subprocess
     import sys
     if bbox is not None and not isinstance(bbox, str):
@@ -225,13 +229,30 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=
                         ("-o", out), ("--name", name), ("--fixes", fixes), ("--cache", cache)):
         if value is not None:
             args += [flag, value]
-    if refresh:
-        args.append("--refresh")
+    args += ["--refresh"] * bool(refresh) + ["--dry-run"] * bool(dry_run)
     cmd = [sys.executable, "-m", "duckosm", "get", *(str(a) for a in args if a is not None)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"duckosm get: {(r.stderr or r.stdout).strip()}")
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # the program writes its progress to stderr; the download line ends with "\r"
+    err, part = [], b""
+
+    def line(raw):
+        text = raw.decode(errors="replace").strip()
+        if text:
+            err.append(text)
+            progress and progress(text)
+
+    for chunk in iter(lambda: p.stderr.read1(4096), b""):
+        *lines, part = (part + chunk).replace(b"\r", b"\n").split(b"\n")
+        for raw in lines:
+            line(raw)
+    line(part)
+    stdout = p.stdout.read().decode(errors="replace")
+    if p.wait() != 0:
+        message = "\n".join(err) or stdout
+        raise RuntimeError(f"duckosm get: {message.strip()}")
+    if dry_run:
+        return json.loads(stdout)
     # the line "wrote <pbf> and <geojson> in <s> s"
-    line = next(x for x in r.stdout.splitlines() if x.startswith("wrote "))
+    line = next(x for x in stdout.splitlines() if x.startswith("wrote "))
     pbf, rest = line.removeprefix("wrote ").split(" and ", 1)
     return Area(pbf, rest.rsplit(" in ", 1)[0])

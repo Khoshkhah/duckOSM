@@ -130,6 +130,7 @@ nav:
       - Install: install.md
       - Your first network: first_network.md
       - duckOSM Studio (browser): guides/studio.md
+      - Choose an area in Jupyter: guides/area-picker.md
   - Build an area:
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
