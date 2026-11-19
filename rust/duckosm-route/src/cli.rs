@@ -378,6 +378,22 @@ pub fn run(args: &[String]) -> Result<()> {
                 return Err("uses is for the edge graph (graph='edge'): its turns carry the labels".into());
             }
             let con = crate::route::open(&db)?;
+            if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+            let t = duckosm_tools::info::thousands;
+            if graph_kind == "node" && fmt == "graphml" {
+                // GraphML has no shapely objects: the geometry is WKT there. The file is written while DuckDB reads the tables.
+                let geo = if geometry == "shapely" { "wkt" } else { geometry.as_str() };
+                let ferr = |e: std::io::Error| format!("{}: {e}", out.display());
+                let mut f = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(&out).map_err(ferr)?);
+                let (n, m) = crate::graphml::write_node_graph(&con, &mode, geo != "none", &mut f)?;
+                std::io::Write::flush(&mut f).map_err(ferr)?;
+                eprintln!("node graph[{mode}]: {} nodes, {} edges, geometry={geo}", t(n as i64), t(m as i64));
+                eprintln!("wrote {graph_kind} graph[{mode}] -> {} ({fmt}: {} nodes, {} edges)", out.display(), t(n as i64), t(m as i64));
+                println!("wrote {} ({fmt}: {n} nodes, {m} edges)", out.display());
+                return Ok(());
+            }
             let doc = if graph_kind == "node" {
                 // GraphML has no shapely objects: the geometry is WKT there
                 let geo = if geometry == "shapely" && fmt == "graphml" { "wkt" } else { geometry.as_str() };
@@ -397,9 +413,6 @@ pub fn run(args: &[String]) -> Result<()> {
                 );
                 d
             };
-            if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
-                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-            }
             let bytes = if fmt == "gpickle" { doc.pickle(graph_kind == "node") } else { doc.write().into_bytes() };
             std::fs::write(&out, bytes).map_err(|e| format!("{}: {e}", out.display()))?;
             let (n, m) = (doc.nodes.len(), doc.edges.len());

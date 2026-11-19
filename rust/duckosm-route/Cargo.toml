@@ -16,6 +16,7 @@ duckosm-router = { path = "../duckosm-router" }
 duckosm-tools = { path = "../duckosm-tools" }
 # Python's text of a float (place::py_float)
 duckosm-build = { path = "../duckosm-build" }
+duckosm-export = { path = "../duckosm-export" }
 
 [dev-dependencies]
 md-5 = "0.10"

@@ -933,6 +933,7 @@ dependencies = [
  "clap",
  "duckdb",
  "duckosm-build",
+ "duckosm-export",
  "duckosm-router",
  "duckosm-tools",
  "md-5",

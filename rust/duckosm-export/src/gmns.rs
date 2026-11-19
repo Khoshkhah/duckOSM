@@ -154,17 +154,39 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
 
 /// Write the GMNS db `out` from the built duckOSM db `source`, as `to_gmns` with the options `o`.
 pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSummary> {
-    let (modes, drive_side) = (&o.modes, o.drive_side.as_str());
+    let drive_side = o.drive_side.as_str();
     if drive_side != "right" && drive_side != "left" {
         return Err(format!("drive_side must be right or left, not {drive_side}"));
     }
     crate::open(source)?; // fail fast if the source is unreadable
-    if out.exists() {
-        std::fs::remove_file(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    }
     if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
+    // the db is built in a file of its own and gets the name `out` only when it is complete: a failed run leaves no GMNS db
+    // that lanelet2 or opendrive could read
+    let partial = out.with_extension("duckdb.partial");
+    let remove = |p: &Path| {
+        for f in [p.to_path_buf(), p.with_extension("partial.wal")] {
+            let _ = std::fs::remove_file(f);
+        }
+    };
+    remove(&partial);
+    let name = out.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let r = build_gmns(source, &partial, &name, o);
+    if r.is_err() {
+        remove(&partial);
+        return r;
+    }
+    if out.exists() {
+        std::fs::remove_file(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    std::fs::rename(&partial, out).map_err(|e| format!("{}: {e}", out.display()))?;
+    r
+}
+
+/// [`to_gmns_with`] into the db file `out`; `name`: the name of the network.
+fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<GmnsSummary> {
+    let (modes, drive_side) = (&o.modes, o.drive_side.as_str());
     let con = Connection::open(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let c = Ctx { con: &con };
     c.exec("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")?;
@@ -188,7 +210,7 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
         c.exec("CREATE TEMP TABLE _sig(osm_id BIGINT)")?;
         eprintln!("GMNS: no 'raw' schema — lane/signal/curb detail limited (no OSM tags)");
     }
-    let name = out.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let name = name.to_string();
     let stops = if o.gtfs.is_empty() { None } else { Some(crate::gtfs::read_stops(&o.gtfs)?) };
     if let Some(s) = &stops {
         eprintln!("GTFS: {} stops", s.len());
@@ -1204,7 +1226,10 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    let mut nxt: Vec<(String, Vec<String>)> = Vec::new(); // a dict of sets of Python, in the order of its keys
+    // a dict of sets of Python, in the order of its keys; `nxt_at`: the place of a key (a search of the list for each lane
+    // took hours on Kentucky)
+    let mut nxt: Vec<(String, Vec<String>)> = Vec::new();
+    let mut nxt_at: HashMap<String, usize> = HashMap::new();
     let mut prv: HashMap<String, HashSet<String>> = HashMap::new();
     for (ib, s0, s1, ob, o0, o1) in mv {
         let (Some(s0), Some(s1), Some(o0), Some(o1)) = (s0, s1, o0, o1) else { continue };
@@ -1214,13 +1239,16 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         for k in 0..=(s1 - s0) {
             if let (Some(a), Some(b)) = (by_num.get(&(ib, s0 + k)), by_num.get(&(ob, o0 + k))) {
                 if lanes[a].2 == lanes[b].2 {
-                    match nxt.iter_mut().find(|x| x.0 == *a) {
-                        Some(x) => {
-                            if !x.1.contains(b) {
-                                x.1.push(b.clone());
+                    match nxt_at.get(a) {
+                        Some(&i) => {
+                            if !nxt[i].1.contains(b) {
+                                nxt[i].1.push(b.clone());
                             }
                         }
-                        None => nxt.push((a.clone(), vec![b.clone()])),
+                        None => {
+                            nxt_at.insert(a.clone(), nxt.len());
+                            nxt.push((a.clone(), vec![b.clone()]));
+                        }
                     }
                     prv.entry(b.clone()).or_default().insert(a.clone());
                 }
@@ -1252,11 +1280,18 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         }
         out
     };
-    let mut moved: Vec<(String, Vec<P>)> = Vec::new(); // a dict of Python
-    let get = |moved: &Vec<(String, Vec<P>)>, id: &str| -> Vec<P> { moved.iter().find(|x| x.0 == id).map(|x| x.1.clone()).unwrap_or_else(|| lanes[id].3.clone()) };
-    let put = |moved: &mut Vec<(String, Vec<P>)>, id: &str, g: Vec<P>| match moved.iter_mut().find(|x| x.0 == id) {
-        Some(x) => x.1 = g,
-        None => moved.push((id.to_string(), g)),
+    // a dict of Python: the list in the order of its keys, and the place of each key
+    let mut moved: Vec<(String, Vec<P>)> = Vec::new();
+    let mut moved_at: HashMap<String, usize> = HashMap::new();
+    let get = |moved: &Vec<(String, Vec<P>)>, at: &HashMap<String, usize>, id: &str| -> Vec<P> {
+        at.get(id).map(|&i| moved[i].1.clone()).unwrap_or_else(|| lanes[id].3.clone())
+    };
+    let put = |moved: &mut Vec<(String, Vec<P>)>, at: &mut HashMap<String, usize>, id: &str, g: Vec<P>| match at.get(id) {
+        Some(&i) => moved[i].1 = g,
+        None => {
+            at.insert(id.to_string(), moved.len());
+            moved.push((id.to_string(), g));
+        }
     };
     for (a, bs) in &nxt {
         if bs.len() != 1 {
@@ -1266,7 +1301,7 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         if prv.get(b).is_none_or(|p| p.len() != 1 || !p.contains(a)) {
             continue;
         }
-        let (la, lb) = (get(&moved, a), get(&moved, b));
+        let (la, lb) = (get(&moved, &moved_at, a), get(&moved, &moved_at, b));
         let (end, start) = (*la.last().unwrap(), lb[0]);
         let (kx, ky) = metres(end.1);
         let gap = ((end.0 - start.0) * kx).hypot((end.1 - start.1) * ky);
@@ -1274,9 +1309,9 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
             continue;
         }
         if count[&lanes[a].0] >= count[&lanes[b].0] {
-            put(&mut moved, b, bend(&lb, true, end));
+            put(&mut moved, &mut moved_at, b, bend(&lb, true, end));
         } else {
-            put(&mut moved, a, bend(&la, false, start));
+            put(&mut moved, &mut moved_at, a, bend(&la, false, start));
         }
     }
     if !moved.is_empty() {
@@ -1426,14 +1461,19 @@ fn fork_letters(c: &Ctx, sch: &str, mv: &str) -> Result<()> {
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
+    // the nodes in the order they come, and the place of each node
     let mut by_node: Vec<(i64, Vec<(String, String)>)> = Vec::new();
+    let mut node_at: HashMap<i64, usize> = HashMap::new();
     let mut ang: HashMap<String, f64> = HashMap::new();
     for (mid, node, code, gi, go) in rows {
         if let Some(a) = window_angle(&gi, &go) {
             ang.insert(mid.clone(), a);
-            match by_node.iter_mut().find(|x| x.0 == node) {
-                Some(x) => x.1.push((mid, code)),
-                None => by_node.push((node, vec![(mid, code)])),
+            match node_at.get(&node) {
+                Some(&i) => by_node[i].1.push((mid, code)),
+                None => {
+                    node_at.insert(node, by_node.len());
+                    by_node.push((node, vec![(mid, code)]));
+                }
             }
         }
     }

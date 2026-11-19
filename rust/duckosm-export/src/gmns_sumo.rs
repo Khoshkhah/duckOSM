@@ -216,13 +216,13 @@ struct Net {
 }
 
 fn read_net(path: &Path) -> Result<Net> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let attr = |l: &str, k: &str| -> Option<String> {
         let key = format!(" {k}=\"");
         l.find(&key).map(|i| l[i + key.len()..].split('"').next().unwrap_or("").to_string())
     };
     let mut net = Net { off: (0.0, 0.0), proj: String::new(), lanes: HashMap::new(), conns: Vec::new(), nxt: HashMap::new() };
-    for l in text.lines().map(str::trim_start) {
+    crate::each_line(path, |l| {
+        let l = l.trim_start();
         if l.starts_with("<location ") {
             let o = attr(l, "netOffset").unwrap_or_default();
             let (x, y) = o.split_once(',').unwrap_or(("0", "0"));
@@ -255,7 +255,8 @@ fn read_net(path: &Path) -> Result<Net> {
                 ));
             }
         }
-    }
+        Ok(())
+    })?;
     if net.proj.is_empty() {
         return Err(format!("{}: no <location> (no projection to read the shapes back)", path.display()));
     }
@@ -310,6 +311,14 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
     let k = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!("duckosm-gmns-sumo-{}-{k}-{mode}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
+    // the folder goes on each way out, also on an error (Kentucky: 1.3 GB)
+    struct Gone<'a>(&'a Path);
+    impl Drop for Gone<'_> {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(self.0);
+        }
+    }
+    let _gone = Gone(&tmp);
     let opts = crate::sumo::SumoOptions {
         bus_edges: mode == "driving",
         lanes: Some(ours_lanes),
@@ -318,7 +327,6 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
     };
     let s = crate::sumo::to_sumo_with(source, &tmp, mode, "gmns", true, None, true, &opts)?;
     let net = read_net(s.net.as_ref().ok_or("netconvert built no net")?)?;
-    let _ = std::fs::remove_dir_all(&tmp);
     let mut check: Vec<Check> = Vec::new();
     c.exec(&format!("CREATE OR REPLACE TABLE {sch}.lane_check(kind VARCHAR, id VARCHAR, detail VARCHAR)"))?;
     // our lanes of each link, left to right, and SUMO's (index from the right)
@@ -509,14 +517,26 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
             app.flush().map_err(|e| e.to_string())?;
         }
         let proj = net.proj.replace('\'', "''");
+        // the points of each shape in lon/lat, joined in their order; the sort spills to disk, a string_agg of all shapes
+        // did not (Kentucky: out of memory at 12.7 GB)
+        let mut ll: Vec<String> = vec![String::new(); cut.len() + connectors.len()];
         let sql = format!(
-            "SELECT id, string_agg(printf('%.8f %.8f', ST_X(g), ST_Y(g)), ', ' ORDER BY k) FROM (
-               SELECT id, k, ST_Transform(ST_Point(x, y), '{proj}', 'EPSG:4326', always_xy := true) AS g FROM _xy) GROUP BY id"
+            "SELECT id, ST_X(g), ST_Y(g) FROM (SELECT id, k, ST_Transform(ST_Point(x, y), '{proj}', 'EPSG:4326', always_xy := true) AS g FROM _xy) \
+             ORDER BY id, k"
         );
-        let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
-        let ll: HashMap<i64, String> =
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
-        drop(st);
+        crate::stream::each_chunk(c.con, &sql, [], |ch| {
+            for i in 0..ch.len {
+                if let (Some(id), Some(x), Some(y)) = (ch.i64(0, i), ch.f64(1, i), ch.f64(2, i)) {
+                    let s = &mut ll[id as usize];
+                    if !s.is_empty() {
+                        s.push_str(", ");
+                    }
+                    s.push_str(&format!("{x:.8} {y:.8}"));
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| format!("{e}\n{sql}"))?;
         c.exec(&format!(
             "ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_cut GEOMETRY;
              CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY);
@@ -526,7 +546,7 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         {
             let mut app = c.con.appender("_cut").map_err(|e| e.to_string())?;
             for (i, (lid, _)) in cut.iter().enumerate() {
-                app.append_row(duckdb::params![lid, format!("LINESTRING ({})", ll[&(i as i64)])]).map_err(|e| e.to_string())?;
+                app.append_row(duckdb::params![lid, format!("LINESTRING ({})", ll[i])]).map_err(|e| e.to_string())?;
             }
             app.flush().map_err(|e| e.to_string())?;
         }
@@ -534,7 +554,7 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         {
             let mut app = c.con.appender("_con").map_err(|e| e.to_string())?;
             for (i, (id, m, a, b, w, _)) in connectors.iter().enumerate() {
-                app.append_row(duckdb::params![id, m, a, b, w, format!("LINESTRING ({})", ll[&((cut.len() + i) as i64)])]).map_err(|e| e.to_string())?;
+                app.append_row(duckdb::params![id, m, a, b, w, format!("LINESTRING ({})", ll[cut.len() + i])]).map_err(|e| e.to_string())?;
             }
             app.flush().map_err(|e| e.to_string())?;
         }
