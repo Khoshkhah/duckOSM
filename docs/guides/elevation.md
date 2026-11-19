@@ -1,135 +1,64 @@
 # Add elevation
 
-`duckosm elevation` adds the ground height to every node of a finished build, in place. Needs
-`pip install "duckosm[elevation]"`.
+`duckosm elevation` adds the ground height to every node of a built database, in place.
 
 ```bash
 duckosm elevation monaco.duckdb
 ```
 
-```text
-  source=auto → copernicus (bbox 7.41, 43.73, 7.44, 43.75)
-  [cycling] 4151 nodes sampled (0 nodata/fill) -> ele
-  [driving] 1719 nodes sampled (0 nodata/fill) -> ele
-  [walking] 4116 nodes sampled (0 nodata/fill) -> ele
-elevation added from Copernicus GLO-30 — 9986 nodes (0 nodata/fill) across 3 mode(s) -> ele
-```
-
-It adds:
-
-- `nodes.ele`: the height at each node, in metres;
-- `edges.z_from`, `edges.z_to`: the height at each edge's two ends;
-- a row in `main.elevation_metadata` saying where the heights came from (source, resolution,
-  vertical datum, licence), and the SHA-256 of the elevation file, the ground id.
+| It adds | Holds |
+|---|---|
+| `<mode>.nodes.ele` | the height of the node, in meters |
+| `<mode>.edges.z_from`, `z_to`, `z_vertices` | the heights of the edge ends and of each vertex |
+| a row in `main.elevation_metadata` | the source, its product, vertical datum and license, and the ground id |
 
 The [MATSim](../exports/matsim.md), [OpenDRIVE](../exports/opendrive.md), [GIS](../exports/gis.md) and
-[GMNS](../exports/gmns_tables.md) exports then include the heights (GMNS: `node.z_coord`, `link.grade`).
+[GMNS](../exports/gmns_tables.md) exports then include the heights. All options: [Command line](../reference/cli.md#elevation).
 
 ## Where the heights come from
 
-With no options it picks a free global elevation model for your area and streams just the part it
-needs: **Copernicus GLO-30** (30 m, worldwide, no account). Inside Europe it uses **EU-DTM** instead
-when you set an [OpenTopography](https://opentopography.org) key in `OPENTOPOGRAPHY_API_KEY`. For
-better accuracy, point it at your own file, e.g. a national 1 m model:
+| Source | Model | Reference ground | License |
+|---|---|---|---|
+| `--source copernicus` | Copernicus GLO-30: 30 m, the whole world, a surface model (DSM) | no: it includes buildings and trees | Copernicus open, with attribution |
+| `--source eudtm` | EU-DTM: 30 m, Europe, bare earth (DTM); needs a free key in `OPENTOPOGRAPHY_API_KEY` | yes | the terms of OpenTopography |
+| `--source auto` (default) | `eudtm` when the area is in Europe and the key is set, else `copernicus` | | |
+| `--dem FILE` | your own file, for example a national 1 m DTM | yes, with `--product DTM` | the license that you give |
+
+The other models and their licenses: [Elevation sources](../reference/elevation-sources.md).
+
+## Use your own file
+
+Each area has one ground: one bare-earth model (DTM) with a known vertical datum ([The ground reference](../concepts/ground-reference.md)).
 
 ```bash
 duckosm elevation monaco.duckdb --dem my_dtm.tif --product DTM --vertical-datum EGM2008 --license CC-BY-4.0
 ```
 
-A `--dem` file in `ele` is the area's ground reference. Its product (`DTM` or `DSM`), its vertical datum and its license
-are necessary: without them the command stops. For a file that is not the reference (a test, a surface model), add `--not-reference`. A file with
-`--suffix` is never the reference.
+`--dem` takes a GeoTIFF in EPSG:4326 with 32-bit float values, as a file or an HTTP address. To convert another format,
+use GDAL ([File formats](../reference/elevation-sources.md#file-formats)). The file is the ground reference of the area, so
+`--product`, `--vertical-datum` and `--license` are necessary. For a test file or a surface model, give `--not-reference`.
 
-| Option | Does | Default |
-|---|---|---|
-| `--dem FILE` | use this elevation file (GeoTIFF, VRT, … any format GDAL reads) | |
-| `--source` | `auto`, `copernicus`, or `eudtm` (needs the key) | `auto` |
-| `-m MODE` | only this mode; repeat for several | every mode |
-| `--nodata-fill` | height written where the model has no value | `0` |
-| `--suffix dsm` | store as a second surface (`ele_dsm`, `z_from_dsm`, …) instead of replacing | |
-| `--product` | `DTM` (bare earth) or `DSM` (surface): the product of the `--dem` file | |
-| `--vertical-datum` | the vertical datum of the `--dem` file, for example `EGM2008` | |
-| `--license` | the license of the `--dem` file | |
-| `--not-reference` | the `--dem` file is not the area's ground reference | |
+`main.elevation_metadata.sha256` is the ground id: the SHA-256 of the file, the same value as `sha256sum my_dtm.tif`.
+It is NULL when the command reads the file in parts (Copernicus, or a `--dem` address).
 
-The Rust build (`duckosm --dem FILE`) has the same rule, with the options `--dem-product`, `--dem-vertical-datum`,
-`--dem-license` and `--dem-not-reference`. To set the DEM one time for each area, put it in the config file, in the section
-[`elevation`](../reference/configuration.md#elevation) (`dem`, `product`, `vertical_datum`, `license`); `--dem` wins over it. The browser build gives them as `Params.dem_product`,
-`dem_vertical_datum`, `dem_license` and `dem_not_reference`.
-
-### The ground id
-
-`main.elevation_metadata.sha256` is the SHA-256 of the elevation file's bytes. It is the same value that `sha256sum`
-gives, so you can check a database against its file:
-
-```bash
-sha256sum my_dtm.tif
-duckdb monaco.duckdb -c "SELECT sha256 FROM main.elevation_metadata WHERE ele_column = 'ele'"
-```
-
-The value is NULL when the step read no whole file: Copernicus GLO-30 is streamed in parts, and a `--dem` URL is read in
-parts. To get a ground id, give the reference as a local file.
-
-Where to get elevation data, and how the sources compare: [Elevation sources](../reference/elevation-sources.md).
-
-To find the sources that cover an area, best first, ask the catalog:
-
-```python
-from duckosm.dem_sources import sources_for_bbox
-
-for s in sources_for_bbox((7.41, 43.73, 7.44, 43.75)):      # Monaco: west, south, east, north
-    print(s["name"], s["resolution_text"], s["product"], s["license"])
-```
-
-The order is a national 1 m DTM, EU-DTM, FABDEM, Copernicus GLO-30 and then the others. Each entry has the `product`, `vertical_datum` and `license`
-that `--product`, `--vertical-datum` and `--license` need. In duckOSM Studio the step "Ground" does the same for the area on the map.
-
-For an area that SimReady, urbanstyle or roadstyle also use, the heights must follow [The ground reference](../concepts/ground-reference.md):
-one bare-earth model (DTM) with a known vertical datum, recorded once and used by every project.
+| Where | How |
+|---|---|
+| the program | `duckosm elevation DB` |
+| duckOSM Studio (browser) | the step **Ground height (DEM)**: it lists the sources for the area and links to their download pages; you drop the file |
+| `duckosm studio` (your computer) | the same step; it also downloads the tiles itself |
 
 ## What the heights mean
 
-The height is the **surface at the node's position**, not the road itself:
-
-- A **tunnel** gets the height of the ground above it, and a **bridge** the ground below.
-- **Copernicus is a surface model**: it includes buildings and trees, at 30 m resolution. In a
-  dense city, short streets between buildings can look steep. A bare-earth model (EU-DTM, or a
-  national one) gives better road grades.
-
-So leave tunnels and bridges out when you look at gradients:
+The height is the ground at the position of the node, not the road. A tunnel gets the height of the ground above it,
+and a bridge the height of the ground below it. A surface model (Copernicus) also includes buildings and trees, so
+short streets in a city can look steep. Thus, leave out tunnels and bridges when you calculate grades:
 
 ```sql
-SELECT name, round(z_from) AS z_from, round(z_to) AS z_to, round(length_m) AS length_m,
-       round(100 * (z_to - z_from) / length_m, 1) AS grade_pct
+SELECT name, round(100 * (z_to - z_from) / length_m, 1) AS grade_pct
 FROM driving.edges
-WHERE length_m > 100 AND name IS NOT NULL AND tunnel IS NULL AND bridge IS NULL
+WHERE length_m > 100 AND tunnel IS NULL AND bridge IS NULL
 ORDER BY abs(z_to - z_from) / length_m DESC LIMIT 5;
 ```
 
-| name | z_from | z_to | length_m | grade_pct |
-|---|---:|---:|---:|---:|
-| Boulevard de Belgique | 86.0 | 111.0 | 110.0 | 22.5 |
-| Boulevard de Belgique | 111.0 | 86.0 | 110.0 | -22.5 |
-| Boulevard du Jardin Exotique | 117.0 | 97.0 | 123.0 | -16.5 |
-| Boulevard du Jardin Exotique | 97.0 | 117.0 | 123.0 | 16.5 |
-| Avenue de La Quarantaine | 32.0 | 8.0 | 144.0 | -16.1 |
-
-With Copernicus, the tunnels of Monaco would top this list: Tunnel Albert II "falls" from 336 m to
-32 m, the height of the hill above it.
-
-## In Rust
-
-`duckosm elevation` has the same options and writes the same values as `duckosm elevation`. It keeps the Copernicus
-tiles in memory and writes no DEM file to disk.
-
-Size test: France, driving only, `--source copernicus`, on a Mac mini (Apple M6, 16 GB, 2026-11-17):
-
-| Item | Value |
-|---|---:|
-| Nodes | 12,292,934 (3,164 nodata) |
-| Copernicus GLO-30 tiles downloaded | 96, 3.4 GB |
-| Time | 6 min 53 s |
-| Peak memory (resident) | 7.3 GB |
-| Database before and after | 6.8 GB, 12.0 GB |
-
-The time includes the download. For the whole France box, GLO-30 has 155 tiles (5.1 GB) and GLO-90 has 0.6 GB.
+France, driving, `--source copernicus`, on a Mac mini (Apple M6, 12 cores, 16 GB): 12.3 million nodes in 6 min 53 s with the
+download, 7.3 GB peak memory.

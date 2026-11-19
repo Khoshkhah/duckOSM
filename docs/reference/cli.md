@@ -31,7 +31,7 @@ duckosm build [OPTIONS]
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
 | `-o`, `--output PATH` | output file | `<name>.duckdb`, named after the boundary file, else the PBF, else the `--source-db` file |
 | `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
-| `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#several-areas-from-one-region)) | |
+| `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#2-cut-a-built-region)) | |
 | `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
@@ -39,7 +39,7 @@ duckosm build [OPTIONS]
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
-| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); overrides the config's `osm_overrides` key | none |
+| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/edit-osm-data.md#the-fixes-file); overrides the config's `osm_overrides` key | none |
 | `--log-file FILE` | also write the log to this file | console only |
 
 With none of `-c`, `-p` and `--source-db`, it uses `config/default.yaml` if that file exists.
@@ -77,7 +77,7 @@ duckosm boundary [OPTIONS] [NAME]
 ### `clip-pbf`
 
 Cuts a PBF down to a GeoJSON area, with `osmium`. Guide:
-[Cut a smaller PBF](../guides/prepare-area.md#cut-a-smaller-pbf).
+[Cut a smaller PBF](../guides/prepare-area.md#1-cut-the-osm-file).
 
 ```text
 duckosm clip-pbf [OPTIONS] PBF BOUNDARY
@@ -91,7 +91,7 @@ duckosm clip-pbf [OPTIONS] PBF BOUNDARY
 ### `extract`
 
 Cuts one area out of a built database into a new database, by name, OSM id or GeoJSON. Edge ids are
-kept. Guide: [Several areas from one region](../guides/prepare-area.md#several-areas-from-one-region).
+kept. Guide: [Cut a built region](../guides/prepare-area.md#2-cut-a-built-region).
 
 ```text
 duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --boundary BOUNDARY)
@@ -208,7 +208,7 @@ duckosm levels-edit [OPTIONS] DB
 Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
 of duckOSM Studio. Each change goes into the fixes file at once. **Build again** runs the build of the database again with the file,
 and the page then shows the new network. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
+`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#the-editor).
 
 ```text
 duckosm edit [OPTIONS] DB
@@ -247,7 +247,7 @@ the data dock shows the facts of the clicked item and the columns of the clicked
 A result of ids shows its objects: turns (`edge_graph`, `turn_restrictions`), ways, bus routes and H3 cells, each with a card. The table `extra.edits`
 has the changes of the fixes file, with the time of each. **Ask** uses your own key of a free AI service, which stays in your browser. The page does not
 change the data or the fixes file. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-Guide: [Ask questions on a page](../guides/query.md#ask-questions-on-a-page-duckosm-ask).
+Guide: [Ask questions on a page](../guides/query.md#ask-in-words).
 
 ```text
 duckosm ask [OPTIONS] DB
@@ -273,7 +273,7 @@ duckosm bus DB
 Writes duckOSM's route planner over a map drawn by mapstyle: drag a start and an end, pick Drive,
 Walk, Cycle or Walk + drive. Routing runs in the browser with the same answers as `route_points()`
 and `directions()`. Walk + drive needs [`multimodal`](#multimodal) first. Needs `duckosm[viz]`. Guide:
-[On a map](../guides/route.md#on-a-map).
+[The map page](../guides/route.md#the-map-page).
 
 ```text
 duckosm route-map [OPTIONS] DB
@@ -534,7 +534,7 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 ### `elevation`
 
 Adds the ground height to every node (`nodes.ele`) and edge end (`edges.z_from`, `z_to`), and a row
-in `main.elevation_metadata`. Running it again overwrites. Needs `duckosm[elevation]`. Guide:
+in `main.elevation_metadata`. Running it again overwrites. Guide:
 [Add elevation](../guides/elevation.md); sources: [Elevation sources](elevation-sources.md).
 
 ```text
@@ -543,7 +543,7 @@ duckosm elevation [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--dem TEXT` | an elevation file or URL, any format GDAL reads; wins over `--source` | |
+| `--dem TEXT` | a GeoTIFF in EPSG:4326 with 32-bit floats, a file or an HTTP address; wins over `--source` | |
 | `--source TEXT` | `auto`, `copernicus` or `eudtm` (needs `OPENTOPOGRAPHY_API_KEY`). `auto` picks EU-DTM in Europe when the key is set, else Copernicus | `auto` |
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
 | `--nodata-fill FLOAT` | height written where the model has no value | `0.0` |

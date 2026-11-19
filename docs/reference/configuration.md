@@ -28,7 +28,7 @@ In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 | `name` | `default` | `my_import` | stem of `-o`, else of `-b`, else of `-p` or `--source-db` | the area's name: the output file is `<name>.duckdb` when `output_path` is a folder; also names the cached PBF cut (below) and the report files |
 | `output_path` | `output.duckdb` | `.` | `-o` | a path ending in `.duckdb` is the output file; anything else is a folder, and the file is `<output_path>/<name>.duckdb` |
 | `modes` | `[driving]` | `[driving]` | `-m` | the networks to build: any of `driving`, `walking`, `cycling`, one schema each |
-| `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md). Used only when named |
+| `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/edit-osm-data.md#the-fixes-file). Used only when named |
 | `pbf_path` | none | | | short for `source.pbf_path` |
 | `boundary_path` | none | | | short for `boundary.path` |
 | `h3_cell` | none | | `--h3-cell` | short for `boundary.h3_cell` |
@@ -137,7 +137,7 @@ The area's DEM: its [ground reference](../concepts/ground-reference.md). Set it 
 command line. Only the Rust build (`duckosm --config`) reads this section: it samples the DEM and writes the heights,
 `main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
 `duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
-[`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit) do that
+[`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#the-editor) do that
 step themselves, with the keys of this section (they need `duckosm[elevation]`).
 
 | Key | Default | Does |
