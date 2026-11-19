@@ -133,62 +133,72 @@ pub fn quack_osm2pgsql_join_to<R: Read, W: Write + Send>(parts: Vec<R>, merc: bo
 /// Write the rows of the engine that `produce` gives (to its `send`) into the GeoParquet files of the four tables `outs`
 /// and/or the PostGIS database `postgis`: the parts of the relation lines wait in `Parts` until `produce` is done, and
 /// [`o2p::finish`] makes the rows of the tables. Gives the rows of each table.
-// ponytail: this thread makes and writes the rows; a writer thread as quack --gdal's when the time on large areas matters
+/// Write the rows that `produce` gives into the GeoParquet files `outs` and/or the PostGIS database `postgis`, on the
+/// writer of the layer modes (`quack_gdal::write_rows`): `finish` (the projection, the merge of the lines, the check of
+/// the polygons) and the COPY text run on the writer's threads. Gives the rows of each table.
 pub fn write_tables<W: Write + Send>(
     merc: bool,
     outs: Option<Vec<W>>,
     postgis: Option<&str>,
     produce: impl FnOnce(&mut dyn FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String>,
 ) -> Result<[usize; 5], String> {
-    let mut parquet = match outs {
-        Some(ws) => Some(ws.into_iter().zip(1..=4u8).map(|(w, t)| Osm2pgsqlWriter::new(t, merc, w)).collect::<Result<Vec<_>, _>>()?),
-        None => None,
+    struct Out<W: Write + Send> {
+        parquet: Option<Vec<Osm2pgsqlWriter<W>>>,
+        pg: Option<Copy>,
+        rows: [usize; 5],
+    }
+    let make = move || -> Result<Out<W>, String> {
+        let parquet = match outs {
+            Some(ws) => Some(ws.into_iter().zip(1..=4u8).map(|(w, t)| Osm2pgsqlWriter::new(t, merc, w)).collect::<Result<Vec<_>, _>>()?),
+            None => None,
+        };
+        let pg = postgis.map(|conn| Copy::new(conn, merc)).transpose()?;
+        Ok(Out { parquet, pg, rows: [0; 5] })
     };
-    let mut pg = postgis.map(|conn| Copy::new(conn, merc)).transpose()?;
-    let mut rows = [0usize; 5];
-    let mut write = |batch: Vec<Feature>| -> Result<(), String> {
-        let mut out = Vec::new();
-        batch.into_iter().for_each(|f| o2p::finish(f, merc, &mut out));
-        for f in out {
-            rows[f.layer as usize] += 1;
-            if let Some(c) = pg.as_mut() {
-                c.write(&f)?;
+    let write = |o: &mut Out<W>, batch: Vec<Feature>| -> Result<(), String> {
+        use rayon::prelude::*;
+        let pg = o.pg.is_some();
+        let rows: Vec<(Feature, Option<String>)> = batch
+            .into_par_iter()
+            .flat_map_iter(|f| {
+                let mut out = Vec::new();
+                o2p::finish(f, merc, &mut out);
+                out
+            })
+            .map(|f| {
+                let line = pg.then(|| copy_line(&f, merc));
+                (f, line)
+            })
+            .collect();
+        for (f, line) in rows {
+            o.rows[f.layer as usize] += 1;
+            if let (Some(c), Some(line)) = (o.pg.as_mut(), line) {
+                c.push(f.layer, &line)?;
             }
-            if let Some(w) = parquet.as_mut() {
+            if let Some(w) = o.parquet.as_mut() {
                 w[f.layer as usize - 1].write(f)?;
             }
         }
         Ok(())
     };
-    let mut parts = Parts::new()?;
-    produce(&mut |batch: Vec<Feature>| {
-        let (part, whole): (Vec<Feature>, Vec<Feature>) = batch.into_iter().partition(|f| f.part.is_some());
-        part.iter().try_for_each(|f| parts.push(f))?;
-        write(whole)
-    })?;
-    let mut batch = Vec::new();
-    parts.rows(quack::BUDGET, |f| {
-        batch.push(f);
-        if batch.len() >= 10_000 {
-            write(std::mem::take(&mut batch))?;
+    let close = |o: Out<W>| -> Result<[usize; 5], String> {
+        if let Some(w) = o.parquet {
+            w.into_iter().try_for_each(|w| w.close().map(|_| ()))?;
         }
-        Ok(())
-    })?;
-    write(batch)?;
-    if let Some(w) = parquet {
-        w.into_iter().try_for_each(|w| w.close().map(|_| ()))?;
-    }
-    if let Some(mut c) = pg {
-        c.finish(true)?;
-    }
-    Ok(rows)
+        if let Some(mut c) = o.pg {
+            c.finish(true)?;
+        }
+        Ok(o.rows)
+    };
+    // half of the threads: `finish` checks each polygon, the heavy part of the run
+    let threads = (rayon::current_num_threads() / 2).max(2);
+    crate::quack_gdal::write_rows(threads, make, write, close, "quack --osm2pgsql", produce)
 }
 
 /// The rows of the four tables in PostgreSQL's COPY text format, as osm2pgsql sends them (`osm_id`, the columns, `tags`
 /// as hstore text, the geometry as hex EWKB), sent while the file is read: each table has its own thread and connection,
 /// which takes the rows through a channel.
 struct Copy {
-    merc: bool,
     lines: Vec<String>,
     to: Vec<std::sync::mpsc::SyncSender<Option<String>>>,
     jobs: Vec<std::thread::JoinHandle<Result<(), String>>>,
@@ -225,6 +235,27 @@ fn ewkb_hex(wkb: &[u8], srid: u32, out: &mut String) {
     }
 }
 
+/// The COPY line of a row: `osm_id`, the columns, `tags` as hstore text, the geometry as hex EWKB, and a new line.
+fn copy_line(f: &Feature, merc: bool) -> String {
+    let mut line = o2p::osm_id(f).to_string();
+    let (vals, tags) = o2p::values(f);
+    for v in vals {
+        line.push('\t');
+        match v {
+            None => line.push_str("\\N"),
+            Some(o2p::Cell::Text(s)) => copy_text(&s, &mut line),
+            Some(o2p::Cell::Int(n)) => line.push_str(&n.to_string()),
+            Some(o2p::Cell::Real(n)) => line.push_str(&n.to_string()),
+        }
+    }
+    line.push('\t');
+    copy_text(&hstore(&tags), &mut line);
+    line.push('\t');
+    ewkb_hex(&f.geometry, if merc { 3857 } else { 4326 }, &mut line);
+    line.push('\n');
+    line
+}
+
 /// The rows that a table thread gets in one message.
 const CHUNK: usize = 1 << 20;
 
@@ -242,7 +273,7 @@ impl Copy {
             to.push(tx);
             jobs.push(std::thread::spawn(move || load(&conn, table, merc, rx)));
         }
-        Ok(Copy { merc, lines: vec![String::new(); 4], to, jobs })
+        Ok(Copy { lines: vec![String::new(); 4], to, jobs })
     }
 
     #[cfg(not(feature = "postgis"))]
@@ -250,25 +281,11 @@ impl Copy {
         Err("the PostGIS output needs the cargo feature \"postgis\"".into())
     }
 
-    fn write(&mut self, f: &Feature) -> Result<(), String> {
-        let t = f.layer as usize - 1;
+    /// Add the COPY line of a row of table `table` ([`copy_line`]).
+    fn push(&mut self, table: u8, row: &str) -> Result<(), String> {
+        let t = table as usize - 1;
         let line = &mut self.lines[t];
-        line.push_str(&o2p::osm_id(f).to_string());
-        let (vals, tags) = o2p::values(f);
-        for v in vals {
-            line.push('\t');
-            match v {
-                None => line.push_str("\\N"),
-                Some(o2p::Cell::Text(s)) => copy_text(&s, line),
-                Some(o2p::Cell::Int(n)) => line.push_str(&n.to_string()),
-                Some(o2p::Cell::Real(n)) => line.push_str(&n.to_string()),
-            }
-        }
-        line.push('\t');
-        copy_text(&hstore(&tags), line);
-        line.push('\t');
-        ewkb_hex(&f.geometry, if self.merc { 3857 } else { 4326 }, line);
-        line.push('\n');
+        line.push_str(row);
         if line.len() >= CHUNK {
             let chunk = std::mem::take(line);
             if self.to[t].send(Some(chunk)).is_err() {

@@ -139,6 +139,21 @@ pub fn write_layers<W: Write + Send>(
             rows: [0; 6],
         })
     };
+    write_rows((rayon::current_num_threads() / 4).max(2), make_out, |out, rows| out.write(rows), |out| out.close(), "quack --gdal", produce)
+}
+
+/// The writer of the layer modes (`quack --gdal`, `quack --osm2pgsql`): the rows that `produce` gives (to its `send`) go
+/// to `write`, and the parts of the relations wait in `Parts` until `produce` is done, then go to `write` joined. Natively,
+/// `make`, `write` and `close` run on a writer thread with a pool of `threads` of its own, while `produce` makes the rows;
+/// in the browser this thread does all.
+pub fn write_rows<O, R: Send>(
+    threads: usize,
+    make: impl FnOnce() -> Result<O, String> + Send,
+    mut write: impl FnMut(&mut O, Vec<Feature>) -> Result<(), String> + Send,
+    close: impl FnOnce(O) -> Result<R, String> + Send,
+    what: &str,
+    produce: impl FnOnce(&mut dyn FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String>,
+) -> Result<R, String> {
     // the rows to the writer, the parts to `Parts`; then the joined parts
     let feed = |send: &mut dyn FnMut(Vec<Feature>) -> Result<(), String>| -> Result<(), String> {
         let mut parts = Parts::new()?;
@@ -156,37 +171,38 @@ pub fn write_layers<W: Write + Send>(
             Ok(())
         })?;
         send(batch)?;
-        duckosm_core::util::step("quack --gdal: the relations of the tiles");
+        duckosm_core::util::step(&format!("{what}: the relations of the tiles"));
         Ok(())
     };
     #[cfg(target_arch = "wasm32")]
     {
-        let mut out = make_out()?;
-        feed(&mut |rows| out.write(rows))?;
-        out.close()
+        let _ = threads;
+        let mut out = make()?;
+        feed(&mut |rows| write(&mut out, rows))?;
+        close(out)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    std::thread::scope(|scope| -> Result<[usize; 6], String> {
+    std::thread::scope(|scope| -> Result<R, String> {
         // one batch waits for the writer: with 8, the waiting rows were 200 MB of the memory on Kentucky
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(1);
         // the writer encodes on a pool of its own. On the pool of the engine, a thread that waited for a job of the writer
         // took a job of the relations, and that job waited for the channel of the relations, which waited for the writer:
         // France by tiles stopped with no error.
-        let threads = (rayon::current_num_threads() / 4).max(2);
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().map_err(|e| format!("quack --gdal: the writer's threads: {e}"))?;
-        let writer = scope.spawn(move || -> Result<[usize; 6], String> {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().map_err(|e| format!("{what}: the writer's threads: {e}"))?;
+        let writer = scope.spawn(move || -> Result<R, String> {
             pool.install(|| {
-                let mut out = make_out()?;
+                let mut out = make()?;
                 for batch in rx {
-                    out.write(batch)?;
+                    write(&mut out, batch)?;
                 }
-                out.close()
+                close(out)
             })
         });
-        let made = feed(&mut |rows| tx.send(rows).map_err(|_| "quack --gdal: the writer stopped".to_string()));
+        let stopped = format!("{what}: the writer stopped");
+        let made = feed(&mut |rows| tx.send(rows).map_err(|_| stopped.clone()));
         drop(tx);
         // the error of the writer explains a stop of the engine
-        let written = writer.join().unwrap_or_else(|_| Err("quack --gdal: the writer stopped (panic)".into()));
+        let written = writer.join().unwrap_or_else(|_| Err(format!("{what}: the writer stopped (panic)")));
         made.and(written)
     })
 }

@@ -562,12 +562,8 @@ pub fn finish(f: Feature, merc: bool, out: &mut Vec<Feature>) {
         }
         _ => {
             let rings: Vec<Vec<Pt>> = rings.iter().map(|r| r.iter().map(|&p| proj(p)).collect()).collect();
-            if merc {
-                use geo::Validation;
-                let ls = |r: &Vec<Pt>| geo::LineString::from(r.iter().map(|p| geo::coord! { x: p.0, y: p.1 }).collect::<Vec<_>>());
-                if !geo::Polygon::new(ls(&rings[0]), rings[1..].iter().map(ls).collect()).is_valid() {
-                    return;
-                }
+            if merc && !valid(&rings) {
+                return;
             }
             let area = (ring_area(&rings[0]).abs() - rings[1..].iter().map(|r| ring_area(r).abs()).sum::<f64>()).abs();
             // osm2pgsql writes the area as text with "{:g}" (6 digits), and PostgreSQL keeps a real
@@ -580,6 +576,85 @@ pub fn finish(f: Feature, merc: bool, out: &mut Vec<Feature>) {
             out.push(Feature { tags, geometry: wkb_rings(3, &rings), ..f });
         }
     }
+}
+
+/// The polygon of `rings` is valid: the rules of the geo crate's `Validation` for a polygon (osm2pgsql's `ST_IsValid`
+/// check), with the test of each ring for a self-intersection by a sweep ([`self_intersects`]) in place of geo's test of
+/// each pair of segments, which took most of the time of a run.
+pub fn valid(rings: &[Vec<Pt>]) -> bool {
+    use geo::coordinate_position::CoordPos;
+    use geo::dimensions::Dimensions;
+    use geo::{PreparedGeometry, Relate, RemoveRepeatedPoints};
+    let ls = |r: &Vec<Pt>| geo::LineString::from(r.iter().map(|p| geo::coord! { x: p.0, y: p.1 }).collect::<Vec<_>>());
+    let poly = geo::Polygon::new(ls(&rings[0]), rings[1..].iter().map(ls).collect());
+    if poly.exterior().0.is_empty() {
+        return true;
+    }
+    for r in std::iter::once(poly.exterior()).chain(poly.interiors()) {
+        if r.0.is_empty() {
+            continue;
+        }
+        if r.remove_repeated_points().0.len() < 4 || self_intersects(r) || r.0.iter().any(|c| !c.x.is_finite() || !c.y.is_finite()) {
+            return false;
+        }
+    }
+    let holes = poly.interiors();
+    if holes.iter().all(|r| r.0.is_empty()) {
+        return true;
+    }
+    let outer = geo::Polygon::new(poly.exterior().clone(), vec![]);
+    let outer = PreparedGeometry::from(&outer);
+    for (k, h1) in holes.iter().enumerate() {
+        if h1.0.is_empty() {
+            continue;
+        }
+        let p1 = geo::Polygon::new(h1.clone(), vec![]);
+        let p1 = PreparedGeometry::from(&p1);
+        let m = outer.relate(&p1);
+        if !m.is_contains() || m.get(CoordPos::OnBoundary, CoordPos::OnBoundary) == Dimensions::OneDimensional {
+            return false;
+        }
+        for h2 in &holes[k + 1..] {
+            if h2.0.is_empty() {
+                continue;
+            }
+            let m = p1.relate(&geo::Polygon::new(h2.clone(), vec![]));
+            if m.get(CoordPos::Inside, CoordPos::Inside) == Dimensions::TwoDimensional
+                || m.get(CoordPos::OnBoundary, CoordPos::OnBoundary) == Dimensions::OneDimensional
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Two segments of the ring meet, other than the end of one at the start of the other: the rule of geo's
+/// `linestring_has_self_intersection`. A sweep by x: the segments sorted by their smallest x, and each compared only with
+/// the segments before it whose boxes overlap its box.
+fn self_intersects(r: &geo::LineString) -> bool {
+    use geo::Intersects;
+    let segs: Vec<geo::Line> = r.lines().collect();
+    let x0 = |l: &geo::Line| l.start.x.min(l.end.x);
+    let mut order: Vec<usize> = (0..segs.len()).collect();
+    order.sort_by(|&a, &b| x0(&segs[a]).total_cmp(&x0(&segs[b])));
+    let mut open: Vec<usize> = Vec::new();
+    for &i in &order {
+        let a = segs[i];
+        let (ax, ay0, ay1) = (x0(&a), a.start.y.min(a.end.y), a.start.y.max(a.end.y));
+        open.retain(|&j| segs[j].start.x.max(segs[j].end.x) >= ax);
+        for &j in &open {
+            let b = segs[j];
+            if b.start.y.max(b.end.y) < ay0 || b.start.y.min(b.end.y) > ay1 {
+                continue;
+            }
+            if a.intersects(&b) && a.start != b.end && a.end != b.start {
+                return true;
+            }
+        }
+        open.push(i);
+    }
+    false
 }
 
 /// The area of a ring (signed), as Boost's `surveyor`: the sum of (x1 - x2)(y1 + y2), which loses less with large
@@ -938,4 +1013,43 @@ mod tests {
         assert!(assemble(&[vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]]).is_none());
         assert!(assemble(&[vec![(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0)]]).is_none());
     }
+
+    /// `valid` equals geo's `is_valid` on rings that are valid and not valid in many ways.
+    #[test]
+    fn valid_equals_geo() {
+        use geo::Validation;
+        let sq = |x: f64, y: f64, d: f64| vec![(x, y), (x + d, y), (x + d, y + d), (x, y + d), (x, y)];
+        let cases: Vec<Vec<Vec<Pt>>> = vec![
+            vec![sq(0.0, 0.0, 10.0)],
+            vec![vec![(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0), (0.0, 0.0)]], // bow tie
+            vec![vec![(0.0, 0.0), (10.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 0.0)]],    // spike
+            vec![vec![(0.0, 0.0), (10.0, 0.0), (0.0, 0.0), (0.0, 0.0)]],                // too few points
+            vec![vec![(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (2.0, 0.0), (0.0, 4.0), (0.0, 0.0)]], // touches itself
+            vec![sq(0.0, 0.0, 10.0), sq(2.0, 2.0, 2.0)],
+            vec![sq(0.0, 0.0, 10.0), sq(0.0, 2.0, 2.0)],  // hole on the outer ring along a line
+            vec![sq(0.0, 0.0, 10.0), sq(8.0, 8.0, 4.0)],  // hole not inside
+            vec![sq(0.0, 0.0, 10.0), sq(2.0, 2.0, 3.0), sq(3.0, 3.0, 3.0)], // holes overlap
+            vec![sq(0.0, 0.0, 10.0), sq(2.0, 2.0, 2.0), sq(4.0, 2.0, 2.0)], // holes share a side
+            vec![sq(0.0, 0.0, 10.0), sq(2.0, 2.0, 2.0), sq(4.0, 4.0, 2.0)], // holes touch at a point
+            vec![vec![(0.0, 0.0), (5.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 0.0)]],     // a repeated point
+        ];
+        // and many rings of random points, most of them not valid
+        let mut seed = 7u64;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) % 8) as f64
+        };
+        let mut all = cases;
+        for n in 0..400 {
+            let mut r: Vec<Pt> = (0..4 + n % 9).map(|_| (rnd(), rnd())).collect();
+            r.push(r[0]);
+            all.push(vec![r]);
+        }
+        for rings in &all {
+            let ls = |r: &Vec<Pt>| geo::LineString::from(r.iter().map(|p| geo::coord! { x: p.0, y: p.1 }).collect::<Vec<_>>());
+            let want = geo::Polygon::new(ls(&rings[0]), rings[1..].iter().map(ls).collect()).is_valid();
+            assert_eq!(valid(rings), want, "{rings:?}");
+        }
+    }
+
 }
