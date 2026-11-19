@@ -491,7 +491,41 @@ pub fn cut_where<R: Read + Seek + Send, W: Write>(
     inside: &(dyn Fn(f64, f64) -> bool + Sync),
     out: W,
 ) -> Result<(W, CutCounts), String> {
-    cut_inner(open, inside, None, out)
+    cut_with(open, inside, Strategy::Smart, out)
+}
+
+/// The rules of a cut, as the strategies of `osmium extract`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strategy {
+    /// The nodes inside, the ways with a node inside (with only the nodes inside), the relations whose first member
+    /// node or way is inside or kept (as osmium does).
+    Simple,
+    /// [`Strategy::Simple`], and each kept way with all its nodes, and the parent relations of the kept relations.
+    CompleteWays,
+    /// [`Strategy::CompleteWays`], and all members of the kept multipolygons (each member way with all its nodes).
+    Smart,
+}
+
+impl std::str::FromStr for Strategy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "simple" => Ok(Strategy::Simple),
+            "complete_ways" => Ok(Strategy::CompleteWays),
+            "smart" => Ok(Strategy::Smart),
+            _ => Err(format!("unknown strategy {s}: use complete_ways, smart or simple")),
+        }
+    }
+}
+
+/// [`cut_where`] with the rules of `strategy`.
+pub fn cut_with<R: Read + Seek + Send, W: Write>(
+    open: impl Fn() -> Result<R, String>,
+    inside: &(dyn Fn(f64, f64) -> bool + Sync),
+    strategy: Strategy,
+    out: W,
+) -> Result<(W, CutCounts), String> {
+    cut_inner(open, inside, strategy, None, out)
 }
 
 /// [`cut_to_pbf`] with the OSM fixes `fixes` in the area file (`duckosm cut --fixes`, docs/exports/osm-file.md), in the
@@ -511,12 +545,13 @@ pub fn cut_with_fixes<R: Read + Seek + Send, W: Write>(
         want: crate::quack::NewWayInputs::of(fixes),
         turn_ways: fixes.turn_restrictions.iter().flat_map(|t| [t.from_way, t.to_way]).collect(),
     };
-    cut_inner(open, &|lon, lat| boundary.contains(lon, lat), Some(&f), out)
+    cut_inner(open, &|lon, lat| boundary.contains(lon, lat), Strategy::Smart, Some(&f), out)
 }
 
 fn cut_inner<R: Read + Seek + Send, W: Write>(
     open: impl Fn() -> Result<R, String>,
     inside: &(dyn Fn(f64, f64) -> bool + Sync),
+    strategy: Strategy,
     fixes: Option<&Fixes>,
     out: W,
 ) -> Result<(W, CutCounts), String> {
@@ -577,8 +612,19 @@ fn cut_inner<R: Read + Seek + Send, W: Write>(
             MemberType::Relation => false,
         })
     };
-    let mut chosen: FxHashSet<i64> = rels.iter().filter(|r| direct(r)).map(|r| r.id).collect();
-    loop {
+    // osmium's `simple` looks only at the first member that is a node or a way (strategy_simple.cpp)
+    let first = |r: &Rel| match r.members.iter().find(|m| m.1 != MemberType::Relation) {
+        Some(&(m, MemberType::Node)) => inside.contains(m),
+        Some(&(m, _)) => kept.contains(m),
+        None => false,
+    };
+    let mut chosen: FxHashSet<i64> =
+        rels.iter().filter(|r| if strategy == Strategy::Simple { first(r) } else { direct(r) }).map(|r| r.id).collect();
+    if strategy == Strategy::Simple {
+        // the ways without their nodes outside, and no parent relations
+        outside = IdSet::default();
+    }
+    while strategy != Strategy::Simple {
         let parents: Vec<i64> = rels
             .iter()
             .filter(|r| !chosen.contains(&r.id))
@@ -592,7 +638,7 @@ fn cut_inner<R: Read + Seek + Send, W: Write>(
     }
     // the members of the multipolygons with a member inside or a member way kept
     let (mut more_ways, mut more_nodes) = (Vec::new(), Vec::new());
-    for r in rels.iter().filter(|r| r.multipolygon && direct(r)) {
+    for r in rels.iter().filter(|r| strategy == Strategy::Smart && r.multipolygon && direct(r)) {
         for &(m, t) in &r.members {
             match t {
                 MemberType::Way if !kept.contains(m) => more_ways.push(m),
@@ -807,6 +853,20 @@ mod tests {
         assert_eq!((n.nodes, n.ways, n.relations), (raw.nodes.len(), raw.ways.len(), raw.relations.len()));
         assert!(n.nodes > 0 && n.ways > 0 && n.relations > 0);
         assert_eq!(elements(&got[..]), elements(&want[..]));
+    }
+
+    /// The three strategies give the numbers of `osmium extract --strategy <s> --polygon monaco.geojson` (osmium 1.18;
+    /// the elements are the same too, checked with `files_have_the_same_elements`).
+    #[test]
+    fn the_strategies_give_the_numbers_of_osmium() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+        let pbf = dir.join("monaco.osm.pbf");
+        let boundary = Boundary::parse(&std::fs::read_to_string(dir.join("monaco.geojson")).unwrap()).unwrap();
+        let open = || std::fs::File::open(&pbf).map(std::io::BufReader::new).map_err(|e| e.to_string());
+        for (s, want) in [(Strategy::Simple, (32884, 5650, 228)), (Strategy::CompleteWays, (34291, 5650, 336)), (Strategy::Smart, (34291, 5650, 336))] {
+            let (_, n) = cut_with(open, &|lon, lat| boundary.contains(lon, lat), s, Vec::new()).unwrap();
+            assert_eq!((n.nodes, n.ways, n.relations), want, "{s:?}");
+        }
     }
 
     /// Two files on the disk (CUT_A and CUT_B) have the same elements: the check of a large cut, for example

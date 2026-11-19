@@ -1,6 +1,6 @@
 # The boundary file
 
-A boundary is the area that you build. `duckosm get`, `duckosm cut` and `duckosm build --boundary` read it from a file.
+A boundary is the area that you build. `duckosm get`, `duckosm cut` and the build read it from a GeoJSON file.
 
 ## The format
 
@@ -18,7 +18,7 @@ longitude and latitude in degrees (EPSG:4326), in the order **[longitude, latitu
 | Rule | Description |
 |---|---|
 | Types | `Polygon`, `MultiPolygon`, a `Feature` with one of them, or a `FeatureCollection` of such features. A `Point`, a `LineString` or a `GeometryCollection` is an error. |
-| Several features | Give one feature. The cut of `get` and `cut` uses the polygons of all features. `main.boundary` is different: see [Properties](#properties). |
+| Several features | Give one feature. With more, the cut uses the polygons of all features, but `main.boundary` can keep only the first ([Properties](#properties)). |
 | Holes | The second and next rings of a polygon are holes. A point in a hole is outside the area. |
 | A point on the border | A node on a ring is inside the area. |
 | Rings | Each ring is closed: its last position equals its first, and it has 4 positions or more. |
@@ -35,8 +35,8 @@ The build writes the boundary to the table `main.boundary`, with its properties 
 
 | Build | Rows of `main.boundary` |
 |---|---|
-| `duckosm build --pbf ... --boundary ...` | One row for each feature, with all its properties (GDAL's `ST_Read`). |
-| The Rust build (`duckosm <PBF> --boundary ...`) and duckOSM Studio | One row: the first feature, with all its properties. |
+| `duckosm FILE --boundary ...` and duckOSM Studio | one row: the first feature, with all its properties |
+| `duckosm build --boundary ...` | one row for each feature, with all its properties |
 
 | GeoJSON value | Column type |
 |---|---|
