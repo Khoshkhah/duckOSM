@@ -2,8 +2,8 @@
 //! `id` = `edge_id`, the legal connections of `edge_graph`), the netconvert config (`.netccfg`), and netconvert.
 //!
 //! `to_sumo_with` also takes the options of the Python API that GMNS uses (`gmns_sumo`): the bus-only edges, each edge's lanes
-//! (with their turn arrows, which netconvert's OSM import applies), attributes of an edge and more netconvert options. Not here:
-//! the join of nodes when the options set `junctions.join`.
+//! (with their turn arrows, which netconvert's OSM import applies), attributes of an edge and more netconvert options. With
+//! `junctions.join` set, netconvert names the joins and this export merges those nodes itself ([`merge_joined`]).
 
 use crate::stream::{cast_col, each_chunk};
 use crate::{has_table, open, quoteattr, Out, Result};
@@ -187,8 +187,62 @@ struct Edge {
     tgt: i64,
     hw: Option<String>,
     name: Option<String>,
+    lanes: Option<i64>,
     spd: Option<f64>,
+    length: Option<f64>,
     wkt: Option<String>,
+}
+
+/// The `<edge>` element of one edge, with its `<lane>`s: `from`, `to` (a joined node has a new name), `both` (the reverse edge
+/// is there), `lanes` (use, width) left to right, `extra` (attributes that GMNS sets).
+fn edge_xml(r: &Edge, from: &str, to: &str, both: bool, lanes: Option<&[(String, f64)]>, extra: Option<&Vec<(String, String)>>, mode: &str) -> String {
+    let path_mode = mode == "walking" || mode == "cycling";
+    let mut a = vec![format!("id=\"{}\"", r.id), format!("from=\"{from}\""), format!("to=\"{to}\""), format!("priority=\"{}\"", priority(r.hw.as_deref()))];
+    if let Some(l) = lanes {
+        a.push(format!("numLanes=\"{}\"", l.len()));
+    } else if let Some(n) = r.lanes.filter(|n| *n > 0 && !path_mode) {
+        a.push(format!("numLanes=\"{n}\""));
+    }
+    if let Some(s) = r.spd.filter(|s| *s > 0.0) {
+        a.push(format!("speed=\"{:.3}\"", s / 3.6));
+    }
+    if let Some(l) = r.length.filter(|l| *l > 0.0) {
+        a.push(format!("length=\"{l:.2}\""));
+    }
+    if let Some(h) = r.hw.as_deref().filter(|h| !h.is_empty()) {
+        a.push(format!("type={}", quoteattr(h)));
+    }
+    match mode {
+        "walking" => a.push("allow=\"pedestrian\"".into()),
+        "cycling" => a.push("allow=\"bicycle\"".into()),
+        _ => {}
+    }
+    // one-way: the line is the middle of its lanes; two-way: the middle of the whole road
+    a.push(if both { "spreadType=\"roadCenter\"".into() } else { "spreadType=\"center\"".into() });
+    if let Some(s) = shape(r.wkt.as_deref()) {
+        a.push(format!("shape=\"{s}\""));
+    }
+    if let Some(n) = r.name.as_deref().filter(|n| !n.is_empty()) {
+        a.push(format!("name={}", quoteattr(n)));
+    }
+    for (k, v) in extra.into_iter().flatten() {
+        a.retain(|x| !x.starts_with(&format!("{k}=")));
+        a.push(format!("{k}={}", quoteattr(v)));
+    }
+    let Some(l) = lanes else { return format!("  <edge {}/>\n", a.join(" ")) };
+    // SUMO numbers the lanes from the right
+    let mut t = format!("  <edge {}>\n", a.join(" "));
+    for (i, (u, w)) in l.iter().rev().enumerate() {
+        let allow = match u.as_str() {
+            "bus" => " allow=\"bus\"",
+            "bike" => " allow=\"bicycle\"",
+            "bus,bike" => " allow=\"bus bicycle\"",
+            _ => "",
+        };
+        t.push_str(&format!("    <lane index=\"{i}\"{allow} width=\"{w:.2}\"/>\n"));
+    }
+    t.push_str("  </edge>\n");
+    t
 }
 
 pub struct Summary {
@@ -551,6 +605,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     }
     // the turns of the mode's own edges (the column `uses`), as routed_graph; each turn once, at its first row
     let (mut pairs_sql, mut stuck_sql, mut perms) = (String::new(), String::new(), Permissions { keyed: HashMap::new(), added: Vec::new() });
+    let mut prules: Vec<PathRule> = Vec::new();
     if use_conns {
         let has_uses: i64 = con
             .query_row(
@@ -608,9 +663,26 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             froms += &format!(" UNION ALL SELECT {}", c.0);
         }
         stuck_sql = format!("SELECT edge_id FROM ({rows_sql}) WHERE source <> target AND edge_id NOT IN ({froms}) ORDER BY k");
-    }
-    if config.is_none() && o.config.iter().any(|(k, v)| k == "junctions.join" && v.eq_ignore_ascii_case("true")) {
-        return Err("to_sumo: junctions.join (the join of nodes) is not ported to Rust".into());
+        // the via-way restrictions (from edge, via edges, to edge): SUMO can give them only where the via edges go into a joined
+        // junction, and the path becomes one connection
+        if has_table(&con, mode, "turn_path_restrictions")? {
+            let mut st = con
+                .prepare(&format!(
+                    "SELECT restriction_type, from_edge, via_edges, to_edge, except_vehicles, applies_to FROM {mode}.turn_path_restrictions"
+                ))
+                .map_err(e)?;
+            prules = st
+                .query_map([], |r| {
+                    let via = match r.get::<_, duckdb::types::Value>(2)? {
+                        duckdb::types::Value::List(l) => l.into_iter().filter_map(|v| if let duckdb::types::Value::BigInt(i) = v { Some(i) } else { None }).collect(),
+                        _ => Vec::new(),
+                    };
+                    Ok(PathRule { rtype: r.get::<_, Option<String>>(0)?.unwrap_or_default(), from: r.get(1)?, via, to: r.get(3)?, except: r.get(4)?, veh: r.get(5)? })
+                })
+                .map_err(e)?
+                .collect::<std::result::Result<_, _>>()
+                .map_err(e)?;
+        }
     }
     // the netconvert options: the built-in ones, then the caller's (a dict update of Python)
     let mut opts: Vec<(String, String)> = DEFAULT_NETCFG.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
@@ -638,6 +710,42 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     let profile = o.lanes.as_ref().unwrap_or(&empty);
     let mut arrowed: Vec<i64> = profile.iter().filter(|(_, ls)| ls.iter().any(|x| x.2.as_deref().is_some_and(|v| !v.is_empty()))).map(|(k, _)| *k).collect();
     arrowed.sort();
+    // the network in memory: only for netconvert's OSM import of the turn arrows (GMNS) and for a junction join
+    let load_nodes = || -> Result<Vec<(i64, f64, f64)>> {
+        let mut nodes = Vec::new();
+        each_chunk(&con, &nodes_sql, [], |c| {
+            nodes.extend((0..c.len).map(|i| (c.i64(0, i).unwrap_or_default(), c.f64(1, i).unwrap_or_default(), c.f64(2, i).unwrap_or_default())));
+            Ok(())
+        })?;
+        Ok(nodes)
+    };
+    let load_rows = || -> Result<Vec<Edge>> {
+        let mut rows = Vec::new();
+        each_chunk(&con, &format!("SELECT * EXCLUDE (k) FROM ({rows_sql}) ORDER BY k"), [], |c| {
+            rows.extend((0..c.len).map(|i| Edge {
+                id: c.i64(0, i).unwrap_or_default(),
+                src: c.i64(1, i).unwrap_or_default(),
+                tgt: c.i64(2, i).unwrap_or_default(),
+                hw: c.str(3, i).map(String::from),
+                name: c.str(4, i).map(String::from),
+                lanes: c.i64(5, i),
+                spd: c.f64(6, i),
+                length: c.f64(7, i),
+                wkt: c.str(8, i).map(String::from),
+            }));
+            Ok(())
+        })?;
+        Ok(rows)
+    };
+    let load_conns = || -> Result<Vec<Conn>> {
+        let mut cs = Vec::new();
+        each_chunk(&con, &pairs_sql, [], |c| {
+            cs.extend((0..c.len).filter_map(|i| perms.at(c.i64(0, i).unwrap_or_default(), c.i64(1, i).unwrap_or_default())));
+            Ok(())
+        })?;
+        cs.extend(perms.added());
+        Ok(cs)
+    };
     let (mut lane_cs, mut here_edges): (Vec<(i64, Vec<(i64, i64, i64)>)>, HashSet<i64>) = (Vec::new(), HashSet::new());
     if use_conns && !arrowed.is_empty() && netconvert {
         // netconvert's OSM import reads the whole network: GMNS's lanes only
@@ -657,24 +765,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             }
             Ok(())
         };
-        let mut nodes = Vec::new();
-        each_chunk(&con, &nodes_sql, [], |c| {
-            nodes.extend((0..c.len).map(|i| (c.i64(0, i).unwrap_or_default(), c.f64(1, i).unwrap_or_default(), c.f64(2, i).unwrap_or_default())));
-            Ok(())
-        })?;
-        let mut rows = Vec::new();
-        each_chunk(&con, &format!("SELECT * EXCLUDE (k) FROM ({rows_sql}) ORDER BY k"), [], |c| {
-            rows.extend((0..c.len).map(|i| Edge {
-                id: c.i64(0, i).unwrap_or_default(),
-                src: c.i64(1, i).unwrap_or_default(),
-                tgt: c.i64(2, i).unwrap_or_default(),
-                hw: c.str(3, i).map(String::from),
-                name: c.str(4, i).map(String::from),
-                spd: c.f64(6, i),
-                wkt: c.str(8, i).map(String::from),
-            }));
-            Ok(())
-        })?;
+        let (nodes, rows) = (load_nodes()?, load_rows()?);
         let mut sql = format!("SELECT edge_id, osm_id, is_reverse::BOOLEAN FROM {mode}.edges");
         if bus {
             sql.push_str(" UNION ALL SELECT edge_id, osm_id, is_reverse::BOOLEAN FROM driving.private_edges WHERE access = 'bus'");
@@ -684,12 +775,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             way_of.extend((0..c.len).map(|i| (c.i64(0, i).unwrap_or_default(), (c.i64(1, i).unwrap_or_default(), c.bool(2, i).unwrap_or(false)))));
             Ok(())
         })?;
-        let mut pairs = Vec::new();
-        each_chunk(&con, &pairs_sql, [], |c| {
-            pairs.extend((0..c.len).filter_map(|i| perms.at(c.i64(0, i).unwrap_or_default(), c.i64(1, i).unwrap_or_default()).map(|x| (x.0, x.1))));
-            Ok(())
-        })?;
-        pairs.extend(perms.added().map(|x| (x.0, x.1)));
+        let pairs: Vec<(i64, i64)> = load_conns()?.into_iter().map(|x| (x.0, x.1)).collect();
         lane_cs = arrow_connections(&way_of, &rows, profile, &arrowed, &pairs, &nodes, out_dir, net_name, &run_osm, &osm_opts)?;
         here_edges = rows.iter().filter(|r| r.src != r.tgt).map(|r| r.id).collect();
     } else if use_conns && !arrowed.is_empty() {
@@ -697,31 +783,63 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     }
     let lane_edges: HashSet<i64> = lane_cs.iter().map(|x| x.0).collect();
 
-    let path_mode = mode == "walking" || mode == "cycling";
-    // the three files, each written while DuckDB reads the tables; gives the numbers of nodes, edges and connections
-    let write = |lanes: Option<&HashMap<(String, String), Vec<(String, String)>>>| -> Result<(usize, usize, usize)> {
+    // the three files, each written while DuckDB reads the tables (`joined`: None), or from the network of a junction join, which
+    // is in memory; gives the numbers of nodes, edges and connections
+    let write = |joined: Option<&Joined<'_>>, lanes: Option<&HashMap<(String, String), Vec<(String, String)>>>| -> Result<(usize, usize, usize)> {
         let mut f = Out::create(&nod_path, false)?;
         f.put("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<nodes>\n")?;
         let mut n_nodes = 0;
-        each_chunk(&con, &nodes_sql, [], |c| {
-            for i in 0..c.len {
-                let (n, x, y) = (c.i64(0, i).unwrap_or_default(), c.f64(1, i).unwrap_or_default(), c.f64(2, i).unwrap_or_default());
-                f.put(&format!("  <node id=\"{n}\" x=\"{x:.7}\" y=\"{y:.7}\"/>\n"))?;
+        match joined {
+            None => each_chunk(&con, &nodes_sql, [], |c| {
+                for i in 0..c.len {
+                    let (n, x, y) = (c.i64(0, i).unwrap_or_default(), c.f64(1, i).unwrap_or_default(), c.f64(2, i).unwrap_or_default());
+                    f.put(&format!("  <node id=\"{n}\" x=\"{x:.7}\" y=\"{y:.7}\"/>\n"))?;
+                }
+                n_nodes += c.len;
+                Ok(())
+            })?,
+            Some(j) => {
+                for (n, x, y) in &j.m.nodes {
+                    f.put(&format!("  <node id=\"{n}\" x=\"{x:.7}\" y=\"{y:.7}\"/>\n"))?;
+                }
+                n_nodes = j.m.nodes.len();
             }
-            n_nodes += c.len;
-            Ok(())
-        })?;
+        }
         f.put("</nodes>\n")?;
         f.finish()?;
         let mut n_edges = 0;
         let mut f = Out::create(&edg_path, false)?;
         f.put("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<edges>\n")?;
-        each_chunk(&con, &edges_sql, [], |c| {
+        if let Some(j) = joined {
+            let end = |n: i64| j.m.of.get(&n).cloned().unwrap_or_else(|| n.to_string());
+            for r in &j.m.rows {
+                let (from, to) = (end(r.src), end(r.tgt));
+                if from == to {
+                    continue; // SUMO refuses from == to
+                }
+                let extra = o.edge_attrs.get(&r.id);
+                let here = if extra.is_some_and(|x| x.iter().any(|(k, _)| k == "numLanes")) { None } else { j.profile.get(&r.id).filter(|l| !l.is_empty()) };
+                f.put(&edge_xml(r, &from, &to, j.both_ways.contains(&(r.tgt, r.src)), here.map(|v| v.as_slice()), extra, mode))?;
+                n_edges += 1;
+            }
+        }
+        if joined.is_none() {
+          each_chunk(&con, &edges_sql, [], |c| {
             let (uses, widths) = (c.col(10).as_list::<i32>(), c.col(11).as_list::<i32>());
             for i in 0..c.len {
                 let (id, src, tgt) = (c.i64(0, i).unwrap_or_default(), c.i64(1, i).unwrap_or_default(), c.i64(2, i).unwrap_or_default());
                 let (hw, name, lanes, spd, len, wkt) = (c.str(3, i), c.str(4, i), c.i64(5, i), c.f64(6, i), c.f64(7, i), c.str(8, i));
-                let mut a = vec![format!("id=\"{id}\""), format!("from=\"{src}\""), format!("to=\"{tgt}\""), format!("priority=\"{}\"", priority(hw))];
+                let r = Edge {
+                    id,
+                    src,
+                    tgt,
+                    hw: hw.map(String::from),
+                    name: name.map(String::from),
+                    lanes,
+                    spd,
+                    length: len,
+                    wkt: wkt.map(String::from),
+                };
                 let extra = o.edge_attrs.get(&id);
                 // the lanes (use, width), left to right
                 let lanes_here: Option<Vec<(String, f64)>> = if extra.is_some_and(|x| x.iter().any(|(k, _)| k == "numLanes")) {
@@ -735,58 +853,12 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
                 } else {
                     None
                 };
-                if let Some(l) = &lanes_here {
-                    a.push(format!("numLanes=\"{}\"", l.len()));
-                } else if let Some(n) = lanes.filter(|n| *n > 0 && !path_mode) {
-                    a.push(format!("numLanes=\"{n}\""));
-                }
-                if let Some(s) = spd.filter(|s| *s > 0.0) {
-                    a.push(format!("speed=\"{:.3}\"", s / 3.6));
-                }
-                if let Some(l) = len.filter(|l| *l > 0.0) {
-                    a.push(format!("length=\"{l:.2}\""));
-                }
-                if let Some(h) = hw.filter(|h| !h.is_empty()) {
-                    a.push(format!("type={}", quoteattr(h)));
-                }
-                match mode {
-                    "walking" => a.push("allow=\"pedestrian\"".into()),
-                    "cycling" => a.push("allow=\"bicycle\"".into()),
-                    _ => {}
-                }
-                // one-way: the line is the middle of its lanes; two-way: the middle of the whole road
-                a.push(if c.bool(9, i) == Some(true) { "spreadType=\"roadCenter\"".into() } else { "spreadType=\"center\"".into() });
-                if let Some(s) = shape(wkt) {
-                    a.push(format!("shape=\"{s}\""));
-                }
-                if let Some(n) = name.filter(|n| !n.is_empty()) {
-                    a.push(format!("name={}", quoteattr(n)));
-                }
-                for (k, v) in extra.into_iter().flatten() {
-                    a.retain(|x| !x.starts_with(&format!("{k}=")));
-                    a.push(format!("{k}={}", quoteattr(v)));
-                }
-                if let Some(l) = &lanes_here {
-                    // SUMO numbers the lanes from the right
-                    let mut t = format!("  <edge {}>\n", a.join(" "));
-                    for (i, (u, w)) in l.iter().rev().enumerate() {
-                        let allow = match u.as_str() {
-                            "bus" => " allow=\"bus\"",
-                            "bike" => " allow=\"bicycle\"",
-                            "bus,bike" => " allow=\"bus bicycle\"",
-                            _ => "",
-                        };
-                        t.push_str(&format!("    <lane index=\"{i}\"{allow} width=\"{w:.2}\"/>\n"));
-                    }
-                    t.push_str("  </edge>\n");
-                    f.put(&t)?;
-                } else {
-                    f.put(&format!("  <edge {}/>\n", a.join(" ")))?;
-                }
+                f.put(&edge_xml(&r, &src.to_string(), &tgt.to_string(), c.bool(9, i) == Some(true), lanes_here.as_deref(), extra, mode))?;
             }
             n_edges += c.len;
             Ok(())
-        })?;
+          })?;
+        }
         f.put("</edges>\n")?;
         f.finish()?;
         let mut n_conns = 0;
@@ -813,19 +885,33 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
                 }
                 Ok(())
             };
-            each_chunk(&con, &pairs_sql, [], |c| {
-                for i in 0..c.len {
-                    if let Some(x) = perms.at(c.i64(0, i).unwrap_or_default(), c.i64(1, i).unwrap_or_default()) {
+            match joined {
+                None => {
+                    each_chunk(&con, &pairs_sql, [], |c| {
+                        for i in 0..c.len {
+                            if let Some(x) = perms.at(c.i64(0, i).unwrap_or_default(), c.i64(1, i).unwrap_or_default()) {
+                                put(&mut f, x)?;
+                            }
+                        }
+                        Ok(())
+                    })?;
+                    for x in perms.added() {
                         put(&mut f, x)?;
                     }
                 }
-                Ok(())
-            })?;
-            for x in perms.added() {
-                put(&mut f, x)?;
+                Some(j) => {
+                    for x in &j.m.cs {
+                        put(&mut f, x.clone())?;
+                    }
+                }
             }
             // the turn arrows' lane connections, onto the edges still there
             let by_lane: HashSet<String> = lanes.map(|l| l.keys().map(|k| k.0.clone()).collect()).unwrap_or_default();
+            let here_joined: Option<HashSet<i64>> = joined.map(|j| {
+                let end = |n: i64| j.m.of.get(&n).cloned().unwrap_or_else(|| n.to_string());
+                j.m.rows.iter().filter(|r| end(r.src) != end(r.tgt)).map(|r| r.id).collect()
+            });
+            let here_edges = here_joined.as_ref().unwrap_or(&here_edges);
             for (fe, ls) in &lane_cs {
                 if !here_edges.contains(fe) || by_lane.contains(&fe.to_string()) {
                     continue;
@@ -838,18 +924,25 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
                     f.put(&format!("  <connection from=\"{fe}\"/>\n"))?;
                 }
             }
-            each_chunk(&con, &stuck_sql, [], |c| {
-                for i in 0..c.len {
-                    f.put(&format!("  <connection from=\"{}\"/>\n", c.i64(0, i).unwrap_or_default()))?;
+            match joined {
+                None => each_chunk(&con, &stuck_sql, [], |c| {
+                    for i in 0..c.len {
+                        f.put(&format!("  <connection from=\"{}\"/>\n", c.i64(0, i).unwrap_or_default()))?;
+                    }
+                    Ok(())
+                })?,
+                Some(j) => {
+                    for fe in &j.m.stuck {
+                        f.put(&format!("  <connection from=\"{fe}\"/>\n"))?;
+                    }
                 }
-                Ok(())
-            })?;
+            }
             f.put("</connections>\n")?;
             f.finish()?;
         }
         Ok((n_nodes, n_edges, n_conns))
     };
-    let (n_nodes, n_edges, n_connections) = write(None)?;
+    let (n_nodes, n_edges, n_connections) = write(None, None)?;
     let mut s = Summary {
         nod: nod_path.clone(),
         edg: edg_path.clone(),
@@ -864,6 +957,24 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     }
 
     let (bin, home) = find_netconvert()?;
+    // the built-in netconvert config (.netccfg) with the options `opts`
+    let write_cfg = |opts: &[(String, String)]| -> Result<()> {
+        let mut l = vec![
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(),
+            "<configuration>".into(),
+            format!("  <node-files value=\"{}\"/>", rel(&nod_path, out_dir)),
+            format!("  <edge-files value=\"{}\"/>", rel(&edg_path, out_dir)),
+        ];
+        if use_conns {
+            l.push(format!("  <connection-files value=\"{}\"/>", rel(&con_path, out_dir)));
+        }
+        l.push(format!("  <output-file value=\"{}\"/>", rel(&net_path, out_dir)));
+        for (k, v) in opts {
+            l.push(format!("  <{k} value=\"{v}\"/>"));
+        }
+        l.extend(["</configuration>".into(), String::new()]);
+        std::fs::write(path("netccfg"), l.join("\n")).map_err(|x| x.to_string())
+    };
     let mut cmd: Vec<String> = Vec::new();
     match config {
         Some(c) => {
@@ -875,29 +986,14 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             }
         }
         None => {
-            let cfg = path("netccfg");
-            let mut l = vec![
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(),
-                "<configuration>".into(),
-                format!("  <node-files value=\"{}\"/>", rel(&nod_path, out_dir)),
-                format!("  <edge-files value=\"{}\"/>", rel(&edg_path, out_dir)),
-            ];
-            if use_conns {
-                l.push(format!("  <connection-files value=\"{}\"/>", rel(&con_path, out_dir)));
-            }
-            l.push(format!("  <output-file value=\"{}\"/>", rel(&net_path, out_dir)));
-            for (k, v) in &opts {
-                l.push(format!("  <{k} value=\"{v}\"/>"));
-            }
-            l.extend(["</configuration>".into(), String::new()]);
-            std::fs::write(&cfg, l.join("\n")).map_err(|x| x.to_string())?;
-            cmd.extend(["-c".into(), cfg.display().to_string()]);
+            write_cfg(&opts)?;
+            cmd.extend(["-c".into(), path("netccfg").display().to_string()]);
         }
     }
-    let run = || -> Result<()> {
-        eprintln!("running: {} {}", bin.display(), cmd.join(" "));
+    let run = |extra: &[String]| -> Result<()> {
+        eprintln!("running: {} {}", bin.display(), cmd.iter().chain(extra).cloned().collect::<Vec<_>>().join(" "));
         let mut c = std::process::Command::new(&bin);
-        c.args(&cmd);
+        c.args(&cmd).args(extra);
         if let Some(h) = &home {
             if std::env::var_os("SUMO_HOME").is_none() {
                 c.env("SUMO_HOME", h);
@@ -910,10 +1006,61 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         }
         Ok(())
     };
-    run()?;
+    // the merged network when netconvert joins nodes (in memory: a join is an option)
+    let (j_nodes, j_rows, j_cs, j_stuck);
+    let mut joined: Option<Joined> = None;
+    if use_conns && config.is_none() && opts.iter().any(|(k, v)| k == "junctions.join" && v.eq_ignore_ascii_case("true")) {
+        // netconvert reads the connections before it joins nodes, and drops each connection to an edge that the join removes (an
+        // edge between two joined nodes): a road whose only way on went through such an edge lost its turns. So netconvert names
+        // the joins (pass 1), this export merges those nodes and writes each legal path through them as one connection, and
+        // netconvert makes the network from that, with no more joins (pass 2).
+        let joins_path = path("joins.xml");
+        run(&["--junctions.join-output".into(), joins_path.display().to_string()])?;
+        let groups = joined_groups(&joins_path)?;
+        if !groups.is_empty() {
+            (j_nodes, j_rows, j_cs) = (load_nodes()?, load_rows()?, load_conns()?);
+            let mut st = Vec::new();
+            each_chunk(&con, &stuck_sql, [], |c| {
+                st.extend((0..c.len).map(|i| c.i64(0, i).unwrap_or_default()));
+                Ok(())
+            })?;
+            j_stuck = st;
+            let m = merge_joined(&j_nodes, &j_rows, &j_cs, &j_stuck, &groups, &prules);
+            let both_ways: HashSet<(i64, i64)> = j_rows.iter().map(|r| (r.src, r.tgt)).collect();
+            let mut profile: HashMap<i64, Vec<(String, f64)>> = o.lanes.iter().flatten().map(|(k, v)| (*k, v.iter().map(|x| (x.0.clone(), x.1)).collect())).collect();
+            if db_profile {
+                let mut st = con.prepare("SELECT edge_id, use, width_m::DOUBLE FROM driving.lane_profile ORDER BY edge_id, lane_num").map_err(e)?;
+                for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default(), r.get::<_, f64>(2)?))).map_err(e)? {
+                    let (id, u, w) = r.map_err(e)?;
+                    profile.entry(id).or_default().push((u, w));
+                }
+            }
+            let j = Joined { m, both_ways, profile };
+            write(Some(&j), None)?;
+            let mut o2 = opts.clone();
+            for x in o2.iter_mut().filter(|x| x.0 == "junctions.join") {
+                x.1 = "false".into();
+            }
+            write_cfg(&o2)?;
+            let n_rules: HashSet<(i64, &[i64])> = prules.iter().map(|p| (p.from, p.via.as_slice())).collect();
+            eprintln!(
+                "SUMO: {} joined junction(s), {} connections through them, {} of {} via-way restriction path(s) applied",
+                groups.len(),
+                j.m.cs.len(),
+                j.m.n_paths,
+                n_rules.len()
+            );
+            joined = Some(j);
+        }
+    }
+    run(&[])?;
     // netconvert takes a permission only on a lane-to-lane connection, and then it works out no other move of that edge:
     // read the lanes that it chose for each move of those edges, and write them all again by lane
-    let froms: HashSet<String> = perms.all_keyed().filter(|c| c.2.is_some() || !c.3.is_empty()).map(|c| c.0.to_string()).collect();
+    let with_rule = |c: &Conn| c.2.is_some() || !c.3.is_empty();
+    let froms: HashSet<String> = match &joined {
+        Some(j) => j.m.cs.iter().filter(|c| with_rule(c)).map(|c| c.0.to_string()).collect(),
+        None => perms.all_keyed().filter(with_rule).map(|c| c.0.to_string()).collect(),
+    };
     if !froms.is_empty() {
         let mut lanes: HashMap<(String, String), Vec<(String, String)>> = HashMap::new();
         for (f, t, fl, tl) in net_connections(&net_path)? {
@@ -921,11 +1068,165 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
                 lanes.entry((f, t)).or_default().push((fl, tl));
             }
         }
-        write(Some(&lanes))?;
-        run()?;
+        write(joined.as_ref(), Some(&lanes))?;
+        run(&[])?;
     }
     s.net = Some(net_path);
     Ok(s)
+}
+
+/// The groups of nodes that netconvert joins into one junction (its `--junctions.join-output`: `<join nodes="1 2 3"/>`).
+fn joined_groups(path: &Path) -> Result<Vec<Vec<String>>> {
+    let text = std::fs::read_to_string(path).map_err(|x| format!("{}: {x}", path.display()))?;
+    Ok(text
+        .split("<join ")
+        .skip(1)
+        .filter_map(|j| j.split("nodes=\"").nth(1)?.split('"').next())
+        .map(|n| n.split_whitespace().map(String::from).collect())
+        .collect())
+}
+
+/// A row of `turn_path_restrictions`: a path from an edge over the via edges to an edge.
+struct PathRule {
+    rtype: String,
+    from: i64,
+    via: Vec<i64>,
+    to: i64,
+    except: Option<String>,
+    veh: Option<String>,
+}
+
+/// A junction join to write: the merged network, the (source, target) pairs of all edges, and each edge's lanes (use, width).
+struct Joined<'a> {
+    m: Merged<'a>,
+    both_ways: HashSet<(i64, i64)>,
+    profile: HashMap<i64, Vec<(String, f64)>>,
+}
+
+/// The network with the joined nodes merged ([`merge_joined`]).
+struct Merged<'a> {
+    nodes: Vec<(String, f64, f64)>,
+    rows: Vec<&'a Edge>,
+    of: HashMap<i64, String>,
+    cs: Vec<Conn>,
+    stuck: Vec<i64>,
+    n_paths: usize,
+}
+
+type Classes = Option<BTreeSet<&'static str>>;
+
+/// The vehicles that both steps let through (None: each vehicle).
+fn both(a: &Classes, b: &Classes) -> Classes {
+    match (a, b) {
+        (None, b) => b.clone(),
+        (a, None) => a.clone(),
+        (Some(a), Some(b)) => Some(a.intersection(b).copied().collect()),
+    }
+}
+
+/// `_merge_joined`: merge each group of nodes into one junction node `cluster_<ids>` (netconvert's own name), at their mean
+/// position. An edge between two nodes of one group is gone (netconvert drops it too); each legal path from an edge into a group
+/// through such edges to an edge out of it (the successors in `cs`, no node two times) becomes one connection, open to the
+/// vehicles that each step lets through and closed to those that a step keeps out. A via-way restriction (`prules`) on a path that
+/// the group took in is applied to that connection: banned (no_*: onto its to edge; only_*: onto each other one) for all but the
+/// exempt, or for its one vehicle class. `n_paths`: how many restriction paths applied.
+fn merge_joined<'a>(nodes: &[(i64, f64, f64)], rows: &'a [Edge], cs: &[Conn], stuck: &[i64], groups: &[Vec<String>], prules: &[PathRule]) -> Merged<'a> {
+    let of: HashMap<i64, String> = groups
+        .iter()
+        .flat_map(|g| {
+            let name = format!("cluster_{}", g.join("_"));
+            g.iter().filter_map(move |n| n.parse::<i64>().ok().map(|n| (n, name.clone())))
+        })
+        .collect();
+    let pos: HashMap<i64, (f64, f64)> = nodes.iter().map(|(n, x, y)| (*n, (*x, *y))).collect();
+    let mut merged: Vec<(String, f64, f64)> = nodes.iter().filter(|n| !of.contains_key(&n.0)).map(|(n, x, y)| (n.to_string(), *x, *y)).collect();
+    for g in groups {
+        let ps: Vec<(f64, f64)> = g.iter().filter_map(|n| n.parse::<i64>().ok().and_then(|n| pos.get(&n).copied())).collect();
+        if !ps.is_empty() {
+            let k = ps.len() as f64;
+            merged.push((format!("cluster_{}", g.join("_")), ps.iter().map(|p| p.0).sum::<f64>() / k, ps.iter().map(|p| p.1).sum::<f64>() / k));
+        }
+    }
+    let j = |n: i64| of.get(&n).cloned().unwrap_or_else(|| n.to_string());
+    let inside: HashSet<i64> = rows.iter().filter(|r| of.contains_key(&r.src) && j(r.src) == j(r.tgt)).map(|r| r.id).collect();
+    let rows2: Vec<&Edge> = rows.iter().filter(|r| !inside.contains(&r.id)).collect();
+    let ends: HashMap<i64, (i64, i64)> = rows.iter().map(|r| (r.id, (r.src, r.tgt))).collect();
+    let mut succ: HashMap<i64, Vec<&Conn>> = HashMap::new();
+    for c in cs {
+        succ.entry(c.0).or_default().push(c);
+    }
+    let mut by_path: HashMap<(i64, &[i64]), Vec<&PathRule>> = HashMap::new();
+    for p in prules {
+        by_path.entry((p.from, p.via.as_slice())).or_default().push(p);
+    }
+    let mut applied: HashSet<(i64, Vec<i64>)> = HashSet::new();
+    // one move found along two paths: open to the vehicles that either path lets through
+    let mut cs2: std::collections::BTreeMap<(i64, i64), (Classes, BTreeSet<&'static str>)> = std::collections::BTreeMap::new();
+    let mut keep = |fe: i64, te: i64, a: Classes, d: BTreeSet<&'static str>| {
+        let v = match cs2.get(&(fe, te)) {
+            Some((a0, d0)) => (
+                match (a0, &a) {
+                    (Some(x), Some(y)) => Some(x.union(y).copied().collect()),
+                    _ => None,
+                },
+                d0.intersection(&d).copied().collect(),
+            ),
+            None => (a, d),
+        };
+        cs2.insert((fe, te), v);
+    };
+    for (fe, te, allow, disallow) in cs {
+        if inside.contains(fe) {
+            continue;
+        }
+        if !inside.contains(te) {
+            keep(*fe, *te, allow.clone(), disallow.clone());
+            continue;
+        }
+        // through the edges that the group took in, never back to a node passed
+        let mut todo: Vec<(i64, HashSet<i64>, Classes, BTreeSet<&'static str>, Vec<i64>)> =
+            vec![(*te, HashSet::from([ends[fe].1, ends[te].1]), allow.clone(), disallow.clone(), vec![*te])];
+        while let Some((e, seen, a, d, inner)) = todo.pop() {
+            for (_, nxt, a2, d2) in succ.get(&e).into_iter().flatten() {
+                let (nxt_end, a3, d3) = (ends[nxt].1, both(&a, a2), d.union(d2).copied().collect::<BTreeSet<_>>());
+                if inside.contains(nxt) {
+                    if !seen.contains(&nxt_end) {
+                        let mut s2 = seen.clone();
+                        s2.insert(nxt_end);
+                        let mut i2 = inner.clone();
+                        i2.push(*nxt);
+                        todo.push((*nxt, s2, a3, d3, i2));
+                    }
+                } else if !seen.contains(&nxt_end) && nxt_end != ends[fe].0 {
+                    // a via-way restriction on this path: (allow, disallow), or None when it is banned to all
+                    let mut ad = Some((a3, d3));
+                    for p in by_path.get(&(*fe, inner.as_slice())).into_iter().flatten() {
+                        let Some((a, d)) = ad.as_mut() else { break };
+                        if (p.rtype.starts_with("no_") && p.to == *nxt) || (p.rtype.starts_with("only_") && p.to != *nxt) {
+                            applied.insert((*fe, inner.clone()));
+                            let exc = classes(p.except.as_deref());
+                            if p.veh.as_deref().is_some_and(|v| !v.is_empty()) {
+                                d.extend(classes(p.veh.as_deref()));
+                            } else if p.except.as_deref().is_some_and(|v| !v.is_empty()) && !exc.is_empty() {
+                                *a = both(a, &Some(exc));
+                            } else {
+                                ad = None;
+                            }
+                        }
+                    }
+                    if let Some((a, d)) = ad {
+                        keep(*fe, *nxt, a, d);
+                    }
+                }
+            }
+        }
+    }
+    let cs2: Vec<Conn> = cs2.into_iter().filter(|(_, (a, _))| a.as_ref().is_none_or(|a| !a.is_empty())).map(|((f, t), (a, d))| (f, t, a, d)).collect();
+    let has: HashSet<i64> = cs2.iter().map(|c| c.0).collect();
+    let had: HashSet<i64> = cs.iter().map(|c| c.0).collect();
+    let mut stuck2: Vec<i64> = stuck.iter().filter(|f| !inside.contains(f)).copied().collect();
+    stuck2.extend(rows2.iter().filter(|r| !has.contains(&r.id) && j(r.src) != j(r.tgt) && had.contains(&r.id)).map(|r| r.id));
+    Merged { nodes: merged, rows: rows2, of, cs: cs2, stuck: stuck2, n_paths: applied.len() }
 }
 
 #[cfg(test)]
@@ -937,6 +1238,26 @@ mod tests {
         for (x, s) in [(7.0, "7.0"), (7.4123, "7.4123"), (43.73, "43.73"), (1e-5, "1e-05"), (1.5e-7, "1.5e-07"), (1e16, "1e+16"), (-0.5, "-0.5"), (0.0001, "0.0001")] {
             assert_eq!(py_float(x), s);
         }
+    }
+
+    /// `merge_joined` as Python's `_merge_joined` on a small junction mapped as two nodes (2, 3): the edge 11 between them goes,
+    /// the straight move from 10 over 11 is banned, the left one is banned except for buses.
+    #[test]
+    fn merge_joined_as_python() {
+        let nodes = [(1, 0.0, 0.0), (2, 1.0, 0.0), (3, 1.0, 0.2), (4, 2.0, 0.0), (5, 1.0, 1.0)];
+        let edge = |id, src, tgt| Edge { id, src, tgt, hw: None, name: None, lanes: None, spd: None, length: None, wkt: None };
+        let rows = [edge(10, 1, 2), edge(11, 2, 3), edge(12, 3, 4), edge(13, 3, 5), edge(14, 4, 1)];
+        let cs: Vec<Conn> = [(10, 11), (11, 12), (11, 13), (12, 14)].iter().map(|&(f, t)| (f, t, None, BTreeSet::new())).collect();
+        let rule = |rtype: &str, to, except: Option<&str>| PathRule { rtype: rtype.into(), from: 10, via: vec![11], to, except: except.map(String::from), veh: None };
+        let prules = [rule("no_left_turn", 13, Some("bus")), rule("no_straight_on", 12, None)];
+        let m = merge_joined(&nodes, &rows, &cs, &[13], &[vec!["2".into(), "3".into()]], &prules);
+        let names: Vec<(String, f64, f64)> = ["1", "4", "5"].iter().map(|n| n.to_string()).zip([(0.0, 0.0), (2.0, 0.0), (1.0, 1.0)]).map(|(n, (x, y))| (n, x, y)).collect();
+        assert_eq!(m.nodes[..3], names[..]);
+        assert_eq!(m.nodes[3].0, "cluster_2_3");
+        assert!((m.nodes[3].1 - 1.0).abs() < 1e-12 && (m.nodes[3].2 - 0.1).abs() < 1e-12);
+        assert_eq!(m.rows.iter().map(|r| r.id).collect::<Vec<_>>(), [10, 12, 13, 14]);
+        assert_eq!(m.cs, vec![(10, 13, Some(BTreeSet::from(["bus", "coach"])), BTreeSet::new()), (12, 14, None, BTreeSet::new())]);
+        assert_eq!((m.stuck, m.n_paths), (vec![13], 1));
     }
 
     /// The same cases as Python's `_apply_permissions` gives (checked with duckosm.sumo, 2026-11-17).

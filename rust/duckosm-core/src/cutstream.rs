@@ -389,34 +389,58 @@ impl RawSink for Kept<'_> {
     }
 }
 
-/// Passes 3 and 4: the elements on the lists, whole.
+/// Passes 3 and 4: the elements on the lists, whole, with the OSM fixes when the cut has them.
 struct Out<'a> {
     nodes_in: [&'a IdSet; 2],
     ways_in: &'a IdSet,
     rels_in: &'a FxHashSet<i64>,
+    fixes: Option<&'a Fixes<'a>>,
     nodes: Vec<RawNode>,
     ways: Vec<RawWay>,
     rels: Vec<Relation>,
+    /// with fixes: the points of the OSM nodes of the new ways, the OSM tags of their `tags_from` ways, and the ways of
+    /// the turn rules that are in the file
+    pts: Vec<(i64, (f64, f64))>,
+    from: Vec<(i64, Vec<(String, String)>)>,
+    seen: Vec<i64>,
+}
+
+/// The OSM fixes of a cut ([`cut_with_fixes`]).
+struct Fixes<'a> {
+    osm: &'a crate::fixes::OsmFixes,
+    rules: crate::quack::QuackFixes,
+    want: crate::quack::NewWayInputs,
+    turn_ways: FxHashSet<i64>,
 }
 
 impl RawSink for Out<'_> {
     fn node<'a>(&mut self, id: i64, lat: f64, lon: f64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>) {
         if self.nodes_in.iter().any(|s| s.contains(id)) {
-            self.nodes.push(RawNode {
-                id,
-                lon,
-                lat,
-                tags: tags.map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            });
+            let mut tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            if let Some(f) = self.fixes {
+                f.rules.node_tags(id, &mut tags);
+                if f.want.nodes.contains(&id) {
+                    self.pts.push((id, (lon, lat)));
+                }
+            }
+            self.nodes.push(RawNode { id, lon, lat, tags });
         }
     }
     fn way<'a>(&mut self, id: i64, tags: &mut dyn Iterator<Item = (&'a str, &'a str)>, refs: &mut dyn Iterator<Item = i64>) {
         if self.ways_in.contains(id) {
-            self.ways.push(RawWay {
-                id,
-                tags: tags.map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-                refs: refs.collect(),
-            });
+            let (mut tags, mut refs): (Vec<(String, String)>, Vec<i64>) = (tags.map(|(k, v)| (k.to_string(), v.to_string())).collect(), refs.collect());
+            if let Some(f) = self.fixes {
+                if f.want.ways.contains(&id) {
+                    self.from.push((id, tags.clone()));
+                }
+                if !f.rules.way(id, &mut tags, &mut refs) {
+                    return;
+                }
+                if f.turn_ways.contains(&id) {
+                    self.seen.push(id);
+                }
+            }
+            self.ways.push(RawWay { id, tags, refs });
         }
     }
     fn relation<'a>(
@@ -426,11 +450,11 @@ impl RawSink for Out<'_> {
         members: &mut dyn Iterator<Item = (i64, MemberType, &'a str)>,
     ) {
         if self.rels_in.contains(&id) {
-            self.rels.push(Relation {
-                id,
-                tags: tags.map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-                members: members.map(|(m, t, r)| (m, t, r.to_string())).collect(),
-            });
+            let mut tags = tags.map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            if let Some(f) = self.fixes {
+                f.rules.relation_tags(id, &mut tags);
+            }
+            self.rels.push(Relation { id, tags, members: members.map(|(m, t, r)| (m, t, r.to_string())).collect() });
         }
     }
 }
@@ -501,6 +525,36 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
     strategy: Strategy,
     out: W,
 ) -> Result<(W, CutCounts), String> {
+    cut_inner(open, inside, strategy, None, out)
+}
+
+/// [`cut_to_pbf`] with the OSM fixes `fixes` in the area file (`duckosm cut --fixes`, docs/exports/osm-file.md), in the
+/// same four passes: the changes of `quack --fixes` ([`crate::quack::QuackFixes`]) on each element as it is written;
+/// after the nodes, the new nodes of the new ways (id `way id * 1000 + position`); after the ways, the new ways; then each
+/// turn rule whose two ways are in the file, as a relation `type=restriction` with the id of the build (-1, -2, ...), and
+/// the relations. The new ids are above all OSM ids and the ids of the turn rules are negative, so the file stays sorted.
+pub fn cut_with_fixes<R: Read + Seek + Send, W: Write>(
+    open: impl Fn() -> Result<R, String>,
+    boundary: &Boundary,
+    fixes: &crate::fixes::OsmFixes,
+    out: W,
+) -> Result<(W, CutCounts), String> {
+    let f = Fixes {
+        osm: fixes,
+        rules: crate::quack::QuackFixes::rules(fixes)?,
+        want: crate::quack::NewWayInputs::of(fixes),
+        turn_ways: fixes.turn_restrictions.iter().flat_map(|t| [t.from_way, t.to_way]).collect(),
+    };
+    cut_inner(open, &|lon, lat| boundary.contains(lon, lat), Strategy::Smart, Some(&f), out)
+}
+
+fn cut_inner<R: Read + Seek + Send, W: Write>(
+    open: impl Fn() -> Result<R, String>,
+    inside: &(dyn Fn(f64, f64) -> bool + Sync),
+    strategy: Strategy,
+    fixes: Option<&Fixes>,
+    out: W,
+) -> Result<(W, CutCounts), String> {
     let (timestamp, sorted) = header(open()?)?;
     if !sorted {
         return Err("the region file is not sorted by type and id (Sort.Type_then_ID)".into());
@@ -568,7 +622,7 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
         rels.iter().filter(|r| if strategy == Strategy::Simple { first(r) } else { direct(r) }).map(|r| r.id).collect();
     if strategy == Strategy::Simple {
         // the ways without their nodes outside, and no parent relations
-        outside.clear();
+        outside = IdSet::default();
     }
     while strategy != Strategy::Simple {
         let parents: Vec<i64> = rels
@@ -629,15 +683,22 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
     // is freed on the thread that made it (the allocator of the browser build keeps a freed block on the thread that
     // frees it), and the compression runs on all threads. The main thread writes the ready blocks in the order of the
     // region file.
-    let emit = |runs: &[Vec<u64>], kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts| {
+    // with fixes: the points of the new ways' OSM nodes (pass 3), the tags of their `tags_from` ways and the ways of the
+    // turn rules in the file (pass 4)
+    let mut got = (crate::util::FxHashMap::default(), crate::util::FxHashMap::default(), FxHashSet::default());
+    let emit = |runs: &[Vec<u64>], kinds: [bool; 3], w: &mut PbfWriter<W>, counts: &mut CutCounts, got: &mut (crate::util::FxHashMap<i64, (f64, f64)>, crate::util::FxHashMap<i64, Vec<(String, String)>>, FxHashSet<i64>)| {
         each_run_at(&mut open()?, runs, |run, buf| {
             let mut s = Out {
                 nodes_in: [&inside, &outside],
                 ways_in: &kept,
                 rels_in: &chosen,
+                fixes,
                 nodes: Vec::new(),
                 ways: Vec::new(),
                 rels: Vec::new(),
+                pts: Vec::new(),
+                from: Vec::new(),
+                seen: Vec::new(),
             };
             for b in run {
                 decode_block(b, kinds, buf, &mut s)?;
@@ -654,21 +715,62 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
             for c in s.rels.chunks(BLOCK) {
                 file_blob(&mut out, "OSMData", &relations_block(c))?;
             }
-            Ok((out, n))
-        }, |(bytes, n)| {
+            Ok((out, n, s.pts, s.from, s.seen))
+        }, |(bytes, n, pts, from, seen)| {
             counts.nodes += n.nodes;
             counts.ways += n.ways;
             counts.relations += n.relations;
+            got.0.extend(pts);
+            got.1.extend(from);
+            got.2.extend(seen);
             w.blocks(&bytes)
         })
     };
     // the region file is sorted, so the kept ids in the span of a block are the kept elements of the block
     let node_runs = runs(node_spans.iter().map(|&(at, (lo, hi))| (at, inside.count_in(lo, hi) + outside.count_in(lo, hi))));
-    emit(&node_runs, [true, false, false], &mut w, &mut counts)?;
+    emit(&node_runs, [true, false, false], &mut w, &mut counts, &mut got)?;
     crate::util::step("cut pass 3: write the nodes");
-    let way_runs = runs(way_spans.iter().map(|&(at, s)| (at, kept.count_in(s[0].0, s[0].1) + chosen_in(s[1].0, s[1].1))));
-    emit(&way_runs, [false, true, true], &mut w, &mut counts)?;
-    crate::util::step("cut pass 4: write the ways and relations");
+    let Some(f) = fixes else {
+        let way_runs = runs(way_spans.iter().map(|&(at, s)| (at, kept.count_in(s[0].0, s[0].1) + chosen_in(s[1].0, s[1].1))));
+        emit(&way_runs, [false, true, true], &mut w, &mut counts, &mut got)?;
+        crate::util::step("cut pass 4: write the ways and relations");
+        return Ok((w.finish()?, counts));
+    };
+    // with fixes, the ways and the relations go in two parts, so the new ways and the turn rules go between them: a
+    // block with both kinds (one block at most, the region file is sorted) is read two times
+    let mut rules = f.rules.clone();
+    rules.finish(f.osm, &got.0, &Default::default());
+    let mut new_nodes: Vec<RawNode> = rules
+        .new_ways()
+        .iter()
+        .flat_map(|&(_, _, refs, pts)| refs.iter().zip(pts))
+        .filter(|(&id, _)| id >= crate::fixes::NEW_WAY_ID_MIN * 1000)
+        .map(|(&id, &(lon, lat))| RawNode { id, lon, lat, tags: Vec::new() })
+        .collect();
+    new_nodes.sort_by_key(|x| x.id);
+    counts.nodes += new_nodes.len();
+    new_nodes.into_iter().try_for_each(|x| w.node(x))?;
+    let way_runs = runs(way_spans.iter().map(|&(at, s)| (at, kept.count_in(s[0].0, s[0].1))));
+    emit(&way_runs, [false, true, false], &mut w, &mut counts, &mut got)?;
+    let mut rules = f.rules.clone();
+    rules.finish(f.osm, &got.0, &got.1);
+    for (id, tags, refs, _) in rules.new_ways() {
+        w.way(RawWay { id, tags: tags.clone(), refs: refs.to_vec() })?;
+        counts.ways += 1;
+        got.2.insert(id);
+    }
+    // -n first: the file is sorted by id
+    for t in f.osm.turn_restrictions.iter().rev().filter(|t| got.2.contains(&t.from_way) && got.2.contains(&t.to_way)) {
+        w.relation(Relation {
+            id: t.id,
+            tags: vec![("type".into(), "restriction".into()), ("restriction".into(), t.restriction.clone())],
+            members: vec![(t.from_way, MemberType::Way, "from".into()), (t.via_node, MemberType::Node, "via".into()), (t.to_way, MemberType::Way, "to".into())],
+        })?;
+        counts.relations += 1;
+    }
+    let rel_runs = runs(way_spans.iter().map(|&(at, s)| (at, chosen_in(s[1].0, s[1].1))));
+    emit(&rel_runs, [false, false, true], &mut w, &mut counts, &mut got)?;
+    crate::util::step("cut pass 4: write the ways and relations, with the fixes");
     Ok((w.finish()?, counts))
 }
 

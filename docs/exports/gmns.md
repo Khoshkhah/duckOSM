@@ -153,7 +153,8 @@ frictionless validate datapackage.json
 **The values.** The schemas check the shape of the tables, not how the values agree. `--check` does:
 
 - a link starts and ends on its nodes, and `link.length` is the length of its geometry;
-- `lane_num` runs 1..n, and `link.lanes` is not more than the number of lane rows;
+- `lane_num` runs 1..n (a lane left of lane 1, such as a bike lane on the left of a one-way road, is -1), and
+  `link.lanes` is not more than the number of lane rows (not in the walking network: it has only the walking lane);
 - a movement turns at the node where its inbound link ends, and its lane ranges exist and have the same length.
 
 **Differences from the specification**, on purpose:

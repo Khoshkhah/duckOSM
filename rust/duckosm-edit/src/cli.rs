@@ -33,9 +33,15 @@ enum Cmd {
         /// No direction arrows on one-way roads.
         #[arg(long)]
         no_arrows: bool,
+        /// Direction arrows on one-way roads (the default). With --no-arrows: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_arrows")]
+        arrows: bool,
         /// Do not draw the area's boundary (main.boundary).
         #[arg(long)]
         no_boundary: bool,
+        /// Draw the area's boundary (the default). With --no-boundary: the last one on the command line wins.
+        #[arg(long, overrides_with = "no_boundary")]
+        boundary: bool,
         /// A Google 3D window linked to the map (default: on when GOOGLE_MAPS_KEY is set).
         #[arg(long = "google-3d", action = ArgAction::SetTrue, overrides_with = "no_google_3d")]
         google_3d: bool,
@@ -90,7 +96,7 @@ enum Cmd {
 pub fn run(args: &[String]) -> Result<(), String> {
     let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
-        Cmd::Viz { db, modes, basemap, out_dir, no_arrows, no_boundary, google_3d, no_google_3d } => {
+        Cmd::Viz { db, modes, basemap, out_dir, no_arrows, no_boundary, google_3d, no_google_3d, .. } => {
             let all = modes.is_empty();
             let v = Viz { all_modes: all, modes: (!all).then_some(modes), basemap, arrows: !no_arrows, boundary: !no_boundary,
                           google_3d: if google_3d { Some(true) } else if no_google_3d { Some(false) } else { None }, ..Viz::new(out_dir) };

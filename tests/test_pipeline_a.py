@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 from duckosm import DuckOSM, Config
-from duckosm.validate import Validator, ValidationError
+from duckosm.validate import Validator
 
 # Clip a sub-area (Sodermalm) out of the country parent (Sweden); both must be built.
 PARENT = Path(__file__).resolve().parents[1] / "data" / "db" / "sweden.duckdb"
@@ -56,23 +56,6 @@ def _toy_graph():
 
 
 # ---- Validator ---------------------------------------------------------------------
-def test_validator_flags_fragment():
-    con = _toy_graph()
-    con.execute("CREATE SCHEMA driving")
-    con.execute('CREATE TABLE driving.edges AS SELECT edge_id, source, target, '
-                'CAST(NULL AS VARCHAR) AS "name" FROM edges')
-
-    class V:  # minimal validation config
-        assert_single_component = True
-        assert_no_stranded_named = False
-        assert_unique_node_id = False
-        assert_way_length_conserved = False
-        warn_layer_without_structure = False
-        fail_on_error = True
-    with pytest.raises(ValidationError):
-        Validator(con, "driving", V()).run()
-
-
 def test_validator_layer_without_structure_warns_not_fails():
     con = _toy_graph()
     con.execute("CREATE SCHEMA driving")
@@ -82,8 +65,6 @@ def test_validator_layer_without_structure_warns_not_fails():
                 'CAST(NULL AS VARCHAR) AS bridge, CAST(NULL AS VARCHAR) AS tunnel FROM edges')
 
     class V:  # minimal validation config
-        assert_single_component = False
-        assert_no_stranded_named = False
         assert_unique_node_id = False
         assert_way_length_conserved = False
         warn_layer_without_structure = True

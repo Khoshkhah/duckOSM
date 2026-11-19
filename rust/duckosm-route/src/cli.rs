@@ -142,7 +142,7 @@ enum Cmd {
         #[arg(long = "json")]
         as_json: bool,
     },
-    /// Export a built network as a graph file (GraphML). By default the geographic node-based MultiDiGraph (OSM junctions as
+    /// Export a built network as a graph file (GraphML or gpickle). By default the geographic node-based MultiDiGraph (OSM junctions as
     /// nodes, road segments keyed by edge_id carrying their full attribute set); --graph edge for the edge-based routing
     /// DiGraph. GraphML is scalar-only: lists and geometry are text.
     #[command(name = "export-graph")]
@@ -157,8 +157,8 @@ enum Cmd {
         /// 'node': geographic MultiDiGraph (junctions + full edge info); 'edge': edge-based routing DiGraph.
         #[arg(short = 'g', long = "graph", default_value = "node", value_parser = ["node", "edge"])]
         graph_kind: String,
-        /// Output format (default: inferred from --out extension, else graphml). gpickle is a Python pickle of a networkx
-        /// graph: only duckOSM's Python package writes it.
+        /// Output format (default: inferred from --out extension, else graphml). gpickle is a Python pickle of the networkx
+        /// graph: lists and None stay, and --geometry shapely gives shapely objects (pickle.load needs networkx, and shapely 2 for them).
         #[arg(short = 'f', long = "format", value_parser = ["graphml", "gpickle"])]
         fmt: Option<String>,
         /// Arc weight for --graph edge (ignored for node graphs).
@@ -373,9 +373,6 @@ pub fn run(args: &[String]) -> Result<()> {
                 "gpickle" | "pkl" | "pickle" => "gpickle".into(),
                 _ => "graphml".into(),
             });
-            if fmt == "gpickle" {
-                return Err("gpickle is a Python pickle of a networkx graph: use duckOSM's Python package for it, or GraphML".into());
-            }
             let uses = crate::route::check_uses(uses.as_deref())?;
             if !uses.is_empty() && graph_kind != "edge" {
                 return Err("uses is for the edge graph (graph='edge'): its turns carry the labels".into());
@@ -384,26 +381,41 @@ pub fn run(args: &[String]) -> Result<()> {
             if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
-            let ferr = |e: std::io::Error| format!("{}: {e}", out.display());
-            let mut f = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(&out).map_err(ferr)?);
             let t = duckosm_tools::info::thousands;
-            let (n, m) = if graph_kind == "node" {
-                let geom = geometry != "none";
-                let (n, m) = crate::graphml::write_node_graph(&con, &mode, geom, &mut f)?;
+            if graph_kind == "node" && fmt == "graphml" {
+                // GraphML has no shapely objects: the geometry is WKT there. The file is written while DuckDB reads the tables.
                 let geo = if geometry == "shapely" { "wkt" } else { geometry.as_str() };
+                let ferr = |e: std::io::Error| format!("{}: {e}", out.display());
+                let mut f = std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(&out).map_err(ferr)?);
+                let (n, m) = crate::graphml::write_node_graph(&con, &mode, geo != "none", &mut f)?;
+                std::io::Write::flush(&mut f).map_err(ferr)?;
                 eprintln!("node graph[{mode}]: {} nodes, {} edges, geometry={geo}", t(n as i64), t(m as i64));
-                (n, m)
+                eprintln!("wrote {graph_kind} graph[{mode}] -> {} ({fmt}: {} nodes, {} edges)", out.display(), t(n as i64), t(m as i64));
+                println!("wrote {} ({fmt}: {n} nodes, {m} edges)", out.display());
+                return Ok(());
+            }
+            let doc = if graph_kind == "node" {
+                // GraphML has no shapely objects: the geometry is WKT there
+                let geo = if geometry == "shapely" && fmt == "graphml" { "wkt" } else { geometry.as_str() };
+                let d = crate::graphml::node_graph(&con, &mode, geo)?;
+                eprintln!(
+                    "node graph[{mode}]: {} nodes, {} edges, geometry={geo}",
+                    duckosm_tools::info::thousands(d.nodes.len() as i64),
+                    duckosm_tools::info::thousands(d.edges.len() as i64)
+                );
+                d
             } else {
                 let d = crate::graphml::edge_graph(&con, &mode, &weight, &uses)?;
                 eprintln!(
                     "routing graph[{mode}]: {} edges, {} arcs, weight={weight}, +node attrs",
-                    t(d.nodes.len() as i64),
-                    t(d.edges.len() as i64)
+                    duckosm_tools::info::thousands(d.nodes.len() as i64),
+                    duckosm_tools::info::thousands(d.edges.len() as i64)
                 );
-                std::io::Write::write_all(&mut f, d.write().as_bytes()).map_err(ferr)?;
-                (d.nodes.len(), d.edges.len())
+                d
             };
-            std::io::Write::flush(&mut f).map_err(ferr)?;
+            let bytes = if fmt == "gpickle" { doc.pickle(graph_kind == "node") } else { doc.write().into_bytes() };
+            std::fs::write(&out, bytes).map_err(|e| format!("{}: {e}", out.display()))?;
+            let (n, m) = (doc.nodes.len(), doc.edges.len());
             eprintln!(
                 "wrote {graph_kind} graph[{mode}] -> {} ({fmt}: {} nodes, {} edges)",
                 out.display(),

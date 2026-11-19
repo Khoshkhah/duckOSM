@@ -48,9 +48,12 @@ fn routes_and_graphml_equal_duckosm() {
     }
 
     let md5 = |s: &str| format!("{:x}", Md5::digest(s.as_bytes()));
-    let mut node = Vec::new();
-    duckosm_route::graphml::write_node_graph(&con, "driving", true, &mut node).unwrap();
-    assert_eq!(md5(std::str::from_utf8(&node).unwrap()), "77fefab017a85c5cbc85320f422920a8", "the node graph");
+    let node = duckosm_route::graphml::node_graph(&con, "driving", "wkt").unwrap().write();
+    assert_eq!(md5(&node), "77fefab017a85c5cbc85320f422920a8", "the node graph");
+    // the file that `export-graph` writes while DuckDB reads the tables
+    let mut streamed = Vec::new();
+    duckosm_route::graphml::write_node_graph(&con, "driving", true, &mut streamed).unwrap();
+    assert_eq!(md5(std::str::from_utf8(&streamed).unwrap()), "77fefab017a85c5cbc85320f422920a8", "the node graph, streamed");
     let edge = duckosm_route::graphml::edge_graph(&con, "driving", "time", &[]).unwrap().write();
     assert_eq!(md5(&edge), "19781276d6fde55c062f42306b6912dd", "the edge graph");
     let _ = std::fs::remove_dir_all(&out);
