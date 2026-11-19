@@ -1,36 +1,43 @@
-//! The GeoParquet files of `duckosm quack --gdal -f geoparquet`: one file for each of GDAL's layers
-//! (`duckosm_core::gdal`), with the columns of the layer (text; `z_order` an integer) and the geometry as WKB.
+//! The GeoParquet files of `duckosm quack --gdal -f geoparquet` and `duckosm quack --geofabrik -f geoparquet`: one file
+//! for each layer of a `duckosm_core::gdal::Schema` (GDAL's or Geofabrik's), with the columns of the layer (text or
+//! integer) and the geometry as WKB.
 
 use super::{compression, err, geo_metadata, ParWriter, ROW_GROUP};
 use arrow_array::builder::{BinaryBuilder, Int32Builder, StringBuilder};
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use duckosm_core::gdal::{columns, values, Value};
+use duckosm_core::gdal::{Schema as Layers, Value};
 use duckosm_core::quack::Feature;
 use parquet::file::properties::WriterProperties;
 use std::io::Write;
 use std::sync::Arc;
 
 /// The geometry type of a layer in the `geo` metadata.
-fn geometry_type(layer: u8) -> &'static str {
-    ["", "Point", "LineString", "MultiLineString", "MultiPolygon", "GeometryCollection"][layer as usize]
+fn geometry_type(s: &Layers, layer: u8) -> &'static str {
+    match (s.geometry)(layer) {
+        "POINT" => "Point",
+        "LINESTRING" => "LineString",
+        "MULTILINESTRING" => "MultiLineString",
+        "MULTIPOLYGON" => "MultiPolygon",
+        _ => "GeometryCollection",
+    }
 }
 
-fn schema(layer: u8) -> SchemaRef {
+fn schema(s: &Layers, layer: u8) -> SchemaRef {
     let mut f: Vec<Field> =
-        columns(layer).iter().map(|(c, int)| Field::new(*c, if *int { DataType::Int32 } else { DataType::Utf8 }, true)).collect();
+        (s.columns)(layer).iter().map(|(c, int, _)| Field::new(*c, if *int { DataType::Int32 } else { DataType::Utf8 }, true)).collect();
     f.push(Field::new("geometry", DataType::Binary, false));
     Arc::new(Schema::new(f))
 }
 
 /// The rows of one layer as one Arrow batch.
-pub fn batch(layer: u8, rows: &[Feature]) -> Result<RecordBatch, String> {
-    let cols = columns(layer);
+pub fn batch(s: &Layers, layer: u8, rows: &[Feature]) -> Result<RecordBatch, String> {
+    let cols = (s.columns)(layer);
     let mut text: Vec<Option<StringBuilder>> = cols.iter().map(|c| (!c.1).then(StringBuilder::new)).collect();
     let mut ints: Vec<Option<Int32Builder>> = cols.iter().map(|c| c.1.then(Int32Builder::new)).collect();
     let mut geom = BinaryBuilder::new();
     for f in rows {
-        for (i, v) in values(f).into_iter().enumerate() {
+        for (i, v) in (s.values)(f).into_iter().enumerate() {
             match (&mut text[i], &mut ints[i], v) {
                 (Some(b), _, Some(Value::Text(s))) => b.append_value(s),
                 (_, Some(b), Some(Value::Int(n))) => b.append_value(n as i32),
@@ -50,11 +57,12 @@ pub fn batch(layer: u8, rows: &[Feature]) -> Result<RecordBatch, String> {
         }
     }
     out.push(Arc::new(geom.finish()));
-    RecordBatch::try_new(schema(layer), out).map_err(err)
+    RecordBatch::try_new(schema(s, layer), out).map_err(err)
 }
 
 /// The writer of the file of one layer: [`GdalWriter::write`] the rows, then [`GdalWriter::close`].
 pub struct GdalWriter<W: Write + Send> {
+    schema: &'static Layers,
     layer: u8,
     w: ParWriter<W>,
     rows: Vec<Feature>,
@@ -62,14 +70,14 @@ pub struct GdalWriter<W: Write + Send> {
 }
 
 impl<W: Write + Send> GdalWriter<W> {
-    pub fn new(layer: u8, out: W) -> Result<Self, String> {
+    pub fn new(schema: &'static Layers, layer: u8, out: W) -> Result<Self, String> {
         let props = WriterProperties::builder()
             .set_compression(compression())
             .set_max_row_group_row_count(Some(ROW_GROUP))
-            .set_key_value_metadata(Some(vec![geo_metadata(geometry_type(layer))]))
+            .set_key_value_metadata(Some(vec![geo_metadata(geometry_type(schema, layer))]))
             .build();
-        let w = ParWriter::try_new(out, schema(layer), Some(props)).map_err(err)?;
-        Ok(GdalWriter { layer, w, rows: Vec::new(), count: 0 })
+        let w = ParWriter::try_new(out, self::schema(schema, layer), Some(props)).map_err(err)?;
+        Ok(GdalWriter { schema, layer, w, rows: Vec::new(), count: 0 })
     }
 
     pub fn write(&mut self, f: Feature) -> Result<(), String> {
@@ -83,7 +91,7 @@ impl<W: Write + Send> GdalWriter<W> {
     fn flush(&mut self) -> Result<(), String> {
         if !self.rows.is_empty() {
             self.count += self.rows.len();
-            let b = batch(self.layer, &std::mem::take(&mut self.rows))?;
+            let b = batch(self.schema, self.layer, &std::mem::take(&mut self.rows))?;
             self.w.write(&b).map_err(err)?;
         }
         Ok(())

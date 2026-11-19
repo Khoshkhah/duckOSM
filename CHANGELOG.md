@@ -8,6 +8,23 @@
   `duckosm get --dry-run` prints the boundary and the extract as JSON and downloads nothing; `duckosm.get()` takes
   `dry_run=` and `progress=`.
 
+- **Eight faults of the command line, found by the review of the docs.** On Monaco:
+  - `duckosm gmns --check` failed 4 of 48 checks. The checks were wrong, not the data: a lane left of lane 1 (a bike lane on
+    the left of a one-way road) has the number -1, as the GMNS spec says, and the walking network has only the walking lane,
+    not the motor lanes that `link.lanes` counts. Now 48 of 48 pass (Python's `check_gmns` too).
+  - `junctions.join` of the SUMO export works in Rust (`to_sumo(config={"junctions.join": "true"})`, and the new option
+    `duckosm sumo --join-junctions`). Before, it stopped with "not ported". The plain XML equals Python's on Monaco
+    (18 joined junctions).
+  - `duckosm export-graph -f gpickle` writes the pickle in Rust. `pickle.load` gives the same networkx graph as
+    `write_graph` (node graph, edge graph, `--geometry shapely`).
+  - The positive flag of each `--x` / `--no-x` pair parses: `--graph` (build), `--arrows` and `--boundary` (viz),
+    `--connections` and `--netconvert` (sumo), `--gzip` (matsim), `--signals` (matsim-lanes), `--lane-geometry` (gmns),
+    `--boundary` (export-gis). The last one on the command line wins.
+  - The checks `validation.assert_single_component` and `assert_no_stranded_named` are removed: they did nothing, because
+    every road stays. A config that has them gets a warning.
+  - `docs/reference/cli.md`: the options of `gmns-map` and `levels-edit` are those of the program.
+  - `duckosm gmns` does not need SUMO: without netconvert it says so and writes the movements with no lanes and no
+    `lane_connector`. Before, it stopped with "netconvert not found".
 - **`main.building_faces` is in the `.duckdb` file.** `duckosm --building-faces --boundary` wrote the walls only as
   `building_faces_main.parquet`, so `duckosm edit` showed no walls. Now the table is in the `.duckdb` output as
   `docs/reference/database.md` says (Monaco: 10,909 walls).
@@ -27,6 +44,12 @@
 ## 0.8.0 (2026-11-18)
 
 The program is `duckosm`, in Rust, and `pip install duckosm` installs it (wheels for 5 systems). The exports, the routers, the maps, the editors and GMNS run in Rust. The Python API keeps its names and calls Rust. The commands `levels`, `bus`, `multimodal` and `clip-pbf`, and the build steps of `DuckOSM.run()`, still run the Python code.
+
+- **`duckosm quack --geofabrik`: Geofabrik's free layers from any `.osm.pbf` file.** The 20 layers of Geofabrik's
+  `<area>-latest-free.shp.zip` and `-free.gpkg.zip` (`gis_osm_roads_free`, `gis_osm_pois_free`, `gis_osm_buildings_a_free`,
+  ...), with Geofabrik's feature classes and codes, as a GeoPackage, a zip file of shapefiles (`-f shp`, pure Rust: also in
+  the browser) or GeoParquet files, in one read, with `--tile-zoom` and `--fixes`. On Monaco each layer equals Geofabrik's
+  file of the same day (`duckosm-build/tests/quack_geofabrik_monaco.rs`). The rules: `duckosm-core/src/geofabrik_rules.txt`.
 
 - **The switch, step 6 of `docs/design/all_in_rust.md`.** The Rust program is `duckosm`. `duckosm-rust` stays for one release:
   it prints "use duckosm" and runs the same command. The wheel has the whole program in the module `duckosm._rust` (with

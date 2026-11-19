@@ -240,6 +240,16 @@ def gz(src, dst):
         o.write(gzip.compress(f.read(), mtime=0))
 
 
+def sumo_join(db, out):
+    """duckosm sumo with junctions.join on (needs netconvert): the plain XML after the nodes that netconvert joins are merged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src = duckdb.connect(db, read_only=True)
+        to_sumo(src, tmp, mode="driving", net_name="monaco", config={"junctions.join": "true"})
+        src.close()
+        for f in ("nod", "edg", "con"):
+            gz(Path(tmp) / f"monaco.{f}.xml", out / f"sumo_join_driving.{f}.xml.gz")
+
+
 def main(db, out, gmns=None):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -270,6 +280,7 @@ def main(db, out, gmns=None):
     gis(db, out)
     gmns(db, out)
     sumo_lane_diff(db, out)
+    sumo_join(db, out)
     for p in sorted(x for x in out.iterdir() if x.is_file()):
         n = len(gzip.open(p).read()) if p.suffix == ".gz" else p.stat().st_size
         print(f"{p}: {n} bytes")

@@ -99,8 +99,6 @@ class Validation:
     """Build-time invariant checks."""
     enabled: bool = False
     fail_on_error: bool = True
-    assert_single_component: bool = True
-    assert_no_stranded_named: bool = True
     assert_unique_node_id: bool = True             # no duplicate node_id in nodes (virtual incl.)
     assert_way_length_conserved: bool = True       # no interior stretch of a kept way silently
                                                    #   deleted in favour of a parallel arc — see
