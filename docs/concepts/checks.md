@@ -8,9 +8,9 @@ Each output is compared with a reference: another tool, a schema or a specificat
 | 1 | [QuackOSM table](quackosm.md) | QuackOSM 0.20.0 | each row equals QuackOSM's |
 | 1 | [GDAL's OSM layers](gdal.md) | GDAL's OSM driver | each row equals GDAL's (Monaco, Kentucky) |
 | 1 | [Base-map layers](../exports/base-map.md) | the golden file of Monaco | each row of each layer is equal |
-| 1 | Geofabrik layers | Geofabrik's own GeoPackage and shapefiles | each row of each layer is equal (Monaco) |
-| 1 | osm2pgsql tables | osm2pgsql 2.3.1 | each row is equal, byte for byte (Monaco) |
-| 1 | Vector tiles (PMTiles) | the golden file of the Monaco sample, the specifications, `pmtiles verify` | each tile is equal and valid |
+| 1 | [Geofabrik layers](../exports/geofabrik.md) | Geofabrik's own GeoPackage and shapefiles | each row of each layer is equal (Monaco) |
+| 1 | [osm2pgsql tables](../exports/osm2pgsql.md) | osm2pgsql 2.3.1 | each row is equal, byte for byte (Monaco) |
+| 1 | [Vector tiles (PMTiles)](../exports/pmtiles.md) | the golden file of the Monaco sample, the specifications, `pmtiles verify` | each tile is equal and valid |
 | 2 | [The turn graph](../exports/turn-graph.md) | the golden file of Monaco | each row is equal |
 | 2 | [GeoPackage, GeoParquet, shapefile](../exports/gis.md) | GDAL | GDAL reads the file back, and each `edge_id` equals the database |
 | 2 | [networkx](../exports/networkx.md) | the database tables | each graph has their nodes and arcs |
