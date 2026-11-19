@@ -8,9 +8,6 @@ theme:
   name: material
   logo: assets/duckosm-mark-inverse.svg   # the header is dark: yellow disc reads, the dark one doesn't
   favicon: assets/duckosm-mark.svg
-  font:
-    text: IBM Plex Sans
-    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -22,17 +19,20 @@ theme:
       primary: custom
       accent: custom
       toggle: { icon: material/weather-sunny, name: Light mode }
+  # the look of rustgis.app (built with Zensical, .github/workflows/docs.yml): no top tabs, the chapters at the left
   features:
-    - navigation.tabs
-    - navigation.sections
-    - navigation.indexes
-    - navigation.top
-    - navigation.footer
-    - search.suggest
     - content.code.copy
+    - navigation.indexes
+    - navigation.footer
+    - navigation.instant
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
 
 extra_css:
   - assets/extra.css
+  - stylesheets/portal.css
 
 extra_javascript:
   - assets/fullscreen.js
