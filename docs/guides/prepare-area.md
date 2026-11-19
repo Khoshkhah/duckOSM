@@ -60,7 +60,7 @@ duckosm build --pbf sodermalm.osm.pbf -m driving
 | Command | Does | Needs |
 |---|---|---|
 | `duckosm cut REGION --boundary FILE -o OUT` | the smart cut of osmium: ways that cross the border stay whole, and relations (rivers, land cover) are complete | a PBF sorted by type and id (the Geofabrik files are) |
-| `duckosm clip-pbf PBF BOUNDARY` | the cut of osmium, with `--strategy complete_ways` (default), `smart` or `simple`; not ported to Rust yet | [osmium](../install.md#outside-tools) and a PBF sorted by type and id |
+| `duckosm clip-pbf PBF BOUNDARY` | the cut of osmium, with `--strategy complete_ways` (default), `smart` or `simple` | a PBF sorted by type and id |
 
 ### 2. Cut a built region
 

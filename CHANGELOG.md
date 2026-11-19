@@ -26,6 +26,12 @@
 
 The program is `duckosm`, in Rust, and `pip install duckosm` installs it (wheels for 5 systems). The exports, the routers, the maps, the editors and GMNS run in Rust. The Python API keeps its names and calls Rust. The commands `levels`, `bus`, `multimodal` and `clip-pbf`, and the build steps of `DuckOSM.run()`, still run the Python code.
 
+- **`duckosm quack --geofabrik`: Geofabrik's free layers from any `.osm.pbf` file.** The 20 layers of Geofabrik's
+  `<area>-latest-free.shp.zip` and `-free.gpkg.zip` (`gis_osm_roads_free`, `gis_osm_pois_free`, `gis_osm_buildings_a_free`,
+  ...), with Geofabrik's feature classes and codes, as a GeoPackage, a zip file of shapefiles (`-f shp`, pure Rust: also in
+  the browser) or GeoParquet files, in one read, with `--tile-zoom` and `--fixes`. On Monaco each layer equals Geofabrik's
+  file of the same day (`duckosm-build/tests/quack_geofabrik_monaco.rs`). The rules: `duckosm-core/src/geofabrik_rules.txt`.
+
 - **The switch, step 6 of `docs/design/all_in_rust.md`.** The Rust program is `duckosm`. `duckosm-rust` stays for one release:
   it prints "use duckosm" and runs the same command. The wheel has the whole program in the module `duckosm._rust` (with
   DuckDB), and the command `duckosm` of the wheel runs it. The Python API keeps its names and calls Rust

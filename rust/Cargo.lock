@@ -861,6 +861,7 @@ name = "duckosm-build"
 version = "0.8.0"
 dependencies = [
  "arrow-array 60.0.0",
+ "dbase",
  "duckdb",
  "duckosm-core",
  "duckosm-duckdb",
@@ -875,11 +876,13 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "sha2 0.10.9",
+ "shapefile",
  "snap",
  "tiff",
  "tzf-rs",
  "ureq",
  "yaml-rust2",
+ "zip",
 ]
 
 [[package]]
@@ -961,6 +964,7 @@ dependencies = [
  "duckosm-build",
  "flate2",
  "geo",
+ "rusqlite",
 ]
 
 [[package]]

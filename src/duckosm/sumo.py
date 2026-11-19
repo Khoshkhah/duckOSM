@@ -105,7 +105,7 @@ DEFAULT_NETCFG = {
 
 
 def _find_netconvert(explicit=None):
-    """Locate netconvert: explicit → eclipse-sumo wheel → sumolib → $SUMO_HOME/bin → PATH.
+    """Locate netconvert: explicit → eclipse-sumo wheel → $SUMO_HOME/bin → PATH.
 
     Importing the ``sumo`` (eclipse-sumo) package also sets ``$SUMO_HOME``, which netconvert needs
     at runtime for its bundled type maps — so the subprocess inherits it.
@@ -118,11 +118,6 @@ def _find_netconvert(explicit=None):
         if os.path.exists(cand):
             os.environ.setdefault("SUMO_HOME", os.path.dirname(sumo.__file__))
             return cand
-    except Exception:
-        pass
-    try:
-        import sumolib
-        return sumolib.checkBinary("netconvert")
     except Exception:
         pass
     sumo_home = os.environ.get("SUMO_HOME")

@@ -62,13 +62,15 @@ impl Feature {
 }
 
 /// The rules of a layer run of the engine ([`gdal_features`]): GDAL's five layers (`duckosm quack --gdal`), or the rows
-/// of osm2pgsql's four tables (`duckosm quack --osm2pgsql`, [`crate::osm2pgsql`]). The osm2pgsql mode reads the file as
-/// GDAL does; its rules decide the rows.
+/// that the Geofabrik layers come from (`duckosm quack --geofabrik`, [`crate::geofabrik`]). The Geofabrik mode reads the
+/// file as GDAL does, with two differences: a multipolygon with no tags of its own does not take the tags of its outer
+/// member, and the polygon of an outer member way is a row also when a complete multipolygon uses it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Quack,
     Gdal,
     Osm2pgsql,
+    Geofabrik,
 }
 
 /// The numbers of a [`features`] run.
@@ -304,7 +306,7 @@ impl QuackFixes {
             })
         };
         let row = |l: &NewLine| match mode {
-            Mode::Gdal => (l.pts.len() >= 2).then(|| gdal_way(l.id, &l.tags, &l.pts, l.closed && crate::gdal::is_area(&l.tags))).flatten(),
+            Mode::Gdal | Mode::Geofabrik => (l.pts.len() >= 2).then(|| gdal_way(l.id, &l.tags, &l.pts, l.closed && crate::gdal::is_area(&l.tags))).flatten(),
             Mode::Osm2pgsql => crate::osm2pgsql::way(l.id, &l.tags, &l.pts, l.closed),
             Mode::Quack => way_feature(l.id, &l.tags, &l.pts),
         };
@@ -1137,7 +1139,8 @@ fn gdal_way(id: i64, tags: &RawTags, pts: &[Pt], area: bool) -> Option<Feature> 
 /// quack --gdal: the rows of a relation from the lines of its members that the file has (in the order of the members).
 ///
 /// - A multipolygon or boundary with all its member ways (not `subarea`): its outer closed member ways go to `used`; the
-///   relation is a row when `mine` and it has a ring.
+///   relation is a row when `mine` and it has a ring. `donate`: a relation with no tags of its own takes the tags of its
+///   first outer member area (GDAL).
 /// - Else the members (nodes only in `other_relations`; ways not `subarea`): one row, or `by_tiles` one row for each
 ///   member that the tile owns (`Feature::part`).
 fn gdal_relation(
@@ -1146,6 +1149,7 @@ fn gdal_relation(
     members: &[Member],
     got: Vec<(usize, u8, Vec<Pt>, RawTags)>,
     by_tiles: bool,
+    donate: bool,
     mine: &dyn Fn(i64) -> bool,
     used: &std::sync::Mutex<Vec<i64>>,
 ) -> Vec<Feature> {
@@ -1168,7 +1172,7 @@ fn gdal_relation(
         let Some(polys) = multipolygon(have.iter().map(|l| l.2.clone()).collect()) else {
             return Vec::new();
         };
-        let tags = if has_own_tags(&tags) {
+        let tags = if has_own_tags(&tags) || !donate {
             tags
         } else {
             // GDAL: the tags of the first outer member area, and the type
@@ -1384,7 +1388,7 @@ fn run<R: Read + Send>(
                 }
             }
             for (id, tags, members) in part.relations {
-                let polygons = mode == Mode::Gdal && crate::gdal::relation_layer(&tags) == crate::gdal::MULTIPOLYGONS;
+                let polygons = matches!(mode, Mode::Gdal | Mode::Geofabrik) && crate::gdal::relation_layer(&tags) == crate::gdal::MULTIPOLYGONS;
                 for (place, (m, t, role)) in members.iter().enumerate() {
                     if *t == MemberType::Node {
                         node_members.push(&Request, &(*m, rels, place as u32)).map_err(io)?;
@@ -1561,7 +1565,7 @@ fn run<R: Read + Send>(
                 .filter_map(|(id, tags, pts, owned, _, area)| {
                     let f = match mode {
                         Mode::Osm2pgsql => crate::osm2pgsql::way(*id, tags, pts, *area),
-                        Mode::Gdal => gdal_way(*id, tags, pts, *area),
+                        Mode::Gdal | Mode::Geofabrik => gdal_way(*id, tags, pts, *area),
                         Mode::Quack => way_feature(*id, tags, pts),
                     };
                     f.map(|mut f| {
@@ -1660,7 +1664,7 @@ fn run<R: Read + Send>(
         let made = if o2p {
             osm2pgsql_relation(id, &tags, &members, got, owner.is_some(), &mine)
         } else if gdal {
-            gdal_relation(id, tags, &members, got, owner.is_some(), &mine, &used)
+            gdal_relation(id, tags, &members, got, owner.is_some(), mode == Mode::Gdal, &mine, &used)
         } else {
             // a relation with a member way that is not a valid way is not a feature
             let owned = got.first().is_some_and(|l| l.1 & OWNED != 0);
@@ -1755,7 +1759,7 @@ fn run<R: Read + Send>(
         let mut part = Vec::new();
         for r in deferred.finish().map_err(io)?.read(&Numbered).map_err(io)? {
             let (way, mut f) = r.map_err(io)?;
-            if used.binary_search(&(way as i64)).is_err() {
+            if mode == Mode::Geofabrik || used.binary_search(&(way as i64)).is_err() {
                 f.layer = crate::gdal::MULTIPOLYGONS;
                 part.push(f);
             }

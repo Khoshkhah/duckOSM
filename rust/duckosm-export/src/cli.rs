@@ -18,7 +18,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Export a built network to GeoPackage, GeoParquet or shapefile, with edge_id as an attribute: the layers edges_<mode>,
-    /// nodes_<mode> and boundary, in EPSG:4326. GeoPackage: one file (ogr2ogr of GDAL puts the layers together). Shapefile:
+    /// nodes_<mode> and boundary, in EPSG:4326. GeoPackage: one file with all layers. Shapefile:
     /// one set of files for each layer. GeoParquet: one .parquet file for each layer and for each features.* table, and
     /// layers.json; the edges files also get the columns of visualization.edge_levels.
     #[command(name = "export-gis")]
@@ -298,9 +298,6 @@ pub fn run(args: &[String]) -> Result<()> {
             let layers = s.layers.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join(", ");
             let dest = s.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "None".into());
             println!("wrote {dest} ({}: {} layers — {layers})", s.fmt, s.layers.len());
-            if s.fmt == "gpkg" && s.path.is_none() {
-                println!("  (ogr2ogr not found — wrote {} single-layer files instead)", s.files.len());
-            }
         }
         Cmd::Opendrive { db, mode, crs, junctions, out } => {
             check_db(&db)?;

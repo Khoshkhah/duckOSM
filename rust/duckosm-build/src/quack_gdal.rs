@@ -1,20 +1,41 @@
 //! `duckosm quack --gdal` (docs/rust/quack.md, "GDAL layers"): the five layers of GDAL's OSM driver
 //! (`duckosm_core::gdal`), made by the quack engine in one read of the file, as a GeoPackage with the tables that GDAL's
 //! GeoPackage driver writes (`ogr2ogr -f GPKG out.gpkg in.osm.pbf`) or as one GeoParquet file for each layer.
+//! `duckosm quack --geofabrik` (docs/concepts/geofabrik.md): the 20 layers of Geofabrik's free files
+//! (`duckosm_core::geofabrik`) with the same writers, and as shapefiles in one zip file (`crate::shp`).
 
-use duckosm_core::gdal::{self, Parts};
+use duckosm_core::gdal::{self, Parts, Schema};
 #[cfg(feature = "gpkg")]
-use duckosm_core::gdal::{columns, values, Value};
+use duckosm_core::gdal::Value;
+pub use duckosm_core::quack::Mode;
 use duckosm_core::quack::{self, Feature, TileSize};
 #[cfg(feature = "gpkg")]
 use duckosm_core::spill::Codec;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-/// The numbers of rows of the layers (index: the layer, 1 to 5) and the files.
+/// The numbers of rows of the layers (index: the layer, 1 to the layers of the schema) and the files.
 pub struct GdalCounts {
-    pub rows: [usize; 6],
+    pub rows: Vec<usize>,
     pub files: Vec<PathBuf>,
+}
+
+/// The schema of the layers of a mode (GDAL's or Geofabrik's).
+pub fn schema(mode: Mode) -> &'static Schema {
+    match mode {
+        Mode::Geofabrik => &duckosm_core::geofabrik::SCHEMA,
+        _ => &gdal::SCHEMA,
+    }
+}
+
+/// The rows of the layers of `mode` from rows of the engine (Geofabrik: [`duckosm_core::geofabrik::rows`]).
+fn layer_rows(mode: Mode, rows: Vec<Feature>) -> Vec<Feature> {
+    if mode != Mode::Geofabrik {
+        return rows;
+    }
+    let mut out = Vec::new();
+    rows.iter().for_each(|f| duckosm_core::geofabrik::rows(f, &mut out));
+    out
 }
 
 /// Make GDAL's layers of `pbf` into the GeoPackage `gpkg` and the GeoParquet files `<parquet>_<layer>.parquet`
@@ -26,6 +47,21 @@ pub fn quack_gdal(
     tiles: Option<TileSize>,
     fixes: Option<&duckosm_core::fixes::OsmFixes>,
 ) -> Result<GdalCounts, String> {
+    quack_layers(pbf, Mode::Gdal, gpkg, parquet, None, tiles, fixes)
+}
+
+/// Make the layers of `mode` (GDAL's or Geofabrik's) of `pbf` into the GeoPackage `gpkg`, the GeoParquet files
+/// `<parquet>_<table>.parquet` and the zip file of shapefiles `shp` (any of them). `tiles` and `fixes` as [`quack_gdal`].
+pub fn quack_layers(
+    pbf: &Path,
+    mode: Mode,
+    gpkg: Option<&Path>,
+    parquet: Option<&Path>,
+    shp: Option<&Path>,
+    tiles: Option<TileSize>,
+    fixes: Option<&duckosm_core::fixes::OsmFixes>,
+) -> Result<GdalCounts, String> {
+    let schema = schema(mode);
     let open = || {
         let f = duckosm_core::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
         Ok(std::io::BufReader::with_capacity(1 << 20, f))
@@ -35,8 +71,8 @@ pub fn quack_gdal(
     let parquet = match parquet {
         Some(base) => {
             let mut w = Vec::new();
-            for layer in 1..=5u8 {
-                let path = PathBuf::from(format!("{}_{}.parquet", base.display(), gdal::layer_name(layer)));
+            for layer in 1..=schema.layers {
+                let path = PathBuf::from(format!("{}_{}.parquet", base.display(), (schema.table)(layer)));
                 let f = std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 w.push(BufWriter::new(f));
                 files.push(path);
@@ -45,10 +81,18 @@ pub fn quack_gdal(
         }
         None => None,
     };
-    let rows = write_layers(gpkg, parquet, |send| {
+    let shp = match shp {
+        Some(p) => {
+            files.push(p.to_path_buf());
+            Some(std::fs::File::create(p).map_err(|e| format!("{}: {e}", p.display()))?)
+        }
+        None => None,
+    };
+    let rows = write_layers(schema, gpkg, parquet, shp, |send| {
+        let mut send = |rows: Vec<Feature>| send(layer_rows(mode, rows));
         match tiles {
-            None => quack::gdal_features(open, quack::BUDGET, quack::Mode::Gdal, fixes.as_ref(), send)?,
-            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, quack::Mode::Gdal, fixes, send)?,
+            None => quack::gdal_features(open, quack::BUDGET, mode, fixes.as_ref(), &mut send)?,
+            Some(size) => quack::gdal_features_by_tiles(open, quack::BUDGET, size, mode, fixes, &mut send)?,
         };
         Ok(())
     })?;
@@ -64,14 +108,16 @@ pub fn quack_gdal(
 pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
     open: impl Fn() -> Result<R, String>,
     tile: duckosm_core::tiles::Tile,
+    mode: Mode,
     out: W,
     fixes: Option<&quack::QuackFixes>,
-) -> Result<[usize; 6], String> {
+) -> Result<Vec<usize>, String> {
     let mut out = snappy::write::FrameEncoder::new(out);
     let owner = quack::Owner { tile, relations: None };
-    let (mut n, mut b) = ([0usize; 6], Vec::new());
-    quack::gdal_features_owned(open, quack::BUDGET, &owner, quack::Mode::Gdal, fixes, |rows| {
-        for f in rows.iter().filter(|f| f.owner) {
+    let (mut n, mut b) = (vec![0usize; schema(mode).layers as usize + 1], Vec::new());
+    quack::gdal_features_owned(open, quack::BUDGET, &owner, mode, fixes, |rows| {
+        let rows = layer_rows(mode, rows.into_iter().filter(|f| f.owner).collect());
+        for f in &rows {
             n[f.layer as usize] += 1;
             b.clear();
             gdal::put_row(f, &mut b);
@@ -83,10 +129,17 @@ pub fn quack_gdal_tile_to<R: Read + Send, W: Write>(
     Ok(n)
 }
 
-/// Join the files of the tiles of [`quack_gdal_tile_to`] (`parts`) into the GeoParquet files of the five layers (`outs`,
-/// in the order of the layers) and/or the GeoPackage `gpkg`. Gives the rows of each layer.
-pub fn quack_gdal_join_to<R: Read, W: Write + Send>(parts: Vec<R>, gpkg: Option<&Path>, outs: Option<Vec<W>>) -> Result<[usize; 6], String> {
-    write_layers(gpkg, outs, |send| {
+/// Join the files of the tiles of [`quack_gdal_tile_to`] (`parts`) into the GeoParquet files of the layers of `mode`
+/// (`outs`, in the order of the layers), the GeoPackage `gpkg` and the zip file of shapefiles `shp` (any of them). Gives
+/// the rows of each layer.
+pub fn quack_gdal_join_to<R: Read, W: Write + Send>(
+    parts: Vec<R>,
+    mode: Mode,
+    gpkg: Option<&Path>,
+    outs: Option<Vec<W>>,
+    shp: Option<W>,
+) -> Result<Vec<usize>, String> {
+    write_layers(schema(mode), gpkg, outs, shp, |send| {
         for r in parts {
             // a buffer: in the browser, each read of a part is a read of its file (two for each row took 14 s on Monaco)
             let mut r = snappy::read::FrameDecoder::new(std::io::BufReader::with_capacity(1 << 20, r));
@@ -111,32 +164,41 @@ pub fn quack_gdal_join_to<R: Read, W: Write + Send>(parts: Vec<R>, gpkg: Option<
     })
 }
 
-/// Write the rows that `produce` gives (to its `send`) into the GeoPackage `gpkg` and the GeoParquet files of the five
-/// layers `parquet` (either or both). Natively, a writer thread writes while `produce` makes the rows; in the browser this
-/// thread does both. The parts of the relations wait in `Parts` until `produce` is done. Gives the rows of each layer.
-pub fn write_layers<W: Write + Send>(
+/// Write the rows that `produce` gives (to its `send`) into the GeoPackage `gpkg`, the GeoParquet files of the layers
+/// `parquet` and the zip file of shapefiles `shp` (any of them), with the layers of `schema`. Natively, a writer thread
+/// writes while `produce` makes the rows; in the browser this thread does both. The parts of the relations wait in
+/// `Parts` until `produce` is done. Gives the rows of each layer.
+pub fn write_layers<W: Write + Send, S: Write + Send>(
+    schema: &'static Schema,
     gpkg: Option<&Path>,
     parquet: Option<Vec<W>>,
+    shp: Option<S>,
     produce: impl FnOnce(&mut dyn FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String>,
-) -> Result<[usize; 6], String> {
+) -> Result<Vec<usize>, String> {
     #[cfg(not(feature = "gpkg"))]
     if let Some(p) = gpkg {
         return Err(format!("{}: the GeoPackage output needs the cargo feature \"gpkg\"", p.display()));
     }
-    let make_out = move || -> Result<Out<W>, String> {
+    let make_out = move || -> Result<Out<W, S>, String> {
         let parquet = match parquet {
-            Some(ws) => Some(ws.into_iter().zip(1..=5u8).map(|(w, layer)| duckosm_parquet::gdal::GdalWriter::new(layer, w)).collect::<Result<_, _>>()?),
+            Some(ws) => Some(
+                ws.into_iter()
+                    .zip(1..=schema.layers)
+                    .map(|(w, layer)| duckosm_parquet::gdal::GdalWriter::new(schema, layer, w))
+                    .collect::<Result<_, _>>()?,
+            ),
             None => None,
         };
         Ok(Out {
             // the GeoPackage is made on the writer thread (its temporary files belong to that thread)
             #[cfg(feature = "gpkg")]
             gpkg: match gpkg {
-                Some(p) => Some(Gpkg::new(p)?),
+                Some(p) => Some(Gpkg::new(p, schema)?),
                 None => None,
             },
             parquet,
-            rows: [0; 6],
+            shp: shp.map(|w| crate::shp::ShpZip::new(schema, w)),
+            rows: vec![0; schema.layers as usize + 1],
         })
     };
     write_rows((rayon::current_num_threads() / 4).max(2), make_out, |out, rows| out.write(rows), |out| out.close(), "quack --gdal", produce)
@@ -208,19 +270,23 @@ pub fn write_rows<O, R: Send>(
 }
 
 /// The writers of the rows (on the writer thread).
-struct Out<W: Write + Send> {
+struct Out<W: Write + Send, S: Write + Send> {
     #[cfg(feature = "gpkg")]
     gpkg: Option<Gpkg>,
     parquet: Option<Vec<duckosm_parquet::gdal::GdalWriter<W>>>,
-    rows: [usize; 6],
+    shp: Option<crate::shp::ShpZip<S>>,
+    rows: Vec<usize>,
 }
 
-impl<W: Write + Send> Out<W> {
+impl<W: Write + Send, S: Write + Send> Out<W, S> {
     fn write(&mut self, batch: Vec<Feature>) -> Result<(), String> {
         batch.iter().for_each(|f| self.rows[f.layer as usize] += 1);
         #[cfg(feature = "gpkg")]
         if let Some(g) = self.gpkg.as_mut() {
             g.write(&batch)?;
+        }
+        if let Some(z) = self.shp.as_mut() {
+            batch.iter().try_for_each(|f| z.write(f))?;
         }
         if let Some(w) = self.parquet.as_mut() {
             for f in batch {
@@ -230,7 +296,7 @@ impl<W: Write + Send> Out<W> {
         Ok(())
     }
 
-    fn close(self) -> Result<[usize; 6], String> {
+    fn close(self) -> Result<Vec<usize>, String> {
         #[cfg(feature = "gpkg")]
         if let Some(g) = self.gpkg {
             g.close()?;
@@ -239,6 +305,9 @@ impl<W: Write + Send> Out<W> {
             for w in w {
                 w.close()?;
             }
+        }
+        if let Some(z) = self.shp {
+            z.close()?;
         }
         Ok(self.rows)
     }
@@ -279,9 +348,10 @@ fn envelope(wkb: &[u8]) -> [f64; 4] {
 #[cfg(feature = "gpkg")]
 struct Gpkg {
     con: rusqlite::Connection,
+    schema: &'static Schema,
     /// the envelope of each layer
-    env: [[f64; 4]; 6],
-    rows: [i64; 6],
+    env: Vec<[f64; 4]>,
+    rows: Vec<i64>,
     /// the INSERT of each layer
     insert: Vec<String>,
     store: Box<dyn duckosm_core::spill::Store>,
@@ -449,9 +519,9 @@ struct Encoded {
 }
 
 #[cfg(feature = "gpkg")]
-fn encode(f: &Feature) -> Encoded {
+fn encode(schema: &Schema, f: &Feature) -> Encoded {
     let env = envelope(&f.geometry);
-    let point = f.layer == gdal::POINTS;
+    let point = (schema.geometry)(f.layer) == "POINT";
     // the GeoPackage header: GDAL writes no envelope for a point
     let mut blob = Vec::with_capacity(8 + 32 + f.geometry.len());
     blob.extend_from_slice(b"GP");
@@ -463,7 +533,7 @@ fn encode(f: &Feature) -> Encoded {
     }
     blob.extend_from_slice(&f.geometry);
     let mut params = vec![rusqlite::types::Value::Blob(blob)];
-    params.extend(values(f).into_iter().map(|v| match v {
+    params.extend((schema.values)(f).into_iter().map(|v| match v {
         Some(Value::Text(s)) => rusqlite::types::Value::Text(s),
         Some(Value::Int(n)) => rusqlite::types::Value::Integer(n),
         None => rusqlite::types::Value::Null,
@@ -475,13 +545,8 @@ fn encode(f: &Feature) -> Encoded {
 const WGS84: &str = r#"GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]"#;
 
 #[cfg(feature = "gpkg")]
-fn geometry_name(layer: u8) -> &'static str {
-    ["", "POINT", "LINESTRING", "MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION"][layer as usize]
-}
-
-#[cfg(feature = "gpkg")]
 impl Gpkg {
-    fn new(path: &Path) -> Result<Gpkg, String> {
+    fn new(path: &Path, schema: &'static Schema) -> Result<Gpkg, String> {
         let e = |x: rusqlite::Error| format!("{}: {x}", path.display());
         if path.exists() {
             std::fs::remove_file(path).map_err(|x| format!("{}: {x}", path.display()))?;
@@ -501,34 +566,41 @@ impl Gpkg {
         sql += &format!(
             "INSERT INTO gpkg_spatial_ref_sys VALUES ('WGS 84 geodetic', 4326, 'EPSG', 4326, '{WGS84}', 'longitude/latitude coordinates in decimal degrees on the WGS 84 spheroid');\n"
         );
-        for layer in 1..=5u8 {
-            let t = gdal::layer_name(layer);
-            let cols: Vec<String> =
-                columns(layer).iter().map(|(c, int)| format!("\"{c}\" {}", if *int { "MEDIUMINT" } else { "TEXT" })).collect();
+        for layer in 1..=schema.layers {
+            let t = (schema.table)(layer);
+            let cols: Vec<String> = (schema.columns)(layer)
+                .iter()
+                .map(|(c, int, w)| match (int, w) {
+                    (true, _) => format!("\"{c}\" MEDIUMINT"),
+                    (false, 0) => format!("\"{c}\" TEXT"),
+                    (false, w) => format!("\"{c}\" TEXT({w})"),
+                })
+                .collect();
             sql += &format!(
                 "CREATE TABLE \"{t}\" ( \"fid\" INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, \"geom\" {}, {});
                 CREATE VIRTUAL TABLE \"rtree_{t}_geom\" USING rtree(id, minx, maxx, miny, maxy);\n",
-                geometry_name(layer),
+                (schema.geometry)(layer),
                 cols.join(", ")
             );
         }
         sql += "BEGIN;";
         con.execute_batch(&sql).map_err(e)?;
-        let insert = (0..=5u8)
+        let insert = (0..=schema.layers)
             .map(|layer| {
                 if layer == 0 {
                     return String::new();
                 }
-                let cols = columns(layer);
+                let cols = (schema.columns)(layer);
                 let names: Vec<String> = cols.iter().map(|c| format!("\"{}\"", c.0)).collect();
                 let marks = vec!["?"; cols.len() + 1].join(",");
-                format!("INSERT INTO \"{}\" (\"geom\",{}) VALUES ({marks})", gdal::layer_name(layer), names.join(","))
+                format!("INSERT INTO \"{}\" (\"geom\",{}) VALUES ({marks})", (schema.table)(layer), names.join(","))
             })
             .collect();
         let store = duckosm_core::spill::temp_store();
         let io = |x: std::io::Error| format!("quack --gdal: a temporary file: {x}");
-        let boxes = (0..6).map(|_| duckosm_core::spill::Writer::new(&*store).map_err(io)).collect::<Result<_, _>>()?;
-        Ok(Gpkg { con, env: [[f64::MAX, f64::MIN, f64::MAX, f64::MIN]; 6], rows: [0; 6], insert, store, boxes })
+        let n = schema.layers as usize + 1;
+        let boxes = (0..n).map(|_| duckosm_core::spill::Writer::new(&*store).map_err(io)).collect::<Result<_, _>>()?;
+        Ok(Gpkg { con, schema, env: vec![[f64::MAX, f64::MIN, f64::MAX, f64::MIN]; n], rows: vec![0; n], insert, store, boxes })
     }
 
     /// Write a batch of rows: encoded on all threads, inserted on this thread.
@@ -536,7 +608,8 @@ impl Gpkg {
         use rayon::prelude::*;
         let e = |x: rusqlite::Error| format!("the GeoPackage: {x}");
         let io = |x: std::io::Error| format!("quack --gdal: a temporary file: {x}");
-        let rows: Vec<Encoded> = batch.par_iter().map(encode).collect();
+        let schema = self.schema;
+        let rows: Vec<Encoded> = batch.par_iter().map(|f| encode(schema, f)).collect();
         for r in rows {
             let layer = r.layer as usize;
             self.con.prepare_cached(&self.insert[layer]).map_err(e)?.execute(rusqlite::params_from_iter(r.params)).map_err(e)?;
@@ -565,12 +638,12 @@ impl Gpkg {
             };
             let sorted = duckosm_core::spill::sort_bytes(boxes.finish().map_err(io)?, key, quack::BUDGET, &*self.store).map_err(io)?;
             let rows = sorted.read(&BoxCodec).map_err(io)?.map(|r| r.map_err(io));
-            bulk_rtree(&self.con, gdal::layer_name(layer as u8), self.rows[layer], rows)?;
+            bulk_rtree(&self.con, (self.schema.table)(layer as u8), self.rows[layer], rows)?;
         }
         duckosm_core::util::step("quack --gdal: the R-trees");
         let mut sql = String::new();
-        for layer in 1..=5u8 {
-            let t = gdal::layer_name(layer);
+        for layer in 1..=self.schema.layers {
+            let t = (self.schema.table)(layer);
             let env = self.env[layer as usize];
             let ext = if self.rows[layer as usize] > 0 { format!("{}, {}, {}, {}", env[0], env[2], env[1], env[3]) } else { "NULL, NULL, NULL, NULL".into() };
             sql += &format!(
@@ -587,7 +660,7 @@ impl Gpkg {
                 CREATE TRIGGER \"rtree_{t}_geom_delete\" AFTER DELETE ON \"{t}\" WHEN old.\"geom\" NOT NULL BEGIN DELETE FROM \"rtree_{t}_geom\" WHERE id = OLD.\"fid\"; END;
                 CREATE TRIGGER \"trigger_insert_feature_count_{t}\" AFTER INSERT ON \"{t}\" BEGIN UPDATE gpkg_ogr_contents SET feature_count = feature_count + 1 WHERE lower(table_name) = lower('{t}'); END;
                 CREATE TRIGGER \"trigger_delete_feature_count_{t}\" AFTER DELETE ON \"{t}\" BEGIN UPDATE gpkg_ogr_contents SET feature_count = feature_count - 1 WHERE lower(table_name) = lower('{t}'); END;\n",
-                geometry_name(layer),
+                (self.schema.geometry)(layer),
                 self.rows[layer as usize]
             );
         }
