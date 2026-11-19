@@ -102,21 +102,37 @@ export default {
       };
     }
 
-    // search and OSM id: the browser asks Nominatim for the polygon (as duckOSM Studio does) and gives it to
-    // `duckosm get --boundary`, so the program asks Nominatim nothing (one server address soon gets "429 Too many requests")
+    // search and OSM id: the browser gets the polygon and gives it to `duckosm get --boundary`, so the program sends no
+    // request for it. Search: Photon (as duckOSM Studio). Polygon of a relation: polygons.openstreetmap.fr, else Nominatim
+    // (Nominatim stops an address that sends many requests, and the browser then only sees "Failed to fetch").
     const info = (text) => { $(".dk-info").classList.remove("dk-err"); $(".dk-info").textContent = text; };
-    const useOsm = async (type, id, name) => {
-      info(`Getting the boundary of OSM ${type} ${id} ...`);
+    const getJson = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(`${new URL(url).host} answered ${r.status}`); return r.json(); };
+    const polygon = async (t, id) => {
+      const errors = [];
+      if (t === "R") {
+        try {
+          const g = await getJson(`https://polygons.openstreetmap.fr/get_geojson.py?id=${id}&params=0`);
+          if (/Polygon$/.test(g?.type ?? "")) return g;
+          errors.push("polygons.openstreetmap.fr has no polygon");
+        } catch (e) { errors.push(e.message); }
+      }
       try {
-        const r = await fetch("https://nominatim.openstreetmap.org/lookup?" + new URLSearchParams({ osm_ids: type[0].toUpperCase() + id, format: "geojson", polygon_geojson: "1" }));
-        if (!r.ok) throw new Error(`Nominatim answered ${r.status}`);
-        const f = (await r.json()).features?.[0];
-        if (!f || !/Polygon$/.test(f.geometry?.type ?? "")) return info(`OSM ${type} ${id} has no boundary (no polygon on Nominatim).`);
-        name = name || f.properties.name || f.properties.display_name?.split(",")[0] || `${type}_${id}`;
-        const geojson = { type: "Feature", properties: { name, osm_type: type, osm_id: id, source: "Nominatim" }, geometry: f.geometry };
+        const d = await getJson("https://nominatim.openstreetmap.org/lookup?" + new URLSearchParams({ osm_ids: t + id, format: "geojson", polygon_geojson: "1" }));
+        const g = d.features?.[0]?.geometry;
+        if (/Polygon$/.test(g?.type ?? "")) return g;
+        errors.push("Nominatim has no polygon");
+      } catch (e) { errors.push(`Nominatim: ${e.message === "Failed to fetch" ? "no answer (too many requests?)" : e.message}`); }
+      throw new Error(errors.join("; "));
+    };
+    const useOsm = async (t, id, name) => {
+      const what = { R: "relation", W: "way", N: "node" }[t];
+      info(`Getting the boundary of OSM ${what} ${id} ...`);
+      try {
+        const geometry = await polygon(t, id);
+        name = name || `${what}_${id}`;
         draft(null);
-        set({ mode: "boundary", geojson, name });
-      } catch (e) { info(`No boundary: ${e.message}`); }
+        set({ mode: "boundary", geojson: { type: "Feature", properties: { name, osm_type: what, osm_id: id }, geometry }, name });
+      } catch (e) { info(`OSM ${what} ${id}: no boundary (${e.message})`); }
     };
     const search = async () => {
       const q = $(".dk-q").value.trim();
@@ -124,15 +140,14 @@ export default {
       const list = $(".dk-list");
       list.textContent = "Searching ...";
       try {
-        const r = await fetch("https://nominatim.openstreetmap.org/search?" + new URLSearchParams({ q, format: "jsonv2", limit: "8" }));
-        if (!r.ok) throw new Error(`Nominatim answered ${r.status}`);
-        const rows = await r.json();
+        const rows = (await getJson("https://photon.komoot.io/api/?" + new URLSearchParams({ q, limit: "8" }))).features.map((f) => f.properties);
         list.innerHTML = rows.length ? "" : "No match.";
         for (const p of rows) {
           // a relation or a closed way can have a boundary; a node is a point
+          const where = [p.city, p.state, p.country].filter((x) => x && x !== p.name).join(", ");
           const b = document.createElement("button");
-          b.textContent = `${p.display_name} (${p.type})` + (p.osm_type === "node" ? ", a point: no boundary" : "");
-          b.disabled = p.osm_type === "node";
+          b.textContent = `${p.name}${where ? ", " + where : ""} (${p.osm_value})` + (p.osm_type === "N" ? ", a point: no boundary" : "");
+          b.disabled = p.osm_type === "N";
           b.onclick = () => { list.innerHTML = ""; useOsm(p.osm_type, p.osm_id, p.name || q); };
           list.append(b);
         }
@@ -141,7 +156,7 @@ export default {
     $(".dk-go").onclick = search;
     $(".dk-q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 
-    $(".dk-osm-go").onclick = () => { const id = parseInt($(".dk-osm").value, 10); if (id > 0) useOsm("relation", id); };
+    $(".dk-osm-go").onclick = () => { const id = parseInt($(".dk-osm").value, 10); if (id > 0) useOsm("R", id); };
 
     // box: drag on the map, or type W,S,E,N
     $(".dk-bbox-go").onclick = () => {

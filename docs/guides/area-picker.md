@@ -80,7 +80,8 @@ duckosm get --bbox 7.42,43.728,7.44,43.738 -o data
 ```
 
 The map uses [MapLibre](https://maplibre.org) and the [OpenFreeMap](https://openfreemap.org) base map. The
-search uses OpenStreetMap's [Nominatim](https://nominatim.openstreetmap.org). For Search and OSM id, the browser
-gets the polygon from Nominatim and gives it to `duckosm get` as the boundary. Thus the program does not send a
-request to Nominatim for each choice. Nominatim stops an address that sends too many requests. The notebook must have a connection
+search uses [Photon](https://photon.komoot.io). For Search and OSM id, the browser gets the polygon from
+[polygons.openstreetmap.fr](https://polygons.openstreetmap.fr), else from OpenStreetMap's
+[Nominatim](https://nominatim.openstreetmap.org), and gives it to `duckosm get` as the boundary. Thus the program
+does not send a request for each choice. Nominatim stops an address that sends too many requests. The notebook must have a connection
 to the internet.
