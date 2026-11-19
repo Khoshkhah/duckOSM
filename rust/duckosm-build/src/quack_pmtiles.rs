@@ -36,6 +36,59 @@ const SORT_BUDGET: usize = quack::BUDGET / 2;
 /// The rows of the tiles that are encoded at once on all threads.
 const TILE_BATCH: usize = 64 << 20;
 
+/// The rows of a feature and its box in world units.
+type Rows = (Vec<Vec<u8>>, [f64; 4]);
+/// A tile id and the rows of the tile.
+type TileRows = (u64, Vec<Vec<u8>>);
+
+/// Sorts the rows of `lines` and of the features of `feed` by tile (temporary files in the temporary store), and gives
+/// the tiles in the order of their ids to `tiles`, at most [`TILE_BATCH`] bytes of rows at a time. Returns the number
+/// of features and the box of the data in world units.
+fn sort_rows(
+    lines: Vec<Rows>,
+    feed: impl FnOnce(&mut dyn FnMut(Vec<Feature>) -> Result<(), String>) -> Result<(), String>,
+    tiles: &mut dyn FnMut(Vec<TileRows>) -> Result<(), String>,
+) -> Result<(usize, [f64; 4]), String> {
+    let io = |e: std::io::Error| format!("quack --pmtiles: {e}");
+    let store = temp_store();
+    // Snappy blocks: the rows repeat much (sorted by tile, with the same attributes)
+    let mut sorter = Sorter::new(row_key, SORT_BUDGET, &*store).snappy();
+    let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+    let mut push = |rows: Vec<Rows>| -> Result<(), String> {
+        for (rows, b) in rows {
+            bbox = [bbox[0].min(b[0]), bbox[1].min(b[1]), bbox[2].max(b[2]), bbox[3].max(b[3])];
+            for r in rows {
+                sorter.push(&Bytes, &r).map_err(io)?;
+            }
+        }
+        Ok(())
+    };
+    push(lines)?;
+    let mut features = 0;
+    feed(&mut |batch| {
+        features += batch.len();
+        push(batch.par_iter().map(rows_of).collect())
+    })?;
+    duckosm_core::util::step("quack --pmtiles: the rows of the tiles");
+    let mut batch: Vec<TileRows> = Vec::new();
+    let mut batch_bytes = 0;
+    for row in sorter.sorted(&Bytes).map_err(io)? {
+        let row = row.map_err(io)?;
+        let id = u64::from_be_bytes(row[..8].try_into().unwrap());
+        if batch.last().is_none_or(|t| t.0 != id) {
+            if batch_bytes >= TILE_BATCH {
+                tiles(std::mem::take(&mut batch))?;
+                batch_bytes = 0;
+            }
+            batch.push((id, Vec::new()));
+        }
+        batch_bytes += row.len();
+        batch.last_mut().unwrap().1.push(row);
+    }
+    tiles(batch)?;
+    Ok((features, bbox))
+}
+
 /// Makes the PMTiles file of `pbf` (`open` opens it) into `out`. `tiles`: tile by tile, as quack by tiles. `fixes`: the
 /// OSM fixes of `duckosm build --fixes`.
 pub fn quack_pmtiles_to<R: Read + Seek + Send, W: Write + Seek>(
@@ -45,44 +98,24 @@ pub fn quack_pmtiles_to<R: Read + Seek + Send, W: Write + Seek>(
     fixes: Option<quack::QuackFixes>,
 ) -> Result<PmtilesCounts, String> {
     let io = |e: std::io::Error| format!("quack --pmtiles: {e}");
-    let store = temp_store();
-    // Snappy blocks: the rows repeat much (sorted by tile, with the same attributes)
-    let mut sorter = Sorter::new(row_key, SORT_BUDGET, &*store).snappy();
     let mut counts = PmtilesCounts::default();
-    // the box of the data in world units
-    let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
-    let mut push = |rows: Vec<(Vec<Vec<u8>>, [f64; 4])>| -> Result<(), String> {
-        for (rows, b) in rows {
-            bbox = [bbox[0].min(b[0]), bbox[1].min(b[1]), bbox[2].max(b[2]), bbox[3].max(b[3])];
-            for r in rows {
-                sorter.push(&Bytes, &r).map_err(io)?;
-            }
-        }
-        Ok(())
-    };
     // the lines of the boundaries come from the member ways of the boundary relations, also the ways with no tags
     let lines = shortbread::boundary_lines(&open)?;
-    push(lines.par_iter().map(|(way, o)| rows_of_out(o, fid("way", *way))).collect())?;
+    let lines: Vec<Rows> = lines.par_iter().map(|(way, o)| rows_of_out(o, fid("way", *way))).collect();
     duckosm_core::util::step("quack --pmtiles: the boundaries");
-    let mut features = 0;
-    let mut take = |batch: Vec<Feature>| -> Result<(), String> {
-        features += batch.len();
-        push(batch.par_iter().map(|f| rows_of(f)).collect())
+    let feed = |take: &mut dyn FnMut(Vec<Feature>) -> Result<(), String>| -> Result<(), String> {
+        match tiles {
+            None => quack::features(&open, quack::BUDGET, fixes.as_ref(), take)?,
+            // the sort gives the order, so each tile gives its features at once (no group of tiles waits in memory)
+            Some(size) => quack::features_by_tiles_any_order(&open, quack::BUDGET, size, fixes, take)?,
+        };
+        Ok(())
     };
-    match tiles {
-        None => quack::features(&open, quack::BUDGET, fixes.as_ref(), &mut take)?,
-        // the sort gives the order, so each tile gives its features at once (no group of tiles waits in memory)
-        Some(size) => quack::features_by_tiles_any_order(&open, quack::BUDGET, size, fixes, &mut take)?,
-    };
-    counts.features = features;
-    duckosm_core::util::step("quack --pmtiles: the rows of the tiles");
 
     let mut w = pmtiles::Writer::new(out).map_err(io)?;
     let mut fields: Vec<BTreeMap<String, &'static str>> = vec![BTreeMap::new(); LAYERS.len()];
     let mut zooms = vec![(u8::MAX, 0u8); LAYERS.len()];
     let mut layer_zoom = vec![[0u64; 15]; LAYERS.len()];
-    let mut batch: Vec<(u64, Vec<Vec<u8>>)> = Vec::new();
-    let mut batch_bytes = 0;
     let mut flush = |batch: &mut Vec<(u64, Vec<Vec<u8>>)>, w: &mut pmtiles::Writer<W>| -> Result<(), String> {
         let tiles: Vec<(u64, Vec<u8>, Vec<Made>)> = batch
             .par_drain(..)
@@ -105,20 +138,34 @@ pub fn quack_pmtiles_to<R: Read + Seek + Send, W: Write + Seek>(
         }
         Ok(())
     };
-    for row in sorter.sorted(&Bytes).map_err(io)? {
-        let row = row.map_err(io)?;
-        let id = u64::from_be_bytes(row[..8].try_into().unwrap());
-        if batch.last().is_none_or(|t| t.0 != id) {
-            if batch_bytes >= TILE_BATCH {
-                flush(&mut batch, &mut w)?;
-                batch_bytes = 0;
-            }
-            batch.push((id, Vec::new()));
-        }
-        batch_bytes += row.len();
-        batch.last_mut().unwrap().1.push(row);
-    }
-    flush(&mut batch, &mut w)?;
+
+    // natively, the rows and the sort run on a thread and a pool of their own, as the writer of quack --gdal. On the pool
+    // of the engine, a thread that waited for a job of the rows took a job of the relations of a tile, and that job
+    // waited for the channel of the relations, which waited for the rows: France by tiles stopped with no error. The
+    // tiles come back to this thread (the output file can belong to this thread: OPFS in the browser).
+    #[cfg(not(target_arch = "wasm32"))]
+    let (features, bbox) = std::thread::scope(|scope| -> Result<(usize, [f64; 4]), String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<Feature>>(1);
+        let (back, tiles_rx) = std::sync::mpsc::sync_channel::<Vec<TileRows>>(1);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(rayon::current_num_threads())
+            .build()
+            .map_err(|e| format!("quack --pmtiles: the threads of the sort: {e}"))?;
+        let sort = scope.spawn(move || {
+            let stopped = || "quack --pmtiles: the file writer stopped".to_string();
+            pool.install(|| sort_rows(lines, |take| rx.into_iter().try_for_each(take), &mut |b| back.send(b).map_err(|_| stopped())))
+        });
+        let stopped = || "quack --pmtiles: the sort stopped".to_string();
+        let fed = feed(&mut |b| tx.send(b).map_err(|_| stopped()));
+        drop(tx);
+        let written = tiles_rx.into_iter().try_for_each(|mut b| flush(&mut b, &mut w));
+        // the error of the sort explains a stop of the engine
+        let sorted = sort.join().unwrap_or_else(|_| Err("quack --pmtiles: the sort stopped (panic)".into()));
+        fed.and(written).and(sorted)
+    })?;
+    #[cfg(target_arch = "wasm32")]
+    let (features, bbox) = sort_rows(lines, feed, &mut |mut b| flush(&mut b, &mut w))?;
+    counts.features = features;
     duckosm_core::util::step("quack --pmtiles: the tiles");
 
     // the header and the metadata
