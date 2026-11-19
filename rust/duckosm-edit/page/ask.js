@@ -38,7 +38,7 @@
     const h3Loaded = script("https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js").then(() => !!window.h3, () => false);
     const [info] = await Promise.all([api("info").then((r) => r.json()), script("https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js")]);
     // QUESTIONS and S: the questions to ask (web/ask/questions.js) and what Ask knows about the tables (web/ask/schema.js, docs/design/ask_schema.md): one file each for this page and
-    // for duckOSM Studio (docs/guides/ask-questions.md). roadstyle's Ask shows its
+    // for duckOSM Studio (docs/design/ask_questions.md). roadstyle's Ask shows its
     // general groups first (any data), then these groups, which are about the data of duckOSM.
     const [F, { dataDock }, { askPanel }, { QUESTIONS }, S, V] = await Promise.all([import("./fixes_editor/fixes.js"), import("./roadstyle/data/data_dock.js"), import("./roadstyle/ask/ask_panel.js"), import("./ask/questions.js"), import("./ask/schema.js"), import("./ask/views.js")]);
 

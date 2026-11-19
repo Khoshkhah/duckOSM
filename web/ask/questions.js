@@ -1,4 +1,4 @@
-// The questions of Ask on the duckOSM page, in groups (docs/guides/ask-questions.md). One source: the page of `duckosm ask` (rust/duckosm-edit/page/ask.js)
+// The questions of Ask on the duckOSM page, in groups (docs/design/ask_questions.md). One source: the page of `duckosm ask` (rust/duckosm-edit/page/ask.js)
 // imports it, and a host page of its own (duckOSM Studio) can copy this file. A group is { title, items }. roadstyle's Ask shows its six general groups first
 // (Know the data, Find and count, ...), so no title here is one of those.
 
