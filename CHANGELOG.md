@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **One roadstyle version, roadstyle main `53135c49`.** The crates pinned three roadstyle commits, and the `duckosm` pages
+  (`viz`, `route-map`, `edit`, `ask`, `studio`, `gmns-map`) had an old dashboard. All roadstyle crates now take one rev from
+  `[workspace.dependencies]` in `rust/Cargo.toml`. The docs maps are made again with it.
+
 ## 0.8.0 (2026-11-18)
 
 The program is `duckosm`, in Rust, and `pip install duckosm` installs it (wheels for 5 systems). The exports, the routers, the maps, the editors and GMNS run in Rust. The Python API keeps its names and calls Rust. The commands `levels`, `bus`, `multimodal` and `clip-pbf`, and the build steps of `DuckOSM.run()`, still run the Python code.
