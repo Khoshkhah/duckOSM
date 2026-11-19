@@ -1,96 +1,81 @@
-# duckOSM and GDAL
+# GDAL's OSM layers
 
-GDAL's OSM driver (`ogr2ogr`, QGIS) reads an `.osm.pbf` file as five layers.
-`duckosm quack --gdal` makes the **same five layers, with the same rows**: faster, and also in the browser.
+GDAL's OSM driver (`ogr2ogr`, QGIS) reads an `.osm.pbf` file as five layers. `duckosm quack --gdal` makes the **same
+five layers, with the same rows**. It is faster, it runs in the browser too, and it can apply your OSM fixes.
+
+| Reference and format | |
+|---|---|
+| Format | five layers, as one [GeoPackage](https://www.geopackage.org/) or one [GeoParquet](https://geoparquet.org/) file for each layer |
+| Reference tool | GDAL's [OSM driver](https://gdal.org/en/stable/drivers/vector/osm.html) 3.13, with its default `osmconf.ini` |
+| Check | each row equals GDAL's, on Monaco and on Kentucky (2 240 511 rows). [How each output is checked](checks.md) |
 
 ```bash
-duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky                # one GeoPackage, as ogr2ogr -f GPKG
-duckosm quack kentucky.osm.pbf --gdal -o out --name kentucky -f geoparquet  # one GeoParquet file for each layer
-duckosm quack france.osm.pbf --gdal -o out --name france --tile-zoom 8      # tile by tile (for a country)
-duckosm quack monaco.osm.pbf --gdal -o out --fixes osm_fixes.yaml           # with the OSM fixes of Edit OSM data
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco                  # one GeoPackage, as ogr2ogr -f GPKG
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco -f geoparquet    # one GeoParquet file for each layer
+duckosm quack monaco.osm.pbf --gdal -o out --fixes osm_fixes.yaml         # with your OSM fixes
 ```
 
-In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio, output **GDAL layers**, format GeoParquet, GeoPackage or both.
+The options are those of the [QuackOSM table](quackosm.md): `-f`, `--fixes`, `--tile-zoom` and `--no-sort`.
 
-## Results
-
-Mac mini (Apple M6, 12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the memory is the peak footprint.
-
-### France (5.1 GB), `--tile-zoom 8`
-
-| | `ogr2ogr` | duckOSM | duckOSM in the browser² |
-|---|---|---|---|
-| Time, GeoPackage | ≈ 10 min³ | ≈ 4 min 40 s³ | |
-| Time, GeoParquet | 14 min 18 s¹ | **3 min 37 s** | 5 min 23 s |
-| Memory, GeoPackage | ≈ 1.3 GB³ | ≈ 1.0 GB³ | |
-| Memory, GeoParquet | 1.7 GB | **1.0 GB** | 1.3 GB + 4.3 GB⁴ |
-| Files, GeoPackage | ≈ 37 GB³ | ≈ 30 GB³ | |
-| Files, GeoParquet | 16.7 GB | **12.1 GB** | 14.4 GB⁵ |
-
-### Kentucky (148 MB)
-
-| | `ogr2ogr` | duckOSM | duckOSM in the browser² |
-|---|---|---|---|
-| Time, GeoPackage | 8.8 s | **4.5 s** | 13.0 s |
-| Time, GeoParquet | 12.5 s¹ | **3.7 s** | 7.8 s |
-| Memory, GeoPackage | 0.47 GB | **0.30 GB** | 0.27 GB + 0.96 GB⁴ |
-| Memory, GeoParquet | 0.62 GB | **0.29 GB** | 0.27 GB + 0.96 GB⁴ |
-| Files, GeoPackage | 1.01 GB | **0.97 GB** | 0.89 GB |
-| Files, GeoParquet | 0.46 GB | **0.39 GB** | 0.41 GB⁵ |
-
-¹ Five runs, one for each layer: GDAL's Parquet driver writes one layer to a file. One read takes about 0.43 of this
-(Kentucky, measured); France one read: about 6 min 10 s (an estimate).
-² France: GeoParquet only. ³ An estimate from the Kentucky ratios: France as a GeoPackage does not fit on the disk of the Mac mini
-with 30 GB free. ⁴ In the 12 tile workers. ⁵ Snappy: the browser has no zstd.
+In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quack.html) of duckOSM Studio, output
+**GDAL layers**. The browser writes the GeoPackage directly into its storage, with no copy in memory.
 
 ## The layers
 
-| Layer | What goes in |
-|---|---|
-| `points` | the nodes with tags |
-| `lines` | the ways that are not areas |
-| `multilinestrings` | the relations of the type `multilinestring` or `route` |
-| `multipolygons` | the areas (closed ways) and the relations of the type `multipolygon` or `boundary` |
-| `other_relations` | all other relations |
+| Layer | What goes in | Columns |
+|---|---|---|
+| `points` | the nodes with tags | `osm_id`, `name`, `barrier`, `highway`, `ref`, `address`, `is_in`, `place`, `man_made`, `other_tags` |
+| `lines` | the ways that are not areas | `osm_id`, `name`, `highway`, `waterway`, `aerialway`, `barrier`, `man_made`, `railway`, `z_order`, `other_tags` |
+| `multilinestrings` | the relations of the type `multilinestring` or `route` | `osm_id`, `name`, `type`, `other_tags` |
+| `multipolygons` | the areas (closed ways), and the relations of the type `multipolygon` or `boundary` | `osm_id`, `osm_way_id`, `name`, `type`, `aeroway`, `amenity`, `admin_level`, `barrier`, `boundary`, `building`, `craft`, `geological`, `historic`, `land_area`, `landuse`, `leisure`, `man_made`, `military`, `natural`, `office`, `place`, `shop`, `sport`, `tourism`, `other_tags` |
+| `other_relations` | all other relations | `osm_id`, `name`, `type`, `other_tags` |
 
-The rules and the columns are those of GDAL's default `osmconf.ini`; the other tags go into `other_tags`.
+Each layer also has its geometry. All columns are text, except `z_order` (an integer). They are the columns of GDAL's
+default `osmconf.ini`:
+
+- **`other_tags`** holds all other tags of the object, as GDAL writes them: `"key"=>"value","key2"=>"value2"`.
+- **`osm_way_id`** is set for an area that is a closed way. `osm_id` is set for an area that is a relation.
+- **`z_order`** is the drawing order of a line, from its road or railway class and its `layer`, `bridge` and `tunnel` tags, by the rule of GDAL.
 
 ## OSM fixes
 
-`--fixes FILE` applies the OSM fixes file of `duckosm build --fixes` to the five layers, as for
-[the QuackOSM table](quackosm.md#osm-fixes):
+`--fixes` applies the fixes file of [Fix the OSM data](../guides/edit-osm-data.md) to the five layers, with the same
+rules as the [QuackOSM table](quackosm.md#osm-fixes). GDAL has no such option. With no `--fixes`, the rows are the rows
+of GDAL.
 
-| Rule of the fixes file | In the output |
-|---|---|
-| `remove`, `keep_nodes`, `tags` | applied to the way |
-| `extra.tag_edits` | applied to the node, the way or the relation |
-| `new_ways` | a new way, with the same id as in the network (from 9 000 000 000 000) |
-| `oneway`, `lanes`, `lanes_forward`, `lanes_backward`, `layer` | OSM tags with the value of the rule: `oneway=yes` or `no`, `lanes`, `lanes:forward`, `lanes:backward`, `layer` |
-| `exclude_modes`, `turn_lanes_*`, `turn_restrictions` | not applied: they have no OSM tag of a way |
+## Speed and memory
 
-With no `--fixes`, the rows are the rows of GDAL.
+Mac mini (Apple M6, 12 cores, 16 GB), GDAL 3.13.3. GeoParquet output.
 
-## The rows are the same
+| Area (input) | | `ogr2ogr` | duckOSM | duckOSM in the browser |
+|---|---|---|---|---|
+| Monaco (0.7 MB) | Time | | **0.05 s** | |
+| | Memory | | **0.01 GB** | |
+| | Files | | 0.9 MB | |
+| Kentucky (148 MB) | Time | 12.5 s | **3.7 s** | 7.8 s |
+| | Memory | 0.62 GB | **0.29 GB** | 1.2 GB |
+| | Files | 0.46 GB | **0.39 GB** | 0.41 GB |
+| France (5.1 GB), by tiles | Time | 14 min 18 s | **3 min 37 s** | 5 min 23 s |
+| | Memory | 1.7 GB | **1.0 GB** | 5.6 GB |
+| | Files | 16.7 GB | **12.1 GB** | 14.4 GB |
 
-On Monaco (all layers, also in the browser) and Kentucky (2 240 511 rows), each row equals GDAL's.⁵ The GeoPackage of the
-browser has the rows of the native GeoPackage on Monaco (0.9 s, 3.6 MB) and on Kentucky (relation rows can be in another order).
-SQLite's `integrity_check` is ok, and `ogrinfo` opens it. The browser writes it directly into its file in the browser storage, with no
-copy in memory.
+- **`ogr2ogr` time:** GDAL's Parquet driver writes one layer to a file, so it runs five times.
+- **Smaller files:** duckOSM writes zstd, GDAL writes Snappy and adds a bbox column. The browser writes Snappy, because
+  it has no zstd.
+- **Browser memory:** the page and its 12 tile workers together.
+- **GeoPackage** on Kentucky: `ogr2ogr` 8.8 s, duckOSM **4.5 s**.
 
-⁵ GDAL on Linux. GDAL on the Mac mini (arm64) gives one other polygon on Kentucky.
+The GeoPackage measurements and the estimates for France:
+[docs/rust/quack.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/rust/quack.md), "GDAL layers".
 
-## Why the files are smaller
+## How it differs
 
-| Reason | Effect on the files of GDAL |
-|---|---|
-| GDAL writes Snappy, duckOSM zstd | larger |
-| GDAL adds a bbox column (GeoParquet 1.1) | about 10 % larger |
-| With `-lco COMPRESSION=ZSTD`, GDAL uses level 9, duckOSM level 1 | about 20 % smaller than duckOSM, 4 times slower |
-
-## Where GDAL is better
-
-- Your own `osmconf.ini`, and the options of `ogr2ogr` (`-spat`, `-where`, `-sql`).
-- More inputs (`.osm` XML, files in any order) and more output formats.
-- QGIS opens an `.osm.pbf` file with GDAL directly.
-
-More details: [docs/rust/quack.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/rust/quack.md), "GDAL layers".
+| | GDAL | duckOSM |
+|---|---|---|
+| Speed | | 2 to 4 times faster |
+| Browser | no | yes |
+| OSM fixes | no | yes |
+| Your own `osmconf.ini` | yes | no |
+| Filters (`-spat`, `-where`, `-sql`) | yes | no |
+| Inputs | `.osm.pbf`, `.osm` XML, files in any order | `.osm.pbf`, sorted |
+| Output formats | many | GeoPackage, GeoParquet |

@@ -1449,9 +1449,28 @@ pub fn write_node_heights_to<W: Write + Send>(out: W, rows: &[(i64, f64)]) -> Re
 
 /// Write the H3 cells of the nodes of a mode (`h3_nodes_<mode>.parquet`): `node_id`, `h3_cell` (the cell as a signed 64-bit number).
 pub fn write_h3_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)]) -> Result<(), String> {
+    write_node_keys_to(out, "h3_cell", rows)
+}
+
+/// Write the H3 columns of the edges of a mode (`h3_edges_<mode>.parquet`): `edge_id`, `from_cell`, `to_cell`, `lca_res`.
+pub fn write_h3_edges_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>, Option<i64>, Option<i64>)]) -> Result<(), String> {
+    write_edge_keys_to(out, ["from_cell", "to_cell", "lca_res"], rows)
+}
+
+/// Write the tile keys of the nodes of a mode (`tile_nodes_<mode>.parquet`): `node_id`, `tile`.
+pub fn write_tile_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)]) -> Result<(), String> {
+    write_node_keys_to(out, "tile", rows)
+}
+
+/// Write the tile columns of the edges of a mode (`tile_edges_<mode>.parquet`): `edge_id`, `from_tile`, `to_tile`, `lca_zoom`.
+pub fn write_tile_edges_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>, Option<i64>, Option<i64>)]) -> Result<(), String> {
+    write_edge_keys_to(out, ["from_tile", "to_tile", "lca_zoom"], rows)
+}
+
+fn write_node_keys_to<W: Write + Send>(out: W, name: &str, rows: &[(i64, Option<i64>)]) -> Result<(), String> {
     let fields = vec![
         field("node_id", DataType::Int64),
-        field("h3_cell", DataType::Int64),
+        field(name, DataType::Int64),
     ];
     write_rows(out, fields, rows, |c| {
         let mut cell = Int64Builder::new();
@@ -1460,16 +1479,16 @@ pub fn write_h3_nodes_to<W: Write + Send>(out: W, rows: &[(i64, Option<i64>)]) -
     })
 }
 
-/// Write the H3 columns of the edges of a mode (`h3_edges_<mode>.parquet`): `edge_id`, `from_cell`, `to_cell`, `lca_res`.
-pub fn write_h3_edges_to<W: Write + Send>(
+fn write_edge_keys_to<W: Write + Send>(
     out: W,
+    names: [&str; 3],
     rows: &[(i64, Option<i64>, Option<i64>, Option<i64>)],
 ) -> Result<(), String> {
     let fields = vec![
         field("edge_id", DataType::Int64),
-        field("from_cell", DataType::Int64),
-        field("to_cell", DataType::Int64),
-        field("lca_res", DataType::Int64),
+        field(names[0], DataType::Int64),
+        field(names[1], DataType::Int64),
+        field(names[2], DataType::Int64),
     ];
     write_rows(out, fields, rows, |c| {
         let (mut f, mut t, mut l) = (Int64Builder::new(), Int64Builder::new(), Int64Builder::new());

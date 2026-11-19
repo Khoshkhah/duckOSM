@@ -21,6 +21,7 @@ with --mapstyle-src or the MAPSTYLE_SRC env var). Its runtime deps (roadstyle/ge
 folium/pyyaml) are already present here.
 """
 import argparse
+import subprocess
 import os
 import sys
 from pathlib import Path
@@ -28,7 +29,6 @@ from pathlib import Path
 import duckdb
 
 from duckosm import route_multimodal
-from duckosm.processors import MultimodalBuilder
 
 # walking green, driving red, cycling blue — matches mapstyle's own per-mode palette (COMBO_COLOR).
 MODE_COLOR = {"walking": "#27ae60", "driving": "#e74c3c", "cycling": "#2b6cb0"}
@@ -66,7 +66,12 @@ def _ensure_mm(con, transfer_cost):
         "WHERE table_schema = 'mm' AND table_name = 'edges'").fetchone()[0]
     if not has_mm:
         print("building mm.* graph (none present) ...")
-        MultimodalBuilder(con, transfer_s=transfer_cost).run()
+        db = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = current_database()").fetchone()[0]
+        con.close()                       # the `duckosm` program opens the file itself
+        subprocess.run([sys.executable, "-m", "duckosm", "multimodal", db, "--transfer-cost", str(transfer_cost)], check=True)
+        con = duckdb.connect(db)
+        con.execute("LOAD spatial")
+    return con
 
 
 def _autopick(con, start_mode="walking", end_mode="walking"):
@@ -141,7 +146,7 @@ def render_multimodal_route(db, src=None, dst=None, out_dir=None, transfer_cost=
 
     con = duckdb.connect(str(db))                    # read-write: may build mm.*
     con.execute("INSTALL spatial; LOAD spatial;")
-    _ensure_mm(con, transfer_cost)
+    con = _ensure_mm(con, transfer_cost)
 
     if src is None or dst is None:
         src, dst = _autopick(con, start_mode, end_mode)

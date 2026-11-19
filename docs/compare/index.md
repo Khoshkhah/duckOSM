@@ -1,11 +1,13 @@
 # Compare
 
-How duckOSM compares with the tools that people use for the same job. Each comparison uses the same input file and checks
-that the rows are the same.
+How duckOSM compares with the tools that people use for the same job, on the same input file. Each tool has its own
+page with the details.
 
-| Other tool | Job | duckOSM is | Page |
+| Other tool | Job | duckOSM | Page |
 |---|---|---|---|
-| [OSMnx](https://osmnx.readthedocs.io/) | a road network from OSM | directed, with turn restrictions and stable `edge_id`s | [duckOSM and OSMnx](../concepts/osmnx.md) |
-| [QuackOSM](https://github.com/kraina-ai/quackosm) | the OSM features table | 3 to 7 times faster, 2 to 5 times less memory, same rows | [duckOSM and QuackOSM](../concepts/quackosm.md) |
-| [GDAL](https://gdal.org/drivers/vector/osm.html) (`ogr2ogr`) | GDAL's five OSM layers | about 4 times faster on France, same rows | [duckOSM and GDAL](../concepts/gdal.md) |
+| [OSMnx](https://osmnx.readthedocs.io/) | a road network from OSM | directed, with turn restrictions, one `edge_id` for each direction, and your OSM fixes | [duckOSM and OSMnx](../concepts/osmnx.md) |
+| [QuackOSM](https://github.com/kraina-ai/quackosm) | the OSM features table | 3 to 7 times faster, 2 to 5 times less memory | [QuackOSM table](../concepts/quackosm.md) |
+| [GDAL](https://gdal.org/drivers/vector/osm.html) (`ogr2ogr`) | the five OSM layers of GDAL | about 4 times faster on France | [GDAL's OSM layers](../concepts/gdal.md) |
+| [osm2pgsql](https://osm2pgsql.org) | the four tables of osm2pgsql in PostGIS | the same tables, with your OSM fixes. Into PostGIS 1.7 times slower on Kentucky; to GeoParquet as fast as osm2pgsql | osm2pgsql tables |
+| [Tilemaker](https://tilemaker.org) | Shortbread vector tiles | Monaco: 0.06 s against 1.5 s | Vector tiles (PMTiles) |
 | all of them | time and memory on France | | [Speed on France](speed.md) |

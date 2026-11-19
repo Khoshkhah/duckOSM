@@ -1,6 +1,6 @@
 //! `info` and `way` give the output of duckOSM's Python commands. The golden files in tests/data/golden_tools/ are the output
 //! of `duckosm info` / `duckosm way` (Python, 2026-11-17) on the database of this config: Monaco's sample PBF in its boundary,
-//! three modes, no sea, no levels. `info` leaves out the build time and the version (its first line, and two keys of the JSON).
+//! three modes, no sea, no levels, no tile columns (the Python build has none). `info` leaves out the build time and the version (its first line, and two keys of the JSON).
 
 use std::path::PathBuf;
 
@@ -17,7 +17,7 @@ fn info_and_way_equal_duckosm() {
     std::fs::create_dir_all(&out).unwrap();
     let s = root.join("data/sample");
     let cfg = format!(
-        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n",
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n  tile_indexing: false\n",
         out.display(),
         s.display(),
         s.display()
@@ -84,7 +84,7 @@ fn admin_and_extract_equal_duckosm() {
     std::fs::create_dir_all(&out).unwrap();
     let s = root.join("data/sample");
     let cfg = format!(
-        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n",
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n  tile_indexing: false\n",
         out.display(),
         s.display(),
         s.display()
@@ -198,7 +198,7 @@ fn elevation_equals_duckosm() {
     std::fs::create_dir_all(&out).unwrap();
     let s = root.join("data/sample");
     let cfg = format!(
-        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n",
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n  tile_indexing: false\n",
         out.display(),
         s.display(),
         s.display()

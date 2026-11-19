@@ -1,23 +1,7 @@
 # Questions to ask the AI agent
 
 Questions for **Ask the data**, on the page of [`duckosm ask`](query.md#ask-in-words). Each one works on the Monaco
-sample. A short question with one task gives the best answer.
-
-| Topic | Question |
-|---|---|
-| Roads | What are the 10 longest primary roads? |
-| Roads | How many edges and how many km of road does each network have? |
-| Junctions and turns | Show the junctions that have a turn restriction. |
-| Traffic signals | Show the crossings that have traffic signals. |
-| Buildings and walls | Show the walls of all buildings, with a color for each wall type. |
-| Your changes | Which objects did I change, and when? |
-| Color and focus | Show only the primary roads and fade the others. |
-| H3 cells | Show the H3 cells of the boundary at resolution 9. |
-| The map | Switch the base map to satellite. |
-| Charts | Draw a bar chart of the km of road in each class. |
-
-All questions, by topic:
-[the full list](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/ask_questions.md).
+sample. A short question with one task gives the best answer. The page of `duckosm ask` shows the same questions, in the same groups.
 
 | To get a good answer | Why |
 |---|---|
@@ -28,3 +12,160 @@ All questions, by topic:
 
 Ask reads the database and controls the map. It cannot change the data: to change the OSM data, use
 [Edit OSM data](edit-osm-data.md).
+
+## Roads of the area
+
+- Which one-way roads have no name?
+- What are the 10 longest primary roads?
+- Which roads have a speed limit above 50 km/h?
+- Which roads have more than 3 lanes?
+- How many edges and how many km of road does each network have?
+- What are the 10 street names with the most km of road?
+- What are the 10 shortest edges?
+- What is the average speed limit of each road class?
+- How many km of road does each class have in the walking network?
+- Which roads have the longest travel time?
+
+## Road details
+
+- How many km of road does each surface have?
+- Which roads have no surface information?
+- How many roads are bridges, and how many are tunnels?
+- Which roads are in a roundabout?
+- Which roads have a restricted access, and what is the restriction?
+- What kinds of service roads are there, and how many km has each kind?
+- Which roads are below the ground level (a layer below 0)?
+
+## Junctions and turns
+
+- How many turn restrictions are there of each type?
+- Show the junctions that have a turn restriction.
+- Which roads start a turn restriction?
+- Which 10 nodes have the most roads that start there?
+- Show the nodes where four or more roads start.
+- Which 10 roads have the most legal turns after them?
+
+## Traffic signals and crossings
+
+- How many traffic signals and how many crossings are there?
+- Show the traffic signals on the map.
+- Show the crossings that have traffic signals.
+- How many crossings of each type are there?
+- Show the crossings that have tactile paving.
+- Show the crossings that have a pedestrian island.
+
+## Buildings and walls
+
+- How many walls of each type do the buildings have?
+- Which buildings have no front wall?
+- Which buildings have more than 10 walls?
+- What are the 100 longest walls?
+- How many buildings are there of each kind?
+- Which buildings have a name?
+- What are the 20 largest buildings by area?
+- What is the total area of the buildings of each kind?
+- Which buildings have the most walls?
+
+## Levels, heights and roofs
+
+- Which 10 buildings have the most levels?
+- How many buildings have a height, and how many have a number of levels?
+- Show the buildings that are taller than 30 m.
+- What roof shapes do the buildings have, and how many has each shape?
+- Color the buildings with more than 10 levels in red and the others in grey.
+- What is the average number of levels of the apartment buildings?
+
+## Walls and streets
+
+- What is the average length of the walls of each type?
+- Show the walls that are longer than 20 m.
+- Which streets do the most front walls face?
+- Show the walls that are more than 30 m from the nearest street.
+- Why do the walls have their type? Count the walls for each reason.
+
+## My changes
+
+- Which objects did I change, and when?
+- Which walls did I change by hand?
+- What did I change in the last day?
+- How many changes of each kind do I have?
+- Which changes have a note?
+- Which turn restrictions did I add?
+- Which new roads did I add?
+- Show the roads that I changed on the map.
+- Show the buildings that have a wall that I changed.
+
+## Shapes on the map
+
+- Show all buildings on the map.
+- Show the walls of all buildings, with a color for each wall type.
+- Show the dead-end nodes of the driving network.
+- Show all nodes of the driving network on the map.
+- Show only the front walls of the buildings.
+- Color the walls that I changed by hand in red and the others in grey.
+- Show the buildings that have a name.
+- Color the buildings by their kind.
+- Show the traffic signals in red and the crossings in blue.
+- Show the 50 longest walls in red.
+- Show the parking areas.
+- Show the bus stops.
+
+## Roads: color and focus
+
+- Color the roads by their class.
+- Show only the primary roads and fade the others.
+- Color the one-way roads red and the two-way roads grey.
+- Color the roads that have a speed limit above 50 km/h.
+- Color the roads by their surface.
+- Color the bridges blue and the tunnels brown.
+- Show only the roundabouts and fade the other roads.
+- Keep the service roads and hide the others.
+- Color the roads by their number of lanes.
+- Color the roads longer than 100 m red.
+- Zoom to the longest road.
+
+## H3 cells and the boundary
+
+- Show the smallest H3 cell that contains the whole boundary.
+- Show the H3 cells of the boundary at resolution 9.
+- How many nodes are in each H3 cell?
+- Make the H3 cells more transparent.
+- How many H3 cells cover the boundary at each resolution?
+- Show the 10 H3 cells with the most nodes.
+- Show the H3 cells that have more than 20 nodes.
+- Show the H3 cells of the boundary at resolution 8 that have no node.
+- Show the H3 cell with the most nodes.
+
+## Water, 3D and base maps
+
+- Turn off the water and the waterways layers.
+- Switch the base map to satellite.
+- Turn on the 3D view and tilt the map.
+- Switch to the dark base map.
+- Turn on the traffic signals and the crossings layers.
+- Turn on the parking layer.
+- Turn on the bus stops layer.
+- Turn off the buildings layer.
+- Switch to the light gray base map.
+- Rotate the map to the east and tilt it by 60 degrees.
+
+## Look of the shapes
+
+- Show all the buildings and make them half transparent.
+- Make the shapes solid.
+- Make the shapes almost invisible.
+- Go back to the default look of the shapes.
+
+## Charts of the data
+
+- Draw a bar chart of the km of road in each class.
+- Draw a histogram of the road lengths.
+- Show a pie chart of the one-way and the two-way roads.
+- Show a pie chart of the surfaces of the roads.
+- Draw a histogram of the speed limits.
+- Draw a scatter chart of the length and the travel time of the roads.
+- Draw a bar chart of the number of buildings of each kind.
+- Draw a histogram of the number of levels of the buildings.
+- Draw a bar chart of the number of walls of each type.
+- Draw a line chart of the number of H3 cells at each resolution.
+- Show a pie chart of the traffic signals and the crossings.
