@@ -58,26 +58,16 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 
 | Extra | Adds | For |
 |---|---|---|
-| `sumo` | SUMO (`netconvert`) | `duckosm sumo` builds the `.net.xml` |
-| `routing` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()` |
+| `sumo` | SUMO (`eclipse-sumo`, with `netconvert`) | `duckosm sumo` builds the `.net.xml` |
+| `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. `routing` is its old name, for one more release |
 | `levels` | roadstyle | `duckosm levels` (not ported to Rust yet) |
-| `viz` | mapstyle, lanestyle | map functions in Python |
-| `elevation` | rasterio, pyproj | not needed by `duckosm elevation` (Rust); this extra goes away |
+| `viz` | mapstyle, lanestyle | the maps of `duckosm build` with `viz.enabled: true` (not ported to Rust yet), and the map functions in Python |
 
-`route()`, the exports and `duckosm elevation` need no extra.
-
-## Outside tools
-
-| Tool | Only for | Without it |
-|---|---|---|
-| osmium | `clip-pbf` and `build -b` | `build` uses the whole PBF; `clip-pbf` stops |
-| GDAL (`ogr2ogr`) | `export-gis` as one file | `export-gis` writes one file for each layer |
-
-Both are being replaced by Rust code.
+`route()`, the exports, `export-graph` to GraphML and `duckosm elevation` need no extra. No duckOSM command needs osmium or GDAL.
 
 ## Not ported to Rust yet
 
-`build` (in part), `levels` and `clip-pbf`. They work, and they move to Rust next.
+`build` (in part) and `levels`. They work, and they move to Rust next.
 
 ## Where files go
 

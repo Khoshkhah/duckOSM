@@ -1,7 +1,7 @@
 """Tests for duckosm.gis_debug — read an export back through GDAL and audit it.
 
 Exercises the real path: export a tiny network with to_gis, then build the debug payload from the
-files on disk. The shapefile path needs no ogr2ogr, so it runs everywhere geopandas is installed.
+files on disk. It runs everywhere geopandas is installed.
 """
 import duckdb
 import pytest

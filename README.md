@@ -103,7 +103,7 @@ a cut and every export ([how](https://khoshkhah.github.io/duckOSM/concepts/edge-
 ## Quick start
 
 ```bash
-pip install "duckosm[routing]"
+pip install duckosm
 
 duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
 duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
