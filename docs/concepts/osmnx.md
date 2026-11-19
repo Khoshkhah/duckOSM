@@ -1,120 +1,60 @@
 # duckOSM and OSMnx
 
-[OSMnx](https://osmnx.readthedocs.io) is a Python library for street networks from OSM. Use it as an
-independent check of the duckOSM network. The two use different road filters and graph models, so compare
-the **length of road for each `highway` class**, not totals and not edge counts.
+[OSMnx](https://osmnx.readthedocs.io) is a Python library that downloads a street network from OSM. duckOSM makes a
+road network too, with more for routing and simulation.
 
-## Line them up first
+| | OSMnx | duckOSM |
+|---|---|---|
+| Input | the Overpass API, for a small area | an `.osm.pbf` file, up to a country |
+| Graph | undirected or directed, one id for each run | directed, one `edge_id` for each direction, the same after each build |
+| Turn restrictions | no | yes, in the turn graph `edge_graph` |
+| OSM fixes | no | yes |
+| Service roads (`drive_service`) | without parking aisles and private roads | all; private roads are drawn but not routed |
+| Pedestrian streets open to cars | no | yes, as `living_street` |
+| Output | a networkx graph | a DuckDB file, and [networkx](../exports/networkx.md), GIS and simulation files |
 
-**Road filter.** Use OSMnx's `drive_service`, the closest to duckOSM's driving network:
+## The same roads
 
-| Network | Service roads |
-|---|---|
-| OSMnx `drive` | none |
-| OSMnx `drive_service` | yes, but not `service=parking`, `parking_aisle`, `emergency_access` or `private` |
-| duckOSM `driving` | all, including parking aisles and driveways; private ones are drawn but not routable |
+On Monaco, the length of road of each `highway` class, inside the boundary of the duckOSM build. OSMnx is
+`drive_service` with `truncate_by_edge=True`, the closest filter to duckOSM's driving network.
 
-**Pedestrian streets.** OSMnx's `drive` and `drive_service` leave `highway=pedestrian` out. duckOSM
-keeps the pedestrian streets that are open to cars, as `living_street`.
+| `highway` | OSMnx | duckOSM | Difference |
+|---|--:|--:|--:|
+| residential | 19,993 m | 19,810 m | −183 m |
+| service | 12,898 m | 12,023 m | −875 m |
+| secondary | 10,451 m | 10,554 m | +103 m |
+| tertiary | 8,492 m | 8,492 m | 0 |
+| primary | 6,486 m | 6,486 m | 0 |
+| other classes | 2,226 m | 1,970 m | −256 m |
+| **total** | **60,546 m** | **59,335 m** | **−2.0 %** |
 
-**Access tags.** duckOSM reads the most specific tag (`motorcar`, then `motor_vehicle`, `vehicle`,
-`access`). OSMnx drops any way with `motor_vehicle=no`, `motorcar=no` or `access=private`. duckOSM
-keeps `access=private` roads in `private_edges`, drawn on its maps but never routed (see
-[Access](networks.md#access-private-and-forbidden-roads)).
+- Where the two filters agree, the lengths agree to the metre.
+- **service −875 m:** OSMnx keeps roads tagged `motor_vehicle=private` with no `access` tag. duckOSM reads that tag and
+  puts them in `private_edges`.
+- Do not compare the counts of edges or nodes: the two tools cut and join the ways by different rules.
 
-**Border.** `graph_from_bbox` drops every edge that crosses the box. Pass `truncate_by_edge=True`,
-and cut both networks to the same area before measuring. Here the area is duckOSM's own boundary
-polygon, because the box around Monaco also holds French roads that duckOSM left out.
+## How to compare
 
-**Length.** Measure in a metric CRS, the UTM zone of the data. At this latitude, Web Mercator (EPSG:3857)
-makes lengths about 1.5 times too long.
-
-## Recipe
-
-Run it in an environment that has `osmnx`, `duckdb` and `geopandas`. It needs a connection to
-the Overpass API.
+Measure the length of each `highway` class, in metres (the UTM zone of the data), inside the same boundary, with one
+direction of each two-way road (`WHERE NOT is_reverse`).
 
 ```python
-import osmnx as ox, duckdb, geopandas as gpd, pandas as pd
+import osmnx as ox, duckdb, geopandas as gpd
 
-con = duckdb.connect("area.duckdb", read_only=True)
-con.execute("LOAD spatial")
-
-# the area to measure: duckOSM's boundary
-area = gpd.GeoSeries.from_wkb(
-    con.execute("SELECT ST_AsWKB(geom) FROM main.boundary").df().iloc[:, 0].map(bytes),
-    crs=4326).union_all()
-utm = gpd.GeoSeries([area], crs=4326).estimate_utm_crs()   # meters (EPSG:32632 for Monaco)
+con = duckdb.connect("area.duckdb", read_only=True); con.execute("LOAD spatial")
+area = gpd.GeoSeries.from_wkb(con.execute("SELECT ST_AsWKB(geom) FROM main.boundary").df().iloc[:, 0].map(bytes),
+                              crs=4326).union_all()
+utm = gpd.GeoSeries([area], crs=4326).estimate_utm_crs()
 cut = gpd.GeoSeries([area], crs=4326).to_crs(utm).iloc[0]
 
-def metres(gdf, name):
+def metres(gdf):
     gdf = gdf.to_crs(utm)
     gdf["highway"] = gdf["highway"].map(lambda h: h[0] if isinstance(h, list) else h)
-    gdf["m"] = gdf.clip(cut).length
-    return gdf.groupby("highway")["m"].sum().rename(name)
+    return gdf.clip(cut).assign(m=lambda d: d.length).groupby("highway")["m"].sum()
 
-def osmnx_m(network_type, truncate):
-    G = ox.graph_from_bbox(area.bounds, network_type=network_type, truncate_by_edge=truncate)
-    return metres(ox.convert.graph_to_gdfs(ox.convert.to_undirected(G), nodes=False), network_type)
-
-duck = gpd.GeoDataFrame(con.execute(
-    "SELECT highway, ST_AsWKB(geometry) AS geometry FROM driving.edges WHERE NOT is_reverse").df())
-duck["geometry"] = gpd.GeoSeries.from_wkb(duck["geometry"].map(bytes), crs=4326)
-duck = metres(duck.set_geometry("geometry"), "duckOSM")
-
-t = pd.concat([osmnx_m("drive", False), osmnx_m("drive", True),
-               osmnx_m("drive_service", True), duck], axis=1).fillna(0).round()
-t.columns = ["drive", "drive + truncate", "drive_service + truncate", "duckOSM"]
-t = t[t.sum(axis=1) > 0].sort_values("duckOSM", ascending=False)
-t.loc["total"] = t.sum()
-print(t.to_string())
+G = ox.graph_from_bbox(area.bounds, network_type="drive_service", truncate_by_edge=True)
+osmnx = metres(ox.convert.graph_to_gdfs(ox.convert.to_undirected(G), nodes=False))
+duck = con.execute("SELECT highway, ST_AsWKB(geometry) AS g FROM driving.edges WHERE NOT is_reverse").df()
+duck = metres(gpd.GeoDataFrame(duck, geometry=gpd.GeoSeries.from_wkb(duck.pop("g").map(bytes), crs=4326)))
+print((duck - osmnx).round())
 ```
-
-When a simplified OSMnx edge merges several OSM ways, its `highway` is a list; the recipe takes the
-first element. `NOT is_reverse` keeps one direction of each two-way street, to match the undirected
-OSMnx graph.
-
-## An example
-
-Monaco, with the recipe above: meters of road inside the boundary of the duckOSM build. A run with newer
-OSM data can be different by some hundred meters.
-
-| `highway` | OSMnx `drive` | `drive` + truncate | `drive_service` + truncate | duckOSM | Difference |
-|---|--:|--:|--:|--:|--:|
-| residential | 20,108 | 20,132 | 19,993 | 19,810 | −183 |
-| service | 0 | 0 | 12,898 | 12,023 | −875 |
-| secondary | 10,451 | 10,451 | 10,451 | 10,554 | +103 |
-| tertiary | 8,492 | 8,492 | 8,492 | 8,492 | 0 |
-| primary | 6,139 | 6,486 | 6,486 | 6,486 | 0 |
-| primary_link | 1,018 | 1,018 | 1,018 | 1,018 | 0 |
-| unclassified | 427 | 427 | 554 | 427 | −127 |
-| secondary_link | 520 | 520 | 520 | 391 | −129 |
-| living_street | 89 | 89 | 89 | 89 | 0 |
-| tertiary_link | 45 | 45 | 45 | 45 | 0 |
-| **total** | **47,289** | **47,660** | **60,546** | **59,335** | **−2.0%** |
-
-The difference is duckOSM minus `drive_service` + truncate.
-
-- **Truncate** adds 371 m, 347 m of it on `primary`: the edges that cross the border.
-- **service −875 m**: mostly roads tagged `motor_vehicle=private` without an `access` tag (1,226 m in
-  Monaco). duckOSM reads that tag and moves them to `private_edges`; OSMnx drops only
-  `access=private`, so it keeps them. Smaller differences go the other way.
-- **residential, secondary, unclassified, secondary_link**: differences of 100 to 200 m each.
-  Where OSMnx merges several ways into one edge, its `highway` is a list, and the recipe takes the
-  first element, so a class can move to a neighbor class from run to run.
-- **living_street**: equal here. The extra `living_street` from pedestrian streets open to cars
-  (see above) did not show up in Monaco.
-
-`tertiary`, `primary`, `primary_link`, `living_street` and `tertiary_link` match to the meter:
-where the filters agree, the geometry agrees.
-
-## What it is good for
-
-| Use it to check | Do not use it to check |
-|---|---|
-| the geometry and the cut to the boundary | the counts of edges or nodes |
-| a road class that is missing | |
-
-OSMnx also splits and merges. But duckOSM cuts every mode at the same points (also where a footway or crosswalk meets a
-road), merges chains by its own rules, and adds virtual nodes. So the counts cannot be equal. OSMnx downloads from the
-Overpass API, so keep the area small.

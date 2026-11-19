@@ -9,7 +9,7 @@ import sys
 
 # TODO (step 6 of docs/design/all_in_rust.md): remove each command when its Rust PR merges, then this list.
 PYTHON_COMMANDS = {
-    "bus", "multimodal", "clip-pbf",       # no Rust port yet
+    "clip-pbf",       # no Rust port yet
 }
 
 

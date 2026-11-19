@@ -69,13 +69,17 @@ One row per direction of a road: a two-way road has two edges. What each mode ke
 | `from_cell` | BIGINT | H3 cell of `source`, at `options.h3_resolution` |
 | `to_cell` | BIGINT | H3 cell of `target` |
 | `lca_res` | TINYINT | resolution of the smallest H3 cell that holds both `from_cell` and `to_cell` |
+| `from_tile` | BIGINT | [tile key](#tile-keys) of `source`, at zoom 28 |
+| `to_tile` | BIGINT | tile key of `target`, at zoom 28 |
+| `lca_zoom` | TINYINT | zoom of the smallest tile that holds both `from_tile` and `to_tile`, 0 to 28 |
 | `z_from`, `z_to` | DOUBLE | ground height in meters at `source` / `target`. Only after [`duckosm elevation`](../guides/elevation.md) |
 | `z_vertices` | DOUBLE[] | the ground height at each vertex of `geometry`, in its order. Only after `duckosm elevation` |
 | `z_from_<suffix>`, `z_to_<suffix>`, `z_vertices_<suffix>` | DOUBLE, DOUBLE[] | the same on a second surface, from `duckosm elevation --suffix <suffix>` |
 
 `maxspeed_kmh` and `cost_s` need `options.process_speeds` and `options.calculate_costs`;
 `walk_type` and `cycle_type` need `options.functional_types`; the H3 columns need
-`options.h3_indexing`. All are on by default.
+`options.h3_indexing`; the tile columns need `options.tile_indexing` and the Rust build (`duckosm --config`,
+`duckosm <PBF>`). All are on by default.
 
 ### `private_edges`
 
@@ -88,8 +92,8 @@ are never routable: not in `turn_restrictions` or any export, nor in the routed 
 (each has rows of its own there, with its `access` label in `uses`; see the table below), and `nodes` holds only
 the ends of routable edges. The maps draw them, marked. [Access: private and forbidden roads](../concepts/networks.md#access-private-and-forbidden-roads).
 
-Columns: those of `edges` from `edge_id` to `cycle_type`. The H3 columns and the elevation columns
-are not added.
+Columns: those of `edges` from `edge_id` to `cycle_type`. The H3 columns, the tile columns and the
+elevation columns are not added.
 
 ### `nodes`
 
@@ -100,6 +104,7 @@ The ends of the routable edges.
 | `node_id` | BIGINT | the OSM node id. Negative for a virtual node (below) |
 | `geom` | GEOMETRY | the point |
 | `h3_cell` | BIGINT | H3 cell at `options.h3_resolution` |
+| `tile` | BIGINT | [tile key](#tile-keys) of the point, at zoom 28 |
 | `ele` | DOUBLE | ground height in meters. Only after [`duckosm elevation`](../guides/elevation.md) |
 | `ele_<suffix>` | DOUBLE | the height on a second surface, from `duckosm elevation --suffix <suffix>`. `ele_dsm - ele` is the height above ground |
 
@@ -107,6 +112,33 @@ A **virtual node** splits a loop, or two edges between the same two nodes, at it
 that `(osm_id, source, target)` is unique and every edge gets its own `edge_id`. Its id is a hash too,
 so it is the same on every rebuild: `-(hash(osm_id, source, refs::VARCHAR) >> 2)` for a loop,
 `-(hash(osm_id, source, target, refs::VARCHAR) >> 2)` for a split edge.
+
+### Tile keys {#tile-keys}
+
+The tile columns (`nodes.tile`, `edges.from_tile`, `to_tile`, `lca_zoom`) are for tileroute
+(`https://github.com/Khoshkhah/tileroute`). Tileroute routes on a graph that is kept by map tiles
+and reads only the tiles that a route needs. The tiles are the standard map tiles (z/x/y, Web Mercator),
+the same tiles as the tile build. A tile at one zoom holds exactly 4 tiles of the next zoom.
+
+A tile key is a BIGINT, always 0 or more:
+
+| Bits | Value |
+|---|---|
+| 63–62 | 0 |
+| 61–6 | the quadkey digits, the coarsest first. The digit at zoom level i is `2 * ybit + xbit`. A tile at zoom z fills the top `2z` bits; the other bits are 0 |
+| 5–0 | the zoom z, 0 to 28 |
+
+`key = (digits << (6 + 2 * (28 - z))) | z`. The parent at zoom r:
+`(key & ~((1 << (6 + 2 * (28 - r))) - 1)) | r`. Thus the keys of a tile and of all its smaller tiles
+are in one range, and `ORDER BY tile` puts near nodes near each other.
+
+The build gives each node point the key of its tile at zoom 28 (about 15 cm at the equator). The tile of a
+point is `x = floor((lon + 180) / 360 * 2^z)`, `y = floor((1 - asinh(tan(lat)) / pi) / 2 * 2^z)`, with
+the latitude clamped to ±85.0511287798 degrees. An edge takes the keys of its two end nodes, so a tile
+build and the whole build give the same keys. The value is NULL when the node has no point.
+
+`lca_zoom` is the zoom of the smallest tile that holds both ends: the number of quadkey digits that
+`from_tile` and `to_tile` share. An edge with `lca_zoom` 14 stays inside one zoom-14 tile.
 
 ### `edge_graph`
 

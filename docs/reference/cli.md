@@ -5,10 +5,10 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 
 | Group | Commands |
 |---|---|
-| [Build and areas](#build-and-areas) | `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
+| [Build and areas](#build-and-areas) | `get`, `cut`, `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
 | [Query and inspect](#query-and-inspect) | `way`, `features-check` |
 | [Maps and routing](#maps-and-routing) | `viz`, `route-map` |
-| [Exports](#exports) | `sumo`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
+| [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
 | [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
 | [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
 
@@ -16,6 +16,44 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 enrich a database (`elevation`, `admin`, `multimodal`) change it in place.
 
 ## Build and areas
+
+### `get`
+
+Finds the boundary of an area, downloads the smallest Geofabrik extract that holds it (to a cache folder), and cuts
+the extract to the boundary. Writes `<name>.osm.pbf` and `<name>.geojson`. Guide: [The OSM file](../exports/osm-file.md).
+
+```text
+duckosm get [OPTIONS] [PLACE]
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `PLACE` | the name of the area, for Nominatim | give one of `PLACE`, `--osm-id`, `--bbox`, `--h3-cell`, `--boundary` |
+| `--osm-id ID` | one OSM boundary relation | |
+| `--bbox W,S,E,N` | a box in degrees | |
+| `--h3-cell CELL` | an H3 cell | |
+| `--boundary FILE` | a GeoJSON [boundary file](boundary.md) | |
+| `-o`, `--out DIR` | the output folder | `.` |
+| `--name NAME` | the name of the two files | from the place, the file or the cell; `area` for a box |
+| `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file): the cut file has the fixes in it | |
+| `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
+| `--refresh` | download the extract and the list of extracts again | the cached files |
+
+### `cut`
+
+Cuts a region file to a boundary and writes the area as a `.osm.pbf` file. Only lists of ids stay in memory.
+Guide: [The OSM file](../exports/osm-file.md#duckosm-cut).
+
+```text
+duckosm cut [OPTIONS] --boundary FILE -o FILE REGION
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `REGION` | the region file, sorted by type and id (as the files of Geofabrik) | required |
+| `--boundary FILE` | the [boundary](boundary.md): GeoJSON, `.poly`, WKT or `W,S,E,N` | required |
+| `-o`, `--out FILE` | the area file to write | required |
+| `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file): the area file has the fixes in it ([what goes in](../exports/osm-file.md#the-fixes-in-the-file)) | |
 
 ### `build`
 
@@ -30,12 +68,13 @@ duckosm build [OPTIONS]
 | `-c`, `--config PATH` | a [config file](configuration.md). An option below that you type overrides the file | |
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
 | `-o`, `--output PATH` | output file | `<name>.duckdb`, named after the boundary file, else the PBF, else the `--source-db` file |
-| `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
+| `-b`, `--boundary PATH` | GeoJSON area to build ([the boundary file](boundary.md)) | none: the whole PBF |
 | `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#2-cut-a-built-region)) | |
 | `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
+| `--tile-index` / `--no-tile-index` | add the zoom-28 [tile keys](database.md#tile-keys) to nodes and edges. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) has this option | on |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
@@ -72,7 +111,7 @@ duckosm boundary [OPTIONS] [NAME]
 | `--pbf PATH` | search the borders in this PBF first; needs GDAL's `ogr2ogr` | |
 | `--osm-id INTEGER` | take this OSM boundary relation (when a name matches several) | |
 | `--offline` | never ask Nominatim | |
-| `-o`, `--out FILE` | output GeoJSON | `<name>.geojson` |
+| `-o`, `--out FILE` | output GeoJSON ([the boundary file](boundary.md)) | `<name>.geojson` |
 
 ### `clip-pbf`
 
@@ -396,6 +435,19 @@ duckosm gmns-map [OPTIONS] GMNS_DB
 | `--source-db PATH` | the core db, for bridges and tunnels in a GMNS file made before links had them | |
 | `-o`, `--out TEXT` | output HTML | `<name>_lanes.html` |
 
+### `sumo-map`
+
+Writes an HTML map of a SUMO net (the `.net.xml` of `duckosm sumo`) with lanestyle and roadstyle: each lane on its own
+shape at its width, and the internal lanes through the junctions. Page: [See it](../exports/sumo.md#see-it).
+
+```text
+duckosm sumo-map [OPTIONS] NET
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `-o`, `--out PATH` | output HTML | `<name>_lanes.html` |
+
 ### `gmns-viz`
 
 Writes an HTML viewer of a GMNS database: lanes, and the meso network when there is one. Hover a
@@ -590,4 +642,5 @@ duckosm multimodal [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `--transfer-cost FLOAT` | seconds added at each change of mode | `60.0` |
+| `--pair-cost FROM->TO=SECONDS` | another cost for one direction, for example `walking->driving=120`; repeat it for more directions (the build's `multimodal.transfer_costs`) | none |
 | `--schema TEXT` | schema for the two tables | `mm` |

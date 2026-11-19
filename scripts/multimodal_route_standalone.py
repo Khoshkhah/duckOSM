@@ -25,12 +25,13 @@ pass a scratch copy if you don't want to modify the source db.
 import argparse
 import html
 import math
+import subprocess
+import sys
 from pathlib import Path
 
 import duckdb
 
 from duckosm import route_multimodal
-from duckosm.processors import MultimodalBuilder
 
 # walking green, driving red, cycling blue; vehicular legs drawn a touch wider.
 MODE_COLOR = {"walking": "#27ae60", "driving": "#e74c3c", "cycling": "#2b6cb0"}
@@ -51,7 +52,12 @@ def _ensure_mm(con, transfer_cost):
         "WHERE table_schema = 'mm' AND table_name = 'edges'").fetchone()[0]
     if not has_mm:
         print("building mm.* graph (none present) ...")
-        MultimodalBuilder(con, transfer_s=transfer_cost).run()
+        db = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = current_database()").fetchone()[0]
+        con.close()                       # the `duckosm` program opens the file itself
+        subprocess.run([sys.executable, "-m", "duckosm", "multimodal", db, "--transfer-cost", str(transfer_cost)], check=True)
+        con = duckdb.connect(db)
+        con.execute("LOAD spatial")
+    return con
 
 
 def _node_coords(con, node_ids):
@@ -310,7 +316,7 @@ def render_standalone(db, src=None, dst=None, out=None, transfer_cost=60.0,
 
     con = duckdb.connect(str(db))                                # read-write: may build mm.*
     con.execute("INSTALL spatial; LOAD spatial;")
-    _ensure_mm(con, transfer_cost)
+    con = _ensure_mm(con, transfer_cost)
 
     if src is None or dst is None:
         src, dst = _autopick(con, start_mode, end_mode)

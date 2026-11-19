@@ -110,6 +110,12 @@ struct Cli {
     /// Add duckOSM's H3 columns (nodes.h3_cell, edges.from_cell, to_cell, lca_res) at this resolution (0 to 15; duckOSM's default is 8).
     #[arg(long, value_name = "RES", conflicts_with = "config")]
     h3_resolution: Option<u8>,
+    /// Add the tile columns (nodes.tile, edges.from_tile, to_tile, lca_zoom: the zoom-28 tile keys of tileroute). On by default.
+    #[arg(long, overrides_with = "no_tile_index")]
+    tile_index: bool,
+    /// Do not add the tile columns (options.tile_indexing: false).
+    #[arg(long, overrides_with = "tile_index")]
+    no_tile_index: bool,
     /// With --boundary: also write the cut area as cut.osm.pbf (the nodes, ways and relations of osmium's smart cut,
     /// before the OSM fixes), to read in other tools or to use as the cut file of the browser page.
     #[arg(long, requires = "boundary")]
@@ -163,13 +169,20 @@ struct CutCli {
     /// The area file to write (.osm.pbf).
     #[arg(short, long)]
     out: PathBuf,
+    /// The OSM fixes file of `duckosm build --fixes` (YAML): the area file has the fixes in it (the rules of quack
+    /// --fixes, and each turn rule as a restriction relation), so other tools read the edited data.
+    #[arg(long, value_name = "FILE")]
+    fixes: Option<PathBuf>,
 }
 
 fn cut(args: &[String]) -> Result<(), String> {
     let cli = CutCli::parse_from(args);
     let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
     let t = std::time::Instant::now();
-    let n = duckosm_build::cut_file(&cli.region, &text, &cli.out)?;
+    let n = duckosm_build::get::cut_with_fixes(&cli.region, &text, &cli.out, cli.fixes.as_deref())?;
+    if n.nodes == 0 {
+        eprintln!("warning: the cut has no nodes: is the boundary in longitude, latitude order (docs/reference/boundary.md)?");
+    }
     eprintln!(
         "cut: {} nodes, {} ways, {} relations in {:.2} s",
         n.nodes,
@@ -1046,6 +1059,8 @@ pub fn main_with(args: Vec<String>) -> i32 {
         Some("levels-edit") => levels_edit(&args[1..]),
         Some("levels") => levels(&args[1..]),
         Some("cut") => cut(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some("get") => duckosm_tools::get::run(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),
         Some("quack-tiles") => quack_tiles(&args[1..]),
@@ -1355,6 +1370,9 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
     }
     if cli.config.is_none() {
         p.h3_resolution = cli.h3_resolution;
+    }
+    if cli.tile_index || cli.no_tile_index {
+        p.tile_indexing = cli.tile_index;
     }
     if let Some(f) = &cli.format {
         p.set_formats(&f.split(',').collect::<Vec<_>>())?;

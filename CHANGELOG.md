@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Level 0 of the outputs: the OSM file** (`docs/exports/osm-file.md`). `duckosm get "Monaco"` finds the boundary
+  (a name, an OSM id, a box, an H3 cell or a GeoJSON file), the smallest Geofabrik extract that holds it (the rule of
+  Studio's page, now in Rust: `duckosm_build::get::covering`), downloads it to `~/.cache/duckosm` (resume, progress, MD5
+  check) and cuts it. `duckosm cut --fixes FILE` writes the OSM fixes into the `.osm.pbf` file with the rules of
+  `quack --fixes`, and each turn rule as a restriction relation. Python: `duckosm.get()`. The new page
+  `docs/reference/boundary.md` gives the format of a boundary file. `get` and `cut` stop a boundary that is not in WGS 84
+  longitude and latitude, and a ring that is not closed.
+
 - **One roadstyle version, roadstyle main `53135c49`.** The crates pinned three roadstyle commits, and the `duckosm` pages
   (`viz`, `route-map`, `edit`, `ask`, `studio`, `gmns-map`) had an old dashboard. All roadstyle crates now take one rev from
   `[workspace.dependencies]` in `rust/Cargo.toml`. The docs maps are made again with it.
