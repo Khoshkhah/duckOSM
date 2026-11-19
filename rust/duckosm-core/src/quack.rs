@@ -1801,7 +1801,19 @@ pub fn features_by_tiles<R: Read + std::io::Seek + Send>(
     fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, Mode::Quack, fixes, |_, part| emit(part))
+    features_of_tiles(open, budget, size, Mode::Quack, true, fixes, |_, part| emit(part))
+}
+
+/// [`features_by_tiles`], but the parts come in any order: each tile gives its parts at once, so no group of tiles waits
+/// in memory. For a caller that sorts the parts itself (quack --pmtiles).
+pub fn features_by_tiles_any_order<R: Read + std::io::Seek + Send>(
+    open: impl Fn() -> Result<R, String>,
+    budget: usize,
+    size: TileSize,
+    fixes: Option<QuackFixes>,
+    mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
+) -> Result<Counts, String> {
+    features_of_tiles(open, budget, size, Mode::Quack, false, fixes, |_, part| emit(part))
 }
 
 /// [`gdal_features`] made tile by tile, as [`features_by_tiles`] makes the table of quack. A relation of
@@ -1815,7 +1827,7 @@ pub fn gdal_features_by_tiles<R: Read + std::io::Seek + Send>(
     fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
-    features_of_tiles(open, budget, size, mode, fixes, |_, part| emit(part))
+    features_of_tiles(open, budget, size, mode, false, fixes, |_, part| emit(part))
 }
 
 /// [`features_by_tiles`], and `emit` gets the tile that made each part too (the tiles one after the other: a part of a
@@ -1825,6 +1837,7 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     budget: usize,
     size: TileSize,
     mode: Mode,
+    ordered: bool,
     mut fixes: Option<QuackFixes>,
     mut emit: impl FnMut(Tile, Vec<Feature>) -> Result<(), String>,
 ) -> Result<Counts, String> {
@@ -1871,11 +1884,11 @@ fn features_of_tiles<R: Read + std::io::Seek + Send>(
     // cores), and their rows go to `emit` in the order of the tiles. Each tile has a thread of its own, not a thread of
     // the pool: a tile waits for rows that the pool makes, so tiles on the pool with 4 threads or fewer left no thread to
     // make them (the test stopped on the CI machine).
-    // quack --gdal: the order of the rows does not matter, so each tile sends its parts at once, and a pool of TILES_AT_ONCE
+    // not `ordered` (quack --gdal, --geofabrik and --pmtiles): the order of the rows does not matter, so each tile sends its parts at once, and a pool of TILES_AT_ONCE
     // threads takes the next tile. A group that waits for its last tile kept the rows of four tiles: France had 8.8 GB of
     // rows in memory at zoom 8.
     #[cfg(not(target_arch = "wasm32"))]
-    if mode != Mode::Quack {
+    if !ordered {
         enum Msg {
             Part(Tile, Vec<Feature>),
             Done(usize, Counts),
