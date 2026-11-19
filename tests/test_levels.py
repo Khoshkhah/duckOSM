@@ -42,7 +42,7 @@ def _all_edge_ids(con):
 
 
 def test_the_roads_of_all_modes_with_their_bands(monaco):
-    from duckosm.levels import load_roads
+    from duckosm._levels import load_roads
     roads = load_roads(monaco)
     con = duckdb.connect(str(monaco), read_only=True)
     assert len(roads) == roads["edge_id"].nunique() == _all_edge_ids(con)             # one row per edge_id, every mode
@@ -72,7 +72,7 @@ def test_levels_command_makes_the_area_and_writes_the_db(monaco, tmp_path):
     assert n[0] == n[1] == _all_edge_ids(con)
     cols = {c for c, in con.execute("SELECT column_name FROM (DESCRIBE visualization.edge_levels)").fetchall()}
     assert {"edge_id", "casing_start", "casing_level", "casing_end", "fill_level", "head_start_m", "head_end_m", "cap_start", "cap_end"} <= cols
-    from duckosm.levels import load_roads
+    from duckosm._levels import load_roads
     roads = load_roads(db)
     assert len(rs.load_area_levels(con, roads)) == len(roads)
     info = CliRunner().invoke(main, ["info", str(db)])
@@ -106,7 +106,7 @@ def test_bus_routes_in_the_build_and_the_level_roads(monaco):
     con = duckdb.connect(str(monaco), read_only=True)
     assert con.execute("SELECT count(*) FROM bus.routes").fetchone()[0] > 0
     assert con.execute("SELECT count(*) FROM bus.route_edges WHERE bus_lane").fetchone()[0] > 0
-    from duckosm.levels import load_roads
+    from duckosm._levels import load_roads
     roads = load_roads(monaco).set_index("edge_ref")
     lane = roads.loc["1449981121#1r"]
     assert "bus" in lane["modes"].split(" + ") and "driving" not in lane["modes"].split(" + ")

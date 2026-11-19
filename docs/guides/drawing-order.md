@@ -14,8 +14,8 @@ from [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/), the same
 | Command | Does |
 |---|---|
 | `duckosm <PBF> -o DIR --levels METHOD` | the build writes the order: `tags` (a rule on `layer`, `bridge` and `tunnel`, the default), `solve` (roadstyle's solver) or `none` |
-| `duckosm build` | the build solves the order as its last step; `--no-levels` or `options.levels: false` skips it (not ported to Rust yet) |
-| `duckosm levels DB` | solve the order of a built database; `--area DIR` for the level area folder. It needs `pip install "duckosm[levels]"` (not ported to Rust yet) |
+| `duckosm build` | the build solves the order as its last step; `--no-levels` or `options.levels: false` skips it |
+| `duckosm levels DB` | solve the order of a built database again, with your edits, in Rust |
 | `duckosm levels-edit DB` | the level editor at `http://127.0.0.1:8000/` (`--port`, `--no-open`). It writes the order into the file |
 
 `duckosm build` keeps your edits, because they are tables in the file, and solves again with them.
@@ -29,19 +29,17 @@ from [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/), the same
 | `visualization.level_edits`, `level_heads`, `level_caps` | your edits: pairs added or switched off, head lengths, end shapes. These tables are the master copy |
 | `visualization.level_unmatched` | edits for a road that is not in the file now; the next build tries them again |
 
-`duckosm levels` uses a level area folder next to the file (`monaco.levels/`) as its work area, and writes it again from
-the tables at each run. The files of the folder:
+`duckosm levels` writes the level area folder next to the file (`monaco.levels/`) again from the tables at each run, for
+[`duckosm gmns-map`](../reference/cli.md#gmns-map). Do not edit the folder: the tables are the master. The files of the folder:
 [the design of the levels](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels.md).
 
 ## Read it
 
 ```python
-import duckdb, roadstyle as rs
-from duckosm.levels import load_roads
+import duckdb
 
 con = duckdb.connect("monaco.duckdb", read_only=True)
-levels = rs.load_area_levels(con, load_roads("monaco.duckdb"))
+levels = con.execute("SELECT * FROM visualization.edge_levels").df()
 ```
 
-`load_area_levels` stops with a message if the edges are not those that the numbers were solved for. After a rebuild, run
-`duckosm levels` again. All options: [`duckosm levels`](../reference/cli.md#levels).
+After a rebuild with `--no-levels`, run `duckosm levels` again: the stored numbers are for the edges of the earlier build. All options: [`duckosm levels`](../reference/cli.md#levels).

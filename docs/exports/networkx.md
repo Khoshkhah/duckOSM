@@ -11,6 +11,14 @@ with no extra.
 
 Both take `mode=` too.
 
+| Library | Function | Use it for |
+|---|---|---|
+| networkx | `to_networkx`, `to_networkx_nodes` | the most tools and examples (osmnx, momepy) |
+| rustworkx | `to_rustworkx(con, graph="turns")`, `to_rustworkx(con, graph="junctions")` | an API like networkx with a Rust engine: faster for large areas. Needs `pip install "duckosm[rustworkx]"` |
+| petgraph (Rust) | `duckosm_route::graphs::to_petgraph` | Rust programs ([Rust SDK](../reference/rust.md)) |
+
+The three libraries get the same two graphs. In rustworkx a node has an index: `g.attrs["index"][edge_id]` gives it.
+
 To save either one to a file (the format comes from the extension):
 
 ```bash

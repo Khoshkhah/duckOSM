@@ -354,7 +354,7 @@ class DuckOSM:
         step is off."""
         if not self.config.options.levels:
             return None
-        from duckosm.levels import read_inputs
+        from duckosm._levels import read_inputs
         got = read_inputs(self.output_path)
         if got:
             return got, True
@@ -371,7 +371,7 @@ class DuckOSM:
             return
         inputs, keep = self._level_inputs or (None, True)
         try:
-            from duckosm.levels import make_and_solve
+            from duckosm._levels import make_and_solve
             res = make_and_solve(self.output_path, inputs=inputs, keep_unmatched=keep)
             logger.info(f"  Drawing order: {res['roads']:,} roads, {res['given_up']} given up, {res['unmatched']} edit row(s) not used "
                         "(visualization.edge_levels)")

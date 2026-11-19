@@ -15,7 +15,7 @@ use duckosm_core::building_faces::{FaceEdit, FaceType};
 use duckosm_core::fixes::{Elem, NewNode, NewWay, OsmFixes, TagEdit, TurnFix, WayFix};
 use duckosm_core::network::Options;
 use std::path::{Path, PathBuf};
-use yaml_rust2::{Yaml, YamlLoader};
+use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
 
 /// A config file read into a build.
 #[derive(Clone, Debug)]
@@ -48,7 +48,8 @@ const TOP: [&str; 16] = [
     "h3_cell",
     "elevation",
 ];
-const OPTIONS: [&str; 23] = [
+const OPTIONS: [&str; 24] = [
+    "engine",
     "build_graph",
     "h3_indexing",
     "h3_resolution",
@@ -164,6 +165,119 @@ fn section<'a>(root: &'a yaml_rust2::yaml::Hash, name: &'a str) -> Result<Sectio
             "config: '{name}' must be a section (a map of keys)"
         )),
     }
+}
+
+/// The options of `duckosm build` (docs/reference/cli.md) that override a config file: each one that is `Some`. Without a config file
+/// they are the whole config.
+#[derive(Clone, Debug, Default)]
+pub struct Overrides {
+    pub pbf: Option<String>,
+    pub source_db: Option<String>,
+    pub output: Option<String>,
+    pub boundary: Option<String>,
+    pub h3_cell: Option<String>,
+    pub modes: Option<Vec<String>>,
+    pub fixes: Option<String>,
+    pub graph: Option<bool>,
+    pub h3_index: Option<bool>,
+    pub h3_resolution: Option<i64>,
+    pub features: Option<bool>,
+    pub levels: Option<bool>,
+}
+
+/// The name of an area from a file: `maps/monaco-latest.osm.pbf` is `monaco-latest` (also without .geojson, .json and .duckdb).
+fn stem(path: &str) -> String {
+    let mut name = Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    for suffix in [".pbf", ".osm", ".geojson", ".json", ".duckdb"] {
+        if let Some(n) = name.strip_suffix(suffix) {
+            name = n.to_string();
+        }
+    }
+    name
+}
+
+/// The config of `duckosm build`: the text of the config file `base` (or a new config) with the options of `o` in it, as YAML text for
+/// [`read_text`]. A new config is named after the output file, else the boundary, the PBF or the parent database, and its output is
+/// `<name>.duckdb` in the current folder.
+pub fn with_overrides(base: Option<&Path>, o: &Overrides) -> Result<String, String> {
+    let mut root = match base {
+        Some(path) => {
+            let text = duckosm_core::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            match YamlLoader::load_from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?.into_iter().next() {
+                None | Some(Yaml::Null) => yaml_rust2::yaml::Hash::new(),
+                Some(Yaml::Hash(h)) => h,
+                Some(_) => return Err("config: the file must be a map of keys".into()),
+            }
+        }
+        None => {
+            let from = o.output.as_deref().or(o.boundary.as_deref()).or(o.pbf.as_deref()).or(o.source_db.as_deref());
+            let name = stem(from.ok_or("provide --config, or --pbf, or --source-db")?);
+            let mut h = yaml_rust2::yaml::Hash::new();
+            h.insert(Yaml::String("name".into()), Yaml::String(name.clone()));
+            h.insert(Yaml::String("output_path".into()), Yaml::String(format!("{name}.duckdb")));
+            h
+        }
+    };
+    let text = |v: &str| Yaml::String(v.into());
+    fn set(root: &mut yaml_rust2::yaml::Hash, section: Option<&str>, k: &str, v: Yaml) {
+        let map = match section {
+            None => root,
+            Some(sec) => {
+                let e = root.entry(Yaml::String(sec.into())).or_insert_with(|| Yaml::Hash(Default::default()));
+                if !matches!(e, Yaml::Hash(_)) {
+                    *e = Yaml::Hash(Default::default());
+                }
+                match e {
+                    Yaml::Hash(h) => h,
+                    _ => unreachable!(),
+                }
+            }
+        };
+        map.insert(Yaml::String(k.into()), v);
+    }
+    if let Some(p) = &o.pbf {
+        set(&mut root, Some("source"), "type", text("pbf"));
+        set(&mut root, Some("source"), "pbf_path", text(p));
+    }
+    if let Some(p) = &o.source_db {
+        set(&mut root, Some("source"), "type", text("duckdb"));
+        set(&mut root, Some("source"), "source_db", text(p));
+    }
+    if let Some(p) = &o.output {
+        set(&mut root, None, "output_path", text(p));
+    }
+    if let Some(p) = &o.boundary {
+        set(&mut root, Some("boundary"), "path", text(p));
+    }
+    if let Some(c) = &o.h3_cell {
+        set(&mut root, Some("boundary"), "h3_cell", text(c));
+    }
+    if let Some(m) = &o.modes {
+        set(&mut root, None, "modes", Yaml::Array(m.iter().map(|m| text(m)).collect()));
+    }
+    if let Some(f) = &o.fixes {
+        set(&mut root, None, "osm_overrides", text(f));
+    }
+    for (k, v) in [("build_graph", o.graph), ("h3_indexing", o.h3_index), ("build_features", o.features), ("levels", o.levels)] {
+        if let Some(v) = v {
+            set(&mut root, Some("options"), k, Yaml::Boolean(v));
+        }
+    }
+    if let Some(r) = o.h3_resolution {
+        set(&mut root, Some("options"), "h3_resolution", Yaml::Integer(r));
+    }
+    let mut out = String::new();
+    YamlEmitter::new(&mut out).dump(&Yaml::Hash(root)).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// [`read`] of a config text (`label` names it in the messages).
+pub fn read_text(text: &str, label: &str, pbf_is_cut: bool) -> Result<FromConfig, String> {
+    let file = std::env::temp_dir().join(format!("duckosm-config-{}-{label}.yaml", std::process::id()));
+    std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))?;
+    let r = read(&file, pbf_is_cut, false);
+    let _ = std::fs::remove_file(&file);
+    r
 }
 
 /// Read the config file. `pbf_is_cut`: the PBF is already cut to the boundary of the config (this
@@ -390,6 +504,8 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
     for k in [
         "simplify_batches",
         "clip_strategy",
+        // the network step is always Rust: an old config's `engine` has no effect
+        "engine",
     ] {
         if options.get(k).is_some() {
             ignored.push(format!("options.{k} (no effect in this program)"));

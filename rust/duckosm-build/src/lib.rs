@@ -2223,6 +2223,11 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                     sum.files.retain(|(k, _)| !k.starts_with("raw_"));
                 }
             }
+            // the walls of the buildings and their doors (the doors read raw.*, which a build without raw.* does not have)
+            if p.building_faces && pq_dir.join("building_faces_main.parquet").exists() && (features || raw_first || p.raw) {
+                duckosm_duckdb::write_building_faces(&db, &pq_dir)?;
+                log.step("building faces");
+            }
             after::run(&db, &p.name, &names, &p.after)?;
             log.step("indexes and checks");
             sum.files.push(("duckdb".to_string(), db));
