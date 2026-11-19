@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **One roadstyle version, roadstyle main `53135c49`.** The crates pinned three roadstyle commits, and the `duckosm` pages
+  (`viz`, `route-map`, `edit`, `ask`, `studio`, `gmns-map`) had an old dashboard. All roadstyle crates now take one rev from
+  `[workspace.dependencies]` in `rust/Cargo.toml`. The docs maps are made again with it.
 - **`duckosm quack --osm2pgsql`: the four tables of osm2pgsql** (`planet_osm_point`, `planet_osm_line`,
   `planet_osm_polygon`, `planet_osm_roads`), as osm2pgsql 2.3.1 writes them with its `default.style` and `--hstore`
   (`rust/duckosm-core/src/osm2pgsql.rs`, `docs/exports/osm2pgsql.md`). Into a PostGIS database (`--postgis`), as GeoParquet or
