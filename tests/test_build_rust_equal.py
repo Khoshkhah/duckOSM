@@ -31,10 +31,22 @@ def _tables(con, db):
 VOLATILE = {"created", "built_at", "area", "build_dir", "build_config", "roadstyle_version", "head_start_m", "head_end_m"}
 
 
+def _col(name, typ):
+    """A column as compared: the geometry as WKB; a map with its entries in key order (the Rust build writes the tags that the
+    network reads first, the Python build in the order of the file: the same keys and values)."""
+    if typ.startswith("GEOMETRY"):
+        return f"ST_AsWKB({name})"
+    if typ.startswith("MAP"):
+        return f'list_sort(map_entries("{name}"))'
+    if name == "boundary_geojson":               # Rust keeps the boundary file's GeoJSON, Python writes ST_AsGeoJSON of it: the same shape
+        return f'ST_AsWKB(ST_Normalize(ST_GeomFromGeoJSON("{name}"::VARCHAR)))'
+    return f'"{name}"'
+
+
 def _rows(con, db, table):
     desc = [r for r in con.execute(f"DESCRIBE {db}.{table}").fetchall() if r[0] not in VOLATILE]
     cols = [(r[0], r[1]) for r in desc]
-    sel = ", ".join(f"ST_AsWKB({r[0]})" if r[1].startswith("GEOMETRY") else f'"{r[0]}"' for r in desc)
+    sel = ", ".join(_col(r[0], r[1]) for r in desc)
     return cols, sorted(map(repr, con.execute(f"SELECT {sel} FROM {db}.{table}").fetchall()))
 
 
@@ -54,6 +66,8 @@ def test_rust_build_equals_python_build(tmp_path, monkeypatch):
     for t in sorted(pt & rt):
         pc, pr = _rows(con, "py", t)
         rc, rr = _rows(con, "rs", t)
+        if not pr and not rr:                    # an empty table (level_edits): Python's types come from an empty DataFrame, so only the names
+            pc, rc = [c for c, _ in pc], [c for c, _ in rc]
         if pc != rc:
             diffs.append(f"{t}: columns differ: {sorted(set(pc) ^ set(rc))}")
         elif pr != rr:
