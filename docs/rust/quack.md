@@ -501,3 +501,58 @@ The filters: tags (`tags_filter`), OSM ids, custom SQL, and a geometry (`geometr
 automatic download of an extract for a geometry, the geocoding, more than one PBF in one call, the tags as columns
 (`explode_tags`), the Hilbert sort (`sort_algorithm="hilbert"`) and the WKT output. `duckosm quack` makes the table of
 QuackOSM's default options, with or without the sort.
+
+## PMTiles
+
+`duckosm quack --pmtiles` ([the user page](../exports/pmtiles.md)) gives the features of the quack engine to the
+Shortbread rules (`duckosm-core/src/shortbread.rs`). Each layer feature is simplified for each zoom from its first zoom
+to zoom 14 and clipped to each tile that it touches (`mvt.rs`). Each clipped part is one row of a sort
+(`spill::Sorter`): the tile id, the layer, the order, the OSM element, the attributes and the geometry in tile units.
+The rows come back in the order of the tile ids, and each tile goes to the PMTiles writer (`pmtiles.rs`) at once.
+
+The runs of this sort are in blocks of 1 MB with Snappy compression (`Sorter::snappy`). The rows repeat much: Kentucky
+has 484 MB of rows and 144 MB on the disk. Most rows are at zoom 14, and about half of the bytes are attribute text.
+
+The math (`tan`, `ln`, `sinh`) is from the `libm` crate, not from the system library: each platform and the browser
+make the same bytes.
+
+### Against Tilemaker
+
+
+Tilemaker 3.2.0 (built from source on the Mac mini) with Geofabrik's Shortbread configuration (version 1.0.1, the
+two ocean layers removed: they come from shapefiles), `languages.lua` with `en` and `de`, on `monaco.osm.pbf`. Both
+files are compared tile by tile: the features of each layer at each zoom, the parts of the features (points, lines,
+rings) and the values of the attributes.
+
+Tilemaker joins features in a different way: it joins equal points into one multipoint feature and touching lines
+into one line. duckOSM joins all lines (or polygons) with equal attributes in a tile into one feature. So the table
+compares the parts, not the features.
+
+| Layer | Parts at zoom 14, duckOSM / Tilemaker | Difference and cause |
+|---|---|---|
+| `streets` | 3,550 / 3,542 | the same at zoom 14. At low zoom duckOSM has more parts: Tilemaker joins the lines that touch. |
+| `street_labels` | 908 / 884 | duckOSM also labels railways, runways and taxiways (Shortbread 1.0); Tilemaker labels only `highway` |
+| `street_polygons`, `streets_polygons_labels` | 32 / 29, 12 / 23 | Tilemaker labels each pedestrian area, also with no name (a fault of its configuration: `name` is not set). duckOSM labels the 12 named areas. |
+| `buildings`, `sites` | 1,345 / 1,334, 59 / 57 | the same buildings; a polygon at a tile border is in both tiles when it touches the buffer of 64 units |
+| `pois` | 1,508 / 1,518 | Tilemaker writes the value of `historic` as `man_made` (a fault of its configuration) and leaves out the `man_made` POIs that the schema lists. Its attributes with no value are `""`; duckOSM leaves them out (the schema: default null). |
+| `addresses` | 317 / 324 | a point at a tile border: in one tile, or in two |
+| `public_transport` | 119 / 119 | the same at zoom 14. Tilemaker puts all of them at zoom 11; duckOSM uses the zoom of each kind in the schema (bus stop 14, station 13, ferry terminal 12). |
+| `land`, `pier_polygons` | 226 / 221, 37 / 37 | the same at zoom 14. At zoom 12, duckOSM has more small polygons (land 192 / 128): Tilemaker removes a polygon that its simplification makes invalid. |
+| `water_polygons` | 31 / 31 | the same |
+| `water_polygons_labels` | 2 / 3 | not checked further |
+| `water_lines` | 4 / 5 | streams start at zoom 14 (the schema); Tilemaker starts them at zoom 13 and also writes `drain` |
+| `boundaries` | 36 / 37 | the same lines; at low zoom Tilemaker joins the lines that touch |
+| `boundary_labels` | 0 / 5 | the boundary relation of Monaco is not complete in the extract, so the quack engine makes no polygon of it. Tilemaker makes a label from the part that is in the file. |
+| `place_labels`, `bridges`, `ferries` | the same | |
+
+Attributes that are different:
+
+| Layer | duckOSM | Tilemaker | Cause |
+|---|---|---|---|
+| `streets` | `bicycle`, `horse`: the OSM value, from zoom 14 | `bicycle`, `horse`, `foot`, `motorcar`: `yes`, `limited` or `no` | Tilemaker follows a later draft of the schema; duckOSM follows Shortbread 1.0 |
+| `boundary_labels` | `way_area`: a number (ha); first zoom from the area (2 to 5) | `way_area`: a string; first zoom 2 | the schema: a float, and the zoom from the area |
+| `aerialways` | also `goods` | no `goods` | the schema lists `goods` |
+
+The time on Monaco: duckOSM 0.06 s and 0.05 GB, Tilemaker 1.5 s and 1.5 GB.
+
+Each file passes `pmtiles verify` of the PMTiles tool, except Tilemaker's: its header has bounds of no area.

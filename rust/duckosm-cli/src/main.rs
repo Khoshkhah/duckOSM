@@ -266,6 +266,11 @@ struct QuackCli {
     /// <out>/<name>_gdal.gpkg (default), or <out>/<name>_gdal_<layer>.parquet with --format geoparquet.
     #[arg(long, conflicts_with = "geofabrik")]
     gdal: bool,
+    /// Write vector tiles of the Shortbread 1.0 schema (zoom 0 to 14, Mapbox Vector Tiles with gzip) in one PMTiles v3
+    /// file, <out>/<name>.pmtiles, in place of QuackOSM's table: a base map for MapLibre, OpenLayers or QGIS with no tile
+    /// server (docs/exports/pmtiles.md).
+    #[arg(long, conflicts_with_all = ["gdal", "geofabrik"])]
+    pmtiles: bool,
     /// Write the 20 layers of Geofabrik's free shapefiles and GeoPackages (gis_osm_roads_free, gis_osm_pois_free,
     /// gis_osm_buildings_a_free, ...: the feature classes of Geofabrik's "OpenStreetMap Data in Layered GIS Format") in
     /// place of QuackOSM's table: <out>/<name>_geofabrik.gpkg (default), <out>/<name>_geofabrik.shp.zip with --format shp,
@@ -311,6 +316,9 @@ fn quack(args: &[String]) -> Result<(), String> {
     if cli.gdal || cli.geofabrik {
         return quack_gdal(&cli);
     }
+    if cli.pmtiles {
+        return quack_pmtiles(&cli);
+    }
     let (mut duckdb, mut geoparquet) = (false, false);
     for f in cli.format.as_deref().unwrap_or("duckdb,geoparquet").split(',') {
         match f.trim() {
@@ -339,6 +347,30 @@ fn quack(args: &[String]) -> Result<(), String> {
     for p in db.iter().chain(parquet.iter()) {
         eprintln!("  {}", p.display());
     }
+    Ok(())
+}
+
+/// `duckosm quack --pmtiles`: the Shortbread vector tiles.
+fn quack_pmtiles(cli: &QuackCli) -> Result<(), String> {
+    if cli.format.is_some() {
+        return Err("--format does not apply with --pmtiles: the output is <out>/<name>.pmtiles".into());
+    }
+    std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
+    let path = cli.out.join(format!("{}.pmtiles", cli.name));
+    let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
+    let tiles = cli.tile_zoom.map(duckosm_build::TileSize::Zoom).or(cli.tiles.map(duckosm_build::TileSize::Nodes));
+    let t = std::time::Instant::now();
+    let fixes = cli.fixes.as_deref().map(duckosm_build::config::read_osm_fixes).transpose()?;
+    let n = duckosm_build::quack_pmtiles::quack_pmtiles(&cli.pbf, &path, tiles, fixes.as_ref())?;
+    eprintln!(
+        "quack --pmtiles: {} features, {} tiles, {:.1} MB in {:.2} s",
+        n.features,
+        n.tiles,
+        n.bytes as f64 / 1e6,
+        t.elapsed().as_secs_f64()
+    );
+    eprintln!("  {}", path.display());
     Ok(())
 }
 
