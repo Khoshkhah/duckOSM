@@ -102,7 +102,7 @@ flowchart LR
 | ② | H3 cells | `H3Indexer` | `options.h3_indexing` (on) |
 | ② | Indexes | `CREATE INDEX` | always |
 | ② | Validate | `Validator` | `validation.enabled` (off in code, on in the config template) |
-| ③ | Intermodal graph | `MultimodalBuilder` | `multimodal.enabled` (off); needs walking plus one other mode |
+| ③ | Intermodal graph | `duckosm multimodal` (Rust) | `multimodal.enabled` (off); needs walking plus one other mode |
 | ③ | Base-map layers | `FeaturesBuilder` | `options.build_features` (off) |
 | ③ | `edge_id_hash` macros | `create_edge_id_macro` | always |
 | ③ | Metadata | `main.visualization_metadata` | always, incl. the area's IANA time zone (a build fails without one) |
