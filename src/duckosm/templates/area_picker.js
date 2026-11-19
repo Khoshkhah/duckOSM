@@ -8,24 +8,29 @@ const h3lib = () => import("https://cdn.jsdelivr.net/npm/h3-js@4.2.1/+esm");
 
 const html = `
 <style>
-.dk { font: 13px system-ui, sans-serif; color: #222; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
-.dk-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; background: #f6f6f6; }
-.dk-tabs button { border: 1px solid #bbb; background: #fff; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
-.dk-tabs button[aria-selected=true] { background: #2563eb; border-color: #2563eb; color: #fff; }
-.dk input[type=text], .dk input[type=number], .dk select { padding: 4px 6px; border: 1px solid #bbb; border-radius: 6px; }
+.dk { --dk-fg: var(--jp-ui-font-color1, #222); --dk-mut: var(--jp-ui-font-color2, #555); --dk-bg: var(--jp-layout-color1, #fff);
+  --dk-bar: var(--jp-layout-color2, #f6f6f6); --dk-line: var(--jp-border-color1, #bbb); --dk-accent: var(--jp-brand-color1, #2563eb);
+  --dk-err: var(--jp-error-color1, #b91c1c);
+  font: 13px var(--jp-ui-font-family, system-ui, sans-serif); color: var(--dk-fg); background: var(--dk-bg);
+  border: 1px solid var(--dk-line); border-radius: 8px; overflow: hidden; }
+.dk-bar, .dk-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; background: var(--dk-bar); }
+.dk button, .dk input, .dk select { font: inherit; color: var(--dk-fg); background: var(--dk-bg); border: 1px solid var(--dk-line);
+  border-radius: 6px; padding: 4px 8px; }
+.dk button { cursor: pointer; }
+.dk-tabs button[aria-selected=true] { background: var(--dk-accent); border-color: var(--dk-accent); color: #fff; }
 .dk-pane { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .dk-pane[hidden] { display: none; }
 .dk-list { max-height: 140px; overflow: auto; padding: 0 8px; }
-.dk-list button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 3px 0; cursor: pointer; }
-.dk-list button:hover { color: #2563eb; }
-.dk-list button:disabled { color: #999; cursor: default; }
+.dk .dk-list button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 3px 0; }
+.dk .dk-list button:hover { color: var(--dk-accent); }
+.dk .dk-list button:disabled { color: var(--dk-mut); cursor: default; }
 .dk-map { height: 420px; }
-.dk-foot { display: flex; gap: 10px; align-items: center; padding: 8px; background: #f6f6f6; flex-wrap: wrap; }
-.dk-get { background: #16a34a; color: #fff; border: 0; padding: 6px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; }
-.dk-get:disabled { background: #9ca3af; cursor: default; }
+.dk .dk-get { background: #16a34a; border-color: #16a34a; color: #fff; padding: 6px 16px; font-weight: 600; }
+.dk .dk-get:disabled { background: var(--dk-line); border-color: var(--dk-line); color: var(--dk-mut); cursor: default; }
 .dk-info b { font-weight: 600; }
-.dk-status { color: #555; font-family: ui-monospace, monospace; font-size: 12px; }
-.dk-err { color: #b91c1c; }
+.dk-status { color: var(--dk-mut); font-family: var(--jp-code-font-family, ui-monospace, monospace); font-size: 12px; }
+.dk-err { color: var(--dk-err); }
+.dk .maplibregl-ctrl button { background-color: #fff; border: 0; border-radius: 0; padding: 0; }
 </style>
 <div class="dk">
   <div class="dk-bar">
@@ -66,6 +71,9 @@ export default {
       document.head.insertAdjacentHTML("beforeend", `<link rel="stylesheet" href="${CSS}">`);
     }
     el.innerHTML = html;
+    // the keys typed in the widget are for the widget, not for JupyterLab's shortcuts of the notebook ("m", "o", ...)
+    el.setAttribute("data-lm-suppress-shortcuts", "true");
+    for (const t of ["keydown", "keypress", "keyup"]) el.addEventListener(t, (e) => e.stopPropagation());
     const $ = (s) => el.querySelector(s);
     const set = (area) => { model.set("area", area); model.save_changes(); };
     let tab = "search";
@@ -114,7 +122,7 @@ export default {
       } catch (e) { list.textContent = `The search failed: ${e.message}`; }
     };
     $(".dk-go").onclick = search;
-    $(".dk-q").onkeydown = (e) => e.key === "Enter" && search();
+    $(".dk-q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 
     $(".dk-osm-go").onclick = () => { const id = parseInt($(".dk-osm").value, 10); if (id > 0) set({ mode: "osm_id", osm_id: id }); };
 
