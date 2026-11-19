@@ -14,7 +14,7 @@ In the browser: the [quack page](https://khoshkhah.github.io/duckosm-studio/quac
 
 ## Results
 
-Mac mini (12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the memory is the peak footprint.
+Mac mini (Apple M6, 12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ bytes; the memory is the peak footprint.
 
 ### France (5.1 GB), `--tile-zoom 8`
 
