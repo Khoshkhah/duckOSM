@@ -214,10 +214,20 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=
         cache=None, refresh=False):
     """``duckosm get``: the boundary of an area, the smallest Geofabrik extract that holds it (downloaded to a cache
     folder), and the cut of the extract to the boundary, with the OSM ``fixes`` in it when given. Give one of
-    ``place``, ``osm_id``, ``bbox`` (``(west, south, east, north)``), ``h3_cell`` and ``boundary``. Returns an
-    :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``."""
+    ``place``, ``osm_id``, ``bbox`` (``(west, south, east, north)``), ``h3_cell`` and ``boundary``. ``boundary`` is a
+    GeoJSON file, or GeoJSON as a dict (a geometry, a Feature or a FeatureCollection), or an object with
+    ``__geo_interface__`` (shapely, geopandas): it is written to ``<out>/<name>.geojson`` (``name`` default ``"area"``).
+    Returns an :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``."""
     import subprocess
     import sys
+    if boundary is not None and not isinstance(boundary, (str, os.PathLike)):
+        geo = getattr(boundary, "__geo_interface__", boundary)
+        if not isinstance(geo, dict):
+            raise TypeError("boundary must be a file path, a GeoJSON dict or an object with __geo_interface__")
+        name = name or "area"
+        Path(out).mkdir(parents=True, exist_ok=True)
+        boundary = Path(out) / f"{name}.geojson"
+        boundary.write_text(json.dumps(geo))
     if bbox is not None and not isinstance(bbox, str):
         bbox = ",".join(str(float(v)) for v in bbox)
     args = [place]
