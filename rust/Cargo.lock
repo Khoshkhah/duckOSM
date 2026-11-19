@@ -1579,7 +1579,7 @@ dependencies = [
 [[package]]
 name = "lanestyle"
 version = "0.4.0"
-source = "git+https://github.com/Khoshkhah/lanestyle.git?rev=273040519162be63ec9f15a3c7ce1934877ea0a3#273040519162be63ec9f15a3c7ce1934877ea0a3"
+source = "git+https://github.com/Khoshkhah/lanestyle.git?rev=62f70f835bb9b7bedf9497d154e5436cae36f9ab#62f70f835bb9b7bedf9497d154e5436cae36f9ab"
 dependencies = [
  "duckdb",
  "geographiclib-rs",
