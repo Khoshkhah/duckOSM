@@ -30,12 +30,18 @@ use std::path::Path;
 
 pub type Result<T> = std::result::Result<T, String>;
 
+/// DuckDB's memory limit for the exports that read a database (`open`).
+pub const MEMORY_LIMIT: &str = "2GB";
+
 /// Open a duckOSM database read-only, with DuckDB's spatial extension (the first `INSTALL` downloads it).
 pub fn open(db: &Path) -> Result<Connection> {
     let cfg = Config::default().access_mode(AccessMode::ReadOnly).map_err(|e| e.to_string())?;
     let con = Connection::open_with_flags(db, cfg).map_err(|e| format!("{}: {e}", db.display()))?;
     con.execute_batch("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
         .map_err(|e| format!("the spatial extension of DuckDB: {e}"))?;
+    // the exports stream their rows: DuckDB's sorts, joins and ordered COPY spill to disk past this limit (its default, 80 %
+    // of the memory, let the GeoParquet export of France take 7.4 GB)
+    con.execute_batch(&format!("SET memory_limit = '{MEMORY_LIMIT}'")).map_err(|e| e.to_string())?;
     Ok(con)
 }
 

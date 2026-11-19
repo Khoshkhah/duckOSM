@@ -159,12 +159,34 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
         return Err(format!("drive_side must be right or left, not {drive_side}"));
     }
     crate::open(source)?; // fail fast if the source is unreadable
-    if out.exists() {
-        std::fs::remove_file(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    }
     if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
+    // the db is built in a file of its own and gets the name `out` only when it is complete: a failed run leaves no GMNS db
+    // that lanelet2 or opendrive could read
+    let partial = out.with_extension("duckdb.partial");
+    let remove = |p: &Path| {
+        for f in [p.to_path_buf(), p.with_extension("partial.wal")] {
+            let _ = std::fs::remove_file(f);
+        }
+    };
+    remove(&partial);
+    let name = out.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let r = build_gmns(source, &partial, &name, o);
+    if r.is_err() {
+        remove(&partial);
+        return r;
+    }
+    if out.exists() {
+        std::fs::remove_file(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    std::fs::rename(&partial, out).map_err(|e| format!("{}: {e}", out.display()))?;
+    r
+}
+
+/// [`to_gmns_with`] into the db file `out`; `name`: the name of the network.
+fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<GmnsSummary> {
+    let (modes, drive_side) = (&o.modes, o.drive_side.as_str());
     let con = Connection::open(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let c = Ctx { con: &con };
     c.exec("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")?;
@@ -181,6 +203,10 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
     if !unknown.is_empty() {
         return Err(format!("mode(s) {unknown:?} not found (present: {present:?})"));
     }
+    if chosen.iter().any(|m| m == "driving" || m == "cycling") {
+        // the lanes of driving and cycling come from netconvert: stop now, not after the first steps
+        crate::sumo::find_netconvert().map_err(|e| format!("duckosm gmns needs SUMO's netconvert for the lanes of driving and cycling: {e}"))?;
+    }
     let has_raw = c.exists("raw", "ways")?;
     if has_raw {
         c.exec("CREATE TEMP TABLE _sig AS SELECT DISTINCT osm_id FROM s.raw.nodes WHERE tags['highway'] = 'traffic_signals'")?;
@@ -188,7 +214,7 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
         c.exec("CREATE TEMP TABLE _sig(osm_id BIGINT)")?;
         eprintln!("GMNS: no 'raw' schema — lane/signal/curb detail limited (no OSM tags)");
     }
-    let name = out.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let name = name.to_string();
     let stops = if o.gtfs.is_empty() { None } else { Some(crate::gtfs::read_stops(&o.gtfs)?) };
     if let Some(s) = &stops {
         eprintln!("GTFS: {} stops", s.len());
