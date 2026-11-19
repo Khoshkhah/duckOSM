@@ -1,43 +1,37 @@
 # Store the drawing order
 
+Store in the database which road a map paints over which: a bridge over the road under it, a street over its sidewalk.
+
 ```bash
-duckosm levels monaco.duckdb                 # solve the drawing order again, with your edits, and write it into the file
-duckosm levels-edit monaco.duckdb            # optional: fix places by hand (Studio's card 8 on the file)
+duckosm levels monaco.duckdb          # solve the drawing order and write it into the file
+duckosm levels-edit monaco.duckdb     # fix places by hand in the level editor
 ```
 
-When roads cross or meet, a map must decide which is painted over which: a bridge over the road under it, a street over its sidewalk, a junction without a ring between the roads that meet.
-The map does it with two numbers for every road: a **casing number** (for the outline, in three parts: start, main, end) and a **fill number** (for the colour). The casings and fills are painted number by
-number, lowest first, and at each number all casings before all fills. 0 is the ground.
+Each road gets a **casing number** (the outline, in three parts: start, main, end) and a **fill number** (the color). A map
+paints the numbers from the lowest up, and at each number all casings before all fills. 0 is the ground. The numbers come
+from [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/), the same as for each roadstyle map.
 
-`duckosm build` hands the roads to [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/) as its last step, which works them out exactly as for any roadstyle map, and stores the result in the schema
-`visualization` of the file, so that a map or another tool reads it instead of computing it again. The file is always current: **a rebuild keeps your edits** (they are tables in the file) and solves again with them.
-For a big area the step takes long: `options.levels: false` (`build --no-levels`) skips it, and `duckosm levels` makes it later.
-
-## The level area
-
-The roads of **all the modes together** (`edges` and `private_edges` of `driving`, `walking` and `cycling`) are one **level area**.
-roadstyle's Rust code makes the pairs of roads that cross or meet and solves them. Your edits are tables in the file, and they are the
-input of each solve. Each solve also writes the area's files into the folder `monaco.levels/` next to the file (`roads.parquet`,
-`pairs.csv`, `edits.csv`, `heads.csv`, `caps.csv`, `levels.csv`), for [`duckosm gmns-map`](../reference/cli.md#gmns-map). The tables are
-the master: do not edit the folder.
-
-| Table | Holds |
+| Command | Does |
 |---|---|
-| `visualization.level_edits` | pairs that you added or switched off |
-| `visualization.level_heads`, `level_caps` | the head length and the end shape of a road end |
-| `visualization.level_unmatched` | the edit rows that name a road that is not in the file now. The next solve tries them again |
+| `duckosm <PBF> -o DIR --levels METHOD` | the build writes the order: `tags` (a rule on `layer`, `bridge` and `tunnel`, the default), `solve` (roadstyle's solver) or `none` |
+| `duckosm build` | the build solves the order as its last step; `--no-levels` or `options.levels: false` skips it |
+| `duckosm levels DB` | solve the order of a built database again, with your edits, in Rust |
+| `duckosm levels-edit DB` | the level editor at `http://127.0.0.1:8000/` (`--port`, `--no-open`). It writes the order into the file |
 
-How the solver decides, and the editor: [Which road is on top](https://khoshkhah.github.io/roadstyle/guides/levels/).
+`duckosm build` keeps your edits, because they are tables in the file, and solves again with them.
 
 ## What it writes
 
 | Table | Holds |
 |---|---|
-| `visualization.edge_levels` | one row for every `edge_id`: `casing_start`, `casing_level`, `casing_end`, `fill_level`, and its ends as drawn: `head_start_m`, `head_end_m`, `cap_start`, `cap_end` |
-| `visualization.edge_levels_meta` | one row: where it came from (the area), the number of edges and a hash of their ids, the roadstyle version, the time |
-| `visualization.level_edits`, `level_heads`, `level_caps` | your edits, as above: written again at each solve |
+| `visualization.edge_levels` | one row for each `edge_id`: `casing_start`, `casing_level`, `casing_end`, `fill_level`, and the ends as drawn: `head_start_m`, `head_end_m`, `cap_start`, `cap_end` |
+| `visualization.edge_levels_meta` | one row: the area, the number of edges and a hash of their ids, the roadstyle version, the time |
+| `visualization.level_edits`, `level_heads`, `level_caps` | your edits: pairs added or switched off, head lengths, end shapes. These tables are the master copy |
+| `visualization.level_unmatched` | edits for a road that is not in the file now; the next build tries them again |
 
-Both tables are replaced at each solve, by `duckosm levels` and by the editor. A stack of roads that cannot all be kept is counted in the message, never hidden.
+`duckosm levels` writes the level area folder next to the file (`monaco.levels/`) again from the tables at each run, for
+[`duckosm gmns-map`](../reference/cli.md#gmns-map). Do not edit the folder: the tables are the master. The files of the folder:
+[the design of the levels](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels.md).
 
 ## Read it
 
@@ -48,6 +42,4 @@ con = duckdb.connect("monaco.duckdb", read_only=True)
 levels = con.execute("SELECT * FROM visualization.edge_levels").df()
 ```
 
-After a rebuild with `--no-levels`, run `duckosm levels` again: the stored numbers are for the edges of the earlier build.
-
-Options: [`duckosm levels`](../reference/cli.md#levels).
+After a rebuild with `--no-levels`, run `duckosm levels` again: the stored numbers are for the edges of the earlier build. All options: [`duckosm levels`](../reference/cli.md#levels).

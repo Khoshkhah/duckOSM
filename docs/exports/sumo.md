@@ -1,51 +1,69 @@
 # SUMO
 
+`duckosm sumo` writes a network for [SUMO](https://eclipse.dev/sumo/). Each SUMO edge id is the duckOSM `edge_id`.
+
+| Reference and format | |
+|---|---|
+| Format | SUMO [plain XML](https://sumo.dlr.de/docs/Networks/PlainXML.html) (`.nod.xml`, `.edg.xml`, `.con.xml`) and the [SUMO network](https://sumo.dlr.de/docs/Networks/SUMO_Road_Networks.html) (`.net.xml`) |
+| Reference tool | SUMO's [netconvert](https://sumo.dlr.de/docs/netconvert.html) |
+| Check | netconvert reads the plain XML and keeps each edge id and each connection. [How each output is checked](../concepts/checks.md) |
+
 ```bash
-pip install "duckosm[sumo]"          # brings SUMO's netconvert
+pip install "duckosm[sumo]"          # adds SUMO's netconvert
 duckosm sumo monaco.duckdb           # -> sumo/monaco.net.xml
 ```
 
-duckOSM writes the network in SUMO's plain-XML format and runs SUMO's own `netconvert` to build the
-`.net.xml`, in metres in the UTM zone of the data. Every SUMO edge id is the duckOSM `edge_id`, and
-each junction allows only the turns in `edge_graph`, so turn restrictions are kept. netconvert
-leaves out a few U-turns it can't build (Monaco: 37 of 1,628); it never adds a turn.
+## What it makes
 
-In a driving network each edge's lanes come from `driving.lane_profile` ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)): one SUMO
-lane per lane, with its vehicle classes (a bus lane `bus`, a bike lane `bicycle`, a shared one `bus bicycle`, a car lane every
-road vehicle) and its width, numbered from the right as SUMO does. `duckosm.sumo_compare.lane_diff(db, osm_file, work_dir)`
-builds the same area with SUMO's own OSM import too and lists, per OSM way and direction, every lane difference with its cause
-(an override, the contraflow bus lane, a default where no `lanes` tag is ...).
+duckOSM writes the network in SUMO's plain-XML format (`.nod.xml`, `.edg.xml`, `.con.xml`) and a `.netccfg`.
+Then it runs SUMO's `netconvert`, which makes the `.net.xml`. The coordinates are in meters, in the UTM zone of the data.
 
-Painted turn arrows (`turn:lanes`) are not in this network: SUMO's plain XML has no field for them. The GMNS export applies them
-([GMNS tables](gmns_tables.md), `lane_check`): where a link's arrows fit its exits, read left to right by order, netconvert's OSM
-import connects that link's lanes by them, and those lane connections go into the plain XML.
-
-A walking network is for pedestrians only (`allow="pedestrian"`, with SUMO walking areas at the
-junctions), a cycling network for bicycles only. A driving network allows every vehicle class. A
-walking or cycling edge is one path lane, 2 m or 1.5 m wide (not the road's lane count at 3.2 m).
-A one-way road's lanes are centred on its line (`spreadType="center"`); the two directions of a two-way road lie
-either side of it.
-
-| Option | Does |
+| SUMO item | From duckOSM |
 |---|---|
-| `--no-netconvert` | only write the plain-XML inputs (`.nod.xml`, `.edg.xml`, `.con.xml`) |
-| `--no-connections` | let netconvert work out the turns itself |
-| `-c my.netccfg` | your own netconvert settings instead of duckOSM's (it still sets the input and output files) |
-| `-m walking` | another mode (default `driving`) |
-| `--out-dir`, `--name` | output folder (default `sumo`) and file name (default: the db's name) |
+| edge id | `edge_id` |
+| connections (turns) | `edge_graph`: only legal turns, so the turn restrictions stay |
+| lanes (driving) | `driving.lane_profile`: one SUMO lane for each lane, with its width and vehicle classes, numbered from the right |
+| lane classes | bus lane `bus`, bike lane `bicycle`, shared lane `bus bicycle`, car lane: each road vehicle |
+| walking network | `allow="pedestrian"`, one path lane 2 m wide, SUMO walking areas at the junctions |
+| cycling network | bicycles only, one path lane 1.5 m wide |
+| one-way road | its lanes are centered on its line (`spreadType="center"`) |
+| two-way road | each direction is on one side of the line |
+
+netconvert does not build some U-turns. It never adds a turn.
+
+## Options
+
+| Option | Does | Default |
+|---|---|---|
+| `-m`, `--mode` | the mode | `driving` |
+| `--out-dir` | the output folder | `sumo` |
+| `--name` | the file name | the name of the database |
+| `--no-netconvert` | write only the plain XML and the `.netccfg` | runs netconvert |
+| `--no-connections` | let netconvert make the turns (the turn restrictions are lost) | turns from `edge_graph` |
+| `-c`, `--config` | your `.netccfg` in place of duckOSM's netconvert options | duckOSM's options |
+
+If netconvert is not found, the command stops. Install SUMO (`pip install "duckosm[sumo]"` or a system package), set
+`SUMO_HOME`, or use `--no-netconvert`.
+
+## Python
 
 ```python
 import duckdb
 from duckosm import to_sumo
 con = duckdb.connect("monaco.duckdb", read_only=True)
-out = to_sumo(con, "sumo/")                                  # out["net"] = "sumo/network.net.xml"
-to_sumo(con, "sumo/", config={"junctions.join": "true"})     # change one netconvert option
-to_sumo(con, "sumo/", edge_attrs={eid: {"numLanes": 2, "width": 3.1}})   # your own lanes and widths per edge (id as number or text)
+out = to_sumo(con, "sumo/")                                          # out["net"]: sumo/network.net.xml
+to_sumo(con, "sumo/", config={"junctions.join": "true"})             # change one netconvert option
+to_sumo(con, "sumo/", edge_attrs={eid: {"numLanes": 2, "width": 3.1}})   # your lanes and widths for an edge
 ```
 
-**Joining close junctions** (`junctions.join`, off by default). A crossroads mapped as two or three close nodes becomes one
-junction. netconvert reads the turns (`.con.xml`) before it joins, and silently drops every turn onto an edge the join swallows (the
-short edge between two joined nodes): a road whose straight or left turn ran over that edge lost it. So when joining is on, duckOSM
-asks netconvert which nodes it joins (a first run with `--junctions.join-output`), merges those nodes itself (`cluster_<ids>`, as
-netconvert names them), writes every legal path through the swallowed edges as one turn (never back through a node it passed) and
-runs netconvert again without joining. Turn restrictions still hold: a path is legal only if each of its steps is in `edge_graph`.
+**Join close junctions** (`junctions.join`, off by default). A crossroads mapped as two or three close nodes becomes one
+junction, and the legal turns through it stay. Only the function `to_sumo(config={"junctions.join": "true"})` does
+this. The command has no option for it. How it works: [design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/sumo_export.md).
+
+**Compare with SUMO's OSM import.** `duckosm.sumo_compare.lane_diff(db, osm_file, work_dir)` builds the same area with
+SUMO's own OSM import. It lists each lane difference for each OSM way and direction, with its cause.
+
+## Limits
+
+- No painted turn arrows (`turn:lanes`): SUMO's plain XML has no field for them. The [GMNS](gmns.md) export uses them.
+- No demand, routes or SUMO configuration (`.sumocfg`): these are your scenario.
