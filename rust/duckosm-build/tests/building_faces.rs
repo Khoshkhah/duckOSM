@@ -69,3 +69,24 @@ fn monaco_faces() {
         ("side".into(), "front".into(), true)
     );
 }
+
+#[test]
+fn faces_in_the_duckdb_file() {
+    // the .duckdb output alone (no GeoParquet): the walls are main.building_faces in the file, as each other table
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("faces-db");
+    let p = Params {
+        modes: vec![Mode::Driving, Mode::Walking],
+        geoparquet: false,
+        duckdb: true,
+        building_faces: true,
+        boundary: Some(data().join("monaco.geojson")),
+        name: "monaco".into(),
+        built_at: Some(0),
+        ..Params::default()
+    };
+    let sum = build(&data().join("monaco_sample.osm.pbf"), &out, &p).unwrap();
+    assert_eq!(sum.building_faces, Some((10909, 1262)));
+    let c = duckdb::Connection::open(out.join("monaco.duckdb")).unwrap();
+    let n: i64 = c.query_row("SELECT count(*) FROM main.building_faces", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 10909, "every wall is in main.building_faces of the .duckdb file");
+}
