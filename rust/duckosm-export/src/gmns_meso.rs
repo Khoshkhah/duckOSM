@@ -19,8 +19,7 @@ fn bezier(x0: &str, y0: &str, cx0: &str, cy0: &str, cx1: &str, cy1: &str, x1: &s
 
 fn open(db: &Path) -> Result<Connection> {
     let con = Connection::open(db).map_err(|e| format!("{}: {e}", db.display()))?;
-    con.execute_batch(&format!("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; SET memory_limit = '{}';", crate::MEMORY_LIMIT))
-        .map_err(|e| e.to_string())?;
+    con.execute_batch("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;").map_err(|e| e.to_string())?;
     Ok(con)
 }
 

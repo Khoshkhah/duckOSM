@@ -154,7 +154,7 @@ pub fn to_gmns(source: &Path, out: &Path, modes: &[String]) -> Result<Vec<ModeSu
 
 /// Write the GMNS db `out` from the built duckOSM db `source`, as `to_gmns` with the options `o`.
 pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSummary> {
-    let (modes, drive_side) = (&o.modes, o.drive_side.as_str());
+    let drive_side = o.drive_side.as_str();
     if drive_side != "right" && drive_side != "left" {
         return Err(format!("drive_side must be right or left, not {drive_side}"));
     }
@@ -190,7 +190,6 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
     let con = Connection::open(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let c = Ctx { con: &con };
     c.exec("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")?;
-    c.exec(&format!("SET memory_limit = '{}'", crate::MEMORY_LIMIT))?;
     c.exec(&format!("ATTACH '{}' AS s (READ_ONLY)", source.display().to_string().replace('\'', "''")))?;
     let present = c.strings(
         "SELECT DISTINCT schema_name FROM duckdb_tables() WHERE database_name = 's' AND table_name = 'edges' \

@@ -517,14 +517,26 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
             app.flush().map_err(|e| e.to_string())?;
         }
         let proj = net.proj.replace('\'', "''");
+        // the points of each shape in lon/lat, joined in their order; the sort spills to disk, a string_agg of all shapes
+        // did not (Kentucky: out of memory at 12.7 GB)
+        let mut ll: Vec<String> = vec![String::new(); cut.len() + connectors.len()];
         let sql = format!(
-            "SELECT id, string_agg(printf('%.8f %.8f', ST_X(g), ST_Y(g)), ', ' ORDER BY k) FROM (
-               SELECT id, k, ST_Transform(ST_Point(x, y), '{proj}', 'EPSG:4326', always_xy := true) AS g FROM _xy) GROUP BY id"
+            "SELECT id, ST_X(g), ST_Y(g) FROM (SELECT id, k, ST_Transform(ST_Point(x, y), '{proj}', 'EPSG:4326', always_xy := true) AS g FROM _xy) \
+             ORDER BY id, k"
         );
-        let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
-        let ll: HashMap<i64, String> =
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
-        drop(st);
+        crate::stream::each_chunk(c.con, &sql, [], |ch| {
+            for i in 0..ch.len {
+                if let (Some(id), Some(x), Some(y)) = (ch.i64(0, i), ch.f64(1, i), ch.f64(2, i)) {
+                    let s = &mut ll[id as usize];
+                    if !s.is_empty() {
+                        s.push_str(", ");
+                    }
+                    s.push_str(&format!("{x:.8} {y:.8}"));
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| format!("{e}\n{sql}"))?;
         c.exec(&format!(
             "ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_cut GEOMETRY;
              CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY);
@@ -534,7 +546,7 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         {
             let mut app = c.con.appender("_cut").map_err(|e| e.to_string())?;
             for (i, (lid, _)) in cut.iter().enumerate() {
-                app.append_row(duckdb::params![lid, format!("LINESTRING ({})", ll[&(i as i64)])]).map_err(|e| e.to_string())?;
+                app.append_row(duckdb::params![lid, format!("LINESTRING ({})", ll[i])]).map_err(|e| e.to_string())?;
             }
             app.flush().map_err(|e| e.to_string())?;
         }
@@ -542,7 +554,7 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         {
             let mut app = c.con.appender("_con").map_err(|e| e.to_string())?;
             for (i, (id, m, a, b, w, _)) in connectors.iter().enumerate() {
-                app.append_row(duckdb::params![id, m, a, b, w, format!("LINESTRING ({})", ll[&((cut.len() + i) as i64)])]).map_err(|e| e.to_string())?;
+                app.append_row(duckdb::params![id, m, a, b, w, format!("LINESTRING ({})", ll[cut.len() + i])]).map_err(|e| e.to_string())?;
             }
             app.flush().map_err(|e| e.to_string())?;
         }
