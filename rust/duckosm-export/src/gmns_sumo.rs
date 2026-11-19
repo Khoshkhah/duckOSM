@@ -216,13 +216,13 @@ struct Net {
 }
 
 fn read_net(path: &Path) -> Result<Net> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let attr = |l: &str, k: &str| -> Option<String> {
         let key = format!(" {k}=\"");
         l.find(&key).map(|i| l[i + key.len()..].split('"').next().unwrap_or("").to_string())
     };
     let mut net = Net { off: (0.0, 0.0), proj: String::new(), lanes: HashMap::new(), conns: Vec::new(), nxt: HashMap::new() };
-    for l in text.lines().map(str::trim_start) {
+    crate::each_line(path, |l| {
+        let l = l.trim_start();
         if l.starts_with("<location ") {
             let o = attr(l, "netOffset").unwrap_or_default();
             let (x, y) = o.split_once(',').unwrap_or(("0", "0"));
@@ -255,7 +255,8 @@ fn read_net(path: &Path) -> Result<Net> {
                 ));
             }
         }
-    }
+        Ok(())
+    })?;
     if net.proj.is_empty() {
         return Err(format!("{}: no <location> (no projection to read the shapes back)", path.display()));
     }

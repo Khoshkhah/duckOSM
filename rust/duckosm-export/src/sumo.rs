@@ -236,17 +236,19 @@ fn rel(p: &Path, base: &Path) -> String {
 
 /// The attributes `from`, `to`, `fromLane`, `toLane` of the `<connection>` elements of a .net.xml (one element on each line).
 fn net_connections(net: &Path) -> Result<Vec<(String, String, String, String)>> {
-    let text = std::fs::read_to_string(net).map_err(|x| format!("{}: {x}", net.display()))?;
     let attr = |l: &str, k: &str| -> String {
         let key = format!(" {k}=\"");
         l.find(&key).map(|i| l[i + key.len()..].split('"').next().unwrap_or("").to_string()).unwrap_or_default()
     };
-    Ok(text
-        .lines()
-        .map(str::trim_start)
-        .filter(|l| l.starts_with("<connection "))
-        .map(|l| (attr(l, "from"), attr(l, "to"), attr(l, "fromLane"), attr(l, "toLane")))
-        .collect())
+    let mut out = Vec::new();
+    crate::each_line(net, |l| {
+        let l = l.trim_start();
+        if l.starts_with("<connection ") {
+            out.push((attr(l, "from"), attr(l, "to"), attr(l, "fromLane"), attr(l, "toLane")));
+        }
+        Ok(())
+    })?;
+    Ok(out)
 }
 
 /// The options of `to_sumo` that GMNS gives.
@@ -441,12 +443,12 @@ fn arrow_connections(
     run(&cmd)?;
     let by_sumo: HashMap<&str, i64> = sumo_id.iter().map(|(s, e)| (s.as_str(), *e)).collect();
     let mut got: Vec<(i64, Vec<(i64, i64, i64)>)> = arrowed.iter().filter(|e| ours.contains_key(e)).map(|e| (*e, Vec::new())).collect();
-    let text = std::fs::read_to_string(&net_path).map_err(|x| format!("{}: {x}", net_path.display()))?;
     let attr = |l: &str, k: &str| -> Option<String> {
         let key = format!(" {k}=\"");
         l.find(&key).map(|i| l[i + key.len()..].split('"').next().unwrap_or("").to_string())
     };
-    for l in text.lines().map(str::trim_start) {
+    let read = crate::each_line(&net_path, |l| {
+        let l = l.trim_start();
         if l.starts_with("<edge ") && attr(l, "function").as_deref() != Some("internal") {
             let id = attr(l, "id").unwrap_or_default();
             if !by_sumo.contains_key(id.as_str()) {
@@ -456,7 +458,7 @@ fn arrow_connections(
         if l.starts_with("<connection ") {
             let from = attr(l, "from").unwrap_or_default();
             if from.starts_with(':') {
-                continue;
+                return Ok(());
             }
             let fe = by_sumo[from.as_str()];
             if let Some(g) = got.iter_mut().find(|g| g.0 == fe) {
@@ -464,7 +466,13 @@ fn arrow_connections(
                 g.1.push((attr(l, "fromLane").unwrap_or_default().parse().unwrap_or(0), to, attr(l, "toLane").unwrap_or_default().parse().unwrap_or(0)));
             }
         }
+        Ok(())
+    });
+    // the files of this pass are read: they go now, not with the folder (Kentucky: some GB)
+    for p in [&osm_path, &typ_path, &con_path, &net_path] {
+        let _ = std::fs::remove_file(p);
     }
+    read?;
     eprintln!("SUMO connections: {} edges with turn arrows connected lane by lane by netconvert's OSM import", got.len());
     Ok(split_lone_lanes(got, profile))
 }

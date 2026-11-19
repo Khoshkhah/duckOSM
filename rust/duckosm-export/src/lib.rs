@@ -111,6 +111,19 @@ pub fn write_text(path: &Path, text: &str, gz: bool) -> Result<()> {
     }
 }
 
+/// Give each line of the text file `path` to `f`, one line at a time (a SUMO .net.xml is some GB: it is not read whole).
+pub fn each_line(path: &Path, mut f: impl FnMut(&str) -> Result<()>) -> Result<()> {
+    use std::io::BufRead;
+    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut r = std::io::BufReader::with_capacity(1 << 20, std::fs::File::open(path).map_err(err)?);
+    let mut l = String::new();
+    while r.read_line(&mut l).map_err(err)? > 0 {
+        f(l.trim_end_matches(['\n', '\r']))?;
+        l.clear();
+    }
+    Ok(())
+}
+
 /// A buffered file writer for `path` (and its folder), gzip-compressed when `gz`: the exports write each row as it comes.
 /// Call [`Out::finish`] at the end (it writes the gzip trailer and reports an error of the last write).
 pub struct Out {
