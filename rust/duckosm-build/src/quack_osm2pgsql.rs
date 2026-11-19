@@ -209,15 +209,16 @@ fn hstore(tags: &[(String, String)]) -> String {
     tags.iter().map(|(k, v)| format!("{}=>{}", q(k), q(v))).collect::<Vec<_>>().join(",")
 }
 
-/// The hex EWKB of a WKB with the SRID.
-fn ewkb_hex(wkb: &[u8], srid: u32) -> String {
-    let mut b = Vec::with_capacity(wkb.len() + 4);
-    b.push(wkb[0]);
+/// The hex EWKB of a WKB with the SRID, added to `out`.
+fn ewkb_hex(wkb: &[u8], srid: u32, out: &mut String) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let kind = u32::from_le_bytes(wkb[1..5].try_into().expect("4 bytes")) | 0x2000_0000;
-    b.extend_from_slice(&kind.to_le_bytes());
-    b.extend_from_slice(&srid.to_le_bytes());
-    b.extend_from_slice(&wkb[5..]);
-    b.iter().map(|x| format!("{x:02X}")).collect()
+    let head = [wkb[0]].into_iter().chain(kind.to_le_bytes()).chain(srid.to_le_bytes());
+    out.reserve(2 * (wkb.len() + 4));
+    for x in head.chain(wkb[5..].iter().copied()) {
+        out.push(HEX[(x >> 4) as usize] as char);
+        out.push(HEX[(x & 15) as usize] as char);
+    }
 }
 
 impl Copy {
@@ -246,24 +247,29 @@ impl Copy {
         line.push('\t');
         copy_text(&hstore(&tags), &mut line);
         line.push('\t');
-        line.push_str(&ewkb_hex(&f.geometry, if merc { 3857 } else { 4326 }));
+        ewkb_hex(&f.geometry, if merc { 3857 } else { 4326 }, &mut line);
         line.push('\n');
         let p = &mut self.files[f.layer as usize - 1];
         p.1.write_all(line.as_bytes()).map_err(|e| format!("{}: {e}", p.0.display()))
     }
 
     /// The tables as osm2pgsql makes them (`table_t::start` and `table_t::stop`): CREATE TABLE, COPY, the rows sorted by
-    /// the geometry, a GiST index with fillfactor 100, ANALYZE.
+    /// the geometry, a GiST index with fillfactor 100, ANALYZE. As osm2pgsql, each table on its own connection, all four at
+    /// the same time.
     #[cfg(feature = "postgis")]
     fn load(self, conn: &str, merc: bool) -> Result<(), String> {
         let e = |x: postgres::Error| format!("PostGIS: {x}");
-        let mut c = postgres::Client::connect(conn, postgres::NoTls).map_err(e)?;
-        c.batch_execute("CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS hstore;").map_err(e)?;
+        let connect = || postgres::Client::connect(conn, postgres::NoTls).map_err(e);
+        connect()?.batch_execute("CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS hstore;").map_err(e)?;
         let srid = if merc { 3857 } else { 4326 };
-        for (i, (path, w)) in self.files.into_iter().enumerate() {
-            let table = (i + 1) as u8;
-            let name = o2p::table_name(table);
+        let mut files = Vec::new();
+        for (path, w) in self.files {
             drop(w.into_inner().map_err(|x| format!("{}: {x}", path.display()))?);
+            files.push(path);
+        }
+        let one = |table: u8, path: &Path| -> Result<(), String> {
+            let mut c = connect()?;
+            let name = o2p::table_name(table);
             let cols: Vec<String> = o2p::columns(table)
                 .iter()
                 .map(|(c, k)| format!("\"{c}\" {}", match k {
@@ -284,17 +290,21 @@ impl Copy {
             ))
             .map_err(e)?;
             let mut copy = c.copy_in(&format!("COPY {name}_tmp FROM STDIN")).map_err(e)?;
-            std::io::copy(&mut std::fs::File::open(&path).map_err(|x| format!("{}: {x}", path.display()))?, &mut copy)
+            std::io::copy(&mut std::fs::File::open(path).map_err(|x| format!("{}: {x}", path.display()))?, &mut copy)
                 .map_err(|x| format!("PostGIS: COPY {name}: {x}"))?;
             copy.finish().map_err(e)?;
-            let _ = std::fs::remove_file(&path);
             c.batch_execute(&format!(
                 "CREATE TABLE {name} AS SELECT * FROM {name}_tmp ORDER BY way; DROP TABLE {name}_tmp;
                  CREATE INDEX ON {name} USING GIST (way) WITH (fillfactor = 100); ANALYZE {name};"
             ))
-            .map_err(e)?;
-        }
-        Ok(())
+            .map_err(e)
+        };
+        let done: Vec<Result<(), String>> = std::thread::scope(|s| {
+            let jobs: Vec<_> = files.iter().zip(1..=4u8).map(|(p, t)| s.spawn(move || one(t, p))).collect();
+            jobs.into_iter().map(|j| j.join().unwrap_or_else(|_| Err("PostGIS: a load thread stopped".into()))).collect()
+        });
+        files.iter().for_each(|p| drop(std::fs::remove_file(p)));
+        done.into_iter().collect()
     }
 
     #[cfg(not(feature = "postgis"))]
@@ -315,6 +325,8 @@ mod tests {
         assert_eq!(s, "a\\tb\\\\");
         // POINT(1 2) as EWKB with SRID 3857
         let wkb = gdal::wkb_point((1.0, 2.0));
-        assert!(ewkb_hex(&wkb, 3857).starts_with("0101000020110F0000"));
+        let mut hex = String::new();
+        ewkb_hex(&wkb, 3857, &mut hex);
+        assert_eq!(hex, "0101000020110F0000000000000000F03F0000000000000040");
     }
 }
