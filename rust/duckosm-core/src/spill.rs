@@ -25,12 +25,19 @@ pub trait Codec<T> {
     fn get(&self, b: &mut &[u8]) -> T;
 }
 
-/// The rows of a temporary file: each row is its length (4 bytes) and its bytes.
+/// The rows of a temporary file: each row is its length (4 bytes) and its bytes. With `snappy`, the rows are in blocks
+/// of about [`BLOCK`] bytes, each block compressed with Snappy (pure Rust, also in the browser) and written as its
+/// length (4 bytes) and its bytes; a row is in one block.
 pub struct Rows {
     blob: Box<dyn Blob>,
     pub len: usize,
+    /// The bytes of the rows (not compressed).
     pub bytes: u64,
+    snappy: bool,
 }
+
+/// The size of a block of rows of a file with Snappy.
+const BLOCK: usize = 1 << 20;
 
 /// Writes rows to a new temporary file.
 pub struct Writer {
@@ -38,6 +45,8 @@ pub struct Writer {
     buf: Vec<u8>,
     len: usize,
     bytes: u64,
+    /// The rows of the block that waits for its compression (Snappy files only).
+    block: Option<Vec<u8>>,
 }
 
 impl Writer {
@@ -52,7 +61,24 @@ impl Writer {
             buf: Vec::new(),
             len: 0,
             bytes: 0,
+            block: None,
         })
+    }
+
+    /// A writer of a file with Snappy blocks: the rows of a sort repeat much (the same keys and attributes), and the
+    /// disk holds 3 to 5 times less.
+    pub fn snappy(store: &dyn Store) -> io::Result<Self> {
+        let mut w = Self::new(store)?;
+        w.block = Some(Vec::with_capacity(BLOCK + (BLOCK >> 3)));
+        Ok(w)
+    }
+
+    fn write_block(w: &mut BufWriter<Box<dyn Blob>>, block: &mut Vec<u8>) -> io::Result<()> {
+        let z = snap::raw::Encoder::new().compress_vec(block).map_err(io::Error::other)?;
+        w.write_all(&(z.len() as u32).to_le_bytes())?;
+        w.write_all(&z)?;
+        block.clear();
+        Ok(())
     }
 
     pub fn push<T>(&mut self, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
@@ -65,19 +91,37 @@ impl Writer {
     }
 
     fn push_bytes(&mut self, b: &[u8]) -> io::Result<()> {
-        self.w.write_all(&(b.len() as u32).to_le_bytes())?;
-        self.w.write_all(b)?;
+        match &mut self.block {
+            None => {
+                self.w.write_all(&(b.len() as u32).to_le_bytes())?;
+                self.w.write_all(b)?;
+            }
+            Some(block) => {
+                block.extend_from_slice(&(b.len() as u32).to_le_bytes());
+                block.extend_from_slice(b);
+                if block.len() >= BLOCK {
+                    Self::write_block(&mut self.w, block)?;
+                }
+            }
+        }
         self.len += 1;
         self.bytes += 4 + b.len() as u64;
         Ok(())
     }
 
-    pub fn finish(self) -> io::Result<Rows> {
+    pub fn finish(mut self) -> io::Result<Rows> {
+        let snappy = self.block.is_some();
+        if let Some(block) = &mut self.block {
+            if !block.is_empty() {
+                Self::write_block(&mut self.w, block)?;
+            }
+        }
         let blob = self.w.into_inner().map_err(|e| e.into_error())?;
         Ok(Rows {
             blob,
             len: self.len,
             bytes: self.bytes,
+            snappy,
         })
     }
 }
@@ -86,43 +130,56 @@ impl Writer {
 pub struct RawIter<R = Box<dyn Blob>> {
     r: BufReader<R>,
     left: usize,
+    /// The block that is read and the place in it (Snappy files only).
+    block: Option<(Vec<u8>, usize)>,
 }
 
 impl<R: Read> RawIter<R> {
-    fn next_into(&mut self, buf: &mut Vec<u8>) -> io::Result<bool> {
-        if self.left == 0 {
-            return Ok(false);
-        }
-        let mut n = [0u8; 4];
-        self.r.read_exact(&mut n)?;
-        buf.resize(u32::from_le_bytes(n) as usize, 0);
-        self.r.read_exact(buf)?;
-        self.left -= 1;
-        Ok(true)
+    fn new(r: R, len: usize, snappy: bool) -> Self {
+        RawIter { r: BufReader::with_capacity(1 << 20, r), left: len, block: snappy.then(|| (Vec::new(), 0)) }
     }
 
-    /// Add the bytes of the next row at the end of `data`.
+    /// The bytes of the next row (its length is read first) at the end of `data`.
     fn append_into(&mut self, data: &mut Vec<u8>) -> io::Result<bool> {
         if self.left == 0 {
             return Ok(false);
         }
-        let mut n = [0u8; 4];
-        self.r.read_exact(&mut n)?;
-        let start = data.len();
-        data.resize(start + u32::from_le_bytes(n) as usize, 0);
-        self.r.read_exact(&mut data[start..])?;
         self.left -= 1;
+        let start = data.len();
+        match &mut self.block {
+            None => {
+                let mut n = [0u8; 4];
+                self.r.read_exact(&mut n)?;
+                data.resize(start + u32::from_le_bytes(n) as usize, 0);
+                self.r.read_exact(&mut data[start..])?;
+            }
+            Some((block, at)) => {
+                if *at == block.len() {
+                    let mut n = [0u8; 4];
+                    self.r.read_exact(&mut n)?;
+                    let mut z = vec![0u8; u32::from_le_bytes(n) as usize];
+                    self.r.read_exact(&mut z)?;
+                    *block = snap::raw::Decoder::new().decompress_vec(&z).map_err(io::Error::other)?;
+                    *at = 0;
+                }
+                let n = u32::from_le_bytes(block[*at..*at + 4].try_into().expect("4 bytes")) as usize;
+                data.extend_from_slice(&block[*at + 4..*at + 4 + n]);
+                *at += 4 + n;
+            }
+        }
         Ok(true)
+    }
+
+    fn next_into(&mut self, buf: &mut Vec<u8>) -> io::Result<bool> {
+        buf.clear();
+        self.append_into(buf)
     }
 }
 
 impl Rows {
     fn raw(mut self) -> io::Result<RawIter> {
         self.blob.seek(SeekFrom::Start(0))?;
-        Ok(RawIter {
-            r: BufReader::with_capacity(1 << 20, self.blob),
-            left: self.len,
-        })
+        Ok(RawIter::new(self.blob, self.len, self.snappy))
     }
 
     /// Read the rows, one at a time, and keep the file for a next read.
@@ -131,10 +188,7 @@ impl Rows {
         codec: &'a C,
     ) -> io::Result<impl Iterator<Item = io::Result<T>> + 'a> {
         self.blob.seek(SeekFrom::Start(0))?;
-        let mut raw = RawIter {
-            r: BufReader::with_capacity(1 << 20, &mut self.blob),
-            left: self.len,
-        };
+        let mut raw = RawIter::new(&mut self.blob, self.len, self.snappy);
         let mut buf = Vec::new();
         Ok(std::iter::from_fn(move || match raw.next_into(&mut buf) {
             Ok(true) => Some(Ok(codec.get(&mut &buf[..]))),
@@ -193,7 +247,7 @@ pub fn sort_bytes_where<K: Ord + Send>(
     if runs.len() == 1 {
         return Ok(runs.pop().expect("one run"));
     }
-    merge(runs, &key, store)
+    merge(runs, &key, store, false)
 }
 
 /// [`sort_bytes`] for rows that are read one time: the rows in the order of `key` (stable), merged from the sorted runs
@@ -258,7 +312,7 @@ fn sorted_runs<K: Ord + Send>(
     let mut data: Vec<u8> = Vec::new();
     let mut index: Vec<(K, usize, usize)> = Vec::new(); // key, start and end of the row in `data`
     let flush = |data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, runs: &mut Vec<Rows>| -> io::Result<()> {
-        runs.push(write_run(data, index, store)?);
+        runs.push(write_run(data, index, store, false)?);
         Ok(())
     };
     let row = std::mem::size_of::<(K, usize, usize)>();
@@ -278,7 +332,7 @@ fn sorted_runs<K: Ord + Send>(
             // open). The runs so far are the first rows of the input, so their merge keeps the sort stable.
             if runs.len() == MERGE_FAN {
                 let all = std::mem::take(&mut runs);
-                runs.push(merge(all, key, store)?);
+                runs.push(merge(all, key, store, false)?);
             }
         }
     }
@@ -291,7 +345,7 @@ fn sorted_runs<K: Ord + Send>(
 }
 
 /// One sorted run of the rows in `data` (`index`: the key, the start and the end of each row); `data` and `index` are empty after.
-fn write_run<K: Ord + Send>(data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, store: &dyn Store) -> io::Result<Rows> {
+fn write_run<K: Ord + Send>(data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize)>, store: &dyn Store, snappy: bool) -> io::Result<Rows> {
     // stable; on all threads when the crate has rayon (the feature `pbf`)
     #[cfg(feature = "pbf")]
     {
@@ -300,7 +354,7 @@ fn write_run<K: Ord + Send>(data: &mut Vec<u8>, index: &mut Vec<(K, usize, usize
     }
     #[cfg(not(feature = "pbf"))]
     index.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut w = Writer::new(store)?;
+    let mut w = if snappy { Writer::snappy(store)? } else { Writer::new(store)? };
     for (_, a, b) in index.drain(..) {
         w.push_bytes(&data[a..b])?;
     }
@@ -320,11 +374,18 @@ pub struct Sorter<'s, K, F: Fn(&[u8]) -> K> {
     index: Vec<(K, usize, usize)>,
     runs: Vec<Rows>,
     buf: Vec<u8>,
+    snappy: bool,
 }
 
 impl<'s, K: Ord + Send, F: Fn(&[u8]) -> K> Sorter<'s, K, F> {
     pub fn new(key: F, budget: usize, store: &'s dyn Store) -> Self {
-        Sorter { key, budget, store, data: Vec::new(), index: Vec::new(), runs: Vec::new(), buf: Vec::new() }
+        Sorter { key, budget, store, data: Vec::new(), index: Vec::new(), runs: Vec::new(), buf: Vec::new(), snappy: false }
+    }
+
+    /// The runs (and their merges) in files with Snappy blocks ([`Writer::snappy`]): less disk for rows that repeat.
+    pub fn snappy(mut self) -> Self {
+        self.snappy = true;
+        self
     }
 
     pub fn push<T>(&mut self, codec: &impl Codec<T>, row: &T) -> io::Result<()> {
@@ -336,11 +397,11 @@ impl<'s, K: Ord + Send, F: Fn(&[u8]) -> K> Sorter<'s, K, F> {
         self.buf = buf;
         self.index.push(((self.key)(&self.data[start..]), start, self.data.len()));
         if self.data.len() + self.index.len() * std::mem::size_of::<(K, usize, usize)>() >= self.budget {
-            self.runs.push(write_run(&mut self.data, &mut self.index, self.store)?);
+            self.runs.push(write_run(&mut self.data, &mut self.index, self.store, self.snappy)?);
             // at most MERGE_FAN open runs; the runs so far are the first rows, so their merge keeps the sort stable
             if self.runs.len() == MERGE_FAN {
                 let all = std::mem::take(&mut self.runs);
-                self.runs.push(merge(all, &self.key, self.store)?);
+                self.runs.push(merge(all, &self.key, self.store, self.snappy)?);
             }
         }
         Ok(())
@@ -353,7 +414,7 @@ impl<'s, K: Ord + Send, F: Fn(&[u8]) -> K> Sorter<'s, K, F> {
         F: 'a,
     {
         if self.runs.is_empty() || !self.index.is_empty() {
-            self.runs.push(write_run(&mut self.data, &mut self.index, self.store)?);
+            self.runs.push(write_run(&mut self.data, &mut self.index, self.store, self.snappy)?);
         }
         let runs = std::mem::take(&mut self.runs);
         merged(runs, self.key, codec)
@@ -364,7 +425,7 @@ impl<'s, K: Ord + Send, F: Fn(&[u8]) -> K> Sorter<'s, K, F> {
 const MERGE_FAN: usize = 64;
 
 /// The merge of sorted runs: the smallest (key, run) first; a run is in the order of the input, so the result is stable.
-fn merge<K: Ord>(runs: Vec<Rows>, key: &impl Fn(&[u8]) -> K, store: &dyn Store) -> io::Result<Rows> {
+fn merge<K: Ord>(runs: Vec<Rows>, key: &impl Fn(&[u8]) -> K, store: &dyn Store, snappy: bool) -> io::Result<Rows> {
     let mut its: Vec<RawIter> = runs.into_iter().map(Rows::raw).collect::<io::Result<_>>()?;
     let mut heap = BinaryHeap::new();
     let mut heads: Vec<Vec<u8>> = vec![Vec::new(); its.len()];
@@ -373,7 +434,7 @@ fn merge<K: Ord>(runs: Vec<Rows>, key: &impl Fn(&[u8]) -> K, store: &dyn Store) 
             heap.push(Reverse((key(&heads[i]), i)));
         }
     }
-    let mut w = Writer::new(store)?;
+    let mut w = if snappy { Writer::snappy(store)? } else { Writer::new(store)? };
     while let Some(Reverse((_, i))) = heap.pop() {
         w.push_bytes(&heads[i])?;
         if its[i].next_into(&mut heads[i])? {
@@ -601,15 +662,44 @@ mod sorter_tests {
         let store = temp_store();
         let key = |b: &[u8]| i64::from_le_bytes(b[..8].try_into().unwrap()).div_euclid(10);
         let rows: Vec<i64> = (0..5000).map(|i| (i * 7919) % 5000 - 1300).collect();
-        let (mut w, mut s) = (Writer::new(&*store).unwrap(), Sorter::new(key, 200, &*store));
-        for k in &rows {
-            w.push(&I64, k).unwrap();
-            s.push(&I64, k).unwrap();
+        for snappy in [false, true] {
+            let mut w = Writer::new(&*store).unwrap();
+            let mut s = Sorter::new(key, 200, &*store);
+            if snappy {
+                s = s.snappy();
+            }
+            for k in &rows {
+                w.push(&I64, k).unwrap();
+                s.push(&I64, k).unwrap();
+            }
+            let want: Vec<i64> = sort_bytes(w.finish().unwrap(), key, 200, &*store).unwrap().read(&I64).unwrap().map(|r| r.unwrap()).collect();
+            let got: Vec<i64> = s.sorted(&I64).unwrap().map(|r| r.unwrap()).collect();
+            assert_eq!((got.len(), &got), (5000, &want), "snappy {snappy}");
         }
-        let want: Vec<i64> = sort_bytes(w.finish().unwrap(), key, 200, &*store).unwrap().read(&I64).unwrap().map(|r| r.unwrap()).collect();
-        let got: Vec<i64> = s.sorted(&I64).unwrap().map(|r| r.unwrap()).collect();
-        assert_eq!((got.len(), &got), (5000, &want));
         assert_eq!(Sorter::new(key, 200, &*store).sorted(&I64).unwrap().count(), 0);
+    }
+
+    /// A file with Snappy blocks gives its rows back, also over the ends of the blocks and with rows of each length.
+    #[test]
+    fn snappy_blocks_give_the_rows_back() {
+        let store = temp_store();
+        let rows: Vec<Vec<u8>> = (0..40_000u32).map(|i| (0..i % 300).map(|j| (i ^ j) as u8).collect()).collect();
+        let mut w = Writer::snappy(&*store).unwrap();
+        for r in &rows {
+            w.push_bytes(r).unwrap();
+        }
+        let mut f = w.finish().unwrap();
+        assert!(f.bytes > 3 * BLOCK as u64, "more than one block");
+        for _ in 0..2 {
+            f.blob.seek(SeekFrom::Start(0)).unwrap();
+            let mut it = RawIter::new(&mut f.blob, f.len, f.snappy);
+            let mut buf = Vec::new();
+            let mut got = Vec::new();
+            while it.next_into(&mut buf).unwrap() {
+                got.push(buf.clone());
+            }
+            assert_eq!(got, rows);
+        }
     }
 }
 

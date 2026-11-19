@@ -46,7 +46,8 @@ pub fn quack_pmtiles_to<R: Read + Seek + Send, W: Write + Seek>(
 ) -> Result<PmtilesCounts, String> {
     let io = |e: std::io::Error| format!("quack --pmtiles: {e}");
     let store = temp_store();
-    let mut sorter = Sorter::new(row_key, SORT_BUDGET, &*store);
+    // Snappy blocks: the rows repeat much (sorted by tile, with the same attributes)
+    let mut sorter = Sorter::new(row_key, SORT_BUDGET, &*store).snappy();
     let mut counts = PmtilesCounts::default();
     // the box of the data in world units
     let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];

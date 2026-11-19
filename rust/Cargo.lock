@@ -829,6 +829,7 @@ dependencies = [
  "rstar",
  "serde",
  "serde_json",
+ "snap",
  "zstd",
 ]
 
