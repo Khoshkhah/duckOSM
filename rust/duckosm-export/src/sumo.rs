@@ -286,7 +286,10 @@ fn arrow_connections(
     // by_ends: a dict of Python (a later row takes the value, the key keeps its first place)
     let mut keys: Vec<(i64, i64, i64)> = Vec::new();
     let mut by_ends: HashMap<(i64, i64, i64), &Edge> = HashMap::new();
-    for r in rows.iter().filter(|r| r.src != r.tgt) {
+    // a way with all its points at one place: netconvert's OSM import discards it ("only 1 node"), and then a connection
+    // of it names an edge that netconvert does not know. It stays out of this file and gets no lane connections here.
+    let one_place = |r: &Edge| shape(r.wkt.as_deref()).is_some_and(|s| s.split(' ').all(|p| Some(p) == s.split(' ').next()));
+    for r in rows.iter().filter(|r| r.src != r.tgt && !one_place(r)) {
         let k = (r.src, r.tgt, way_of[&r.id].0);
         if by_ends.insert(k, r).is_none() {
             keys.push(k);
@@ -425,6 +428,8 @@ fn arrow_connections(
         "--osm-files", &osm_path.display().to_string(), "--type-files", &typ_path.display().to_string(),
         "--connection-files", &con_path.display().to_string(), "--output-file", &net_path.display().to_string(),
         "--osm.turn-lanes", "true", "--osm.lane-access", "true",
+        // two OSM ways on the same nodes are two duckOSM edges: without this, netconvert keeps one of them
+        "--osm.skip-duplicates-check", "true",
     ]
     .iter()
     .map(|s| s.to_string())
