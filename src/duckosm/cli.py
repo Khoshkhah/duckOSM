@@ -473,30 +473,6 @@ def levels_edit(db, area, port, reports, plain):
 
 @main.command()
 @click.argument('db', type=DB_PATH)
-def bus(db):
-    """Match the bus routes of the db's OSM relations to its driving edges (schema bus).
-
-    Writes bus.routes (one row per route relation, with its gaps) and bus.route_edges (the driving edges
-    each route travels, in order and in its direction; bus lanes included). The build does it too
-    (options.bus_routes); this command adds it to a file built before. Needs raw.* and the driving network.
-    """
-    import duckdb
-
-    from duckosm.bus import write_bus_routes
-
-    con = duckdb.connect(db)
-    try:
-        r = write_bus_routes(con)
-    except duckdb.CatalogException as e:
-        raise click.ClickException(f"needs raw.relations, raw.ways and the driving network: {e}")
-    finally:
-        con.close()
-    gaps = int((r["gaps"].str.len() > 0).sum())
-    click.echo(f"{len(r)} bus routes, {int(r['edges'].sum()):,} route edges, {gaps} with gaps; wrote bus.routes and bus.route_edges")
-
-
-@main.command()
-@click.argument('db', type=DB_PATH)
 @click.option('--json', 'as_json', is_flag=True, help='Print one JSON object instead of a table')
 def info(db, as_json):
     """What a built database holds: per mode its edges, nodes, private edges, km, legal turns and
@@ -645,39 +621,6 @@ def sumo(db, mode, out_dir, name, connections, config, netconvert):
         click.echo(f"wrote {out['con']} ({out['n_connections']} connections)")
     if out.get("net"):
         click.echo(f"wrote {out['net']}")
-
-
-@main.command()
-@click.argument('db', type=DB_PATH)
-@click.option('--transfer-cost', type=float, default=60.0, show_default=True,
-              help='Flat transfer penalty in seconds at each shared junction (v1 coarse)')
-@click.option('--schema', default='mm', show_default=True,
-              help='Target schema for the mm.edges / mm.transfers tables')
-def multimodal(db, transfer_cost, schema):
-    """Build the intermodal transfer graph (mm.edges + mm.transfers) into a built db.
-
-    Stitches the per-mode networks (driving/walking/cycling) into one layered graph so a trip can
-    switch mode mid-route (walk->drive->walk / park-and-ride). Needs >=2 modes including walking.
-    Route the result with `duckosm.route_multimodal(con, src_node, dst_node)`. See
-    https://khoshkhah.github.io/duckOSM/concepts/multimodal/. The db is modified in place (writes the `mm` schema).
-    """
-    import duckdb
-
-    from duckosm.processors import MultimodalBuilder
-
-    logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
-    con = duckdb.connect(db)                     # read-write: this writes the mm.* tables
-    try:
-        stats = MultimodalBuilder(con, transfer_s=transfer_cost, schema=schema).run()
-        con.execute("CHECKPOINT")
-    except NotImplementedError as e:
-        raise click.ClickException(str(e))
-    except Exception as e:
-        raise click.ClickException(str(e))
-    finally:
-        con.close()
-    click.echo(f"wrote {schema}.edges ({stats.get('edge_count', 0)} edges) and "
-               f"{schema}.transfers ({stats.get('transfer_count', 0)} arcs)")
 
 
 @main.command(name="export-graph")

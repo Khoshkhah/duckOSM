@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// The command names of this crate: `duckosm <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 7] = ["info", "way", "init-config", "boundary", "extract", "admin", "elevation"];
+pub const COMMANDS: [&str; 9] = ["info", "way", "init-config", "boundary", "extract", "admin", "elevation", "bus", "multimodal"];
 
 #[derive(Parser)]
 #[command(name = "duckosm")]
@@ -16,6 +16,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Match the bus routes of the db's OSM relations to its driving edges (schema bus). Writes bus.routes (one row per
+    /// route relation, with its gaps) and bus.route_edges (the driving edges each route travels, in order and in its
+    /// direction; bus lanes included). The build does it too (options.bus_routes); this command adds it to a file built
+    /// before. Needs raw.* and the driving network.
+    Bus {
+        /// The .duckdb file of a build.
+        db: PathBuf,
+    },
+    /// Build the multimodal graph (mm.edges and mm.transfers) into a built db: a route can then change mode at a junction
+    /// (walk, drive, walk). Needs walking and one more mode. Route the result with `duckosm route-multimodal`. The db is
+    /// changed in place.
+    Multimodal {
+        /// The .duckdb file of a build.
+        db: PathBuf,
+        /// The cost of a change of mode at a shared junction, in seconds.
+        #[arg(long, default_value_t = 60.0)]
+        transfer_cost: f64,
+        /// Another cost for one direction, FROM->TO=SECONDS (for example walking->driving=120). Repeat for more.
+        #[arg(long = "pair-cost", value_name = "FROM->TO=SECONDS")]
+        pair_costs: Vec<String>,
+        /// The schema of the mm.edges and mm.transfers tables.
+        #[arg(long, default_value = "mm")]
+        schema: String,
+    },
     /// What a built database holds: per mode its edges, nodes, private edges, km, legal turns and turn restrictions; when and
     /// by which duckOSM version it was built; its time zone; and the other schemas (raw OSM data, base-map layers, across
     /// modes, boundary, elevation). Read-only.
@@ -222,6 +246,24 @@ pub fn run(args: &[String]) -> Result<()> {
             );
         }
         Cmd::Admin { pbf, db, gpkg } => crate::admin::admin(&pbf, &db, gpkg.as_deref())?,
+        Cmd::Bus { db } => {
+            need_db(&db)?;
+            let c = duckosm_duckdb::steps::bus_routes(&db)?;
+            println!("{} bus routes, {} route edges, {} with gaps; wrote bus.routes and bus.route_edges", c.routes, crate::info::thousands(c.edges as i64), c.with_gaps);
+        }
+        Cmd::Multimodal { db, transfer_cost, pair_costs, schema } => {
+            need_db(&db)?;
+            let pairs = pair_costs
+                .iter()
+                .map(|p| {
+                    p.rsplit_once('=')
+                        .and_then(|(k, v)| Some((k.to_string(), v.parse::<f64>().ok()?)))
+                        .ok_or_else(|| format!("--pair-cost {p}: give FROM->TO=SECONDS"))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let (e, t) = duckosm_duckdb::steps::multimodal(&db, transfer_cost, &pairs, &schema)?;
+            println!("wrote {schema}.edges ({e} edges) and {schema}.transfers ({t} arcs)");
+        }
         Cmd::InitConfig { path, force } => {
             if path.exists() && !force {
                 return Err(format!("{} already exists (use --force to overwrite)", path.display()));
@@ -232,3 +274,4 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     Ok(())
 }
+

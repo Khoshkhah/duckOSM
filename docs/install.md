@@ -77,7 +77,7 @@ Both are being replaced by Rust code.
 
 ## Not ported to Rust yet
 
-`build` (in part), `levels`, `bus`, `multimodal` and `clip-pbf`. They work, and they move to Rust next.
+`build` (in part), `levels` and `clip-pbf`. They work, and they move to Rust next.
 
 ## Where files go
 

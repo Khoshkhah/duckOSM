@@ -74,6 +74,7 @@ duckosm build [OPTIONS]
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
+| `--tile-index` / `--no-tile-index` | add the zoom-28 [tile keys](database.md#tile-keys) to nodes and edges. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) has this option | on |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
@@ -642,4 +643,5 @@ duckosm multimodal [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `--transfer-cost FLOAT` | seconds added at each change of mode | `60.0` |
+| `--pair-cost FROM->TO=SECONDS` | another cost for one direction, for example `walking->driving=120`; repeat it for more directions (the build's `multimodal.transfer_costs`) | none |
 | `--schema TEXT` | schema for the two tables | `mm` |

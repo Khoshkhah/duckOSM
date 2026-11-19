@@ -1,15 +1,15 @@
 # What each network contains
 
-Each mode is its own schema with its own `edges`, `nodes` and `edge_graph`. All rules and tag lists:
-[networks in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/networks_details.md).
+Each mode is a schema of its own, with its own `edges`, `nodes` and `edge_graph`. Your [OSM fixes](../guides/edit-osm-data.md)
+can remove a way from a mode, or change its one-way, lanes and turns.
 
-| Mode | Monaco edges | Monaco nodes | Keeps | Speed |
-|---|---|---|---|---|
-| `driving` | 2,765 | 1,719 | roads from `motorway` to `service`, `living_street`, `road` | the speed limit, or a default for the road class |
-| `walking` | 10,952 | 4,116 | footways, paths, steps and roads people can walk on; never `motorway` ([Walking](../guides/walking.md)) | 5 km/h |
-| `cycling` | 10,274 | 4,151 | cycleways, paths, tracks and roads; plus dismount edges | 15 km/h; 5 km/h on dismount edges |
+| Mode | Keeps | Speed |
+|---|---|---|
+| `driving` | roads from `motorway` to `service`, `living_street`, `road` | the speed limit, or a default for the road class |
+| `walking` | footways, paths, steps and the roads that people can walk on; never `motorway` ([Walking](../guides/walking.md)) | 5 km/h |
+| `cycling` | cycleways, paths, tracks and roads, and the dismount edges | 15 km/h; 5 km/h on dismount edges |
 
-A way with no `highway` tag is in no network. The exception is a ferry line. A way that a mode does not keep stays in `raw.ways`.
+A way with no `highway` tag is in no network, except a ferry line. A way that a mode does not keep stays in `raw.ways`.
 
 ## Access: private and forbidden roads
 
@@ -61,11 +61,12 @@ Walking and cycling edges get a type from OSM sub-tags, for example `sidewalk`, 
 ## Turn restrictions
 
 Only driving has them, from OSM `type=restriction` relations (via a node) and from a [fixes file](../guides/edit-osm-data.md#the-fixes-file).
-A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction removes all other turns. Monaco: 38 of the
-43 restriction relations map onto edges.
+A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction removes all other turns.
 
 ## Bus routes
 
 OSM bus route relations are matched to the driving edges, in schema [`bus`](../reference/database.md#bus-schema)
 (`bus.routes`, `bus.route_edges`). A PBF build with driving makes them; [`duckosm bus DB`](../reference/cli.md#bus) adds them later.
-`bus.routes.gaps` lists each way that the route cannot follow. Monaco: 56 routes, no gaps.
+`bus.routes.gaps` lists each way that the route cannot follow.
+
+All rules and tag lists: [networks in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/networks_details.md).
