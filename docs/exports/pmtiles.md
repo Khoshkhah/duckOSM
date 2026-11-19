@@ -53,14 +53,28 @@ Not in the file:
 
 ## Speed and size
 
-Mac mini (Apple M6, 12 cores, 16 GB).
+Mac mini (Apple M6, 12 cores, 16 GB). 1 GB = 10⁹ bytes. The memory is the peak footprint (`/usr/bin/time -l`), and
+the disk is the peak of the output and the temporary files.
 
-| Area (input) | Time | Memory | File | Tiles |
-|---|---|---|---|---|
-| Monaco (0.6 MB) | 0.06 s | 0.05 GB | 0.2 MB | 59 |
-| Kentucky (148 MB) | 5.2 s | 0.99 GB | 101 MB | 41 640 |
+| Area (input) | | duckOSM | Tilemaker 3.2.0 |
+|---|---|---|---|
+| Monaco (0.6 MB) | time | 0.06 s | 1.5 s |
+| | memory | 0.05 GB | 1.5 GB |
+| | file | 0.2 MB | |
+| | tiles | 59 | |
+| Kentucky (148 MB) | time | 5.5 s | 5.0 s |
+| | memory | 1.13 GB | 2.9 GB |
+| | file | 101 MB | 101 MB |
+| | tiles | 41 640 | 71 791 |
+| France (5.1 GB) | time | 236 s | 212 s |
+| | memory | 9.3 GB | 3.1 GB |
+| | file | 2.95 GB | 2.91 GB |
+| | tiles | 308 154 | 623 176 |
+| | disk | 16.1 GB | 18.4 GB |
 
-On Monaco, Tilemaker takes 1.5 s and 1.5 GB.
+On France, duckOSM runs with `--tile-zoom 8`, and Tilemaker with `--store` (its nodes and ways in a temporary folder,
+not in memory). Planetiler: not run, because the Mac mini has no Java runtime. Planetiler also writes the OpenMapTiles
+schema, not Shortbread.
 
 ## Against Tilemaker
 
