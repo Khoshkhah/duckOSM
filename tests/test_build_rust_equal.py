@@ -29,6 +29,8 @@ def _tables(con, db):
 # the time of the build, and where it ran: not the same in two builds. The heads of edge_levels: roadstyle's Rust level editor makes the
 # two heads of a road shorter than 10 m shorter (newer than the roadstyle of the Python build), so only the numbers are compared.
 VOLATILE = {"created", "built_at", "area", "build_dir", "build_config", "roadstyle_version", "head_start_m", "head_end_m"}
+# the zoom-28 tile keys of tileroute: only the Rust build writes them (PR 336, docs/reference/database.md#tile-keys)
+RUST_ONLY = {"tile", "from_tile", "to_tile", "lca_zoom"}
 
 
 def _col(name, typ):
@@ -44,7 +46,7 @@ def _col(name, typ):
 
 
 def _rows(con, db, table):
-    desc = [r for r in con.execute(f"DESCRIBE {db}.{table}").fetchall() if r[0] not in VOLATILE]
+    desc = [r for r in con.execute(f"DESCRIBE {db}.{table}").fetchall() if r[0] not in VOLATILE | RUST_ONLY]
     cols = [(r[0], r[1]) for r in desc]
     sel = ", ".join(_col(r[0], r[1]) for r in desc)
     return cols, sorted(map(repr, con.execute(f"SELECT {sel} FROM {db}.{table}").fetchall()))
