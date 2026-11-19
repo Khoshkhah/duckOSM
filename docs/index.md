@@ -15,8 +15,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </div>
 
 <figure markdown="span">
-  ![duckOSM Studio: the steps in the panel, and the area of Monaco on the map](images/studio.png)
-  <figcaption>duckOSM Studio in the browser: choose an area, get its OSM data, build, edit and export.</figcaption>
+  ![duckOSM Studio: the Build card in the panel, and the road network of Monaco on the map](images/tour-studio.png)
+  <figcaption>duckOSM Studio in the browser: choose an area, build its network, edit the OSM data and export.</figcaption>
 </figure>
 
 ## Highlights
@@ -90,6 +90,21 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
   <figcaption>Edit OSM data: the turns at a junction, in the browser or with <code>duckosm edit</code>.</figcaption>
 </figure>
 
+<figure markdown="span">
+  ![The quack page: the counts of the five GDAL layers of Monaco and a download button for each layer](images/tour-quack.png)
+  <figcaption>The quack page: GDAL's five OSM layers or the QuackOSM table, made in the browser.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![The route planner: a walking route from Fontvieille to Larvotto on the map, with the directions](images/tour-route.png)
+  <figcaption>The route planner of <code>duckosm route-map</code>: a route on the turn graph, with directions.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![The map of duckosm viz in 3D: the buildings of Monaco stand up around the port, with the roads between them](images/tour-map.png)
+  <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database.</figcaption>
+</figure>
+
 <figure class="pair" markdown="span">
   ![The lanes of one Monaco junction from the GMNS export, drawn by roadstyle](images/tour-lanes-gmns.png)
   ![The same junction from the SUMO export after netconvert, drawn by roadstyle](images/tour-lanes-sumo.png)
@@ -97,13 +112,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </figure>
 
 <figure markdown="span">
-  ![Monaco: the ground heights from FABDEM, with the area boundary](images/terrain-monaco.png)
-  <figcaption>The ground of an area: one bare-earth DEM for every height.</figcaption>
-</figure>
-
-<figure markdown="span">
-  ![The heights of the roads of Södermalm](images/sodermalm_elevation.png)
-  <figcaption>The height of each node and edge, after <code>duckosm elevation</code>.</figcaption>
+  ![Monaco in 3D on the ground of the area, with hillshade: the hill rises behind the port, and the roads climb it](images/tour-elevation.png)
+  <figcaption>Monaco in 3D on the ground of the area: the hill behind the port and the roads that climb it (<code>duckosm elevation</code>, or the step Ground height in Studio).</figcaption>
 </figure>
 
 </div>
