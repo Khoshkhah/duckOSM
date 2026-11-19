@@ -126,14 +126,11 @@ fn gis_equals_python() {
         got.push(format!("geoparquet\t{lyr}\t{}", summary(&format!("read_parquet('{}/{lyr}.parquet')", gp.display()))));
     }
     same(&gp.join("layers.json"), "monaco_geoparquet_layers.json");
-    // without ogr2ogr (the CI), each layer is its own file: the same rows
+    // one GeoPackage file with all layers
     let s = to_gis(db(), &d.join("monaco.gpkg"), &[], "gpkg", true, Some("monaco"), "EPSG:4326").unwrap();
+    let p = s.path.expect("one GeoPackage file");
     for (lyr, _) in &s.layers {
-        let src = match &s.path {
-            Some(p) => format!("ST_Read('{}', layer = '{lyr}')", p.display()),
-            None => format!("ST_Read('{}/monaco_{lyr}.gpkg')", d.display()),
-        };
-        got.push(format!("gpkg\t{lyr}\t{}", summary(&src)));
+        got.push(format!("gpkg\t{lyr}\t{}", summary(&format!("ST_Read('{}', layer = '{lyr}')", p.display()))));
     }
     let shp = d.join("shp");
     let s = to_gis(db(), &shp, &["driving".into()], "shp", true, Some("monaco"), "EPSG:4326").unwrap();
@@ -142,8 +139,7 @@ fn gis_equals_python() {
         let prj = std::fs::read_to_string(shp.join(format!("monaco_{lyr}.prj"))).unwrap();
         got.push(format!("shp\t{lyr}.prj\t{}\t\t", prj.trim()));
     }
-    // gis-debug on these files (the GeoPackage of one file needs ogr2ogr, as in the golden), and on bad shapefiles
-    assert!(d.join("monaco.gpkg").is_file(), "the gis-debug golden needs the GeoPackage of ogr2ogr (GDAL)");
+    // gis-debug on these files (the golden was made from the GeoPackage that ogr2ogr joined), and on bad shapefiles
     bad_files(&d.join("bad"));
     for (x, golden) in [("monaco.gpkg", "gpkg"), ("shp", "shp"), ("bad", "bad")] {
         let page = d.join(format!("{x}.html"));
