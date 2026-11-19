@@ -256,7 +256,7 @@ the data dock shows the facts of the clicked item and the columns of the clicked
 A result of ids shows its objects: turns (`edge_graph`, `turn_restrictions`), ways, bus routes and H3 cells, each with a card. The table `extra.edits`
 has the changes of the fixes file, with the time of each. **Ask** uses your own key of a free AI service, which stays in your browser. The page does not
 change the data or the fixes file. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-Guide: [Ask questions on a page](../guides/query.md#ask-questions-on-a-page-duckosm-ask).
+Guide: [Ask questions on a page](../guides/query.md#ask-in-words).
 
 ```text
 duckosm ask [OPTIONS] DB
