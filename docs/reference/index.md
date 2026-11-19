@@ -8,6 +8,7 @@ Every command, function, setting and table, for look-up.
 | [Python SDK](python.md) | Every function of the Python package `duckosm`. |
 | [Rust SDK](rust.md) | The Rust crates of the engine and how to use them. |
 | [Configuration](configuration.md) | Every setting of the YAML config file of a build. |
+| [The boundary file](boundary.md) | The format of a boundary file, and how to make one. |
 | [Database schema](database.md) | Every table and column that a build writes. |
 | [GMNS tables](../exports/gmns_tables.md) | Every table and column of the GMNS database of `duckosm gmns`. |
 | [Base-map layers](features.md) | The layers of the `features` schema and their classes. |
