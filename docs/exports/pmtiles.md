@@ -66,11 +66,11 @@ the disk is the peak of the output and the temporary files.
 | | memory | 1.13 GB | 2.9 GB |
 | | file | 101 MB | 101 MB |
 | | tiles | 41 640 | 71 791 |
-| France (5.1 GB) | time | 236 s | 212 s |
-| | memory | 9.3 GB | 3.1 GB |
+| France (5.1 GB) | time | 228 s | 212 s |
+| | memory | 2.7 GB | 3.1 GB |
 | | file | 2.95 GB | 2.91 GB |
 | | tiles | 308 154 | 623 176 |
-| | disk | 16.1 GB | 18.4 GB |
+| | disk | 18.0 GB | 18.4 GB |
 
 On France, duckOSM runs with `--tile-zoom 8`, and Tilemaker with `--store` (its nodes and ways in a temporary folder,
 not in memory). Planetiler: not run, because the Mac mini has no Java runtime. Planetiler also writes the OpenMapTiles
