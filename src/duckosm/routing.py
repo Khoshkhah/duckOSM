@@ -418,7 +418,7 @@ def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: st
     """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
 
     Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
-    by :class:`duckosm.processors.multimodal.MultimodalBuilder`: the roads are ``mm.edges`` (weight
+    by ``duckosm multimodal``: the roads are ``mm.edges`` (weight
     ``cost_s``) and the changes of mode are ``mm.transfers`` (a transfer penalty in seconds). So a
     single trip can **switch mode** (walk → drive → walk).
 
