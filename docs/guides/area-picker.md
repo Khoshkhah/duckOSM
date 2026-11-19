@@ -41,12 +41,17 @@ picker
 
 3. Click **Get**. The line next to the button shows the progress of the download and the cut.
 
-4. Use the result:
+4. Build the network of the area with the result:
 
     ```python
+    import subprocess, sys
+
     area = picker.result            # area.pbf and area.boundary: paths
-    db = duckosm.build(pbf=area.pbf, boundary=area.boundary)
+    subprocess.run([sys.executable, "-m", "duckosm", "build", "--pbf", str(area.pbf),
+                    "--boundary", str(area.boundary), "-o", "data/area.duckdb", "-m", "driving"], check=True)
     ```
+
+    The test notebook `notebooks/area_picker.ipynb` also counts the edges and finds a route in the new database.
 
 You can also set the area and get the file from Python, with no click:
 
