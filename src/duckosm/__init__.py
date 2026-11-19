@@ -19,6 +19,7 @@ _NAMES = {
     "to_gmns": "duckosm.gmns", "to_meso": "duckosm.gmns", "to_micro": "duckosm.gmns", "check_gmns": "duckosm.gmns_check",
     "to_matsim": "duckosm._api", "to_matsim_lanes": "duckosm._api", "to_opendrive": "duckosm._api",
     "to_railml": "duckosm._api", "to_lanelet2": "duckosm._api",
+    "get": "duckosm._api", "Area": "duckosm._api",
     "build_lane_graph": "duckosm._api", "route_lanes": "duckosm._api", "to_elevation": "duckosm._api",
 }
 __all__ = list(_NAMES)

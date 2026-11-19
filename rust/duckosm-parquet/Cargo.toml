@@ -23,7 +23,7 @@ bytes = "1"   # a GeoParquet file in memory (the join of quack by tiles in the b
 # the writers encode the columns of a row group on all threads; load_raw_here decodes the blocks on all threads
 rayon = "1.12"
 # the rows of visualization.edge_levels (the same commit as duckosm-build)
-roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "39696602fac3a6e200fd324526022bc88239b95f" }
+roadstyle-levels = { workspace = true }
 
 [dev-dependencies]
 duckosm-core = { path = "../duckosm-core" }

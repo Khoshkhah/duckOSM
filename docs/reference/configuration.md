@@ -28,7 +28,7 @@ In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
 | `name` | `default` | `my_import` | stem of `-o`, else of `-b`, else of `-p` or `--source-db` | the area's name: the output file is `<name>.duckdb` when `output_path` is a folder; also names the cached PBF cut (below) and the report files |
 | `output_path` | `output.duckdb` | `.` | `-o` | a path ending in `.duckdb` is the output file; anything else is a folder, and the file is `<output_path>/<name>.duckdb` |
 | `modes` | `[driving]` | `[driving]` | `-m` | the networks to build: any of `driving`, `walking`, `cycling`, one schema each |
-| `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md). Used only when named |
+| `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/edit-osm-data.md#the-fixes-file). Used only when named |
 | `pbf_path` | none | | | short for `source.pbf_path` |
 | `boundary_path` | none | | | short for `boundary.path` |
 | `h3_cell` | none | | `--h3-cell` | short for `boundary.h3_cell` |
@@ -71,7 +71,7 @@ The clean-up after the area is cut. Details: [Network clean-up](../concepts/clea
 | Key | Default | Does |
 |---|---|---|
 | `clip.predicate` | `intersects` | `duckdb` source only: which edges are copied. `intersects`: every edge that touches the area; `within`: only edges completely inside; `centroid`: edges whose middle point is inside. A `pbf` build always keeps whole ways |
-| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md#component-filter)) |
+| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md)) |
 | `clip.min_component_edges` | `1` | no effect: the component filter is removed |
 | `clip.connectivity_rescue` | `true` | walking and cycling, `pbf` build: [join dangling path ends](../concepts/cleanup.md#connect-dangling-paths) to the nearest node. Runs with or without a boundary |
 | `clip.connect_snap_m` | `10.0` | the largest gap, in metres, that `connectivity_rescue` joins |
@@ -86,6 +86,7 @@ Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_l
 | `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns |
 | `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res`. `duckosm` writes the same values (flag: `--h3-resolution`) |
 | `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` (`duckosm`: for the columns only) |
+| `options.tile_indexing` | `true` | `--tile-index` / `--no-tile-index` | add `nodes.tile` and `edges.from_tile`, `to_tile`, `lca_zoom`: the zoom-28 [tile keys](database.md#tile-keys) of tileroute. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) writes them. There is no zoom option: the zoom is always 28 |
 | `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
 | `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
 | `options.engine` | `rust` | `--engine` | who builds the network step (edges, private edges, nodes, `edge_id_map`): `rust`, the Rust engine in the module `duckosm._rust` (about 50 times faster, the same tables and ids), or `python`, the SQL steps in DuckDB (the reference). The other steps run in Python in both cases. A clip build (`source.type: duckdb`) has no PBF and ignores the option. [The Rust engine](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/rust_engine.md) |
@@ -139,7 +140,7 @@ The area's DEM: its [ground reference](../concepts/ground-reference.md). Set it 
 command line. Only the Rust build (`duckosm --config`) reads this section: it samples the DEM and writes the heights,
 `main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
 `duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
-[`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit) do that
+[`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#the-editor) do that
 step themselves, with the keys of this section (they need `duckosm[elevation]`).
 
 | Key | Default | Does |

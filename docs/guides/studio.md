@@ -32,7 +32,7 @@ export the result.
 | The areas are | in the browser's storage | in folders on your disk (default: the current folder) |
 | Largest area | a country, by tiles | a country, by tiles |
 
-Both versions use the same steps and give the same tables. Speed on France: [Home](../index.md#speed-on-france).
+Both versions use the same steps and give the same tables. Speed on France: [Speed](../compare/speed.md).
 How the two builds work: [Browser and native builds](../concepts/browser-native.md).
 
 The native version (its options, your areas, the limits):

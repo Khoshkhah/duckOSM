@@ -1,7 +1,9 @@
-"""Bus routes: an OSM bus route relation as the ordered driving edges it travels, in its direction (src/duckosm/bus.py)."""
-import duckdb
+"""Bus routes: an OSM bus route relation as the ordered driving edges it travels, in its direction (`duckosm bus`, Rust:
+rust/duckosm-core/src/bus.rs)."""
+import subprocess
+import sys
 
-from duckosm.bus import match_bus_routes
+import duckdb
 
 WAYS = {  # osm_id: (nodes, tags)
     10: ([1, 2, 3], {"highway": "primary"}),                                  # drawn along the route 1 -> 3, two edges
@@ -51,64 +53,61 @@ def _db():
     return con
 
 
-def _route(df, r):
-    return list(df[df.relation_id == r].sort_values("seq").edge_ref)
-
-
-def _gaps(df, r):
-    g = df.attrs["gaps"]
-    return list(g[g.relation_id == r][["way_id", "kind"]].itertuples(index=False, name=None))
-
-
-def test_directions_from_the_neighbouring_ways_and_the_roles():
-    """Split ways in both drawing directions, a contraflow bus lane, a way entered in its middle (role backward); stops and platforms skipped."""
-    df = match_bus_routes(_db())
-    assert _route(df, 1) == ["10#1f", "10#2f", "20#2r", "20#1r", "30#1r", "40#1r"]
-    assert list(df[df.relation_id == 1].bus_lane) == [False] * 4 + [True, False]
-    assert list(df[df.relation_id == 1].seq) == [1, 2, 3, 4, 5, 6]
-    assert _gaps(df, 1) == []
-
-
-def test_gaps_are_reported():
-    """A way not joined to the next, a way with no car edge, a way outside the file, a private road, a role the ways contradict."""
-    df = match_bus_routes(_db())
-    assert _route(df, 2) == ["10#1f", "10#2f"]
-    assert _gaps(df, 2) == [(10, "no_connection"), (50, "no_edge"), (999, "outside")]
-    assert _route(df, 3) == ["30#1f", "20#1f", "20#2f", "10#2r", "10#1r"]       # 10 travelled backwards: its role forward is wrong
-    assert _gaps(df, 3) == [(10, "role_conflict"), (70, "private")]
-
-
-def test_a_roundabout_from_entry_to_exit():
-    df = match_bus_routes(_db())
-    assert _route(df, 4) == ["81#1f", "80#1f", "80#2f", "82#1f"]
-    assert _gaps(df, 4) == []
-
-
-def test_the_bus_tables():
-    """bus.routes: one row per route with its gaps (outside the area counted apart); bus.route_edges: the edges in order."""
-    from duckosm.bus import write_bus_routes
-    con = _db()
-    write_bus_routes(con)
-    rows = {r[0]: r[1:] for r in con.execute("SELECT osm_id, ref, edges, outside, gaps FROM bus.routes").fetchall()}
-    assert rows == {1: ("1", 6, 0, []), 2: ("2", 2, 1, ["10 no_connection", "50 no_edge"]),
-                    3: ("3", 5, 0, ["10 role_conflict", "70 private"]), 4: ("4", 4, 0, [])}
-    assert con.execute("SELECT list(edge_ref ORDER BY seq) FROM bus.route_edges WHERE route_id = 1").fetchone()[0] == \
-        ["10#1f", "10#2f", "20#2r", "20#1r", "30#1r", "40#1r"]
-    assert con.execute("SELECT count(*) FROM bus.route_edges WHERE bus_lane").fetchone()[0] == 1
-
-
-def test_bus_command_writes_the_tables(tmp_path):
-    from click.testing import CliRunner
-
-    from duckosm.cli import main
+def _bus(tmp_path):
+    """`duckosm bus` on a file copy of the test db: (the command's output, a connection to the file)."""
     db = tmp_path / "routes.duckdb"         # not bus.duckdb: its catalog name would clash with the schema bus
     con = _db()
     con.execute(f"ATTACH '{db}' AS f; COPY FROM DATABASE memory TO f; DETACH f")
     con.close()
-    r = CliRunner().invoke(main, ["bus", str(db)])
-    assert r.exit_code == 0, r.output
-    assert "4 bus routes, 17 route edges, 2 with gaps" in r.output
+    r = subprocess.run([sys.executable, "-m", "duckosm", "bus", str(db)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout, duckdb.connect(str(db))
+
+
+def _route(con, r):
+    return con.execute("SELECT list(edge_ref ORDER BY seq) FROM bus.route_edges WHERE route_id = ?", [r]).fetchone()[0]
+
+
+def _gaps(con, r):
+    return con.execute("SELECT gaps, outside FROM bus.routes WHERE osm_id = ?", [r]).fetchone()
+
+
+def test_directions_from_the_neighbouring_ways_and_the_roles(tmp_path):
+    """Split ways in both drawing directions, a contraflow bus lane, a way entered in its middle (role backward); stops and platforms skipped."""
+    _, con = _bus(tmp_path)
+    assert _route(con, 1) == ["10#1f", "10#2f", "20#2r", "20#1r", "30#1r", "40#1r"]
+    assert con.execute("SELECT list(bus_lane ORDER BY seq), list(seq ORDER BY seq) FROM bus.route_edges WHERE route_id = 1").fetchone() == \
+        ([False] * 4 + [True, False], [1, 2, 3, 4, 5, 6])
+    assert _gaps(con, 1) == ([], 0)
+
+
+def test_gaps_are_reported(tmp_path):
+    """A way not joined to the next, a way with no car edge, a way outside the file, a private road, a role the ways contradict."""
+    _, con = _bus(tmp_path)
+    assert _route(con, 2) == ["10#1f", "10#2f"]
+    assert _gaps(con, 2) == (["10 no_connection", "50 no_edge"], 1)                 # way 999 is outside the file
+    assert _route(con, 3) == ["30#1f", "20#1f", "20#2f", "10#2r", "10#1r"]       # 10 travelled backwards: its role forward is wrong
+    assert _gaps(con, 3) == (["10 role_conflict", "70 private"], 0)
+
+
+def test_a_roundabout_from_entry_to_exit(tmp_path):
+    _, con = _bus(tmp_path)
+    assert _route(con, 4) == ["81#1f", "80#1f", "80#2f", "82#1f"]
+    assert _gaps(con, 4) == ([], 0)
+
+
+def test_the_bus_tables(tmp_path):
+    """bus.routes: one row per route with its gaps (outside the area counted apart); bus.route_edges: the edges in order."""
+    out, con = _bus(tmp_path)
+    assert "4 bus routes, 17 route edges, 2 with gaps" in out
+    rows = {r[0]: r[1:] for r in con.execute("SELECT osm_id, ref, edges, outside, gaps FROM bus.routes").fetchall()}
+    assert rows == {1: ("1", 6, 0, []), 2: ("2", 2, 1, ["10 no_connection", "50 no_edge"]),
+                    3: ("3", 5, 0, ["10 role_conflict", "70 private"]), 4: ("4", 4, 0, [])}
+    assert con.execute("SELECT count(*) FROM bus.route_edges WHERE bus_lane").fetchone()[0] == 1
+
+
+def test_bus_command_needs_the_raw_tables(tmp_path):
     empty = tmp_path / "empty.duckdb"
     duckdb.connect(str(empty)).close()
-    r = CliRunner().invoke(main, ["bus", str(empty)])
-    assert r.exit_code != 0 and "needs raw.relations" in r.output
+    r = subprocess.run([sys.executable, "-m", "duckosm", "bus", str(empty)], capture_output=True, text=True)
+    assert r.returncode != 0 and "needs raw.relations" in r.stderr

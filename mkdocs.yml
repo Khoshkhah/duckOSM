@@ -8,9 +8,6 @@ theme:
   name: material
   logo: assets/duckosm-mark-inverse.svg   # the header is dark: yellow disc reads, the dark one doesn't
   favicon: assets/duckosm-mark.svg
-  font:
-    text: IBM Plex Sans
-    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -22,16 +19,20 @@ theme:
       primary: custom
       accent: custom
       toggle: { icon: material/weather-sunny, name: Light mode }
+  # the look of rustgis.app (built with Zensical, .github/workflows/docs.yml): no top tabs, the chapters at the left
   features:
-    - navigation.tabs
-    - navigation.sections
-    - navigation.top
-    - navigation.footer
-    - search.suggest
     - content.code.copy
+    - navigation.indexes
+    - navigation.footer
+    - navigation.instant
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
 
 extra_css:
   - assets/extra.css
+  - stylesheets/portal.css
 
 extra_javascript:
   - assets/fullscreen.js
@@ -75,7 +76,6 @@ plugins:
         Guides:
           - guides/prepare-area.md
           - guides/build.md
-          - guides/fix-osm-errors.md
           - guides/studio.md
           - guides/edit-osm-data.md
           - guides/query.md
@@ -88,6 +88,7 @@ plugins:
           - guides/check-build.md
         Exports:
           - exports/index.md
+          - exports/osm-file.md
           - exports/sumo.md
           - exports/matsim.md
           - exports/gmns.md
@@ -111,11 +112,14 @@ plugins:
           - exports/geofabrik.md
         Reference:
           - reference/cli.md
+          - reference/boundary.md
           - reference/configuration.md
           - reference/database.md
           - reference/features.md
           - reference/elevation-sources.md
 
+not_in_nav: |
+  guides/fix-osm-errors.md
 exclude_docs: |
   design/
   development.md
@@ -125,18 +129,20 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Start:
+      - Overview: start/index.md
       - Install: install.md
       - Your first network: first_network.md
       - duckOSM Studio (browser): guides/studio.md
   - Build an area:
+      - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
       - Build a network: guides/build.md
       - Fix the OSM data: guides/edit-osm-data.md
-      - The fixes file: guides/fix-osm-errors.md
       - Add elevation: guides/elevation.md
       - Add administrative boundaries: guides/admin-boundaries.md
       - Check a build: guides/check-build.md
   - Use the network:
+      - Overview: use/index.md
       - Route: guides/route.md
       - Walking: guides/walking.md
       - Routing across modes: concepts/multimodal.md
@@ -146,29 +152,34 @@ nav:
       - Drawing order: guides/drawing-order.md
   - Export:
       - Overview: exports/index.md
+      - 0. The OSM file: exports/osm-file.md
       - 1. OSM data:
+          - exports/osm-data/index.md
           - QuackOSM table: concepts/quackosm.md
           - GDAL's OSM layers: concepts/gdal.md
+          - Base-map layers: exports/base-map.md
           - Geofabrik layers: exports/geofabrik.md
           # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
           # - Vector tiles (PMTiles): exports/pmtiles.md (added by its session)
       - 2. The network:
+          - exports/network/index.md
           - The turn graph: exports/turn-graph.md
-          - Base-map layers: exports/base-map.md
           - GeoPackage / shapefile: exports/gis.md
           - networkx: exports/networkx.md
       - 3. Traffic simulation:
+          - exports/simulation/index.md
           - GMNS: exports/gmns.md
-          - GMNS tables: exports/gmns_tables.md
+          - GMNS meso and micro: exports/gmns-meso-micro.md
           - MATSim: exports/matsim.md
           - SUMO: exports/sumo.md
-          - GMNS meso and micro: exports/gmns-meso-micro.md
           - railML: exports/railml.md
       - 4. Lane level and 3D:
+          - exports/lanes/index.md
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
           - OpenDRIVE: exports/opendrive.md
   - How it works:
+      - Overview: concepts/index.md
       - How a build works: concepts/build.md
       - Browser and native builds: concepts/browser-native.md
       - Memory at each step: concepts/memory-by-step.md
@@ -185,10 +196,13 @@ nav:
       - Speed on France: compare/speed.md
       - duckOSM and OSMnx: concepts/osmnx.md
   - Reference:
+      - Overview: reference/index.md
       - Command line: reference/cli.md
       - Python SDK: reference/python.md
       - Rust SDK: reference/rust.md
       - Configuration: reference/configuration.md
+      - The boundary file: reference/boundary.md
       - Database schema: reference/database.md
+      - GMNS tables: exports/gmns_tables.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md

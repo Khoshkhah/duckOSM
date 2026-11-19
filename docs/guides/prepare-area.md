@@ -1,101 +1,104 @@
 # Prepare an area
 
-Before a build you need two things: the map data (a `.osm.pbf` file) and, for a city or district,
-its boundary. [Your first network](../first_network.md) walks through this once for Monaco; this page
-has the details.
+A build needs the map data (a `.osm.pbf` file) and, for a city or a district, its boundary (a GeoJSON file).
+[Your first network](../first_network.md) shows how to find the OSM id of an area and download its region file.
 
-## Get the map data
-
-[Geofabrik](https://download.geofabrik.de) offers free `.osm.pbf` extracts of every continent,
-country and many regions, updated daily. Download the **smallest region that contains your area**:
+`duckosm get` does it all in one command: it finds the boundary, downloads the smallest Geofabrik extract that holds it,
+and cuts it ([The OSM file](../exports/osm-file.md)).
 
 ```bash
-curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf     # 0.7 MB
-curl -LO https://download.geofabrik.de/europe/sweden-latest.osm.pbf     # 835 MB
+duckosm get "Monaco"  # -> monaco.osm.pbf and monaco.geojson
 ```
-
-Any `.osm.pbf` works, up to the [whole planet](https://planet.openstreetmap.org).
-
-## Find the area's id
-
-Search for the area on [openstreetmap.org](https://www.openstreetmap.org) and click the result whose
-border is drawn on the map. The page address ends in `relation/<id>`: that number is the **OSM id**.
-Seeing the outline is the surest way to pick the right area: there is a Södermalm in Stockholm and
-one in Sundsvall, and a coastal country's border can reach far out to sea. Monaco's country border
-([relation/1124039](https://www.openstreetmap.org/relation/1124039)) includes its territorial waters;
-its land area is [relation/2220322](https://www.openstreetmap.org/relation/2220322).
 
 ## Make the boundary file
 
 ```bash
-duckosm boundary --osm-id 2220322 --pbf monaco-latest.osm.pbf       # -> monaco.geojson
+duckosm boundary --osm-id 2220322 --pbf monaco-latest.osm.pbf
 ```
 
 ```text
 wrote monaco.geojson: Monaco (admin level 8, OSM relation 2220322, 2.39 km²), from PBF monaco-latest.osm.pbf
 ```
 
-With `--pbf`, the border is read from the PBF itself (offline; needs [GDAL](../install.md#tools-outside-python)).
-Without it, or if GDAL is missing, it's fetched from OpenStreetMap online.
+`duckosm boundary Monaco --pbf monaco-latest.osm.pbf` finds the area by name. Case, accents and hyphens do not
+matter, and English names (`name:en`) also match. When two or more borders match, the command takes the exact name with
+the largest area and lists the other borders with their ids.
 
-**By name instead of id.** `duckosm boundary Monaco --pbf monaco-latest.osm.pbf` searches by name:
-case, accents and hyphens don't matter, and English names (`name:en`) match too. If the name matches
-more than one border, it takes the exact name with the largest area and lists the others with their
-ids, so you can rerun with the right `--osm-id`. For "Monaco" it takes the country (with its sea) and
-lists the land area:
+| Option | Does | Default |
+|---|---|---|
+| `NAME` | find the border by this name | |
+| `--osm-id ID` | take this OSM relation | |
+| `--pbf FILE` | find the border in this PBF first; then find it from Nominatim | from Nominatim only |
+| `--offline` | do not use Nominatim | |
+| `-o FILE` | output file | `<name>.geojson` |
 
-```text
-also matched (pick one with --osm-id):
-  Monaco (admin level 8, OSM relation 2220322, 2.39 km²)
-  Monaco-Ville (admin level 10, OSM relation 2220207, 0.2 km²)
+Any GeoJSON polygon can be a boundary: [The boundary file](../reference/boundary.md) gives the format, how to make one,
+and the errors. A [config file](build.md#the-config-file) can also give the area as
+`boundary.place`, `boundary.bbox` or `boundary.h3_cell`: the build then writes `<name>.boundary.geojson`.
+
+## Three ways to cut an area
+
+| Way | Cuts | Use it when | Command |
+|---|---|---|---|
+| **1. Cut the OSM file** | the `.osm.pbf`, before the build | one area; or you want the area's own `.osm.pbf` for other tools | `duckosm cut`, or `build --boundary` |
+| **2. Cut a built region** | the `.duckdb` of a region, after the build | many areas of one region; you must keep the region's `edge_id`s | `duckosm extract` |
+| **3. Build by tiles** | the region into map tiles, then one build | a large area, such as a country, in little memory | `duckosm tiles` |
+
+All three keep a road that crosses the border whole. Way 2 keeps the `edge_id`s of the region exactly; ways 1 and 3 give
+the `edge_id`s of a build of that area.
+
+### 1. Cut the OSM file
+
+```bash
+duckosm cut sweden-latest.osm.pbf --boundary sodermalm.geojson -o sodermalm.osm.pbf
+duckosm build --pbf sodermalm.osm.pbf -m driving
 ```
 
-| Option | Does |
+`duckosm build --pbf sweden-latest.osm.pbf --boundary sodermalm.geojson` does the same cut by itself, before it builds.
+`duckosm cut --fixes osm_fixes.yaml` writes your OSM fixes into the cut file ([The OSM file](../exports/osm-file.md)).
+
+| Command | Does | Needs |
+|---|---|---|
+| `duckosm cut REGION --boundary FILE -o OUT` | the smart cut of osmium: ways that cross the border stay whole, and relations (rivers, land cover) are complete | a PBF sorted by type and id (the Geofabrik files are) |
+| `duckosm clip-pbf PBF BOUNDARY` | the cut of osmium, with `--strategy complete_ways` (default), `smart` or `simple`; not ported to Rust yet | [osmium](../install.md#outside-tools) and a PBF sorted by type and id |
+
+### 2. Cut a built region
+
+Build the region once. Then `duckosm extract` copies the part of each area from the built database. It does not read the
+`.osm.pbf` again, so each area takes seconds.
+
+```bash
+# 1. Build the region once (slow)
+duckosm build --pbf sweden-latest.osm.pbf -m driving
+
+# 2. Get the border of one area
+duckosm boundary --osm-id 2017432 -o sodermalm.geojson
+
+# 3. Cut the area from the region (seconds)
+duckosm extract --source sweden-latest.duckdb \
+    --db sodermalm.duckdb --boundary sodermalm.geojson
+```
+
+Each road keeps its `edge_id` from the region. So data that you joined to the roads of the region, such as traffic counts,
+also fits the area.
+
+| Option of `extract` | Does |
 |---|---|
-| `--osm-id ID` | take this exact OSM relation |
-| `--pbf FILE` | read the border from this PBF (offline) |
-| `--offline` | never go online |
-| `-o FILE` | output file (default `<name>.geojson`) |
+| `--source FILE` | the built region (required) |
+| `--db FILE` | the output database, overwritten (required) |
+| `--boundary FILE` | the area as a GeoJSON file |
+| `--name NAME`, `--osm-id ID` | the area from the [administrative boundaries](admin-boundaries.md) of the region |
 
-Any GeoJSON polygon you already have works as a boundary too.
+`duckosm build --source-db` and `source.type: duckdb` in a config file do the same cut.
 
-### Or let the build make it
+### 3. Build by tiles
 
-In a [config file](build.md#the-config-file), give the area instead of a file:
-
-```yaml
-boundary:
-  place: Monaco                        # found like `duckosm boundary Monaco`
-  # bbox: [7.40, 43.72, 7.44, 43.75]   # or a box: west, south, east, north
-  # h3_cell: 883969a403fffff           # or one H3 cell (also: build --h3-cell)
-```
-
-The build writes it to `<name>.boundary.geojson` next to the output and uses that file.
-
-## Several areas from one region
-
-To build many areas of one country, build the country once and cut the areas out of it. Cutting
-takes seconds, re-reads no OSM, and every `edge_id` stays the same as in the parent, so data keyed on
-the parent's ids works on the areas as they are:
+For a large area, `duckosm tiles` cuts the region file into map tiles of zoom 8 with
+[pbfcut](https://github.com/Khoshkhah/pbfcut), builds each tile alone, and joins them into one database. The memory does
+not grow with the area.
 
 ```bash
-duckosm build --pbf sweden-latest.osm.pbf -m driving          # slow, once -> sweden-latest.duckdb
-duckosm boundary --osm-id 2017432 -o sodermalm.geojson        # Södermalm, Stockholm
-duckosm extract --source sweden-latest.duckdb --db sodermalm.duckdb --boundary sodermalm.geojson
+duckosm tiles france-latest.osm.pbf --boundary france.geojson -o out -- --modes driving
 ```
 
-`extract` keeps edges that cross the border whole. It can also find the area by `--name` or `--osm-id`
-if the parent has [administrative boundaries](admin-boundaries.md). The same cut can run as a build
-from a config file with `source.type: duckdb`; see [Configuration](../reference/configuration.md).
-
-## Cut a smaller PBF
-
-To get just the area's map data as a PBF, for example for another tool:
-
-```bash
-duckosm clip-pbf sweden-latest.osm.pbf sodermalm.geojson      # -> sodermalm.osm.pbf
-```
-
-It needs [osmium](../install.md#tools-outside-python). By default, ways that cross the border are kept
-whole (`--strategy complete_ways`); `--strategy smart` also keeps rivers and other areas whole, which
-the [base-map layers](../reference/features.md) need.
+The tables are the same as those of one build. More: [Browser and native builds](../concepts/browser-native.md).

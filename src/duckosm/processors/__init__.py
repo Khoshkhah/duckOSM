@@ -19,7 +19,6 @@ from duckosm.processors.duckdb_clipper import DuckdbClipper
 from duckosm.processors.osm_overrides import OsmOverrides
 from duckosm.processors.separate_sidewalks import SeparateSidewalks
 from duckosm.processors.lane_profile import LaneProfile
-from duckosm.processors.multimodal import MultimodalBuilder, TransferPointExtractor
 
 __all__ = [
     "SeparateSidewalks",
@@ -39,6 +38,4 @@ __all__ = [
     "FunctionalType",
     "PathConnector",
     "DuckdbClipper",
-    "MultimodalBuilder",
-    "TransferPointExtractor",
 ]

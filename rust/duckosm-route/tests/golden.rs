@@ -1,5 +1,5 @@
 //! The routes and the GraphML files equal duckOSM's Python output (2026-11-17) on the database of this config: Monaco's
-//! sample PBF in its boundary, three modes, no sea, no levels. tests/data/golden_route/monaco_routes.json has 40 routes for
+//! sample PBF in its boundary, three modes, no sea, no levels, no tile columns (the Python build has none). tests/data/golden_route/monaco_routes.json has 40 routes for
 //! each of driving and walking, by time and by length (`Router(con, mode, weight).route(a, b)`: the edge ids, `time_s`,
 //! `length_m`; null when there is no route). The GraphML files of `duckosm export-graph` (node graph, edge graph by time)
 //! are too large for the repository: the test has their MD5.
@@ -15,7 +15,7 @@ fn routes_and_graphml_equal_duckosm() {
     std::fs::create_dir_all(&out).unwrap();
     let s = root.join("data/sample");
     let cfg = format!(
-        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n",
+        "name: monaco\noutput_path: {}\nsource: {{type: pbf, pbf_path: {}/monaco.osm.pbf}}\nboundary: {{path: {}/monaco.geojson}}\nmodes: [driving, walking, cycling]\noptions:\n  sea: false\n  levels: false\n  tile_indexing: false\n",
         out.display(),
         s.display(),
         s.display()

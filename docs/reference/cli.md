@@ -5,10 +5,10 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 
 | Group | Commands |
 |---|---|
-| [Build and areas](#build-and-areas) | `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
+| [Build and areas](#build-and-areas) | `get`, `cut`, `build`, `init-config`, `boundary`, `clip-pbf`, `extract` |
 | [Query and inspect](#query-and-inspect) | `way`, `features-check` |
 | [Maps and routing](#maps-and-routing) | `viz`, `route-map` |
-| [Exports](#exports) | `sumo`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
+| [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
 | [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
 | [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
 
@@ -16,6 +16,44 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 enrich a database (`elevation`, `admin`, `multimodal`) change it in place.
 
 ## Build and areas
+
+### `get`
+
+Finds the boundary of an area, downloads the smallest Geofabrik extract that holds it (to a cache folder), and cuts
+the extract to the boundary. Writes `<name>.osm.pbf` and `<name>.geojson`. Guide: [The OSM file](../exports/osm-file.md).
+
+```text
+duckosm get [OPTIONS] [PLACE]
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `PLACE` | the name of the area, for Nominatim | give one of `PLACE`, `--osm-id`, `--bbox`, `--h3-cell`, `--boundary` |
+| `--osm-id ID` | one OSM boundary relation | |
+| `--bbox W,S,E,N` | a box in degrees | |
+| `--h3-cell CELL` | an H3 cell | |
+| `--boundary FILE` | a GeoJSON [boundary file](boundary.md) | |
+| `-o`, `--out DIR` | the output folder | `.` |
+| `--name NAME` | the name of the two files | from the place, the file or the cell; `area` for a box |
+| `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file): the cut file has the fixes in it | |
+| `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
+| `--refresh` | download the extract and the list of extracts again | the cached files |
+
+### `cut`
+
+Cuts a region file to a boundary and writes the area as a `.osm.pbf` file. Only lists of ids stay in memory.
+Guide: [The OSM file](../exports/osm-file.md#duckosm-cut).
+
+```text
+duckosm cut [OPTIONS] --boundary FILE -o FILE REGION
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `REGION` | the region file, sorted by type and id (as the files of Geofabrik) | required |
+| `--boundary FILE` | the [boundary](boundary.md): GeoJSON, `.poly`, WKT or `W,S,E,N` | required |
+| `-o`, `--out FILE` | the area file to write | required |
+| `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file): the area file has the fixes in it ([what goes in](../exports/osm-file.md#the-fixes-in-the-file)) | |
 
 ### `build`
 
@@ -30,16 +68,17 @@ duckosm build [OPTIONS]
 | `-c`, `--config PATH` | a [config file](configuration.md). An option below that you type overrides the file | |
 | `-p`, `--pbf PATH` | input `.osm.pbf` | |
 | `-o`, `--output PATH` | output file | `<name>.duckdb`, named after the boundary file, else the PBF, else the `--source-db` file |
-| `-b`, `--boundary PATH` | GeoJSON area to build | none: the whole PBF |
-| `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#several-areas-from-one-region)) | |
+| `-b`, `--boundary PATH` | GeoJSON area to build ([the boundary file](boundary.md)) | none: the whole PBF |
+| `--source-db PATH` | cut from this built database instead of a PBF ([how](../guides/prepare-area.md#2-cut-a-built-region)) | |
 | `--h3-cell TEXT` | build the area of this H3 cell: its outline is the boundary | |
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
+| `--tile-index` / `--no-tile-index` | add the zoom-28 [tile keys](database.md#tile-keys) to nodes and edges. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) has this option | on |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
-| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/fix-osm-errors.md); overrides the config's `osm_overrides` key | none |
+| `--fixes FILE` | a rules file of [fixes for OSM errors](../guides/edit-osm-data.md#the-fixes-file); overrides the config's `osm_overrides` key | none |
 | `--log-file FILE` | also write the log to this file | console only |
 
 With none of `-c`, `-p` and `--source-db`, it uses `config/default.yaml` if that file exists.
@@ -72,12 +111,12 @@ duckosm boundary [OPTIONS] [NAME]
 | `--pbf PATH` | search the borders in this PBF first; needs GDAL's `ogr2ogr` | |
 | `--osm-id INTEGER` | take this OSM boundary relation (when a name matches several) | |
 | `--offline` | never ask Nominatim | |
-| `-o`, `--out FILE` | output GeoJSON | `<name>.geojson` |
+| `-o`, `--out FILE` | output GeoJSON ([the boundary file](boundary.md)) | `<name>.geojson` |
 
 ### `clip-pbf`
 
 Cuts a PBF down to a GeoJSON area, with `osmium`. Guide:
-[Cut a smaller PBF](../guides/prepare-area.md#cut-a-smaller-pbf).
+[Cut a smaller PBF](../guides/prepare-area.md#1-cut-the-osm-file).
 
 ```text
 duckosm clip-pbf [OPTIONS] PBF BOUNDARY
@@ -91,7 +130,7 @@ duckosm clip-pbf [OPTIONS] PBF BOUNDARY
 ### `extract`
 
 Cuts one area out of a built database into a new database, by name, OSM id or GeoJSON. Edge ids are
-kept. Guide: [Several areas from one region](../guides/prepare-area.md#several-areas-from-one-region).
+kept. Guide: [Cut a built region](../guides/prepare-area.md#2-cut-a-built-region).
 
 ```text
 duckosm extract --source SOURCE --db DB (--name NAME | --osm-id OSM_ID | --boundary BOUNDARY)
@@ -217,7 +256,7 @@ The program needs the level editor's WebAssembly package (`rust/duckosm-edit/edi
 Edits the OSM data of the database on a page on your computer: roadstyle's dashboard of the database, with the panel **Edit OSM data**
 of duckOSM Studio. Each change goes into the fixes file at once. **Build again** runs the build of the database again with the file,
 and the page then shows the new network. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#edit-on-your-computer-duckosm-edit).
+`duckosm edit` is the same page in the Rust program. Guide: [Edit on your computer](../guides/edit-osm-data.md#the-editor).
 
 ```text
 duckosm edit [OPTIONS] DB
@@ -256,7 +295,7 @@ the data dock shows the facts of the clicked item and the columns of the clicked
 A result of ids shows its objects: turns (`edge_graph`, `turn_restrictions`), ways, bus routes and H3 cells, each with a card. The table `extra.edits`
 has the changes of the fixes file, with the time of each. **Ask** uses your own key of a free AI service, which stays in your browser. The page does not
 change the data or the fixes file. The page is at `http://127.0.0.1:PORT/` and answers only on this computer. Ctrl+C stops it.
-Guide: [Ask questions on a page](../guides/query.md#ask-questions-on-a-page-duckosm-ask).
+Guide: [Ask questions on a page](../guides/query.md#ask-in-words).
 
 ```text
 duckosm ask [OPTIONS] DB
@@ -282,7 +321,7 @@ duckosm bus DB
 Writes duckOSM's route planner over a map drawn by mapstyle: drag a start and an end, pick Drive,
 Walk, Cycle or Walk + drive. Routing runs in the browser with the same answers as `route_points()`
 and `directions()`. Walk + drive needs [`multimodal`](#multimodal) first. Needs `duckosm[viz]`. Guide:
-[On a map](../guides/route.md#on-a-map).
+[The map page](../guides/route.md#the-map-page).
 
 ```text
 duckosm route-map [OPTIONS] DB
@@ -396,6 +435,19 @@ duckosm gmns-map [OPTIONS] GMNS_DB
 | `--palette TEXT` | road colours: `mono`, `carto` or `highsat` | `mono` |
 | `--source-db PATH` | the core db, for bridges and tunnels in a GMNS file made before links had them | |
 | `-o`, `--out TEXT` | output HTML | `<name>_lanes.html` |
+
+### `sumo-map`
+
+Writes an HTML map of a SUMO net (the `.net.xml` of `duckosm sumo`) with lanestyle and roadstyle: each lane on its own
+shape at its width, and the internal lanes through the junctions. Page: [See it](../exports/sumo.md#see-it).
+
+```text
+duckosm sumo-map [OPTIONS] NET
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `-o`, `--out PATH` | output HTML | `<name>_lanes.html` |
 
 ### `gmns-viz`
 
@@ -541,7 +593,7 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 ### `elevation`
 
 Adds the ground height to every node (`nodes.ele`) and edge end (`edges.z_from`, `z_to`), and a row
-in `main.elevation_metadata`. Running it again overwrites. Needs `duckosm[elevation]`. Guide:
+in `main.elevation_metadata`. Running it again overwrites. Guide:
 [Add elevation](../guides/elevation.md); sources: [Elevation sources](elevation-sources.md).
 
 ```text
@@ -550,7 +602,7 @@ duckosm elevation [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--dem TEXT` | an elevation file or URL, any format GDAL reads; wins over `--source` | |
+| `--dem TEXT` | a GeoTIFF in EPSG:4326 with 32-bit floats, a file or an HTTP address; wins over `--source` | |
 | `--source TEXT` | `auto`, `copernicus` or `eudtm` (needs `OPENTOPOGRAPHY_API_KEY`). `auto` picks EU-DTM in Europe when the key is set, else Copernicus | `auto` |
 | `-m`, `--mode TEXT` | modes; repeat for several | every mode in the db |
 | `--nodata-fill FLOAT` | height written where the model has no value | `0.0` |
@@ -591,4 +643,5 @@ duckosm multimodal [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `--transfer-cost FLOAT` | seconds added at each change of mode | `60.0` |
+| `--pair-cost FROM->TO=SECONDS` | another cost for one direction, for example `walking->driving=120`; repeat it for more directions (the build's `multimodal.transfer_costs`) | none |
 | `--schema TEXT` | schema for the two tables | `mm` |

@@ -12,7 +12,7 @@ TODO (step 6, before the Python engine code goes):
   test_editor_changes.py and test_page_fixes.py fail with it.
 - GMNS (group C): the command ``duckosm gmns`` is Rust; the functions ``to_gmns``, ``to_meso``, ``to_micro``,
   ``check_gmns`` and ``to_sumo`` with ``bus_edges``, ``edge_attrs`` or ``lanes`` still call the Python code.
-- The commands with no Rust port yet: ``levels``, ``bus``, ``multimodal``, ``clip-pbf`` (see ``duckosm/_main.py``).
+- The commands with no Rust port yet: ``levels``, ``clip-pbf`` (see ``duckosm/_main.py``).
 - ``to_networkx``, ``to_networkx_nodes`` and ``write_graph`` give networkx graphs: they stay Python.
 - ``to_sumo`` with a ``dict`` config or ``netconvert_bin``, ``to_railml`` with other ``rail_types``,
   ``route`` with a ``graph`` and ``route_multimodal`` with ``_points``.
@@ -196,3 +196,42 @@ def build_lane_graph(gmns_db, mode="driving"):
 def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
     """See :func:`duckosm.lane_routing.route_lanes`."""
     return json.loads(_rust().route_lanes(_db(gmns_db), str(from_lane), str(to_lane), mode))
+
+
+# ---- level 0: the OSM file -----------------------------------------------------------------------------------------
+
+class Area:
+    """The result of :func:`get`: ``pbf`` (the cut ``.osm.pbf`` file) and ``boundary`` (its GeoJSON boundary), as paths."""
+
+    def __init__(self, pbf, boundary):
+        self.pbf, self.boundary = Path(pbf), Path(boundary)
+
+    def __repr__(self):
+        return f"Area(pbf={str(self.pbf)!r}, boundary={str(self.boundary)!r})"
+
+
+def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=".", name=None, fixes=None,
+        cache=None, refresh=False):
+    """``duckosm get``: the boundary of an area, the smallest Geofabrik extract that holds it (downloaded to a cache
+    folder), and the cut of the extract to the boundary, with the OSM ``fixes`` in it when given. Give one of
+    ``place``, ``osm_id``, ``bbox`` (``(west, south, east, north)``), ``h3_cell`` and ``boundary``. Returns an
+    :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``."""
+    import subprocess
+    import sys
+    if bbox is not None and not isinstance(bbox, str):
+        bbox = ",".join(str(float(v)) for v in bbox)
+    args = [place]
+    for flag, value in (("--osm-id", osm_id), ("--bbox", bbox), ("--h3-cell", h3_cell), ("--boundary", boundary),
+                        ("-o", out), ("--name", name), ("--fixes", fixes), ("--cache", cache)):
+        if value is not None:
+            args += [flag, value]
+    if refresh:
+        args.append("--refresh")
+    cmd = [sys.executable, "-m", "duckosm", "get", *(str(a) for a in args if a is not None)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"duckosm get: {(r.stderr or r.stdout).strip()}")
+    # the line "wrote <pbf> and <geojson> in <s> s"
+    line = next(x for x in r.stdout.splitlines() if x.startswith("wrote "))
+    pbf, rest = line.removeprefix("wrote ").split(" and ", 1)
+    return Area(pbf, rest.rsplit(" in ", 1)[0])

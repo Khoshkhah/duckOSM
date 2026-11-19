@@ -60,7 +60,7 @@ For WebAssembly, use `default-features = false, features = ["snap"]`.
 | `duckosm_build::run(input, &fixes, boundary, &Params, &mut log, file)` | The whole build without a file system: each output file goes to a writer that you give. The browser build uses it. | |
 | `duckosm_build::quack(pbf, parquet, duckdb, threads, sort, tiles)` | The features table of QuackOSM | `duckosm quack` |
 | `duckosm_build::quack_gdal::quack_gdal(pbf, gpkg, geoparquet, tiles)` | The five layers of GDAL's OSM driver | `duckosm quack --gdal` |
-| `duckosm_build::config::read_osm_fixes(path) -> Result<OsmFixes, String>` | Reads an [OSM fixes file](../guides/fix-osm-errors.md) | |
+| `duckosm_build::config::read_osm_fixes(path) -> Result<OsmFixes, String>` | Reads an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) | |
 | `duckosm_core::hash::edge_id(osm_id, source, target) -> i64` | The [stable edge id](../concepts/edge-ids.md) | |
 | `duckosm_route::route::routing_graph(&con, mode, weight, &uses)` | The routing graph of one mode | |
 | `duckosm_route::route::route(&con, &graph, from_edge, to_edge, mode)` | The shortest route between two edges, as JSON | `duckosm route` |

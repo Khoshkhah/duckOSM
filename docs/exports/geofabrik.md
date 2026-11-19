@@ -61,11 +61,5 @@ Mac mini (Apple M6, 12 cores, 16 GB).
 | Memory | 0.02 GB | 0.29 to 0.40 GB |
 | GeoPackage, shapefiles (zip), GeoParquet | 2.4, 0.8, 0.6 MB | 638, 294, 312 MB |
 
-## The rows are the same
-
-On Monaco, each of the 8 732 rows in the 20 layers equals Geofabrik's files of the same day: the `osm_id`, `code`,
-`fclass`, every column and the geometry (`ST_Equals`). This is also true by tiles and in the browser. The test compares
-with a golden file made from Geofabrik's own GeoPackage, not from duckOSM.
-
 The differences between Geofabrik's PDF and its files, and the other measurements:
 [docs/rust/quack.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/rust/quack.md), "Geofabrik layers".
