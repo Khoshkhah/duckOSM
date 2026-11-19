@@ -30,65 +30,117 @@ use std::io::{Read, Seek, SeekFrom, Write};
 /// The numbers of elements that a cut wrote (the type of pbfcut, so the tile cut and this cut give one type).
 pub use pbfcut::extract::CutCounts;
 
-/// Sorted ids with a directory, as `network::Coords`: a look-up reads one entry of the directory (about one for
-/// each 64 ids, so it stays in the cache of the processor) and searches the ids of one range. 8 bytes for each id.
+/// The ids of one span of 2^16 ids (the low 16 bits): a sorted list while it has at most `ARRAY_MAX` ids (2 bytes
+/// for each id), else a bitmap (8 kB).
+enum Chunk {
+    Array(Vec<u16>),
+    Bits(Box<[u64; 1024]>),
+}
+
+/// An array chunk with more ids than this becomes a bitmap: from here the bitmap is smaller.
+const ARRAY_MAX: usize = 4096;
+
+impl Chunk {
+    fn contains(&self, low: u16) -> bool {
+        match self {
+            Chunk::Array(v) => v.binary_search(&low).is_ok(),
+            Chunk::Bits(b) => b[low as usize >> 6] >> (low & 63) & 1 == 1,
+        }
+    }
+    /// The number of ids in `lo..=hi`.
+    fn count_in(&self, lo: u16, hi: u16) -> usize {
+        match self {
+            Chunk::Array(v) => v.partition_point(|&x| x <= hi) - v.partition_point(|&x| x < lo),
+            Chunk::Bits(b) => {
+                let (lw, hw) = (lo as usize >> 6, hi as usize >> 6);
+                // the bits from `lo` in the first word, up to `hi` in the last word
+                let lo_mask = u64::MAX << (lo & 63);
+                let hi_mask = u64::MAX >> (63 - (hi & 63));
+                if lw == hw {
+                    return (b[lw] & lo_mask & hi_mask).count_ones() as usize;
+                }
+                let inner: u32 = b[lw + 1..hw].iter().map(|w| w.count_ones()).sum();
+                ((b[lw] & lo_mask).count_ones() + inner + (b[hw] & hi_mask).count_ones()) as usize
+            }
+        }
+    }
+    /// Sort the list and remove the doubles; a list with more than `ARRAY_MAX` ids becomes a bitmap.
+    fn tidy(&mut self) {
+        if let Chunk::Array(v) = self {
+            v.sort_unstable();
+            v.dedup();
+            if v.len() > ARRAY_MAX {
+                let mut b = Box::new([0u64; 1024]);
+                for &x in v.iter() {
+                    b[x as usize >> 6] |= 1 << (x & 63);
+                }
+                *self = Chunk::Bits(b);
+            } else {
+                v.shrink_to_fit();
+            }
+        }
+    }
+    fn insert(&mut self, low: u16) {
+        match self {
+            Chunk::Array(v) => {
+                v.push(low);
+                // a list with doubles can grow past ARRAY_MAX: tidy it then, not at each id
+                if v.len() > 2 * ARRAY_MAX {
+                    self.tidy();
+                }
+            }
+            Chunk::Bits(b) => b[low as usize >> 6] |= 1 << (low & 63),
+        }
+    }
+}
+
+/// A set of ids as roaring bitmaps: the ids in chunks of 2^16, each chunk a sorted list (2 bytes for each id) or a
+/// bitmap (8 kB, when it has more than 4096 ids). The nodes inside France are 4.8 GB as a list of i64, about 1 GB
+/// here. The ids can come in any order; [`IdSet::tidy`] must run before a look-up.
+#[derive(Default)]
 struct IdSet {
-    ids: Vec<i64>,
-    dir: Vec<u32>,
-    min: i64,
-    shift: u32,
+    chunks: std::collections::BTreeMap<i64, Chunk>,
 }
 
 impl IdSet {
-    /// From lists of ids (for example one for each block): one list with the exact size, sorted, with no doubles.
-    fn new(parts: Vec<Vec<i64>>) -> IdSet {
-        let mut ids = Vec::with_capacity(parts.iter().map(Vec::len).sum());
-        for p in parts {
-            ids.extend(p);
+    fn insert(&mut self, id: i64) {
+        self.chunks.entry(id >> 16).or_insert_with(|| Chunk::Array(Vec::new())).insert(id as u16);
+    }
+
+    fn extend(&mut self, ids: impl IntoIterator<Item = i64>) {
+        for id in ids {
+            self.insert(id);
         }
-        ids.sort_unstable();
-        ids.dedup();
-        ids.shrink_to_fit();
-        let (Some(&first), Some(&last)) = (ids.first(), ids.last()) else {
-            return IdSet { ids, dir: Vec::new(), min: 0, shift: 0 };
-        };
-        let (min, span) = (first, last.abs_diff(first));
-        let ranges = (ids.len() / 64).max(1) as u64;
-        let mut shift = 0;
-        while shift < 63 && (span >> shift) >= ranges {
-            shift += 1;
-        }
-        let range = |id: i64| (id.abs_diff(min) >> shift) as usize;
-        let mut dir = Vec::with_capacity(range(last) + 2);
-        for (i, &id) in ids.iter().enumerate() {
-            while dir.len() <= range(id) {
-                dir.push(i as u32);
-            }
-        }
-        dir.push(ids.len() as u32);
-        IdSet { ids, dir, min, shift }
+    }
+
+    /// Sort each list (after the last insert, before the first look-up).
+    fn tidy(mut self) -> IdSet {
+        self.chunks.values_mut().for_each(Chunk::tidy);
+        self
     }
 
     /// Is an id of the set in `lo..=hi`?
     fn any_in(&self, lo: i64, hi: i64) -> bool {
-        let i = self.ids.partition_point(|&x| x < lo);
-        i < self.ids.len() && self.ids[i] <= hi
+        self.count_in(lo, hi) > 0
     }
 
     /// The number of ids of the set in `lo..=hi` (0 for an empty span, `lo > hi`).
     fn count_in(&self, lo: i64, hi: i64) -> usize {
-        self.ids.partition_point(|&x| x <= hi).saturating_sub(self.ids.partition_point(|&x| x < lo))
+        if lo > hi {
+            return 0;
+        }
+        self.chunks
+            .range(lo >> 16..=hi >> 16)
+            .map(|(&k, c)| {
+                let a = if k == lo >> 16 { lo as u16 } else { 0 };
+                let b = if k == hi >> 16 { hi as u16 } else { u16::MAX };
+                c.count_in(a, b)
+            })
+            .sum()
     }
 
     fn contains(&self, id: i64) -> bool {
-        if id < self.min || self.ids.is_empty() {
-            return false;
-        }
-        let b = (id.abs_diff(self.min) >> self.shift) as usize;
-        match (self.dir.get(b), self.dir.get(b + 1)) {
-            (Some(&lo), Some(&hi)) => self.ids[lo as usize..hi as usize].binary_search(&id).is_ok(),
-            _ => false,
-        }
+        self.chunks.get(&(id >> 16)).is_some_and(|c| c.contains(id as u16))
     }
 }
 
@@ -455,13 +507,13 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
     }
     // pass 1: the nodes inside, and the ids of the nodes of each block; it stops after the first block with ways or
     // relations
-    let (mut parts, mut node_spans, mut ways_at) = (Vec::new(), Vec::new(), None);
+    let (mut inside_ids, mut node_spans, mut ways_at) = (IdSet::default(), Vec::new(), None);
     each_block(&mut open()?, |b, buf| {
         let mut s = Inside { inside, ids: Vec::new(), other: false, span: EMPTY };
         decode_block_tags(b, [true, true, true], [false; 3], buf, &mut s)?;
         Ok((s.ids, s.other, s.span))
     }, |(ids, other, span), at| {
-        parts.push(ids);
+        inside_ids.extend(ids);
         node_spans.push((at, span));
         if other {
             ways_at = Some(at);
@@ -469,7 +521,7 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
         Ok(!other)
     })?;
     crate::util::step("cut pass 1: the nodes inside");
-    let inside = IdSet::new(parts);
+    let inside = inside_ids.tidy();
     let ways_at = ways_at.unwrap_or(0);
     // pass 2: the kept ways, their nodes outside, the relations, and the ids of the ways and relations of each block
     let kept_sink = |wanted| Kept {
@@ -481,7 +533,7 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
         refs: Vec::new(),
         spans: [EMPTY; 2],
     };
-    let (mut way_parts, mut outside, mut rels, mut way_spans) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut kept, mut outside, mut rels, mut way_spans) = (IdSet::default(), IdSet::default(), Vec::new(), Vec::new());
     let mut r = open()?;
     r.seek(SeekFrom::Start(ways_at)).map_err(|e| e.to_string())?;
     each_block(&mut r, |b, buf| {
@@ -490,14 +542,14 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
         decode_block_tags(b, [false, true, true], [false, false, true], buf, &mut s)?;
         Ok((s.ways, s.outside, s.rels, s.spans))
     }, |(w, o, mut rl, spans), at| {
-        way_parts.push(w);
-        outside.push(o);
+        kept.extend(w);
+        outside.extend(o);
         rels.append(&mut rl);
         way_spans.push((ways_at + at, spans));
         Ok(true)
     })?;
     crate::util::step("cut pass 2: the ways and relations");
-    let mut kept = IdSet::new(way_parts);
+    let mut kept = kept.tidy();
     // the relations: a member node inside or a member way kept, then their parents
     let direct = |r: &Rel| {
         r.members.iter().any(|&(m, t)| match t {
@@ -542,25 +594,26 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
         }
     }
     drop(rels);
-    outside.push(more_nodes);
+    outside.extend(more_nodes);
     if !more_ways.is_empty() {
         // the member ways: only the blocks with one of them
-        let wanted = IdSet::new(vec![more_ways]);
+        let mut wanted = IdSet::default();
+        wanted.extend(more_ways);
+        let wanted = wanted.tidy();
         let at: Vec<u64> = way_spans.iter().filter(|(_, s)| wanted.any_in(s[0].0, s[0].1)).map(|b| b.0).collect();
-        let mut all = vec![std::mem::take(&mut kept.ids)];
         each_block_at(&mut open()?, &at, |b, buf| {
             let mut s = kept_sink(Some(&wanted));
             decode_block_tags(b, [false, true, false], [false; 3], buf, &mut s)?;
             Ok((s.ways, s.outside))
         }, |(w, o)| {
-            all.push(w);
-            outside.push(o);
+            kept.extend(w);
+            outside.extend(o);
             Ok(())
         })?;
-        kept = IdSet::new(all);
+        kept = kept.tidy();
     }
     crate::util::step("cut: the relations, the member ways");
-    let outside = IdSet::new(outside);
+    let outside = outside.tidy();
     let mut chosen_ids: Vec<i64> = chosen.iter().copied().collect();
     chosen_ids.sort_unstable();
     let chosen_in = |lo: i64, hi: i64| {
@@ -656,6 +709,27 @@ mod tests {
             decode_block(&b, [true; 3], &mut buf, &mut all).unwrap();
         }
         all
+    }
+
+    /// The id set gives the answers of a sorted list: sparse and dense chunks, negative ids, doubles, any order.
+    #[test]
+    fn id_set_as_a_sorted_list() {
+        let mut ids: Vec<i64> = (0..20_000).map(|i| (i * 7919) % 70_000 - 3_000).collect(); // dense around 0
+        ids.extend((0..3000).map(|i| i * 1_000_003 + (1 << 40))); // sparse
+        ids.extend(ids.clone()); // doubles
+        let mut set = IdSet::default();
+        set.extend(ids.iter().rev().copied());
+        let set = set.tidy();
+        ids.sort_unstable();
+        ids.dedup();
+        let count = |lo: i64, hi: i64| ids.iter().filter(|&&x| lo <= x && x <= hi).count();
+        for id in [-3_001, -3_000, -1, 0, 1, 65_535, 65_536, 66_999, 1 << 40, (1 << 40) + 1] {
+            assert_eq!(set.contains(id), ids.binary_search(&id).is_ok(), "{id}");
+        }
+        for (lo, hi) in [(-5000, 5), (0, 0), (63, 64), (100, 65_600), (-3000, 70_000), (1 << 40, (1 << 40) + 3_000_000), (5, 4)] {
+            assert_eq!(set.count_in(lo, hi), count(lo, hi), "{lo}..={hi}");
+            assert_eq!(set.any_in(lo, hi), count(lo, hi) > 0);
+        }
     }
 
     /// The cut that streams has the same elements as the cut in memory (`read_area_raw`, then `cutfile::write_pbf`),
