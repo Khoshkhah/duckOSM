@@ -46,7 +46,10 @@ duckosm get "Tartu" --fixes osm_fixes.yaml   # the file has your fixes in it
 | `--name NAME` | the name of the two files | from the place, the file or the cell; `area` for a box |
 | `--fixes FILE` | your OSM fixes file | |
 | `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
-| `--refresh` | downloads the extract and the list of extracts again | |
+| `--refresh` | download the extract and the list of extracts again | the files in the cache are used |
+| `--dry-run` | find the boundary and the extract, print them as JSON and stop: no download, no files | |
+
+The list of extracts stays in the cache for 7 days. An extract in the cache stays until you use `--refresh`.
 
 ## `duckosm cut`
 
@@ -93,4 +96,5 @@ area = duckosm.get("Monaco")                   # area.pbf, area.boundary: the tw
 db = duckosm.build(pbf=area.pbf, boundary=area.boundary)
 ```
 
+To choose the area on a map in a notebook, see [Choose an area in Jupyter](../guides/area-picker.md).
 See [Python SDK](../reference/python.md#build-and-areas).

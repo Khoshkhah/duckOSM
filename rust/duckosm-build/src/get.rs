@@ -134,7 +134,7 @@ pub fn cut_with_fixes(region: &Path, boundary: &str, out: &Path, fixes: Option<&
 }
 
 #[cfg(feature = "get")]
-pub use download::{cache_dir, download, region_file};
+pub use download::{cache_dir, choose, download, region_file, Choice};
 
 #[cfg(feature = "get")]
 mod download {
@@ -313,10 +313,27 @@ mod download {
         Ok(url)
     }
 
-    /// The region file for `area`: the smallest Geofabrik extract that covers it, in the cache folder `cache` (downloaded
-    /// when it is not there, or with `refresh`). `index`: the list of extracts (an address or a file; None: Geofabrik's,
-    /// kept in the cache for 7 days). Gives the file and the extract's name.
-    pub fn region_file(area: &Boundary, cache: &Path, index: Option<&str>, refresh: bool) -> Result<(PathBuf, String), String> {
+    /// The extract that `duckosm get` takes for an area, with no download (`duckosm get --dry-run`).
+    pub struct Choice {
+        pub id: String,
+        pub name: String,
+        pub km2: f64,
+        /// The address of the extract (`<region>-latest.osm.pbf`).
+        pub url: String,
+        /// The file of the extract in the cache folder (it is there or not).
+        pub file: PathBuf,
+    }
+
+    impl Choice {
+        /// The dated address that the download takes and its size in bytes (0: the server gives no size).
+        pub fn size(&self) -> Result<(String, u64), String> {
+            resolve(&self.url)
+        }
+    }
+
+    /// The smallest Geofabrik extract that covers `area`, and its file in the cache folder `cache`. `index`: the list
+    /// of extracts (an address or a file; None: Geofabrik's, kept in the cache for 7 days, read again with `refresh`).
+    pub fn choose(area: &Boundary, cache: &Path, index: Option<&str>, refresh: bool) -> Result<Choice, String> {
         let text = match index {
             Some(i) if !i.starts_with("http") => std::fs::read_to_string(i).map_err(|e| format!("{i}: {e}"))?,
             _ => {
@@ -340,15 +357,21 @@ mod download {
         if rel.is_empty() || rel.split('/').any(|p| p.is_empty() || p == "..") {
             return Err(format!("{}: not a file address", x.pbf));
         }
-        let file = cache.join("geofabrik").join(rel);
+        Ok(Choice { id: x.id.clone(), name: x.name.clone(), km2: x.km2, url: x.pbf.clone(), file: cache.join("geofabrik").join(rel) })
+    }
+
+    /// The region file for `area`: the extract of [`choose`], downloaded when it is not in the cache folder (or with
+    /// `refresh`). Gives the file and the extract's name.
+    pub fn region_file(area: &Boundary, cache: &Path, index: Option<&str>, refresh: bool) -> Result<(PathBuf, String), String> {
+        let x = choose(area, cache, index, refresh)?;
         eprintln!("  extract: {} ({}, {:.0} km²)", x.name, x.id, x.km2);
-        if file.is_file() && !refresh {
-            eprintln!("  in the cache: {}", file.display());
+        if x.file.is_file() && !refresh {
+            eprintln!("  in the cache: {}", x.file.display());
         } else {
-            let dated = download(&x.pbf, &file)?;
-            eprintln!("  saved {} ({dated})", file.display());
+            let dated = download(&x.url, &x.file)?;
+            eprintln!("  saved {} ({dated})", x.file.display());
         }
-        Ok((file, x.name.clone()))
+        Ok((x.file, x.name))
     }
 }
 

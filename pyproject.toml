@@ -42,8 +42,9 @@ viz = ["mapstyle>=0.7.0", "lanestyle>=0.4.0"]  # duckosm viz / route-map / gmns-
 networkx = ["networkx"]
 routing = ["networkx"]                       # the old name of the extra networkx: removed in the next release
 rustworkx = ["rustworkx>=0.15"]                # duckosm.to_rustworkx: the graphs as rustworkx graphs (a Rust engine)
+widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
 sumo = ["eclipse-sumo"]
-dev = ["roadstyle>=0.24.2", "pytest", "black", "ruff", "networkx", "rustworkx>=0.15", "lxml", "frictionless", "path4gmns"]   # lxml: MATSim network_v2 DTD validation in tests
+dev = ["roadstyle>=0.24.2", "anywidget>=0.9", "pytest", "black", "ruff", "networkx", "rustworkx>=0.15", "lxml", "frictionless", "path4gmns"]   # lxml: MATSim network_v2 DTD validation in tests
 
 [project.urls]
 Homepage = "https://github.com/khoshkhah/duckOSM"
