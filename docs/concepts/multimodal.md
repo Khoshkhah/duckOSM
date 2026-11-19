@@ -18,7 +18,7 @@ The functions and the commands: [Route](../guides/route.md#the-functions).
 |---|---|
 | `duckosm <PBF> -o DIR` | yes, always |
 | `duckosm --config FILE` and `duckosm build --config FILE` | only with `multimodal.enabled: true` |
-| `duckosm multimodal DB` | yes, on a built database (not ported to Rust yet) |
+| `duckosm multimodal DB` | yes, on a built database |
 
 The database must have walking and at least one other mode. `mm.transfers` is a table: after you build a mode again,
 make it again.

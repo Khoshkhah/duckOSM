@@ -1,91 +1,61 @@
 # MATSim
 
-`duckosm matsim` writes a MATSim `network.xml` (the `network_v2` format). MATSim, BEAM and eqasim read it.
-Each MATSim link id is the duckOSM `edge_id`.
+`duckosm matsim` writes a MATSim `network.xml`, with your OSM fixes. MATSim, BEAM and eqasim read it. Each MATSim link
+id is the duckOSM `edge_id`.
 
 | Reference and format | |
 |---|---|
-| Format | MATSim [network_v2 DTD](https://www.matsim.org/files/dtd/network_v2.dtd); lanes and signals: [laneDefinitions_v2.0](https://www.matsim.org/files/dtd/laneDefinitions_v2.0.xsd), [signalSystems_v2.0](https://www.matsim.org/files/dtd/signalSystems_v2.0.xsd), [signalGroups_v2.0](https://www.matsim.org/files/dtd/signalGroups_v2.0.xsd) and [signalControl_v2.0](https://www.matsim.org/files/dtd/signalControl_v2.0.xsd) XSD |
-| Reference tool | none: no test loads the files in MATSim |
-| Check | `network.xml` is valid against the DTD; the lanes and signal files are valid against the XSD schemas. [How each output is checked](../concepts/checks.md) |
+| Format | MATSim [network_v2](https://www.matsim.org/files/dtd/network_v2.dtd). Lanes and signals: [laneDefinitions_v2.0](https://www.matsim.org/files/dtd/laneDefinitions_v2.0.xsd) and the signal files (signalSystems, signalGroups, signalControl v2.0) |
+| Reference tool | none: no test loads the files in MATSim yet |
+| Check | each file is valid against its DTD or XSD schema. [How each output is checked](../concepts/checks.md) |
 
 ```bash
-duckosm matsim monaco.duckdb           # -> monaco_network.xml.gz
+duckosm matsim monaco.duckdb                   # -> monaco_network.xml.gz, driving
+duckosm matsim monaco.duckdb -m all            # all modes in one network
 ```
 
-Monaco test build, driving: 1,769 nodes, 2,844 links.
+## The links
 
-## What it makes
-
-Each duckOSM edge becomes one directed link:
+Each edge becomes one directed link. A road that several modes use is one link with each mode (`modes="car,bike,walk"`),
+so a trip can change mode with no transfer links.
 
 | Link attribute | From |
 |---|---|
 | `id` | `edge_id` |
-| `from`, `to` | `source`, `target` (node ids) |
+| `from`, `to` | `source`, `target` |
 | `length` | `length_m` |
-| `freespeed` | the speed in m/s (`maxspeed_kmh` / 3.6) |
-| `permlanes` | `lanes` in this direction (1 if empty) |
-| `capacity` | a value for each lane of the road class × `permlanes`, in vehicles/hour (motorway 2,000 … service 300; other classes 800) |
-| `modes` | `car`, `bike` or `walk` |
+| `freespeed` | `maxspeed_kmh` / 3.6, in m/s |
+| `permlanes` | the lanes in this direction (1 if OSM has no lane count) |
+| `capacity` | a value for each lane of the road class × `permlanes`, in vehicles an hour |
+| `modes` | `car`, `bike`, `walk` |
 
-Node coordinates are in meters, in the UTM zone of the data. The file attributes give the CRS. After
+The node coordinates are in metres, in the UTM zone of the data (`--crs` gives another). After
 [`duckosm elevation`](../guides/elevation.md), each node also has a `z`.
-
-## Options
-
-| Option | Does | Default |
-|---|---|---|
-| `-m`, `--mode` | a mode, a comma list (`driving,cycling`) or `all` | `driving` |
-| `--crs` | the projected CRS of the node coordinates, for example `EPSG:3006` | the UTM zone of the data |
-| `--no-gzip` | write plain `.xml` | gzip |
-| `-o`, `--out` | the output file | `<name>_network.xml.gz` |
-
-```python
-from duckosm import to_matsim
-to_matsim("monaco.duckdb", "network.xml.gz", mode="driving")    # -> {"nodes", "links", "crs"}
-```
-
-## All modes in one network
-
-```bash
-duckosm matsim monaco.duckdb -m all -o network.xml.gz      # Monaco test build: 4,750 nodes, 13,291 links
-```
-
-A road that several modes use is one link with each mode on it (`modes="car,bike,walk"`), because its `edge_id` is the
-same in each network. MATSim routes each leg of a trip on the links that allow its mode. The links are shared, so you
-do not need transfer links.
 
 ## Lanes and signals
 
-```bash
-duckosm gmns monaco.duckdb                  # first: the lanes and the turns
-duckosm matsim-lanes monaco_gmns.duckdb     # -> ./lanes.xml, signalSystems.xml, signalGroups.xml, signalControl.xml
-```
+`network.xml` alone has no turns: MATSim lets a car take each link at a junction, banned turns too. For the legal turns,
+add the lanes file:
 
-`matsim-lanes` reads a [GMNS database](gmns.md). Its link ids are the same `edge_id`s, so these files go with the
-`network.xml` of the same build.
+```bash
+duckosm gmns monaco.duckdb                     # first: the lanes and the turns
+duckosm matsim-lanes monaco_gmns.duckdb        # -> lanes.xml and the signal files
+```
 
 | File | Holds |
 |---|---|
-| `lanes.xml` | for each link, its lanes and the links each lane leads to: only legal turns. A U-turn on the same road only at a dead end. Where OSM has `turn:lanes`, each lane gets its own turns; elsewhere each lane can take each legal turn |
-| signal files | one signal system for each junction with traffic lights in OSM (Monaco test build: 1) |
+| `lanes.xml` | the lanes of each link, and the links that each lane leads to: only legal turns. With `turn:lanes` in OSM, each lane has its own turns |
+| signal files | one signal system for each junction with traffic lights. The timing is a fixed cycle in two phases, because OSM has no signal plans: calibrate it |
 
-**The signal timing is a placeholder**: a fixed cycle in two phases, because OSM has no signal plans. Calibrate it.
+## Speed and memory
 
-| Option | Does | Default |
-|---|---|---|
-| `-m`, `--mode` | the GMNS mode | `driving` |
-| `--cycle` | the signal cycle, in seconds | 90 |
-| `--no-signals` | do not write the signal files | writes them |
-| `-o`, `--out` | the output folder | `.` |
+Mac mini (Apple M6, 12 cores, 16 GB). France is the driving network only.
 
-Design: [matsim_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/matsim_export.md),
-[matsim_lanes_signals](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/matsim_lanes_signals.md).
+| Area (input) | Time | Memory | Output |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.04 s | 18.6 MB | 0.1 MB |
+| Kentucky (148 MB) | 3.4 s | 853 MB | 84.1 MB |
+| France (5.1 GB) | 46 s | 10.0 GB | 923 MB |
 
-## Limits
-
-- `network.xml` alone has no turns: MATSim lets a car take each link at a junction, banned turns too. Add `lanes.xml`
-  for legal turns only.
-- `freespeed` and `capacity` come from the defaults of the road class where OSM has no speed limit or lane count.
-- No demand, plans, transit or `config.xml`: these are your scenario.
+`freespeed` and `capacity` come from the defaults of the road class where OSM has no speed limit or lane count. The
+demand, the plans and `config.xml` are your scenario. All options: [Command line](../reference/cli.md#matsim).

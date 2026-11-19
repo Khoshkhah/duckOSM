@@ -15,15 +15,16 @@ duckosm --version
 ## Quick start
 
 ```bash
-curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf
-duckosm build --pbf monaco-latest.osm.pbf --output monaco.duckdb --modes driving
-duckosm quack monaco-latest.osm.pbf --gdal -o out --name monaco
+duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
+duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco
 ```
 
 ```python
 import duckosm
 
-db = duckosm.build(pbf="monaco-latest.osm.pbf", output="monaco.duckdb")  # as duckosm build (in the next release)
+area = duckosm.get("Monaco")  # as duckosm get (in the next release)
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build (in the next release)
 
 r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
 r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
@@ -66,7 +67,7 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 
 ## Not ported to Rust yet
 
-`build` (in part), `levels`, `bus` and `multimodal`. They work, and they move to Rust next.
+`build` (in part) and `levels`. They work, and they move to Rust next.
 
 ## Where files go
 

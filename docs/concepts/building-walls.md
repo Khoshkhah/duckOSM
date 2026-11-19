@@ -1,16 +1,21 @@
 # The walls of the buildings
 
-duckOSM can give each wall of each building a type. The build writes the walls to
-[`main.building_faces`](../reference/database.md#building_faces), and you can change a type in the fixes editor
-([Edit OSM data](../guides/edit-osm-data.md)).
+duckOSM can give each wall of each building a type: front, back, side, party or court. The build writes the walls to
+[`main.building_faces`](../reference/database.md#building_faces). You can change a type in
+[Fix the OSM data](../guides/edit-osm-data.md), and the next build keeps your change.
 
-```yaml
-options:
-  building_faces: true
-```
+| Where | Turn it on |
+|---|---|
+| Command line | `--building-faces` |
+| Config file | `options.building_faces: true` |
+| duckOSM Studio | **Wall labels** |
 
-The walls need a PBF source and a boundary. On the command line, add `--building-faces`. In duckOSM Studio, select
-**Wall labels**. Monaco: 10,909 walls of 1,262 buildings.
+The walls need an OSM file and a boundary.
+
+<figure markdown="span">
+  ![The walls of the buildings of Monaco: front walls green, back walls red, side walls gray, shared walls purple](../images/building-walls.png)
+  <figcaption>The walls of Monaco, in the Building tab of Edit OSM data: front green, back red, side gray, party purple.</figcaption>
+</figure>
 
 ## The five types
 
@@ -40,15 +45,7 @@ The walls need a PBF source and a boundary. On the command line, add `--building
 The column `type_reason` tells which rule gave the type (`street`, `address`, `entrance`, `corner`, `inferred`, `opposite`,
 `shared`, `other`, `none`, `inner`). Check `inferred` fronts by eye.
 
-## Monaco
-
-| Type | Walls | Share |
-|---|---|---|
-| `side` | 4,632 | 42 % |
-| `front` | 3,134 | 29 % |
-| `back` | 1,614 | 15 % |
-| `party` | 1,130 | 10 % |
-| `court` | 399 | 4 % |
+## How sure it is
 
 The method is a rule of thumb from the shapes and a few tags. No reference data tells which wall is the real front.
 The score, all rules and all constants: [walls in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/building_walls_details.md).

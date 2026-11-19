@@ -1,63 +1,38 @@
 # The Rust engine
 
-duckOSM builds the road networks with an engine in Rust. It is the default since 2026-11-04. It gives the same tables and the same
-`edge_id` values as the old Python engine, and it is much faster.
+duckOSM is one Rust program, `duckosm`. The command line, the Python SDK, the Rust SDK and duckOSM Studio in the browser
+all run the same Rust code, so they give the same rows and the same `edge_id`.
 
-| Area | Rust engine | Python engine |
-|---|---|---|
-| Estonia, the network step | 19 s, 1.5 GB of memory | 1,545 s, 10 GB of memory |
-
-## What runs in Rust
-
-| Step | Engine |
+| You use | It runs |
 |---|---|
-| The network: `edges`, `private_edges`, `nodes`, `edge_id_map`, `edge_graph`, turn restrictions | Rust |
-| `raw.*` of a whole file in the program `duckosm`: the table function `read_osm`, about 30% less CPU than `ST_READOSM` ([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/streaming_load.md)) | Rust |
-| The cut of the PBF to the boundary (`clip-pbf`, also in `duckosm build`) | Rust |
-| `raw.*` of `duckosm build`, the base-map layers (`features.*`), the bus routes, the drawing levels | Python, for now |
-
-The Python steps move to Rust one at a time. Each move has a test that the tables stay equal.
-
-## Choose the engine
-
-The engine is the option `options.engine` of the [configuration](../reference/configuration.md):
-
-```yaml
-options:
-  engine: rust      # the default; python runs the old SQL steps
-```
-
-On the command line, `duckosm build --engine python ...` uses the Python engine. The Python engine stays as the reference for one
-release.
+| the command `duckosm` | the Rust program |
+| the Python SDK (`import duckosm`) | the same program, through the module `duckosm._rust`. Python only calls it |
+| the Rust SDK | the crates `duckosm-core`, `duckosm-build` and the others |
+| [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) | the same engine as WebAssembly, in the browser |
 
 ## Install
 
-The Rust engine is the module `duckosm._rust`, inside the `duckosm` wheel. You do not install it separately. There are wheels for Linux
-(x86_64 and aarch64), macOS (x86_64 and arm64) and Windows (x64). On another system, `pip` builds the package from the source, and that
-needs a [Rust toolchain](https://rustup.rs).
+`pip install duckosm` installs the program and the Python SDK in one wheel, with nothing to compile. There are wheels for
+Linux (x86_64, aarch64), macOS (x86_64, arm64) and Windows (x64). On another system, `pip` builds it from the source, and
+that needs a [Rust toolchain](https://rustup.rs). [Install](../install.md).
 
-## The program duckosm
+## Speed
 
-The folder `rust/` also has a program with no Python: `duckosm`. It builds an area from a config or from a cut `.osm.pbf` file.
+| Area | The network step |
+|---|---|
+| Estonia | 19 s, 1.5 GB of memory |
 
-```bash
-cargo build --release --manifest-path rust/Cargo.toml -p duckosm-cli   # makes rust/target/release/duckosm
-rust/target/release/duckosm --config my_area.yaml --allow-skipped
-rust/target/release/duckosm edit my_area.duckdb                   # the page of Edit OSM data
-rust/target/release/duckosm quack my_area.osm.pbf -o out          # the features table of QuackOSM
-```
+The speed of each output: [Compare](../compare/index.md).
 
-`--allow-skipped` lets the build go on when the config asks for a step that only Python has (for example the maps, `viz.enabled`).
-`duckosm --help` lists all the options.
-`duckosm quack` makes the features table of QuackOSM, with the same rows: see [duckOSM and QuackOSM](quackosm.md).
+## Not ported to Rust yet
 
-## In the browser
+These commands still run code that is not ported to Rust yet. They give the same tables, and each port keeps them equal.
 
-[duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) runs the same engine as WebAssembly. It builds the same tables in a web
-page, with nothing to install.
+| Command | Not ported yet |
+|---|---|
+| `duckosm build` with a config file | the validation, the report and the multimodal graph. Its network steps run in Rust. `duckosm FILE` is the whole build in Rust |
+| `duckosm levels` | the whole command |
 
-## For developers
-
-The design and the measurements are on GitHub: [the engine](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/rust_engine.md),
-[the move into duckOSM](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/rust_engine_move.md) and
-[the Rust documents](https://github.com/Khoshkhah/duckOSM/tree/main/docs/rust).
+The plan and the state of each port:
+[All of duckOSM in Rust](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/all_in_rust.md). The design of the
+engine: [the Rust documents](https://github.com/Khoshkhah/duckOSM/tree/main/docs/rust).

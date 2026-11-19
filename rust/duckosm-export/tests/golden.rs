@@ -29,6 +29,7 @@ fn db() -> &'static Path {
             bus_routes: false,
             features: true,
             built_at: Some(0),
+            tile_indexing: false, // the Python build has no tile columns
             ..Params::default()
         };
         build(&data().join("monaco_sample.osm.pbf"), &out, &p).unwrap();

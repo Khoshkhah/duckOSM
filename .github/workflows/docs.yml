@@ -26,9 +26,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # MkDocs 2.0 drops the plugin/theme system Material depends on: stay on 1.x
-      - run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6"
-      - run: mkdocs build --strict
+      # The look of rustgis.app: Zensical builds the site from mkdocs.yml. The ci job "docs" still checks the links with
+      # mkdocs --strict. Zensical does not read exclude_docs, so the developer documents are removed first.
+      - run: pip install "zensical==0.0.67"
+      - run: rm -rf docs/design docs/rust docs/proposals docs/development.md docs/lane_map.md
+      - run: zensical build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

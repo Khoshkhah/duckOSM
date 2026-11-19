@@ -281,9 +281,7 @@ class DuckOSM:
                 # Needs raw.* and the driving network; options.bus_routes (on).
                 if self.config.options.bus_routes and "driving" in self.config.modes and self.config.source.type == "pbf":
                     self._say(progress, main_task, "Matching bus routes...")
-                    from duckosm.bus import write_bus_routes
-                    routes = write_bus_routes(self.con)
-                    logger.info(f"  Bus routes: {len(routes)}, {int((routes['gaps'].str.len() > 0).sum())} with gaps (bus.routes)")
+                    self._rust_step("bus")
 
                 # Every driving edge's lanes, decided once (docs/design/gmns_lane_profile.md): after all modes (a bus-only edge in the
                 # cycling network is shared by bikes) and while raw.* is still here
@@ -394,6 +392,10 @@ class DuckOSM:
         for stale in (self.output_path, wal):
             if stale.exists():
                 stale.unlink()
+        self._open()
+
+    def _open(self) -> None:
+        """Open the output file with the settings of the build (the build can close it for a step of the `duckosm` program)."""
         self.con = duckdb.connect(str(self.output_path))
         # geometry_always_xy = false: the *_Spheroid functions take (lat, lon), as before DuckDB 2.0; 2.0 refuses them until it is set
         self.con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
@@ -416,6 +418,20 @@ class DuckOSM:
         except Exception:
             logger.warning("H3 extension not available, using Python fallback")
             self._h3_available = False
+
+    def _rust_step(self, *args) -> None:
+        """Run the `duckosm` program (Rust) with ``args`` and the output file: close the file first (the program opens it
+        itself), then open it again in the schema that was in use."""
+        schema = self.con.execute("SELECT current_schema()").fetchone()[0]
+        self.con.execute("CHECKPOINT")
+        self.con.close()
+        try:
+            code = rust_engine.module().cli(["duckosm", *map(str, args), str(self.output_path)])
+        finally:
+            self._open()
+            self.con.execute(f"USE {schema}")
+        if code:
+            raise RuntimeError(f"duckosm {args[0]} failed (exit code {code})")
     
     def _raw_way_fixes(self) -> None:
         """The osm_overrides fixes that act on raw.ways, before any step reads it (docs/design/osm_override_new_ways.md):
@@ -833,15 +849,14 @@ class DuckOSM:
     def _build_multimodal(self) -> None:
         """Build the intermodal mm.* transfer graph (walk<->drive<->cycle). Optional post-mode step;
         never aborts the build."""
-        from duckosm.processors import MultimodalBuilder
         mm = self.config.multimodal
         logger.info("Building multimodal transfer graph (mm.*)...")
         start = time.time()
+        pairs = [a for k, v in (mm.transfer_costs or {}).items() for a in ("--pair-cost", f"{k}={v}")]
         try:
-            stats = MultimodalBuilder(self.con, transfer_s=mm.transfer_s,
-                                      transfer_costs=mm.transfer_costs).run()
-            self.stats['mm_edge_count'] = stats.get('edge_count', 0)
-            self.stats['mm_transfer_count'] = stats.get('transfer_count', 0)
+            self._rust_step("multimodal", "--transfer-cost", mm.transfer_s, *pairs)
+            self.stats['mm_edge_count'] = self.con.execute("SELECT count(*) FROM mm.edges").fetchone()[0]
+            self.stats['mm_transfer_count'] = self.con.execute("SELECT count(*) FROM mm.transfers").fetchone()[0]
             logger.info(f"  Multimodal graph built in {time.time() - start:.2f}s: "
                         f"{self.stats['mm_edge_count']:,} edges, "
                         f"{self.stats['mm_transfer_count']:,} transfers")

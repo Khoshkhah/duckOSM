@@ -35,9 +35,10 @@ def test_clip_pbf_to_the_boundary(tmp_path):
 def test_db_named_like_a_schema_is_refused(tmp_path):
     """DuckDB names a database after its file: `driving.duckdb` / `mm.duckdb` make every
     `driving.edges` / `mm.edges` ambiguous. The CLI refuses such a file with a clear message."""
+    import subprocess
+    import sys
+
     import duckdb
-    from click.testing import CliRunner
-    from duckosm.cli import main
     from duckosm.utils import check_db_name
     for bad in ("driving.duckdb", "mm.duckdb", "Walking.duckdb"):
         with pytest.raises(ValueError, match="Rename it"):
@@ -45,8 +46,8 @@ def test_db_named_like_a_schema_is_refused(tmp_path):
     check_db_name(tmp_path / "monaco.duckdb")
     db = tmp_path / "mm.duckdb"
     duckdb.connect(str(db)).close()
-    r = CliRunner().invoke(main, ["multimodal", str(db)])
-    assert r.exit_code != 0 and "Rename it" in r.output
+    r = subprocess.run([sys.executable, "-m", "duckosm", "multimodal", str(db)], capture_output=True, text=True)
+    assert r.returncode != 0 and "Rename it" in r.stderr
 
 
 def test_pbf_cut_is_keyed_on_boundary_and_pbf(tmp_path):

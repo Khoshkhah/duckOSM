@@ -1,118 +1,76 @@
 # Stable edge ids
 
+Each edge has an `edge_id`, made from OpenStreetMap ids. It is not a row number.
+
 ```sql
 edge_id = (hash(osm_id, source, target) >> 1)::BIGINT      -- DuckDB's hash()
 ```
 
-- **`osm_id`**: the OSM way the edge comes from.
-- **`source`, `target`**: the OSM node ids where the edge starts and ends (or a
-  [virtual node](#one-id-per-edge)). Their order is the direction, so the two directions of a
-  two-way road have different ids.
+| Input | Is |
+|---|---|
+| `osm_id` | the OSM way that the edge comes from |
+| `source`, `target` | the OSM nodes where the edge starts and ends, in the direction of travel |
 
-`edge_id` is not a row number. All three inputs come from OpenStreetMap ids, so an unchanged edge gets
-the same `edge_id` on every rebuild, in every area cut from the same build, and in every export. An
-id changes only when its edge changes: a new way id, new end nodes, a new junction that splits it,
-or, for a [merged edge](#merged-edges), a change in the pieces it is made of.
+So:
 
-The `is_reverse` column says whether an edge runs against the way's drawing direction (a way tagged
-`oneway=-1` is turned round first, so its one edge is not a reverse). For a merged two-way edge, the node ids set the
-forward direction, not the drawing. `is_reverse` is not part of the id.
+| Rule | Why |
+|---|---|
+| **The two directions of a two-way road have two ids** | `source` and `target` change places, so the hash changes. Data for one direction (a count, a speed) joins on its own id |
+| An unchanged edge keeps its id after a rebuild, in each area cut from the build, and in each export | the inputs are OSM ids, not row numbers |
+| An id changes only when its edge changes | a new way id, new end nodes, or a new junction that splits the edge |
+| The same road has the same id in each mode | the modes cut the ways at the same junctions |
 
-## One id per edge
+## One id for each edge
 
-`(osm_id, source, target)` must be unique. Where it repeats (a way that ends where it starts, a
-way that runs between the same two junctions twice, or goes from A to B and back), the build splits
-the edge at its midpoint with a **virtual node**. A virtual node has `node_id < 0` and its id is a
-hash of the edge's content, so it is as stable as the rest. If a repeated triple still survives, the
-build stops with an error. Monaco: 1 virtual node in driving, 19 in walking, 21 in cycling.
+`(osm_id, source, target)` must be unique. Where it repeats (a way that ends where it starts, or that runs between the
+same two junctions twice), the build splits the edge at its middle with a **virtual node**. A virtual node has a negative
+`node_id`, made from the content of the edge, so it is as stable as the rest.
 
 ## The same id in every mode
 
-Every mode cuts ways at one shared set of points, `main.global_junctions`: each node of a road
-that another highway way also uses (another road, or a footway, path or cycleway, such as a
-crosswalk), and each node where a road ends. It is made once from all highway ways in `raw.ways`,
-before any mode filters them. A road is cut at these points, and so is a footway or path that
-passes through one, also in a mode that does not have the road. So a way that is in two modes is cut
-into the same pieces and has the same `edge_id` in both. Monaco: 2,754 of the 2,765 driving edges
-have the same `edge_id` in cycling, 2,275 in walking. The others are roads that the mode does not keep.
-
-So a crosswalk cuts the road it crosses in driving too, and the road cuts the crosswalk in walking
-too (where a road whose sidewalk is a separate way is not in the walking network). Walkers and cyclists connect to
-the road there, and the pieces are the same in every mode. Ways that do not exist on the ground
-(`highway=proposed`, `construction`, …) cut nothing. `options.global_junctions: false` makes each mode
-split at its own junctions, and the ids of a road can then differ between modes.
-
-Because the mode is not in the id, the same `edge_id` can be in several schemas. Across modes, the key
-is `(mode, edge_id)`.
+Each mode cuts the ways at the same points, `main.global_junctions`: each node that two highway ways share (a road and
+a crossing footway too), and each end of a road. So a way that is in two modes has the same pieces and the same
+`edge_id` in both. The same `edge_id` can then be in several schemas: across modes, the key is `(mode, edge_id)`.
 
 ## Merged edges
 
-With `options.merge_segments` (on), a chain of edges that is one road is joined into one edge: the
-edges must agree on `highway`, `name`, `oneway`, `maxspeed`, `lanes`, `surface`, `access`, `junction`,
-`layer`, `bridge`, `tunnel` and `service`. Both directions take the `osm_id` of the piece at the
-forward edge's `source` end (`seq` 1).
-
-A point in `main.global_junctions` is never merged away (with `options.global_junctions` on). So
-roads are not joined across OSM ways; only chains of footways, paths and the like are. Monaco:
-
-| Mode | Edges with merging | Edges with `merge_segments: false` |
-|---|---|---|
-| driving | 2,765 | 2,765 |
-| walking | 10,952 | 11,374 |
-| cycling | 10,274 | 10,828 |
+A chain of edges that is one road (the same `highway`, `name`, `oneway`, `maxspeed`, `lanes` and other tags) is
+joined into one edge. Roads are not joined across OSM ways; chains of footways and paths are.
 
 ### `edge_id_map`
 
-Each mode with merging has an `edge_id_map` table: one row per piece of each merged edge. The
-reverse of a two-way road is a merged edge of its own, with its own rows. A piece and the merged
-edge it maps to always run the same way.
+This table of each mode maps each piece to its merged edge:
 
-| Column | Meaning |
+| Column | Holds |
 |---|---|
-| `old_edge_id` | the piece's `edge_id` in a build without merging |
-| `new_edge_id` | the merged edge it is part of |
-| `seq` | the piece's position, 1 at the forward edge's `source` end |
-| `is_reverse` | whether the piece (`old_edge_id`) runs against its way's drawing |
-| `osm_id` | the piece's own OSM way |
-
-An edge that is not in the table was not merged. Monaco, walking: 796 rows for
-372 merged edges. The OSM ways of one merged edge, in order:
-
-```sql
-SELECT seq, osm_id FROM walking.edge_id_map WHERE new_edge_id = ? ORDER BY seq;
-```
+| `old_edge_id` | the `edge_id` of the piece, as in a build without merging |
+| `new_edge_id` | the merged edge |
+| `seq` | the position of the piece, 1 at the start |
+| `is_reverse` | whether the piece runs against the drawing direction of its way |
+| `osm_id` | the OSM way of the piece |
 
 ## Connector edges
 
-The edges that join a dangling path to the network have a negative `osm_id`: `-min(a, b)`, where `a`
-and `b` are the `osm_id`s of the path and of the road it joins. Their `edge_id` uses the same formula.
-Select them with `osm_id < 0`. See [Network clean-up](cleanup.md#connect-dangling-paths).
+An edge that joins a dangling path to the network has a negative `osm_id`: `-min(a, b)`, where `a` and `b` are the
+`osm_id` of the path and of the road. Its `edge_id` uses the same formula. See
+[Network clean-up](cleanup.md#connect-dangling-paths).
 
-## Clips and exports
+## Cuts and exports
 
-A clip (`source.type: duckdb`, `build --source-db`, `duckosm extract`) copies edges as they are, so
-every `edge_id` is the parent's. A clip has no `edge_id_map`. The road [exports](../exports/index.md)
-keep `edge_id`: as the id (SUMO, MATSim, GMNS `link_id`, OpenDRIVE road id) or as an attribute or tag
-(GeoPackage, Lanelet2 `duckosm:edge_id`). railML (rail) has none.
+A cut (`duckosm extract`) copies the edges as they are, so each `edge_id` is the same as in the larger database. The
+[exports](../exports/index.md) keep `edge_id`: as the id (SUMO edge, MATSim link, GMNS `link_id`, OpenDRIVE road) or as
+an attribute (GeoPackage, Lanelet2 `duckosm:edge_id`).
 
 ## Compute or match an id
 
-Every database has two macros:
-
-| Macro | Formula |
-|---|---|
-| `edge_id_hash(osm_id, source, target)` | the formula above |
-| `edge_id_hash_v1(osm_id, source, target, is_reverse)` | the older formula, which also hashed `is_reverse`: to map ids from a database built with it |
+Each database has the macro `edge_id_hash(osm_id, source, target)`:
 
 ```sql
 SELECT count(*) FROM driving.edges WHERE edge_id <> edge_id_hash(osm_id, source, target);   -- 0
 ```
 
-In Python: `from duckosm import edge_id_hash, edge_id_expr` (one id, or the SQL expression).
-
-`hash()` is internal to DuckDB and can change in a new major version, so duckOSM requires
-`duckdb<2`. Outside DuckDB, you cannot compute the id again. To give your own data the ids, join on the
-three columns and read `edge_id`:
+`hash()` belongs to DuckDB and can change in a new major version, so duckOSM stays on DuckDB 1.x. Outside DuckDB, join
+your data on the three columns:
 
 ```sql
 SELECT s.*, e.edge_id

@@ -1,50 +1,63 @@
 # railML (experimental)
 
-`duckosm railml` writes a railML 2.4 infrastructure file, for rail tools such as OpenTrack, RailSys and Viriato.
+`duckosm railml` writes the railways of an area as a railML 2.4 infrastructure file, with your OSM fixes, for rail
+planning tools such as OpenTrack, RailSys and Viriato.
 
 | Reference and format | |
 |---|---|
-| Format | [railML 2.4](https://www.railml.org/en/documentation-railml2), infrastructure ([XML tree](https://wiki2.railml.org/wiki/Dev:XMLtree/2.4)) |
-| Reference tool | none: the file is not yet loaded in a rail tool |
-| Check | none yet against the railML schema, because it needs a registration. The tests check the XML structure and its references. [How each output is checked](../concepts/checks.md) |
+| Format | [railML 2.4](https://www.railml.org/en/documentation-railml2), infrastructure |
+| Reference tool | none: no test loads the file in a rail tool yet |
+| Check | the tests check the XML structure and its references. A check against the railML schema needs a registration. [How each output is checked](../concepts/checks.md) |
 
 ```bash
 duckosm railml monaco.duckdb        # -> monaco.railml.xml
 ```
 
-Monaco test build: 13 tracks, 6 switches, 1 station.
+The command reads the railways from the raw OSM tables (`raw.*`) of a build from an `.osm.pbf`. A database cut from a
+larger one has no raw tables.
 
-## What it makes
-
-duckOSM has no rail network. This command reads the railways from the raw OSM data in the database (`raw.*`). A build from
-an `.osm.pbf` keeps it; an area clipped from a bigger build has none. Railway types: `rail`, `light_rail`, `subway`,
-`tram`, `narrow_gauge`, `funicular`.
+## What goes in
 
 | railML item | From OSM |
 |---|---|
-| track | a railway, cut at switches and where tracks meet, with its length |
+| track | a railway (`rail`, `light_rail`, `subway`, `tram`, `narrow_gauge`, `funicular`), cut at switches, with its length |
 | switch | `railway=switch`, or a node where three or more tracks meet |
 | signal | `railway=signal`, at its position on the track |
-| station (OCP) | `railway=station` or `halt`, with its coordinates |
-| buffer stop | `railway=buffer_stop` at a track end; other dead ends are open ends |
+| station | `railway=station` or `halt`, with its coordinates |
+| buffer stop | `railway=buffer_stop` at the end of a track |
 
-## Options
+## The file
 
-| Option | Does | Default |
+| Element | Attributes | Holds |
 |---|---|---|
-| `-o`, `--out` | the output file | `<name>.railml.xml` |
+| `infrastructure` | `id` | all of the area |
+| `ocp` (operation control point) | `id` (`ocp_<node id>`), `name` | a station or a halt |
+| `ocp/geoCoord` | `coord` (longitude latitude), `epsgCode` 4326 | the position of the station |
+| `track` | `id`, `type` (the OSM `railway` value) | one track |
+| `trackBegin`, `trackEnd` | `id`, `pos` (metres from the track start) | the two ends of a track |
+| `connection` | `id`, `ref` (the connection at the other track) | two tracks that join |
+| `bufferStop`, `openEnd` | `id` | a track end with a buffer stop, or with nothing |
+| `switch` | `id` (`sw_<node id>`), `pos`, `name` | a switch on the track |
+| `signal` | `id` (`sig_<node id>`), `pos`, `dir` | a signal on the track |
 
-```python
-from duckosm import to_railml
-to_railml("monaco.duckdb", "monaco.railml.xml")     # -> {"tracks", "switches", "signals", "ocps"}
-```
+The `<node id>` is the OSM node id, so you can find each item in OSM.
 
-Design: [railml_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/railml_export.md).
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB).
+
+| Area (input) | Time | Memory | Output |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.03 s | 18.6 MB | 0.1 MB |
+| Kentucky (148 MB) | 0.22 s | 394 MB | 4.8 MB |
+| France (5.1 GB) | not run: the build with the raw tables needs more disk than the Mac mini has free | | |
 
 ## Limits
 
-- Infrastructure only: no timetable and no rolling stock.
-- No electrification, gauge, speed or gradient: OSM seldom has these tags.
-- At a switch, only two tracks are joined. The third branch is an open end, and the switch has no connections.
-- Tracks have no geometry. Only stations have coordinates.
-- The direction of a signal is not read.
+| Not in the file | Why |
+|---|---|
+| timetable, rolling stock | railML infrastructure only |
+| electrification, gauge, speed, gradient | OSM seldom has these tags |
+| the third branch of a switch | only two tracks are joined; the third is an open end |
+| the shape of a track | only stations have coordinates |
+| the direction of a signal | not read yet |

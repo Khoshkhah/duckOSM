@@ -1,37 +1,47 @@
 # How a build works
 
-A build (`duckosm build`, or `DuckOSM(config).run()` in Python) runs a list of steps chosen from the config. Each step is SQL
-in the output DuckDB file. For the Rust build, see [Browser and native builds](browser-native.md).
+A build turns an `.osm.pbf` file into one DuckDB file with the networks of an area. It runs in 6 steps. Each step
+writes its result to storage, and the next step reads only what it needs.
+
+```bash
+duckosm monaco.osm.pbf --boundary monaco.geojson -f duckdb --features -o out   # the build, all in Rust
+```
+
+## The steps
+
+| Step | Does | Writes |
+|---|---|---|
+| 0. Cut | cuts the OSM file to the boundary: each way with a node inside stays whole | the cut file |
+| 1. Read | reads the ways, the node positions and the turn restrictions, and applies your [OSM fixes](../guides/edit-osm-data.md) | the ways and the nodes |
+| 2. Junctions | finds the nodes where ways meet, for all modes together | `main.global_junctions` |
+| 3. Network | for each mode: selects the ways ([what each network contains](networks.md)), cuts them into edges at the junctions, gives each edge its [`edge_id`](edge-ids.md), speed and cost, and makes the turn graph | `edges`, `nodes`, `edge_graph`, `turn_restrictions` |
+| 4. Write | writes the tables of each mode into the DuckDB file | the schemas `driving`, `walking`, `cycling` |
+| 5. More tables | the area tables, the drawing levels, the bus routes, the lane profile, the building walls, and with `--features` the base-map layers | `main.*`, `visualization.*`, `bus.*`, `features.*` |
+
+For a country, the build runs by map tiles: each tile in its own process, then one join. Its memory does not grow with
+the area: [Browser and native builds](browser-native.md).
 
 ## Two ways in
 
-| | Build from a PBF | Clip from a parent build |
+| | Build from an OSM file | Cut from a built database |
 |---|---|---|
-| Input | an `.osm.pbf` file | an existing `.duckdb` and a boundary |
-| Config | `source.type: pbf` | `source.type: duckdb`, or `duckosm build --source-db` |
-| `edge_id` | made from OSM | the parent's |
-| Tables | all | `edges`, `private_edges`, `nodes`, `edge_graph`, `turn_restrictions` |
+| Input | an `.osm.pbf` file | a built `.duckdb` file and a boundary |
+| Command | `duckosm FILE`, `duckosm build` | `duckosm extract` |
+| `edge_id` | made from OSM | the same as in the larger database |
+| Tables | all | the network tables only, no `raw.*` and no base-map layers |
 
-How to clip: [Cut a built region](../guides/prepare-area.md#2-cut-a-built-region).
-
-## The steps of a PBF build
-
-| Stage | Steps |
-|---|---|
-| ① Once | cut the PBF to the boundary, parse OSM into `raw.*`, global junctions |
-| ② Each mode | filter roads ([What each network contains](networks.md)), OSM fixes, build edges, simplify and merge, connect dangling paths, speeds, costs, walk / cycle type, private roads apart, turn restrictions, edge graph, H3, indexes, validate |
-| ③ Once, at the end | intermodal graph `mm.*`, base-map layers `features.*`, bus routes `bus.*`, `edge_id_hash` macros, metadata and time zone, report and map |
-
-A step in ③ that fails writes a warning, and the build continues. The time zone and the bus routes stop the build.
-
-Each mode has its own schema (`driving`, `walking`, `cycling`). More about ②: [Stable edge ids](edge-ids.md),
-[Network clean-up](cleanup.md).
+How to cut: [Prepare an area](../guides/prepare-area.md).
 
 ## What stays in the database
 
-- The routing tables: `edges`, `nodes`, `edge_graph`, `turn_restrictions`.
-- For each mode: `private_edges`, `ways`, `way_nodes`, `edge_id_map`.
-- `raw.*`, `main.global_junctions`, `main.boundary` and `features.*`.
+| Tables | Holds |
+|---|---|
+| `<mode>.edges`, `nodes`, `edge_graph`, `turn_restrictions` | the routable network of each mode |
+| `<mode>.private_edges`, `ways`, `way_nodes`, `edge_id_map` | the restricted roads, the OSM ways, and the map from OSM ways to edges |
+| `main.boundary`, `main.global_junctions` | the area and its junctions |
+| `features.*`, `raw.*` | the base-map layers, and the raw OSM tables they are made from |
 
-Every table and column: [Database schema](../reference/database.md). Diagrams, the config key and condition of each step, and the
-Monaco numbers: [build in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/build_details.md).
+Every table and column: [Database schema](../reference/database.md).
+
+`duckosm build` with a config file still runs some steps that are not ported to Rust yet: the validation, the report
+and the multimodal graph. The network steps run in Rust in both commands.
