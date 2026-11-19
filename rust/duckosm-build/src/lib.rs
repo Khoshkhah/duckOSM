@@ -21,6 +21,7 @@ pub mod area;
 pub mod clip;
 pub mod config;
 pub mod elevation;
+pub mod get;
 #[cfg(feature = "duckdb")]
 pub mod features_check;
 pub mod h3;

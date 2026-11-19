@@ -163,13 +163,20 @@ struct CutCli {
     /// The area file to write (.osm.pbf).
     #[arg(short, long)]
     out: PathBuf,
+    /// The OSM fixes file of `duckosm build --fixes` (YAML): the area file has the fixes in it (the rules of quack
+    /// --fixes, and each turn rule as a restriction relation), so other tools read the edited data.
+    #[arg(long, value_name = "FILE")]
+    fixes: Option<PathBuf>,
 }
 
 fn cut(args: &[String]) -> Result<(), String> {
     let cli = CutCli::parse_from(args);
     let text = std::fs::read_to_string(&cli.boundary).map_err(|e| format!("{}: {e}", cli.boundary.display()))?;
     let t = std::time::Instant::now();
-    let n = duckosm_build::cut_file(&cli.region, &text, &cli.out)?;
+    let n = duckosm_build::get::cut_with_fixes(&cli.region, &text, &cli.out, cli.fixes.as_deref())?;
+    if n.nodes == 0 {
+        eprintln!("warning: the cut has no nodes: is the boundary in longitude, latitude order (docs/reference/boundary.md)?");
+    }
     eprintln!(
         "cut: {} nodes, {} ways, {} relations in {:.2} s",
         n.nodes,
@@ -1057,6 +1064,8 @@ pub fn main_with(mut args: Vec<String>) -> i32 {
         Some("studio") => studio(&args[1..]),
         Some("levels-edit") => levels_edit(&args[1..]),
         Some("cut") => cut(&args[1..]),
+        #[cfg(feature = "duckdb")]
+        Some("get") => duckosm_tools::get::run(&args[1..]),
         Some("tiles") => tiles(&args[1..]),
         Some("quack") => quack(&args[1..]),
         Some("quack-tiles") => quack_tiles(&args[1..]),

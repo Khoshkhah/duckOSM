@@ -868,6 +868,7 @@ dependencies = [
  "flate2",
  "geo",
  "h3o",
+ "md-5 0.10.6",
  "postgres",
  "rayon",
  "roadstyle-levels",
@@ -877,6 +878,7 @@ dependencies = [
  "snap",
  "tiff",
  "tzf-rs",
+ "ureq",
  "yaml-rust2",
 ]
 

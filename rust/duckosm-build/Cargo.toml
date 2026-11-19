@@ -18,6 +18,8 @@ duckdb = ["dep:duckosm-duckdb"]
 snap = ["duckosm-parquet/snap"]
 # zstd is a C library: the browser build (duckosm-wasm) leaves it out and uses snap.
 zstd = ["duckosm-parquet/zstd", "duckosm-core/zstd"]
+# duckosm get: the download of a Geofabrik extract (not in the browser build)
+get = ["dep:ureq", "dep:md-5"]
 
 [dependencies]
 duckosm-core = { path = "../duckosm-core" }
@@ -43,6 +45,8 @@ sha2 = "0.10"
 serde_json = { version = "1", features = ["preserve_order"] }
 # the tiles of the levels that do not wait for each other run at the same time (the same rayon as duckosm-core)
 rayon = "1.12"
+ureq = { version = "3", optional = true }
+md-5 = { version = "0.10", optional = true }
 # the build of a tile keeps only its own rows (union.rs, own_rows)
 arrow-array = "=60.0.0"
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place

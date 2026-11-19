@@ -27,6 +27,16 @@ Mac mini (Apple M6, 12 cores, 16 GB), GDAL 3.13.3, GeoParquet. 1 GB = 10⁹ byte
 | Files, GeoPackage | ≈ 37 GB³ | ≈ 30 GB³ | |
 | Files, GeoParquet | 16.7 GB | **12.1 GB** | 14.4 GB⁵ |
 
+### Monaco (0.7 MB)
+
+| | `ogr2ogr` | duckOSM |
+|---|---|---|
+| Time, GeoParquet | | **0.05 s** |
+| Memory, GeoParquet | | **0.01 GB** |
+| Files, GeoParquet | | **0.9 MB** |
+
+`ogr2ogr` was not measured on Monaco.
+
 ### Kentucky (148 MB)
 
 | | `ogr2ogr` | duckOSM | duckOSM in the browser² |

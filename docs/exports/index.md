@@ -5,7 +5,7 @@
 The levels go from the raw OSM data to the most detailed network. Each level is made from the level before it.
 
 <div class="dk-levels">
-<div class="lv"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></div>
+<a class="lv" href="#0-the-osm-file"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
 <a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
 <a class="lv" href="#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
 <a class="lv" href="#3-traffic-simulation"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
@@ -13,6 +13,14 @@ The levels go from the raw OSM data to the most detailed network. Each level is 
 </div>
 
 Your OSM fixes go into every level.
+
+### 0. The OSM file
+
+The OSM data of the area as one `.osm.pbf` file, with your OSM fixes in it.
+
+| Tool | Export | Command |
+|---|---|---|
+| OSMnx, osm2pgsql, SUMO, QGIS, osmium | [the OSM file](osm-file.md) of the area, cut from a Geofabrik extract, with the fixes | `duckosm get`, `duckosm cut --fixes` |
 
 ### 1. OSM data
 
