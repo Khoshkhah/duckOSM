@@ -1,91 +1,43 @@
 # GeoPackage, GeoParquet and shapefile
 
+`duckosm export-gis` writes the network of each mode as GIS layers, with your OSM fixes, for QGIS, ArcGIS and FME.
+
+| Reference and format | |
+|---|---|
+| Format | [GeoPackage](https://www.geopackage.org/), [GeoParquet](https://geoparquet.org/) or shapefile, in longitude and latitude (EPSG:4326) |
+| Check | GDAL reads each file back, and each `edge_id` equals the database. [How each output is checked](../concepts/checks.md) |
+
 ```bash
 duckosm export-gis monaco.duckdb                 # -> monaco.gpkg
-duckosm export-gis monaco.duckdb -f shp          # -> monaco_gis/monaco_edges_driving.shp, … (one per layer)
-duckosm export-gis monaco.duckdb -f geoparquet   # -> monaco_geoparquet/edges_driving.parquet, … (one per layer)
+duckosm export-gis monaco.duckdb -f geoparquet   # -> monaco_geoparquet/
+duckosm export-gis monaco.duckdb -f shp          # -> monaco_gis/
 ```
 
-For QGIS, ArcGIS, FME, or any tool that imports GIS files (Visum, Aimsun, …). The GeoPackage is one
-file with all layers.
+## The layers
 
-## GeoParquet
-
-GeoParquet is a column file format for geodata. Use it for web and cloud tools. GeoLibre
-opens a file from a URL (`?data=<url>`). RustGIS also opens it. DuckDB, GeoPandas and GDAL read it too.
-
-- `out` is a folder. The command writes one file per layer: `edges_<mode>.parquet`,
-  `nodes_<mode>.parquet` and `boundary.parquet`. The layers are the same as in the GeoPackage.
-- DuckDB writes the GeoParquet `geo` metadata. Coordinates are longitude / latitude (EPSG:4326).
-- Column names stay as they are (no shapefile renames). `edge_id` stays a 64-bit integer. As in
-  the GeoPackage, list columns such as `refs` are not written.
-- If the database has the table `visualization.edge_levels`, each `edges_<mode>.parquet` file also
-  gets all its columns except `edge_id`. The join uses `edge_id`. An edge with no row there gets
-  NULL values. The columns are `casing_start`, `casing_level`, `casing_end` and `fill_level`, and,
-  if the table has them, `head_start_m`, `head_end_m`, `cap_start` and `cap_end`. The `nodes` and
-  `boundary` files do not get them. duckOSM only reads that table. Without it, the command writes
-  the edges as they are and logs one line.
-- Each `features.*` table (the base map) gets its own file, `features_<table>.parquet`, with all its
-  columns. mapstyle's look splits a file into its layers by `kind`.
-- The folder also gets `layers.json`, the list of the files: `file`, `kind` (`edges`, `nodes`,
-  `boundary` or `features`), `mode` (edges and nodes) or `table` (features), and `count` for each. The roadstyle GeoLibre plugin reads it to open the
-  whole folder in one step (roadstyle › Open a duckOSM folder).
-
-## Layers
-
-One pair per mode, plus the area boundary. Monaco:
-
-| Layer | Features |
+| Layer | Columns |
 |---|---|
-| `edges_driving`, `nodes_driving` | 2,765, 1,719 |
-| `edges_walking`, `nodes_walking` | 10,952, 4,116 |
-| `edges_cycling`, `nodes_cycling` | 10,274, 4,151 |
-| `boundary` | 1 |
+| `edges_<mode>` | the columns of [`edges`](../reference/database.md): `edge_id`, `source`, `target`, `osm_id`, `highway`, `name`, `oneway`, `lanes`, `maxspeed_kmh`, `length_m`, `cost_s`, … |
+| `nodes_<mode>` | the columns of [`nodes`](../reference/database.md): `node_id`, … |
+| `boundary` | the area boundary |
 
-Every column of the `edges` and `nodes` tables comes along as an attribute, except lists such as
-`refs`: `edge_id`, `source`,
-`target`, `osm_id`, `highway`, `name`, `oneway`, `lanes`, `length_m`, `maxspeed_kmh`, `cost_s`, …
-([what each means](../reference/database.md)); with [elevation](../guides/elevation.md), `ele`,
-`z_from`, `z_to` too. `length_m` and `cost_s` are rounded to 2 decimals. Coordinates are longitude / latitude (EPSG:4326).
+## The formats
 
-Only the map layers are exported: the graph of legal turns and the turn restrictions are not GIS
-data. For those, use [networkx](networkx.md) or [SUMO](sumo.md).
+| | GeoPackage | GeoParquet | Shapefile |
+|---|---|---|---|
+| Files | one file | one file for each layer | a set of files for each layer |
+| `edge_id`, `osm_id` | integers | integers | text |
+| Column names | full | full | 10 characters (`spd_kmh`) |
 
-## Shapefile limits
+## Speed and memory
 
-Use a shapefile only for a tool that needs one:
+Mac mini (Apple M6, 12 cores, 16 GB). France is the driving network only.
 
-- **Ids are written as text.** Every 64-bit column (`edge_id`, `node_id`, `osm_id`, `source`,
-  `target`, the H3 cells) is too big for a shapefile number; read them back as strings. GeoPackage keeps
-  them as 64-bit integers.
-- Field names can have 10 characters, so `maxspeed_kmh` is renamed `spd_kmh`, `is_reverse`
-  `is_rev`, `admin_level` `adm_level`.
-- One file set per layer; 2 GB per file.
+| Area (input) | Format | Time | Memory | Output |
+|---|---|---|---|---|
+| Kentucky (148 MB) | GeoPackage | 14 s | 663 MB | 843 MB |
+| | GeoParquet | 0.33 s | 2.1 GB | 386 MB |
+| | shapefile | 17 s | 606 MB | 3.2 GB |
+| France (5.1 GB) | GeoParquet | 6.9 s | 7.4 GB | 3.6 GB |
 
-## Options
-
-| Option | Does | Default |
-|---|---|---|
-| `-m`, `--mode` | modes to export; repeat for several | every mode in the db |
-| `-f`, `--format` | `gpkg`, `geoparquet` or `shp` | `gpkg` |
-| `-o`, `--out` | `.gpkg` file, or folder for shapefiles and GeoParquet | `<name>.gpkg` / `<name>_gis/` / `<name>_geoparquet/` |
-| `--name` | the file name | the db's name |
-| `--no-boundary` | leave out the boundary layer | included |
-
-```python
-import duckdb
-from duckosm import to_gis
-con = duckdb.connect("monaco.duckdb", read_only=True)
-to_gis(con, "monaco.gpkg")             # -> {"layers": {name: count}, ...}
-to_gis(con, "monaco_geoparquet", fmt="geoparquet")   # a folder of .parquet files
-```
-
-## Check an export
-
-```bash
-duckosm gis-debug monaco.gpkg --source-db monaco.duckdb     # -> monaco_gis_debug.html
-```
-
-Reads the file back through GDAL, as a GIS tool would, and writes a page with a map of every layer
-and a check: feature counts, CRS and, with `--source-db`, whether every `edge_id` in the file matches
-the database exactly. It ends with PASS, CHECK or FAIL. Needs `geopandas`.
+All options: [Command line](../reference/cli.md#export-gis).

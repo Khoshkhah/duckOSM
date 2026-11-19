@@ -1,173 +1,99 @@
 # Configuration
 
-A build reads its settings from a YAML file. `duckosm init-config` writes a commented template;
-edit it, then build:
+A build can read its settings from a YAML file. `duckosm init-config` writes a template with comments:
 
 ```bash
 duckosm init-config my_area.yaml
-duckosm build -c my_area.yaml
+duckosm --config my_area.yaml
 ```
 
-- A key you leave out takes the **default** in the tables below. An unknown key anywhere (at the top
-  level, a section name, or inside a section) is ignored with a warning. That covers a typo and a
-  key that no longer exists.
-- Relative paths resolve against the folder you run `duckosm` in, not the config file's folder.
-- With `-c`, a `build` option you type overrides the file (e.g. `-c monaco.yaml -m walking
-  --no-features`); options you don't type leave the file's values. The **Flag** column shows the
-  option for each field ([Command line](cli.md#build)).
-- The template sets a few keys to a value other than the default; the **Template** column shows them.
-  It turns on `validation` and `report`, and gives example values for `name`, `output_path` and
-  `source.pbf_path`.
+| Rule | |
+|---|---|
+| A key that you leave out | takes the default of the tables below |
+| An unknown key | is ignored, with a warning |
+| A relative path | is read from the folder where you run `duckosm` |
+| An option on the command line | wins over the file, for example `--config my_area.yaml -m walking` |
+| A value outside its choices | stops the build before it starts |
 
-In a clone of the repo, `config/sample_monaco.yaml` is a short working example.
+## Area and output
 
-## Top level
-
-| Key | Default | Template | Flag | Does |
-|---|---|---|---|---|
-| `name` | `default` | `my_import` | stem of `-o`, else of `-b`, else of `-p` or `--source-db` | the area's name: the output file is `<name>.duckdb` when `output_path` is a folder; also names the cached PBF cut (below) and the report files |
-| `output_path` | `output.duckdb` | `.` | `-o` | a path ending in `.duckdb` is the output file; anything else is a folder, and the file is `<output_path>/<name>.duckdb` |
-| `modes` | `[driving]` | `[driving]` | `-m` | the networks to build: any of `driving`, `walking`, `cycling`, one schema each |
-| `osm_overrides` | none | none | `--fixes` | a rules file of [fixes for OSM errors](../guides/edit-osm-data.md#the-fixes-file). Used only when named |
-| `pbf_path` | none | | | short for `source.pbf_path` |
-| `boundary_path` | none | | | short for `boundary.path` |
-| `h3_cell` | none | | `--h3-cell` | short for `boundary.h3_cell` |
-
-With a boundary, the PBF is first cut to it and the cut is kept as `pbf/<name>.<strategy>.<key>.osm.pbf`,
-where `<key>` is a fingerprint of the boundary and the PBF. The next build reuses it while both are
-unchanged; after a change it cuts again and removes the old cut of the same name and strategy.
-
-## `source`
-
-Where the network comes from. [How a build works](../concepts/build.md) describes both kinds.
-
-| Key | Default | Flag | Does |
+| Key | Default | Option | Does |
 |---|---|---|---|
-| `source.type` | `pbf` | `--source-db` sets `duckdb` | `pbf`: build from OSM data. `duckdb`: cut an area out of a built database, keeping its edge ids |
-| `source.pbf_path` | none | `-p` | the `.osm.pbf` file; required for `pbf` |
-| `source.source_db` | none | `--source-db` | the built database to cut from; required for `duckdb`, together with a boundary (`path`, `place`, `bbox` or `h3_cell`) |
+| `name` | `default` | `--name` | the name of the area: the output file is `<name>.duckdb` |
+| `output_path` | `output.duckdb` | `-o` | a `.duckdb` file, or a folder for `<name>.duckdb` |
+| `modes` | `[driving]` | `-m` | `driving`, `walking`, `cycling` |
+| `osm_overrides` | none | `--fixes` | your [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) |
+| `source.pbf_path` (or `pbf_path`) | none | `PBF` | the `.osm.pbf` file |
+| `source.type` | `pbf` | | `pbf`, or `duckdb` to cut an area out of the built database `source.source_db`, with its edge ids |
 
 ## `boundary`
 
-The area to build.
+Give one of these. With none, the whole file is built. [The boundary file](boundary.md).
 
-| Key | Default | Flag | Does |
-|---|---|---|---|
-| `boundary.path` | none | `-b` | a GeoJSON polygon. With none of the four boundary keys, the whole PBF is built |
-| `boundary.buffer_m` | `0` | | grow the boundary outwards by this many metres first (measured in the local UTM zone) |
-| `boundary.place` | none | | a place name, e.g. `Monaco`: looked up in the PBF's own borders, else on Nominatim, as [`duckosm boundary`](cli.md#boundary) does |
-| `boundary.bbox` | none | | a box, `[west, south, east, north]` in degrees |
-| `boundary.h3_cell` | none | `--h3-cell` | an H3 cell id: its outline is the area |
-
-Give one of `path`, `place`, `bbox`, `h3_cell`; `path` wins. The other three are written to
-`<name>.boundary.geojson` next to the output, and the build uses that file.
-
-To make a boundary file: [Prepare an area](../guides/prepare-area.md).
-
-## `clip`
-
-The clean-up after the area is cut. Details: [Network clean-up](../concepts/cleanup.md).
-
-| Key | Default | Does |
-|---|---|---|
-| `clip.predicate` | `intersects` | `duckdb` source only: which edges are copied. `intersects`: every edge that touches the area; `within`: only edges completely inside; `centroid`: edges whose middle point is inside. A `pbf` build always keeps whole ways |
-| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md)) |
-| `clip.min_component_edges` | `1` | no effect: the component filter is removed |
-| `clip.connectivity_rescue` | `true` | walking and cycling, `pbf` build: [join dangling path ends](../concepts/cleanup.md#connect-dangling-paths) to the nearest node. Runs with or without a boundary |
-| `clip.connect_snap_m` | `10.0` | the largest gap, in metres, that `connectivity_rescue` joins |
+| Key | Does |
+|---|---|
+| `boundary.path` (or `boundary_path`) | a GeoJSON file |
+| `boundary.place` | a place name, for example `Monaco`, as [`duckosm boundary`](cli.md#boundary) finds it |
+| `boundary.bbox` | a box, `[west, south, east, north]` in degrees |
+| `boundary.h3_cell` (or `h3_cell`) | an H3 cell |
+| `boundary.buffer_m` | grows the boundary by this many metres first (default `0`) |
 
 ## `options`
 
-Build options. They apply to a `pbf` build; a `duckdb` build uses only `memory_limit`, `threads` and
-`build_graph` (for the indexes).
-
-| Key | Default | Flag | Does |
-|---|---|---|---|
-| `options.build_graph` | `true` | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns |
-| `options.h3_indexing` | `true` | `--h3-index` / `--no-h3-index` | add `nodes.h3_cell` and `edges.from_cell`, `to_cell`, `lca_res`. `duckosm` writes the same values (flag: `--h3-resolution`) |
-| `options.h3_resolution` | `8` | `--h3-resolution` | H3 resolution, 0–15, for those columns and for `boundary_cells` (`duckosm`: for the columns only) |
-| `options.tile_indexing` | `true` | `--tile-index` / `--no-tile-index` | add `nodes.tile` and `edges.from_tile`, `to_tile`, `lca_zoom`: the zoom-28 [tile keys](database.md#tile-keys) of tileroute. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) writes them. There is no zoom option: the zoom is always 28 |
-| `options.merge_segments` | `true` | | join a chain of edges that is one road into one edge; writes `<mode>.edge_id_map`. [Merged edges](../concepts/edge-ids.md#merged-edges) |
-| `options.global_junctions` | `true` | | split every mode's roads at the same junctions, so a road has the same `edge_id` in every mode. [The same id in every mode](../concepts/edge-ids.md#the-same-id-in-every-mode) |
-| `options.engine` | `rust` | `--engine` | who builds the network step (edges, private edges, nodes, `edge_id_map`): `rust`, the Rust engine in the module `duckosm._rust` (about 50 times faster, the same tables and ids), or `python`, the SQL steps in DuckDB (the reference). The other steps run in Python in both cases. A clip build (`source.type: duckdb`) has no PBF and ignores the option. [The Rust engine](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/rust_engine.md) |
-| `options.infer_separate_sidewalks` | `true` | | a road with no sidewalk tag whose both sides are covered (a `footway=sidewalk` line beside it, or the other half of a dual carriageway) gets `sidewalk=separate` (and `duckosm:sidewalk=inferred`) in `raw.ways`, so walking uses its sidewalks, not its carriageway. Needs the walking mode |
-| `options.functional_types` | `true` | | add `walk_type` (walking) and `cycle_type` (cycling). [`walk_type` and `cycle_type`](../concepts/networks.md#walk_type-and-cycle_type) |
-| `options.cycling_dismount` | `true` | | add footways and pedestrian streets to cycling as [dismount edges](../concepts/networks.md#dismount-edges) |
-| `options.process_speeds` | `true` | | add `maxspeed_kmh` to edges. [Speeds and travel time](../concepts/networks.md#speeds-and-travel-time) |
-| `options.calculate_costs` | `true` | | add `cost_s`, the travel time in seconds. Routing and `multimodal` need it |
-| `options.extract_restrictions` | `true` | | driving: build `turn_restrictions` and remove the forbidden turns from `edge_graph`. [Turn restrictions](../concepts/networks.md#turn-restrictions) |
-| `options.boundary_cells` | `false` | | write `main.boundary_cells`, the H3 cells that cover the boundary. Needs a boundary. `duckosm` does not make it: it skips the option |
-| `options.boundary_cell_resolutions` | none | | resolutions for `boundary_cells`, e.g. `[6, 7, 8]`; none means `[h3_resolution]` |
-| `options.build_features` | `true` | | build the [base-map layers](features.md), `features.*` (`build --no-features` turns it off). Needs `raw.*`, so a `duckdb` build skips it. `duckosm` makes the same tables (flag: `--features`, with `--boundary`) and keeps `raw.*` in the file, as `duckosm build` does; without a boundary it skips the option |
-| `options.sea` | `overture` | | the sea, [`features.ocean`](features.md), from Overture Maps (needs the network; skipped offline); `false` = none. `duckosm` makes it with `build_features` (flag: `--sea`) |
-| `options.levels` | `true` | | the last step: the drawing order of the roads, [`visualization.edge_levels`](database.md#visualization-schema), solved with your edits kept in `visualization.level_*` (`build --no-levels` turns it off). Needs the `levels` extra. A clip takes the edits of its parent for the roads it has. [Guide](../guides/drawing-order.md) |
-| `options.building_faces` | `false` (`true` in the config templates) | | write [`main.building_faces`](database.md#building_faces), the walls of the buildings with a type each ([The walls of the buildings](../concepts/building-walls.md)), and apply the wall rules (`extra.building_faces`) of the [fixes file](../guides/edit-osm-data.md). Needs the Rust engine, a PBF and a boundary: another build writes a warning and makes no walls |
-| `options.bus_routes` | `true` | | match the OSM bus routes to the driving edges: schema [`bus`](database.md#bus-schema). Needs driving and `raw.*`, so a `duckdb` build skips it |
-| `options.clip_strategy` | none | | how duckOSM cuts the PBF (the rules of `osmium extract`): `complete_ways`, `smart` or `simple` ([`clip-pbf`](cli.md#clip-pbf)). None means `smart` with `build_features`, else `complete_ways` |
-| `options.memory_limit` | none | | DuckDB memory limit, e.g. `"16GB"`; none is DuckDB's default. The program `duckosm` uses it for the load of `raw.*` |
-| `options.threads` | none | | number of DuckDB threads; none is DuckDB's default. The program `duckosm` uses it for the load of `raw.*` |
-| `options.simplify_batches` | `0` | | split the simplify step into this many batches to save memory; `0` sizes them from the node count, `1` is one pass |
-
-## `validation`
-
-Checks each mode at the end of the build. What each check means: [Check a build](../guides/check-build.md).
-
-| Key | Default | Template | Does |
-|---|---|---|---|
-| `validation.enabled` | `false` | `true` | run the checks |
-| `validation.fail_on_error` | `true` | `true` | stop the build when a check fails; `false` only warns |
-| `validation.assert_unique_node_id` | `true` | | no two nodes with the same `node_id` |
-| `validation.assert_way_length_conserved` | `true` | | no part of an OSM way lost when it was split into edges. Skipped in a `duckdb` build |
-| `validation.warn_layer_without_structure` | `true` | `true` | warn (never fail) about edges with a `layer` but no `bridge` or `tunnel` tag |
-
-## `multimodal`
-
-Builds `mm.edges` and `mm.transfers` at the end of the build, the same as
-[`duckosm multimodal`](cli.md#multimodal). Needs walking and at least one other mode.
-[Routing across modes](../concepts/multimodal.md).
+Each step is on by default, except where the table says off.
 
 | Key | Default | Does |
 |---|---|---|
-| `multimodal.enabled` | `false` | build the `mm` tables |
-| `multimodal.transfer_s` | `60.0` | seconds added at each change of mode |
-| `multimodal.transfer_costs` | none | seconds per direction, e.g. `{"walking->driving": 60, "driving->walking": 30}`; a pair not listed uses `transfer_s` |
+| `options.build_graph` | on | the turn graph `edge_graph` |
+| `options.extract_restrictions` | on | driving: the turn restrictions |
+| `options.merge_segments` | on | joins a chain of edges that is one road ([merged edges](../concepts/edge-ids.md#merged-edges)) |
+| `options.global_junctions` | on | cuts each mode at the same junctions, so a road has the same `edge_id` in each mode |
+| `options.process_speeds`, `options.calculate_costs` | on | `maxspeed_kmh` and `cost_s` |
+| `options.functional_types` | on | `walk_type` and `cycle_type` |
+| `options.cycling_dismount` | on | footways in cycling, as [dismount edges](../concepts/networks.md#dismount-edges) |
+| `options.infer_separate_sidewalks` | on | walking uses the sidewalk lines of a road, not the road |
+| `options.h3_indexing`, `options.h3_resolution` | on, `8` | the H3 columns |
+| `options.tile_indexing` | on | the zoom 28 [tile keys](database.md#tile-keys) |
+| `options.build_features` | on | the [base-map layers](features.md) |
+| `options.sea` | `overture` | `features.ocean` from Overture Maps; `false` for none |
+| `options.levels` | on | the [drawing order](../guides/drawing-order.md) of the roads, with your edits kept |
+| `options.building_faces` | off | the [walls of the buildings](../concepts/building-walls.md) |
+| `options.bus_routes` | on | the [bus routes](../concepts/networks.md#bus-routes) on the driving edges |
+| `options.boundary_cells`, `options.boundary_cell_resolutions` | off | the H3 cells that cover the boundary |
+| `options.clip_strategy` | `smart` with the base-map layers, else `complete_ways` | how the file is cut to the boundary: `complete_ways`, `smart` or `simple` |
+| `options.memory_limit`, `options.threads` | DuckDB's own | the memory and the threads of DuckDB |
+
+## `clip`
+
+| Key | Default | Does |
+|---|---|---|
+| `clip.connectivity_rescue` | on | walking and cycling: [connects dangling paths](../concepts/cleanup.md#connect-dangling-paths) |
+| `clip.connect_snap_m` | `10.0` | the largest gap that it connects, in metres |
+| `clip.predicate` | `intersects` | `source.type: duckdb` only: the edges that are copied: `intersects`, `within` or `centroid` |
 
 ## `elevation`
 
-The area's DEM: its [ground reference](../concepts/ground-reference.md). Set it one time for each area here, not on each
-command line. Only the Rust build (`duckosm --config`) reads this section: it samples the DEM and writes the heights,
-`main.elevation_grid` and `main.elevation_metadata`. A `--dem` on the command line wins over the whole section. The Python
-`duckosm build` keeps the section but does not sample: run [`duckosm elevation`](cli.md#elevation) after it.
-[`duckosm studio`](../guides/studio.md) and Build again of [`duckosm edit`](../guides/edit-osm-data.md#the-editor) do that
-step themselves, with the keys of this section.
-
-| Key | Default | Does |
-|---|---|---|
-| `elevation.dem` | none | the DEM file: a GeoTIFF in EPSG:4326 with 32-bit floats. No file: no heights |
-| `elevation.product` | none | `DTM` (bare earth) or `DSM` (surface). Necessary when `reference` is `true` |
-| `elevation.vertical_datum` | none | its vertical datum, for example `EGM2008`. Necessary when `reference` is `true` |
-| `elevation.license` | none | its license. Necessary when `reference` is `true` |
-| `elevation.reference` | `true` | the file is the area's ground reference. `false` (a test, a second surface): the product, the datum and the license can stay unknown |
+The DEM of the area: its [ground reference](../concepts/ground-reference.md). Give it one time for each area here.
+`--dem` on the command line wins over this section.
 
 ```yaml
 elevation:
-  dem: data/dem/fabdem-monaco.tif
-  product: DTM
+  dem: data/dem/fabdem-monaco.tif     # a GeoTIFF in EPSG:4326, 32-bit floats
+  product: DTM                        # DTM (bare earth) or DSM (surface)
   vertical_datum: EGM2008
   license: CC-BY-NC-SA-4.0
+  reference: true                     # false: a test or a second surface; then the 3 keys above can be unknown
 ```
 
-The build writes the SHA-256 of the file in `main.elevation_metadata.sha256`, the ground id.
+## `validation`, `multimodal`, `report`, `viz` {#validation}
 
-## `report` and `viz`
+| Key | Default | Does |
+|---|---|---|
+| `validation.enabled` | off | [checks the build](../guides/check-build.md) and stops on a fault (`validation.fail_on_error`) |
+| `multimodal.enabled` | off | the [`mm` tables](../concepts/multimodal.md), for trips across modes. `multimodal.transfer_s` (`60`) is the cost of each change of mode |
+| `report.enabled` | off | a report of the build, in `reports/` |
+| `viz.enabled` | off | the maps of the build, as [`duckosm viz`](cli.md#viz) |
 
-| Key | Default | Template | Does |
-|---|---|---|---|
-| `report.enabled` | `false` | `true` | write `reports/<name>_<time>.md` and `.html`: counts per mode, what the road filter kept, network pieces, validation results |
-| `viz.enabled` | `false` | `false` | write the maps after the build, `reports/<name>_map.html` and `<name>_<mode>_network.html`, like [`duckosm viz`](cli.md#viz). Needs `duckosm[viz]` |
-| `viz.basemap` | none | | a background from the web under the maps (`voyager`, `positron`, `osm`, `satellite`, …); none = the database's own layers |
-
-A failed report or map logs a warning; the build still succeeds.
-
-A value of `modes`, `options.clip_strategy` or `clip.predicate` outside its choices stops the build
-before it starts, with an error that lists the choices.
+More keys: `validation.assert_*` (each check, [Check a build](../guides/check-build.md)), `multimodal.transfer_costs`
+(a cost for each direction, for example `{"walking->driving": 60}`), `viz.basemap` (a web background under the maps) and
+`options.simplify_batches` (a memory limit for one step). The template of `duckosm init-config` explains each one.
