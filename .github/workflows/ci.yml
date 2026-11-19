@@ -59,11 +59,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      # GDAL (ogr2ogr) and osmium: duckosm boundary / clip-pbf and the sample build's pre-clip.
-      - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool
+      # no GDAL and no osmium: duckosm boundary, clip-pbf, admin and export-gis are in Rust (sumo_compare's test skips)
       # Tests that need local PBFs / built dbs / netconvert skip themselves.
       # [sumo] brings netconvert, so the SUMO export is tested for real
-      - run: pip install -e ".[dev,routing,sumo]"
+      - run: pip install -e ".[dev,networkx,sumo]"
       # python -m pytest puts the repo root on the path: tests import each other as `tests.test_gmns`
       - run: python -m pytest tests/ -q -rs
       # the fixes editor of the page (web/fixes_editor/, docs/design/fixes_editor.md): its unit tests need only Node (on the runner)
@@ -97,8 +96,8 @@ jobs:
       # the router has no DuckDB and no threads: it builds for the pages too (WebAssembly; the planner page of route-map runs duckosm-planner)
       - run: cargo check --release -p duckosm-router -p duckosm-planner --target wasm32-unknown-unknown
         working-directory: rust
-      # ogr2ogr: the GeoPackage of one file of duckosm export-gis and the golden of gis-debug
-      - run: sudo apt-get update -q && sudo apt-get install -y -q gdal-bin osmium-tool   # osmium: sumo_compare's .pbf
+      # osmium: sumo_compare's .pbf (a developer tool, not a duckosm command)
+      - run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
       # netconvert for the GMNS export (gmns_sumo): the version that made tests/data/exports/monaco_gmns_columns.tsv
       - run: python3 -m pip install --user -q eclipse-sumo==1.27.0 && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # duckosm-edit too: the CLI and the wheel link it, so the golden tests run with the features that it adds (roadstyle's serde_json)
@@ -153,7 +152,6 @@ jobs:
           workspaces: rust
           # only main saves: the store has 10 GB, and the caches of pull requests pushed out main's (each about 0.9 GB)
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
       - run: pip install -e ".[dev]" "playwright==1.55.0"
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest tests/test_edit_page.py tests/test_editor_host_shapes.py tests/test_editor_building.py tests/test_editor_road_node.py tests/test_editor_turn_changes.py -q -rs

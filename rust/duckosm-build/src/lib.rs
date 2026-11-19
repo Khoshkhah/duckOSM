@@ -2143,7 +2143,7 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     let p = &Params { cut_pbf: false, features: p.features && cut.is_some(), ..p.clone() };
     let res = (|| -> Result<Summary, String> {
         if let (Some(b), Some(f)) = (&cut, &area_file) {
-            cut_to_file(pbf_path, b, f)?;
+            cut_to_file(pbf_path, b, f, duckosm_core::cutstream::Strategy::Smart)?;
             log.step("cut to the boundary");
         }
         let mut files = Vec::new();
@@ -2255,17 +2255,33 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
 /// Step 0 alone: cut the region file `region` to `boundary` (GeoJSON text) and write the area to `out` as a
 /// `.osm.pbf` file. The cut keeps only lists of ids in memory ([`duckosm_core::cutstream`]).
 pub fn cut_file(region: &Path, boundary: &str, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
-    cut_to_file(region, &Boundary::parse(boundary)?, out)
+    cut_to_file(region, &Boundary::parse(boundary)?, out, duckosm_core::cutstream::Strategy::Smart)
 }
 
-fn cut_to_file(region: &Path, b: &Boundary, out: &Path) -> Result<duckosm_core::cutstream::CutCounts, String> {
+/// [`cut_file`] with the rules of `strategy` (`duckosm clip-pbf`).
+pub fn clip_file(
+    region: &Path,
+    boundary: &str,
+    out: &Path,
+    strategy: duckosm_core::cutstream::Strategy,
+) -> Result<duckosm_core::cutstream::CutCounts, String> {
+    cut_to_file(region, &Boundary::parse(boundary)?, out, strategy)
+}
+
+fn cut_to_file(
+    region: &Path,
+    b: &Boundary,
+    out: &Path,
+    strategy: duckosm_core::cutstream::Strategy,
+) -> Result<duckosm_core::cutstream::CutCounts, String> {
     let open = || {
         duckosm_core::fs::File::open(region)
             .map(|f| std::io::BufReader::with_capacity(1 << 20, f))
             .map_err(|e| format!("{}: {e}", region.display()))
     };
     let f = duckosm_core::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
-    let (w, n) = duckosm_core::cutstream::cut_to_pbf(open, b, std::io::BufWriter::with_capacity(1 << 20, f))?;
+    let inside = |lon, lat| b.contains(lon, lat);
+    let (w, n) = duckosm_core::cutstream::cut_with(open, &inside, strategy, std::io::BufWriter::with_capacity(1 << 20, f))?;
     w.into_inner().map_err(|e| format!("{}: {e}", out.display()))?;
     Ok(n)
 }

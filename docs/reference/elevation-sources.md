@@ -1,15 +1,16 @@
 # Elevation sources
 
-Where `duckosm elevation` gets its heights, and how the sources compare. How to run it:
-[Add elevation](../guides/elevation.md).
+Where the heights come from, and how the sources compare. How to add them: [Add elevation](../guides/elevation.md).
 
-| Option | Gives |
+| You want | Use |
 |---|---|
-| `--source` | a 30 m model for the area, downloaded. `copernicus` works everywhere with no setup; `eudtm` is Europe only and needs a free key |
-| `--dem` | a **file** that you have: the best choice where a national 1 m model exists. It must be a GeoTIFF in EPSG:4326 ([File formats](#file-formats)) |
+| any area, no setup | `--source copernicus` (the `auto` default outside Europe) |
+| Europe, bare ground | `--source eudtm`, with a free key |
+| the best heights in one country | `--dem` with its national 1 m DTM |
+| bare ground, commercial use, outside Europe | a national DTM; not FABDEM |
 
-The list of sources is data: `src/duckosm/data/dem_sources.json`. The program, the ground of duckOSM Studio
-(step 4, Build) and the two tables below read it. [The sources for an area](#the-sources-for-an-area) gives the order.
+The rule for each area: [The ground reference](../concepts/ground-reference.md). It needs a bare-earth model (a DTM):
+Copernicus is a surface model (a DSM).
 
 ## `--source`
 
@@ -65,29 +66,15 @@ Many countries publish a 1 m DTM made from LiDAR. It shows cliffs, cuttings and 
 For other countries, find the open DTM of the national mapping agency. A national model has its own CRS:
 convert it to EPSG:4326 before you give it to `--dem` ([File formats](#file-formats)).
 
-## The sources for an area
+## The order of the sources
 
-`duckosm.dem_sources.sources_for_bbox((west, south, east, north))` gives the sources that cover a box, best first:
+duckOSM Studio suggests the sources that cover an area, in this order:
 
 1. a national 1 m DTM, where one covers the area;
 2. EU-DTM, in Europe;
 3. FABDEM (a DTM, **not for commercial use**);
 4. Copernicus GLO-30 (a DSM);
 5. the other models, by resolution.
-
-A source covers the box when the full box is in its coverage. The coverage of a country is an approximate outline:
-look at the download page of the source.
-
-| Field of an entry | Holds |
-|---|---|
-| product | `DTM` or `DSM` |
-| CRS, vertical datum | the coordinate system and the height reference |
-| `license` | the license, and whether it permits commercial use |
-| access | a download, a COG, a STAC API, or tiles; an account or a key |
-| `cors` | TRUE when a web page can read the data. The Copernicus COG files on AWS send no CORS header, so a page cannot read them |
-
-The ground of Studio uses the list to suggest a source, and to fill the product, the datum and the license of
-a file that you give.
 
 ## File formats
 
@@ -127,15 +114,6 @@ surveys give noise, not heights.
 
 ## Vertical datum
 
-A height is measured from a reference surface, and the models are different. Most use the geoid (approximately sea
-level, for example EGM2008). GNSS uses the ellipsoid. The difference can be tens of meters. You can compare the heights
-of one model. Do not mix models. `main.elevation_metadata.vertical_datum` records it.
-
-## Which one
-
-| You want | Use |
-|---|---|
-| any area, no setup | `--source copernicus` (the `auto` default outside Europe) |
-| Europe, bare ground | `--source eudtm`, with the key |
-| the best heights in one country | `--dem` with its national 1 m DTM |
-| bare ground, commercial use, outside Europe | a national DTM; not FABDEM |
+A height is measured from a reference surface. Most models use the geoid (about sea level, for example EGM2008); GNSS
+uses the ellipsoid. The difference can be tens of metres, so do not mix models. `main.elevation_metadata.vertical_datum`
+records it.

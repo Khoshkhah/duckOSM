@@ -60,7 +60,7 @@ class Options:
     bus_routes: bool = True                # bus.routes / bus.route_edges: the driving edges each OSM bus route relation travels (needs driving; PBF builds only). See docs/concepts/networks.md#bus-routes
     sea: Optional[str] = "overture"        # features.ocean, the sea (OSM only has coastline lines): 'overture' = Overture Maps' ocean polygons, read for the area from S3 (needs the network; offline it is skipped), or false. See docs/design/sea.md
     building_faces: bool = False           # main.building_faces: the walls of the buildings, each with a type (front, back, side, party, court), with the wall rules (extra.building_faces) of the fixes file. Rust engine, a PBF and a boundary only. See docs/design/fixes_editor.md
-    clip_strategy: Optional[str] = None    # osmium extract strategy: 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
+    clip_strategy: Optional[str] = None    # clip strategy (as osmium extract): 'smart' | 'complete_ways' | 'simple'. Default: 'smart' when build_features (completes multipolygon relations — rivers/landcover/coastlines), else 'complete_ways'
 
 
 @dataclass

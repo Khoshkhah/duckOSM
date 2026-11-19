@@ -44,7 +44,7 @@ class _Db:
 
 def build_area(config: str, folder: str, db: str, fixes: str | None = None, on_step=None) -> str:
     """``duckosm build`` with the config text ``config`` in the folder ``folder`` (the config's relative paths), into ``db``, with the fixes file
-    ``fixes`` when there is one. The DEM of the config's ``elevation:`` section is applied after the build (needs ``duckosm[elevation]``), and the
+    ``fixes`` when there is one. The DEM of the config's ``elevation:`` section is applied after the build (the Rust ``to_elevation``), and the
     build's record (``build_config``, ``build_dir`` of main.visualization_metadata) is written, so that Build again of ``duckosm edit`` can run it
     again. ``on_step(text)`` gets each step. Gives a line about the build."""
     import duckdb
@@ -71,10 +71,8 @@ def build_area(config: str, folder: str, db: str, fixes: str | None = None, on_s
     if dem:
         if on_step:
             on_step("Sampling the DEM")
-        try:
-            from duckosm.elevation import to_elevation, write_grid
-        except ImportError as e:
-            raise RuntimeError(f"the DEM step needs rasterio and pyproj: pip install 'duckosm[elevation]' ({e})")
+        from duckosm._api import to_elevation
+        from duckosm.elevation import write_grid
         e = cfg.elevation
         to_elevation(db, dem=str(Path(dem).resolve()), product=e.product, vertical_datum=e.vertical_datum, license=e.license, reference=e.reference)
         write_grid(db, Path(dem).resolve())

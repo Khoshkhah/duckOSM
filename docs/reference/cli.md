@@ -108,14 +108,14 @@ duckosm boundary [OPTIONS] [NAME]
 
 | Option | Does | Default |
 |---|---|---|
-| `--pbf PATH` | search the borders in this PBF first; needs GDAL's `ogr2ogr` | |
+| `--pbf PATH` | search the borders in this PBF first | |
 | `--osm-id INTEGER` | take this OSM boundary relation (when a name matches several) | |
 | `--offline` | never ask Nominatim | |
 | `-o`, `--out FILE` | output GeoJSON ([the boundary file](boundary.md)) | `<name>.geojson` |
 
 ### `clip-pbf`
 
-Cuts a PBF down to a GeoJSON area, with `osmium`. Guide:
+Cuts a PBF down to a GeoJSON area. The strategies have the rules of `osmium extract`. Guide:
 [Cut a smaller PBF](../guides/prepare-area.md#1-cut-the-osm-file).
 
 ```text
@@ -617,7 +617,7 @@ A `--dem` file in `ele` (no `--suffix`) is the area's ground reference. Give `--
 ### `admin`
 
 Adds `main.admin_boundaries`: every OSM administrative boundary in the PBF, with its parent. Replaces
-the table if it exists. Needs GDAL's `ogr2ogr`. Guide:
+the table if it exists. Guide:
 [Add administrative boundaries](../guides/admin-boundaries.md).
 
 ```text
@@ -628,7 +628,7 @@ duckosm admin --pbf PBF --db DB [--gpkg GPKG]
 |---|---|---|
 | `--pbf PBF` | the OSM PBF | required |
 | `--db DB` | the database to add the table to | required |
-| `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (skips the slow `ogr2ogr` step next time) | a temporary file |
+| `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (the next run does not read the PBF again) | a temporary file |
 
 ### `multimodal`
 

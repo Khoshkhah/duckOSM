@@ -41,7 +41,7 @@ NEW_WAY_ID_MIN = 9_000_000_000_000
 
 
 def pbf_cut_path(cache_dir, name, strategy, pbf, boundary) -> Path:
-    """Where the osmium cut of ``pbf`` to ``boundary`` is cached: ``<name>.<strategy>.<key>.osm.pbf``,
+    """Where the cut of ``pbf`` to ``boundary`` is cached: ``<name>.<strategy>.<key>.osm.pbf``,
     the key a fingerprint of the boundary file's content and the PBF (path, size, modification
     time), so a changed boundary or a newer PBF never reuses an old cut."""
     import hashlib
@@ -130,7 +130,7 @@ class DuckOSM:
             ]
         else:
             global_steps = [("connect", "Connecting to DuckDB", self._connect)]
-            # In-pipeline osmium clip: make `boundary` actually clip the graph (A1).
+            # In-pipeline clip: make `boundary` actually clip the graph (A1).
             if self.config.effective_boundary_path:
                 global_steps.append(("clip_pbf", "Clipping PBF to boundary", self._clip_pbf))
             global_steps.append(("load_pbf", "Loading PBF file", self._load_pbf))
@@ -616,15 +616,11 @@ class DuckOSM:
             self.con, Path(self._effective_boundary_path()).resolve(), resolutions
         ).run()
 
-    # ---- source.type: pbf — in-pipeline osmium clip (A1) -----------------------------
+    # ---- source.type: pbf — in-pipeline clip (A1) -------------------------------------
     def _clip_pbf(self) -> None:
-        """Pre-clip the source PBF to the boundary with osmium so `boundary` actually
+        """Pre-clip the source PBF to the boundary (the Rust ``duckosm clip-pbf``) so `boundary` actually
         constrains the graph. Idempotent (caches to pbf/<name>.osm.pbf). Falls back to
-        the original PBF if osmium is unavailable or the clip fails."""
-        osmium = shutil.which("osmium")
-        if not osmium:
-            logger.warning("osmium not found — skipping in-pipeline clip; using PBF as-is")
-            return
+        the original PBF if the clip fails."""
         boundary = Path(self._effective_boundary_path()).resolve()
         cache_dir = Path("pbf")
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -651,7 +647,7 @@ class DuckOSM:
                 old.unlink()
         if not clipped.exists():
             from duckosm.area import clip_pbf
-            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (osmium, --strategy {strategy}) ...")
+            logger.info(f"Clipping {self.pbf_path.name} -> {clipped} (--strategy {strategy}) ...")
             try:
                 clip_pbf(self.pbf_path, boundary, clipped, strategy)
             except RuntimeError as e:

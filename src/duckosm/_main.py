@@ -8,9 +8,7 @@ import signal
 import sys
 
 # TODO (step 6 of docs/design/all_in_rust.md): remove each command when its Rust PR merges, then this list.
-PYTHON_COMMANDS = {
-    "clip-pbf",       # no Rust port yet
-}
+PYTHON_COMMANDS = set()   # every command is in Rust now
 
 
 def main():

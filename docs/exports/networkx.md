@@ -1,7 +1,8 @@
 # networkx
 
 Load the network into [networkx](https://networkx.org) for your own analysis, or save it to a file.
-Needs `pip install "duckosm[routing]"`.
+The functions need `pip install "duckosm[networkx]"`. The command `duckosm export-graph` writes GraphML
+with no extra.
 
 | Function | Nodes | Edges |
 |---|---|---|
@@ -22,11 +23,12 @@ To save either one to a file (the format comes from the extension):
 
 ```bash
 duckosm export-graph monaco.duckdb                            # -> monaco_driving.graphml (junctions)
-duckosm export-graph monaco.duckdb -g edge -o routing.gpickle # the routing graph
+duckosm export-graph monaco.duckdb -g edge -o routing.graphml # the routing graph
 ```
 
-GraphML opens in any tool but stores lists and geometry as text; gpickle keeps lists and types but
-only loads in Python (add `--geometry shapely` for shapely geometries on the junction graph). From Python: `write_graph(con, "monaco.graphml")`.
+GraphML opens in any tool but stores lists and geometry as text. gpickle keeps lists and types but
+only loads in Python: write it from Python, `write_graph(con, "monaco.gpickle")` (add `geometry="shapely"` for shapely
+geometries on the junction graph).
 
 
 ## Turns of the restricted edges
