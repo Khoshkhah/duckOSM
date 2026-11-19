@@ -2,16 +2,17 @@ name: Release to PyPI
 
 # A version tag (v0.7.0, ...) builds the wheels, the sdist and the CLI archives, publishes to PyPI via trusted
 # publishing (no API token stored), and makes a GitHub Release with the CLI archives.
-# A run by hand (workflow_dispatch), and a pull request that changes this file, build and test everything but
-# publish nothing: the jobs "publish" and "release" run for a tag only.
+# A push to main that changes the package, and a run by hand (workflow_dispatch), build and test everything but
+# publish nothing: the jobs "publish" and "release" run for a tag only. Pull requests do not run this workflow (Kaveh,
+# 2026-11-19): its 12 builds for 5 systems waited hours for the GitHub runners; the tests of ci.yml check each PR.
 # One-time setup on pypi.org: add a "trusted publisher" for this repo and workflow
 # (project: duckosm, owner: Khoshkhah, repository: duckOSM, workflow: release.yml, environment: pypi).
 # docs/design/rust_engine_move.md, step M3.
 on:
   push:
     tags: ["v*"]
-  pull_request:
-    paths: [".github/workflows/release.yml", "pyproject.toml", "rust/duckosm-py/**", "rust/duckosm-cli/**", "src/duckosm/_main.py", "src/duckosm/_api.py", "tests/test_wheel.py"]
+    branches: [main]
+    paths: [".github/workflows/release.yml", "pyproject.toml", "rust/**", "src/duckosm/**", "tests/test_wheel.py"]
   workflow_dispatch:
 
 jobs:

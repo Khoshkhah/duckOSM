@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`main.building_faces` is in the `.duckdb` file.** `duckosm --building-faces --boundary` wrote the walls only as
+  `building_faces_main.parquet`, so `duckosm edit` showed no walls. Now the table is in the `.duckdb` output as
+  `docs/reference/database.md` says (Monaco: 10,909 walls).
 - **Level 0 of the outputs: the OSM file** (`docs/exports/osm-file.md`). `duckosm get "Monaco"` finds the boundary
   (a name, an OSM id, a box, an H3 cell or a GeoJSON file), the smallest Geofabrik extract that holds it (the rule of
   Studio's page, now in Rust: `duckosm_build::get::covering`), downloads it to `~/.cache/duckosm` (resume, progress, MD5
