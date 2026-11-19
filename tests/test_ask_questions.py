@@ -1,4 +1,4 @@
-"""The questions to ask the AI agent (docs/guides/ask-questions.md). One source: web/ask/questions.js. The page (rust/duckosm-edit/page/ask.js) imports it and gives
+"""The questions to ask the AI agent (docs/design/ask_questions.md). One source: web/ask/questions.js. The page (rust/duckosm-edit/page/ask.js) imports it and gives
 it to Ask as the examples, the server of the page has it in the program, and the guide lists the same questions in the same groups. Reading files only: no browser
 (tests/test_ask_page.py shows the examples in a browser)."""
 import re
@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "web" / "ask" / "questions.js").read_text(encoding="utf-8")
 ASK = (ROOT / "rust" / "duckosm-edit" / "page" / "ask.js").read_text(encoding="utf-8")
 LIB = (ROOT / "rust" / "duckosm-edit" / "src" / "lib.rs").read_text(encoding="utf-8")
-GUIDE = (ROOT / "docs" / "guides" / "ask-questions.md").read_text(encoding="utf-8")
+GUIDE = (ROOT / "docs" / "design" / "ask_questions.md").read_text(encoding="utf-8")
 # the six general groups of roadstyle's Ask (GENERAL in ask_panel.js): they show first, so a title of the page must not repeat one
 GENERAL = {"Know the data", "Find and count", "Show on the map", "Colour and focus", "The map and the layers", "Charts"}
 
