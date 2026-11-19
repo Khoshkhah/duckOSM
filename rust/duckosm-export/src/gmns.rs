@@ -222,8 +222,16 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
         }
         build_movement(&c, &sch, mode, uses)?;
         if mode == "driving" || mode == "cycling" {
-            // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut
-            crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
+            // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut. GMNS does
+            // not need SUMO: without netconvert the movements have no lane ranges, and there is no lane_connector
+            if crate::sumo::find_netconvert().is_ok() {
+                crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
+            } else {
+                eprintln!(
+                    "GMNS[{mode}]: netconvert (SUMO) not found: the movements have no lanes (start_ib_lane ... end_ob_lane are empty) and \
+                     there is no lane_connector. Install SUMO (`pip install eclipse-sumo`) for them"
+                );
+            }
             if o.lane_geometry {
                 meet_lanes(&c, &sch)?;
             }

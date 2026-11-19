@@ -65,6 +65,9 @@ struct Cli {
     /// Do not build edge_graph and turn_permission (duckOSM option build_graph: false).
     #[arg(long, conflicts_with = "config")]
     no_graph: bool,
+    /// Build edge_graph and turn_permission (the default). With --no-graph: the last one on the command line wins.
+    #[arg(long, overrides_with = "no_graph", conflicts_with = "config")]
+    graph: bool,
     /// Do not build turn_restrictions and turn_path_restrictions (duckOSM option extract_restrictions: false).
     #[arg(long, conflicts_with = "config")]
     no_restrictions: bool,
@@ -255,13 +258,20 @@ struct QuackCli {
     #[arg(long, default_value = "area")]
     name: String,
     /// Output formats, comma separated: geoparquet, duckdb (the table main.quackosm). With --gdal: gpkg, geoparquet.
+    /// With --geofabrik: gpkg, shp, geoparquet.
     #[arg(short, long)]
     format: Option<String>,
     /// Write the five layers of GDAL's OSM driver (points, lines, multilinestrings, multipolygons, other_relations: what
     /// ogr2ogr and QGIS give for the .osm.pbf file, with GDAL's default osmconf.ini) in place of QuackOSM's table:
     /// <out>/<name>_gdal.gpkg (default), or <out>/<name>_gdal_<layer>.parquet with --format geoparquet.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "geofabrik")]
     gdal: bool,
+    /// Write the 20 layers of Geofabrik's free shapefiles and GeoPackages (gis_osm_roads_free, gis_osm_pois_free,
+    /// gis_osm_buildings_a_free, ...: the feature classes of Geofabrik's "OpenStreetMap Data in Layered GIS Format") in
+    /// place of QuackOSM's table: <out>/<name>_geofabrik.gpkg (default), <out>/<name>_geofabrik.shp.zip with --format shp,
+    /// or <out>/<name>_geofabrik_<layer>.parquet with --format geoparquet.
+    #[arg(long)]
+    geofabrik: bool,
     /// The threads (default: all the cores), as QuackOSM's cpu_limit: the pool of the Rust threads, the blocks of the file
     /// that are decoded at the same time, and the threads of DuckDB.
     #[arg(long)]
@@ -298,7 +308,7 @@ fn quack(args: &[String]) -> Result<(), String> {
     let cli = QuackCli::parse_from(args);
     let _ = QUACK_START.set(std::time::Instant::now());
     let _ = duckosm_build::STEP_HOOK.set(quack_step);
-    if cli.gdal {
+    if cli.gdal || cli.geofabrik {
         return quack_gdal(&cli);
     }
     let (mut duckdb, mut geoparquet) = (false, false);
@@ -332,28 +342,33 @@ fn quack(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `duckosm quack --gdal`: GDAL's five layers.
+/// `duckosm quack --gdal` (GDAL's five layers) and `duckosm quack --geofabrik` (Geofabrik's 20 layers).
 fn quack_gdal(cli: &QuackCli) -> Result<(), String> {
-    let (mut gpkg, mut geoparquet) = (false, false);
+    use duckosm_build::quack_gdal::Mode;
+    let (mode, flag) = if cli.geofabrik { (Mode::Geofabrik, "geofabrik") } else { (Mode::Gdal, "gdal") };
+    let (mut gpkg, mut geoparquet, mut shp) = (false, false, false);
     for f in cli.format.as_deref().unwrap_or("gpkg").split(',') {
         match f.trim() {
             "gpkg" => gpkg = true,
             "geoparquet" => geoparquet = true,
+            "shp" if cli.geofabrik => shp = true,
+            other if cli.geofabrik => return Err(format!("unknown format {other} with --geofabrik: use gpkg, shp, geoparquet")),
             other => return Err(format!("unknown format {other} with --gdal: use gpkg, geoparquet or both")),
         }
     }
     std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
-    let base = cli.out.join(format!("{}_gdal", cli.name));
+    let base = cli.out.join(format!("{}_{flag}", cli.name));
     let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
     rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
     let tiles = cli.tile_zoom.map(duckosm_build::TileSize::Zoom).or(cli.tiles.map(duckosm_build::TileSize::Nodes));
     let t = std::time::Instant::now();
     let gpkg = gpkg.then(|| base.with_extension("gpkg"));
     let fixes = cli.fixes.as_deref().map(duckosm_build::config::read_osm_fixes).transpose()?;
-    let n = duckosm_build::quack_gdal::quack_gdal(&cli.pbf, gpkg.as_deref(), geoparquet.then_some(base.as_path()), tiles, fixes.as_ref())?;
-    let names = ["points", "lines", "multilinestrings", "multipolygons", "other_relations"];
-    let rows: Vec<String> = names.iter().enumerate().map(|(i, l)| format!("{} {l}", n.rows[i + 1])).collect();
-    eprintln!("quack --gdal: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());
+    let shp = shp.then(|| PathBuf::from(format!("{}.shp.zip", base.display())));
+    let n = duckosm_build::quack_gdal::quack_layers(&cli.pbf, mode, gpkg.as_deref(), geoparquet.then_some(base.as_path()), shp.as_deref(), tiles, fixes.as_ref())?;
+    let schema = duckosm_build::quack_gdal::schema(mode);
+    let rows: Vec<String> = (1..=schema.layers).map(|l| format!("{} {}", n.rows[l as usize], (schema.table)(l))).collect();
+    eprintln!("quack --{flag}: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());
     for p in &n.files {
         eprintln!("  {}", p.display());
     }
@@ -1055,7 +1070,7 @@ fn main() {
     // --gdal on Kentucky had a footprint of 0.89 GB with it unset and 0.25 GB with it (a heap of at most 0.37 GB; time
     // 3.9 s and 4.3 s). So quack --gdal starts again with it.
     #[cfg(target_os = "macos")]
-    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal") && std::env::var_os("MallocSpaceEfficient").is_none() {
+    if args.get(1).is_some_and(|a| a == "quack") && args.iter().any(|a| a == "--gdal" || a == "--geofabrik") && std::env::var_os("MallocSpaceEfficient").is_none() {
         use std::os::unix::process::CommandExt;
         if let Ok(me) = std::env::current_exe() {
             // exec returns only when it fails: then this process goes on

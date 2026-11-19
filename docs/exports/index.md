@@ -30,6 +30,7 @@ The OSM objects as tables, with no network. Each row is one OSM object.
 |---|---|---|
 | DuckDB, pandas, Spark | the OSM features table of QuackOSM, as GeoParquet ([duckOSM and QuackOSM](../concepts/quackosm.md)) | `duckosm quack` |
 | QGIS, ArcGIS | GDAL's five OSM layers, as GeoPackage or GeoParquet ([duckOSM and GDAL](../concepts/gdal.md)) | `duckosm quack --gdal` |
+| QGIS, ArcGIS | Geofabrik's 20 layers (roads, POIs, buildings, land use, ...), as GeoPackage, shapefiles or GeoParquet ([duckOSM and Geofabrik](geofabrik.md)) | `duckosm quack --geofabrik` |
 
 ### 2. The network
 

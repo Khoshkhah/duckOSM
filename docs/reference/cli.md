@@ -227,11 +227,10 @@ duckosm levels DB
 ### `levels-edit`
 
 The level editor of the database: fix which road is drawn over which (bridges, crossings) and the head and the cap of a road end. It is
-[roadstyle's editor](https://khoshkhah.github.io/roadstyle/guides/levels/), started on the area of the file, with mapstyle's base map (water, land, buildings,
-railways, signals) and **every road of the file**: the roads of its modes and their `private_edges` (bus, private, pedestrian, delivery). The roads that no mode can use are coloured as on the maps: private grey, bus lanes blue, pedestrian streets lavender, delivery streets tan. With `GOOGLE_MAPS_KEY` set, the editor has the Google 3D window and Street View Linked; the key's website list must have the editor's address (`http://localhost:8000/*`, the same as for the maps). A file with one mode gives
-an editor of that mode; with several modes, the editor's boxes show only some. The work folder is written from the tables `visualization.level_*` (they are the
-master), and solved first if the stored numbers are not those of the roads in the file. At each Apply the editor writes your edits and the new drawing order into the
-file. Needs `duckosm[levels]`; the layers need `duckosm[viz]`. Guide: [Store the drawing order](../guides/drawing-order.md).
+the page of `duckosm studio` on this one file, with card 8 (Edit levels) open: [roadstyle's editor](https://khoshkhah.github.io/roadstyle/guides/levels/)
+on the area's map of Studio (the base-map layers of `features.*` and every road of the file). "← Steps" writes the drawing order into the
+file. The map files (`DB` name `.map.html`, the terrain) go next to the file. The program needs the level editor's WebAssembly package
+(`rust/duckosm-edit/editor_pkg.sh` before the build); without it, card 8 says so. Guide: [Store the drawing order](../guides/drawing-order.md).
 
 ```text
 duckosm levels-edit [OPTIONS] DB
@@ -239,16 +238,8 @@ duckosm levels-edit [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--area DIR` | the work folder, rewritten from the tables of the database | `DB.levels` next to the database |
-| `--port INTEGER` | the editor is at `http://localhost:PORT/`, and the maps of `--reports` on the same port: one port for ever, so a Google key's website list needs one address (`http://localhost:8000/*`) | `8000` |
-| `--reports DIR` | a folder of maps (`duckosm viz`), served as files at the same port; any other address is the editor | `reports` |
-| `--plain` | no base-map layers: the editor as roadstyle draws it | off |
-
-`duckosm levels-edit DB [--port PORT] [--no-open]` is the same editor in the Rust program, with no Python: the page of
-`duckosm studio` on this one file, with card 8 (Edit levels) open. "← Steps" writes the drawing order into the file. The map
-is the area's map of Studio (the base-map layers of `features.*` and every road), and the work folder is the page's own (no
-`DB.levels` folder). The map files (`DB` name `.map.html`, the terrain) go next to the file. It has no `--area`, `--reports` and `--plain`.
-The program needs the level editor's WebAssembly package (`rust/duckosm-edit/editor_pkg.sh` before the build); without it, card 8 says so.
+| `--port INTEGER` | the editor is at `http://127.0.0.1:PORT/` | `8000` |
+| `--no-open` | do not open the page in the browser | off |
 
 ### `edit`
 
@@ -365,6 +356,7 @@ duckosm sumo [OPTIONS] DB
 | `--connections` / `--no-connections` | write the allowed turns from `edge_graph`; off lets `netconvert` guess them | on |
 | `-c`, `--config PATH` | a `netconvert` config (`.netccfg`) instead of the built-in one | |
 | `--netconvert` / `--no-netconvert` | build the `.net.xml` with `netconvert`; off writes only the plain XML files | on |
+| `--join-junctions` | join close junctions (netconvert's `junctions.join`): a crossroads mapped as two or three nodes becomes one junction ([how](../exports/sumo.md)); not with `-c` | off |
 
 ### `matsim`
 
@@ -400,7 +392,8 @@ duckosm matsim-lanes [OPTIONS] GMNS_DB
 ### `gmns`
 
 Writes a GMNS database: nodes, links, lanes, movements, signals; `link_id` is the `edge_id`.
-Page: [GMNS](../exports/gmns.md).
+SUMO's `netconvert` gives which lanes each movement uses; without it, the movements have no lanes and
+there is no `lane_connector` (the command says so). Page: [GMNS](../exports/gmns.md).
 
 ```text
 duckosm gmns [OPTIONS] DB
@@ -421,19 +414,19 @@ duckosm gmns [OPTIONS] DB
 
 ### `gmns-map`
 
-Writes an HTML map of a GMNS database with [lanestyle](https://github.com/Khoshkhah/lanestyle):
-every lane at its width, on a base map. Needs `pip install "duckosm[viz]"`. Page: [See it](../exports/gmns.md#see-it).
+Writes an HTML map of a GMNS database with [lanestyle](https://github.com/Khoshkhah/lanestyle): the roads of the level area
+as roadstyle draws them, each as wide as its lanes, with the lanes, lane lines, arrows, zebras and sidewalks on them. Needs
+the level area of the core database first: `duckosm levels SOURCE_DB`. Page: [See it](../exports/gmns.md#see-it).
 
 ```text
-duckosm gmns-map [OPTIONS] GMNS_DB
+duckosm gmns-map [OPTIONS] --source-db SOURCE_DB GMNS_DB
 ```
 
 | Option | Does | Default |
 |---|---|---|
-| `-m`, `--mode TEXT` | the GMNS mode | `driving` |
-| `--palette TEXT` | road colours: `mono`, `carto` or `highsat` | `mono` |
-| `--source-db PATH` | the core db, for bridges and tunnels in a GMNS file made before links had them | |
-| `-o`, `--out TEXT` | output HTML | `<name>_lanes.html` |
+| `--source-db PATH` | the core database that the GMNS file was made from | required |
+| `--area DIR` | the level area | `SOURCE_DB.levels`, made by `duckosm levels SOURCE_DB` |
+| `-o`, `--out FILE` | output HTML | `<name>_lanes.html` |
 
 ### `sumo-map`
 
@@ -498,7 +491,7 @@ duckosm gis-debug [OPTIONS] EXPORT_PATH
 
 ### `export-graph`
 
-Writes a networkx graph file (GraphML or gpickle). Needs networkx. Page: [networkx](../exports/networkx.md).
+Writes a networkx graph file (GraphML or gpickle). To load a gpickle file, Python needs networkx (and shapely 2 for `--geometry shapely`). Page: [networkx](../exports/networkx.md).
 
 ```text
 duckosm export-graph [OPTIONS] DB

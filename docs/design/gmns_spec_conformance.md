@@ -78,7 +78,7 @@ cycling and the combined network), then ran two kinds of check.
 | Check | Result |
 |---|---|
 | link ends on its `from` / `to` node; no loops, no missing nodes; no orphan nodes; node coordinates in range | all pass, every area and mode |
-| `lane_num` is 1..n with no gaps or duplicates; every link has lane rows; every lane has a geometry | all pass |
+| `lane_num` is 1..n with no gaps or duplicates (-1, -2, ... left of lane 1); every link has lane rows; every lane has a geometry | all pass |
 | movements: `node_id` is the inbound link's end and the outbound link's start; lane ranges inside the link's lanes; ib and ob ranges of equal length; no duplicates | all pass |
 | `curb_seg` inside the link; `geometry` table = one row per link; speeds and capacities positive | all pass |
 | **`link.length` against the geometry's length** | **0.4 to 0.8 % of links are more than 2 % off, up to 23 %** (Tartu driving 226 of 28,340) |

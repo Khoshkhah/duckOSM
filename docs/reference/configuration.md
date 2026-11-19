@@ -116,8 +116,6 @@ Checks each mode at the end of the build. What each check means: [Check a build]
 |---|---|---|---|
 | `validation.enabled` | `false` | `true` | run the checks |
 | `validation.fail_on_error` | `true` | `true` | stop the build when a check fails; `false` only warns |
-| `validation.assert_single_component` | `true` | `true` | one connected network. Always skipped: there is no component filter, so a network can have separate pieces |
-| `validation.assert_no_stranded_named` | `true` | `true` | no named road outside the main network. Always skipped, as above |
 | `validation.assert_unique_node_id` | `true` | | no two nodes with the same `node_id` |
 | `validation.assert_way_length_conserved` | `true` | | no part of an OSM way lost when it was split into edges. Skipped in a `duckdb` build |
 | `validation.warn_layer_without_structure` | `true` | `true` | warn (never fail) about edges with a `layer` but no `bridge` or `tunnel` tag |

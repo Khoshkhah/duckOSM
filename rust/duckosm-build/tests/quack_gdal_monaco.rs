@@ -148,11 +148,11 @@ fn tiles_alone(pbf: &std::path::Path, gpkg: &std::path::Path) {
         }
         let mut out = Vec::new();
         let open_tile = || Ok(std::io::BufReader::new(files.reader(i)));
-        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, &mut out, None).unwrap();
+        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, duckosm_build::quack_gdal::Mode::Gdal, &mut out, None).unwrap();
         parts.push(std::io::Cursor::new(out));
     }
     assert!(parts.len() > 1, "more than one tile");
-    duckosm_build::quack_gdal::quack_gdal_join_to::<_, Vec<u8>>(parts, Some(gpkg), None).unwrap();
+    duckosm_build::quack_gdal::quack_gdal_join_to::<_, Vec<u8>>(parts, duckosm_build::quack_gdal::Mode::Gdal, Some(gpkg), None, None).unwrap();
 }
 
 fn check(mode: Mode) {
@@ -259,11 +259,11 @@ fn monaco_fixes() {
         let mut out = Vec::new();
         let open_tile = || Ok(std::io::BufReader::new(files.reader(i)));
         let worker = QuackFixes::from_json(&json).unwrap();
-        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, &mut out, Some(&worker)).unwrap();
+        duckosm_build::quack_gdal::quack_gdal_tile_to(open_tile, *tile, duckosm_build::quack_gdal::Mode::Gdal, &mut out, Some(&worker)).unwrap();
         parts.push(std::io::Cursor::new(out));
     }
     let gpkg = dir.join("alone.gpkg");
-    duckosm_build::quack_gdal::quack_gdal_join_to::<_, Vec<u8>>(parts, Some(&gpkg), None).unwrap();
+    duckosm_build::quack_gdal::quack_gdal_join_to::<_, Vec<u8>>(parts, duckosm_build::quack_gdal::Mode::Gdal, Some(&gpkg), None, None).unwrap();
     let alone = ours(&gpkg);
     std::fs::remove_dir_all(&dir).ok();
     assert!(alone == whole, "each tile alone");
