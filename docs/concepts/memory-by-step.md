@@ -4,7 +4,7 @@ Each step writes its tables to storage. A later step reads only what it needs. T
 one build (`duckosm FILE`, not by tiles). The build by tiles and its totals: [Browser and native builds](browser-native.md).
 
 Driving, `--building-faces --levels solve`, on the Mac mini (Apple M6, 12 cores, 16 GB). Kentucky also with `--raw`. The step
-numbers are those of [Browser and native builds](browser-native.md#the-steps).
+numbers are those of [How a build works](build.md#the-steps).
 
 ## Heap peak of each step
 
@@ -30,7 +30,7 @@ MiB. "Held" is the data from earlier steps at the start of the step.
 ## What grows with the area
 
 In one build, these steps hold a list of the whole area. For a large area, build by tiles: its memory does not grow with
-the area ([the limits](browser-native.md#the-limits)).
+the area ([the limits](browser-native.md#speed-and-memory)).
 
 | Step | France peak | What is in memory |
 |---|---|---|

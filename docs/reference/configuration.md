@@ -71,7 +71,7 @@ The clean-up after the area is cut. Details: [Network clean-up](../concepts/clea
 | Key | Default | Does |
 |---|---|---|
 | `clip.predicate` | `intersects` | `duckdb` source only: which edges are copied. `intersects`: every edge that touches the area; `within`: only edges completely inside; `centroid`: edges whose middle point is inside. A `pbf` build always keeps whole ways |
-| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md#component-filter)) |
+| `clip.keep_largest_component` | `false` | no effect: the component filter is removed (2026-11-14); every road stays ([clean-up](../concepts/cleanup.md)) |
 | `clip.min_component_edges` | `1` | no effect: the component filter is removed |
 | `clip.connectivity_rescue` | `true` | walking and cycling, `pbf` build: [join dangling path ends](../concepts/cleanup.md#connect-dangling-paths) to the nearest node. Runs with or without a boundary |
 | `clip.connect_snap_m` | `10.0` | the largest gap, in metres, that `connectivity_rescue` joins |
