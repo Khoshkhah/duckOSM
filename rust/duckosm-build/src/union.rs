@@ -30,7 +30,7 @@ fn create(p: &Path) -> Result<BufWriter<File>, String> {
 }
 
 /// The tables of the tiles and the key of their rows (the key of the merge of the border rows). `{m}`: the name of the mode.
-const TABLES: [(&str, &[&str]); 21] = [
+const TABLES: [(&str, &[&str]); 23] = [
     ("edges_{m}", &["edge_id"]),
     ("private_edges_{m}", &["edge_id"]),
     ("nodes_{m}", &["node_id"]),
@@ -45,6 +45,8 @@ const TABLES: [(&str, &[&str]); 21] = [
     ("turn_path_restrictions_{m}", &["restriction_id", "from_edge", "to_edge"]),
     ("h3_nodes_{m}", &["node_id"]),
     ("h3_edges_{m}", &["edge_id"]),
+    ("tile_nodes_{m}", &["node_id"]),
+    ("tile_edges_{m}", &["edge_id"]),
     ("elevation_nodes_{m}", &["node_id"]),
     ("elevation_edges_{m}", &["edge_id"]),
     // the nodes with no height: only for the count of `elevation_metadata_main` (the union deletes the table)

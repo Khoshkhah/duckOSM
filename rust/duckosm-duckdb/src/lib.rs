@@ -89,6 +89,27 @@ pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memor
             .map_err(|e| format!("{mode}: H3 columns: {e}"))?;
         }
     }
+    // the tile columns (options.tile_indexing): the zoom-28 tile key of each node, and the keys and lca_zoom of each edge
+    for mode in modes {
+        let (nz, ez) = (
+            parquet_dir.join(format!("tile_nodes_{mode}.parquet")),
+            parquet_dir.join(format!("tile_edges_{mode}.parquet")),
+        );
+        if nz.exists() && ez.exists() {
+            con.execute_batch(&format!(
+                "ALTER TABLE {mode}.nodes ADD COLUMN tile BIGINT;
+                 UPDATE {mode}.nodes n SET tile = t.tile FROM read_parquet('{}') t WHERE t.node_id = n.node_id;
+                 ALTER TABLE {mode}.edges ADD COLUMN from_tile BIGINT;
+                 ALTER TABLE {mode}.edges ADD COLUMN to_tile BIGINT;
+                 ALTER TABLE {mode}.edges ADD COLUMN lca_zoom TINYINT;
+                 UPDATE {mode}.edges e SET from_tile = t.from_tile, to_tile = t.to_tile, lca_zoom = t.lca_zoom::TINYINT
+                   FROM read_parquet('{}') t WHERE t.edge_id = e.edge_id;",
+                nz.display(),
+                ez.display()
+            ))
+            .map_err(|e| format!("{mode}: tile columns: {e}"))?;
+        }
+    }
     // the elevation step: duckOSM's columns on the nodes and the edges, and main.elevation_metadata
     for mode in modes {
         let (nz, ez) = (
