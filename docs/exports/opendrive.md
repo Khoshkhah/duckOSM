@@ -49,6 +49,18 @@ to_opendrive("monaco_gmns.duckdb", "monaco.xodr", junctions=True)
 
 Design: [opendrive_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/opendrive_export.md).
 
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the peak memory footprint (`/usr/bin/time -l`). 1 MB = 10⁶ bytes.
+
+| Area | Time | Memory | Output size |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.06 s | 50.2 MB | 5.9 MB |
+| Kentucky (148 MB) | measuring |  |  |
+| France (5.1 GB) | measuring |  |  |
+
+The command: `duckosm opendrive area_gmns.duckdb --junctions`. The input is the GMNS database of `duckosm gmns`.
+
 ## Limits
 
 - Each lane is 3.25 m wide: OSM `width:lanes` is not used.

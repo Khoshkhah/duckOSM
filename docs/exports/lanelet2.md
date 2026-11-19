@@ -44,6 +44,18 @@ to_lanelet2("monaco_gmns.duckdb", "monaco.lanelet2.osm")     # -> {"lanelets", "
 
 Design: [lanelet2_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/lanelet2_export.md).
 
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the peak memory footprint (`/usr/bin/time -l`). 1 MB = 10⁶ bytes.
+
+| Area | Time | Memory | Output size |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.11 s | 63.3 MB | 10.5 MB |
+| Kentucky (148 MB) | measuring |  |  |
+| France (5.1 GB) | measuring |  |  |
+
+The command: `duckosm lanelet2 area_gmns.duckdb`. The input is the GMNS database of `duckosm gmns`.
+
 ## Limits
 
 **It is a start map, not a survey-grade HD map.** The borders come from OSM center lines and default widths. They are

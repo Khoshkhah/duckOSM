@@ -41,6 +41,18 @@ to_railml("monaco.duckdb", "monaco.railml.xml")     # -> {"tracks", "switches", 
 
 Design: [railml_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/railml_export.md).
 
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the peak memory footprint (`/usr/bin/time -l`). 1 MB = 10⁶ bytes.
+
+| Area | Time | Memory | Output size |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.03 s | 18.6 MB | 0.1 MB |
+| Kentucky (148 MB) | measuring |  |  |
+| France (5.1 GB) | measuring |  |  |
+
+The command: `duckosm railml area.duckdb`. The input is the build with `--features`: railML reads `raw.*`.
+
 ## Limits
 
 - Infrastructure only: no timetable and no rolling stock.

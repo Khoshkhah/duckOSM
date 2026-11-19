@@ -83,6 +83,18 @@ duckosm matsim-lanes monaco_gmns.duckdb     # -> ./lanes.xml, signalSystems.xml,
 Design: [matsim_export](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/matsim_export.md),
 [matsim_lanes_signals](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/matsim_lanes_signals.md).
 
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Time: the wall-clock time. Memory: the peak memory footprint (`/usr/bin/time -l`). 1 MB = 10⁶ bytes.
+
+| Area | Time | Memory | Output size |
+|---|---|---|---|
+| Monaco (0.7 MB) | 0.04 s | 18.6 MB | 0.1 MB |
+| Kentucky (148 MB) | measuring |  |  |
+| France (5.1 GB) | measuring |  |  |
+
+The command: `duckosm matsim area.duckdb`. The input is the driving network of `duckosm build` with the boundary of the area.
+
 ## Limits
 
 - `network.xml` alone has no turns: MATSim lets a car take each link at a junction, banned turns too. Add `lanes.xml`
