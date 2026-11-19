@@ -116,6 +116,9 @@ struct NewLine {
     id: i64,
     tags: RawTags,
     pts: Vec<Pt>,
+    /// the node ids of `pts`: an OSM node, or a new node `id * 1000 + position` (as `OsmFixes::apply_to_ways`)
+    #[serde(default)]
+    refs: Vec<i64>,
     closed: bool,
     tile: Option<(u8, u32, u32)>,
 }
@@ -219,7 +222,11 @@ impl QuackFixes {
                 (Some(NewNode::Osm(a)), Some(NewNode::Osm(b))) => a == b,
                 _ => n.nodes.len() > 1 && line.first() == line.last(),
             };
-            q.new_ways.push(NewLine { id: n.id, tags, pts: line, closed, tile: None });
+            let refs = n.nodes.iter().enumerate().map(|(i, x)| match x {
+                NewNode::Osm(id) => *id,
+                NewNode::At(_) => n.id * 1000 + i as i64 + 1,
+            });
+            q.new_ways.push(NewLine { id: n.id, tags, pts: line, refs: refs.collect(), closed, tile: None });
         }
         Ok(q)
     }
@@ -242,8 +249,25 @@ impl QuackFixes {
         }
     }
 
+    /// Change the tags of node `id` (`cut --fixes`).
+    pub(crate) fn node_tags(&self, id: i64, tags: &mut RawTags) {
+        fix_tags(Some(&self.nodes), id, tags);
+    }
+
+    /// Change the tags of relation `id` (`cut --fixes`).
+    pub(crate) fn relation_tags(&self, id: i64, tags: &mut RawTags) {
+        fix_tags(Some(&self.relations), id, tags);
+    }
+
+    /// The new ways as (id, tags, node ids, points), sorted by id (`cut --fixes`).
+    pub(crate) fn new_ways(&self) -> Vec<(i64, &RawTags, &[i64], &[Pt])> {
+        let mut v: Vec<_> = self.new_ways.iter().map(|l| (l.id, &l.tags, &l.refs[..], &l.pts[..])).collect();
+        v.sort_by_key(|w| w.0);
+        v
+    }
+
     /// Change the tags and the nodes of way `id`; false: the way is removed.
-    fn way(&self, id: i64, tags: &mut RawTags, refs: &mut Vec<i64>) -> bool {
+    pub(crate) fn way(&self, id: i64, tags: &mut RawTags, refs: &mut Vec<i64>) -> bool {
         let Some(c) = self.ways.get(&id) else { return true };
         if c.remove {
             return false;
