@@ -92,7 +92,7 @@ Next: [Your first network](../first_network.md) walks through it step by step, a
 - **Maps in one offline HTML page:** `duckosm viz` draws the network and the base map from the
   database ([Draw a map](../guides/draw-map.md)); `duckosm route-map` is a route planner (drive, walk,
   cycle, walk + drive) where you drag a start and an end and get turn-by-turn directions
-  ([try it](../guides/route.md#on-a-map)). The pages are drawn by
+  ([try it](../guides/route.md#the-map-page)). The pages are drawn by
   [mapstyle](https://khoshkhah.github.io/mapstyle/).
 - **The drawing order of the roads:** `duckosm levels` stores which road is painted over which
   (casing and fill numbers) in the file ([Store the drawing order](../guides/drawing-order.md)).

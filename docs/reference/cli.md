@@ -282,7 +282,7 @@ duckosm bus DB
 Writes duckOSM's route planner over a map drawn by mapstyle: drag a start and an end, pick Drive,
 Walk, Cycle or Walk + drive. Routing runs in the browser with the same answers as `route_points()`
 and `directions()`. Walk + drive needs [`multimodal`](#multimodal) first. Needs `duckosm[viz]`. Guide:
-[On a map](../guides/route.md#on-a-map).
+[The map page](../guides/route.md#the-map-page).
 
 ```text
 duckosm route-map [OPTIONS] DB

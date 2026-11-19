@@ -1,27 +1,40 @@
 # Route
 
-Find the fastest or the shortest route between two roads or two points. A route follows the graph of legal turns, so it
-never takes a banned turn.
+Find the way from A to B on the network of an area: by car, on foot or by bike, the fastest or the shortest. A route
+takes only legal turns, so it never uses a turn that a sign forbids.
+
+The easiest way to try it is the route planner below. Drag **A** and **B**, and pick **Drive**, **Walk**, **Cycle** or
+**Walk + drive**. The panel shows the time, the distance and the directions.
+
+<iframe src="../../maps/monaco_route_map.html" allow="clipboard-write" title="A route planner for Monaco, made by duckosm route-map"
+        loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
+
+## Three ways to route
+
+| Way | For | Example |
+|---|---|---|
+| **A map page** | look and try | `duckosm route-map monaco.duckdb`: one HTML page, as above |
+| **Python** | your own program | `route_points(con, (7.4155, 43.7285), (7.4400, 43.7480))` |
+| **The command line** | scripts, many routes at once | `duckosm route-points monaco.duckdb 7.4155 43.7285 7.4400 43.7480` |
+
+## In Python
+
+Give two points as (longitude, latitude). The result has the time, the length and the roads of the route in order:
 
 ```python
 import duckdb
-from duckosm import route, route_points, directions
+from duckosm import route_points, directions
 
 con = duckdb.connect("monaco.duckdb", read_only=True)
-r = route(con, from_edge, to_edge)  # by car, fastest
-r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480))  # from (lon, lat) to (lon, lat)
+r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480))  # by car, fastest
+r["time_s"], r["length_m"]  # seconds, meters
 for step in directions(con, r):
     print(step["text"])  # "At the roundabout, take the 1st exit onto ..."
 ```
 
-The same in the program `duckosm`, which prints JSON:
+To route on foot, give `mode="walking"`. For the shortest route, give `weight="length"`.
 
-```bash
-duckosm route monaco.duckdb FROM_EDGE TO_EDGE
-duckosm route-points monaco.duckdb 7.4155 43.7285 7.4400 43.7480
-```
-
-## The functions
+## All functions and commands
 
 | Function | From, to | Arguments and defaults |
 |---|---|---|
@@ -58,18 +71,14 @@ To find an `edge_id`, click a road on the route map below, or use SQL ([Query th
 SELECT min(edge_id) FROM driving.edges WHERE name = 'Boulevard du Larvotto';
 ```
 
-## On a map
+## The map page
 
 ```bash
 duckosm route-map monaco.duckdb -m walk+drive      # writes reports/monaco_route_map.html
 ```
 
-One HTML page, with no server. Drag the two markers to set the start and the end, and select Drive, Walk, Cycle or
-Walk + drive. The page routes with the same router as `duckosm route-points`, built into the page. The panel shows the
-directions; click one to go to it. Click a road to copy its `edge_id`. The map is drawn by roadstyle.
-
-<iframe src="../../maps/monaco_route_map.html" allow="clipboard-write" title="A route planner for Monaco, made by duckosm route-map"
-        loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
+One HTML page, with no server: the planner at the top of this page. It routes with the same router as
+`duckosm route-points`. Click a direction to go to it, or a road to copy its `edge_id`.
 
 | Option | Does | Default |
 |---|---|---|
