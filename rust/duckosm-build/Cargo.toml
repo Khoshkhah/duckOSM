@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["duckdb", "zstd", "tzf", "gpkg"]
+default = ["duckdb", "zstd", "tzf", "gpkg", "postgis"]
+# quack --osm2pgsql -f postgis: the tables straight into a PostGIS database (a network client: not in the browser build)
+postgis = ["dep:postgres"]
 # quack --gdal -f gpkg: the GeoPackage (SQLite, a C library: not in the browser build)
 gpkg = ["dep:rusqlite"]
 # the time zone of an area from the world map of tzf-rs (2.7 MB with gzip): natively; the browser build uses the
@@ -24,6 +26,7 @@ duckosm-core = { path = "../duckosm-core" }
 duckosm-parquet = { path = "../duckosm-parquet", default-features = false, features = ["pbf"] }
 duckosm-duckdb = { path = "../duckosm-duckdb", optional = true }
 rusqlite = { version = "0.39", features = ["bundled"], optional = true }
+postgres = { version = "0.19", optional = true }
 # the files of the tiles of quack --gdal in the browser (Snappy frames, pure Rust; the name "snap" is a feature here)
 snappy = { package = "snap", version = "1" }
 yaml-rust2 = "0.13"

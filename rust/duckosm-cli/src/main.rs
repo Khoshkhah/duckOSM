@@ -266,6 +266,19 @@ struct QuackCli {
     /// <out>/<name>_gdal.gpkg (default), or <out>/<name>_gdal_<layer>.parquet with --format geoparquet.
     #[arg(long, conflicts_with = "geofabrik")]
     gdal: bool,
+    /// Write the four tables of osm2pgsql's `pgsql` output with its `default.style` and `--hstore` (planet_osm_point,
+    /// planet_osm_line, planet_osm_polygon, planet_osm_roads: the input of PostGIS map styles such as OSM Carto) in place
+    /// of QuackOSM's table: <out>/<name>_osm2pgsql_<table>.parquet (default), <out>/<name>_osm2pgsql.duckdb with
+    /// --format duckdb, or the database of --postgis.
+    #[arg(long, conflicts_with_all = ["gdal", "geofabrik", "pmtiles"])]
+    osm2pgsql: bool,
+    /// With --osm2pgsql: write the tables into this PostGIS database (a connection string, for example
+    /// "host=localhost user=osm dbname=gis"), as osm2pgsql does. The tables of the same names are replaced.
+    #[arg(long, value_name = "CONNECTION", requires = "osm2pgsql")]
+    postgis: Option<String>,
+    /// With --osm2pgsql: the geometry in EPSG:4326 (osm2pgsql --latlong), not EPSG:3857.
+    #[arg(long, requires = "osm2pgsql")]
+    latlong: bool,
     /// Write vector tiles of the Shortbread 1.0 schema (zoom 0 to 14, Mapbox Vector Tiles with gzip) in one PMTiles v3
     /// file, <out>/<name>.pmtiles, in place of QuackOSM's table: a base map for MapLibre, OpenLayers or QGIS with no tile
     /// server (docs/exports/pmtiles.md).
@@ -316,6 +329,9 @@ fn quack(args: &[String]) -> Result<(), String> {
     if cli.gdal || cli.geofabrik {
         return quack_gdal(&cli);
     }
+    if cli.osm2pgsql {
+        return quack_osm2pgsql(&cli);
+    }
     if cli.pmtiles {
         return quack_pmtiles(&cli);
     }
@@ -346,6 +362,39 @@ fn quack(args: &[String]) -> Result<(), String> {
     );
     for p in db.iter().chain(parquet.iter()) {
         eprintln!("  {}", p.display());
+    }
+    Ok(())
+}
+
+/// `duckosm quack --osm2pgsql`: osm2pgsql's four tables.
+fn quack_osm2pgsql(cli: &QuackCli) -> Result<(), String> {
+    let (mut geoparquet, mut duckdb) = (false, false);
+    let default = if cli.postgis.is_some() { "" } else { "geoparquet" };
+    for f in cli.format.as_deref().unwrap_or(default).split(',').filter(|f| !f.is_empty()) {
+        match f.trim() {
+            "geoparquet" => geoparquet = true,
+            "duckdb" => duckdb = true,
+            other => return Err(format!("unknown format {other} with --osm2pgsql: use geoparquet, duckdb (and --postgis)")),
+        }
+    }
+    std::fs::create_dir_all(&cli.out).map_err(|e| format!("{}: {e}", cli.out.display()))?;
+    let base = cli.out.join(format!("{}_osm2pgsql", cli.name));
+    let threads = cli.threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+    rayon::ThreadPoolBuilder::new().num_threads(threads).build_global().map_err(|e| e.to_string())?;
+    let tiles = cli.tile_zoom.map(duckosm_build::TileSize::Zoom).or(cli.tiles.map(duckosm_build::TileSize::Nodes));
+    let t = std::time::Instant::now();
+    let fixes = cli.fixes.as_deref().map(duckosm_build::config::read_osm_fixes).transpose()?;
+    let parquet = geoparquet.then_some(base.as_path());
+    let db = duckdb.then(|| base.with_extension("duckdb"));
+    let n = duckosm_build::quack_osm2pgsql::quack_osm2pgsql(&cli.pbf, parquet, db.as_deref(), cli.postgis.as_deref(), !cli.latlong, tiles, fixes.as_ref())?;
+    let files = &n.files;
+    let rows: Vec<String> = (1..=4u8).map(|t| format!("{} {}", n.rows[t as usize], duckosm_build::quack_osm2pgsql::table_name(t))).collect();
+    eprintln!("quack --osm2pgsql: {} in {:.2} s", rows.join(", "), t.elapsed().as_secs_f64());
+    for p in files {
+        eprintln!("  {}", p.display());
+    }
+    if cli.postgis.is_some() {
+        eprintln!("  PostGIS: {}", rows.join(", "));
     }
     Ok(())
 }

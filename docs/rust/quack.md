@@ -495,6 +495,69 @@ A layer of more than 2 GB continues in `_2`, `_3` (Geofabrik's spillover).
 (`tests/data/monaco_geofabrik.jsonl.gz`, made by `tools/geofabrik_golden.py` from Geofabrik's file): the whole file, by
 tiles of zoom 12, each tile alone with the join (the browser), and the shapefiles.
 
+## osm2pgsql tables (`--osm2pgsql`)
+
+The user page is [`docs/exports/osm2pgsql.md`](../exports/osm2pgsql.md). The rules of `default.style` are in
+`rust/duckosm-core/src/osm2pgsql.rs`; the writers are `rust/duckosm-build/src/quack_osm2pgsql.rs` (GeoParquet, DuckDB,
+PostGIS) and `rust/duckosm-parquet/src/osm2pgsql.rs`. The rows go through the writer of the layer modes,
+`quack_gdal::write_rows`, the same as `--gdal`: the projection, the merge of the lines, the check of the polygons and
+the COPY text run on the writer's own threads. Into PostGIS, each table has its own thread and connection from the start,
+and takes the rows through a channel while the file is read (no temporary files). At the end, the four tables are
+sorted by geometry and get their GiST index at the same time, as in osm2pgsql.
+
+### The Monaco check
+
+`tests/data/monaco.osm.pbf` on the Mac mini: osm2pgsql 2.3.1 (`osm2pgsql --hstore`, default style, no `--slim`) into
+one database, `duckosm quack --osm2pgsql --postgis` into a second one, PostgreSQL 18 with PostGIS 3.7.
+`tests/osm2pgsql/check.sh` runs both, and `tests/osm2pgsql/compare.sql` compares the tables row by row.
+
+| Table | Rows, osm2pgsql | Rows, duckOSM | Rows that differ |
+|---|---|---|---|
+| `planet_osm_point` | 3959 | 3959 | 0 |
+| `planet_osm_line` | 3919 | 3919 | 0 |
+| `planet_osm_polygon` | 1837 | 1837 | 0 |
+| `planet_osm_roads` | 422 | 422 | 0 |
+
+Each row has the same `osm_id`, the same value in each column (also `z_order` and `way_area`), the same `tags`, and
+the same geometry, byte for byte (the same points in the same order). The result is the same for the whole file,
+tile by tile (`--tile-zoom 12` and `14`), and for each tile alone with the join (the way of the browser).
+
+The golden test `rust/duckosm-build/tests/quack_osm2pgsql_monaco.rs` checks this in CI against
+`tests/data/monaco_osm2pgsql.jsonl.gz`: the tables of osm2pgsql, made with `tests/osm2pgsql/golden.sql`.
+
+### How duckOSM gets the same bytes
+
+- The EPSG:3857 coordinates with osmium's fast formula, with its multiply-adds fused as clang compiles them. Without
+  that, about half of the y values differ by 1 nm.
+- `way_area` with Boost's formula, (x1 − x2)(y1 + y2), written with 6 digits, as osm2pgsql writes it.
+- The rings as osmium makes them: each ring starts at its smallest point, the outer rings counterclockwise, the holes
+  clockwise and in the order of their first point.
+- The polygon check (osm2pgsql's `ST_IsValid`) has the rules of the geo crate's `Validation` (`osm2pgsql::valid`). Only
+  the self-intersection test of a ring is different: a sweep by x compares only the segments whose boxes overlap, in
+  place of geo's test of each pair of segments. On Kentucky, geo's test took 14 s on one thread. The unit test
+  `valid_equals_geo` compares the two on 412 polygons.
+
+### Known difference
+
+| Case | Difference | Cause |
+|---|---|---|
+| `--latlong` (EPSG:4326) | `way_area` differs in the 6th digit in 65 of 1837 polygons; the geometries are equal | In degrees, the area of a small polygon is often exactly halfway between two 6-digit values. Which way the value rounds then depends on the last bit of the sum. |
+
+### The OSM fixes
+
+With the fixes file of the tests (`tests/data/osm_fixes_quack.yaml`), exactly the rows of the fixed objects change, and
+no other row (the test `monaco_fixes_change_their_rows`):
+
+| Fix | Rows |
+|---|---|
+| way 23715051 removed | its polygon goes |
+| way 25722685, `keep_nodes` | its ring is open now: a line in place of a polygon |
+| way 4227277: tags | its line and its road have the new tags |
+| way 503462470: `oneway`, `lanes` | its line and its road have `oneway=yes`, `lanes=3` |
+| node 21911886: tag edits | its point has the new tags |
+| relation 393226: `name` | its polygon (`osm_id` −393226) has the new name |
+| new ways 9000000000001 and 9000000000002 | two new lines |
+
 ## What QuackOSM has and duckOSM does not have
 
 The filters: tags (`tags_filter`), OSM ids, custom SQL, and a geometry (`geometry_filter`, features that touch it). The

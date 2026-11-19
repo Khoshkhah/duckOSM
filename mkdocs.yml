@@ -160,7 +160,7 @@ nav:
           - GDAL's OSM layers: concepts/gdal.md
           - Base-map layers: exports/base-map.md
           - Geofabrik layers: exports/geofabrik.md
-          # - osm2pgsql tables: exports/osm2pgsql.md (added by its session)
+          - osm2pgsql tables: exports/osm2pgsql.md
           - Vector tiles (PMTiles): exports/pmtiles.md
       - 2. The network:
           - exports/network/index.md

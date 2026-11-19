@@ -214,6 +214,21 @@ CHECKPOINT;",
     .map_err(|e| format!("raw.*: {e}"))
 }
 
+/// `duckosm quack --osm2pgsql -f duckdb`: osm2pgsql's tables (`planet_osm_point`, ...) from their GeoParquet files
+/// (`tables`: the name and the file). DuckDB reads `way` as a GEOMETRY with its CRS. A file that is there is made again.
+pub fn write_osm2pgsql(db: &Path, tables: &[(&str, &Path)]) -> Result<(), String> {
+    if db.exists() {
+        std::fs::remove_file(db).map_err(|e| format!("{}: {e}", db.display()))?;
+    }
+    let con = Connection::open(db).map_err(|e| format!("{}: {e}", db.display()))?;
+    for (name, file) in tables {
+        let file = file.display().to_string().replace('\'', "''");
+        con.execute_batch(&format!("CREATE TABLE {name} AS SELECT * FROM read_parquet('{file}')"))
+            .map_err(|e| format!("{name}: {e}"))?;
+    }
+    con.execute_batch("CHECKPOINT").map_err(|e| e.to_string())
+}
+
 pub fn write_features(db: &Path, parquet_dir: &Path, sql: &str) -> Result<(), String> {
     let con = Connection::open(db).map_err(|e| e.to_string())?;
     let mut sql = sql.to_string();
