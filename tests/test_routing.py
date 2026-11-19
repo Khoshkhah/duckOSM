@@ -162,6 +162,40 @@ def test_write_graph_bad_format_raises(tmp_path):
         write_graph(_node_db(), tmp_path / "g.xyz", fmt="nope")
 
 
+def test_export_graph_gpickle_is_write_graph(tmp_path):
+    """`duckosm export-graph -f gpickle` (Rust) loads to the graph of write_graph (Python): the node graph and the edge graph,
+    with lists, None, large ids and the shared dicts of _adj and _pred."""
+    import pickle
+    from duckosm import _rust
+    db = tmp_path / "g.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("INSTALL spatial; LOAD spatial;")
+    con.execute("CREATE SCHEMA driving")
+    con.execute("CREATE TABLE driving.nodes(node_id BIGINT, geom GEOMETRY)")
+    con.execute("INSERT INTO driving.nodes VALUES (10, ST_Point(0, 0)), (11, ST_Point(1, 0)), (5000000000, ST_Point(2, 0))")
+    con.execute("CREATE TABLE driving.edges(edge_id BIGINT, source BIGINT, target BIGINT, name VARCHAR, highway VARCHAR, "
+                "length_m DOUBLE, maxspeed_kmh FLOAT, cost_s DOUBLE, oneway BOOLEAN, refs BIGINT[], geometry GEOMETRY)")
+    con.execute("INSERT INTO driving.edges VALUES "
+                "(-7, 10, 11, 'A St', 'residential', 100, 30, 12, TRUE, [10, 11], ST_GeomFromText('LINESTRING(0 0,1 0)')),"
+                "(9000000000, 11, 5000000000, NULL, 'primary', 200, NULL, 14, FALSE, [], ST_GeomFromText('LINESTRING(1 0,2 0)')),"
+                "(8, 11, 10, 'A St', 'residential', 100, 30, 12, TRUE, [11, 10], ST_GeomFromText('LINESTRING(1 0,0 0)'))")
+    con.execute("CREATE TABLE driving.edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
+    con.execute("INSERT INTO driving.edge_graph VALUES (-7, 9000000000, 12), (8, -7, 12)")
+    con.close()
+    con = duckdb.connect(str(db), read_only=True)
+    for kind, want in (("node", to_networkx_nodes(con)), ("edge", to_networkx(con))):
+        out = tmp_path / f"{kind}.gpickle"
+        assert _rust.cli(["duckosm", "export-graph", str(db), "-g", kind, "-o", str(out)]) == 0
+        with open(out, "rb") as f:
+            got = pickle.load(f)
+        assert type(got) is type(want) and got.graph == want.graph
+        assert list(got.nodes(data=True)) == list(want.nodes(data=True))
+        kw = {"keys": True} if want.is_multigraph() else {}
+        assert list(got.edges(data=True, **kw)) == list(want.edges(data=True, **kw))
+        u, v = next(iter(got.edges()))
+        assert got._pred == want._pred and got._succ is got._adj and got._pred[v][u] is got._adj[u][v]
+
+
 def _route_db():
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial;")

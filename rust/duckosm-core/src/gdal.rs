@@ -79,6 +79,32 @@ pub fn columns(layer: u8) -> Vec<(&'static str, bool)> {
     c
 }
 
+/// The layers of a layer output (GDAL's layers here, Geofabrik's in [`crate::geofabrik`]): the writers of the GeoPackage,
+/// the GeoParquet files and the shapefiles take one. A row's `Feature::layer` is its layer (1 to `layers`).
+pub struct Schema {
+    pub layers: u8,
+    /// The table of a layer (the GeoPackage table and the name in the file names).
+    pub table: fn(u8) -> &'static str,
+    /// The geometry type of a layer as the GeoPackage names it (`POINT`, `LINESTRING`, `MULTIPOLYGON`, ...).
+    pub geometry: fn(u8) -> &'static str,
+    /// The columns of a layer: name, integer (else text), and the width (0: no width) of a shapefile and GeoPackage.
+    pub columns: fn(u8) -> Vec<(&'static str, bool, u8)>,
+    /// The values of the columns of a row.
+    pub values: fn(&Feature) -> Vec<Option<Value>>,
+}
+
+/// GDAL's five layers.
+pub const SCHEMA: Schema = Schema { layers: 5, table: layer_name, geometry: geometry_name, columns: schema_columns, values };
+
+/// The geometry type of a layer of GDAL.
+pub fn geometry_name(layer: u8) -> &'static str {
+    ["", "POINT", "LINESTRING", "MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION"][layer as usize]
+}
+
+fn schema_columns(layer: u8) -> Vec<(&'static str, bool, u8)> {
+    columns(layer).into_iter().map(|(c, int)| (c, int, 0)).collect()
+}
+
 /// A value of a column.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -165,7 +191,7 @@ fn hstore(s: &str, out: &mut String) {
 }
 
 /// C `atoi`: the integer at the start of the text (0 when there is none).
-fn atoi(s: &str) -> i64 {
+pub fn atoi(s: &str) -> i64 {
     let s = s.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
     let (neg, digits) = match s.as_bytes().first() {
         Some(b'-') => (true, &s[1..]),

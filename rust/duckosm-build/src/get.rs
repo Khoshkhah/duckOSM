@@ -116,28 +116,21 @@ fn open_ring(v: &Value) -> Result<(), String> {
 }
 
 /// Cut the region file `region` to `boundary` (text) and write the area to `out` (`duckosm cut`). With `fixes` (the
-/// fixes file of `duckosm build --fixes`), the area file has the fixes in it: the cut goes to `<out>.cut` first, then
-/// [`duckosm_core::fixpbf::write_fixed`] copies it to `out` with the fixes.
+/// fixes file of `duckosm build --fixes`), the area file has the fixes in it, written in the passes of the cut
+/// ([`duckosm_core::cutstream::cut_with_fixes`]).
 pub fn cut_with_fixes(region: &Path, boundary: &str, out: &Path, fixes: Option<&Path>) -> Result<CutCounts, String> {
-    check_boundary(boundary)?;
+    let b = check_boundary(boundary)?;
     let Some(fixes) = fixes else {
         return crate::cut_file(region, boundary, out);
     };
     let osm = crate::config::read_osm_fixes(fixes)?;
-    let cut = PathBuf::from(format!("{}.cut", out.display()));
-    let res = (|| {
-        crate::cut_file(region, boundary, &cut)?;
-        let open = || {
-            duckosm_core::fs::File::open(&cut).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", cut.display()))
-        };
-        let q = duckosm_core::quack::QuackFixes::new(&osm, open)?;
-        let f = duckosm_core::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
-        let (w, n) = duckosm_core::fixpbf::write_fixed(open, &q, &osm.turn_restrictions, std::io::BufWriter::with_capacity(1 << 20, f))?;
-        w.into_inner().map_err(|e| format!("{}: {e}", out.display()))?;
-        Ok(n)
-    })();
-    let _ = std::fs::remove_file(&cut);
-    res
+    let open = || {
+        duckosm_core::fs::File::open(region).map(|f| std::io::BufReader::with_capacity(1 << 20, f)).map_err(|e| format!("{}: {e}", region.display()))
+    };
+    let f = duckosm_core::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let (w, n) = duckosm_core::cutstream::cut_with_fixes(open, &b, &osm, std::io::BufWriter::with_capacity(1 << 20, f))?;
+    w.into_inner().map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(n)
 }
 
 #[cfg(feature = "get")]

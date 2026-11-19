@@ -51,8 +51,6 @@ boundary is set** — a whole-country build legitimately has separate components
 
 When `validation.enabled`, a `Validator` runs per mode after the build and **fails the
 build** (when `fail_on_error`) on a broken invariant:
-- `single_component` — one dominant weakly-connected component,
-- `no_stranded_named` — no named edge outside the largest component,
 - `edge_id_stable` — reserved (needs a fixture/parent baseline).
 
 ## Report & viz

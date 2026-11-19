@@ -82,11 +82,14 @@ const CLIP: [&str; 5] = [
     "connectivity_rescue",
     "connect_snap_m",
 ];
+/// Removed checks: every road stays (there is no component filter), so a network can have separate parts. A config that
+/// has them gets a warning.
+const VALIDATION_REMOVED: [&str; 2] = ["assert_single_component", "assert_no_stranded_named"];
 const VALIDATION: [&str; 7] = [
     "enabled",
     "fail_on_error",
-    "assert_single_component",
-    "assert_no_stranded_named",
+    VALIDATION_REMOVED[0],
+    VALIDATION_REMOVED[1],
     "assert_unique_node_id",
     "assert_way_length_conserved",
     "warn_layer_without_structure",
@@ -196,6 +199,9 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
     boundary.check_keys(&BOUNDARY)?;
     clip.check_keys(&CLIP)?;
     validation.check_keys(&VALIDATION)?;
+    for k in VALIDATION_REMOVED.into_iter().filter(|k| validation.get(k).is_some()) {
+        eprintln!("warning: config: validation.{k} is removed (a network can have separate parts): it has no effect");
+    }
     report.check_keys(&REPORT)?;
     viz.check_keys(&VIZ)?;
     multimodal.check_keys(&MULTIMODAL)?;
@@ -355,7 +361,6 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
     let viz_on = if viz.bool("enabled", false)? { Some(viz.str("basemap")?) } else { None };
     // the steps on the .duckdb file after the tables (after.rs)
     let validation = if validation.bool("enabled", false)? {
-        // assert_single_component and assert_no_stranded_named: no effect, as in duckOSM (there is no component filter)
         Some(crate::after::Validation {
             fail_on_error: validation.bool("fail_on_error", true)?,
             unique_node_id: validation.bool("assert_unique_node_id", true)?,
