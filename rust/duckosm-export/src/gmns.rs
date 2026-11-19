@@ -1222,7 +1222,10 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    let mut nxt: Vec<(String, Vec<String>)> = Vec::new(); // a dict of sets of Python, in the order of its keys
+    // a dict of sets of Python, in the order of its keys; `nxt_at`: the place of a key (a search of the list for each lane
+    // took hours on Kentucky)
+    let mut nxt: Vec<(String, Vec<String>)> = Vec::new();
+    let mut nxt_at: HashMap<String, usize> = HashMap::new();
     let mut prv: HashMap<String, HashSet<String>> = HashMap::new();
     for (ib, s0, s1, ob, o0, o1) in mv {
         let (Some(s0), Some(s1), Some(o0), Some(o1)) = (s0, s1, o0, o1) else { continue };
@@ -1232,13 +1235,16 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         for k in 0..=(s1 - s0) {
             if let (Some(a), Some(b)) = (by_num.get(&(ib, s0 + k)), by_num.get(&(ob, o0 + k))) {
                 if lanes[a].2 == lanes[b].2 {
-                    match nxt.iter_mut().find(|x| x.0 == *a) {
-                        Some(x) => {
-                            if !x.1.contains(b) {
-                                x.1.push(b.clone());
+                    match nxt_at.get(a) {
+                        Some(&i) => {
+                            if !nxt[i].1.contains(b) {
+                                nxt[i].1.push(b.clone());
                             }
                         }
-                        None => nxt.push((a.clone(), vec![b.clone()])),
+                        None => {
+                            nxt_at.insert(a.clone(), nxt.len());
+                            nxt.push((a.clone(), vec![b.clone()]));
+                        }
                     }
                     prv.entry(b.clone()).or_default().insert(a.clone());
                 }
@@ -1270,11 +1276,18 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         }
         out
     };
-    let mut moved: Vec<(String, Vec<P>)> = Vec::new(); // a dict of Python
-    let get = |moved: &Vec<(String, Vec<P>)>, id: &str| -> Vec<P> { moved.iter().find(|x| x.0 == id).map(|x| x.1.clone()).unwrap_or_else(|| lanes[id].3.clone()) };
-    let put = |moved: &mut Vec<(String, Vec<P>)>, id: &str, g: Vec<P>| match moved.iter_mut().find(|x| x.0 == id) {
-        Some(x) => x.1 = g,
-        None => moved.push((id.to_string(), g)),
+    // a dict of Python: the list in the order of its keys, and the place of each key
+    let mut moved: Vec<(String, Vec<P>)> = Vec::new();
+    let mut moved_at: HashMap<String, usize> = HashMap::new();
+    let get = |moved: &Vec<(String, Vec<P>)>, at: &HashMap<String, usize>, id: &str| -> Vec<P> {
+        at.get(id).map(|&i| moved[i].1.clone()).unwrap_or_else(|| lanes[id].3.clone())
+    };
+    let put = |moved: &mut Vec<(String, Vec<P>)>, at: &mut HashMap<String, usize>, id: &str, g: Vec<P>| match at.get(id) {
+        Some(&i) => moved[i].1 = g,
+        None => {
+            at.insert(id.to_string(), moved.len());
+            moved.push((id.to_string(), g));
+        }
     };
     for (a, bs) in &nxt {
         if bs.len() != 1 {
@@ -1284,7 +1297,7 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         if prv.get(b).is_none_or(|p| p.len() != 1 || !p.contains(a)) {
             continue;
         }
-        let (la, lb) = (get(&moved, a), get(&moved, b));
+        let (la, lb) = (get(&moved, &moved_at, a), get(&moved, &moved_at, b));
         let (end, start) = (*la.last().unwrap(), lb[0]);
         let (kx, ky) = metres(end.1);
         let gap = ((end.0 - start.0) * kx).hypot((end.1 - start.1) * ky);
@@ -1292,9 +1305,9 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
             continue;
         }
         if count[&lanes[a].0] >= count[&lanes[b].0] {
-            put(&mut moved, b, bend(&lb, true, end));
+            put(&mut moved, &mut moved_at, b, bend(&lb, true, end));
         } else {
-            put(&mut moved, a, bend(&la, false, start));
+            put(&mut moved, &mut moved_at, a, bend(&la, false, start));
         }
     }
     if !moved.is_empty() {
@@ -1444,14 +1457,19 @@ fn fork_letters(c: &Ctx, sch: &str, mv: &str) -> Result<()> {
         .map_err(|e| e.to_string())?
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| e.to_string())?;
+    // the nodes in the order they come, and the place of each node
     let mut by_node: Vec<(i64, Vec<(String, String)>)> = Vec::new();
+    let mut node_at: HashMap<i64, usize> = HashMap::new();
     let mut ang: HashMap<String, f64> = HashMap::new();
     for (mid, node, code, gi, go) in rows {
         if let Some(a) = window_angle(&gi, &go) {
             ang.insert(mid.clone(), a);
-            match by_node.iter_mut().find(|x| x.0 == node) {
-                Some(x) => x.1.push((mid, code)),
-                None => by_node.push((node, vec![(mid, code)])),
+            match node_at.get(&node) {
+                Some(&i) => by_node[i].1.push((mid, code)),
+                None => {
+                    node_at.insert(node, by_node.len());
+                    by_node.push((node, vec![(mid, code)]));
+                }
             }
         }
     }

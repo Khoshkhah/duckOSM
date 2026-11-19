@@ -443,6 +443,7 @@ fn arrow_connections(
     run(&cmd)?;
     let by_sumo: HashMap<&str, i64> = sumo_id.iter().map(|(s, e)| (s.as_str(), *e)).collect();
     let mut got: Vec<(i64, Vec<(i64, i64, i64)>)> = arrowed.iter().filter(|e| ours.contains_key(e)).map(|e| (*e, Vec::new())).collect();
+    let got_at: HashMap<i64, usize> = got.iter().enumerate().map(|(i, g)| (g.0, i)).collect();
     let attr = |l: &str, k: &str| -> Option<String> {
         let key = format!(" {k}=\"");
         l.find(&key).map(|i| l[i + key.len()..].split('"').next().unwrap_or("").to_string())
@@ -461,7 +462,7 @@ fn arrow_connections(
                 return Ok(());
             }
             let fe = by_sumo[from.as_str()];
-            if let Some(g) = got.iter_mut().find(|g| g.0 == fe) {
+            if let Some(g) = got_at.get(&fe).map(|&i| &mut got[i]) {
                 let to = by_sumo[attr(l, "to").unwrap_or_default().as_str()];
                 g.1.push((attr(l, "fromLane").unwrap_or_default().parse().unwrap_or(0), to, attr(l, "toLane").unwrap_or_default().parse().unwrap_or(0)));
             }
