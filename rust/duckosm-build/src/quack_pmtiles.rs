@@ -71,7 +71,8 @@ pub fn quack_pmtiles_to<R: Read + Seek + Send, W: Write + Seek>(
     };
     match tiles {
         None => quack::features(&open, quack::BUDGET, fixes.as_ref(), &mut take)?,
-        Some(size) => quack::features_by_tiles(&open, quack::BUDGET, size, fixes, &mut take)?,
+        // the sort gives the order, so each tile gives its features at once (no group of tiles waits in memory)
+        Some(size) => quack::features_by_tiles_any_order(&open, quack::BUDGET, size, fixes, &mut take)?,
     };
     counts.features = features;
     duckosm_core::util::step("quack --pmtiles: the rows of the tiles");
