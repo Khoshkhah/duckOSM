@@ -30,8 +30,8 @@ picker
 
     | Tab | What to do | The argument of `duckosm.get()` |
     |---|---|---|
-    | Search | Type a place name and click a match. You can choose only a match that is an OSM relation, because only a relation has a boundary. | `osm_id` |
-    | OSM id | Type the id of an OSM boundary relation. | `osm_id` |
+    | Search | Type a place name and click a match. You cannot choose a match that is a point (an OSM node), because a point has no boundary. | `boundary` |
+    | OSM id | Type the id of an OSM boundary relation. | `boundary` |
     | Box | Drag a box on the map, or type `west,south,east,north`. | `bbox` |
     | H3 cell | Select the level (5 to 10) and click a hexagon, or type the cell id. | `h3_cell` |
     | File | Load a GeoJSON file. | `boundary` |
@@ -80,5 +80,7 @@ duckosm get --bbox 7.42,43.728,7.44,43.738 -o data
 ```
 
 The map uses [MapLibre](https://maplibre.org) and the [OpenFreeMap](https://openfreemap.org) base map. The
-search uses OpenStreetMap's [Nominatim](https://nominatim.openstreetmap.org). The notebook must have a connection
+search uses OpenStreetMap's [Nominatim](https://nominatim.openstreetmap.org). For Search and OSM id, the browser
+gets the polygon from Nominatim and gives it to `duckosm get` as the boundary. Thus the program does not send a
+request to Nominatim for each choice. Nominatim stops an address that sends too many requests. The notebook must have a connection
 to the internet.

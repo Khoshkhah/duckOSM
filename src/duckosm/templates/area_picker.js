@@ -102,7 +102,22 @@ export default {
       };
     }
 
-    // search: Nominatim; a relation has a boundary, and `duckosm get --osm-id` takes it
+    // search and OSM id: the browser asks Nominatim for the polygon (as duckOSM Studio does) and gives it to
+    // `duckosm get --boundary`, so the program asks Nominatim nothing (one server address soon gets "429 Too many requests")
+    const info = (text) => { $(".dk-info").classList.remove("dk-err"); $(".dk-info").textContent = text; };
+    const useOsm = async (type, id, name) => {
+      info(`Getting the boundary of OSM ${type} ${id} ...`);
+      try {
+        const r = await fetch("https://nominatim.openstreetmap.org/lookup?" + new URLSearchParams({ osm_ids: type[0].toUpperCase() + id, format: "geojson", polygon_geojson: "1" }));
+        if (!r.ok) throw new Error(`Nominatim answered ${r.status}`);
+        const f = (await r.json()).features?.[0];
+        if (!f || !/Polygon$/.test(f.geometry?.type ?? "")) return info(`OSM ${type} ${id} has no boundary (no polygon on Nominatim).`);
+        name = name || f.properties.name || f.properties.display_name?.split(",")[0] || `${type}_${id}`;
+        const geojson = { type: "Feature", properties: { name, osm_type: type, osm_id: id, source: "Nominatim" }, geometry: f.geometry };
+        draft(null);
+        set({ mode: "boundary", geojson, name });
+      } catch (e) { info(`No boundary: ${e.message}`); }
+    };
     const search = async () => {
       const q = $(".dk-q").value.trim();
       if (!q) return;
@@ -110,13 +125,15 @@ export default {
       list.textContent = "Searching ...";
       try {
         const r = await fetch("https://nominatim.openstreetmap.org/search?" + new URLSearchParams({ q, format: "jsonv2", limit: "8" }));
+        if (!r.ok) throw new Error(`Nominatim answered ${r.status}`);
         const rows = await r.json();
         list.innerHTML = rows.length ? "" : "No match.";
         for (const p of rows) {
+          // a relation or a closed way can have a boundary; a node is a point
           const b = document.createElement("button");
-          b.textContent = p.display_name + (p.osm_type === "relation" ? "" : " (no boundary)");
-          b.disabled = p.osm_type !== "relation";
-          b.onclick = () => { list.innerHTML = ""; draft(null); set({ mode: "osm_id", osm_id: p.osm_id, name: p.name || q }); };
+          b.textContent = `${p.display_name} (${p.type})` + (p.osm_type === "node" ? ", a point: no boundary" : "");
+          b.disabled = p.osm_type === "node";
+          b.onclick = () => { list.innerHTML = ""; useOsm(p.osm_type, p.osm_id, p.name || q); };
           list.append(b);
         }
       } catch (e) { list.textContent = `The search failed: ${e.message}`; }
@@ -124,7 +141,7 @@ export default {
     $(".dk-go").onclick = search;
     $(".dk-q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 
-    $(".dk-osm-go").onclick = () => { const id = parseInt($(".dk-osm").value, 10); if (id > 0) set({ mode: "osm_id", osm_id: id }); };
+    $(".dk-osm-go").onclick = () => { const id = parseInt($(".dk-osm").value, 10); if (id > 0) useOsm("relation", id); };
 
     // box: drag on the map, or type W,S,E,N
     $(".dk-bbox-go").onclick = () => {
@@ -193,6 +210,7 @@ export default {
       } else if (!Object.keys(model.get("area") || {}).length) info.textContent = "Choose an area.";
       else info.textContent = "";
       $(".dk-get").disabled = !plan.extract || model.get("busy");
+      $(".dk-get").textContent = model.get("busy") ? "Getting ..." : "Get";
       if (map.getSource("area")) {
         map.getSource("area").setData(plan.boundary || empty);
         if (plan.boundary) { draft(null); map.fitBounds(bounds(plan.boundary), { padding: 30, maxZoom: 14 }); }
@@ -203,7 +221,13 @@ export default {
     model.on("change:busy", showPlan);
     model.on("change:status", showStatus);
     showStatus();
-    $(".dk-get").onclick = () => model.send({ type: "get" });
+    $(".dk-get").onclick = () => {
+      // the answer of the kernel can take a moment: show at once that the click came
+      $(".dk-get").disabled = true;
+      $(".dk-get").textContent = "Getting ...";
+      $(".dk-status").textContent = "starting duckosm get ...";
+      model.send({ type: "get" });
+    };
 
     return () => map.remove();
   },
