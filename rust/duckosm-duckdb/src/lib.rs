@@ -53,8 +53,9 @@ pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memor
         &con,
         parquet_dir,
         "main",
-        // building_faces only when the build made the walls (--building-faces): write_schema skips a table that has no file
-        &["global_junctions", "boundary", "visualization_metadata", "building_faces"],
+        // building_faces and building_entrances only when the build made the walls (--building-faces): write_schema skips a table
+        // that has no file
+        &["global_junctions", "boundary", "visualization_metadata", "building_faces", "building_entrances"],
     )?;
     write_schema(&con, parquet_dir, "mm", &["transfers"])?;
     write_schema(&con, parquet_dir, "bus", &["routes", "route_edges"])?;
@@ -356,7 +357,7 @@ const MODE_TABLES: &[&str] = &[
 pub fn select(table: &str) -> &'static str {
     match table {
         "nodes" | "virtual_nodes" => "SELECT node_id, geometry AS geom",
-        "boundary" => "SELECT * EXCLUDE (geometry), geometry AS geom",
+        "boundary" | "building_entrances" => "SELECT * EXCLUDE (geometry), geometry AS geom",
         "visualization_metadata" => {
             "SELECT boundary_geojson::JSON AS boundary_geojson, center_lat, center_lon, initial_zoom, timezone, built_at, duckosm_version"
         }
