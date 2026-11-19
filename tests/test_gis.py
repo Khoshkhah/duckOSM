@@ -4,15 +4,12 @@ The point of every duckOSM exporter is that the content-hash `edge_id` survives 
 plain attribute, and the geographic layers (edges/nodes/boundary) carry through while routing-only
 list columns (`refs`) are dropped so the shapefile stays valid.
 """
-import shutil
-
 import duckdb
 import pytest
 
 from duckosm.gis import to_gis
 
 E1, E2 = 6141068311830699705, 3843102655846694531
-HAVE_OGR2OGR = shutil.which("ogr2ogr") is not None
 
 
 def _db():
@@ -104,7 +101,6 @@ def test_unknown_mode_errors(tmp_path):
         to_gis(_db(), str(tmp_path), fmt="shp", modes=["flying"])
 
 
-@pytest.mark.skipif(not HAVE_OGR2OGR, reason="ogr2ogr (GDAL) not installed")
 def test_gpkg_is_single_multi_layer_file(tmp_path):
     con = _db()
     out = tmp_path / "net.gpkg"

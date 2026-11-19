@@ -13,6 +13,7 @@ pub mod fixes;
 pub mod fixpbf;
 #[cfg(feature = "pbf")]
 pub mod gdal;
+pub mod geofabrik;
 pub mod geom;
 pub mod graph;
 pub mod hash;

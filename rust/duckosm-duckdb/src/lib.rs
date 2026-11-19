@@ -53,7 +53,8 @@ pub fn write_network_tables(db: &Path, parquet_dir: &Path, modes: &[&str], memor
         &con,
         parquet_dir,
         "main",
-        &["global_junctions", "boundary", "visualization_metadata"],
+        // building_faces only when the build made the walls (--building-faces): write_schema skips a table that has no file
+        &["global_junctions", "boundary", "visualization_metadata", "building_faces"],
     )?;
     write_schema(&con, parquet_dir, "mm", &["transfers"])?;
     write_schema(&con, parquet_dir, "bus", &["routes", "route_edges"])?;
