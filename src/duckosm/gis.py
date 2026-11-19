@@ -15,10 +15,7 @@ exports, not here. See https://khoshkhah.github.io/duckOSM/exports/gis/ for the 
     to_gis(con, "sodermalm.gpkg")                 # GeoPackage: every mode present + boundary
     to_gis(con, "gis/", fmt="shp", modes=["driving"])  # one shapefile set per layer into gis/
 
-GeoPackage is multi-layer, but DuckDB's ``COPY`` writes one layer per file (named after the file)
-and overwrites on re-copy — so each layer is written to a temp single-layer ``.gpkg`` and assembled
-into the one target with ``ogr2ogr -update -append -nln <layer>`` (the same GDAL dependency the
-``duckosm admin --gpkg`` export uses). Without ``ogr2ogr`` it falls back to one file per layer.
+The GeoPackage (one file with all layers) comes from the Rust export (``duckosm export-gis``).
 Shapefiles need no assembly (one layer per file by nature).
 
 GeoParquet (``fmt="geoparquet"``) writes one ``.parquet`` file per layer into a directory
@@ -33,8 +30,6 @@ stays BIGINT. When the db has ``visualization.edge_levels``, every edges file al
 import json
 import logging
 import os
-import shutil
-import subprocess
 import tempfile
 
 logger = logging.getLogger("duckosm")
@@ -130,7 +125,7 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
     boundary : also export ``main.boundary`` as a ``boundary`` layer, if it exists (default True).
     name : basename for layers / shapefiles (default: the ``out`` file stem, else ``"network"``).
     srs : CRS written into every layer (default ``"EPSG:4326"`` — duckOSM geometries are lon/lat).
-    ogr2ogr_bin : explicit ``ogr2ogr`` path (else auto-located; used only to assemble the GeoPackage).
+    ogr2ogr_bin : not used (kept so old calls work).
 
     Returns ``{"fmt", "path"(gpkg)|"dir"(shp, geoparquet), "layers": {name: n_features}, "files": [...]}``.
     Every layer keeps ``edge_id`` as a plain attribute — the cross-format stable join key.
@@ -167,7 +162,7 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
         return _export_geoparquet(con, out, layers)
     if fmt == "shp":
         return _export_shp(con, out, base, layers, srs)
-    return _export_gpkg(con, out, base, layers, srs, ogr2ogr_bin)
+    return _export_gpkg(con, out, base, layers, srs)
 
 
 def _export_shp(con, out_dir, base, layers, srs):
@@ -211,43 +206,20 @@ def _export_geoparquet(con, out_dir, layers):
     return {"fmt": "geoparquet", "dir": out_dir, "layers": counts, "files": written}
 
 
-def _export_gpkg(con, out, base, layers, srs, ogr2ogr_bin):
-    """Multi-layer GeoPackage assembled with ogr2ogr (fallback: one .gpkg per layer)."""
-    ogr = ogr2ogr_bin or shutil.which("ogr2ogr")
-    counts = {}
+def _export_gpkg(con, out, base, layers, srs):
+    """One GeoPackage with all layers: the Rust export. It reads a database file, so the tables of ``con`` go to a
+    temporary file first."""
+    from duckosm import _rust
 
-    if not ogr:
-        # fallback: DuckDB writes one single-layer .gpkg per layer, alongside `out`
-        logger.warning("ogr2ogr not found — writing one GeoPackage per layer (install GDAL for a "
-                       "single multi-layer .gpkg)")
-        out_dir = os.path.dirname(out) or "."
-        os.makedirs(out_dir, exist_ok=True)
-        written = []
-        for lyr, schema, table in layers:
-            path = os.path.join(out_dir, f"{base}_{lyr}.gpkg")
-            _copy(con, _select_sql(con, schema, table, for_shp=False), path, "GPKG", srs)
-            counts[lyr] = _count(con, schema, table)
-            written.append(path)
-            logger.info(f"GIS[gpkg]: {lyr} — {counts[lyr]:,} features -> {path}")
-        return {"fmt": "gpkg", "path": None, "layers": counts, "files": written}
-
-    out_dir = os.path.dirname(out) or "."
-    os.makedirs(out_dir, exist_ok=True)
-    if os.path.exists(out):
-        os.remove(out)                      # start clean so -append builds a fresh, complete file
+    modes = [schema for _, schema, table in layers if table == "edges"]
+    boundary = any(lyr == "boundary" for lyr, _, _ in layers)
     with tempfile.TemporaryDirectory() as tmp:
-        for i, (lyr, schema, table) in enumerate(layers):
-            part = os.path.join(tmp, f"{lyr}.gpkg")
-            _copy(con, _select_sql(con, schema, table, for_shp=False), part, "GPKG", srs)
-            args = [ogr, "-f", "GPKG"]
-            if os.path.exists(out):
-                args += ["-update", "-append"]
-            args += [out, part, "-nln", lyr]
-            res = subprocess.run(args, capture_output=True, text=True)
-            if res.returncode != 0:
-                raise RuntimeError(f"ogr2ogr failed on layer {lyr} (exit {res.returncode}):\n"
-                                   f"{res.stderr[-2000:]}")
-            counts[lyr] = _count(con, schema, table)
-            logger.info(f"GIS[gpkg]: {lyr} — {counts[lyr]:,} features")
+        db = os.path.join(tmp, "export.duckdb")
+        con.execute(f"ATTACH '{db}' AS _gis_export")
+        try:
+            con.execute("COPY FROM DATABASE " + con.execute("SELECT current_database()").fetchone()[0] + " TO _gis_export")
+        finally:
+            con.execute("DETACH _gis_export")
+        r = json.loads(_rust.to_gis(db, str(out), modes, "gpkg", boundary, base, srs))
     logger.info(f"wrote GeoPackage ({len(layers)} layers) -> {out}")
-    return {"fmt": "gpkg", "path": out, "layers": counts, "files": [out]}
+    return {"fmt": "gpkg", "path": r["path"], "layers": r["layers"], "files": r["files"]}

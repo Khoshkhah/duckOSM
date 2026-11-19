@@ -18,7 +18,7 @@ route: 115 lanes, cost 3876, maneuvers: right turn, right turn, merge, fork, lan
 lane graph links each lane to the lanes it can turn into (legal turns only) and to the lanes beside
 it (a lane change). The cost is metres, plus a penalty for each turn and lane change.
 `lane-graph` saves the graph in the GMNS database (`lane_driving.lane_edges`) so that repeated
-routes are faster; `route-lanes` also works without it. Needs `pip install "duckosm[routing]"`.
+routes are faster; `route-lanes` also works without it.
 
 ```python
 from duckosm import build_lane_graph, route_lanes
