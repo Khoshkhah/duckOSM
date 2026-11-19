@@ -568,7 +568,7 @@ pub fn cut_with<R: Read + Seek + Send, W: Write>(
         rels.iter().filter(|r| if strategy == Strategy::Simple { first(r) } else { direct(r) }).map(|r| r.id).collect();
     if strategy == Strategy::Simple {
         // the ways without their nodes outside, and no parent relations
-        outside.clear();
+        outside = IdSet::default();
     }
     while strategy != Strategy::Simple {
         let parents: Vec<i64> = rels
