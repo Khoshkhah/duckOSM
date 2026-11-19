@@ -43,7 +43,7 @@ rayon = "1.12"
 # the build of a tile keeps only its own rows (union.rs, own_rows)
 arrow-array = "=60.0.0"
 # roadstyle's engine in Rust (roadstyle repository, rust/): the drawing levels (levels.rs), roadstyle's rules in one place
-roadstyle-levels = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "39696602fac3a6e200fd324526022bc88239b95f" }
+roadstyle-levels = { workspace = true }
 
 [dev-dependencies]
 # the golden file of quack --gdal (tests/quack_gdal_monaco.rs)

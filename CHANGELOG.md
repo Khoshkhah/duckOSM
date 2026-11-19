@@ -19,6 +19,9 @@
   - `docs/reference/cli.md`: the options of `gmns-map` and `levels-edit` are those of the program.
   - `duckosm gmns` does not need SUMO: without netconvert it says so and writes the movements with no lanes and no
     `lane_connector`. Before, it stopped with "netconvert not found".
+- **One roadstyle version, roadstyle main `53135c49`.** The crates pinned three roadstyle commits, and the `duckosm` pages
+  (`viz`, `route-map`, `edit`, `ask`, `studio`, `gmns-map`) had an old dashboard. All roadstyle crates now take one rev from
+  `[workspace.dependencies]` in `rust/Cargo.toml`. The docs maps are made again with it.
 
 ## 0.8.0 (2026-11-18)
 
