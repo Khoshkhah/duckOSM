@@ -105,10 +105,9 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
   <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database.</figcaption>
 </figure>
 
-<figure class="pair" markdown="span">
-  ![The lanes of one Monaco junction from the GMNS export, drawn by roadstyle](images/tour-lanes-gmns.png)
-  ![The same junction from the SUMO export after netconvert, drawn by roadstyle](images/tour-lanes-sumo.png)
-  <figcaption>One Monaco junction: the GMNS lanes (left) and SUMO's lanes after netconvert (right). The roads have the same lanes; inside the junction, SUMO draws its own.</figcaption>
+<figure markdown="span">
+  ![The lanes of one Monaco junction from the GMNS export: each lane at its width, with its turn arrows](images/tour-lanes-gmns.png)
+  <figcaption>GMNS lanes of one Monaco junction: each lane at its width, with its turns. <a href="exports/sumo/">Against SUMO</a></figcaption>
 </figure>
 
 <figure markdown="span">
