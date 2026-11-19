@@ -31,13 +31,18 @@ Without `--junctions`, the roads do not link: you can look at them, but a vehicl
 
 ## Speed and memory
 
-Mac mini (Apple M6, 12 cores, 16 GB). With `--junctions`.
+The file is written while DuckDB reads the rows. The memory stays near DuckDB's limit of 2 GB and does not grow with
+the area.
 
-| Area (input) | Time | Memory | Output |
-|---|---|---|---|
-| Monaco (0.7 MB) | 0.06 s | 50.5 MB | 6.0 MB |
-| Kentucky (148 MB) | not run: `duckosm gmns` stops on Kentucky | | |
-| France (5.1 GB) | not run | | |
+| Area (input) | Machine | Command | Time | Memory | Output |
+|---|---|---|---|---|---|
+| Monaco (0.7 MB) | Mac mini (M6, 16 GB) | `--junctions` | 0.06 s | 50.5 MB | 6.0 MB |
+| Kentucky (148 MB) | WSL (20 cores, 23 GB) | roads only | 21 s | 0.52 GB | 2.3 GB |
+| Kentucky (148 MB) | WSL (20 cores, 23 GB) | `--junctions` ¹ | 78 s | 2.1 GB | 8.5 GB |
+| France (5.1 GB) | | | not run yet | | |
+
+¹ On a GMNS db made without netconvert: one movement for each turn. With netconvert, a turn can have one movement for
+each run of lanes, so the file has more connecting roads.
 
 ## Limits
 

@@ -155,6 +155,16 @@ impl Out {
         .map_err(|e| format!("{}: {e}", self.path.display()))
     }
 
+    /// Copy all of `r` to the file.
+    pub fn copy_from(&mut self, r: &mut impl std::io::Read) -> Result<()> {
+        match &mut self.w {
+            OutFile::Plain(f) => std::io::copy(r, f),
+            OutFile::Gz(g) => std::io::copy(r, g),
+        }
+        .map(|_| ())
+        .map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+
     pub fn finish(self) -> Result<()> {
         use std::io::Write;
         let err = |e: std::io::Error| format!("{}: {e}", self.path.display());

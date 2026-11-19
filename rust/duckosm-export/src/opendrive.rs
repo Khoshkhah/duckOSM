@@ -4,10 +4,10 @@
 //! driving lanes on the right; no junctions. Phase 2 (`junctions`, a GMNS db): the links are roads, and at each junction
 //! node each movement is a connecting road.
 
-use crate::{data_utm_crs, has_table, open, quoteattr, write_text, Result};
+use crate::stream::each_chunk;
+use crate::{data_utm_crs, has_table, open, quoteattr, Out, Result};
 use duckdb::Connection;
-use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The lane width (metres) when OSM has no width:lanes.
 const LANE_W: &str = "3.25";
@@ -66,55 +66,84 @@ fn segments(pts: &[(f64, f64)]) -> (Vec<(f64, f64, f64, f64, f64)>, f64) {
     (segs, s)
 }
 
-fn planview(o: &mut Vec<String>, segs: &[(f64, f64, f64, f64, f64)]) {
-    o.push("\t\t<planView>".into());
-    for (s, x, y, hdg, length) in segs {
-        o.push(format!(
-            "\t\t\t<geometry s=\"{s:.4}\" x=\"{x:.4}\" y=\"{y:.4}\" hdg=\"{hdg:.6}\" length=\"{length:.4}\"><line/></geometry>"
-        ));
-    }
-    o.push("\t\t</planView>".into());
+/// The body of the file: each line goes to a file beside `out` at once, and the extent of all points is kept for the header.
+struct Body {
+    o: Out,
+    path: PathBuf,
+    ext: [f64; 4],
 }
 
-fn lanes(o: &mut Vec<String>, n: i64) {
-    o.push("\t\t<lanes>".into());
-    o.push("\t\t\t<laneSection s=\"0\">".into());
-    o.push("\t\t\t\t<center><lane id=\"0\" type=\"none\" level=\"false\"/></center>".into());
-    o.push("\t\t\t\t<right>".into());
-    for i in 1..=n {
-        o.push(format!("\t\t\t\t\t<lane id=\"-{i}\" type=\"driving\" level=\"false\">"));
-        o.push(format!("\t\t\t\t\t\t<width sOffset=\"0\" a=\"{LANE_W}\" b=\"0\" c=\"0\" d=\"0\"/>"));
-        o.push("\t\t\t\t\t</lane>".into());
+impl Body {
+    fn new(out: &Path) -> Result<Body> {
+        let mut name = out.file_name().unwrap_or_default().to_os_string();
+        name.push(".body");
+        let path = out.with_file_name(name);
+        Ok(Body { o: Out::create(&path, false)?, path, ext: [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY] })
     }
-    o.push("\t\t\t\t</right>".into());
-    o.push("\t\t\t</laneSection>".into());
-    o.push("\t\t</lanes>".into());
-}
 
-/// The file: the header (the extent of all points), then `body`.
-fn document(name: &str, xs: &[f64], ys: &[f64], crs: &str, body: Vec<String>) -> Result<String> {
-    if xs.is_empty() {
-        return Err("no road with a geometry of two or more points".into());
+    fn line(&mut self, l: &str) -> Result<()> {
+        self.o.put(l)?;
+        self.o.put("\n")
     }
-    let mx = |v: &[f64]| v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let mn = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
-    let mut o = vec![
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(),
-        "<OpenDRIVE>".into(),
-        format!(
-            "\t<header revMajor=\"1\" revMinor=\"7\" name={} version=\"1.00\" north=\"{:.2}\" south=\"{:.2}\" east=\"{:.2}\" west=\"{:.2}\">",
-            quoteattr(name),
-            mx(ys),
-            mn(ys),
-            mx(xs),
-            mn(xs)
-        ),
-        format!("\t\t<geoReference><![CDATA[{}]]></geoReference>", geo_ref(crs)),
-        "\t</header>".into(),
-    ];
-    o.extend(body);
-    o.push("</OpenDRIVE>\n".into());
-    Ok(o.join("\n"))
+
+    fn points(&mut self, pts: &[(f64, f64)]) {
+        for &(x, y) in pts {
+            self.ext = [self.ext[0].min(x), self.ext[1].min(y), self.ext[2].max(x), self.ext[3].max(y)];
+        }
+    }
+
+    fn planview(&mut self, segs: &[(f64, f64, f64, f64, f64)]) -> Result<()> {
+        self.line("\t\t<planView>")?;
+        for (s, x, y, hdg, length) in segs {
+            self.line(&format!(
+                "\t\t\t<geometry s=\"{s:.4}\" x=\"{x:.4}\" y=\"{y:.4}\" hdg=\"{hdg:.6}\" length=\"{length:.4}\"><line/></geometry>"
+            ))?;
+        }
+        self.line("\t\t</planView>")
+    }
+
+    fn lanes(&mut self, n: i64) -> Result<()> {
+        self.line("\t\t<lanes>")?;
+        self.line("\t\t\t<laneSection s=\"0\">")?;
+        self.line("\t\t\t\t<center><lane id=\"0\" type=\"none\" level=\"false\"/></center>")?;
+        self.line("\t\t\t\t<right>")?;
+        for i in 1..=n {
+            self.line(&format!("\t\t\t\t\t<lane id=\"-{i}\" type=\"driving\" level=\"false\">"))?;
+            self.line(&format!("\t\t\t\t\t\t<width sOffset=\"0\" a=\"{LANE_W}\" b=\"0\" c=\"0\" d=\"0\"/>"))?;
+            self.line("\t\t\t\t\t</lane>")?;
+        }
+        self.line("\t\t\t\t</right>")?;
+        self.line("\t\t\t</laneSection>")?;
+        self.line("\t\t</lanes>")
+    }
+
+    /// The file `out`: the header (the extent of all points), then the body. The body file is removed.
+    fn finish(self, out: &Path, name: &str, crs: &str) -> Result<()> {
+        let Body { o, path, ext } = self;
+        o.finish()?;
+        let r = (|| {
+            if ext[0] == f64::INFINITY {
+                return Err("no road with a geometry of two or more points".to_string());
+            }
+            let mut f = Out::create(out, false)?;
+            f.put(&format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<OpenDRIVE>\n\t<header revMajor=\"1\" revMinor=\"7\" name={} version=\"1.00\" \
+                 north=\"{:.2}\" south=\"{:.2}\" east=\"{:.2}\" west=\"{:.2}\">\n\t\t<geoReference><![CDATA[{}]]></geoReference>\n\t</header>\n",
+                quoteattr(name),
+                ext[3],
+                ext[1],
+                ext[2],
+                ext[0],
+                geo_ref(crs)
+            ))?;
+            let mut b = std::fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            f.copy_from(&mut b)?;
+            f.put("</OpenDRIVE>\n")?;
+            f.finish()
+        })();
+        let _ = std::fs::remove_file(&path);
+        r
+    }
 }
 
 fn tx(col: &str) -> String {
@@ -132,7 +161,21 @@ pub struct Summary {
     pub crs: String,
 }
 
-fn phase1(con: &Connection, mode: &str, crs: &str, name: &str) -> Result<(String, Summary)> {
+/// The straight pieces of a road with two or more points and a length, with its points in the extent. None: no road.
+fn road(b: &mut Body, wkt: Option<&str>) -> Option<(Vec<(f64, f64, f64, f64, f64)>, f64)> {
+    let pts = coords(wkt.unwrap_or(""));
+    if pts.len() < 2 {
+        return None;
+    }
+    let (segs, total) = segments(&pts);
+    if segs.is_empty() {
+        return None;
+    }
+    b.points(&pts);
+    Some((segs, total))
+}
+
+fn phase1(con: &Connection, mode: &str, crs: &str, b: &mut Body) -> Result<Summary> {
     let have_z: i64 = con
         .query_row(
             "SELECT count(*) FROM duckdb_columns() WHERE schema_name = ? AND table_name = 'edges' AND column_name = 'z_from'",
@@ -141,171 +184,143 @@ fn phase1(con: &Connection, mode: &str, crs: &str, name: &str) -> Result<(String
         )
         .map_err(e)?;
     let zsel = if have_z > 0 { ", z_from::DOUBLE, z_to::DOUBLE" } else { ", NULL::DOUBLE, NULL::DOUBLE" };
-    let mut st = con
-        .prepare(&format!(
-            "SELECT edge_id, COALESCE(lanes, 1)::BIGINT, name, {}{zsel} FROM {mode}.edges WHERE geometry IS NOT NULL",
-            tx("geometry")
-        ))
-        .map_err(e)?;
-    type Row = (i64, i64, Option<String>, Option<String>, Option<f64>, Option<f64>);
-    let rows: Vec<Row> = st
-        .query_map([crs], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
-        .map_err(e)?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(e)?;
-    let (mut xs, mut ys, mut o) = (Vec::new(), Vec::new(), Vec::new());
+    let sql = format!("SELECT edge_id, COALESCE(lanes, 1)::BIGINT, name, {}{zsel} FROM {mode}.edges WHERE geometry IS NOT NULL", tx("geometry"));
     let mut roads = 0;
-    for (eid, n, nm, wkt, z0, z1) in rows {
-        let pts = coords(wkt.as_deref().unwrap_or(""));
-        if pts.len() < 2 {
-            continue;
+    each_chunk(con, &sql, [crs], |c| {
+        for r in 0..c.len {
+            let Some((segs, total)) = road(b, c.str(3, r)) else { continue };
+            b.line(&format!(
+                "\t<road name={} length=\"{total:.4}\" id=\"{}\" junction=\"-1\">",
+                quoteattr(c.str(2, r).unwrap_or("")),
+                c.i64(0, r).unwrap_or_default()
+            ))?;
+            b.planview(&segs)?;
+            if let (Some(z0), Some(z1)) = (c.f64(4, r), c.f64(5, r)) {
+                // a straight ramp from z_from to z_to: after planView, before lanes (the order of the schema)
+                let slope = if total > 0.0 { (z1 - z0) / total } else { 0.0 };
+                b.line("\t\t<elevationProfile>")?;
+                b.line(&format!("\t\t\t<elevation s=\"0\" a=\"{z0:.4}\" b=\"{slope:.6}\" c=\"0\" d=\"0\"/>"))?;
+                b.line("\t\t</elevationProfile>")?;
+            }
+            b.lanes(c.i64(1, r).unwrap_or(1).max(1))?;
+            b.line("\t</road>")?;
+            roads += 1;
         }
-        let (segs, total) = segments(&pts);
-        if segs.is_empty() {
-            continue;
-        }
-        xs.extend(pts.iter().map(|p| p.0));
-        ys.extend(pts.iter().map(|p| p.1));
-        o.push(format!("\t<road name={} length=\"{total:.4}\" id=\"{eid}\" junction=\"-1\">", quoteattr(nm.as_deref().unwrap_or(""))));
-        planview(&mut o, &segs);
-        if let (Some(z0), Some(z1)) = (z0, z1) {
-            // a straight ramp from z_from to z_to: after planView, before lanes (the order of the schema)
-            let b = if total > 0.0 { (z1 - z0) / total } else { 0.0 };
-            o.push("\t\t<elevationProfile>".into());
-            o.push(format!("\t\t\t<elevation s=\"0\" a=\"{z0:.4}\" b=\"{b:.6}\" c=\"0\" d=\"0\"/>"));
-            o.push("\t\t</elevationProfile>".into());
-        }
-        lanes(&mut o, n.max(1));
-        o.push("\t</road>".into());
-        roads += 1;
-    }
-    let doc = document(name, &xs, &ys, crs, o)?;
-    Ok((doc, Summary { roads, connecting_roads: 0, junctions: 0, crs: crs.into() }))
+        Ok(())
+    })?;
+    Ok(Summary { roads, connecting_roads: 0, junctions: 0, crs: crs.into() })
 }
 
-fn junctions(con: &Connection, g: &str, crs: &str, name: &str) -> Result<(String, Summary)> {
-    let mut st = con
-        .prepare(&format!(
-            "SELECT link_id, from_node_id, to_node_id, COALESCE(lanes, 1)::BIGINT, name, {} FROM {g}.link WHERE geom IS NOT NULL",
-            tx("geom")
-        ))
-        .map_err(e)?;
-    type Link = (i64, i64, i64, i64, Option<String>, Option<String>);
-    let links: Vec<Link> = st
-        .query_map([crs], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
-        .map_err(e)?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(e)?;
-    let mut st = con
-        .prepare(&format!(
-            "SELECT node_id, ib_link_id, ob_link_id, {} FROM {g}.movement WHERE geometry IS NOT NULL AND ib_link_id IS NOT NULL \
-             AND ob_link_id IS NOT NULL",
-            tx("ST_GeomFromText(geometry)")
-        ))
-        .map_err(e)?;
-    let movements: Vec<(i64, i64, i64, Option<String>)> = st
-        .query_map([crs], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-        .map_err(e)?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(e)?;
-
-    // a junction: a node where an inbound link has two or more outbound choices, or where three or more inbound links meet
-    let mut ib_obs: HashMap<i64, HashMap<i64, BTreeSet<i64>>> = HashMap::new();
-    for (node, ib, ob, _) in &movements {
-        ib_obs.entry(*node).or_default().entry(*ib).or_default().insert(*ob);
-    }
-    let jnodes: BTreeSet<i64> =
-        ib_obs.iter().filter(|(_, ibs)| ibs.len() >= 3 || ibs.values().any(|o| o.len() >= 2)).map(|(n, _)| *n).collect();
-    // at a node that is not a junction: road to road (the first movement wins)
-    let (mut succ, mut pred) = (HashMap::new(), HashMap::new());
-    for (node, ib, ob, _) in &movements {
-        if !jnodes.contains(node) {
-            succ.entry(*ib).or_insert(*ob);
-            pred.entry(*ob).or_insert(*ib);
-        }
-    }
-
-    let (mut xs, mut ys, mut road_o, mut conn_o) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+/// Phase 2. The movements, the junction nodes and the road-to-road links stay in DuckDB temp tables (they spill to disk), not
+/// in this program: its memory does not grow with the area.
+fn junctions(con: &Connection, g: &str, crs: &str, b: &mut Body) -> Result<Summary> {
+    // a junction: a node where an inbound link has two or more outbound choices, or where three or more inbound links meet.
+    // At a node that is not a junction: road to road, the first movement (in the order of the table) wins
+    con.execute_batch(&format!(
+        "CREATE TEMP TABLE _mv AS SELECT rowid AS rid, node_id, ib_link_id AS ib, ob_link_id AS ob FROM {g}.movement
+           WHERE geometry IS NOT NULL AND ib_link_id IS NOT NULL AND ob_link_id IS NOT NULL;
+         CREATE TEMP TABLE _jn AS SELECT node_id FROM (SELECT node_id, ib, count(DISTINCT ob) AS n FROM _mv GROUP BY ALL)
+           GROUP BY node_id HAVING count(*) >= 3 OR max(n) >= 2;
+         CREATE TEMP TABLE _succ AS SELECT ib, arg_min(ob, rid) AS ob FROM _mv ANTI JOIN _jn USING (node_id) GROUP BY ib;
+         CREATE TEMP TABLE _pred AS SELECT ob, arg_min(ib, rid) AS ib FROM _mv ANTI JOIN _jn USING (node_id) GROUP BY ob;"
+    ))
+    .map_err(e)?;
+    let sql = format!(
+        "SELECT l.link_id, l.from_node_id, l.to_node_id, COALESCE(l.lanes, 1)::BIGINT, l.name, {}, jf.node_id IS NOT NULL,
+           jt.node_id IS NOT NULL, p.ib, s.ob
+         FROM {g}.link l LEFT JOIN _jn jf ON jf.node_id = l.from_node_id LEFT JOIN _jn jt ON jt.node_id = l.to_node_id
+           LEFT JOIN _pred p ON p.ob = l.link_id LEFT JOIN _succ s ON s.ib = l.link_id
+         WHERE l.geom IS NOT NULL ORDER BY l.rowid",
+        tx("l.geom")
+    );
     let mut roads = 0;
-    for (lid, fnode, tnode, n, nm, wkt) in &links {
-        let pts = coords(wkt.as_deref().unwrap_or(""));
-        if pts.len() < 2 {
-            continue;
+    each_chunk(con, &sql, [crs], |c| {
+        for r in 0..c.len {
+            let Some((segs, total)) = road(b, c.str(5, r)) else { continue };
+            let (lid, fnode, tnode) = (c.i64(0, r).unwrap_or_default(), c.i64(1, r).unwrap_or_default(), c.i64(2, r).unwrap_or_default());
+            let mut link = Vec::new();
+            if c.bool(6, r) == Some(true) {
+                link.push(format!("\t\t\t<predecessor elementType=\"junction\" elementId=\"{fnode}\"/>"));
+            } else if let Some(p) = c.i64(8, r) {
+                link.push(format!("\t\t\t<predecessor elementType=\"road\" elementId=\"{p}\" contactPoint=\"end\"/>"));
+            }
+            if c.bool(7, r) == Some(true) {
+                link.push(format!("\t\t\t<successor elementType=\"junction\" elementId=\"{tnode}\"/>"));
+            } else if let Some(s) = c.i64(9, r) {
+                link.push(format!("\t\t\t<successor elementType=\"road\" elementId=\"{s}\" contactPoint=\"start\"/>"));
+            }
+            b.line(&format!("\t<road name={} length=\"{total:.4}\" id=\"{lid}\" junction=\"-1\">", quoteattr(c.str(4, r).unwrap_or(""))))?;
+            if !link.is_empty() {
+                b.line("\t\t<link>")?;
+                for l in &link {
+                    b.line(l)?;
+                }
+                b.line("\t\t</link>")?;
+            }
+            b.planview(&segs)?;
+            b.lanes(c.i64(3, r).unwrap_or(1).max(1))?;
+            b.line("\t</road>")?;
+            roads += 1;
         }
-        let (segs, total) = segments(&pts);
-        if segs.is_empty() {
-            continue;
-        }
-        xs.extend(pts.iter().map(|p| p.0));
-        ys.extend(pts.iter().map(|p| p.1));
-        let mut link = Vec::new();
-        if jnodes.contains(fnode) {
-            link.push(format!("\t\t\t<predecessor elementType=\"junction\" elementId=\"{fnode}\"/>"));
-        } else if let Some(p) = pred.get(lid) {
-            link.push(format!("\t\t\t<predecessor elementType=\"road\" elementId=\"{p}\" contactPoint=\"end\"/>"));
-        }
-        if jnodes.contains(tnode) {
-            link.push(format!("\t\t\t<successor elementType=\"junction\" elementId=\"{tnode}\"/>"));
-        } else if let Some(s) = succ.get(lid) {
-            link.push(format!("\t\t\t<successor elementType=\"road\" elementId=\"{s}\" contactPoint=\"start\"/>"));
-        }
-        road_o.push(format!("\t<road name={} length=\"{total:.4}\" id=\"{lid}\" junction=\"-1\">", quoteattr(nm.as_deref().unwrap_or(""))));
-        if !link.is_empty() {
-            road_o.push("\t\t<link>".into());
-            road_o.extend(link);
-            road_o.push("\t\t</link>".into());
-        }
-        planview(&mut road_o, &segs);
-        lanes(&mut road_o, (*n).max(1));
-        road_o.push("\t</road>".into());
-        roads += 1;
+        Ok(())
+    })?;
+    // a connecting road for each movement at a junction
+    let sql = format!(
+        "SELECT m.node_id, m.ib_link_id, m.ob_link_id, {} FROM {g}.movement m SEMI JOIN _jn USING (node_id)
+         WHERE m.geometry IS NOT NULL AND m.ib_link_id IS NOT NULL AND m.ob_link_id IS NOT NULL ORDER BY m.rowid",
+        tx("ST_GeomFromText(m.geometry)")
+    );
+    // (node, connecting road, inbound road) of each connecting road: in a second connection, as a write in the connection of
+    // the stream would end the stream
+    let scratch = con.try_clone().map_err(e)?;
+    scratch.execute_batch("CREATE TEMP TABLE _conn(node_id BIGINT, ci BIGINT, ib BIGINT)").map_err(e)?;
+    let mut ci: i64 = 0;
+    {
+        let mut app = scratch.appender_to_catalog_and_db("_conn", "temp", "main").map_err(e)?;
+        each_chunk(con, &sql, [crs], |c| {
+            for r in 0..c.len {
+                let Some(w) = c.str(3, r).filter(|w| !w.is_empty()) else { continue };
+                let Some((segs, total)) = road(b, Some(w)) else { continue };
+                let (node, ib, ob) = (c.i64(0, r).unwrap_or_default(), c.i64(1, r).unwrap_or_default(), c.i64(2, r).unwrap_or_default());
+                b.line(&format!("\t<road name=\"\" length=\"{total:.4}\" id=\"c{ci}\" junction=\"{node}\">"))?;
+                b.line("\t\t<link>")?;
+                b.line(&format!("\t\t\t<predecessor elementType=\"road\" elementId=\"{ib}\" contactPoint=\"end\"/>"))?;
+                b.line(&format!("\t\t\t<successor elementType=\"road\" elementId=\"{ob}\" contactPoint=\"start\"/>"))?;
+                b.line("\t\t</link>")?;
+                b.planview(&segs)?;
+                b.lanes(1)?;
+                b.line("\t</road>")?;
+                app.append_row(duckdb::params![node, ci, ib]).map_err(e)?;
+                ci += 1;
+            }
+            Ok(())
+        })?;
+        app.flush().map_err(e)?;
     }
-    // a connecting road for each movement at a junction; the junctions in the order of their first connecting road
-    let mut ci = 0;
-    let mut order: Vec<i64> = Vec::new();
-    let mut conns: HashMap<i64, Vec<(String, i64)>> = HashMap::new();
-    for (node, ib, ob, wkt) in &movements {
-        let Some(wkt) = wkt.as_deref().filter(|w| !w.is_empty() && jnodes.contains(node)) else { continue };
-        let pts = coords(wkt);
-        if pts.len() < 2 {
-            continue;
+    // the junctions in the order of their first connecting road
+    let (mut junctions, mut cur, mut k) = (0, None, 0);
+    each_chunk(&scratch, "SELECT node_id, ci, ib FROM _conn ORDER BY min(ci) OVER (PARTITION BY node_id), ci", [], |c| {
+        for r in 0..c.len {
+            let (node, cid, ib) = (c.i64(0, r).unwrap_or_default(), c.i64(1, r).unwrap_or_default(), c.i64(2, r).unwrap_or_default());
+            if cur != Some(node) {
+                if cur.is_some() {
+                    b.line("\t</junction>")?;
+                }
+                b.line(&format!("\t<junction id=\"{node}\" name=\"\">"))?;
+                (cur, k, junctions) = (Some(node), 0, junctions + 1);
+            }
+            b.line(&format!("\t\t<connection id=\"{k}\" incomingRoad=\"{ib}\" connectingRoad=\"c{cid}\" contactPoint=\"start\">"))?;
+            b.line("\t\t\t<laneLink from=\"-1\" to=\"-1\"/>")?;
+            b.line("\t\t</connection>")?;
+            k += 1;
         }
-        let (segs, total) = segments(&pts);
-        if segs.is_empty() {
-            continue;
-        }
-        let cid = format!("c{ci}");
-        ci += 1;
-        xs.extend(pts.iter().map(|p| p.0));
-        ys.extend(pts.iter().map(|p| p.1));
-        conn_o.push(format!("\t<road name=\"\" length=\"{total:.4}\" id=\"{cid}\" junction=\"{node}\">"));
-        conn_o.push("\t\t<link>".into());
-        conn_o.push(format!("\t\t\t<predecessor elementType=\"road\" elementId=\"{ib}\" contactPoint=\"end\"/>"));
-        conn_o.push(format!("\t\t\t<successor elementType=\"road\" elementId=\"{ob}\" contactPoint=\"start\"/>"));
-        conn_o.push("\t\t</link>".into());
-        planview(&mut conn_o, &segs);
-        lanes(&mut conn_o, 1);
-        conn_o.push("\t</road>".into());
-        conns.entry(*node).or_insert_with(|| {
-            order.push(*node);
-            Vec::new()
-        });
-        conns.get_mut(node).unwrap().push((cid, *ib));
+        Ok(())
+    })?;
+    if cur.is_some() {
+        b.line("\t</junction>")?;
     }
-    let mut junc_o = Vec::new();
-    for node in &order {
-        junc_o.push(format!("\t<junction id=\"{node}\" name=\"\">"));
-        for (k, (cid, ib)) in conns[node].iter().enumerate() {
-            junc_o.push(format!("\t\t<connection id=\"{k}\" incomingRoad=\"{ib}\" connectingRoad=\"{cid}\" contactPoint=\"start\">"));
-            junc_o.push("\t\t\t<laneLink from=\"-1\" to=\"-1\"/>".into());
-            junc_o.push("\t\t</connection>".into());
-        }
-        junc_o.push("\t</junction>".into());
-    }
-    road_o.extend(conn_o);
-    road_o.extend(junc_o);
-    let doc = document(name, &xs, &ys, crs, road_o)?;
-    Ok((doc, Summary { roads, connecting_roads: ci, junctions: order.len(), crs: crs.into() }))
+    con.execute_batch("DROP TABLE _mv; DROP TABLE _jn; DROP TABLE _succ; DROP TABLE _pred").map_err(e)?;
+    Ok(Summary { roads, connecting_roads: ci as usize, junctions, crs: crs.into() })
 }
 
 /// Write an OpenDRIVE file from the database `db`, as `to_opendrive`. `crs`: None = the UTM zone of the data.
@@ -313,26 +328,29 @@ fn junctions(con: &Connection, g: &str, crs: &str, name: &str) -> Result<(String
 pub fn to_opendrive(db: &Path, out: &Path, mode: &str, crs: Option<&str>, with_junctions: bool) -> Result<Summary> {
     let con = open(db)?;
     let name = db.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let (xml, s) = if with_junctions {
-        let g = format!("gmns_{mode}");
-        if !has_table(&con, &g, "movement")? {
-            return Err(format!("--junctions needs a GMNS db (no '{g}.movement' in {}) — build with duckosm gmns", db.display()));
-        }
-        let crs = match crs {
-            Some(c) => c.to_string(),
-            None => data_utm_crs(&con, &format!("{g}.link"), "geom")?,
-        };
-        junctions(&con, &g, &crs, name)?
-    } else {
-        if !has_table(&con, mode, "edges")? {
-            return Err(format!("no '{mode}.edges' in {} — is this a built duckOSM db with mode '{mode}'?", db.display()));
-        }
-        let crs = match crs {
-            Some(c) => c.to_string(),
-            None => data_utm_crs(&con, &format!("{mode}.edges"), "geometry")?,
-        };
-        phase1(&con, mode, &crs, name)?
+    let (table, geom) = if with_junctions { (format!("gmns_{mode}.link"), "geom") } else { (format!("{mode}.edges"), "geometry") };
+    if with_junctions && !has_table(&con, &format!("gmns_{mode}"), "movement")? {
+        return Err(format!("--junctions needs a GMNS db (no 'gmns_{mode}.movement' in {}) — build with duckosm gmns", db.display()));
+    }
+    if !with_junctions && !has_table(&con, mode, "edges")? {
+        return Err(format!("no '{mode}.edges' in {} — is this a built duckOSM db with mode '{mode}'?", db.display()));
+    }
+    let crs = match crs {
+        Some(c) => c.to_string(),
+        None => data_utm_crs(&con, &table, geom)?,
     };
-    write_text(out, &xml, false)?;
-    Ok(s)
+    let mut b = Body::new(out)?;
+    let s = if with_junctions { junctions(&con, &format!("gmns_{mode}"), &crs, &mut b) } else { phase1(&con, mode, &crs, &mut b) };
+    match s {
+        Ok(s) => {
+            b.finish(out, name, &crs)?;
+            Ok(s)
+        }
+        Err(x) => {
+            let p = b.path.clone();
+            drop(b);
+            let _ = std::fs::remove_file(p);
+            Err(x)
+        }
+    }
 }

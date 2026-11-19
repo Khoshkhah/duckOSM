@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm opendrive` writes the file while it reads the rows.** Before, it kept all lines, then the whole file, in
+  memory. With `--junctions`, the movements, the junction nodes and the road-to-road links stay in DuckDB (they spill to
+  disk past its limit of 2 GB). The file is byte-equal. Kentucky: roads only 33.6 s and 8.3 GB before, 21 s and 0.52 GB
+  now; `--junctions` 78 s and 2.1 GB (before: more than 15 GB).
+
 - **`duckosm.AreaPicker`: choose an area on a map in Jupyter** (`docs/guides/area-picker.md`). Search a place, type an
   OSM relation id, drag a box, click an H3 cell or load a GeoJSON file. The widget shows the boundary and the Geofabrik
   extract with its size, and **Get** runs `duckosm get`. `pip install "duckosm[widget]"` (anywidget). New:
