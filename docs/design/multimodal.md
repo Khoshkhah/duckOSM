@@ -47,8 +47,8 @@ python scripts/multimodal_route_standalone.py --db <db>                         
 python scripts/multimodal_route_standalone.py --db <db> --src <node_id> --dst <node_id> --out route.html
 ```
 
-Implementation: `MultimodalBuilder` in `src/duckosm/processors/multimodal.py`, `route_multimodal` in
-`src/duckosm/routing.py`, the `multimodal` CLI subcommand in `src/duckosm/cli.py`, config block in
+Implementation: `duckosm multimodal` in Rust (`rust/duckosm-duckdb/src/steps.rs`; the Python `MultimodalBuilder` was
+deleted after the port), `route_multimodal` in `src/duckosm/routing.py`, config block in
 `src/duckosm/config.py`, tests in `tests/test_multimodal.py`.
 
 ## Goal

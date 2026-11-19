@@ -5,6 +5,7 @@ pub mod after;
 pub mod input;
 pub mod quack;
 pub mod read_osm;
+pub mod steps;
 pub use duckdb;
 pub use quack::write_quack;
 pub use input::RawInput;
@@ -327,7 +328,7 @@ pub fn mm_edges(modes: &[&str]) -> String {
     )
 }
 
-fn write_schema(
+pub(crate) fn write_schema(
     con: &Connection,
     parquet_dir: &Path,
     schema: &str,

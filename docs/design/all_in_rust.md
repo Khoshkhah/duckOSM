@@ -54,7 +54,7 @@ To do:
   edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
   tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
 - GMNS (group C): the command `gmns` is Rust; the functions `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
-- No Rust port yet: `levels`, `bus`, `multimodal`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
+- No Rust port yet: `levels`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
   the Python CLI reads them and the build runs in Rust.
 - Then: remove `PYTHON_COMMANDS` of `src/duckosm/_main.py`, remove the Python engine code (the tag `python-engine-final`
   keeps it), release 1.0.0.
