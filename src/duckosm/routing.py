@@ -406,7 +406,7 @@ class Router:
 
 # ---- multimodal (intermodal) routing over the mm.* layered graph ------------------------------
 
-# The pedestrian layer every mode-change routes through (matches MultimodalBuilder). A trip is
+# The pedestrian layer every mode-change routes through (as `duckosm multimodal` makes the transfers). A trip is
 # walk* (drive|cycle)* walk*: you can only *enter* a vehicle from walking and *leave* it back to
 # walking, so every vehicular leg is bracketed by walking.
 _HUB_MODE = "walking"
