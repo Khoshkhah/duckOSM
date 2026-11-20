@@ -141,6 +141,7 @@ nav:
       - 3. Routing: notebooks/03_routing.md
       - 4. Exports: notebooks/04_exports.md
       - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
+      - 9. HD maps: notebooks/09_hdmap.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
@@ -203,6 +204,7 @@ nav:
       - Overview: compare/index.md
       - Speed on France: compare/speed.md
       - duckOSM and OSMnx: concepts/osmnx.md
+      - duckOSM for automated driving users: compare/for-hdmap-users.md
   - Reference:
       - Overview: reference/index.md
       - Command line: reference/cli.md

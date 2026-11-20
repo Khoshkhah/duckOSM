@@ -21,6 +21,7 @@ _PIP = {
     "matplotlib": 'pip install "duckosm[viz]"',
     "mapstyle": 'pip install "duckosm[viz]"',
     "sumolib": 'pip install "duckosm[sim]"',
+    "commonroad": 'pip install "duckosm[hdmap]"',
 }
 
 
