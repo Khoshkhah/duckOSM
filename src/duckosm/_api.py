@@ -288,22 +288,83 @@ def _each(flag, values):
     return [x for v in values for x in (flag, v)]
 
 
-def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None,
-          features=None, levels=None, graph=None, h3_index=None, h3_resolution=None, progress=None):
-    """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``). ``config``: a
-    config file; an option that is not None overrides it. ``progress``: None shows one progress line in a notebook,
-    False shows nothing, a function gets each line. Returns the :class:`duckosm.Network` of the .duckdb file (also its
-    path: ``os.PathLike``).
+# The build options of the SDK: the keyword and its key in the config file (config/template.yaml). The other keys of
+# the config file are for experts: give them with ``config=`` (a file or a dict).
+BUILD_OPTIONS = {
+    "merge_segments": ("options", "merge_segments"),      # False: each OSM way piece stays its own edge
+    "speeds": ("options", "process_speeds"),              # False: no maxspeed_kmh (the raw maxspeed text stays), no cost_s
+    "costs": ("options", "calculate_costs"),              # False: no cost_s
+    "restrictions": ("options", "extract_restrictions"),  # False: no turn_restrictions
+    "bus_routes": ("options", "bus_routes"),              # False: no bus.routes and bus.route_edges
+    "connect_paths": ("clip", "connectivity_rescue"),     # False: free path ends stay free
+    "snap_m": ("clip", "connect_snap_m"),                 # the distance for connect_paths, in metres
+}
 
-    >>> net = duckosm.build(pbf=area.pbf, boundary=area.boundary, modes=["driving", "walking"])"""
+
+def _build_config(config, options):
+    """The config file for ``duckosm build``: ``config`` (a YAML or JSON file, or a dict) with the keyword ``options``
+    over it. None when the call needs no file of its own."""
+    import copy
+    import difflib
+    import tempfile
+
+    import yaml
+
+    from duckosm.errors import DuckOSMError
+    for k in options:
+        if k not in BUILD_OPTIONS:
+            near = difflib.get_close_matches(k, list(BUILD_OPTIONS), n=1)
+            raise DuckOSMError(f"build has no option {k!r}" + (f": did you mean {near[0]!r}?" if near else "") +
+                               f" The options: {', '.join(BUILD_OPTIONS)}. Other keys of config/template.yaml go in config=.")
+    if options.get("speeds") is False:
+        options.setdefault("costs", False)     # cost_s needs maxspeed_kmh (the build stops on costs without speeds)
+    if not options and not isinstance(config, dict):
+        return config
+    if isinstance(config, dict):
+        cfg = copy.deepcopy(config)
+    elif config is not None:
+        cfg = yaml.safe_load(Path(config).read_text(encoding="utf-8")) or {}
+    else:
+        cfg = {}
+    for k, v in options.items():
+        section, key = BUILD_OPTIONS[k]
+        cfg.setdefault(section, {})[key] = v
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", prefix="duckosm-config-", delete=False, encoding="utf-8")
+    with f:
+        json.dump(cfg, f)          # JSON is YAML: the build reads it as a config file
+    return f.name
+
+
+def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None,
+          features=None, levels=None, graph=None, h3_index=None, h3_resolution=None, dem=None, progress=None, **options):
+    """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``).
+
+    ``config``: a config file (YAML or JSON) or a dict with the keys of ``config/template.yaml``; a keyword overrides
+    the same key. ``options``: the keywords of :data:`BUILD_OPTIONS` (``merge_segments``, ``speeds``, ``costs``,
+    ``restrictions``, ``bus_routes``, ``connect_paths``, ``snap_m``). ``dem``: a DEM file (GeoTIFF): after the build,
+    the heights of the nodes and the edges (:func:`duckosm.analysis.add_elevation`). ``progress``: None shows one
+    progress line in a notebook, False shows nothing, a function gets each line. Returns the :class:`duckosm.Network`
+    of the .duckdb file (also its path: ``os.PathLike``).
+
+    >>> net = duckosm.build(pbf=area.pbf, boundary=area.boundary, modes=["driving", "walking"])
+    >>> net = duckosm.build(pbf="my.osm.pbf", merge_segments=False, config={"options": {"bus_routes": False}})"""
     def flag(name, value):
         return None if value is None else (f"--{name}" if value else f"--no-{name}")
-    text = _run("build", *_opt("-c", config), *_opt("-p", pbf), *_opt("-o", output), *_opt("-b", boundary),
+    given = config
+    config = _build_config(config, options)
+    try:
+        text = _run("build", *_opt("-c", config), *_opt("-p", pbf), *_opt("-o", output), *_opt("-b", boundary),
                 *_opt("--source-db", source_db), *_opt("--h3-cell", h3_cell), *_each("-m", modes), *_opt("--fixes", fixes),
                 flag("features", features), flag("levels", levels), flag("graph", graph), flag("h3-index", h3_index),
                 *_opt("--h3-resolution", h3_resolution), progress=progress)
+    finally:
+        if config is not None and config != given:
+            Path(config).unlink(missing_ok=True)
     from duckosm.network import Network
-    return Network(text.rsplit("Output: ", 1)[1].strip())
+    net = Network(text.rsplit("Output: ", 1)[1].strip())
+    if dem is not None:
+        to_elevation(net.path, dem=dem)
+    return net
 
 
 def levels(db):
