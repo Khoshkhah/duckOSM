@@ -432,7 +432,7 @@ class Network(os.PathLike):
             return MapLink(out)
         require("playwright", "show='picture'")
         import roadstyle as rs
-        rs.snapshot(live, out)
+        rs.snapshot(live, out, controls=False)      # the map only: a picture cannot use the toolbox
         return MapPicture(out)
 
     def save_map(self, path: str | os.PathLike, mode: str | None = None, *, dashboard: bool = False, **options) -> Path:
