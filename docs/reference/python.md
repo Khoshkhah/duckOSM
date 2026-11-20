@@ -101,7 +101,8 @@ base map until `roadstyle.duckosm.page` takes them.
 
 ## The modules
 
-Each module takes a `Network`, a `ModeView`, a path or a DuckDB connection. The methods of `Network` call them:
+The plan of each module and its decision: [Python SDK: the modules](python-modules.md). Each module takes a
+`Network`, a `ModeView`, a path or a DuckDB connection. The methods of `Network` call them:
 `net.walking.route(a, b)` is `duckosm.routing.route(net.walking, a, b)`.
 
 | Module | Users | Today | Page |

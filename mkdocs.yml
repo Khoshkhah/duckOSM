@@ -217,6 +217,7 @@ nav:
           - hdmap: reference/sdk/hdmap.md
           - ml: reference/sdk/ml.md
           - fixes: reference/sdk/fixes.md
+      - "Python SDK: the modules": reference/python-modules.md
       - Rust SDK: reference/rust.md
       - Configuration: reference/configuration.md
       - The boundary file: reference/boundary.md
