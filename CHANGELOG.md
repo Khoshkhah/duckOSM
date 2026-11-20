@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`duckosm.routing`, the routing module of the SDK** (`docs/reference/sdk/routing.md`). `route` gives a `Route`
+  (also the old dict): `.edges` (a GeoDataFrame in route order), `.length_m`, `.time_s`, `.geometry`, `.directions()`,
+  `.map()` and a card. A place is an edge id, a `(lon, lat)` point or a place name (`geocode`). New calls, in Rust on
+  the graph of `route`: `routes` (many routes in parallel), `k_shortest_paths` (Yen), `matrix` (one Dijkstra for each
+  origin, in parallel), `isochrones` (the reached edges with a buffer) and `accessibility`. Each is also a method of a
+  `Network` and a `ModeView`. The tests check each result against `route` on Monaco. A guide for users of
+  openrouteservice, OSRM, r5py, pandana and OSMnx (`docs/compare/for-routing-users.md`) and the notebook
+  6. Advanced routing.
 - **The Python SDK, PR 1 of its design** (`docs/proposals/python-sdk.md`). The core: `duckosm.network("Monaco")` gets
   and builds an area in one call; `duckosm.build` and `Area.build` give a `Network` (it acts as the path, so old code
   works); `duckosm.open(path)`. `net["walking"]` or `net.walking` is a `ModeView`, the same calls for one mode. With

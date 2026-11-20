@@ -3,7 +3,7 @@
 //! heap keys `(distance, counter)`, so a tie gives the same path as in duckOSM.
 
 use crate::Result;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// The graph, compact: the arcs of each node in two flat arrays (successors and predecessors), with their offsets. A node is a
 /// number 0..n in the order the nodes came; `ids` gives its id.
@@ -291,6 +291,121 @@ impl Graph {
     }
 }
 
+impl Graph {
+    /// One-to-many search: the cost from node `source` (an index) to each node, `NaN` where the node is not reached or
+    /// costs more than `limit`. One Dijkstra that stops at `limit` (`f64::INFINITY`: the whole graph).
+    pub fn costs_from(&self, source: usize, limit: f64) -> Vec<f64> {
+        let mut dist = vec![f64::NAN; self.ids.len()];
+        let mut done = vec![false; self.ids.len()];
+        let mut fringe = BinaryHeap::new();
+        dist[source] = 0.0;
+        fringe.push(Key(0.0, 0, source as u32));
+        while let Some(Key(d, _, v)) = fringe.pop() {
+            let v = v as usize;
+            if done[v] {
+                continue;
+            }
+            if d > limit {
+                break;
+            }
+            done[v] = true;
+            for (u, cost) in self.arcs_of(v, false) {
+                let du = d + cost;
+                if !cost.is_nan() && !done[u] && (dist[u].is_nan() || du < dist[u]) {
+                    dist[u] = du;
+                    fringe.push(Key(du, 0, u as u32));
+                }
+            }
+        }
+        for (x, ok) in dist.iter_mut().zip(&done) {
+            if !ok {
+                *x = f64::NAN;
+            }
+        }
+        dist
+    }
+
+    /// The weight of the arc `u -> v` (indexes).
+    fn weight(&self, u: usize, v: usize) -> f64 {
+        self.arcs_of(u, false).find(|&(x, _)| x == v).map_or(f64::NAN, |(_, w)| w)
+    }
+
+    /// Dijkstra from `s` to `t` (indexes) without the nodes `no_node` and the arcs `no_arc`: the cost and the path.
+    fn path_without(&self, s: usize, t: usize, no_node: &[bool], no_arc: &HashSet<(usize, usize)>) -> Option<(f64, Vec<usize>)> {
+        const NONE: u32 = u32::MAX;
+        let n = self.ids.len();
+        let (mut dist, mut done, mut parent) = (vec![f64::NAN; n], vec![false; n], vec![NONE; n]);
+        let mut fringe = BinaryHeap::new();
+        let mut c: u64 = 0;
+        dist[s] = 0.0;
+        fringe.push(Key(0.0, c, s as u32));
+        while let Some(Key(d, _, v)) = fringe.pop() {
+            let v = v as usize;
+            if done[v] {
+                continue;
+            }
+            done[v] = true;
+            if v == t {
+                let mut p = vec![t];
+                while parent[*p.last()?] != NONE {
+                    p.push(parent[*p.last()?] as usize);
+                }
+                p.reverse();
+                return Some((d, p));
+            }
+            for (u, cost) in self.arcs_of(v, false) {
+                if cost.is_nan() || no_node[u] || done[u] || no_arc.contains(&(v, u)) {
+                    continue;
+                }
+                let du = d + cost;
+                if dist[u].is_nan() || du < dist[u] {
+                    dist[u] = du;
+                    parent[u] = v as u32;
+                    c += 1;
+                    fringe.push(Key(du, c, u as u32));
+                }
+            }
+        }
+        None
+    }
+
+    /// Yen's `k` shortest loopless paths from `source` to `target` (node ids), the shortest first: `(cost, path)`. The first
+    /// path is the path of [`Graph::bidirectional_dijkstra`], so it equals the route of the same pair.
+    pub fn k_shortest_paths(&self, source: i64, target: i64, k: usize) -> Result<Vec<(f64, Vec<i64>)>> {
+        let Some((c0, p0)) = self.bidirectional_dijkstra(source, target)? else { return Ok(Vec::new()) };
+        let t = self.index_of(target).expect("checked by bidirectional_dijkstra");
+        let mut found: Vec<(f64, Vec<usize>)> = vec![(c0, p0.iter().map(|&id| self.index[&id] as usize).collect())];
+        let mut candidates: Vec<(f64, Vec<usize>)> = Vec::new();
+        let mut no_node = vec![false; self.ids.len()];
+        while found.len() < k {
+            let prev = found.last().expect("not empty").1.clone();
+            let mut root_cost = 0.0;
+            for i in 0..prev.len().saturating_sub(1) {
+                let root = &prev[..=i];
+                let no_arc: HashSet<(usize, usize)> =
+                    found.iter().filter(|(_, p)| p.len() > i + 1 && p[..=i] == *root).map(|(_, p)| (p[i], p[i + 1])).collect();
+                for &x in &root[..i] {
+                    no_node[x] = true;
+                }
+                if let Some((c, spur)) = self.path_without(prev[i], t, &no_node, &no_arc) {
+                    let path: Vec<usize> = root[..i].iter().copied().chain(spur).collect();
+                    if !found.iter().chain(&candidates).any(|(_, p)| *p == path) {
+                        candidates.push((root_cost + c, path));
+                    }
+                }
+                for &x in &root[..i] {
+                    no_node[x] = false;
+                }
+                root_cost += self.weight(prev[i], prev[i + 1]);
+            }
+            // the cheapest candidate; of equal costs, the first found
+            let Some(best) = (0..candidates.len()).min_by(|&a, &b| candidates[a].0.total_cmp(&candidates[b].0)) else { break };
+            found.push(candidates.remove(best));
+        }
+        Ok(found.into_iter().map(|(c, p)| (c, p.into_iter().map(|i| self.ids[i]).collect())).collect())
+    }
+}
+
 /// A heap entry `(distance, counter, node)`, the smallest first (Python's `heapq` with tuples).
 #[derive(PartialEq)]
 struct Key(f64, u64, u32);
@@ -322,5 +437,17 @@ mod tests {
         // networkx: nx.dijkstra_path(G, 1, 4) -> [1, 2, 4]; nx.has_path(G, 5, 1) -> False
         assert_eq!(g.dijkstra(1, 4).unwrap(), Some((2.0, vec![1, 2, 4])));
         assert!(!g.has_path(5, 1) && g.has_path(1, 5));
+    }
+
+    #[test]
+    fn costs_from_and_k_shortest_paths() {
+        // 1 -> 2 -> 4 costs 2, 1 -> 3 -> 4 costs 3, 1 -> 4 costs 5
+        let g = Graph::from_arcs([(1, 2, 1.0), (2, 4, 1.0), (1, 3, 1.0), (3, 4, 2.0), (1, 4, 5.0)]);
+        let d = g.costs_from(g.index_of(1).unwrap(), f64::INFINITY);
+        assert_eq!(d[g.index_of(4).unwrap()], 2.0);
+        assert!(g.costs_from(g.index_of(1).unwrap(), 1.5)[g.index_of(4).unwrap()].is_nan());
+        let k = g.k_shortest_paths(1, 4, 5).unwrap();
+        assert_eq!(k, vec![(2.0, vec![1, 2, 4]), (3.0, vec![1, 3, 4]), (5.0, vec![1, 4])]);
+        assert_eq!(g.k_shortest_paths(4, 1, 3).unwrap(), vec![]);
     }
 }
