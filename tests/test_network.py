@@ -82,7 +82,7 @@ def test_plot_and_static_map(net, monkeypatch):
     matplotlib.use("Agg")
     r = net.walking.route(A, B)
     assert net.plot() is None and net.walking.plot(routes={"walk": r}) is None
-    monkeypatch.setenv("DUCKOSM_STATIC_MAPS", "1")
+    monkeypatch.setenv("DUCKOSM_MAP_SHOW", "plot")
     counts = net.driving.edges().set_index("edge_id").length_m.rename("metres")     # your own data, keyed by edge_id
     assert net.driving.map(color_by=counts) is None
     with pytest.raises(duckosm.DuckOSMError, match="colors="):
@@ -91,13 +91,24 @@ def test_plot_and_static_map(net, monkeypatch):
 
 def test_live_maps(net, tmp_path, monkeypatch):
     pytest.importorskip("roadstyle")
-    monkeypatch.delenv("DUCKOSM_STATIC_MAPS", raising=False)
+    monkeypatch.delenv("DUCKOSM_MAP_SHOW", raising=False)
     r = net.walking.route(A, B)
     assert hasattr(net.map(), "_repr_html_")                                   # roadstyle.duckosm.page, all modes
     assert hasattr(net.walking.map(highlight=r["edges"]), "_repr_html_")
     assert hasattr(net.driving.map(color_by="maxspeed_kmh", cmap="viridis"), "_repr_html_")
     assert hasattr(net.map("walking", routes=[r]), "_repr_html_")
     assert hasattr(net.dashboard(), "_repr_html_")
-    monkeypatch.setenv("DUCKOSM_STATIC_MAPS", "1")                             # a file is the live map also then
+    monkeypatch.setenv("DUCKOSM_MAP_SHOW", "plot")                              # a file is the live map also then
     out = net.save_map(tmp_path / "monaco.html")
     assert out.stat().st_size > 100_000 and "<html" in out.read_text()[:3000].lower()
+    link = net.driving.map(show="link", path=tmp_path / "link.html")              # the saved live map and a link to it
+    assert Path(link).stat().st_size > 100_000 and "Open the live map" in link._repr_html_()
+    with pytest.raises(duckosm.DuckOSMError, match="show must be"):
+        net.map(show="video")
+
+
+def test_map_picture(net, tmp_path):
+    pytest.importorskip("roadstyle")
+    pytest.importorskip("playwright")
+    pic = net.map(show="picture", path=tmp_path / "monaco.png")                  # a PNG of the live roadstyle map
+    assert pic._repr_png_()[:8] == b"\x89PNG\r\n\x1a\n" and Path(pic).stat().st_size > 20_000

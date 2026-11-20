@@ -16,6 +16,51 @@ from typing import Any, Iterable
 from duckosm.errors import DuckOSMError, require
 
 HIGHLIGHT = "#e8590c"
+MAP_SHOWS = ("live", "link", "picture", "plot")
+_MAP_COUNT = 0          # the <n> of the default file names of show="link" and show="picture"
+
+
+def _show(show):
+    show = show or os.environ.get("DUCKOSM_MAP_SHOW") or "live"
+    if show not in MAP_SHOWS:
+        raise DuckOSMError(f"show must be one of {', '.join(MAP_SHOWS)}, got {show!r}")
+    return show
+
+
+class MapLink(os.PathLike):
+    """A saved live map: a link in a notebook, the path of the HTML file everywhere else."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __fspath__(self):
+        return str(self.path)
+
+    def __repr__(self):
+        return f"MapLink({str(self.path)!r})"
+
+    def _repr_html_(self):
+        mb = self.path.stat().st_size / 1e6
+        return f'<a href="{self.path.as_posix()}" target="_blank">Open the live map</a> ({mb:.1f} MB)'
+
+    def _repr_markdown_(self):
+        return f"[Open the live map]({self.path.as_posix()}) ({self.path.stat().st_size / 1e6:.1f} MB)"
+
+
+class MapPicture(os.PathLike):
+    """A PNG of a live map: the picture in a notebook, the path of the PNG file everywhere else."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __fspath__(self):
+        return str(self.path)
+
+    def __repr__(self):
+        return f"MapPicture({str(self.path)!r})"
+
+    def _repr_png_(self):
+        return self.path.read_bytes()
 ROUTE_COLORS = ("#e8590c", "#1c7ed6", "#2f9e44", "#ae3ec9", "#f08c00")
 MODE_COLORS = {"driving": "#e8590c", "walking": "#2f9e44", "cycling": "#1c7ed6"}
 MAP_COLUMNS = ("edge_id", "osm_id", "name", "highway", "oneway", "lanes", "length_m", "maxspeed_kmh", "layer", "bridge",
@@ -285,8 +330,17 @@ class Network(os.PathLike):
         return self._each(mode, lambda m: self._frame(f"{m}.nodes", "geom", "true ORDER BY node_id", crs))
 
     # ---- maps -------------------------------------------------------------------------------------------------------
-    def map(self, mode: str | None = None, *, theme: str = "liberty", color_by=None, highlight=None, routes=None, **style):
-        """The live roadstyle map in a notebook: all modes with the base map of the file (``mode=None``) or one mode.
+    def map(self, mode: str | None = None, *, show: str | None = None, path=None, theme: str = "liberty", color_by=None,
+            highlight=None, routes=None, **style):
+        """The roadstyle map of the file: all modes with the base map of the file (``mode=None``) or one mode.
+
+        - ``show``: how the notebook shows the map (default: ``DUCKOSM_MAP_SHOW``, else ``"live"``):
+
+          - ``"live"``: the live map in the output (about 6 MB for Monaco);
+          - ``"link"``: the live map saved as an HTML file (``path``, default ``maps/<file>-<n>.html``) and a link to it;
+          - ``"picture"``: a PNG of the live map (``path``, default ``maps/<file>-<n>.png``), taken in headless Chromium
+            (needs ``pip install playwright`` and ``playwright install chromium``);
+          - ``"plot"``: :meth:`plot`, a matplotlib picture with no roadstyle.
 
         - ``theme``: a roadstyle theme (``"liberty"``, ``"osm"``, ``"google"``, ``"grey"``, ``"roadstyle"``).
         - ``color_by``: a column of the edges, or your own data: a Series keyed by ``edge_id``, or a DataFrame with
@@ -295,13 +349,15 @@ class Network(os.PathLike):
         - ``routes``: a route, a list of routes or ``{label: route}``: lines on top, each in its own color.
         - ``style``: other options of roadstyle.
 
-        With ``DUCKOSM_STATIC_MAPS=1`` it draws :meth:`plot` in place of the live map (the saved outputs of the manual).
-
         >>> net.map()
-        >>> net.map("driving", color_by="maxspeed_kmh", cmap="viridis")
-        >>> net.map("walking", routes=net.walking.route_points(a, b))"""
-        if os.environ.get("DUCKOSM_STATIC_MAPS") == "1":
+        >>> net.map("driving", color_by="maxspeed_kmh", cmap="viridis", show="picture")
+        >>> net.map("walking", routes=net.walking.route_points(a, b), show="link")"""
+        show = _show(show)
+        if show == "plot":
             return self.plot(mode, color_by=color_by, highlight=highlight, routes=routes, **style)
+        return self._present(self._live_map(mode, theme, color_by, highlight, routes, style), show, path)
+
+    def _live_map(self, mode, theme, color_by, highlight, routes, style):
         require("roadstyle", "Network.map")
         if mode is not None:
             self._mode(mode)
@@ -325,31 +381,49 @@ class Network(os.PathLike):
         return rs.render_edges(gdf[[c for c in gdf.columns if c in MAP_COLUMNS or c == color_by or c == gdf.geometry.name]],
                                **style)
 
-    def dashboard(self, mode: str | None = None, **style):
+    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, **style):
         """roadstyle's dashboard of the file: the map, the panel with the road card and the color menu (road class,
-        modes), docked.
-
-        With ``DUCKOSM_STATIC_MAPS=1`` it draws :meth:`plot` in its place.
+        modes), docked. ``show`` and ``path``: as in :meth:`map`.
 
         >>> net.dashboard()"""
-        if os.environ.get("DUCKOSM_STATIC_MAPS") == "1":
+        show = _show(show)
+        if show == "plot":
             return self.plot(mode)
+        return self._present(self._live_dashboard(mode, style), show, path)
+
+    def _live_dashboard(self, mode, style):
         require("roadstyle", "Network.dashboard")
         from roadstyle import duckosm as page
         return page.page(self.path, "all" if mode is None else self._mode(mode), dashboard=True, **style)
+
+    def _present(self, live, show, path):
+        """The live map as ``show`` asks: itself, a link to its saved HTML file or a PNG of it."""
+        if show == "live":
+            return live
+        global _MAP_COUNT
+        _MAP_COUNT += 1
+        out = Path(path or f"maps/{self.path.name.split('.')[0]}-{_MAP_COUNT}.{'html' if show == 'link' else 'png'}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if show == "link":
+            live.save(str(out))
+            return MapLink(out)
+        require("playwright", "show='picture'")
+        import roadstyle as rs
+        rs.snapshot(live, out)
+        return MapPicture(out)
 
     def save_map(self, path: str | os.PathLike, mode: str | None = None, *, dashboard: bool = False, **options) -> Path:
         """The map of :meth:`map` (or of :meth:`dashboard`) as one offline HTML file, with the same options. Returns the path.
 
         >>> net.save_map("monaco.html")"""
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        static = os.environ.pop("DUCKOSM_STATIC_MAPS", None)       # a file is always the live map
-        try:
-            m = self.dashboard(mode, **options) if dashboard else self.map(mode, **options)
-            m.save(str(path))
-        finally:
-            if static is not None:
-                os.environ["DUCKOSM_STATIC_MAPS"] = static
+        if dashboard:
+            m = self._live_dashboard(mode, options)
+        else:
+            theme = options.pop("theme", "liberty")
+            m = self._live_map(mode, theme, options.pop("color_by", None), options.pop("highlight", None),
+                               options.pop("routes", None), options)
+        m.save(str(path))
         return Path(path)
 
     def plot(self, mode: str | None = None, *, color_by=None, highlight=None, routes=None, ax=None, **style):

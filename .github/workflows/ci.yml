@@ -48,7 +48,7 @@ jobs:
       - run: mkdocs build --strict
 
   # the demo notebooks of the manual (docs/notebooks/): each cell must run on Monaco. The live roadstyle maps run here; the
-  # saved outputs have pictures (DUCKOSM_STATIC_MAPS=1 when they are made).
+  # saved outputs have pictures (DUCKOSM_MAP_SHOW=plot when they are made). The map tests run here too: this job has roadstyle.
   notebooks:
     needs: changes
     if: needs.changes.outputs.notebooks == 'true'
@@ -69,7 +69,10 @@ jobs:
       # torch for CPU first (the default wheel brings CUDA, about 2.5 GB); then the extras of the install cells ([sim]
       # brings netconvert, [ml] torch_geometric); osmnx: notebook 12 (to_osmnx)
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap,analysis,ml]" osmnx pytest nbmake
+      - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap,analysis,ml]" osmnx pytest nbmake "playwright==1.55.0"
+      # show="picture" takes a PNG of the live map in headless Chromium
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest tests/test_network.py -q -rs -k "map or plot"
       - run: python -m pytest --nbmake docs/notebooks/ -q
 
   test:
