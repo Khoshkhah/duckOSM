@@ -1,42 +1,127 @@
 # Python SDK
 
-The Python package `duckosm` has one function for each command of duckOSM. Each function calls the Rust program, so
-the result is the same as the result of the command.
-
-```bash
-pip install duckosm roadstyle      # roadstyle: the maps of net.map()
-```
+The Python package `duckosm` has a core and one module for each group of users. The core gets a network, reads its
+data and draws it. Each module has the calls of one kind of work. All the work is in the Rust program of duckOSM; the
+SDK calls it. The design: [docs/proposals/python-sdk.md](https://github.com/Khoshkhah/duckOSM/blob/main/docs/proposals/python-sdk.md).
 
 ## Quick start
 
 ```python
-net = duckosm.network("Monaco")    # get and build Monaco in one call: a duckosm.Network
-net                                # in a notebook: a card with the file, and the edges, nodes and km of each mode
-net.map()                          # the roadstyle map of the driving network
-```
-
-## From a PBF file to a route and an export
-
-```python
 import duckosm
 
-area = duckosm.get("Monaco")                               # area.pbf, area.boundary
-db = duckosm.build(pbf=area.pbf, boundary=area.boundary,
-                   modes=["driving", "walking"])           # a duckosm.Network (monaco.duckdb)
-
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4335, 43.7468))   # (lon, lat): Fontvieille to Larvotto
-r["time_s"], r["length_m"], r["edges"]                     # the fastest route, door to door
-for step in duckosm.directions(db, r):
-    print(step)
-
-duckosm.to_sumo(db, "sumo/")                               # SUMO files of the driving network
-duckosm.to_gis(db, "monaco.gpkg", modes=["driving"])       # a GeoPackage for QGIS
+net = duckosm.network("Monaco")    # get and build Monaco in one call: a duckosm.Network
+net                                # in a notebook: a card with the file and the edges, nodes and km of each mode
+net.map()                          # the roadstyle map of all modes
 ```
 
-To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
-[The config file](../guides/build.md#the-config-file).
+## Install
 
-## Rules for all functions
+```bash
+pip install "duckosm[viz]"
+```
+
+| Extra | Adds | For |
+|---|---|---|
+| (none) | the core: build, data reads, routes, the exports | all |
+| `viz` | roadstyle, mapstyle, lanestyle, matplotlib | `net.map()`, `net.plot()`, `net.dashboard()`, `duckosm viz` |
+| `graph` | networkx, rustworkx | `duckosm.ml` |
+| `sim` | eclipse-sumo (`netconvert`) | `duckosm.sim.to_sumo` with the `.net.xml` |
+| `widget` | anywidget | `duckosm.AreaPicker` |
+| `all` | all of the above | |
+
+The old extras `networkx`, `rustworkx`, `routing` and `sumo` stay.
+
+## The objects
+
+| Object | What it is | Made by |
+|---|---|---|
+| `Area` | An OSM file of an area and its boundary. `area.build(...)` gives a `Network`. | `duckosm.get(...)` |
+| `Network` | A built `.duckdb` file with one or more modes. It is also the path of the file (`os.PathLike`). | `duckosm.network`, `duckosm.build`, `duckosm.open`, `Area.build` |
+| `ModeView` | One mode of a `Network`: the same calls with no `mode=` | `net["walking"]`, `net.walking` |
+
+## Get a network
+
+| Call | Does |
+|---|---|
+| `network(place=None, *, modes=("driving", "walking", "cycling"), fixes=None, out="data", name=None, pbf=None, progress=None, **area)` | Gets the OSM file and builds the network in one call. The area: `place`, or `bbox=(west, south, east, north)`, `point=(lon, lat)` with `dist_m=`, `osm_id=`, `h3_cell=`, `boundary=` (a GeoJSON file, a dict or a GeoDataFrame), or `pbf=` (your own file). The download stays in a cache. |
+| `get(...)` → `Area`; `area.build(modes=None, output=None, fixes=None)` → `Network` | The same in two steps |
+| `build(pbf=None, ...)` → `Network` | Builds from a file (the table under [The functions of the package](#the-functions-of-the-package)) |
+| `open(path)` → `Network` | Opens a file that you built before |
+
+Later (PR 2 of the design): `network(address=...)`, `geocode(text)`, `geocode_to_gdf(text)`.
+
+## What is in the file
+
+| Call | Returns |
+|---|---|
+| `net` (the last line of a cell) | a card: the file, its size, the build time, the fixes file, and one row for each mode |
+| `net.path`, `net.modes`, `net.boundary` | the file, the list of modes, the boundary (`GeoDataFrame`) |
+| `net.summary()` | a DataFrame, one row for each mode: `edges`, `nodes`, `km`, `oneway_km` |
+| `net.tables()`, `net.columns("driving.edges")` | the tables of the file; the columns of one table and their types |
+| `net.edges(mode=None, where=None, crs=None)` | a `GeoDataFrame` of the edges: all columns, `edge_id` as `int64`, float columns as `float64`. `where`: a SQL filter, put into the query as it is (give only text that you trust). `crs`: for example `3857`, or `"utm"` for the UTM zone of the area. |
+| `net.nodes(mode=None, crs=None)` | a `GeoDataFrame` of the nodes |
+| `net.sql("SELECT ...", params=None)` | a DataFrame; read-only, with the extension spatial |
+
+## Modes
+
+| Case | `edges()`, `nodes()`, `map()`, `plot()` | A call for one mode (a route, a graph, an export) |
+|---|---|---|
+| One mode in the file | that mode | that mode |
+| More modes | all modes; the data has a `mode` column, the map shows all modes | a `DuckOSMError` that lists the modes and shows `net["walking"].route(...)` |
+
+`net["walking"]` and `net.walking` give a `ModeView`. Each call above also takes `mode=`.
+
+## Maps
+
+| Call | Returns |
+|---|---|
+| `net.map(mode=None, *, theme="liberty", color_by=None, highlight=None, routes=None, **style)` | the live roadstyle map in a notebook (`roadstyle.duckosm.page`: the roads of all modes, the levels, the base map of the file). `theme`: `"liberty"`, `"osm"`, `"google"`, `"grey"` or `"roadstyle"`. |
+| `net.dashboard(mode=None)` | roadstyle's dashboard: the map and the panel with the road card and the color menu |
+| `net.save_map(path, mode=None, *, dashboard=False, **options)` | the same map as one offline HTML file |
+| `net.plot(mode=None, *, color_by=None, highlight=None, routes=None, ax=None)` | a static matplotlib picture |
+
+| Option | Gives |
+|---|---|
+| `color_by` | a column of the edges, or your own data: a Series keyed by `edge_id`, or a DataFrame with `edge_id` and one value column. Numbers get a color ramp (`cmap=`); classes need `colors={value: color}`. |
+| `highlight` | edge ids in orange; the other edges gray |
+| `routes` | a route, a list of routes or `{label: route}`: lines on top, each in its own color |
+
+`DUCKOSM_STATIC_MAPS=1` makes `net.map()` draw `net.plot()`: the saved outputs of the [notebooks](../notebooks/index.md)
+are pictures, not megabytes of map HTML. A map with `color_by` or `routes` uses `roadstyle.render_edges` on the default
+base map until `roadstyle.duckosm.page` takes them.
+
+## In a notebook
+
+| Item | Behavior |
+|---|---|
+| Cards | `Network`, `ModeView` and `Area` show an HTML card and a one-line text form |
+| Progress | `get`, `build`, `network` and the exports of a `Network` show one line that updates. `progress=False` shows nothing; a function gets each line. Outside a notebook they show nothing. |
+| Errors | `duckosm.DuckOSMError` (a `RuntimeError`) says what to do: the list of modes, the build command, or the `pip install "duckosm[...]"` line |
+| Help | Type hints and a short example in each docstring (Shift+Tab in Jupyter) |
+
+## The modules
+
+Each module takes a `Network`, a `ModeView`, a path or a DuckDB connection. The methods of `Network` call them:
+`net.walking.route(a, b)` is `duckosm.routing.route(net.walking, a, b)`.
+
+| Module | Users | Today | Page |
+|---|---|---|---|
+| `duckosm.analysis` | street network analysts (OSMnx) | comes in PR 2 | [analysis](sdk/analysis.md) |
+| `duckosm.gis` | GIS and data engineers | `to_gis`, `quack`, `admin` | [gis](sdk/gis.md) |
+| `duckosm.routing` | routing and accessibility | `route`, `route_points`, `route_multimodal`, `route_multimodal_points`, `directions` | [routing](sdk/routing.md) |
+| `duckosm.sim` | traffic simulation | `to_sumo`, `to_matsim`, `to_matsim_lanes` | [sim](sdk/sim.md) |
+| `duckosm.planning` | transport planning | `to_gmns`, `check_gmns`, `to_meso`, `to_micro` | [planning](sdk/planning.md) |
+| `duckosm.mobility` | mobility data | comes in PR 5 | [mobility](sdk/mobility.md) |
+| `duckosm.hdmap` | automated driving and HD maps | `to_opendrive`, `to_lanelet2`, `lane_graph`, `route_lanes` | [hdmap](sdk/hdmap.md) |
+| `duckosm.ml` | graph machine learning | `to_networkx`, `to_networkx_nodes`, `to_rustworkx` | [ml](sdk/ml.md) |
+| `duckosm.fixes` | all groups | comes in PR 6 | [fixes](sdk/fixes.md) |
+
+## The functions of the package
+
+The top-level functions stay, with the same arguments: `duckosm.route(db, ...)`, `duckosm.to_sumo(db, ...)` and the
+others. Their mode default is `"driving"`, as before. `build` gives a `Network`, which acts as a path.
+
+### Rules for all functions
 
 | Rule | Description |
 |---|---|
@@ -46,7 +131,7 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 | A list option | A Python list. `modes=["driving", "walking"]` is `-m driving -m walking`. |
 | An error | The function raises `RuntimeError` with the message of the command. |
 
-## Build and areas
+### Build and areas
 
 
 | Function | Main options | Returns | Command |
@@ -60,77 +145,9 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 | `levels(db)` | Solves the drawing order again with the edits in the database | the `Path` of the database | [`duckosm levels`](cli.md#levels) |
 | `init_config(path="duckosm.yaml", *, force=False)` | `force`: overwrite the file | the `Path` of the file | [`duckosm init-config`](cli.md#init-config) |
 
-## Routing
+### Routes, graphs and exports
 
-| Function | Main options | Returns | Command |
-|---|---|---|---|
-| `route(con, from_edge, to_edge, mode="driving", weight="time")` | `weight`: `"time"` or `"length"` | a dict `{edges, time_s, length_m, path}`, or `None` when no route connects the two edges | [`duckosm route`](cli.md#route-route-points-directions) |
-| `Router(con, mode="driving", weight="time")` | Makes the graph one time. `.route(from_edge, to_edge)` gives the same dict as `route`. | a router | |
-| `route_points(con, a, b, mode="driving", weight="time", radius_m=50.0, access_kmh=4.5)` | `a`, `b`: `(lon, lat)` points | a dict `{time_s, length_m, edges, start, end, path}`, or `None` | [`duckosm route-points`](cli.md#route-route-points-directions) |
-| `route_multimodal(con, src_node, dst_node, schema="mm", start_mode="walking", end_mode="walking", enforce_sequence=True, allowed_modes=None)` | Needs the [`mm` schema](../concepts/multimodal.md) | a dict with the legs of each mode | [`duckosm route-multimodal`](cli.md#route-route-points-directions) |
-| `route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm", allowed_modes=None, enforce_sequence=True)` | `a`, `b`: `(lon, lat)` points | a dict with the legs of each mode | [`duckosm route-multimodal-points`](cli.md#route-route-points-directions) |
-| `directions(con, route, mode="driving")` | `route`: a result of a route function | a list of the turn-by-turn steps | [`duckosm directions`](cli.md#route-route-points-directions) |
-| `to_networkx(con, mode="driving", weight="time")` | | a `networkx.DiGraph`: a node is an `edge_id` | `duckosm export-graph` |
-| `to_networkx_nodes(con, mode="driving")` | | a `networkx.MultiDiGraph`: a node is a junction, an edge a road | `duckosm export-graph` |
-| `to_rustworkx(con, mode="driving", graph="turns", weight="time")` | `graph`: `"turns"` (the graph of `to_networkx`) or `"junctions"` (the graph of `to_networkx_nodes`). Needs `duckosm[rustworkx]`. | a `rustworkx.PyDiGraph`; `g.attrs["index"]` gives the node index of an id | |
-
-Guide: [Route](../guides/route.md).
-
-## Network
-
-`network(place)` gets and builds an area in one call. `build` gives a `Network`, and `open(path)` opens a built
-`.duckdb` file. A `Network` is also the path of its file (`os.PathLike`): `os.fspath(net)`, `str(net)`,
-`duckdb.connect(str(net))` and each function above take it. Each read opens a read-only connection and closes it. The
-methods call the functions of the same name: `net.route(a, b)` is `route(net, a, b)`.
-
-| Function | Gives |
-|---|---|
-| `network(place=None, *, modes=("driving",), out="data", name=None, fixes=None, progress=None, **area)` | `get` and `build` in one call, into `<out>/<name>.duckdb`. The area: `place`, or `bbox=`, `point=` with `dist_m=`, `osm_id=`, `h3_cell=`, `boundary=`. |
-| `open(path)` | the `Network` of a built file |
-
-| Member | Gives |
-|---|---|
-| `net` (in a notebook) | a card: the file, its size, the build time, and the edges, nodes and km of each mode. `repr(net)` is one line of text. |
-| `net.path` | the `Path` of the `.duckdb` file |
-| `net.modes` | the networks in the file, for example `["driving", "walking"]` |
-| `net.tables(mode="driving")`, `net.columns(mode="driving", table="edges")` | the tables of a schema; the columns of a table and their types |
-| `net.summary()` | the numbers of the card, as a dict |
-| `net.edges(mode="driving", where=None, crs=None)` | the edges as a `GeoDataFrame`, all columns of `<mode>.edges`, `edge_id` as `int64`. `where`: a SQL filter, for example `"highway = 'primary'"`. The text goes into the query as it is: give only text that you trust. `crs`: the CRS of the result (default EPSG:4326). |
-| `net.nodes(mode="driving", crs=None)` | the nodes as a `GeoDataFrame` |
-| `net.sql(query, params=None)` | the result of a SQL query as a pandas `DataFrame` (the extension spatial is loaded) |
-| `net.map(mode="driving", *, theme="light", color_by=None, highlight=None, route=None, data=None, dashboard=False, **style)` | the roadstyle map: casing and fill, bridges and tunnels on top. `theme`: `"light"`, `"dark"` or `"satellite"`. `color_by`: a number column (a color ramp, `cmap=`) or a class column (`colors={value: color}`). `highlight`: edge ids in orange. `route`: a route, a list of routes or `{label: route}`, drawn as lines on top. `data`: a `GeoDataFrame` from `net.edges()` with columns of your own. `dashboard=True`: roadstyle's dashboard page (number tiles, a query box, a chart, the road card). `style`: the options of `roadstyle.render_edges`. With `DUCKOSM_STATIC_MAPS=1`: a small matplotlib picture. |
-| `net.save_map(path, mode="driving", **options)` | the map of `net.map(...)` as one HTML file |
-| `net.route`, `net.route_points`, `net.route_multimodal_points`, `net.directions` | the routing functions on this network |
-| `net.to_networkx`, `net.to_rustworkx` | the turn graph |
-| `net.to_sumo`, `net.to_gmns`, `net.to_matsim`, `net.to_opendrive`, `net.to_gis` | the exports of this network, with a progress line in a notebook |
-
-```python
-net = duckosm.open("monaco.duckdb")
-r = net.route_points((7.4155, 43.7285), (7.4335, 43.7468))
-net.map(theme="dark", route=r)                     # the route as a line on the network
-net.save_map("route.html", theme="dark", route=r)  # the same map as one HTML file
-```
-
-### Progress and errors
-
-| Item | Behavior |
-|---|---|
-| Progress | `get`, `build`, `network` and the exports of a `Network` show one progress line in a notebook. `progress=False` shows nothing; a function gets each line. Outside a notebook they show nothing. |
-| `DuckOSMError` | the error of the SDK (a `RuntimeError`). An unknown mode lists the modes of the file. A missing file says how to build it. A missing optional dependency says the pip command, for example `pip install "duckosm[widget]"`. A failed command gives its message. |
-
-The [notebooks](../notebooks/index.md) use a `Network` in each cell.
-
-## Exports
-
-| Function | Main options | Returns | Command |
-|---|---|---|---|
-| `to_sumo(con, out_dir, mode="driving", net_name="network", run_netconvert=True, connections=True, config=None)` | `run_netconvert`: also make `.net.xml` with SUMO's `netconvert` | a dict of the file paths | [`duckosm sumo`](cli.md#sumo) |
-| `to_matsim(source, out_path, mode="driving", crs=None, gzip=True)` | `mode`: one mode or a list | a dict of the numbers | [`duckosm matsim`](cli.md#matsim) |
-| `to_gis(con, out, modes=None, fmt="gpkg", boundary=True, name=None, srs="EPSG:4326")` | `fmt`: `"gpkg"`, `"geoparquet"` or `"shp"` | a dict `{path, dir, files}` | [`duckosm export-gis`](cli.md#export-gis) |
-| `to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False)` | `to_csv`: also write the CSV files to this folder | a dict `{path, csv, combined, modes}` | [`duckosm gmns`](cli.md#gmns) |
-| `to_opendrive(source, out_path, mode="driving", crs=None, junctions=False)` | Experimental | a dict of the numbers | [`duckosm opendrive`](cli.md#opendrive) |
-| `to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01)` | Reads a [GMNS database](../exports/gmns.md). Experimental. | a dict of the numbers | [`duckosm lanelet2`](cli.md#lanelet2) |
-| `to_railml(source, out_path)` | Experimental | a dict of the numbers | [`duckosm railml`](cli.md#railml) |
-| `to_elevation(db, dem=None, source="auto", modes=None, vertical_datum=None, license=None, product=None, reference=True)` | Adds the heights to the database. `product`: `"DTM"` or `"DSM"`. | a dict with the source and the numbers | [`duckosm elevation`](cli.md#elevation) |
-
-Guides: [Exports](../exports/index.md), [Add elevation](../guides/elevation.md).
+The other top-level functions are on the pages of their modules: [routing](sdk/routing.md), [ml](sdk/ml.md),
+[sim](sdk/sim.md), [planning](sdk/planning.md), [hdmap](sdk/hdmap.md) and [gis](sdk/gis.md).
+`to_railml(source, out_path)` (experimental) and `to_elevation(db, dem=None, ...)` ([Add elevation](../guides/elevation.md))
+stay in the core.

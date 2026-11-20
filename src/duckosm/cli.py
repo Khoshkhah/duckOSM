@@ -593,7 +593,7 @@ def export_graph(db, mode, out, graph_kind, fmt, weight, geometry, uses):
     """
     import duckdb
 
-    from duckosm.routing import write_graph
+    from duckosm._routing_py import write_graph
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     con = duckdb.connect(db, read_only=True)
@@ -633,7 +633,7 @@ def export_gis(db, modes, fmt, out, boundary, name):
     """
     import duckdb
 
-    from duckosm.gis import to_gis
+    from duckosm._gis_py import to_gis
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     con = duckdb.connect(db, read_only=True)

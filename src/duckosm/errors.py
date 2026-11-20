@@ -14,12 +14,13 @@ class MissingDependency(DuckOSMError, ImportError):
 # the pip command for each optional module
 _PIP = {
     "anywidget": 'pip install "duckosm[widget]"',
-    "networkx": 'pip install "duckosm[networkx]"',
-    "rustworkx": 'pip install "duckosm[rustworkx]"',
-    "roadstyle": 'pip install roadstyle (or pip install "duckosm[viz]")',
-    "geopandas": 'pip install geopandas (or pip install "duckosm[viz]")',
-    "matplotlib": "pip install matplotlib",
+    "networkx": 'pip install "duckosm[graph]"',
+    "rustworkx": 'pip install "duckosm[graph]"',
+    "roadstyle": 'pip install "duckosm[viz]"',
+    "geopandas": 'pip install "duckosm[viz]"',
+    "matplotlib": 'pip install "duckosm[viz]"',
     "mapstyle": 'pip install "duckosm[viz]"',
+    "sumolib": 'pip install "duckosm[sim]"',
 }
 
 

@@ -1,0 +1,37 @@
+"""``duckosm.sim``: traffic simulation (docs/proposals/python-sdk.md, section 5.4).
+
+Today: ``to_sumo``, ``to_matsim``, ``to_matsim_lanes``. Later: ``sumo_net``, ``edge_map``. Each export keeps the
+``edge_id`` of duckOSM as the id of the edge or link. pip extra: ``duckosm[sim]`` (SUMO's ``netconvert``).
+"""
+from duckosm.network import resolve
+from duckosm.sumo import DEFAULT_NETCFG  # noqa: F401
+
+
+def to_sumo(net, out_dir, mode=None, **kwargs):
+    """The SUMO network of one mode in ``out_dir`` (``.nod.xml``, ``.edg.xml``, ``.con.xml``; with SUMO's ``netconvert``
+    also ``.net.xml``). Options as :func:`duckosm.to_sumo` (``run_netconvert``, ``net_name`` ...). Returns the paths.
+
+    >>> duckosm.sim.to_sumo(net.driving, "out/sumo")"""
+    from duckosm import _api
+    db, mode = resolve(net, mode)
+    return _api.to_sumo(db, out_dir, mode=mode, **kwargs)
+
+
+def to_matsim(net, out_path, mode=None, **kwargs):
+    """The MATSim ``network.xml`` (``.gz``) of one mode, or of a list of modes. Returns the numbers.
+
+    >>> duckosm.sim.to_matsim(net.driving, "out/network.xml.gz")"""
+    from duckosm import _api
+    if isinstance(mode, (list, tuple)):
+        db = net.network if hasattr(net, "network") else net
+    else:
+        db, mode = resolve(net, mode)
+    return _api.to_matsim(db, out_path, mode=mode, **kwargs)
+
+
+def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90):
+    """MATSim lanes and signals from a GMNS database (:func:`duckosm.planning.to_gmns`).
+
+    >>> duckosm.sim.to_matsim_lanes("out/gmns.duckdb", "out/matsim")"""
+    from duckosm import _api
+    return _api.to_matsim_lanes(gmns_db, out_dir, mode=mode, signals=signals, cycle_s=cycle_s)

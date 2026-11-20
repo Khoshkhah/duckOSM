@@ -62,9 +62,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
            srs: str = "EPSG:4326", ogr2ogr_bin: str = None):
-    """See :func:`duckosm.gis.to_gis`. ``ogr2ogr_bin`` is not used: Rust writes the GeoPackage through DuckDB."""
+    """See :func:`duckosm._gis_py.to_gis`. ``ogr2ogr_bin`` is not used: Rust writes the GeoPackage through DuckDB."""
     if _db(con) is None:
-        from duckosm import gis
+        from duckosm import _gis_py as gis
         return gis.to_gis(con, out, modes, fmt, boundary, name, srs, ogr2ogr_bin)
     modes = [modes] if isinstance(modes, str) else list(modes or [])
     r = json.loads(_rust().to_gis(_db(con), str(out), modes, fmt, boundary, name, srs))
@@ -117,13 +117,13 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
 
 class Router:
     """Build the routing graph of one mode once, then answer many shortest-route queries. See
-    :class:`duckosm.routing.Router`; the graph is in Rust, so there is no ``.graph``."""
+    :class:`duckosm._routing_py.Router`; the graph is in Rust, so there is no ``.graph``."""
 
     def __init__(self, con, mode: str = "driving", weight: str = "time"):
         self.con, self.mode, self.weight = con, mode, weight
         db = _db(con)
         if db is None:
-            from duckosm import routing
+            from duckosm import _routing_py as routing
             self._py = routing.Router(con, mode, weight)
         else:
             self._py, self._r = None, _rust().Router(db, mode, weight)
@@ -141,18 +141,18 @@ class Router:
 
 
 def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
-    """See :func:`duckosm.routing.route`. With a networkx ``graph``, the Python code."""
+    """See :func:`duckosm._routing_py.route`. With a networkx ``graph``, the Python code."""
     if graph is not None or _db(con) is None:
-        from duckosm import routing
+        from duckosm import _routing_py as routing
         return routing.route(con, from_edge, to_edge, mode=mode, weight=weight, graph=graph)
     return Router(con, mode, weight).route(from_edge, to_edge)
 
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
                      end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None, _points=None):
-    """See :func:`duckosm.routing.route_multimodal`."""
+    """See :func:`duckosm._routing_py.route_multimodal`."""
     if _points is not None or _db(con) is None:
-        from duckosm import routing
+        from duckosm import _routing_py as routing
         return routing.route_multimodal(con, src_node, dst_node, schema, start_mode, end_mode, enforce_sequence,
                                         allowed_modes, _points)
     modes = None if allowed_modes is None else list(allowed_modes)
@@ -368,6 +368,15 @@ class Area:
 
     def __repr__(self):
         return f"Area(pbf={str(self.pbf)!r}, boundary={str(self.boundary)!r})"
+
+    def build(self, modes=None, *, output=None, fixes=None, progress=None, **options):
+        """Build the network of this area: :func:`duckosm.build` with this OSM file and boundary. ``output``: the
+        ``.duckdb`` file (default: next to the OSM file). Returns the :class:`duckosm.Network`.
+
+        >>> net = duckosm.get("Monaco").build(modes=["driving", "walking"])"""
+        output = output or self.pbf.parent / f"{self.pbf.name.split('.')[0]}.duckdb"
+        return build(pbf=self.pbf, boundary=self.boundary, modes=modes, output=output, fixes=fixes, progress=progress,
+                     **options)
 
     def _repr_html_(self):
         """The card of the area in a notebook: its name and its two files with their sizes."""

@@ -181,7 +181,7 @@ def route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm
     its mode (docs/design/multimodal_edge_graph.md). Returns the
     same dict as ``route_multimodal`` (``time_s`` includes the access legs, ``length_m`` their
     metres) plus ``start`` / ``end`` as in :func:`route_points`; ``None`` if not connected."""
-    from duckosm.routing import route_multimodal
+    from duckosm._routing_py import route_multimodal
 
     if allowed_modes and "walking" not in allowed_modes:
         raise ValueError("a trip between two points starts and ends walking: allowed_modes needs 'walking'")
