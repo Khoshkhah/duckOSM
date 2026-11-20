@@ -12,6 +12,8 @@ duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 flate2 = "1"
 geo = { version = "0.33", default-features = false }
+# the map tiles of GMNS by tiles: the tile grid of the tile cut (the rev of duckosm-core)
+pbfcut = { git = "https://github.com/Khoshkhah/pbfcut.git", rev = "2facc00595ff6397660d76211ca255098affab38" }
 # the join of the layer files into one GeoPackage (the version of duckosm-build)
 rusqlite = { version = "0.39", features = ["bundled"] }
 
