@@ -175,3 +175,15 @@
 .md-typeset table.dataframe thead th { font-weight: 700; text-align: left; }
 .md-typeset table.dataframe tbody th { font-weight: 400; color: var(--md-default-fg-color--light); }
 .md-typeset table.dataframe tbody tr:hover { background-color: var(--md-typeset-table-color--light, rgba(0,0,0,.035)); }
+
+/* The output of a notebook cell: a code block with no highlight spans (the code of a cell has them). It has no
+   background, a thin border and a bar on the left, so the output does not look like code that you can run. */
+.md-typeset div.highlight > pre > code:not(:has(span)) {
+  background-color: transparent;
+  border: .05rem solid var(--md-default-fg-color--lightest);
+  border-left: .2rem solid var(--md-default-fg-color--lighter);
+  color: var(--md-default-fg-color--light);
+}
+.md-typeset div.highlight > pre > code:not(:has(span))::-webkit-scrollbar-thumb {
+  background-color: var(--md-default-fg-color--lighter);
+}

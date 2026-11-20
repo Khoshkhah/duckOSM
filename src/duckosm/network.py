@@ -16,8 +16,66 @@ from typing import Any, Iterable
 from duckosm.errors import DuckOSMError, require
 
 HIGHLIGHT = "#e8590c"
+MAP_SHOWS = ("live", "link", "picture", "plot")
+# the base-map layers that plot draws: roadstyle's layer name -> (the table in features, its color)
+PLOT_LAYERS = {"ocean": ("ocean", "#aad3df"), "landcover": ("land", "#dde8cf"), "water": ("water_polygons", "#aad3df"),
+               "waterways": ("water_lines", "#7fb6cc"), "buildings": ("buildings", "#d9d0c9")}
+_MAP_COUNT = 0          # the <n> of the default file names of show="link" and show="picture"
+
+
+def _modes_label(modes):
+    """The dashboard's name of the modes that can use a road: "all modes", "driving + walking", ... or "driving"."""
+    if set(DEFAULT_MODES) <= modes:
+        return "all modes"
+    return " + ".join(m for m in DEFAULT_MODES if m in modes) or " + ".join(sorted(modes))
+
+
+def _show(show):
+    show = show or os.environ.get("DUCKOSM_MAP_SHOW") or "live"
+    if show not in MAP_SHOWS:
+        raise DuckOSMError(f"show must be one of {', '.join(MAP_SHOWS)}, got {show!r}")
+    return show
+
+
+class MapLink(os.PathLike):
+    """A saved live map: a link in a notebook, the path of the HTML file everywhere else."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __fspath__(self):
+        return str(self.path)
+
+    def __repr__(self):
+        return f"MapLink({str(self.path)!r})"
+
+    def _repr_html_(self):
+        mb = self.path.stat().st_size / 1e6
+        return f'<a href="{self.path.as_posix()}" target="_blank">Open the live map</a> ({mb:.1f} MB)'
+
+    def _repr_markdown_(self):
+        return f"[Open the live map]({self.path.as_posix()}) ({self.path.stat().st_size / 1e6:.1f} MB)"
+
+
+class MapPicture(os.PathLike):
+    """A PNG of a live map: the picture in a notebook, the path of the PNG file everywhere else."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __fspath__(self):
+        return str(self.path)
+
+    def __repr__(self):
+        return f"MapPicture({str(self.path)!r})"
+
+    def _repr_png_(self):
+        return self.path.read_bytes()
 ROUTE_COLORS = ("#e8590c", "#1c7ed6", "#2f9e44", "#ae3ec9", "#f08c00")
-MODE_COLORS = {"driving": "#e8590c", "walking": "#2f9e44", "cycling": "#1c7ed6"}
+# the colors of the modes that can use a road: the "Modes" colors of roadstyle's dashboard (roadstyle
+# data/basemap/modes.yaml, mode_colors), so that plot and the dashboard agree
+MODES_COLORS = {"all modes": "#555555", "driving + walking": "#e67e22", "driving + cycling": "#9b59b6",
+                "walking + cycling": "#16a085", "driving": "#e74c3c", "walking": "#27ae60", "cycling": "#2b6cb0"}
 MAP_COLUMNS = ("edge_id", "osm_id", "name", "highway", "oneway", "lanes", "length_m", "maxspeed_kmh", "layer", "bridge",
                "tunnel", "mode")
 DEFAULT_MODES = ("driving", "walking", "cycling")
@@ -337,8 +395,23 @@ class Network(os.PathLike):
         return self._each(mode, lambda m: self._frame(f"{m}.nodes", "geom", "true ORDER BY node_id", crs))
 
     # ---- maps -------------------------------------------------------------------------------------------------------
-    def map(self, mode: str | None = None, *, theme: str = "liberty", color_by=None, highlight=None, routes=None, **style):
-        """The live roadstyle map in a notebook: all modes with the base map of the file (``mode=None``) or one mode.
+    def map(self, mode: str | None = None, *, show: str | None = None, path=None, layers=None, theme: str = "liberty",
+            color_by=None, highlight=None, routes=None, **style):
+        """The roadstyle map of the file: all modes with the base map of the file (``mode=None``) or one mode.
+
+        - ``show``: how the notebook shows the map (default: ``DUCKOSM_MAP_SHOW``, else ``"live"``):
+
+          - ``"live"``: the live map in the output (about 6 MB for Monaco);
+          - ``"link"``: the live map saved as an HTML file (``path``, default ``maps/<file>-<n>.html``) and a link to it;
+          - ``"picture"``: a PNG of the live map (``path``, default ``maps/<file>-<n>.png``), taken in headless Chromium
+            (needs ``pip install playwright`` and ``playwright install chromium``);
+          - ``"plot"``: :meth:`plot`, a matplotlib picture with no roadstyle.
+
+        - ``layers``: the base map of the file under the roads: True (all layers), False (the roads only) or a list of
+          roadstyle layer names, for example ``["water", "buildings"]``. Default: all layers on the live map
+          (``"live"``, ``"link"``, ``"picture"``), the roads only with ``"plot"``. The live map's layers button turns them on
+          and off. With ``color_by`` or ``routes`` the live map has roadstyle's default base map, and ``layers`` has no
+          effect (a roadstyle change).
 
         - ``theme``: a roadstyle theme (``"liberty"``, ``"osm"``, ``"google"``, ``"grey"``, ``"roadstyle"``).
         - ``color_by``: a column of the edges, or your own data: a Series keyed by ``edge_id``, or a DataFrame with
@@ -347,13 +420,17 @@ class Network(os.PathLike):
         - ``routes``: a route, a list of routes or ``{label: route}``: lines on top, each in its own color.
         - ``style``: other options of roadstyle.
 
-        With ``DUCKOSM_STATIC_MAPS=1`` it draws :meth:`plot` in place of the live map (the saved outputs of the manual).
-
         >>> net.map()
-        >>> net.map("driving", color_by="maxspeed_kmh", cmap="viridis")
-        >>> net.map("walking", routes=net.walking.route_points(a, b))"""
-        if os.environ.get("DUCKOSM_STATIC_MAPS") == "1":
-            return self.plot(mode, color_by=color_by, highlight=highlight, routes=routes, **style)
+        >>> net.map("driving", color_by="maxspeed_kmh", cmap="viridis", show="picture")
+        >>> net.map("walking", routes=net.walking.route_points(a, b), show="link")"""
+        show = _show(show)
+        if show == "plot":
+            return self.plot(mode, layers=bool(layers) and layers, color_by=color_by, highlight=highlight, routes=routes,
+                             **style)
+        return self._present(self._live_map(mode, theme, color_by, highlight, routes,
+                                            {"layers": True if layers is None else layers, **style}), show, path)
+
+    def _live_map(self, mode, theme, color_by, highlight, routes, style):
         require("roadstyle", "Network.map")
         if mode is not None:
             self._mode(mode)
@@ -365,6 +442,7 @@ class Network(os.PathLike):
         # ponytail: roadstyle.duckosm.page reads its own road columns and takes no overlays yet (a roadstyle change):
         # until then a map with your own column or routes is roadstyle.render_edges on the edges, on its default base map
         import roadstyle as rs
+        style.pop("layers", None)
         gdf, color_by = self._colored(mode, color_by, style)
         line = self._route_lines(routes)
         if line:
@@ -377,36 +455,60 @@ class Network(os.PathLike):
         return rs.render_edges(gdf[[c for c in gdf.columns if c in MAP_COLUMNS or c == color_by or c == gdf.geometry.name]],
                                **style)
 
-    def dashboard(self, mode: str | None = None, **style):
+    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, layers=None, **style):
         """roadstyle's dashboard of the file: the map, the panel with the road card and the color menu (road class,
-        modes), docked.
-
-        With ``DUCKOSM_STATIC_MAPS=1`` it draws :meth:`plot` in its place.
+        modes), docked. ``show``, ``path`` and ``layers``: as in :meth:`map`.
 
         >>> net.dashboard()"""
-        if os.environ.get("DUCKOSM_STATIC_MAPS") == "1":
-            return self.plot(mode)
+        show = _show(show)
+        if show == "plot":
+            return self.plot(mode, layers=bool(layers) and layers)
+        return self._present(self._live_dashboard(mode, {"layers": True if layers is None else layers, **style}), show,
+                             path)
+
+    def _live_dashboard(self, mode, style):
         require("roadstyle", "Network.dashboard")
         from roadstyle import duckosm as page
         return page.page(self.path, "all" if mode is None else self._mode(mode), dashboard=True, **style)
+
+    def _present(self, live, show, path):
+        """The live map as ``show`` asks: itself, a link to its saved HTML file or a PNG of it."""
+        if show == "live":
+            return live
+        global _MAP_COUNT
+        _MAP_COUNT += 1
+        out = Path(path or f"maps/{self.path.name.split('.')[0]}-{_MAP_COUNT}.{'html' if show == 'link' else 'png'}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if show == "link":
+            live.save(str(out))
+            return MapLink(out)
+        require("playwright", "show='picture'")
+        import roadstyle as rs
+        rs.snapshot(live, out, controls=False)      # the map only: a picture cannot use the toolbox
+        return MapPicture(out)
 
     def save_map(self, path: str | os.PathLike, mode: str | None = None, *, dashboard: bool = False, **options) -> Path:
         """The map of :meth:`map` (or of :meth:`dashboard`) as one offline HTML file, with the same options. Returns the path.
 
         >>> net.save_map("monaco.html")"""
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        static = os.environ.pop("DUCKOSM_STATIC_MAPS", None)       # a file is always the live map
-        try:
-            m = self.dashboard(mode, **options) if dashboard else self.map(mode, **options)
-            m.save(str(path))
-        finally:
-            if static is not None:
-                os.environ["DUCKOSM_STATIC_MAPS"] = static
+        if dashboard:
+            m = self._live_dashboard(mode, options)
+        else:
+            theme = options.pop("theme", "liberty")
+            m = self._live_map(mode, theme, options.pop("color_by", None), options.pop("highlight", None),
+                               options.pop("routes", None), options)
+        m.save(str(path))
         return Path(path)
 
-    def plot(self, mode: str | None = None, *, color_by=None, highlight=None, routes=None, ax=None, **style):
+    def plot(self, mode: str | None = None, *, layers=False, color_by=None, highlight=None, routes=None, ax=None, **style):
         """A static matplotlib picture (for papers and saved notebook outputs), with the options of :meth:`map`. All modes:
-        one color for each mode; one mode: one color for each road class. Returns the axis.
+        one color for each set of modes that can use a road (``"all modes"``, ``"driving + walking"``, ... ``"cycling"``),
+        the colors of the "Modes" option of :meth:`dashboard`; one mode: one color for each road class. Returns the axis.
+
+        ``layers``: the base map of the file under the roads: False (the default: the roads only), True (the layers below)
+        or a list of these names:
+        ``ocean``, ``landcover``, ``water``, ``waterways``, ``buildings`` (the names of roadstyle's layers).
 
         >>> net.plot("driving", color_by="maxspeed_kmh")"""
         require("matplotlib", "Network.plot")
@@ -417,6 +519,10 @@ class Network(os.PathLike):
         own_axis = ax is None
         if own_axis:
             _, ax = plt.subplots(figsize=(7, 7), dpi=72)
+        x0, y0, x1, y1 = gdf.total_bounds            # the view: the roads and a small margin, as the live map
+        pad = 0.03 * max(x1 - x0, y1 - y0)
+        view = (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+        self._plot_layers(ax, layers, view)
         handles, colors = [], style.get("colors")
         plain = highlight is not None or bool(line)
         if colors:                                   # classes: gray edges, then each class in its color
@@ -427,10 +533,12 @@ class Network(os.PathLike):
         elif color_by is not None:                   # numbers: a color ramp, gray where there is no value
             gdf.plot(ax=ax, column=color_by, cmap=style.get("cmap", "viridis"), linewidth=1.2, legend=True,
                      legend_kwds={"label": color_by, "shrink": 0.6}, missing_kwds={"color": "#cccccc", "linewidth": 0.5})
-        elif "mode" in gdf and not plain:            # all modes: one color for each
-            for m, part in gdf.groupby("mode", sort=False):
-                part.plot(ax=ax, color=MODE_COLORS.get(m, "#555555"), linewidth=0.7)
-                handles.append(Line2D([], [], color=MODE_COLORS.get(m, "#555555"), linewidth=2, label=m))
+        elif "modes" in gdf and not plain:           # all modes: one color for each set of modes, as the dashboard
+            for label, color in MODES_COLORS.items():
+                part = gdf[gdf.modes == label]
+                if len(part):
+                    part.plot(ax=ax, color=color, linewidth=0.7)
+                    handles.append(Line2D([], [], color=color, linewidth=2, label=label))
         elif "highway" in gdf and not plain:         # one mode: the road classes
             gdf.plot(ax=ax, column="highway", cmap="tab20", linewidth=0.8, legend=True,
                      legend_kwds={"loc": "lower right", "fontsize": 7})
@@ -444,17 +552,44 @@ class Network(os.PathLike):
             handles.append(Line2D([], [], color=color, linewidth=3.5, label=label))
         if handles:
             ax.legend(handles=handles, loc="lower right")
+        ax.set_xlim(view[0], view[2])
+        ax.set_ylim(view[1], view[3])
         ax.set_axis_off()
         if own_axis:
             plt.show()
         return ax if not own_axis else None
 
+    def _plot_layers(self, ax, layers, view):
+        """Draws the base-map layers of ``features.*`` on ``ax``, in roadstyle's draw order, cut to ``view``
+        (``x0, y0, x1, y1``): the ocean of a file can reach far past the roads."""
+        if layers is False or layers is None:
+            return
+        names = list(PLOT_LAYERS) if layers is True else list(layers)
+        wrong = [n for n in names if n not in PLOT_LAYERS]
+        if wrong:
+            raise DuckOSMError(f"plot draws the layers {', '.join(PLOT_LAYERS)}, not {', '.join(wrong)}; "
+                               "the live map (show='live' or 'picture') draws all of roadstyle's layers")
+        gpd = require("geopandas", "Network.plot")
+        have = set(self.tables())
+        for name in PLOT_LAYERS:                     # draw order: ocean, land, water, buildings
+            table, color = PLOT_LAYERS[name]
+            if name in names and f"features.{table}" in have:
+                box = "ST_MakeEnvelope({}, {}, {}, {})".format(*(float(v) for v in view))
+                df = self.sql(f"SELECT ST_AsWKB(ST_Intersection(geom, {box})) AS wkb FROM features.{table} "
+                              f"WHERE ST_Intersects(geom, {box})")
+                gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries.from_wkb(df.wkb.map(bytes), crs="EPSG:4326"))
+                if len(gdf):
+                    kw = {"linewidth": 0.6} if name == "waterways" else {"linewidth": 0}
+                    gdf.plot(ax=ax, color=color, zorder=0, **kw)
+
     def _colored(self, mode, color_by, style):
         """The edges to draw, and the column to color by: a column of the edges, or your own data joined on ``edge_id``."""
         import pandas as pd
         gdf = self.edges(mode)
-        if "mode" in gdf and mode is None:           # all modes on one map: each road once, with its first mode
-            gdf = gdf.drop_duplicates("edge_id", keep="first")
+        if "mode" in gdf and mode is None:           # all modes on one map: each road once, with all its modes
+            used = gdf.groupby("edge_id")["mode"].agg(frozenset)
+            gdf = gdf.drop_duplicates("edge_id", keep="first").copy()
+            gdf["modes"] = gdf.edge_id.map(used).map(_modes_label)
         if color_by is None:
             return gdf, None
         if isinstance(color_by, pd.Series):

@@ -3,7 +3,7 @@
 `duckosm.AreaPicker` is a map in a Jupyter notebook. You use it to choose an area. Then you click **Get** to get the
 OSM file of the area.
 
-![The AreaPicker widget in JupyterLab: the search found Monaco, and the line under the map shows the extract](../images/area-picker.png)
+![The AreaPicker widget in JupyterLab: the OSM id 2220322 gives the city of Monaco, and the line under the map shows the extract](../images/area-picker.png)
 
 The widget does the same work as [`duckosm get`](../exports/osm-file.md): it finds the
 boundary, takes the smallest Geofabrik extract that holds the boundary, downloads the extract and cuts it.

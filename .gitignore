@@ -28,6 +28,7 @@ docs/notebooks/[0-9]*.md
 docs/notebooks/*_files/
 docs/notebooks/data/
 docs/notebooks/out/
+docs/notebooks/maps/
 docs/notebooks/*.yaml
 
 # IDE
