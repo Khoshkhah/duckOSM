@@ -343,7 +343,7 @@ class Network(os.PathLike):
         return self._each(mode, lambda m: self._frame(f"{m}.nodes", "geom", "true ORDER BY node_id", crs))
 
     # ---- maps -------------------------------------------------------------------------------------------------------
-    def map(self, mode: str | None = None, *, show: str | None = None, path=None, layers=True, theme: str = "liberty",
+    def map(self, mode: str | None = None, *, show: str | None = None, path=None, layers=None, theme: str = "liberty",
             color_by=None, highlight=None, routes=None, **style):
         """The roadstyle map of the file: all modes with the base map of the file (``mode=None``) or one mode.
 
@@ -356,7 +356,8 @@ class Network(os.PathLike):
           - ``"plot"``: :meth:`plot`, a matplotlib picture with no roadstyle.
 
         - ``layers``: the base map of the file under the roads: True (all layers), False (the roads only) or a list of
-          roadstyle layer names, for example ``["water", "buildings"]``. The live map's layers button turns them on
+          roadstyle layer names, for example ``["water", "buildings"]``. Default: all layers on the live map
+          (``"live"``, ``"link"``, ``"picture"``), the roads only with ``"plot"``. The live map's layers button turns them on
           and off. With ``color_by`` or ``routes`` the live map has roadstyle's default base map, and ``layers`` has no
           effect (a roadstyle change).
 
@@ -372,9 +373,10 @@ class Network(os.PathLike):
         >>> net.map("walking", routes=net.walking.route_points(a, b), show="link")"""
         show = _show(show)
         if show == "plot":
-            return self.plot(mode, layers=layers, color_by=color_by, highlight=highlight, routes=routes, **style)
-        return self._present(self._live_map(mode, theme, color_by, highlight, routes, {"layers": layers, **style}), show,
-                             path)
+            return self.plot(mode, layers=bool(layers) and layers, color_by=color_by, highlight=highlight, routes=routes,
+                             **style)
+        return self._present(self._live_map(mode, theme, color_by, highlight, routes,
+                                            {"layers": True if layers is None else layers, **style}), show, path)
 
     def _live_map(self, mode, theme, color_by, highlight, routes, style):
         require("roadstyle", "Network.map")
@@ -401,15 +403,16 @@ class Network(os.PathLike):
         return rs.render_edges(gdf[[c for c in gdf.columns if c in MAP_COLUMNS or c == color_by or c == gdf.geometry.name]],
                                **style)
 
-    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, layers=True, **style):
+    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, layers=None, **style):
         """roadstyle's dashboard of the file: the map, the panel with the road card and the color menu (road class,
         modes), docked. ``show``, ``path`` and ``layers``: as in :meth:`map`.
 
         >>> net.dashboard()"""
         show = _show(show)
         if show == "plot":
-            return self.plot(mode, layers=layers)
-        return self._present(self._live_dashboard(mode, {"layers": layers, **style}), show, path)
+            return self.plot(mode, layers=bool(layers) and layers)
+        return self._present(self._live_dashboard(mode, {"layers": True if layers is None else layers, **style}), show,
+                             path)
 
     def _live_dashboard(self, mode, style):
         require("roadstyle", "Network.dashboard")
@@ -446,12 +449,13 @@ class Network(os.PathLike):
         m.save(str(path))
         return Path(path)
 
-    def plot(self, mode: str | None = None, *, layers=True, color_by=None, highlight=None, routes=None, ax=None, **style):
+    def plot(self, mode: str | None = None, *, layers=False, color_by=None, highlight=None, routes=None, ax=None, **style):
         """A static matplotlib picture (for papers and saved notebook outputs), with the options of :meth:`map`. All modes:
         one color for each set of modes that can use a road (``"all modes"``, ``"driving + walking"``, ... ``"cycling"``),
         the colors of the "Modes" option of :meth:`dashboard`; one mode: one color for each road class. Returns the axis.
 
-        ``layers``: the base map of the file under the roads: True (the layers below), False or a list of these names:
+        ``layers``: the base map of the file under the roads: False (the default: the roads only), True (the layers below)
+        or a list of these names:
         ``ocean``, ``landcover``, ``water``, ``waterways``, ``buildings`` (the names of roadstyle's layers).
 
         >>> net.plot("driving", color_by="maxspeed_kmh")"""
