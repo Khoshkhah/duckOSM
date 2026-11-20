@@ -452,8 +452,8 @@ class Network(os.PathLike):
         return analysis.stats(self, area_m2=area_m2, mode=mode)
 
     def route(self, a, b, mode: str | None = None, weight: str = "time") -> dict | None:
-        """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: two edge ids, or two ``(lon, lat)``
-        points. :func:`duckosm.routing.route`.
+        """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: edge ids, ``(lon, lat)`` points or
+        place names. A :class:`duckosm.routing.Route`. :func:`duckosm.routing.route`.
 
         >>> r = net.walking.route((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import routing
@@ -465,6 +465,41 @@ class Network(os.PathLike):
         >>> r = net.driving.route_points((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import routing
         return routing.route_points(self, a, b, mode=mode, **kwargs)
+
+    def routes(self, origins, destinations, mode: str | None = None, **kwargs) -> list:
+        """:func:`duckosm.routing.routes`: many routes, in parallel.
+
+        >>> rs = net.driving.routes([e1, e2], [e3, e4])"""
+        from duckosm import routing
+        return routing.routes(self, origins, destinations, mode=mode, **kwargs)
+
+    def k_shortest_paths(self, a, b, k: int = 3, mode: str | None = None, **kwargs) -> list:
+        """:func:`duckosm.routing.k_shortest_paths`: the ``k`` best routes (Yen).
+
+        >>> rs = net.driving.k_shortest_paths(e1, e2, k=3)"""
+        from duckosm import routing
+        return routing.k_shortest_paths(self, a, b, k=k, mode=mode, **kwargs)
+
+    def matrix(self, origins, destinations=None, mode: str | None = None, **kwargs):
+        """:func:`duckosm.routing.matrix`: a travel time (or distance) matrix, a DataFrame.
+
+        >>> m = net.driving.matrix(edge_ids)"""
+        from duckosm import routing
+        return routing.matrix(self, origins, destinations, mode=mode, **kwargs)
+
+    def isochrones(self, origins, minutes=(5, 10, 15), mode: str | None = None, **kwargs):
+        """:func:`duckosm.routing.isochrones`: the polygons reached within each time.
+
+        >>> iso = net.walking.isochrones([(7.4246, 43.7384)])"""
+        from duckosm import routing
+        return routing.isochrones(self, origins, minutes, mode=mode, **kwargs)
+
+    def accessibility(self, origins, targets, minutes=15, mode: str | None = None):
+        """:func:`duckosm.routing.accessibility`: the targets reached from each origin, and the nearest.
+
+        >>> acc = net.walking.accessibility(homes, shops, minutes=[5, 10])"""
+        from duckosm import routing
+        return routing.accessibility(self, origins, targets, minutes, mode=mode)
 
     def route_multimodal_points(self, a: tuple, b: tuple, **kwargs) -> dict:
         """:func:`duckosm.routing.route_multimodal_points`: a route across the modes (needs the multimodal graph ``mm``).
@@ -590,7 +625,8 @@ class ModeView:
     >>> walk = net.walking
     >>> walk.edges(), walk.map(), walk.route((7.4155, 43.7285), (7.4335, 43.7468))"""
 
-    _CALLS = ("edges", "nodes", "map", "plot", "dashboard", "stats", "route", "route_points", "directions", "to_networkx",
+    _CALLS = ("edges", "nodes", "map", "plot", "dashboard", "stats", "route", "route_points", "routes", "k_shortest_paths", "matrix",
+              "isochrones", "accessibility", "directions", "to_networkx",
               "to_rustworkx", "to_sumo", "to_matsim", "to_gmns", "to_opendrive", "to_gis")
 
     def __init__(self, network: Network, mode: str):
