@@ -52,6 +52,8 @@ pub fn run(db: &std::path::Path, name: &str, modes: &[&str], a: &After) -> Resul
     if let Some((b, rs)) = &a.boundary_cells {
         crate::place::boundary_cells(db, b, rs)?;
     }
+    // the comments come before the indexes: DuckDB cannot alter a table that has an index
+    sql::comments(db, &comments(modes))?;
     sql::create_indexes(db, modes)?;
     let mut results: Vec<(String, Vec<sql::Check>)> = Vec::new();
     if let Some(v) = &a.validation {
@@ -227,8 +229,128 @@ th{background:#f4f6fb}";
     )
 }
 
+/// The schema page of the manual. It is the one source of the descriptions of the tables and the columns.
+/// The sdist of the Python package includes it (pyproject.toml, `[tool.maturin] include`).
+const DATABASE_MD: &str = include_str!("../../../docs/reference/database.md");
+
+/// One comment: (schema, table, column, text). The column is `None` for the comment of the table.
+pub type Comment = (String, String, Option<String>, String);
+
+/// The comments of the tables and the columns from `docs/reference/database.md`. A `## `x` schema` section gives the
+/// schema; the section `<mode>` gives each mode of `modes`. A `### ` heading gives the tables (the names in backticks;
+/// a heading with no name in backticks is not a table). The text between the heading and its first table is the
+/// comment of the table. A table with the column `Description` (or `Meaning`) gives the comments of the columns.
+pub fn comments(modes: &[&str]) -> Vec<Comment> {
+    let mut out = Vec::new();
+    let mut schemas: Vec<String> = Vec::new();
+    let mut tables: Vec<String> = Vec::new();
+    let mut text: Vec<&str> = Vec::new();
+    // the index of the column `Description` in the current table; Some(None): a table with no such column
+    let mut desc: Option<Option<usize>> = None;
+    let add = |out: &mut Vec<Comment>, schemas: &[String], tables: &[String], col: Option<&str>, t: &str| {
+        for s in schemas {
+            for tb in tables {
+                out.push((s.clone(), tb.clone(), col.map(str::to_string), t.to_string()));
+            }
+        }
+    };
+    let flush = |out: &mut Vec<Comment>, schemas: &[String], tables: &[String], text: &mut Vec<&str>| {
+        if !text.is_empty() {
+            add(out, schemas, tables, None, &clean(&text.join(" ")));
+            text.clear();
+        }
+    };
+    for line in DATABASE_MD.lines() {
+        let line = line.trim();
+        if let Some(h) = line.strip_prefix("## ") {
+            schemas = match code_names(h).first().map(String::as_str) {
+                Some("<mode>") => modes.iter().map(|m| m.to_string()).collect(),
+                Some(s) => vec![s.to_string()],
+                None => Vec::new(),
+            };
+            tables.clear();
+            text.clear();
+            desc = None;
+        } else if let Some(h) = line.strip_prefix("### ") {
+            tables = code_names(h);
+            text.clear();
+            desc = None;
+        } else if tables.is_empty() {
+            continue;
+        } else if line.starts_with('|') {
+            flush(&mut out, &schemas, &tables, &mut text);
+            let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+            match desc {
+                None => desc = Some(if cells.first() == Some(&"Column") { cells.iter().position(|c| *c == "Description" || *c == "Meaning") } else { None }),
+                Some(Some(i)) if cells.len() > i && !cells[0].starts_with("---") => {
+                    let t = clean(&cells[i..].join("|"));
+                    for c in code_names(cells[0]).iter().filter(|c| !c.contains('<')) {
+                        add(&mut out, &schemas, &tables, Some(c), &t);
+                    }
+                }
+                _ => {}
+            }
+        } else if line.is_empty() {
+            // a table ends at the first line that is not a row; the text of a table comes only before its first table
+            if desc.is_some() {
+                desc = Some(None);
+            }
+        } else if desc.is_none() {
+            text.push(line);
+        }
+    }
+    out
+}
+
+/// The names in backticks of a heading or a cell.
+fn code_names(s: &str) -> Vec<String> {
+    s.split('`').skip(1).step_by(2).map(str::to_string).collect()
+}
+
+/// The text of a comment: a Markdown link `[text](url)` becomes `text`, and the backticks go.
+fn clean(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find('[') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        match after.find("](").and_then(|j| after[j + 2..].find(')').map(|k| (j, j + 2 + k))) {
+            Some((j, k)) if !after[..j].contains('[') => {
+                out.push_str(&after[..j]);
+                rest = &after[k + 1..];
+            }
+            _ => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace('`', "")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_comment_has_no_links_and_no_backticks() {
+        assert_eq!(super::clean("the `x` id. [Stable ids](../a.md#b) and BIGINT[] [t](#k)"), "the x id. Stable ids and BIGINT[] t");
+    }
+
+    #[test]
+    fn the_comments_come_from_the_schema_page() {
+        let c = super::comments(&["driving", "walking"]);
+        let find = |s: &str, t: &str, col: Option<&str>| c.iter().find(|x| x.0 == s && x.1 == t && x.2.as_deref() == col).map(|x| x.3.clone());
+        assert!(find("walking", "edges", Some("edge_id")).unwrap().starts_with("the edge's id: (hash(osm_id, source, target) >> 1)::BIGINT."));
+        assert!(find("driving", "edges", None).unwrap().ends_with("What each network contains."));
+        assert_eq!(find("driving", "nodes", Some("ele_<suffix>")), None);
+        assert!(find("driving", "edges", Some("z_to")).is_some());
+        assert!(find("visualization", "level_caps", None).is_some());
+        assert!(find("visualization", "edge_levels_meta", Some("n_edges")).is_some());
+        assert_eq!(find("driving", "lane_profile", Some("width_m")).as_deref(), Some("the width of the lane, in meters"));
+        // a heading that is not a table, and a table of the access values, give no comments
+        assert!(c.iter().all(|x| x.1 != "Tile keys" && x.2.as_deref() != Some("private")));
+    }
+
     #[test]
     fn the_html_of_the_report_is_the_html_of_duckosm() {
         // the output of duckOSM's report._md_to_html for this text

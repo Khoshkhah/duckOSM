@@ -19,6 +19,43 @@ fn has_table(con: &Connection, schema: &str, table: &str) -> Result<bool, String
     )? > 0)
 }
 
+/// Write the comments of the tables and the columns (COMMENT ON). Each item is (schema, table, column, text); the
+/// column is `None` for the comment of the table. The step skips an item for a table or a column that is not in the
+/// file, and a view. It does not change a row or a type.
+pub fn comments(db: &Path, items: &[(String, String, Option<String>, String)]) -> Result<(), String> {
+    use std::collections::HashSet;
+    let con = Connection::open(db).map_err(err)?;
+    let mut stmt = con
+        .prepare(
+            "SELECT c.schema_name, c.table_name, c.column_name FROM duckdb_columns() c JOIN duckdb_tables() t
+             USING (database_name, schema_name, table_name) WHERE c.database_name = current_database()",
+        )
+        .map_err(err)?;
+    let mut tables = HashSet::new();
+    let mut columns = HashSet::new();
+    for r in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))).map_err(err)? {
+        let (s, t, c) = r.map_err(err)?;
+        tables.insert((s.clone(), t.clone()));
+        columns.insert((s, t, c));
+    }
+    let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    let id = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+    let mut sql = String::from("BEGIN;\n");
+    for (s, t, c, text) in items {
+        match c {
+            None if tables.contains(&(s.clone(), t.clone())) => {
+                sql += &format!("COMMENT ON TABLE {}.{} IS {};\n", id(s), id(t), q(text));
+            }
+            Some(c) if columns.contains(&(s.clone(), t.clone(), c.clone())) => {
+                sql += &format!("COMMENT ON COLUMN {}.{}.{} IS {};\n", id(s), id(t), id(c), q(text));
+            }
+            _ => {}
+        }
+    }
+    sql += "COMMIT;";
+    con.execute_batch(&sql).map_err(|e| format!("comments: {e}"))
+}
+
 /// duckOSM's indexes on each mode: the ids, the ends of the edges, the geometries (R-tree) and, with the graph, the two
 /// ends of `edge_graph`. They come last: DuckDB cannot add a column to a table that has an index.
 pub fn create_indexes(db: &Path, modes: &[&str]) -> Result<(), String> {
