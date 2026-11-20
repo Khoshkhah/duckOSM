@@ -1,7 +1,7 @@
 # duckOSM and OSMnx
 
 [OSMnx](https://osmnx.readthedocs.io) is a Python library that downloads a street network from OSM. duckOSM makes a
-road network too, with more for routing and simulation. The guide [duckOSM for OSMnx users](../guides/osmnx-users.md) gives
+road network too, with more for routing and simulation. The guide [duckOSM for OSMnx users](../compare/for-osmnx-users.md) gives
 the duckOSM call for each OSMnx call.
 
 | | OSMnx | duckOSM |

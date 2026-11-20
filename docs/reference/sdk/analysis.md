@@ -59,4 +59,4 @@ The numbers of the `osmnx` view are equal to `ox.basic_stats(ox.simplify_graph(G
 | `simplify_graph` | the build simplifies; the `osmnx` view of `stats` |
 | `consolidate_intersections` | later |
 
-Guide: [duckOSM for OSMnx users](../../guides/osmnx-users.md). Page: [duckOSM and OSMnx](../../concepts/osmnx.md).
+Guide: [duckOSM for OSMnx users](../../compare/for-osmnx-users.md). Page: [duckOSM and OSMnx](../../concepts/osmnx.md).
