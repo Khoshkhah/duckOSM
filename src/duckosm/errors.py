@@ -21,6 +21,8 @@ _PIP = {
     "matplotlib": 'pip install "duckosm[viz]"',
     "mapstyle": 'pip install "duckosm[viz]"',
     "sumolib": 'pip install "duckosm[sim]"',
+    "torch_geometric": 'pip install "duckosm[ml]"',
+    "dgl": "pip install dgl (see https://www.dgl.ai/pages/start.html for the wheel of your torch)",
 }
 
 

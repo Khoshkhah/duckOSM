@@ -44,7 +44,7 @@ jobs:
       # MkDocs 2.0 drops the plugin/theme system Material depends on: stay on 1.x
       - run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6" "nbconvert>=7,<8"
       # the pages of the notebooks (docs/notebooks/index.md links them): Markdown with the saved outputs
-      - run: jupyter nbconvert --to markdown docs/notebooks/0*.ipynb
+      - run: jupyter nbconvert --to markdown docs/notebooks/[0-9]*.ipynb
       - run: mkdocs build --strict
 
   # the demo notebooks of the manual (docs/notebooks/): each cell must run on Monaco. The live roadstyle maps run here; the
@@ -67,7 +67,9 @@ jobs:
           # only main saves: the store has 10 GB, and the caches of pull requests pushed out main's (each about 0.9 GB)
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # the extras of the five install cells; [sim] brings netconvert
-      - run: pip install -e ".[widget,viz,graph,sim]" pytest nbmake
+      # torch for CPU first (the default wheel brings CUDA, about 2.5 GB), then the extra ml (torch_geometric)
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[widget,viz,graph,sim,ml]" pytest nbmake
       - run: python -m pytest --nbmake docs/notebooks/ -q
 
   test:
