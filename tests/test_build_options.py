@@ -23,7 +23,7 @@ def _has_bus(net):
 def test_options_and_config(tmp_path):
     plain = _build(tmp_path, "plain")
     assert _has_bus(plain) and "maxspeed_kmh" in set(plain.columns("driving.edges").column_name)
-    pieces = _build(tmp_path, "pieces", merge_segments=False, speeds=False, bus_routes=False)   # the keywords
+    pieces = _build(tmp_path, "pieces", speeds=False, bus_routes=False)   # the keywords
     cols = set(pieces.columns("driving.edges").column_name)
     assert "maxspeed_kmh" not in cols and "cost_s" not in cols and not _has_bus(pieces)        # speeds off: costs off
     as_dict = _build(tmp_path, "as_dict", config={"options": {"bus_routes": False}})          # a dict
@@ -38,18 +38,18 @@ def test_options_and_config(tmp_path):
 
 def test_each_keyword_is_its_config_key(tmp_path):
     f = _api._build_config({"options": {"bus_routes": True}, "name": "x"},
-                           {"merge_segments": False, "costs": False, "restrictions": False, "bus_routes": False,
+                           {"costs": False, "restrictions": False, "bus_routes": False,
                             "connect_paths": False, "snap_m": 5.0})
     cfg = json.loads(Path(f).read_text())
     Path(f).unlink()
-    assert cfg == {"name": "x", "options": {"merge_segments": False, "calculate_costs": False, "extract_restrictions": False,
+    assert cfg == {"name": "x", "options": {"calculate_costs": False, "extract_restrictions": False,
                                             "bus_routes": False}, "clip": {"connectivity_rescue": False, "connect_snap_m": 5.0}}
     assert _api._build_config("my.yaml", {}) == "my.yaml"                    # a file and no keyword: the file itself
 
 
 def test_wrong_option_names_the_right_one(tmp_path):
-    with pytest.raises(duckosm.DuckOSMError, match="did you mean 'merge_segments'"):
-        _build(tmp_path, "x", merge_segment=False)
+    with pytest.raises(duckosm.DuckOSMError, match="did you mean 'bus_routes'"):
+        _build(tmp_path, "x", bus_route=False)
 
 
 def test_network_own_pbf_and_dem(tmp_path, monkeypatch):

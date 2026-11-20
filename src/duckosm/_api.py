@@ -291,7 +291,6 @@ def _each(flag, values):
 # The build options of the SDK: the keyword and its key in the config file (config/template.yaml). The other keys of
 # the config file are for experts: give them with ``config=`` (a file or a dict).
 BUILD_OPTIONS = {
-    "merge_segments": ("options", "merge_segments"),      # False: each OSM way piece stays its own edge
     "speeds": ("options", "process_speeds"),              # False: no maxspeed_kmh (the raw maxspeed text stays), no cost_s
     "costs": ("options", "calculate_costs"),              # False: no cost_s
     "restrictions": ("options", "extract_restrictions"),  # False: no turn_restrictions
@@ -340,14 +339,14 @@ def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, sour
     """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``).
 
     ``config``: a config file (YAML or JSON) or a dict with the keys of ``config/template.yaml``; a keyword overrides
-    the same key. ``options``: the keywords of :data:`BUILD_OPTIONS` (``merge_segments``, ``speeds``, ``costs``,
+    the same key. ``options``: the keywords of :data:`BUILD_OPTIONS` (``speeds``, ``costs``,
     ``restrictions``, ``bus_routes``, ``connect_paths``, ``snap_m``). ``dem``: a DEM file (GeoTIFF): after the build,
     the heights of the nodes and the edges (:func:`duckosm.analysis.add_elevation`). ``progress``: None shows one
     progress line in a notebook, False shows nothing, a function gets each line. Returns the :class:`duckosm.Network`
     of the .duckdb file (also its path: ``os.PathLike``).
 
     >>> net = duckosm.build(pbf=area.pbf, boundary=area.boundary, modes=["driving", "walking"])
-    >>> net = duckosm.build(pbf="my.osm.pbf", merge_segments=False, config={"options": {"bus_routes": False}})"""
+    >>> net = duckosm.build(pbf="my.osm.pbf", speeds=False, config={"options": {"bus_routes": False}})"""
     def flag(name, value):
         return None if value is None else (f"--{name}" if value else f"--no-{name}")
     given = config

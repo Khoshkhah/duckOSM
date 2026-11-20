@@ -46,12 +46,12 @@ def network(place: str | None = None, *, modes: Iterable[str] | None = DEFAULT_M
     file of your own; ``boundary=`` cuts it, without it the whole file is the area). ``modes``: the networks (default
     driving, walking and cycling). ``fixes``: an OSM fixes file for the cut and the build. The file is
     ``<out>/<name>.duckdb``. The build options of :func:`duckosm.build` work here too: ``config=`` (a YAML or JSON file,
-    or a dict), ``merge_segments``, ``speeds``, ``costs``, ``restrictions``, ``bus_routes``, ``connect_paths``,
+    or a dict), ``speeds``, ``costs``, ``restrictions``, ``bus_routes``, ``connect_paths``,
     ``snap_m``, ``dem``, ``features`` and ``levels``. ``progress``: as :func:`duckosm.build`.
 
     >>> net = duckosm.network("Monaco")
     >>> net = duckosm.network(point=(7.4246, 43.7384), dist_m=500, modes=["walking"])
-    >>> net = duckosm.network(pbf="my.osm.pbf", boundary="area.geojson", merge_segments=False)"""
+    >>> net = duckosm.network(pbf="my.osm.pbf", boundary="area.geojson", bus_routes=False)"""
     from duckosm._api import build, get
     from duckosm._api import BUILD_OPTIONS
     modes = None if modes is None else list(modes)

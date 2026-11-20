@@ -84,7 +84,6 @@ net = duckosm.network(pbf="my_region.osm.pbf", boundary="district.geojson")  # c
 
 | Keyword | Default | Config key | What it does |
 |---|---|---|---|
-| `merge_segments` | `True` | `options.merge_segments` | `False`: each OSM way piece stays its own edge (no join of the chains that are one road) |
 | `speeds` | `True` | `options.process_speeds` | `False`: no `maxspeed_kmh` (the raw `maxspeed` text stays) and no `cost_s` |
 | `costs` | `True` | `options.calculate_costs` | `False`: no `cost_s` (the travel time); needs `speeds` |
 | `restrictions` | `True` | `options.extract_restrictions` | `False`: no turn restrictions |
@@ -99,7 +98,7 @@ net = duckosm.network(pbf="my_region.osm.pbf", boundary="district.geojson")  # c
 overrides the same key of the config. A wrong keyword gives an error with the nearest name.
 
 ```python
-net = duckosm.network(pbf="my.osm.pbf", config="my.yaml", merge_segments=False)
+net = duckosm.network(pbf="my.osm.pbf", config="my.yaml", bus_routes=False)
 net = duckosm.build(pbf="my.osm.pbf", config={"options": {"bus_routes": False}, "clip": {"connect_snap_m": 5}})
 ```
 
