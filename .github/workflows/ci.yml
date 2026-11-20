@@ -67,10 +67,9 @@ jobs:
           # only main saves: the store has 10 GB, and the caches of pull requests pushed out main's (each about 0.9 GB)
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # the extras of the five install cells; [sim] brings netconvert
-      - run: pip install -e ".[widget,viz,graph,sim,gis]" pytest nbmake
       # torch for CPU first (the default wheel brings CUDA, about 2.5 GB), then the extra ml (torch_geometric)
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[widget,viz,graph,sim,ml]" pytest nbmake
+      - run: pip install -e ".[widget,viz,graph,sim,gis,ml]" pytest nbmake
       - run: python -m pytest --nbmake docs/notebooks/ -q
 
   test:
