@@ -23,7 +23,7 @@ flowchart LR
 | # | Module | Users (their tools today) | What the module gives (exists today in bold) | Decision |
 |---|---|---|---|---|
 |  | `duckosm` (core) | All | `Network`, `ModeView`, `Area`, `network()`, `open()`, `edges()`, `nodes()`, `sql()`, `summary()`, `map()`, `dashboard()`; **`get`, `build`** | Approved |
-| 1 | `duckosm.analysis` | Street network analysts (OSMnx, momepy, cityseer) | Statistics, bearings, nearest nodes and edges, largest component, clip, elevation, `to_osmnx` | To decide |
+| 1 | `duckosm.analysis` | Street network analysts (OSMnx, momepy, cityseer) | Statistics, bearings, nearest nodes and edges, largest component, clip, elevation, `to_osmnx` | Approved |
 | 2 | `duckosm.gis` | GIS and data engineers (osmium, QuackOSM) | Features as a GeoDataFrame, OSM XML; **GIS formats, QuackOSM, Geofabrik, PMTiles** | To decide |
 | 3 | `duckosm.routing` | Routing, accessibility, logistics (openrouteservice, OSRM, r5py, pandana) | Many routes, k shortest paths, travel time matrices, isochrones, accessibility; **routes, point routes, multimodal, directions** | To decide |
 | 4 | `duckosm.sim` | Traffic simulation (SUMO, MATSim) | The map from SUMO and MATSim ids back to `edge_id`; **SUMO, MATSim, MATSim lanes** | To decide |
@@ -40,3 +40,15 @@ The decision for each module is one of these:
 | Approved | The module is in the plan of work |
 | Later | The module waits; the functions that exist today stay where they are |
 | No | The module is not made |
+
+## Decisions inside the modules
+
+### `duckosm.analysis`
+
+| # | Point | Decision |
+|---|---|---|
+| 1 | `stats()` returns two sets of numbers | **OSMnx view**: a point where only another mode connects (for example a walking way that meets a driving road) is not a node of this mode, and the two pieces count as one segment, as in OSMnx's graph. **duckOSM view**: every node and edge of the mode's tables. Intersections (3 or more roads of the mode) are the same in both. |
+| 2 | Close connection points (for example two roundabout entries 0.8 m apart) | Each connection point counts as one intersection, as in OSMnx. Joining close points into one (`consolidate_intersections`) comes later. |
+| 3 | The graph that `stats()` uses | The node graph, as in OSMnx |
+
+These change only the calculation. The tables of the file do not change.
