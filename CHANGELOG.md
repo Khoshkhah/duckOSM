@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **`duckosm gmns` by tiles.** An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
+  tiles; `--tile-zoom`, 0: the whole area) is made one tile at a time: a tile source with a band of 2 km, the GMNS steps
+  without a change, then the rows that the tile owns. Kentucky (driving, with netconvert): 4.9 GB, before 25.9 GB.
+  Without netconvert, each column but `lane.geom` is equal to the whole export; the lane lines can differ (the whole
+  export also differs from run to run there). `docs/design/gmns_by_tiles.md`.
+- **The crossings of `duckosm gmns` do not stop the export on a GEOS `TopologyException`.** The lane surface is made again
+  with the points rounded to 1 mm, then 1 cm (GEOS also tries again with less precision); a lane that still fails has no
+  crossing, and the export says how many.
+- **The turn-arrow pass of `duckosm gmns` (netconvert's OSM import) stopped with "connection-source edge ... is not
+  known".** netconvert joins the OSM nodes at one position: an inner point of an edge at the place of a node split the
+  edge. Île-de-France has such a pair (a service road that ends on a point of Rue des Collinettes, two OSM nodes at one
+  place). The pass now leaves out such a point; it reads back only the lane connections, not the shapes.
+- **The main SUMO pass of `duckosm gmns` stopped with "connection-destination edge ... not known".** A `turn_permission`
+  row can go into a private edge that is not in the SUMO network (Île-de-France). The pass now writes only the
+  connections between edges of the network.
+- **The crossings of `duckosm gmns` took hours on a dense area** (the Paris tile: more than 5 hours, now 2 minutes for
+  the whole tile without netconvert). Three steps did a scan of all lanes or all crossings for each crossing: the lanes
+  near a line, the lanes of the crossed links (or of the way of a zebra node), and the overlap with the crossings
+  already placed. A grid of 100 m and maps by link and by way replace the scans. The result is the same (golden tests).
 - **`duckosm.routing`, the routing module of the SDK** (`docs/reference/sdk/routing.md`). `route` gives a `Route`
   (also the old dict): `.edges` (a GeoDataFrame in route order), `.length_m`, `.time_s`, `.geometry`, `.directions()`,
   `.map()` and a card. A place is an edge id, a `(lon, lat)` point or a place name (`geocode`). New calls, in Rust on

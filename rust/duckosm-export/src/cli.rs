@@ -213,6 +213,10 @@ enum Cmd {
         /// Move a mapped sidewalk off the carriageway: it takes its place from its road's lanes.
         #[arg(long)]
         walk_frame: bool,
+        /// The zoom of the map tiles: an area with nodes in two or more tiles is made one tile at a time, so the memory
+        /// does not grow with the area. 0: the whole area at once.
+        #[arg(long, default_value_t = crate::gmns::TILE_ZOOM)]
+        tile_zoom: u8,
         /// Gap in metres between the kerb and a footpath placed by --walk-frame.
         #[arg(long, default_value_t = 0.0)]
         walk_clearance: f64,
@@ -405,6 +409,7 @@ pub fn run(args: &[String]) -> Result<()> {
             gtfs_max_m,
             csv_extensions,
             check,
+            tile_zoom,
             ..
         } => {
             check_db(&db)?;
@@ -424,6 +429,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 gtfs_max_m,
                 walk_frame,
                 walk_clearance_m: walk_clearance,
+                tile_zoom: (tile_zoom > 0).then_some(tile_zoom),
             };
             let res = crate::gmns::to_gmns_with(&db, &out, &o)?;
             println!("wrote {}", out.display());

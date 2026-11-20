@@ -443,7 +443,14 @@ class Network(os.PathLike):
                                                 "length_m": [round(r.get("length_m", 0))]}, geometry=[geom], crs="EPSG:4326")
         return out
 
-    # ---- routes, graphs and exports: the functions of the modules ---------------------------------------------------
+    # ---- analysis, routes, graphs and exports: the functions of the modules -----------------------------------------
+    def stats(self, mode: str | None = None, area_m2: float | None = None):
+        """:func:`duckosm.analysis.stats`: the numbers of OSMnx ``basic_stats`` in two views (``osmnx``, ``duckosm``).
+
+        >>> net.driving.stats()"""
+        from duckosm import analysis
+        return analysis.stats(self, area_m2=area_m2, mode=mode)
+
     def route(self, a, b, mode: str | None = None, weight: str = "time") -> dict | None:
         """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: edge ids, ``(lon, lat)`` points or
         place names. A :class:`duckosm.routing.Route`. :func:`duckosm.routing.route`.
@@ -618,7 +625,7 @@ class ModeView:
     >>> walk = net.walking
     >>> walk.edges(), walk.map(), walk.route((7.4155, 43.7285), (7.4335, 43.7468))"""
 
-    _CALLS = ("edges", "nodes", "map", "plot", "dashboard", "route", "route_points", "routes", "k_shortest_paths", "matrix",
+    _CALLS = ("edges", "nodes", "map", "plot", "dashboard", "stats", "route", "route_points", "routes", "k_shortest_paths", "matrix",
               "isochrones", "accessibility", "directions", "to_networkx",
               "to_rustworkx", "to_sumo", "to_matsim", "to_gmns", "to_opendrive", "to_gis")
 
@@ -656,3 +663,18 @@ class ModeView:
         from html import escape
         return (f"<div><b>{escape(self.mode)}</b> of <code>{escape(str(self.network.path))}</code>"
                 f"{self.summary().to_html(index=False)}</div>")
+
+
+# ---- duckosm.network is a function and a module -------------------------------------------------------------------------
+
+class _CallableModule(type(os)):
+    """When a module imports ``duckosm.network`` (the module), Python sets ``duckosm.network`` to the module, not to the
+    function :func:`network`. A call of the module calls the function, so ``duckosm.network("Monaco")`` always works."""
+
+    def __call__(self, *args, **kwargs) -> Network:
+        return network(*args, **kwargs)
+
+
+import sys  # noqa: E402
+
+sys.modules[__name__].__class__ = _CallableModule

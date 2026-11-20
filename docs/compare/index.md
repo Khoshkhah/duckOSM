@@ -12,6 +12,7 @@ page with the details.
 | [Tilemaker](https://tilemaker.org) | Shortbread vector tiles | Kentucky: about the same time (5.5 s against 5.0 s), 2.6 times less memory. France: 236 s against 212 s, 3 times the memory | [Vector tiles (PMTiles)](../exports/pmtiles.md) |
 | [Geofabrik's free files](https://download.geofabrik.de/) | the 20 GIS layers (`gis_osm_*_free`) | the same rows, for any area, with your OSM fixes, also GeoParquet and in the browser | [Geofabrik layers](../exports/geofabrik.md) |
 | OSMnx `features_from_*`, QuackOSM, osmium (Python) | OSM features as GeoDataFrames, OSM XML | the same calls in `duckosm.gis` | [duckOSM for GIS users](for-gis-users.md) |
+| OSMnx (the analysis functions) | statistics, bearings, nearest nodes and edges, components, clip | the same calls in `duckosm.analysis` | [duckOSM for OSMnx users](for-osmnx-users.md) |
 | SUMO (netconvert, sumolib), MATSim | the simulation network, and the results joined back | the same ids as duckOSM (`edge_id`), `duckosm.sim` | [duckOSM for traffic simulation users](for-simulation-users.md) |
 | osm2gmns, path4gmns, AequilibraE | a planning network (GMNS, an AequilibraE project) | GMNS with lanes and movements, `duckosm.planning` | [duckOSM for transport planning users](for-planning-users.md) |
 | CommonRoad Scenario Designer, Lanelet2, scenariogeneration | lane maps for automated driving | CommonRoad, Lanelet2 and OpenDRIVE from one network, `duckosm.hdmap` | [duckOSM for automated driving users](for-hdmap-users.md) |
