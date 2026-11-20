@@ -68,6 +68,21 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 
 Guide: [Route](../guides/route.md).
 
+## Edges and maps
+
+| Function | Main options | Returns |
+|---|---|---|
+| `edges(db, mode="driving", where=None)` | `where`: a SQL filter on the columns of `<mode>.edges`, for example `"highway = 'primary'"`. The text goes into the query as it is: give only text that you trust. Needs geopandas. | a `GeoDataFrame` in EPSG:4326: `edge_id`, `osm_id`, `name`, `highway`, `length_m`, `maxspeed_kmh`, `geometry` |
+| `show_edges(gdf, highlight=None, **style)` | `highlight`: edge ids to draw in orange, for example the `edges` of a route. `style`: the options of `roadstyle.render_edges`, for example `color_by="maxspeed_kmh", cmap="viridis"`. Needs roadstyle. With `DUCKOSM_STATIC_MAPS=1`: a small matplotlib picture in place of the live map. | the live roadstyle map (it shows in Jupyter), or `None` for the picture |
+
+```python
+gdf = duckosm.edges(db)                                  # the driving edges as a GeoDataFrame
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4335, 43.7468))
+duckosm.show_edges(gdf, highlight=r["edges"])           # the route in orange on the network
+```
+
+The [notebooks](../notebooks/index.md) use these two functions for their maps.
+
 ## Exports
 
 | Function | Main options | Returns | Command |

@@ -23,6 +23,7 @@ _NAMES = {
     "init_config": "duckosm._api", "build": "duckosm._api", "levels": "duckosm._api",
     "to_rustworkx": "duckosm._api",
     "get": "duckosm._api", "Area": "duckosm._api", "AreaPicker": "duckosm.widget",
+    "edges": "duckosm.maps", "show_edges": "duckosm.maps",
     "build_lane_graph": "duckosm._api", "route_lanes": "duckosm._api", "to_elevation": "duckosm._api",
 }
 __all__ = list(_NAMES)
