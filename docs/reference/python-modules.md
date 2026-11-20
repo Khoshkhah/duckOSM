@@ -47,8 +47,10 @@ The decision for each module is one of these:
 
 | # | Point | Decision |
 |---|---|---|
-| 1 | `stats()` returns two sets of numbers | **OSMnx view**: a point where only another mode connects (for example a walking way that meets a driving road) is not a node of this mode, and the two pieces count as one segment, as in OSMnx's graph. **duckOSM view**: every node and edge of the mode's tables. Intersections (3 or more roads of the mode) are the same in both. |
+| 1 | `stats()` returns two sets of numbers | **OSMnx view**: a point where only another mode connects (for example a walking way that meets a driving road) is not a node of this mode, and the two pieces count as one segment, as in OSMnx's graph. **duckOSM view**: every node and edge of the mode's tables. |
 | 2 | Close connection points (for example two roundabout entries 0.8 m apart) | Each connection point counts as one intersection, as in OSMnx. Joining close points into one (`consolidate_intersections`) comes later. |
 | 3 | The graph that `stats()` uses | The node graph, as in OSMnx |
+| 4 | What a junction is | A node with 3 or more **different neighbouring nodes** of the mode. A two-way road that passes through a node has 4 edge rows there but 2 neighbouring nodes, so the node is not a junction. |
+| 5 | The intersection count | OSMnx counts a node with 2 or more streets. In the duckOSM view, the 2-road nodes (a split for another mode, a change of the road's tags, or an OSM way end) raise this count; the OSMnx view removes them. |
 
 These change only the calculation. The tables of the file do not change.
