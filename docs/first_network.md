@@ -97,6 +97,18 @@ Open the file in a browser. This is that file, live: zoom, hover a road, click o
 <iframe src="../maps/monaco_driving.html" title="Monaco's driving network, drawn by duckosm viz"
         loading="lazy" style="width: 100%; height: 520px; border: 0; border-radius: 8px"></iframe>
 
+In Python or Jupyter, `duckosm.build` gives a `duckosm.Network`. Its methods give the tables and the map:
+
+```python
+import duckosm
+
+net = duckosm.build(pbf="monaco.osm.pbf", boundary="monaco.geojson")   # or duckosm.open("monaco.duckdb")
+edges = net.edges()            # the driving edges as a GeoDataFrame
+net.map()                      # the live map in Jupyter (needs pip install roadstyle)
+```
+
+The [notebooks](notebooks/index.md) show more.
+
 ## Next
 
 | To | Read |

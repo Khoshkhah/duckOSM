@@ -24,11 +24,12 @@ duckosm quack monaco.osm.pbf --gdal -o out --name monaco
 import duckosm
 
 area = duckosm.get("Monaco")  # as duckosm get (in the next release)
-db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build (in the next release)
+net = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build: a duckosm.Network
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))  # Fontvieille to Larvotto (lon, lat)
+r = net.route_points((7.4155, 43.7285), (7.4335, 43.7468))  # Fontvieille to Larvotto (lon, lat)
 r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
-duckosm.to_gis(db, "monaco.gpkg")  # a GeoPackage for QGIS
+net.edges()  # the driving edges as a GeoDataFrame
+net.to_gis("monaco.gpkg")  # a GeoPackage for QGIS
 ```
 
 All functions: [Python SDK](reference/python.md), [Rust SDK](reference/rust.md).

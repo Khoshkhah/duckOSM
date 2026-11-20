@@ -206,7 +206,17 @@ nav:
   - Reference:
       - Overview: reference/index.md
       - Command line: reference/cli.md
-      - Python SDK: reference/python.md
+      - Python SDK:
+          - Core: reference/python.md
+          - analysis: reference/sdk/analysis.md
+          - gis: reference/sdk/gis.md
+          - routing: reference/sdk/routing.md
+          - sim: reference/sdk/sim.md
+          - planning: reference/sdk/planning.md
+          - mobility: reference/sdk/mobility.md
+          - hdmap: reference/sdk/hdmap.md
+          - ml: reference/sdk/ml.md
+          - fixes: reference/sdk/fixes.md
       - "Python SDK: the modules": reference/python-modules.md
       - Rust SDK: reference/rust.md
       - Configuration: reference/configuration.md
