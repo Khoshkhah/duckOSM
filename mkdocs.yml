@@ -134,33 +134,6 @@ nav:
       - Your first network: first_network.md
       - duckOSM Studio (browser): guides/studio.md
       - Choose an area in Jupyter: guides/area-picker.md
-  - Notebooks:
-      - Overview: notebooks/index.md
-      - 1. From an area to a network: notebooks/01_area_to_network.md
-      - 2. Fix the OSM data once: notebooks/02_osm_fixes.md
-      - 3. Routing: notebooks/03_routing.md
-      - 4. Exports: notebooks/04_exports.md
-      - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
-      - 6. OSM data for GIS: notebooks/06_gis.md
-      - 7. Traffic simulation: notebooks/07_sim.md
-      - 8. Transport planning: notebooks/08_planning.md
-      - 9. HD maps: notebooks/09_hdmap.md
-      - 10. Graph machine learning: notebooks/10_ml.md
-      - 11. Advanced routing: notebooks/11_routing_advanced.md
-      - 12. Street network analysis: notebooks/12_analysis.md
-      - 13. Mobility data: notebooks/13_mobility.md
-  - Python SDK:
-      - Core: reference/python.md
-      - The modules: reference/python-modules.md
-      - analysis: reference/sdk/analysis.md
-      - gis: reference/sdk/gis.md
-      - routing: reference/sdk/routing.md
-      - sim: reference/sdk/sim.md
-      - planning: reference/sdk/planning.md
-      - mobility: reference/sdk/mobility.md
-      - hdmap: reference/sdk/hdmap.md
-      - ml: reference/sdk/ml.md
-      - fixes: reference/sdk/fixes.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
@@ -206,6 +179,33 @@ nav:
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
           - OpenDRIVE: exports/opendrive.md
+  - Notebooks:
+      - Overview: notebooks/index.md
+      - 1. From an area to a network: notebooks/01_area_to_network.md
+      - 2. Fix the OSM data once: notebooks/02_osm_fixes.md
+      - 3. Routing: notebooks/03_routing.md
+      - 4. Exports: notebooks/04_exports.md
+      - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
+      - 6. OSM data for GIS: notebooks/06_gis.md
+      - 7. Traffic simulation: notebooks/07_sim.md
+      - 8. Transport planning: notebooks/08_planning.md
+      - 9. HD maps: notebooks/09_hdmap.md
+      - 10. Graph machine learning: notebooks/10_ml.md
+      - 11. Advanced routing: notebooks/11_routing_advanced.md
+      - 12. Street network analysis: notebooks/12_analysis.md
+      - 13. Mobility data: notebooks/13_mobility.md
+  - Python SDK:
+      - Core: reference/python.md
+      - The modules: reference/python-modules.md
+      - analysis: reference/sdk/analysis.md
+      - gis: reference/sdk/gis.md
+      - routing: reference/sdk/routing.md
+      - sim: reference/sdk/sim.md
+      - planning: reference/sdk/planning.md
+      - mobility: reference/sdk/mobility.md
+      - hdmap: reference/sdk/hdmap.md
+      - ml: reference/sdk/ml.md
+      - fixes: reference/sdk/fixes.md
   - How it works:
       - Overview: concepts/index.md
       - How a build works: concepts/build.md
