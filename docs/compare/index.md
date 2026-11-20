@@ -16,4 +16,5 @@ page with the details.
 | SUMO (netconvert, sumolib), MATSim | the simulation network, and the results joined back | the same ids as duckOSM (`edge_id`), `duckosm.sim` | [duckOSM for traffic simulation users](for-simulation-users.md) |
 | osm2gmns, path4gmns, AequilibraE | a planning network (GMNS, an AequilibraE project) | GMNS with lanes and movements, `duckosm.planning` | [duckOSM for transport planning users](for-planning-users.md) |
 | CommonRoad Scenario Designer, Lanelet2, scenariogeneration | lane maps for automated driving | CommonRoad, Lanelet2 and OpenDRIVE from one network, `duckosm.hdmap` | [duckOSM for automated driving users](for-hdmap-users.md) |
+| PyTorch Geometric, DGL, city2graph | road graphs as tensors | the junction graph and the turn graph with edge features and `edge_id`, `duckosm.ml` | [duckOSM for graph machine learning users](for-ml-users.md) |
 | all of them | time and memory on France | | [Speed on France](speed.md) |

@@ -24,6 +24,8 @@ _PIP = {
     "path4gmns": 'pip install "duckosm[planning]"',
     "aequilibrae": "pip install aequilibrae (Python 3.11 or later), and SpatiaLite: apt install libsqlite3-mod-spatialite",
     "commonroad": 'pip install "duckosm[hdmap]"',
+    "torch_geometric": 'pip install "duckosm[ml]"',
+    "dgl": "pip install dgl (see https://www.dgl.ai/pages/start.html for the wheel of your torch)",
 }
 
 

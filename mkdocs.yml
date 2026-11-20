@@ -145,6 +145,7 @@ nav:
       - 7. Traffic simulation: notebooks/07_sim.md
       - 8. Transport planning: notebooks/08_planning.md
       - 9. HD maps: notebooks/09_hdmap.md
+      - 10. Graph machine learning: notebooks/10_ml.md
       - 11. Advanced routing: notebooks/11_routing_advanced.md
       - 12. Street network analysis: notebooks/12_analysis.md
   - Build an area:
@@ -215,6 +216,7 @@ nav:
       - duckOSM for traffic simulation users: compare/for-simulation-users.md
       - duckOSM for transport planning users: compare/for-planning-users.md
       - duckOSM for automated driving users: compare/for-hdmap-users.md
+      - duckOSM for graph machine learning users: compare/for-ml-users.md
   - Reference:
       - Overview: reference/index.md
       - Command line: reference/cli.md
