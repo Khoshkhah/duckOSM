@@ -162,5 +162,5 @@
     transform: translateX(-50%); }
 }
 
-/* The Colab badge on the notebook pages: on the middle line of the text, not above it. */
-.md-typeset a img[src*="colab-badge"] { vertical-align: middle; margin-right: .5em; }
+/* The badges on the notebook pages (Open in Colab, Download): on the middle line of the text, with a space between them. */
+.md-typeset a img[src*="colab-badge"], .md-typeset a img[src*="img.shields.io"] { vertical-align: middle; margin-right: .5em; }
