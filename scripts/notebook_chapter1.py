@@ -18,7 +18,7 @@ import re as _re
 import textwrap as _textwrap
 
 IMAGES = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images"
-BOX = {"output": "What the output shows", "tip": "Tip", "warning": "Warning"}
+BOX = {"output": "What the output shows", "tip": "Tip", "warning": "Warning", "key": "Key idea"}
 
 
 def box(kind, text):
@@ -37,27 +37,30 @@ def styled(source):
         s = par.strip()
         if s.startswith("**What the output shows.**"):
             out.append(box("output", s[len("**What the output shows.**"):]))
-        elif s.startswith("> **Tip:**") or s.startswith("> **Warning:**"):
+        elif s.startswith(("> **Tip:**", "> **Warning:**", "> **Key idea:**")):
             body = " ".join(line[1:].strip() for line in s.splitlines())
-            kind = "tip" if body.startswith("**Tip:**") else "warning"
+            kind = next(k for start, k in (("**Tip:**", "tip"), ("**Warning:**", "warning"), ("**Key idea:**", "key"))
+                        if body.startswith(start))
             out.append(box(kind, body.split(":**", 1)[1]))
         else:
             out.append(par)
     return "\n\n".join(out)
 
 
-def banner(number, line):
-    """The band of a chapter as an SVG picture in docs/notebooks/images/; returns its address."""
-    lines = _textwrap.wrap(line, 78)
-    h = 70 + 28 * len(lines)
-    rows = "".join(f'<text x="28" y="{78 + 28 * i}" font-size="20" fill="#ffffff">{_html.escape(r)}</text>'
-                   for i, r in enumerate(lines))
-    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="900" height="{h}" viewBox="0 0 900 {h}" '
-           f'font-family="Segoe UI, Helvetica, Arial, sans-serif"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
-           f'<stop offset="0" stop-color="#1f6feb"/><stop offset="1" stop-color="#0b4f8a"/></linearGradient></defs>'
-           f'<rect width="900" height="{h}" rx="14" fill="url(#g)"/>'
-           f'<text x="28" y="40" font-size="13" letter-spacing="1.6" fill="#ffffff" fill-opacity="0.85">'
-           f'DUCKOSM NOTEBOOK MANUAL · CHAPTER {number}</text>{rows}</svg>')
+CHAPTERS = 14
+
+
+def banner(number, title, line):
+    """The band of a chapter as an SVG picture in docs/notebooks/images/ (a light card, a thin blue line on the left,
+    dark text); returns its address."""
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="132" viewBox="0 0 900 132" '
+           'font-family="Segoe UI, Helvetica, Arial, sans-serif">'
+           '<rect x="1" y="1" width="898" height="130" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>'
+           '<rect x="1" y="1" width="7" height="130" rx="3" fill="#1f6feb"/>'
+           f'<text x="32" y="38" font-size="13" font-weight="600" letter-spacing="1.4" fill="#1f6feb">'
+           f'DUCKOSM NOTEBOOK MANUAL · CHAPTER {number} OF {CHAPTERS}</text>'
+           f'<text x="32" y="78" font-size="30" font-weight="700" fill="#1f2328">{_html.escape(title)}</text>'
+           f'<text x="32" y="108" font-size="17" fill="#57606a">{_html.escape(line)}</text></svg>')
     folder = _os.path.join(_os.path.dirname(_os.path.abspath(out)), "images")
     _os.makedirs(folder, exist_ok=True)
     with open(_os.path.join(folder, f"banner-{number}.svg"), "w", encoding="utf-8") as f:
@@ -72,12 +75,12 @@ def header(number, title, line, card):
     return (f"# {number}. {title}\n\n"
             f'[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)]({NB}) '
             f'<a href="{DL}" download><img src="https://img.shields.io/badge/Download-notebook-F37626?logo=jupyter&logoColor=white" alt="Download the notebook"></a>\n\n'
-            f'<img src="{banner(number, line)}" alt="duckOSM notebook manual, chapter {number}: {_html.escape(line)}" width="100%">\n\n'
+            f'<img src="{banner(number, title, line)}" alt="duckOSM notebook manual, chapter {number}: {_html.escape(title)}" width="100%">\n\n'
             f"{rows}")
 
 
 cells.append(md(header(1, "Get and build an area",
-    "Get the road network of an area into one file: from a place, an OSM id, a box, a point, an H3 cell, a polygon of your own, a map, or an OSM file that you already have.",
+    "From a place, a box, a polygon or your own OSM file to one network file",
     [("You learn", "the parts of a duckOSM build; seven ways to choose an area; the modes; your own PBF file; the build options and `config=`; where the files go"),
      ("Time", "about 3 minutes (the first download included)"),
      ("Extras", "`duckosm[widget,viz]` (the install cell installs them)"),
@@ -101,6 +104,8 @@ cells.append(md("""## The parts of a build
 
 A duckOSM build has three steps. Each step has its own call, and `duckosm.network` does all three in one call.
 
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/build-flow.svg" alt="The flow of a build: your area, the boundary, the extract, the cut, the network" width="100%">
+
 | Step | What happens | The call | The result |
 |---|---|---|---|
 | 1. The boundary | The area becomes a polygon: from a name or an OSM id (Nominatim), a box, a point, an H3 cell or your own GeoJSON | part of `duckosm.get` | `<name>.geojson` |
@@ -110,6 +115,9 @@ A duckOSM build has three steps. Each step has its own call, and `duckosm.networ
 The result is **one DuckDB file**. Each mode is a schema in it (`driving`, `walking`, `cycling`), with the tables
 `edges` and `nodes`. Each edge has an `edge_id`, a number that stays the same when you build the area again, so your
 own data can join to it (chapter 5).
+
+> **Key idea:** one area is one file. The networks of all modes, the nodes, the turns and the base map of the area
+> are in the same `.duckdb` file, and `edge_id` connects them to your own data.
 
 > **Tip:** you can open the file with any DuckDB tool (the `duckdb` program, DBeaver, Python's `duckdb`), not only
 > with duckOSM."""))
@@ -147,6 +155,14 @@ A mode is one network. Each mode keeps the roads that it can use, with its own r
 | `driving` | the roads for cars (motorway to residential, service roads, ramps), with one-way rules and turn restrictions | footways, paths, steps, private roads |
 | `walking` | footways, paths, steps, pedestrian streets, sidewalks, and the roads where people can walk | motorways and roads where walking is not allowed |
 | `cycling` | cycleways, roads for bicycles, and footways where you can push the bicycle | motorways, steps |
+
+The picture shows Monaco: in each panel, all the roads are gray, and the roads of that mode have its color. Walking
+has the steps and footways of the old town; driving has the tunnel loop in the west and no footways.
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/modes-monaco.png" alt="Monaco: the driving, walking and cycling networks" width="100%">
+
+> **Key idea:** a road can be in more than one mode. A street with sidewalks is in all three, with the same
+> `edge_id` in each mode. So you join your data once, and it is correct in every mode.
 
 `net.walking` (or `net["walking"]`) is the view of one mode: the same calls, without `mode=`."""))
 cells.append(code("""net.walking            # the card of one mode"""))
@@ -293,9 +309,49 @@ cells.append(md("""## Where the files go
 
 cells.append(md("""## Try it yourself
 
-1. Get the walking network of 1 km around a place that you know, with `point=` and `dist_m=1000`.
-2. Build Monaco twice, once with `speeds=False`, and compare `net.columns("driving.edges")` of both files.
-3. Use `dry_run=True` for your own city, and look at the size of its extract before you get it."""))
+**1.** Get the walking network of 1 km around a place that you know, with `point=` and `dist_m=1000`.
+
+<details><summary>Show the answer</summary>
+
+```python
+mine = duckosm.network(point=(2.2945, 48.8584), dist_m=1000, modes=["walking"], name="eiffel")   # the Eiffel Tower
+mine.summary()
+```
+</details>
+
+**2.** Build Monaco twice, once with `speeds=False`, and find the columns that the second file does not have.
+
+<details><summary>Show the answer</summary>
+
+```python
+fast = duckosm.network(osm_id=2220322, name="monaco_nospeed", modes=["driving"], speeds=False)
+set(net.columns("driving.edges").column_name) - set(fast.columns("driving.edges").column_name)   # maxspeed_kmh, cost_s
+```
+</details>
+
+**3.** Use `dry_run=True` for your own city, and look at the size of its extract before you get it.
+
+<details><summary>Show the answer</summary>
+
+```python
+plan = duckosm.get("Tartu", dry_run=True)     # any city name
+plan["extract"]["name"], round(plan["extract"]["bytes"] / 1e6, 1), "MB"
+```
+</details>"""))
+
+cells.append(md("""## Words in this chapter
+
+| Word | Meaning |
+|---|---|
+| area | the part of the world that you build: a city, a district, a box |
+| boundary | the polygon of the area (`<name>.geojson`) |
+| extract | a file of OSM data for a country or a region, from Geofabrik |
+| PBF | the file format of OSM data (`.osm.pbf`) |
+| cut | the part of an extract inside the boundary |
+| mode | one network: driving, walking or cycling |
+| edge | one direction of a road between two nodes: a row of `<mode>.edges` |
+| node | a point where edges meet: a row of `<mode>.nodes` |
+| `edge_id` | the number of an edge; it stays the same when you build the area again |"""))
 
 cells.append(md("""## Summary
 
