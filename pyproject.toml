@@ -42,6 +42,7 @@ levels = ["roadstyle>=0.24.2"]               # duckosm levels: the level area (r
 viz = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib"]  # net.map / plot / dashboard, duckosm viz, route-map, gmns-map
 graph = ["networkx", "rustworkx>=0.15"]      # duckosm.ml: to_networkx, to_rustworkx
 sim = ["eclipse-sumo"]                       # duckosm.sim: SUMO's netconvert for to_sumo
+analysis = ["networkx", "matplotlib", "geopandas"]  # duckosm.analysis: to_osmnx, plot_orientation, sample_points, clip
 widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
 all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9"]
 # the old names: they stay

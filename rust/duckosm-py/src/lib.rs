@@ -8,6 +8,8 @@
 //! ```
 
 #[cfg(feature = "duckdb")]
+mod analysis;
+#[cfg(feature = "duckdb")]
 mod api;
 
 use duckosm_build::{
@@ -295,6 +297,8 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StepSink>()?;
     #[cfg(feature = "duckdb")]
     api::add(m)?;
+    #[cfg(feature = "duckdb")]
+    analysis::add(m)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

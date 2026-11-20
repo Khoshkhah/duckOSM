@@ -107,7 +107,7 @@ The plan of each module and its decision: [Python SDK: the modules](python-modul
 
 | Module | Users | Today | Page |
 |---|---|---|---|
-| `duckosm.analysis` | street network analysts (OSMnx) | comes in PR 2 | [analysis](sdk/analysis.md) |
+| `duckosm.analysis` | street network analysts (OSMnx) | `stats`, `streets_per_node`, `bearings`, `orientation_entropy`, `plot_orientation`, `nearest_nodes`, `nearest_edges`, `components`, `largest_component`, `clip`, `add_elevation`, `grades`, `sample_points`, `to_osmnx` | [analysis](sdk/analysis.md) |
 | `duckosm.gis` | GIS and data engineers | `to_gis`, `quack`, `admin` | [gis](sdk/gis.md) |
 | `duckosm.routing` | routing and accessibility | `route`, `route_points`, `route_multimodal`, `route_multimodal_points`, `directions` | [routing](sdk/routing.md) |
 | `duckosm.sim` | traffic simulation | `to_sumo`, `to_matsim`, `to_matsim_lanes` | [sim](sdk/sim.md) |
