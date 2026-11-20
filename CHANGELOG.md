@@ -10,6 +10,17 @@
 - **The crossings of `duckosm gmns` do not stop the export on a GEOS `TopologyException`.** The lane surface is made again
   with the points rounded to 1 mm, then 1 cm (GEOS also tries again with less precision); a lane that still fails has no
   crossing, and the export says how many.
+- **The turn-arrow pass of `duckosm gmns` (netconvert's OSM import) stopped with "connection-source edge ... is not
+  known".** netconvert joins the OSM nodes at one position: an inner point of an edge at the place of a node split the
+  edge. Île-de-France has such a pair (a service road that ends on a point of Rue des Collinettes, two OSM nodes at one
+  place). The pass now leaves out such a point; it reads back only the lane connections, not the shapes.
+- **The main SUMO pass of `duckosm gmns` stopped with "connection-destination edge ... not known".** A `turn_permission`
+  row can go into a private edge that is not in the SUMO network (Île-de-France). The pass now writes only the
+  connections between edges of the network.
+- **The crossings of `duckosm gmns` took hours on a dense area** (the Paris tile: more than 5 hours, now 2 minutes for
+  the whole tile without netconvert). Three steps did a scan of all lanes or all crossings for each crossing: the lanes
+  near a line, the lanes of the crossed links (or of the way of a zebra node), and the overlap with the crossings
+  already placed. A grid of 100 m and maps by link and by way replace the scans. The result is the same (golden tests).
 - **`duckosm opendrive` writes the file while it reads the rows.** Before, it kept all lines, then the whole file, in
   memory. With `--junctions`, the movements, the junction nodes and the road-to-road links stay in DuckDB (they spill to
   disk past its limit of 2 GB). The file is byte-equal. Kentucky: roads only 33.6 s and 8.3 GB before, 21 s and 0.52 GB

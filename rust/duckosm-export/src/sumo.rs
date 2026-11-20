@@ -379,6 +379,11 @@ fn arrow_connections(
         t
     };
     let node_ids: HashSet<i64> = nodes.iter().map(|n| n.0).collect();
+    // netconvert's OSM import joins the nodes at one position: a shape point at the place of a node (or of an earlier shape
+    // point) would split the way, and a connection would then name an edge that netconvert does not know. Such a point
+    // stays out: this pass reads back only the lane connections, not the shapes.
+    let at = |x: f64, y: f64| ((x * 1e7).round() as i64, (y * 1e7).round() as i64);
+    let mut taken: HashSet<(i64, i64)> = nodes.iter().map(|n| at(n.1, n.2)).collect();
     let mut sumo_id: Vec<(String, i64)> = Vec::new();
     let mut f = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<osm version=\"0.6\">\n");
     for (n, x, y) in nodes {
@@ -395,11 +400,14 @@ fn arrow_connections(
         let pts: Vec<String> = shape(r.wkt.as_deref()).map(|s| s.split(' ').map(String::from).collect()).unwrap_or_default();
         if pts.len() > 2 {
             for pt in &pts[1..pts.len() - 1] {
+                let (x, y) = pt.split_once(',').unwrap();
+                if !taken.insert(at(x.parse().unwrap_or(f64::NAN), y.parse().unwrap_or(f64::NAN))) {
+                    continue;
+                }
                 shape_id += 1;
                 while node_ids.contains(&shape_id) {
                     shape_id += 1;
                 }
-                let (x, y) = pt.split_once(',').unwrap();
                 f.push_str(&format!("  <node id=\"{shape_id}\" lat=\"{y}\" lon=\"{x}\"/>\n"));
                 refs.push(shape_id);
             }
@@ -633,9 +641,19 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         let graph = format!("(SELECT k, from_edge, to_edge FROM {graph} QUALIFY row_number() OVER (PARTITION BY from_edge, to_edge ORDER BY k) = 1)");
         pairs_sql = format!("SELECT from_edge, to_edge FROM {graph} ORDER BY k");
         let has_perm = has_table(&con, mode, "turn_permission")?;
+        let net = if bus {
+            format!("SELECT edge_id FROM {mode}.edges UNION ALL SELECT edge_id FROM driving.private_edges WHERE access = 'bus'")
+        } else {
+            format!("SELECT edge_id FROM {mode}.edges")
+        };
         if has_perm {
             let mut st = con
-                .prepare(&format!("SELECT from_edge, to_edge, allowed, vehicles, except_vehicles FROM {mode}.turn_permission"))
+                // only the turns between edges of the network: a permission into an edge that SUMO does not have (a private
+                // edge that is not for buses) would name an edge that netconvert does not know
+                .prepare(&format!(
+                    "SELECT from_edge, to_edge, allowed, vehicles, except_vehicles FROM {mode}.turn_permission \
+                     WHERE from_edge IN ({net}) AND to_edge IN ({net})"
+                ))
                 .map_err(e)?;
             let perm: Vec<Perm> = st
                 .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<bool>>(2)?.unwrap_or(false), r.get(3)?, r.get(4)?)))

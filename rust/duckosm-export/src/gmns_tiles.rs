@@ -197,9 +197,20 @@ pub(crate) fn by_tiles(
         }
         let t0 = std::time::Instant::now();
         tile_source(c, &src, *t, present, has_raw)?;
+        let t1 = std::time::Instant::now();
         build(&src, &dst, &one)?;
+        let t2 = std::time::Instant::now();
         merge(c, &dst, *t, k == 0)?;
-        eprintln!("GMNS: tile {} ({}/{}) in {:.1} s", t.name(), k + 1, tiles.len(), t0.elapsed().as_secs_f64());
+        eprintln!(
+            "GMNS: tile {} ({}/{}) in {:.1} s (source {:.1} s, GMNS {:.1} s, merge {:.1} s)",
+            t.name(),
+            k + 1,
+            tiles.len(),
+            t0.elapsed().as_secs_f64(),
+            (t1 - t0).as_secs_f64(),
+            (t2 - t1).as_secs_f64(),
+            t2.elapsed().as_secs_f64()
+        );
     }
     Ok(())
 }

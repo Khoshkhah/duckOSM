@@ -74,12 +74,40 @@ struct Lanes {
     gpoly: Vec<Vec<crate::geos::Polygon>>,
     env: Vec<(f64, f64, f64, f64)>,
     tree: Vec<usize>,
+    /// the position of each lane in `tree`, and the lanes of each grid cell (`index`)
+    rank: Vec<usize>,
+    grid: HashMap<(i64, i64), Vec<usize>>,
+}
+
+/// The side of a grid cell of `Lanes::grid`, in metres.
+const CELL_M: f64 = 100.0;
+
+fn cells(e: (f64, f64, f64, f64)) -> impl Iterator<Item = (i64, i64)> {
+    let c = |v: f64| (v / CELL_M).floor() as i64;
+    let (x0, y0, x1, y1) = (c(e.0), c(e.1), c(e.2), c(e.3));
+    (x0..=x1).flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
 }
 
 impl Lanes {
     /// shapely's `STRtree(poly).query(geom)`: the lanes whose envelope meets `e`, in the tree's order.
+    /// A grid in place of the tree: a scan of all lanes for each query took hours on a large tile (Paris).
     fn query(&self, e: (f64, f64, f64, f64)) -> Vec<usize> {
-        self.tree.iter().copied().filter(|&j| meet(self.env[j], e)).collect()
+        let mut v: Vec<usize> = cells(e).filter_map(|k| self.grid.get(&k)).flatten().copied().filter(|&j| meet(self.env[j], e)).collect();
+        v.sort_unstable_by_key(|&j| self.rank[j]);
+        v.dedup();
+        v
+    }
+    fn index(&mut self) {
+        self.rank = vec![0; self.tree.len()];
+        for (r, &j) in self.tree.iter().enumerate() {
+            self.rank[j] = r;
+        }
+        // an empty surface has an infinite envelope, which meets nothing
+        for (j, e) in self.env.iter().enumerate().filter(|(_, e)| e.0.is_finite() && e.2.is_finite()) {
+            for k in cells(*e) {
+                self.grid.entry(k).or_default().push(j);
+            }
+        }
     }
     fn tangent(&self, j: usize, p: P) -> P {
         let g = &self.geom[j];
@@ -313,7 +341,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
     let to_ll = |x: f64, y: f64| (x / (kx * M) + x0, y / M + y0);
     let mut unbuffered = 0;
-    let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![] };
+    let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
     for (lid, lk, w, wkt, osm, ly, br, tu, is_conn) in &lanes {
         let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
         if shp::length(&g) < 0.5 {
@@ -336,6 +364,12 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         eprintln!("GMNS[crossings]: {unbuffered} lane(s) without a surface (the buffer failed also with less precision): no crossing on them");
     }
     l.tree = shp::strtree_order(&l.env);
+    l.index();
+    // the lanes of each link: a scan of all lanes for each crossing took hours on a large tile (Paris)
+    let mut lanes_of_link: HashMap<i64, Vec<usize>> = HashMap::new();
+    for (j, k) in l.link.iter().enumerate() {
+        lanes_of_link.entry(*k).or_default().push(j);
+    }
     // every crossing: (source, osm_id, type, markings, width, the line, the lanes it may use, level)
     struct Cand {
         src: &'static str,
@@ -373,13 +407,17 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
             cands.push(Cand { src: "w", osm: *osm, ct: ct.clone(), mk: mk.clone(), width: num(wd.as_deref()), line: pts, only: None, level: Some(level(ly, br, tu)) });
         }
     }
+    let mut lanes_of_way: HashMap<i64, Vec<usize>> = HashMap::new();
+    for (j, w) in l.way.iter().enumerate() {
+        lanes_of_way.entry(*w).or_default().push(j);
+    }
     let on_crossing_way: HashSet<i64> = ways.iter().flat_map(|w| w.4.iter().copied()).collect();
     for (osm, lon, lat, ct, mk) in &nodes {
         if on_crossing_way.contains(osm) || road_ways.get(osm).map(|s| s.len()) != Some(1) {
             continue;
         }
         let way = *road_ways[osm].iter().next().unwrap();
-        let only: HashSet<usize> = (0..l.geom.len()).filter(|j| l.way[*j] == way).collect();
+        let only: HashSet<usize> = lanes_of_way.get(&way).into_iter().flatten().copied().collect();
         let p = to_m(*lon, *lat);
         let mut near: Vec<usize> = only.iter().copied().filter(|j| shp::point_line_distance(p, &l.geom[*j]) < 12.0).collect();
         near.sort();
@@ -413,7 +451,8 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     found.sort_by(|a, b| b.0.total_cmp(&a.0)); // the long crossings first (a stable sort, as Python's)
     let mut crossing_rows: Vec<(String, &str, Option<String>, Option<String>, bool, f64, f64, i64, String)> = Vec::new();
     let mut lane_rows: Vec<(String, String, i64, f64, f64, f64, f64, bool)> = Vec::new();
-    let mut placed: Option<MultiPolygon<f64>> = None;
+    // the crossings placed so far, with their boxes: one union of all of them took hours on a large tile (Paris)
+    let mut placed: Vec<((f64, f64, f64, f64), MultiPolygon<f64>)> = Vec::new();
     let mut seen: HashMap<(&str, i64), usize> = HashMap::new();
     for (_, ci, parts, near) in &found {
         let cd = &cands[*ci];
@@ -504,8 +543,8 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
             let mid = (ends.iter().map(|p| p.0).sum::<f64>() / ends.len() as f64, ends.iter().map(|p| p.1).sum::<f64>() / ends.len() as f64);
             let crossed: HashSet<i64> = road.iter().map(|x| l.link[x.0]).collect();
             let part_lines: Vec<LineString<f64>> = parts.iter().map(|q| ls(q)).collect();
-            for j2 in 0..l.geom.len() {
-                if crossed.contains(&l.link[j2]) && !l.conn[j2] && cd.level.is_none_or(|v| l.level[j2] == v) {
+            for &j2 in crossed.iter().filter_map(|k| lanes_of_link.get(k)).flatten() {
+                if !l.conn[j2] && cd.level.is_none_or(|v| l.level[j2] == v) {
                     let dmin = part_lines.iter().map(|q| Euclidean.distance(&l.poly[j2], q)).fold(f64::INFINITY, f64::min);
                     if dmin < ROAD_REACH_M {
                         let pt = shp::interpolate(&l.geom[j2], shp::project(&l.geom[j2], mid));
@@ -525,8 +564,11 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
             ring.push(corners[0]);
             let rect = MultiPolygon(vec![Polygon::new(ls(&ring), vec![])]);
             let rect_area = rect.unsigned_area();
-            if let Some(pl) = &placed {
-                if rect.intersection(pl).unsigned_area() > MAX_OVERLAP * rect_area {
+            let re = env_of(&rect);
+            let mut near = placed.iter().filter(|(e, _)| meet(*e, re)).map(|(_, p)| p);
+            if let Some(first) = near.next() {
+                let pl = near.fold(first.clone(), |u, p| u.union(p));
+                if rect.intersection(&pl).unsigned_area() > MAX_OVERLAP * rect_area {
                     continue;
                 }
             }
@@ -589,10 +631,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
             }
         }
         for rect in fresh {
-            placed = Some(match placed {
-                None => rect,
-                Some(p) => p.union(&rect),
-            });
+            placed.push((env_of(&rect), rect));
         }
     }
     if !crossing_rows.is_empty() {
@@ -614,4 +653,29 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         ))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grid_query_is_the_scan() {
+        let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
+        let mut s = 7u64;
+        let mut r = || { s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (s >> 33) as f64 / (1u64 << 31) as f64 };
+        for _ in 0..500 {
+            let (x, y, w, h) = (r() * 2000.0 - 1000.0, r() * 2000.0 - 1000.0, r() * 300.0, r() * 30.0);
+            l.env.push((x, y, x + w, y + h));
+        }
+        l.env.push((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
+        l.tree = shp::strtree_order(&l.env);
+        l.index();
+        for _ in 0..200 {
+            let (x, y) = (r() * 2200.0 - 1100.0, r() * 2200.0 - 1100.0);
+            let e = (x, y, x + r() * 150.0, y + r() * 150.0);
+            let scan: Vec<usize> = l.tree.iter().copied().filter(|&j| meet(l.env[j], e)).collect();
+            assert_eq!(l.query(e), scan);
+        }
+    }
 }
