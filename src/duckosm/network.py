@@ -101,19 +101,33 @@ def network(place: str | None = None, *, modes: Iterable[str] | None = DEFAULT_M
 
     The area: ``place`` (a name), or one of ``bbox=(west, south, east, north)``, ``point=(lon, lat)`` with ``dist_m=``,
     ``osm_id=``, ``h3_cell=``, ``boundary=`` (a GeoJSON file, a dict or a GeoDataFrame), or ``pbf=`` (an ``.osm.pbf``
-    file of your own; ``boundary=`` cuts it). ``modes``: the networks (default driving, walking and cycling). ``fixes``: an
-    OSM fixes file for the cut and the build. The file is ``<out>/<name>.duckdb``. ``progress``: as :func:`duckosm.build`.
+    file of your own; ``boundary=`` cuts it, without it the whole file is the area). ``modes``: the networks (default
+    driving, walking and cycling). ``fixes``: an OSM fixes file for the cut and the build. The file is
+    ``<out>/<name>.duckdb``. The build options of :func:`duckosm.build` work here too: ``config=`` (a YAML or JSON file,
+    or a dict), ``speeds``, ``costs``, ``restrictions``, ``bus_routes``, ``connect_paths``,
+    ``snap_m``, ``dem``, ``features`` and ``levels``. ``progress``: as :func:`duckosm.build`.
 
     >>> net = duckosm.network("Monaco")
-    >>> net = duckosm.network(point=(7.4246, 43.7384), dist_m=500, modes=["walking"])"""
+    >>> net = duckosm.network(point=(7.4246, 43.7384), dist_m=500, modes=["walking"])
+    >>> net = duckosm.network(pbf="my.osm.pbf", boundary="area.geojson", bus_routes=False)"""
     from duckosm._api import build, get
+    from duckosm._api import BUILD_OPTIONS
     modes = None if modes is None else list(modes)
+    built = {k: area.pop(k) for k in list(area) if k in BUILD_OPTIONS or k in ("config", "dem", "features", "levels")}
+    area_args = ("osm_id", "bbox", "h3_cell", "boundary", "point", "dist_m", "cache", "refresh")
+    for k in area:                   # a wrong name: the nearest of the area arguments and the build options
+        if k not in area_args:
+            import difflib
+            names = [*area_args, *BUILD_OPTIONS, "config", "dem", "features", "levels"]
+            near = difflib.get_close_matches(k, names, n=1)
+            raise DuckOSMError(f"network has no argument {k!r}" + (f": did you mean {near[0]!r}?" if near else "") +
+                               f" The area: {', '.join(area_args)}. The build options: {', '.join(names[len(area_args):])}.")
     if pbf is not None:
         stem = name or Path(pbf).name.split(".")[0]
         return build(pbf=pbf, boundary=area.pop("boundary", None), modes=modes, output=Path(out) / f"{stem}.duckdb",
-                     fixes=fixes, progress=progress)
+                     fixes=fixes, progress=progress, **area, **built)
     return get(place, out=out, name=name, fixes=fixes, progress=progress, **area).build(modes=modes, fixes=fixes,
-                                                                                         progress=progress)
+                                                                                         progress=progress, **built)
 
 
 def resolve(target, mode: str | None, default: str | None = "driving"):
