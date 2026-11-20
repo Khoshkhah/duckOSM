@@ -41,10 +41,11 @@ levels = ["roadstyle>=0.24.2"]               # duckosm levels: the level area (r
 # the extras of the SDK (docs/proposals/python-sdk.md): one for each module whose libraries differ
 viz = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib"]  # net.map / plot / dashboard, duckosm viz, route-map, gmns-map
 graph = ["networkx", "rustworkx>=0.15"]      # duckosm.ml: to_networkx, to_rustworkx
+gis = ["geopandas"]                          # duckosm.gis: features, admin_boundaries (GeoDataFrames)
 sim = ["eclipse-sumo"]                       # duckosm.sim: SUMO's netconvert for to_sumo
 hdmap = ["commonroad-io"]                    # duckosm.hdmap: to_commonroad
 widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
-all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "commonroad-io", "anywidget>=0.9"]
+all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas", "commonroad-io"]
 # the old names: they stay
 networkx = ["networkx"]
 routing = ["networkx"]
