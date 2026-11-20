@@ -67,6 +67,41 @@ that names a module calls the function of that module, with the same other argum
 
 Later (PR 2 of the design): `network(address=...)`, `geocode(text)`, `geocode_to_gdf(text)`.
 
+### Your own PBF
+
+`pbf=` takes an `.osm.pbf` file of your own. With `boundary=`, the build cuts the file to that area; without it, the
+whole file is the area.
+
+```python
+net = duckosm.network(pbf="my_city.osm.pbf")                              # the whole file
+net = duckosm.network(pbf="my_region.osm.pbf", boundary="district.geojson")  # cut to the boundary
+```
+
+### Build options
+
+`network()`, `area.build()` and `build()` take these keywords. Each one sets a key of the config file
+(`config/template.yaml`).
+
+| Keyword | Default | Config key | What it does |
+|---|---|---|---|
+| `speeds` | `True` | `options.process_speeds` | `False`: no `maxspeed_kmh` (the raw `maxspeed` text stays) and no `cost_s` |
+| `costs` | `True` | `options.calculate_costs` | `False`: no `cost_s` (the travel time); needs `speeds` |
+| `restrictions` | `True` | `options.extract_restrictions` | `False`: no turn restrictions |
+| `bus_routes` | `True` | `options.bus_routes` | `False`: no `bus.routes` and `bus.route_edges` |
+| `connect_paths` | `True` | `clip.connectivity_rescue` | `False`: the free ends of paths are not connected to the network |
+| `snap_m` | `10` | `clip.connect_snap_m` | the distance in metres for `connect_paths` |
+| `features` | `True` | `--features` | `False`: no base-map layers (`features.*`) |
+| `levels` | `True` | `--levels` | `False`: no drawing order of the roads |
+| `dem` | none | `duckosm elevation` | a DEM file (GeoTIFF): after the build, the heights of the nodes and the edges |
+
+`config=` gives all the other keys: a YAML or JSON file, or a dict with the keys of `config/template.yaml`. A keyword
+overrides the same key of the config. A wrong keyword gives an error with the nearest name.
+
+```python
+net = duckosm.network(pbf="my.osm.pbf", config="my.yaml", bus_routes=False)
+net = duckosm.build(pbf="my.osm.pbf", config={"options": {"bus_routes": False}, "clip": {"connect_snap_m": 5}})
+```
+
 ## What is in the file
 
 | Call | Returns |
