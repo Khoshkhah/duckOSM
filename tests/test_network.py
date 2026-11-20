@@ -35,6 +35,8 @@ def test_tables(net):
     con.close()
     gdf = net.edges()
     assert len(gdf) == n and str(gdf.crs) == "EPSG:4326" and str(gdf.edge_id.dtype) == "int64"
+    assert gdf.length_m.dtype == "float64"                       # FLOAT columns as float64 ...
+    assert net.sql("SELECT 44.2::FLOAT AS x").x[0] == 44.2       # ... through their shortest text
     assert gdf.edge_id.is_monotonic_increasing and {"osm_id", "highway", "length_m", "maxspeed_kmh"} <= set(gdf.columns)
     main = net.edges(where="highway = 'primary'")
     assert 0 < len(main) < n and set(main.highway) == {"primary"}

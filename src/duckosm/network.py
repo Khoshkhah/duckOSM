@@ -71,9 +71,13 @@ class Network(os.PathLike):
         """The result of the SQL ``query`` as a pandas DataFrame. ``params``: the values of ``?`` or ``$name``."""
         con = self._connect()
         try:
-            return con.execute(query, params).df() if params is not None else con.sql(query).df()
+            df = con.execute(query, params).df() if params is not None else con.sql(query).df()
         finally:
             con.close()
+        # a DuckDB FLOAT is a float32: as float64 through its shortest text, so that 44.2 shows as 44.2, not 44.200001
+        for c in df.columns[df.dtypes == "float32"]:
+            df[c] = df[c].to_numpy().astype(str).astype("float64")
+        return df
 
     @property
     def modes(self):
