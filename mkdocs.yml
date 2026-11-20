@@ -122,6 +122,7 @@ not_in_nav: |
   guides/fix-osm-errors.md
 exclude_docs: |
   design/
+  proposals/
   development.md
   lane_map.md
   rust/
