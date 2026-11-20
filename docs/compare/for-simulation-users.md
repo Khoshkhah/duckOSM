@@ -38,7 +38,7 @@ pip install "duckosm[sim]"      # SUMO (netconvert, sumo) and sumolib
 ```python
 files = net.driving.to_sumo("out/sumo")
 ids = duckosm.sim.edge_map(files)                                   # SUMO id -> edge_id
-counts = pd.read_xml("out/sumo/edgedata.xml", xpath="//edge", dtype={"id": str})
+counts = pd.read_xml("out/sumo/edgedata.xml", xpath=".//edge", parser="etree", dtype={"id": str})
 cars = counts.merge(ids, on="id").groupby("edge_id").entered.sum()
 net.driving.map(color_by=cars)
 ```
