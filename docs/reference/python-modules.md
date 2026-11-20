@@ -24,14 +24,14 @@ flowchart LR
 |---|---|---|---|---|
 |  | `duckosm` (core) | All | `Network`, `ModeView`, `Area`, `network()`, `open()`, `edges()`, `nodes()`, `sql()`, `summary()`, `map()`, `dashboard()`; **`get`, `build`** | Approved |
 | 1 | `duckosm.analysis` | Street network analysts (OSMnx, momepy, cityseer) | Statistics, bearings, nearest nodes and edges, largest component, clip, elevation, `to_osmnx` | Approved |
-| 2 | `duckosm.gis` | GIS and data engineers (osmium, QuackOSM) | Features as a GeoDataFrame, OSM XML; **GIS formats, QuackOSM, Geofabrik, PMTiles** | To decide |
-| 3 | `duckosm.routing` | Routing, accessibility, logistics (openrouteservice, OSRM, r5py, pandana) | Many routes, k shortest paths, travel time matrices, isochrones, accessibility; **routes, point routes, multimodal, directions** | To decide |
-| 4 | `duckosm.sim` | Traffic simulation (SUMO, MATSim) | The map from SUMO and MATSim ids back to `edge_id`; **SUMO, MATSim, MATSim lanes** | To decide |
-| 5 | `duckosm.mobility` | Mobility data (movingpandas, trackintel, leuvenmapmatching) | Map matching onto `edge_id`, snap, join, aggregate, the `edge_id` map between builds | To decide |
-| 6 | `duckosm.planning` | Transport planning (AequilibraE, osm2gmns, path4gmns) | AequilibraE project; **GMNS, meso and micro networks, checks** | To decide |
-| 7 | `duckosm.hdmap` | Automated driving (scenariogeneration, CARLA, Lanelet2, CommonRoad) | CommonRoad; **OpenDRIVE, Lanelet2, lane graph, lane routes** | To decide |
-| 8 | `duckosm.ml` | Graph machine learning (PyTorch Geometric, DGL) | `to_pyg`, `to_dgl`; **networkx, rustworkx** | To decide |
-| 9 | `duckosm.fixes` | All groups | Edit the OSM fixes from Python, rebuild, diff; **the fixes file, `duckosm edit`** | To decide |
+| 2 | `duckosm.gis` | GIS and data engineers (osmium, QuackOSM) | Features as a GeoDataFrame, OSM XML; **GIS formats, QuackOSM, Geofabrik, PMTiles** | Approved |
+| 3 | `duckosm.routing` | Routing, accessibility, logistics (openrouteservice, OSRM, r5py, pandana) | Many routes, k shortest paths, travel time matrices, isochrones, accessibility; **routes, point routes, multimodal, directions** | Approved |
+| 4 | `duckosm.sim` | Traffic simulation (SUMO, MATSim) | The map from SUMO and MATSim ids back to `edge_id`; **SUMO, MATSim, MATSim lanes** | Approved |
+| 5 | `duckosm.mobility` | Mobility data (movingpandas, trackintel, leuvenmapmatching) | Map matching onto `edge_id`, snap, join, aggregate, the `edge_id` map between builds | Approved |
+| 6 | `duckosm.planning` | Transport planning (AequilibraE, osm2gmns, path4gmns) | AequilibraE project; **GMNS, meso and micro networks, checks** | Approved |
+| 7 | `duckosm.hdmap` | Automated driving (scenariogeneration, CARLA, Lanelet2, CommonRoad) | CommonRoad; **OpenDRIVE, Lanelet2, lane graph, lane routes** | Approved |
+| 8 | `duckosm.ml` | Graph machine learning (PyTorch Geometric, DGL) | `to_pyg`, `to_dgl`; **networkx, rustworkx** | Approved |
+| 9 | `duckosm.fixes` | All groups | Edit the OSM fixes from Python, rebuild, diff; **the fixes file, `duckosm edit`** | Approved |
 
 The decision for each module is one of these:
 
