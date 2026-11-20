@@ -75,17 +75,24 @@ jobs:
       # the Geofabrik index and the Monaco extract of duckosm get: the cache of the last run, then one download with
       # retries before the notebooks (the runner's connection to Geofabrik sometimes fails), so the notebooks read them
       # from ~/.cache/duckosm
-      - uses: actions/cache@v4
+      # restore, then save at once after a good download (not at the end of the job): a run on main that reaches Geofabrik
+      # gives its files to the pull requests, also when a notebook fails later
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/duckosm
           key: duckosm-downloads-${{ github.run_id }}
           restore-keys: duckosm-downloads-
-      - run: |
+      - id: prefetch
+        run: |
           for i in 1 2 3 4 5; do
             python -c "import duckosm; duckosm.get(osm_id=2220322, name='monaco', out='/tmp/prefetch')" && exit 0
             sleep 30
           done
           exit 1
+      - uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/duckosm
+          key: duckosm-downloads-${{ github.run_id }}
       - run: python -m pytest tests/test_network.py -q -rs -k "map or plot"
       # the saved outputs of the manual: each notebook with its outputs, maps as plot pictures (not 6 MB of HTML);
       # commit them from the artifact "notebooks"
