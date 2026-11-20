@@ -190,6 +190,14 @@ class Network(os.PathLike):
             con.load_extension("spatial")
         return con
 
+    def connect(self):
+        """A read-only DuckDB connection to the file, with the extension spatial loaded: for Arrow (``.arrow()``),
+        Polars (``.pl()``) or DuckDB relations. Close it after use, or use it in a ``with`` block.
+
+        >>> with net.connect() as con:
+        ...     t = con.sql("SELECT * FROM driving.edges").arrow()"""
+        return self._connect()
+
     def sql(self, query: str, params: Any = None):
         """The result of a SQL query as a pandas DataFrame (read-only; the extension spatial is loaded). ``params``: the
         values of ``?`` or ``$name``. FLOAT columns come as float64 (44.2, not 44.200001).
@@ -224,14 +232,52 @@ class Network(os.PathLike):
                      "WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name")
         return list(t.t)
 
-    def columns(self, table: str = "driving.edges"):
-        """The columns of a table (``schema.table``) and their types, as a DataFrame.
+    def schema(self, schema: str | None = None):
+        """One row for each table of the file: ``schema``, ``table``, ``rows``, ``columns`` and ``description`` (the
+        comment that the build writes; empty in a file of an older duckOSM). ``schema``: only the tables of that schema,
+        for example ``"driving"`` or ``"main"``.
 
-        >>> net.columns("walking.edges")"""
+        >>> net.schema()
+        >>> net.schema("driving")"""
+        where = "" if schema is None else " AND schema_name = $schema"
+        df = self.sql("SELECT schema_name AS schema, table_name AS \"table\", column_count AS columns, "
+                      "coalesce(comment, '') AS description FROM duckdb_tables() "
+                      f"WHERE database_name = current_database(){where} ORDER BY schema, \"table\"",
+                      None if schema is None else {"schema": schema})
+        if schema is not None and not len(df):
+            raise DuckOSMError(f"no schema {schema!r} in {self.path}; the schemas: "
+                               f"{', '.join(sorted({t.split('.')[0] for t in self.tables()}))}")
+        if len(df):                                  # exact counts: duckdb_tables().estimated_size is an estimate
+            counts = self.sql(" UNION ALL ".join(f"SELECT {i} AS i, count(*) AS n FROM \"{s}\".\"{n}\""
+                                                 for i, (s, n) in enumerate(zip(df.schema, df.table))))
+            df.insert(2, "rows", counts.sort_values("i").n.to_numpy())
+        return df
+
+    def _table(self, table):
+        """``(schema, name)`` of ``schema.table``, or an error that names the tables of the file."""
         if table not in self.tables():
             raise DuckOSMError(f"no table {table}; the tables: {', '.join(self.tables())}")
-        schema, name = table.split(".", 1)
-        return self.sql(f'DESCRIBE "{schema}"."{name}"')[["column_name", "column_type"]]
+        return table.split(".", 1)
+
+    def columns(self, table: str = "driving.edges"):
+        """The columns of a table (``schema.table``): ``column_name``, ``column_type`` and ``description`` (the comment
+        that the build writes; empty in a file of an older duckOSM), as a DataFrame.
+
+        >>> net.columns("walking.edges")"""
+        schema, name = self._table(table)
+        return self.sql("SELECT column_name, data_type AS column_type, coalesce(comment, '') AS description "
+                        "FROM duckdb_columns() WHERE database_name = current_database() AND schema_name = $s "
+                        "AND table_name = $t ORDER BY column_index", {"s": schema, "t": name})
+
+    def summarize(self, table: str = "driving.edges"):
+        """DuckDB's ``SUMMARIZE`` of a table: for each column the type, the minimum, the maximum, the number of distinct
+        values, the average, the quartiles, the count and the percentage of NULL values. Geometry columns are left out.
+
+        >>> net.summarize("driving.edges")"""
+        schema, name = self._table(table)
+        cols = self.columns(table)
+        keep = [c for c, ty in zip(cols.column_name, cols.column_type) if not ty.upper().startswith("GEOMETRY")]
+        return self.sql(f'SUMMARIZE SELECT {", ".join(chr(34) + c + chr(34) for c in keep)} FROM "{schema}"."{name}"')
 
     def summary(self):
         """One row for each mode: ``mode``, ``edges``, ``nodes``, ``km`` and ``oneway_km`` (the km of the one-way edges).
