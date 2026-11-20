@@ -314,13 +314,13 @@ def levels(db):
 
 
 def quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None,
-          tile_zoom=None):
+          tile_zoom=None, progress=None):
     """``duckosm quack``: the features table of QuackOSM, or with ``gdal=True`` the five layers of GDAL's OSM driver. Returns
     the paths of the files that it wrote."""
     formats = [formats] if isinstance(formats, str) else formats
     _run("quack", pbf, "-o", out, "--name", name, *_opt("--format", formats and ",".join(formats)),
          "--gdal" if gdal else None, *_opt("--fixes", fixes), *_opt("--threads", threads), None if sort else "--no-sort",
-         *_opt("--tiles", tiles), *_opt("--tile-zoom", tile_zoom))
+         *_opt("--tiles", tiles), *_opt("--tile-zoom", tile_zoom), progress=progress)
     out = Path(out)
     return sorted(out.glob(f"{name}_gdal*" if gdal else f"{name}_quack.*"))
 
