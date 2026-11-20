@@ -125,6 +125,20 @@ extra:
 
 A wall `type` is `front`, `back`, `side`, `party` or `court`. The result is in [`main.building_faces`](../reference/database.md#building_faces).
 
+## From Python
+
+`duckosm.fixes` writes the same file ([reference](../reference/sdk/fixes.md)).
+
+| Editor | Python |
+|---|---|
+| **Road** tab: a tag | `fixes.set(way=..., maxspeed=30)` |
+| **Road** tab: one-way, lanes, layer | `fixes.set(way=..., oneway=True, lanes=2, layer=1)` |
+| **Road** tab: delete the road | `fixes.remove(way=...)` |
+| remove the way from one network | `fixes.exclude(way=..., modes=["driving"])` |
+| **Changes**: **Build again** | `net.rebuild(fixes=fixes)` |
+| the editor on a map | `net.edit()` |
+| the edges that changed | `net.diff(fixed)` |
+
 ## Where the fixes are used
 
 | Command | How |

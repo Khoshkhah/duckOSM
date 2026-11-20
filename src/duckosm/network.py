@@ -452,8 +452,8 @@ class Network(os.PathLike):
         return analysis.stats(self, area_m2=area_m2, mode=mode)
 
     def route(self, a, b, mode: str | None = None, weight: str = "time") -> dict | None:
-        """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: two edge ids, or two ``(lon, lat)``
-        points. :func:`duckosm.routing.route`.
+        """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: edge ids, ``(lon, lat)`` points or
+        place names. A :class:`duckosm.routing.Route`. :func:`duckosm.routing.route`.
 
         >>> r = net.walking.route((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import routing
@@ -465,6 +465,41 @@ class Network(os.PathLike):
         >>> r = net.driving.route_points((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import routing
         return routing.route_points(self, a, b, mode=mode, **kwargs)
+
+    def routes(self, origins, destinations, mode: str | None = None, **kwargs) -> list:
+        """:func:`duckosm.routing.routes`: many routes, in parallel.
+
+        >>> rs = net.driving.routes([e1, e2], [e3, e4])"""
+        from duckosm import routing
+        return routing.routes(self, origins, destinations, mode=mode, **kwargs)
+
+    def k_shortest_paths(self, a, b, k: int = 3, mode: str | None = None, **kwargs) -> list:
+        """:func:`duckosm.routing.k_shortest_paths`: the ``k`` best routes (Yen).
+
+        >>> rs = net.driving.k_shortest_paths(e1, e2, k=3)"""
+        from duckosm import routing
+        return routing.k_shortest_paths(self, a, b, k=k, mode=mode, **kwargs)
+
+    def matrix(self, origins, destinations=None, mode: str | None = None, **kwargs):
+        """:func:`duckosm.routing.matrix`: a travel time (or distance) matrix, a DataFrame.
+
+        >>> m = net.driving.matrix(edge_ids)"""
+        from duckosm import routing
+        return routing.matrix(self, origins, destinations, mode=mode, **kwargs)
+
+    def isochrones(self, origins, minutes=(5, 10, 15), mode: str | None = None, **kwargs):
+        """:func:`duckosm.routing.isochrones`: the polygons reached within each time.
+
+        >>> iso = net.walking.isochrones([(7.4246, 43.7384)])"""
+        from duckosm import routing
+        return routing.isochrones(self, origins, minutes, mode=mode, **kwargs)
+
+    def accessibility(self, origins, targets, minutes=15, mode: str | None = None):
+        """:func:`duckosm.routing.accessibility`: the targets reached from each origin, and the nearest.
+
+        >>> acc = net.walking.accessibility(homes, shops, minutes=[5, 10])"""
+        from duckosm import routing
+        return routing.accessibility(self, origins, targets, minutes, mode=mode)
 
     def route_multimodal_points(self, a: tuple, b: tuple, **kwargs) -> dict:
         """:func:`duckosm.routing.route_multimodal_points`: a route across the modes (needs the multimodal graph ``mm``).
@@ -526,6 +561,53 @@ class Network(os.PathLike):
         from duckosm._progress import timed
         return timed(progress, f"OpenDRIVE {out_path}", lambda: hdmap.to_opendrive(self, out_path, mode=mode, **kwargs))
 
+    # ---- the OSM fixes: duckosm.fixes ------------------------------------------------------------------------------
+    @property
+    def fixes(self):
+        """The :class:`duckosm.fixes.Fixes` of the file that the network was built with, or None.
+
+        >>> net.fixes"""
+        from duckosm.fixes import Fixes
+        path = self._meta().get("fixes")
+        return Fixes(path) if path else None
+
+    def rebuild(self, fixes=None, out: str | os.PathLike | None = None, progress: Any = None) -> "Network":
+        """Build the area again, with the same modes, from the OSM file and the boundary beside the file (where
+        ``duckosm.network`` and ``Area.build`` put them), with ``fixes`` (a :class:`duckosm.fixes.Fixes` or a path).
+        ``out``: the new file (default: ``<name>_fixed.duckdb`` beside this one). Returns the new Network.
+
+        >>> fixed = net.rebuild(fixes=fixes)"""
+        from duckosm._api import build
+        pbf = self.path.with_name(self.path.name.split(".")[0] + ".osm.pbf")
+        if not pbf.is_file():
+            raise DuckOSMError(f"rebuild: no OSM file {pbf.name} beside {self.path.name}. Build with the Area: "
+                               f"duckosm.get(...).build(output=..., fixes=...)")
+        boundary = pbf.with_name(pbf.name.split(".")[0] + ".geojson")
+        out = Path(out) if out else self.path.with_name(self.path.name.split(".")[0] + "_fixed.duckdb")
+        if out.resolve() == self.path.resolve():
+            raise DuckOSMError("rebuild: give a new file in out=, not the file of this network")
+        return build(pbf=pbf, boundary=boundary if boundary.is_file() else None, modes=self.modes, output=out,
+                     fixes=None if fixes is None else os.fspath(fixes), progress=progress)
+
+    def diff(self, other, mode: str | None = None):
+        """:func:`duckosm.fixes.diff`: the edges that were added, removed or changed in ``other``, by ``edge_id``.
+
+        >>> net.diff(fixed)"""
+        from duckosm.fixes import diff
+        return diff(self, other, mode=mode)
+
+    def edit(self, fixes=None, port: int = 8790) -> str:
+        """Open ``duckosm edit`` on the file: the editor of the fixes, on a map. The server runs in the background while
+        Python runs; each change is saved in ``fixes`` at once (default: the fixes file of the build, else
+        ``osm_fixes.yaml`` beside the file). Returns the URL of the page.
+
+        >>> net.edit()"""
+        from duckosm import _rust
+        from duckosm.edit import _Db
+        if fixes is None:
+            fixes = self._meta().get("fixes") or self.path.with_name("osm_fixes.yaml")
+        return _rust.edit(str(self.path.resolve()), str(Path(fixes).resolve()), port, _Db(self.path.resolve()))
+
     def to_gis(self, out, mode: str | None = None, progress: Any = None, **kwargs) -> dict:
         """:func:`duckosm.gis.to_gis`: a GeoPackage, GeoParquet or shapefiles (``mode=None``: all modes).
 
@@ -543,7 +625,8 @@ class ModeView:
     >>> walk = net.walking
     >>> walk.edges(), walk.map(), walk.route((7.4155, 43.7285), (7.4335, 43.7468))"""
 
-    _CALLS = ("edges", "nodes", "map", "plot", "dashboard", "stats", "route", "route_points", "directions", "to_networkx",
+    _CALLS = ("edges", "nodes", "map", "plot", "dashboard", "stats", "route", "route_points", "routes", "k_shortest_paths", "matrix",
+              "isochrones", "accessibility", "directions", "to_networkx",
               "to_rustworkx", "to_sumo", "to_matsim", "to_gmns", "to_opendrive", "to_gis")
 
     def __init__(self, network: Network, mode: str):

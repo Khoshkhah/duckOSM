@@ -142,6 +142,7 @@ nav:
       - 4. Exports: notebooks/04_exports.md
       - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
       - 6. OSM data for GIS: notebooks/06_gis.md
+      - 11. Advanced routing: notebooks/11_routing_advanced.md
       - 12. Street network analysis: notebooks/12_analysis.md
       - 13. Mobility data: notebooks/13_mobility.md
   - Build an area:
@@ -205,6 +206,7 @@ nav:
   - Compare:
       - Overview: compare/index.md
       - Speed on France: compare/speed.md
+      - duckOSM for routing users: compare/for-routing-users.md
       - duckOSM and OSMnx: concepts/osmnx.md
       - duckOSM for GIS users: compare/for-gis-users.md
       - duckOSM for OSMnx users: compare/for-osmnx-users.md
