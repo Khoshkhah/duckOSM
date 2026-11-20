@@ -39,6 +39,23 @@ The old extras `networkx`, `rustworkx`, `routing` and `sumo` stay.
 | `Network` | A built `.duckdb` file with one or more modes. It is also the path of the file (`os.PathLike`). | `duckosm.network`, `duckosm.build`, `duckosm.open`, `Area.build` |
 | `ModeView` | One mode of a `Network`: the same calls with no `mode=` | `net["walking"]`, `net.walking` |
 
+## The methods of `Network`
+
+A method with `mode` takes the mode name; on a `ModeView` (`net.walking`) the same method has no `mode`. A method
+that names a module calls the function of that module, with the same other arguments.
+
+| Group | Methods and properties |
+|---|---|
+| Data | `sql(query, params=None)`, `tables()`, `columns(table)`, `summary()`, `modes`, `boundary`, `edges(mode, where=None, crs=None)`, `nodes(mode, crs=None)` |
+| Maps | `map(mode=None, theme=None, color_by=None, highlight=None, routes=None, **style)`, `dashboard(mode, **style)`, `save_map(path, mode=None, dashboard=False, **options)`, `plot(mode=None, color_by=None, highlight=None, routes=None, ax=None, **style)` |
+| [analysis](sdk/analysis.md) | `stats(mode, area_m2=None)` |
+| [routing](sdk/routing.md) | `route(a, b, mode, weight)`, `route_points(a, b, mode)`, `routes(origins, destinations, mode)`, `k_shortest_paths(a, b, k, mode)`, `matrix(origins, destinations, mode)`, `isochrones(origins, minutes, mode)`, `accessibility(origins, targets, minutes, mode)`, `route_multimodal_points(a, b)`, `directions(route, mode)` |
+| [ml](sdk/ml.md) | `to_networkx(mode)`, `to_rustworkx(mode)` |
+| Exports ([sim](sdk/sim.md), [planning](sdk/planning.md), [hdmap](sdk/hdmap.md), [gis](sdk/gis.md)) | `to_sumo(out_dir, mode)`, `to_matsim(out_path, mode)`, `to_gmns(out_path, mode)`, `to_opendrive(out_path, mode)`, `to_gis(out, mode)` |
+| [fixes](sdk/fixes.md) | `fixes`, `rebuild(fixes=None, out=None)`, `diff(other, mode)`, `edit(fixes=None, port=None)` |
+
+`ModeView` also has `save_map(path, **options)` and `summary()` for its mode. `Area` has `build(...)`, which gives a `Network`.
+
 ## Get a network
 
 | Call | Does |
@@ -105,17 +122,19 @@ The plan of each module and its decision: [Python SDK: the modules](python-modul
 `Network`, a `ModeView`, a path or a DuckDB connection. The methods of `Network` call them:
 `net.walking.route(a, b)` is `duckosm.routing.route(net.walking, a, b)`.
 
-| Module | Users | Today | Page |
-|---|---|---|---|
-| `duckosm.analysis` | street network analysts (OSMnx) | `stats`, `streets_per_node`, `bearings`, `orientation_entropy`, `plot_orientation`, `nearest_nodes`, `nearest_edges`, `components`, `largest_component`, `clip`, `add_elevation`, `grades`, `sample_points`, `to_osmnx` | [analysis](sdk/analysis.md) |
-| `duckosm.gis` | GIS and data engineers | `to_gis`, `quack`, `admin` | [gis](sdk/gis.md) |
-| `duckosm.routing` | routing and accessibility | `route`, `route_points`, `route_multimodal`, `route_multimodal_points`, `directions` | [routing](sdk/routing.md) |
-| `duckosm.sim` | traffic simulation | `to_sumo`, `to_matsim`, `to_matsim_lanes` | [sim](sdk/sim.md) |
-| `duckosm.planning` | transport planning | `to_gmns`, `check_gmns`, `to_meso`, `to_micro` | [planning](sdk/planning.md) |
-| `duckosm.mobility` | mobility data | `snap`, `match`, `join`, `aggregate`, `edge_id_map` | [mobility](sdk/mobility.md) |
-| `duckosm.hdmap` | automated driving and HD maps | `to_opendrive`, `to_lanelet2`, `lane_graph`, `route_lanes` | [hdmap](sdk/hdmap.md) |
-| `duckosm.ml` | graph machine learning | `to_networkx`, `to_networkx_nodes`, `to_rustworkx` | [ml](sdk/ml.md) |
-| `duckosm.fixes` | all groups | comes in PR 6 | [fixes](sdk/fixes.md) |
+| Module | Users | Functions and classes |
+|---|---|---|
+| [`duckosm.analysis`](sdk/analysis.md) | street network analysts (OSMnx) | `stats`, `streets_per_node`, `bearings`, `orientation_entropy`, `plot_orientation`, `nearest_nodes`, `nearest_edges`, `components`, `largest_component`, `clip`, `add_elevation`, `grades`, `sample_points`, `to_osmnx` |
+| [`duckosm.gis`](sdk/gis.md) | GIS and data engineers | `features`, `admin_boundaries`, `to_osm_xml`, `to_gis`, `quack`, `admin` |
+| [`duckosm.routing`](sdk/routing.md) | routing and accessibility | `Route`, `route`, `route_points`, `routes`, `k_shortest_paths`, `matrix`, `isochrones`, `accessibility`, `geocode`, `routed_graph`, `route_multimodal`, `route_multimodal_points`, `directions`, `Router`, `to_networkx`, `to_networkx_nodes`, `write_graph` |
+| [`duckosm.sim`](sdk/sim.md) | traffic simulation | `to_sumo`, `to_matsim`, `to_matsim_lanes`, `sumo_net`, `edge_map` |
+| [`duckosm.planning`](sdk/planning.md) | transport planning | `to_gmns`, `check_gmns`, `to_meso`, `to_micro`, `to_path4gmns`, `to_aequilibrae` |
+| [`duckosm.mobility`](sdk/mobility.md) | mobility data | `snap`, `match`, `join`, `aggregate`, `edge_id_map` |
+| [`duckosm.hdmap`](sdk/hdmap.md) | automated driving and HD maps | `to_opendrive`, `to_lanelet2`, `to_commonroad`, `build_lane_graph`, `route_lanes` |
+| [`duckosm.ml`](sdk/ml.md) | graph machine learning | `to_networkx`, `to_networkx_nodes`, `to_rustworkx`, `graph_arrays`, `to_pyg`, `to_dgl` |
+| [`duckosm.fixes`](sdk/fixes.md) | all groups | `Fixes`, `diff` |
+
+Each module page has one row for each function: its arguments, what it returns and the OSMnx or other tool function that it matches.
 
 ## The functions of the package
 
