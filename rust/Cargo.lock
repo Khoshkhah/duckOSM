@@ -966,6 +966,7 @@ dependencies = [
  "duckosm-build",
  "flate2",
  "geo",
+ "pbfcut",
  "rusqlite",
 ]
 
