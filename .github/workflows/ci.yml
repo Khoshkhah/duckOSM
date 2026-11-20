@@ -17,16 +17,20 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      notebooks: ${{ steps.diff.outputs.notebooks }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - id: diff
         run: |
-          if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "${{ github.event_name }}" != pull_request ]; then echo code=true >> "$GITHUB_OUTPUT"; echo notebooks=true >> "$GITHUB_OUTPUT"; exit 0; fi
           files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")
           echo "$files"
-          if echo "$files" | grep -vE '^(docs/|README\.md$|CHANGELOG\.md$|mkdocs\.yml$)' | grep -q .; then echo code=true; else echo code=false; fi >> "$GITHUB_OUTPUT"
+          if echo "$files" | grep -vE '^(docs/|README\.md$|CHANGELOG\.md$|mkdocs\.yml$)' | grep -q .; then code=true; else code=false; fi
+          echo code=$code >> "$GITHUB_OUTPUT"
+          # the notebooks run on a change of the code or of a notebook
+          if [ $code = true ] || echo "$files" | grep -q '^docs/notebooks/'; then echo notebooks=true; else echo notebooks=false; fi >> "$GITHUB_OUTPUT"
 
   # the docs site, as docs.yml builds it for Pages
   docs:
@@ -38,8 +42,33 @@ jobs:
         with:
           python-version: "3.12"
       # MkDocs 2.0 drops the plugin/theme system Material depends on: stay on 1.x
-      - run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6"
+      - run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6" "nbconvert>=7,<8"
+      # the pages of the notebooks (docs/notebooks/index.md links them): Markdown with the saved outputs
+      - run: jupyter nbconvert --to markdown docs/notebooks/[0-9]*.ipynb
       - run: mkdocs build --strict
+
+  # the demo notebooks of the manual (docs/notebooks/): each cell must run on Monaco. The live roadstyle maps run here; the
+  # saved outputs have pictures (DUCKOSM_STATIC_MAPS=1 when they are made).
+  notebooks:
+    needs: changes
+    if: needs.changes.outputs.notebooks == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          # only main saves: the store has 10 GB, and the caches of pull requests pushed out main's (each about 0.9 GB)
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # the extras of the five install cells; [sim] brings netconvert
+      - run: pip install -e ".[widget,viz,graph,sim,gis,planning]" pytest nbmake
+      - run: python -m pytest --nbmake docs/notebooks/ -q
 
   test:
     needs: changes

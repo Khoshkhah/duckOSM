@@ -62,9 +62,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
            srs: str = "EPSG:4326", ogr2ogr_bin: str = None):
-    """See :func:`duckosm.gis.to_gis`. ``ogr2ogr_bin`` is not used: Rust writes the GeoPackage through DuckDB."""
+    """See :func:`duckosm._gis_py.to_gis`. ``ogr2ogr_bin`` is not used: Rust writes the GeoPackage through DuckDB."""
     if _db(con) is None:
-        from duckosm import gis
+        from duckosm import _gis_py as gis
         return gis.to_gis(con, out, modes, fmt, boundary, name, srs, ogr2ogr_bin)
     modes = [modes] if isinstance(modes, str) else list(modes or [])
     r = json.loads(_rust().to_gis(_db(con), str(out), modes, fmt, boundary, name, srs))
@@ -117,13 +117,13 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
 
 class Router:
     """Build the routing graph of one mode once, then answer many shortest-route queries. See
-    :class:`duckosm.routing.Router`; the graph is in Rust, so there is no ``.graph``."""
+    :class:`duckosm._routing_py.Router`; the graph is in Rust, so there is no ``.graph``."""
 
     def __init__(self, con, mode: str = "driving", weight: str = "time"):
         self.con, self.mode, self.weight = con, mode, weight
         db = _db(con)
         if db is None:
-            from duckosm import routing
+            from duckosm import _routing_py as routing
             self._py = routing.Router(con, mode, weight)
         else:
             self._py, self._r = None, _rust().Router(db, mode, weight)
@@ -141,18 +141,18 @@ class Router:
 
 
 def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
-    """See :func:`duckosm.routing.route`. With a networkx ``graph``, the Python code."""
+    """See :func:`duckosm._routing_py.route`. With a networkx ``graph``, the Python code."""
     if graph is not None or _db(con) is None:
-        from duckosm import routing
+        from duckosm import _routing_py as routing
         return routing.route(con, from_edge, to_edge, mode=mode, weight=weight, graph=graph)
     return Router(con, mode, weight).route(from_edge, to_edge)
 
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
                      end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None, _points=None):
-    """See :func:`duckosm.routing.route_multimodal`."""
+    """See :func:`duckosm._routing_py.route_multimodal`."""
     if _points is not None or _db(con) is None:
-        from duckosm import routing
+        from duckosm import _routing_py as routing
         return routing.route_multimodal(con, src_node, dst_node, schema, start_mode, end_mode, enforce_sequence,
                                         allowed_modes, _points)
     modes = None if allowed_modes is None else list(allowed_modes)
@@ -236,15 +236,46 @@ def to_rustworkx(con, mode="driving", graph="turns", weight="time"):
 # Each function runs the program duckosm (the Rust code, duckosm._rust.cli) in its own process, with the options of its
 # command: the memory goes back to the system at the end, and the global thread pool of a command starts new each time.
 
-def _run(*args):
-    """Run ``duckosm ARGS`` and give its standard output. A failure raises RuntimeError with the message of the command."""
+def _stream(args, progress=None):
+    """Run ``duckosm ARGS``; give each line of its standard error (its progress) to ``progress`` as it comes. Returns
+    ``(stdout, the lines of stderr)``. A failure raises :class:`duckosm.DuckOSMError` with the message of the command."""
     import subprocess
     import sys
+    import threading
+    from duckosm.errors import DuckOSMError
     cmd = [sys.executable, "-m", "duckosm", *(str(a) for a in args if a is not None)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"duckosm {args[0]}: {(r.stderr or r.stdout).strip()}")
-    return r.stdout + r.stderr
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # stdout in a thread: a large output (the JSON of get --dry-run) fills the pipe, and the program then waits
+    out = []
+    reader = threading.Thread(target=lambda: out.append(p.stdout.read()))
+    reader.start()
+    err, part = [], b""
+
+    def line(raw):
+        text = raw.decode(errors="replace").strip()
+        if text:
+            err.append(text)
+            progress and progress(text)
+
+    for chunk in iter(lambda: p.stderr.read1(4096), b""):    # a download line ends with "\r"
+        *lines, part = (part + chunk).replace(b"\r", b"\n").split(b"\n")
+        for raw in lines:
+            line(raw)
+    line(part)
+    reader.join()
+    stdout = out[0].decode(errors="replace")
+    if p.wait() != 0:
+        message = "\n".join(err) or stdout
+        raise DuckOSMError(f"duckosm {args[0]}: {message.strip()}")
+    return stdout, err
+
+
+def _run(*args, progress=None):
+    """Run ``duckosm ARGS`` and give its standard output and standard error. ``progress``: see
+    :func:`duckosm._progress.reporter`. A failure raises :class:`duckosm.DuckOSMError` (a ``RuntimeError``)."""
+    from duckosm._progress import reporter
+    stdout, err = _stream(args, reporter(progress))
+    return stdout + "\n".join(err)
 
 
 def _opt(flag, value):
@@ -258,16 +289,21 @@ def _each(flag, values):
 
 
 def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None,
-          features=None, levels=None, graph=None, h3_index=None, h3_resolution=None):
+          features=None, levels=None, graph=None, h3_index=None, h3_resolution=None, progress=None):
     """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``). ``config``: a
-    config file; an option that is not None overrides it. Returns the path of the .duckdb file."""
+    config file; an option that is not None overrides it. ``progress``: None shows one progress line in a notebook,
+    False shows nothing, a function gets each line. Returns the :class:`duckosm.Network` of the .duckdb file (also its
+    path: ``os.PathLike``).
+
+    >>> net = duckosm.build(pbf=area.pbf, boundary=area.boundary, modes=["driving", "walking"])"""
     def flag(name, value):
         return None if value is None else (f"--{name}" if value else f"--no-{name}")
     text = _run("build", *_opt("-c", config), *_opt("-p", pbf), *_opt("-o", output), *_opt("-b", boundary),
                 *_opt("--source-db", source_db), *_opt("--h3-cell", h3_cell), *_each("-m", modes), *_opt("--fixes", fixes),
                 flag("features", features), flag("levels", levels), flag("graph", graph), flag("h3-index", h3_index),
-                *_opt("--h3-resolution", h3_resolution))
-    return Path(text.rsplit("Output: ", 1)[1].strip())
+                *_opt("--h3-resolution", h3_resolution), progress=progress)
+    from duckosm.network import Network
+    return Network(text.rsplit("Output: ", 1)[1].strip())
 
 
 def levels(db):
@@ -278,13 +314,13 @@ def levels(db):
 
 
 def quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None,
-          tile_zoom=None):
+          tile_zoom=None, progress=None):
     """``duckosm quack``: the features table of QuackOSM, or with ``gdal=True`` the five layers of GDAL's OSM driver. Returns
     the paths of the files that it wrote."""
     formats = [formats] if isinstance(formats, str) else formats
     _run("quack", pbf, "-o", out, "--name", name, *_opt("--format", formats and ",".join(formats)),
          "--gdal" if gdal else None, *_opt("--fixes", fixes), *_opt("--threads", threads), None if sort else "--no-sort",
-         *_opt("--tiles", tiles), *_opt("--tile-zoom", tile_zoom))
+         *_opt("--tiles", tiles), *_opt("--tile-zoom", tile_zoom), progress=progress)
     out = Path(out)
     return sorted(out.glob(f"{name}_gdal*" if gdal else f"{name}_quack.*"))
 
@@ -333,21 +369,55 @@ class Area:
     def __repr__(self):
         return f"Area(pbf={str(self.pbf)!r}, boundary={str(self.boundary)!r})"
 
+    def build(self, modes=None, *, output=None, fixes=None, progress=None, **options):
+        """Build the network of this area: :func:`duckosm.build` with this OSM file and boundary. ``output``: the
+        ``.duckdb`` file (default: next to the OSM file). Returns the :class:`duckosm.Network`.
 
-def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=".", name=None, fixes=None,
-        cache=None, refresh=False, dry_run=False, progress=None):
+        >>> net = duckosm.get("Monaco").build(modes=["driving", "walking"])"""
+        output = output or self.pbf.parent / f"{self.pbf.name.split('.')[0]}.duckdb"
+        return build(pbf=self.pbf, boundary=self.boundary, modes=modes, output=output, fixes=fixes, progress=progress,
+                     **options)
+
+    def _repr_html_(self):
+        """The card of the area in a notebook: its name and its two files with their sizes."""
+        from html import escape
+        rows = "".join(f"<tr><td>{k}</td><td><code>{escape(str(p))}</code></td><td>{_size(p)}</td></tr>"
+                       for k, p in (("OSM file", self.pbf), ("boundary", self.boundary)))
+        return (f"<div><b>Area {escape(self.pbf.name.split('.')[0])}</b>"
+                f"<table><tr><th></th><th>file</th><th>size</th></tr>{rows}</table></div>")
+
+
+def _size(path):
+    """The size of a file as text (for example "1.2 MB"), or "missing"."""
+    try:
+        n = os.path.getsize(path)
+    except OSError:
+        return "missing"
+    return f"{n / 1e6:.1f} MB" if n >= 1e5 else f"{n / 1e3:.0f} kB"
+
+
+def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, point=None, dist_m=1000, out=".", name=None,
+        fixes=None, cache=None, refresh=False, dry_run=False, progress=None):
     """``duckosm get``: the boundary of an area, the smallest Geofabrik extract that holds it (downloaded to a cache
     folder), and the cut of the extract to the boundary, with the OSM ``fixes`` in it when given. Give one of
-    ``place``, ``osm_id``, ``bbox`` (``(west, south, east, north)``), ``h3_cell`` and ``boundary``. ``boundary`` is a
+    ``place``, ``osm_id``, ``bbox`` (``(west, south, east, north)``), ``h3_cell``, ``point`` and ``boundary``.
+    ``point``: ``(lon, lat)``, the area is the box ``dist_m`` metres from it in each direction. ``boundary`` is a
     GeoJSON file, or GeoJSON as a dict (a geometry, a Feature or a FeatureCollection), or an object with
     ``__geo_interface__`` (shapely, geopandas): it is written to ``<out>/<name>.geojson`` (``name`` default ``"area"``).
     Returns an :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``.
 
     ``dry_run=True`` downloads and writes nothing: it returns a dict with the ``name``, the ``boundary`` (a GeoJSON
-    Feature) and the ``extract`` (``id``, ``name``, ``km2``, ``url``, ``bytes``, ``cached``). ``progress``: a function
-    that gets each progress line of the program (the download too)."""
-    import subprocess
-    import sys
+    Feature) and the ``extract`` (``id``, ``name``, ``km2``, ``url``, ``bytes``, ``cached``). ``progress``: None shows
+    one progress line in a notebook, False shows nothing, a function gets each line (the download too).
+
+    >>> area = duckosm.get("Monaco")
+    >>> area = duckosm.get(point=(7.4246, 43.7384), dist_m=500)"""
+    import math
+    from duckosm._progress import reporter
+    if point is not None:            # the box around the point (as osmnx graph_from_point)
+        lon, lat = (float(v) for v in point)
+        dy, dx = dist_m / 111_320, dist_m / (111_320 * math.cos(math.radians(lat)))
+        bbox, name = (lon - dx, lat - dy, lon + dx, lat + dy), name or "point"
     if boundary is not None and not isinstance(boundary, (str, os.PathLike)):
         geo = getattr(boundary, "__geo_interface__", boundary)
         if not isinstance(geo, dict):
@@ -364,32 +434,7 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=
         if value is not None:
             args += [flag, value]
     args += ["--refresh"] * bool(refresh) + ["--dry-run"] * bool(dry_run)
-    cmd = [sys.executable, "-m", "duckosm", "get", *(str(a) for a in args if a is not None)]
-    import threading
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # stdout in a thread: a large boundary (the JSON of --dry-run) fills the pipe, and the program then waits
-    out = []
-    reader = threading.Thread(target=lambda: out.append(p.stdout.read()))
-    reader.start()
-    # the program writes its progress to stderr; the download line ends with "\r"
-    err, part = [], b""
-
-    def line(raw):
-        text = raw.decode(errors="replace").strip()
-        if text:
-            err.append(text)
-            progress and progress(text)
-
-    for chunk in iter(lambda: p.stderr.read1(4096), b""):
-        *lines, part = (part + chunk).replace(b"\r", b"\n").split(b"\n")
-        for raw in lines:
-            line(raw)
-    line(part)
-    reader.join()
-    stdout = out[0].decode(errors="replace")
-    if p.wait() != 0:
-        message = "\n".join(err) or stdout
-        raise RuntimeError(f"duckosm get: {message.strip()}")
+    stdout, _ = _stream(["get", *args], reporter(progress))
     if dry_run:
         return json.loads(stdout)
     # the line "wrote <pbf> and <geojson> in <s> s"

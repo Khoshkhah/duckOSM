@@ -21,6 +21,34 @@
   the whole tile without netconvert). Three steps did a scan of all lanes or all crossings for each crossing: the lanes
   near a line, the lanes of the crossed links (or of the way of a zebra node), and the overlap with the crossings
   already placed. A grid of 100 m and maps by link and by way replace the scans. The result is the same (golden tests).
+- **`duckosm.routing`, the routing module of the SDK** (`docs/reference/sdk/routing.md`). `route` gives a `Route`
+  (also the old dict): `.edges` (a GeoDataFrame in route order), `.length_m`, `.time_s`, `.geometry`, `.directions()`,
+  `.map()` and a card. A place is an edge id, a `(lon, lat)` point or a place name (`geocode`). New calls, in Rust on
+  the graph of `route`: `routes` (many routes in parallel), `k_shortest_paths` (Yen), `matrix` (one Dijkstra for each
+  origin, in parallel), `isochrones` (the reached edges with a buffer) and `accessibility`. Each is also a method of a
+  `Network` and a `ModeView`. The tests check each result against `route` on Monaco. A guide for users of
+  openrouteservice, OSRM, r5py, pandana and OSMnx (`docs/compare/for-routing-users.md`) and the notebook "11.
+  Advanced routing" (`docs/notebooks/11_routing_advanced.ipynb`).
+- **The Python SDK, PR 1 of its design** (`docs/proposals/python-sdk.md`). The core: `duckosm.network("Monaco")` gets
+  and builds an area in one call; `duckosm.build` and `Area.build` give a `Network` (it acts as the path, so old code
+  works); `duckosm.open(path)`. `net["walking"]` or `net.walking` is a `ModeView`, the same calls for one mode. With
+  more modes, `net.edges()`, `net.nodes()` and `net.map()` give all modes; a call for one mode says which modes the file
+  has. `net.summary()`, `net.tables()`, `net.columns()`, `net.boundary`, `crs=` (also `"utm"`), FLOAT columns as
+  float64. Maps from `roadstyle.duckosm.page`: `net.map()`, `net.dashboard()`, `net.save_map()`, and `net.plot()`
+  (matplotlib). Cards in a notebook, one progress line for `get`, `build` and the exports, and `duckosm.DuckOSMError`
+  with what to do. The modules `analysis`, `gis`, `routing`, `sim`, `planning`, `mobility`, `hdmap`, `ml` and `fixes`
+  (imported when first used) have the functions that exist today; the top-level functions stay. New pip extras:
+  `viz` (with roadstyle and matplotlib), `graph`, `sim`, `all`.
+- **`duckosm.get(point=(lon, lat), dist_m=...)`**: the box around a point.
+- **Five demo notebooks** (`docs/notebooks/`, the chapter Notebooks of the manual): from an area to a network, the OSM
+  fixes in every output, routing, the exports, and a join by `edge_id`. Each has a Colab badge, and the CI workflow
+  runs them on Monaco (`pytest --nbmake`). `notebooks/area_picker.ipynb` moved to `tests/notebooks/`;
+  `notebooks/explore_network.ipynb` is removed (old Sweden database).
+- **`duckosm get` writes the list of Geofabrik extracts in one step** (a temporary file, then a rename). Before, a second
+  `duckosm get` at the same time (the dry run of `duckosm.AreaPicker` and its Get, with an empty cache) could read a part
+  of the file and stop with `the list of extracts: EOF while parsing`.
+- **`duckosm.to_gmns` takes a `Path`**, as `duckosm.build` returns one. Before, a `Path` gave a `TypeError`.
+
 - **`duckosm opendrive` writes the file while it reads the rows.** Before, it kept all lines, then the whole file, in
   memory. With `--junctions`, the movements, the junction nodes and the road-to-road links stay in DuckDB (they spill to
   disk past its limit of 2 GB). The file is byte-equal. Kentucky: roads only 33.6 s and 8.3 GB before, 21 s and 0.52 GB

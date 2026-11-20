@@ -161,3 +161,17 @@
   .md-typeset .dk-levels .lv:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -1.35rem;
     transform: translateX(-50%); }
 }
+
+/* The badges on the notebook pages (Open in Colab, Download): on the middle line of the text, with a space between them. */
+.md-typeset a img[src*="colab-badge"], .md-typeset a img[src*="img.shields.io"] { vertical-align: middle; margin-right: .5em; }
+
+/* The tables that pandas writes in the notebook outputs (class "dataframe"): the theme styles only tables without a
+   class, so these get the same look here, without the border="1" grid. All cells are left-aligned, as in the other
+   tables of the site: CSS cannot tell a text column from a number column. */
+.md-typeset table.dataframe { display: inline-block; max-width: 100%; overflow: auto; font-size: .64rem;
+  border: .05rem solid var(--md-typeset-table-color); border-radius: .1rem; border-collapse: collapse; }
+.md-typeset table.dataframe th, .md-typeset table.dataframe td { border: none; padding: .6em 1.25em; vertical-align: top; }
+.md-typeset table.dataframe td { border-top: .05rem solid var(--md-typeset-table-color); text-align: left; }
+.md-typeset table.dataframe thead th { font-weight: 700; text-align: left; }
+.md-typeset table.dataframe tbody th { font-weight: 400; color: var(--md-default-fg-color--light); }
+.md-typeset table.dataframe tbody tr:hover { background-color: var(--md-typeset-table-color--light, rgba(0,0,0,.035)); }

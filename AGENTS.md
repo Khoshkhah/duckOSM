@@ -18,7 +18,9 @@ pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim
 .venv/bin/duckosm build --config config/<area>.yaml        # Kaveh's area configs: local, git-ignored
 .venv/bin/duckosm <command> --help                         # every exporter/tool is a click subcommand
 python scripts/validate_geometry.py --db data/db/<area>.duckdb   # self-loop / endpoint / zero-length checks
-mkdocs build --strict                                      # docs site (pip install "mkdocs<2" "mkdocs-material<10" "mkdocs-llmstxt<0.6"); CI deploys it to Pages
+jupyter nbconvert --to markdown docs/notebooks/0*.ipynb    # the pages of the notebooks (git-ignored): run it before the docs build
+mkdocs build --strict                                      # docs site (pip install "mkdocs<2" "mkdocs-material<10" "mkdocs-llmstxt<0.6" nbconvert); CI deploys it to Pages
+pytest --nbmake docs/notebooks/                            # run the five demo notebooks (pip install nbmake); they keep their saved outputs
 ```
 
 Several tests skip themselves unless local artifacts or tools exist: `pbf/sodermalm*.osm.pbf`,

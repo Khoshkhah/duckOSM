@@ -51,7 +51,7 @@ picker
                     "--boundary", str(area.boundary), "-o", "data/area.duckdb", "-m", "driving"], check=True)
     ```
 
-    The test notebook `notebooks/area_picker.ipynb` also counts the edges and finds a route in the new database.
+    The notebook [From an area to a network](../notebooks/01_area_to_network.md) does these steps and queries the new database.
 
 You can also set the area and get the file from Python, with no click:
 

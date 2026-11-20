@@ -1,225 +1,201 @@
+"""``duckosm.gis``: GIS and data engineers (docs/proposals/python-sdk.md, section 5.2).
+
+``to_gis`` (GeoPackage, GeoParquet, shapefiles), ``quack`` (the QuackOSM table, GDAL's layers, PMTiles), ``admin`` (the
+table of administrative boundaries), ``features`` (OSM features as a GeoDataFrame), ``to_osm_xml`` (the network as OSM
+XML) and ``admin_boundaries`` (the administrative areas as a GeoDataFrame). The work is in Rust (``duckosm quack``,
+``duckosm admin``) and in DuckDB SQL; Python only makes the GeoDataFrame.
 """
-GIS exporter — write a built duckOSM network to the universal GIS interchange formats,
-**GeoPackage** (primary), **GeoParquet** or **ESRI shapefile** (fallback), preserving the stable ``edge_id``.
+from __future__ import annotations
 
-This is the widest-reach export: it hands the network to the whole GIS world (QGIS / ArcGIS / FME
-and any tool with a GIS importer — Aimsun, PTV Visum, …) with no DuckDB knowledge required. Only the
-*geographic* tables are written — ``<mode>.edges`` (layer ``edges_<mode>``), ``<mode>.nodes``
-(``nodes_<mode>``) and ``main.boundary`` (``boundary``). The routing adjacency (``edge_graph`` /
-``turn_restrictions``) is a topology GIS tools can't act on and belongs in the NetworkX / SUMO
-exports, not here. See https://khoshkhah.github.io/duckOSM/exports/gis/ for the format spec.
-
-    import duckdb
-    from duckosm.gis import to_gis
-    con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
-    to_gis(con, "sodermalm.gpkg")                 # GeoPackage: every mode present + boundary
-    to_gis(con, "gis/", fmt="shp", modes=["driving"])  # one shapefile set per layer into gis/
-
-The GeoPackage (one file with all layers) comes from the Rust export (``duckosm export-gis``).
-Shapefiles need no assembly (one layer per file by nature).
-
-GeoParquet (``fmt="geoparquet"``) writes one ``.parquet`` file per layer into a directory
-(``edges_<mode>.parquet``, ``nodes_<mode>.parquet``, ``boundary.parquet``) and ``layers.json``, the list of these
-files (file, kind, mode or table, count). Each ``features.*`` table (the base map) also gets a file,
-``features_<table>.parquet``. DuckDB writes the
-GeoParquet ``geo`` metadata itself. It needs no GDAL. Column names stay as they are, and ``edge_id``
-stays BIGINT. When the db has ``visualization.edge_levels``, every edges file also gets its columns
-(except ``edge_id``) by LEFT JOIN on ``edge_id``. duckOSM only reads that table. GeoLibre
-(``?data=<url>``) and RustGIS open GeoParquet.
-"""
-import json
-import logging
-import os
 import tempfile
+from pathlib import Path
 
-logger = logging.getLogger("duckosm")
-
-# Shapefile field names are capped at 10 chars — rename the few that overflow so they stay
-# meaningful instead of being silently truncated (GeoPackage keeps the full names).
-_SHP_RENAME = {
-    "maxspeed_kmh": "spd_kmh",
-    "is_reverse": "is_rev",
-    "admin_level": "adm_level",
-}
+from duckosm.errors import DuckOSMError, require
 
 
-def _mode_schemas(con):
-    """Mode schemas that have an ``edges`` table (mirrors the `viz` command's discovery)."""
-    return [r[0] for r in con.execute(
-        "SELECT DISTINCT schema_name FROM duckdb_tables() "
-        "WHERE table_name = 'edges' "
-        "AND schema_name NOT IN ('information_schema', 'pg_catalog', 'main', 'raw') "
-        "ORDER BY schema_name").fetchall()]
+def to_gis(net, out, modes=None, fmt="gpkg", boundary=True, name=None, srs="EPSG:4326", ogr2ogr_bin=None, mode=None):
+    """The edges and nodes of the modes (default: all of the file; a ``ModeView`` or ``mode=``: one) as a GeoPackage
+    (``fmt="gpkg"``), GeoParquet (``"geoparquet"``) or shapefiles (``"shp"``). Returns ``{path, dir, files, layers}``.
+
+    >>> duckosm.gis.to_gis(net, "out/monaco.gpkg")"""
+    from duckosm import _api
+    if hasattr(net, "network"):                       # a ModeView
+        net, modes = net.network, [net.mode]
+    elif mode is not None:
+        modes = [mode]
+    return _api.to_gis(net, out, modes=modes, fmt=fmt, boundary=boundary, name=name, srs=srs, ogr2ogr_bin=ogr2ogr_bin)
 
 
-def _table_exists(con, schema, table):
-    return con.execute(
-        "SELECT count(*) FROM information_schema.tables "
-        "WHERE table_schema = ? AND table_name = ?", [schema, table]).fetchone()[0] > 0
+def quack(pbf, **kwargs):
+    """``duckosm quack`` on an OSM file or an :class:`duckosm.Area`: the QuackOSM features table (``formats=``), GDAL's
+    five layers (``gdal=True``); with ``fixes=`` the fixes are in it. Options as :func:`duckosm.quack`. Returns the paths.
+
+    >>> duckosm.gis.quack(area, out="out", name="monaco", formats=["geoparquet"])"""
+    from duckosm import _api
+    return _api.quack(getattr(pbf, "pbf", pbf), **kwargs)
 
 
-def _select_sql(con, schema, table, for_shp):
-    """A ``SELECT`` over ``schema.table`` keeping every scalar + the geometry column, dropping list /
-    nested columns (e.g. ``refs BIGINT[]`` — the shapefile format can't hold them and they're
-    routing-internal).
+def admin(net, pbf, gpkg=None):
+    """``duckosm admin``: add the table ``admin_boundaries`` (all OSM administrative levels, each with its parent) to the
+    database, from the boundary relations of the OSM file ``pbf`` (or an :class:`duckosm.Area`). ``gpkg``: also a
+    GeoPackage. The database is changed in place. Returns the database.
 
-    For shapefiles two format defects are worked around: (1) over-long field names are aliased via
-    :data:`_SHP_RENAME` (10-char DBF cap), and (2) 64-bit integers are cast to text — a DBF numeric
-    field can't hold an int64 exactly, so GDAL would otherwise write ``edge_id`` as a float and
-    **silently corrupt it** (a 19-digit content hash exceeds a float64's ~15 exact digits). Casting
-    the id columns to VARCHAR keeps them exact. GeoPackage stores Integer64 natively — no cast."""
-    cols = con.execute(
-        "SELECT column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-        [schema, table]).fetchall()
+    >>> duckosm.gis.admin(net, area)"""
+    from duckosm._api import _opt, _run
+    _run("admin", "--pbf", getattr(pbf, "pbf", pbf), "--db", net, *_opt("--gpkg", gpkg))
+    return net
+
+
+# ---- new in the SDK ----------------------------------------------------------------------------------------------------
+
+def _pbf(source) -> Path:
+    """The OSM file of an :class:`duckosm.Area`, of a path, or of a Network (the ``.osm.pbf`` beside its file, where
+    ``duckosm.network`` and ``Area.build`` put it)."""
+    from duckosm.network import ModeView, Network
+    if isinstance(source, ModeView):
+        source = source.network
+    if isinstance(source, Network):
+        pbf = source.path.with_name(source.path.name.split(".")[0] + ".osm.pbf")
+        if not pbf.is_file():
+            raise DuckOSMError(f"{source.path}: no OSM file {pbf.name} beside it. Give the OSM file or the Area: "
+                               f"duckosm.gis.features(duckosm.get(...), tags=...)")
+        return pbf
+    pbf = Path(getattr(source, "pbf", source))
+    if not pbf.is_file():
+        raise DuckOSMError(f"{pbf}: no such OSM file")
+    return pbf
+
+
+def _tag_filter(tags) -> str:
+    """The SQL condition of OSMnx's ``tags``: ``{key: True}`` any value, ``{key: "v"}`` one value, ``{key: [..]}`` one of
+    the values. The keys are joined with OR, as in OSMnx. ``None``: all features."""
+    if not tags:
+        return "true"
+
+    def q(s):
+        return "'" + str(s).replace("'", "''") + "'"
     parts = []
-    for name, dtype in cols:
-        d = dtype.upper()
-        if d.endswith("[]") or "STRUCT" in d or "MAP" in d:     # nested → GDAL/shp can't store it
-            continue
-        if name.upper() == "OGC_FID":                           # GDAL-reserved feature-id name
-            continue                                            # (synthetic ST_Read artifact, not data)
-        alias = _SHP_RENAME.get(name, name) if for_shp else name
-        expr = f'"{name}"'
-        if for_shp and ("BIGINT" in d or "HUGEINT" in d):       # keep int64 ids exact as text
-            expr = f'CAST("{name}" AS VARCHAR)'
-        if name in ("length_m", "cost_s") and ("DOUBLE" in d or "FLOAT" in d):
-            # cm / centisecond accuracy suffices; CAST first — ROUND on a FLOAT stays FLOAT,
-            # whose base-2 noise (57.849998) would leak into the written file
-            expr = f'ROUND(CAST({expr} AS DOUBLE), 2)'
-        parts.append(f'{expr} AS "{alias}"')
-    return f'SELECT {", ".join(parts)} FROM "{schema}"."{table}"'
+    for key, value in tags.items():
+        v = f"tags[{q(key)}]"
+        if value is True:
+            parts.append(f"{v} IS NOT NULL")
+        elif isinstance(value, str):
+            parts.append(f"{v} = {q(value)}")
+        else:
+            parts.append(f"{v} IN ({', '.join(q(x) for x in value)})")
+    return " OR ".join(parts)
 
 
-def _levels_sql(con, select_sql):
-    """Add the columns of ``visualization.edge_levels`` (all but ``edge_id``) to an edges SELECT.
-    An edge with no row there gets NULLs. Returns ``(sql, joined)``; no table = no join."""
-    if not _table_exists(con, "visualization", "edge_levels"):
-        return select_sql, False
-    return (f'SELECT s.*, v.* EXCLUDE (edge_id) FROM ({select_sql}) s '
-            f'LEFT JOIN "visualization"."edge_levels" v ON s.edge_id = v.edge_id'), True
+def features(source, tags=None, *, fixes=None, threads=None):
+    """The OSM features of an area as a GeoDataFrame (EPSG:4326), as OSMnx's ``features_from_*`` gives them. ``source``:
+    an :class:`duckosm.Area`, an OSM file or a Network (its OSM file beside it). ``tags`` as in OSMnx: ``{"building":
+    True}`` (any value), ``{"amenity": "cafe"}``, ``{"amenity": ["cafe", "bar"]}``; the keys are joined with OR. Columns:
+    ``feature_id`` (``way/123``), one column for each key of ``tags``, ``tags`` (all tags, a dict) and ``geometry``.
+    ``fixes``: an OSM fixes file, applied first. The table comes from ``duckosm quack`` (the QuackOSM rows).
 
-
-def _copy(con, select_sql, out_file, driver, srs):
-    """One DuckDB spatial ``COPY`` → a single-layer GDAL dataset (SRS written so a .prj/CRS lands)."""
-    con.execute(f"COPY ({select_sql}) TO '{out_file}' "
-                f"(FORMAT gdal, DRIVER '{driver}', SRS '{srs}')")
-
-
-def _count(con, schema, table):
-    return con.execute(f'SELECT count(*) FROM "{schema}"."{table}"').fetchone()[0]
-
-
-def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
-           srs: str = "EPSG:4326", ogr2ogr_bin: str = None):
-    """Export the geographic network (edges + nodes [+ boundary]) to GeoPackage, GeoParquet or shapefile.
-
-    Parameters
-    ----------
-    con : DuckDB connection to a built duckOSM db (spatial extension loaded here).
-    out : GeoPackage → the target ``.gpkg`` file. Shapefile or GeoParquet → the target **directory**.
-    modes : mode schemas to export (default: every mode present in the db).
-    fmt : ``"gpkg"`` (default), ``"geoparquet"`` or ``"shp"``. GeoParquet files are named
-        ``edges_<mode>.parquet`` etc. (``name`` is not used). Edges files get the columns of
-        ``visualization.edge_levels`` when that table exists.
-    boundary : also export ``main.boundary`` as a ``boundary`` layer, if it exists (default True).
-    name : basename for layers / shapefiles (default: the ``out`` file stem, else ``"network"``).
-    srs : CRS written into every layer (default ``"EPSG:4326"`` — duckOSM geometries are lon/lat).
-    ogr2ogr_bin : not used (kept so old calls work).
-
-    Returns ``{"fmt", "path"(gpkg)|"dir"(shp, geoparquet), "layers": {name: n_features}, "files": [...]}``.
-    Every layer keeps ``edge_id`` as a plain attribute — the cross-format stable join key.
-    """
-    try:
-        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
-    except Exception:
-        pass
-
-    fmt = fmt.lower()
-    if fmt not in ("gpkg", "shp", "geoparquet"):
-        raise ValueError(f"fmt must be 'gpkg', 'shp' or 'geoparquet', got {fmt!r}")
-
-    present = _mode_schemas(con)
-    chosen = list(modes) if modes else present
-    if not chosen:
-        raise ValueError("no mode schemas with an 'edges' table in the db")
-    unknown = [m for m in chosen if m not in present]
-    if unknown:
-        raise ValueError(f"mode(s) {unknown} not found (present: {present or 'none'})")
-
-    # layers: (layer_name, schema, table) — one edges + one nodes per mode, plus the shared boundary
-    layers = []
-    for m in chosen:
-        layers.append((f"edges_{m}", m, "edges"))
-        if _table_exists(con, m, "nodes"):
-            layers.append((f"nodes_{m}", m, "nodes"))
-    if boundary and _table_exists(con, "main", "boundary"):
-        layers.append(("boundary", "main", "boundary"))
-
-    base = name or (os.path.splitext(os.path.basename(out))[0] if fmt == "gpkg" else None) or "network"
-
-    if fmt == "geoparquet":
-        return _export_geoparquet(con, out, layers)
-    if fmt == "shp":
-        return _export_shp(con, out, base, layers, srs)
-    return _export_gpkg(con, out, base, layers, srs)
-
-
-def _export_shp(con, out_dir, base, layers, srs):
-    """One shapefile set per layer (a .shp holds a single layer/geometry type)."""
-    os.makedirs(out_dir, exist_ok=True)
-    written, counts = [], {}
-    for lyr, schema, table in layers:
-        path = os.path.join(out_dir, f"{base}_{lyr}.shp")
-        _copy(con, _select_sql(con, schema, table, for_shp=True), path, "ESRI Shapefile", srs)
-        counts[lyr] = _count(con, schema, table)
-        written.append(path)
-        logger.info(f"GIS[shp]: {lyr} — {counts[lyr]:,} features -> {path}")
-    return {"fmt": "shp", "dir": out_dir, "layers": counts, "files": written}
-
-
-def _export_geoparquet(con, out_dir, layers):
-    """One GeoParquet file per layer, plus one per ``features.*`` table (the base map: ``features_<table>``).
-    DuckDB writes the 'geo' metadata for a GEOMETRY column."""
-    os.makedirs(out_dir, exist_ok=True)
-    written, counts = [], {}
-    layers = layers + [(f"features_{t}", "features", t) for (t,) in con.execute(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'features' ORDER BY 1").fetchall()]
-    for lyr, schema, table in layers:
-        path = os.path.join(out_dir, f"{lyr}.parquet")
-        sql, joined = _select_sql(con, schema, table, for_shp=False), False
-        if table == "edges":
-            sql, joined = _levels_sql(con, sql)
-            if not joined:
-                logger.info(f"GIS[geoparquet]: {lyr} has no visualization columns "
-                            "(no visualization.edge_levels table)")
-        con.execute(f"COPY ({sql}) TO '{path}' (FORMAT parquet)")
-        counts[lyr] = _count(con, schema, table)
-        written.append(path)
-        logger.info(f"GIS[geoparquet]: {lyr} — {counts[lyr]:,} features -> {path}")
-    # layers.json: the list of the files, so a viewer (the roadstyle GeoLibre plugin) opens the folder in one step
-    index = [{"file": f"{lyr}.parquet", "kind": "features" if schema == "features" else table,
-              **({"mode": schema} if table in ("edges", "nodes") and schema != "features" else {}),
-              **({"table": table} if schema == "features" else {}), "count": counts[lyr]} for lyr, schema, table in layers]
-    with open(os.path.join(out_dir, "layers.json"), "w") as f:
-        json.dump({"layers": index}, f, indent=1)
-    return {"fmt": "geoparquet", "dir": out_dir, "layers": counts, "files": written}
-
-
-def _export_gpkg(con, out, base, layers, srs):
-    """One GeoPackage with all layers: the Rust export. It reads a database file, so the tables of ``con`` go to a
-    temporary file first."""
-    from duckosm import _rust
-
-    modes = [schema for _, schema, table in layers if table == "edges"]
-    boundary = any(lyr == "boundary" for lyr, _, _ in layers)
+    >>> cafes = duckosm.gis.features(area, tags={"amenity": "cafe"})"""
+    require("geopandas", "duckosm.gis.features")
+    import duckdb
+    import geopandas as gpd
     with tempfile.TemporaryDirectory() as tmp:
-        db = os.path.join(tmp, "export.duckdb")
-        con.execute(f"ATTACH '{db}' AS _gis_export")
+        files = quack(_pbf(source), out=tmp, name="features", formats=["geoparquet"], fixes=fixes, threads=threads,
+                      progress=False)
+        con = duckdb.connect()
         try:
-            con.execute("COPY FROM DATABASE " + con.execute("SELECT current_database()").fetchone()[0] + " TO _gis_export")
-        finally:
-            con.execute("DETACH _gis_export")
-        r = json.loads(_rust.to_gis(db, str(out), modes, "gpkg", boundary, base, srs))
-    logger.info(f"wrote GeoPackage ({len(layers)} layers) -> {out}")
-    return {"fmt": "gpkg", "path": r["path"], "layers": r["layers"], "files": r["files"]}
+            con.load_extension("spatial")
+        except duckdb.Error:
+            con.install_extension("spatial")
+            con.load_extension("spatial")
+        keys = "".join(f", tags['{k.replace(chr(39), chr(39) * 2)}'] AS \"{k.replace(chr(34), chr(34) * 2)}\""
+                       for k in (tags or {}))
+        df = con.execute(f"SELECT feature_id{keys}, map_from_entries(map_entries(tags)) AS tags, "
+                         f"ST_AsWKB(geometry) AS wkb FROM read_parquet('{files[0]}') "
+                         f"WHERE {_tag_filter(tags)} ORDER BY feature_id").df()
+        con.close()
+    geometry = gpd.GeoSeries.from_wkb(df.pop("wkb").map(bytes), crs="EPSG:4326")
+    return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
+
+
+def admin_boundaries(net, pbf=None):
+    """The administrative areas of the network's area as a GeoDataFrame (EPSG:4326): ``osm_id``, ``name``,
+    ``admin_level``, the parent and the geometry, one row for each OSM boundary relation. When the database has no table
+    ``admin_boundaries``, it is added first with :func:`admin` from ``pbf`` (default: the OSM file beside the database).
+
+    >>> duckosm.gis.admin_boundaries(net)"""
+    require("geopandas", "duckosm.gis.admin_boundaries")
+    import geopandas as gpd
+    from duckosm.network import ModeView, Network
+    net = net.network if isinstance(net, ModeView) else Network(net)
+    if "main.admin_boundaries" not in net.tables():
+        admin(net, _pbf(pbf if pbf is not None else net))
+    df = net.sql("SELECT * EXCLUDE (geometry), ST_AsWKB(geometry) AS wkb FROM main.admin_boundaries "
+                 "ORDER BY admin_level, name")
+    geometry = gpd.GeoSeries.from_wkb(df.pop("wkb").map(bytes), crs="EPSG:4326")
+    return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
+
+
+# the tags of to_osm_xml that are columns of the edges with the same name
+_XML_TAGS = ("highway", "name", "junction", "layer", "bridge", "tunnel", "service", "surface", "access")
+
+
+def to_osm_xml(net, path, mode=None):
+    """The network of one mode as an OSM XML file (``.osm``), as OSMnx's ``save_graph_xml`` writes it: a ``<node>`` for
+    each node of the roads (``source``, the OSM nodes of ``refs``, ``target``), a ``<way>`` for each road, with the id ``edge_id`` of its
+    forward edge and the tags ``highway``, ``name``, ``oneway``, ``lanes``, ``maxspeed``, ``layer``, ``bridge``,
+    ``tunnel`` ..., ``duckosm:osm_id`` (the OSM way) and ``duckosm:edge_id``. A two-way road is one way. DuckDB writes the
+    file. Returns ``{path, nodes, ways}``.
+
+    >>> duckosm.gis.to_osm_xml(net.driving, "out/monaco.osm")"""
+    from duckosm.network import resolve
+    db, mode = resolve(net, mode)
+    from duckosm.network import Network
+    db = db if isinstance(db, Network) else Network(db)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    e = f'"{mode}".edges'
+
+    def attr(expr):     # an XML attribute value: & < " escaped
+        return f"replace(replace(replace({expr}, '&', '&amp;'), '<', '&lt;'), '\"', '&quot;')"
+
+    def tag(k, expr):
+        return f"""CASE WHEN {expr} IS NOT NULL THEN '  <tag k="{k}" v="' || {attr(f"CAST({expr} AS VARCHAR)")} || '"/>' || chr(10) ELSE '' END"""
+    tags = " || ".join([tag(k, k) for k in _XML_TAGS] + [
+        tag("oneway", "CASE WHEN oneway THEN 'yes' ELSE 'no' END"),
+        tag("lanes", "CASE WHEN oneway THEN lanes ELSE lanes + coalesce(twin_lanes, lanes) END"),
+        tag("lanes:forward", "CASE WHEN NOT oneway THEN lanes END"),
+        tag("lanes:backward", "CASE WHEN NOT oneway THEN coalesce(twin_lanes, lanes) END"),
+        tag("maxspeed", "CAST(round(maxspeed_kmh) AS INTEGER)"),
+        tag("duckosm:osm_id", "osm_id"), tag("duckosm:edge_id", "edge_id")])
+    # the nodes of each road: source, the OSM nodes of refs, target; where refs and the vertices differ (an edge cut at a
+    # virtual node), each inner vertex gets a hashed negative id
+    ids = ("CASE WHEN len(e.refs) = ST_NPoints(e.geometry) THEN [e.source] || e.refs[2:len(e.refs) - 1] || [e.target] "
+           "ELSE [e.source] || list_transform(range(2, ST_NPoints(e.geometry)), i -> -(hash(e.edge_id, i) >> 2)::BIGINT) "
+           "|| [e.target] END")
+    roads = (f"SELECT e.*, {ids} AS ids, t.lanes AS twin_lanes FROM {e} e LEFT JOIN {e} t ON t.osm_id = e.osm_id AND "
+             f"t.source = e.target AND t.target = e.source AND t.is_reverse WHERE NOT e.is_reverse")
+    sql = f"""
+        WITH r AS ({roads}),
+             p AS (SELECT unnest(ids) AS id, unnest(generate_series(1, len(ids))) AS i, geometry FROM r),
+             n AS (SELECT DISTINCT ON (id) id, ST_Y(ST_PointN(geometry, CAST(i AS INTEGER))) AS lat,
+                          ST_X(ST_PointN(geometry, CAST(i AS INTEGER))) AS lon FROM p ORDER BY id),
+             body AS (
+               SELECT 0 AS part, id AS k, '<node id="' || id || '" version="1" lat="' || printf('%.7f', lat) ||
+                      '" lon="' || printf('%.7f', lon) || '"/>' AS line FROM n
+               UNION ALL
+               SELECT 1, edge_id, '<way id="' || edge_id || '" version="1">' || chr(10) ||
+                      list_aggr(list_transform(ids, x -> '  <nd ref="' || x || '"/>' || chr(10)), 'string_agg', '') ||
+                      {tags} || '</way>' FROM r)
+        SELECT line FROM (
+            SELECT -1 AS part, 0 AS k, '<?xml version="1.0" encoding="UTF-8"?>' || chr(10) ||
+                   '<osm version="0.6" generator="duckOSM">' AS line
+            UNION ALL SELECT part, k, line FROM body
+            UNION ALL SELECT 2, 0, '</osm>') ORDER BY part, k"""
+    con = db._connect()
+    try:
+        out = str(path).replace("'", "''")
+        con.execute(f"COPY ({sql}) TO '{out}' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '\t')")
+        nodes, ways = con.execute(f"SELECT count(DISTINCT x), count(DISTINCT edge_id) FROM "
+                                  f"(SELECT unnest(ids) x, edge_id FROM ({roads}))").fetchone()
+    finally:
+        con.close()
+    return {"path": path, "nodes": nodes, "ways": ways}

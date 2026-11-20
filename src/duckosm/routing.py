@@ -1,667 +1,348 @@
+"""``duckosm.routing``: routing, accessibility and logistics (docs/proposals/python-sdk.md, section 5.3).
+
+Each function takes a ``Network``, a ``ModeView`` (``net.walking``), a path or a DuckDB connection. A place (``a``,
+``b``, ``origins`` ...) is an edge id, a ``(lon, lat)`` point or a place name. The searches run in Rust on the edge
+graph of ``route`` (the same turn rules); the calls for many places run in parallel.
 """
-Routing helper — load the edge-based routing graph as a networkx DiGraph.
+from __future__ import annotations
 
-The DB stores an edge-based (line) graph: `<mode>.edge_graph(from_edge, to_edge, cost)`, where
-each NODE is an `edge_id` and an arc `u -> v` means you may drive from edge `u` onto edge `v`
-(illegal turns are already removed). `to_networkx` loads it into a `networkx.DiGraph` so you can
-run any networkx algorithm:
+import json
+import math
+import urllib.parse
+import urllib.request
 
-    import duckdb, networkx as nx
-    from duckosm.routing import to_networkx
-    con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
-    G = to_networkx(con, weight="time")                 # or weight="length"
-    path = nx.shortest_path(G, from_edge_id, to_edge_id, weight="weight")
-    secs = nx.shortest_path_length(G, from_edge_id, to_edge_id, weight="weight")
+from duckosm._api import route_multimodal  # noqa: F401 -- the names of this module
+# the old names of duckosm.routing (the Python code): they stay. Router is the Python Router (it has .graph); the Rust
+# one is duckosm.Router.
+from duckosm._routing_py import Router, node_branches, node_out_degree, to_networkx, to_networkx_nodes, write_graph  # noqa: F401
+from duckosm.errors import DuckOSMError, require
+from duckosm.network import Network, resolve
 
-This loads the whole graph into memory — fine for a city; for country-scale prefer an on-disk
-search (see docs). Every road in `edges` is part of `edge_graph`, including `highway='service'`.
-
-For the *geographic* (node-based) view — OSM junctions as nodes, road segments as edges with
-their full attribute set, in the osmnx `MultiDiGraph` layout — use `to_networkx_nodes` instead.
-"""
-import logging
-
-logger = logging.getLogger("duckosm")
+WEIGHTS = {"time": "cost_s", "length": "length_m"}
 
 
-def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bool = True, uses=None):
-    """Return a `networkx.DiGraph` of the routing graph, with a `weight` attribute per arc.
+# ---- the Route object ------------------------------------------------------------------------------------------------
 
-    Parameters
-    ----------
-    con : a DuckDB connection to a built duckOSM database.
-    mode : the mode schema to read (default ``"driving"``).
-    weight : ``"time"`` → travel time in seconds (`cost_s`, the default) or
-        ``"length"`` → length in metres (`length_m`). The chosen value is stored on each arc as
-        the ``weight`` attribute, so `nx.shortest_path(G, a, b, weight="weight")` gives the
-        fastest / shortest route between two edge ids.
-    node_attrs : when True (default) attach each edge's metadata to its node — ``name``,
-        ``highway``, ``length_m``, ``maxspeed_kmh``, ``cost_s`` and ``geometry`` (WKT) — so
-        ``G.nodes[edge_id]`` carries the road data, not just the routing ``weight`` on arcs. Pass
-        False for a bare graph (e.g. inside :func:`route`, which doesn't need it).
+class Route(dict):
+    """One route. It is also the dict of the old ``route`` (``r["edges"]`` is the list of edge ids), so the old code
+    and ``net.map(routes=r)`` still work.
 
-    uses : more turns to take, by their label (a comma string or a list of ``bus``, ``private``, ``pedestrian``,
-        ``delivery``): the turns into and out of those restricted edges (``private_edges``), which get an ``access``
-        attribute. Default none: the mode's own turns only (docs/design/restricted_edge_graph_rows.md).
+    - ``.edge_ids``: the edge ids, in the order of the route.
+    - ``.edges``: a GeoDataFrame of the edges, in the order of the route (``seq``, ``edge_id``, the edge columns).
+    - ``.length_m``, ``.time_s``: the sums of ``length_m`` and ``cost_s`` of the edges.
+    - ``.geometry``: one shapely line (a MultiLineString where the edges do not join).
+    - ``.directions()``: the turn-by-turn steps. ``.map()``: the route on the roadstyle map of the network.
 
-    Returns a DiGraph whose nodes are ``edge_id``s (with the attributes above when ``node_attrs``).
-    """
-    try:
-        import networkx as nx
-    except ImportError as e:
-        raise ImportError("to_networkx needs networkx — `pip install networkx`") from e
+    >>> r = duckosm.routing.route(net.driving, (7.4155, 43.7285), (7.4335, 43.7468))
+    >>> r.time_s, r.length_m, r.map()"""
 
-    from duckosm.processors.edge_graph import routed_graph
-    graph = routed_graph(con, mode, uses)                # the mode's own turns, and the labels asked for in uses
-    roads = _roads_relation(con, mode, uses)             # edges, and private_edges when uses asks for their turns
-    if weight == "time":
-        # edge_graph.cost is already the from_edge's travel time (cost_s).
-        sql = f"SELECT from_edge, to_edge, cost FROM {graph}"
-    elif weight == "length":
-        # length of the from_edge.
-        sql = (f"SELECT g.from_edge, g.to_edge, e.length_m "
-               f"FROM {graph} g JOIN {roads} e ON e.edge_id = g.from_edge")
-    else:
-        raise ValueError("weight must be 'time' or 'length'")
+    def __init__(self, data: dict, db, mode: str):
+        super().__init__(data)
+        self._db, self._mode = db, mode
 
-    g = nx.DiGraph()
-    cur = con.execute(sql)
-    # in batches: a list of all arcs beside the graph doubles the memory
-    while rows := cur.fetchmany(100_000):
-        g.add_weighted_edges_from(rows, weight="weight")
-    if node_attrs:
-        _attach_edge_attrs(con, g, mode, roads)
-    logger.info(f"routing graph[{mode}]: {g.number_of_nodes():,} edges, "
-                f"{g.number_of_edges():,} arcs, weight={weight}"
-                f"{', +node attrs' if node_attrs else ''}")
-    return g
+    @property
+    def edge_ids(self) -> list[int]:
+        return [int(e) for e in self["edges"]]
 
+    @property
+    def length_m(self) -> float:
+        return float(self["length_m"])
 
-def _roads_relation(con, mode, uses=None):
-    """``<mode>.edges`` as a FROM-able relation with an ``access`` column (NULL); with ``uses``, the rows of ``private_edges`` too."""
-    from duckosm.processors.edge_graph import check_uses
-    cols = "edge_id, name, highway, length_m, maxspeed_kmh, cost_s, geometry"
-    if not check_uses(uses):
-        return f"{mode}.edges"
-    return (f"(SELECT {cols}, NULL AS access FROM {mode}.edges UNION ALL "
-            f"SELECT {cols}, access FROM {mode}.private_edges)")
+    @property
+    def time_s(self) -> float:
+        return float(self["time_s"])
 
+    def _network(self) -> Network:
+        return self._db if isinstance(self._db, Network) else Network(_file(self._db))
 
-def _attach_edge_attrs(con, g, mode, roads=None):
-    """Attach each edge's metadata onto its node (edge_id) in an edge-based graph.
+    @property
+    def edges(self):
+        net = self._network()
+        ids = ",".join(map(str, self.edge_ids))
+        gdf = net._frame(f"{self._mode}.edges", "geometry", f"edge_id IN ({ids})", None)
+        order = {e: i for i, e in enumerate(self.edge_ids)}
+        gdf.insert(0, "seq", gdf["edge_id"].map(order))
+        return gdf.sort_values("seq").reset_index(drop=True)
 
-    Sets name/highway/length_m/maxspeed_kmh/cost_s and geometry (WKT) on every node already in
-    ``g``; isolated edges absent from the graph are skipped.
-    """
-    try:
-        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
-    except Exception:
-        pass
-    with_access = roads is not None and roads != f"{mode}.edges"      # the restricted edges are in: say which ones
-    cur = con.execute(
-        f"SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry)"
-        f"{', access' if with_access else ''} FROM {roads or f'{mode}.edges'}")
-    while rows := cur.fetchmany(100_000):
-        for eid, name, hw, length, spd, cost, geom, *acc in rows:
-            if eid in g:
-                g.nodes[eid].update(name=name, highway=hw, length_m=length,
-                                    maxspeed_kmh=spd, cost_s=cost, geometry=geom)
-                if with_access and acc[0]:
-                    g.nodes[eid]["access"] = acc[0]
-    return g
+    @property
+    def geometry(self):
+        from shapely.ops import linemerge
+        return linemerge(list(self.edges.geometry))
+
+    def directions(self) -> list[dict]:
+        return directions(self._db, self, mode=self._mode)
+
+    def map(self, **style):
+        return self._network().map(self._mode, routes=self, **style)
+
+    def __repr__(self) -> str:
+        return f"Route({self._mode}: {len(self['edges'])} edges, {self.length_m:.0f} m, {self.time_s:.0f} s)"
+
+    def _repr_html_(self) -> str:
+        return (f"<div><b>Route</b> ({self._mode})<table><tr><td>edges</td><td>{len(self['edges'])}</td></tr>"
+                f"<tr><td>length</td><td>{self.length_m:,.0f} m</td></tr>"
+                f"<tr><td>time</td><td>{self.time_s / 60:,.1f} min</td></tr></table></div>")
 
 
-def to_networkx_nodes(con, mode: str = "driving", geometry: str = "wkt"):
-    """Return a node-based ``networkx.MultiDiGraph`` of the road network for ``mode``.
-
-    Where :func:`to_networkx` returns the *edge-based* routing (line) graph — whose nodes are
-    ``edge_id``s and whose arcs are legal turns — this returns the **geographic** graph: nodes are
-    OSM junction ``node_id``s and each graph edge is a road segment from ``<mode>.edges`` carrying
-    its **full attribute set** (``edge_id``, ``osm_id``, ``highway``, ``name``, ``oneway``,
-    ``lanes``, ``length_m``, ``maxspeed_kmh``, ``cost_s``, ``geometry``, ``is_reverse``, …).
-
-    The layout matches osmnx: a directed multigraph keyed by ``edge_id`` (so parallel ways between
-    the same two junctions are preserved), nodes carry ``x``/``y`` (lon/lat) plus any extra node
-    columns (e.g. ``h3_cell``), and ``G.graph['crs'] = 'EPSG:4326'``. So osmnx / momepy tooling can
-    consume it directly::
-
-        from duckosm.routing import to_networkx_nodes
-        G = to_networkx_nodes(con, mode="driving")
-        G.nodes[node_id]["x"], G.nodes[node_id]["y"]       # lon, lat
-        G[u][v][edge_id]["highway"]                        # full edge attrs, keyed by edge_id
-
-    Parameters
-    ----------
-    con : a DuckDB connection to a built duckOSM database.
-    mode : the mode schema to read (default ``"driving"``).
-    geometry : how to store each edge's geometry — ``"wkt"`` (default) as a WKT string,
-        ``"shapely"`` as a shapely object (needs ``shapely``; matches osmnx), or ``"none"`` to omit
-        it (lighter graph). Node geometry is always reduced to ``x``/``y``.
-    """
-    try:
-        import networkx as nx
-    except ImportError as e:
-        raise ImportError("to_networkx_nodes needs networkx — `pip install networkx`") from e
-    if geometry not in ("wkt", "shapely", "none"):
-        raise ValueError("geometry must be 'wkt', 'shapely' or 'none'")
-    try:
-        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
-    except Exception:
-        pass
-
-    to_shapely = None
-    if geometry == "shapely":
-        try:
-            from shapely import wkt as _wkt
-        except ImportError as e:
-            raise ImportError("geometry='shapely' needs shapely — `pip install shapely`") from e
-        to_shapely = _wkt.loads
-
-    g = nx.MultiDiGraph()
-    g.graph["crs"] = "EPSG:4326"
-    g.graph["mode"] = mode
-
-    # --- nodes: node_id -> x/y (+ any other node columns, e.g. h3_cell) -------------------------
-    ncols = [r[1] for r in con.execute(f"PRAGMA table_info('{mode}.nodes')").fetchall()]
-    nselect = ["node_id", "ST_X(geom) AS x", "ST_Y(geom) AS y"]
-    nextra = [c for c in ncols if c not in ("node_id", "geom")]
-    nselect += nextra
-    nrows = con.execute(f"SELECT {', '.join(nselect)} FROM {mode}.nodes WHERE geom IS NOT NULL")
-    ncolnames = [d[0] for d in nrows.description]
-    for row in nrows.fetchall():
-        rec = dict(zip(ncolnames, row))
-        nid = rec.pop("node_id")
-        g.add_node(nid, **rec)
-
-    # --- edges: one directed multigraph edge per row, keyed by edge_id, with full attributes ----
-    ecols = [r[1] for r in con.execute(f"PRAGMA table_info('{mode}.edges')").fetchall()]
-    eselect = []
-    for c in ecols:
-        if c == "geometry":
-            if geometry == "none":
-                continue
-            eselect.append("ST_AsText(geometry) AS geometry")
-        else:
-            eselect.append(c)
-    erows = con.execute(f"SELECT {', '.join(eselect)} FROM {mode}.edges")
-    ecolnames = [d[0] for d in erows.description]
-    n_edges = 0
-    for row in erows.fetchall():
-        rec = dict(zip(ecolnames, row))
-        eid = rec["edge_id"]
-        source = rec.pop("source")
-        target = rec.pop("target")
-        if to_shapely is not None and rec.get("geometry") is not None:
-            rec["geometry"] = to_shapely(rec["geometry"])
-        # source/target may be junctions pruned from `nodes` (clipped builds); add_edge re-adds them
-        # as bare nodes, which is fine and matches osmnx behaviour.
-        g.add_edge(source, target, key=eid, **rec)
-        n_edges += 1
-
-    logger.info(f"node graph[{mode}]: {g.number_of_nodes():,} nodes, {n_edges:,} edges, "
-                f"geometry={geometry}")
-    return g
+def _route(data, db, mode):
+    return None if data is None else Route(data, db, mode)
 
 
-# file extensions we recognise per format, for inferring `fmt` from the output path.
-_GRAPH_EXTS = {".graphml": "graphml", ".gpickle": "gpickle", ".pkl": "gpickle",
-               ".pickle": "gpickle"}
+# ---- places: edge ids, points and place names --------------------------------------------------------------------
+
+def _is_point(x):
+    return isinstance(x, (tuple, list)) and len(x) == 2 and all(isinstance(v, (int, float)) for v in x) \
+        and not all(isinstance(v, int) for v in x)
 
 
-def _graphml_safe(g):
-    """In-place: coerce attribute values GraphML can't serialise (lists, None, other objects).
+def geocode(net, name: str, mode: str | None = None) -> tuple[float, float]:
+    """The ``(lon, lat)`` of a place name: the middle of the longest edge of that name in the network, else the first hit of
+    OpenStreetMap's Nominatim in the box of the network (this needs the internet).
 
-    GraphML only stores scalars (str/int/float/bool). Lists (e.g. the ``refs`` array) and any other
-    object become their ``str``; ``None``-valued keys are dropped (GraphML has no null). Done on a
-    shallow copy of each attr dict so the caller's graph is untouched only if they pass a copy — we
-    mutate ``g`` directly here, so this is for write-paths that build the graph fresh.
-    """
-    def fix(d):
-        for k in list(d):
-            v = d[k]
-            if v is None:
-                del d[k]
-            elif not isinstance(v, (str, int, float, bool)):
-                d[k] = str(v)
-    for _, data in g.nodes(data=True):
-        fix(data)
-    # MultiDiGraph edge views accept keys=True; plain DiGraph (the edge graph) does not.
-    edges = g.edges(data=True, keys=True) if g.is_multigraph() else g.edges(data=True)
-    for *_, data in edges:
-        fix(data)
-
-
-def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None,
-                weight: str = "time", geometry: str = "wkt", uses=None):
-    """Build a networkx graph for ``mode`` and write it to ``path``. Returns a small summary dict.
-
-    Parameters
-    ----------
-    path : output file. ``fmt`` is inferred from its extension when not given.
-    graph : ``"node"`` → the geographic node-based ``MultiDiGraph`` (:func:`to_networkx_nodes`,
-        full edge info) or ``"edge"`` → the edge-based routing ``DiGraph`` (:func:`to_networkx`).
-    fmt : ``"graphml"`` or ``"gpickle"``. Default: inferred from the path extension, else
-        ``"graphml"``. GraphML is portable but scalar-only (lists like ``refs`` and shapely
-        geometry are stringified, nulls dropped); gpickle round-trips the graph losslessly
-        (including shapely objects) but is Python-only.
-    weight, geometry : forwarded to the underlying builder (``weight`` only for ``graph="edge"``;
-        ``geometry`` only for ``graph="node"``).
-    """
-    from pathlib import Path
-    path = Path(path)
-    fmt = fmt or _GRAPH_EXTS.get(path.suffix.lower(), "graphml")
-    if fmt not in ("graphml", "gpickle"):
-        raise ValueError("fmt must be 'graphml' or 'gpickle'")
-    if graph not in ("node", "edge"):
-        raise ValueError("graph must be 'node' or 'edge'")
-    if uses and graph != "edge":
-        raise ValueError("uses is for the edge graph (graph='edge'): its turns carry the labels")
-    try:
-        import networkx as nx
-    except ImportError as e:
-        raise ImportError("write_graph needs networkx — `pip install networkx`") from e
-
-    if graph == "node":
-        # GraphML can't hold shapely objects; keep geometry as WKT for that format.
-        geom = "wkt" if (fmt == "graphml" and geometry == "shapely") else geometry
-        g = to_networkx_nodes(con, mode=mode, geometry=geom)
-    else:
-        g = to_networkx(con, mode=mode, weight=weight, uses=uses)
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if fmt == "graphml":
-        _graphml_safe(g)
-        nx.write_graphml(g, path)
-    else:
-        import pickle
-        with open(path, "wb") as f:
-            pickle.dump(g, f)
-    summary = {"path": str(path), "fmt": fmt, "graph": graph, "mode": mode,
-               "n_nodes": g.number_of_nodes(), "n_edges": g.number_of_edges()}
-    logger.info(f"wrote {graph} graph[{mode}] -> {path} ({fmt}: "
-                f"{summary['n_nodes']:,} nodes, {summary['n_edges']:,} edges)")
-    return summary
+    >>> duckosm.routing.geocode(net.driving, "Boulevard Albert 1er")"""
+    db, mode = resolve(net, mode)
+    net = db if isinstance(db, Network) else Network(_file(db))
+    row = net.sql(f"SELECT ST_X(c), ST_Y(c) FROM (SELECT ST_LineInterpolatePoint(geometry, 0.5) AS c FROM {mode}.edges "
+                  "WHERE lower(name) = lower($n) ORDER BY length_m DESC, edge_id LIMIT 1)", {"n": name})
+    if len(row):
+        return float(row.iloc[0, 0]), float(row.iloc[0, 1])
+    w, s, e, n = net.sql(f"SELECT min(ST_XMin(geometry)), min(ST_YMin(geometry)), max(ST_XMax(geometry)), "
+                         f"max(ST_YMax(geometry)) FROM {mode}.edges").iloc[0]
+    query = urllib.parse.urlencode({"q": name, "format": "json", "limit": 1, "viewbox": f"{w},{n},{e},{s}", "bounded": 1})
+    req = urllib.request.Request(f"https://nominatim.openstreetmap.org/search?{query}", headers={"User-Agent": "duckosm"})
+    with urllib.request.urlopen(req, timeout=30) as f:
+        hits = json.load(f)
+    if not hits:
+        raise DuckOSMError(f"no place {name!r} in the network or in Nominatim inside the box of the network")
+    return float(hits[0]["lon"]), float(hits[0]["lat"])
 
 
-def _compass_bearing(a, b):
-    """Initial compass bearing (deg, 0 = north, clockwise) from ``a`` to ``b`` (``[lng, lat]``)."""
-    import math
-    lon1, lat1, lon2, lat2 = map(math.radians, (a[0], a[1], b[0], b[1]))
-    dlon = lon2 - lon1
-    y = math.sin(dlon) * math.cos(lat2)
-    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
-    return round((math.degrees(math.atan2(y, x)) + 360.0) % 360.0, 1)
+def _file(db):
+    from duckosm import _api
+    path = _api._db(db)
+    if path is None:
+        raise DuckOSMError("this call needs a database file, not an in-memory database")
+    return path
 
 
-def node_branches(con, node_ids, mode: str = "driving"):
-    """For each node, the LEAVING bearing of every edge whose ``source`` is that node.
-
-    Returns ``{node_id: [(edge_id, bearing_deg), …]}`` — the full branch structure at a junction, so
-    guidance can reason about **forks** ("keep left/right" when two branches both go ~forward) and
-    **roundabout exits**. Bearing = compass heading over the first ~2 segments of each branch. Same
-    source data as :func:`node_out_degree`; no new tables.
-    """
-    ids = {int(n) for n in node_ids if n is not None}
-    if not ids:
-        return {}
-    rows = con.execute(f"""
-        SELECT source, edge_id,
-               ST_X(ST_PointN(geometry, 1)), ST_Y(ST_PointN(geometry, 1)),
-               ST_X(ST_PointN(geometry, CAST(LEAST(ST_NPoints(geometry), 3) AS INTEGER))),
-               ST_Y(ST_PointN(geometry, CAST(LEAST(ST_NPoints(geometry), 3) AS INTEGER)))
-        FROM {mode}.edges WHERE source IN ({",".join(map(str, ids))})
-    """).fetchall()
-    out = {}
-    for src, eid, x1, y1, x2, y2 in rows:
-        out.setdefault(int(src), []).append((str(eid), _compass_bearing((x1, y1), (x2, y2))))
+def _edge_ids(db, mode, places) -> list[int]:
+    """The edge id of each place: an edge id stays; a point (or a geocoded name) takes its nearest edge."""
+    places = list(places)
+    out = [None if isinstance(p, str) or _is_point(p) else int(p) for p in places]
+    todo = [i for i, e in enumerate(out) if e is None]
+    if todo:
+        gpd = require("geopandas", "routing from points")
+        net = db if isinstance(db, Network) else Network(_file(db))
+        pts = [geocode(net, places[i], mode) if isinstance(places[i], str) else places[i] for i in todo]
+        edges = net.edges(mode, where=f"edge_id IN (SELECT from_edge FROM {_routed(net, mode)})")[["edge_id", "geometry"]]
+        crs = edges.estimate_utm_crs()
+        at = gpd.GeoDataFrame({"i": todo}, geometry=gpd.points_from_xy(*zip(*pts)), crs="EPSG:4326").to_crs(crs)
+        hit = gpd.sjoin_nearest(at, edges.to_crs(crs), how="left").drop_duplicates("i")
+        for i, e in zip(hit["i"], hit["edge_id"]):
+            out[i] = int(e)
     return out
 
 
-def node_out_degree(con, node_ids, mode: str = "driving"):
-    """Out-degree of each node in ``<mode>.edges`` — how many edges LEAVE it (``source = node``).
+def routed_graph(net, mode: str | None = None) -> str:
+    """The SQL relation of the rows of ``<mode>.edge_graph`` that the mode routes on (its own ``uses``): the graph of
+    :func:`route`. ``SELECT from_edge FROM {routed_graph(net.driving)}`` gives the edges that a route can start on.
 
-    A junction hint for turn-by-turn guidance: out-degree ``<= 2`` is a **through-node** (the road just
-    continues, or a dead-end — no real choice, so a bend there isn't a "turn"); ``>= 3`` is a **genuine
-    junction** where turns/forks are worth announcing. Out-degree (not undirected degree) is the right
-    measure: a two-way road passing straight through has out-degree 2 (continue + the way back), while a
-    3-way junction has 3 — undirected degree would double-count every two-way road.
-
-    Returns ``{node_id: out_degree}`` for the requested nodes (absent nodes omitted). No new tables —
-    computed straight from ``source``.
-    """
-    ids = {int(n) for n in node_ids if n is not None}
-    if not ids:
-        return {}
-    idlist = ",".join(map(str, ids))
-    rows = con.execute(
-        f"SELECT source, COUNT(*) FROM {mode}.edges WHERE source IN ({idlist}) GROUP BY source"
-    ).fetchall()
-    return {int(n): int(d) for n, d in rows}
+    >>> net.sql(f"SELECT count(*) FROM {duckosm.routing.routed_graph(net.driving)}")"""
+    db, mode = resolve(net, mode)
+    return _routed(db if isinstance(db, Network) else Network(_file(db)), mode)
 
 
-def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
-    """Shortest route between two edge ids.
-
-    Returns a dict ``{edges, time_s, length_m, path}`` where ``edges`` is the ordered list of
-    edge_ids, ``time_s``/``length_m`` are the door-to-door totals (summed over every edge on the
-    route), and ``path`` is those edges in order with ``name``/``highway``/``length_m``/``cost_s``/
-    ``geometry`` (WKT). Returns ``None`` if the two edges aren't connected.
-
-    Defaults: fastest route (``weight="time"``). Pass a prebuilt ``graph`` (from
-    :func:`to_networkx`) to route many times without rebuilding it.
-    """
-    try:
-        import networkx as nx
-    except ImportError as e:
-        raise ImportError("route needs networkx — `pip install duckosm[networkx]`") from e
-
-    g = graph if graph is not None else to_networkx(con, mode=mode, weight=weight,
-                                                    node_attrs=False)
-    missing = [e for e in (from_edge, to_edge) if e not in g]
-    if missing:
-        raise ValueError(f"edge id(s) not in the {mode} routing graph: {missing}")
-    try:
-        path = nx.shortest_path(g, from_edge, to_edge, weight="weight")
-    except nx.NetworkXNoPath:
-        return None
-
-    # per-edge detail in path order
-    try:
-        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
-    except Exception:
-        pass
-    ids = ", ".join(str(e) for e in path)
-    detail = {r[0]: r for r in con.execute(
-        f"SELECT edge_id, name, highway, length_m, cost_s, ST_AsText(geometry) AS wkt "
-        f"FROM {mode}.edges WHERE edge_id IN ({ids})").fetchall()}
-    rows = [{"edge_id": e, "name": detail[e][1], "highway": detail[e][2],
-             "length_m": detail[e][3], "cost_s": detail[e][4], "geometry": detail[e][5]}
-            for e in path]
-    return {
-        "edges": path,
-        "time_s": sum(r["cost_s"] for r in rows if r["cost_s"] is not None),
-        "length_m": sum(r["length_m"] for r in rows if r["length_m"] is not None),
-        "path": rows,
-    }
+def _routed(net, mode):
+    use = {"driving": "car", "walking": "walk", "cycling": "bike"}.get(mode)
+    has = len(net.sql("SELECT 1 FROM information_schema.columns WHERE table_schema = $m AND table_name = 'edge_graph' "
+                      "AND column_name = 'uses'", {"m": mode}))
+    return f"(SELECT * FROM {mode}.edge_graph WHERE uses = '{use}')" if has and use else f"{mode}.edge_graph"
 
 
-class Router:
-    """Build the routing graph ONCE, then answer many shortest-path queries cheaply.
-
-        r = Router(con)                 # builds the in-memory graph once (time)
-        r.route(from_edge, to_edge)     # reuses it -> same dict as routing.route()
-        r.route(c, d)                   # no rebuild
-
-    Defaults match :func:`route` (fastest); set ``weight="length"`` per Router. The prebuilt graph
-    is on ``.graph``.
-    """
-
-    def __init__(self, con, mode: str = "driving", weight: str = "time"):
-        self.con = con
-        self.mode = mode
-        self.weight = weight
-        self.graph = to_networkx(con, mode=mode, weight=weight, node_attrs=False)
-
-    def route(self, from_edge, to_edge):
-        """Shortest route between two edge ids, reusing the prebuilt graph."""
-        return route(self.con, from_edge, to_edge, mode=self.mode, weight=self.weight,
-                     graph=self.graph)
+def _labels(places):
+    places = list(places)
+    return places if all(isinstance(p, (int, str)) for p in places) else list(range(len(places)))
 
 
-# ---- multimodal (intermodal) routing over the mm.* layered graph ------------------------------
+def _router(db, mode, weight):
+    from duckosm import _api
+    if weight not in WEIGHTS:
+        raise DuckOSMError(f"weight must be one of {', '.join(WEIGHTS)}, not {weight!r}")
+    return _api._rust().Router(_file(db), mode, weight)
 
-# The pedestrian layer every mode-change routes through (as `duckosm multimodal` makes the transfers). A trip is
-# walk* (drive|cycle)* walk*: you can only *enter* a vehicle from walking and *leave* it back to
-# walking, so every vehicular leg is bracketed by walking.
-_HUB_MODE = "walking"
 
-
-def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
-                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None,
-                     _points=None):
-    """Fastest **intermodal** route between two junction ``node_id``s over the ``mm.*`` graph.
-
-    Where :func:`route` stays in one mode end-to-end, this routes across the *layered* graph built
-    by ``duckosm multimodal``: the roads are ``mm.edges`` (weight
-    ``cost_s``) and the changes of mode are ``mm.transfers`` (a transfer penalty in seconds). So a
-    single trip can **switch mode** (walk → drive → walk).
-
-    Everything is weighted in **seconds**, so ``time_s`` is exactly ``Σ edge cost_s + Σ transfer
-    cost_s``. An edge-based Dijkstra (``heapq``; needs no networkx): a road is followed by the roads
-    of its mode's ``edge_graph``, so every part of the trip obeys the turn restrictions, as
-    :func:`route` does. Where a mode has no ``edge_graph`` (an old database), any road that leaves
-    the junction may follow (docs/design/multimodal_edge_graph.md).
-
-    Parameters
-    ----------
-    con : DuckDB connection to a db that has an ``mm`` schema (run ``duckosm multimodal`` first).
-    src_node, dst_node : OSM junction ``node_id``s (as in ``<mode>.nodes`` / ``mm.edges``).
-    schema : the multimodal schema (default ``"mm"``).
-    start_mode, end_mode : the mode you begin / end the trip in (default walking on both ends).
-    enforce_sequence : when True (default) restrict the trip to ``walk* (drive|cycle)* walk*`` — at
-        most one contiguous vehicular segment, entered and left via walking. False = plain layered
-        Dijkstra (any mode alternation the transfers allow).
-    allowed_modes : optional iterable of modes to restrict the trip to (e.g. ``{"walking", "cycling"}``
-        for a **car-free** route). ``None`` = all modes present in the graph. ``start_mode``/``end_mode``
-        must be in it.
-
-    Returns a dict::
-
-        { "time_s":    float,                       # door-to-door seconds (edges + transfers)
-          "length_m":  float,                       # summed edge length
-          "edges":     [(mode, edge_id), …],        # full ordered path
-          "legs":      [{"mode","edges","time_s","path"}, …],   # grouped into same-mode legs
-          "transfers": [{"node_id","from_mode","to_mode","cost_s","kind"}, …],
-          "nodes":     [node_id, …] }               # junction path (consecutive dups collapsed)
-
-    ``None`` if the two nodes aren't connected (e.g. no transfers → the layers are disconnected).
-    Raises ``ValueError`` if an endpoint isn't present in its mode's layer.
-
-    ``_points`` (private, :func:`duckosm.point_routing.route_multimodal_points`): ``(starts, ends)``
-    in place of the two nodes. ``starts`` is a list of ``(edge_id, fraction, access_s)`` and ``ends``
-    a dict ``edge_id -> (fraction, access_s)``, all walking roads: the trip starts on a road at
-    ``fraction`` of it and ends at ``fraction`` of another; ``access_s`` is the walk to and from the
-    road. The result then also has ``access_s``.
-    """
-    import heapq
-
-    try:
-        con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
-    except Exception:
-        pass
-
-    allow = set(allowed_modes) if allowed_modes else None   # None = all modes
-
-    # --- the roads and the changes of mode (two SQL reads), skipping any mode not in `allow` ------
-    info: dict = {}                      # (mode, edge_id) -> (source, target, cost_s)
-    out_of: dict = {}                    # (mode, node) -> [edge_id, …] that leave the node
-    nodes_by_mode: dict = {}             # mode -> {node_id}
-    for mode, s, t, eid, cost in con.execute(
-            f"SELECT mode, source, target, edge_id, cost_s FROM {schema}.edges").fetchall():
-        if allow is not None and mode not in allow:
-            continue
-        info[(mode, eid)] = (s, t, float(cost) if cost is not None else 0.0)
-        out_of.setdefault((mode, s), []).append(eid)
-        nm = nodes_by_mode.setdefault(mode, set())
-        nm.add(s)
-        nm.add(t)
-    tadj: dict = {}                      # (from_mode, node) -> [(to_mode, cost_s, kind)]
-    for nid, fm, tm, cost, kind in con.execute(
-            f"SELECT node_id, from_mode, to_mode, cost_s, kind FROM {schema}.transfers").fetchall():
-        if allow is not None and (fm not in allow or tm not in allow):
-            continue
-        tadj.setdefault((fm, nid), []).append((tm, float(cost) if cost is not None else 0.0, kind))
-
-    # --- the legal turns of each mode: its edge_graph, as route() reads it ---------------------------
-    from duckosm.processors.edge_graph import routed_graph
-    turns: dict = {}                     # mode -> {from_edge: [to_edge, …]}
-    for mode in nodes_by_mode:
-        if not con.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = ? "
-                           "AND table_name = 'edge_graph'", [mode]).fetchone()[0]:
-            continue                     # an old database: no turn data for this mode
-        nxt = turns.setdefault(mode, {})
-        for f, t in con.execute(f"SELECT from_edge, to_edge FROM {routed_graph(con, mode)}").fetchall():
-            if (mode, t) in info:
-                nxt.setdefault(f, []).append(t)
-
-    def following(mode, eid):            # the roads that may come after a road
-        if mode in turns:
-            return turns[mode].get(eid, ())
-        return out_of.get((mode, info[(mode, eid)][1]), ())
-
-    starts, ends = _points if _points else (None, None)
-    if starts is None:
-        if src_node not in nodes_by_mode.get(start_mode, set()):
-            raise ValueError(f"src node {src_node} not in the '{start_mode}' layer of {schema}.edges")
-        if dst_node not in nodes_by_mode.get(end_mode, set()):
-            raise ValueError(f"dst node {dst_node} not in the '{end_mode}' layer of {schema}.edges")
-
-    # --- Dijkstra over states: ("E", mode, edge_id, phase) = at the end of a road, with its cost paid;
-    #     ("N", mode, node_id, phase) = at a junction, just after a change of mode (or at the start).
-    #     A label is the time spent so far. ("END",) is the end of a trip that stops part-way along a road.
-    INF = float("inf")
-    init_phase = (0 if start_mode == _HUB_MODE else 1) if enforce_sequence else 0
-    dist: dict = {}
-    prev: dict = {}                      # state -> (previous state or None, step)
-    pq: list = []
-    END = ("END",)
-    n_push = [0]
-
-    def push(d, state, before, step):
-        if d < dist.get(state, INF):
-            dist[state] = d
-            prev[state] = (before, step)
-            n_push[0] += 1
-            heapq.heappush(pq, (d, n_push[0], state))
-
-    best_direct = None                   # a trip that starts and ends on one road, forwards
-    if starts is None:
-        push(0.0, ("N", start_mode, src_node, init_phase), None, None)
-    else:
-        for eid, frac, acc in starts:
-            c = info[(_HUB_MODE, eid)][2]
-            push(acc + (1.0 - frac) * c, ("E", _HUB_MODE, eid, init_phase), None,
-                 ("edge", eid, _HUB_MODE, (1.0 - frac) * c, 1.0 - frac, acc))
-            if eid in ends and frac <= ends[eid][0]:
-                g, acc_t = ends[eid]
-                total = acc + (g - frac) * c + acc_t
-                if best_direct is None or total < best_direct[0]:
-                    best_direct = (total, [("edge", eid, _HUB_MODE, (g - frac) * c, g - frac, acc + acc_t)])
-
-    def onto(d, state, mode, eid, phase):    # take the road `eid`; maybe stop part-way along it
-        c = info[(mode, eid)][2]
-        push(d + c, ("E", mode, eid, phase), state, ("edge", eid, mode, c, 1.0, 0.0))
-        if ends and mode == _HUB_MODE and eid in ends:
-            g, acc_t = ends[eid]
-            push(d + g * c + acc_t, END, state, ("edge", eid, mode, g * c, g, acc_t))
-
-    goal = None
-    while pq:
-        d, _, state = heapq.heappop(pq)
-        if d > dist.get(state, INF):
-            continue
-        if state == END:
-            goal = state
-            break
-        kind, mode, key, phase = state
-        if kind == "E":
-            node = info[(mode, key)][1]
-            if ends is None and node == dst_node and mode == end_mode:
-                goal = state
-                break
-            for nxt_e in following(mode, key):
-                onto(d, state, mode, nxt_e, phase)
-        else:
-            node = key
-            if ends is None and node == dst_node and mode == end_mode:
-                goal = state
-                break
-            for nxt_e in out_of.get((mode, node), ()):
-                onto(d, state, mode, nxt_e, phase)
-        # changes of mode at this junction (+ enforce the walk* veh* walk* phase)
-        for tm, cost, tkind in tadj.get((mode, node), ()):
-            nphase = phase
-            if enforce_sequence:
-                entering = mode == _HUB_MODE and tm != _HUB_MODE
-                leaving = mode != _HUB_MODE and tm == _HUB_MODE
-                if entering:
-                    if phase != 0:
-                        continue            # already used (or past) the one vehicular segment
-                    nphase = 1
-                elif leaving:
-                    if phase != 1:
-                        continue
-                    nphase = 2
-            push(d + cost, ("N", tm, node, nphase), state, ("transfer", node, mode, tm, cost, tkind))
-
-    if best_direct is not None and (goal is None or best_direct[0] <= dist[goal]):
-        steps = best_direct[1]
-    elif goal is None:
-        return None
-    else:
-        steps, s = [], goal
-        while True:
-            before, step = prev[s]
-            if step is not None:
-                steps.append(step)
-            if before is None:
-                break
-            s = before
-        steps.reverse()
-
-    # --- the ordered steps: roads, legs, changes of mode ---------------------------------------------
-    edges_seq: list = []                 # (mode, edge_id) in order
-    legs: list = []
-    transfers: list = []
-    access_s = 0.0
-    nodes: list = [] if starts is not None else [src_node]
-    for step in steps:
-        if step[0] == "edge":
-            _, eid, mode, cost, frac, acc = step
-            edges_seq.append((mode, eid))
-            if not legs or legs[-1]["mode"] != mode:
-                legs.append({"mode": mode, "edges": [], "time_s": 0.0, "_fr": []})
-            legs[-1]["edges"].append(eid)
-            legs[-1]["_fr"].append(frac)
-            legs[-1]["time_s"] += cost
-            access_s += acc
-            if not nodes or nodes[-1] != info[(mode, eid)][1]:
-                nodes.append(info[(mode, eid)][1])
-        else:
-            _, node, fm, tm, cost, tkind = step
-            transfers.append({"node_id": node, "from_mode": fm, "to_mode": tm,
-                              "cost_s": cost, "kind": tkind})
-
-    # --- per-edge detail (name/highway/length/cost/geometry) for each leg ------------------------
-    detail: dict = {}
-    ids = {e for _, e in edges_seq}
+def _routes_of(db, mode, paths) -> list:
+    """The Route of each path (a list of edge ids, or None), with the edge rows of the old ``route``."""
+    ids = sorted({e for p in paths if p for e in p})
+    rows = {}
     if ids:
-        idlist = ", ".join(str(e) for e in ids)
-        for row in con.execute(
-                f"SELECT mode, edge_id, name, highway, length_m, cost_s, "
-                f"ST_AsText(geometry) AS wkt FROM {schema}.edges "
-                f"WHERE edge_id IN ({idlist})").fetchall():
-            detail[(row[0], row[1])] = row
-    length_m = 0.0
-    for leg in legs:
-        leg["path"] = []
-        for eid, frac in zip(leg["edges"], leg.pop("_fr"), strict=True):
-            r = detail.get((leg["mode"], eid))
-            if r is None:
-                continue
-            row = {"edge_id": eid, "name": r[2], "highway": r[3],
-                   "length_m": r[4], "cost_s": r[5], "geometry": r[6]}
-            if frac != 1.0:                  # part of an edge (a point beside a road)
-                row.update(fraction=frac, length_m=(r[4] or 0.0) * frac, cost_s=(r[5] or 0.0) * frac)
-            leg["path"].append(row)
-            if r[4] is not None:
-                length_m += r[4] * frac
-
-    time_s = sum(leg["time_s"] for leg in legs) + sum(t["cost_s"] for t in transfers) + access_s
-    logger.info(f"route_multimodal: {src_node} -> {dst_node}: {len(legs)} leg(s), "
-                f"{len(transfers)} transfer(s), {time_s:.1f}s")
-    out = {"time_s": time_s, "length_m": length_m, "edges": edges_seq, "legs": legs,
-           "transfers": transfers, "nodes": nodes}
-    if _points:
-        out["access_s"] = access_s
+        net = db if isinstance(db, Network) else Network(_file(db))
+        df = net.sql(f"SELECT edge_id, name, highway, length_m::DOUBLE AS length_m, cost_s::DOUBLE AS cost_s, "
+                     f"ST_AsText(geometry) AS geometry FROM {mode}.edges WHERE list_contains($ids, edge_id)", {"ids": ids})
+        rows = {int(r["edge_id"]): {k: (None if v != v else v) for k, v in r.items()} for r in df.to_dict("records")}
+    out = []
+    for p in paths:
+        if p is None:
+            out.append(None)
+            continue
+        path = [{**rows[e], "edge_id": e} for e in p]
+        out.append(Route({"edges": list(p), "time_s": sum(r["cost_s"] or 0 for r in path),
+                          "length_m": sum(r["length_m"] or 0 for r in path), "path": path}, db, mode))
     return out
+
+
+def _own_weight(db, mode, weight, ids) -> dict:
+    """The weight (``cost_s`` or ``length_m``) of each edge: the cost of the last edge of a route, which the graph cost
+    does not hold (an arc of the edge graph costs its from-edge)."""
+    net = db if isinstance(db, Network) else Network(_file(db))
+    df = net.sql(f"SELECT edge_id, coalesce({WEIGHTS[weight]}, 0)::DOUBLE AS w FROM {mode}.edges "
+                 "WHERE list_contains($ids, edge_id)", {"ids": sorted(set(ids))})
+    return dict(zip(df["edge_id"].astype(int), df["w"]))
+
+
+# ---- routes ----------------------------------------------------------------------------------------------------------
+
+def route(net, a, b, mode=None, weight="time", graph=None):
+    """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``, as a :class:`Route`, or None when no
+    route connects them. ``a`` and ``b``: two edge ids, two ``(lon, lat)`` points (then :func:`route_points`: each point
+    joins its nearest road) or place names (:func:`geocode`). ``graph``: a networkx graph of
+    :func:`duckosm.ml.to_networkx` (the Python code).
+
+    >>> duckosm.routing.route(net.driving, (7.4155, 43.7285), (7.4335, 43.7468))
+    >>> duckosm.routing.route(net.walking, "Boulevard Albert 1er", "Avenue de la Costa")"""
+    from duckosm import _api
+    db, mode = resolve(net, mode)
+    a, b = (geocode(db, x, mode) if isinstance(x, str) else x for x in (a, b))
+    if _is_point(a) and _is_point(b):
+        return _route(_api.route_points(db, a, b, mode=mode, weight=weight), db, mode)
+    if _is_point(a) or _is_point(b):
+        a, b = _edge_ids(db, mode, [a, b])
+    return _route(_api.route(db, a, b, mode=mode, weight=weight, graph=graph), db, mode)
+
+
+def route_points(net, a, b, mode=None, weight="time", radius_m=50.0, access_kmh=4.5):
+    """The fastest route between two ``(lon, lat)`` points: each joins the network at its nearest road within
+    ``radius_m``. A :class:`Route` (also ``start``, ``end``), or None.
+
+    >>> duckosm.routing.route_points(net.walking, (7.4155, 43.7285), (7.4335, 43.7468))"""
+    from duckosm import _api
+    db, mode = resolve(net, mode)
+    return _route(_api.route_points(db, a, b, mode=mode, weight=weight, radius_m=radius_m, access_kmh=access_kmh), db, mode)
+
+
+def routes(net, origins, destinations, mode=None, weight="time") -> list:
+    """The route from each origin to the destination at the same place in the list (``zip``), in parallel. A list of
+    :class:`Route` (None: not connected). A point takes its nearest edge.
+
+    >>> rs = duckosm.routing.routes(net.driving, [e1, e2], [e3, e4])"""
+    db, mode = resolve(net, mode)
+    origins, destinations = list(origins), list(destinations)
+    if len(origins) != len(destinations):
+        raise DuckOSMError(f"{len(origins)} origins and {len(destinations)} destinations: give the same number")
+    ids = _edge_ids(db, mode, origins + destinations)
+    pairs = list(zip(ids[:len(origins)], ids[len(origins):]))
+    return _routes_of(db, mode, _router(db, mode, weight).paths(pairs))
+
+
+def k_shortest_paths(net, a, b, k=3, mode=None, weight="time") -> list:
+    """The ``k`` fastest routes (``weight="length"``: shortest) from ``a`` to ``b`` that visit no edge twice, the best
+    first (Yen's algorithm, on the graph and the turn rules of :func:`route`). The first equals :func:`route` of two edge
+    ids. A list of :class:`Route`; fewer than ``k`` when the graph has fewer.
+
+    >>> for r in duckosm.routing.k_shortest_paths(net.driving, a, b, k=3): print(r.time_s)"""
+    db, mode = resolve(net, mode)
+    a, b = _edge_ids(db, mode, [a, b])
+    return _routes_of(db, mode, _router(db, mode, weight).k_shortest_paths(a, b, int(k)))
+
+
+def matrix(net, origins, destinations=None, mode=None, weight="time", max_cost=None):
+    """The travel time in seconds (``weight="length"``: the distance in metres) from each origin to each destination,
+    as a DataFrame: a row for each origin, a column for each destination. ``destinations=None``: the origins. A cell is
+    the ``time_s`` (``length_m``) of :func:`route` of that pair: from the start of the origin edge to the end of the
+    destination edge. NaN: not connected, more than ``max_cost``, or an edge that is not in the graph of the mode. One Dijkstra search for each origin, in parallel
+    (Rust); ``max_cost`` stops each search early.
+
+    >>> m = duckosm.routing.matrix(net.driving, edge_ids[:100])"""
+    import numpy as np
+    import pandas as pd
+    db, mode = resolve(net, mode)
+    origins = list(origins)
+    destinations = origins if destinations is None else list(destinations)
+    ids = _edge_ids(db, mode, origins + destinations)
+    o, d = ids[:len(origins)], ids[len(origins):]
+    own = _own_weight(db, mode, weight, d)
+    limit = math.inf if max_cost is None else float(max_cost)
+    cost = np.array(_router(db, mode, weight).costs(o, d, limit), dtype=float).reshape(len(o), len(d))
+    cost = cost + np.array([own.get(e, 0.0) for e in d])
+    cost[cost > limit] = np.nan
+    return pd.DataFrame(cost, index=_labels(origins), columns=_labels(destinations))
+
+
+def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0):
+    """The area reached from each origin within each number of minutes, as a GeoDataFrame of polygons (``origin``,
+    ``minutes``, ``n_edges``, ``geometry``). An edge is reached when the whole edge is reached: its :func:`matrix` cell is
+    at most the time. The polygon is the union of the reached edges, each with a buffer of ``buffer_m`` metres (in the UTM
+    zone of the area).
+
+    >>> iso = duckosm.routing.isochrones(net.walking, [(7.4246, 43.7384)], minutes=[5, 10])"""
+    gpd = require("geopandas", "isochrones")
+    import pandas as pd
+    from shapely import Polygon, union_all
+    db, mode = resolve(net, mode)
+    origins, minutes = list(origins), sorted(float(m) for m in ([minutes] if isinstance(minutes, (int, float)) else minutes))
+    ids = _edge_ids(db, mode, origins)
+    reach = _router(db, mode, "time").reach(ids, max(minutes) * 60)
+    every = sorted({e for hit, _ in reach for e in hit})
+    own = _own_weight(db, mode, "time", every)
+    edges = Network(_file(db)).edges(mode, where=f"edge_id IN ({','.join(map(str, every)) or 'NULL'})", crs="utm")
+    geom = dict(zip(edges["edge_id"].astype(int), edges.buffer(buffer_m, resolution=4)))
+    rows = []
+    for label, (hit, cost) in zip(_labels(origins), reach):
+        total = pd.Series(cost, index=hit) + pd.Series([own[e] for e in hit], index=hit)
+        poly, done = None, 0.0
+        for m in minutes:                   # each polygon: the one before, and the edges of the next minutes
+            ring = total.index[(total > done * 60) & (total <= m * 60)]
+            parts = [geom[e] for e in ring] + ([poly] if poly is not None else [])
+            poly, done = union_all(parts) if parts else Polygon(), m
+            rows.append({"origin": label, "minutes": m, "n_edges": int((total <= m * 60).sum()), "geometry": poly})
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=edges.crs).to_crs("EPSG:4326")
+
+
+def accessibility(net, origins, targets, minutes=15, mode=None):
+    """For each origin: the number of targets reached within each number of minutes (a column ``n_<m>min``), and the
+    nearest target (``nearest``, ``nearest_s``). It uses :func:`matrix` (one search for each origin, stopped at the
+    largest time). A DataFrame with a row for each origin.
+
+    >>> acc = duckosm.routing.accessibility(net.walking, homes, shops, minutes=[5, 10])"""
+    import numpy as np
+    import pandas as pd
+    minutes = sorted(float(m) for m in ([minutes] if isinstance(minutes, (int, float)) else minutes))
+    m = matrix(net, origins, targets, mode=mode, max_cost=max(minutes) * 60)
+    out = {f"n_{x:g}min": (m <= x * 60).sum(axis=1).astype(int) for x in minutes}
+    best = m.to_numpy()
+    reached = ~np.isnan(best).all(axis=1)
+    pick = np.where(reached, np.nanargmin(np.where(np.isnan(best), np.inf, best), axis=1), 0)
+    out["nearest"] = pd.Series([m.columns[j] if ok else None for j, ok in zip(pick, reached)], index=m.index, dtype=object)
+    out["nearest_s"] = [best[i, j] if ok else np.nan for i, (j, ok) in enumerate(zip(pick, reached))]
+    return pd.DataFrame(out, index=m.index)
+
+
+# ---- across modes, and the steps -------------------------------------------------------------------------------------
+
+def route_multimodal_points(net, a, b, **kwargs):
+    """A route across the modes between two ``(lon, lat)`` points (it can walk to a car and drive). Needs the multimodal
+    graph ``mm`` (a build with ``multimodal: {enabled: true}``). Returns the legs of each mode.
+
+    >>> duckosm.routing.route_multimodal_points(net, (7.4155, 43.7285), (7.4335, 43.7468))"""
+    from duckosm import _api
+    db = net.network if hasattr(net, "network") else net
+    return _api.route_multimodal_points(db, a, b, **kwargs)
+
+
+def directions(net, route, mode=None):
+    """The turn-by-turn steps of a route (``text``, ``length_m``, ``type`` ...).
+
+    >>> for step in duckosm.routing.directions(net.driving, r): print(step["text"])"""
+    from duckosm import _api
+    db, mode = resolve(net, mode)
+    return _api.directions(db, dict(route), mode=mode)
