@@ -17,6 +17,7 @@ pub mod geom;
 pub mod graph;
 pub mod hash;
 pub mod lanes;
+pub mod matching;
 pub mod model;
 pub mod mvt;
 pub mod network;

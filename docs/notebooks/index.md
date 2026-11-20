@@ -18,6 +18,7 @@ run the notebook, you get the live map.
 | [10. Graph machine learning](10_ml.md) | The junction graph and the turn graph as PyTorch Geometric graphs; a small graph neural network that learns the speed limits | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/10_ml.ipynb) |
 | [11. Advanced routing](11_routing_advanced.md) | The `Route` object, many routes, the k best routes, a travel time matrix, isochrones and accessibility, each with a map or a chart | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/11_routing_advanced.ipynb) |
 | [12. Street network analysis](12_analysis.md) | The numbers of OSMnx in two views, junctions, street directions, connected parts, nearest roads, clip, random points, OSMnx on the network | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/12_analysis.ipynb) |
+| [13. Mobility data](13_mobility.md) | Map matching of GPS traces onto `edge_id`, sensors on the edges, counts per edge and hour, the old edge ids after a rebuild | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/13_mobility.ipynb) |
 
 ## Run a notebook on your computer
 

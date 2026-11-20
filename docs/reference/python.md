@@ -112,7 +112,7 @@ The plan of each module and its decision: [Python SDK: the modules](python-modul
 | `duckosm.routing` | routing and accessibility | `route`, `route_points`, `route_multimodal`, `route_multimodal_points`, `directions` | [routing](sdk/routing.md) |
 | `duckosm.sim` | traffic simulation | `to_sumo`, `to_matsim`, `to_matsim_lanes` | [sim](sdk/sim.md) |
 | `duckosm.planning` | transport planning | `to_gmns`, `check_gmns`, `to_meso`, `to_micro` | [planning](sdk/planning.md) |
-| `duckosm.mobility` | mobility data | comes in PR 5 | [mobility](sdk/mobility.md) |
+| `duckosm.mobility` | mobility data | `snap`, `match`, `join`, `aggregate`, `edge_id_map` | [mobility](sdk/mobility.md) |
 | `duckosm.hdmap` | automated driving and HD maps | `to_opendrive`, `to_lanelet2`, `lane_graph`, `route_lanes` | [hdmap](sdk/hdmap.md) |
 | `duckosm.ml` | graph machine learning | `to_networkx`, `to_networkx_nodes`, `to_rustworkx` | [ml](sdk/ml.md) |
 | `duckosm.fixes` | all groups | comes in PR 6 | [fixes](sdk/fixes.md) |

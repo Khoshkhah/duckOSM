@@ -11,6 +11,8 @@
 mod analysis;
 #[cfg(feature = "duckdb")]
 mod api;
+#[cfg(feature = "duckdb")]
+mod mobility;
 
 use duckosm_build::{
     build as run_build, config, parse_levels, NetworkMode, NetworkOptions, Params, Summary,
@@ -299,6 +301,8 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     api::add(m)?;
     #[cfg(feature = "duckdb")]
     analysis::add(m)?;
+    #[cfg(feature = "duckdb")]
+    mobility::add(m)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

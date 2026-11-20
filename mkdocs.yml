@@ -148,6 +148,7 @@ nav:
       - 10. Graph machine learning: notebooks/10_ml.md
       - 11. Advanced routing: notebooks/11_routing_advanced.md
       - 12. Street network analysis: notebooks/12_analysis.md
+      - 13. Mobility data: notebooks/13_mobility.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
