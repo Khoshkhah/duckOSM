@@ -1,6 +1,6 @@
 # GMNS by tiles
 
-Status: built, 2026-11-19. The section "Result" gives the numbers.
+Status: built, 2026-11-20. The section "Result" gives the numbers.
 
 `duckosm gmns` kept the rows of the whole area in memory in some steps (the lanes: all edges with their OSM tags and
 lines; the SUMO step: all lanes, then netconvert on the whole area). Kentucky (driving): 1085 s and 25.9 GB on the
@@ -55,7 +55,7 @@ Kentucky, driving, zoom 9 (49 tiles). WSL (20 cores, 23 GB). Memory: the program
 | Whole area, without netconvert | 187 s | 12.2 GB |
 | By tiles, without netconvert | 346 s | 3.4 GB |
 | Whole area, with netconvert | stopped past 15.8 GB (Mac mini: 1085 s, 25.9 GB) | |
-| By tiles, with netconvert | 1893 s | 4.9 GB |
+| By tiles, with netconvert | 1406 s (1893 s before the crossings fix) | 5.0 GB |
 
 Without netconvert and without the crossings (the whole area stops in the crossings without netconvert, a GEOS
 `TopologyException`), by tiles against the whole area: 123 columns, each with the same count and the same values, but
@@ -69,5 +69,20 @@ Without netconvert and without the crossings (the whole area stops in the crossi
 The largest ones are ring roads, whose lanes start at another piece of the ring (the order of the rows), not the edges
 of the tiles.
 
-The time is larger, because each tile copies its source rows and the band is done two times or more. Not measured
-yet: by tiles against the whole area with netconvert (the whole area needs about 26 GB).
+The time is larger, because each tile copies its source rows (source and merge: 145 s of 1406 s) and the band is done
+two times or more. Not measured: by tiles against the whole area with netconvert on one machine (the whole area needs
+about 26 GB).
+
+Île-de-France, driving, zoom 9 (15 tiles), WSL: 1373 s, 8.5 GB, 1.80 million links. The Paris tile (9/259/176) takes
+734 s and has 1.3 million movements.
+
+Three faults came out on Île-de-France, and each one is also a fault of the whole-area export:
+
+| Fault | Fix |
+|---|---|
+| The crossings did a scan of all lanes or all placed crossings for each crossing: more than 5 hours on the Paris tile | A grid of 100 m, maps by link and by way, and a list of the placed crossings with their boxes. 2 minutes. |
+| netconvert joins two OSM nodes at one position: a shape point of an edge split the edge in the turn-arrow pass | The pass leaves out such a point |
+| A `turn_permission` row into a private edge that is not in the SUMO network | Only the connections between edges of the network |
+
+Known limit: netconvert 1.28 stops with a crash (exit 245) on the Kentucky tile 9/134/197; 1.27 has no problem. The CI
+uses 1.27.
