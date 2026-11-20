@@ -6,6 +6,9 @@
   fixes in every output, routing, the exports, and a join by `edge_id`. Each has a Colab badge, and the CI workflow
   runs them on Monaco (`pytest --nbmake`). `notebooks/area_picker.ipynb` moved to `tests/notebooks/`;
   `notebooks/explore_network.ipynb` is removed (old Sweden database).
+- **`duckosm get` writes the list of Geofabrik extracts in one step** (a temporary file, then a rename). Before, a second
+  `duckosm get` at the same time (the dry run of `duckosm.AreaPicker` and its Get, with an empty cache) could read a part
+  of the file and stop with `the list of extracts: EOF while parsing`.
 - **`duckosm.to_gmns` takes a `Path`**, as `duckosm.build` returns one. Before, a `Path` gave a `TypeError`.
 
 - **`duckosm opendrive` writes the file while it reads the rows.** Before, it kept all lines, then the whole file, in
