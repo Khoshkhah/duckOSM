@@ -42,14 +42,14 @@ levels = ["roadstyle>=0.24.2"]               # duckosm levels: the level area (r
 viz = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib"]  # net.map / plot / dashboard, duckosm viz, route-map, gmns-map
 graph = ["networkx", "rustworkx>=0.15"]      # duckosm.ml: to_networkx, to_rustworkx
 gis = ["geopandas"]                          # duckosm.gis: features, admin_boundaries (GeoDataFrames)
-sim = ["eclipse-sumo"]                       # duckosm.sim: SUMO's netconvert for to_sumo
+sim = ["eclipse-sumo", "sumolib"]            # duckosm.sim: SUMO's netconvert for to_sumo, sumolib for sumo_net
 widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
-all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas"]
+all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas", "sumolib"]
 # the old names: they stay
 networkx = ["networkx"]
 routing = ["networkx"]
 rustworkx = ["rustworkx>=0.15"]
-sumo = ["eclipse-sumo"]
+sumo = ["eclipse-sumo", "sumolib"]
 dev = ["roadstyle>=0.29.0", "matplotlib", "anywidget>=0.9", "pytest", "black", "ruff", "networkx", "rustworkx>=0.15", "lxml", "frictionless", "path4gmns"]   # lxml: MATSim network_v2 DTD validation in tests
 
 [project.urls]
