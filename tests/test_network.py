@@ -83,6 +83,9 @@ def test_plot_and_static_map(net, monkeypatch):
     r = net.walking.route(A, B)
     assert net.plot() is None and net.walking.plot(routes={"walk": r}) is None
     assert net.plot(layers=False) is None and net.plot(layers=["water", "buildings"]) is None    # the base-map layers
+    roads, _ = net._colored(None, None, {})                  # all modes: each road once, with the set of its modes
+    from duckosm.network import MODES_COLORS
+    assert roads.edge_id.is_unique and set(roads.modes) <= set(MODES_COLORS)
     with pytest.raises(duckosm.DuckOSMError, match="plot draws the layers"):
         net.plot(layers=["parking"])
     monkeypatch.setenv("DUCKOSM_MAP_SHOW", "plot")

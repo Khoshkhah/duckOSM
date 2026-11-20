@@ -23,6 +23,13 @@ PLOT_LAYERS = {"ocean": ("ocean", "#aad3df"), "landcover": ("land", "#dde8cf"), 
 _MAP_COUNT = 0          # the <n> of the default file names of show="link" and show="picture"
 
 
+def _modes_label(modes):
+    """The dashboard's name of the modes that can use a road: "all modes", "driving + walking", ... or "driving"."""
+    if set(DEFAULT_MODES) <= modes:
+        return "all modes"
+    return " + ".join(m for m in DEFAULT_MODES if m in modes) or " + ".join(sorted(modes))
+
+
 def _show(show):
     show = show or os.environ.get("DUCKOSM_MAP_SHOW") or "live"
     if show not in MAP_SHOWS:
@@ -65,7 +72,10 @@ class MapPicture(os.PathLike):
     def _repr_png_(self):
         return self.path.read_bytes()
 ROUTE_COLORS = ("#e8590c", "#1c7ed6", "#2f9e44", "#ae3ec9", "#f08c00")
-MODE_COLORS = {"driving": "#e8590c", "walking": "#2f9e44", "cycling": "#1c7ed6"}
+# the colors of the modes that can use a road: the "Modes" colors of roadstyle's dashboard (roadstyle
+# data/basemap/modes.yaml, mode_colors), so that plot and the dashboard agree
+MODES_COLORS = {"all modes": "#555555", "driving + walking": "#e67e22", "driving + cycling": "#9b59b6",
+                "walking + cycling": "#16a085", "driving": "#e74c3c", "walking": "#27ae60", "cycling": "#2b6cb0"}
 MAP_COLUMNS = ("edge_id", "osm_id", "name", "highway", "oneway", "lanes", "length_m", "maxspeed_kmh", "layer", "bridge",
                "tunnel", "mode")
 DEFAULT_MODES = ("driving", "walking", "cycling")
@@ -438,7 +448,8 @@ class Network(os.PathLike):
 
     def plot(self, mode: str | None = None, *, layers=True, color_by=None, highlight=None, routes=None, ax=None, **style):
         """A static matplotlib picture (for papers and saved notebook outputs), with the options of :meth:`map`. All modes:
-        one color for each mode; one mode: one color for each road class. Returns the axis.
+        one color for each set of modes that can use a road (``"all modes"``, ``"driving + walking"``, ... ``"cycling"``),
+        the colors of the "Modes" option of :meth:`dashboard`; one mode: one color for each road class. Returns the axis.
 
         ``layers``: the base map of the file under the roads: True (the layers below), False or a list of these names:
         ``ocean``, ``landcover``, ``water``, ``waterways``, ``buildings`` (the names of roadstyle's layers).
@@ -463,10 +474,12 @@ class Network(os.PathLike):
         elif color_by is not None:                   # numbers: a color ramp, gray where there is no value
             gdf.plot(ax=ax, column=color_by, cmap=style.get("cmap", "viridis"), linewidth=1.2, legend=True,
                      legend_kwds={"label": color_by, "shrink": 0.6}, missing_kwds={"color": "#cccccc", "linewidth": 0.5})
-        elif "mode" in gdf and not plain:            # all modes: one color for each
-            for m, part in gdf.groupby("mode", sort=False):
-                part.plot(ax=ax, color=MODE_COLORS.get(m, "#555555"), linewidth=0.7)
-                handles.append(Line2D([], [], color=MODE_COLORS.get(m, "#555555"), linewidth=2, label=m))
+        elif "modes" in gdf and not plain:           # all modes: one color for each set of modes, as the dashboard
+            for label, color in MODES_COLORS.items():
+                part = gdf[gdf.modes == label]
+                if len(part):
+                    part.plot(ax=ax, color=color, linewidth=0.7)
+                    handles.append(Line2D([], [], color=color, linewidth=2, label=label))
         elif "highway" in gdf and not plain:         # one mode: the road classes
             gdf.plot(ax=ax, column="highway", cmap="tab20", linewidth=0.8, legend=True,
                      legend_kwds={"loc": "lower right", "fontsize": 7})
@@ -507,8 +520,10 @@ class Network(os.PathLike):
         """The edges to draw, and the column to color by: a column of the edges, or your own data joined on ``edge_id``."""
         import pandas as pd
         gdf = self.edges(mode)
-        if "mode" in gdf and mode is None:           # all modes on one map: each road once, with its first mode
-            gdf = gdf.drop_duplicates("edge_id", keep="first")
+        if "mode" in gdf and mode is None:           # all modes on one map: each road once, with all its modes
+            used = gdf.groupby("edge_id")["mode"].agg(frozenset)
+            gdf = gdf.drop_duplicates("edge_id", keep="first").copy()
+            gdf["modes"] = gdf.edge_id.map(used).map(_modes_label)
         if color_by is None:
             return gdf, None
         if isinstance(color_by, pd.Series):
