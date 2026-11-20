@@ -44,7 +44,7 @@ jobs:
       # MkDocs 2.0 drops the plugin/theme system Material depends on: stay on 1.x
       - run: pip install "mkdocs>=1.6,<2" "mkdocs-material>=9.5,<10" "mkdocs-llmstxt>=0.5,<0.6" "nbconvert>=7,<8"
       # the pages of the notebooks (docs/notebooks/index.md links them): Markdown with the saved outputs
-      - run: jupyter nbconvert --to markdown docs/notebooks/[0-9]*.ipynb
+      - run: python scripts/notebook_pages.py
       - run: mkdocs build --strict
 
   # the demo notebooks of the manual (docs/notebooks/): each cell must run on Monaco. The map tests (live, link, picture,
