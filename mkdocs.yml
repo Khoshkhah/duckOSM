@@ -207,6 +207,7 @@ nav:
       - Overview: reference/index.md
       - Command line: reference/cli.md
       - Python SDK: reference/python.md
+      - "Python SDK: the modules": reference/python-modules.md
       - Rust SDK: reference/rust.md
       - Configuration: reference/configuration.md
       - The boundary file: reference/boundary.md
