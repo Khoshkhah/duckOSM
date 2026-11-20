@@ -16,6 +16,7 @@ run the notebook, you get the live map.
 | [8. Transport planning](08_planning.md) | The GMNS network and its checks, loaded in path4gmns; the same shortest path in duckOSM and path4gmns | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/08_planning.ipynb) |
 | [9. HD maps for automated driving](09_hdmap.md) | The lanes as a CommonRoad map (read back with commonroad-io), a Lanelet2 map and an OpenDRIVE file | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/09_hdmap.ipynb) |
 | [11. Advanced routing](11_routing_advanced.md) | The `Route` object, many routes, the k best routes, a travel time matrix, isochrones and accessibility, each with a map or a chart | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/11_routing_advanced.ipynb) |
+| [12. Street network analysis](12_analysis.md) | The numbers of OSMnx in two views, junctions, street directions, connected parts, nearest roads, clip, random points, OSMnx on the network | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/12_analysis.ipynb) |
 
 ## Run a notebook on your computer
 

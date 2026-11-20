@@ -43,6 +43,7 @@ viz = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib"]
 graph = ["networkx", "rustworkx>=0.15"]      # duckosm.ml: to_networkx, to_rustworkx
 gis = ["geopandas"]                          # duckosm.gis: features, admin_boundaries (GeoDataFrames)
 sim = ["eclipse-sumo", "sumolib"]            # duckosm.sim: SUMO's netconvert for to_sumo, sumolib for sumo_net
+analysis = ["networkx", "matplotlib", "geopandas"]  # duckosm.analysis: to_osmnx, plot_orientation, sample_points, clip
 widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
 planning = ["path4gmns", "requests"]        # duckosm.planning: to_path4gmns (path4gmns needs requests and does not say so)
 hdmap = ["commonroad-io"]                    # duckosm.hdmap: to_commonroad

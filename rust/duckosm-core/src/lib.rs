@@ -1,5 +1,6 @@
 //! duckosm-core: the network step of duckOSM in Rust. See docs/design.md.
 
+pub mod analysis;
 pub mod boundary;
 pub mod building_faces;
 pub mod bus;

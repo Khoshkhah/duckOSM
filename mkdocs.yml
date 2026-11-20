@@ -146,6 +146,7 @@ nav:
       - 8. Transport planning: notebooks/08_planning.md
       - 9. HD maps: notebooks/09_hdmap.md
       - 11. Advanced routing: notebooks/11_routing_advanced.md
+      - 12. Street network analysis: notebooks/12_analysis.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
@@ -210,6 +211,7 @@ nav:
       - duckOSM for routing users: compare/for-routing-users.md
       - duckOSM and OSMnx: concepts/osmnx.md
       - duckOSM for GIS users: compare/for-gis-users.md
+      - duckOSM for OSMnx users: compare/for-osmnx-users.md
       - duckOSM for traffic simulation users: compare/for-simulation-users.md
       - duckOSM for transport planning users: compare/for-planning-users.md
       - duckOSM for automated driving users: compare/for-hdmap-users.md
