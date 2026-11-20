@@ -161,3 +161,6 @@
   .md-typeset .dk-levels .lv:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -1.35rem;
     transform: translateX(-50%); }
 }
+
+/* The Colab badge on the notebook pages: on the middle line of the text, not above it. */
+.md-typeset a img[src*="colab-badge"] { vertical-align: middle; margin-right: .5em; }
