@@ -23,6 +23,7 @@ _PIP = {
     "sumolib": 'pip install "duckosm[sim]"',
     "path4gmns": 'pip install "duckosm[planning]"',
     "aequilibrae": "pip install aequilibrae (Python 3.11 or later), and SpatiaLite: apt install libsqlite3-mod-spatialite",
+    "commonroad": 'pip install "duckosm[hdmap]"',
 }
 
 

@@ -144,6 +144,7 @@ nav:
       - 6. OSM data for GIS: notebooks/06_gis.md
       - 7. Traffic simulation: notebooks/07_sim.md
       - 8. Transport planning: notebooks/08_planning.md
+      - 9. HD maps: notebooks/09_hdmap.md
       - 11. Advanced routing: notebooks/11_routing_advanced.md
   - Build an area:
       - Overview: build-area/index.md
@@ -211,6 +212,7 @@ nav:
       - duckOSM for GIS users: compare/for-gis-users.md
       - duckOSM for traffic simulation users: compare/for-simulation-users.md
       - duckOSM for transport planning users: compare/for-planning-users.md
+      - duckOSM for automated driving users: compare/for-hdmap-users.md
   - Reference:
       - Overview: reference/index.md
       - Command line: reference/cli.md

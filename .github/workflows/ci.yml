@@ -67,7 +67,7 @@ jobs:
           # only main saves: the store has 10 GB, and the caches of pull requests pushed out main's (each about 0.9 GB)
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # the extras of the five install cells; [sim] brings netconvert
-      - run: pip install -e ".[widget,viz,graph,sim,gis,planning]" pytest nbmake
+      - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap]" pytest nbmake
       - run: python -m pytest --nbmake docs/notebooks/ -q
 
   test:
@@ -91,7 +91,7 @@ jobs:
       # no GDAL and no osmium: duckosm boundary, clip-pbf, admin and export-gis are in Rust (sumo_compare's test skips)
       # Tests that need local PBFs / built dbs / netconvert skip themselves.
       # [sumo] brings netconvert, so the SUMO export is tested for real
-      - run: pip install -e ".[dev,networkx,sumo]"
+      - run: pip install -e ".[dev,networkx,sumo,hdmap]"   # hdmap: commonroad-io reads the CommonRoad map back
       # python -m pytest puts the repo root on the path: tests import each other as `tests.test_gmns`
       - run: python -m pytest tests/ -q -rs
       # the fixes editor of the page (web/fixes_editor/, docs/design/fixes_editor.md): its unit tests need only Node (on the runner)
