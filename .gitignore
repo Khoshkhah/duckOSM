@@ -24,7 +24,7 @@ venv/
 # Jupyter
 .ipynb_checkpoints/
 # docs/notebooks: the pages that nbconvert makes before the docs build, and the files that a run writes
-docs/notebooks/0*.md
+docs/notebooks/[0-9]*.md
 docs/notebooks/*_files/
 docs/notebooks/data/
 docs/notebooks/out/
