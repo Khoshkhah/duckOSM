@@ -119,6 +119,17 @@ fn to_elevation(
     Ok(text(&json!({"source": s.source, "modes": modes, "column": s.column, "n_nodes": s.n_nodes, "n_nodata": s.n_nodata})))
 }
 
+impl Router {
+    /// The edge ids not in the graph, as an error.
+    fn check(&self, ids: &[i64]) -> PyResult<()> {
+        let missing: Vec<String> = ids.iter().filter(|e| !self.graph.contains(**e)).map(i64::to_string).collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        Err(err(format!("edge id(s) not in the {} routing graph: [{}]", self.mode, missing.join(", "))))
+    }
+}
+
 /// The routing graph of one mode, made once (duckOSM's `Router`).
 #[pyclass(unsendable)]
 struct Router {
@@ -145,6 +156,61 @@ impl Router {
     fn route(&self, from_edge: i64, to_edge: i64) -> PyResult<String> {
         let r = duckosm_route::route::route(&self.con, &self.graph, from_edge, to_edge, &self.mode).map_err(err)?;
         Ok(text(&r.unwrap_or(J::Null)))
+    }
+
+    /// The path (edge ids) of each pair `(from_edge, to_edge)`, in parallel: the path of `route` (None: not connected).
+    fn paths(&self, py: Python<'_>, pairs: Vec<(i64, i64)>) -> PyResult<Vec<Option<Vec<i64>>>> {
+        use rayon::prelude::*;
+        self.check(&pairs.iter().flat_map(|&(a, b)| [a, b]).collect::<Vec<_>>())?;
+        let g = &self.graph;
+        py.detach(|| pairs.par_iter().map(|&(a, b)| g.bidirectional_dijkstra(a, b).map(|r| r.map(|(_, p)| p))).collect::<Result<Vec<_>, _>>())
+            .map_err(err)
+    }
+
+    /// Yen's `k` shortest loopless paths (edge ids) from `from_edge` to `to_edge`, the shortest first.
+    fn k_shortest_paths(&self, py: Python<'_>, from_edge: i64, to_edge: i64, k: usize) -> PyResult<Vec<Vec<i64>>> {
+        self.check(&[from_edge, to_edge])?;
+        let g = &self.graph;
+        let r = py.detach(|| g.k_shortest_paths(from_edge, to_edge, k)).map_err(err)?;
+        Ok(r.into_iter().map(|(_, p)| p).collect())
+    }
+
+    /// The graph cost from each origin edge to each target edge (NaN: not reached, more than `limit`, or an edge that is not in
+    /// the graph): one search for each origin, in parallel. A row for each origin.
+    fn costs(&self, py: Python<'_>, origins: Vec<i64>, targets: Vec<i64>, limit: f64) -> PyResult<Vec<Vec<f64>>> {
+        use rayon::prelude::*;
+        let g = &self.graph;
+        let at: Vec<Option<usize>> = targets.iter().map(|&t| g.index_of(t)).collect();
+        Ok(py.detach(|| {
+            origins
+                .par_iter()
+                .map(|&o| match g.index_of(o) {
+                    Some(i) => {
+                        let d = g.costs_from(i, limit);
+                        at.iter().map(|t| t.map_or(f64::NAN, |j| d[j])).collect()
+                    }
+                    None => vec![f64::NAN; at.len()],
+                })
+                .collect()
+        }))
+    }
+
+    /// The edges reached from each origin edge within `limit`, with their graph cost: `(edge ids, costs)` for each origin (empty:
+    /// an edge that is not in the graph).
+    fn reach(&self, py: Python<'_>, origins: Vec<i64>, limit: f64) -> PyResult<Vec<(Vec<i64>, Vec<f64>)>> {
+        use rayon::prelude::*;
+        let g = &self.graph;
+        Ok(py.detach(|| {
+            origins
+                .par_iter()
+                .map(|&o| {
+                    let Some(i) = g.index_of(o) else { return (Vec::new(), Vec::new()) };
+                    let d = g.costs_from(i, limit);
+                    let hit: Vec<usize> = (0..d.len()).filter(|&i| !d[i].is_nan()).collect();
+                    (hit.iter().map(|&i| g.ids[i]).collect(), hit.iter().map(|&i| d[i]).collect())
+                })
+                .collect()
+        }))
     }
 }
 
