@@ -17,7 +17,7 @@ _PIP = {
     "networkx": 'pip install "duckosm[graph]"',
     "rustworkx": 'pip install "duckosm[graph]"',
     "roadstyle": 'pip install "duckosm[viz]"',
-    "geopandas": 'pip install "duckosm[viz]"',
+    "geopandas": 'pip install "duckosm[gis]"',
     "matplotlib": 'pip install "duckosm[viz]"',
     "mapstyle": 'pip install "duckosm[viz]"',
     "sumolib": 'pip install "duckosm[sim]"',
