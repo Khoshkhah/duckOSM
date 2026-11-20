@@ -3,6 +3,9 @@
 Every table and column a build writes. Types are as DuckDB reports them. Geometries are
 longitude / latitude (EPSG:4326). How to query them: [Query the database](../guides/query.md).
 
+Each build writes the descriptions of this page into the `.duckdb` file as DuckDB comments. Read them with
+`SELECT schema_name, table_name, column_name, comment FROM duckdb_columns()` (and `duckdb_tables()` for the tables).
+
 | Schema | Holds | Written by |
 |---|---|---|
 | [`<mode>`](#mode-schema) | one network: `driving`, `walking` or `cycling` | `build` |

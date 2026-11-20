@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The `.duckdb` file has the descriptions of its tables and columns** (DuckDB `COMMENT ON`), from
+  `docs/reference/database.md`: `SELECT comment FROM duckdb_columns()`. The Rust build reads the page at compile time;
+  the sdist includes it. The step writes a comment only for a table or a column that is in the file. Monaco, three
+  modes: 247 of 428 columns have a comment, before 0.
 - **`duckosm gmns` by tiles.** An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
   tiles; `--tile-zoom`, 0: the whole area) is made one tile at a time: a tile source with a band of 2 km, the GMNS steps
   without a change, then the rows that the tile owns. Kentucky (driving, with netconvert): 4.9 GB, before 25.9 GB.
