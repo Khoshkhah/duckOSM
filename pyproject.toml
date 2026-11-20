@@ -44,7 +44,8 @@ graph = ["networkx", "rustworkx>=0.15"]      # duckosm.ml: to_networkx, to_rustw
 gis = ["geopandas"]                          # duckosm.gis: features, admin_boundaries (GeoDataFrames)
 sim = ["eclipse-sumo", "sumolib"]            # duckosm.sim: SUMO's netconvert for to_sumo, sumolib for sumo_net
 widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
-all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas", "sumolib"]
+planning = ["path4gmns", "requests"]        # duckosm.planning: to_path4gmns (path4gmns needs requests and does not say so)
+all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas", "sumolib", "path4gmns", "requests"]
 # the old names: they stay
 networkx = ["networkx"]
 routing = ["networkx"]

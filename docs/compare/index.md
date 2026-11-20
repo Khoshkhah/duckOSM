@@ -13,4 +13,5 @@ page with the details.
 | [Geofabrik's free files](https://download.geofabrik.de/) | the 20 GIS layers (`gis_osm_*_free`) | the same rows, for any area, with your OSM fixes, also GeoParquet and in the browser | [Geofabrik layers](../exports/geofabrik.md) |
 | OSMnx `features_from_*`, QuackOSM, osmium (Python) | OSM features as GeoDataFrames, OSM XML | the same calls in `duckosm.gis` | [duckOSM for GIS users](for-gis-users.md) |
 | SUMO (netconvert, sumolib), MATSim | the simulation network, and the results joined back | the same ids as duckOSM (`edge_id`), `duckosm.sim` | [duckOSM for traffic simulation users](for-simulation-users.md) |
+| osm2gmns, path4gmns, AequilibraE | a planning network (GMNS, an AequilibraE project) | GMNS with lanes and movements, `duckosm.planning` | [duckOSM for transport planning users](for-planning-users.md) |
 | all of them | time and memory on France | | [Speed on France](speed.md) |
