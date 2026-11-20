@@ -15,7 +15,7 @@ run the notebook, you get the live map.
 ## Run a notebook on your computer
 
 ```bash
-pip install "duckosm[widget,networkx,rustworkx,sumo]" roadstyle jupyterlab
+pip install "duckosm[all]" jupyterlab
 jupyter lab
 ```
 

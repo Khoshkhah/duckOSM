@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **The Python SDK, PR 1 of its design** (`docs/proposals/python-sdk.md`). The core: `duckosm.network("Monaco")` gets
+  and builds an area in one call; `duckosm.build` and `Area.build` give a `Network` (it acts as the path, so old code
+  works); `duckosm.open(path)`. `net["walking"]` or `net.walking` is a `ModeView`, the same calls for one mode. With
+  more modes, `net.edges()`, `net.nodes()` and `net.map()` give all modes; a call for one mode says which modes the file
+  has. `net.summary()`, `net.tables()`, `net.columns()`, `net.boundary`, `crs=` (also `"utm"`), FLOAT columns as
+  float64. Maps from `roadstyle.duckosm.page`: `net.map()`, `net.dashboard()`, `net.save_map()`, and `net.plot()`
+  (matplotlib). Cards in a notebook, one progress line for `get`, `build` and the exports, and `duckosm.DuckOSMError`
+  with what to do. The modules `analysis`, `gis`, `routing`, `sim`, `planning`, `mobility`, `hdmap`, `ml` and `fixes`
+  (imported when first used) have the functions that exist today; the top-level functions stay. New pip extras:
+  `viz` (with roadstyle and matplotlib), `graph`, `sim`, `all`.
+- **`duckosm.get(point=(lon, lat), dist_m=...)`**: the box around a point.
 - **Five demo notebooks** (`docs/notebooks/`, the chapter Notebooks of the manual): from an area to a network, the OSM
   fixes in every output, routing, the exports, and a join by `edge_id`. Each has a Colab badge, and the CI workflow
   runs them on Monaco (`pytest --nbmake`). `notebooks/area_picker.ipynb` moved to `tests/notebooks/`;
