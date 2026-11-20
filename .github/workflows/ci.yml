@@ -67,7 +67,7 @@ jobs:
           # only main saves: the store has 10 GB, and the caches of pull requests pushed out main's (each about 0.9 GB)
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # the extras of the install cells; [sim] brings netconvert; osmnx: notebook 12 (to_osmnx)
-      - run: pip install -e ".[widget,viz,graph,sim,gis,analysis]" osmnx pytest nbmake
+      - run: pip install -e ".[widget,viz,graph,sim,gis,planning,analysis]" osmnx pytest nbmake
       - run: python -m pytest --nbmake docs/notebooks/ -q
 
   test:
