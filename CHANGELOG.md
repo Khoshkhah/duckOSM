@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The SDK in a notebook.** `duckosm.network("Monaco")` gets and builds an area in one call. A `Network` shows a card
+  in a notebook (the file, and the edges, nodes and km of each mode); an `Area` too. `net.tables()`, `net.columns()`,
+  `net.summary()`, and `crs=` on `net.edges()` and `net.nodes()`. `get`, `build` and the exports show one progress
+  line in a notebook (`progress=False`: nothing). `duckosm.get(point=(lon, lat), dist_m=...)`. One error class,
+  `duckosm.DuckOSMError`: an unknown mode lists the modes of the file, a missing file says how to build it, a missing
+  optional dependency gives the pip command.
+- **`net.map()` with more of roadstyle**: `theme="light" | "dark" | "satellite"`, `color_by=`, `route=` (routes as
+  lines on top), `dashboard=True` (roadstyle's dashboard page), and `net.save_map(path)` (one HTML file).
 - **`duckosm.Network`**: `duckosm.build` now gives a `Network`, and `duckosm.open(path)` opens a built file. Its
   members: `path`, `modes`, `edges()` and `nodes()` (GeoDataFrames), `sql()`, `map()` (the live roadstyle map, or a
   small picture with `DUCKOSM_STATIC_MAPS=1`), and the routes and the exports (`route`, `route_points`, `to_sumo`,

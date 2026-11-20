@@ -23,7 +23,8 @@ _NAMES = {
     "init_config": "duckosm._api", "build": "duckosm._api", "levels": "duckosm._api",
     "to_rustworkx": "duckosm._api",
     "get": "duckosm._api", "Area": "duckosm._api", "AreaPicker": "duckosm.widget",
-    "Network": "duckosm.network", "open": "duckosm.network",
+    "Network": "duckosm.network", "open": "duckosm.network", "network": "duckosm.network",
+    "DuckOSMError": "duckosm.errors",
     "build_lane_graph": "duckosm._api", "route_lanes": "duckosm._api", "to_elevation": "duckosm._api",
 }
 __all__ = [n for n in _NAMES if n != "open"]    # duckosm.open, but "from duckosm import *" keeps the built-in open
@@ -32,7 +33,14 @@ __all__ = [n for n in _NAMES if n != "open"]    # duckosm.open, but "from duckos
 def __getattr__(name):
     if name in _NAMES:
         import importlib
-        value = getattr(importlib.import_module(_NAMES[name]), name)
+        try:
+            module = importlib.import_module(_NAMES[name])
+        except ModuleNotFoundError as e:     # an optional dependency (anywidget for AreaPicker ...): say how to install it
+            from duckosm.errors import _PIP, MissingDependency
+            if e.name not in _PIP:
+                raise
+            raise MissingDependency(f"duckosm.{name} needs {e.name}: {_PIP[e.name]}") from e
+        value = getattr(module, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module 'duckosm' has no attribute {name!r}")
