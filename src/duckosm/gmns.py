@@ -582,6 +582,7 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     """
     import duckdb
 
+    source_db, out_path = str(source_db), str(out_path)       # a Path too (duckosm.build returns one)
     present_check = duckdb.connect(source_db, read_only=True)
     present_check.close()                                    # fail fast if source is unreadable
     if os.path.exists(out_path):

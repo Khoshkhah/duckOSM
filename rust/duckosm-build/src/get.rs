@@ -344,9 +344,15 @@ mod download {
                     eprintln!("  the list of extracts: {url}");
                     let t = ureq::get(url).call().map_err(|e| format!("{url}: {e}"))?.body_mut().with_config().limit(256 << 20).read_to_string().map_err(|e| format!("{url}: {e}"))?;
                     std::fs::create_dir_all(cache).map_err(|e| format!("{}: {e}", cache.display()))?;
-                    std::fs::write(&file, &t).map_err(|e| format!("{}: {e}", file.display()))?;
+                    // a temporary file, then a rename: a second process (the dry run of duckosm.AreaPicker and its
+                    // Get at the same time) does not read a part of the file
+                    let tmp = cache.join(format!("index-v1.json.{}.tmp", std::process::id()));
+                    std::fs::write(&tmp, &t).map_err(|e| format!("{}: {e}", tmp.display()))?;
+                    std::fs::rename(&tmp, &file).map_err(|e| format!("{}: {e}", file.display()))?;
+                    t
+                } else {
+                    std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?
                 }
-                std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?
             }
         };
         let index: Value = serde_json::from_str(&text).map_err(|e| format!("the list of extracts: {e}"))?;

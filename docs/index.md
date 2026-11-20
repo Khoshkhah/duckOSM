@@ -149,7 +149,7 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
     `pip install duckosm`, then `import duckosm`: build, quack, route and export from Python, all in the Rust engine.
 
-    [Python SDK](reference/python.md) · [Quick start](install.md#quick-start)
+    [Python SDK](reference/python.md) · [Notebooks](notebooks/index.md) · [Quick start](install.md#quick-start)
 
 -   :material-language-rust:{ .lg .middle } **Rust SDK**
 
