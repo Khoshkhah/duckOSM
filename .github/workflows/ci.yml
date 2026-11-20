@@ -72,20 +72,22 @@ jobs:
       - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap,analysis,ml]" osmnx pytest nbmake "playwright==1.55.0"
       # show="picture" takes a PNG of the live map in headless Chromium
       - run: python -m playwright install --with-deps chromium
-      # the Geofabrik index and the Monaco extract of duckosm get: the cache of the last run, then one download with
-      # retries before the notebooks (the runner's connection to Geofabrik sometimes fails), so the notebooks read them
-      # from ~/.cache/duckosm
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/duckosm
-          key: duckosm-downloads-${{ github.run_id }}
-          restore-keys: duckosm-downloads-
-      - run: |
-          for i in 1 2 3 4 5; do
-            python -c "import duckosm; duckosm.get(osm_id=2220322, name='monaco', out='/tmp/prefetch')" && exit 0
-            sleep 30
-          done
-          exit 1
+      # the notebooks get Monaco with duckosm get. The runners often cannot reach Geofabrik ("Network is unreachable" on
+      # all its addresses), so this step puts a list of extracts with only Monaco, and the Monaco extract of the repository
+      # (tests/data/monaco.osm.pbf), in the cache of duckosm get (~/.cache/duckosm): get finds both and downloads nothing
+      # from Geofabrik. The boundary still comes from Nominatim.
+      - name: Put the Monaco extract in the cache of duckosm get
+        run: |
+          c=~/.cache/duckosm && mkdir -p $c/geofabrik/europe
+          cp tests/data/monaco.osm.pbf $c/geofabrik/europe/monaco-latest.osm.pbf
+          python - <<'PY'
+          import json, os
+          w, s, e, n = 7.38, 43.70, 7.47, 43.77                    # a box around Monaco
+          ring = [[w, s], [e, s], [e, n], [w, n], [w, s]]
+          index = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [ring]},
+                   "properties": {"id": "monaco", "name": "Monaco", "urls": {"pbf": "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"}}}]}
+          json.dump(index, open(os.path.expanduser("~/.cache/duckosm/index-v1.json"), "w"))
+          PY
       - run: python -m pytest tests/test_network.py -q -rs -k "map or plot"
       # the saved outputs of the manual: each notebook with its outputs, maps as plot pictures (not 6 MB of HTML);
       # commit them from the artifact "notebooks"
