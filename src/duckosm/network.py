@@ -463,7 +463,10 @@ class Network(os.PathLike):
         own_axis = ax is None
         if own_axis:
             _, ax = plt.subplots(figsize=(7, 7), dpi=72)
-        self._plot_layers(ax, layers)
+        x0, y0, x1, y1 = gdf.total_bounds            # the view: the roads and a small margin, as the live map
+        pad = 0.03 * max(x1 - x0, y1 - y0)
+        view = (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+        self._plot_layers(ax, layers, view)
         handles, colors = [], style.get("colors")
         plain = highlight is not None or bool(line)
         if colors:                                   # classes: gray edges, then each class in its color
@@ -493,13 +496,16 @@ class Network(os.PathLike):
             handles.append(Line2D([], [], color=color, linewidth=3.5, label=label))
         if handles:
             ax.legend(handles=handles, loc="lower right")
+        ax.set_xlim(view[0], view[2])
+        ax.set_ylim(view[1], view[3])
         ax.set_axis_off()
         if own_axis:
             plt.show()
         return ax if not own_axis else None
 
-    def _plot_layers(self, ax, layers):
-        """Draws the base-map layers of ``features.*`` on ``ax``, in roadstyle's draw order."""
+    def _plot_layers(self, ax, layers, view):
+        """Draws the base-map layers of ``features.*`` on ``ax``, in roadstyle's draw order, cut to ``view``
+        (``x0, y0, x1, y1``): the ocean of a file can reach far past the roads."""
         if layers is False or layers is None:
             return
         names = list(PLOT_LAYERS) if layers is True else list(layers)
@@ -507,11 +513,15 @@ class Network(os.PathLike):
         if wrong:
             raise DuckOSMError(f"plot draws the layers {', '.join(PLOT_LAYERS)}, not {', '.join(wrong)}; "
                                "the live map (show='live' or 'picture') draws all of roadstyle's layers")
+        gpd = require("geopandas", "Network.plot")
         have = set(self.tables())
         for name in PLOT_LAYERS:                     # draw order: ocean, land, water, buildings
             table, color = PLOT_LAYERS[name]
             if name in names and f"features.{table}" in have:
-                gdf = self._frame(f"features.{table}", "geom", "true", None)
+                box = "ST_MakeEnvelope({}, {}, {}, {})".format(*(float(v) for v in view))
+                df = self.sql(f"SELECT ST_AsWKB(ST_Intersection(geom, {box})) AS wkb FROM features.{table} "
+                              f"WHERE ST_Intersects(geom, {box})")
+                gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries.from_wkb(df.wkb.map(bytes), crs="EPSG:4326"))
                 if len(gdf):
                     kw = {"linewidth": 0.6} if name == "waterways" else {"linewidth": 0}
                     gdf.plot(ax=ax, color=color, zorder=0, **kw)
