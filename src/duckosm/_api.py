@@ -260,14 +260,16 @@ def _each(flag, values):
 def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None,
           features=None, levels=None, graph=None, h3_index=None, h3_resolution=None):
     """``duckosm build``: build the networks of an area from a PBF, or cut one from a built database (``source_db``). ``config``: a
-    config file; an option that is not None overrides it. Returns the path of the .duckdb file."""
+    config file; an option that is not None overrides it. Returns the :class:`duckosm.Network` of the .duckdb file (also
+    its path: ``os.PathLike``)."""
     def flag(name, value):
         return None if value is None else (f"--{name}" if value else f"--no-{name}")
     text = _run("build", *_opt("-c", config), *_opt("-p", pbf), *_opt("-o", output), *_opt("-b", boundary),
                 *_opt("--source-db", source_db), *_opt("--h3-cell", h3_cell), *_each("-m", modes), *_opt("--fixes", fixes),
                 flag("features", features), flag("levels", levels), flag("graph", graph), flag("h3-index", h3_index),
                 *_opt("--h3-resolution", h3_resolution))
-    return Path(text.rsplit("Output: ", 1)[1].strip())
+    from duckosm.network import Network
+    return Network(text.rsplit("Output: ", 1)[1].strip())
 
 
 def levels(db):

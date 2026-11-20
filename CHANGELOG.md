@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- **`duckosm.edges` and `duckosm.show_edges`** (`src/duckosm/maps.py`): the edges of one mode as a GeoDataFrame (`where`:
-  a SQL filter), and a map of them: the live roadstyle map, or a small picture with `DUCKOSM_STATIC_MAPS=1`. The
-  notebooks use them, so each map cell has 2 or 3 lines in place of a helper of 45 lines in four notebooks.
+- **`duckosm.Network`**: `duckosm.build` now gives a `Network`, and `duckosm.open(path)` opens a built file. Its
+  members: `path`, `modes`, `edges()` and `nodes()` (GeoDataFrames), `sql()`, `map()` (the live roadstyle map, or a
+  small picture with `DUCKOSM_STATIC_MAPS=1`), and the routes and the exports (`route`, `route_points`, `to_sumo`,
+  `to_gmns` ...), which call the functions. A `Network` is also the path of its file (`os.PathLike`, equal to the
+  `Path`), so code that used the `Path` from `build` still works. The notebooks use it: each map cell has one line.
 - **Five demo notebooks** (`docs/notebooks/`, the chapter Notebooks of the manual): from an area to a network, the OSM
   fixes in every output, routing, the exports, and a join by `edge_id`. Each has a Colab badge, and the CI workflow
   runs them on Monaco (`pytest --nbmake`). `notebooks/area_picker.ipynb` moved to `tests/notebooks/`;

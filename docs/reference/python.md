@@ -14,9 +14,9 @@ import duckosm
 
 area = duckosm.get("Monaco")                               # area.pbf, area.boundary
 db = duckosm.build(pbf=area.pbf, boundary=area.boundary,
-                   modes=["driving", "walking"])           # Path("monaco.duckdb")
+                   modes=["driving", "walking"])           # a duckosm.Network (monaco.duckdb)
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4335, 43.7468))   # (lon, lat): Fontvieille to Larvotto
 r["time_s"], r["length_m"], r["edges"]                     # the fastest route, door to door
 for step in duckosm.directions(db, r):
     print(step)
@@ -44,7 +44,7 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 | Function | Main options | Returns | Command |
 |---|---|---|---|
 | `get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, out=".", name=None, fixes=None, cache=None, refresh=False)` | Give one of `place`, `osm_id`, `bbox` (a tuple `(west, south, east, north)`), `h3_cell` and `boundary`. `boundary`: a GeoJSON file, a GeoJSON dict, or an object with `__geo_interface__` (shapely, geopandas). `fixes`: the cut file has the [OSM fixes](../guides/edit-osm-data.md#the-fixes-file) in it. | an object with `pbf` and `boundary`, the `Path`s of the two files | [`duckosm get`](cli.md#get) |
-| `build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None, features=None, levels=None, graph=None, h3_index=None, h3_resolution=None)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that is not `None` overrides the file. Without a config file, `None` is the default of the command (`modes=["driving"]`, the switches on, `h3_resolution=8`). | the `Path` of the `.duckdb` file | [`duckosm build`](cli.md#build) |
+| `build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None, features=None, levels=None, graph=None, h3_index=None, h3_resolution=None)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that is not `None` overrides the file. Without a config file, `None` is the default of the command (`modes=["driving"]`, the switches on, `h3_resolution=8`). | a [`Network`](#network): the `.duckdb` file | [`duckosm build`](cli.md#build) |
 | `tiles(region=None, *, boundary=None, out=None, config=None, zoom=8, memory="2G", jobs=None, tile_threads=2, keep_tiles=False, build_args=[])` | `build_args`: the build options of each tile (the options after `--`) | the `Path` of the output folder | [`duckosm tiles`](cli.md#tiles) |
 | `quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None, tile_zoom=None)` | `formats`: `["geoparquet"]`, `["duckdb"]` or both. With `gdal=True`: `["gpkg"]` or `["geoparquet"]`. `fixes`: an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file). `tile_zoom`: make the table tile by tile (zoom 0 to 14). | a list of the `Path`s of the files that it wrote | [`duckosm quack`](cli.md#quack) |
 | `extract(source, db, *, name=None, osm_id=None, boundary=None)` | Give one of `name`, `osm_id` and `boundary`. | the `Path` of the new database | [`duckosm extract`](cli.md#extract) |
@@ -68,20 +68,32 @@ To build from a config file, use `duckosm.build(config="duckosm.yaml")`. See
 
 Guide: [Route](../guides/route.md).
 
-## Edges and maps
+## Network
 
-| Function | Main options | Returns |
-|---|---|---|
-| `edges(db, mode="driving", where=None)` | `where`: a SQL filter on the columns of `<mode>.edges`, for example `"highway = 'primary'"`. The text goes into the query as it is: give only text that you trust. Needs geopandas. | a `GeoDataFrame` in EPSG:4326: `edge_id`, `osm_id`, `name`, `highway`, `length_m`, `maxspeed_kmh`, `geometry` |
-| `show_edges(gdf, highlight=None, **style)` | `highlight`: edge ids to draw in orange, for example the `edges` of a route. `style`: the options of `roadstyle.render_edges`, for example `color_by="maxspeed_kmh", cmap="viridis"`. Needs roadstyle. With `DUCKOSM_STATIC_MAPS=1`: a small matplotlib picture in place of the live map. | the live roadstyle map (it shows in Jupyter), or `None` for the picture |
+`build` gives a `Network`, and `open(path)` opens a built `.duckdb` file. A `Network` is also the path of its file
+(`os.PathLike`): `os.fspath(net)`, `str(net)`, `duckdb.connect(str(net))` and each function above take it. Each read
+opens a read-only connection and closes it. The methods call the functions of the same name: `net.route(a, b)` is
+`route(net, a, b)`.
+
+| Member | Gives |
+|---|---|
+| `net.path` | the `Path` of the `.duckdb` file |
+| `net.modes` | the networks in the file, for example `["driving", "walking"]` |
+| `net.edges(mode="driving", where=None)` | the edges as a `GeoDataFrame` in EPSG:4326, all columns of `<mode>.edges`, `edge_id` as `int64`. `where`: a SQL filter, for example `"highway = 'primary'"`. The text goes into the query as it is: give only text that you trust. Needs geopandas. |
+| `net.nodes(mode="driving")` | the nodes as a `GeoDataFrame` |
+| `net.sql(query, params=None)` | the result of a SQL query as a pandas `DataFrame` (the extension spatial is loaded) |
+| `net.map(mode="driving", highlight=None, data=None, **style)` | the live roadstyle map (needs roadstyle). `highlight`: edge ids in orange. `data`: a `GeoDataFrame` from `net.edges()` with columns of your own. `style`: the options of `roadstyle.render_edges`, for example `color_by="maxspeed_kmh", cmap="viridis"`. With `DUCKOSM_STATIC_MAPS=1`: a small matplotlib picture. |
+| `net.route`, `net.route_points`, `net.route_multimodal_points`, `net.directions` | the routing functions on this network |
+| `net.to_networkx`, `net.to_rustworkx` | the turn graph |
+| `net.to_sumo`, `net.to_gmns`, `net.to_matsim`, `net.to_opendrive`, `net.to_gis` | the exports of this network |
 
 ```python
-gdf = duckosm.edges(db)                                  # the driving edges as a GeoDataFrame
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4335, 43.7468))
-duckosm.show_edges(gdf, highlight=r["edges"])           # the route in orange on the network
+net = duckosm.open("monaco.duckdb")
+r = net.route_points((7.4155, 43.7285), (7.4335, 43.7468))
+net.map(highlight=r["edges"])                       # the route in orange on the network
 ```
 
-The [notebooks](../notebooks/index.md) use these two functions for their maps.
+The [notebooks](../notebooks/index.md) use a `Network` in each cell.
 
 ## Exports
 
