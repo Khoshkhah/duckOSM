@@ -134,6 +134,13 @@ nav:
       - Your first network: first_network.md
       - duckOSM Studio (browser): guides/studio.md
       - Choose an area in Jupyter: guides/area-picker.md
+  - Notebooks:
+      - Overview: notebooks/index.md
+      - 1. From an area to a network: notebooks/01_area_to_network.md
+      - 2. Fix the OSM data once: notebooks/02_osm_fixes.md
+      - 3. Routing: notebooks/03_routing.md
+      - 4. Exports: notebooks/04_exports.md
+      - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md

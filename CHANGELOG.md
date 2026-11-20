@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Five demo notebooks** (`docs/notebooks/`, the chapter Notebooks of the manual): from an area to a network, the OSM
+  fixes in every output, routing, the exports, and a join by `edge_id`. Each has a Colab badge, and the CI workflow
+  runs them on Monaco (`pytest --nbmake`). `notebooks/area_picker.ipynb` moved to `tests/notebooks/`;
+  `notebooks/explore_network.ipynb` is removed (old Sweden database).
+- **`duckosm.to_gmns` takes a `Path`**, as `duckosm.build` returns one. Before, a `Path` gave a `TypeError`.
+
 - **`duckosm opendrive` writes the file while it reads the rows.** Before, it kept all lines, then the whole file, in
   memory. With `--junctions`, the movements, the junction nodes and the road-to-road links stay in DuckDB (they spill to
   disk past its limit of 2 GB). The file is byte-equal. Kentucky: roads only 33.6 s and 8.3 GB before, 21 s and 0.52 GB
