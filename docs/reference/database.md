@@ -465,6 +465,8 @@ modes, so the key is `(mode, edge_id)`.
 | `highway`, `name` | VARCHAR |
 | `geometry` | GEOMETRY |
 
+### `transfers`
+
 `mm.transfers` holds the changes of mode, at every node that walking shares with another mode. Each
 change goes through walking.
 
