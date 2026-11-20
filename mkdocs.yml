@@ -143,6 +143,7 @@ nav:
       - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
       - 6. OSM data for GIS: notebooks/06_gis.md
       - 12. Street network analysis: notebooks/12_analysis.md
+      - 13. Mobility data: notebooks/13_mobility.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
