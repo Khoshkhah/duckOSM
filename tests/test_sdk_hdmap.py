@@ -21,9 +21,10 @@ def gmns(tmp_path_factory):
 
 
 def test_to_commonroad(gmns, tmp_path):
+    """A file name with "_" (the map name of the scenario id): commonroad-io 2022 failed to read it back."""
     pytest.importorskip("commonroad")
     from commonroad.common.file_reader import CommonRoadFileReader
-    out = duckosm.hdmap.to_commonroad(gmns, tmp_path / "monaco.xml")
+    out = duckosm.hdmap.to_commonroad(gmns, tmp_path / "monaco_commonroad.xml")
     scenario, _ = CommonRoadFileReader(str(out["path"])).open()
     lanelets = scenario.lanelet_network.lanelets
     assert len(lanelets) == out["lanelets"] > 0.95 * (out["lanes"] + out["connectors"])

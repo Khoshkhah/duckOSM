@@ -48,13 +48,19 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
 
     from duckosm.errors import require
     require("commonroad", "duckosm.hdmap.to_commonroad")
-    from commonroad.common.common_lanelet import LaneletType, RoadUser
-    from commonroad.common.common_scenario import Location
     from commonroad.common.file_writer import CommonRoadFileWriter, OverwriteExistingFile
-    from commonroad.common.util import FileFormat
     from commonroad.planning.planning_problem import PlanningProblemSet
     from commonroad.scenario.lanelet import Lanelet, LaneletNetwork
     from commonroad.scenario.scenario import Scenario, ScenarioID, Tag
+    try:                                       # commonroad-io 2024 and later
+        from commonroad.common.common_lanelet import LaneletType, RoadUser
+        from commonroad.common.common_scenario import Location
+        from commonroad.common.util import FileFormat
+        xml = {"file_format": FileFormat.XML}  # the default is protobuf
+    except ImportError:                        # commonroad-io 2022 and 2023 (pip takes it when protobuf 3.20 cannot be installed)
+        from commonroad.scenario.lanelet import LaneletType, RoadUser
+        from commonroad.scenario.scenario import Location
+        xml = {}
 
     g = f"gmns_{mode}"
     con = duckdb.connect(str(gmns_db), read_only=True)
@@ -115,12 +121,13 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
                                 lanelet_type={kind}, user_one_way={user}))
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    scenario = Scenario(0.1, ScenarioID(country_id=country_id, map_name=map_name or path.stem.split(".")[0][:32], map_id=1))
+    import re
+    name = re.sub(r"[^A-Za-z0-9]", "", map_name or path.name.split(".")[0])[:32] or "duckOSM"   # "_" and "-" split the id
+    scenario = Scenario(0.1, ScenarioID(country_id=country_id, map_name=name, map_id=1))
     scenario.add_objects(LaneletNetwork.create_from_lanelet_list(lanelets))
     location = Location(gps_latitude=lat0, gps_longitude=lon0)
     CommonRoadFileWriter(scenario, PlanningProblemSet(), author=author, affiliation=affiliation, source="duckOSM",
-                         tags={Tag.URBAN}, location=location, file_format=FileFormat.XML
-                         ).write_to_file(str(path), OverwriteExistingFile.ALWAYS)
+                         tags={Tag.URBAN}, location=location, **xml).write_to_file(str(path), OverwriteExistingFile.ALWAYS)
     ids = pd.DataFrame({"lanelet_id": rows.lanelet_id, "gmns_id": rows.key,
                         "edge_id": pd.concat([lanes.edge_id, conns.from_lane_id.str.split("_").str[0].astype("int64")],
                                              ignore_index=True)})
