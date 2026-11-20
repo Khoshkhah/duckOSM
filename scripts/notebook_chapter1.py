@@ -10,34 +10,23 @@ NB = "https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/
 DL = "https://khoshkhah.github.io/duckOSM/notebooks/01_area_to_network.ipynb"
 cells = []
 
-# ---- the look: HTML with inline styles, so that Colab, JupyterLab and the manual show the same boxes -------------
+# ---- the look: Colab removes inline CSS, so the look is made of what Colab draws: a picture (the band), a Markdown
+# table (the card) and quote blocks with a colored icon (the boxes). The manual colors each kind of box (extra.css).
 import html as _html
+import os as _os
 import re as _re
+import textwrap as _textwrap
 
-ACCENT = "#1f6feb"
-BOX = {  # kind: (title, border, background); transparent backgrounds work in a light and in a dark theme
-    "output": ("What the output shows", "#388bfd", "rgba(56,139,253,0.10)"),
-    "tip": ("Tip", "#2ea043", "rgba(46,160,67,0.10)"),
-    "warning": ("Warning", "#d29922", "rgba(210,153,34,0.14)"),
-}
-
-
-def inline(text):
-    """Markdown of one paragraph to HTML: `code`, **bold**, *italic*, [text](address)."""
-    t = _html.escape(" ".join(text.split()), quote=False)
-    t = _re.sub(r"`([^`]+)`", r'<code>\1</code>', t)
-    t = _re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", t)
-    t = _re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", t)
-    return _re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', t)
+IMAGES = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images"
+BOX = {"output": "What the output shows", "tip": "Tip", "warning": "Warning"}
 
 
 def box(kind, text):
-    title, border, bg = BOX[kind]
-    text = text.strip()
-    text = text[:1].upper() + text[1:]      # the first word after the title starts with a capital
-    return (f'<div style="border-left:4px solid {border};background:{bg};border-radius:6px;padding:10px 14px;'
-            f'margin:10px 0;font-size:0.95em;line-height:1.55">'
-            f'<div style="font-weight:700;color:{border};margin-bottom:4px">{title}</div>{inline(text)}</div>')
+    """A quote block with the icon and the title of its kind: Colab draws it, the manual colors it."""
+    text = " ".join(text.split())
+    text = text[:1].upper() + text[1:]
+    icon = f'<img src="{IMAGES}/icon-{kind}.svg" width="18" height="18" alt="">'
+    return f"> {icon} **{BOX[kind]}**\n>\n> {text}"
 
 
 def styled(source):
@@ -57,18 +46,35 @@ def styled(source):
     return "\n\n".join(out)
 
 
+def banner(number, line):
+    """The band of a chapter as an SVG picture in docs/notebooks/images/; returns its address."""
+    lines = _textwrap.wrap(line, 78)
+    h = 70 + 28 * len(lines)
+    rows = "".join(f'<text x="28" y="{78 + 28 * i}" font-size="20" fill="#ffffff">{_html.escape(r)}</text>'
+                   for i, r in enumerate(lines))
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="900" height="{h}" viewBox="0 0 900 {h}" '
+           f'font-family="Segoe UI, Helvetica, Arial, sans-serif"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+           f'<stop offset="0" stop-color="#1f6feb"/><stop offset="1" stop-color="#0b4f8a"/></linearGradient></defs>'
+           f'<rect width="900" height="{h}" rx="14" fill="url(#g)"/>'
+           f'<text x="28" y="40" font-size="13" letter-spacing="1.6" fill="#ffffff" fill-opacity="0.85">'
+           f'DUCKOSM NOTEBOOK MANUAL · CHAPTER {number}</text>{rows}</svg>')
+    folder = _os.path.join(_os.path.dirname(_os.path.abspath(out)), "images")
+    _os.makedirs(folder, exist_ok=True)
+    with open(_os.path.join(folder, f"banner-{number}.svg"), "w", encoding="utf-8") as f:
+        f.write(svg)
+    return f"{IMAGES}/banner-{number}.svg"
+
+
 def header(number, title, line, card):
-    """The top of a chapter: the title (a Markdown heading, for the tables of contents), a band and an info card."""
-    rows = "".join(f'<tr><td style="width:7em;padding:6px 14px 6px 0;font-weight:700;vertical-align:top;white-space:nowrap">{k}</td>'
-                   f'<td style="padding:6px 0">{inline(v)}</td></tr>' for k, v in card)
+    """The top of a chapter: the title (a Markdown heading, for the tables of contents), the band and the card."""
+    rows = [f"| **{k}** | {v} |" for k, v in card]
+    rows = "\n".join([rows[0], "|---|---|", *rows[1:]])          # the first row is the header row of the table
     return (f"# {number}. {title}\n\n"
             f'[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)]({NB}) '
             f'<a href="{DL}" download><img src="https://img.shields.io/badge/Download-notebook-F37626?logo=jupyter&logoColor=white" alt="Download the notebook"></a>\n\n'
-            f'<div style="background:linear-gradient(135deg,{ACCENT},#0b4f8a);color:#fff;border-radius:10px;padding:16px 20px;margin:12px 0">'
-            f'<div style="font-size:0.8em;letter-spacing:0.08em;text-transform:uppercase;opacity:0.85">duckOSM notebook manual · chapter {number}</div>'
-            f'<div style="font-size:1.15em;margin-top:6px;line-height:1.5">{inline(line)}</div></div>\n\n'
-            f'<div style="border:1px solid rgba(128,128,128,0.35);border-radius:8px;padding:8px 16px;margin:10px 0">'
-            f'<table style="border-collapse:collapse;width:100%;margin:0">{rows}</table></div>')
+            f'<img src="{banner(number, line)}" alt="duckOSM notebook manual, chapter {number}: {_html.escape(line)}" width="100%">\n\n'
+            f"{rows}")
+
 
 cells.append(md(header(1, "Get and build an area",
     "Get the road network of an area into one file: from a place, an OSM id, a box, a point, an H3 cell, a polygon of your own, a map, or an OSM file that you already have.",
