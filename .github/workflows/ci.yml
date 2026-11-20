@@ -47,8 +47,8 @@ jobs:
       - run: jupyter nbconvert --to markdown docs/notebooks/[0-9]*.ipynb
       - run: mkdocs build --strict
 
-  # the demo notebooks of the manual (docs/notebooks/): each cell must run on Monaco. The live roadstyle maps run here; the
-  # saved outputs have pictures (DUCKOSM_MAP_SHOW=plot when they are made). The map tests run here too: this job has roadstyle.
+  # the demo notebooks of the manual (docs/notebooks/): each cell must run on Monaco. The map tests (live, link, picture,
+  # plot) run here: this job has roadstyle. The run saves the notebooks with their outputs as the artifact "notebooks".
   notebooks:
     needs: changes
     if: needs.changes.outputs.notebooks == 'true'
@@ -73,7 +73,16 @@ jobs:
       # show="picture" takes a PNG of the live map in headless Chromium
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest tests/test_network.py -q -rs -k "map or plot"
-      - run: python -m pytest --nbmake docs/notebooks/ -q
+      # the saved outputs of the manual: each notebook with its outputs, maps as plot pictures (not 6 MB of HTML);
+      # commit them from the artifact "notebooks"
+      - run: python -m pytest --nbmake --overwrite docs/notebooks/ -q
+        env:
+          DUCKOSM_MAP_SHOW: plot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: notebooks
+          path: docs/notebooks/[0-9]*.ipynb
 
   test:
     needs: changes
