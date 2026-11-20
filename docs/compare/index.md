@@ -13,4 +13,5 @@ page with the details.
 | [Geofabrik's free files](https://download.geofabrik.de/) | the 20 GIS layers (`gis_osm_*_free`) | the same rows, for any area, with your OSM fixes, also GeoParquet and in the browser | [Geofabrik layers](../exports/geofabrik.md) |
 | OSMnx `features_from_*`, QuackOSM, osmium (Python) | OSM features as GeoDataFrames, OSM XML | the same calls in `duckosm.gis` | [duckOSM for GIS users](for-gis-users.md) |
 | OSMnx (the analysis functions) | statistics, bearings, nearest nodes and edges, components, clip | the same calls in `duckosm.analysis` | [duckOSM for OSMnx users](for-osmnx-users.md) |
+| SUMO (netconvert, sumolib), MATSim | the simulation network, and the results joined back | the same ids as duckOSM (`edge_id`), `duckosm.sim` | [duckOSM for traffic simulation users](for-simulation-users.md) |
 | all of them | time and memory on France | | [Speed on France](speed.md) |
