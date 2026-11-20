@@ -1,6 +1,6 @@
 # Notebooks
 
-Six Jupyter notebooks show duckOSM from Python. Each notebook uses Monaco, installs duckOSM when it is not installed,
+The Jupyter notebooks show duckOSM from Python. Each notebook uses Monaco, installs duckOSM when it is not installed,
 and runs in less than 2 minutes. The pages show the outputs of a run on Monaco. A map on a page is a picture; when you
 run the notebook, you get the live map.
 
@@ -11,7 +11,7 @@ run the notebook, you get the live map.
 | [3. Routing](03_routing.md) | Routes between roads, between points and across modes; directions; networkx and rustworkx graphs | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/03_routing.ipynb) |
 | [4. Exports](04_exports.md) | SUMO, GMNS, MATSim, OpenDRIVE, GeoPackage, the QuackOSM table and PMTiles, each with a check | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/04_exports.ipynb) |
 | [5. Join your data by edge_id](05_join_by_edge_id.md) | Join traffic counts to the edges by `edge_id`, color the map by them, and keep the join after a rebuild | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/05_join_by_edge_id.ipynb) |
-| [6. Advanced routing](06_routing_advanced.md) | The `Route` object, many routes, the k best routes, a travel time matrix, isochrones and accessibility, each with a map or a chart | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/06_routing_advanced.ipynb) |
+| [11. Advanced routing](11_routing_advanced.md) | The `Route` object, many routes, the k best routes, a travel time matrix, isochrones and accessibility, each with a map or a chart | [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/11_routing_advanced.ipynb) |
 
 ## Run a notebook on your computer
 
