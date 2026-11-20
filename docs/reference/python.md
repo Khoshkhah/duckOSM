@@ -83,6 +83,7 @@ Later (PR 2 of the design): `network(address=...)`, `geocode(text)`, `geocode_to
 | Option | Gives |
 |---|---|
 | `color_by` | a column of the edges, or your own data: a Series keyed by `edge_id`, or a DataFrame with `edge_id` and one value column. Numbers get a color ramp (`cmap=`); classes need `colors={value: color}`. |
+| `layers` | the base map of the file under the roads: `True` (all layers, the default), `False` (the roads only) or a list of roadstyle layer names, for example `["water", "buildings"]`. `plot` draws `ocean`, `landcover`, `water`, `waterways` and `buildings`. With `color_by` or `routes`, the live map has roadstyle's default base map and `layers` has no effect. |
 | `highlight` | edge ids in orange; the other edges gray |
 | `routes` | a route, a list of routes or `{label: route}`: lines on top, each in its own color |
 

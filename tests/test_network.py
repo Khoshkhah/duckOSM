@@ -82,6 +82,9 @@ def test_plot_and_static_map(net, monkeypatch):
     matplotlib.use("Agg")
     r = net.walking.route(A, B)
     assert net.plot() is None and net.walking.plot(routes={"walk": r}) is None
+    assert net.plot(layers=False) is None and net.plot(layers=["water", "buildings"]) is None    # the base-map layers
+    with pytest.raises(duckosm.DuckOSMError, match="plot draws the layers"):
+        net.plot(layers=["parking"])
     monkeypatch.setenv("DUCKOSM_MAP_SHOW", "plot")
     counts = net.driving.edges().set_index("edge_id").length_m.rename("metres")     # your own data, keyed by edge_id
     assert net.driving.map(color_by=counts) is None
@@ -98,6 +101,7 @@ def test_live_maps(net, tmp_path, monkeypatch):
     assert hasattr(net.driving.map(color_by="maxspeed_kmh", cmap="viridis"), "_repr_html_")
     assert hasattr(net.map("walking", routes=[r]), "_repr_html_")
     assert hasattr(net.dashboard(), "_repr_html_")
+    assert hasattr(net.map(layers=False), "_repr_html_") and hasattr(net.map(layers=["water"]), "_repr_html_")
     monkeypatch.setenv("DUCKOSM_MAP_SHOW", "plot")                              # a file is the live map also then
     out = net.save_map(tmp_path / "monaco.html")
     assert out.stat().st_size > 100_000 and "<html" in out.read_text()[:3000].lower()

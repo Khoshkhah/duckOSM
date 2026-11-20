@@ -17,6 +17,9 @@ from duckosm.errors import DuckOSMError, require
 
 HIGHLIGHT = "#e8590c"
 MAP_SHOWS = ("live", "link", "picture", "plot")
+# the base-map layers that plot draws: roadstyle's layer name -> (the table in features, its color)
+PLOT_LAYERS = {"ocean": ("ocean", "#aad3df"), "landcover": ("land", "#dde8cf"), "water": ("water_polygons", "#aad3df"),
+               "waterways": ("water_lines", "#7fb6cc"), "buildings": ("buildings", "#d9d0c9")}
 _MAP_COUNT = 0          # the <n> of the default file names of show="link" and show="picture"
 
 
@@ -330,8 +333,8 @@ class Network(os.PathLike):
         return self._each(mode, lambda m: self._frame(f"{m}.nodes", "geom", "true ORDER BY node_id", crs))
 
     # ---- maps -------------------------------------------------------------------------------------------------------
-    def map(self, mode: str | None = None, *, show: str | None = None, path=None, theme: str = "liberty", color_by=None,
-            highlight=None, routes=None, **style):
+    def map(self, mode: str | None = None, *, show: str | None = None, path=None, layers=True, theme: str = "liberty",
+            color_by=None, highlight=None, routes=None, **style):
         """The roadstyle map of the file: all modes with the base map of the file (``mode=None``) or one mode.
 
         - ``show``: how the notebook shows the map (default: ``DUCKOSM_MAP_SHOW``, else ``"live"``):
@@ -341,6 +344,11 @@ class Network(os.PathLike):
           - ``"picture"``: a PNG of the live map (``path``, default ``maps/<file>-<n>.png``), taken in headless Chromium
             (needs ``pip install playwright`` and ``playwright install chromium``);
           - ``"plot"``: :meth:`plot`, a matplotlib picture with no roadstyle.
+
+        - ``layers``: the base map of the file under the roads: True (all layers), False (the roads only) or a list of
+          roadstyle layer names, for example ``["water", "buildings"]``. The live map's layers button turns them on
+          and off. With ``color_by`` or ``routes`` the live map has roadstyle's default base map, and ``layers`` has no
+          effect (a roadstyle change).
 
         - ``theme``: a roadstyle theme (``"liberty"``, ``"osm"``, ``"google"``, ``"grey"``, ``"roadstyle"``).
         - ``color_by``: a column of the edges, or your own data: a Series keyed by ``edge_id``, or a DataFrame with
@@ -354,8 +362,9 @@ class Network(os.PathLike):
         >>> net.map("walking", routes=net.walking.route_points(a, b), show="link")"""
         show = _show(show)
         if show == "plot":
-            return self.plot(mode, color_by=color_by, highlight=highlight, routes=routes, **style)
-        return self._present(self._live_map(mode, theme, color_by, highlight, routes, style), show, path)
+            return self.plot(mode, layers=layers, color_by=color_by, highlight=highlight, routes=routes, **style)
+        return self._present(self._live_map(mode, theme, color_by, highlight, routes, {"layers": layers, **style}), show,
+                             path)
 
     def _live_map(self, mode, theme, color_by, highlight, routes, style):
         require("roadstyle", "Network.map")
@@ -369,6 +378,7 @@ class Network(os.PathLike):
         # ponytail: roadstyle.duckosm.page reads its own road columns and takes no overlays yet (a roadstyle change):
         # until then a map with your own column or routes is roadstyle.render_edges on the edges, on its default base map
         import roadstyle as rs
+        style.pop("layers", None)
         gdf, color_by = self._colored(mode, color_by, style)
         line = self._route_lines(routes)
         if line:
@@ -381,15 +391,15 @@ class Network(os.PathLike):
         return rs.render_edges(gdf[[c for c in gdf.columns if c in MAP_COLUMNS or c == color_by or c == gdf.geometry.name]],
                                **style)
 
-    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, **style):
+    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, layers=True, **style):
         """roadstyle's dashboard of the file: the map, the panel with the road card and the color menu (road class,
-        modes), docked. ``show`` and ``path``: as in :meth:`map`.
+        modes), docked. ``show``, ``path`` and ``layers``: as in :meth:`map`.
 
         >>> net.dashboard()"""
         show = _show(show)
         if show == "plot":
-            return self.plot(mode)
-        return self._present(self._live_dashboard(mode, style), show, path)
+            return self.plot(mode, layers=layers)
+        return self._present(self._live_dashboard(mode, {"layers": layers, **style}), show, path)
 
     def _live_dashboard(self, mode, style):
         require("roadstyle", "Network.dashboard")
@@ -426,9 +436,12 @@ class Network(os.PathLike):
         m.save(str(path))
         return Path(path)
 
-    def plot(self, mode: str | None = None, *, color_by=None, highlight=None, routes=None, ax=None, **style):
+    def plot(self, mode: str | None = None, *, layers=True, color_by=None, highlight=None, routes=None, ax=None, **style):
         """A static matplotlib picture (for papers and saved notebook outputs), with the options of :meth:`map`. All modes:
         one color for each mode; one mode: one color for each road class. Returns the axis.
+
+        ``layers``: the base map of the file under the roads: True (the layers below), False or a list of these names:
+        ``ocean``, ``landcover``, ``water``, ``waterways``, ``buildings`` (the names of roadstyle's layers).
 
         >>> net.plot("driving", color_by="maxspeed_kmh")"""
         require("matplotlib", "Network.plot")
@@ -439,6 +452,7 @@ class Network(os.PathLike):
         own_axis = ax is None
         if own_axis:
             _, ax = plt.subplots(figsize=(7, 7), dpi=72)
+        self._plot_layers(ax, layers)
         handles, colors = [], style.get("colors")
         plain = highlight is not None or bool(line)
         if colors:                                   # classes: gray edges, then each class in its color
@@ -470,6 +484,24 @@ class Network(os.PathLike):
         if own_axis:
             plt.show()
         return ax if not own_axis else None
+
+    def _plot_layers(self, ax, layers):
+        """Draws the base-map layers of ``features.*`` on ``ax``, in roadstyle's draw order."""
+        if layers is False or layers is None:
+            return
+        names = list(PLOT_LAYERS) if layers is True else list(layers)
+        wrong = [n for n in names if n not in PLOT_LAYERS]
+        if wrong:
+            raise DuckOSMError(f"plot draws the layers {', '.join(PLOT_LAYERS)}, not {', '.join(wrong)}; "
+                               "the live map (show='live' or 'picture') draws all of roadstyle's layers")
+        have = set(self.tables())
+        for name in PLOT_LAYERS:                     # draw order: ocean, land, water, buildings
+            table, color = PLOT_LAYERS[name]
+            if name in names and f"features.{table}" in have:
+                gdf = self._frame(f"features.{table}", "geom", "true", None)
+                if len(gdf):
+                    kw = {"linewidth": 0.6} if name == "waterways" else {"linewidth": 0}
+                    gdf.plot(ax=ax, color=color, zorder=0, **kw)
 
     def _colored(self, mode, color_by, style):
         """The edges to draw, and the column to color by: a column of the edges, or your own data joined on ``edge_id``."""
