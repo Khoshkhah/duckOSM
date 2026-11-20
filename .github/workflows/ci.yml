@@ -72,6 +72,12 @@ jobs:
       - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap,analysis,ml]" osmnx pytest nbmake "playwright==1.55.0"
       # show="picture" takes a PNG of the live map in headless Chromium
       - run: python -m playwright install --with-deps chromium
+      # the Geofabrik index and the Monaco extract of duckosm get: one download a week, not one for each notebook
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/duckosm
+          key: duckosm-downloads-${{ github.run_id }}
+          restore-keys: duckosm-downloads-
       - run: python -m pytest tests/test_network.py -q -rs -k "map or plot"
       # the saved outputs of the manual: each notebook with its outputs, maps as plot pictures (not 6 MB of HTML);
       # commit them from the artifact "notebooks"
