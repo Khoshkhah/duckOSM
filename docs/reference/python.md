@@ -46,7 +46,7 @@ that names a module calls the function of that module, with the same other argum
 
 | Group | Methods and properties |
 |---|---|
-| Data | `sql(query, params=None)`, `tables()`, `columns(table)`, `summary()`, `modes`, `boundary`, `edges(mode, where=None, crs=None)`, `nodes(mode, crs=None)` |
+| Data | `sql(query, params=None)`, `connect()`, `schema(schema=None)`, `tables()`, `columns(table)`, `summarize(table)`, `summary()`, `modes`, `boundary`, `edges(mode, where=None, crs=None)`, `nodes(mode, crs=None)` |
 | Maps | `map(mode=None, theme=None, color_by=None, highlight=None, routes=None, **style)`, `dashboard(mode, **style)`, `save_map(path, mode=None, dashboard=False, **options)`, `plot(mode=None, color_by=None, highlight=None, routes=None, ax=None, **style)` |
 | [analysis](sdk/analysis.md) | `stats(mode, area_m2=None)` |
 | [routing](sdk/routing.md) | `route(a, b, mode, weight)`, `route_points(a, b, mode)`, `routes(origins, destinations, mode)`, `k_shortest_paths(a, b, k, mode)`, `matrix(origins, destinations, mode)`, `isochrones(origins, minutes, mode)`, `accessibility(origins, targets, minutes, mode)`, `route_multimodal_points(a, b)`, `directions(route, mode)` |
@@ -74,7 +74,10 @@ Later (PR 2 of the design): `network(address=...)`, `geocode(text)`, `geocode_to
 | `net` (the last line of a cell) | a card: the file, its size, the build time, the fixes file, and one row for each mode |
 | `net.path`, `net.modes`, `net.boundary` | the file, the list of modes, the boundary (`GeoDataFrame`) |
 | `net.summary()` | a DataFrame, one row for each mode: `edges`, `nodes`, `km`, `oneway_km` |
-| `net.tables()`, `net.columns("driving.edges")` | the tables of the file; the columns of one table and their types |
+| `net.schema()`, `net.schema("driving")` | one row for each table: the schema, the table, the number of rows and of columns, and the description |
+| `net.tables()`, `net.columns("driving.edges")` | the tables of the file; the columns of one table, with their types and descriptions |
+| `net.summarize("driving.edges")` | DuckDB's `SUMMARIZE`: for each column the minimum, the maximum, the distinct values, the quartiles and the NULL percentage |
+| `net.connect()` | a read-only DuckDB connection with the extension spatial: for Arrow (`.arrow()`), Polars (`.pl()`) or DuckDB relations |
 | `net.edges(mode=None, where=None, crs=None)` | a `GeoDataFrame` of the edges: all columns, `edge_id` as `int64`, float columns as `float64`. `where`: a SQL filter, put into the query as it is (give only text that you trust). `crs`: for example `3857`, or `"utm"` for the UTM zone of the area. |
 | `net.nodes(mode=None, crs=None)` | a `GeoDataFrame` of the nodes |
 | `net.sql("SELECT ...", params=None)` | a DataFrame; read-only, with the extension spatial |

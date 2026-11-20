@@ -64,6 +64,17 @@ def test_data(net, one):
     assert net.driving.edges(crs=3857).crs.to_epsg() == 3857 and net.driving.edges(crs="utm").crs.to_epsg() == 32632
     assert len(one.nodes()) == one.summary().nodes[0] and "mode" not in one.nodes()
     assert "driving.edges" in net.tables() and "edge_id" in set(net.columns("driving.edges").column_name)
+    cols = net.columns("driving.edges")                       # name, type and the description that the build writes
+    assert list(cols.columns) == ["column_name", "column_type", "description"]
+    s = net.schema("driving")                                 # one row for each table, with exact row counts
+    assert list(s.columns) == ["schema", "table", "rows", "columns", "description"]
+    assert int(s[s.table == "edges"].rows.iloc[0]) == int(net.sql("SELECT count(*) AS n FROM driving.edges").n[0])
+    with pytest.raises(duckosm.DuckOSMError, match="no schema"):
+        net.schema("nothing")
+    summ = net.summarize("driving.edges")                     # DuckDB SUMMARIZE, without the geometry
+    assert "edge_id" in set(summ.column_name) and "geometry" not in set(summ.column_name)
+    with net.connect() as con:                                # a read-only DuckDB connection with spatial
+        assert con.sql("SELECT count(*) FROM driving.edges").fetchone()[0] == len(net.driving.edges())
     with pytest.raises(duckosm.DuckOSMError, match="the tables"):
         net.columns("driving.none")
     assert len(net.boundary) == 1
