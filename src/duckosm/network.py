@@ -114,6 +114,14 @@ def network(place: str | None = None, *, modes: Iterable[str] | None = DEFAULT_M
     from duckosm._api import BUILD_OPTIONS
     modes = None if modes is None else list(modes)
     built = {k: area.pop(k) for k in list(area) if k in BUILD_OPTIONS or k in ("config", "dem", "features", "levels")}
+    area_args = ("osm_id", "bbox", "h3_cell", "boundary", "point", "dist_m", "cache", "refresh")
+    for k in area:                   # a wrong name: the nearest of the area arguments and the build options
+        if k not in area_args:
+            import difflib
+            names = [*area_args, *BUILD_OPTIONS, "config", "dem", "features", "levels"]
+            near = difflib.get_close_matches(k, names, n=1)
+            raise DuckOSMError(f"network has no argument {k!r}" + (f": did you mean {near[0]!r}?" if near else "") +
+                               f" The area: {', '.join(area_args)}. The build options: {', '.join(names[len(area_args):])}.")
     if pbf is not None:
         stem = name or Path(pbf).name.split(".")[0]
         return build(pbf=pbf, boundary=area.pop("boundary", None), modes=modes, output=Path(out) / f"{stem}.duckdb",

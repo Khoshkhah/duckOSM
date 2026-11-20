@@ -52,6 +52,13 @@ def test_wrong_option_names_the_right_one(tmp_path):
         _build(tmp_path, "x", bus_route=False)
 
 
+def test_network_wrong_name(tmp_path):
+    with pytest.raises(duckosm.DuckOSMError, match="did you mean 'bus_routes'"):
+        duckosm.network(pbf=PBF, out=tmp_path, bus_route=False)
+    with pytest.raises(duckosm.DuckOSMError, match="did you mean 'osm_id'"):
+        duckosm.network(osmid=2220322, out=tmp_path)
+
+
 def test_network_own_pbf_and_dem(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(_api, "to_elevation", lambda db, dem=None, **kw: calls.append((Path(db).name, dem)))
