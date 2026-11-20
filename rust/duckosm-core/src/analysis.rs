@@ -282,6 +282,9 @@ pub fn undirected(view: &View) -> Vec<usize> {
         let s = &view.segs[i];
         groups.entry((s.u.min(s.v), s.u.max(s.v), s.key)).or_default().push(i);
     }
+    // in key order, so that the same edge stays at each run
+    let mut groups: Vec<((usize, usize, usize), Vec<usize>)> = groups.into_iter().collect();
+    groups.sort_unstable_by_key(|g| g.0);
     let mut slots: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
     for ((a, b, _), list) in groups {
         let shapes: Vec<Vec<u64>> = list.iter().map(|&i| canon(&view.segs[i])).collect();
