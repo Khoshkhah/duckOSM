@@ -68,14 +68,17 @@ it turns red, and the lanes that its turns lead into turn green.
 
 ## Speed and memory
 
-Mac mini (Apple M6, 12 cores, 16 GB).
+An area with nodes in two or more map tiles (zoom 9, `--tile-zoom`) is made one tile at a time, with a band of 2 km
+around the tile. The memory is that of the largest tile, not of the area
+([gmns_by_tiles](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_by_tiles.md)). Driving, with
+netconvert. Memory: the program and netconvert together.
 
-| Area (input) | Time | Memory | Output |
-|---|---|---|---|
-| Monaco (0.7 MB) | 0.79 s | 145 MB | 8.4 MB |
-| Kentucky (148 MB) | stops: netconvert rejects the connection file (28 unknown edges) | 13 GB | |
-| France (5.1 GB) | not run | | |
-
+| Area (input) | Machine | Time | Memory | Output |
+|---|---|---|---|---|
+| Monaco (0.7 MB), all modes | Mac mini (M6, 16 GB) | 0.79 s | 145 MB | 8.4 MB |
+| Kentucky (148 MB), whole area (before) | Mac mini (M6, 16 GB) | 1085 s | 25.9 GB | 6.2 GB |
+| Kentucky (148 MB), 49 tiles | WSL (20 cores, 23 GB) | 1893 s | 4.9 GB | 5.9 GB |
+| France (5.1 GB) | | not run: the GMNS db (about 150 GB) does not fit on the disk | | |
 
 ## duckOSM and osm2gmns
 

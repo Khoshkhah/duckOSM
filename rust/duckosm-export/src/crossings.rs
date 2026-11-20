@@ -212,6 +212,19 @@ fn clip(line: &[P], polys: &[crate::geos::Polygon]) -> Vec<Vec<P>> {
     out
 }
 
+/// The flat-capped surface of a lane (metres), as `offset::line_buffer`. Where the buffer fails (GEOS's `TopologyException`),
+/// GEOS tries again with less precision: here the points are rounded to 1 mm, then to 1 cm. None: it failed each time.
+fn surface(g: &[P], half_w: f64, failed: &mut usize) -> Option<Vec<crate::geos::Polygon>> {
+    for grid in [0.0, 1e-3, 1e-2] {
+        let pts: Vec<P> = if grid == 0.0 { g.to_vec() } else { g.iter().map(|p| ((p.0 / grid).round() * grid, (p.1 / grid).round() * grid)).collect() };
+        if let Ok(gp) = crate::offset::line_buffer(&pts, half_w, true) {
+            return Some(gp);
+        }
+    }
+    *failed += 1;
+    None
+}
+
 fn shp_env(l: &[P]) -> (f64, f64, f64, f64) {
     crate::gmns_lanes::envelope(l)
 }
@@ -299,13 +312,14 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     const M: f64 = 111320.0;
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
     let to_ll = |x: f64, y: f64| (x / (kx * M) + x0, y / M + y0);
+    let mut unbuffered = 0;
     let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![] };
     for (lid, lk, w, wkt, osm, ly, br, tu, is_conn) in &lanes {
         let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
         if shp::length(&g) < 0.5 {
             continue;
         }
-        let gp = crate::offset::line_buffer(&g, w / 2.0, true)?;
+        let Some(gp) = surface(&g, w / 2.0, &mut unbuffered) else { continue };
         let poly = mp(&gp);
         l.gpoly.push(gp);
         l.env.push(env_of(&poly));
@@ -317,6 +331,9 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         l.width.push(*w);
         l.geom.push(g);
         l.poly.push(poly);
+    }
+    if unbuffered > 0 {
+        eprintln!("GMNS[crossings]: {unbuffered} lane(s) without a surface (the buffer failed also with less precision): no crossing on them");
     }
     l.tree = shp::strtree_order(&l.env);
     // every crossing: (source, osm_id, type, markings, width, the line, the lanes it may use, level)

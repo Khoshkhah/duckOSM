@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`duckosm gmns` by tiles.** An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
+  tiles; `--tile-zoom`, 0: the whole area) is made one tile at a time: a tile source with a band of 2 km, the GMNS steps
+  without a change, then the rows that the tile owns. Kentucky (driving, with netconvert): 4.9 GB, before 25.9 GB.
+  Without netconvert, each column but `lane.geom` is equal to the whole export; the lane lines can differ (the whole
+  export also differs from run to run there). `docs/design/gmns_by_tiles.md`.
+- **The crossings of `duckosm gmns` do not stop the export on a GEOS `TopologyException`.** The lane surface is made again
+  with the points rounded to 1 mm, then 1 cm (GEOS also tries again with less precision); a lane that still fails has no
+  crossing, and the export says how many.
+
 - **`duckosm.AreaPicker`: choose an area on a map in Jupyter** (`docs/guides/area-picker.md`). Search a place, type an
   OSM relation id, drag a box, click an H3 cell or load a GeoJSON file. The widget shows the boundary and the Geofabrik
   extract with its size, and **Get** runs `duckosm get`. `pip install "duckosm[widget]"` (anywidget). New:

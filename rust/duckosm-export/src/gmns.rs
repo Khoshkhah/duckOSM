@@ -108,7 +108,11 @@ pub struct ModeSummary {
     pub counts: Vec<(&'static str, i64)>,
 }
 
+/// The default zoom of GMNS by tiles (`duckosm gmns --tile-zoom`).
+pub const TILE_ZOOM: u8 = 9;
+
 /// The options of `to_gmns` (the options of `duckosm gmns`).
+#[derive(Clone)]
 pub struct GmnsOptions {
     /// The modes (default: each mode of the db).
     pub modes: Vec<String>,
@@ -132,11 +136,13 @@ pub struct GmnsOptions {
     pub walk_frame: bool,
     /// The gap in metres between the kerb and a sidewalk placed by `walk_frame`.
     pub walk_clearance_m: f64,
+    /// The zoom of the map tiles of GMNS by tiles (docs/design/gmns_by_tiles.md). None: the whole area at once.
+    pub tile_zoom: Option<u8>,
 }
 
 impl Default for GmnsOptions {
     fn default() -> Self {
-        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0 }
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, tile_zoom: Some(TILE_ZOOM) }
     }
 }
 
@@ -215,8 +221,24 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
     if let Some(s) = &stops {
         eprintln!("GTFS: {} stops", s.len());
     }
+    let tiles = match o.tile_zoom {
+        Some(z) => crate::gmns_tiles::tiles_of(&c, &chosen, z)?,
+        None => vec![],
+    };
     let mut summary = Vec::new();
-    for mode in &chosen {
+    if tiles.len() > 1 {
+        c.exec(&format!("SET memory_limit = '{}'", crate::MEMORY_LIMIT))?;
+        let one = GmnsOptions { modes: chosen.clone(), tile_zoom: None, ..o.clone() };
+        crate::gmns_tiles::by_tiles(&c, out, &tiles, &present, has_raw, &one, |s, d, oo| build_gmns(s, d, &name, oo).map(|_| ()))?;
+        for mode in &chosen {
+            let mut counts = Vec::new();
+            for t in ["node", "link", "lane", "movement", "signal_controller", "curb_seg"] {
+                counts.push((t, c.count(&format!("SELECT count(*) FROM gmns_{mode}.{t}"))?));
+            }
+            summary.push(ModeSummary { mode: mode.clone(), counts });
+        }
+    }
+    for mode in chosen.iter().filter(|_| tiles.len() <= 1) {
         let sch = format!("gmns_{mode}");
         let uses = mode_use(mode);
         c.exec(&format!("CREATE SCHEMA {sch}"))?;
