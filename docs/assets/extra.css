@@ -187,3 +187,13 @@
 .md-typeset div.highlight > pre > code:not(:has(span))::-webkit-scrollbar-thumb {
   background-color: var(--md-default-fg-color--lighter);
 }
+
+/* A tip or a warning of a notebook page: a quote block (Colab shows the same block). Normal text color, a light
+   background and a bar in the accent color, so that it reads as a box and not as gray text. */
+.md-typeset blockquote {
+  color: var(--md-default-fg-color);
+  background-color: var(--md-accent-fg-color--transparent);
+  border-left: .2rem solid var(--md-accent-fg-color);
+  border-radius: .1rem;
+  padding: .4em .9em;
+}
