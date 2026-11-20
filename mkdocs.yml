@@ -143,6 +143,7 @@ nav:
       - 5. Join your data by edge_id: notebooks/05_join_by_edge_id.md
       - 6. OSM data for GIS: notebooks/06_gis.md
       - 7. Traffic simulation: notebooks/07_sim.md
+      - 11. Advanced routing: notebooks/11_routing_advanced.md
   - Build an area:
       - Overview: build-area/index.md
       - Prepare an area: guides/prepare-area.md
@@ -204,6 +205,7 @@ nav:
   - Compare:
       - Overview: compare/index.md
       - Speed on France: compare/speed.md
+      - duckOSM for routing users: compare/for-routing-users.md
       - duckOSM and OSMnx: concepts/osmnx.md
       - duckOSM for GIS users: compare/for-gis-users.md
       - duckOSM for traffic simulation users: compare/for-simulation-users.md
