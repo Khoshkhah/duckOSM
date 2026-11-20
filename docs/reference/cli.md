@@ -505,6 +505,7 @@ duckosm gmns [OPTIONS] DB
 | `--micro-mode TEXT` | modes for `--micro`; repeat for several | `driving` |
 | `--combined` | also write `gmns_all`, one network for all modes | |
 | `--drive-side` | `right` or `left`: the side two-way lanes are drawn on | `right` |
+| `--tile-zoom Z` | make an area with nodes in two or more map tiles of zoom `Z` one tile at a time, so the memory follows a tile, not the area. `0`: the whole area at once | `9` |
 
 ### `gmns-map`
 
