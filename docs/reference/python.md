@@ -103,11 +103,22 @@ Later (PR 2 of the design): `network(address=...)`, `geocode(text)`, `geocode_to
 | Option | Gives |
 |---|---|
 | `color_by` | a column of the edges, or your own data: a Series keyed by `edge_id`, or a DataFrame with `edge_id` and one value column. Numbers get a color ramp (`cmap=`); classes need `colors={value: color}`. |
+| `layers` | the base map of the file under the roads: `True` (all layers), `False` (the roads only) or a list of roadstyle layer names, for example `["water", "buildings"]`. The default: all layers on the live map, the roads only with `plot`. `plot` draws `ocean`, `landcover`, `water`, `waterways` and `buildings`. With `color_by` or `routes`, the live map has roadstyle's default base map and `layers` has no effect. |
 | `highlight` | edge ids in orange; the other edges gray |
+| (no `color_by`, all modes) | `plot` gives each road one color for the set of modes that can use it: all modes, driving + walking, driving + cycling, walking + cycling, driving, walking or cycling. These are the colors of the "Modes" option of `net.dashboard()`. |
 | `routes` | a route, a list of routes or `{label: route}`: lines on top, each in its own color |
 
-`DUCKOSM_STATIC_MAPS=1` makes `net.map()` draw `net.plot()`: the saved outputs of the [notebooks](../notebooks/index.md)
-are pictures, not megabytes of map HTML. A map with `color_by` or `routes` uses `roadstyle.render_edges` on the default
+`show` sets how a notebook shows the map of `net.map()` and `net.dashboard()`. The setting `DUCKOSM_MAP_SHOW` gives
+the default for all maps; without it the default is `"live"`.
+
+| `show` | The output | Size (Monaco) |
+|---|---|---|
+| `"live"` | The live roadstyle map in the output | about 6 MB |
+| `"link"` | The live map saved as an HTML file (`path=`, default `maps/<file>-<n>.html`) and a link to it | a link; the file about 6 MB |
+| `"picture"` | A PNG of the live roadstyle map, taken in headless Chromium (`path=`, default `maps/<file>-<n>.png`). Needs `pip install playwright` and `playwright install chromium`. | about 175 KB |
+| `"plot"` | `net.plot()`: a matplotlib picture without roadstyle | a small PNG |
+
+The saved outputs of the [notebooks](../notebooks/index.md) are made with `DUCKOSM_MAP_SHOW=plot`. A map with `color_by` or `routes` uses `roadstyle.render_edges` on the default
 base map until `roadstyle.duckosm.page` takes them.
 
 ## In a notebook

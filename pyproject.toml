@@ -39,7 +39,7 @@ duckosm = "duckosm._main:main"   # the Rust program (duckosm._rust.cli); the Pyt
 [project.optional-dependencies]
 levels = ["roadstyle>=0.24.2"]               # duckosm levels: the level area (roadstyle-levels: make, solve, edit; its solver)
 # the extras of the SDK (docs/proposals/python-sdk.md): one for each module whose libraries differ
-viz = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib"]  # net.map / plot / dashboard, duckosm viz, route-map, gmns-map
+viz = ["roadstyle>=0.30.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib"]  # net.map / plot / dashboard, duckosm viz, route-map, gmns-map
 graph = ["networkx", "rustworkx>=0.15"]      # duckosm.ml: to_networkx, to_rustworkx
 gis = ["geopandas"]                          # duckosm.gis: features, admin_boundaries (GeoDataFrames)
 sim = ["eclipse-sumo", "sumolib"]            # duckosm.sim: SUMO's netconvert for to_sumo, sumolib for sumo_net
@@ -48,13 +48,13 @@ ml = ["torch", "torch_geometric"]           # duckosm.ml: to_pyg (to_dgl needs d
 widget = ["anywidget>=0.9"]                  # duckosm.AreaPicker: choose an area on a map in Jupyter
 planning = ["path4gmns", "requests"]        # duckosm.planning: to_path4gmns (path4gmns needs requests and does not say so)
 hdmap = ["commonroad-io"]                    # duckosm.hdmap: to_commonroad
-all = ["roadstyle>=0.29.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas", "sumolib", "path4gmns", "requests", "commonroad-io"]
+all = ["roadstyle>=0.30.0", "mapstyle>=0.7.0", "lanestyle>=0.4.0", "matplotlib", "networkx", "rustworkx>=0.15", "eclipse-sumo", "anywidget>=0.9", "geopandas", "sumolib", "path4gmns", "requests", "commonroad-io"]
 # the old names: they stay
 networkx = ["networkx"]
 routing = ["networkx"]
 rustworkx = ["rustworkx>=0.15"]
 sumo = ["eclipse-sumo", "sumolib"]
-dev = ["roadstyle>=0.29.0", "matplotlib", "anywidget>=0.9", "pytest", "black", "ruff", "networkx", "rustworkx>=0.15", "lxml", "frictionless", "path4gmns"]   # lxml: MATSim network_v2 DTD validation in tests
+dev = ["roadstyle>=0.30.0", "matplotlib", "anywidget>=0.9", "pytest", "black", "ruff", "networkx", "rustworkx>=0.15", "lxml", "frictionless", "path4gmns"]   # lxml: MATSim network_v2 DTD validation in tests
 
 [project.urls]
 Homepage = "https://github.com/khoshkhah/duckOSM"

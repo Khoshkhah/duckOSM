@@ -75,7 +75,9 @@ export default {
     el.setAttribute("data-lm-suppress-shortcuts", "true");
     for (const t of ["keydown", "keypress", "keyup"]) el.addEventListener(t, (e) => e.stopPropagation());
     const $ = (s) => el.querySelector(s);
-    const set = (area) => { model.set("area", area); model.save_changes(); };
+    // `own`: the change comes from this widget, not from Python (see showArea)
+    let own = false;
+    const set = (area) => { own = true; model.set("area", area); model.save_changes(); own = false; };
     let tab = "search";
 
     const map = new maplibregl.Map({ container: $(".dk-map"), style: STYLE, center: [10, 50], zoom: 3, attributionControl: { compact: true } });
@@ -92,15 +94,27 @@ export default {
     const draft = (geom) => map.getSource("draft")?.setData(geom ? { type: "Feature", geometry: geom, properties: {} } : empty);
 
     // the tabs
-    for (const b of el.querySelectorAll(".dk-tabs button")) {
-      b.onclick = () => {
-        tab = b.dataset.tab;
-        el.querySelectorAll(".dk-tabs button").forEach((x) => x.setAttribute("aria-selected", x === b));
-        el.querySelectorAll(".dk-pane").forEach((p) => (p.hidden = p.dataset.pane !== tab));
-        $(".dk-list").innerHTML = "";
-        map.getCanvas().style.cursor = tab === "box" || tab === "h3" ? "crosshair" : "";
-      };
-    }
+    const selectTab = (name) => {
+      tab = name;
+      el.querySelectorAll(".dk-tabs button").forEach((x) => x.setAttribute("aria-selected", x.dataset.tab === tab));
+      el.querySelectorAll(".dk-pane").forEach((p) => (p.hidden = p.dataset.pane !== tab));
+      $(".dk-list").innerHTML = "";
+      map.getCanvas().style.cursor = tab === "box" || tab === "h3" ? "crosshair" : "";
+    };
+    for (const b of el.querySelectorAll(".dk-tabs button")) b.onclick = () => selectTab(b.dataset.tab);
+
+    // an area that Python sets (picker.area = {...}): its tab, with its value in the field
+    const showArea = () => {
+      const a = model.get("area") || {};
+      const osmId = a.osm_id ?? a.geojson?.properties?.osm_id;
+      if (a.mode === "place") { selectTab("search"); $(".dk-q").value = a.place ?? ""; }
+      else if (a.mode === "osm_id" || (a.mode === "boundary" && osmId)) { selectTab("osm"); $(".dk-osm").value = osmId ?? ""; }
+      else if (a.mode === "bbox") { selectTab("box"); $(".dk-bbox").value = (a.bbox || []).join(","); }
+      else if (a.mode === "h3") { selectTab("h3"); $(".dk-h3").value = a.h3_cell ?? ""; }
+      else if (a.mode === "boundary") selectTab("file");
+    };
+    showArea();
+    model.on("change:area", () => { if (!own) showArea(); });
 
     // search and OSM id: the browser gets the polygon and gives it to `duckosm get --boundary`, so the program sends no
     // request for it. Search: Photon (as duckOSM Studio). Polygon of a relation: polygons.openstreetmap.fr, else Nominatim
