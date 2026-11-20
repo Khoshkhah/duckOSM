@@ -197,3 +197,17 @@
   border-radius: .1rem;
   padding: .4em .9em;
 }
+
+/* A box of a notebook page: a quote block with an icon (Colab removes inline CSS, so the notebook gives only the
+   icon and the title). The icon tells the kind, and the manual gives each kind its colors. */
+.md-typeset blockquote {
+  color: var(--md-default-fg-color);
+  border-left: .2rem solid var(--md-default-fg-color--lighter);
+  border-radius: .2rem;
+  padding: .5em 1em;
+}
+.md-typeset blockquote img[src$="icon-output.svg"], .md-typeset blockquote img[src$="icon-tip.svg"],
+.md-typeset blockquote img[src$="icon-warning.svg"] { vertical-align: -.2em; margin-right: .3em; }
+.md-typeset blockquote:has(img[src$="icon-output.svg"]) { background: rgba(56, 139, 253, .10); border-left-color: #388bfd; }
+.md-typeset blockquote:has(img[src$="icon-tip.svg"]) { background: rgba(46, 160, 67, .10); border-left-color: #2ea043; }
+.md-typeset blockquote:has(img[src$="icon-warning.svg"]) { background: rgba(210, 153, 34, .14); border-left-color: #d29922; }
