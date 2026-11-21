@@ -78,8 +78,9 @@ The call gives a dict with the path of each file and the counts.
 ch.code("""files = net.driving.to_sumo("out/sumo", run_netconvert=True)    # the plain XML files, netconvert and network.net.xml
 {k: str(v) for k, v in files.items()}                       # the files and the counts""")
 ch.md("""The SUMO
-network has 1768 nodes and 2840 edges, the same numbers as the driving network, and 5082 connections. `net` is the
-path of `network.net.xml`, the file that SUMO reads.""")
+network has 1768 nodes and 2840 edges, the same numbers as the driving network, and 5082 connections. The nodes
+have 18 traffic lights and 12 stop signs, and `network.add.xml` has 106 bus stops. `net` is the path of
+`network.net.xml`, the file that SUMO reads; `tll` has the signal programs that netconvert made.""")
 
 ch.md("""### The netconvert options
 
@@ -106,8 +107,8 @@ with open("merge.netccfg", "w") as f:                                      # a n
     f.write("<configuration>\\n" + "".join(f'  <{k} value="{v}"/>\\n' for k, v in cfg.items()) + "</configuration>\\n")
 merged = net.driving.to_sumo("out/sumo_merged", config="merge.netccfg", run_netconvert=True)    # netconvert with your options
 len(duckosm.sim.edge_map(merged)), files["n_edges"]                     # the edges with their edge_id in SUMO, of all""")
-ch.md("""With `geometry.remove = true`, only 1615 of the 2840 edges keep their `edge_id` as a
-SUMO edge. netconvert joined the other 1225 edges into their neighbors.
+ch.md("""With `geometry.remove = true`, only 1629 of the 2840 edges keep their `edge_id` as a
+SUMO edge. netconvert joined the other 1211 edges into their neighbors.
 
 > **Warning:** keep `geometry.remove` set to `false`. With `true`, netconvert joins the edges between two junctions
 > into one SUMO edge, and keeps only the id of the first edge. The other edges then have no SUMO edge, and their
@@ -131,7 +132,8 @@ ch.code("""sn = duckosm.sim.sumo_net(files)             # the .net.xml read with
 {"SUMO edges": len(sn.getEdges(withInternal=False)), "junctions": len(sn.getNodes()),
  "traffic lights": len(sn.getTrafficLights()), "duckOSM edges": int(net.driving.summary().edges[0])}    # the numbers""")
 ch.md("""Sumolib reads 2840 SUMO edges and 1768 junctions: one SUMO edge for each duckOSM edge,
-and one junction for each node. The traffic lights come from the OSM tag `highway=traffic_signals` (chapter 6).""")
+and one junction for each node. The 15 traffic lights are the programs of the 18 traffic-light junctions (chapter 6): the
+lights within 20 m of each other share one program.""")
 ch.code("""e = sn.getEdges(withInternal=False)[0]                                     # one SUMO edge
 {"id": e.getID(), "lanes": e.getLaneNumber(), "speed m/s": e.getSpeed(), "length m": round(e.getLength(), 1),
  "from": e.getFromNode().getID(), "to": e.getToNode().getID()}             # what SUMO knows of it""")
@@ -197,14 +199,14 @@ counts = pd.read_xml("out/sumo/edgedata.xml", xpath=".//edge", parser="etree", d
 cars = counts.merge(edges, on="id").groupby("edge_id").entered.sum()               # the cars of each edge_id
 cars.describe()                                                                    # the counts""")
 ch.md("""Each of the 2840 edges has a count. Half of the edges have 7 cars or fewer in the 30
-minutes, and some have none. The busiest edge has 145 cars.""")
+minutes, and some have none. The busiest edge has 146 cars.""")
 ch.code("""net.driving.map(color_by=cars)    # the edges colored by the number of cars (a picture here; live when you run it)""")
 ch.md("""The main roads and the tunnels have the most cars (green and yellow): the random trips cross Monaco
 on them. The small streets have few cars or none.""")
 ch.code("""top = net.driving.edges(where=f"edge_id IN ({','.join(map(str, cars.nlargest(3).index))})")[["edge_id", "name", "highway"]]
 top.assign(cars=top.edge_id.map(cars)).sort_values("cars", ascending=False)        # the three edges with the most cars""")
-ch.md("""**What the output shows.** The busiest edges are on the Place d'Armes (145 cars), the roundabout Giratoire
-Aureglia (126) and the Boulevard Albert 1er (126): primary and secondary roads. The names come from the duckOSM
+ch.md("""**What the output shows.** The busiest edges are on the Place d'Armes (146 cars), the roundabout Giratoire
+Aureglia (127) and the Boulevard Albert 1er (127): primary and secondary roads. The names come from the duckOSM
 edges, through the `edge_id`.""")
 
 ch.md("""## MATSim
