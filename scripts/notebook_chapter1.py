@@ -108,8 +108,15 @@ ch.code("""net.walking            # the card of one mode""")
 
 ch.md("""## Seven ways to choose an area
 
-`duckosm.get` does steps 1 and 2 and gives an `Area`: the cut OSM file and its boundary. It does not build. Use it
-to look at an area before the build, or to build it later with other options. Each way below is one argument.
+`duckosm.get` does steps 1 and 2. It does not build. It gives an `Area`: the pair of files of one area.
+
+| `Area` | File | What it is |
+|---|---|---|
+| `area.boundary` | `<name>.geojson` | the boundary polygon of the area |
+| `area.pbf` | `<name>.osm.pbf` | the OSM data inside the boundary (the cut) |
+
+`area.build()` makes the network from these two files. Use `duckosm.get` to look at an area before the build, or to
+build it later with other options. Each way below is one argument of `duckosm.get`.
 
 | Argument | The area | Example |
 |---|---|---|
