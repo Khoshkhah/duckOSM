@@ -290,7 +290,7 @@ ch.md("""Each polygon follows the streets and the steps, not a circle: the hills
 ch.md("""## Accessibility: `accessibility`
 
 `accessibility(origins, targets, minutes)` answers: how many targets can I reach from each origin, and which target is
-the nearest? The targets can be bus stops, schools, shops or sensors. The result is a DataFrame with one row for each
+the nearest? The targets can be bus stops, schools, shops, pharmacies or parks. The result is a DataFrame with one row for each
 origin and these columns:
 
 | Column | What it is |
