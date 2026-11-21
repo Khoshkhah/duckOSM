@@ -25,7 +25,7 @@ variants of it, and the base file does not change.
 
 ## The files
 
-The line over the tabs shows the two files: **Loaded: osm_fixes.yaml · Saving to: osm_fixes_v2.yaml**, or **not chosen yet**.
+The lines over the tabs show the two files: **Loaded: osm_fixes.yaml** and **Saving to: osm_fixes_v2.yaml**, or **not chosen yet**.
 
 | Button | Does |
 |---|---|
@@ -39,7 +39,7 @@ runs. In duckOSM Studio, **Open** reads a file from your computer and **Save** d
 When the database was built with a fixes file, the page shows **Built with data/osm_fixes.yaml. Load it?** The page does not load
 it by itself. The first write to a file that exists keeps a copy of it as `FILE.bak`.
 
-![The page of duckosm edit: the panel Edit OSM data at the left, the roads of the database on the base map, tilted, with the buildings in 3D](../images/edit-page.png)
+![The page of duckosm edit: the panel Edit OSM data at the left with the two files over the tabs and Boulevard Charles III picked, and the roads of the database on the base map, tilted](../images/edit-page.png)
 
 | Tab | What you change | Key in the file |
 |---|---|---|

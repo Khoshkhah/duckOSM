@@ -327,8 +327,8 @@ net.edit(load="osm_fixes.yaml", save="osm_fixes_v2.yaml")
 'http://127.0.0.1:8790/'
 ```
 
-`net.edit()` starts the page in the background and gives its address. Open the address in your browser. The line
-over the tabs shows the two files: **Loaded: osm_fixes.yaml · Saving to: osm_fixes_v2.yaml**. Each change goes into
+`net.edit()` starts the page in the background and gives its address. Open the address in your browser. Two lines
+over the tabs show the files: **Loaded: osm_fixes.yaml** and **Saving to: osm_fixes_v2.yaml**. Each change goes into
 the save file at once. **Open** loads another file, **Save** writes the list, and **Save as** writes it to another
 file. A path is relative to the folder where Python runs.
 

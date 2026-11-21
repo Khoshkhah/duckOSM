@@ -62,7 +62,7 @@ The panel returns `text()` (the fixes file, or `null` when there is no change), 
 
 ## The fixes files
 
-Over the tabs, the panel shows **Loaded: X · Saving to: Y** (or **not chosen yet**), with **Open**, **Save** and **Save as**. The panel
+Over the tabs, the panel shows **Loaded: X** and **Saving to: Y** (or **not chosen yet**), with **Open**, **Save** and **Save as**. The panel
 never chooses a file name. **Open** asks first when the list has changes, and after it the save file is not chosen, so a write never puts
 the list of one file into another file. The host gives `files`:
 

@@ -51,7 +51,7 @@ with sync_playwright() as p:
     page.goto(URL)
     page.wait_for_function("window.fixesPanel && window.map && window.map._loaded", timeout=60_000)
 
-    view(page, ROAD, 16.8)
+    view(page, ROAD, 17.4)
     pick(page, ROAD)
     page.wait_for_timeout(800)
     shot(page, "edit-page.png")

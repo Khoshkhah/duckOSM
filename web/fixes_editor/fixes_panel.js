@@ -1044,7 +1044,7 @@ export async function initFixesPanel(ctx) {
     write: async (name, txt) => download(name, txt),
   };
   fr.head.insertAdjacentHTML("afterbegin", `<div id="fix-files" class="small">
-    <p id="fix-names"><span>Loaded: <code id="fix-loaded"></code></span> · <span>Saving to: <code id="fix-saving"></code></span></p>
+    <p id="fix-names">Loaded: <code id="fix-loaded"></code><br>Saving to: <code id="fix-saving"></code></p>
     <p id="fix-built" hidden>Built with <code></code>. <a href="#" class="link" role="button" id="fix-built-load">Load it?</a></p>
     <div class="row"><button id="fix-open" type="button">Open</button><button id="fix-file-save" type="button">Save</button><button id="fix-save-as" type="button">Save as</button><input id="fix-open-file" type="file" accept=".yaml,.yml" hidden></div>
     <form id="fix-path" hidden><label for="fix-path-in" id="fix-path-label"></label><div class="row"><input id="fix-path-in" type="text" spellcheck="false" autocomplete="off"><button class="sb-primary" type="submit" id="fix-path-ok">OK</button><button type="button" id="fix-path-no">Cancel</button></div></form>
