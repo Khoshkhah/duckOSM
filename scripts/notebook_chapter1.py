@@ -14,6 +14,31 @@ ch = Chapter(1, "01_area_to_network", "Get and build an area",
              time="about 3 minutes (the first download included)", extras="widget,viz",
              next_=("02_inspect", "2. Look inside the file", "the tables, the columns and SQL"))
 
+ch.md("""## What an area is
+
+An **area** is the part of the world whose roads you want in one file: a city, a district, a park, a box around a
+point, or a region. duckOSM describes an area with one polygon, the **boundary**. The build keeps the roads in the
+boundary. A road that crosses the boundary stays whole, so the network has no cut roads at its edge.
+
+| You give | The boundary that duckOSM makes |
+|---|---|
+| a place name (`place`) | the polygon of the first answer of Nominatim for the name |
+| an OSM id (`osm_id`) | the polygon of that OSM relation |
+| a box (`bbox`) | the rectangle: west, south, east, north |
+| a point and a distance (`point`, `dist_m`) | the square `dist_m` metres around the point |
+| an H3 cell (`h3_cell`) | the hexagon of the cell |
+| a polygon (`boundary`) | your polygon, as it is |
+| an OSM file (`pbf`) without a boundary | the area of the whole file |
+
+The picture shows two boundaries for "Monaco". The name finds the country, whose boundary includes a large part of
+the sea; the OSM id 2220322 is the city. The gray lines are the roads: some cross the city boundary, and they stay
+whole.
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/area-boundary.png" alt="Two boundaries for Monaco: the country with its sea, and the city" width="100%">
+
+> **Key idea:** an area is a polygon. Each way to choose an area (a name, an id, a box, a point, a file) ends as one
+> boundary polygon, and the build keeps the roads in it.""")
+
 ch.md("""## The parts of a build
 
 A duckOSM build has three steps. Each step has its own call, and `duckosm.network` does all three in one call.
