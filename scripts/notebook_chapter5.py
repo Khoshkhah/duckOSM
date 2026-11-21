@@ -40,52 +40,80 @@ database, the map, the routes and every export show the corrected data.
 
 ch.md("""## The format of the file
 
-A fixes file is a small text file in YAML. Here is a file with one rule:
+A fixes file is a small text file in YAML. It has five keys, one for each kind of record. This file has one record of
+each kind:
 
 ```yaml
-overrides:
+overrides:                       # change an OSM way, by its id
   - osm_id: 4230891
-    tags:
-      maxspeed: "10"
+    tags: {maxspeed: "10"}
     note: road works
+  - {osm_id: 4230100, oneway: true}
+  - {osm_id: 503462470, lanes: 3, turn_lanes_forward: left|through|through}
+  - {osm_id: 4229577, exclude_modes: [driving]}
+  - {osm_id: 4229578, remove: true}
+new_ways:                        # add a road that OSM does not have
+  - id: 9000000000000
+    nodes: [21911886, [7.4235072, 43.7371133], 21914340]
+    tags: {highway: service, name: New lane}
+turn_restrictions:               # forbid or force a turn
+  - {from_way: 4230100, via_node: 21924057, to_way: 4230099, restriction: no_left_turn}
+extra:
+  tag_edits:                     # set or delete the tags of a way, a node or a relation
+    - {type: node, id: 21924057, set: {highway: traffic_signals}}
+    - {type: relation, id: 393226, delete: [building]}
+  building_faces:                # the type and the door of a wall of a building
+    - {building: 23715051, from_node: 256791677, to_node: 256791676, type: front, door: main}
 ```
 
-| Line | Means |
-|---|---|
-| `overrides:` | the list of the rules for OSM ways |
-| `- osm_id: 4230891` | one rule: it is for the OSM way 4230891 (Boulevard Louis II in Monaco) |
-| `tags:` and `maxspeed: "10"` | set the OSM tag `maxspeed` of the way to 10 km/h |
-| `note: road works` | your text: why you made the fix. The build does not read it |
+You need only the keys that you use. A file with one rule of `overrides` is a correct file. A record for an object
+that is not in the area does nothing, so one file can hold the fixes of all your areas. The editing page adds
+`changed`, the time of the change, to each record. The build does not read it.
 
-Each rule names one OSM way by its id and says what to change. The build reads the rules before it makes the
-networks, so it sees the way as if OSM had `maxspeed=10`.
+### `overrides`: change an OSM way
 
-The file can hold more than one kind of record. These are its keys:
-
-| Key | Holds |
-|---|---|
-| `overrides` | the rules for OSM ways: change one-way, lanes, layer or OSM tags, or remove the way |
-| `new_ways` | roads that OSM does not have |
-| `turn_restrictions` | turns that a driver cannot make, or must make |
-| `extra.tag_edits` | changes of the tags of a way, a node or a relation |
-| `extra.building_faces` | the type and the door of each wall of a building |
-
-These are the fields of one rule of `overrides`:
+A rule of `overrides` names one OSM way by its `osm_id` and says what to change. The build sees the way as if OSM had
+these values.
 
 | Field | Does |
 |---|---|
 | `osm_id` | the OSM id of the way (the key of the rule) |
+| `tags` | sets these OSM tags on the way (`maxspeed`, `highway`, `name`, `surface` ...) |
 | `oneway` | `true` or `false` |
 | `lanes`, `lanes_forward`, `lanes_backward` | the lanes in both directions, or in one direction |
-| `layer` | the vertical level (a bridge is 1, a tunnel is -1) |
 | `turn_lanes_forward`, `turn_lanes_backward` | the arrows of the lanes, in the syntax of the OSM tag `turn:lanes` |
+| `layer` | the vertical level (a bridge is 1, a tunnel is -1) |
 | `keep_nodes` | `[from, to]`: keep only this part of the way |
-| `exclude_modes` | removes the way from these networks: `driving`, `walking`, `cycling` |
-| `remove` | `true`: removes the way from the build |
-| `tags` | sets these OSM tags on the way (`maxspeed`, `highway`, `name` ...) |
-| `note` | your text. The build does not read it |
+| `exclude_modes` | removes the way from these networks only: `driving`, `walking`, `cycling` |
+| `remove` | `true`: removes the way from the whole build |
+| `note` | your text: why you made the fix. The build does not read it |
 
-A rule for a way that is not in the area does nothing. So one file can hold the fixes of all your areas.""")
+### `new_ways`: add a road
+
+| Field | Does |
+|---|---|
+| `id` | 9,000,000,000,000 or more, used one time. Do not change it: the edge ids come from it |
+| `nodes` | the points of the road: an OSM node id, or `[lon, lat]` for a new point. Make the two ends OSM nodes, so that the road connects to the network |
+| `tags`, `tags_from` | the OSM tags of the road, or the OSM way to copy the tags from |
+
+### `turn_restrictions`: forbid or force a turn
+
+| Field | Does |
+|---|---|
+| `from_way`, `via_node`, `to_way` | the way before the junction, the node of the junction and the way after it |
+| `restriction` | `no_u_turn` (the default), `no_left_turn`, `no_right_turn`, `no_straight_on`, or `only_left_turn`, `only_right_turn`, `only_straight_on` |
+
+A turn restriction changes the driving network.
+
+### `extra.tag_edits` and `extra.building_faces`
+
+| Record | Fields |
+|---|---|
+| `tag_edits` | `type` (`way`, `node` or `relation`), `id`, and `set` (tags to set) or `delete` (tags to delete) |
+| `building_faces` | `building`, `from_node` and `to_node` (the wall), `type` (`front`, `back`, `side`, `party` or `court`) and `door` |
+
+Use `tag_edits` for an object that is not a road, for example a traffic signal on a node. Use `building_faces` for the
+3D buildings of the base map ([`main.building_faces`](../reference/database.md#building_faces)).""")
 
 ch.md("""## Build Monaco without a fix
 
