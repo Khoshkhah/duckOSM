@@ -284,7 +284,7 @@ def matrix(net, origins, destinations=None, mode=None, weight="time", max_cost=N
 
 def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0):
     """The area reached from each origin within each number of minutes, as a GeoDataFrame of polygons (``origin``,
-    ``minutes``, ``n_edges``, ``geometry``). An edge is reached when the whole edge is reached: its :func:`matrix` cell is
+    ``minutes``, ``n_edges``, ``area_km2``, ``geometry``). An edge is reached when the whole edge is reached: its :func:`matrix` cell is
     at most the time. The polygon is the union of the reached edges, each with a buffer of ``buffer_m`` metres (in the UTM
     zone of the area).
 
@@ -308,7 +308,8 @@ def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0):
             ring = total.index[(total > done * 60) & (total <= m * 60)]
             parts = [geom[e] for e in ring] + ([poly] if poly is not None else [])
             poly, done = union_all(parts) if parts else Polygon(), m
-            rows.append({"origin": label, "minutes": m, "n_edges": int((total <= m * 60).sum()), "geometry": poly})
+            rows.append({"origin": label, "minutes": m, "n_edges": int((total <= m * 60).sum()),
+                         "area_km2": round(poly.area / 1e6, 3), "geometry": poly})        # the area in the UTM zone
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=edges.crs).to_crs("EPSG:4326")
 
 

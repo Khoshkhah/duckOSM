@@ -241,32 +241,51 @@ ch.md("""The rows and the columns have the three names. With `weight="length"` t
 
 ch.md("""## Isochrones: `isochrones`
 
-An **isochrone** is the area that you reach from a place within a time. `isochrones(origins, minutes)` gives one
-polygon for each origin and each time, as a GeoDataFrame with the columns `origin`, `minutes`, `n_edges` and
-`geometry`.
+### What an isochrone is
 
-An edge is in the isochrone of `m` minutes when you reach the end of the whole edge within `m` minutes. Each reached
-edge gets a buffer of `buffer_m` metres (default 25 m), and the polygon is the union of the buffers. The polygon is
-not a hull around the edges: a park or a block with no road stays out of it.
+An **isochrone** answers one question: how far can I go from here in 10 minutes? It is the area that you reach from a
+place within a time, on the roads of one mode. It is not a circle, because the roads, the hills and the sea limit
+where you can go.
+
+### How duckOSM makes it
+
+1. It searches the roads from the start place, up to the largest time.
+2. It keeps each edge that you reach to its end within the time.
+3. It draws a band of 25 m around each kept edge, and joins the bands into one polygon.
+
+So a park or a block with no road stays out of the polygon.
+
+### The call
+
+`net.walking.isochrones(origins, minutes)` gives one polygon for each start place and each time.
 
 | Argument | Default | What it does |
 |---|---|---|
-| `origins` | | the start places, one polygon set for each |
-| `minutes` | `(5, 10, 15)` | the times: a number or a list |
-| `buffer_m` | `25.0` | the width of the buffer around each reached edge, in metres |
+| `origins` | | a list of start places: `(lon, lat)` points, edge ids or place names |
+| `minutes` | `(5, 10, 15)` | the times: one number or a list |
+| `buffer_m` | `25.0` | the width of the band around each reached edge, in metres |
 
-Here the origin is the casino square, on foot.""")
-ch.code("""casino = (7.4280, 43.7393)                                           # Place du Casino (lon, lat)
-iso = net.walking.isochrones([casino], minutes=[5, 10, 15])          # three walking times
-iso[["minutes", "n_edges"]].assign(km2=iso.to_crs(iso.estimate_utm_crs()).area / 1e6).round(3)    # edges and area""")
-ch.md("""From the casino square, 1,525 walking edges are within 5 minutes, 3,483 within 10 minutes and 5,983 within 15 minutes. The areas are 0.24 km², 0.65 km² and 1.15 km². In the picture each polygon follows the streets and the steps, not a circle: the hills and the sea limit the walk.""")
-ch.code("""fig, ax = plt.subplots(figsize=(7, 7))                                           # one picture
-iso.iloc[::-1].plot(ax=ax, column="minutes", categorical=True, cmap="plasma", alpha=0.7, legend=True,
-                    legend_kwds={"title": "minutes on foot"})                    # the polygons, the largest below
-net.walking.edges().plot(ax=ax, color="#555555", linewidth=0.3)                  # the walking roads, thin and gray
-ax.plot(*casino, "k*", markersize=14); ax.set_axis_off(); plt.show()             # the start""")
-ch.md("""> **Tip:** the walking speed comes from `cost_s` of the walking edges. For more than one origin, give a list:
-> each origin gets its own polygons, with its place in the column `origin`.""")
+Here the start is the casino square, on foot, for 5, 10 and 15 minutes.""")
+ch.code("""casino = (7.4280, 43.7393)                                       # Place du Casino (lon, lat)
+iso = net.walking.isochrones([casino], minutes=[5, 10, 15])      # one polygon for each time
+iso[["minutes", "n_edges", "area_km2"]]                          # the reached edges and the area of each polygon""")
+ch.md("""Each row is one polygon. From the casino square, 1,525 walking edges are within 5 minutes, 3,483 within 10
+minutes and 5,983 within 15 minutes. The areas are 0.24 km², 0.65 km² and 1.15 km².
+
+### Draw the isochrones
+
+The cell draws the walking roads in gray, then the three polygons over them. It draws the largest polygon first,
+so the smaller ones stay on top of it.""")
+ch.code("""fig, ax = plt.subplots(figsize=(7, 7))                                          # one picture
+net.walking.edges().plot(ax=ax, color="lightgray", linewidth=0.5)               # the walking roads, in gray
+iso[::-1].plot(ax=ax, column="minutes", categorical=True, cmap="autumn", alpha=0.6,
+               legend=True, legend_kwds={"title": "minutes"})                  # the polygons: 15, 10, then 5 minutes
+ax.set_axis_off()                                                               # no degrees on the sides
+plt.show()""")
+ch.md("""Each polygon follows the streets and the steps, not a circle: the hills and the sea limit the walk.
+
+> **Tip:** the walking speed comes from `cost_s` of the walking edges. For more than one start place, give a list:
+> each place gets its own polygons, with its place in the column `origin`.""")
 
 ch.md("""## Accessibility: `accessibility`
 
