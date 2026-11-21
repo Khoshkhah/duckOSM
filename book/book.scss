@@ -357,7 +357,7 @@ body .sidebar-navigation .sidebar-link.active .chapter-number, body.quarto-dark 
 #quarto-sidebar .aa-SubmitIcon { width: 15px; height: 15px; }
 
 // ---- code and output: clearly different in the light theme (code gray, output white) ----
-body:not(.quarto-dark) div.sourceCode { background: #eef1f5 !important; }
-body:not(.quarto-dark) div.cell .cell-output { background: #ffffff !important; }
+body:not(.quarto-dark) div.sourceCode { background: #e3e8ee !important; }
+body:not(.quarto-dark) div.cell .cell-output { background: #f4f6f8 !important; }
 // code below the page color, output above it: the two boxes differ in both themes
 body.quarto-dark div.cell .cell-output { background: #2d333b !important; }
